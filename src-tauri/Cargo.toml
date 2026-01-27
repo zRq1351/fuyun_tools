@@ -1,0 +1,56 @@
+[package]
+name = "fuyun_tool"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "fuyun_tool_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.3", features = [] }
+
+[dependencies]
+tauri = { version = "2.9.5", features = [ "tray-icon"] }
+tauri-build = { version = "2.5.3", features = [] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+single-instance = "0.3.3"
+opener = "0.8.4"
+tauri-plugin-global-shortcut = "2.3.1"
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-log = "2.8.0"
+log = "0.4.29"
+tauri-plugin-clipboard-manager = "2.3.2"
+tauri-plugin-notification = "2.2.3"
+tauri-plugin-dialog = "2.6.0"
+user32-sys = "0.2"
+
+tauri-plugin-updater = { version = "2.9.0" }
+tauri-plugin-positioner = { version = "2.3.1" }
+enigo = { version = "0.6.1", default-features = false }
+
+# Windows 特定的依赖，用于 Windows API 调用
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3.9", features = ["winuser", "winnt", "minwindef", "windef", "libloaderapi", "winbase", "processthreadsapi", "windowsx", "errhandlingapi", "handleapi", "heapapi", "memoryapi", "psapi", "synchapi", "sysinfoapi", "timezoneapi", "tlhelp32", "winioctl", "wingdi", "winerror", "winnls", "winreg", "winsvc", "setupapi", "ioapiset", "fileapi", "consoleapi", "namedpipeapi", "processenv", "stringapiset", "profileapi", "libloaderapi", "dwmapi"] }
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_SystemInformation","Win32_UI_Accessibility", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_Security", "Win32_System_Diagnostics_Debug", "Win32_System_Environment", "Win32_UI_WindowsAndMessaging"] }
+widestring = "1.0"
+user32-sys = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS 需要使用不同的方式实现划词检测
+objc = "0.2"
+core-foundation = "0.10.1"
+core-graphics = "0.25.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Linux 需要使用不同的方式实现划词检测
+enigo = { version = "0.6.1", features = ["x11rb"], default-features = false }
+

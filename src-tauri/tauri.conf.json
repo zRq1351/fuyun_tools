@@ -1,0 +1,65 @@
+{
+  "productName": "fuyun_tool",
+  "version": "0.3.5",
+  "identifier": "com.clipboard-manager.fuyun",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "fuyun_tool",
+        "visible": false,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": true,
+        "center": false,
+        "resizable": true,
+        "maximizable": false,
+        "minimizable": false
+      },
+      {
+        "label": "selection_toolbar",
+        "title":"fuyun_tool",
+        "visible": false,
+        "resizable":false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "acceptFirstMouse": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' tauri://ipc tauri://*; img-src 'self' data: https:; font-src 'self' https:; object-src 'none';"
+    },
+    "withGlobalTauri": true
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/zRq1351/shear/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGNzUwQjU4MTAwMDhCNjAKUldSZ2l3QVFXQXQxajY2dVhkdEFoT1JJc00xZzUrMW1tcEZYRXVwN0svN3h1bEtpcDlaOUdVM3oK"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/64x64.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true
+  }
+}

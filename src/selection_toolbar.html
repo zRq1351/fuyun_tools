@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>划词工具栏</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            overflow: hidden;
+        }
+
+        .toolbar {
+            background: rgba(25, 25, 25, 0.95);
+            border-radius: 8px;
+            padding: 4px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            gap: 2px;
+            position: fixed;
+            top: 50%;
+            transform: translateY(-50%); /* 垂直居中 */
+            z-index: 9999;
+        }
+
+        .toolbar-button {
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            color: white;
+            padding: 12px 8px; /* 调整垂直padding适应垂直布局 */
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s ease;
+            width: 100%; /* 按钮宽度占满容器 */
+            min-height: 30px; /* 确保最小高度 */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .toolbar-button:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .toolbar-button:active {
+            transform: scale(0.95);
+        }
+
+        .translate-btn {
+            color: #4CAF50;
+        }
+
+        .explain-btn {
+            color: #2196F3;
+            margin: 2px 0;
+        }
+
+        .copy-btn {
+            color: #FF9800;
+        }
+
+    </style>
+</head>
+<body>
+<div class="toolbar">
+    <button class="toolbar-button translate-btn" id="translateBtn">翻译</button>
+    <button class="toolbar-button explain-btn" id="explainBtn">解释</button>
+    <button class="toolbar-button copy-btn" id="copyBtn">复制</button>
+</div>
+
+<script>
+    // 获取Tauri API
+    const invoke = window.__TAURI__.core.invoke;
+    const { getCurrentWindow } = window.__TAURI__.window;
+    const listen = window.__TAURI__.event.listen;
+
+    let selectedText = '';
+    listen('selected-text', (event) => {
+        selectedText = event.payload;
+        console.log('选中的文本:', selectedText);
+    });
+
+    // 翻译按钮点击事件
+    document.getElementById('translateBtn').addEventListener('click', async () => {
+        if (selectedText) {
+            try {
+                const result = await invoke('translate_text', {text: selectedText});
+                console.log('翻译结果:', result);
+            } catch (error) {
+                console.error('翻译失败:', error);
+            }
+        }
+    });
+
+    // 解释按钮点击事件
+    document.getElementById('explainBtn').addEventListener('click', async () => {
+        if (selectedText) {
+            try {
+                const result = await invoke('explain_text', {text: selectedText});
+                console.log('解释结果:', result);
+            } catch (error) {
+                console.error('解释失败:', error);
+            }
+        }
+    });
+
+    // 复制按钮点击事件
+    document.getElementById('copyBtn').addEventListener('click', async () => {
+        if (selectedText) {
+            try {
+                await invoke('copy_text', {text: selectedText});
+                console.log('文本已复制');
+                await getCurrentWindow().close();
+            } catch (error) {
+                console.error('复制失败:', error);
+            }
+        }
+    });
+
+
+</script>
+</body>
+</html>
