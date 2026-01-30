@@ -57,8 +57,6 @@ impl MouseListener {
         let detection_thread_app_handle = app_handle.clone();
 
         thread::spawn(move || {
-            let mut last_selected_text = String::new();
-
             loop {
                 if GLOBAL_STATE.needs_detection.load(Ordering::SeqCst) {
                     GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
@@ -69,7 +67,7 @@ impl MouseListener {
                     };
 
                     if let Some(text) = perform_text_selection_detection(&detection_thread_app_handle, clipboard_manager) {
-                        if !text.trim().is_empty() && text != last_selected_text {
+                        if !text.trim().is_empty() {
                             if is_valid_selection(&text) {
                                 log::info!("检测到有效的选中文本: '{}'", text);
                                 let app_handle_clone = detection_thread_app_handle.clone();
@@ -91,7 +89,6 @@ impl MouseListener {
                                         state_guard.is_processing_selection = false;
                                     });
                                 });
-                                last_selected_text = text;
                             }
                         }
                     }

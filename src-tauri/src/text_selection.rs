@@ -57,6 +57,11 @@ fn get_selected_text_windows(
 
     let new_content = get_current_clipboard_content_with_manager(&clipboard_manager, app_handle);
 
+    if new_content == original_content {
+        log::info!("剪贴板内容没有改变，取消获取选中文本");
+        return None;
+    }
+
     if let Some(ref original) = original_content {
         set_original_clipboard_content_back_with_manager(&clipboard_manager, app_handle, original);
     }

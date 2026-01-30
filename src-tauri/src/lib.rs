@@ -146,7 +146,6 @@ pub fn run() {
                             state_clone_hide.clone(),
                         );
                         
-                        // 重置全局Ctrl键状态，防止状态不一致
                         mouse_listener::reset_ctrl_key_state();
                     }
                 })
@@ -177,7 +176,7 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(
             tauri_plugin_log::Builder::default()
-                .level(log::LevelFilter::Warn)
+                .level(log::LevelFilter::Info)
                 .target(tauri_plugin_log::Target::new(
                     tauri_plugin_log::TargetKind::Folder {
                         path: get_logs_dir_path(),
