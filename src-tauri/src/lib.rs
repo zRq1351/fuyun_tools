@@ -147,7 +147,7 @@ pub fn run() {
                         );
                         
                         // 重置全局Ctrl键状态，防止状态不一致
-                        crate::mouse_listener::reset_ctrl_key_state();
+                        mouse_listener::reset_ctrl_key_state();
                     }
                 })
                 .map_err(|e| e.to_string())?;
