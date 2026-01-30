@@ -2,23 +2,18 @@ pub mod clipboard;
 pub mod config;
 pub mod utils;
 
-#[cfg(windows)]
-pub mod windows_text_selection;
+pub mod text_selection;
+pub mod mouse_listener;
 
-#[cfg(target_os = "macos")]
-pub mod macos_text_selection;
-
-#[cfg(target_os = "linux")]
-pub mod linux_text_selection;
-
-use crate::config::{DEFAULT_HIDE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT};
+use crate::config::{CTRL_KEY, DEFAULT_HIDE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT};
 use crate::utils::get_logs_dir_path;
 use clipboard::ClipboardManager;
 use config::{CLIPBOARD_POLL_INTERVAL, MAX_ITEMS_OPTIONS};
 use enigo::{Enigo, Key, Keyboard, Settings};
-use std::cell::RefCell;
+// use rdev::{listen, Button, EventType}; // 仅在需要鼠标键盘监听时使用
 use std::collections::HashMap;
 use std::env;
+
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -33,6 +28,13 @@ use tauri_plugin_positioner::{Position, WindowExt};
 use tauri_plugin_updater::UpdaterExt;
 use utils::{load_settings, save_settings, AppSettingsData};
 
+// 添加必要的导入
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref ENIGO_INSTANCE: Arc<Mutex<Option<Enigo>>> = Arc::new(Mutex::new(None));
+}
+
 #[derive(Clone)]
 struct TrayMenuItems {
     max_items_map: HashMap<String, CheckMenuItem<tauri::Wry>>,
@@ -46,7 +48,7 @@ struct AppSettings {
     max_items: usize,
 }
 
-struct AppState {
+pub struct AppState {
     clipboard_manager: Arc<Mutex<ClipboardManager>>,
     is_visible: bool,
     selected_index: usize,
@@ -94,12 +96,21 @@ impl Default for AppState {
 pub fn run() {
     let initial_state = AppState::default();
     let state_arc = Arc::new(Mutex::new(initial_state));
-
     tauri::Builder::default()
         .manage(state_arc.clone())
         .setup(move |app| {
+            let instance = single_instance::SingleInstance::new("fuyun_tools")
+                .expect("未能创建单实例锁");
+            
+            if !instance.is_single() {
+                app.dialog()
+                    .message("软件已运行，请观察系统托盘！")
+                    .title("提示")
+                    .blocking_show();
+                std::process::exit(0);
+            }
+            
             let app_handle = app.handle();
-
             let current_max_items = {
                 let state_guard = state_arc.lock().unwrap();
                 state_guard.settings.max_items
@@ -117,12 +128,14 @@ pub fn run() {
                         if !state_guard.is_visible && !state_guard.is_processing_selection {
                             drop(state_guard);
                             show_clipboard_window(app_handle_clone.clone(), state_clone.clone());
+                            
+                            // 重置全局Ctrl键状态，防止状态不一致
+                            crate::mouse_listener::reset_ctrl_key_state();
                         }
                     }
                 })
                 .map_err(|e| e.to_string())?;
 
-            // 注册隐藏窗口的全局快捷键
             let state_clone_hide = state_arc.clone();
             let app_handle_clone_hide = app_handle.clone();
             app.global_shortcut()
@@ -132,16 +145,17 @@ pub fn run() {
                             app_handle_clone_hide.clone(),
                             state_clone_hide.clone(),
                         );
+                        
+                        // 重置全局Ctrl键状态，防止状态不一致
+                        crate::mouse_listener::reset_ctrl_key_state();
                     }
                 })
                 .map_err(|e| e.to_string())?;
 
             start_clipboard_listener(app_handle.clone(), state_arc.clone());
-
-            // 启动划词选择监听器
+            
             start_text_selection_listener(app_handle.clone(), state_arc.clone());
 
-            // 初始化 updater 插件
             #[cfg(desktop)]
             app_handle
                 .plugin(tauri_plugin_updater::Builder::new().build())
@@ -155,7 +169,6 @@ pub fn run() {
             select_and_fill,
             window_blur,
             selection_toolbar_blur,
-            // 添加划词相关命令
             translate_text,
             explain_text,
             copy_text,
@@ -164,7 +177,7 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(
             tauri_plugin_log::Builder::default()
-                .level(log::LevelFilter::Debug)
+                .level(log::LevelFilter::Warn)
                 .target(tauri_plugin_log::Target::new(
                     tauri_plugin_log::TargetKind::Folder {
                         path: get_logs_dir_path(),
@@ -183,29 +196,12 @@ pub fn run() {
         .expect("构建Tauri应用时出错")
         .run(|_app_handle, _event| {});
 }
-
-// 启动划词选择监听器
-fn start_text_selection_listener(app_handle: AppHandle, _state: Arc<Mutex<AppState>>) {
-    #[cfg(windows)]
-    {
-        // 在Windows上使用新的实现
-        windows_text_selection::start_windows_text_selection_listener(app_handle);
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        // 在macOS上使用专门的实现
-        macos_text_selection::start_macos_text_selection_listener(app_handle);
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        // 在Linux上使用专门的实现
-        linux_text_selection::start_linux_text_selection_listener(app_handle);
-    }
+/// 启动划词选择监听器
+pub fn start_text_selection_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
+    mouse_listener::MouseListener::start_mouse_listener(app_handle, state);
 }
 
-// 显示划词工具栏的实际实现
+/// 打开划词工具栏
 fn show_selection_toolbar_impl(app_handle: AppHandle, selected_text: String) {
     if let Some(toolbar_window) = app_handle.get_webview_window("selection_toolbar") {
         set_toolbar_window(&toolbar_window);
@@ -217,9 +213,19 @@ fn show_selection_toolbar_impl(app_handle: AppHandle, selected_text: String) {
     }
 }
 
+/// 设置工具栏窗口位置
 fn set_toolbar_window(window: &tauri::WebviewWindow) {
     let _ = window.set_size(tauri::LogicalSize::new(50, 130));
     let _ = window.move_window(Position::RightCenter);
+}
+
+/// 隐藏工具栏窗口
+fn hide_selection_toolbar_impl(app_handle: AppHandle) {
+    if let Some(toolbar_window) = app_handle.get_webview_window("selection_toolbar") {
+        if let Ok(_) = toolbar_window.is_focused(){
+            toolbar_window.hide().unwrap();
+        }
+    }
 }
 
 ///
@@ -299,11 +305,11 @@ fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
         manager.get_history()
     };
 
-    if let Some(_window) = app_handle.get_webview_window("main") {
+    if let Some(_window) = app_handle.get_webview_window("clipboard") {
         let app_handle_clone = app_handle.clone();
         let history_clone = history.clone();
         thread::spawn(move || {
-            if let Some(window) = app_handle_clone.get_webview_window("main") {
+            if let Some(window) = app_handle_clone.get_webview_window("clipboard") {
                 set_window_position(&window);
                 if window.show().is_ok() {
                     let _ = window.set_focus();
@@ -328,10 +334,9 @@ fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
         return;
     }
 
-    if let Some(window) = app_handle.get_webview_window("main") {
+    if let Some(window) = app_handle.get_webview_window("clipboard") {
         let _ = window.hide();
     }
-
     {
         let mut state_guard = state.lock().unwrap();
         state_guard.is_visible = false;
@@ -350,18 +355,14 @@ fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
 /// * `window` - 要设置位置的窗口引用
 /// * `_position` - 位置字符串（目前未使用，窗口始终固定在底部）
 fn set_window_position(window: &tauri::WebviewWindow) {
-    // 获取屏幕尺寸
     if let Some(monitor) = window.current_monitor().unwrap() {
         let screen_size = monitor.size();
 
-        // 计算窗口大小：宽度100%，高度30%
         let window_width = screen_size.width;
         let window_height = 250u32;
 
-        // 设置窗口大小
         let _ = window.set_size(tauri::LogicalSize::new(window_width, window_height));
 
-        // 使用 positioner 插件将窗口定位到底部
         let _ = window.move_window(Position::BottomLeft);
     }
 }
@@ -569,6 +570,14 @@ fn add_to_clipboard_history(content: String, state: Arc<Mutex<AppState>>) {
         return;
     }
 
+    {
+        let state_guard = state.lock().unwrap();
+        if state_guard.is_processing_selection {
+            log::debug!("正在进行划词操作，跳过添加到历史记录");
+            return;
+        }
+    }
+
     let state_guard = state.lock().unwrap();
     let manager = state_guard.clipboard_manager.lock().unwrap();
     manager.add_to_history(content);
@@ -582,7 +591,6 @@ async fn get_clipboard_history(
     let manager = state_guard.clipboard_manager.lock().unwrap();
     Ok(manager.get_history())
 }
-// 通用的更新应用设置函数
 fn update_app_settings(state: &Arc<Mutex<AppState>>, max_items: usize) {
     {
         let mut state_guard = state.lock().unwrap();
@@ -643,8 +651,6 @@ async fn select_and_fill(
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(50));
         hide_clipboard_window(app_handle, state_clone.clone());
-
-        // 修复重复代码段，移除重复的处理代码
     });
     match result {
         Ok(_) => {
@@ -668,29 +674,21 @@ async fn select_and_fill(
         }
     }
 }
-thread_local! {
-    static ENIGO_INSTANCE: RefCell<Option<Enigo>> = RefCell::new(None);
-}
+
 fn simulate_paste() {
-    let key = if cfg!(target_os = "macos") {
-        Key::Meta
-    } else {
-        Key::Control
-    };
-    ENIGO_INSTANCE.with(|enigo_cell| {
-        let mut enigo_ref = enigo_cell.borrow_mut();
-        if enigo_ref.is_none() {
-            *enigo_ref = Some(Enigo::new(&Settings::default()).expect("未能初始化enigo"));
+    {
+        let mut enigo_guard = ENIGO_INSTANCE.lock().unwrap();
+        if enigo_guard.is_none() {
+            *enigo_guard = Some(Enigo::new(&Settings::default()).expect("未能初始化enigo"));
         }
 
-        if let Some(ref mut enigo) = *enigo_ref {
+        if let Some(ref mut enigo) = *enigo_guard {
             // 执行粘贴操作
-            let _ = enigo.key(key, enigo::Direction::Press);
-            let _ = enigo.key(Key::Unicode('v'), enigo::Direction::Press);
-            let _ = enigo.key(Key::Unicode('v'), enigo::Direction::Release);
-            let _ = enigo.key(key, enigo::Direction::Release);
+            let _ = enigo.key(CTRL_KEY, enigo::Direction::Press);
+            let _ = enigo.key(Key::Unicode('v'), enigo::Direction::Click);
+            let _ = enigo.key(CTRL_KEY, enigo::Direction::Release);
         }
-    });
+    }
 }
 
 #[tauri::command]
@@ -720,7 +718,6 @@ async fn window_blur(state: State<'_, Arc<Mutex<AppState>>>, app: AppHandle) -> 
 
 #[tauri::command]
 async fn selection_toolbar_blur(app: AppHandle) -> Result<(), String> {
-    // 直接关闭划词工具栏窗口
     if let Some(toolbar_window) = app.get_webview_window("selection_toolbar") {
         let _ = toolbar_window.close();
     }
@@ -737,11 +734,9 @@ fn handle_quit_event(app: &AppHandle) {
 fn handle_autostart_event(app: &AppHandle, state: &Arc<Mutex<AppState>>) {
     log::info!("切换开机自启状态");
 
-    // 检查当前自启动状态
     let is_enabled = app.autolaunch().is_enabled().unwrap_or(false);
 
     let result = if is_enabled {
-        // 如果已启用，则禁用自启动
         match app.autolaunch().disable() {
             Ok(()) => {
                 log::info!("已禁用开机自启");
@@ -754,7 +749,6 @@ fn handle_autostart_event(app: &AppHandle, state: &Arc<Mutex<AppState>>) {
             }
         }
     } else {
-        // 如果未启用，则启用自启动
         match app.autolaunch().enable() {
             Ok(()) => {
                 log::info!("已启用开机自启");
@@ -798,7 +792,6 @@ fn handle_check_update_event(app: &AppHandle) {
                 } else {
                     log::info!("已是最新版本");
 
-                    // 发送通知告知用户已是最新版本
                     let _ = app_handle
                         .notification()
                         .builder()
@@ -810,13 +803,12 @@ fn handle_check_update_event(app: &AppHandle) {
             Err(e) => {
                 log::error!("检查更新失败: {}", e);
 
-                // 发送错误通知
                 let _ = app_handle
-                    .notification()
-                    .builder()
-                    .title("更新错误")
-                    .body(&format!("检查更新失败: {}", e))
-                    .show();
+                        .notification()
+                        .builder()
+                        .title("更新错误")
+                        .body(&format!("检查更新失败: {}", e))
+                        .show();
             }
         }
     });
@@ -854,7 +846,6 @@ async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
                                         progress
                                     );
 
-                                    // 发送系统通知显示下载进度
                                     let _ = app
                                         .notification()
                                         .builder()
@@ -865,7 +856,6 @@ async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
                                 || {
                                     log::info!("更新下载完成，准备安装...");
 
-                                    // 发送系统通知显示下载完成
                                     let _ = app
                                         .notification()
                                         .builder()
@@ -895,15 +885,11 @@ async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
 }
 #[tauri::command]
 async fn translate_text(text: String) -> Result<String, String> {
-    // 这里应该调用AI翻译API
-    // 暂时返回模拟结果
     Ok(format!("Translation for: {}", text))
 }
 
 #[tauri::command]
 async fn explain_text(text: String) -> Result<String, String> {
-    // 这里应该调用AI解释API
-    // 暂时返回模拟结果
     Ok(format!("Explanation for: {}", text))
 }
 

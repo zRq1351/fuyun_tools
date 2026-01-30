@@ -1,5 +1,5 @@
 {
-  "productName": "fuyun_tool",
+  "productName": "fuyun_tools",
   "version": "0.3.5",
   "identifier": "com.clipboard-manager.fuyun",
   "build": {
@@ -8,8 +8,9 @@
   "app": {
     "windows": [
       {
-        "label": "main",
-        "title": "fuyun_tool",
+        "label": "clipboard",
+        "title": "fuyun_tools",
+        "url": "clipboard.html",
         "visible": false,
         "decorations": false,
         "shadow": false,
@@ -24,7 +25,8 @@
       },
       {
         "label": "selection_toolbar",
-        "title":"fuyun_tool",
+        "title":"fuyun_tools",
+        "url": "selection_toolbar.html",
         "visible": false,
         "resizable":false,
         "decorations": false,
@@ -36,7 +38,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' tauri://ipc tauri://*; img-src 'self' data: https:; font-src 'self' https:; object-src 'none';"
+        "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' tauri://ipc; img-src 'self' data:; font-src 'self'; object-src 'none';"
     },
     "withGlobalTauri": true
   },
