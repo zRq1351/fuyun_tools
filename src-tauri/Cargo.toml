@@ -34,7 +34,9 @@ tauri-plugin-positioner = { version = "2.3.1" }
 enigo = { version = "0.6.1", default-features = false }
 rdev = "0.5.3"
 tokio = { version = "1.49.0", features = ["rt", "rt-multi-thread", "macros"] }
-reqwest = { version = "0.13.1", features = ["json"] }
+reqwest = { version = "0.13.1", features = ["json", "stream"] }
+
+futures-util = "0.3.31"
 
 # Windows 特定的依赖，用于 Windows API 调用
 [target.'cfg(target_os = "windows")'.dependencies]

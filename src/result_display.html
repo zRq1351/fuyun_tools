@@ -34,37 +34,180 @@
         }
 
         .title {
-            font-size: 12px;
+            font-size: 16px;
             font-weight: bold;
             margin: 0;
         }
 
         .content {
             flex: 1;
-            white-space: pre-wrap;
-            word-break: break-word;
             line-height: 1.6;
-            overflow-y: auto;
+            overflow-y: auto; /* 启用竖向滚动 */
             padding: 10px;
             background: #2d2d2d;
             border-radius: 6px;
+            /* 隐藏滚动条但保持滚动功能 */
+            -ms-overflow-style: none;  /* IE 和 Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
+        
+        /* 隐藏滚动条但保持滚动功能 - Chrome, Safari, Opera */
+        .content::-webkit-scrollbar {
+            display: none;
+        }
+        
+        /* 确保即使隐藏滚动条也能通过鼠标滚轮滚动 */
+        .content:hover {
+            -ms-overflow-style: auto;
+            scrollbar-width: auto;
+        }
+        
+        .content:hover::-webkit-scrollbar {
+            display: block;
+            width: 8px;
+        }
+        
+        .content:hover::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 4px;
+        }
+        
+        .content:hover::-webkit-scrollbar-track {
+            background: #333;
+        }
+        
+        /* Markdown 样式 */
+        .content h1, .content h2, .content h3, .content h4, .content h5, .content h6 {
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            color: #ffffff;
+        }
+        
+        .content h1 { font-size: 1.7em; }
+        .content h2 { font-size: 1.5em; }
+        .content h3 { font-size: 1.3em; }
+        .content h4 { font-size: 1.2em; }
+        .content h5 { font-size: 1.1em; }
+        .content h6 { font-size: 1.0em; }
+        
+        .content p {
+            margin: 0.8em 0;
+        }
+        
+        .content ul, .content ol {
+            padding-left: 1.5em;
+            margin: 0.5em 0;
+        }
+        
+        .content li {
+            margin: 0.3em 0;
+        }
+        
+        .content code {
+            background-color: #444;
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .content pre {
+            background-color: #222;
+            padding: 1em;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 0.8em 0;
+        }
+        
+        .content pre code {
+            background: none;
+            padding: 0;
+        }
+        
+        .content blockquote {
+            border-left: 3px solid #666;
+            padding-left: 1em;
+            margin: 0.8em 0;
+            color: #ccc;
+        }
+        
+        .content a {
+            color: #4CAF50;
+        }
+        
+        .content strong {
+            font-weight: bold;
+            color: #dddddd;
+        }
+        
+        .content em {
+            font-style: italic;
+        }
+        
+        .content hr {
+            border: 0;
+            border-top: 1px solid #444;
+            margin: 1em 0;
+        }
+        
+        .content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 0.8em 0;
+        }
+        
+        .content th, .content td {
+            border: 1px solid #444;
+            padding: 0.5em;
+            text-align: left;
+        }
+        
+        .content th {
+            background-color: #333;
         }
     </style>
 </head>
 <body>
 <div class="container">
+    <div class="header">
+        <h2 class="title" id="resultTitle">结果展示</h2>
+    </div>
     <div class="content" id="resultContent">加载中...</div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
     const {listen} = window.__TAURI__.event;
     const {appWindow} = window.__TAURI__.window;
 
+    // 初始化内容存储
+    let fullContent = '';
+    
     // 监听结果数据事件
     listen('result-data', (event) => {
         const data = event.payload;
         document.getElementById('resultTitle').textContent = data.title;
-        document.getElementById('resultContent').textContent = data.content;
+        
+        const contentElement = document.getElementById('resultContent');
+        
+        // 区分流式更新和非流式更新
+        if (data.content.startsWith('正在') || data.content === '加载中...' || data.title.includes('失败')) {
+            // 非流式内容，直接替换
+            contentElement.innerHTML = data.content;
+            fullContent = data.content;
+        } else {
+            // 流式内容，追加到现有内容后面
+            if (fullContent === '加载中...') {
+                // 第一次流式内容，清空初始文本
+                fullContent = '';
+            }
+            fullContent += data.content;
+            
+            // 使用marked.js将Markdown转换为HTML并显示
+            contentElement.innerHTML = marked.parse(fullContent);
+        }
+        
+        // 自动滚动到底部
+        contentElement.scrollTop = contentElement.scrollHeight;
     });
 </script>
 </body>

@@ -27,6 +27,7 @@ use tauri_plugin_updater::UpdaterExt;
 use utils::{load_settings, save_settings, AppSettingsData};
 
 use lazy_static::lazy_static;
+use crate::ai_client::AIClient;
 
 lazy_static! {
     static ref ENIGO_INSTANCE: Arc<Mutex<Option<Enigo>>> = Arc::new(Mutex::new(None));
@@ -166,7 +167,9 @@ pub fn run() {
             save_ai_settings,
             test_ai_connection,
             show_result_window,
-            update_result_window
+            update_result_window,
+            stream_translate_text,
+            stream_explain_text
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
@@ -732,7 +735,7 @@ fn handle_check_update_event(app: &AppHandle) {
                 log::error!("检查更新失败: {}", e);
 
                 let _ = app_handle
-                    .notification()
+                        .notification()
                         .builder()
                         .title("更新错误")
                         .body(&format!("检查更新失败: {}", e))
@@ -980,25 +983,14 @@ async fn show_result_window(
         // 创建新窗口
         tauri::WebviewWindowBuilder::new(&app, &window_label, tauri::WebviewUrl::App("result_display.html".into()))
             .title(&title)
-            .inner_size(600.0, 400.0)
+            .inner_size(300.0, 300.0)
             .resizable(true)
             .decorations(true)
             .build()
             .map_err(|e| format!("创建窗口失败: {}", e))?
     };
-    
-    // 获取工具栏窗口位置，将结果窗口显示在其旁边
-    if let Some(toolbar_window) = app.get_webview_window("selection_toolbar") {
-        if let Ok(position) = toolbar_window.outer_position() {
-            let toolbar_width = 50; // 工具栏宽度
-            let spacing = 10; // 间距
-            let new_x = position.x + toolbar_width + spacing;
-            let new_y = position.y;
-            
-            let _ = window.set_position(tauri::LogicalPosition::new(new_x, new_y));
-        }
-    }
-    
+
+    let _ = window.move_window(Position::RightCenter);
     // 显示窗口并将内容发送到前端
     window.show().map_err(|e| format!("显示窗口失败: {}", e))?;
     window.set_focus().map_err(|e| format!("设置焦点失败: {}", e))?;
@@ -1021,25 +1013,169 @@ async fn update_result_window(
 ) -> Result<(), String> {
     use tauri::Manager;
     
-    let window_label = format!("result_{}", window_type);
+    // 简化窗口标签处理
+    let window_label = if window_type.contains("translation") {
+        "result_translation".to_string()
+    } else if window_type.contains("explanation") {
+        "result_explanation".to_string()
+    } else {
+        format!("result_{}", window_type)
+    };
+    
+    let title = if window_type.contains("translation") {
+        "翻译结果".to_string()
+    } else if window_type.contains("explanation") {
+        "解释结果".to_string()
+    } else {
+        "结果".to_string()
+    };
     
     if let Some(window) = app.get_webview_window(&window_label) {
-        // 更新窗口内容
-        let title = if window_type.contains("translation") { 
-            "翻译结果" 
-        } else if window_type.contains("explanation") { 
-            "解释结果" 
-        } else { 
-            "结果" 
-        };
-        
         let payload = serde_json::json!({
             "title": title,
             "content": content
         });
-        window.emit("result-data", payload).map_err(|e| format!("发送数据失败: {}", e))?;
-        Ok(())
+        match window.emit("result-data", payload) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("发送数据失败: {}", e))
+        }
     } else {
         Err("窗口不存在".to_string())
     }
+}
+
+// 创建一个辅助函数来创建AI客户端
+async fn create_ai_client() -> Result<AIClient, String> {
+    use crate::ai_client::{AIClient, AIConfig};
+    
+    let settings_data = AppState::default().settings;
+    let ai_api_key = &settings_data.ai_api_key;
+    let ai_api_url = &settings_data.ai_api_url;
+    let model = &settings_data.ai_model_name;
+
+    let config = AIConfig {
+        api_key: ai_api_key.clone(),
+        base_url: ai_api_url.clone(),
+        model: model.clone(),
+    };
+
+    AIClient::new(config).map_err(|e| format!("客户端初始化失败: {}", e))
+}
+
+#[tauri::command]
+async fn stream_translate_text(text: String, app: AppHandle) -> Result<(), String> {
+    use crate::ai_client::{Message, ChatCompletionRequest};
+    
+    // 创建AI客户端
+    let client: AIClient = create_ai_client().await?;
+    let model = AppState::default().settings.ai_model_name;
+    
+    // 先打开结果窗口
+    show_result_window("翻译结果".to_string(), "正在翻译...".to_string(), "translation".to_string(), app.clone()).await?;
+    
+    // 构建翻译请求
+    let messages = vec![
+        Message {
+            role: "user".to_string(),
+            content: format!("请不要解释直接翻译这段话：\n\n{}", text),
+        }
+    ];
+    
+    let request = ChatCompletionRequest {
+        model: model.clone(),
+        messages,
+        temperature: Some(0.7),
+        max_tokens: None,
+        max_completion_tokens: None,
+        top_p: Some(1.0),
+        frequency_penalty: Some(0.0),
+        presence_penalty: Some(0.0),
+        stream: Some(true), // 启用流式响应
+    };
+    
+    // 使用流式响应进行翻译
+    let result = client.chat_completion_stream(&request, |content_chunk| {
+        // 每收到一块内容就更新结果窗口
+        let app_clone = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = update_result_window(
+                content_chunk, 
+                "translation_stream".to_string(), 
+                app_clone
+            ).await {
+                eprintln!("更新翻译结果窗口失败: {}", e);
+            }
+        });
+    }).await;
+    
+    match result {
+        Ok(()) => {
+            log::info!("翻译完成");
+        }
+        Err(e) => {
+            let error_msg = format!("翻译失败: {}", e);
+            update_result_window(error_msg, "translation_error".to_string(), app).await?;
+        }
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn stream_explain_text(text: String, app: AppHandle) -> Result<(), String> {
+    use crate::ai_client::{Message, ChatCompletionRequest};
+    
+    // 创建AI客户端
+    let client: AIClient = create_ai_client().await?;
+    let model = AppState::default().settings.ai_model_name;
+    
+    // 先打开结果窗口
+    show_result_window("解释结果".to_string(), "正在解释...".to_string(), "explanation".to_string(), app.clone()).await?;
+    
+    // 构建解释请求
+    let messages = vec![
+        Message {
+            role: "user".to_string(),
+            content: format!("请用中文200字内解释这段话：\n\n{}", text),
+        }
+    ];
+    
+    let request = ChatCompletionRequest {
+        model: model.clone(),
+        messages,
+        temperature: Some(0.7),
+        max_tokens: Some(1000),
+        max_completion_tokens: Some(1000),
+        top_p: Some(1.0),
+        frequency_penalty: Some(0.0),
+        presence_penalty: Some(0.0),
+        stream: Some(true), // 启用流式响应
+    };
+    
+    // 使用流式响应进行解释
+    let result = client.chat_completion_stream(&request, |content_chunk| {
+        // 每收到一块内容就更新结果窗口
+        let app_clone = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = update_result_window(
+                content_chunk, 
+                "explanation_stream".to_string(), 
+                app_clone
+            ).await {
+                eprintln!("更新解释结果窗口失败: {}", e);
+            }
+        });
+    }).await;
+    
+    match result {
+        Ok(()) => {
+            log::info!("解释完成");
+        }
+        Err(e) => {
+            let error_msg = format!("解释失败: {}", e);
+            update_result_window(error_msg, "explanation_error".to_string(), app).await?;
+        }
+    }
+    
+    Ok(())
 }

@@ -89,69 +89,18 @@
         console.log('选中的文本:', selectedText);
     });
 
-    // 翻译按钮点击事件
     document.getElementById('translateBtn').addEventListener('click', async () => {
         if (selectedText) {
-            // 先打开结果窗口
-            await invoke('show_result_window', { 
-                title: '翻译结果', 
-                content: '正在翻译...',
-                windowType: 'translation'
-            });
-            
-            try {
-                // 然后调用AI获取结果
-                const result = await invoke('translate_text', {text: selectedText});
-                
-                // 更新结果窗口内容
-                await invoke('update_result_window', { 
-                    content: result,
-                    windowType: 'translation'
-                });
-            } catch (error) {
-                console.error('翻译失败:', error);
-                
-                // 显示错误信息
-                await invoke('update_result_window', { 
-                    content: `翻译失败: ${error}`,
-                    windowType: 'translation'
-                });
-            }
+            await invoke('stream_translate_text', {text: selectedText});
         }
     });
 
-    // 解释按钮点击事件
     document.getElementById('explainBtn').addEventListener('click', async () => {
         if (selectedText) {
-            // 先打开结果窗口
-            await invoke('show_result_window', { 
-                title: '解释结果', 
-                content: '正在解释...',
-                windowType: 'explanation'
-            });
-            
-            try {
-                // 然后调用AI获取结果
-                const result = await invoke('explain_text', {text: selectedText});
-                
-                // 更新结果窗口内容
-                await invoke('update_result_window', { 
-                    content: result,
-                    windowType: 'explanation'
-                });
-            } catch (error) {
-                console.error('解释失败:', error);
-                
-                // 显示错误信息
-                await invoke('update_result_window', { 
-                    content: `解释失败: ${error}`,
-                    windowType: 'explanation'
-                });
-            }
+            await invoke('stream_explain_text', {text: selectedText});
         }
     });
 
-    // 复制按钮点击事件
     document.getElementById('copyBtn').addEventListener('click', async () => {
         if (selectedText) {
             try {
