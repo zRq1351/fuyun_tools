@@ -114,7 +114,6 @@ impl MouseListener {
                         }
                     }
                     EventType::KeyRelease(key) => {
-                        hide_selection_toolbar_impl(app_handle.clone());
                         if key == Key::ControlLeft {
                             GLOBAL_STATE.ctrl_left_pressed.store(false, Ordering::SeqCst);
                             log::info!("检测到左Ctrl键释放");
@@ -138,7 +137,6 @@ impl MouseListener {
                         *state_guard = MouseActionState::MouseDown(last_x, last_y, current_time);
                     }
                     EventType::ButtonRelease(Button::Left) => {
-                        hide_selection_toolbar_impl(app_handle.clone());
                         let current_time = std::time::Instant::now();
 
                         let (last_x, last_y) = {
@@ -467,12 +465,12 @@ fn is_foreground_window_console() -> bool {
                     {
                         log::info!("检测到IDE应用: {}, 检查是否是终端面板", app_name);
 
-                        if app_name.contains("terminal") || is_ide_terminal_active() {
+                        return if app_name.contains("terminal") || is_ide_terminal_active() {
                             log::info!("检测到IDE中的终端面板: {}", app_name);
-                            return true;
+                            true
                         } else {
                             log::info!("检测到IDE但非终端面板，允许划词: {}", app_name);
-                            return false;
+                            false
                         }
                     }
                     log::info!("检测到终端应用或IDE: {}", app_name);

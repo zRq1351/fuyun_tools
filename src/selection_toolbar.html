@@ -63,7 +63,10 @@
         .copy-btn {
             color: #FF9800;
         }
-
+        
+        .settings-btn {
+            color: #9b59b6;
+        }
     </style>
 </head>
 <body>
@@ -76,8 +79,9 @@
 <script>
     // 获取Tauri API
     const invoke = window.__TAURI__.core.invoke;
-    const { getCurrentWindow } = window.__TAURI__.window;
+    const { getCurrentWindow, LogicalSize, appWindow } = window.__TAURI__.window;
     const listen = window.__TAURI__.event.listen;
+    const { confirm } = window.__TAURI__.dialog;
 
     let selectedText = '';
     listen('selected-text', (event) => {
@@ -88,11 +92,30 @@
     // 翻译按钮点击事件
     document.getElementById('translateBtn').addEventListener('click', async () => {
         if (selectedText) {
+            // 先打开结果窗口
+            await invoke('show_result_window', { 
+                title: '翻译结果', 
+                content: '正在翻译...',
+                windowType: 'translation'
+            });
+            
             try {
+                // 然后调用AI获取结果
                 const result = await invoke('translate_text', {text: selectedText});
-                console.log('翻译结果:', result);
+                
+                // 更新结果窗口内容
+                await invoke('update_result_window', { 
+                    content: result,
+                    windowType: 'translation'
+                });
             } catch (error) {
                 console.error('翻译失败:', error);
+                
+                // 显示错误信息
+                await invoke('update_result_window', { 
+                    content: `翻译失败: ${error}`,
+                    windowType: 'translation'
+                });
             }
         }
     });
@@ -100,11 +123,30 @@
     // 解释按钮点击事件
     document.getElementById('explainBtn').addEventListener('click', async () => {
         if (selectedText) {
+            // 先打开结果窗口
+            await invoke('show_result_window', { 
+                title: '解释结果', 
+                content: '正在解释...',
+                windowType: 'explanation'
+            });
+            
             try {
+                // 然后调用AI获取结果
                 const result = await invoke('explain_text', {text: selectedText});
-                console.log('解释结果:', result);
+                
+                // 更新结果窗口内容
+                await invoke('update_result_window', { 
+                    content: result,
+                    windowType: 'explanation'
+                });
             } catch (error) {
                 console.error('解释失败:', error);
+                
+                // 显示错误信息
+                await invoke('update_result_window', { 
+                    content: `解释失败: ${error}`,
+                    windowType: 'explanation'
+                });
             }
         }
     });

@@ -1,17 +1,15 @@
+pub mod ai_client;
 pub mod clipboard;
 pub mod config;
-pub mod utils;
-
-pub mod text_selection;
 pub mod mouse_listener;
+pub mod text_selection;
+pub mod utils; // 添加新的AI客户端模块
 
 use crate::config::{CTRL_KEY, DEFAULT_HIDE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT};
 use crate::utils::get_logs_dir_path;
 use clipboard::ClipboardManager;
-use config::{CLIPBOARD_POLL_INTERVAL, MAX_ITEMS_OPTIONS};
+use config::CLIPBOARD_POLL_INTERVAL;
 use enigo::{Enigo, Key, Keyboard, Settings};
-// use rdev::{listen, Button, EventType}; // 仅在需要鼠标键盘监听时使用
-use std::collections::HashMap;
 use std::env;
 
 use std::sync::{Arc, Mutex};
@@ -28,7 +26,6 @@ use tauri_plugin_positioner::{Position, WindowExt};
 use tauri_plugin_updater::UpdaterExt;
 use utils::{load_settings, save_settings, AppSettingsData};
 
-// 添加必要的导入
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -37,24 +34,16 @@ lazy_static! {
 
 #[derive(Clone)]
 struct TrayMenuItems {
-    max_items_map: HashMap<String, CheckMenuItem<tauri::Wry>>,
     autostart_item: CheckMenuItem<tauri::Wry>,
-}
-
-#[derive(Clone)]
-struct AppSettings {
-    #[allow(dead_code)] // 允许该字段未被读取
-    position: String,
-    max_items: usize,
 }
 
 pub struct AppState {
     clipboard_manager: Arc<Mutex<ClipboardManager>>,
     is_visible: bool,
     selected_index: usize,
-    settings: AppSettings,
-    is_updating_clipboard: bool,   // 添加标志位，标识是否正在更新剪贴板
-    is_processing_selection: bool, // 添加标志位，标识是否正在处理选择
+    settings: AppSettingsData,
+    is_updating_clipboard: bool,
+    is_processing_selection: bool,
     tray_menu_items: Option<TrayMenuItems>,
 }
 
@@ -82,10 +71,7 @@ impl Default for AppState {
             ))),
             is_visible: false,
             selected_index: 0,
-            settings: AppSettings {
-                position: "bottom".to_string(),
-                max_items: saved_settings.max_items,
-            },
+            settings: saved_settings,
             is_updating_clipboard: false,
             is_processing_selection: false,
             tray_menu_items: None,
@@ -99,9 +85,9 @@ pub fn run() {
     tauri::Builder::default()
         .manage(state_arc.clone())
         .setup(move |app| {
-            let instance = single_instance::SingleInstance::new("fuyun_tools")
-                .expect("未能创建单实例锁");
-            
+            let instance =
+                single_instance::SingleInstance::new("fuyun_tools").expect("未能创建单实例锁");
+
             if !instance.is_single() {
                 app.dialog()
                     .message("软件已运行，请观察系统托盘！")
@@ -109,15 +95,21 @@ pub fn run() {
                     .blocking_show();
                 std::process::exit(0);
             }
-            
+
+            // 为设置窗口添加事件处理器，仅处理关闭事件，不影响其他窗口操作
+            // 由于设置窗口在tauri.conf.json中配置了decorations:true，它有原生的关闭按钮
+            if let Some(settings_window) = app.get_webview_window("settings") {
+                let settings_window_clone = settings_window.clone();
+                settings_window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = settings_window_clone.hide();
+                    }
+                });
+            }
+
             let app_handle = app.handle();
-            let current_max_items = {
-                let state_guard = state_arc.lock().unwrap();
-                state_guard.settings.max_items
-            };
-
-            rebuild_tray_menu(&app_handle, Some(current_max_items), state_arc.clone());
-
+            rebuild_tray_menu(&app_handle, state_arc.clone());
             // 注册全局快捷键监听
             let state_clone = state_arc.clone();
             let app_handle_clone = app_handle.clone();
@@ -128,9 +120,8 @@ pub fn run() {
                         if !state_guard.is_visible && !state_guard.is_processing_selection {
                             drop(state_guard);
                             show_clipboard_window(app_handle_clone.clone(), state_clone.clone());
-                            
-                            // 重置全局Ctrl键状态，防止状态不一致
-                            crate::mouse_listener::reset_ctrl_key_state();
+
+                            mouse_listener::reset_ctrl_key_state();
                         }
                     }
                 })
@@ -145,14 +136,14 @@ pub fn run() {
                             app_handle_clone_hide.clone(),
                             state_clone_hide.clone(),
                         );
-                        
+
                         mouse_listener::reset_ctrl_key_state();
                     }
                 })
                 .map_err(|e| e.to_string())?;
 
             start_clipboard_listener(app_handle.clone(), state_arc.clone());
-            
+
             start_text_selection_listener(app_handle.clone(), state_arc.clone());
 
             #[cfg(desktop)]
@@ -171,16 +162,21 @@ pub fn run() {
             translate_text,
             explain_text,
             copy_text,
+            get_ai_settings,
+            save_ai_settings,
+            test_ai_connection,
+            show_result_window,
+            update_result_window
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(
             tauri_plugin_log::Builder::default()
-                .level(log::LevelFilter::Info)
+                .level(log::LevelFilter::Warn)
                 .target(tauri_plugin_log::Target::new(
                     tauri_plugin_log::TargetKind::Folder {
                         path: get_logs_dir_path(),
-                        file_name: Some(String::from("share_log")),
+                        file_name: Some(String::from("fuyun_log")),
                     },
                 ))
                 .max_file_size(1000000) // 1MB
@@ -221,8 +217,14 @@ fn set_toolbar_window(window: &tauri::WebviewWindow) {
 /// 隐藏工具栏窗口
 fn hide_selection_toolbar_impl(app_handle: AppHandle) {
     if let Some(toolbar_window) = app_handle.get_webview_window("selection_toolbar") {
-        if let Ok(_) = toolbar_window.is_focused(){
-            toolbar_window.hide().unwrap();
+        if let Ok(is_visible) = toolbar_window.is_visible() {
+            if is_visible {
+                if let Ok(has_focus) = toolbar_window.is_focused() {
+                    if !has_focus {
+                        let _ = toolbar_window.hide();
+                    }
+                }
+            }
         }
     }
 }
@@ -366,14 +368,6 @@ fn set_window_position(window: &tauri::WebviewWindow) {
     }
 }
 
-/// 更新最大记录数设置
-fn update_max_items_setting(app: &AppHandle, max_items: usize, state: Arc<Mutex<AppState>>) {
-    log::info!("更新最大记录数设置: {}", max_items);
-    update_app_settings(&state, max_items);
-
-    rebuild_tray_menu(app, Some(max_items), state);
-}
-
 /// 打开日志目录
 fn open_log_directory() -> Result<(), Box<dyn std::error::Error>> {
     let log_dir = get_logs_dir_path();
@@ -405,39 +399,17 @@ fn clear_log_files() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn rebuild_tray_menu(
-    app_handle: &AppHandle,
-    selected_max_items: Option<usize>,
-    state: Arc<Mutex<AppState>>,
-) {
-    let current_max_items = selected_max_items.unwrap_or_else(|| {
-        let state_guard = state.lock().unwrap();
-        state_guard.settings.max_items
-    });
-
+fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
     let mut state_guard = state.lock().unwrap();
     let tray_menu_items = &mut state_guard.tray_menu_items;
     if let Some(ref mut items) = *tray_menu_items {
-        for &select in MAX_ITEMS_OPTIONS {
-            if let Some(menu_item) = items.max_items_map.get(&select.to_string()) {
-                let _ = menu_item.set_checked(current_max_items == select);
-                log::info!(
-                    "设置{}条记录选中状态: {}",
-                    select,
-                    current_max_items == select
-                );
-            }
-        }
-
         match app_handle.autolaunch().is_enabled() {
             Ok(autostart_enabled) => {
                 let _ = items.autostart_item.set_checked(autostart_enabled);
                 log::info!("设置自启动状态: {}", autostart_enabled);
             }
             Err(e) => {
-                log::error!("获取自启动状态失败: {}", e);
-                // 在某些平台上可能不支持，记录警告但不中断程序
-                log::warn!("自启动功能可能不支持当前平台");
+                log::error!("自启动功能可能不支持当前平台: {}", e);
             }
         }
     } else {
@@ -450,6 +422,7 @@ fn rebuild_tray_menu(
         let clear_history_item = create_menu_item("clear_history", "清除记录");
         let clear_logs_item = create_menu_item("clear_logs", "清除日志");
         let open_logs_item = create_menu_item("open_logs", "打开日志目录");
+        let settings_item = create_menu_item("settings", "设置");
         let check_update_item = create_menu_item("check_update", "检查更新");
         let autostart_enabled = app_handle.autolaunch().is_enabled().unwrap_or(false);
         let autostart_item = CheckMenuItemBuilder::with_id("autostart", "开机自启")
@@ -457,38 +430,9 @@ fn rebuild_tray_menu(
             .build(app_handle)
             .expect("创建开机自启菜单项失败");
 
-        let mut max_items_map = HashMap::new();
-        let mut max_items_menu_items = Vec::new();
-
-        for &select in MAX_ITEMS_OPTIONS {
-            let label = format!("{}条", select);
-            let menu_item = CheckMenuItemBuilder::with_id(select, &label)
-                .checked(current_max_items == select)
-                .build(app_handle)
-                .expect(&format!("未能创建{}菜单项", label));
-
-            max_items_map.insert(select.to_string(), menu_item.clone());
-            max_items_menu_items.push(menu_item);
-        }
-
         *tray_menu_items = Some(TrayMenuItems {
-            max_items_map,
             autostart_item: autostart_item.clone(),
         });
-
-        let mut max_items_menu_items_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
-            Vec::new();
-        for item in &max_items_menu_items {
-            max_items_menu_items_refs.push(item);
-        }
-
-        let items_submenu = tauri::menu::Submenu::with_items(
-            app_handle,
-            "记录数",
-            true,
-            &max_items_menu_items_refs,
-        )
-        .expect("未能创建记录数子菜单");
 
         let clear_submenu_items: [&dyn tauri::menu::IsMenuItem<tauri::Wry>; 2] =
             [&clear_history_item, &clear_logs_item];
@@ -499,9 +443,9 @@ fn rebuild_tray_menu(
 
         let menu_items: [&dyn tauri::menu::IsMenuItem<tauri::Wry>; 6] = [
             &autostart_item,
-            &items_submenu,
             &clear_submenu,
             &open_logs_item,
+            &settings_item,
             &check_update_item,
             &quit_item,
         ];
@@ -529,13 +473,6 @@ fn rebuild_tray_menu(
                         "autostart" => {
                             handle_autostart_event(&app, &state_for_events);
                         }
-                        id if id.parse::<i32>().is_ok() => {
-                            update_max_items_setting(
-                                app,
-                                id.parse().unwrap(),
-                                state_for_events.clone(),
-                            );
-                        }
                         "open_logs" => {
                             if let Err(e) = open_log_directory() {
                                 log::error!("打开日志目录失败: {}", e);
@@ -552,6 +489,9 @@ fn rebuild_tray_menu(
                         "check_update" => {
                             handle_check_update_event(app);
                         }
+                        "settings" => {
+                            open_settings(app);
+                        }
                         _ => {
                             log::info!("未知的菜单事件: {}", event_id);
                         }
@@ -559,7 +499,13 @@ fn rebuild_tray_menu(
                 }
             })
             .build(app_handle)
-            .expect("未能创建托盘图标");
+            .expect("创建托盘图标失败");
+    }
+}
+
+fn open_settings(app: &AppHandle) {
+    if let Some(settings_window) = app.get_webview_window("settings") {
+        let _ = settings_window.show();
     }
 }
 
@@ -589,22 +535,6 @@ async fn get_clipboard_history(
     let state_guard = state.lock().unwrap();
     let manager = state_guard.clipboard_manager.lock().unwrap();
     Ok(manager.get_history())
-}
-fn update_app_settings(state: &Arc<Mutex<AppState>>, max_items: usize) {
-    {
-        let mut state_guard = state.lock().unwrap();
-        state_guard.settings.max_items = max_items;
-
-        let mut manager = state_guard.clipboard_manager.lock().unwrap();
-        manager.set_max_items(max_items);
-    }
-
-    let settings = AppSettingsData { max_items };
-
-    if let Err(e) = save_settings(&settings) {
-        log::error!("保存设置失败: {}", e);
-        eprintln!("保存设置失败: {}", e);
-    }
 }
 
 #[tauri::command]
@@ -682,7 +612,6 @@ fn simulate_paste() {
         }
 
         if let Some(ref mut enigo) = *enigo_guard {
-            // 执行粘贴操作
             let _ = enigo.key(CTRL_KEY, enigo::Direction::Press);
             let _ = enigo.key(Key::Unicode('v'), enigo::Direction::Click);
             let _ = enigo.key(CTRL_KEY, enigo::Direction::Release);
@@ -718,7 +647,7 @@ async fn window_blur(state: State<'_, Arc<Mutex<AppState>>>, app: AppHandle) -> 
 #[tauri::command]
 async fn selection_toolbar_blur(app: AppHandle) -> Result<(), String> {
     if let Some(toolbar_window) = app.get_webview_window("selection_toolbar") {
-        let _ = toolbar_window.close();
+        let _ = toolbar_window.hide();
     }
     Ok(())
 }
@@ -766,7 +695,7 @@ fn handle_autostart_event(app: &AppHandle, state: &Arc<Mutex<AppState>>) {
         let state_clone = state.clone();
         thread::spawn(move || {
             thread::sleep(Duration::from_millis(100));
-            rebuild_tray_menu(&app_handle, None, state_clone);
+            rebuild_tray_menu(&app_handle, state_clone);
         });
     }
 }
@@ -803,7 +732,7 @@ fn handle_check_update_event(app: &AppHandle) {
                 log::error!("检查更新失败: {}", e);
 
                 let _ = app_handle
-                        .notification()
+                    .notification()
                         .builder()
                         .title("更新错误")
                         .body(&format!("检查更新失败: {}", e))
@@ -833,7 +762,6 @@ async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
                         update
                             .download_and_install(
                                 |progress, total| {
-                                    // 显示下载进度
                                     let percentage = if let Some(total) = total {
                                         (progress as f64 / total as f64 * 100.0).round() as u32
                                     } else {
@@ -882,14 +810,138 @@ async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
         Err(e) => Err(e.to_string()),
     }
 }
+
+#[tauri::command]
+async fn get_ai_settings() -> Result<AppSettingsData, String> {
+    load_settings()
+}
+
+#[tauri::command]
+async fn save_ai_settings(
+    max_items: usize,
+    ai_api_url: String,
+    ai_model_name: String,
+    ai_api_key: String,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<(), String> {
+    let settings = AppSettingsData {
+        max_items,
+        ai_api_url,
+        ai_model_name,
+        ai_api_key,
+    };
+
+    save_settings(&settings).map_err(|e| e.to_string())?;
+
+    {
+        let mut state_guard = state.lock().unwrap();
+        state_guard.settings = settings;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn test_ai_connection(
+    ai_api_url: String,
+    ai_model_name: String,
+    ai_api_key: String,
+) -> Result<String, String> {
+    use crate::ai_client::{AIClient, AIConfig};
+
+    let config = AIConfig {
+        api_key: ai_api_key,
+        base_url: ai_api_url,
+        model: ai_model_name,
+    };
+
+    let client = AIClient::new(config).map_err(|e| format!("客户端初始化失败: {}", e))?;
+
+    match client.test_connection().await {
+        Ok(success) => {
+            if success {
+                Ok("连接成功".to_string())
+            } else {
+                Err("连接测试未返回预期结果".to_string())
+            }
+        }
+        Err(e) => {
+            log::error!("AI连接测试失败: {}", e);
+            Err(format!("连接测试失败: {}", e))
+        }
+    }
+}
+
 #[tauri::command]
 async fn translate_text(text: String) -> Result<String, String> {
-    Ok(format!("Translation for: {}", text))
+    use crate::ai_client::{AIClient, AIConfig};
+
+    let settings_data = AppState::default().settings;
+    let ai_api_key = &settings_data.ai_api_key;
+    let ai_api_url = &settings_data.ai_api_url;
+    let model = &settings_data.ai_model_name;
+
+    let config = AIConfig {
+        api_key: ai_api_key.clone(),
+        base_url: ai_api_url.clone(),
+        model: model.clone(),
+    };
+
+    let source_language = "英文";
+    let target_language = "中文";
+
+    let client = AIClient::new(config).map_err(|e| format!("客户端初始化失败: {}", e))?;
+
+    match client
+        .generate_text(
+            &format!(
+                "请翻译这段话不要过多解释，最好根据文字直接翻译,由{}翻译为:{}。：\n\n{}",
+                source_language, target_language, text
+            ),
+            Some(1000),
+        )
+        .await
+    {
+        Ok(result) => {
+            Ok(result)
+        }
+        Err(e) => {
+            log::error!("翻译遇到错误: {}", e);
+            Err("遇到未知错误,请重试".to_string())
+        }
+    }
 }
 
 #[tauri::command]
 async fn explain_text(text: String) -> Result<String, String> {
-    Ok(format!("Explanation for: {}", text))
+    use crate::ai_client::{AIClient, AIConfig};
+
+    let settings_data = AppState::default().settings;
+    let ai_api_key = &settings_data.ai_api_key;
+    let ai_api_url = &settings_data.ai_api_url;
+    let model = &settings_data.ai_model_name;
+
+    let config = AIConfig {
+        api_key: ai_api_key.clone(),
+        base_url: ai_api_url.clone(),
+        model: model.clone(),
+    };
+
+    let client = AIClient::new(config).map_err(|e| format!("客户端初始化失败: {}", e))?;
+
+    match client
+        .generate_text(
+            &format!("请用中文不超过200字解释这段话：\n\n{}", text),
+            Some(1000),
+        )
+        .await
+    {
+        Ok(result) => Ok(result),
+        Err(e) => {
+            log::error!("解释遇到错误: {}", e);
+            Err("遇到未知错误,请重试".to_string())
+        }
+    }
 }
 
 #[tauri::command]
@@ -906,5 +958,88 @@ async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
             log::error!("{}", error_msg);
             Err(error_msg)
         }
+    }
+}
+
+#[tauri::command]
+async fn show_result_window(
+    title: String,
+    content: String,
+    window_type: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    use tauri::Manager;
+    
+    // 检查窗口是否存在，如果不存在则创建
+    let window_label = format!("result_{}", window_type);
+    
+    // 如果窗口已存在，直接获取它
+    let window = if let Some(existing_window) = app.get_webview_window(&window_label) {
+        existing_window
+    } else {
+        // 创建新窗口
+        tauri::WebviewWindowBuilder::new(&app, &window_label, tauri::WebviewUrl::App("result_display.html".into()))
+            .title(&title)
+            .inner_size(600.0, 400.0)
+            .resizable(true)
+            .decorations(true)
+            .build()
+            .map_err(|e| format!("创建窗口失败: {}", e))?
+    };
+    
+    // 获取工具栏窗口位置，将结果窗口显示在其旁边
+    if let Some(toolbar_window) = app.get_webview_window("selection_toolbar") {
+        if let Ok(position) = toolbar_window.outer_position() {
+            let toolbar_width = 50; // 工具栏宽度
+            let spacing = 10; // 间距
+            let new_x = position.x + toolbar_width + spacing;
+            let new_y = position.y;
+            
+            let _ = window.set_position(tauri::LogicalPosition::new(new_x, new_y));
+        }
+    }
+    
+    // 显示窗口并将内容发送到前端
+    window.show().map_err(|e| format!("显示窗口失败: {}", e))?;
+    window.set_focus().map_err(|e| format!("设置焦点失败: {}", e))?;
+    
+    // 发送数据到结果窗口
+    let payload = serde_json::json!({
+        "title": title,
+        "content": content
+    });
+    window.emit("result-data", payload).map_err(|e| format!("发送数据失败: {}", e))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn update_result_window(
+    content: String,
+    window_type: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    use tauri::Manager;
+    
+    let window_label = format!("result_{}", window_type);
+    
+    if let Some(window) = app.get_webview_window(&window_label) {
+        // 更新窗口内容
+        let title = if window_type.contains("translation") { 
+            "翻译结果" 
+        } else if window_type.contains("explanation") { 
+            "解释结果" 
+        } else { 
+            "结果" 
+        };
+        
+        let payload = serde_json::json!({
+            "title": title,
+            "content": content
+        });
+        window.emit("result-data", payload).map_err(|e| format!("发送数据失败: {}", e))?;
+        Ok(())
+    } else {
+        Err("窗口不存在".to_string())
     }
 }

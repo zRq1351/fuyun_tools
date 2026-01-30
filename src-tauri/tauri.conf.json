@@ -35,6 +35,21 @@
         "skipTaskbar": true,
         "focus": false,
         "acceptFirstMouse": true
+      },
+      {
+        "label": "settings",
+        "title":"设置",
+        "url": "settings.html",
+        "visible": false,
+        "resizable": true,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "focus": true,
+        "width": 830,
+        "height": 666,
+        "center": true
       }
     ],
     "security": {

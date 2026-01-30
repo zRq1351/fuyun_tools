@@ -293,3 +293,16 @@ function updateProgressComplete(message) {
         }
     }, 3000);
 }
+
+// 打开设置窗口
+function openSettings() {
+    // 使用Tauri的shell插件打开新窗口
+    if (window.__TAURI__) {
+        window.__TAURI__.webviewWindow.getCurrent().hide(); // 隐藏当前窗口
+        // 发送命令给后端打开设置窗口
+        window.__TAURI__.core.invoke('handle_open_settings_event'); // 这里需要后端提供相应的命令
+    } else {
+        // 开发环境下的模拟行为
+        alert('此功能需要在Tauri应用环境中运行');
+    }
+}

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>结果展示</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            overflow: auto;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+
+        .container {
+            max-width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #444;
+            position: relative;
+        }
+
+        .title {
+            font-size: 12px;
+            font-weight: bold;
+            margin: 0;
+        }
+
+        .content {
+            flex: 1;
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.6;
+            overflow-y: auto;
+            padding: 10px;
+            background: #2d2d2d;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="content" id="resultContent">加载中...</div>
+</div>
+
+<script>
+    const {listen} = window.__TAURI__.event;
+    const {appWindow} = window.__TAURI__.window;
+
+    // 监听结果数据事件
+    listen('result-data', (event) => {
+        const data = event.payload;
+        document.getElementById('resultTitle').textContent = data.title;
+        document.getElementById('resultContent').textContent = data.content;
+    });
+</script>
+</body>
+</html>

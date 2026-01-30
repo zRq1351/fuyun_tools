@@ -7,11 +7,19 @@ use std::time::Duration;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AppSettingsData {
     pub max_items: usize,
+    pub ai_api_url: String,
+    pub ai_model_name: String,
+    pub ai_api_key: String,
 }
 
 impl Default for AppSettingsData {
     fn default() -> Self {
-        Self { max_items: 50 }
+        Self { 
+            max_items: 50,
+            ai_api_url: String::new(),
+            ai_model_name: String::new(),
+            ai_api_key: String::new(),
+        }
     }
 }
 
@@ -25,6 +33,14 @@ pub fn get_settings_file_path() -> PathBuf {
     let mut settings_dir = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
     settings_dir.pop();
     settings_dir.push("settings.json");
+    settings_dir
+}
+
+/// 获取AI设置文件路径
+pub fn get_ai_settings_file_path() -> PathBuf {
+    let mut settings_dir = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    settings_dir.pop();
+    settings_dir.push("ai_settings.json");
     settings_dir
 }
 
@@ -113,5 +129,5 @@ pub fn load_history() -> Result<Vec<String>, String> {
 
 /// 获取日志目录路径
 pub fn get_logs_dir_path() -> PathBuf {
-    std::path::PathBuf::from("logs")
+    PathBuf::from("logs")
 }
