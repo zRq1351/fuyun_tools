@@ -97,8 +97,6 @@ pub fn run() {
                 std::process::exit(0);
             }
 
-            // 为设置窗口添加事件处理器，仅处理关闭事件，不影响其他窗口操作
-            // 由于设置窗口在tauri.conf.json中配置了decorations:true，它有原生的关闭按钮
             if let Some(settings_window) = app.get_webview_window("settings") {
                 let settings_window_clone = settings_window.clone();
                 settings_window.on_window_event(move |event| {
@@ -160,8 +158,6 @@ pub fn run() {
             select_and_fill,
             window_blur,
             selection_toolbar_blur,
-            translate_text,
-            explain_text,
             copy_text,
             get_ai_settings,
             save_ai_settings,
@@ -874,76 +870,6 @@ async fn test_ai_connection(
 }
 
 #[tauri::command]
-async fn translate_text(text: String) -> Result<String, String> {
-    use crate::ai_client::{AIClient, AIConfig};
-
-    let settings_data = AppState::default().settings;
-    let ai_api_key = &settings_data.ai_api_key;
-    let ai_api_url = &settings_data.ai_api_url;
-    let model = &settings_data.ai_model_name;
-
-    let config = AIConfig {
-        api_key: ai_api_key.clone(),
-        base_url: ai_api_url.clone(),
-        model: model.clone(),
-    };
-
-    let source_language = "英文";
-    let target_language = "中文";
-
-    let client = AIClient::new(config).map_err(|e| format!("客户端初始化失败: {}", e))?;
-
-    match client
-        .generate_text(
-            &format!(
-                "请翻译这段话不要过多解释，最好根据文字直接翻译,由{}翻译为:{}。：\n\n{}",
-                source_language, target_language, text
-            ),
-            Some(1000),
-        )
-        .await
-    {
-        Ok(result) => Ok(result),
-        Err(e) => {
-            log::error!("翻译遇到错误: {}", e);
-            Err("遇到未知错误,请重试".to_string())
-        }
-    }
-}
-
-#[tauri::command]
-async fn explain_text(text: String) -> Result<String, String> {
-    use crate::ai_client::{AIClient, AIConfig};
-
-    let settings_data = AppState::default().settings;
-    let ai_api_key = &settings_data.ai_api_key;
-    let ai_api_url = &settings_data.ai_api_url;
-    let model = &settings_data.ai_model_name;
-
-    let config = AIConfig {
-        api_key: ai_api_key.clone(),
-        base_url: ai_api_url.clone(),
-        model: model.clone(),
-    };
-
-    let client = AIClient::new(config).map_err(|e| format!("客户端初始化失败: {}", e))?;
-
-    match client
-        .generate_text(
-            &format!("请用中文不超过200字解释这段话：\n\n{}", text),
-            Some(1000),
-        )
-        .await
-    {
-        Ok(result) => Ok(result),
-        Err(e) => {
-            log::error!("解释遇到错误: {}", e);
-            Err("遇到未知错误,请重试".to_string())
-        }
-    }
-}
-
-#[tauri::command]
 async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -1072,10 +998,14 @@ async fn stream_translate_text(text: String, app: AppHandle) -> Result<(), Strin
         app.clone(),
     )
     .await?;
-
+    let source_language = "英文";
+    let target_language = "中文";
     let messages = vec![Message {
         role: "user".to_string(),
-        content: format!("请不要解释直接翻译这段话：\n\n{}", text),
+        content: format!(
+            "请翻译这段话不要过多解释，最好根据文字直接翻译,由{}翻译为:{}。：\n\n{}",
+            source_language, target_language, text
+        ),
     }];
 
     let request = ChatCompletionRequest {
@@ -1131,19 +1061,19 @@ async fn stream_explain_text(text: String, app: AppHandle) -> Result<(), String>
         app.clone(),
     )
     .await?;
-
+    let target_language = "中文";
     let messages = vec![Message {
         role: "user".to_string(),
-        content: format!("请用中文200字内解释这段话：\n\n{}", text),
+        content: format!("请用{}200字内解释这段话：\n\n{}", target_language, text),
     }];
 
     let request = ChatCompletionRequest {
         model: model.clone(),
         messages,
         temperature: Some(0.7),
-        max_tokens: Some(1000),
-        max_completion_tokens: Some(1000),
         top_p: Some(1.0),
+        max_tokens: None,
+        max_completion_tokens: None,
         frequency_penalty: Some(0.0),
         presence_penalty: Some(0.0),
         stream: Some(true), // 启用流式响应
