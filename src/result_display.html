@@ -27,21 +27,18 @@
         .content {
             flex: 1;
             line-height: 1.6;
-            overflow-y: auto; /* 启用竖向滚动 */
+            overflow-y: auto;
             padding: 10px;
             background: #2d2d2d;
             border-radius: 6px;
-            /* 隐藏滚动条但保持滚动功能 */
-            -ms-overflow-style: none;  /* IE 和 Edge */
-            scrollbar-width: none;  /* Firefox */
+            -ms-overflow-style: none;
+            scrollbar-width: none;
         }
         
-        /* 隐藏滚动条但保持滚动功能 - Chrome, Safari, Opera */
         .content::-webkit-scrollbar {
             display: none;
         }
         
-        /* 确保即使隐藏滚动条也能通过鼠标滚轮滚动 */
         .content:hover {
             -ms-overflow-style: auto;
             scrollbar-width: auto;
@@ -61,7 +58,6 @@
             background: #333;
         }
         
-        /* Markdown 样式 */
         .content h1, .content h2, .content h3, .content h4, .content h5, .content h6 {
             margin-top: 0.5em;
             margin-bottom: 0.5em;
