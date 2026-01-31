@@ -26,8 +26,8 @@ use tauri_plugin_positioner::{Position, WindowExt};
 use tauri_plugin_updater::UpdaterExt;
 use utils::{load_settings, save_settings, AppSettingsData};
 
-use lazy_static::lazy_static;
 use crate::ai_client::AIClient;
+use lazy_static::lazy_static;
 
 lazy_static! {
     static ref ENIGO_INSTANCE: Arc<Mutex<Option<Enigo>>> = Arc::new(Mutex::new(None));
@@ -166,8 +166,6 @@ pub fn run() {
             get_ai_settings,
             save_ai_settings,
             test_ai_connection,
-            show_result_window,
-            update_result_window,
             stream_translate_text,
             stream_explain_text
         ])
@@ -735,11 +733,11 @@ fn handle_check_update_event(app: &AppHandle) {
                 log::error!("检查更新失败: {}", e);
 
                 let _ = app_handle
-                        .notification()
-                        .builder()
-                        .title("更新错误")
-                        .body(&format!("检查更新失败: {}", e))
-                        .show();
+                    .notification()
+                    .builder()
+                    .title("更新错误")
+                    .body(&format!("检查更新失败: {}", e))
+                    .show();
             }
         }
     });
@@ -905,9 +903,7 @@ async fn translate_text(text: String) -> Result<String, String> {
         )
         .await
     {
-        Ok(result) => {
-            Ok(result)
-        }
+        Ok(result) => Ok(result),
         Err(e) => {
             log::error!("翻译遇到错误: {}", e);
             Err("遇到未知错误,请重试".to_string())
@@ -964,7 +960,6 @@ async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
 async fn show_result_window(
     title: String,
     content: String,
@@ -972,48 +967,49 @@ async fn show_result_window(
     app: AppHandle,
 ) -> Result<(), String> {
     use tauri::Manager;
-    
-    // 检查窗口是否存在，如果不存在则创建
+
     let window_label = format!("result_{}", window_type);
-    
-    // 如果窗口已存在，直接获取它
+
     let window = if let Some(existing_window) = app.get_webview_window(&window_label) {
         existing_window
     } else {
-        // 创建新窗口
-        tauri::WebviewWindowBuilder::new(&app, &window_label, tauri::WebviewUrl::App("result_display.html".into()))
-            .title(&title)
-            .inner_size(300.0, 300.0)
-            .resizable(true)
-            .decorations(true)
-            .build()
-            .map_err(|e| format!("创建窗口失败: {}", e))?
+        tauri::WebviewWindowBuilder::new(
+            &app,
+            &window_label,
+            tauri::WebviewUrl::App("result_display.html".into()),
+        )
+        .title(&title)
+        .visible(false)
+        .inner_size(300.0, 300.0)
+        .resizable(true)
+        .decorations(true)
+        .build()
+        .map_err(|e| format!("创建窗口失败: {}", e))?
     };
-
     let _ = window.move_window(Position::RightCenter);
-    // 显示窗口并将内容发送到前端
     window.show().map_err(|e| format!("显示窗口失败: {}", e))?;
-    window.set_focus().map_err(|e| format!("设置焦点失败: {}", e))?;
-    
-    // 发送数据到结果窗口
+    window
+        .set_focus()
+        .map_err(|e| format!("设置焦点失败: {}", e))?;
+
     let payload = serde_json::json!({
         "title": title,
         "content": content
     });
-    window.emit("result-data", payload).map_err(|e| format!("发送数据失败: {}", e))?;
-    
+    window
+        .emit("result-data", payload)
+        .map_err(|e| format!("发送数据失败: {}", e))?;
+
     Ok(())
 }
 
-#[tauri::command]
 async fn update_result_window(
     content: String,
     window_type: String,
     app: AppHandle,
 ) -> Result<(), String> {
     use tauri::Manager;
-    
-    // 简化窗口标签处理
+
     let window_label = if window_type.contains("translation") {
         "result_translation".to_string()
     } else if window_type.contains("explanation") {
@@ -1021,7 +1017,7 @@ async fn update_result_window(
     } else {
         format!("result_{}", window_type)
     };
-    
+
     let title = if window_type.contains("translation") {
         "翻译结果".to_string()
     } else if window_type.contains("explanation") {
@@ -1029,7 +1025,7 @@ async fn update_result_window(
     } else {
         "结果".to_string()
     };
-    
+
     if let Some(window) = app.get_webview_window(&window_label) {
         let payload = serde_json::json!({
             "title": title,
@@ -1037,17 +1033,17 @@ async fn update_result_window(
         });
         match window.emit("result-data", payload) {
             Ok(_) => Ok(()),
-            Err(e) => Err(format!("发送数据失败: {}", e))
+            Err(e) => Err(format!("发送数据失败: {}", e)),
         }
     } else {
+        log::error!("{}窗口不存在", window_label);
         Err("窗口不存在".to_string())
     }
 }
 
-// 创建一个辅助函数来创建AI客户端
 async fn create_ai_client() -> Result<AIClient, String> {
     use crate::ai_client::{AIClient, AIConfig};
-    
+
     let settings_data = AppState::default().settings;
     let ai_api_key = &settings_data.ai_api_key;
     let ai_api_url = &settings_data.ai_api_url;
@@ -1064,23 +1060,24 @@ async fn create_ai_client() -> Result<AIClient, String> {
 
 #[tauri::command]
 async fn stream_translate_text(text: String, app: AppHandle) -> Result<(), String> {
-    use crate::ai_client::{Message, ChatCompletionRequest};
-    
-    // 创建AI客户端
+    use crate::ai_client::{ChatCompletionRequest, Message};
+
     let client: AIClient = create_ai_client().await?;
     let model = AppState::default().settings.ai_model_name;
-    
-    // 先打开结果窗口
-    show_result_window("翻译结果".to_string(), "正在翻译...".to_string(), "translation".to_string(), app.clone()).await?;
-    
-    // 构建翻译请求
-    let messages = vec![
-        Message {
-            role: "user".to_string(),
-            content: format!("请不要解释直接翻译这段话：\n\n{}", text),
-        }
-    ];
-    
+
+    show_result_window(
+        "翻译结果".to_string(),
+        "正在翻译...".to_string(),
+        "translation".to_string(),
+        app.clone(),
+    )
+    .await?;
+
+    let messages = vec![Message {
+        role: "user".to_string(),
+        content: format!("请不要解释直接翻译这段话：\n\n{}", text),
+    }];
+
     let request = ChatCompletionRequest {
         model: model.clone(),
         messages,
@@ -1092,22 +1089,21 @@ async fn stream_translate_text(text: String, app: AppHandle) -> Result<(), Strin
         presence_penalty: Some(0.0),
         stream: Some(true), // 启用流式响应
     };
-    
-    // 使用流式响应进行翻译
-    let result = client.chat_completion_stream(&request, |content_chunk| {
-        // 每收到一块内容就更新结果窗口
-        let app_clone = app.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(e) = update_result_window(
-                content_chunk, 
-                "translation_stream".to_string(), 
-                app_clone
-            ).await {
-                eprintln!("更新翻译结果窗口失败: {}", e);
-            }
-        });
-    }).await;
-    
+
+    let result = client
+        .chat_completion_stream(&request, |content_chunk| {
+            let app_clone = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) =
+                    update_result_window(content_chunk, "translation_stream".to_string(), app_clone)
+                        .await
+                {
+                    log::error!("发送数据失败:{}", e);
+                }
+            });
+        })
+        .await;
+
     match result {
         Ok(()) => {
             log::info!("翻译完成");
@@ -1117,29 +1113,30 @@ async fn stream_translate_text(text: String, app: AppHandle) -> Result<(), Strin
             update_result_window(error_msg, "translation_error".to_string(), app).await?;
         }
     }
-    
+
     Ok(())
 }
 
 #[tauri::command]
 async fn stream_explain_text(text: String, app: AppHandle) -> Result<(), String> {
-    use crate::ai_client::{Message, ChatCompletionRequest};
-    
-    // 创建AI客户端
+    use crate::ai_client::{ChatCompletionRequest, Message};
+
     let client: AIClient = create_ai_client().await?;
     let model = AppState::default().settings.ai_model_name;
-    
-    // 先打开结果窗口
-    show_result_window("解释结果".to_string(), "正在解释...".to_string(), "explanation".to_string(), app.clone()).await?;
-    
-    // 构建解释请求
-    let messages = vec![
-        Message {
-            role: "user".to_string(),
-            content: format!("请用中文200字内解释这段话：\n\n{}", text),
-        }
-    ];
-    
+
+    show_result_window(
+        "解释结果".to_string(),
+        "正在解释...".to_string(),
+        "explanation".to_string(),
+        app.clone(),
+    )
+    .await?;
+
+    let messages = vec![Message {
+        role: "user".to_string(),
+        content: format!("请用中文200字内解释这段话：\n\n{}", text),
+    }];
+
     let request = ChatCompletionRequest {
         model: model.clone(),
         messages,
@@ -1151,22 +1148,21 @@ async fn stream_explain_text(text: String, app: AppHandle) -> Result<(), String>
         presence_penalty: Some(0.0),
         stream: Some(true), // 启用流式响应
     };
-    
-    // 使用流式响应进行解释
-    let result = client.chat_completion_stream(&request, |content_chunk| {
-        // 每收到一块内容就更新结果窗口
-        let app_clone = app.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(e) = update_result_window(
-                content_chunk, 
-                "explanation_stream".to_string(), 
-                app_clone
-            ).await {
-                eprintln!("更新解释结果窗口失败: {}", e);
-            }
-        });
-    }).await;
-    
+
+    let result = client
+        .chat_completion_stream(&request, |content_chunk| {
+            let app_clone = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) =
+                    update_result_window(content_chunk, "explanation_stream".to_string(), app_clone)
+                        .await
+                {
+                    log::error!("更新解释结果窗口失败: {}", e);
+                }
+            });
+        })
+        .await;
+
     match result {
         Ok(()) => {
             log::info!("解释完成");
@@ -1176,6 +1172,6 @@ async fn stream_explain_text(text: String, app: AppHandle) -> Result<(), String>
             update_result_window(error_msg, "explanation_error".to_string(), app).await?;
         }
     }
-    
+
     Ok(())
 }

@@ -23,7 +23,7 @@
             gap: 2px;
             position: fixed;
             top: 50%;
-            transform: translateY(-50%); /* 垂直居中 */
+            transform: translateY(-50%); 
             z-index: 9999;
         }
 
@@ -31,13 +31,13 @@
             background: rgba(255, 255, 255, 0.1);
             border: none;
             color: white;
-            padding: 12px 8px; /* 调整垂直padding适应垂直布局 */
+            padding: 12px 8px;
             border-radius: 6px;
             cursor: pointer;
             font-size: 12px;
             transition: all 0.2s ease;
-            width: 100%; /* 按钮宽度占满容器 */
-            min-height: 30px; /* 确保最小高度 */
+            width: 100%; 
+            min-height: 30px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -63,10 +63,7 @@
         .copy-btn {
             color: #FF9800;
         }
-        
-        .settings-btn {
-            color: #9b59b6;
-        }
+
     </style>
 </head>
 <body>
@@ -77,16 +74,13 @@
 </div>
 
 <script>
-    // 获取Tauri API
     const invoke = window.__TAURI__.core.invoke;
     const { getCurrentWindow, LogicalSize, appWindow } = window.__TAURI__.window;
     const listen = window.__TAURI__.event.listen;
-    const { confirm } = window.__TAURI__.dialog;
 
     let selectedText = '';
     listen('selected-text', (event) => {
         selectedText = event.payload;
-        console.log('选中的文本:', selectedText);
     });
 
     document.getElementById('translateBtn').addEventListener('click', async () => {

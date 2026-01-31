@@ -24,21 +24,6 @@
             position: relative;
         }
 
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-bottom: 10px;
-            border-bottom: 1px solid #444;
-            position: relative;
-        }
-
-        .title {
-            font-size: 16px;
-            font-weight: bold;
-            margin: 0;
-        }
-
         .content {
             flex: 1;
             line-height: 1.6;
@@ -168,45 +153,32 @@
 </head>
 <body>
 <div class="container">
-    <div class="header">
-        <h2 class="title" id="resultTitle">结果展示</h2>
-    </div>
     <div class="content" id="resultContent">加载中...</div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="scripts/marked.min.js"></script>
 <script>
     const {listen} = window.__TAURI__.event;
     const {appWindow} = window.__TAURI__.window;
 
-    // 初始化内容存储
     let fullContent = '';
     
-    // 监听结果数据事件
     listen('result-data', (event) => {
         const data = event.payload;
-        document.getElementById('resultTitle').textContent = data.title;
-        
         const contentElement = document.getElementById('resultContent');
         
-        // 区分流式更新和非流式更新
         if (data.content.startsWith('正在') || data.content === '加载中...' || data.title.includes('失败')) {
-            // 非流式内容，直接替换
             contentElement.innerHTML = data.content;
             fullContent = data.content;
         } else {
-            // 流式内容，追加到现有内容后面
             if (fullContent === '加载中...') {
-                // 第一次流式内容，清空初始文本
                 fullContent = '';
             }
             fullContent += data.content;
             
-            // 使用marked.js将Markdown转换为HTML并显示
             contentElement.innerHTML = marked.parse(fullContent);
         }
         
-        // 自动滚动到底部
         contentElement.scrollTop = contentElement.scrollHeight;
     });
 </script>
