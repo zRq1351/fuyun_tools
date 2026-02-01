@@ -1,56 +1,42 @@
+use crate::{ClipboardManager, ENIGO_INSTANCE};
+use enigo::{Enigo, Key, Keyboard, Settings};
 use log;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use enigo::{Enigo, Key, Keyboard, Settings};
-use crate::{ClipboardManager, ENIGO_INSTANCE};
 use tauri::AppHandle;
 
 pub use crate::AppState as SharedAppState;
 
-use tauri::Manager;
 use crate::config::CTRL_KEY;
+use tauri::Manager;
 
-/// 跨平台获取选中文本的实现
 pub fn get_selected_text_with_app(
     app_handle: &AppHandle,
-    clipboard_manager: Arc<Mutex<ClipboardManager>>
+    clipboard_manager: Arc<Mutex<ClipboardManager>>,
 ) -> Option<String> {
-    log::info!("开始跨平台获取选中文本");
-
-    #[cfg(target_os = "windows")]
-    {
-        get_selected_text_windows(app_handle, clipboard_manager)
-    }
-    #[cfg(target_os = "macos")]
-    {
-        get_selected_text_macos(app_handle, clipboard_manager)
-    }
-    #[cfg(target_os = "linux")]
-    {
-        get_selected_text_linux(app_handle, clipboard_manager)
-    }
+    get_selected_text_windows(app_handle, clipboard_manager)
 }
 
 fn get_selected_text_windows(
     app_handle: &AppHandle,
-    clipboard_manager: Arc<Mutex<ClipboardManager>>
+    clipboard_manager: Arc<Mutex<ClipboardManager>>,
 ) -> Option<String> {
     let state_manager = app_handle.state::<Arc<Mutex<SharedAppState>>>();
-    
+
     {
         let mut state = state_manager.lock().unwrap();
         state.is_processing_selection = true;
     }
 
-    let original_content = get_current_clipboard_content_with_manager(&clipboard_manager, app_handle);
+    let original_content =
+        get_current_clipboard_content_with_manager(&clipboard_manager, app_handle);
 
     let mut enigo_guard = ENIGO_INSTANCE.lock().unwrap();
     if enigo_guard.is_none() {
         *enigo_guard = Some(Enigo::new(&Settings::default()).expect("未能初始化enigo"));
     }
 
-    // 确保Ctrl键初始状态是释放的
     crate::mouse_listener::reset_ctrl_key_state();
 
     if let Some(ref mut enigo) = *enigo_guard {
@@ -62,7 +48,6 @@ fn get_selected_text_windows(
 
     log::info!("已发送Ctrl+C模拟按键");
 
-    // 再次确保Ctrl键状态正确释放
     thread::sleep(Duration::from_millis(50));
     crate::mouse_listener::reset_ctrl_key_state();
 
@@ -88,10 +73,9 @@ fn get_selected_text_windows(
     new_content
 }
 
-/// 使用 ClipboardManager 获取当前剪贴板内容
 fn get_current_clipboard_content_with_manager(
     clipboard_manager: &Arc<Mutex<ClipboardManager>>,
-    app_handle: &AppHandle
+    app_handle: &AppHandle,
 ) -> Option<String> {
     let content = {
         let manager = clipboard_manager.lock().unwrap();
@@ -106,11 +90,10 @@ fn get_current_clipboard_content_with_manager(
     content
 }
 
-/// 使用 ClipboardManager 恢复原始剪贴板内容
 fn set_original_clipboard_content_back_with_manager(
     clipboard_manager: &Arc<Mutex<ClipboardManager>>,
     app_handle: &AppHandle,
-    content: &str
+    content: &str,
 ) {
     let result = {
         let manager = clipboard_manager.lock().unwrap();
