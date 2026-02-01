@@ -34,63 +34,197 @@
             -ms-overflow-style: none;
             scrollbar-width: none;
         }
-        
+
         .content::-webkit-scrollbar {
             display: none;
         }
-        
+
         .content:hover {
             -ms-overflow-style: auto;
             scrollbar-width: auto;
         }
-        
+
         .content:hover::-webkit-scrollbar {
             display: block;
             width: 8px;
         }
-        
+
         .content:hover::-webkit-scrollbar-thumb {
             background: #555;
             border-radius: 4px;
         }
-        
+
         .content:hover::-webkit-scrollbar-track {
             background: #333;
         }
-        
+
         .content h1, .content h2, .content h3, .content h4, .content h5, .content h6 {
             margin-top: 0.5em;
             margin-bottom: 0.5em;
             color: #ffffff;
         }
-        
-        .content h1 { font-size: 1.7em; }
-        .content h2 { font-size: 1.5em; }
-        .content h3 { font-size: 1.3em; }
-        .content h4 { font-size: 1.2em; }
-        .content h5 { font-size: 1.1em; }
-        .content h6 { font-size: 1.0em; }
-        
+
+        .content h1 {
+            font-size: 1.7em;
+        }
+
+        .content h2 {
+            font-size: 1.5em;
+        }
+
+        .content h3 {
+            font-size: 1.3em;
+        }
+
+        .content h4 {
+            font-size: 1.2em;
+        }
+
+        .content h5 {
+            font-size: 1.1em;
+        }
+
+        .content h6 {
+            font-size: 1.0em;
+        }
+
+        /* 语言选择区域样式 */
+        .language-selector {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding: 12px;
+            background: #2d2d2d;
+            border-radius: 6px;
+            border: 1px solid #444;
+        }
+
+        .translation-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+        }
+
+        .language-pair {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .language-flag {
+            width: 24px;
+            height: 24px;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: bold;
+            background: #444;
+        }
+
+        .language-dropdown {
+            min-width: 120px;
+            padding: 8px 12px;
+            background: #3a3a3a;
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #ffffff;
+            font-family: inherit;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3Csvg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            background-size: 12px;
+        }
+
+        .language-dropdown:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+
+        .arrow {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            text-align: center;
+            line-height: 16px;
+            font-size: 12px;
+            color: #999;
+        }
+
+        .explanation-section {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .explanation-label {
+            font-size: 14px;
+            color: #ccc;
+        }
+
+        .explanation-dropdown {
+            min-width: 120px;
+            padding: 8px 12px;
+            background: #3a3a3a;
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #ffffff;
+            font-family: inherit;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3Csvg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            background-size: 12px;
+        }
+
+        .explanation-dropdown:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+
+        .hide-original-btn {
+            padding: 6px 12px;
+            background: transparent;
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #999;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: auto;
+        }
+
+        .hide-original-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }
+
         .content p {
             margin: 0.8em 0;
         }
-        
+
         .content ul, .content ol {
             padding-left: 1.5em;
             margin: 0.5em 0;
         }
-        
+
         .content li {
             margin: 0.3em 0;
         }
-        
+
         .content code {
             background-color: #444;
             padding: 0.2em 0.4em;
             border-radius: 3px;
             font-family: 'Courier New', monospace;
         }
-        
+
         .content pre {
             background-color: #222;
             padding: 1em;
@@ -98,50 +232,50 @@
             overflow-x: auto;
             margin: 0.8em 0;
         }
-        
+
         .content pre code {
             background: none;
             padding: 0;
         }
-        
+
         .content blockquote {
             border-left: 3px solid #666;
             padding-left: 1em;
             margin: 0.8em 0;
             color: #ccc;
         }
-        
+
         .content a {
             color: #4CAF50;
         }
-        
+
         .content strong {
             font-weight: bold;
             color: #dddddd;
         }
-        
+
         .content em {
             font-style: italic;
         }
-        
+
         .content hr {
             border: 0;
             border-top: 1px solid #444;
             margin: 1em 0;
         }
-        
+
         .content table {
             border-collapse: collapse;
             width: 100%;
             margin: 0.8em 0;
         }
-        
+
         .content th, .content td {
             border: 1px solid #444;
             padding: 0.5em;
             text-align: left;
         }
-        
+
         .content th {
             background-color: #333;
         }
@@ -149,34 +283,155 @@
 </head>
 <body>
 <div class="container">
+    <!-- 语言选择区域 -->
+    <div class="language-selector">
+        <div class="explanation-section" id="explanationSection" style="display: none;">
+            <span class="explanation-label">解释语言：</span>
+            <select class="explanation-dropdown" id="explanationLanguage">
+                <option value="中文" selected>中文</option>
+                <option value="英文">英文</option>
+                <option value="日文">日文</option>
+                <option value="韩文">韩文</option>
+            </select>
+        </div>
+        <div class="translation-section" id="translationSection">
+            <div class="language-pair">
+                <div class="language-flag">🇬🇧</div>
+                <select class="language-dropdown" id="sourceLanguage">
+                    <option value="英文" selected>英文</option>
+                    <option value="中文">中文</option>
+                    <option value="日文">日文</option>
+                    <option value="韩文">韩文</option>
+                    <option value="法文">法文</option>
+                    <option value="德文">德文</option>
+                    <option value="西班牙文">西班牙文</option>
+                </select>
+                <div class="arrow">→</div>
+                <select class="language-dropdown" id="targetLanguage">
+                    <option value="简体中文" selected>简体中文</option>
+                    <option value="英文">英文</option>
+                    <option value="日文">日文</option>
+                    <option value="韩文">韩文</option>
+                    <option value="法文">法文</option>
+                    <option value="德文">德文</option>
+                    <option value="西班牙文">西班牙文</option>
+                </select>
+            </div>
+        </div>
+        <button class="hide-original-btn" id="showOriginalBtn">显示原文</button>
+    </div>
+
+    <!-- 原文内容区域 -->
+    <div class="content" id="originalContent" style="display: none;"></div>
+
+    <!-- 翻译/解释内容区域 -->
     <div class="content" id="resultContent">加载中...</div>
 </div>
 
 <script src="scripts/marked.min.js"></script>
 <script>
     const {listen} = window.__TAURI__.event;
-    const {appWindow} = window.__TAURI__.window;
-
-    let fullContent = '';
-    
-    listen('result-data', (event) => {
-        const data = event.payload;
-        const contentElement = document.getElementById('resultContent');
-        
-        if (data.content.startsWith('正在') || data.content === '加载中...' || data.title.includes('失败')) {
-            contentElement.innerHTML = data.content;
-            fullContent = data.content;
-        } else {
-            if (fullContent === '加载中...') {
-                fullContent = '';
-            }
-            fullContent += data.content;
-            
-            contentElement.innerHTML = marked.parse(fullContent);
+    const invoke = window.__TAURI__.core.invoke;
+    const data = window.__INITIAL_DATA__;
+    document.addEventListener('DOMContentLoaded', () => {
+        const sourceLanguageSelect = document.getElementById('sourceLanguage');
+        const targetLanguageSelect = document.getElementById('targetLanguage');
+        const explanationLanguageSelect = document.getElementById('explanationLanguage');
+        const showOriginalBtn = document.getElementById('showOriginalBtn');
+        document.getElementById('originalContent');
+        let fullContent = '';
+        let title = '';
+        let original = '';
+        title = data.type;
+        original = data.original;
+        const originalContentElement = document.getElementById('originalContent');
+        if (original) {
+            originalContentElement.innerHTML = marked.parse(original);
         }
-        
-        contentElement.scrollTop = contentElement.scrollHeight;
-    });
+
+        if (title === 'explanation') {
+            document.getElementById('translationSection').style.display = 'none';
+            document.getElementById('explanationSection').style.display = 'flex';
+        } else {
+            document.getElementById('translationSection').style.display = 'flex';
+            document.getElementById('explanationSection').style.display = 'none';
+        }
+        sourceLanguageSelect.addEventListener('change', function () {
+            const selectedText = localStorage.getItem('selectedText') || '';
+            if (selectedText) {
+                if (title === 'translation') {
+                    document.getElementById('resultContent').innerHTML = '正在翻译...';
+                    fullContent = '正在翻译...';
+                    invoke('stream_translate_text', {
+                        text: selectedText,
+                        sourceLanguage: sourceLanguageSelect.value,
+                        targetLanguage: targetLanguageSelect.value
+                    }).catch(console.error);
+                } else {
+                    document.getElementById('resultContent').innerHTML = '正在解释...';
+                    fullContent = '正在解释...';
+                    invoke('stream_explain_text', {
+                        text: selectedText,
+                        targetLanguage: explanationLanguageSelect.value
+                    }).catch(console.error);
+                }
+            }
+        });
+
+        targetLanguageSelect.addEventListener('change', function () {
+            const selectedText = localStorage.getItem('selectedText') || '';
+            if (selectedText) {
+                if (title === 'translation') {
+                    document.getElementById('resultContent').innerHTML = '正在翻译...';
+                    fullContent = '正在翻译...';
+                    invoke('stream_translate_text', {
+                        text: selectedText,
+                        sourceLanguage: sourceLanguageSelect.value,
+                        targetLanguage: targetLanguageSelect.value
+                    }).catch(console.error);
+                } else {
+                    document.getElementById('resultContent').innerHTML = '正在解释...';
+                    fullContent = '正在解释...';
+                    invoke('stream_explain_text', {
+                        text: selectedText,
+                        targetLanguage: explanationLanguageSelect.value
+                    }).catch(console.error);
+                }
+            }
+        });
+
+        explanationLanguageSelect.addEventListener('change', function () {
+            const selectedText = localStorage.getItem('selectedText') || '';
+            if (selectedText) {
+                document.getElementById('resultContent').innerHTML = '正在解释...';
+                fullContent = '正在解释...';
+                invoke('stream_explain_text', {
+                    text: selectedText,
+                    targetLanguage: explanationLanguageSelect.value
+                }).catch(console.error);
+            }
+        });
+        showOriginalBtn.addEventListener('click', function () {
+            const originalContentElement = document.getElementById('originalContent');
+            if (originalContentElement.style.display === 'none') {
+                originalContentElement.style.display = 'block';
+                showOriginalBtn.textContent = '隐藏原文';
+                originalContentElement.innerHTML = marked.parse(original);
+            } else {
+                originalContentElement.style.display = 'none';
+                showOriginalBtn.textContent = '显示原文';
+            }
+        });
+        listen('result-update', (event) => {
+            const data = event.payload;
+            const contentElement = document.getElementById('resultContent');
+            fullContent += data.content;
+            contentElement.innerHTML = marked.parse(fullContent);
+            contentElement.scrollTop = contentElement.scrollHeight;
+        });
+
+    })
 </script>
 </body>
 </html>
+

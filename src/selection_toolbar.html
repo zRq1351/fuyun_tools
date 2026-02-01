@@ -23,7 +23,7 @@
             gap: 2px;
             position: fixed;
             top: 50%;
-            transform: translateY(-50%); 
+            transform: translateY(-50%);
             z-index: 9999;
         }
 
@@ -36,7 +36,7 @@
             cursor: pointer;
             font-size: 12px;
             transition: all 0.2s ease;
-            width: 100%; 
+            width: 100%;
             min-height: 30px;
             display: flex;
             align-items: center;
@@ -75,9 +75,7 @@
 
 <script>
     const invoke = window.__TAURI__.core.invoke;
-    const { getCurrentWindow, LogicalSize, appWindow } = window.__TAURI__.window;
     const listen = window.__TAURI__.event.listen;
-
     let selectedText = '';
     listen('selected-text', (event) => {
         selectedText = event.payload;
@@ -85,13 +83,20 @@
 
     document.getElementById('translateBtn').addEventListener('click', async () => {
         if (selectedText) {
-            await invoke('stream_translate_text', {text: selectedText});
+            await invoke('stream_translate_text', {
+                text: selectedText,
+                sourceLanguage: '英文',
+                targetLanguage: '简体中文'
+            });
         }
     });
 
     document.getElementById('explainBtn').addEventListener('click', async () => {
         if (selectedText) {
-            await invoke('stream_explain_text', {text: selectedText});
+            await invoke('stream_explain_text', {
+                text: selectedText,
+                targetLanguage: '中文'
+            });
         }
     });
 
@@ -100,7 +105,6 @@
             try {
                 await invoke('copy_text', {text: selectedText});
                 console.log('文本已复制');
-                await getCurrentWindow().close();
             } catch (error) {
                 console.error('复制失败:', error);
             }

@@ -6,8 +6,8 @@ use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
 
-use crate::{hide_selection_toolbar_impl, AppState as SharedAppState};
 use crate::ClipboardManager;
+use crate::{hide_selection_toolbar_impl, AppState as SharedAppState};
 
 #[derive(Debug, Clone, PartialEq)]
 enum MouseActionState {
@@ -37,13 +37,17 @@ lazy_static::lazy_static! {
 }
 
 fn is_any_ctrl_pressed() -> bool {
-    GLOBAL_STATE.ctrl_left_pressed.load(Ordering::SeqCst) || 
-    GLOBAL_STATE.ctrl_right_pressed.load(Ordering::SeqCst)
+    GLOBAL_STATE.ctrl_left_pressed.load(Ordering::SeqCst)
+        || GLOBAL_STATE.ctrl_right_pressed.load(Ordering::SeqCst)
 }
 
 pub fn reset_ctrl_key_state() {
-    GLOBAL_STATE.ctrl_left_pressed.store(false, Ordering::SeqCst);
-    GLOBAL_STATE.ctrl_right_pressed.store(false, Ordering::SeqCst);
+    GLOBAL_STATE
+        .ctrl_left_pressed
+        .store(false, Ordering::SeqCst);
+    GLOBAL_STATE
+        .ctrl_right_pressed
+        .store(false, Ordering::SeqCst);
     log::info!("已重置Ctrl键状态");
 }
 
@@ -56,46 +60,36 @@ impl MouseListener {
 
         let detection_thread_app_handle = app_handle.clone();
 
-        thread::spawn(move || {
-            loop {
-                if GLOBAL_STATE.needs_detection.load(Ordering::SeqCst) {
-                    GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
+        thread::spawn(move || loop {
+            if GLOBAL_STATE.needs_detection.load(Ordering::SeqCst) {
+                GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
 
-                    let clipboard_manager = {
-                        let state_guard = state.lock().unwrap();
-                        state_guard.clipboard_manager.clone()
-                    };
+                let clipboard_manager = {
+                    let state_guard = state.lock().unwrap();
+                    state_guard.clipboard_manager.clone()
+                };
 
-                    if let Some(text) = perform_text_selection_detection(&detection_thread_app_handle, clipboard_manager) {
-                        if !text.trim().is_empty() {
-                            if is_valid_selection(&text) {
-                                log::info!("检测到有效的选中文本: '{}'", text);
-                                let app_handle_clone = detection_thread_app_handle.clone();
-                                let state_clone = state.clone();
-                                let text_clone = text.clone();
+                if let Some(text) = perform_text_selection_detection(
+                    &detection_thread_app_handle,
+                    clipboard_manager,
+                ) {
+                    if !text.trim().is_empty() {
+                        if is_valid_selection(&text) {
+                            log::info!("检测到有效的选中文本: '{}'", text);
+                            let app_handle_clone = detection_thread_app_handle.clone();
+                            let text_clone = text.clone();
 
-                                tauri::async_runtime::spawn(async move {
-                                    log::info!("准备调用 show_selection_toolbar_impl");
-                                    crate::show_selection_toolbar_impl(
-                                        app_handle_clone,
-                                        text_clone,
-                                    );
-                                    log::info!("已调用 show_selection_toolbar_impl");
-
-                                    let state_guard = state_clone.clone();
-                                    tauri::async_runtime::spawn(async move {
-                                        tokio::time::sleep(Duration::from_millis(100)).await;
-                                        let mut state_guard = state_guard.lock().unwrap();
-                                        state_guard.is_processing_selection = false;
-                                    });
-                                });
-                            }
+                            tauri::async_runtime::spawn(async move {
+                                log::info!("准备调用 show_selection_toolbar_impl");
+                                crate::show_selection_toolbar_impl(app_handle_clone, text_clone);
+                                log::info!("已调用 show_selection_toolbar_impl");
+                            });
                         }
                     }
                 }
-
-                thread::sleep(Duration::from_millis(50));
             }
+
+            thread::sleep(Duration::from_millis(50));
         });
 
         thread::spawn(move || {
@@ -109,16 +103,22 @@ impl MouseListener {
                             GLOBAL_STATE.ctrl_left_pressed.store(true, Ordering::SeqCst);
                             log::info!("检测到左Ctrl键按下");
                         } else if key == Key::ControlRight {
-                            GLOBAL_STATE.ctrl_right_pressed.store(true, Ordering::SeqCst);
+                            GLOBAL_STATE
+                                .ctrl_right_pressed
+                                .store(true, Ordering::SeqCst);
                             log::info!("检测到右Ctrl键按下");
                         }
                     }
                     EventType::KeyRelease(key) => {
                         if key == Key::ControlLeft {
-                            GLOBAL_STATE.ctrl_left_pressed.store(false, Ordering::SeqCst);
+                            GLOBAL_STATE
+                                .ctrl_left_pressed
+                                .store(false, Ordering::SeqCst);
                             log::info!("检测到左Ctrl键释放");
                         } else if key == Key::ControlRight {
-                            GLOBAL_STATE.ctrl_right_pressed.store(false, Ordering::SeqCst);
+                            GLOBAL_STATE
+                                .ctrl_right_pressed
+                                .store(false, Ordering::SeqCst);
                             log::info!("检测到右Ctrl键释放");
                         }
                     }
@@ -197,7 +197,7 @@ impl MouseListener {
                     EventType::MouseMove { x, y } => {
                         let mouse_x = x as u64;
                         let mouse_y = y as u64;
-                        
+
                         {
                             let mut pos_guard = GLOBAL_STATE.last_mouse_pos.lock().unwrap();
                             *pos_guard = (mouse_x, mouse_y);
@@ -218,7 +218,7 @@ impl MouseListener {
 
 fn perform_text_selection_detection(
     app_handle: &AppHandle,
-    clipboard_manager: Arc<Mutex<ClipboardManager>>
+    clipboard_manager: Arc<Mutex<ClipboardManager>>,
 ) -> Option<String> {
     log::info!("开始执行划词检测");
 
@@ -471,7 +471,7 @@ fn is_foreground_window_console() -> bool {
                         } else {
                             log::info!("检测到IDE但非终端面板，允许划词: {}", app_name);
                             false
-                        }
+                        };
                     }
                     log::info!("检测到终端应用或IDE: {}", app_name);
                     return true;
@@ -520,7 +520,7 @@ fn is_ide_terminal_active() -> bool {
 
 fn get_selected_text(
     app_handle: &AppHandle,
-    clipboard_manager: Arc<Mutex<ClipboardManager>>
+    clipboard_manager: Arc<Mutex<ClipboardManager>>,
 ) -> Option<String> {
     log::info!("开始获取选中文本（模拟复制）");
 

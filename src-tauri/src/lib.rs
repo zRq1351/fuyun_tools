@@ -17,7 +17,7 @@ use std::thread;
 use std::time::Duration;
 use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -163,7 +163,7 @@ pub fn run() {
             save_ai_settings,
             test_ai_connection,
             stream_translate_text,
-            stream_explain_text
+            stream_explain_text,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
@@ -213,7 +213,7 @@ fn set_toolbar_window(window: &tauri::WebviewWindow) {
 
 /// 隐藏工具栏窗口
 fn hide_selection_toolbar_impl(app_handle: AppHandle) {
-    if let Some(toolbar_window) = app_handle.get_webview_window("selection_toolbar") {
+        if let Some(toolbar_window) = app_handle.get_webview_window("selection_toolbar") {
         if let Ok(is_visible) = toolbar_window.is_visible() {
             if is_visible {
                 if let Ok(has_focus) = toolbar_window.is_focused() {
@@ -885,47 +885,48 @@ async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
         }
     }
 }
-
 async fn show_result_window(
     title: String,
     content: String,
     window_type: String,
+    original: String,
     app: AppHandle,
 ) -> Result<(), String> {
-    use tauri::Manager;
-
     let window_label = format!("result_{}", window_type);
 
-    let window = if let Some(existing_window) = app.get_webview_window(&window_label) {
-        existing_window
-    } else {
-        tauri::WebviewWindowBuilder::new(
-            &app,
-            &window_label,
-            tauri::WebviewUrl::App("result_display.html".into()),
-        )
-        .title(&title)
-        .visible(false)
-        .inner_size(300.0, 300.0)
-        .resizable(true)
-        .decorations(true)
-        .build()
-        .map_err(|e| format!("创建窗口失败: {}", e))?
-    };
+    if let Some(existing_window) = app.get_webview_window(&window_label) {
+        let _ = existing_window.show();
+        let _ = existing_window.set_focus();
+        println!("✅ 窗口 {} 已显示111111", window_label);
+        return Ok(());
+    }
+
+    let window = tauri::WebviewWindowBuilder::new(
+        &app,
+        &window_label,
+        WebviewUrl::App("result_display.html".into()),
+    )
+    .title(&title)
+    .visible(false)
+    .inner_size(480.0, 300.0)
+    .resizable(true)
+    .decorations(true)
+    .on_page_load(move |window, _| {
+        let payload = serde_json::json!({
+            "type": window_type.clone(),
+            "original": original.clone(),
+            "content": content.clone()
+        });
+        let script = format!("window.__INITIAL_DATA__ = {};", payload);
+        let _ = window.eval(&script);
+    })
+    .build()
+    .map_err(|e| format!("创建窗口失败: {}", e))?;
+
     let _ = window.move_window(Position::RightCenter);
-    window.show().map_err(|e| format!("显示窗口失败: {}", e))?;
-    window
-        .set_focus()
-        .map_err(|e| format!("设置焦点失败: {}", e))?;
-
-    let payload = serde_json::json!({
-        "title": title,
-        "content": content
-    });
-    window
-        .emit("result-data", payload)
-        .map_err(|e| format!("发送数据失败: {}", e))?;
-
+    let _ = window.show();
+    let _ = window.set_focus();
+    println!("✅ 窗口 {} 已显示", window_label);
     Ok(())
 }
 
@@ -935,34 +936,17 @@ async fn update_result_window(
     app: AppHandle,
 ) -> Result<(), String> {
     use tauri::Manager;
-
-    let window_label = if window_type.contains("translation") {
-        "result_translation".to_string()
-    } else if window_type.contains("explanation") {
-        "result_explanation".to_string()
-    } else {
-        format!("result_{}", window_type)
-    };
-
-    let title = if window_type.contains("translation") {
-        "翻译结果".to_string()
-    } else if window_type.contains("explanation") {
-        "解释结果".to_string()
-    } else {
-        "结果".to_string()
-    };
-
+    let window_label = format!("result_{}", window_type);
     if let Some(window) = app.get_webview_window(&window_label) {
         let payload = serde_json::json!({
-            "title": title,
             "content": content
         });
-        match window.emit("result-data", payload) {
+        match window.emit("result-update", payload) {
             Ok(_) => Ok(()),
             Err(e) => Err(format!("发送数据失败: {}", e)),
         }
     } else {
-        log::error!("{}窗口不存在", window_label);
+        log::error!("{}窗口不存在", &window_type);
         Err("窗口不存在".to_string())
     }
 }
@@ -985,7 +969,12 @@ async fn create_ai_client() -> Result<AIClient, String> {
 }
 
 #[tauri::command]
-async fn stream_translate_text(text: String, app: AppHandle) -> Result<(), String> {
+async fn stream_translate_text(
+    text: String,
+    source_language: String,
+    target_language: String,
+    app: AppHandle,
+) -> Result<(), String> {
     use crate::ai_client::{ChatCompletionRequest, Message};
 
     let client: AIClient = create_ai_client().await?;
@@ -995,16 +984,20 @@ async fn stream_translate_text(text: String, app: AppHandle) -> Result<(), Strin
         "翻译结果".to_string(),
         "正在翻译...".to_string(),
         "translation".to_string(),
+        text.clone(),
         app.clone(),
     )
     .await?;
-    let source_language = "英文";
-    let target_language = "中文";
+
+    // 直接使用传入的中文语言名称
+    let source_language_name = source_language;
+    let target_language_name = target_language;
+
     let messages = vec![Message {
         role: "user".to_string(),
         content: format!(
             "请翻译这段话不要过多解释，最好根据文字直接翻译,由{}翻译为:{}。：\n\n{}",
-            source_language, target_language, text
+            source_language_name, target_language_name, text
         ),
     }];
 
@@ -1025,8 +1018,7 @@ async fn stream_translate_text(text: String, app: AppHandle) -> Result<(), Strin
             let app_clone = app.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) =
-                    update_result_window(content_chunk, "translation_stream".to_string(), app_clone)
-                        .await
+                    update_result_window(content_chunk, "translation".to_string(), app_clone).await
                 {
                     log::error!("发送数据失败:{}", e);
                 }
@@ -1040,7 +1032,7 @@ async fn stream_translate_text(text: String, app: AppHandle) -> Result<(), Strin
         }
         Err(e) => {
             let error_msg = format!("翻译失败: {}", e);
-            update_result_window(error_msg, "translation_error".to_string(), app).await?;
+            update_result_window(error_msg, "translation".to_string(), app).await?;
         }
     }
 
@@ -1048,7 +1040,11 @@ async fn stream_translate_text(text: String, app: AppHandle) -> Result<(), Strin
 }
 
 #[tauri::command]
-async fn stream_explain_text(text: String, app: AppHandle) -> Result<(), String> {
+async fn stream_explain_text(
+    text: String,
+    target_language: String,
+    app: AppHandle,
+) -> Result<(), String> {
     use crate::ai_client::{ChatCompletionRequest, Message};
 
     let client: AIClient = create_ai_client().await?;
@@ -1058,13 +1054,18 @@ async fn stream_explain_text(text: String, app: AppHandle) -> Result<(), String>
         "解释结果".to_string(),
         "正在解释...".to_string(),
         "explanation".to_string(),
+        text.clone(),
         app.clone(),
     )
     .await?;
-    let target_language = "中文";
+    let target_language_name = target_language;
+
     let messages = vec![Message {
         role: "user".to_string(),
-        content: format!("请用{}200字内解释这段话：\n\n{}", target_language, text),
+        content: format!(
+            "请用{}200字内解释这段话：\n\n{}",
+            target_language_name, text
+        ),
     }];
 
     let request = ChatCompletionRequest {
@@ -1084,8 +1085,7 @@ async fn stream_explain_text(text: String, app: AppHandle) -> Result<(), String>
             let app_clone = app.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) =
-                    update_result_window(content_chunk, "explanation_stream".to_string(), app_clone)
-                        .await
+                    update_result_window(content_chunk, "explanation".to_string(), app_clone).await
                 {
                     log::error!("更新解释结果窗口失败: {}", e);
                 }
@@ -1099,7 +1099,7 @@ async fn stream_explain_text(text: String, app: AppHandle) -> Result<(), String>
         }
         Err(e) => {
             let error_msg = format!("解释失败: {}", e);
-            update_result_window(error_msg, "explanation_error".to_string(), app).await?;
+            update_result_window(error_msg, "explanation".to_string(), app).await?;
         }
     }
 
