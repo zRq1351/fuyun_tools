@@ -94,116 +94,110 @@ impl MouseListener {
 
         thread::spawn(move || {
             log::info!("开始监听鼠标键盘事件");
-            if let Err(error) = listen(move |event| {
-                match event.event_type {
-                    EventType::KeyPress(key) => {
-                        if key == Key::ControlLeft {
-                            GLOBAL_STATE.ctrl_left_pressed.store(true, Ordering::SeqCst);
-                            log::info!("检测到左Ctrl键按下");
-                        } else if key == Key::ControlRight {
-                            GLOBAL_STATE
-                                .ctrl_right_pressed
-                                .store(true, Ordering::SeqCst);
-                            log::info!("检测到右Ctrl键按下");
-                        }
+            if let Err(error) = listen(move |event| match event.event_type {
+                EventType::KeyPress(key) => {
+                    if key == Key::ControlLeft {
+                        GLOBAL_STATE.ctrl_left_pressed.store(true, Ordering::SeqCst);
+                        log::info!("检测到左Ctrl键按下");
+                    } else if key == Key::ControlRight {
+                        GLOBAL_STATE
+                            .ctrl_right_pressed
+                            .store(true, Ordering::SeqCst);
+                        log::info!("检测到右Ctrl键按下");
                     }
-                    EventType::KeyRelease(key) => {
-                        if key == Key::ControlLeft {
-                            GLOBAL_STATE
-                                .ctrl_left_pressed
-                                .store(false, Ordering::SeqCst);
-                            log::info!("检测到左Ctrl键释放");
-                        } else if key == Key::ControlRight {
-                            GLOBAL_STATE
-                                .ctrl_right_pressed
-                                .store(false, Ordering::SeqCst);
-                            log::info!("检测到右Ctrl键释放");
-                        }
+                }
+                EventType::KeyRelease(key) => {
+                    if key == Key::ControlLeft {
+                        GLOBAL_STATE
+                            .ctrl_left_pressed
+                            .store(false, Ordering::SeqCst);
+                        log::info!("检测到左Ctrl键释放");
+                    } else if key == Key::ControlRight {
+                        GLOBAL_STATE
+                            .ctrl_right_pressed
+                            .store(false, Ordering::SeqCst);
+                        log::info!("检测到右Ctrl键释放");
                     }
-                    EventType::ButtonPress(Button::Left) => {
-                        hide_selection_toolbar_impl(app_handle.clone());
-                        let current_time = std::time::Instant::now();
+                }
+                EventType::ButtonPress(Button::Left) => {
+                    hide_selection_toolbar_impl(app_handle.clone());
+                    let current_time = std::time::Instant::now();
 
-                        let (last_x, last_y) = {
-                            let pos_guard = GLOBAL_STATE.last_mouse_pos.lock().unwrap();
-                            *pos_guard
-                        };
+                    let (last_x, last_y) = {
+                        let pos_guard = GLOBAL_STATE.last_mouse_pos.lock().unwrap();
+                        *pos_guard
+                    };
 
-                        log::info!("检测到鼠标左键按下 at ({}, {})", last_x, last_y);
+                    log::info!("检测到鼠标左键按下 at ({}, {})", last_x, last_y);
 
-                        let mut state_guard = GLOBAL_STATE.mouse_action_state.lock().unwrap();
-                        *state_guard = MouseActionState::MouseDown(last_x, last_y, current_time);
-                    }
-                    EventType::ButtonRelease(Button::Left) => {
-                        let current_time = std::time::Instant::now();
+                    let mut state_guard = GLOBAL_STATE.mouse_action_state.lock().unwrap();
+                    *state_guard = MouseActionState::MouseDown(last_x, last_y, current_time);
+                }
+                EventType::ButtonRelease(Button::Left) => {
+                    let current_time = std::time::Instant::now();
 
-                        let (last_x, last_y) = {
-                            let pos_guard = GLOBAL_STATE.last_mouse_pos.lock().unwrap();
-                            *pos_guard
-                        };
+                    let (last_x, last_y) = {
+                        let pos_guard = GLOBAL_STATE.last_mouse_pos.lock().unwrap();
+                        *pos_guard
+                    };
 
-                        log::info!("检测到鼠标左键释放 at ({}, {})", last_x, last_y);
+                    log::info!("检测到鼠标左键释放 at ({}, {})", last_x, last_y);
 
-                        let mut state_guard = GLOBAL_STATE.mouse_action_state.lock().unwrap();
-                        let prev_state =
-                            std::mem::replace(&mut *state_guard, MouseActionState::Idle);
+                    let mut state_guard = GLOBAL_STATE.mouse_action_state.lock().unwrap();
+                    let prev_state = std::mem::replace(&mut *state_guard, MouseActionState::Idle);
 
-                        if let MouseActionState::MouseDown(down_x, down_y, down_time) = prev_state {
-                            let up_time = current_time;
-                            *state_guard = MouseActionState::MouseUp(last_x, last_y, up_time);
+                    if let MouseActionState::MouseDown(down_x, down_y, down_time) = prev_state {
+                        let up_time = current_time;
+                        *state_guard = MouseActionState::MouseUp(last_x, last_y, up_time);
 
-                            let distance = calculate_distance(down_x, down_y, last_x, last_y);
-                            let duration = up_time.duration_since(down_time);
+                        let distance = calculate_distance(down_x, down_y, last_x, last_y);
+                        let duration = up_time.duration_since(down_time);
 
-                            log::info!(
-                                "鼠标移动距离: {:.2}px, 操作持续时间: {:?}ms",
-                                distance,
-                                duration.as_millis()
-                            );
+                        log::info!(
+                            "鼠标移动距离: {:.2}px, 操作持续时间: {:?}ms",
+                            distance,
+                            duration.as_millis()
+                        );
 
-                            if is_valid_drag_operation(distance, duration) {
-                                if !is_foreground_window_console() {
-                                    if !is_any_ctrl_pressed() {
-                                        let last_processed = {
-                                            GLOBAL_STATE.last_processed_time.lock().unwrap().clone()
-                                        };
+                        if is_valid_drag_operation(distance, duration) {
+                            if !is_foreground_window_console() {
+                                if !is_any_ctrl_pressed() {
+                                    let last_processed = {
+                                        GLOBAL_STATE.last_processed_time.lock().unwrap().clone()
+                                    };
 
-                                        if up_time.duration_since(last_processed)
-                                            > Duration::from_millis(100)
-                                        {
-                                            GLOBAL_STATE
-                                                .needs_detection
-                                                .store(true, Ordering::SeqCst);
-                                            log::info!("设置划词检测标志");
+                                    if up_time.duration_since(last_processed)
+                                        > Duration::from_millis(100)
+                                    {
+                                        GLOBAL_STATE.needs_detection.store(true, Ordering::SeqCst);
+                                        log::info!("设置划词检测标志");
 
-                                            *GLOBAL_STATE.last_processed_time.lock().unwrap() =
-                                                up_time;
-                                        } else {
-                                            log::info!("操作过于频繁，跳过此次检测");
-                                        }
+                                        *GLOBAL_STATE.last_processed_time.lock().unwrap() = up_time;
                                     } else {
-                                        log::info!("Ctrl键被按下，忽略此次点击");
+                                        log::info!("操作过于频繁，跳过此次检测");
                                     }
                                 } else {
-                                    log::info!("当前在命令行/终端环境中，跳过划词检测");
+                                    log::info!("Ctrl键被按下，忽略此次点击");
                                 }
                             } else {
-                                log::info!("不满足划词条件（距离或时间不足），跳过");
+                                log::info!("当前在命令行/终端环境中，跳过划词检测");
                             }
+                        } else {
+                            log::info!("不满足划词条件（距离或时间不足），跳过");
                         }
                     }
-                    EventType::MouseMove { x, y } => {
-                        let mouse_x = x as u64;
-                        let mouse_y = y as u64;
+                }
+                EventType::MouseMove { x, y } => {
+                    let mouse_x = x as u64;
+                    let mouse_y = y as u64;
 
-                        {
-                            let mut pos_guard = GLOBAL_STATE.last_mouse_pos.lock().unwrap();
-                            *pos_guard = (mouse_x, mouse_y);
-                        }
+                    {
+                        let mut pos_guard = GLOBAL_STATE.last_mouse_pos.lock().unwrap();
+                        *pos_guard = (mouse_x, mouse_y);
                     }
-                    _ => {
-                        hide_selection_toolbar_impl(app_handle.clone());
-                    }
+                }
+                _ => {
+                    hide_selection_toolbar_impl(app_handle.clone());
                 }
             }) {
                 log::error!("鼠标监听器启动失败: {:?}", error);
@@ -263,7 +257,6 @@ fn is_valid_drag_operation(distance: f64, duration: Duration) -> bool {
 }
 
 fn is_foreground_window_console() -> bool {
-    #[cfg(target_os = "windows")]
     {
         unsafe {
             use winapi::um::winuser::{GetClassNameW, GetForegroundWindow, GetWindowTextW};
@@ -369,150 +362,6 @@ fn is_foreground_window_console() -> bool {
             }
         }
     }
-
-    #[cfg(target_os = "linux")]
-    {
-        use std::process::Command;
-
-        if let Ok(output) = Command::new("sh")
-            .arg("-c")
-            .arg("echo $XDG_CURRENT_DESKTOP")
-            .output()
-        {
-            let desktop_env = String::from_utf8_lossy(&output.stdout).to_lowercase();
-            if desktop_env.contains("terminal") || desktop_env.contains("console") {
-                return true;
-            }
-        }
-
-        if let Ok(active_window) = Command::new("sh")
-            .arg("-c")
-            .arg("xprop -root _NET_ACTIVE_WINDOW | awk '{print $NF}'")
-            .output()
-        {
-            let window_id = String::from_utf8_lossy(&active_window.stdout);
-            if let Ok(window_class) = Command::new("sh")
-                .arg("-c")
-                .arg(format!(
-                    "xprop -id $(xprop -root _NET_ACTIVE_WINDOW | awk '{{print $NF}}') WM_CLASS"
-                ))
-                .output()
-            {
-                let class_info = String::from_utf8_lossy(&window_class.stdout).to_lowercase();
-                let terminal_classes = [
-                    "terminal",
-                    "console",
-                    "xterm",
-                    "gnome-terminal",
-                    "konsole",
-                    "xfce4-terminal",
-                    "sun-awt",
-                    "jetbrains",
-                ];
-
-                for term_class in terminal_classes.iter() {
-                    if class_info.contains(term_class) {
-                        log::info!("检测到Linux终端窗口或IDE终端: {}", class_info);
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        use std::process::Command;
-
-        let script = r#"
-        try
-            tell application "System Events"
-                set frontAppName to name of first application process whose frontmost is true
-            end tell
-            return frontAppName
-        on error
-            return ""
-        end try
-        "#;
-
-        if let Ok(output) = Command::new("osascript").arg("-e").arg(script).output() {
-            let app_name = String::from_utf8_lossy(&output.stdout)
-                .to_lowercase()
-                .trim()
-                .to_string();
-            let terminal_apps = [
-                "terminal",
-                "iterm",
-                "kitty",
-                "alacritty",
-                "hyper",
-                "x11",
-                "idea",
-                "intellij",
-                "eclipse",
-                "netbeans",
-                "console",
-            ];
-
-            for app in terminal_apps.iter() {
-                if app_name.contains(app) {
-                    if app_name.contains("idea")
-                        || app_name.contains("intellij")
-                        || app_name.contains("eclipse")
-                        || app_name.contains("netbeans")
-                    {
-                        log::info!("检测到IDE应用: {}, 检查是否是终端面板", app_name);
-
-                        return if app_name.contains("terminal") || is_ide_terminal_active() {
-                            log::info!("检测到IDE中的终端面板: {}", app_name);
-                            true
-                        } else {
-                            log::info!("检测到IDE但非终端面板，允许划词: {}", app_name);
-                            false
-                        };
-                    }
-                    log::info!("检测到终端应用或IDE: {}", app_name);
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
-}
-
-#[cfg(target_os = "macos")]
-fn is_ide_terminal_active() -> bool {
-    use std::process::Command;
-
-    let script = r#"
-    try
-        tell application "System Events"
-            set frontAppName to name of first application process whose frontmost is true
-            if frontAppName contains "IntelliJ" or frontAppName contains "IDEA" or frontAppName contains "Eclipse" then
-                tell process frontAppName
-                    set windowNames to name of every window
-                    repeat with winName in windowNames
-                        if winName contains "Terminal" or winName contains "Run" or winName contains "Debug" or winName contains "Console" then
-                            return true
-                        end if
-                    end repeat
-                end tell
-            end if
-        end tell
-        return false
-    on error
-        return false
-    end try
-    "#;
-
-    if let Ok(output) = Command::new("osascript").arg("-e").arg(script).output() {
-        let result = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_lowercase();
-        return result.contains("true") || result == "1";
-    }
-
     false
 }
 

@@ -149,6 +149,7 @@ pub fn run() {
 
             start_clipboard_listener(app_handle.clone(), state_arc.clone());
 
+            #[cfg(windows)]
             start_text_selection_listener(app_handle.clone(), state_arc.clone());
 
             #[cfg(desktop)]

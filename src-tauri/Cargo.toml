@@ -13,7 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.5.3", features = [] }
 
 [dependencies]
-tauri = { version = "2.9.5", features = [ "tray-icon"] }
+tauri = { version = "2.9.5", features = ["tray-icon"] }
 tauri-build = { version = "2.5.3", features = [] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
@@ -37,20 +37,5 @@ reqwest = { version = "0.13.1", features = ["json", "stream"] }
 
 futures-util = "0.3.31"
 
-# Windows 特定的依赖，用于 Windows API 调用
-[target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.9", features = ["winuser", "winnt", "minwindef", "windef", "libloaderapi", "winbase", "processthreadsapi", "windowsx", "errhandlingapi", "handleapi", "heapapi", "memoryapi", "psapi", "synchapi", "sysinfoapi", "timezoneapi", "tlhelp32", "winioctl", "wingdi", "winerror", "winnls", "winreg", "winsvc", "setupapi", "ioapiset", "fileapi", "consoleapi", "namedpipeapi", "processenv", "stringapiset", "profileapi", "libloaderapi", "dwmapi"] }
 windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_UI_Accessibility", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_Security", "Win32_System_Diagnostics_Debug", "Win32_System_Environment", "Win32_UI_WindowsAndMessaging"] }
-widestring = "1.0"
-user32-sys = "0.2"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-# macOS 需要使用不同的方式实现划词检测
-objc = "0.2"
-core-foundation = "0.10.1"
-core-graphics = "0.25.0"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-# Linux 需要使用不同的方式实现划词检测
-enigo = { version = "0.6.1", features = ["x11rb"], default-features = false }
-arboard = "3.4.1"
