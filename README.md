@@ -47,7 +47,7 @@ shear/
 
 | gitee                                          | github                                          |
 |------------------------------------------------|-------------------------------------------------|
-| [下载](https://gitee.com/zrq1351/shear/releases) | [下载](https://github.com/zRq1351/shear/releases) |
+| [下载](https://gitee.com/zrq1351/fuyun_tools/releases) | [下载](https://github.com/zRq1351/fuyun_tools/releases) |
 
 
 
