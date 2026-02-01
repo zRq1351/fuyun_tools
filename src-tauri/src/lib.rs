@@ -461,7 +461,7 @@ fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
         let version = app_handle.package_info().version.clone();
         let tray_builder = TrayIconBuilder::with_id("main")
             .icon(app_handle.default_window_icon().unwrap().clone())
-            .tooltip(&format!("剪贴板工具 v{}", version))
+            .tooltip(&format!("fy_tools v{}", version))
             .menu(&menu);
 
         tray_builder
