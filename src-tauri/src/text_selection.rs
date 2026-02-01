@@ -2,7 +2,8 @@ use log;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use crate::ClipboardManager;
+use enigo::{Enigo, Key, Keyboard, Settings};
+use crate::{ClipboardManager, ENIGO_INSTANCE};
 use tauri::AppHandle;
 
 pub use crate::AppState as SharedAppState;
@@ -44,14 +45,26 @@ fn get_selected_text_windows(
 
     let original_content = get_current_clipboard_content_with_manager(&clipboard_manager, app_handle);
 
-    use enigo::{Enigo, Keyboard, Settings};
-    let mut enigo = Enigo::new(&Settings::default()).unwrap();
+    let mut enigo_guard = ENIGO_INSTANCE.lock().unwrap();
+    if enigo_guard.is_none() {
+        *enigo_guard = Some(Enigo::new(&Settings::default()).expect("未能初始化enigo"));
+    }
 
-    let _ = enigo.key(CTRL_KEY, enigo::Direction::Press);
-    let _ = enigo.key(enigo::Key::Unicode('c'), enigo::Direction::Click);
-    let _ = enigo.key(CTRL_KEY, enigo::Direction::Release);
+    // 确保Ctrl键初始状态是释放的
+    crate::mouse_listener::reset_ctrl_key_state();
+
+    if let Some(ref mut enigo) = *enigo_guard {
+        let _ = enigo.key(CTRL_KEY, enigo::Direction::Press);
+        let _ = enigo.key(Key::Unicode('c'), enigo::Direction::Click);
+        thread::sleep(Duration::from_millis(100));
+        let _ = enigo.key(CTRL_KEY, enigo::Direction::Release);
+    }
 
     log::info!("已发送Ctrl+C模拟按键");
+
+    // 再次确保Ctrl键状态正确释放
+    thread::sleep(Duration::from_millis(50));
+    crate::mouse_listener::reset_ctrl_key_state();
 
     thread::sleep(Duration::from_millis(150));
 

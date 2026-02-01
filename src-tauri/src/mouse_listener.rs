@@ -26,7 +26,7 @@ struct GlobalState {
 }
 
 lazy_static::lazy_static! {
-    static ref GLOBAL_STATE: GlobalState = GlobalState {
+    static ref  GLOBAL_STATE: GlobalState = GlobalState {
         mouse_action_state: Arc::new(Mutex::new(MouseActionState::Idle)),
         ctrl_left_pressed: AtomicBool::new(false),
         ctrl_right_pressed: AtomicBool::new(false),
@@ -97,8 +97,6 @@ impl MouseListener {
             if let Err(error) = listen(move |event| {
                 match event.event_type {
                     EventType::KeyPress(key) => {
-                        hide_selection_toolbar_impl(app_handle.clone());
-                        // 检测到Ctrl键按下
                         if key == Key::ControlLeft {
                             GLOBAL_STATE.ctrl_left_pressed.store(true, Ordering::SeqCst);
                             log::info!("检测到左Ctrl键按下");
@@ -304,7 +302,7 @@ fn is_foreground_window_console() -> bool {
 
                 for class_indicator in console_classes.iter() {
                     if lower_class.contains(class_indicator) {
-                        log::info!("检测到命令行/终端窗口类: {}", lower_class);
+                        log::warn!("检测到命令行/终端窗口类: {}", lower_class);
                         return true;
                     }
                 }
@@ -358,14 +356,14 @@ fn is_foreground_window_console() -> bool {
 
             for indicator in console_indicators.iter() {
                 if title.contains(indicator) || class.contains(indicator) {
-                    log::info!("检测到命令行/终端窗口: {} (class: {})", title, class);
+                    log::warn!("检测到命令行/终端窗口: {} (class: {})", title, class);
                     return true;
                 }
             }
 
             for class_indicator in console_classes.iter() {
                 if class.contains(class_indicator) {
-                    log::info!("检测到命令行/终端窗口类: {} (title: {})", class, title);
+                    log::warn!("检测到命令行/终端窗口类: {} (title: {})", class, title);
                     return true;
                 }
             }
@@ -525,7 +523,9 @@ fn get_selected_text(
     log::info!("开始获取选中文本（模拟复制）");
 
     use crate::text_selection::get_selected_text_with_app;
-    get_selected_text_with_app(app_handle, clipboard_manager)
+    let result = get_selected_text_with_app(app_handle, clipboard_manager);
+    reset_ctrl_key_state();
+    result
 }
 
 fn is_valid_selection(text: &str) -> bool {

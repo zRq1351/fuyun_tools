@@ -617,6 +617,7 @@ fn simulate_paste() {
         if let Some(ref mut enigo) = *enigo_guard {
             let _ = enigo.key(CTRL_KEY, enigo::Direction::Press);
             let _ = enigo.key(Key::Unicode('v'), enigo::Direction::Click);
+            thread::sleep(Duration::from_millis(100));
             let _ = enigo.key(CTRL_KEY, enigo::Direction::Release);
         }
     }
