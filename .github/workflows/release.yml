@@ -12,17 +12,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [ubuntu-latest, windows-latest, macos-latest]
+        platform: [windows-latest]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
       - name: 安装 Rust stable
         uses: dtolnay/rust-toolchain@stable
-      - name: 安装依赖 (Ubuntu only)
-        if: matrix.platform == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - name: 构建并发布 Tauri 应用
         uses: tauri-apps/tauri-action@v0
         env:
@@ -32,6 +27,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
-          releaseBody: 'See assets below for the latest release.'
+          releaseBody: '最新版本请见下方资源。'
           releaseDraft: false
           prerelease: false
