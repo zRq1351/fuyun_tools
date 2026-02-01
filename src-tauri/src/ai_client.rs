@@ -58,9 +58,10 @@ pub struct AIConfig {
     pub model: String,
 }
 
+#[derive(Debug, Clone)]
 pub struct AIClient {
-    client: reqwest::Client,
-    config: AIConfig,
+    pub client: reqwest::Client,
+    pub config: AIConfig,
 }
 
 impl AIClient {
@@ -78,7 +79,7 @@ impl AIClient {
         let url = format!("{}/chat/completions", self.config.base_url.trim_end_matches('/'));
 
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("api-key", self.config.api_key.parse().unwrap()); // 使用api-key而不是Authorization
+        headers.insert("api-key", self.config.api_key.parse().unwrap());
         headers.insert("Content-Type", "application/json".parse().unwrap());
 
         let response = self.client
@@ -106,8 +107,7 @@ impl AIClient {
         F: FnMut(String) -> (),
     {
         let mut stream_request = request.clone();
-        stream_request.stream = Some(true); // 启用流式响应
-        // 优先使用max_completion_tokens，如果未设置则使用max_tokens
+        stream_request.stream = Some(true);
         if stream_request.max_completion_tokens.is_none() {
             stream_request.max_completion_tokens = stream_request.max_tokens;
         }
@@ -133,24 +133,20 @@ impl AIClient {
             let chunk = chunk_result.map_err(|e| format!("读取数据块失败: {}", e))?;
             let text = String::from_utf8_lossy(&chunk);
 
-            // 处理服务器发送的事件流数据
             for line in text.lines() {
                 if line.starts_with("data: ") {
-                    let data = &line[6..]; // 移除 "data: " 前缀
+                    let data = &line[6..];
                     if data == "[DONE]" {
                         break;
                     }
 
-                    // 尝试解析JSON数据
                     if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(data) {
-                        // 检查是否有错误
                         if json_value.get("error").is_some() {
                             if let Ok(error_msg) = serde_json::to_string(&json_value) {
                                 return Err(format!("API错误: {}", error_msg));
                             }
                         }
                         
-                        // 提取内容部分
                         if let Some(choices) = json_value.get("choices").and_then(|c| c.as_array()) {
                             for choice in choices {
                                 if let Some(delta) = choice.get("delta") {
@@ -160,9 +156,7 @@ impl AIClient {
                                         }
                                     }
                                 } else if let Some(finish_reason) = choice.get("finish_reason").and_then(|fr| fr.as_str()) {
-                                    // 处理结束原因
                                     if finish_reason == "stop" {
-                                        // 正常结束
                                         break;
                                     }
                                 }
@@ -188,11 +182,11 @@ impl AIClient {
             messages,
             temperature: Some(0.7),
             max_tokens,
-            max_completion_tokens: max_tokens, // 使用max_tokens作为max_completion_tokens的值
+            max_completion_tokens: max_tokens,
             top_p: Some(1.0),
             frequency_penalty: Some(0.0),
             presence_penalty: Some(0.0),
-            stream: Some(false), // 非流式响应
+            stream: Some(false),
         };
 
         let response = self.chat_completion(&request).await?;
@@ -219,11 +213,11 @@ impl AIClient {
             messages,
             temperature: Some(0.7),
             max_tokens,
-            max_completion_tokens: max_tokens, // 使用max_tokens作为max_completion_tokens的值
+            max_completion_tokens: max_tokens,
             top_p: Some(1.0),
             frequency_penalty: Some(0.0),
             presence_penalty: Some(0.0),
-            stream: Some(true), // 启用流式响应
+            stream: Some(true),
         };
 
         self.chat_completion_stream(&request, callback).await
@@ -242,7 +236,6 @@ impl AIClient {
     }
 }
 
-// 自定义错误类型
 #[derive(Debug)]
 pub struct AIClientError {
     pub message: String,
@@ -256,7 +249,6 @@ impl std::fmt::Display for AIClientError {
 
 impl std::error::Error for AIClientError {}
 
-// 为 String 实现 From trait
 impl From<String> for AIClientError {
     fn from(msg: String) -> Self {
         AIClientError { message: msg }

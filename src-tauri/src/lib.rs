@@ -26,8 +26,11 @@ use tauri_plugin_positioner::{Position, WindowExt};
 use tauri_plugin_updater::UpdaterExt;
 use utils::{load_settings, save_settings, AppSettingsData};
 
-use crate::ai_client::AIClient;
+use crate::ai_client::{AIClient, AIConfig};
 use lazy_static::lazy_static;
+
+// 类型别名定义
+pub type SharedAppState = AppState;
 
 lazy_static! {
     static ref ENIGO_INSTANCE: Arc<Mutex<Option<Enigo>>> = Arc::new(Mutex::new(None));
@@ -46,6 +49,7 @@ pub struct AppState {
     is_updating_clipboard: bool,
     is_processing_selection: bool,
     tray_menu_items: Option<TrayMenuItems>,
+    ai_client: Arc<Mutex<Option<AIClient>>>, // 新增AI客户端缓存
 }
 
 impl Clone for AppState {
@@ -58,6 +62,7 @@ impl Clone for AppState {
             is_updating_clipboard: self.is_updating_clipboard,
             is_processing_selection: self.is_processing_selection,
             tray_menu_items: None,
+            ai_client: Arc::new(Mutex::new((*self.ai_client.lock().unwrap()).clone())), // 复制AI客户端
         }
     }
 }
@@ -76,6 +81,7 @@ impl Default for AppState {
             is_updating_clipboard: false,
             is_processing_selection: false,
             tray_menu_items: None,
+            ai_client: Arc::new(Mutex::new(None)), // 初始化为None
         }
     }
 }
@@ -730,10 +736,10 @@ fn handle_check_update_event(app: &AppHandle) {
 
                 let _ = app_handle
                     .notification()
-                    .builder()
-                    .title("更新错误")
-                    .body(&format!("检查更新失败: {}", e))
-                    .show();
+                        .builder()
+                        .title("更新错误")
+                        .body(&format!("检查更新失败: {}", e))
+                        .show();
             }
         }
     });
@@ -885,6 +891,7 @@ async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
         }
     }
 }
+
 async fn show_result_window(
     title: String,
     content: String,
@@ -897,7 +904,6 @@ async fn show_result_window(
     if let Some(existing_window) = app.get_webview_window(&window_label) {
         let _ = existing_window.show();
         let _ = existing_window.set_focus();
-        println!("✅ 窗口 {} 已显示111111", window_label);
         return Ok(());
     }
 
@@ -926,7 +932,6 @@ async fn show_result_window(
     let _ = window.move_window(Position::RightCenter);
     let _ = window.show();
     let _ = window.set_focus();
-    println!("✅ 窗口 {} 已显示", window_label);
     Ok(())
 }
 
@@ -951,21 +956,41 @@ async fn update_result_window(
     }
 }
 
-async fn create_ai_client() -> Result<AIClient, String> {
-    use crate::ai_client::{AIClient, AIConfig};
-
-    let settings_data = AppState::default().settings;
-    let ai_api_key = &settings_data.ai_api_key;
-    let ai_api_url = &settings_data.ai_api_url;
-    let model = &settings_data.ai_model_name;
-
-    let config = AIConfig {
-        api_key: ai_api_key.clone(),
-        base_url: ai_api_url.clone(),
-        model: model.clone(),
+async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> Result<AIClient, String> {
+    let current_config = {
+        let state_guard = state.lock().unwrap();
+        let settings = &state_guard.settings;
+        let cached_client_exists_and_valid = {
+            if let Some(ref client) = *state_guard.ai_client.lock().unwrap() {
+                settings.ai_api_key == client.config.api_key &&
+                settings.ai_api_url == client.config.base_url &&
+                settings.ai_model_name == client.config.model
+            } else {
+                false
+            }
+        };
+        
+        if cached_client_exists_and_valid {
+            if let Some(client) = (*state_guard.ai_client.lock().unwrap()).as_ref() {
+                return Ok(client.clone());
+            }
+        }
+        
+        AIConfig {
+            api_key: settings.ai_api_key.clone(),
+            base_url: settings.ai_api_url.clone(),
+            model: settings.ai_model_name.clone(),
+        }
     };
 
-    AIClient::new(config).map_err(|e| format!("客户端初始化失败: {}", e))
+    let client = AIClient::new(current_config).map_err(|e| format!("客户端初始化失败: {}", e))?;
+
+    {
+        let state_guard = state.lock().unwrap();
+        *state_guard.ai_client.lock().unwrap() = Some(client.clone());
+    }
+
+    Ok(client)
 }
 
 #[tauri::command]
@@ -974,11 +999,15 @@ async fn stream_translate_text(
     source_language: String,
     target_language: String,
     app: AppHandle,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
     use crate::ai_client::{ChatCompletionRequest, Message};
 
-    let client: AIClient = create_ai_client().await?;
-    let model = AppState::default().settings.ai_model_name;
+    let client: AIClient = get_or_create_ai_client(state.inner().clone()).await?;
+    let model = {
+        let state_guard = state.lock().unwrap();
+        state_guard.settings.ai_model_name.clone()
+    };
 
     show_result_window(
         "翻译结果".to_string(),
@@ -1032,7 +1061,8 @@ async fn stream_translate_text(
         }
         Err(e) => {
             let error_msg = format!("翻译失败: {}", e);
-            update_result_window(error_msg, "translation".to_string(), app).await?;
+            update_result_window(error_msg.clone(), "translation".to_string(), app).await?;
+            log::error!("翻译失败: {}", error_msg);
         }
     }
 
@@ -1044,11 +1074,15 @@ async fn stream_explain_text(
     text: String,
     target_language: String,
     app: AppHandle,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
     use crate::ai_client::{ChatCompletionRequest, Message};
 
-    let client: AIClient = create_ai_client().await?;
-    let model = AppState::default().settings.ai_model_name;
+    let client: AIClient = get_or_create_ai_client(state.inner().clone()).await?;
+    let model = {
+        let state_guard = state.lock().unwrap();
+        state_guard.settings.ai_model_name.clone()
+    };
 
     show_result_window(
         "解释结果".to_string(),
