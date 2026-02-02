@@ -22,17 +22,19 @@
             display: flex;
             flex-direction: column;
             position: relative;
+            gap: 12px;
         }
 
         .content {
             flex: 1;
             line-height: 1.6;
             overflow-y: auto;
-            padding: 10px;
+            padding: 15px;
             background: #2d2d2d;
-            border-radius: 6px;
+            border-radius: 8px;
             -ms-overflow-style: none;
             scrollbar-width: none;
+            border: 1px solid #3a3a3a;
         }
 
         .content::-webkit-scrollbar {
@@ -56,6 +58,35 @@
 
         .content:hover::-webkit-scrollbar-track {
             background: #333;
+        }
+
+        /* 原文内容区域特殊样式 */
+        .original-content {
+            background: #252525;
+            border: 1px solid #444;
+            border-left: 4px solid #4CAF50;
+            color: #cccccc;
+            font-style: italic;
+        }
+
+        .original-content h1, .original-content h2, .original-content h3, 
+        .original-content h4, .original-content h5, .original-content h6 {
+            color: #aaaaaa;
+        }
+
+        .original-content code {
+            background-color: #3a3a3a;
+        }
+
+        .original-content pre {
+            background-color: #2a2a2a;
+        }
+
+        /* 结果内容区域样式 */
+        .result-content {
+            background: #2d2d2d;
+            border: 1px solid #3a3a3a;
+            border-left: 4px solid #2196F3;
         }
 
         .content h1, .content h2, .content h3, .content h4, .content h5, .content h6 {
@@ -345,6 +376,11 @@
         title = data.type;
         original = data.original;
         const originalContentElement = document.getElementById('originalContent');
+        const resultContentElement = document.getElementById('resultContent');
+        
+        // 为结果内容区域添加样式类
+        resultContentElement.className = 'content result-content';
+        
         if (original) {
             originalContentElement.innerHTML = marked.parse(original);
         }
@@ -357,21 +393,20 @@
             document.getElementById('explanationSection').style.display = 'none';
         }
         sourceLanguageSelect.addEventListener('change', function () {
-            const selectedText = localStorage.getItem('selectedText') || '';
-            if (selectedText) {
+            if (original) {
                 if (title === 'translation') {
                     document.getElementById('resultContent').innerHTML = '正在翻译...';
-                    fullContent = '正在翻译...';
+                    fullContent = '';
                     invoke('stream_translate_text', {
-                        text: selectedText,
+                        text: original,
                         sourceLanguage: sourceLanguageSelect.value,
                         targetLanguage: targetLanguageSelect.value
                     }).catch(console.error);
                 } else {
                     document.getElementById('resultContent').innerHTML = '正在解释...';
-                    fullContent = '正在解释...';
+                    fullContent = '';
                     invoke('stream_explain_text', {
-                        text: selectedText,
+                        text: original,
                         targetLanguage: explanationLanguageSelect.value
                     }).catch(console.error);
                 }
@@ -379,21 +414,20 @@
         });
 
         targetLanguageSelect.addEventListener('change', function () {
-            const selectedText = localStorage.getItem('selectedText') || '';
-            if (selectedText) {
+            if (original) {
                 if (title === 'translation') {
                     document.getElementById('resultContent').innerHTML = '正在翻译...';
-                    fullContent = '正在翻译...';
+                    fullContent = '';
                     invoke('stream_translate_text', {
-                        text: selectedText,
+                        text: original,
                         sourceLanguage: sourceLanguageSelect.value,
                         targetLanguage: targetLanguageSelect.value
                     }).catch(console.error);
                 } else {
                     document.getElementById('resultContent').innerHTML = '正在解释...';
-                    fullContent = '正在解释...';
+                    fullContent = '';
                     invoke('stream_explain_text', {
-                        text: selectedText,
+                        text: original,
                         targetLanguage: explanationLanguageSelect.value
                     }).catch(console.error);
                 }
@@ -401,12 +435,11 @@
         });
 
         explanationLanguageSelect.addEventListener('change', function () {
-            const selectedText = localStorage.getItem('selectedText') || '';
-            if (selectedText) {
+            if (original) {
                 document.getElementById('resultContent').innerHTML = '正在解释...';
-                fullContent = '正在解释...';
+                fullContent = '';
                 invoke('stream_explain_text', {
-                    text: selectedText,
+                    text: original,
                     targetLanguage: explanationLanguageSelect.value
                 }).catch(console.error);
             }
@@ -415,6 +448,7 @@
             const originalContentElement = document.getElementById('originalContent');
             if (originalContentElement.style.display === 'none') {
                 originalContentElement.style.display = 'block';
+                originalContentElement.className = 'content original-content';
                 showOriginalBtn.textContent = '隐藏原文';
                 originalContentElement.innerHTML = marked.parse(original);
             } else {
@@ -434,4 +468,3 @@
 </script>
 </body>
 </html>
-
