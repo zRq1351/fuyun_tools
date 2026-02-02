@@ -25,10 +25,10 @@
       },
       {
         "label": "selection_toolbar",
-        "title":"fuyun_tools",
+        "title": "fuyun_tools",
         "url": "selection_toolbar.html",
         "visible": false,
-        "resizable":false,
+        "resizable": false,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
@@ -38,7 +38,7 @@
       },
       {
         "label": "settings",
-        "title":"设置",
+        "title": "设置",
         "url": "settings.html",
         "visible": false,
         "resizable": true,
@@ -47,13 +47,13 @@
         "alwaysOnTop": false,
         "skipTaskbar": false,
         "focus": true,
-        "width": 830,
-        "height": 666,
+        "min-width": 850,
+        "min-height": 700,
         "center": true
       }
     ],
     "security": {
-        "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' tauri://ipc; img-src 'self' data:; font-src 'self'; object-src 'none';"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' tauri://ipc; img-src 'self' data:; font-src 'self'; object-src 'none';"
     },
     "withGlobalTauri": true
   },

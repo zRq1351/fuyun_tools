@@ -126,6 +126,13 @@ impl AIClient {
             .await
             .map_err(|e| format!("请求发送失败: {}", e))?;
 
+        // 检查HTTP响应状态
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_else(|_| "无法读取错误响应".to_string());
+            return Err(format!("HTTP错误 {}: {}", status, error_text));
+        }
+
         let mut stream = response.bytes_stream();
 
         use futures_util::StreamExt;
@@ -137,30 +144,41 @@ impl AIClient {
                 if line.starts_with("data: ") {
                     let data = &line[6..];
                     if data == "[DONE]" {
-                        break;
+                        return Ok(());
                     }
 
-                    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(data) {
-                        if json_value.get("error").is_some() {
-                            if let Ok(error_msg) = serde_json::to_string(&json_value) {
+                    if data.trim().is_empty() {
+                        continue;
+                    }
+
+                    match serde_json::from_str::<serde_json::Value>(data) {
+                        Ok(json_value) => {
+                            // 检查API错误
+                            if let Some(error_obj) = json_value.get("error") {
+                                let error_msg = error_obj.to_string();
                                 return Err(format!("API错误: {}", error_msg));
                             }
-                        }
-                        
-                        if let Some(choices) = json_value.get("choices").and_then(|c| c.as_array()) {
-                            for choice in choices {
-                                if let Some(delta) = choice.get("delta") {
-                                    if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-                                        if !content.is_empty() {
-                                            callback(content.to_string());
+                            
+                            // 处理正常响应
+                            if let Some(choices) = json_value.get("choices").and_then(|c| c.as_array()) {
+                                for choice in choices {
+                                    if let Some(delta) = choice.get("delta") {
+                                        if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+                                            if !content.is_empty() {
+                                                callback(content.to_string());
+                                            }
                                         }
-                                    }
-                                } else if let Some(finish_reason) = choice.get("finish_reason").and_then(|fr| fr.as_str()) {
-                                    if finish_reason == "stop" {
-                                        break;
+                                    } else if let Some(finish_reason) = choice.get("finish_reason").and_then(|fr| fr.as_str()) {
+                                        if finish_reason == "stop" {
+                                            return Ok(());
+                                        }
                                     }
                                 }
                             }
+                        }
+                        Err(e) => {
+                            // 记录解析错误但继续处理，因为可能是不完整的JSON
+                            log::warn!("解析流式响应失败: {}, 数据: {}", e, data);
                         }
                     }
                 }

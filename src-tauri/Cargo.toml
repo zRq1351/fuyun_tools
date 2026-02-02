@@ -31,11 +31,13 @@ regex = "1.11.1"
 
 tauri-plugin-updater = { version = "2.9.0" }
 tauri-plugin-positioner = { version = "2.3.1" }
+tauri-plugin-shell = { version = "2.3.4" }
 enigo = { version = "0.6.1", default-features = false }
 rdev = "0.5.3"
 reqwest = { version = "0.13.1", features = ["json", "stream"] }
 
 futures-util = "0.3.31"
+base64 = "0.22.1"
 
 winapi = { version = "0.3.9", features = ["winuser", "winnt", "minwindef", "windef", "libloaderapi", "winbase", "processthreadsapi", "windowsx", "errhandlingapi", "handleapi", "heapapi", "memoryapi", "psapi", "synchapi", "sysinfoapi", "timezoneapi", "tlhelp32", "winioctl", "wingdi", "winerror", "winnls", "winreg", "winsvc", "setupapi", "ioapiset", "fileapi", "consoleapi", "namedpipeapi", "processenv", "stringapiset", "profileapi", "libloaderapi", "dwmapi"] }
 windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_UI_Accessibility", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_Security", "Win32_System_Diagnostics_Debug", "Win32_System_Environment", "Win32_UI_WindowsAndMessaging"] }

@@ -3,7 +3,7 @@ pub mod clipboard;
 pub mod config;
 pub mod mouse_listener;
 pub mod text_selection;
-pub mod utils; // 添加新的AI客户端模块
+pub mod utils;
 
 use crate::config::{CTRL_KEY, DEFAULT_HIDE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT};
 use crate::utils::get_logs_dir_path;
@@ -29,11 +29,17 @@ use utils::{load_settings, save_settings, AppSettingsData};
 use crate::ai_client::{AIClient, AIConfig};
 use lazy_static::lazy_static;
 
-// 类型别名定义
 pub type SharedAppState = AppState;
 
 lazy_static! {
     static ref ENIGO_INSTANCE: Arc<Mutex<Option<Enigo>>> = Arc::new(Mutex::new(None));
+}
+
+/// 清理ENIGO实例资源
+fn cleanup_enigo_instance() {
+    let mut enigo_guard = ENIGO_INSTANCE.lock().unwrap();
+    *enigo_guard = None;
+    log::info!("已清理ENIGO实例资源");
 }
 
 #[derive(Clone)]
@@ -115,7 +121,6 @@ pub fn run() {
 
             let app_handle = app.handle();
             rebuild_tray_menu(&app_handle, state_arc.clone());
-            // 注册全局快捷键监听
             let state_clone = state_arc.clone();
             let app_handle_clone = app_handle.clone();
             app.global_shortcut()
@@ -191,6 +196,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_shell::init())
         .build(tauri::generate_context!())
         .expect("构建Tauri应用时出错")
         .run(|_app_handle, _event| {});
@@ -253,26 +259,35 @@ fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) 
             }
             last_check_time = std::time::Instant::now();
 
-            let is_updating = {
+            // 获取状态时需要保持锁，避免竞态条件
+            let (is_updating, should_skip) = {
                 let state_guard = state.lock().unwrap();
-                state_guard.is_updating_clipboard || state_guard.is_processing_selection
+                (
+                    state_guard.is_updating_clipboard || state_guard.is_processing_selection,
+                    state_guard.is_processing_selection, // 如果是划词操作，完全跳过
+                )
             };
 
             if is_updating {
+                if should_skip {
+                    // 如果是划词操作，等待更长时间再检查
+                    thread::sleep(Duration::from_millis(200));
+                }
                 continue;
             }
 
-            let state_guard = state.lock().unwrap();
-            let manager = state_guard.clipboard_manager.lock().unwrap();
+            // 在同一个锁保护下获取剪贴板内容
+            let current_content = {
+                let state_guard = state.lock().unwrap();
+                let manager = state_guard.clipboard_manager.lock().unwrap();
+                manager.get_content(&app_handle)
+            };
 
-            if let Some(current_content) = manager.get_content(&app_handle) {
+            if let Some(current_content) = current_content {
                 if !current_content.is_empty() && current_content != last_content {
-                    let current_content_clone = current_content.clone();
-                    drop(manager);
-                    drop(state_guard);
-
-                    add_to_clipboard_history(current_content_clone.clone(), state.clone());
-                    last_content = current_content_clone.clone();
+                    // 添加到历史记录
+                    add_to_clipboard_history(current_content.clone(), state.clone());
+                    last_content = current_content.clone();
 
                     check_interval = Duration::from_millis(50);
                     log::info!("检测到剪贴板内容变化，已添加到历史记录");
@@ -660,6 +675,8 @@ async fn selection_toolbar_blur(app: AppHandle) -> Result<(), String> {
 /// 处理退出事件
 fn handle_quit_event(app: &AppHandle) {
     log::info!("退出应用");
+    // 清理资源
+    cleanup_enigo_instance();
     app.exit(0);
 }
 
@@ -827,15 +844,26 @@ async fn save_ai_settings(
     ai_api_url: String,
     ai_model_name: String,
     ai_api_key: String,
+    app: AppHandle,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<(), String> {
-    let settings = AppSettingsData {
+    let version = app.package_info().version.to_string();
+    
+    let mut settings = AppSettingsData {
+        version,
         max_items,
         ai_api_url,
         ai_model_name,
         ai_api_key,
+        encrypted_api_key: String::new(),
     };
-
+    
+    // 加密API密钥
+    settings.encrypt_api_key().map_err(|e| format!("加密API密钥失败: {}", e))?;
+    
+    // 验证设置
+    settings.validate().map_err(|e| format!("设置验证失败: {}", e))?;
+    
     save_settings(&settings).map_err(|e| e.to_string())?;
 
     {
@@ -904,11 +932,31 @@ async fn show_result_window(
     let window_label = format!("result_{}", window_type);
 
     if let Some(existing_window) = app.get_webview_window(&window_label) {
-        let _ = existing_window.show();
+        // 窗口已存在，确保它可见并获得焦点
+        if let Ok(is_visible) = existing_window.is_visible() {
+            if !is_visible {
+                let _ = existing_window.show();
+            }
+        } else {
+            let _ = existing_window.show();
+        }
+        
+        // 设置焦点
         let _ = existing_window.set_focus();
+        
+        // 更新窗口内容
+        let payload = serde_json::json!({
+            "type": window_type.clone(),
+            "original": original.clone(),
+            "content": content.clone()
+        });
+        let script = format!("window.__INITIAL_DATA__ = {};", payload);
+        let _ = existing_window.eval(&script);
+        
         return Ok(());
     }
 
+    // 创建新窗口
     let window = tauri::WebviewWindowBuilder::new(
         &app,
         &window_label,
