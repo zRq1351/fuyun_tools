@@ -1,6 +1,6 @@
 {
   "productName": "fuyun_tools",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "identifier": "com.clipboard-manager.fuyun",
   "build": {
     "frontendDist": "../src"
@@ -47,8 +47,8 @@
         "alwaysOnTop": false,
         "skipTaskbar": false,
         "focus": true,
-        "min-width": 850,
-        "min-height": 700,
+        "width": 850,
+        "height": 700,
         "center": true
       }
     ],

@@ -1,8 +1,7 @@
 [package]
 name = "fuyun_tools"
-version = "0.1.2"
-description = "A Tauri App"
-authors = ["you"]
+version = "0.2.0"
+authors = ["zrq"]
 edition = "2021"
 
 [lib]

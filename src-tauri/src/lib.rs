@@ -21,7 +21,6 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_positioner::{Position, WindowExt};
 use tauri_plugin_updater::UpdaterExt;
 use utils::{load_settings, save_settings, AppSettingsData};
@@ -176,6 +175,8 @@ pub fn run() {
             test_ai_connection,
             stream_translate_text,
             stream_explain_text,
+            check_for_updates,
+            restart_app,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
@@ -442,7 +443,6 @@ fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
         let clear_logs_item = create_menu_item("clear_logs", "清除日志");
         let open_logs_item = create_menu_item("open_logs", "打开日志目录");
         let settings_item = create_menu_item("settings", "设置");
-        let check_update_item = create_menu_item("check_update", "检查更新");
         let autostart_enabled = app_handle.autolaunch().is_enabled().unwrap_or(false);
         let autostart_item = CheckMenuItemBuilder::with_id("autostart", "开机自启")
             .checked(autostart_enabled)
@@ -460,12 +460,11 @@ fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
             tauri::menu::Submenu::with_items(app_handle, "清除", true, &clear_submenu_items)
                 .expect("未能创建清除子菜单");
 
-        let menu_items: [&dyn tauri::menu::IsMenuItem<tauri::Wry>; 6] = [
+        let menu_items: [&dyn tauri::menu::IsMenuItem<tauri::Wry>; 5] = [
             &autostart_item,
             &clear_submenu,
             &open_logs_item,
             &settings_item,
-            &check_update_item,
             &quit_item,
         ];
 
@@ -504,9 +503,6 @@ fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
                             if let Err(e) = clear_log_files() {
                                 log::error!("清除日志文件失败: {}", e);
                             }
-                        }
-                        "check_update" => {
-                            handle_check_update_event(app);
                         }
                         "settings" => {
                             open_settings(app);
@@ -729,40 +725,6 @@ fn handle_clear_history_event(state: &Arc<Mutex<AppState>>) {
     manager.clear_history();
 }
 
-/// 处理检查更新事件
-fn handle_check_update_event(app: &AppHandle) {
-    log::info!("检查更新");
-
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        match check_for_updates(app_handle.clone()).await {
-            Ok(has_update) => {
-                if has_update {
-                    log::info!("发现新版本并已开始下载安装");
-                } else {
-                    log::info!("已是最新版本");
-
-                    let _ = app_handle
-                        .notification()
-                        .builder()
-                        .title("更新")
-                        .body("应用已是最新版本")
-                        .show();
-                }
-            }
-            Err(e) => {
-                log::error!("检查更新失败: {}", e);
-
-                let _ = app_handle
-                    .notification()
-                        .builder()
-                        .title("更新错误")
-                        .body(&format!("检查更新失败: {}", e))
-                        .show();
-            }
-        }
-    });
-}
 
 #[tauri::command]
 async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
@@ -781,6 +743,9 @@ async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
                         .blocking_show();
 
                     if should_update {
+                        // 发送事件通知前端开始更新
+                        let _ = app.emit("update-started", ());
+                        
                         update
                             .download_and_install(
                                 |progress, total| {
@@ -795,22 +760,14 @@ async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
                                         progress
                                     );
 
-                                    let _ = app
-                                        .notification()
-                                        .builder()
-                                        .title("更新下载进度")
-                                        .body(&format!("下载进度: {}%", percentage))
-                                        .show();
+                                    // 发送进度更新事件到前端
+                                    let _ = app.emit("update-progress", percentage);
                                 },
                                 || {
                                     log::info!("更新下载完成，准备安装...");
-
-                                    let _ = app
-                                        .notification()
-                                        .builder()
-                                        .title("更新下载完成")
-                                        .body("更新下载完成，准备安装...")
-                                        .show();
+                                    
+                                    // 发送下载完成事件到前端
+                                    let _ = app.emit("update-download-complete", ());
                                 },
                             )
                             .await
@@ -820,10 +777,6 @@ async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
                         Ok(false)
                     }
                 } else {
-                    app.dialog()
-                        .message("已是最新版本")
-                        .title("更新")
-                        .blocking_show();
                     Ok(false)
                 }
             }
@@ -920,6 +873,20 @@ async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
             Err(error_msg)
         }
     }
+}
+
+#[tauri::command]
+async fn restart_app(app: AppHandle) -> Result<(), String> {
+    log::info!("重启应用");
+    
+    // 延迟重启，确保前端收到响应
+    tauri::async_runtime::spawn(async move {
+        // 使用std::thread::sleep而不是tokio::time::sleep
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        app.restart();
+    });
+    
+    Ok(())
 }
 
 async fn show_result_window(
