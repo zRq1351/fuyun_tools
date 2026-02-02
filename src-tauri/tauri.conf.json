@@ -1,6 +1,6 @@
 {
   "productName": "fuyun_tools",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "identifier": "com.clipboard-manager.fuyun",
   "build": {
     "frontendDist": "../src"
