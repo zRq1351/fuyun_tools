@@ -31,17 +31,6 @@
     "global-shortcut:default",
     "log:default",
     "clipboard-manager:default",
-    "opener:default",
-    {
-      "identifier":"opener:allow-open-path",
-      "allow": [
-        {
-          "path": "https://github.com/zRq1351/fuyun_tools"
-        },
-        {
-          "path": "https://github.com/zRq1351/fuyun_tools/issues"
-        }
-      ]
-    }
+    "opener:default"
   ]
 }

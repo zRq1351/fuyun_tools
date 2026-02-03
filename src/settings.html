@@ -218,13 +218,12 @@
 
     <div class="settings-footer-container">
         <div class="settings-footer">
-            <p>需要帮助？<a data-href="https://github.com/zRq1351/fuyun_tools" href="#"
-                           onclick="openExternalLink(this.dataset.href); return false;">
-                查看文档
-            </a> | <a data-href="https://github.com/zRq1351/fuyun_tools/issues" href="#"
-                      onclick="openExternalLink(this.dataset.href); return false;">
-                报告问题
-            </a></p>
+            <p>
+                需要帮助？
+                <a class="external-link" data-href="https://github.com/zRq1351/fuyun_tools">查看文档</a>
+                |
+                <a class="external-link" data-href="https://github.com/zRq1351/fuyun_tools/issues">报告问题</a>
+            </p>
             <p id="footer"></p>
         </div>
     </div>
@@ -233,12 +232,13 @@
 <script>
     const invoke = window.__TAURI__.core.invoke;
     const {getCurrentWindow} = window.__TAURI__.window;
-    const { openPath } = window.__TAURI__.opener
+    const {openUrl} = window.__TAURI__.opener
+
     async function openExternalLink(url) {
         try {
-            await openPath(url);
+            await openUrl(url);
         } catch (err) {
-            console.error('打开失败:', err.message || err);
+            console.error(err);
         }
         return false;
     }
@@ -325,7 +325,6 @@
             // AI设置
             document.getElementById('apiUrl').value = settings.ai_api_url || '';
             document.getElementById('modelName').value = settings.ai_model_name || '';
-
             // 保存原始API密钥并显示部分隐藏版本
             originalApiKey = settings.ai_api_key || '';
             maskedKey = getMaskedApiKey(originalApiKey);
@@ -355,6 +354,15 @@
         } catch (error) {
             console.error('加载设置失败:', error);
         }
+
+        document.querySelectorAll('.external-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const url = link.dataset.href;
+                openExternalLink(url);
+            });
+        });
+
     });
 
     // 简单Toast函数作为备用
