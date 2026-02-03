@@ -2,7 +2,13 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["clipboard", "selection_toolbar", "result_explanation", "result_translation", "settings"],
+  "windows": [
+    "clipboard",
+    "selection_toolbar",
+    "result_explanation",
+    "result_translation",
+    "settings"
+  ],
   "permissions": [
     "core:path:default",
     "core:event:default",
@@ -25,7 +31,17 @@
     "global-shortcut:default",
     "log:default",
     "clipboard-manager:default",
-    "shell:allow-open",
-    "shell:default"
+    "opener:default",
+    {
+      "identifier":"opener:allow-open-path",
+      "allow": [
+        {
+          "path": "https://github.com/zRq1351/fuyun_tools"
+        },
+        {
+          "path": "https://github.com/zRq1351/fuyun_tools/issues"
+        }
+      ]
+    }
   ]
 }

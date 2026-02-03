@@ -75,14 +75,21 @@ impl AIClient {
     }
 
     /// 发送聊天完成请求
-    pub async fn chat_completion(&self, request: &ChatCompletionRequest) -> Result<ChatCompletionResponse, String> {
-        let url = format!("{}/chat/completions", self.config.base_url.trim_end_matches('/'));
+    pub async fn chat_completion(
+        &self,
+        request: &ChatCompletionRequest,
+    ) -> Result<ChatCompletionResponse, String> {
+        let url = format!(
+            "{}/chat/completions",
+            self.config.base_url.trim_end_matches('/')
+        );
 
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("api-key", self.config.api_key.parse().unwrap());
         headers.insert("Content-Type", "application/json".parse().unwrap());
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .headers(headers)
             .json(request)
@@ -112,13 +119,17 @@ impl AIClient {
             stream_request.max_completion_tokens = stream_request.max_tokens;
         }
 
-        let url = format!("{}/chat/completions", self.config.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/chat/completions",
+            self.config.base_url.trim_end_matches('/')
+        );
 
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("api-key", self.config.api_key.parse().unwrap());
         headers.insert("Content-Type", "application/json".parse().unwrap());
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .headers(headers)
             .json(&stream_request)
@@ -129,7 +140,10 @@ impl AIClient {
         // 检查HTTP响应状态
         if !response.status().is_success() {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_else(|_| "无法读取错误响应".to_string());
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "无法读取错误响应".to_string());
             return Err(format!("HTTP错误 {}: {}", status, error_text));
         }
 
@@ -158,17 +172,23 @@ impl AIClient {
                                 let error_msg = error_obj.to_string();
                                 return Err(format!("API错误: {}", error_msg));
                             }
-                            
+
                             // 处理正常响应
-                            if let Some(choices) = json_value.get("choices").and_then(|c| c.as_array()) {
+                            if let Some(choices) =
+                                json_value.get("choices").and_then(|c| c.as_array())
+                            {
                                 for choice in choices {
                                     if let Some(delta) = choice.get("delta") {
-                                        if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+                                        if let Some(content) =
+                                            delta.get("content").and_then(|c| c.as_str())
+                                        {
                                             if !content.is_empty() {
                                                 callback(content.to_string());
                                             }
                                         }
-                                    } else if let Some(finish_reason) = choice.get("finish_reason").and_then(|fr| fr.as_str()) {
+                                    } else if let Some(finish_reason) =
+                                        choice.get("finish_reason").and_then(|fr| fr.as_str())
+                                    {
                                         if finish_reason == "stop" {
                                             return Ok(());
                                         }
@@ -189,7 +209,11 @@ impl AIClient {
     }
 
     /// 简单的文本生成
-    pub async fn generate_text(&self, prompt: &str, max_tokens: Option<u32>) -> Result<String, String> {
+    pub async fn generate_text(
+        &self,
+        prompt: &str,
+        max_tokens: Option<u32>,
+    ) -> Result<String, String> {
         let messages = vec![Message {
             role: "user".to_string(),
             content: prompt.to_string(),
@@ -208,7 +232,7 @@ impl AIClient {
         };
 
         let response = self.chat_completion(&request).await?;
-        
+
         if let Some(choice) = response.choices.first() {
             Ok(choice.message.content.clone())
         } else {
@@ -217,7 +241,12 @@ impl AIClient {
     }
 
     /// 流式文本生成
-    pub async fn generate_text_stream<F>(&self, prompt: &str, max_tokens: Option<u32>, callback: F) -> Result<(), String>
+    pub async fn generate_text_stream<F>(
+        &self,
+        prompt: &str,
+        max_tokens: Option<u32>,
+        callback: F,
+    ) -> Result<(), String>
     where
         F: FnMut(String) -> (),
     {
@@ -245,7 +274,9 @@ impl AIClient {
     pub async fn test_connection(&self) -> Result<bool, String> {
         let test_prompt = "请输出：连接成功";
         match self.generate_text(test_prompt, Some(50)).await {
-            Ok(result) => Ok(result.contains("成功") || result.contains("Success") || result.to_lowercase().contains("connected")),
+            Ok(result) => Ok(result.contains("成功")
+                || result.contains("Success")
+                || result.to_lowercase().contains("connected")),
             Err(e) => {
                 log::error!("AI连接测试失败: {}", e);
                 Err(e)
@@ -275,6 +306,8 @@ impl From<String> for AIClientError {
 
 impl From<&str> for AIClientError {
     fn from(msg: &str) -> Self {
-        AIClientError { message: msg.to_string() }
+        AIClientError {
+            message: msg.to_string(),
+        }
     }
 }
