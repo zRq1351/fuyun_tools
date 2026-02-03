@@ -27,6 +27,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
-          releaseBody: '最新版本请见下方资源。'
+          releaseBody: '-修复外链无法打开问题
+                        -修复菜单栏无法显示问题'
           releaseDraft: false
           prerelease: false

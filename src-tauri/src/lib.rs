@@ -27,6 +27,7 @@ use utils::{load_settings, save_settings, AppSettingsData};
 
 use crate::ai_client::{AIClient, AIConfig};
 use lazy_static::lazy_static;
+use tauri_plugin_opener::OpenerExt;
 
 pub type SharedAppState = AppState;
 
@@ -389,13 +390,15 @@ fn set_window_position(window: &tauri::WebviewWindow) {
 }
 
 /// 打开日志目录
-fn open_log_directory() -> Result<(), Box<dyn std::error::Error>> {
+fn open_log_directory(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let log_dir = get_logs_dir_path();
-
     if !log_dir.exists() {
         return Ok(());
     }
-    opener::open(log_dir)?;
+    let log_dir_string = log_dir.to_string_lossy().to_string();
+    app_handle
+        .opener()
+        .open_path(log_dir_string, None::<&str>)?;
     Ok(())
 }
 
@@ -492,7 +495,7 @@ fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
                             handle_autostart_event(&app, &state_for_events);
                         }
                         "open_logs" => {
-                            if let Err(e) = open_log_directory() {
+                            if let Err(e) = open_log_directory(&app) {
                                 log::error!("打开日志目录失败: {}", e);
                             }
                         }
