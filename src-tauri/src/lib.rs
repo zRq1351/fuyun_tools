@@ -1019,13 +1019,7 @@ async fn stream_translate_text(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    use crate::ai_client::{ChatCompletionRequest, Message};
-
     let client: AIClient = get_or_create_ai_client(state.inner().clone()).await?;
-    let model = {
-        let state_guard = state.lock().unwrap();
-        state_guard.settings.ai_model_name.clone()
-    };
 
     show_result_window(
         "翻译结果".to_string(),
@@ -1035,33 +1029,18 @@ async fn stream_translate_text(
         app.clone(),
     )
     .await?;
-
+    hide_selection_toolbar_impl(app.clone());
     // 直接使用传入的中文语言名称
     let source_language_name = source_language;
     let target_language_name = target_language;
 
-    let messages = vec![Message {
-        role: "user".to_string(),
-        content: format!(
-            "请翻译这段话不要过多解释，最好根据文字直接翻译,由{}翻译为:{}。：\n\n{}",
-            source_language_name, target_language_name, text
-        ),
-    }];
-
-    let request = ChatCompletionRequest {
-        model: model.clone(),
-        messages,
-        temperature: Some(0.7),
-        max_tokens: None,
-        max_completion_tokens: None,
-        top_p: Some(1.0),
-        frequency_penalty: Some(0.0),
-        presence_penalty: Some(0.0),
-        stream: Some(true), // 启用流式响应
-    };
+    let messages = format!(
+        "直接翻译下面的文字由{}翻译为:{}，不要有任何额外的内容输出文字输出。需要翻译内容为：\n\n{}",
+        source_language_name, target_language_name, text
+    );
 
     let result = client
-        .chat_completion_stream(&request, |content_chunk| {
+        .generate_text_stream(messages.as_str(), Some(1000), |content_chunk| {
             let app_clone = app.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) =
@@ -1072,7 +1051,6 @@ async fn stream_translate_text(
             });
         })
         .await;
-
     match result {
         Ok(()) => {
             log::info!("翻译完成");
@@ -1083,7 +1061,6 @@ async fn stream_translate_text(
             log::error!("翻译失败: {}", error_msg);
         }
     }
-
     Ok(())
 }
 
@@ -1094,14 +1071,7 @@ async fn stream_explain_text(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    use crate::ai_client::{ChatCompletionRequest, Message};
-
     let client: AIClient = get_or_create_ai_client(state.inner().clone()).await?;
-    let model = {
-        let state_guard = state.lock().unwrap();
-        state_guard.settings.ai_model_name.clone()
-    };
-
     show_result_window(
         "解释结果".to_string(),
         "正在解释...".to_string(),
@@ -1110,30 +1080,15 @@ async fn stream_explain_text(
         app.clone(),
     )
     .await?;
+    hide_selection_toolbar_impl(app.clone());
     let target_language_name = target_language;
 
-    let messages = vec![Message {
-        role: "user".to_string(),
-        content: format!(
-            "请用{}200字内解释这段话：\n\n{}",
-            target_language_name, text
-        ),
-    }];
-
-    let request = ChatCompletionRequest {
-        model: model.clone(),
-        messages,
-        temperature: Some(0.7),
-        top_p: Some(1.0),
-        max_tokens: None,
-        max_completion_tokens: None,
-        frequency_penalty: Some(0.0),
-        presence_penalty: Some(0.0),
-        stream: Some(true), // 启用流式响应
-    };
-
+    let messages = format!(
+        "请用{}200字内解释这段话：\n\n{}",
+        target_language_name, text
+    );
     let result = client
-        .chat_completion_stream(&request, |content_chunk| {
+        .generate_text_stream(messages.as_str(), Some(1000), |content_chunk| {
             let app_clone = app.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) =
@@ -1144,7 +1099,6 @@ async fn stream_explain_text(
             });
         })
         .await;
-
     match result {
         Ok(()) => {
             log::info!("解释完成");
@@ -1154,6 +1108,5 @@ async fn stream_explain_text(
             update_result_window(error_msg, "explanation".to_string(), app).await?;
         }
     }
-
     Ok(())
 }

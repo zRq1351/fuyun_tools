@@ -6,8 +6,8 @@ use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
 
-use crate::ClipboardManager;
-use crate::{hide_selection_toolbar_impl, AppState as SharedAppState};
+use crate::{hide_selection_toolbar_impl, ClipboardManager};
+use crate::{AppState as SharedAppState};
 
 #[derive(Debug, Clone, PartialEq)]
 enum MouseActionState {
@@ -120,7 +120,6 @@ impl MouseListener {
                     }
                 }
                 EventType::ButtonPress(Button::Left) => {
-                    hide_selection_toolbar_impl(app_handle.clone());
                     let current_time = std::time::Instant::now();
 
                     let (last_x, last_y) = {
