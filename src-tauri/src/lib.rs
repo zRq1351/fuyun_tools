@@ -95,7 +95,6 @@ pub fn run() {
     let initial_state = AppState::default();
     let state_arc = Arc::new(Mutex::new(initial_state));
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .manage(state_arc.clone())
         .setup(move |app| {
             let instance =
@@ -881,15 +880,10 @@ async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 async fn restart_app(app: AppHandle) -> Result<(), String> {
-    log::info!("重启应用");
-
-    // 延迟重启，确保前端收到响应
     tauri::async_runtime::spawn(async move {
-        // 使用std::thread::sleep而不是tokio::time::sleep
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        tokio::time::sleep(Duration::from_millis(500)).await;
         app.restart();
     });
-
     Ok(())
 }
 

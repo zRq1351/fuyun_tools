@@ -1532,6 +1532,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-positioner",
  "tauri-plugin-updater",
+ "tokio",
  "winapi",
  "windows 0.62.2",
 ]
