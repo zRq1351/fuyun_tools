@@ -87,10 +87,10 @@ body {
 .category-tab.active::after {
     content: '';
     position: absolute;
-    bottom: -9px;
+    bottom: -5px;
     left: 0;
     right: 0;
-    height: 3px;
+    height: 5px;
     background: #6366f1;
     border-radius: 3px 3px 0 0;
 }
@@ -498,8 +498,8 @@ body {
 
 /* 黑夜主题样式 */
 body.dark-theme {
-    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-    color: #e2e8f0;
+    background: linear-gradient(135deg, #4e5a6b 0%, #394e76 100%);
+    color: #ffffff;
 }
 
 body.dark-theme .settings-container {

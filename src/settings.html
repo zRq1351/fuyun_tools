@@ -4,49 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>设置</title>
-    <link rel="stylesheet" href="./styles/main.css">
     <link href="./styles/settings.css" rel="stylesheet">
     <link rel="stylesheet" href="./assets/fontawesome-free-6.7.2/css/all.css">
-    <script src="./scripts/toast.js"></script>
-    <style>
-        /* 简单Toast样式作为备用 */
-        .simple-toast {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 16px 20px;
-            background: #10b981;
-            color: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            z-index: 9999;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            font-size: 14px;
-            animation: simple-slide-in 0.3s forwards;
-            max-width: 400px;
-        }
-
-        @keyframes simple-slide-in {
-            from {
-                transform: translateX(120%);
-            }
-            to {
-                transform: translateX(0);
-            }
-        }
-
-        .simple-toast-error {
-            background: #ef4444;
-        }
-
-        .simple-toast-warning {
-            background: #f59e0b;
-        }
-
-        .simple-toast-info {
-            background: #3b82f6;
-        }
-    </style>
+    <link href="./styles/toast.css" rel="stylesheet">
 </head>
 <body>
 <div class="settings-container">
@@ -228,92 +188,90 @@
         </div>
     </div>
 </div>
-
+<script src="./scripts/main.js"></script>
+<script src="./scripts/toast.js"></script>
 <script>
     const invoke = window.__TAURI__.core.invoke;
-    const {getCurrentWindow} = window.__TAURI__.window;
+    const {listen} = window.__TAURI__.event;
     const {openUrl} = window.__TAURI__.opener
+    document.addEventListener('DOMContentLoaded', async () => {
+        const year = new Date().getFullYear();
+        let maskedKey;
+        let originalApiKey = '';
+        window.Toast.init();
 
-    async function openExternalLink(url) {
-        try {
-            await openUrl(url);
-        } catch (err) {
-            console.error(err);
-        }
-        return false;
-    }
-
-    let originalApiKey = '';
-
-    function getMaskedApiKey(apiKey) {
-        if (!apiKey || apiKey.length === 0) {
-            return '';
-        }
-
-        const len = apiKey.length;
-        if (len <= 16) {
-            return '*'.repeat(Math.min(len, 30));
-        }
-
-        const prefix = apiKey.substring(0, 8);
-        const suffix = apiKey.substring(len - 8);
-        return prefix + '*'.repeat(30) + suffix;
-    }
-
-    function isMaskedValue(value) {
-        if (!value || value.length === 0) return false;
-
-        const starPattern = /\*{30}/;
-        if (!starPattern.test(value)) {
+        async function openExternalLink(url) {
+            try {
+                await openUrl(url);
+            } catch (err) {
+                console.error(err);
+            }
             return false;
         }
 
-        return value.length >= 46;
-    }
-
-    document.querySelectorAll('.category-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-            document.querySelectorAll('.category-tab').forEach(t => {
-                t.classList.remove('active');
-            });
-
-            document.querySelectorAll('.category-content').forEach(content => {
-                content.classList.remove('active');
-            });
-
-            tab.classList.add('active');
-
-            const category = tab.getAttribute('data-category');
-            document.getElementById(`${category}-content`).classList.add('active');
-
-            updateTestButtonVisibility(category);
-
-            // 根据当前分类显示/隐藏保存按钮
-            const saveBtnContainer = document.querySelector('.save-button-container');
-            if (category === 'about') {
-                saveBtnContainer.classList.add('hidden');
-            } else {
-                saveBtnContainer.classList.remove('hidden');
+        function getMaskedApiKey(apiKey) {
+            if (!apiKey || apiKey.length === 0) {
+                return '';
             }
-        });
-    });
 
-    // 根据分类更新测试按钮可见性
-    function updateTestButtonVisibility(category) {
-        const testBtn = document.getElementById('testBtn');
-        if (category === 'ai') {
-            testBtn.style.display = 'inline-flex';
-        } else {
-            testBtn.style.display = 'none';
+            const len = apiKey.length;
+            if (len <= 16) {
+                return '*'.repeat(Math.min(len, 30));
+            }
+
+            const prefix = apiKey.substring(0, 8);
+            const suffix = apiKey.substring(len - 8);
+            return prefix + '*'.repeat(30) + suffix;
         }
-    }
 
-    // 初始化时根据当前分类设置测试按钮可见性
-    updateTestButtonVisibility('clipboard');
-    let maskedKey;
-    const year = new Date().getFullYear();
-    // 加载设置
-    document.addEventListener('DOMContentLoaded', async () => {
+        function isMaskedValue(value) {
+            if (!value || value.length === 0) return false;
+
+            const starPattern = /\*{30}/;
+            if (!starPattern.test(value)) {
+                return false;
+            }
+
+            return value.length >= 46;
+        }
+
+        document.querySelectorAll('.category-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.category-tab').forEach(t => {
+                    t.classList.remove('active');
+                });
+
+                document.querySelectorAll('.category-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+
+                tab.classList.add('active');
+
+                const category = tab.getAttribute('data-category');
+                document.getElementById(`${category}-content`).classList.add('active');
+
+                updateTestButtonVisibility(category);
+
+                const saveBtnContainer = document.querySelector('.save-button-container');
+                if (category === 'about') {
+                    saveBtnContainer.classList.add('hidden');
+                } else {
+                    saveBtnContainer.classList.remove('hidden');
+                }
+            });
+        });
+
+        // 根据分类更新测试按钮可见性
+        function updateTestButtonVisibility(category) {
+            const testBtn = document.getElementById('testBtn');
+            if (category === 'ai') {
+                testBtn.style.display = 'inline-flex';
+            } else {
+                testBtn.style.display = 'none';
+            }
+        }
+
+        updateTestButtonVisibility('clipboard');
         try {
             const settings = await invoke('get_ai_settings');
 
@@ -363,345 +321,9 @@
             });
         });
 
-    });
-
-    // 简单Toast函数作为备用
-    function showSimpleToast(message, type = 'success') {
-        console.log('showSimpleToast called:', message, type);
-
-        // 移除现有的简单toast
-        const existingToasts = document.querySelectorAll('.simple-toast');
-        existingToasts.forEach(toast => {
-            if (toast.parentNode) {
-                toast.parentNode.removeChild(toast);
-            }
-        });
-
-        // 创建新的toast
-        const toast = document.createElement('div');
-        toast.className = `simple-toast simple-toast-${type}`;
-        toast.textContent = message;
-
-        // 添加到body
-        document.body.appendChild(toast);
-
-        // 3秒后自动移除
-        setTimeout(() => {
-            if (toast.parentNode) {
-                toast.parentNode.removeChild(toast);
-            }
-        }, 3000);
-
-        return toast;
-    }
-
-    // 保存设置
-    document.getElementById('saveBtn').addEventListener('click', async () => {
-        const maxItems = parseInt(document.getElementById('maxItems').value) || 50;
-        const apiUrl = document.getElementById('apiUrl').value;
-        const modelName = document.getElementById('modelName').value;
-        let apiKey = document.getElementById('apiKey').value;
-
-        const maskedOriginal = getMaskedApiKey(originalApiKey);
-        if (apiKey === maskedOriginal && originalApiKey) {
-            apiKey = originalApiKey;
-        } else if (isMaskedValue(apiKey) && originalApiKey) {
-            apiKey = originalApiKey;
-        }
-
-        try {
-            await invoke('save_ai_settings', {
-                maxItems: maxItems,
-                aiApiUrl: apiUrl,
-                aiModelName: modelName,
-                aiApiKey: apiKey
-            });
-
-            originalApiKey = apiKey;
-
-            document.getElementById('apiKey').value = getMaskedApiKey(originalApiKey);
-            maskedKey = getMaskedApiKey(originalApiKey);
-
-            // 确保toast组件已初始化
-            if (window.Toast && typeof window.Toast.init === 'function') {
-                window.Toast.init();
-            }
-
-            // 尝试多种方式显示提示
-            console.log('保存成功，尝试显示提示...');
-            console.log('window.showSuccessToast exists:', typeof window.showSuccessToast);
-            console.log('window.Toast exists:', typeof window.Toast);
-
-            let toastShown = false;
-
-            // 方式1: 使用window.showSuccessToast
-            if (window.showSuccessToast && typeof window.showSuccessToast === 'function') {
-                try {
-                    console.log('尝试使用window.showSuccessToast');
-                    window.showSuccessToast('设置已保存');
-                    toastShown = true;
-                } catch (e) {
-                    console.error('window.showSuccessToast失败:', e);
-                }
-            }
-
-            // 方式2: 使用window.Toast.success
-            if (!toastShown && window.Toast && typeof window.Toast.success === 'function') {
-                try {
-                    console.log('尝试使用window.Toast.success');
-                    window.Toast.success('设置已保存');
-                    toastShown = true;
-                } catch (e) {
-                    console.error('window.Toast.success失败:', e);
-                }
-            }
-
-            // 方式3: 使用简单Toast
-            if (!toastShown) {
-                console.log('使用简单Toast');
-                showSimpleToast('设置已保存', 'success');
-                toastShown = true;
-            }
-
-            // 方式4: 最后回退到showTestResult
-            if (!toastShown) {
-                console.log('回退到showTestResult');
-                showTestResult('设置已保存', 'success');
-            }
-
-        } catch (error) {
-            console.error('保存设置失败:', error);
-
-            // 确保toast组件已初始化
-            if (window.Toast && typeof window.Toast.init === 'function') {
-                window.Toast.init();
-            }
-
-            // 错误提示
-            let errorToastShown = false;
-
-            // 方式1: 使用window.showErrorToast
-            if (window.showErrorToast && typeof window.showErrorToast === 'function') {
-                try {
-                    window.showErrorToast(`保存失败: ${error}`);
-                    errorToastShown = true;
-                } catch (e) {
-                    console.error('window.showErrorToast失败:', e);
-                }
-            }
-
-            // 方式2: 使用简单Toast
-            if (!errorToastShown) {
-                showSimpleToast(`保存失败: ${error}`, 'error');
-                errorToastShown = true;
-            }
-
-            // 方式3: 最后回退到showTestResult
-            if (!errorToastShown) {
-                showTestResult(`保存失败: ${error}`, 'error');
-            }
-        }
-    });
-
-    // 测试连接
-    document.getElementById('testBtn').addEventListener('click', async () => {
-        const apiUrl = document.getElementById('apiUrl').value;
-        const modelName = document.getElementById('modelName').value;
-        let apiKey = document.getElementById('apiKey').value;
-
-        const maskedOriginal = getMaskedApiKey(originalApiKey);
-        if (apiKey === maskedOriginal && originalApiKey) {
-            apiKey = originalApiKey;
-        } else if (isMaskedValue(apiKey) && originalApiKey) {
-            apiKey = originalApiKey;
-        }
-
-        if (!apiUrl || !modelName || !apiKey) {
-            showTestResult('请填写完整信息后再测试', 'error');
-            return;
-        }
-
-        try {
-            showTestResult('等待响应......', 'error');
-            const testResult = await invoke('test_ai_connection', {
-                aiApiUrl: apiUrl,
-                aiModelName: modelName,
-                aiApiKey: apiKey
-            });
-
-            showTestResult(testResult, 'success');
-        } catch (error) {
-            showTestResult(`检查密钥、地址、模型名称是否正确。查看对应模型官方文档`, 'error');
-        }
-    });
-
-    function showTestResult(message, type) {
-        const resultDiv = document.getElementById('testResult');
-        const resultIcon = resultDiv.querySelector('.test-result-icon');
-        const resultText = resultDiv.querySelector('.test-result-text');
-
-        if (type === 'success') {
-            resultIcon.className = 'test-result-icon fas fa-check-circle';
-        } else {
-            resultIcon.className = 'test-result-icon fas fa-exclamation-circle';
-        }
-
-        resultText.textContent = message;
-
-        resultDiv.className = `test-result ${type}`;
-        resultDiv.style.display = 'block';
-
-        if (type === 'success') {
-            setTimeout(() => {
-                resultDiv.style.display = 'none';
-            }, 2000);
-        }
-    }
-
-    // 检查更新功能
-    document.getElementById('checkUpdateBtn').addEventListener('click', async () => {
-        const checkUpdateBtn = document.getElementById('checkUpdateBtn');
-        const originalText = checkUpdateBtn.innerHTML;
-
-        try {
-            checkUpdateBtn.innerHTML = '<i class="fas fa-spinner fa-spin btn-icon"></i> 检查中...';
-            checkUpdateBtn.disabled = true;
-
-            document.getElementById('updateResult').style.display = 'none';
-            document.getElementById('updateProgress').classList.remove('hidden');
-
-            resetUpdateProgress();
-
-            const hasUpdate = await invoke('check_for_updates');
-
-            if (hasUpdate) {
-                showUpdateResult('发现新版本，已开始下载更新', 'success');
-                setupUpdateProgressListeners();
-            } else {
-                showUpdateResult('已是最新版本', 'success');
-                hideUpdateProgress();
-            }
-        } catch (error) {
-            console.error('检查更新失败:', error);
-            showUpdateResult(`检查更新失败请重试！`, 'error');
-            hideUpdateProgress();
-        } finally {
-            checkUpdateBtn.innerHTML = originalText;
-            checkUpdateBtn.disabled = false;
-        }
-    });
-
-    // 重启按钮事件
-    document.getElementById('restartBtn').addEventListener('click', async () => {
-        try {
-            await invoke('restart_app');
-        } catch (error) {
-            console.error('重启失败:', error);
-            document.getElementById('statusText').textContent = '重启失败，请手动重启应用。';
-        }
-    });
-
-    // 关闭更新进度按钮事件
-    document.getElementById('closeUpdateBtn').addEventListener('click', () => {
-        hideUpdateProgress();
-    });
-
-    function resetUpdateProgress() {
-        document.getElementById('progressText').textContent = '正在准备更新...';
-        document.getElementById('percentage').textContent = '0%';
-        document.getElementById('progressFill').style.width = '0%';
-        document.getElementById('statusText').textContent = '正在检查更新...';
-        document.getElementById('updateActionButtons').classList.add('hidden');
-    }
-
-    function hideUpdateProgress() {
-        document.getElementById('updateProgress').classList.add('hidden');
-    }
-
-    function setupUpdateProgressListeners() {
-        const {listen} = window.__TAURI__.event;
-
-        listen('update-started', () => {
-            document.getElementById('progressText').textContent = '开始下载更新...';
-            document.getElementById('statusText').textContent = '正在下载新版本文件，请稍候...';
-        });
-
-        listen('update-progress', (event) => {
-            const progress = event.payload;
-            document.getElementById('progressFill').style.width = `${progress}%`;
-            document.getElementById('percentage').textContent = `${progress}%`;
-            document.getElementById('progressText').textContent = `下载进度: ${progress}%`;
-
-            if (progress === 100) {
-                document.getElementById('statusText').textContent = '下载完成，正在准备安装...';
-            }
-        });
-
-        listen('update-download-complete', () => {
-            document.getElementById('progressFill').style.width = '100%';
-            document.getElementById('percentage').textContent = '100%';
-            document.getElementById('progressText').textContent = '下载完成';
-            document.getElementById('statusText').textContent = '更新下载完成，正在安装...';
-
-            setTimeout(() => {
-                document.getElementById('updateActionButtons').classList.remove('hidden');
-                document.getElementById('statusText').textContent = '更新安装完成！请重启应用以使用新版本。';
-            }, 2000);
-        });
-    }
-
-    function showUpdateResult(message, type) {
-        const resultDiv = document.getElementById('updateResult');
-        const resultIcon = resultDiv.querySelector('.test-result-icon');
-        const resultText = resultDiv.querySelector('.test-result-text');
-
-        if (type === 'success') {
-            resultIcon.className = 'test-result-icon fas fa-check-circle';
-        } else {
-            resultIcon.className = 'test-result-icon fas fa-exclamation-circle';
-        }
-
-        resultText.textContent = message;
-
-        resultDiv.className = `test-result ${type}`;
-        resultDiv.style.display = 'block';
-
-        if (type === 'success') {
-            setTimeout(() => {
-                resultDiv.style.display = 'none';
-            }, 5000);
-        }
-    }
-
-    // 主题切换功能
-    document.getElementById('themeToggleBtn').addEventListener('click', () => {
-        const body = document.body;
-        const themeBtn = document.getElementById('themeToggleBtn');
-        const icon = themeBtn.querySelector('.btn-icon');
-        const text = themeBtn.querySelector('.theme-text');
-
-        if (body.classList.contains('dark-theme')) {
-            // 切换到白天主题
-            body.classList.remove('dark-theme');
-            icon.className = 'fas fa-moon btn-icon';
-            text.textContent = '黑夜';
-            localStorage.setItem('settings-theme', 'light');
-        } else {
-            // 切换到黑夜主题
-            body.classList.add('dark-theme');
-            icon.className = 'fas fa-sun btn-icon';
-            text.textContent = '白天';
-            localStorage.setItem('settings-theme', 'dark');
-        }
-    });
-
-    // 初始化主题
-    document.addEventListener('DOMContentLoaded', () => {
-        // 检查本地存储中的主题偏好
         const savedTheme = localStorage.getItem('settings-theme');
         const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
 
-        // 默认使用白天主题，如果有保存的偏好则使用保存的，否则根据系统偏好
         if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
             document.body.classList.add('dark-theme');
             const themeBtn = document.getElementById('themeToggleBtn');
@@ -710,6 +332,232 @@
             icon.className = 'fas fa-sun btn-icon';
             text.textContent = '白天';
         }
+
+        document.getElementById('saveBtn').addEventListener('click', async () => {
+            const maxItems = parseInt(document.getElementById('maxItems').value) || 50;
+            const apiUrl = document.getElementById('apiUrl').value;
+            const modelName = document.getElementById('modelName').value;
+            let apiKey = document.getElementById('apiKey').value;
+
+            const maskedOriginal = getMaskedApiKey(originalApiKey);
+            if (apiKey === maskedOriginal && originalApiKey) {
+                apiKey = originalApiKey;
+            } else if (isMaskedValue(apiKey) && originalApiKey) {
+                apiKey = originalApiKey;
+            }
+
+            try {
+                await invoke('save_ai_settings', {
+                    maxItems: maxItems,
+                    aiApiUrl: apiUrl,
+                    aiModelName: modelName,
+                    aiApiKey: apiKey
+                });
+                originalApiKey = apiKey;
+                document.getElementById('apiKey').value = getMaskedApiKey(originalApiKey);
+                maskedKey = getMaskedApiKey(originalApiKey);
+                window.showSuccessToast('保存成功');
+            } catch (error) {
+                window.showErrorToast(`保存失败: ${error}`);
+            }
+        });
+
+        // 测试连接
+        document.getElementById('testBtn').addEventListener('click', async () => {
+            const apiUrl = document.getElementById('apiUrl').value;
+            const modelName = document.getElementById('modelName').value;
+            let apiKey = document.getElementById('apiKey').value;
+
+            const maskedOriginal = getMaskedApiKey(originalApiKey);
+            if (apiKey === maskedOriginal && originalApiKey) {
+                apiKey = originalApiKey;
+            } else if (isMaskedValue(apiKey) && originalApiKey) {
+                apiKey = originalApiKey;
+            }
+
+            if (!apiUrl || !modelName || !apiKey) {
+                showTestResult('请填写完整信息后再测试', 'error');
+                return;
+            }
+
+            try {
+                showTestResult('等待响应......', 'error');
+                const testResult = await invoke('test_ai_connection', {
+                    aiApiUrl: apiUrl,
+                    aiModelName: modelName,
+                    aiApiKey: apiKey
+                });
+
+                showTestResult(testResult, 'success');
+            } catch (error) {
+                showTestResult(`检查密钥、地址、模型名称是否正确。查看对应模型官方文档`, 'error');
+            }
+        });
+
+        // 展示测试结果
+        function showTestResult(message, type) {
+            const resultDiv = document.getElementById('testResult');
+            const resultIcon = resultDiv.querySelector('.test-result-icon');
+            const resultText = resultDiv.querySelector('.test-result-text');
+
+            if (type === 'success') {
+                resultIcon.className = 'test-result-icon fas fa-check-circle';
+            } else {
+                resultIcon.className = 'test-result-icon fas fa-exclamation-circle';
+            }
+
+            resultText.textContent = message;
+
+            resultDiv.className = `test-result ${type}`;
+            resultDiv.style.display = 'block';
+
+            if (type === 'success') {
+                setTimeout(() => {
+                    resultDiv.style.display = 'none';
+                }, 2000);
+            }
+        }
+
+        // 检查更新功能
+        document.getElementById('checkUpdateBtn').addEventListener('click', async () => {
+            const checkUpdateBtn = document.getElementById('checkUpdateBtn');
+            const originalText = checkUpdateBtn.innerHTML;
+
+            try {
+                checkUpdateBtn.innerHTML = '<i class="fas fa-spinner fa-spin btn-icon"></i> 检查中...';
+                checkUpdateBtn.disabled = true;
+
+                document.getElementById('updateResult').style.display = 'none';
+                document.getElementById('updateProgress').classList.remove('hidden');
+
+                resetUpdateProgress();
+
+                const hasUpdate = await invoke('check_for_updates');
+
+                if (hasUpdate) {
+                    showUpdateResult('发现新版本，已开始下载更新', 'success');
+                    setupUpdateProgressListeners();
+                } else {
+                    showUpdateResult('已是最新版本', 'success');
+                    hideUpdateProgress();
+                }
+            } catch (error) {
+                console.error('检查更新失败:', error);
+                showUpdateResult(`检查更新失败请重试！`, 'error');
+                hideUpdateProgress();
+            } finally {
+                checkUpdateBtn.innerHTML = originalText;
+                checkUpdateBtn.disabled = false;
+            }
+        });
+
+        // 重启按钮事件
+        document.getElementById('restartBtn').addEventListener('click', async () => {
+            try {
+                await invoke('restart_app');
+            } catch (error) {
+                console.error('重启失败:', error);
+                document.getElementById('statusText').textContent = '重启失败，请手动重启应用。';
+            }
+        });
+
+        // 关闭更新进度按钮事件
+        document.getElementById('closeUpdateBtn').addEventListener('click', () => {
+            hideUpdateProgress();
+        });
+
+        // 更新进度
+        function resetUpdateProgress() {
+            document.getElementById('progressText').textContent = '正在准备更新...';
+            document.getElementById('percentage').textContent = '0%';
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('statusText').textContent = '正在检查更新...';
+            document.getElementById('updateActionButtons').classList.add('hidden');
+        }
+
+        // 隐藏更新进度
+        function hideUpdateProgress() {
+            document.getElementById('updateProgress').classList.add('hidden');
+        }
+
+        // 显示更新结果
+        function setupUpdateProgressListeners() {
+
+            listen('update-started', () => {
+                document.getElementById('progressText').textContent = '开始下载更新...';
+                document.getElementById('statusText').textContent = '正在下载新版本文件，请稍候...';
+            });
+
+            listen('update-progress', (event) => {
+                const progress = event.payload;
+                document.getElementById('progressFill').style.width = `${progress}%`;
+                document.getElementById('percentage').textContent = `${progress}%`;
+                document.getElementById('progressText').textContent = `下载进度: ${progress}%`;
+
+                if (progress === 100) {
+                    document.getElementById('statusText').textContent = '下载完成，正在准备安装...';
+                }
+            });
+
+            listen('update-download-complete', () => {
+                document.getElementById('progressFill').style.width = '100%';
+                document.getElementById('percentage').textContent = '100%';
+                document.getElementById('progressText').textContent = '下载完成';
+                document.getElementById('statusText').textContent = '更新下载完成，正在安装...';
+
+                setTimeout(() => {
+                    document.getElementById('updateActionButtons').classList.remove('hidden');
+                    document.getElementById('statusText').textContent = '更新安装完成！请重启应用以使用新版本。';
+                }, 2000);
+            });
+        }
+
+        // 显示更新结果
+        function showUpdateResult(message, type) {
+            const resultDiv = document.getElementById('updateResult');
+            const resultIcon = resultDiv.querySelector('.test-result-icon');
+            const resultText = resultDiv.querySelector('.test-result-text');
+
+            if (type === 'success') {
+                resultIcon.className = 'test-result-icon fas fa-check-circle';
+            } else {
+                resultIcon.className = 'test-result-icon fas fa-exclamation-circle';
+            }
+
+            resultText.textContent = message;
+
+            resultDiv.className = `test-result ${type}`;
+            resultDiv.style.display = 'block';
+
+            if (type === 'success') {
+                setTimeout(() => {
+                    resultDiv.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        // 主题切换功能
+        document.getElementById('themeToggleBtn').addEventListener('click', () => {
+            const body = document.body;
+            const themeBtn = document.getElementById('themeToggleBtn');
+            const icon = themeBtn.querySelector('.btn-icon');
+            const text = themeBtn.querySelector('.theme-text');
+
+            if (body.classList.contains('dark-theme')) {
+                // 切换到白天主题
+                body.classList.remove('dark-theme');
+                icon.className = 'fas fa-moon btn-icon';
+                text.textContent = '黑夜';
+                localStorage.setItem('settings-theme', 'light');
+            } else {
+                // 切换到黑夜主题
+                body.classList.add('dark-theme');
+                icon.className = 'fas fa-sun btn-icon';
+                text.textContent = '白天';
+                localStorage.setItem('settings-theme', 'dark');
+            }
+        });
+
     });
 </script>
 </body>
