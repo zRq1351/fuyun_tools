@@ -102,6 +102,9 @@ body {
     padding: 20px 30px;
     box-sizing: border-box;
 }
+.external-link{
+    cursor: pointer;
+}
 
 .category-content {
     display: none;
@@ -463,7 +466,6 @@ body {
     margin-left: auto;
     padding: 12px 20px;
     background: none;
-    border: none;
     border-radius: 0.5rem;
     font-weight: 600;
     font-size: 14px;
