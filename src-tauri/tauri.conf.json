@@ -60,6 +60,9 @@
   "plugins": {
     "updater": {
       "active": true,
+      "windows": {
+        "installMode": "passive"
+      },
       "endpoints": [
         "https://github.com/zRq1351/fuyun_tools/releases/latest/download/latest.json"
       ],
