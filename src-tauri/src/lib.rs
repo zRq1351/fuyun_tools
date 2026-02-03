@@ -95,6 +95,7 @@ pub fn run() {
     let initial_state = AppState::default();
     let state_arc = Arc::new(Mutex::new(initial_state));
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .manage(state_arc.clone())
         .setup(move |app| {
             let instance =
@@ -197,7 +198,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_positioner::init())
-        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .build(tauri::generate_context!())
         .expect("构建Tauri应用时出错")
         .run(|_app_handle, _event| {});
@@ -227,7 +228,7 @@ fn set_toolbar_window(window: &tauri::WebviewWindow) {
 
 /// 隐藏工具栏窗口
 fn hide_selection_toolbar_impl(app_handle: AppHandle) {
-        if let Some(toolbar_window) = app_handle.get_webview_window("selection_toolbar") {
+    if let Some(toolbar_window) = app_handle.get_webview_window("selection_toolbar") {
         if let Ok(is_visible) = toolbar_window.is_visible() {
             if is_visible {
                 if let Ok(has_focus) = toolbar_window.is_focused() {
@@ -725,7 +726,6 @@ fn handle_clear_history_event(state: &Arc<Mutex<AppState>>) {
     manager.clear_history();
 }
 
-
 #[tauri::command]
 async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
     match app.updater().map_err(|e| e.to_string()) {
@@ -745,7 +745,7 @@ async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
                     if should_update {
                         // 发送事件通知前端开始更新
                         let _ = app.emit("update-started", ());
-                        
+
                         update
                             .download_and_install(
                                 |progress, total| {
@@ -765,7 +765,7 @@ async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
                                 },
                                 || {
                                     log::info!("更新下载完成，准备安装...");
-                                    
+
                                     // 发送下载完成事件到前端
                                     let _ = app.emit("update-download-complete", ());
                                 },
@@ -801,7 +801,7 @@ async fn save_ai_settings(
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<(), String> {
     let version = app.package_info().version.to_string();
-    
+
     let mut settings = AppSettingsData {
         version,
         max_items,
@@ -810,13 +810,17 @@ async fn save_ai_settings(
         ai_api_key,
         encrypted_api_key: String::new(),
     };
-    
+
     // 加密API密钥
-    settings.encrypt_api_key().map_err(|e| format!("加密API密钥失败: {}", e))?;
-    
+    settings
+        .encrypt_api_key()
+        .map_err(|e| format!("加密API密钥失败: {}", e))?;
+
     // 验证设置
-    settings.validate().map_err(|e| format!("设置验证失败: {}", e))?;
-    
+    settings
+        .validate()
+        .map_err(|e| format!("设置验证失败: {}", e))?;
+
     save_settings(&settings).map_err(|e| e.to_string())?;
 
     {
@@ -878,14 +882,14 @@ async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn restart_app(app: AppHandle) -> Result<(), String> {
     log::info!("重启应用");
-    
+
     // 延迟重启，确保前端收到响应
     tauri::async_runtime::spawn(async move {
         // 使用std::thread::sleep而不是tokio::time::sleep
         std::thread::sleep(std::time::Duration::from_millis(500));
         app.restart();
     });
-    
+
     Ok(())
 }
 
@@ -907,10 +911,10 @@ async fn show_result_window(
         } else {
             let _ = existing_window.show();
         }
-        
+
         // 设置焦点
         let _ = existing_window.set_focus();
-        
+
         // 更新窗口内容
         let payload = serde_json::json!({
             "type": window_type.clone(),
@@ -919,7 +923,7 @@ async fn show_result_window(
         });
         let script = format!("window.__INITIAL_DATA__ = {};", payload);
         let _ = existing_window.eval(&script);
-        
+
         return Ok(());
     }
 
@@ -979,20 +983,20 @@ async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> Result<AI
         let settings = &state_guard.settings;
         let cached_client_exists_and_valid = {
             if let Some(ref client) = *state_guard.ai_client.lock().unwrap() {
-                settings.ai_api_key == client.config.api_key &&
-                settings.ai_api_url == client.config.base_url &&
-                settings.ai_model_name == client.config.model
+                settings.ai_api_key == client.config.api_key
+                    && settings.ai_api_url == client.config.base_url
+                    && settings.ai_model_name == client.config.model
             } else {
                 false
             }
         };
-        
+
         if cached_client_exists_and_valid {
             if let Some(client) = (*state_guard.ai_client.lock().unwrap()).as_ref() {
                 return Ok(client.clone());
             }
         }
-        
+
         AIConfig {
             api_key: settings.ai_api_key.clone(),
             base_url: settings.ai_api_url.clone(),

@@ -1,21 +1,42 @@
 // toast.js - 侧滑提示消息组件
 class Toast {
     constructor() {
+        console.log('Toast constructor called');
         this.container = null;
         this.initialized = false;
         this.initQueue = [];
     }
 
     init() {
+        console.log('Toast.init() called, initialized:', this.initialized, 'document.body:', !!document.body);
         if (this.initialized) return;
         
+        // 使用更健壮的初始化方式，适应生产环境
         if (!document.body) {
+            console.log('document.body not ready, delaying initialization');
             // 如果document.body还不存在，延迟初始化
             if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', () => this._init());
+                console.log('DOM still loading, adding DOMContentLoaded listener');
+                document.addEventListener('DOMContentLoaded', () => {
+                    console.log('DOMContentLoaded fired, calling _init()');
+                    this._init();
+                });
             } else {
-                // 如果DOM已经加载完成但body可能还不存在，使用setTimeout
-                setTimeout(() => this._init(), 0);
+                console.log('DOM loaded but body not ready, using requestAnimationFrame');
+                // 使用requestAnimationFrame替代setTimeout，更适合动画
+                requestAnimationFrame(() => {
+                    if (!document.body) {
+                        // 如果仍然没有body，使用setInterval定期检查
+                        const interval = setInterval(() => {
+                            if (document.body) {
+                                clearInterval(interval);
+                                this._init();
+                            }
+                        }, 10);
+                    } else {
+                        this._init();
+                    }
+                });
             }
             return;
         }
@@ -155,35 +176,42 @@ class Toast {
         
         this.container.appendChild(toast);
         
-        // 添加动画样式
-        if (!document.querySelector('#toast-styles')) {
-            const style = document.createElement('style');
-            style.id = 'toast-styles';
-            style.textContent = `
-                @keyframes slideIn {
-                    from {
-                        transform: translateX(120%);
-                    }
-                    to {
-                        transform: translateX(0);
-                    }
+        // 使用内联动画样式，避免CSP限制
+        const animationStyles = `
+            @keyframes slideIn {
+                from {
+                    transform: translateX(120%);
                 }
-                
-                @keyframes slideOut {
-                    from {
-                        transform: translateX(0);
-                    }
-                    to {
-                        transform: translateX(120%);
-                    }
+                to {
+                    transform: translateX(0);
                 }
-                
-                .toast-hide {
-                    animation: slideOut 0.3s forwards !important;
+            }
+            
+            @keyframes slideOut {
+                from {
+                    transform: translateX(0);
                 }
-            `;
-            document.head.appendChild(style);
+                to {
+                    transform: translateX(120%);
+                }
+            }
+        `;
+        
+        // 检查是否已有样式
+        let styleElement = document.querySelector('#toast-styles');
+        if (!styleElement) {
+            styleElement = document.createElement('style');
+            styleElement.id = 'toast-styles';
+            document.head.appendChild(styleElement);
         }
+        
+        // 添加动画样式
+        if (styleElement && !styleElement.textContent.includes('slideIn')) {
+            styleElement.textContent = animationStyles;
+        }
+        
+        // 为当前toast添加动画类
+        toast.style.animation = 'slideIn 0.3s forwards';
         
         // 自动隐藏
         if (duration > 0) {
@@ -255,26 +283,116 @@ class Toast {
     }
 }
 
-// 创建全局实例
-window.Toast = new Toast();
+// 创建全局实例，但不立即初始化
+let toastInstance = null;
+
+function getToastInstance() {
+    if (!toastInstance) {
+        toastInstance = new Toast();
+    }
+    // 确保实例已初始化
+    if (typeof toastInstance.init === 'function' && !toastInstance.initialized) {
+        toastInstance.init();
+    }
+    return toastInstance;
+}
 
 // 导出函数
 window.showToast = (message, type = 'success', duration = 3000) => {
-    return window.Toast.show(message, type, duration);
+    try {
+        return getToastInstance().show(message, type, duration);
+    } catch (e) {
+        console.error('showToast error:', e);
+        // 降级到简单toast
+        showSimpleToastFallback(message, type);
+    }
 };
 
 window.showSuccessToast = (message, duration = 3000) => {
-    return window.Toast.success(message, duration);
+    try {
+        return getToastInstance().success(message, duration);
+    } catch (e) {
+        console.error('showSuccessToast error:', e);
+        // 降级到简单toast
+        showSimpleToastFallback(message, 'success');
+    }
 };
 
-window.showErrorToast = (message, duration = -1) => {
-    return window.Toast.error(message, duration);
+window.showErrorToast = (message, duration = 3000) => {
+    try {
+        return getToastInstance().error(message, duration);
+    } catch (e) {
+        console.error('showErrorToast error:', e);
+        // 降级到简单toast
+        showSimpleToastFallback(message, 'error');
+    }
 };
 
-window.showWarningToast = (message, duration = -1) => {
-    return window.Toast.warning(message, duration);
+window.showWarningToast = (message, duration = 3000) => {
+    try {
+        return getToastInstance().warning(message, duration);
+    } catch (e) {
+        console.error('showWarningToast error:', e);
+        // 降级到简单toast
+        showSimpleToastFallback(message, 'warning');
+    }
 };
 
 window.showInfoToast = (message, duration = 3000) => {
-    return window.Toast.info(message, duration);
+    try {
+        return getToastInstance().info(message, duration);
+    } catch (e) {
+        console.error('showInfoToast error:', e);
+        // 降级到简单toast
+        showSimpleToastFallback(message, 'info');
+    }
+};
+
+// 降级简单toast函数
+function showSimpleToastFallback(message, type = 'success') {
+    try {
+        // 移除现有的简单toast
+        const existingToasts = document.querySelectorAll('.simple-toast');
+        existingToasts.forEach(toast => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
+            }
+        });
+        
+        // 创建新的toast
+        const toast = document.createElement('div');
+        toast.className = `simple-toast simple-toast-${type}`;
+        toast.textContent = message;
+        
+        // 添加到body
+        document.body.appendChild(toast);
+        
+        // 3秒后自动移除
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
+            }
+        }, 3000);
+        
+        return toast;
+    } catch (e) {
+        console.error('showSimpleToastFallback error:', e);
+        // 最终降级：使用alert
+        alert(message);
+    }
+}
+
+// 兼容性：保留全局Toast实例
+window.Toast = {
+    show: window.showToast,
+    success: window.showSuccessToast,
+    error: window.showErrorToast,
+    warning: window.showWarningToast,
+    info: window.showInfoToast,
+    init: () => {
+        const instance = getToastInstance();
+        if (instance && typeof instance.init === 'function') {
+            instance.init();
+        }
+    }
 };

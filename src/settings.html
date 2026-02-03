@@ -8,6 +8,45 @@
     <link href="./styles/settings.css" rel="stylesheet">
     <link rel="stylesheet" href="./assets/fontawesome-free-6.7.2/css/all.css">
     <script src="./scripts/toast.js"></script>
+    <style>
+        /* 简单Toast样式作为备用 */
+        .simple-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 16px 20px;
+            background: #10b981;
+            color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 9999;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            animation: simple-slide-in 0.3s forwards;
+            max-width: 400px;
+        }
+
+        @keyframes simple-slide-in {
+            from {
+                transform: translateX(120%);
+            }
+            to {
+                transform: translateX(0);
+            }
+        }
+
+        .simple-toast-error {
+            background: #ef4444;
+        }
+
+        .simple-toast-warning {
+            background: #f59e0b;
+        }
+
+        .simple-toast-info {
+            background: #3b82f6;
+        }
+    </style>
 </head>
 <body>
 <div class="settings-container">
@@ -39,7 +78,8 @@
                         </label>
                         <div class="input-group">
                             <span class="input-icon"><i class="fas fa-list-ol"></i></span>
-                            <input class="form-input input-with-icon" id="maxItems" max="1000" min="1" placeholder="例如: 50"
+                            <input class="form-input input-with-icon" id="maxItems" max="1000" min="1"
+                                   placeholder="例如: 50"
                                    type="number">
                         </div>
                         <span class="form-hint">设置剪贴板历史记录的最大保存数量 (1-1000)</span>
@@ -57,7 +97,8 @@
                         </label>
                         <div class="input-group">
                             <span class="input-icon"><i class="fas fa-link"></i></span>
-                            <input class="form-input input-with-icon" id="apiUrl" placeholder="例如: https://api.openai.com/v1"
+                            <input class="form-input input-with-icon" id="apiUrl"
+                                   placeholder="例如: https://api.openai.com/v1"
                                    type="url">
                             <span class="test-icon" id="testBtn">
                                 <i class="fas fa-plug"></i>
@@ -144,9 +185,12 @@
                 <div class="about-section">
                     <h3><i class="fas fa-star btn-icon"></i> 软件功能</h3>
                     <ul class="feature-list">
-                        <li><i class="fas fa-clipboard-check"></i> <strong>剪贴板管理</strong> - 自动记录剪贴板历史，支持快速选择和粘贴</li>
-                        <li><i class="fas fa-mouse-pointer"></i> <strong>划词翻译</strong> - 选中文本后自动显示翻译和解释选项</li>
-                        <li><i class="fas fa-robot"></i> <strong>AI集成</strong> - 支持OpenAI等AI服务，提供智能翻译和解释</li>
+                        <li><i class="fas fa-clipboard-check"></i> <strong>剪贴板管理</strong> - 自动记录剪贴板历史，支持快速选择和粘贴
+                        </li>
+                        <li><i class="fas fa-mouse-pointer"></i> <strong>划词翻译</strong> - 选中文本后自动显示翻译和解释选项
+                        </li>
+                        <li><i class="fas fa-robot"></i> <strong>AI集成</strong> - 支持OpenAI等AI服务，提供智能翻译和解释
+                        </li>
                         <li><i class="fas fa-bolt"></i> <strong>快捷键操作</strong> - 支持自定义快捷键，提高工作效率</li>
                         <li><i class="fas fa-history"></i> <strong>历史记录</strong> - 保存剪贴板历史，方便重复使用</li>
                     </ul>
@@ -174,11 +218,14 @@
 
     <div class="settings-footer-container">
         <div class="settings-footer">
-            <p>需要帮助？<a href="https://github.com/zRq1351/fuyun_tools"
-                           onclick="openExternalLink(this.href); return false;">查看文档</a> | <a
-                    href="https://github.com/zRq1351/fuyun_tools/issues"
-                    onclick="openExternalLink(this.href); return false;">报告问题</a></p>
-            <p>版本 0.1.2 | © 2025 fuyun_tools</p>
+            <p>需要帮助？<a data-href="https://github.com/zRq1351/fuyun_tools" href="#"
+                           onclick="openExternalLink(this.dataset.href); return false;">
+                查看文档
+            </a> | <a data-href="https://github.com/zRq1351/fuyun_tools/issues" href="#"
+                      onclick="openExternalLink(this.dataset.href); return false;">
+                报告问题
+            </a></p>
+            <p id="footer"></p>
         </div>
     </div>
 </div>
@@ -186,13 +233,13 @@
 <script>
     const invoke = window.__TAURI__.core.invoke;
     const {getCurrentWindow} = window.__TAURI__.window;
-    const {open} = window.__TAURI__.shell;
-
-    function openExternalLink(url) {
-        open(url).then(() => {
-        }).catch(err => {
-            console.error('无法打开链接：', err);
-        });
+    const { openPath } = window.__TAURI__.opener
+    async function openExternalLink(url) {
+        try {
+            await openPath(url);
+        } catch (err) {
+            console.error('打开失败:', err.message || err);
+        }
         return false;
     }
 
@@ -240,7 +287,7 @@
             document.getElementById(`${category}-content`).classList.add('active');
 
             updateTestButtonVisibility(category);
-            
+
             // 根据当前分类显示/隐藏保存按钮
             const saveBtnContainer = document.querySelector('.save-button-container');
             if (category === 'about') {
@@ -264,6 +311,7 @@
     // 初始化时根据当前分类设置测试按钮可见性
     updateTestButtonVisibility('clipboard');
     let maskedKey;
+    const year = new Date().getFullYear();
     // 加载设置
     document.addEventListener('DOMContentLoaded', async () => {
         try {
@@ -273,7 +321,7 @@
             document.getElementById('maxItems').value = settings.max_items || 50;
             document.getElementById('currentVersion').innerText = settings.version;
             console.log('当前版本：', settings.version);
-
+            document.getElementById('footer').innerText = `版本 ${settings.version} | © ${year} fuyun_tools`;
             // AI设置
             document.getElementById('apiUrl').value = settings.ai_api_url || '';
             document.getElementById('modelName').value = settings.ai_model_name || '';
@@ -295,12 +343,12 @@
                     apiKeyInput.value = maskedKey;
                 }
             });
-            
+
             // 初始化时隐藏关于页面的保存按钮
             const activeTab = document.querySelector('.category-tab.active');
             const category = activeTab.getAttribute('data-category');
             const saveBtnContainer = document.querySelector('.save-button-container');
-            
+
             if (category === 'about') {
                 saveBtnContainer.classList.add('hidden');
             }
@@ -308,6 +356,36 @@
             console.error('加载设置失败:', error);
         }
     });
+
+    // 简单Toast函数作为备用
+    function showSimpleToast(message, type = 'success') {
+        console.log('showSimpleToast called:', message, type);
+
+        // 移除现有的简单toast
+        const existingToasts = document.querySelectorAll('.simple-toast');
+        existingToasts.forEach(toast => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
+            }
+        });
+
+        // 创建新的toast
+        const toast = document.createElement('div');
+        toast.className = `simple-toast simple-toast-${type}`;
+        toast.textContent = message;
+
+        // 添加到body
+        document.body.appendChild(toast);
+
+        // 3秒后自动移除
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
+            }
+        }, 3000);
+
+        return toast;
+    }
 
     // 保存设置
     document.getElementById('saveBtn').addEventListener('click', async () => {
@@ -335,20 +413,83 @@
 
             document.getElementById('apiKey').value = getMaskedApiKey(originalApiKey);
             maskedKey = getMaskedApiKey(originalApiKey);
-            
-            // 使用toast显示成功提示
-            if (window.showSuccessToast) {
-                window.showSuccessToast('设置已保存');
-            } else {
+
+            // 确保toast组件已初始化
+            if (window.Toast && typeof window.Toast.init === 'function') {
+                window.Toast.init();
+            }
+
+            // 尝试多种方式显示提示
+            console.log('保存成功，尝试显示提示...');
+            console.log('window.showSuccessToast exists:', typeof window.showSuccessToast);
+            console.log('window.Toast exists:', typeof window.Toast);
+
+            let toastShown = false;
+
+            // 方式1: 使用window.showSuccessToast
+            if (window.showSuccessToast && typeof window.showSuccessToast === 'function') {
+                try {
+                    console.log('尝试使用window.showSuccessToast');
+                    window.showSuccessToast('设置已保存');
+                    toastShown = true;
+                } catch (e) {
+                    console.error('window.showSuccessToast失败:', e);
+                }
+            }
+
+            // 方式2: 使用window.Toast.success
+            if (!toastShown && window.Toast && typeof window.Toast.success === 'function') {
+                try {
+                    console.log('尝试使用window.Toast.success');
+                    window.Toast.success('设置已保存');
+                    toastShown = true;
+                } catch (e) {
+                    console.error('window.Toast.success失败:', e);
+                }
+            }
+
+            // 方式3: 使用简单Toast
+            if (!toastShown) {
+                console.log('使用简单Toast');
+                showSimpleToast('设置已保存', 'success');
+                toastShown = true;
+            }
+
+            // 方式4: 最后回退到showTestResult
+            if (!toastShown) {
+                console.log('回退到showTestResult');
                 showTestResult('设置已保存', 'success');
             }
+
         } catch (error) {
             console.error('保存设置失败:', error);
-            
-            // 使用toast显示错误提示
-            if (window.showErrorToast) {
-                window.showErrorToast(`保存失败: ${error}`);
-            } else {
+
+            // 确保toast组件已初始化
+            if (window.Toast && typeof window.Toast.init === 'function') {
+                window.Toast.init();
+            }
+
+            // 错误提示
+            let errorToastShown = false;
+
+            // 方式1: 使用window.showErrorToast
+            if (window.showErrorToast && typeof window.showErrorToast === 'function') {
+                try {
+                    window.showErrorToast(`保存失败: ${error}`);
+                    errorToastShown = true;
+                } catch (e) {
+                    console.error('window.showErrorToast失败:', e);
+                }
+            }
+
+            // 方式2: 使用简单Toast
+            if (!errorToastShown) {
+                showSimpleToast(`保存失败: ${error}`, 'error');
+                errorToastShown = true;
+            }
+
+            // 方式3: 最后回退到showTestResult
+            if (!errorToastShown) {
                 showTestResult(`保存失败: ${error}`, 'error');
             }
         }
@@ -413,18 +554,18 @@
     document.getElementById('checkUpdateBtn').addEventListener('click', async () => {
         const checkUpdateBtn = document.getElementById('checkUpdateBtn');
         const originalText = checkUpdateBtn.innerHTML;
-        
+
         try {
             checkUpdateBtn.innerHTML = '<i class="fas fa-spinner fa-spin btn-icon"></i> 检查中...';
             checkUpdateBtn.disabled = true;
 
             document.getElementById('updateResult').style.display = 'none';
             document.getElementById('updateProgress').classList.remove('hidden');
-            
+
             resetUpdateProgress();
 
             const hasUpdate = await invoke('check_for_updates');
-            
+
             if (hasUpdate) {
                 showUpdateResult('发现新版本，已开始下载更新', 'success');
                 setupUpdateProgressListeners();
@@ -470,8 +611,8 @@
     }
 
     function setupUpdateProgressListeners() {
-        const { listen } = window.__TAURI__.event;
-        
+        const {listen} = window.__TAURI__.event;
+
         listen('update-started', () => {
             document.getElementById('progressText').textContent = '开始下载更新...';
             document.getElementById('statusText').textContent = '正在下载新版本文件，请稍候...';
@@ -482,7 +623,7 @@
             document.getElementById('progressFill').style.width = `${progress}%`;
             document.getElementById('percentage').textContent = `${progress}%`;
             document.getElementById('progressText').textContent = `下载进度: ${progress}%`;
-            
+
             if (progress === 100) {
                 document.getElementById('statusText').textContent = '下载完成，正在准备安装...';
             }
@@ -493,7 +634,7 @@
             document.getElementById('percentage').textContent = '100%';
             document.getElementById('progressText').textContent = '下载完成';
             document.getElementById('statusText').textContent = '更新下载完成，正在安装...';
-            
+
             setTimeout(() => {
                 document.getElementById('updateActionButtons').classList.remove('hidden');
                 document.getElementById('statusText').textContent = '更新安装完成！请重启应用以使用新版本。';
@@ -530,7 +671,7 @@
         const themeBtn = document.getElementById('themeToggleBtn');
         const icon = themeBtn.querySelector('.btn-icon');
         const text = themeBtn.querySelector('.theme-text');
-        
+
         if (body.classList.contains('dark-theme')) {
             // 切换到白天主题
             body.classList.remove('dark-theme');
@@ -551,7 +692,7 @@
         // 检查本地存储中的主题偏好
         const savedTheme = localStorage.getItem('settings-theme');
         const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-        
+
         // 默认使用白天主题，如果有保存的偏好则使用保存的，否则根据系统偏好
         if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
             document.body.classList.add('dark-theme');
