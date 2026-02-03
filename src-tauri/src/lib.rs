@@ -98,16 +98,6 @@ pub fn run() {
     tauri::Builder::default()
         .manage(state_arc.clone())
         .setup(move |app| {
-            let instance =
-                single_instance::SingleInstance::new("fuyun_tools").expect("未能创建单实例锁");
-
-            if !instance.is_single() {
-                app.dialog()
-                    .message("软件已运行，请观察系统托盘！")
-                    .title("提示")
-                    .blocking_show();
-                std::process::exit(0);
-            }
 
             if let Some(settings_window) = app.get_webview_window("settings") {
                 let settings_window_clone = settings_window.clone();
@@ -176,8 +166,7 @@ pub fn run() {
             test_ai_connection,
             stream_translate_text,
             stream_explain_text,
-            check_for_updates,
-            restart_app,
+            check_for_updates
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
@@ -743,33 +732,16 @@ async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
                         ))
                         .title("发现更新")
                         .blocking_show();
-
+                    let mut downloaded = 0;
                     if should_update {
-                        // 发送事件通知前端开始更新
-                        let _ = app.emit("update-started", ());
-
                         update
                             .download_and_install(
-                                |progress, total| {
-                                    let percentage = if let Some(total) = total {
-                                        (progress as f64 / total as f64 * 100.0).round() as u32
-                                    } else {
-                                        0
-                                    };
-                                    log::info!(
-                                        "更新下载进度: {}% ({} bytes)",
-                                        percentage,
-                                        progress
-                                    );
-
-                                    // 发送进度更新事件到前端
-                                    let _ = app.emit("update-progress", percentage);
+                                |chunk_length, content_length| {
+                                    downloaded += chunk_length;
+                                    println!("已下载 {downloaded} / {content_length:?}");
                                 },
                                 || {
-                                    log::info!("更新下载完成，准备安装...");
-
-                                    // 发送下载完成事件到前端
-                                    let _ = app.emit("update-download-complete", ());
+                                    println!("下载结束");
                                 },
                             )
                             .await
@@ -879,15 +851,6 @@ async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
             Err(error_msg)
         }
     }
-}
-
-#[tauri::command]
-async fn restart_app(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        app.restart();
-    });
-    Ok(())
 }
 
 async fn show_result_window(
