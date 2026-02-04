@@ -1,4 +1,4 @@
-use crate::config::ProviderConfig;
+use crate::core::config::ProviderConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -314,7 +314,7 @@ pub fn get_logs_dir_path() -> PathBuf {
 
 /// 初始化内置提供商配置
 fn initialize_builtin_providers(settings: &mut AppSettingsData) {
-    use crate::config::{AIProvider, ProviderConfig};
+    use crate::core::config::{AIProvider, ProviderConfig};
 
     // 为每个内置提供商创建默认配置
     let builtin_providers = [

@@ -1,4 +1,5 @@
-use crate::{ClipboardManager, ENIGO_INSTANCE};
+use crate::ui::window_manager::ENIGO_INSTANCE;
+use crate::utils::clipboard::ClipboardManager;
 use enigo::{Enigo, Key, Keyboard, Settings};
 use log;
 use std::sync::{Arc, Mutex};
@@ -6,9 +7,8 @@ use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
 
-pub use crate::AppState as SharedAppState;
-
-use crate::config::CTRL_KEY;
+use crate::core::app_state::AppState as SharedAppState;
+use crate::core::config::CTRL_KEY;
 use tauri::Manager;
 
 pub fn get_selected_text_with_app(
@@ -37,7 +37,7 @@ fn get_selected_text_windows(
         *enigo_guard = Some(Enigo::new(&Settings::default()).expect("未能初始化enigo"));
     }
 
-    crate::mouse_listener::reset_ctrl_key_state();
+    crate::features::mouse_listener::reset_ctrl_key_state();
 
     if let Some(ref mut enigo) = *enigo_guard {
         let _ = enigo.key(CTRL_KEY, enigo::Direction::Press);
@@ -49,7 +49,7 @@ fn get_selected_text_windows(
     log::info!("已发送Ctrl+C模拟按键");
 
     thread::sleep(Duration::from_millis(50));
-    crate::mouse_listener::reset_ctrl_key_state();
+    crate::features::mouse_listener::reset_ctrl_key_state();
 
     thread::sleep(Duration::from_millis(150));
 
