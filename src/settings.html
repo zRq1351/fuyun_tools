@@ -52,6 +52,19 @@
             <form id="aiSettingsForm">
                 <div class="settings-grid">
                     <div class="form-group full-width">
+                        <label class="form-label" for="aiProvider">
+                            <i class="fas fa-cloud btn-icon"></i> AI服务提供商
+                        </label>
+                        <div class="input-group">
+                            <span class="input-icon"><i class="fas fa-network-wired"></i></span>
+                            <select class="form-input input-with-icon" id="aiProvider">
+                                <option value="">请选择提供商</option>
+                            </select>
+                        </div>
+                        <span class="form-hint">选择AI服务提供商</span>
+                    </div>
+
+                    <div class="form-group">
                         <label class="form-label" for="apiUrl">
                             <i class="fas fa-server btn-icon"></i> AI服务地址
                         </label>
@@ -79,14 +92,17 @@
                         <span class="form-hint">使用的AI模型名称</span>
                     </div>
 
-                    <div class="form-group">
+                    <div class="form-group full-width" >
                         <label class="form-label" for="apiKey">
                             <i class="fas fa-key btn-icon"></i> API密钥
                         </label>
                         <div class="input-group">
                             <span class="input-icon"><i class="fas fa-lock"></i></span>
                             <input class="form-input input-with-icon" id="apiKey" placeholder="请输入您的API密钥"
-                                   type="text">
+                                   type="password">
+                            <span class="toggle-password test-icon" id="togglePassword">
+                                <i class="fas fa-eye"></i>
+                            </span>
                         </div>
                         <span class="form-hint">用于访问AI服务的API密钥</span>
                     </div>
@@ -184,8 +200,6 @@
     const {openUrl} = window.__TAURI__.opener
     document.addEventListener('DOMContentLoaded', async () => {
         const year = new Date().getFullYear();
-        let maskedKey;
-        let originalApiKey = '';
         window.Toast.init();
 
         async function openExternalLink(url) {
@@ -197,30 +211,82 @@
             return false;
         }
 
-        function getMaskedApiKey(apiKey) {
-            if (!apiKey || apiKey.length === 0) {
-                return '';
+        // 加载AI提供商列表
+        async function loadAiProviders() {
+            try {
+                console.log('正在加载AI提供商列表...');
+                const providers = await invoke('get_ai_providers');
+                console.log('获取到的提供商列表:', providers);
+                
+                const providerSelect = document.getElementById('aiProvider');
+                if (!providerSelect) {
+                    console.error('未找到aiProvider元素');
+                    return;
+                }
+                
+                // 清空现有选项
+                providerSelect.innerHTML = '<option value="">请选择提供商</option>';
+                
+                // 添加提供商选项
+                if (providers && Array.isArray(providers)) {
+                    providers.forEach(([provider, displayName]) => {
+                        console.log('添加提供商选项:', provider, displayName);
+                        const option = document.createElement('option');
+                        option.value = provider;
+                        option.textContent = displayName;
+                        providerSelect.appendChild(option);
+                    });
+                    console.log('提供商列表加载完成，共', providers.length, '个提供商');
+                } else {
+                    console.error('提供商数据格式不正确:', providers);
+                }
+            } catch (error) {
+                console.error('加载AI提供商失败:', error);
+                // 显示错误信息给用户
+                const providerSelect = document.getElementById('aiProvider');
+                if (providerSelect) {
+                    providerSelect.innerHTML = '<option value="">加载失败，请刷新页面</option>';
+                }
             }
-
-            const len = apiKey.length;
-            if (len <= 16) {
-                return '*'.repeat(Math.min(len, 30));
-            }
-
-            const prefix = apiKey.substring(0, 8);
-            const suffix = apiKey.substring(len - 8);
-            return prefix + '*'.repeat(30) + suffix;
         }
 
-        function isMaskedValue(value) {
-            if (!value || value.length === 0) return false;
-
-            const starPattern = /\*{30}/;
-            if (!starPattern.test(value)) {
-                return false;
+        // 根据提供商自动填充配置
+        async function autoFillProviderConfig(provider) {
+            if (!provider) return;
+            
+            try {
+                console.log('正在加载提供商配置:', provider);
+                // 首先尝试加载已保存的配置
+                const providerConfig = await invoke('load_provider_settings', { provider });
+                console.log('加载到的配置:', providerConfig);
+                
+                // 更新UI
+                document.getElementById('apiUrl').value = providerConfig.api_url || '';
+                document.getElementById('modelName').value = providerConfig.model_name || '';
+                document.getElementById('apiKey').value = providerConfig.api_key || '';
+                
+                // 同时更新当前选中的提供商
+                document.getElementById('aiProvider').value = provider;
+                
+            } catch (error) {
+                console.error('加载提供商配置失败，使用默认配置:', error);
+                // 如果加载失败，使用默认配置
+                try {
+                    const configResult = await invoke('get_provider_config', { provider });
+                    console.log('获取到的默认配置:', configResult);
+                    // 注意：get_provider_config 返回的是 [url, model] 数组
+                    if (Array.isArray(configResult) && configResult.length >= 2) {
+                        const [url, model] = configResult;
+                        document.getElementById('apiUrl').value = url || '';
+                        document.getElementById('modelName').value = model || '';
+                        document.getElementById('apiKey').value = '';
+                    } else {
+                        console.error('默认配置格式不正确:', configResult);
+                    }
+                } catch (defaultError) {
+                    console.error('获取默认配置也失败:', defaultError);
+                }
             }
-
-            return value.length >= 46;
         }
 
         document.querySelectorAll('.category-tab').forEach(tab => {
@@ -238,8 +304,6 @@
                 const category = tab.getAttribute('data-category');
                 document.getElementById(`${category}-content`).classList.add('active');
 
-                updateTestButtonVisibility(category);
-
                 const saveBtnContainer = document.querySelector('.save-button-container');
                 if (category === 'about') {
                     saveBtnContainer.classList.add('hidden');
@@ -249,17 +313,16 @@
             });
         });
 
-        // 根据分类更新测试按钮可见性
-        function updateTestButtonVisibility(category) {
-            const testBtn = document.getElementById('testBtn');
-            if (category === 'ai') {
-                testBtn.style.display = 'inline-flex';
-            } else {
-                testBtn.style.display = 'none';
-            }
-        }
+        await loadAiProviders();
 
-        updateTestButtonVisibility('clipboard');
+        document.getElementById('aiProvider').addEventListener('change', async (event) => {
+            const selectedProvider = event.target.value;
+            console.log('AI提供商切换到:', selectedProvider);
+            if (selectedProvider) {
+                await autoFillProviderConfig(selectedProvider);
+            }
+        });
+        
         try {
             const settings = await invoke('get_ai_settings');
 
@@ -269,33 +332,20 @@
             console.log('当前版本：', settings.version);
             document.getElementById('footer').innerText = `版本 ${settings.version} | © ${year} fuyun_tools`;
             // AI设置
-            document.getElementById('apiUrl').value = settings.ai_api_url || '';
-            document.getElementById('modelName').value = settings.ai_model_name || '';
-            // 保存原始API密钥并显示部分隐藏版本
-            originalApiKey = settings.ai_api_key || '';
-            maskedKey = getMaskedApiKey(originalApiKey);
-            const apiKeyInput = document.getElementById('apiKey');
-            apiKeyInput.value = maskedKey;
-
-            apiKeyInput.addEventListener('focus', () => {
-                if (apiKeyInput.value === maskedKey && originalApiKey) {
-                    apiKeyInput.value = originalApiKey;
-                }
-            });
-
-            apiKeyInput.addEventListener('blur', () => {
-                if (apiKeyInput.value === originalApiKey && originalApiKey) {
-                    apiKeyInput.value = maskedKey;
-                }
-            });
-
-            // 初始化时隐藏关于页面的保存按钮
-            const activeTab = document.querySelector('.category-tab.active');
-            const category = activeTab.getAttribute('data-category');
-            const saveBtnContainer = document.querySelector('.save-button-container');
-
-            if (category === 'about') {
-                saveBtnContainer.classList.add('hidden');
+            document.getElementById('aiProvider').value = settings.ai_provider || '';
+            
+            // 从provider_configs中获取当前提供商的配置
+            const currentProvider = settings.ai_provider;
+            if (currentProvider && settings.provider_configs && settings.provider_configs[currentProvider]) {
+                const providerConfig = settings.provider_configs[currentProvider];
+                document.getElementById('apiUrl').value = providerConfig.api_url || '';
+                document.getElementById('modelName').value = providerConfig.model_name || '';
+                document.getElementById('apiKey').value = providerConfig.api_key || '';
+            } else {
+                // 如果没有配置，使用默认值
+                document.getElementById('apiUrl').value = '';
+                document.getElementById('modelName').value = '';
+                document.getElementById('apiKey').value = '';
             }
         } catch (error) {
             console.error('加载设置失败:', error);
@@ -323,45 +373,35 @@
 
         document.getElementById('saveBtn').addEventListener('click', async () => {
             const maxItems = parseInt(document.getElementById('maxItems').value) || 50;
+            const aiProvider = document.getElementById('aiProvider').value;
             const apiUrl = document.getElementById('apiUrl').value;
             const modelName = document.getElementById('modelName').value;
             let apiKey = document.getElementById('apiKey').value;
 
-            const maskedOriginal = getMaskedApiKey(originalApiKey);
-            if (apiKey === maskedOriginal && originalApiKey) {
-                apiKey = originalApiKey;
-            } else if (isMaskedValue(apiKey) && originalApiKey) {
-                apiKey = originalApiKey;
-            }
-
             try {
                 await invoke('save_ai_settings', {
                     maxItems: maxItems,
+                    aiProvider: aiProvider,
                     aiApiUrl: apiUrl,
                     aiModelName: modelName,
                     aiApiKey: apiKey
                 });
-                originalApiKey = apiKey;
-                document.getElementById('apiKey').value = getMaskedApiKey(originalApiKey);
-                maskedKey = getMaskedApiKey(originalApiKey);
                 window.showSuccessToast('保存成功');
             } catch (error) {
                 window.showErrorToast(`保存失败: ${error}`);
             }
         });
+        document.getElementById('togglePassword').addEventListener('click',  () => {
+            // apiKey的展示与隐藏
+            const apiKeyInput = document.getElementById('apiKey');
+            apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
 
+        })
         // 测试连接
         document.getElementById('testBtn').addEventListener('click', async () => {
             const apiUrl = document.getElementById('apiUrl').value;
             const modelName = document.getElementById('modelName').value;
-            let apiKey = document.getElementById('apiKey').value;
-
-            const maskedOriginal = getMaskedApiKey(originalApiKey);
-            if (apiKey === maskedOriginal && originalApiKey) {
-                apiKey = originalApiKey;
-            } else if (isMaskedValue(apiKey) && originalApiKey) {
-                apiKey = originalApiKey;
-            }
+            const apiKey = document.getElementById('apiKey').value;
 
             if (!apiUrl || !modelName || !apiKey) {
                 showTestResult('请填写完整信息后再测试', 'error');
