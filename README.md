@@ -9,7 +9,7 @@ fuyun_tools是一款集剪切板管理和AI划词功能于一体的桌面效率�
 - **前端**: HTML/CSS/JavaScript（原生Web技术，无框架依赖）
 - **后端**: Rust + Tauri 2.0
 - **AI集成**: async-openai库，支持多种OpenAI兼容服务
-- **安全加密**: 自研XOR加密算法保护敏感凭证
+- **安全加密**: api_key加密存储保护敏感凭证
 
 ## 🌍 兼容性
 
