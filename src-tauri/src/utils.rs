@@ -37,15 +37,14 @@ impl Default for AppSettingsData {
 
 impl AppSettingsData {
     /// 为指定提供商加密API密钥
-    pub fn encrypt_provider_api_key(&mut self, provider_key: &str) -> Result<(), String> {
+    pub fn encrypt_provider_api_key(&mut self, provider_key: &str, api_key: &str) -> Result<(), String> {
         if let Some(config) = self.provider_configs.get_mut(provider_key) {
-            if config.api_key.is_empty() {
+            if api_key.is_empty() {
                 config.encrypted_api_key.clear();
                 return Ok(());
             }
 
-            let encrypted: Vec<u8> = config
-                .api_key
+            let encrypted: Vec<u8> = api_key
                 .bytes()
                 .enumerate()
                 .map(|(i, b)| b ^ ENCRYPTION_KEY[i % ENCRYPTION_KEY.len()])
@@ -54,17 +53,15 @@ impl AppSettingsData {
             use base64::engine::general_purpose::STANDARD;
             use base64::Engine as _;
             config.encrypted_api_key = STANDARD.encode(encrypted);
-            config.api_key.clear();
         }
         Ok(())
     }
 
     /// 为指定提供商解密API密钥
-    pub fn decrypt_provider_api_key(&mut self, provider_key: &str) -> Result<(), String> {
-        if let Some(config) = self.provider_configs.get_mut(provider_key) {
+    pub fn decrypt_provider_api_key(&self, provider_key: &str) -> Result<String, String> {
+        if let Some(config) = self.provider_configs.get(provider_key) {
             if config.encrypted_api_key.is_empty() {
-                config.api_key.clear();
-                return Ok(());
+                return Ok(String::new());
             }
 
             use base64::engine::general_purpose::STANDARD;
@@ -79,18 +76,18 @@ impl AppSettingsData {
                 .map(|(i, &b)| b ^ ENCRYPTION_KEY[i % ENCRYPTION_KEY.len()])
                 .collect();
 
-            config.api_key =
-                String::from_utf8(decrypted).map_err(|e| format!("UTF-8解码失败: {}", e))?;
+            String::from_utf8(decrypted).map_err(|e| format!("UTF-8解码失败: {}", e))
+        } else {
+            Ok(String::new())
         }
-        Ok(())
     }
 
     /// 保存当前提供商的配置
-    pub fn save_current_provider_config(&mut self) -> Result<(), String> {
+    pub fn save_current_provider_config(&mut self, api_key: &str) -> Result<(), String> {
         let provider_key = self.ai_provider.clone();  // 克隆避免借用冲突
 
         // 加密该提供商的API密钥
-        self.encrypt_provider_api_key(&provider_key)?;
+        self.encrypt_provider_api_key(&provider_key, api_key)?;
 
         Ok(())
     }
@@ -128,13 +125,12 @@ impl AppSettingsData {
             ProviderConfig {
                 api_url: default_url,
                 model_name: default_model,
-                api_key: String::new(),
                 encrypted_api_key: String::new(),
             }
         };
 
         // 解密该提供商的API密钥
-        self.decrypt_provider_api_key(&provider_key)?;
+        let _ = self.decrypt_provider_api_key(&provider_key);
 
         // 更新当前提供商
         self.ai_provider = provider_name.to_string();
@@ -167,26 +163,27 @@ impl AppSettingsData {
 
     /// 获取部分隐藏的API密钥（用于前端显示）
     pub fn get_masked_api_key(&self) -> String {
-        if let Some(config) = self.get_current_provider_config() {
-            if config.api_key.is_empty() {
-                return String::new();
+        // 解密当前提供商的API密钥
+        match self.decrypt_provider_api_key(&self.ai_provider) {
+            Ok(api_key) => {
+                if api_key.is_empty() {
+                    return String::new();
+                }
+
+                let len = api_key.len();
+
+                if len <= 16 {
+                    // 如果密钥长度小于等于16，全部显示为*
+                    return "*".repeat(len.min(30));
+                }
+
+                // 前8个字符 + 30个* + 后8个字符
+                let prefix = &api_key[..8.min(len)];
+                let suffix = &api_key[len - 8.min(len - 8)..];
+
+                format!("{}{}{}", prefix, "*".repeat(30), suffix)
             }
-
-            let key = &config.api_key;
-            let len = key.len();
-
-            if len <= 16 {
-                // 如果密钥长度小于等于16，全部显示为*
-                return "*".repeat(len.min(30));
-            }
-
-            // 前8个字符 + 30个* + 后8个字符
-            let prefix = &key[..8.min(len)];
-            let suffix = &key[len - 8.min(len - 8)..];
-
-            format!("{}{}{}", prefix, "*".repeat(30), suffix)
-        } else {
-            String::new()
+            Err(_) => String::new(),
         }
     }
 
@@ -256,8 +253,8 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
     settings.migrate_from_old();
 
     // 解密当前提供商的API密钥
-    let provider_key = settings.ai_provider.to_string();
-    settings.decrypt_provider_api_key(&provider_key)?;
+    let _provider_key = settings.ai_provider.to_string();
+    // 解密操作已经在 decrypt_provider_api_key 方法中处理
 
     Ok(settings)
 }
@@ -333,7 +330,6 @@ fn initialize_builtin_providers(settings: &mut AppSettingsData) {
         let config = ProviderConfig {
             api_url: default_url,
             model_name: default_model,
-            api_key: String::new(),
             encrypted_api_key: String::new(),
         };
 

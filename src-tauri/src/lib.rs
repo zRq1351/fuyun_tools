@@ -5,7 +5,9 @@ pub mod mouse_listener;
 pub mod text_selection;
 pub mod utils;
 
-use crate::config::{AIProvider, ProviderConfig, CTRL_KEY, DEFAULT_HIDE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT};
+use crate::config::{
+    AIProvider, ProviderConfig, CTRL_KEY, DEFAULT_HIDE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT,
+};
 use crate::utils::get_logs_dir_path;
 use clipboard::ClipboardManager;
 use config::CLIPBOARD_POLL_INTERVAL;
@@ -55,7 +57,6 @@ pub struct AppState {
     is_updating_clipboard: bool,
     is_processing_selection: bool,
     tray_menu_items: Option<TrayMenuItems>,
-    ai_client: Arc<Mutex<Option<AIClient>>>, // 新增AI客户端缓存
 }
 
 impl Clone for AppState {
@@ -68,7 +69,6 @@ impl Clone for AppState {
             is_updating_clipboard: self.is_updating_clipboard,
             is_processing_selection: self.is_processing_selection,
             tray_menu_items: None,
-            ai_client: Arc::new(Mutex::new((*self.ai_client.lock().unwrap()).clone())), // 复制AI客户端
         }
     }
 }
@@ -87,7 +87,6 @@ impl Default for AppState {
             is_updating_clipboard: false,
             is_processing_selection: false,
             tray_menu_items: None,
-            ai_client: Arc::new(Mutex::new(None)), // 初始化为None
         }
     }
 }
@@ -98,7 +97,6 @@ pub fn run() {
     tauri::Builder::default()
         .manage(state_arc.clone())
         .setup(move |app| {
-
             if let Some(settings_window) = app.get_webview_window("settings") {
                 let settings_window_clone = settings_window.clone();
                 settings_window.on_window_event(move |event| {
@@ -162,7 +160,7 @@ pub fn run() {
             selection_toolbar_blur,
             copy_text,
             get_ai_settings,
-            save_app_settings,  // 替换 save_ai_settings 和 add_custom_provider
+            save_app_settings,
             test_ai_connection,
             stream_translate_text,
             stream_explain_text,
@@ -194,6 +192,7 @@ pub fn run() {
         .expect("构建Tauri应用时出错")
         .run(|_app_handle, _event| {});
 }
+
 /// 启动划词选择监听器
 pub fn start_text_selection_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     mouse_listener::MouseListener::start_mouse_listener(app_handle, state);
@@ -763,14 +762,68 @@ async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn get_ai_settings() -> Result<AppSettingsData, String> {
-    load_settings()
+async fn get_ai_settings() -> Result<std::collections::HashMap<String, serde_json::Value>, String> {
+    let settings = load_settings()?;
+
+    // 转换为HashMap格式，便于前端处理
+    let mut result = std::collections::HashMap::new();
+
+    // 添加基本设置
+    result.insert(
+        "version".to_string(),
+        serde_json::Value::String(settings.version.clone()),
+    );
+    result.insert(
+        "max_items".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(settings.max_items)),
+    );
+    result.insert(
+        "ai_provider".to_string(),
+        serde_json::Value::String(settings.ai_provider.clone()),
+    );
+
+    // 处理provider_configs，将encrypted_api_key替换为解密后的api_key
+    let mut provider_configs_map = std::collections::HashMap::new();
+
+    // 先收集所有提供商键名，避免借用冲突
+    let provider_keys: Vec<String> = settings.provider_configs.keys().cloned().collect();
+
+    for provider_key in provider_keys {
+        // 解密API密钥
+        if let Ok(api_key) = settings.decrypt_provider_api_key(&provider_key) {
+            if let Some(decrypted_config) = settings.provider_configs.get(&provider_key) {
+                let mut config_map = std::collections::HashMap::new();
+                config_map.insert(
+                    "api_url".to_string(),
+                    serde_json::Value::String(decrypted_config.api_url.clone()),
+                );
+                config_map.insert(
+                    "model_name".to_string(),
+                    serde_json::Value::String(decrypted_config.model_name.clone()),
+                );
+                config_map.insert("api_key".to_string(), serde_json::Value::String(api_key));
+                // 注意：这里不再包含encrypted_api_key字段
+
+                provider_configs_map.insert(
+                    provider_key,
+                    serde_json::Value::Object(config_map.into_iter().collect()),
+                );
+            }
+        }
+    }
+
+    result.insert(
+        "provider_configs".to_string(),
+        serde_json::Value::Object(provider_configs_map.into_iter().collect()),
+    );
+
+    Ok(result)
 }
 
 #[tauri::command]
 async fn save_app_settings(
     max_items: usize,
-    ai_provider: String,  // 提供商名称（内置或自定义）
+    ai_provider: String,
     ai_api_url: String,
     ai_model_name: String,
     ai_api_key: String,
@@ -779,40 +832,35 @@ async fn save_app_settings(
 ) -> Result<(), String> {
     let version = app.package_info().version.to_string();
 
-    // 获取当前设置，保留现有的provider_configs
     let mut settings = {
         let state_guard = state.lock().unwrap();
         state_guard.settings.clone()
     };
-    
-    // 更新基本设置
+
     settings.version = version;
     settings.max_items = max_items;
 
-    // 基本验证 - 只检查是否为空
     if ai_provider.is_empty() {
         return Err("提供商名称不能为空".to_string());
     }
 
-    // 更新当前提供商 - 用户保存哪个提供商，就设为当前提供商
     settings.ai_provider = ai_provider.clone();
 
-    // 迁移旧数据
     settings.migrate_from_old();
-    
-    // 创建或更新提供商配置
-    let config = settings.provider_configs.entry(ai_provider.clone()).or_insert_with(|| {
-        ProviderConfig::default()
-    });
-    
+
+    let config = settings
+        .provider_configs
+        .entry(ai_provider.clone())
+        .or_insert_with(|| ProviderConfig::default());
+
     config.api_url = ai_api_url;
     config.model_name = ai_model_name;
-    config.api_key = ai_api_key;
-    
-    // 保存当前提供商的配置
-    settings.save_current_provider_config().map_err(|e| format!("保存提供商配置失败: {}", e))?;
+    // api_key 不再存储在config中，直接用于加密
 
-    // 验证设置
+    settings
+        .save_current_provider_config(&ai_api_key)
+        .map_err(|e| format!("保存提供商配置失败: {}", e))?;
+
     settings
         .validate()
         .map_err(|e| format!("设置验证失败: {}", e))?;
@@ -824,10 +872,13 @@ async fn save_app_settings(
         state_guard.settings = settings;
     }
 
-    log::info!("设置保存成功: max_items={}, provider={}", max_items, ai_provider);
+    log::info!(
+        "设置保存成功: max_items={}, provider={}",
+        max_items,
+        ai_provider
+    );
     Ok(())
 }
-
 #[tauri::command]
 async fn test_ai_connection(
     ai_api_url: String,
@@ -886,7 +937,6 @@ async fn show_result_window(
     let window_label = format!("result_{}", window_type);
 
     if let Some(existing_window) = app.get_webview_window(&window_label) {
-        // 窗口已存在，确保它可见并获得焦点
         if let Ok(is_visible) = existing_window.is_visible() {
             if !is_visible {
                 let _ = existing_window.show();
@@ -895,10 +945,8 @@ async fn show_result_window(
             let _ = existing_window.show();
         }
 
-        // 设置焦点
         let _ = existing_window.set_focus();
 
-        // 更新窗口内容
         let payload = serde_json::json!({
             "type": window_type.clone(),
             "original": original.clone(),
@@ -961,81 +1009,20 @@ async fn update_result_window(
 }
 
 async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> Result<AIClient, String> {
-    // 首先检查是否有缓存的有效客户端
-    let cache_valid = {
-        let state_guard = state.lock().unwrap();
-        let cached_client = (*state_guard.ai_client.lock().unwrap()).clone();
-        if let Some(client) = cached_client.as_ref() {
-            // 检查缓存的客户端是否与当前设置匹配
-            if let Some(provider_config) = state_guard.settings.get_current_provider_config() {
-                client.config.api_key == provider_config.api_key
-                    && client.config.base_url == provider_config.api_url
-                    && client.config.model == provider_config.model_name
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    };
-
-    // 如果缓存有效，返回缓存的客户端
-    if cache_valid {
-        let state_guard = state.lock().unwrap();
-        let client_result = if let Some(client) = (*state_guard.ai_client.lock().unwrap()).as_ref() {
-            Ok(client.clone())
-        } else {
-            // 这种情况理论上不会发生，但为了类型匹配需要处理
-            return Err("缓存客户端不存在".to_string());
-        };
-        return client_result;
-    }
-
-    // 否则创建新的客户端
     let current_config = {
         let state_guard = state.lock().unwrap();
-        if let Some(provider_config) = state_guard.settings.get_current_provider_config() {
-            AIConfig {
-                api_key: provider_config.api_key.clone(),
-                base_url: provider_config.api_url.clone(),
-                model: provider_config.model_name.clone(),
-            }
-        } else {
-            // 使用当前提供商的默认配置
-            let (default_url, default_model) = match state_guard.settings.ai_provider.as_str() {
-                "deepseek" => (
-                    "https://api.deepseek.com/v1".to_string(),
-                    "deepseek-chat".to_string(),
-                ),
-                "qwen" => (
-                    "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
-                    "qwen-plus".to_string(),
-                ),
-                "xiaomimimo" => (
-                    "https://api.xiaomimimo.com/v1".to_string(),
-                    "mimo-v2-flash".to_string(),
-                ),
-                _ => {
-                    // 自定义提供商或其他情况使用空值
-                    (String::new(), String::new())
-                }
-            };
-            AIConfig {
-                api_key: String::new(),
-                base_url: default_url,
-                model: default_model,
-            }
+        let api_key = state_guard
+            .settings
+            .decrypt_provider_api_key(&state_guard.settings.ai_provider)
+            .unwrap_or_default();
+        let provider_config = state_guard.settings.get_current_provider_config().unwrap();
+        AIConfig {
+            api_key,
+            base_url: provider_config.api_url.clone(),
+            model: provider_config.model_name.clone(),
         }
     };
-
     let client = AIClient::new(current_config).map_err(|e| format!("客户端初始化失败: {}", e))?;
-
-    // 更新缓存
-    {
-        let state_guard = state.lock().unwrap();
-        *state_guard.ai_client.lock().unwrap() = Some(client.clone());
-    }
-
     Ok(client)
 }
 
@@ -1066,7 +1053,9 @@ async fn stream_translate_text(
         "直接翻译下面的文字由{}翻译为:{}，不要有任何额外的内容输出文字输出。需要翻译内容为：\n\n{}",
         source_language_name, target_language_name, text
     );
-
+    if let Some(window) = app.clone().get_webview_window("result_translation") {
+        let _ = window.emit("result-clean", "");
+    }
     let result = client
         .generate_text_stream(messages.as_str(), Some(1000), |content_chunk| {
             let app_clone = app.clone();
@@ -1115,6 +1104,9 @@ async fn stream_explain_text(
         "请用{}200字内解释这段话：\n\n{}",
         target_language_name, text
     );
+    if let Some(window) = app.clone().get_webview_window("result_explanation") {
+        let _ = window.emit("result-clean", "");
+    }
     let result = client
         .generate_text_stream(messages.as_str(), Some(1000), |content_chunk| {
             let app_clone = app.clone();
@@ -1152,33 +1144,12 @@ async fn get_all_configured_providers(
 ) -> Result<Vec<(String, String)>, String> {
     let state_guard = state.lock().unwrap();
     let settings = &state_guard.settings;
-    
+
     let mut providers: Vec<(String, String)> = Vec::new();
-    
-    // 添加内置提供商（硬编码英文标识符）
-    let builtin_providers = vec![
-        ("deepseek".to_string(), "deepseek".to_string()),
-        ("qwen".to_string(), "qwen".to_string()),
-        ("xiaomimimo".to_string(), "xiaomimimo".to_string()),
-    ];
-    
-    for (provider_key, display_name) in &builtin_providers {
-        providers.push((provider_key.clone(), display_name.clone()));
-    }
-    
-    // 添加自定义提供商（从provider_configs中提取）
+
     for (provider_key, _) in &settings.provider_configs {
-        // 检查是否已经是内置提供商
-        let is_builtin = builtin_providers
-            .iter()
-            .any(|(builtin_key, _)| builtin_key == provider_key);
-        
-        if !is_builtin {
-            // 对于自定义提供商，显示名称就用键名
-            providers.push((provider_key.clone(), provider_key.clone()));
-        }
+        providers.push((provider_key.clone(), provider_key.clone()));
     }
-    
+
     Ok(providers)
 }
-

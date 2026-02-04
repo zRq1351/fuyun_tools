@@ -378,7 +378,6 @@
         const originalContentElement = document.getElementById('originalContent');
         const resultContentElement = document.getElementById('resultContent');
         
-        // 为结果内容区域添加样式类
         resultContentElement.className = 'content result-content';
         
         if (original) {
@@ -456,6 +455,9 @@
                 showOriginalBtn.textContent = '显示原文';
             }
         });
+        listen('result-clean', () => {
+            fullContent = '';
+        });
         listen('result-update', (event) => {
             const data = event.payload;
             const contentElement = document.getElementById('resultContent');
@@ -463,7 +465,6 @@
             contentElement.innerHTML = marked.parse(fullContent);
             contentElement.scrollTop = contentElement.scrollHeight;
         });
-
     })
 </script>
 </body>

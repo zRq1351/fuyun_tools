@@ -225,10 +225,8 @@
             return false;
         }
 
-        // 加载AI提供商列表
         async function loadAiProviders() {
             try {
-                // 使用新命令获取所有已配置的提供商（包括自定义的）
                 const providers = await invoke('get_all_configured_providers');
                 
                 const providerSelect = document.getElementById('aiProvider');
@@ -237,10 +235,8 @@
                     return;
                 }
                 
-                // 清空现有选项
                 providerSelect.innerHTML = '<option value="">请选择提供商</option>';
                 
-                // 添加内置提供商选项
                 if (providers && Array.isArray(providers)) {
                     providers.forEach(([provider, displayName]) => {
                         const option = document.createElement('option');
@@ -252,7 +248,6 @@
                     window.showErrorToast('提供商数据格式不正确:', providers);
                 }
                 
-                // 添加前端硬编码的自定义选项
                 const customOption = document.createElement('option');
                 customOption.value = 'custom';
                 customOption.textContent = '自定义';
@@ -260,7 +255,6 @@
                 
             } catch (error) {
                 window.showErrorToast('加载AI提供商失败:', error);
-                // 显示错误信息给用户
                 const providerSelect = document.getElementById('aiProvider');
                 if (providerSelect) {
                     providerSelect.innerHTML = '<option value="">加载失败，请刷新页面</option>';
@@ -268,39 +262,30 @@
             }
         }
 
-        // 根据提供商自动填充配置
         async function autoFillProviderConfig(provider) {
             if (!provider) return;
             
-            // 处理自定义提供商选项
             if (provider === 'custom') {
-                // 显示自定义提供商名称输入框
                 document.getElementById('customProviderContainer').classList.remove('hidden');
-                // 清空配置字段
                 document.getElementById('apiUrl').value = '';
                 document.getElementById('modelName').value = '';
                 document.getElementById('apiKey').value = '';
                 return;
             } else {
-                // 隐藏自定义提供商名称输入框
                 document.getElementById('customProviderContainer').classList.add('hidden');
             }
             
             try {
-                // 直接从全局设置中获取提供商配置，避免额外的后端调用
                 const settings = await invoke('get_ai_settings');
                 const providerConfigs = settings.provider_configs || {};
                 
                 if (providerConfigs[provider]) {
-                    // 使用已保存的配置
                     const providerConfig = providerConfigs[provider];
                     document.getElementById('apiUrl').value = providerConfig.api_url || '';
                     document.getElementById('modelName').value = providerConfig.model_name || '';
                     document.getElementById('apiKey').value = providerConfig.api_key || '';
                 } else {
-                    // 如果没有保存的配置，使用默认配置
                     const configResult = await invoke('get_provider_config', { provider });
-                    // 注意：get_provider_config 返回的是 [url, model] 数组
                     if (Array.isArray(configResult) && configResult.length >= 2) {
                         const [url, model] = configResult;
                         document.getElementById('apiUrl').value = url || '';
@@ -311,15 +296,12 @@
                     }
                 }
                 
-                // 同时更新当前选中的提供商
                 document.getElementById('aiProvider').value = provider;
                 
             } catch (error) {
                 window.showErrorToast('加载提供商配置失败:', error);
-                // 如果加载失败，使用默认配置
                 try {
                     const configResult = await invoke('get_provider_config', { provider });
-                    // 注意：get_provider_config 返回的是 [url, model] 数组
                     if (Array.isArray(configResult) && configResult.length >= 2) {
                         const [url, model] = configResult;
                         document.getElementById('apiUrl').value = url || '';
@@ -370,14 +352,11 @@
         try {
             const settings = await invoke('get_ai_settings');
 
-            // 剪切板设置
             document.getElementById('maxItems').value = settings.max_items || 50;
             document.getElementById('currentVersion').innerText = settings.version;
             document.getElementById('footer').innerText = `版本 ${settings.version} | © ${year} fuyun_tools`;
-            // AI设置
             document.getElementById('aiProvider').value = settings.ai_provider || '';
             
-            // 从provider_configs中获取当前提供商的配置
             const currentProvider = settings.ai_provider;
             if (currentProvider && settings.provider_configs && settings.provider_configs[currentProvider]) {
                 const providerConfig = settings.provider_configs[currentProvider];
@@ -385,7 +364,6 @@
                 document.getElementById('modelName').value = providerConfig.model_name || '';
                 document.getElementById('apiKey').value = providerConfig.api_key || '';
             } else {
-                // 如果没有配置，使用默认值
                 document.getElementById('apiUrl').value = '';
                 document.getElementById('modelName').value = '';
                 document.getElementById('apiKey').value = '';
@@ -421,35 +399,30 @@
             const modelName = document.getElementById('modelName').value;
             let apiKey = document.getElementById('apiKey').value;
 
-            // 处理自定义提供商 - 直接使用aiProvider参数
+            let selectedProvider;
             if (aiProvider === 'custom') {
                 const customProviderName = document.getElementById('customProviderName').value.trim();
                 if (!customProviderName) {
                     window.showErrorToast('请输入自定义提供商名称');
                     return;
                 }
-                // 对于自定义提供商，使用自定义名称作为提供商标识
                 selectedProvider = customProviderName;
             } else {
-                // 对于内置提供商，直接使用选择的值
                 selectedProvider = aiProvider;
             }
 
             try {
                 await invoke('save_app_settings', {
                     maxItems: maxItems,
-                    aiProvider: selectedProvider,  // 统一使用这个参数
+                    aiProvider: selectedProvider,
                     aiApiUrl: apiUrl,
                     aiModelName: modelName,
                     aiApiKey: apiKey
-                    // 移除 customProviderName 参数
                 });
                 
                 if (aiProvider === 'custom') {
                     window.showSuccessToast(`自定义提供商 '${selectedProvider}' 添加成功`);
-                    // 重新加载提供商列表
                     await loadAiProviders();
-                    // 选中新添加的提供商
                     document.getElementById('aiProvider').value = selectedProvider;
                 } else {
                     window.showSuccessToast('保存成功');
@@ -459,12 +432,10 @@
             }
         });
         document.getElementById('togglePassword').addEventListener('click',  () => {
-            // apiKey的展示与隐藏
             const apiKeyInput = document.getElementById('apiKey');
             apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
 
         })
-        // 测试连接
         document.getElementById('testBtn').addEventListener('click', async () => {
             const apiUrl = document.getElementById('apiUrl').value;
             const modelName = document.getElementById('modelName').value;

@@ -1,6 +1,6 @@
 use async_openai::{
     types::{
-        ChatCompletionRequestMessage, 
+        ChatCompletionRequestMessage,
         ChatCompletionRequestSystemMessageArgs,
         CreateChatCompletionRequestArgs
     },
@@ -276,10 +276,6 @@ impl AIClient {
             presence_penalty: Some(0.0),
             stream: Some(true),
         };
-        println!("prompt:{}", prompt);
-        println!("base_url:{}", self.config.base_url);
-        println!("model:{}", self.config.model);
-        println!("api_key:{}", self.config.api_key);
         self.chat_completion_stream(&request, callback).await
     }
 
