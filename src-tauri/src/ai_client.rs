@@ -1,6 +1,12 @@
-use reqwest;
+use async_openai::{
+    types::{
+        ChatCompletionRequestMessage, 
+        ChatCompletionRequestSystemMessageArgs,
+        CreateChatCompletionRequestArgs
+    },
+    Client,
+};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Message {
@@ -60,18 +66,59 @@ pub struct AIConfig {
 
 #[derive(Debug, Clone)]
 pub struct AIClient {
-    pub client: reqwest::Client,
+    pub client: Client<async_openai::config::OpenAIConfig>,
     pub config: AIConfig,
 }
 
 impl AIClient {
     pub fn new(config: AIConfig) -> Result<Self, String> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .map_err(|e| format!("HTTP客户端创建失败: {}", e))?;
+        let openai_config = async_openai::config::OpenAIConfig::new()
+            .with_api_key(&config.api_key)
+            .with_api_base(&config.base_url);
+        
+        let client = Client::with_config(openai_config);
 
         Ok(AIClient { client, config })
+    }
+
+    /// 将内部消息格式转换为OpenAI消息格式
+    fn convert_messages(&self, messages: &[Message]) -> Vec<ChatCompletionRequestMessage> {
+        messages
+            .iter()
+            .map(|msg| {
+                ChatCompletionRequestMessage::System(
+                    ChatCompletionRequestSystemMessageArgs::default()
+                        .content(msg.content.clone())
+                        .build()
+                        .unwrap()
+                )
+            })
+            .collect()
+    }
+
+    /// 构建OpenAI聊天完成请求
+    fn build_chat_request(
+        &self,
+        request: &ChatCompletionRequest,
+        stream: bool,
+    ) -> Result<async_openai::types::CreateChatCompletionRequest, String> {
+        let messages = self.convert_messages(&request.messages);
+        
+        let mut binding = CreateChatCompletionRequestArgs::default();
+        let mut builder = binding
+            .model(&request.model)
+            .messages(messages)
+            .temperature(request.temperature.unwrap_or(0.7))
+            .max_tokens(request.max_tokens.unwrap_or(1000))
+            .top_p(request.top_p.unwrap_or(1.0))
+            .frequency_penalty(request.frequency_penalty.unwrap_or(0.0))
+            .presence_penalty(request.presence_penalty.unwrap_or(0.0));
+            
+        if stream {
+            builder = builder.stream(true);
+        }
+        
+        builder.build().map_err(|e| format!("构建请求失败: {}", e))
     }
 
     /// 发送聊天完成请求
@@ -79,29 +126,40 @@ impl AIClient {
         &self,
         request: &ChatCompletionRequest,
     ) -> Result<ChatCompletionResponse, String> {
-        let url = format!(
-            "{}/chat/completions",
-            self.config.base_url.trim_end_matches('/')
-        );
-
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("api-key", self.config.api_key.parse().unwrap());
-        headers.insert("Content-Type", "application/json".parse().unwrap());
+        let openai_request = self.build_chat_request(request, false)?;
 
         let response = self
             .client
-            .post(&url)
-            .headers(headers)
-            .json(request)
-            .send()
+            .chat()
+            .create(openai_request)
             .await
             .map_err(|e| format!("请求发送失败: {}", e))?;
 
-        let response: ChatCompletionResponse = response
-            .json()
-            .await
-            .map_err(|e| format!("响应解析失败: {}", e))?;
-        Ok(response)
+        // 转换为我们的响应格式
+        let chat_response = ChatCompletionResponse {
+            id: Some(response.id.clone()),
+            choices: response
+                .choices
+                .into_iter()
+                .map(|choice| Choice {
+                    index: Some(choice.index as u64),
+                    message: Message {
+                        role: "assistant".to_string(),
+                        content: choice.message.content.unwrap_or_default(),
+                    },
+                    finish_reason: choice.finish_reason.map(|fr| format!("{:?}", fr)),
+                })
+                .collect(),
+            created: Some(response.created as u64),
+            model: Some(response.model),
+            usage: response.usage.map(|usage| Usage {
+                prompt_tokens: Some(usage.prompt_tokens),
+                completion_tokens: Some(usage.completion_tokens),
+                total_tokens: Some(usage.total_tokens),
+            }),
+        };
+
+        Ok(chat_response)
     }
 
     /// 流式发送聊天完成请求
@@ -113,94 +171,46 @@ impl AIClient {
     where
         F: FnMut(String) -> (),
     {
-        let mut stream_request = request.clone();
-        stream_request.stream = Some(true);
-        if stream_request.max_completion_tokens.is_none() {
-            stream_request.max_completion_tokens = stream_request.max_tokens;
-        }
+        let messages = self.convert_messages(&request.messages);
 
-        let url = format!(
-            "{}/chat/completions",
-            self.config.base_url.trim_end_matches('/')
-        );
+        let openai_request = CreateChatCompletionRequestArgs::default()
+            .model(&request.model)
+            .messages(messages)
+            .temperature(request.temperature.unwrap_or(0.7))
+            .max_tokens(request.max_tokens.unwrap_or(1000))
+            .top_p(request.top_p.unwrap_or(1.0))
+            .frequency_penalty(request.frequency_penalty.unwrap_or(0.0))
+            .presence_penalty(request.presence_penalty.unwrap_or(0.0))
+            .stream(true)
+            .build()
+            .map_err(|e| format!("构建请求失败: {}", e))?;
 
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("api-key", self.config.api_key.parse().unwrap());
-        headers.insert("Content-Type", "application/json".parse().unwrap());
-
-        let response = self
+        let mut stream = self
             .client
-            .post(&url)
-            .headers(headers)
-            .json(&stream_request)
-            .send()
+            .chat()
+            .create_stream(openai_request)
             .await
             .map_err(|e| format!("请求发送失败: {}", e))?;
 
-        // 检查HTTP响应状态
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "无法读取错误响应".to_string());
-            return Err(format!("HTTP错误 {}: {}", status, error_text));
-        }
-
-        let mut stream = response.bytes_stream();
-
         use futures_util::StreamExt;
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result.map_err(|e| format!("读取数据块失败: {}", e))?;
-            let text = String::from_utf8_lossy(&chunk);
-
-            for line in text.lines() {
-                if line.starts_with("data: ") {
-                    let data = &line[6..];
-                    if data == "[DONE]" {
-                        return Ok(());
-                    }
-
-                    if data.trim().is_empty() {
-                        continue;
-                    }
-
-                    match serde_json::from_str::<serde_json::Value>(data) {
-                        Ok(json_value) => {
-                            // 检查API错误
-                            if let Some(error_obj) = json_value.get("error") {
-                                let error_msg = error_obj.to_string();
-                                return Err(format!("API错误: {}", error_msg));
-                            }
-
-                            // 处理正常响应
-                            if let Some(choices) =
-                                json_value.get("choices").and_then(|c| c.as_array())
-                            {
-                                for choice in choices {
-                                    if let Some(delta) = choice.get("delta") {
-                                        if let Some(content) =
-                                            delta.get("content").and_then(|c| c.as_str())
-                                        {
-                                            if !content.is_empty() {
-                                                callback(content.to_string());
-                                            }
-                                        }
-                                    } else if let Some(finish_reason) =
-                                        choice.get("finish_reason").and_then(|fr| fr.as_str())
-                                    {
-                                        if finish_reason == "stop" {
-                                            return Ok(());
-                                        }
-                                    }
-                                }
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(response) => {
+                    for choice in response.choices {
+                        if let Some(content) = choice.delta.content {
+                            if !content.is_empty() {
+                                callback(content);
                             }
                         }
-                        Err(e) => {
-                            // 记录解析错误但继续处理，因为可能是不完整的JSON
-                            log::warn!("解析流式响应失败: {}, 数据: {}", e, data);
+                        if let Some(finish_reason) = choice.finish_reason {
+                            if format!("{:?}", finish_reason) == "Stop" {
+                                return Ok(());
+                            }
                         }
                     }
+                }
+                Err(e) => {
+                    return Err(format!("流式响应错误: {}", e));
                 }
             }
         }
@@ -266,7 +276,10 @@ impl AIClient {
             presence_penalty: Some(0.0),
             stream: Some(true),
         };
-
+        println!("prompt:{}", prompt);
+        println!("base_url:{}", self.config.base_url);
+        println!("model:{}", self.config.model);
+        println!("api_key:{}", self.config.api_key);
         self.chat_completion_stream(&request, callback).await
     }
 
@@ -281,33 +294,6 @@ impl AIClient {
                 log::error!("AI连接测试失败: {}", e);
                 Err(e)
             }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct AIClientError {
-    pub message: String,
-}
-
-impl std::fmt::Display for AIClientError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for AIClientError {}
-
-impl From<String> for AIClientError {
-    fn from(msg: String) -> Self {
-        AIClientError { message: msg }
-    }
-}
-
-impl From<&str> for AIClientError {
-    fn from(msg: &str) -> Self {
-        AIClientError {
-            message: msg.to_string(),
         }
     }
 }

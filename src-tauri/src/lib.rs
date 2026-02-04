@@ -5,7 +5,7 @@ pub mod mouse_listener;
 pub mod text_selection;
 pub mod utils;
 
-use crate::config::{CTRL_KEY, DEFAULT_HIDE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT};
+use crate::config::{AIProvider, ProviderConfig, CTRL_KEY, DEFAULT_HIDE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT, get_supported_providers};
 use crate::utils::get_logs_dir_path;
 use clipboard::ClipboardManager;
 use config::CLIPBOARD_POLL_INTERVAL;
@@ -166,7 +166,10 @@ pub fn run() {
             test_ai_connection,
             stream_translate_text,
             stream_explain_text,
-            check_for_updates
+            check_for_updates,
+            get_ai_providers,
+            get_provider_config,
+            load_provider_settings,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
@@ -768,6 +771,7 @@ async fn get_ai_settings() -> Result<AppSettingsData, String> {
 #[tauri::command]
 async fn save_ai_settings(
     max_items: usize,
+    ai_provider: AIProvider,
     ai_api_url: String,
     ai_model_name: String,
     ai_api_key: String,
@@ -776,19 +780,32 @@ async fn save_ai_settings(
 ) -> Result<(), String> {
     let version = app.package_info().version.to_string();
 
-    let mut settings = AppSettingsData {
-        version,
-        max_items,
-        ai_api_url,
-        ai_model_name,
-        ai_api_key,
-        encrypted_api_key: String::new(),
+    // 获取当前设置，保留现有的provider_configs
+    let mut settings = {
+        let state_guard = state.lock().unwrap();
+        state_guard.settings.clone()
     };
+    
+    // 更新基本设置
+    settings.version = version;
+    settings.max_items = max_items;
+    settings.ai_provider = ai_provider.clone();
 
-    // 加密API密钥
-    settings
-        .encrypt_api_key()
-        .map_err(|e| format!("加密API密钥失败: {}", e))?;
+    // 迁移旧数据
+    settings.migrate_from_old();
+    
+    // 创建或更新当前提供商的配置
+    let provider_key = ai_provider.to_string();
+    let config = settings.provider_configs.entry(provider_key).or_insert_with(|| {
+        ProviderConfig::default()
+    });
+    
+    config.api_url = ai_api_url;
+    config.model_name = ai_model_name;
+    config.api_key = ai_api_key;
+    
+    // 保存当前提供商的配置
+    settings.save_current_provider_config().map_err(|e| format!("保存提供商配置失败: {}", e))?;
 
     // 验证设置
     settings
@@ -938,34 +955,66 @@ async fn update_result_window(
 }
 
 async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> Result<AIClient, String> {
-    let current_config = {
+    // 先解密当前提供商的API密钥
+    {
+        let mut state_guard = state.lock().unwrap();
+        let settings = &mut state_guard.settings;
+        let provider_key = settings.ai_provider.to_string();
+        settings.decrypt_provider_api_key(&provider_key).map_err(|e| format!("解密API密钥失败: {}", e))?;
+    }
+    
+    // 然后检查缓存是否有效
+    let cache_valid = {
         let state_guard = state.lock().unwrap();
-        let settings = &state_guard.settings;
-        let cached_client_exists_and_valid = {
-            if let Some(ref client) = *state_guard.ai_client.lock().unwrap() {
-                settings.ai_api_key == client.config.api_key
-                    && settings.ai_api_url == client.config.base_url
-                    && settings.ai_model_name == client.config.model
+        let result = if let Some(ref client) = *state_guard.ai_client.lock().unwrap() {
+            if let Some(current_config) = state_guard.settings.get_current_provider_config() {
+                current_config.api_key == client.config.api_key
+                    && current_config.api_url == client.config.base_url
+                    && current_config.model_name == client.config.model
             } else {
                 false
             }
+        } else {
+            false
         };
+        result
+    };
 
-        if cached_client_exists_and_valid {
-            if let Some(client) = (*state_guard.ai_client.lock().unwrap()).as_ref() {
-                return Ok(client.clone());
+    // 如果缓存有效，返回缓存的客户端
+    if cache_valid {
+        let state_guard = state.lock().unwrap();
+        let client_result = if let Some(client) = (*state_guard.ai_client.lock().unwrap()).as_ref() {
+            Ok(client.clone())
+        } else {
+            // 这种情况理论上不会发生，但为了类型匹配需要处理
+            return Err("缓存客户端不存在".to_string());
+        };
+        return client_result;
+    }
+
+    // 否则创建新的客户端
+    let current_config = {
+        let state_guard = state.lock().unwrap();
+        if let Some(provider_config) = state_guard.settings.get_current_provider_config() {
+            AIConfig {
+                api_key: provider_config.api_key.clone(),
+                base_url: provider_config.api_url.clone(),
+                model: provider_config.model_name.clone(),
             }
-        }
-
-        AIConfig {
-            api_key: settings.ai_api_key.clone(),
-            base_url: settings.ai_api_url.clone(),
-            model: settings.ai_model_name.clone(),
+        } else {
+            // 使用当前提供商的默认配置
+            let (default_url, default_model) = state_guard.settings.ai_provider.get_default_config();
+            AIConfig {
+                api_key: String::new(),
+                base_url: default_url,
+                model: default_model,
+            }
         }
     };
 
     let client = AIClient::new(current_config).map_err(|e| format!("客户端初始化失败: {}", e))?;
 
+    // 更新缓存
     {
         let state_guard = state.lock().unwrap();
         *state_guard.ai_client.lock().unwrap() = Some(client.clone());
@@ -1072,4 +1121,42 @@ async fn stream_explain_text(
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+async fn get_ai_providers() -> Result<Vec<(AIProvider, String)>, String> {
+    let providers = get_supported_providers()
+        .into_iter()
+        .map(|(provider, name)| (provider, name.to_string()))
+        .collect();
+    Ok(providers)
+}
+
+#[tauri::command]
+async fn get_provider_config(provider: AIProvider) -> Result<(String, String), String> {
+    let (url, model) = provider.get_default_config();
+    Ok((url, model))
+}
+
+/// 加载指定提供商的设置
+#[tauri::command]
+async fn load_provider_settings(
+    provider: AIProvider,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<ProviderConfig, String> {
+    let mut settings = {
+        let state_guard = state.lock().unwrap();
+        state_guard.settings.clone()
+    };
+    
+    // 加载提供商配置
+    let config = settings.load_provider_config_to_current(&provider).map_err(|e| format!("加载提供商配置失败: {}", e))?;
+    
+    // 更新状态
+    {
+        let mut state_guard = state.lock().unwrap();
+        state_guard.settings = settings;
+    }
+    
+    Ok(config)
 }

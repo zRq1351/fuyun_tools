@@ -1,4 +1,7 @@
+use crate::config::AIProvider;
+use crate::config::ProviderConfig;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::thread;
@@ -15,12 +18,11 @@ pub fn get_default_app_version() -> String {
 pub struct AppSettingsData {
     pub version: String,
     pub max_items: usize,
-    pub ai_api_url: String,
-    pub ai_model_name: String,
-    #[serde(skip_serializing_if = "String::is_empty", default)]
-    pub ai_api_key: String,
     #[serde(default)]
-    pub encrypted_api_key: String,
+    pub ai_provider: AIProvider,
+    /// 每个AI提供商的独立配置
+    #[serde(default)]
+    pub provider_configs: HashMap<String, ProviderConfig>,
 }
 
 impl Default for AppSettingsData {
@@ -28,59 +30,111 @@ impl Default for AppSettingsData {
         Self {
             version: get_default_app_version(),
             max_items: 50,
-            ai_api_url: String::new(),
-            ai_model_name: String::new(),
-            ai_api_key: String::new(),
-            encrypted_api_key: String::new(),
+            ai_provider: AIProvider::Custom,
+            provider_configs: HashMap::new(),
         }
     }
 }
 
 impl AppSettingsData {
-    /// 加密API密钥
-    pub fn encrypt_api_key(&mut self) -> Result<(), String> {
-        if self.ai_api_key.is_empty() {
-            self.encrypted_api_key.clear();
-            return Ok(());
+    /// 为指定提供商加密API密钥
+    pub fn encrypt_provider_api_key(&mut self, provider_key: &str) -> Result<(), String> {
+        if let Some(config) = self.provider_configs.get_mut(provider_key) {
+            if config.api_key.is_empty() {
+                config.encrypted_api_key.clear();
+                return Ok(());
+            }
+
+            let encrypted: Vec<u8> = config
+                .api_key
+                .bytes()
+                .enumerate()
+                .map(|(i, b)| b ^ ENCRYPTION_KEY[i % ENCRYPTION_KEY.len()])
+                .collect();
+
+            use base64::engine::general_purpose::STANDARD;
+            use base64::Engine as _;
+            config.encrypted_api_key = STANDARD.encode(encrypted);
+            config.api_key.clear();
         }
-
-        let encrypted: Vec<u8> = self
-            .ai_api_key
-            .bytes()
-            .enumerate()
-            .map(|(i, b)| b ^ ENCRYPTION_KEY[i % ENCRYPTION_KEY.len()])
-            .collect();
-
-        use base64::engine::general_purpose::STANDARD;
-        use base64::Engine as _;
-        self.encrypted_api_key = STANDARD.encode(encrypted);
-        self.ai_api_key.clear();
         Ok(())
     }
 
-    /// 解密API密钥
-    pub fn decrypt_api_key(&mut self) -> Result<(), String> {
-        if self.encrypted_api_key.is_empty() {
-            self.ai_api_key.clear();
-            return Ok(());
+    /// 为指定提供商解密API密钥
+    pub fn decrypt_provider_api_key(&mut self, provider_key: &str) -> Result<(), String> {
+        if let Some(config) = self.provider_configs.get_mut(provider_key) {
+            if config.encrypted_api_key.is_empty() {
+                config.api_key.clear();
+                return Ok(());
+            }
+
+            use base64::engine::general_purpose::STANDARD;
+            use base64::Engine as _;
+            let encrypted = STANDARD
+                .decode(&config.encrypted_api_key)
+                .map_err(|e| format!("解密失败: {}", e))?;
+
+            let decrypted: Vec<u8> = encrypted
+                .iter()
+                .enumerate()
+                .map(|(i, &b)| b ^ ENCRYPTION_KEY[i % ENCRYPTION_KEY.len()])
+                .collect();
+
+            config.api_key =
+                String::from_utf8(decrypted).map_err(|e| format!("UTF-8解码失败: {}", e))?;
         }
-
-        // 使用新的base64 Engine API
-        use base64::engine::general_purpose::STANDARD;
-        use base64::Engine as _;
-        let encrypted = STANDARD
-            .decode(&self.encrypted_api_key)
-            .map_err(|e| format!("解密失败: {}", e))?;
-
-        let decrypted: Vec<u8> = encrypted
-            .iter()
-            .enumerate()
-            .map(|(i, &b)| b ^ ENCRYPTION_KEY[i % ENCRYPTION_KEY.len()])
-            .collect();
-
-        self.ai_api_key =
-            String::from_utf8(decrypted).map_err(|e| format!("UTF-8解码失败: {}", e))?;
         Ok(())
+    }
+
+    /// 保存当前提供商的配置
+    pub fn save_current_provider_config(&mut self) -> Result<(), String> {
+        let provider_key = self.ai_provider.to_string();
+        
+        // 加密该提供商的API密钥
+        self.encrypt_provider_api_key(&provider_key)?;
+        
+        Ok(())
+    }
+
+    /// 加载指定提供商的配置到当前设置
+    pub fn load_provider_config_to_current(&mut self, provider: &AIProvider) -> Result<ProviderConfig, String> {
+        let provider_key = provider.to_string();
+        
+        // 先获取配置的副本
+        let config_copy = if let Some(config) = self.provider_configs.get(&provider_key) {
+            config.clone()
+        } else {
+            let (default_url, default_model) = provider.get_default_config();
+            ProviderConfig {
+                api_url: default_url,
+                model_name: default_model,
+                api_key: String::new(),
+                encrypted_api_key: String::new(),
+            }
+        };
+        
+        // 解密该提供商的API密钥
+        self.decrypt_provider_api_key(&provider_key)?;
+        
+        // 更新当前提供商
+        self.ai_provider = provider.clone();
+        
+        // 如果是已存在的配置，需要重新获取解密后的版本
+        if self.provider_configs.contains_key(&provider_key) {
+            if let Some(decrypted_config) = self.provider_configs.get(&provider_key) {
+                Ok(decrypted_config.clone())
+            } else {
+                Ok(config_copy)
+            }
+        } else {
+            Ok(config_copy)
+        }
+    }
+
+    /// 获取当前提供商的配置信息
+    pub fn get_current_provider_config(&self) -> Option<&ProviderConfig> {
+        let provider_key = self.ai_provider.to_string();
+        self.provider_configs.get(&provider_key)
     }
 
     /// 验证设置有效性
@@ -89,31 +143,32 @@ impl AppSettingsData {
             return Err("max_items必须在1-1000之间".to_string());
         }
 
-        if !self.ai_api_url.is_empty() && !self.ai_api_url.starts_with("http") {
-            return Err("AI API URL必须以http或https开头".to_string());
-        }
-
         Ok(())
     }
+    
     /// 获取部分隐藏的API密钥（用于前端显示）
     pub fn get_masked_api_key(&self) -> String {
-        if self.ai_api_key.is_empty() {
-            return String::new();
+        if let Some(config) = self.get_current_provider_config() {
+            if config.api_key.is_empty() {
+                return String::new();
+            }
+
+            let key = &config.api_key;
+            let len = key.len();
+
+            if len <= 16 {
+                // 如果密钥长度小于等于16，全部显示为*
+                return "*".repeat(len.min(30));
+            }
+
+            // 前8个字符 + 30个* + 后8个字符
+            let prefix = &key[..8.min(len)];
+            let suffix = &key[len - 8.min(len - 8)..];
+
+            format!("{}{}{}", prefix, "*".repeat(30), suffix)
+        } else {
+            String::new()
         }
-
-        let key = &self.ai_api_key;
-        let len = key.len();
-
-        if len <= 16 {
-            // 如果密钥长度小于等于16，全部显示为*
-            return "*".repeat(len.min(30));
-        }
-
-        // 前8个字符 + 30个* + 后8个字符
-        let prefix = &key[..8.min(len)];
-        let suffix = &key[len - 8.min(len - 8)..];
-
-        format!("{}{}{}", prefix, "*".repeat(30), suffix)
     }
 
     /// 迁移旧版本设置
@@ -121,9 +176,6 @@ impl AppSettingsData {
         if let Ok(old_version) = self.version.parse::<u32>() {
             if old_version == 0 {
                 self.version = get_default_app_version();
-                if !self.ai_api_key.is_empty() && self.encrypted_api_key.is_empty() {
-                    let _ = self.encrypt_api_key();
-                }
             }
         } else if self.version != get_default_app_version() {
             self.version = get_default_app_version();
@@ -138,16 +190,14 @@ pub struct ClipboardHistoryData {
 
 /// 获取设置文件路径
 pub fn get_settings_file_path() -> PathBuf {
-    let mut settings_dir = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-    settings_dir.pop();
+    let mut settings_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     settings_dir.push("settings.json");
     settings_dir
 }
 
 /// 获取历史记录文件路径
 pub fn get_history_file_path() -> PathBuf {
-    let mut history_dir = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-    history_dir.pop();
+    let mut history_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     history_dir.push("history.json");
     history_dir
 }
@@ -179,8 +229,9 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
 
     settings.migrate_from_old();
 
-    // 解密API密钥以便前端使用
-    settings.decrypt_api_key()?;
+    // 解密当前提供商的API密钥
+    let provider_key = settings.ai_provider.to_string();
+    settings.decrypt_provider_api_key(&provider_key)?;
 
     Ok(settings)
 }
