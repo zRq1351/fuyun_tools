@@ -32,13 +32,11 @@ pub enum AIProvider {
     Qwen,
     #[serde(rename = "xiaomimimo")]
     XiaoMiMimo,
-    #[serde(rename = "custom")]
-    Custom,
 }
 
 impl Default for AIProvider {
     fn default() -> Self {
-        AIProvider::Custom
+        AIProvider::DeepSeek
     }
 }
 
@@ -48,7 +46,6 @@ impl std::fmt::Display for AIProvider {
             AIProvider::DeepSeek => "deepseek",
             AIProvider::Qwen => "qwen",
             AIProvider::XiaoMiMimo => "xiaomimimo",
-            AIProvider::Custom => "custom",
         };
         write!(f, "{}", s)
     }
@@ -70,19 +67,9 @@ impl AIProvider {
                 "https://api.xiaomimimo.com/v1".to_string(),
                 "mimo-v2-flash".to_string(),
             ),
-            AIProvider::Custom => (String::new(), String::new()),
         }
     }
 
-    /// 获取提供商的显示名称
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            AIProvider::DeepSeek => "DeepSeek",
-            AIProvider::Qwen => "通义千问",
-            AIProvider::XiaoMiMimo => "小米Mimo",
-            AIProvider::Custom => "自定义",
-        }
-    }
 }
 
 /// 单个AI提供商的配置
@@ -94,14 +81,4 @@ pub struct ProviderConfig {
     pub api_key: String,
     #[serde(default)]
     pub encrypted_api_key: String,
-}
-
-/// 获取所有支持的AI提供商列表
-pub fn get_supported_providers() -> Vec<(AIProvider, &'static str)> {
-    vec![
-        (AIProvider::DeepSeek, "DeepSeek"),
-        (AIProvider::Qwen, "通义千问"),
-        (AIProvider::XiaoMiMimo, "小米Mimo"),
-        (AIProvider::Custom, "自定义"),
-    ]
 }
