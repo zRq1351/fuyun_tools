@@ -6,8 +6,9 @@ use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
 
-use crate::{hide_selection_toolbar_impl, ClipboardManager};
-use crate::{AppState as SharedAppState};
+use crate::core::app_state::AppState as SharedAppState;
+use crate::ui::window_manager::{hide_selection_toolbar_impl, show_selection_toolbar_impl};
+use crate::utils::clipboard::ClipboardManager;
 
 #[derive(Debug, Clone, PartialEq)]
 enum MouseActionState {
@@ -81,7 +82,7 @@ impl MouseListener {
 
                             tauri::async_runtime::spawn(async move {
                                 log::info!("准备调用 show_selection_toolbar_impl");
-                                crate::show_selection_toolbar_impl(app_handle_clone, text_clone);
+                                show_selection_toolbar_impl(app_handle_clone, text_clone);
                                 log::info!("已调用 show_selection_toolbar_impl");
                             });
                         }
@@ -370,7 +371,7 @@ fn get_selected_text(
 ) -> Option<String> {
     log::info!("开始获取选中文本（模拟复制）");
 
-    use crate::text_selection::get_selected_text_with_app;
+    use crate::features::text_selection::get_selected_text_with_app;
     let result = get_selected_text_with_app(app_handle, clipboard_manager);
     reset_ctrl_key_state();
     result

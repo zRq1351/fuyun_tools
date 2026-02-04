@@ -69,7 +69,6 @@ impl AIProvider {
             ),
         }
     }
-
 }
 
 /// 单个AI提供商的配置

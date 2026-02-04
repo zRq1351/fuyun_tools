@@ -2,7 +2,7 @@ use async_openai::{
     types::{
         ChatCompletionRequestMessage,
         ChatCompletionRequestSystemMessageArgs,
-        CreateChatCompletionRequestArgs
+        CreateChatCompletionRequestArgs,
     },
     Client,
 };
@@ -75,7 +75,7 @@ impl AIClient {
         let openai_config = async_openai::config::OpenAIConfig::new()
             .with_api_key(&config.api_key)
             .with_api_base(&config.base_url);
-        
+
         let client = Client::with_config(openai_config);
 
         Ok(AIClient { client, config })
@@ -103,7 +103,7 @@ impl AIClient {
         stream: bool,
     ) -> Result<async_openai::types::CreateChatCompletionRequest, String> {
         let messages = self.convert_messages(&request.messages);
-        
+
         let mut binding = CreateChatCompletionRequestArgs::default();
         let mut builder = binding
             .model(&request.model)
@@ -113,11 +113,11 @@ impl AIClient {
             .top_p(request.top_p.unwrap_or(1.0))
             .frequency_penalty(request.frequency_penalty.unwrap_or(0.0))
             .presence_penalty(request.presence_penalty.unwrap_or(0.0));
-            
+
         if stream {
             builder = builder.stream(true);
         }
-        
+
         builder.build().map_err(|e| format!("构建请求失败: {}", e))
     }
 
