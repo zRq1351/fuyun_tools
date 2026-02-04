@@ -1,4 +1,3 @@
-use crate::config::AIProvider;
 use crate::config::ProviderConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -19,7 +18,7 @@ pub struct AppSettingsData {
     pub version: String,
     pub max_items: usize,
     #[serde(default)]
-    pub ai_provider: AIProvider,
+    pub ai_provider: String,  // 改为String类型以支持自定义提供商
     /// 每个AI提供商的独立配置
     #[serde(default)]
     pub provider_configs: HashMap<String, ProviderConfig>,
@@ -30,7 +29,7 @@ impl Default for AppSettingsData {
         Self {
             version: get_default_app_version(),
             max_items: 50,
-            ai_provider: AIProvider::Custom,
+            ai_provider: "deepseek".to_string(),  // 默认使用字符串
             provider_configs: HashMap::new(),
         }
     }
@@ -88,23 +87,44 @@ impl AppSettingsData {
 
     /// 保存当前提供商的配置
     pub fn save_current_provider_config(&mut self) -> Result<(), String> {
-        let provider_key = self.ai_provider.to_string();
-        
+        let provider_key = self.ai_provider.clone();  // 克隆避免借用冲突
+
         // 加密该提供商的API密钥
         self.encrypt_provider_api_key(&provider_key)?;
-        
+
         Ok(())
     }
 
     /// 加载指定提供商的配置到当前设置
-    pub fn load_provider_config_to_current(&mut self, provider: &AIProvider) -> Result<ProviderConfig, String> {
-        let provider_key = provider.to_string();
-        
+    pub fn load_provider_config_to_current(
+        &mut self,
+        provider_name: &str,  // 改为接受字符串参数
+    ) -> Result<ProviderConfig, String> {
+        let provider_key = provider_name.to_string();
+
         // 先获取配置的副本
         let config_copy = if let Some(config) = self.provider_configs.get(&provider_key) {
             config.clone()
         } else {
-            let (default_url, default_model) = provider.get_default_config();
+            // 对于内置提供商，获取默认配置
+            let (default_url, default_model) = match provider_name {
+                "deepseek" => (
+                    "https://api.deepseek.com/v1".to_string(),
+                    "deepseek-chat".to_string(),
+                ),
+                "qwen" => (
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
+                    "qwen-plus".to_string(),
+                ),
+                "xiaomimimo" => (
+                    "https://api.xiaomimimo.com/v1".to_string(),
+                    "mimo-v2-flash".to_string(),
+                ),
+                _ => {
+                    // 自定义提供商使用空默认值
+                    (String::new(), String::new())
+                }
+            };
             ProviderConfig {
                 api_url: default_url,
                 model_name: default_model,
@@ -112,13 +132,13 @@ impl AppSettingsData {
                 encrypted_api_key: String::new(),
             }
         };
-        
+
         // 解密该提供商的API密钥
         self.decrypt_provider_api_key(&provider_key)?;
-        
+
         // 更新当前提供商
-        self.ai_provider = provider.clone();
-        
+        self.ai_provider = provider_name.to_string();
+
         // 如果是已存在的配置，需要重新获取解密后的版本
         if self.provider_configs.contains_key(&provider_key) {
             if let Some(decrypted_config) = self.provider_configs.get(&provider_key) {
@@ -133,8 +153,7 @@ impl AppSettingsData {
 
     /// 获取当前提供商的配置信息
     pub fn get_current_provider_config(&self) -> Option<&ProviderConfig> {
-        let provider_key = self.ai_provider.to_string();
-        self.provider_configs.get(&provider_key)
+        self.provider_configs.get(&self.ai_provider)
     }
 
     /// 验证设置有效性
@@ -145,7 +164,7 @@ impl AppSettingsData {
 
         Ok(())
     }
-    
+
     /// 获取部分隐藏的API密钥（用于前端显示）
     pub fn get_masked_api_key(&self) -> String {
         if let Some(config) = self.get_current_provider_config() {
@@ -187,17 +206,18 @@ impl AppSettingsData {
 pub struct ClipboardHistoryData {
     pub items: Vec<String>,
 }
-
 /// 获取设置文件路径
 pub fn get_settings_file_path() -> PathBuf {
-    let mut settings_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut settings_dir = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    settings_dir.pop();
     settings_dir.push("settings.json");
     settings_dir
 }
 
 /// 获取历史记录文件路径
 pub fn get_history_file_path() -> PathBuf {
-    let mut history_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut history_dir = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    history_dir.pop();
     history_dir.push("history.json");
     history_dir
 }
@@ -216,10 +236,16 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
     let settings_path = get_settings_file_path();
 
     if !settings_path.exists() {
-        let json = serde_json::to_string_pretty(&AppSettingsData::default())
+        // 首次运行，初始化默认设置和内置提供商配置
+        let mut default_settings = AppSettingsData::default();
+
+        // 初始化内置提供商的默认配置
+        initialize_builtin_providers(&mut default_settings);
+
+        let json = serde_json::to_string_pretty(&default_settings)
             .map_err(|e| format!("序列化默认设置失败: {}", e))?;
         std::fs::write(&settings_path, json).map_err(|e| format!("创建设置文件失败: {}", e))?;
-        return Ok(AppSettingsData::default());
+        return Ok(default_settings);
     }
     let contents =
         std::fs::read_to_string(&settings_path).map_err(|e| format!("读取设置文件失败: {}", e))?;
@@ -287,4 +313,32 @@ pub fn load_history() -> Result<Vec<String>, String> {
 /// 获取日志目录路径
 pub fn get_logs_dir_path() -> PathBuf {
     PathBuf::from("logs")
+}
+
+/// 初始化内置提供商配置
+fn initialize_builtin_providers(settings: &mut AppSettingsData) {
+    use crate::config::{AIProvider, ProviderConfig};
+
+    // 为每个内置提供商创建默认配置
+    let builtin_providers = [
+        AIProvider::DeepSeek,
+        AIProvider::Qwen,
+        AIProvider::XiaoMiMimo,
+    ];
+
+    for provider in builtin_providers {
+        let provider_key = provider.to_string();
+        let (default_url, default_model) = provider.get_default_config();
+
+        let config = ProviderConfig {
+            api_url: default_url,
+            model_name: default_model,
+            api_key: String::new(),
+            encrypted_api_key: String::new(),
+        };
+
+        settings.provider_configs.insert(provider_key, config);
+    }
+
+    log::info!("已初始化内置AI提供商配置");
 }

@@ -5,7 +5,7 @@ pub mod mouse_listener;
 pub mod text_selection;
 pub mod utils;
 
-use crate::config::{AIProvider, ProviderConfig, CTRL_KEY, DEFAULT_HIDE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT, get_supported_providers};
+use crate::config::{AIProvider, ProviderConfig, CTRL_KEY, DEFAULT_HIDE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT};
 use crate::utils::get_logs_dir_path;
 use clipboard::ClipboardManager;
 use config::CLIPBOARD_POLL_INTERVAL;
@@ -162,14 +162,13 @@ pub fn run() {
             selection_toolbar_blur,
             copy_text,
             get_ai_settings,
-            save_ai_settings,
+            save_app_settings,  // 替换 save_ai_settings 和 add_custom_provider
             test_ai_connection,
             stream_translate_text,
             stream_explain_text,
             check_for_updates,
-            get_ai_providers,
             get_provider_config,
-            load_provider_settings,
+            get_all_configured_providers,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
@@ -769,9 +768,9 @@ async fn get_ai_settings() -> Result<AppSettingsData, String> {
 }
 
 #[tauri::command]
-async fn save_ai_settings(
+async fn save_app_settings(
     max_items: usize,
-    ai_provider: AIProvider,
+    ai_provider: String,  // 提供商名称（内置或自定义）
     ai_api_url: String,
     ai_model_name: String,
     ai_api_key: String,
@@ -789,14 +788,20 @@ async fn save_ai_settings(
     // 更新基本设置
     settings.version = version;
     settings.max_items = max_items;
+
+    // 基本验证 - 只检查是否为空
+    if ai_provider.is_empty() {
+        return Err("提供商名称不能为空".to_string());
+    }
+
+    // 更新当前提供商 - 用户保存哪个提供商，就设为当前提供商
     settings.ai_provider = ai_provider.clone();
 
     // 迁移旧数据
     settings.migrate_from_old();
     
-    // 创建或更新当前提供商的配置
-    let provider_key = ai_provider.to_string();
-    let config = settings.provider_configs.entry(provider_key).or_insert_with(|| {
+    // 创建或更新提供商配置
+    let config = settings.provider_configs.entry(ai_provider.clone()).or_insert_with(|| {
         ProviderConfig::default()
     });
     
@@ -819,6 +824,7 @@ async fn save_ai_settings(
         state_guard.settings = settings;
     }
 
+    log::info!("设置保存成功: max_items={}, provider={}", max_items, ai_provider);
     Ok(())
 }
 
@@ -955,29 +961,22 @@ async fn update_result_window(
 }
 
 async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> Result<AIClient, String> {
-    // 先解密当前提供商的API密钥
-    {
-        let mut state_guard = state.lock().unwrap();
-        let settings = &mut state_guard.settings;
-        let provider_key = settings.ai_provider.to_string();
-        settings.decrypt_provider_api_key(&provider_key).map_err(|e| format!("解密API密钥失败: {}", e))?;
-    }
-    
-    // 然后检查缓存是否有效
+    // 首先检查是否有缓存的有效客户端
     let cache_valid = {
         let state_guard = state.lock().unwrap();
-        let result = if let Some(ref client) = *state_guard.ai_client.lock().unwrap() {
-            if let Some(current_config) = state_guard.settings.get_current_provider_config() {
-                current_config.api_key == client.config.api_key
-                    && current_config.api_url == client.config.base_url
-                    && current_config.model_name == client.config.model
+        let cached_client = (*state_guard.ai_client.lock().unwrap()).clone();
+        if let Some(client) = cached_client.as_ref() {
+            // 检查缓存的客户端是否与当前设置匹配
+            if let Some(provider_config) = state_guard.settings.get_current_provider_config() {
+                client.config.api_key == provider_config.api_key
+                    && client.config.base_url == provider_config.api_url
+                    && client.config.model == provider_config.model_name
             } else {
                 false
             }
         } else {
             false
-        };
-        result
+        }
     };
 
     // 如果缓存有效，返回缓存的客户端
@@ -1003,7 +1002,24 @@ async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> Result<AI
             }
         } else {
             // 使用当前提供商的默认配置
-            let (default_url, default_model) = state_guard.settings.ai_provider.get_default_config();
+            let (default_url, default_model) = match state_guard.settings.ai_provider.as_str() {
+                "deepseek" => (
+                    "https://api.deepseek.com/v1".to_string(),
+                    "deepseek-chat".to_string(),
+                ),
+                "qwen" => (
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
+                    "qwen-plus".to_string(),
+                ),
+                "xiaomimimo" => (
+                    "https://api.xiaomimimo.com/v1".to_string(),
+                    "mimo-v2-flash".to_string(),
+                ),
+                _ => {
+                    // 自定义提供商或其他情况使用空值
+                    (String::new(), String::new())
+                }
+            };
             AIConfig {
                 api_key: String::new(),
                 base_url: default_url,
@@ -1124,39 +1140,45 @@ async fn stream_explain_text(
 }
 
 #[tauri::command]
-async fn get_ai_providers() -> Result<Vec<(AIProvider, String)>, String> {
-    let providers = get_supported_providers()
-        .into_iter()
-        .map(|(provider, name)| (provider, name.to_string()))
-        .collect();
-    Ok(providers)
-}
-
-#[tauri::command]
 async fn get_provider_config(provider: AIProvider) -> Result<(String, String), String> {
     let (url, model) = provider.get_default_config();
     Ok((url, model))
 }
 
-/// 加载指定提供商的设置
+/// 获取所有已配置的提供商列表（包括自定义提供商）
 #[tauri::command]
-async fn load_provider_settings(
-    provider: AIProvider,
+async fn get_all_configured_providers(
     state: State<'_, Arc<Mutex<AppState>>>,
-) -> Result<ProviderConfig, String> {
-    let mut settings = {
-        let state_guard = state.lock().unwrap();
-        state_guard.settings.clone()
-    };
+) -> Result<Vec<(String, String)>, String> {
+    let state_guard = state.lock().unwrap();
+    let settings = &state_guard.settings;
     
-    // 加载提供商配置
-    let config = settings.load_provider_config_to_current(&provider).map_err(|e| format!("加载提供商配置失败: {}", e))?;
+    let mut providers: Vec<(String, String)> = Vec::new();
     
-    // 更新状态
-    {
-        let mut state_guard = state.lock().unwrap();
-        state_guard.settings = settings;
+    // 添加内置提供商（硬编码英文标识符）
+    let builtin_providers = vec![
+        ("deepseek".to_string(), "deepseek".to_string()),
+        ("qwen".to_string(), "qwen".to_string()),
+        ("xiaomimimo".to_string(), "xiaomimimo".to_string()),
+    ];
+    
+    for (provider_key, display_name) in &builtin_providers {
+        providers.push((provider_key.clone(), display_name.clone()));
     }
     
-    Ok(config)
+    // 添加自定义提供商（从provider_configs中提取）
+    for (provider_key, _) in &settings.provider_configs {
+        // 检查是否已经是内置提供商
+        let is_builtin = builtin_providers
+            .iter()
+            .any(|(builtin_key, _)| builtin_key == provider_key);
+        
+        if !is_builtin {
+            // 对于自定义提供商，显示名称就用键名
+            providers.push((provider_key.clone(), provider_key.clone()));
+        }
+    }
+    
+    Ok(providers)
 }
+
