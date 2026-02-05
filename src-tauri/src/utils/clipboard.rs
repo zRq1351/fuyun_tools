@@ -88,14 +88,23 @@ impl ClipboardManager {
         if let Some((replace_index, comparison)) =
             find_best_replacement_candidate(&content, &history, similarity_threshold)
         {
-            log::info!("检测到相似版本，正在替换: {}", comparison.reason);
+            log::info!("检测到相似版本，正在处理: {}", comparison.reason);
             log::info!("相似度: {:.4}, 完整性: {:?}", 
                       comparison.similarity_score, 
                       comparison.new_completeness);
-            history[replace_index] = content.clone();
-            let item = history.remove(replace_index);
-            history.insert(0, item);
-            log::info!("已用完整版本替换不完整版本");
+
+            if comparison.reason.contains("子集") || comparison.reason.contains("找回完整版本") {
+                // 如果是子集关系或找回完整版本，将完整版本移动到最前面
+                let complete_version = history.remove(replace_index);
+                history.insert(0, complete_version);
+                log::info!("已将完整版本移动到最前面");
+            } else {
+                // 正常替换逻辑
+                history[replace_index] = content.clone();
+                let item = history.remove(replace_index);
+                history.insert(0, item);
+                log::info!("已用完整版本替换不完整版本");
+            }
         } else {
             log::debug!("未找到相似版本，直接添加");
             history.retain(|item| item != &content);
