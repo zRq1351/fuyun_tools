@@ -27,7 +27,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
-          releaseBody: '-修复外链无法打开问题
-                        -使用自定义toast'
+          releaseBody: '有新版本发布，点击确认更新'
           releaseDraft: false
           prerelease: false
