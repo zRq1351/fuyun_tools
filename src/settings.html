@@ -541,7 +541,8 @@
                 document.getElementById('updateResult').style.display = 'none';
                 document.getElementById('updateProgress').classList.remove('hidden');
 
-                resetUpdateProgress();
+                document.getElementById('statusText').textContent = '正在检查更新...';
+                document.getElementById('updateActionButtons').classList.add('hidden');
 
                 const hasUpdate = await invoke('check_for_updates');
 
@@ -565,12 +566,6 @@
         document.getElementById('closeUpdateBtn').addEventListener('click', () => {
             hideUpdateProgress();
         });
-
-
-        function resetUpdateProgress() {
-            document.getElementById('statusText').textContent = '正在检查更新...';
-            document.getElementById('updateActionButtons').classList.add('hidden');
-        }
 
 
         function hideUpdateProgress() {
