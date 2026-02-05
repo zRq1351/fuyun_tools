@@ -1,6 +1,6 @@
 use crate::core::app_state::{AppState, TrayMenuItems};
 use crate::ui::window_manager::cleanup_enigo_instance;
-use crate::utils::utils::get_logs_dir_path;
+use crate::utils::utils_helpers::get_logs_dir_path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;

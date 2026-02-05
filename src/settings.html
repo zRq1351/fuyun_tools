@@ -81,7 +81,7 @@
                         <div class="input-group">
                             <input class="form-input input-with-icon" id="toggleShortcut"
                                    placeholder="例如: Ctrl+Shift+K"
-                                   readonly type="text">
+                                   type="text">
                             <span class="test-icon" id="editShortcutBtn"><i class="fas fa-edit"></i></span>
                         </div>
                         <span class="form-hint">点击编辑按钮来自定义打开剪切板窗口的快捷键</span>
@@ -398,6 +398,7 @@
             document.getElementById('currentVersion').innerText = settings.version;
             document.getElementById('footer').innerText = `版本 ${settings.version} | © ${year} fuyun_tools`;
             document.getElementById('aiProvider').value = settings.ai_provider || '';
+            document.getElementById('toggleShortcut').value = settings.hot_key || '';
             
             const currentProvider = settings.ai_provider;
             if (currentProvider && settings.provider_configs && settings.provider_configs[currentProvider]) {
@@ -440,6 +441,7 @@
             const apiUrl = document.getElementById('apiUrl').value;
             const modelName = document.getElementById('modelName').value;
             let apiKey = document.getElementById('apiKey').value;
+            const hotkey = document.getElementById('toggleShortcut').value;
 
             let selectedProvider;
             if (aiProvider === 'custom') {
@@ -459,7 +461,8 @@
                     aiProvider: selectedProvider,
                     aiApiUrl: apiUrl,
                     aiModelName: modelName,
-                    aiApiKey: apiKey
+                    aiApiKey: apiKey,
+                    hotKey: hotkey
                 });
                 
                 if (aiProvider === 'custom') {
@@ -625,23 +628,6 @@
         let recordedShortcut = '';
         let currentShortcut = '';
 
-        async function loadCurrentShortcut() {
-            try {
-                // 使用默认快捷键
-                const defaultShortcut = 'Ctrl+Shift+K';
-                document.getElementById('toggleShortcut').value = defaultShortcut;
-                recordedShortcut = defaultShortcut;
-                currentShortcut = defaultShortcut;
-            } catch (error) {
-                console.error('加载当前快捷键失败:', error);
-                // 使用默认值
-                const defaultShortcut = 'Ctrl+Shift+K';
-                document.getElementById('toggleShortcut').value = defaultShortcut;
-                recordedShortcut = defaultShortcut;
-                currentShortcut = defaultShortcut;
-            }
-        }
-
         async function startRecording() {
             try {
                 // 防止重复点击
@@ -705,11 +691,9 @@
             try {
                 if (!isRecording) return;
 
-                // 阻止默认行为
                 event.preventDefault();
                 event.stopPropagation();
 
-                // 防止重复处理同一事件
                 if (event.repeat) return;
 
                 const modifiers = [];
@@ -791,22 +775,6 @@
             }
         }
 
-        async function saveShortcut() {
-            if (!recordedShortcut || recordedShortcut === currentShortcut) {
-                return;
-            }
-
-            try {
-                // 保存到本地存储
-                localStorage.setItem('customToggleShortcut', recordedShortcut);
-                currentShortcut = recordedShortcut;
-                window.showSuccessToast('快捷键保存成功');
-                console.log('快捷键已保存到本地存储:', recordedShortcut);
-            } catch (error) {
-                window.showErrorToast('保存失败: ' + error);
-            }
-        }
-
         // 事件监听器
         document.getElementById('editShortcutBtn').addEventListener('click', async (event) => {
             event.preventDefault();
@@ -833,26 +801,6 @@
                 stopRecording();
             }
         });
-
-        const originalSaveHandler = document.getElementById('saveBtn').onclick;
-        document.getElementById('saveBtn').addEventListener('click', async () => {
-            if (originalSaveHandler) {
-                originalSaveHandler.call(document.getElementById('saveBtn'));
-            }
-
-            await saveShortcut();
-        });
-
-        await loadCurrentShortcut();
-
-        const savedShortcut = localStorage.getItem('customToggleShortcut');
-        if (savedShortcut) {
-            currentShortcut = savedShortcut;
-            recordedShortcut = savedShortcut;
-            document.getElementById('toggleShortcut').value = savedShortcut;
-            console.log('从本地存储加载快捷键:', savedShortcut);
-        }
-
     });
 </script>
 </body>
