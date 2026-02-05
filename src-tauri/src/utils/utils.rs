@@ -489,32 +489,138 @@ pub fn detect_text_completeness(text: &str, reference_text: &str) -> TextComplet
     }
 }
 
+/// 统计文本中标点符号数量
+fn count_punctuation(text: &str) -> usize {
+    let punctuation_chars = ['。', '！', '？', '.', '!', '?', '；', ';', '，', ','];
+    text.chars().filter(|&c| punctuation_chars.contains(&c)).count()
+}
+
+/// 判断文本是否具有更完整的句子结构
+fn is_more_complete_sentence(new_text: &str, old_text: &str) -> bool {
+    // 检查新文本是否有句子结束标志而旧文本没有
+    let new_ends_with_period = has_sentence_endings(new_text);
+    let old_ends_with_period = has_sentence_endings(old_text);
+
+    new_ends_with_period && !old_ends_with_period
+}
+
+/// 判断文本是否以句子结束符结尾
+fn has_sentence_endings(text: &str) -> bool {
+    let ending_chars = ['。', '！', '？', '.', '!', '?'];
+    text.trim_end().chars().last().map_or(false, |c| ending_chars.contains(&c))
+}
+
+/// 判断文本是否像是被截断的句子
+fn is_truncated_sentence(text: &str) -> bool {
+    let trimmed = text.trim_end();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // 如果文本以某些字符结尾，可能是被截断的
+    let last_char = trimmed.chars().last().unwrap();
+    let truncation_indicators = ['，', ',', '、', '(', '[', '{', '"', '\''];
+
+    truncation_indicators.contains(&last_char) ||
+        // 或者以常见词汇结尾但没有句子结束符
+        (!has_sentence_endings(trimmed) &&
+            (trimmed.ends_with("但非") ||
+                trimmed.ends_with("但是") ||
+                trimmed.ends_with("而且") ||
+                trimmed.ends_with("并且")))
+}
+
+/// 判断new_text是否是old_text的子集（前缀或后缀）
+fn is_subset_of(new_text: &str, old_text: &str) -> bool {
+    if new_text.is_empty() || old_text.is_empty() {
+        return false;
+    }
+
+    // 检查是否是前缀
+    if old_text.starts_with(new_text) {
+        return true;
+    }
+
+    // 检查是否是后缀
+    if old_text.ends_with(new_text) {
+        return true;
+    }
+
+    // 检查是否包含在中间
+    if old_text.contains(new_text) && new_text.len() < old_text.len() {
+        return true;
+    }
+
+    false
+}
+
 /// 比较两个版本并决定是否应该替换
 pub fn compare_versions(old_text: &str, new_text: &str, similarity_threshold: f64) -> VersionComparison {
     let similarity = calculate_text_similarity(old_text, new_text);
     let completeness = detect_text_completeness(new_text, old_text);
 
+    log::debug!("版本对比 - 旧:'{}' 新:'{}'", old_text, new_text);
+    log::debug!("相似度: {:.4}, 完整性: {:?}", similarity, completeness);
+
     let (should_replace, reason) = if similarity >= similarity_threshold {
         match completeness {
             TextCompleteness::Complete => {
+                // 改进的完整版本判断逻辑
                 if new_text.len() > old_text.len() {
                     (true, "新版本更完整，长度更长".to_string())
                 } else if new_text.len() == old_text.len() {
-                    (false, "版本相同，无需替换".to_string())
+                    // 即使长度相同，如果新版本包含更多标点符号或完整句子结构，也应该替换
+                    let new_has_more_punctuation = count_punctuation(new_text) > count_punctuation(old_text);
+                    let new_is_more_complete = is_more_complete_sentence(new_text, old_text);
+
+                    if new_has_more_punctuation || new_is_more_complete {
+                        (true, "新版本句子结构更完整".to_string())
+                    } else {
+                        (false, "版本相同，无需替换".to_string())
+                    }
                 } else {
-                    (false, "新版本较短，保持原版本".to_string())
+                    // 新版本更短的情况 - 检查是否是已有完整版本的子集
+                    if is_subset_of(new_text, old_text) {
+                        (true, "新版本是已有完整版本的子集，移动完整版本到前面".to_string())
+                    } else {
+                        // 即使新版本稍短，但如果它更完整（如句子结束符），也可以考虑替换
+                        let old_is_truncated = is_truncated_sentence(old_text);
+                        let new_is_complete = has_sentence_endings(new_text);
+
+                        if old_is_truncated && new_is_complete {
+                            (true, "替换不完整的截断版本".to_string())
+                        } else {
+                            (false, "新版本较短，保持原版本".to_string())
+                        }
+                    }
                 }
             },
             TextCompleteness::MissingPrefix | TextCompleteness::MissingSuffix | TextCompleteness::MissingBoth => {
-                (false, "新版本内容不完整，保持原版本".to_string())
+                // 对于不完整版本，检查是否存在对应的完整版本
+                if new_text.len() < old_text.len() && is_subset_of(new_text, old_text) {
+                    // 新版本是旧版本的子集，说明是找回完整版本的情况
+                    (true, "找回完整版本，将完整版本移动到前面".to_string())
+                } else if new_text.len() > old_text.len() && has_sentence_endings(new_text) {
+                    // 新版本更长且有句子结束符
+                    (true, "新版本虽被标记为不完整但实际更完整".to_string())
+                } else {
+                    (false, "新版本内容不完整，保持原版本".to_string())
+                }
             },
             TextCompleteness::Unknown => {
-                (false, "无法确定版本关系，保持原版本".to_string())
+                // 当无法确定时，基于长度和句子完整性做保守判断
+                if new_text.len() > old_text.len() && has_sentence_endings(new_text) && !has_sentence_endings(old_text) {
+                    (true, "基于长度和句子完整性判断，新版本更完整".to_string())
+                } else {
+                    (false, "无法确定版本关系，保持原版本".to_string())
+                }
             }
         }
     } else {
         (false, "文本相似度低于阈值，视为不同内容".to_string())
     };
+
+    log::debug!("替换决策: {}, 原因: {}", should_replace, reason);
 
     VersionComparison {
         similarity_score: similarity,
@@ -544,7 +650,8 @@ pub fn find_best_replacement_candidate(
                     // 选择相似度更高或更完整的版本
                     if comparison.similarity_score > existing_comparison.similarity_score ||
                         (comparison.similarity_score == existing_comparison.similarity_score &&
-                            matches!(comparison.new_completeness, TextCompleteness::Complete)) {
+                            (matches!(comparison.new_completeness, TextCompleteness::Complete) ||
+                                comparison.reason.contains("更完整"))) {
                         best_candidate = Some((index, comparison));
                     }
                 }
