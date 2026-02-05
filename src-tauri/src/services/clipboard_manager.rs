@@ -67,15 +67,27 @@ pub fn add_to_clipboard_history(content: String, state: Arc<Mutex<AppState>>) {
         return;
     }
 
-    {
+    // 优化：先检查是否应该跳过，减少不必要的锁操作
+    let should_skip = {
         let state_guard = state.lock().unwrap();
-        if state_guard.is_processing_selection {
-            log::debug!("正在进行划词操作，跳过添加到历史记录");
-            return;
-        }
+        state_guard.is_processing_selection
+    };
+
+    if should_skip {
+        log::debug!("正在进行划词操作，跳过添加到历史记录");
+        return;
     }
 
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.clipboard_manager.lock().unwrap();
-    manager.add_to_history(content);
+    // 优化：分离锁操作，先获取管理器引用，然后释放AppState锁
+    let manager_result = {
+        let state_guard = state.lock().unwrap();
+        // 克隆Arc引用，这样可以在释放锁后仍然使用
+        state_guard.clipboard_manager.clone()
+    };
+
+    // 在单独的作用域中使用manager锁
+    {
+        let manager = manager_result.lock().unwrap();
+        manager.add_to_history(content);
+    }
 }

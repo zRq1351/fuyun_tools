@@ -27,13 +27,14 @@ pub async fn select_and_fill(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<String, String> {
-    let item = {
+    // 获取要选择的项目内容
+    let item_content = {
         let state_guard = state.lock().unwrap();
         let manager = state_guard.clipboard_manager.lock().unwrap();
         let history = manager.get_history();
 
         if let Some(item) = history.get(index) {
-            Some(item.clone())
+            item.clone()
         } else {
             let error_msg = format!("索引 {} 超出范围", index);
             log::info!("{}", error_msg);
@@ -41,48 +42,67 @@ pub async fn select_and_fill(
         }
     };
 
+    // 设置处理状态
     {
         let mut state_guard = state.lock().unwrap();
         state_guard.is_updating_clipboard = true;
         state_guard.is_processing_selection = true;
     }
 
-    let item_content = item.as_ref().unwrap().clone();
+    // 尝试设置剪贴板内容
     let result = {
         let state_guard = state.lock().unwrap();
         let manager = state_guard.clipboard_manager.lock().unwrap();
         manager.set_clipboard_content(&app, &item_content)
     };
 
+    // 清理状态 - 确保无论如何都会清理
     {
         let mut state_guard = state.lock().unwrap();
         state_guard.is_updating_clipboard = false;
+        // 注意：is_processing_selection将在成功路径中保持为true直到粘贴完成
     }
 
-    let app_handle = app.clone();
-    let state_clone = state.inner().clone();
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(50));
-        hide_clipboard_window(app_handle, state_clone.clone());
-    });
     match result {
         Ok(_) => {
-            let value = item_content.clone();
+            log::info!("成功复制内容到剪贴板");
+
+            // 隐藏窗口
+            let app_handle = app.clone();
+            let state_clone = state.inner().clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(50));
+                hide_clipboard_window(app_handle, state_clone.clone());
+            });
+
+            // 模拟粘贴操作
+            let app_handle = app.clone();
             thread::spawn(move || {
                 thread::sleep(Duration::from_millis(100));
                 crate::ui::window_manager::simulate_paste();
+
+                // 在粘贴完成后最终清理状态
+                if let Some(state_guard) = app_handle.try_state::<Arc<Mutex<SharedAppState>>>() {
+                    if let Ok(mut guard) = state_guard.lock() {
+                        guard.is_processing_selection = false;
+                        log::debug!("已完成粘贴操作，清理处理状态");
+                    }
+                }
             });
 
-            Ok(value)
+            Ok(item_content)
         }
         Err(e) => {
             let error_msg = format!("复制到剪贴板失败: {}", e);
-            log::info!("{}", error_msg);
+            log::error!("{}", error_msg);
+
+            // 在错误路径中也要清理所有状态
             {
-                let state_guard = state.lock().unwrap();
-                let mut state_guard = state_guard;
+                let mut state_guard = state.lock().unwrap();
                 state_guard.is_processing_selection = false;
+                log::debug!("复制失败，已清理处理状态");
             }
+
             Err(error_msg)
         }
     }

@@ -1,4 +1,3 @@
-// toast.js - 安全兼容 Tauri 生产环境的 Toast 组件
 class Toast {
     constructor() {
         this.container = null;
@@ -36,7 +35,6 @@ class Toast {
         document.body.appendChild(this.container);
         this.initialized = true;
 
-        // 处理初始化前排队的消息
         while (this.initQueue.length > 0) {
             const { message, type, duration } = this.initQueue.shift();
             this.show(message, type, duration);
@@ -78,7 +76,6 @@ class Toast {
 
         this.container.appendChild(toast);
 
-        // 自动隐藏
         if (duration > 0) {
             setTimeout(() => this.hide(toast), duration);
         }
@@ -89,7 +86,6 @@ class Toast {
     hide(toast) {
         if (!toast || !toast.parentNode) return;
 
-        // 触发退出动画
         toast.style.animation = 'slideOut 0.3s cubic-bezier(0.68, -0.55, 0.27, 1.55) forwards';
         setTimeout(() => {
             if (toast.parentNode === this.container) {
@@ -125,13 +121,11 @@ class Toast {
     }
 }
 
-// 全局单例管理
 let toastInstance = null;
 
 function getToastInstance() {
     if (!toastInstance) {
         toastInstance = new Toast();
-        // 延迟初始化，避免 DOM 未就绪
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => toastInstance.init());
         } else {
@@ -141,7 +135,6 @@ function getToastInstance() {
     return toastInstance;
 }
 
-// 全局函数导出
 window.showToast = (message, type = 'success', duration = 3000) =>
     getToastInstance().show(message, type, duration);
 
@@ -157,7 +150,6 @@ window.showWarningToast = (message, duration = 3000) =>
 window.showInfoToast = (message, duration = 3000) =>
     getToastInstance().info(message, duration);
 
-// 兼容旧调用方式
 window.Toast = {
     show: window.showToast,
     success: window.showSuccessToast,

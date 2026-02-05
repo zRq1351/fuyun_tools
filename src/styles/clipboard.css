@@ -14,7 +14,6 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: transparent;
     user-select: none;
-    /* 防止滚动条出现 */
     overflow: hidden;
 }
 
@@ -174,14 +173,13 @@ body {
 .clipboard-item:hover .delete-btn {
     opacity: 0.9;
 }
-/* 删除动画 */
+
 .clipboard-item.deleting {
     opacity: 0;
     transform: translateX(-100%);
     transition: all 0.3s ease-in-out;
 }
 
-/* 移动动画 */
 .clipboard-item.moving-left {
     transform: translateX(-262px);
     transition: transform 0.3s ease-in-out;

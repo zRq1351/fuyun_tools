@@ -4,6 +4,9 @@ pub mod ui;
 pub mod utils;
 pub mod features;
 
+#[cfg(test)]
+mod functional_tests;
+
 use crate::core::app_state::AppState;
 use crate::core::config::{DEFAULT_HIDE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT};
 use crate::services::ai_services::{stream_explain_text, stream_translate_text};
@@ -16,9 +19,30 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+/// 根据编译环境获取日志级别
+fn get_log_level() -> log::LevelFilter {
+    // 根据编译环境自动设置日志级别
+    if cfg!(debug_assertions) {
+        // 开发环境使用Debug级别
+        log::LevelFilter::Debug
+    } else {
+        // 生产环境使用Warn级别
+        log::LevelFilter::Warn
+    }
+}
+
 /// 启动划词选择监听器
 pub fn start_text_selection_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     features::mouse_listener::MouseListener::start_mouse_listener(app_handle, state);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_basic_compilation() {
+        // 基本编译测试
+        assert!(true);
+    }
 }
 
 pub fn run() {
@@ -102,7 +126,7 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(
             tauri_plugin_log::Builder::default()
-                .level(log::LevelFilter::Warn)
+                .level(get_log_level())
                 .target(tauri_plugin_log::Target::new(
                     tauri_plugin_log::TargetKind::Folder {
                         path: get_logs_dir_path(),
