@@ -51,7 +51,7 @@ body {
 
 .content::after {
     content: "";
-    flex: 0 0 480px;
+    flex: 0 0 742px;
     height: 1px;
 }
 
