@@ -64,7 +64,7 @@
                         <span class="form-hint">选择AI服务提供商</span>
                     </div>
 
-                    <!-- 自定义提供商名称输入框 -->
+
                     <div class="form-group full-width hidden" id="customProviderContainer">
                         <label class="form-label" for="customProviderName">
                             <i class="fas fa-tag btn-icon"></i> 自定义提供商名称
@@ -460,7 +460,7 @@
             }
         });
 
-        // 展示测试结果
+
         function showTestResult(message, type) {
             const resultDiv = document.getElementById('testResult');
             const resultIcon = resultDiv.querySelector('.test-result-icon');
@@ -484,7 +484,7 @@
             }
         }
 
-        // 检查更新功能
+
         document.getElementById('checkUpdateBtn').addEventListener('click', async () => {
             const checkUpdateBtn = document.getElementById('checkUpdateBtn');
             const originalText = checkUpdateBtn.innerHTML;
@@ -516,24 +516,23 @@
             }
         });
 
-        // 关闭更新进度按钮事件
+
         document.getElementById('closeUpdateBtn').addEventListener('click', () => {
             hideUpdateProgress();
         });
 
-        // 更新进度
+
         function resetUpdateProgress() {
             document.getElementById('statusText').textContent = '正在检查更新...';
             document.getElementById('updateActionButtons').classList.add('hidden');
         }
 
-        // 隐藏更新进度
+
         function hideUpdateProgress() {
             document.getElementById('updateProgress').classList.add('hidden');
         }
 
 
-        // 显示更新结果
         function showUpdateResult(message, type) {
             const resultDiv = document.getElementById('updateResult');
             const resultIcon = resultDiv.querySelector('.test-result-icon');
@@ -557,7 +556,7 @@
             }
         }
 
-        // 主题切换功能
+
         document.getElementById('themeToggleBtn').addEventListener('click', () => {
             const body = document.body;
             const themeBtn = document.getElementById('themeToggleBtn');
@@ -565,13 +564,13 @@
             const text = themeBtn.querySelector('.theme-text');
 
             if (body.classList.contains('dark-theme')) {
-                // 切换到白天主题
+
                 body.classList.remove('dark-theme');
                 icon.className = 'fas fa-moon btn-icon';
                 text.textContent = '黑夜';
                 localStorage.setItem('settings-theme', 'light');
             } else {
-                // 切换到黑夜主题
+
                 body.classList.add('dark-theme');
                 icon.className = 'fas fa-sun btn-icon';
                 text.textContent = '白天';

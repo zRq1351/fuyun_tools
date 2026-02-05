@@ -239,7 +239,8 @@ fn calculate_distance(x1: u64, y1: u64, x2: u64, y2: u64) -> f64 {
 
 fn is_valid_drag_operation(distance: f64, duration: Duration) -> bool {
     const MIN_DRAG_DISTANCE: f64 = 5.0;
-    const MAX_OPERATION_TIME: u128 = 5000; // 5秒
+    /// 最大操作时间限制（毫秒）
+    const MAX_OPERATION_TIME: u128 = 5000;
 
     let is_distance_valid = distance >= MIN_DRAG_DISTANCE;
     let is_duration_valid = duration.as_millis() <= MAX_OPERATION_TIME;

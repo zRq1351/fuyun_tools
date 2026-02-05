@@ -5,7 +5,7 @@ pub mod text_selection;
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    // 简单的模拟剪贴板管理器
+    /// 用于测试的简单剪贴板管理器模拟实现
     #[derive(Debug)]
     struct TestClipboardManager {
         content: Option<String>,

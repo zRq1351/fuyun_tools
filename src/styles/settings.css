@@ -1,4 +1,4 @@
-/* settings.css - 设置页面专用样式 */
+
 
 body {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -21,7 +21,7 @@ body {
     flex-direction: column;
 }
 
-/* 标题区域 */
+
 .settings-header {
     text-align: center;
     padding: 20px 30px 0;
@@ -45,7 +45,7 @@ body {
     font-weight: 400;
 }
 
-/* 固定标签页区域 */
+
 .category-tabs-container {
     border-radius: 10px 10px 0 0;
     padding: 0 30px;
@@ -95,7 +95,7 @@ body {
     border-radius: 3px 3px 0 0;
 }
 
-/* 可滚动内容区域 */
+
 .settings-content {
     flex: 1;
     overflow-y: auto;
@@ -114,7 +114,7 @@ body {
     display: block;
 }
 
-/* 表单样式 */
+
 .settings-grid {
     display: grid;
     grid-template-columns: 1fr;
@@ -172,7 +172,7 @@ body {
     line-height: 1.4;
 }
 
-/* 按钮区域 */
+
 .save-button-container {
     padding: 20px 30px;
     flex-shrink: 0;
@@ -222,7 +222,7 @@ body {
     font-size: 18px;
 }
 
-/* 固定页脚区域 */
+
 .settings-footer-container {
     border-radius: 0 0 10px 10px;
     padding: 15px 30px;
@@ -246,7 +246,7 @@ body {
     text-decoration: underline;
 }
 
-/* 测试结果样式 */
+
 .test-result {
     margin-top: 20px;
     padding: 16px;
@@ -280,7 +280,7 @@ body {
     flex-shrink: 0;
 }
 
-/* 输入组装饰 */
+
 .input-group {
     position: relative;
 }
@@ -308,7 +308,7 @@ body {
     font-size: 18px;
 }
 
-/* 关于页面样式 */
+
 .about-content {
     padding: 20px 0;
 }
@@ -387,7 +387,7 @@ body {
     margin-bottom: 15px;
 }
 
-/* 更新进度条样式 */
+
 .update-progress {
     margin-top: 20px;
     padding: 20px;
@@ -461,7 +461,7 @@ body {
     display: none;
 }
 
-/* 主题切换按钮样式 */
+
 .theme-toggle-btn {
     margin-left: auto;
     padding: 12px 20px;
@@ -498,7 +498,7 @@ body {
     font-weight: 500;
 }
 
-/* 黑夜主题样式 */
+
 body.dark-theme {
     background: linear-gradient(135deg, #4e5a6b 0%, #394e76 100%);
     color: #ffffff;
@@ -675,7 +675,7 @@ body.dark-theme .status-message p {
     color: #94a3b8;
 }
 
-/* 隐藏类 */
+
 .hidden {
     display: none !important;
 }

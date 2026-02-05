@@ -43,14 +43,14 @@ document.addEventListener('keydown', (event) => {
             event.preventDefault();
             if (clipboardHistory.length > 0) {
                 const newIndex = selectedIndex > 0 ? selectedIndex - 1 : 0;
-                updateSelection(newIndex, true); // 键盘导航时自动滚动
+                updateSelection(newIndex, true);
             }
             break;
         case 'ArrowRight':
             event.preventDefault();
             if (clipboardHistory.length > 0) {
                 const newIndex = selectedIndex < clipboardHistory.length - 1 ? selectedIndex + 1 : clipboardHistory.length - 1;
-                updateSelection(newIndex, true); // 键盘导航时自动滚动
+                updateSelection(newIndex, true);
             }
             break;
         case 'Enter':
