@@ -92,11 +92,9 @@ async function showWindow(data) {
 }
 
 function hideWindow() {
-    clipboardHistory = [];
     isVisible = false;
 }
 
-// 渲染列表
 function render() {
     const content = document.getElementById('content');
     if (!content) {
@@ -129,9 +127,10 @@ function render() {
         item.addEventListener('dblclick', () => handleDoubleClick(index));
     });
 
-    document.querySelectorAll('.delete-btn').forEach((btn, index) => {
+    document.querySelectorAll('.delete-btn').forEach((btn) => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
+            const index = parseInt(btn.getAttribute('data-index'));
             deleteItem(index).then(r => {
                 console.log('deleteItem', r);
             });
@@ -167,7 +166,7 @@ function addDragScrolling(element) {
         if (!isDown) return;
         e.preventDefault();
         const x = e.pageX - element.offsetLeft;
-        const walk = (x - startX) * 2; // 滚动速度
+        const walk = (x - startX) * 2;
         element.scrollLeft = scrollLeft - walk;
     });
 }

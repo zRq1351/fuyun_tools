@@ -73,6 +73,7 @@
     <button class="toolbar-button copy-btn" id="copyBtn">复制</button>
 </div>
 <script src="./scripts/main.js"></script>
+<script src="./scripts/toast.js"></script>
 <script>
     const invoke = window.__TAURI__.core.invoke;
     const listen = window.__TAURI__.event.listen;
@@ -83,22 +84,48 @@
 
     document.getElementById('translateBtn').addEventListener('click', async () => {
         if (selectedText) {
-            await invoke('stream_translate_text', {
-                text: selectedText,
-                sourceLanguage: '英文',
-                targetLanguage: '简体中文'
-            });
+            try {
+                await invoke('stream_translate_text', {
+                    text: selectedText,
+                    sourceLanguage: '英文',
+                    targetLanguage: '简体中文'
+                });
+            } catch (error) {
+                console.error('翻译失败:', error);
+                handleError(error);
+            }
         }
     });
 
     document.getElementById('explainBtn').addEventListener('click', async () => {
         if (selectedText) {
-            await invoke('stream_explain_text', {
-                text: selectedText,
-                targetLanguage: '中文'
-            });
+            try {
+                await invoke('stream_explain_text', {
+                    text: selectedText,
+                    targetLanguage: '中文'
+                });
+            } catch (error) {
+                console.error('解释失败:', error);
+                handleError(error);
+            }
         }
     });
+
+    function handleError(error) {
+        let errorMessage = error.toString();
+
+        if (errorMessage.includes('未配置AI提供商')) {
+            showErrorToast('未配置 AI 提供商，请在设置中填写 API Key 与 Endpoint 后重试。');
+        } else if (errorMessage.includes('API地址不能为空')) {
+            showErrorToast('API地址未配置，请在设置中填写正确的API地址。');
+        } else if (errorMessage.includes('API密钥未配置')) {
+            showErrorToast('API密钥未配置，请在设置中填写正确的API密钥。');
+        } else if (errorMessage.includes('模型名称不能为空')) {
+            showErrorToast('模型名称未配置，请在设置中填写正确的模型名称。');
+        } else {
+            showErrorToast(`操作失败: ${errorMessage}`);
+        }
+    }
 
     document.getElementById('copyBtn').addEventListener('click', async () => {
         if (selectedText) {
