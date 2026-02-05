@@ -7,6 +7,35 @@
     <link href="./styles/settings.css" rel="stylesheet">
     <link rel="stylesheet" href="./assets/fontawesome-free-6.7.2/css/all.css">
     <link href="./styles/toast.css" rel="stylesheet">
+    <style>
+        /* 快捷键录制状态样式 */
+        #editShortcutBtn.recording {
+            color: red !important;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.05);
+            }
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        #toggleShortcut:disabled {
+            background-color: #f3f4f6;
+            color: #6b7280;
+            cursor: not-allowed;
+        }
+
+        .dark-theme #toggleShortcut:disabled {
+            background-color: #374151;
+            color: #9ca3af;
+        }
+    </style>
 </head>
 <body>
 <div class="settings-container">
@@ -43,6 +72,19 @@
                                    type="number">
                         </div>
                         <span class="form-hint">设置剪贴板历史记录的最大保存数量 (1-1000)</span>
+                    </div>
+
+                    <div class="form-group full-width">
+                        <label class="form-label" for="toggleShortcut">
+                            <i class="fas fa-keyboard btn-icon"></i> 打开剪切板窗口快捷键
+                        </label>
+                        <div class="input-group">
+                            <input class="form-input input-with-icon" id="toggleShortcut"
+                                   placeholder="例如: Ctrl+Shift+K"
+                                   readonly type="text">
+                            <span class="test-icon" id="editShortcutBtn"><i class="fas fa-edit"></i></span>
+                        </div>
+                        <span class="form-hint">点击编辑按钮来自定义打开剪切板窗口的快捷键</span>
                     </div>
                 </div>
             </form>
@@ -577,6 +619,239 @@
                 localStorage.setItem('settings-theme', 'dark');
             }
         });
+
+        // 快捷键录制功能
+        let isRecording = false;
+        let recordedShortcut = '';
+        let currentShortcut = '';
+
+        async function loadCurrentShortcut() {
+            try {
+                // 使用默认快捷键
+                const defaultShortcut = 'Ctrl+Shift+K';
+                document.getElementById('toggleShortcut').value = defaultShortcut;
+                recordedShortcut = defaultShortcut;
+                currentShortcut = defaultShortcut;
+            } catch (error) {
+                console.error('加载当前快捷键失败:', error);
+                // 使用默认值
+                const defaultShortcut = 'Ctrl+Shift+K';
+                document.getElementById('toggleShortcut').value = defaultShortcut;
+                recordedShortcut = defaultShortcut;
+                currentShortcut = defaultShortcut;
+            }
+        }
+
+        async function startRecording() {
+            try {
+                // 防止重复点击
+                if (isRecording) return;
+
+                isRecording = true;
+                recordedShortcut = '';
+
+                // 更新UI状态
+                const toggleInput = document.getElementById('toggleShortcut');
+                const editBtn = document.getElementById('editShortcutBtn');
+
+                if (toggleInput) {
+                    toggleInput.value = '请按下快捷键...';
+                    toggleInput.disabled = true;
+                }
+
+                if (editBtn) {
+                    editBtn.innerHTML = '<i class="fas fa-stop"></i>';
+                    editBtn.title = '停止录制';
+                    editBtn.classList.add('recording');
+                }
+
+                // 监听键盘事件来捕获快捷键
+                document.addEventListener('keydown', handleKeyDown, true);
+
+                window.showInfoToast('开始录制快捷键，请按下组合键');
+                console.log('开始快捷键录制模式');
+            } catch (error) {
+                console.error('开始录制失败:', error);
+                window.showErrorToast('开始录制失败: ' + error.message);
+                isRecording = false;
+                resetRecordingUI();
+            }
+        }
+
+        function stopRecording() {
+            isRecording = false;
+            resetRecordingUI();
+            document.removeEventListener('keydown', handleKeyDown, true);
+            console.log('停止快捷键录制模式');
+        }
+
+        function resetRecordingUI() {
+            const toggleInput = document.getElementById('toggleShortcut');
+            const editBtn = document.getElementById('editShortcutBtn');
+
+            if (toggleInput) {
+                toggleInput.value = recordedShortcut || currentShortcut || 'Ctrl+Shift+K';
+                toggleInput.disabled = false;
+            }
+
+            if (editBtn) {
+                editBtn.innerHTML = '<i class="fas fa-edit"></i>';
+                editBtn.title = '编辑快捷键';
+                editBtn.classList.remove('recording');
+            }
+        }
+
+        function handleKeyDown(event) {
+            try {
+                if (!isRecording) return;
+
+                // 阻止默认行为
+                event.preventDefault();
+                event.stopPropagation();
+
+                // 防止重复处理同一事件
+                if (event.repeat) return;
+
+                const modifiers = [];
+                if (event.ctrlKey) modifiers.push('Ctrl');
+                if (event.altKey) modifiers.push('Alt');
+                if (event.shiftKey) modifiers.push('Shift');
+
+                // 获取触发键
+                let key = '';
+                if (event.key.length === 1 && /[a-zA-Z0-9]/.test(event.key)) {
+                    key = event.key.toUpperCase();
+                } else {
+                    // 处理特殊键
+                    switch (event.key.toLowerCase()) {
+                        case ' ':
+                        case 'spacebar':
+                            key = 'Space';
+                            break;
+                        case 'enter':
+                            key = 'Enter';
+                            break;
+                        case 'tab':
+                            key = 'Tab';
+                            break;
+                        case 'backspace':
+                            key = 'Backspace';
+                            break;
+                        case 'delete':
+                            key = 'Delete';
+                            break;
+                        case 'escape':
+                        case 'esc':
+                            key = 'Escape';
+                            break;
+                        case 'arrowup':
+                        case 'up':
+                            key = 'Up';
+                            break;
+                        case 'arrowdown':
+                        case 'down':
+                            key = 'Down';
+                            break;
+                        case 'arrowleft':
+                        case 'left':
+                            key = 'Left';
+                            break;
+                        case 'arrowright':
+                        case 'right':
+                            key = 'Right';
+                            break;
+                        default:
+                            if (event.key.toLowerCase().startsWith('f') && event.key.length <= 3) {
+                                key = event.key.toUpperCase();
+                            }
+                            break;
+                    }
+                }
+
+                console.log('检测到按键:', {modifiers, key, fullKey: event.key});
+
+                if (modifiers.length > 0 && key) {
+                    recordedShortcut = [...modifiers, key].join('+');
+                    const toggleInput = document.getElementById('toggleShortcut');
+                    if (toggleInput) {
+                        toggleInput.value = recordedShortcut;
+                    }
+
+                    stopRecording();
+                    window.showSuccessToast(`已录制快捷键: ${recordedShortcut}`);
+                } else if (modifiers.length === 0 && key) {
+                    window.showWarningToast('请至少按下一个功能键(Ctrl/Alt/Shift)');
+                } else if (modifiers.length > 0 && !key) {
+                    window.showWarningToast('请按下一个有效的主键');
+                }
+            } catch (error) {
+                console.error('处理键盘事件错误:', error);
+                window.showErrorToast('录制过程中发生错误: ' + error.message);
+                stopRecording();
+            }
+        }
+
+        async function saveShortcut() {
+            if (!recordedShortcut || recordedShortcut === currentShortcut) {
+                return;
+            }
+
+            try {
+                // 保存到本地存储
+                localStorage.setItem('customToggleShortcut', recordedShortcut);
+                currentShortcut = recordedShortcut;
+                window.showSuccessToast('快捷键保存成功');
+                console.log('快捷键已保存到本地存储:', recordedShortcut);
+            } catch (error) {
+                window.showErrorToast('保存失败: ' + error);
+            }
+        }
+
+        // 事件监听器
+        document.getElementById('editShortcutBtn').addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            // 防止事件冒泡和重复触发
+            if (event.target !== this && !event.target.closest('#editShortcutBtn')) {
+                return;
+            }
+
+            try {
+                console.log('点击快捷键编辑按钮，当前录制状态:', isRecording);
+
+                if (isRecording) {
+                    stopRecording();
+                    window.showInfoToast('已停止录制');
+                } else {
+                    await startRecording();
+                }
+            } catch (error) {
+                console.error('快捷键录制错误:', error);
+                window.showErrorToast('操作失败: ' + error.message);
+                isRecording = false;
+                stopRecording();
+            }
+        });
+
+        const originalSaveHandler = document.getElementById('saveBtn').onclick;
+        document.getElementById('saveBtn').addEventListener('click', async () => {
+            if (originalSaveHandler) {
+                originalSaveHandler.call(document.getElementById('saveBtn'));
+            }
+
+            await saveShortcut();
+        });
+
+        await loadCurrentShortcut();
+
+        const savedShortcut = localStorage.getItem('customToggleShortcut');
+        if (savedShortcut) {
+            currentShortcut = savedShortcut;
+            recordedShortcut = savedShortcut;
+            document.getElementById('toggleShortcut').value = savedShortcut;
+            console.log('从本地存储加载快捷键:', savedShortcut);
+        }
 
     });
 </script>
