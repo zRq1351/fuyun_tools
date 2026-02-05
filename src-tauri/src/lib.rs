@@ -5,13 +5,13 @@ pub mod utils;
 pub mod features;
 
 use crate::core::app_state::AppState;
-use crate::core::config::{DEFAULT_HIDE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT};
+use crate::core::config::DEFAULT_HIDE_SHORTCUT;
 use crate::services::ai_services::{stream_explain_text, stream_translate_text};
 use crate::services::clipboard_manager::start_clipboard_listener;
 use crate::ui::commands::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{hide_clipboard_window, show_clipboard_window};
-use crate::utils::utils::get_logs_dir_path;
+use crate::utils::utils_helpers::get_logs_dir_path;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -31,15 +31,6 @@ fn get_log_level() -> log::LevelFilter {
 /// 启动划词选择监听器
 pub fn start_text_selection_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     features::mouse_listener::MouseListener::start_mouse_listener(app_handle, state);
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_basic_compilation() {
-        // 基本编译测试
-        assert!(true);
-    }
 }
 
 pub fn run() {
@@ -63,8 +54,10 @@ pub fn run() {
             rebuild_tray_menu(&app_handle, state_arc.clone());
             let state_clone = state_arc.clone();
             let app_handle_clone = app_handle.clone();
+            let hot_key = state_arc
+                .lock().unwrap().settings.hot_key.clone();
             app.global_shortcut()
-                .on_shortcut(DEFAULT_TOGGLE_SHORTCUT, move |_app, _shortcut, event| {
+                .on_shortcut(hot_key.as_str(), move |_app, _shortcut, event| {
                     if let ShortcutState::Pressed = event.state {
                         let state_guard = state_clone.lock().unwrap();
                         if !state_guard.is_visible && !state_guard.is_processing_selection {

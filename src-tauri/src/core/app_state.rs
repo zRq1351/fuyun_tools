@@ -1,5 +1,5 @@
 use crate::utils::clipboard::ClipboardManager;
-use crate::utils::utils::{load_settings, AppSettingsData};
+use crate::utils::utils_helpers::{load_settings, AppSettingsData};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]

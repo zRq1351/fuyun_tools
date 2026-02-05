@@ -1,8 +1,9 @@
 use crate::core::app_state::AppState as SharedAppState;
 use crate::core::config::{AIProvider, ProviderConfig};
+use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
-use crate::ui::window_manager::hide_clipboard_window;
-use crate::utils::utils::{load_settings, save_settings};
+use crate::ui::window_manager::{hide_clipboard_window, show_clipboard_window};
+use crate::utils::utils_helpers::{load_settings, save_settings};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -10,6 +11,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_updater::UpdaterExt;
 
 #[tauri::command]
@@ -121,7 +123,10 @@ pub async fn remove_clipboard_item(
 }
 
 #[tauri::command]
-pub async fn window_blur(state: State<'_, Arc<Mutex<SharedAppState>>>, app: AppHandle) -> Result<(), String> {
+pub async fn window_blur(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+    app: AppHandle,
+) -> Result<(), String> {
     let is_visible = {
         let state_guard = state.lock().unwrap();
         state_guard.is_visible
@@ -204,6 +209,10 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         "ai_provider".to_string(),
         serde_json::Value::String(settings.ai_provider.clone()),
     );
+    result.insert(
+        "hot_key".to_string(),
+        serde_json::Value::String(settings.hot_key.clone()),
+    );
 
     // 处理provider_configs，将encrypted_api_key替换为解密后的api_key
     let mut provider_configs_map: HashMap<String, serde_json::Value> = HashMap::new();
@@ -250,6 +259,7 @@ pub async fn save_app_settings(
     ai_api_url: String,
     ai_model_name: String,
     ai_api_key: String,
+    hot_key: String,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -263,10 +273,39 @@ pub async fn save_app_settings(
     settings.version = version;
     settings.max_items = max_items;
 
+    if hot_key.is_empty() {
+        return Err("快捷键不能为空".to_string());
+    }
+
     if ai_provider.is_empty() {
         return Err("提供商名称不能为空".to_string());
     }
+    if hot_key != settings.hot_key {
+        if app.global_shortcut().is_registered(hot_key.as_str()) {
+            return Err("快捷键冲突".to_string());
+        }
 
+        app.global_shortcut()
+            .unregister(settings.hot_key.as_str())
+            .map_err(|e| format!("保存配置失败: {}", e.to_string()))?;
+        let app_clone = app.clone();
+        let state_clone = state.inner().clone();
+        app.global_shortcut()
+            .on_shortcut(hot_key.as_str(), move |_app, _shortcut, event| {
+                if let ShortcutState::Pressed = event.state {
+                    let sg = state_clone.lock().unwrap();
+                    if !sg.is_visible && !sg.is_processing_selection {
+                        let state_for_window = state_clone.clone();
+                        drop(sg);
+                        show_clipboard_window(app_clone.clone(), state_for_window);
+                        features::mouse_listener::reset_ctrl_key_state();
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+    }
+
+    settings.hot_key = hot_key;
     settings.ai_provider = ai_provider.clone();
 
     settings.migrate_from_old();

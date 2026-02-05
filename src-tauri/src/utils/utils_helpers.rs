@@ -1,4 +1,4 @@
-use crate::core::config::ProviderConfig;
+use crate::core::config::{ProviderConfig, DEFAULT_TOGGLE_SHORTCUT};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -17,6 +17,7 @@ pub fn get_default_app_version() -> String {
 pub struct AppSettingsData {
     pub version: String,
     pub max_items: usize,
+    pub hot_key: String,
     #[serde(default)]
     pub ai_provider: String,  // 改为String类型以支持自定义提供商
     /// 每个AI提供商的独立配置
@@ -29,7 +30,8 @@ impl Default for AppSettingsData {
         Self {
             version: get_default_app_version(),
             max_items: 50,
-            ai_provider: "deepseek".to_string(),  // 默认使用字符串
+            hot_key: DEFAULT_TOGGLE_SHORTCUT.to_string(),
+            ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
         }
     }
@@ -189,12 +191,117 @@ impl AppSettingsData {
 
     /// 迁移旧版本设置
     pub fn migrate_from_old(&mut self) {
-        if let Ok(old_version) = self.version.parse::<u32>() {
-            if old_version == 0 {
-                self.version = get_default_app_version();
+        let current_version = get_default_app_version();
+
+        if self.version == current_version {
+            log::debug!("当前已是最新版本: {}，无需迁移", self.version);
+            return;
+        }
+
+        match (self.version.parse::<u32>(), current_version.parse::<u32>()) {
+            (Ok(old_ver), Ok(new_ver)) => {
+                if old_ver < new_ver {
+                    log::debug!("执行版本 {} 到 {} 的迁移", old_ver, new_ver);
+                    self.perform_version_migration(old_ver, new_ver);
+                }
             }
-        } else if self.version != get_default_app_version() {
-            self.version = get_default_app_version();
+            _ => {
+                log::debug!("无法解析版本号格式，执行通用迁移");
+                self.perform_generic_migration();
+            }
+        }
+
+        self.version = current_version;
+        log::debug!("版本迁移完成，当前版本: {}", self.version);
+    }
+
+    /// 执行具体的版本迁移逻辑
+    fn perform_version_migration(&mut self, old_version: u32, new_version: u32) {
+        println!("执行版本迁移: {} -> {}", old_version, new_version);
+        // 根据不同版本间的差异执行特定迁移
+        if old_version < 3 && new_version >= 3 {
+            println!("迁移至版本 3: 初始化AI提供商配置");
+            self.initialize_ai_provider_configs_if_needed();
+        }
+
+        if old_version < 2 && new_version >= 2 {
+            println!("迁移至版本 2: 确保基础配置完整性");
+            self.ensure_basic_config_integrity();
+        }
+    }
+
+    /// 执行通用迁移（当版本号无法解析时）
+    fn perform_generic_migration(&mut self) {
+        log::info!("执行通用配置迁移");
+
+        // 确保基础配置完整性
+        self.ensure_basic_config_integrity();
+
+        // 初始化AI提供商配置
+        self.initialize_ai_provider_configs_if_needed();
+    }
+
+    /// 确保基础配置完整性
+    fn ensure_basic_config_integrity(&mut self) {
+        println!("开始确保基础配置完整性");
+        println!("迁移前 max_items: {}", self.max_items);
+
+        // 确保必要字段有合理默认值
+        if self.max_items < 10 || self.max_items > 1000 {
+            let old_value = self.max_items;
+            self.max_items = 50;
+            println!("修复 max_items 从 {} 为默认值: 50", old_value);
+        }
+
+        if self.hot_key.is_empty() {
+            self.hot_key = DEFAULT_TOGGLE_SHORTCUT.to_string();
+            println!("修复 hot_key 为默认值: {}", DEFAULT_TOGGLE_SHORTCUT);
+        }
+
+        println!("迁移后 max_items: {}", self.max_items);
+    }
+
+    /// 初始化AI提供商配置（如果需要）
+    fn initialize_ai_provider_configs_if_needed(&mut self) {
+        // 如果提供商配置为空，初始化默认配置
+        if self.provider_configs.is_empty() {
+            initialize_builtin_providers(self);
+            log::info!("初始化内置AI提供商配置");
+        }
+
+        if !self.provider_configs.contains_key(&self.ai_provider) {
+            let (default_url, default_model) = self.get_provider_default_config(&self.ai_provider);
+
+            let config = ProviderConfig {
+                api_url: default_url,
+                model_name: default_model,
+                encrypted_api_key: String::new(),
+            };
+
+            self.provider_configs.insert(self.ai_provider.clone(), config);
+            log::info!("为提供商 {} 创建默认配置", self.ai_provider);
+        }
+    }
+
+    /// 获取提供商的默认配置
+    fn get_provider_default_config(&self, provider_name: &str) -> (String, String) {
+        match provider_name {
+            "deepseek" => (
+                "https://api.deepseek.com/v1".to_string(),
+                "deepseek-chat".to_string(),
+            ),
+            "qwen" => (
+                "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
+                "qwen-plus".to_string(),
+            ),
+            "xiaomimimo" => (
+                "https://api.xiaomimimo.com/v1".to_string(),
+                "mimo-v2-flash".to_string(),
+            ),
+            _ => {
+                // 自定义提供商使用空默认值
+                (String::new(), String::new())
+            }
         }
     }
 }
@@ -233,10 +340,9 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
     let settings_path = get_settings_file_path();
 
     if !settings_path.exists() {
-        // 首次运行，初始化默认设置和内置提供商配置
+        log::info!("首次运行，创建默认设置文件");
         let mut default_settings = AppSettingsData::default();
 
-        // 初始化内置提供商的默认配置
         initialize_builtin_providers(&mut default_settings);
 
         let json = serde_json::to_string_pretty(&default_settings)
@@ -244,17 +350,22 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
         std::fs::write(&settings_path, json).map_err(|e| format!("创建设置文件失败: {}", e))?;
         return Ok(default_settings);
     }
+
     let contents =
         std::fs::read_to_string(&settings_path).map_err(|e| format!("读取设置文件失败: {}", e))?;
 
     let mut settings: AppSettingsData =
         serde_json::from_str(&contents).map_err(|e| format!("解析设置文件失败: {}", e))?;
 
+    let old_version = settings.version.clone();
     settings.migrate_from_old();
 
-    // 解密当前提供商的API密钥
+    if old_version != settings.version {
+        log::info!("配置已更新，保存到文件");
+        save_settings(&settings)?;
+    }
+
     let _provider_key = settings.ai_provider.to_string();
-    // 解密操作已经在 decrypt_provider_api_key 方法中处理
 
     Ok(settings)
 }

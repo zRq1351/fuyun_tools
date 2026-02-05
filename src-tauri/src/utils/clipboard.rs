@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use crate::utils::utils::{find_best_replacement_candidate, load_history, save_history_with_retry};
+use crate::utils::utils_helpers::{find_best_replacement_candidate, load_history, save_history_with_retry};
 
 pub struct ClipboardManager {
     history: Arc<Mutex<Vec<String>>>,
