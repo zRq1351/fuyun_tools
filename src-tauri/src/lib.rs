@@ -45,6 +45,7 @@ mod tests {
 pub fn run() {
     let initial_state = AppState::default();
     let state_arc = Arc::new(Mutex::new(initial_state));
+
     tauri::Builder::default()
         .manage(state_arc.clone())
         .setup(move |app| {

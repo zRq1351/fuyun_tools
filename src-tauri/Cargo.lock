@@ -1620,6 +1620,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-positioner",
  "tauri-plugin-updater",
+ "uuid",
  "winapi",
 ]
 
