@@ -4,19 +4,21 @@ use enigo::Key;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-// 剪贴板监听配置
+/// 剪贴板轮询间隔时间
 pub const CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(100);
-// 快捷键配置
+/// 默认切换快捷键（根据操作系统自动适配）
 pub const DEFAULT_TOGGLE_SHORTCUT: &str = if cfg!(target_os = "macos") {
     "Cmd+Shift+k"
 } else {
     "Ctrl+Shift+k"
 };
+/// 默认隐藏快捷键
 pub const DEFAULT_HIDE_SHORTCUT: &str = "Escape";
-// 记录数配置项
+
+/// 历史记录最大条数选项
 pub const MAX_ITEMS_OPTIONS: &[usize] = &[10, 20, 50, 100];
 
-// ctrl+c中的ctrl键
+/// Ctrl+C操作中的控制键（根据操作系统自动适配）
 pub const CTRL_KEY: Key = if cfg!(target_os = "macos") {
     Key::Meta
 } else {

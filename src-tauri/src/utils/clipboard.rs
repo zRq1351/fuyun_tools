@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use crate::utils::utils::{load_history, save_history_with_retry};
+use crate::utils::utils::{find_best_replacement_candidate, load_history, save_history_with_retry};
 
 pub struct ClipboardManager {
     history: Arc<Mutex<Vec<String>>>,
@@ -57,18 +57,56 @@ impl ClipboardManager {
         history.clone()
     }
 
+    /// 将内容添加到剪贴板历史记录中
+    ///
+    /// 该函数实现了智能历史记录管理，包括版本优化和去重功能。
+    /// 当检测到相似的不完整版本时，会自动用完整版本替换旧版本。
+    ///
+    /// # 参数
+    ///
+    /// * `content` - 要添加到历史记录的字符串内容
+    ///
+    /// # 功能说明
+    ///
+    /// 1. 版本优化：使用0.8的相似度阈值检测并替换不完整的早期版本
+    /// 2. 去重处理：移除完全相同的重复项
+    /// 3. 数量限制：确保历史记录不超过最大条数限制
+    /// 4. 持久化保存：将更新后的历史记录保存到文件
     pub fn add_to_history(&self, content: String) {
         let mut history = self.history.lock().unwrap();
-        // 移除重复项
-        history.retain(|item| item != &content);
-        // 在开头插入新内容
-        history.insert(0, content);
-        // 限制历史记录数量
+
+        log::debug!("添加到历史记录: '{}'", content);
+        log::debug!("当前历史记录数量: {}", history.len());
+
+        let similarity_threshold = 0.8;
+
+        // 调试：显示所有历史记录用于对比
+        for (i, item) in history.iter().enumerate() {
+            log::debug!("历史记录[{}]: '{}'", i, item);
+        }
+
+        if let Some((replace_index, comparison)) =
+            find_best_replacement_candidate(&content, &history, similarity_threshold)
+        {
+            log::info!("检测到相似版本，正在替换: {}", comparison.reason);
+            log::info!("相似度: {:.4}, 完整性: {:?}", 
+                      comparison.similarity_score, 
+                      comparison.new_completeness);
+            history[replace_index] = content.clone();
+            let item = history.remove(replace_index);
+            history.insert(0, item);
+            log::info!("已用完整版本替换不完整版本");
+        } else {
+            log::debug!("未找到相似版本，直接添加");
+            history.retain(|item| item != &content);
+
+            history.insert(0, content);
+        }
+
         if history.len() > self.max_items {
             history.truncate(self.max_items);
         }
 
-        // 保存到文件
         if let Err(e) = save_history_with_retry(&history, 3) {
             log::error!("保存历史记录失败: {}", e);
         }

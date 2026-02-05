@@ -1,4 +1,4 @@
-/* =============== Toast 提示组件 - 静态样式（安全兼容 Tauri 生产环境） =============== */
+
 
 @keyframes slideIn {
     from { transform: translateX(120%); opacity: 0; }
@@ -19,7 +19,7 @@
     flex-direction: column;
     gap: 10px;
     max-width: 400px;
-    pointer-events: none; /* 防止遮挡点击 */
+    pointer-events: none;
 }
 
 .toast {
@@ -35,13 +35,24 @@
     box-sizing: border-box;
     color: #ffffff;
     animation: slideIn 0.3s cubic-bezier(0.68, -0.55, 0.27, 1.55) forwards;
-    pointer-events: auto; /* 恢复自身交互 */
+    pointer-events: auto;
 }
 
-.toast-success { background-color: #10b981; } /* green-500 */
-.toast-error   { background-color: #ef4444; } /* red-500 */
-.toast-warning { background-color: #f59e0b; } /* amber-500 */
-.toast-info    { background-color: #3b82f6; } /* blue-500 */
+.toast-success {
+    background-color: #10b981;
+}
+
+.toast-error {
+    background-color: #ef4444;
+}
+
+.toast-warning {
+    background-color: #f59e0b;
+}
+
+.toast-info {
+    background-color: #3b82f6;
+}
 
 .toast-message {
     flex: 1;

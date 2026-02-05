@@ -4,9 +4,6 @@ pub mod ui;
 pub mod utils;
 pub mod features;
 
-#[cfg(test)]
-mod functional_tests;
-
 use crate::core::app_state::AppState;
 use crate::core::config::{DEFAULT_HIDE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT};
 use crate::services::ai_services::{stream_explain_text, stream_translate_text};

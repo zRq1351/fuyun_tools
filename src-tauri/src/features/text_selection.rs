@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
 
-// 划词捕获配置常量
+/// 划词捕获最大重试时长
 const CAPTURE_RETRY_MAX_DURATION: Duration = Duration::from_millis(2000);
 const CAPTURE_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 const INITIAL_DELAY: Duration = Duration::from_millis(50);

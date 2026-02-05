@@ -338,3 +338,219 @@ fn initialize_builtin_providers(settings: &mut AppSettingsData) {
 
     log::info!("已初始化内置AI提供商配置");
 }
+
+/// 文本完整性检测结果
+#[derive(Debug, Clone, PartialEq)]
+pub enum TextCompleteness {
+    /// 完整文本
+    Complete,
+    /// 缺失前段
+    MissingPrefix,
+    /// 缺失后段
+    MissingSuffix,
+    /// 缺失前后段
+    MissingBoth,
+    /// 无法确定
+    Unknown,
+}
+
+/// 版本对比结果
+#[derive(Debug, Clone)]
+pub struct VersionComparison {
+    /// 相似度分数 (0.0 - 1.0)
+    pub similarity_score: f64,
+    /// 新版本的完整性状态
+    pub new_completeness: TextCompleteness,
+    /// 是否应该替换旧版本
+    pub should_replace: bool,
+    /// 替换建议原因
+    pub reason: String,
+}
+
+/// 计算两个文本的相似度
+/// 使用最长公共子序列(LCS)算法计算相似度
+pub fn calculate_text_similarity(text1: &str, text2: &str) -> f64 {
+    if text1.is_empty() && text2.is_empty() {
+        return 1.0;
+    }
+
+    if text1.is_empty() || text2.is_empty() {
+        return 0.0;
+    }
+
+    let chars1: Vec<char> = text1.chars().collect();
+    let chars2: Vec<char> = text2.chars().collect();
+    let len1 = chars1.len();
+    let len2 = chars2.len();
+
+    log::debug!("计算相似度: '{}' vs '{}'", text1, text2);
+    log::debug!("长度: {} vs {}", len1, len2);
+
+    // 创建DP表
+    let mut dp = vec![vec![0; len2 + 1]; len1 + 1];
+
+    // 填充DP表
+    for i in 1..=len1 {
+        for j in 1..=len2 {
+            if chars1[i - 1] == chars2[j - 1] {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+                dp[i][j] = dp[i - 1][j].max(dp[i][j - 1]);
+            }
+        }
+    }
+
+    // 计算相似度
+    let lcs_length = dp[len1][len2];
+    let max_len = len1.max(len2);
+
+    let similarity = if max_len == 0 {
+        0.0
+    } else {
+        lcs_length as f64 / max_len as f64
+    };
+
+    log::debug!("LCS长度: {}, 最大长度: {}, 相似度: {:.4}", 
+                lcs_length, max_len, similarity);
+
+    similarity
+}
+
+/// 检测文本完整性
+/// 分析文本是否可能是截断版本
+pub fn detect_text_completeness(text: &str, reference_text: &str) -> TextCompleteness {
+    if text.is_empty() || reference_text.is_empty() {
+        return TextCompleteness::Unknown;
+    }
+
+    // 如果文本完全相同，认为是完整版本
+    if text == reference_text {
+        return TextCompleteness::Complete;
+    }
+
+    // 如果新文本比参考文本长，认为是完整版本
+    if text.len() > reference_text.len() {
+        return TextCompleteness::Complete;
+    }
+
+    // 检查是否是前缀
+    if reference_text.starts_with(text) {
+        return TextCompleteness::MissingSuffix;
+    }
+
+    // 检查是否是后缀
+    if reference_text.ends_with(text) {
+        return TextCompleteness::MissingPrefix;
+    }
+
+    // 检查是否包含在中间
+    if reference_text.contains(text) && text.len() < reference_text.len() {
+        return TextCompleteness::MissingBoth;
+    }
+
+    // 检查相似度，如果很高但不是上述情况，可能是部分内容缺失
+    let similarity = calculate_text_similarity(text, reference_text);
+    if similarity > 0.8 {
+        // 通过字符位置分析判断缺失类型
+        let text_chars: Vec<char> = text.chars().collect();
+        let ref_chars: Vec<char> = reference_text.chars().collect();
+
+        // 检查开头是否匹配
+        let mut prefix_match = true;
+        let min_len = text_chars.len().min(10); // 检查前10个字符
+        for i in 0..min_len {
+            if i >= ref_chars.len() || text_chars[i] != ref_chars[i] {
+                prefix_match = false;
+                break;
+            }
+        }
+
+        // 检查结尾是否匹配
+        let mut suffix_match = true;
+        let min_len = text_chars.len().min(10); // 检查后10个字符
+        for i in 0..min_len {
+            let text_idx = text_chars.len() - 1 - i;
+            let ref_idx = ref_chars.len() - 1 - i;
+            if text_idx >= text_chars.len() || ref_idx >= ref_chars.len() ||
+                text_chars[text_idx] != ref_chars[ref_idx] {
+                suffix_match = false;
+                break;
+            }
+        }
+
+        match (prefix_match, suffix_match) {
+            (true, false) => TextCompleteness::MissingSuffix,
+            (false, true) => TextCompleteness::MissingPrefix,
+            (false, false) => TextCompleteness::MissingBoth,
+            (true, true) => TextCompleteness::Complete, // 可能是完全相同的短文本
+        }
+    } else {
+        TextCompleteness::Unknown
+    }
+}
+
+/// 比较两个版本并决定是否应该替换
+pub fn compare_versions(old_text: &str, new_text: &str, similarity_threshold: f64) -> VersionComparison {
+    let similarity = calculate_text_similarity(old_text, new_text);
+    let completeness = detect_text_completeness(new_text, old_text);
+
+    let (should_replace, reason) = if similarity >= similarity_threshold {
+        match completeness {
+            TextCompleteness::Complete => {
+                if new_text.len() > old_text.len() {
+                    (true, "新版本更完整，长度更长".to_string())
+                } else if new_text.len() == old_text.len() {
+                    (false, "版本相同，无需替换".to_string())
+                } else {
+                    (false, "新版本较短，保持原版本".to_string())
+                }
+            },
+            TextCompleteness::MissingPrefix | TextCompleteness::MissingSuffix | TextCompleteness::MissingBoth => {
+                (false, "新版本内容不完整，保持原版本".to_string())
+            },
+            TextCompleteness::Unknown => {
+                (false, "无法确定版本关系，保持原版本".to_string())
+            }
+        }
+    } else {
+        (false, "文本相似度低于阈值，视为不同内容".to_string())
+    };
+
+    VersionComparison {
+        similarity_score: similarity,
+        new_completeness: completeness,
+        should_replace,
+        reason,
+    }
+}
+
+/// 在历史记录中查找相似条目并返回最佳替换候选
+pub fn find_best_replacement_candidate(
+    new_text: &str,
+    history: &[String],
+    similarity_threshold: f64,
+) -> Option<(usize, VersionComparison)> {
+    let mut best_candidate: Option<(usize, VersionComparison)> = None;
+
+    for (index, old_text) in history.iter().enumerate() {
+        let comparison = compare_versions(old_text, new_text, similarity_threshold);
+
+        if comparison.should_replace {
+            match &best_candidate {
+                None => {
+                    best_candidate = Some((index, comparison));
+                },
+                Some((_, existing_comparison)) => {
+                    // 选择相似度更高或更完整的版本
+                    if comparison.similarity_score > existing_comparison.similarity_score ||
+                        (comparison.similarity_score == existing_comparison.similarity_score &&
+                            matches!(comparison.new_completeness, TextCompleteness::Complete)) {
+                        best_candidate = Some((index, comparison));
+                    }
+                }
+            }
+        }
+    }
+
+    best_candidate
+}
