@@ -22,7 +22,10 @@
             关于
           </el-radio-button>
         </el-radio-group>
-        <el-button :icon="isDark ? Sunny : Moon" @click="toggleTheme">
+        <el-button @click="toggleTheme">
+          <template #icon>
+            <component :is="isDark ? Sunny : Moon"/>
+          </template>
           {{ isDark ? '白天' : '黑夜' }}
         </el-button>
       </div>
@@ -208,7 +211,7 @@
 <script setup>
 import {onMounted, reactive, ref} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
-import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
+import zhCn from 'element-plus/dist/locale/zh-cn'
 import {
   CircleCheck,
   Connection,
@@ -388,7 +391,7 @@ const checkUpdate = async () => {
 
   try {
     const update = await check()
-    if (update && update.available) {
+    if (update) {
       updateStatus.value = null
 
       try {
@@ -447,20 +450,7 @@ const checkUpdate = async () => {
     }
   } catch (error) {
     if (error !== 'cancel') {
-      const errorStr = String(error)
-      if (
-          errorStr.includes('Network Error') ||
-          errorStr.includes('timeout') ||
-          errorStr.includes('Failed to fetch') ||
-          errorStr.includes('connection refused') ||
-          errorStr.includes('unreachable') ||
-          errorStr.includes('error sending request')
-      ) {
-        updateStatus.value = {message: '网络连接失败，请检查您的网络设置后重试', type: 'error'}
-      } else {
-        updateStatus.value = {message: `检查更新失败: ${error}`, type: 'error'}
-      }
-      console.error(error)
+      updateStatus.value = {message: '网络连接失败，请检查您的网络设置后重试', type: 'error'}
     }
   } finally {
     checkingUpdate.value = false
