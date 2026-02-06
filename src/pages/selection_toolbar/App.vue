@@ -5,7 +5,6 @@
         <el-icon>
           <collection/>
         </el-icon>
-        <span class="btn-text">翻译</span>
       </div>
     </el-tooltip>
 
@@ -14,7 +13,6 @@
         <el-icon>
           <chat-line-round/>
         </el-icon>
-        <span class="btn-text">解释</span>
       </div>
     </el-tooltip>
 
@@ -23,7 +21,6 @@
         <el-icon>
           <document-copy/>
         </el-icon>
-        <span class="btn-text">复制</span>
       </div>
     </el-tooltip>
   </div>
