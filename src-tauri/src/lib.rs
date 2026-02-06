@@ -21,7 +21,7 @@ fn get_log_level() -> log::LevelFilter {
     // 根据编译环境自动设置日志级别
     if cfg!(debug_assertions) {
         // 开发环境使用Debug级别
-        log::LevelFilter::Debug
+        log::LevelFilter::Warn
     } else {
         // 生产环境使用Warn级别
         log::LevelFilter::Warn
