@@ -130,6 +130,35 @@ pub fn hide_selection_toolbar_impl(app_handle: AppHandle) {
     }
 }
 
+/// 检查并自动关闭划词工具栏
+/// 如果 click_pos 为 Some，则检查点击位置是否在窗口范围内
+/// 如果 click_pos 为 None，则检查窗口是否拥有焦点
+pub fn handle_selection_toolbar_autoclose(app_handle: &AppHandle, click_pos: Option<(i32, i32)>) {
+    if let Some(window) = app_handle.get_webview_window("selection_toolbar") {
+        if let Ok(true) = window.is_visible() {
+            if let Some((mx, my)) = click_pos {
+                if let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) {
+                    let wx = pos.x;
+                    let wy = pos.y;
+                    let ww = size.width as i32;
+                    let wh = size.height as i32;
+
+                    // 检查点击是否在窗口外部
+                    if mx < wx || mx > wx + ww || my < wy || my > wy + wh {
+                        let _ = window.hide();
+                    }
+                }
+            } else {
+                // 非鼠标点击事件（如键盘），如果窗口未获取焦点则关闭
+                // 这样允许用户在工具栏内输入，但如果在外部操作则关闭
+                if let Ok(false) = window.is_focused() {
+                    let _ = window.hide();
+                }
+            }
+        }
+    }
+}
+
 /// 模拟粘贴操作
 pub fn simulate_paste() {
     use crate::core::config::CTRL_KEY;
@@ -192,7 +221,7 @@ pub async fn show_result_window(
         .visible(false)
         .inner_size(480.0, 300.0)
         .resizable(true)
-        .decorations(true)
+        .decorations(false)
         .on_page_load(move |window, _| {
             let payload = serde_json::json!({
             "type": window_type.clone(),

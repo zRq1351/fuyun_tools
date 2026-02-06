@@ -7,7 +7,9 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 use crate::core::app_state::AppState as SharedAppState;
-use crate::ui::window_manager::{hide_selection_toolbar_impl, show_selection_toolbar_impl};
+use crate::ui::window_manager::{
+    handle_selection_toolbar_autoclose, hide_selection_toolbar_impl, show_selection_toolbar_impl,
+};
 use crate::utils::clipboard::ClipboardManager;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +26,7 @@ struct GlobalState {
     needs_detection: AtomicBool,
     last_processed_time: Arc<Mutex<std::time::Instant>>,
     last_mouse_pos: Arc<Mutex<(u64, u64)>>, // 存储最后的鼠标位置
+    last_click: Arc<Mutex<Option<(u64, u64, std::time::Instant)>>>, // 存储上一次点击信息(x, y, time)
 }
 
 lazy_static::lazy_static! {
@@ -34,6 +37,7 @@ lazy_static::lazy_static! {
         needs_detection: AtomicBool::new(false),
         last_processed_time: Arc::new(Mutex::new(std::time::Instant::now())),
         last_mouse_pos: Arc::new(Mutex::new((0, 0))),
+        last_click: Arc::new(Mutex::new(None)),
     };
 }
 
@@ -128,6 +132,12 @@ impl MouseListener {
                         *pos_guard
                     };
 
+                    // 检查是否需要自动关闭工具栏
+                    handle_selection_toolbar_autoclose(
+                        &app_handle,
+                        Some((last_x as i32, last_y as i32)),
+                    );
+
                     log::info!("检测到鼠标左键按下 at ({}, {})", last_x, last_y);
 
                     let mut state_guard = GLOBAL_STATE.mouse_action_state.lock().unwrap();
@@ -159,7 +169,33 @@ impl MouseListener {
                             duration.as_millis()
                         );
 
-                        if is_valid_drag_operation(distance, duration) {
+                        // 判定是否为拖拽操作
+                        let is_drag = is_valid_drag_operation(distance, duration);
+
+                        // 判定是否为双击操作
+                        let is_double_click = if !is_drag {
+                            let mut last_click_guard = GLOBAL_STATE.last_click.lock().unwrap();
+                            let result = if let Some((lx, ly, ltime)) = *last_click_guard {
+                                let click_dist = calculate_distance(lx, ly, last_x, last_y);
+                                let click_interval = up_time.duration_since(ltime);
+                                // 双击判定：两次点击距离小于5px，间隔小于500ms
+                                click_dist < 5.0 && click_interval.as_millis() < 500
+                            } else {
+                                false
+                            };
+                            *last_click_guard = Some((last_x, last_y, up_time));
+                            result
+                        } else {
+                            // 如果是拖拽，清除上一次点击记录，避免拖拽后立即触发双击
+                            *GLOBAL_STATE.last_click.lock().unwrap() = None;
+                            false
+                        };
+
+                        if is_drag || is_double_click {
+                            if is_double_click {
+                                log::info!("检测到双击/三击操作");
+                            }
+
                             if !is_foreground_window_console() {
                                 if !is_any_ctrl_pressed() {
                                     let last_processed = {
@@ -183,7 +219,7 @@ impl MouseListener {
                                 log::info!("当前在命令行/终端环境中，跳过划词检测");
                             }
                         } else {
-                            log::info!("不满足划词条件（距离或时间不足），跳过");
+                            log::info!("不满足划词或双击条件，跳过");
                         }
                     }
                 }
