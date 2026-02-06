@@ -37,9 +37,25 @@
         </el-select>
       </div>
 
-      <el-button class="toggle-btn" size="small" @click="toggleOriginal">
-        {{ showOriginal ? '隐藏原文' : '显示原文' }}
-      </el-button>
+      <div class="right-controls">
+        <el-tooltip
+            :content="showOriginal ? '隐藏原文' : '显示原文'"
+            :show-after="500"
+            placement="bottom"
+        >
+          <div class="icon-btn toggle-btn" @click="toggleOriginal">
+            <el-icon>
+              <Hide v-if="showOriginal"/>
+              <View v-else/>
+            </el-icon>
+          </div>
+        </el-tooltip>
+        <div class="icon-btn close-btn" @click="handleClose">
+          <el-icon>
+            <Close/>
+          </el-icon>
+        </div>
+      </div>
     </div>
 
     <div v-if="showOriginal" class="content original-content" v-html="originalHtml"></div>
@@ -55,6 +71,8 @@ import {computed, nextTick, onMounted, ref} from 'vue'
 import {marked} from 'marked'
 import {invoke} from '@tauri-apps/api/core'
 import {listen} from '@tauri-apps/api/event'
+import {getCurrentWindow} from '@tauri-apps/api/window'
+import {Close, Hide, View} from '@element-plus/icons-vue'
 
 const mode = ref('translation')
 const originalText = ref('')
@@ -139,6 +157,10 @@ const handleLanguageChange = async () => {
     resultText.value = `Error: ${error}`
   }
 }
+
+const handleClose = async () => {
+  await getCurrentWindow().close()
+}
 </script>
 
 <style>
@@ -192,8 +214,39 @@ body {
   color: #999;
 }
 
-.toggle-btn {
+.right-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
+}
+
+.icon-btn {
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  color: #ccc;
+  width: 20px;
+  height: 20px;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.toggle-btn:hover {
+  color: #409eff; /* Primary color hover */
+  background: rgba(64, 158, 255, 0.1);
+}
+
+.close-btn:hover {
+  color: #f56c6c; /* Danger color hover */
+  background: rgba(245, 108, 108, 0.1);
 }
 
 .content {

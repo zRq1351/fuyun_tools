@@ -82,7 +82,7 @@ pub async fn stream_translate_text(
 
     show_result_window(
         "翻译结果".to_string(),
-        "正在翻译...".to_string(),
+        "".to_string(),
         "translation".to_string(),
         text.clone(),
         app.clone(),
@@ -135,7 +135,7 @@ pub async fn stream_explain_text(
     let client: AIClient = get_or_create_ai_client(state.inner().clone()).await?;
     show_result_window(
         "解释结果".to_string(),
-        "正在解释...".to_string(),
+        "".to_string(),
         "explanation".to_string(),
         text.clone(),
         app.clone(),
