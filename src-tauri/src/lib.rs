@@ -21,7 +21,7 @@ fn get_log_level() -> log::LevelFilter {
     // 根据编译环境自动设置日志级别
     if cfg!(debug_assertions) {
         // 开发环境使用Debug级别
-        log::LevelFilter::Warn
+        log::LevelFilter::Debug
     } else {
         // 生产环境使用Warn级别
         log::LevelFilter::Warn
@@ -117,12 +117,13 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(get_log_level())
-                .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Folder {
+                .target(
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
                         path: get_logs_dir_path(),
                         file_name: Some(String::from("fuyun_log")),
-                    },
-                ))
+                    })
+                        .filter(|record| record.level() <= log::Level::Error),
+                )
                 .max_file_size(1000000) // 1MB
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
                 .build(),
