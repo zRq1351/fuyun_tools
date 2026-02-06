@@ -138,7 +138,7 @@ fn retry_capture_clipboard_content(
         }
     }
 
-    log::warn!("重试{}次后仍未捕获到新内容，总耗时: {:?}", 
+    log::debug!("重试{}次后仍未捕获到新内容，总耗时: {:?}",
                attempts, start_time.elapsed());
     None
 }
