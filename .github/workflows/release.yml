@@ -32,7 +32,7 @@ jobs:
 
       - name: disable beforeBuildCommand
         shell: bash
-        run:
+        run: |
           sed -i 's/"beforeBuildCommand": "npm run build"/"beforeBuildCommand": ""/' src-tauri/tauri.conf.json
 
       - name: 安装 Rust stable

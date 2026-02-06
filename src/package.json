@@ -6,7 +6,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri": "cd .. && node src/node_modules/@tauri-apps/cli/tauri.js"
+    "tauri": "cd .. && node src/node_modules/@tauri-apps/cli/tauri.js",
+    "tauri:dev": "npm run tauri -- dev",
+    "tauri:build": "npm run tauri -- build"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.0",
