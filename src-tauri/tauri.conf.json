@@ -61,7 +61,7 @@
     "updater": {
       "active": true,
       "windows": {
-        "installMode": "passive"
+        "installMode": "basicUi"
       },
       "endpoints": [
         "https://github.com/zRq1351/fuyun_tools/releases/latest/download/latest.json"
