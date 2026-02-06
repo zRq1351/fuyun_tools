@@ -1,5 +1,7 @@
 # 🚀 fuyun_tools
 
+[中文](README.md) | [English](README_EN.md)
+
 ## 🎯 使用说明
 
 fuyun_tools是一款集剪切板管理和AI划词功能于一体的桌面效率工具，运行在系统托盘中。通过智能化的历史记录管理和AI辅助功能，大幅提升日常工作效率。
