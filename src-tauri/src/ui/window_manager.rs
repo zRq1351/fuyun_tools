@@ -176,7 +176,7 @@ pub async fn show_result_window(
             "original": original.clone(),
             "content": content.clone()
         });
-        let script = format!("window.__INITIAL_DATA__ = {};", payload);
+        let script = format!("window.__INITIAL_DATA__ = {}; window.dispatchEvent(new Event('init-data'));", payload);
         let _ = existing_window.eval(&script);
 
         return Ok(());
