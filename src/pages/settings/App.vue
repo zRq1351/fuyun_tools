@@ -488,22 +488,6 @@ const testConnection = async () => {
   }
 }
 
-const checkUpdate = async () => {
-  checkingUpdate.value = true
-  updateStatus.value = {message: '正在检查更新...', type: 'info'}
-  try {
-    const hasUpdate = await invoke('check_for_updates')
-    if (hasUpdate) {
-      updateStatus.value = {message: '发现新版本，已开始下载更新', type: 'success'}
-    } else {
-      updateStatus.value = {message: '已是最新版本', type: 'success'}
-    }
-  } catch (error) {
-    updateStatus.value = {message: `检查更新失败: ${error}`, type: 'error'}
-  } finally {
-    checkingUpdate.value = false
-  }
-}
 
 const saveSettings = async () => {
   let selectedProvider = form.aiProvider

@@ -127,17 +127,8 @@ const deleteItem = async (index) => {
     if (selectedIndex.value >= history.value.length) {
       selectedIndex.value = Math.max(0, history.value.length - 1)
     }
-    // Call backend to delete? Original script calls deleteItem but I don't see its definition in the snippet I read.
-    // Wait, the original script snippet I read had:
-    // invoke('delete_item', { index }) ? No, it called `deleteItem(index)` function which wasn't fully shown or was implicit?
-    // Let's assume there is a backend command `delete_item` or similar.
-    // Actually, looking at the snippet again:
-    // 134: deleteItem(index).then(r => { ... })
-    // But `deleteItem` function definition was NOT in the first 200 lines I read.
-    // I should check if there is a `delete_item` command in `lib.rs` or `main.rs`.
-    // But safely, I should invoke whatever command deletes the item.
-    // Let's assume it's `delete_item`.
-    await invoke('delete_item', {index})
+    // Call backend to delete
+    await invoke('remove_clipboard_item', {index})
   } catch (error) {
     console.error('删除失败:', error)
   }
@@ -208,6 +199,19 @@ onMounted(() => {
   init()
 })
 </script>
+
+<style>
+::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+html, body {
+  overflow: hidden;
+  scrollbar-width: none;
+}
+</style>
 
 <style scoped>
 /* Reset and Base Styles */
