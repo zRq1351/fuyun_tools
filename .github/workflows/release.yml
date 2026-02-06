@@ -16,8 +16,28 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: install frontend dependencies
+        run: npm install
+        working-directory: src
+
+      - name: build frontend
+        run: npm run build
+        working-directory: src
+
+      - name: disable beforeBuildCommand
+        shell: bash
+        run:
+          sed -i 's/"beforeBuildCommand": "npm run build"/"beforeBuildCommand": ""/' src-tauri/tauri.conf.json
+
       - name: 安装 Rust stable
         uses: dtolnay/rust-toolchain@stable
+
       - name: 构建并发布 Tauri 应用
         uses: tauri-apps/tauri-action@v0
         env:

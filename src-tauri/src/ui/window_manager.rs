@@ -111,7 +111,7 @@ pub fn show_selection_toolbar_impl(app_handle: AppHandle, selected_text: String)
 
 /// 设置工具栏窗口位置
 fn set_toolbar_window(window: &tauri::WebviewWindow) {
-    let _ = window.set_size(tauri::LogicalSize::new(50, 130));
+    let _ = window.set_size(tauri::LogicalSize::new(50, 103));
     let _ = window.move_window(Position::RightCenter);
 }
 
