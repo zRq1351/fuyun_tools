@@ -47,6 +47,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
-          releaseBody: '有新版本发布，点击确认更新'
+          releaseBody: '第一个版本发布'
           releaseDraft: false
           prerelease: false
