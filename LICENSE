@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2025 zrq1351
+Copyright (c) 2025-2026 zrq1351
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,9 @@ SOFTWARE.
 
 --------------------------------------------------------------------------------
 
-# Third Party Licenses
+# Open Source Acknowledgments
 
-This project uses Font Awesome Free icons, which are licensed under the terms
-of the Fonticons, Inc. License. See the included LICENSE.txt file in the 
-fontawesome-free-6.7.2 directory for the full license terms.
+This project is made possible by the following open source projects:
+- **Element Plus**: Copyright (c) 2020-present Element Plus
+- **Tauri**: Copyright (c) Tauri Programme within The Commons Conservancy
+And many other Rust crates that make this project possible.
