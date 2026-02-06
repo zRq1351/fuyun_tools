@@ -31,6 +31,7 @@
     "global-shortcut:default",
     "log:default",
     "clipboard-manager:default",
-    "opener:default"
+    "opener:default",
+    "updater:default"
   ]
 }

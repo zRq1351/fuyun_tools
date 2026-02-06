@@ -243,7 +243,7 @@ const updateProgress = ref(0)
 const showUpdateProgress = ref(false)
 
 const form = reactive({
-  maxItems: 50,
+  maxItems: 100,
   toggleShortcut: '',
   aiProvider: '',
   apiUrl: '',
@@ -252,7 +252,6 @@ const form = reactive({
   customProviderName: ''
 })
 
-// Shortcut Recording
 const isRecording = ref(false)
 const recordedShortcut = ref('')
 
@@ -333,10 +332,6 @@ const stopRecording = () => {
   if (recordedShortcut.value) {
     form.toggleShortcut = recordedShortcut.value
   } else {
-    // Revert if cancelled
-    // We need to store original value if we want to revert, 
-    // but for now let's just leave it or fetch from backend again? 
-    // Simplified: just leave what's there if it wasn't empty, or fetch from settings.
   }
 }
 
@@ -394,7 +389,7 @@ const checkUpdate = async () => {
   try {
     const update = await check()
     if (update && update.available) {
-      updateStatus.value = null // Clear status to show dialog
+      updateStatus.value = null
 
       try {
         await ElMessageBox.confirm(
@@ -407,26 +402,22 @@ const checkUpdate = async () => {
             }
         )
 
-        // User confirmed
         showUpdateProgress.value = true
         updateStatus.value = {message: '正在下载更新...', type: 'info'}
 
+        let contentLength = 0
+        let downloaded = 0
+
         await update.downloadAndInstall((event) => {
           if (event.event === 'Started') {
+            contentLength = event.data.contentLength || 0
+            downloaded = 0
             updateProgress.value = 0
           } else if (event.event === 'Progress') {
-            updateProgress.value = 0 // Reset for chunks
-            if (event.data.total) {
-              // Approximate progress if total is known, but chunks are relative
-              // Simple version: just show spinner or indeterminate if needed
-              // But let's try to accumulate if we can, or just update text
-              // event.data.chunkLength / event.data.contentLength
+            downloaded += event.data.chunkLength
+            if (contentLength > 0) {
+              updateProgress.value = Math.round((downloaded / contentLength) * 100)
             }
-            // Since event.data only gives chunk length, it's hard to calculate percentage exactly without total state
-            // But the rust example used chunk_length and content_length.
-            // The JS event gives { chunkLength: number } or { total: number }?
-            // Let's check docs or assume basic progress.
-            // Actually, for better UX without complex state, let's just show downloading.
           } else if (event.event === 'Finished') {
             updateProgress.value = 100
           }
@@ -449,18 +440,26 @@ const checkUpdate = async () => {
       } catch (action) {
         if (action === 'cancel') {
           updateStatus.value = {message: '已取消更新', type: 'info'}
-        } else {
-          // Error in update process
-          throw action
         }
       }
     } else {
       updateStatus.value = {message: '已是最新版本', type: 'success'}
     }
   } catch (error) {
-    // Check if it's a cancel action or actual error
     if (error !== 'cancel') {
-      updateStatus.value = {message: `检查更新失败: ${error}`, type: 'error'}
+      const errorStr = String(error)
+      if (
+          errorStr.includes('Network Error') ||
+          errorStr.includes('timeout') ||
+          errorStr.includes('Failed to fetch') ||
+          errorStr.includes('connection refused') ||
+          errorStr.includes('unreachable') ||
+          errorStr.includes('error sending request')
+      ) {
+        updateStatus.value = {message: '网络连接失败，请检查您的网络设置后重试', type: 'error'}
+      } else {
+        updateStatus.value = {message: `检查更新失败: ${error}`, type: 'error'}
+      }
       console.error(error)
     }
   } finally {
@@ -530,7 +529,6 @@ const openExternal = async (url) => {
 }
 
 onMounted(async () => {
-  // Init Theme
   const savedTheme = localStorage.getItem('settings-theme')
   const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
   if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
@@ -538,7 +536,6 @@ onMounted(async () => {
     document.documentElement.classList.add('dark')
   }
 
-  // Load Settings
   try {
     await loadAiProviders()
     const settings = await invoke('get_ai_settings')
