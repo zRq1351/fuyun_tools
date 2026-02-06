@@ -56,26 +56,21 @@ import {marked} from 'marked'
 import {invoke} from '@tauri-apps/api/core'
 import {listen} from '@tauri-apps/api/event'
 
-// State
-const mode = ref('translation') // 'translation' or 'explanation'
+const mode = ref('translation')
 const originalText = ref('')
 const resultText = ref('')
 const showOriginal = ref(false)
 
-// Language State
 const explanationLanguage = ref('中文')
 const sourceLanguage = ref('英文')
 const targetLanguage = ref('简体中文')
 
 const resultRef = ref(null)
 
-// Computed Markdown
 const originalHtml = computed(() => marked.parse(originalText.value))
 const resultHtml = computed(() => marked.parse(resultText.value))
 
-// Initialize
 onMounted(async () => {
-  // Load initial data injected by Rust
   const loadInitialData = () => {
     const initialData = window.__INITIAL_DATA__
     if (initialData) {
@@ -83,7 +78,6 @@ onMounted(async () => {
       originalText.value = initialData.original || ''
       resultText.value = initialData.content || ''
 
-      // Auto-scroll to bottom if there is content
       scrollToBottom()
     }
   }
@@ -91,7 +85,6 @@ onMounted(async () => {
   loadInitialData()
   window.addEventListener('init-data', loadInitialData)
 
-  // Setup Listeners
   try {
     await listen('result-clean', () => {
       resultText.value = ''
@@ -124,7 +117,7 @@ const toggleOriginal = () => {
 const handleLanguageChange = async () => {
   if (!originalText.value) return
 
-  resultText.value = '' // Clear previous result
+  resultText.value = ''
 
   try {
     if (mode.value === 'translation') {

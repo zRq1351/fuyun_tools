@@ -52,7 +52,6 @@ const isVisible = ref(false)
 const containerRef = ref(null)
 const contentRef = ref(null)
 
-// Drag scrolling state
 let isDown = false
 let startX = 0
 let scrollLeft = 0
@@ -82,14 +81,12 @@ const showWindow = (data) => {
   isVisible.value = true
 
   if (history.value.length > 0) {
-    // Ensure selection is valid
     if (selectedIndex.value < 0 || selectedIndex.value >= history.value.length) {
       selectedIndex.value = 0
     }
     updateSelection(selectedIndex.value, true)
   }
 
-  // Focus container to capture key events
   nextTick(() => {
     containerRef.value?.focus()
   })
@@ -122,12 +119,10 @@ const selectAndFillDirect = async (index) => {
 
 const deleteItem = async (index) => {
   try {
-    // Optimistic update
     history.value.splice(index, 1)
     if (selectedIndex.value >= history.value.length) {
       selectedIndex.value = Math.max(0, history.value.length - 1)
     }
-    // Call backend to delete
     await invoke('remove_clipboard_item', {index})
   } catch (error) {
     console.error('删除失败:', error)
@@ -169,7 +164,6 @@ const handleKeydown = (event) => {
   }
 }
 
-// Drag Scrolling Logic
 const handleMouseDown = (e) => {
   isDown = true
   startX = e.pageX - contentRef.value.offsetLeft
