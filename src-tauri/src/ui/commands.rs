@@ -10,9 +10,7 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
-use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-use tauri_plugin_updater::UpdaterExt;
 
 #[tauri::command]
 pub async fn get_clipboard_history(
@@ -146,48 +144,6 @@ pub async fn selection_toolbar_blur(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-pub async fn check_for_updates(app: AppHandle) -> Result<bool, String> {
-    match app.updater().map_err(|e| e.to_string()) {
-        Ok(updater) => match updater.check().await {
-            Ok(update_option) => {
-                if let Some(update) = update_option {
-                    let should_update = app
-                        .dialog()
-                        .message(format!(
-                            "发现新版本 {}，是否立即更新？\n\n更新内容:\n{}",
-                            update.version,
-                            update.body.as_ref().unwrap_or(&"".to_string())
-                        ))
-                        .title("发现更新")
-                        .blocking_show();
-                    let mut downloaded = 0;
-                    if should_update {
-                        update
-                            .download_and_install(
-                                |chunk_length, content_length| {
-                                    downloaded += chunk_length;
-                                    println!("已下载 {downloaded} / {content_length:?}");
-                                },
-                                || {
-                                    println!("下载结束");
-                                },
-                            )
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        Ok(true)
-                    } else {
-                        Ok(false)
-                    }
-                } else {
-                    Ok(false)
-                }
-            }
-            Err(e) => Err(e.to_string()),
-        },
-        Err(e) => Err(e.to_string()),
-    }
-}
 
 #[tauri::command]
 pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, String> {

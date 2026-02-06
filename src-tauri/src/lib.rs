@@ -109,7 +109,6 @@ pub fn run() {
             test_ai_connection,
             stream_translate_text,
             stream_explain_text,
-            check_for_updates,
             get_provider_config,
             get_all_configured_providers,
         ])
