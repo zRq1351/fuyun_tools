@@ -420,7 +420,10 @@ pub fn load_history() -> Result<Vec<String>, String> {
 
 /// 获取日志目录路径
 pub fn get_logs_dir_path() -> PathBuf {
-    PathBuf::from("logs")
+    let mut logs_dir = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    logs_dir.pop();
+    logs_dir.push("logs");
+    logs_dir
 }
 
 /// 初始化内置提供商配置
