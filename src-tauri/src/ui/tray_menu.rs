@@ -171,7 +171,9 @@ pub fn handle_autostart_event(app: &AppHandle, state: &Arc<Mutex<AppState>>) {
 pub fn handle_clear_history_event(state: &Arc<Mutex<AppState>>) {
     let state_guard = state.lock().unwrap();
     let manager = state_guard.clipboard_manager.lock().unwrap();
-    manager.clear_history();
+    if let Err(e) = manager.clear_history() {
+        log::error!("清除历史记录失败: {}", e);
+    }
 }
 
 /// 打开日志目录

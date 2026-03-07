@@ -1,21 +1,29 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::utils::utils_helpers::{find_best_replacement_candidate, load_history, save_history_with_retry};
+use crate::utils::utils_helpers::{
+    find_best_replacement_candidate, load_history_data, save_history_data_with_retry,
+    ClipboardHistoryData,
+};
 
 pub struct ClipboardManager {
     history: Arc<Mutex<Vec<String>>>,
+    categories: Arc<Mutex<HashMap<String, String>>>,
+    category_list: Arc<Mutex<Vec<String>>>,
     max_items: usize,
 }
 
 impl ClipboardManager {
     pub fn new(max_items: usize) -> Self {
-        let history = load_history().unwrap_or_else(|e| {
+        let history_data = load_history_data().unwrap_or_else(|e| {
             log::error!("加载历史记录失败: {}，使用空历史记录", e);
-            vec![]
+            ClipboardHistoryData::default()
         });
 
         Self {
-            history: Arc::new(Mutex::new(history)),
+            history: Arc::new(Mutex::new(history_data.items)),
+            categories: Arc::new(Mutex::new(history_data.categories)),
+            category_list: Arc::new(Mutex::new(history_data.category_list)),
             max_items,
         }
     }
@@ -55,6 +63,115 @@ impl ClipboardManager {
     pub fn get_history(&self) -> Vec<String> {
         let history = self.history.lock().unwrap();
         history.clone()
+    }
+
+    pub fn get_categories(&self) -> HashMap<String, String> {
+        let categories = self.categories.lock().unwrap();
+        categories.clone()
+    }
+
+    pub fn get_category_list(&self) -> Vec<String> {
+        let list = self.category_list.lock().unwrap();
+        list.clone()
+    }
+
+    pub fn add_category(&self, category: String) -> Result<(), String> {
+        let (categories_clone, category_list_clone) = {
+            let categories = self.categories.lock().unwrap();
+            let mut category_list = self.category_list.lock().unwrap();
+
+            let normalized_category = category.trim().to_string();
+
+            if !normalized_category.is_empty()
+                && normalized_category != "未分类"
+                && normalized_category != "全部"
+                && !category_list.contains(&normalized_category) {
+                category_list.push(normalized_category);
+            }
+
+            (categories.clone(), category_list.clone())
+        };
+
+        // 异步保存
+        let history = self.history.lock().unwrap().clone();
+
+        std::thread::spawn(move || {
+            let data = ClipboardHistoryData {
+                items: history,
+                categories: categories_clone,
+                category_list: category_list_clone,
+            };
+            if let Err(e) = save_history_data_with_retry(&data, 3) {
+                log::error!("异步保存历史数据失败: {}", e);
+            }
+        });
+
+        Ok(())
+    }
+
+    pub fn set_category(&self, item: String, category: String) -> Result<(), String> {
+        // 先获取需要的数据，然后立即释放锁
+        let (categories_clone, category_list_clone) = {
+            let mut categories = self.categories.lock().unwrap();
+            let mut category_list = self.category_list.lock().unwrap();
+
+            // 规范化处理：如果分类是空或“未分类”，则视为移除
+            let normalized_category = category.trim().to_string();
+
+            if normalized_category.is_empty() || normalized_category == "未分类" || normalized_category == "全部" {
+                categories.remove(&item);
+            } else {
+                categories.insert(item, normalized_category.clone());
+                // 确保分类存在于列表中
+                if !category_list.contains(&normalized_category) {
+                    category_list.push(normalized_category);
+                }
+            }
+            (categories.clone(), category_list.clone())
+        };
+
+        // 异步保存，不持有锁
+        let history = self.history.lock().unwrap().clone();
+
+        std::thread::spawn(move || {
+            let data = ClipboardHistoryData {
+                items: history,
+                categories: categories_clone,
+                category_list: category_list_clone,
+            };
+            if let Err(e) = save_history_data_with_retry(&data, 3) {
+                log::error!("异步保存历史数据失败: {}", e);
+            }
+        });
+
+        Ok(())
+    }
+
+    pub fn remove_category(&self, category: String) -> Result<(), String> {
+        let (categories_clone, category_list_clone) = {
+            let mut categories = self.categories.lock().unwrap();
+            let mut category_list = self.category_list.lock().unwrap();
+
+            category_list.retain(|c| c != &category);
+            categories.retain(|_, v| v != &category);
+            (categories.clone(), category_list.clone())
+        };
+
+        // 异步保存，不持有锁
+        let history = self.history.lock().unwrap().clone();
+
+        std::thread::spawn(move || {
+            let data = ClipboardHistoryData {
+                items: history,
+                categories: categories_clone,
+                category_list: category_list_clone,
+            };
+            if let Err(e) = save_history_data_with_retry(&data, 3) {
+                log::error!("异步保存历史数据失败: {}", e);
+            }
+        });
+
+        Ok(())
     }
 
     /// 将内容添加到剪贴板历史记录中
@@ -116,18 +233,48 @@ impl ClipboardManager {
             history.truncate(self.max_items);
         }
 
-        if let Err(e) = save_history_with_retry(&history, 3) {
-            log::error!("保存历史记录失败: {}", e);
-        }
+        // 保存时也需要带上分类数据
+        let categories = self.categories.lock().unwrap();
+        let category_list = self.category_list.lock().unwrap();
+        let data = ClipboardHistoryData {
+            items: history.clone(),
+            categories: categories.clone(),
+            category_list: category_list.clone(),
+        };
+
+        // 异步保存
+        std::thread::spawn(move || {
+            if let Err(e) = save_history_data_with_retry(&data, 3) {
+                log::error!("异步保存历史记录失败: {}", e);
+            }
+        });
     }
 
-    pub fn clear_history(&self) {
+    pub fn clear_history(&self) -> Result<(), String> {
         let mut history = self.history.lock().unwrap();
-        *history = vec![];
-        if let Err(e) = save_history_with_retry(&history, 3) {
-            log::error!("清空历史记录时保存失败: {}", e);
-        }
+        history.clear();
+
+        // 同时清理分类
+        let mut categories = self.categories.lock().unwrap();
+        categories.clear();
+
+        let mut category_list = self.category_list.lock().unwrap();
+        category_list.clear();
+
+        // 异步保存
+        std::thread::spawn(move || {
+            let data = ClipboardHistoryData {
+                items: Vec::new(),
+                categories: HashMap::new(),
+                category_list: Vec::new(),
+            };
+            if let Err(e) = save_history_data_with_retry(&data, 3) {
+                log::error!("异步清空历史记录保存失败: {}", e);
+            }
+        });
+        
         log::info!("历史记录已清空");
+        Ok(())
     }
 
     pub fn set_max_items(&mut self, max_items: usize) {
@@ -138,28 +285,66 @@ impl ClipboardManager {
         let mut history = self.history.lock().unwrap();
         if history.len() > max_items {
             history.truncate(max_items);
-            if let Err(e) = save_history_with_retry(&history, 3) {
-                log::error!("截断历史记录时保存失败: {}", e);
-            }
+
+            // 获取分类数据以便保存完整记录
+            let categories = self.categories.lock().unwrap();
+            let category_list = self.category_list.lock().unwrap();
+
+            let data = ClipboardHistoryData {
+                items: history.clone(),
+                categories: categories.clone(),
+                category_list: category_list.clone(),
+            };
+
+            // 异步保存
+            std::thread::spawn(move || {
+                if let Err(e) = save_history_data_with_retry(&data, 3) {
+                    log::error!("截断历史记录时保存失败: {}", e);
+                }
+            });
         }
     }
 
     pub fn remove_from_history(&self, index: usize) -> Result<(), String> {
         let mut history = self.history.lock().unwrap();
-        if index >= history.len() {
-            return Err(format!("索引 {} 超出范围", index));
-        }
-        history.remove(index);
+        if index < history.len() {
+            let item = history.remove(index);
 
-        if let Err(e) = save_history_with_retry(&history, 3) {
-            return Err(format!("保存历史记录失败: {}", e));
+            // 同时清理分类
+            let mut categories = self.categories.lock().unwrap();
+            categories.remove(&item);
+
+            // 保存完整数据
+            let category_list = self.category_list.lock().unwrap();
+            let data = ClipboardHistoryData {
+                items: history.clone(),
+                categories: categories.clone(),
+                category_list: category_list.clone(),
+            };
+
+            // 异步保存
+            std::thread::spawn(move || {
+                if let Err(e) = save_history_data_with_retry(&data, 3) {
+                    log::error!("异步保存历史记录失败: {}", e);
+                }
+            });
+            Ok(())
+        } else {
+            Err("索引超出范围".to_string())
         }
-        Ok(())
     }
 
     pub fn save_history_on_exit(&self) -> Result<(), String> {
         let history = self.history.lock().unwrap();
-        save_history_with_retry(&history, 3)
+        let categories = self.categories.lock().unwrap();
+        let category_list = self.category_list.lock().unwrap();
+
+        let data = ClipboardHistoryData {
+            items: history.clone(),
+            categories: categories.clone(),
+            category_list: category_list.clone(),
+        };
+        save_history_data_with_retry(&data, 3)
     }
 }
 

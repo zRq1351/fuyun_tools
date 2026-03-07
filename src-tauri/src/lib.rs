@@ -30,7 +30,16 @@ fn get_log_level() -> log::LevelFilter {
 
 /// 启动划词选择监听器
 pub fn start_text_selection_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
-    features::mouse_listener::MouseListener::start_mouse_listener(app_handle, state);
+    let selection_enabled = {
+        let state_guard = state.lock().unwrap();
+        state_guard.settings.selection_enabled
+    };
+
+    features::mouse_listener::set_selection_listener_enabled(
+        app_handle,
+        state,
+        selection_enabled,
+    );
 }
 
 pub fn run() {
@@ -45,7 +54,10 @@ pub fn run() {
                 settings_window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
-                        let _ = settings_window_clone.hide();
+                        let window = settings_window_clone.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = window.hide();
+                        });
                     }
                 });
             }
@@ -101,6 +113,9 @@ pub fn run() {
             remove_clipboard_item,
             get_clipboard_history,
             select_and_fill,
+            set_item_category,
+            add_category,
+            remove_category,
             window_blur,
             selection_toolbar_blur,
             copy_text,
@@ -122,7 +137,13 @@ pub fn run() {
                         path: get_logs_dir_path(),
                         file_name: Some(String::from("fuyun_log")),
                     })
-                        .filter(|record| record.level() <= log::Level::Error),
+                        .filter(|record| {
+                            // 过滤掉 tao 库的特定警告日志
+                            if record.target() == "tao::platform_impl::platform::event_loop::runner" {
+                                return false;
+                            }
+                            record.level() <= log::Level::Error
+                        }),
                 )
                 .max_file_size(1000000) // 1MB
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)

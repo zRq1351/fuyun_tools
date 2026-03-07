@@ -12,13 +12,55 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+#[derive(serde::Serialize)]
+pub struct HistoryResponse {
+    history: Vec<String>,
+    categories: HashMap<String, String>,
+    category_list: Vec<String>,
+}
+
 #[tauri::command]
 pub async fn get_clipboard_history(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
-) -> Result<Vec<String>, String> {
+) -> Result<HistoryResponse, String> {
     let state_guard = state.lock().unwrap();
     let manager = state_guard.clipboard_manager.lock().unwrap();
-    Ok(manager.get_history())
+    Ok(HistoryResponse {
+        history: manager.get_history(),
+        categories: manager.get_categories(),
+        category_list: manager.get_category_list(),
+    })
+}
+
+#[tauri::command]
+pub async fn set_item_category(
+    item: String,
+    category: String,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.clipboard_manager.lock().unwrap();
+    manager.set_category(item, category)
+}
+
+#[tauri::command]
+pub async fn remove_category(
+    category: String,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.clipboard_manager.lock().unwrap();
+    manager.remove_category(category)
+}
+
+#[tauri::command]
+pub async fn add_category(
+    category: String,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.clipboard_manager.lock().unwrap();
+    manager.add_category(category)
 }
 
 #[tauri::command]
@@ -169,6 +211,10 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         "hot_key".to_string(),
         serde_json::Value::String(settings.hot_key.clone()),
     );
+    result.insert(
+        "selection_enabled".to_string(),
+        serde_json::Value::Bool(settings.selection_enabled),
+    );
 
     // 处理provider_configs，将encrypted_api_key替换为解密后的api_key
     let mut provider_configs_map: HashMap<String, serde_json::Value> = HashMap::new();
@@ -216,6 +262,7 @@ pub async fn save_app_settings(
     ai_model_name: String,
     ai_api_key: String,
     hot_key: String,
+    selection_enabled: bool,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -228,6 +275,7 @@ pub async fn save_app_settings(
 
     settings.version = version;
     settings.max_items = max_items;
+    settings.selection_enabled = selection_enabled;
 
     if hot_key.is_empty() {
         return Err("快捷键不能为空".to_string());
@@ -285,10 +333,17 @@ pub async fn save_app_settings(
 
     save_settings(&settings).map_err(|e| e.to_string())?;
 
+    let selection_enabled = settings.selection_enabled;
     {
         let mut state_guard = state.lock().unwrap();
-        state_guard.settings = settings;
+        state_guard.settings = settings.clone();
     }
+
+    features::mouse_listener::set_selection_listener_enabled(
+        app.clone(),
+        state.inner().clone(),
+        selection_enabled,
+    );
 
     log::info!(
         "设置保存成功: max_items={}, provider={}",

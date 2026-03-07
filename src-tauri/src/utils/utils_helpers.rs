@@ -23,6 +23,8 @@ pub struct AppSettingsData {
     /// 每个AI提供商的独立配置
     #[serde(default)]
     pub provider_configs: HashMap<String, ProviderConfig>,
+    #[serde(default = "default_selection_enabled")]
+    pub selection_enabled: bool,
 }
 
 impl Default for AppSettingsData {
@@ -33,8 +35,13 @@ impl Default for AppSettingsData {
             hot_key: DEFAULT_TOGGLE_SHORTCUT.to_string(),
             ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
+            selection_enabled: true,
         }
     }
+}
+
+fn default_selection_enabled() -> bool {
+    true
 }
 
 impl AppSettingsData {
@@ -309,6 +316,10 @@ impl AppSettingsData {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ClipboardHistoryData {
     pub items: Vec<String>,
+    #[serde(default)]
+    pub categories: HashMap<String, String>, // item -> category_name
+    #[serde(default)]
+    pub category_list: Vec<String>, // ordered list of categories
 }
 /// 获取设置文件路径
 pub fn get_settings_file_path() -> PathBuf {
@@ -376,6 +387,8 @@ pub fn save_history(history: &[String]) -> Result<(), String> {
 
     let history_data = ClipboardHistoryData {
         items: history.to_vec(),
+        categories: HashMap::new(),
+        category_list: Vec::new(),
     };
 
     let json = serde_json::to_string_pretty(&history_data)
@@ -386,36 +399,116 @@ pub fn save_history(history: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// 带重试机制的保存历史记录函数
-pub fn save_history_with_retry(history: &[String], max_retries: u32) -> Result<(), String> {
-    let mut attempts = 0;
-    loop {
-        match save_history(history) {
-            Ok(()) => return Ok(()),
-            Err(e) if attempts >= max_retries => return Err(e),
-            Err(_) => {
-                attempts += 1;
-                thread::sleep(Duration::from_millis((100 * attempts).into()));
+/// 保存历史记录到文件（带重试）
+pub fn save_history_with_retry(history: &Vec<String>, max_retries: u32) -> Result<(), String> {
+    save_history_data_with_retry(
+        &ClipboardHistoryData {
+            items: history.clone(),
+            categories: HashMap::new(),
+            category_list: Vec::new(),
+        },
+        max_retries,
+    )
+}
+
+/// 保存完整的历史数据（包含分类）到文件（带重试）
+pub fn save_history_data_with_retry(
+    data: &ClipboardHistoryData,
+    max_retries: u32,
+) -> Result<(), String> {
+    let history_path = get_history_file_path();
+    let json = serde_json::to_string_pretty(data).map_err(|e| format!("序列化历史记录失败: {}", e))?;
+
+    for i in 0..max_retries {
+        match std::fs::write(&history_path, &json) {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                if i == max_retries - 1 {
+                    return Err(format!("写入历史记录文件失败: {}", e));
+                }
+                log::warn!("写入历史记录失败 (重试 {}/{}): {}", i + 1, max_retries, e);
+                thread::sleep(Duration::from_millis(50));
             }
         }
     }
+    Ok(())
 }
 
-/// 从文件加载剪切板历史记录
+/// 从文件加载历史记录
 pub fn load_history() -> Result<Vec<String>, String> {
+    load_history_data().map(|data| data.items)
+}
+
+/// 从文件加载完整的历史数据（包含分类）
+pub fn load_history_data() -> Result<ClipboardHistoryData, String> {
     let history_path = get_history_file_path();
 
     if !history_path.exists() {
-        return Ok(vec![]);
+        return Ok(ClipboardHistoryData::default());
     }
 
     let contents = std::fs::read_to_string(&history_path)
         .map_err(|e| format!("读取历史记录文件失败: {}", e))?;
 
-    let history_data: ClipboardHistoryData =
-        serde_json::from_str(&contents).map_err(|e| format!("解析历史记录文件失败: {}", e))?;
+    // 尝试解析为新结构
+    if let Ok(mut data) = serde_json::from_str::<ClipboardHistoryData>(&contents) {
+        // 确保 category_list 不为空，如果 categories 有数据但 category_list 为空，则从 categories 恢复
+        if data.category_list.is_empty() && !data.categories.is_empty() {
+            let mut unique_categories: Vec<String> = data.categories.values().cloned().collect();
+            unique_categories.sort();
+            unique_categories.dedup();
+            // 过滤掉 "未分类" 和 "全部"，因为它们由前端自动添加
+            data.category_list = unique_categories
+                .into_iter()
+                .filter(|c| c != "未分类" && c != "全部")
+                .collect();
+        }
+        Ok(data)
+    } else {
+        // 尝试解析为旧的 Vec<String> 格式
+        match serde_json::from_str::<Vec<String>>(&contents) {
+            Ok(items) => Ok(ClipboardHistoryData {
+                items,
+                categories: HashMap::new(),
+                category_list: Vec::new(),
+            }),
+            Err(_) => {
+                // 如果既不是新结构也不是旧结构，可能是文件损坏，或者是一个空的 JSON 对象
+                if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&contents) {
+                    if let Some(obj) = json_val.as_object() {
+                        // 尝试手动提取字段，兼容部分字段缺失的情况
+                        let items = obj.get("items")
+                            .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
+                            .unwrap_or_default();
 
-    Ok(history_data.items)
+                        let categories = obj.get("categories")
+                            .and_then(|v| serde_json::from_value::<HashMap<String, String>>(v.clone()).ok())
+                            .unwrap_or_default();
+
+                        let mut category_list = obj.get("category_list")
+                            .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
+                            .unwrap_or_default();
+
+                        // 如果列表为空但有分类数据，尝试恢复
+                        if category_list.is_empty() && !categories.is_empty() {
+                            let mut unique: Vec<String> = categories.values().cloned().collect();
+                            unique.sort();
+                            unique.dedup();
+                            category_list = unique.into_iter().filter(|c| c != "未分类" && c != "全部").collect();
+                        }
+
+                        return Ok(ClipboardHistoryData {
+                            items,
+                            categories,
+                            category_list,
+                        });
+                    }
+                }
+
+                Err(format!("无法解析历史记录文件"))
+            },
+        }
+    }
 }
 
 /// 获取日志目录路径
