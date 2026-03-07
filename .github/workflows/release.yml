@@ -47,6 +47,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
-          releaseBody: '1、添加历史记录分类功能。2、历史记录窗口位置调整功能。3、更新软件图标。'
+          releaseBody: '1、修复关闭设置窗口卡顿问题。2、修复特定条件下的一些bug'
           releaseDraft: false
           prerelease: false
