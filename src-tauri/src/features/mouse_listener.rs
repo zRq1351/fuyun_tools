@@ -145,7 +145,6 @@ impl MouseListener {
             log::info!("开始监听鼠标键盘事件");
             if let Err(error) = listen(move |event| {
                 if !LISTENER_ENABLED.load(Ordering::SeqCst) {
-                    hide_selection_toolbar_impl(listener_app_handle.clone());
                     return;
                 }
 
@@ -155,7 +154,6 @@ impl MouseListener {
                 };
 
                 if !selection_enabled {
-                    hide_selection_toolbar_impl(listener_app_handle.clone());
                     return;
                 }
 

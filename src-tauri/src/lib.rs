@@ -11,22 +11,11 @@ use crate::services::clipboard_manager::start_clipboard_listener;
 use crate::ui::commands::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{hide_clipboard_window, show_clipboard_window};
+#[cfg(debug_assertions)]
 use crate::utils::utils_helpers::get_logs_dir_path;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-
-/// 根据编译环境获取日志级别
-fn get_log_level() -> log::LevelFilter {
-    // 根据编译环境自动设置日志级别
-    if cfg!(debug_assertions) {
-        // 开发环境使用Debug级别
-        log::LevelFilter::Debug
-    } else {
-        // 生产环境使用Warn级别
-        log::LevelFilter::Warn
-    }
-}
 
 /// 启动划词选择监听器
 pub fn start_text_selection_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
@@ -46,7 +35,7 @@ pub fn run() {
     let initial_state = AppState::default();
     let state_arc = Arc::new(Mutex::new(initial_state));
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(state_arc.clone())
         .setup(move |app| {
             if let Some(settings_window) = app.get_webview_window("settings") {
@@ -54,10 +43,7 @@ pub fn run() {
                 settings_window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
-                        let window = settings_window_clone.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let _ = window.hide();
-                        });
+                        let _ = settings_window_clone.hide();
                     }
                 });
             }
@@ -132,10 +118,12 @@ pub fn run() {
             get_all_configured_providers,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_autostart::Builder::new().build())
-        .plugin(
+        .plugin(tauri_plugin_autostart::Builder::new().build());
+
+    #[cfg(debug_assertions)]
+    let builder = builder.plugin(
             tauri_plugin_log::Builder::default()
-                .level(get_log_level())
+                .level(log::LevelFilter::Debug)
                 .target(
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
                         path: get_logs_dir_path(),
@@ -152,7 +140,9 @@ pub fn run() {
                 .max_file_size(1000000) // 1MB
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
                 .build(),
-        )
+    );
+
+    builder
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())

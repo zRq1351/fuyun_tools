@@ -1,5 +1,6 @@
 use crate::core::app_state::{AppState, TrayMenuItems};
 use crate::ui::window_manager::cleanup_enigo_instance;
+#[cfg(debug_assertions)]
 use crate::utils::utils_helpers::get_logs_dir_path;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -8,6 +9,7 @@ use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{menu::CheckMenuItemBuilder, AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
+#[cfg(debug_assertions)]
 use tauri_plugin_opener::OpenerExt;
 
 /// 重建托盘菜单
@@ -32,7 +34,9 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
 
         let quit_item = create_menu_item("quit", "退出");
         let clear_history_item = create_menu_item("clear_history", "清除记录");
+        #[cfg(debug_assertions)]
         let clear_logs_item = create_menu_item("clear_logs", "清除日志");
+        #[cfg(debug_assertions)]
         let open_logs_item = create_menu_item("open_logs", "打开日志目录");
         let settings_item = create_menu_item("settings", "设置");
         let autostart_enabled = app_handle.autolaunch().is_enabled().unwrap_or(false);
@@ -45,20 +49,24 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
             autostart_item: autostart_item.clone(),
         });
 
-        let clear_submenu_items: [&dyn tauri::menu::IsMenuItem<tauri::Wry>; 2] =
-            [&clear_history_item, &clear_logs_item];
+        let mut clear_submenu_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+            vec![&clear_history_item];
+
+        #[cfg(debug_assertions)]
+        clear_submenu_items.push(&clear_logs_item);
 
         let clear_submenu =
             Submenu::with_items(app_handle, "清除", true, &clear_submenu_items)
                 .expect("未能创建清除子菜单");
 
-        let menu_items: [&dyn tauri::menu::IsMenuItem<tauri::Wry>; 5] = [
-            &autostart_item,
-            &clear_submenu,
-            &open_logs_item,
-            &settings_item,
-            &quit_item,
-        ];
+        let mut menu_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+            vec![&autostart_item, &clear_submenu];
+
+        #[cfg(debug_assertions)]
+        menu_items.push(&open_logs_item);
+
+        menu_items.push(&settings_item);
+        menu_items.push(&quit_item);
 
         let menu = Menu::with_items(app_handle, &menu_items).expect("创建主菜单失败");
 
@@ -83,6 +91,7 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
                         "autostart" => {
                             handle_autostart_event(&app, &state_for_events);
                         }
+                        #[cfg(debug_assertions)]
                         "open_logs" => {
                             if let Err(e) = open_log_directory(&app) {
                                 log::error!("打开日志目录失败: {}", e);
@@ -91,6 +100,7 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
                         "clear_history" => {
                             handle_clear_history_event(&state_for_events);
                         }
+                        #[cfg(debug_assertions)]
                         "clear_logs" => {
                             if let Err(e) = clear_log_files() {
                                 log::error!("清除日志文件失败: {}", e);
@@ -177,6 +187,7 @@ pub fn handle_clear_history_event(state: &Arc<Mutex<AppState>>) {
 }
 
 /// 打开日志目录
+#[cfg(debug_assertions)]
 fn open_log_directory(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let log_dir = get_logs_dir_path();
     if !log_dir.exists() {
@@ -190,6 +201,7 @@ fn open_log_directory(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::
 }
 
 /// 清除日志文件
+#[cfg(debug_assertions)]
 fn clear_log_files() -> Result<(), Box<dyn std::error::Error>> {
     let log_dir = get_logs_dir_path();
 
