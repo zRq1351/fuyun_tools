@@ -1,10 +1,15 @@
 use crate::core::app_state::AppState;
+use crate::core::config::CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN;
 use lazy_static::lazy_static;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_positioner::{Position, WindowExt};
+#[cfg(target_os = "windows")]
+use winapi::shared::windef::RECT;
+#[cfg(target_os = "windows")]
+use winapi::um::winuser::{GetSystemMetrics, SystemParametersInfoW, SM_CYSCREEN, SPI_GETWORKAREA};
 
 lazy_static! {
     pub static ref ENIGO_INSTANCE: Arc<Mutex<Option<enigo::Enigo>>> = Arc::new(Mutex::new(None));
@@ -46,6 +51,11 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
         )
     };
 
+    let bottom_offset = {
+        let state_guard = state.lock().unwrap();
+        state_guard.settings.clipboard_bottom_offset
+    };
+
     if let Some(_window) = app_handle.get_webview_window("clipboard") {
         let app_handle_clone = app_handle.clone();
         let history_clone = history.clone();
@@ -53,13 +63,14 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
         let category_list_clone = category_list.clone();
         thread::spawn(move || {
             if let Some(window) = app_handle_clone.get_webview_window("clipboard") {
-                set_window_position(&window);
+                set_window_position(&window, bottom_offset);
                 if window.show().is_ok() {
                     let _ = window.set_focus();
                     let payload = serde_json::json!({
                         "history": history_clone,
                         "categories": categories_clone,
                         "category_list": category_list_clone,
+                        "bottomOffset": bottom_offset,
                         "selectedIndex": selected_index
                     });
                     let _ = app_handle_clone.emit("show-window", payload);
@@ -92,22 +103,46 @@ pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
 }
 
 /// 设置窗口位置和大小
-pub fn set_window_position(window: &tauri::WebviewWindow) {
+pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
     if let Some(monitor) = window.current_monitor().unwrap() {
+        let monitor_position = monitor.position();
         let screen_size = monitor.size();
-        let taskbar_safe_offset = 56i32;
+        let taskbar_safe_offset = get_taskbar_safe_offset() + bottom_offset.max(0);
 
         let window_width = screen_size.width;
         let window_height = 250u32;
 
         let _ = window.set_size(tauri::LogicalSize::new(window_width, window_height));
 
-        let _ = window.move_window(Position::BottomLeft);
-        if let Ok(current_pos) = window.outer_position() {
-            let adjusted_y = current_pos.y.saturating_sub(taskbar_safe_offset);
-            let _ = window.set_position(tauri::PhysicalPosition::new(current_pos.x, adjusted_y));
+        let target_x = monitor_position.x;
+        let target_y = monitor_position.y + screen_size.height as i32
+            - window_height as i32
+            - taskbar_safe_offset;
+        let _ = window.set_position(tauri::PhysicalPosition::new(target_x, target_y));
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn get_taskbar_safe_offset() -> i32 {
+    unsafe {
+        let mut work_area: RECT = std::mem::zeroed();
+        if SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            &mut work_area as *mut _ as *mut _,
+            0,
+        ) != 0
+        {
+            let screen_height = GetSystemMetrics(SM_CYSCREEN);
+            return (screen_height - work_area.bottom).max(0);
         }
     }
+    CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_taskbar_safe_offset() -> i32 {
+    CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN
 }
 
 /// 打开划词工具栏

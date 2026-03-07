@@ -63,15 +63,21 @@
         <div v-show="activeTab === 'ai'">
           <el-form :model="form" label-position="top">
             <el-form-item label="AI服务提供商">
-              <el-select v-model="form.aiProvider" placeholder="请选择提供商" @change="handleProviderChange">
-                <el-option
-                    v-for="provider in providers"
-                    :key="provider.value"
-                    :label="provider.label"
-                    :value="provider.value"
-                />
-                <el-option label="自定义" value="custom"/>
-              </el-select>
+              <div class="provider-row">
+                <el-select v-model="form.aiProvider" class="provider-select" placeholder="请选择提供商"
+                           @change="handleProviderChange">
+                  <el-option
+                      v-for="provider in providers"
+                      :key="provider.value"
+                      :label="provider.label"
+                      :value="provider.value"
+                  />
+                  <el-option label="自定义" value="custom"/>
+                </el-select>
+                <el-button v-if="canDeleteSelectedProvider" link type="danger" @click="removeSelectedProvider">
+                  删除当前自定义提供商
+                </el-button>
+              </div>
             </el-form-item>
 
             <el-form-item v-if="form.aiProvider === 'custom'" label="自定义提供商名称">
@@ -214,7 +220,7 @@
 </template>
 
 <script setup>
-import {onMounted, reactive, ref} from 'vue'
+import {computed, onMounted, reactive, ref} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import zhCn from 'element-plus/dist/locale/zh-cn'
 import {
@@ -263,6 +269,11 @@ const form = reactive({
 
 const isRecording = ref(false)
 const recordedShortcut = ref('')
+const builtinProviders = new Set(['deepseek', 'qwen', 'xiaomimimo'])
+const canDeleteSelectedProvider = computed(() => {
+  const provider = form.aiProvider
+  return !!provider && provider !== 'custom' && !builtinProviders.has(provider)
+})
 
 const toggleTheme = () => {
   isDark.value = !isDark.value
@@ -316,6 +327,53 @@ const handleProviderChange = async (provider) => {
     }
   } catch (error) {
     ElMessage.error('加载提供商配置失败: ' + error)
+  }
+}
+
+const applyCurrentProviderConfig = (settings) => {
+  form.aiProvider = settings.ai_provider || ''
+  form.customProviderName = ''
+  const currentProvider = form.aiProvider
+  const providerConfigs = settings.provider_configs || {}
+
+  if (currentProvider && providerConfigs[currentProvider]) {
+    const config = providerConfigs[currentProvider]
+    form.apiUrl = config.api_url || ''
+    form.modelName = config.model_name || ''
+    form.apiKey = config.api_key || ''
+  } else {
+    form.apiUrl = ''
+    form.modelName = ''
+    form.apiKey = ''
+  }
+}
+
+const removeSelectedProvider = async () => {
+  const provider = form.aiProvider
+  if (!canDeleteSelectedProvider.value) {
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+        `确定删除自定义提供商 "${provider}" 吗？`,
+        '删除提供商',
+        {
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+          type: 'warning',
+        }
+    )
+
+    await invoke('remove_ai_provider', {provider})
+    await loadAiProviders()
+    const settings = await invoke('get_ai_settings')
+    applyCurrentProviderConfig(settings)
+    ElMessage.success(`已删除提供商 "${provider}"`)
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(`删除失败: ${error}`)
+    }
   }
 }
 
@@ -539,17 +597,9 @@ onMounted(async () => {
 
     form.maxItems = settings.max_items || 50
     currentVersion.value = settings.version || '0.3.1'
-    form.aiProvider = settings.ai_provider || ''
     form.toggleShortcut = settings.hot_key || ''
     form.selectionEnabled = settings.selection_enabled !== false
-
-    const currentProvider = settings.ai_provider
-    if (currentProvider && settings.provider_configs && settings.provider_configs[currentProvider]) {
-      const config = settings.provider_configs[currentProvider]
-      form.apiUrl = config.api_url || ''
-      form.modelName = config.model_name || ''
-      form.apiKey = config.api_key || ''
-    }
+    applyCurrentProviderConfig(settings)
   } catch (error) {
     ElMessage.error(`加载设置失败: ${error}`)
   }
@@ -591,6 +641,16 @@ body {
   font-size: 12px;
   color: #909399;
   margin-top: 4px;
+}
+
+.provider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.provider-select {
+  flex: 1;
 }
 
 .footer {

@@ -1,6 +1,13 @@
 <template>
   <div ref="containerRef" class="container" tabindex="-1" @click="closeContextMenu" @keydown="handleKeydown">
     <div class="toolbar">
+      <div class="window-offset-handle" title="按住拖动上下调整窗口位置"
+           @mousedown.stop.prevent="startWindowOffsetDrag">
+        <el-icon>
+          <Rank/>
+        </el-icon>
+        <span class="window-offset-label">调高</span>
+      </div>
       <el-input
           v-model="searchKeyword"
           class="search-input"
@@ -139,7 +146,7 @@
 
 <script setup>
 import {computed, nextTick, onMounted, ref} from 'vue'
-import {Check, Close, Link, Plus, Search} from '@element-plus/icons-vue'
+import {Check, Close, Link, Plus, Rank, Search} from '@element-plus/icons-vue'
 import {invoke} from '@tauri-apps/api/core'
 import {listen} from '@tauri-apps/api/event'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
@@ -167,6 +174,78 @@ const dragItem = ref(null)
 let isDown = false
 let startX = 0
 let scrollLeft = 0
+let isWindowOffsetDragging = false
+let dragStartScreenY = 0
+let dragStartBottomOffset = 0
+let previewFramePending = false
+let previewRequestInFlight = false
+let queuedPreviewOffset = null
+let pendingPreviewOffset = 0
+const bottomOffset = ref(8)
+
+const clampBottomOffset = (offset) => {
+  return Math.max(0, Math.min(400, Math.round(offset)))
+}
+
+const flushPreviewBottomOffset = () => {
+  previewFramePending = false
+  const offset = pendingPreviewOffset
+  if (previewRequestInFlight) {
+    queuedPreviewOffset = offset
+    return
+  }
+  previewRequestInFlight = true
+  invoke('preview_clipboard_bottom_offset', {offset})
+      .catch((error) => {
+        console.error('预览窗口偏移失败:', error)
+      })
+      .finally(() => {
+        previewRequestInFlight = false
+        if (queuedPreviewOffset !== null && queuedPreviewOffset !== offset) {
+          pendingPreviewOffset = queuedPreviewOffset
+          queuedPreviewOffset = null
+          flushPreviewBottomOffset()
+        } else {
+          queuedPreviewOffset = null
+        }
+      })
+}
+
+const schedulePreviewBottomOffset = (offset) => {
+  pendingPreviewOffset = offset
+  if (previewFramePending) return
+  previewFramePending = true
+  requestAnimationFrame(flushPreviewBottomOffset)
+}
+
+const handleWindowOffsetDrag = (event) => {
+  if (!isWindowOffsetDragging) return
+  const deltaY = event.screenY - dragStartScreenY
+  const nextOffset = clampBottomOffset(dragStartBottomOffset - deltaY)
+  if (nextOffset === bottomOffset.value) return
+  bottomOffset.value = nextOffset
+  schedulePreviewBottomOffset(nextOffset)
+}
+
+const endWindowOffsetDrag = async () => {
+  if (!isWindowOffsetDragging) return
+  isWindowOffsetDragging = false
+  window.removeEventListener('mousemove', handleWindowOffsetDrag)
+  window.removeEventListener('mouseup', endWindowOffsetDrag)
+  try {
+    await invoke('save_clipboard_bottom_offset', {offset: bottomOffset.value})
+  } catch (error) {
+    console.error('保存窗口偏移失败:', error)
+  }
+}
+
+const startWindowOffsetDrag = (event) => {
+  isWindowOffsetDragging = true
+  dragStartScreenY = event.screenY
+  dragStartBottomOffset = bottomOffset.value
+  window.addEventListener('mousemove', handleWindowOffsetDrag)
+  window.addEventListener('mouseup', endWindowOffsetDrag)
+}
 
 const init = async () => {
   try {
@@ -189,6 +268,9 @@ const init = async () => {
 
 const showWindow = (data) => {
   history.value = Array.isArray(data.history) ? data.history : []
+  if (typeof data.bottomOffset === 'number') {
+    bottomOffset.value = clampBottomOffset(data.bottomOffset)
+  }
   // 从后端数据恢复分类状态
   if (data.categories) {
     categoryMap.value = data.categories
@@ -604,6 +686,38 @@ html, body {
   align-items: center;
 }
 
+.window-offset-handle {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border-radius: 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: rgba(255, 255, 255, 0.78);
+  cursor: ns-resize;
+  flex: 0 0 auto;
+  user-select: none;
+  transition: all 0.2s ease;
+  box-shadow: none;
+}
+
+.window-offset-label {
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.5px;
+}
+
+.window-offset-handle:hover {
+  border-color: rgba(255, 120, 120, 0.9);
+  color: #fff;
+  background: rgba(245, 108, 108, 0.2);
+  box-shadow: 0 4px 14px rgba(245, 108, 108, 0.35);
+}
+
 .search-input {
   width: 240px;
   flex: 0 0 auto;
@@ -884,13 +998,19 @@ html, body {
 
 .category-wrap {
   position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 8px;
+  left: 36px;
+  right: 56px;
+  top: 5px;
+  display: flex;
+  justify-content: center;
+  z-index: 10;
 }
 
 .category-chip {
-  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
   padding: 4px 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
@@ -898,21 +1018,31 @@ html, body {
   color: rgba(255, 255, 255, 0.85);
   font-size: 12px;
   text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .item-content {
-  margin-top: 24px;
-  padding-bottom: 32px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 7; /* Show about 7 lines */
-  -webkit-box-orient: vertical;
+  margin-top: 38px;
+  padding-bottom: 10px;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  z-index: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   font-size: 13px;
   line-height: 1.5;
   color: #dcdfe6;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.item-content::-webkit-scrollbar {
+  display: none;
 }
 
 .context-menu {
