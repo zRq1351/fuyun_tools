@@ -63,21 +63,31 @@
         <div v-show="activeTab === 'ai'">
           <el-form :model="form" label-position="top">
             <el-form-item label="AI服务提供商">
-              <div class="provider-row">
-                <el-select v-model="form.aiProvider" class="provider-select" placeholder="请选择提供商"
-                           @change="handleProviderChange">
+              <el-select v-model="form.aiProvider" class="provider-select" placeholder="请选择提供商"
+                         @change="handleProviderChange">
                   <el-option
                       v-for="provider in providers"
                       :key="provider.value"
                       :label="provider.label"
                       :value="provider.value"
-                  />
+                  >
+                    <div class="provider-option-row">
+                      <span class="provider-option-label">{{ provider.label }}</span>
+                      <el-button
+                          v-if="isRemovableProvider(provider.value)"
+                          class="provider-option-delete"
+                          link
+                          type="danger"
+                          @click.stop.prevent="removeProvider(provider.value)"
+                      >
+                        <el-icon>
+                          <CloseBold/>
+                        </el-icon>
+                      </el-button>
+                    </div>
+                  </el-option>
                   <el-option label="自定义" value="custom"/>
-                </el-select>
-                <el-button v-if="canDeleteSelectedProvider" link type="danger" @click="removeSelectedProvider">
-                  删除当前自定义提供商
-                </el-button>
-              </div>
+              </el-select>
             </el-form-item>
 
             <el-form-item v-if="form.aiProvider === 'custom'" label="自定义提供商名称">
@@ -220,11 +230,12 @@
 </template>
 
 <script setup>
-import {computed, onMounted, reactive, ref} from 'vue'
+import {onMounted, reactive, ref} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import zhCn from 'element-plus/dist/locale/zh-cn'
 import {
   CircleCheck,
+  CloseBold,
   Connection,
   Cpu,
   DocumentCopy,
@@ -270,10 +281,7 @@ const form = reactive({
 const isRecording = ref(false)
 const recordedShortcut = ref('')
 const builtinProviders = new Set(['deepseek', 'qwen', 'xiaomimimo'])
-const canDeleteSelectedProvider = computed(() => {
-  const provider = form.aiProvider
-  return !!provider && provider !== 'custom' && !builtinProviders.has(provider)
-})
+const isRemovableProvider = (provider) => !!provider && provider !== 'custom' && !builtinProviders.has(provider)
 
 const toggleTheme = () => {
   isDark.value = !isDark.value
@@ -348,9 +356,8 @@ const applyCurrentProviderConfig = (settings) => {
   }
 }
 
-const removeSelectedProvider = async () => {
-  const provider = form.aiProvider
-  if (!canDeleteSelectedProvider.value) {
+const removeProvider = async (provider) => {
+  if (!isRemovableProvider(provider)) {
     return
   }
 
@@ -643,14 +650,26 @@ body {
   margin-top: 4px;
 }
 
-.provider-row {
+.provider-select {
+  flex: 1;
+}
+
+.provider-option-row {
+  width: 100%;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.provider-select {
-  flex: 1;
+.provider-option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-option-delete {
+  padding: 2px;
 }
 
 .footer {
