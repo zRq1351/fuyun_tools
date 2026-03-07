@@ -6,6 +6,8 @@ use std::time::Duration;
 
 /// 剪贴板轮询间隔时间
 pub const CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// 剪贴板窗口与任务栏之间的额外安全边距（像素）
+pub const CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN: i32 = 8;
 /// 默认切换快捷键（根据操作系统自动适配）
 pub const DEFAULT_TOGGLE_SHORTCUT: &str = if cfg!(target_os = "macos") {
     "Cmd+Shift+k"

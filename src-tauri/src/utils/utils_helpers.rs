@@ -25,6 +25,8 @@ pub struct AppSettingsData {
     pub provider_configs: HashMap<String, ProviderConfig>,
     #[serde(default = "default_selection_enabled")]
     pub selection_enabled: bool,
+    #[serde(default = "default_clipboard_bottom_offset")]
+    pub clipboard_bottom_offset: i32,
 }
 
 impl Default for AppSettingsData {
@@ -36,12 +38,17 @@ impl Default for AppSettingsData {
             ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
             selection_enabled: true,
+            clipboard_bottom_offset: default_clipboard_bottom_offset(),
         }
     }
 }
 
 fn default_selection_enabled() -> bool {
     true
+}
+
+fn default_clipboard_bottom_offset() -> i32 {
+    8
 }
 
 impl AppSettingsData {
@@ -263,6 +270,10 @@ impl AppSettingsData {
         if self.hot_key.is_empty() {
             self.hot_key = DEFAULT_TOGGLE_SHORTCUT.to_string();
             println!("修复 hot_key 为默认值: {}", DEFAULT_TOGGLE_SHORTCUT);
+        }
+
+        if self.clipboard_bottom_offset < 0 || self.clipboard_bottom_offset > 400 {
+            self.clipboard_bottom_offset = default_clipboard_bottom_offset();
         }
 
         println!("迁移后 max_items: {}", self.max_items);

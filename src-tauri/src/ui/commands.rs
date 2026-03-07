@@ -2,7 +2,7 @@ use crate::core::app_state::AppState as SharedAppState;
 use crate::core::config::{AIProvider, ProviderConfig};
 use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
-use crate::ui::window_manager::{hide_clipboard_window, show_clipboard_window};
+use crate::ui::window_manager::{hide_clipboard_window, set_window_position, show_clipboard_window};
 use crate::utils::utils_helpers::{load_settings, save_settings};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -61,6 +61,50 @@ pub async fn add_category(
     let state_guard = state.lock().unwrap();
     let manager = state_guard.clipboard_manager.lock().unwrap();
     manager.add_category(category)
+}
+
+#[tauri::command]
+pub async fn get_clipboard_bottom_offset(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<i32, String> {
+    let state_guard = state.lock().unwrap();
+    Ok(state_guard.settings.clipboard_bottom_offset)
+}
+
+#[tauri::command]
+pub async fn preview_clipboard_bottom_offset(
+    offset: i32,
+    app: AppHandle,
+) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("clipboard") {
+        set_window_position(&window, offset.max(0));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn save_clipboard_bottom_offset(
+    offset: i32,
+    app: AppHandle,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let final_offset = offset.clamp(0, 400);
+    let mut settings = {
+        let state_guard = state.lock().unwrap();
+        state_guard.settings.clone()
+    };
+    settings.clipboard_bottom_offset = final_offset;
+    save_settings(&settings).map_err(|e| e.to_string())?;
+
+    {
+        let mut state_guard = state.lock().unwrap();
+        state_guard.settings = settings;
+    }
+
+    if let Some(window) = app.get_webview_window("clipboard") {
+        set_window_position(&window, final_offset);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -401,6 +445,50 @@ pub async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
 pub async fn get_provider_config(provider: AIProvider) -> Result<(String, String), String> {
     let (url, model) = provider.get_default_config();
     Ok((url, model))
+}
+
+#[tauri::command]
+pub async fn remove_ai_provider(
+    provider: String,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    if provider.is_empty() {
+        return Err("提供商名称不能为空".to_string());
+    }
+
+    let is_builtin = matches!(provider.as_str(), "deepseek" | "qwen" | "xiaomimimo");
+    if is_builtin {
+        return Err("内置提供商不支持删除".to_string());
+    }
+
+    let mut settings = {
+        let state_guard = state.lock().unwrap();
+        state_guard.settings.clone()
+    };
+
+    if settings.provider_configs.remove(&provider).is_none() {
+        return Err("未找到该提供商配置".to_string());
+    }
+
+    if settings.ai_provider == provider {
+        let fallback = "deepseek".to_string();
+        if settings.provider_configs.contains_key(&fallback) {
+            settings.ai_provider = fallback;
+        } else if let Some(first_provider) = settings.provider_configs.keys().next() {
+            settings.ai_provider = first_provider.clone();
+        } else {
+            settings.ai_provider = "deepseek".to_string();
+        }
+    }
+
+    save_settings(&settings).map_err(|e| e.to_string())?;
+
+    {
+        let mut state_guard = state.lock().unwrap();
+        state_guard.settings = settings;
+    }
+
+    Ok(())
 }
 
 /// 获取所有已配置的提供商列表（包括自定义提供商）

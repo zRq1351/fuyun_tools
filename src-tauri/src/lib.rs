@@ -116,6 +116,9 @@ pub fn run() {
             set_item_category,
             add_category,
             remove_category,
+            get_clipboard_bottom_offset,
+            preview_clipboard_bottom_offset,
+            save_clipboard_bottom_offset,
             window_blur,
             selection_toolbar_blur,
             copy_text,
@@ -125,6 +128,7 @@ pub fn run() {
             stream_translate_text,
             stream_explain_text,
             get_provider_config,
+            remove_ai_provider,
             get_all_configured_providers,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
