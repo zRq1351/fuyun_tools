@@ -41,6 +41,23 @@ lazy_static::lazy_static! {
     };
 }
 
+static LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
+static LISTENER_ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub fn set_selection_listener_enabled(
+    app_handle: AppHandle,
+    state: Arc<Mutex<SharedAppState>>,
+    enabled: bool,
+) {
+    LISTENER_ENABLED.store(enabled, Ordering::SeqCst);
+    if enabled {
+        MouseListener::start_mouse_listener(app_handle, state);
+    } else {
+        GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
+        hide_selection_toolbar_impl(app_handle);
+    }
+}
+
 fn is_any_ctrl_pressed() -> bool {
     GLOBAL_STATE.ctrl_left_pressed.load(Ordering::SeqCst)
         || GLOBAL_STATE.ctrl_right_pressed.load(Ordering::SeqCst)
@@ -61,16 +78,40 @@ pub struct MouseListener;
 
 impl MouseListener {
     pub fn start_mouse_listener(app_handle: AppHandle, state: Arc<Mutex<SharedAppState>>) {
+        if LISTENER_STARTED
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            LISTENER_ENABLED.store(true, Ordering::SeqCst);
+            return;
+        }
+
         log::info!("启动跨平台鼠标监听器");
 
         let detection_thread_app_handle = app_handle.clone();
+        let detection_state = state.clone();
 
         thread::spawn(move || loop {
+            if !LISTENER_ENABLED.load(Ordering::SeqCst) {
+                thread::sleep(Duration::from_millis(200));
+                continue;
+            }
+
             if GLOBAL_STATE.needs_detection.load(Ordering::SeqCst) {
                 GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
 
+                let selection_enabled = {
+                    let state_guard = detection_state.lock().unwrap();
+                    state_guard.settings.selection_enabled
+                };
+
+                if !selection_enabled {
+                    thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+
                 let clipboard_manager = {
-                    let state_guard = state.lock().unwrap();
+                    let state_guard = detection_state.lock().unwrap();
                     state_guard.clipboard_manager.clone()
                 };
 
@@ -97,9 +138,28 @@ impl MouseListener {
             thread::sleep(Duration::from_millis(50));
         });
 
+        let listener_state = state.clone();
+        let listener_app_handle = app_handle.clone();
+
         thread::spawn(move || {
             log::info!("开始监听鼠标键盘事件");
-            if let Err(error) = listen(move |event| match event.event_type {
+            if let Err(error) = listen(move |event| {
+                if !LISTENER_ENABLED.load(Ordering::SeqCst) {
+                    hide_selection_toolbar_impl(listener_app_handle.clone());
+                    return;
+                }
+
+                let selection_enabled = {
+                    let state_guard = listener_state.lock().unwrap();
+                    state_guard.settings.selection_enabled
+                };
+
+                if !selection_enabled {
+                    hide_selection_toolbar_impl(listener_app_handle.clone());
+                    return;
+                }
+
+                match event.event_type {
                 EventType::KeyPress(key) => {
                     if key == Key::ControlLeft {
                         GLOBAL_STATE.ctrl_left_pressed.store(true, Ordering::SeqCst);
@@ -134,7 +194,7 @@ impl MouseListener {
 
                     // 检查是否需要自动关闭工具栏
                     handle_selection_toolbar_autoclose(
-                        &app_handle,
+                        &listener_app_handle,
                         Some((last_x as i32, last_y as i32)),
                     );
 
@@ -234,6 +294,7 @@ impl MouseListener {
                 }
                 _ => {
                     hide_selection_toolbar_impl(app_handle.clone());
+                }
                 }
             }) {
                 log::error!("鼠标监听器启动失败: {:?}", error);

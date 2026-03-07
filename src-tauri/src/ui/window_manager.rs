@@ -36,15 +36,21 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
         state_guard.selected_index
     };
 
-    let history = {
+    let (history, categories, category_list) = {
         let state_guard = state.lock().unwrap();
         let manager = state_guard.clipboard_manager.lock().unwrap();
-        manager.get_history()
+        (
+            manager.get_history(),
+            manager.get_categories(),
+            manager.get_category_list(),
+        )
     };
 
     if let Some(_window) = app_handle.get_webview_window("clipboard") {
         let app_handle_clone = app_handle.clone();
         let history_clone = history.clone();
+        let categories_clone = categories.clone();
+        let category_list_clone = category_list.clone();
         thread::spawn(move || {
             if let Some(window) = app_handle_clone.get_webview_window("clipboard") {
                 set_window_position(&window);
@@ -52,6 +58,8 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
                     let _ = window.set_focus();
                     let payload = serde_json::json!({
                         "history": history_clone,
+                        "categories": categories_clone,
+                        "category_list": category_list_clone,
                         "selectedIndex": selected_index
                     });
                     let _ = app_handle_clone.emit("show-window", payload);
@@ -87,6 +95,7 @@ pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
 pub fn set_window_position(window: &tauri::WebviewWindow) {
     if let Some(monitor) = window.current_monitor().unwrap() {
         let screen_size = monitor.size();
+        let taskbar_safe_offset = 56i32;
 
         let window_width = screen_size.width;
         let window_height = 250u32;
@@ -94,11 +103,26 @@ pub fn set_window_position(window: &tauri::WebviewWindow) {
         let _ = window.set_size(tauri::LogicalSize::new(window_width, window_height));
 
         let _ = window.move_window(Position::BottomLeft);
+        if let Ok(current_pos) = window.outer_position() {
+            let adjusted_y = current_pos.y.saturating_sub(taskbar_safe_offset);
+            let _ = window.set_position(tauri::PhysicalPosition::new(current_pos.x, adjusted_y));
+        }
     }
 }
 
 /// 打开划词工具栏
 pub fn show_selection_toolbar_impl(app_handle: AppHandle, selected_text: String) {
+    if let Some(state) = app_handle.try_state::<Arc<Mutex<AppState>>>() {
+        if let Ok(state_guard) = state.lock() {
+            if !state_guard.settings.selection_enabled {
+                return;
+            }
+        } else {
+            return;
+        }
+    } else {
+        return;
+    }
     if let Some(toolbar_window) = app_handle.get_webview_window("selection_toolbar") {
         set_toolbar_window(&toolbar_window);
         if toolbar_window.show().is_ok() {

@@ -31,6 +31,9 @@ fn get_selected_text_windows(
 
     {
         let mut state = state_manager.lock().unwrap();
+        if !state.settings.selection_enabled {
+            return None;
+        }
         state.is_processing_selection = true;
     }
 

@@ -102,6 +102,11 @@
                   type="password"
               />
             </el-form-item>
+
+            <el-form-item label="划词功能">
+              <el-switch v-model="form.selectionEnabled" active-text="启用" inactive-text="关闭"/>
+              <div class="form-hint">关闭后不再触发划词工具栏与AI功能</div>
+            </el-form-item>
           </el-form>
         </div>
 
@@ -252,7 +257,8 @@ const form = reactive({
   apiUrl: '',
   modelName: '',
   apiKey: '',
-  customProviderName: ''
+  customProviderName: '',
+  selectionEnabled: true
 })
 
 const isRecording = ref(false)
@@ -495,7 +501,8 @@ const saveSettings = async () => {
       aiApiUrl: form.apiUrl,
       aiModelName: form.modelName,
       aiApiKey: form.apiKey,
-      hotKey: form.toggleShortcut
+      hotKey: form.toggleShortcut,
+      selectionEnabled: form.selectionEnabled
     })
 
     if (form.aiProvider === 'custom') {
@@ -534,6 +541,7 @@ onMounted(async () => {
     currentVersion.value = settings.version || '0.3.1'
     form.aiProvider = settings.ai_provider || ''
     form.toggleShortcut = settings.hot_key || ''
+    form.selectionEnabled = settings.selection_enabled !== false
 
     const currentProvider = settings.ai_provider
     if (currentProvider && settings.provider_configs && settings.provider_configs[currentProvider]) {
