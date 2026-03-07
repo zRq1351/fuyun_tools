@@ -10,9 +10,9 @@ pub const CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(100);
 pub const CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN: i32 = 8;
 /// 默认切换快捷键（根据操作系统自动适配）
 pub const DEFAULT_TOGGLE_SHORTCUT: &str = if cfg!(target_os = "macos") {
-    "Cmd+Shift+k"
+    "Cmd+Shift+z"
 } else {
-    "Ctrl+Shift+k"
+    "Ctrl+Shift+z"
 };
 /// 默认隐藏快捷键
 pub const DEFAULT_HIDE_SHORTCUT: &str = "Escape";
