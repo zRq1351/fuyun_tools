@@ -7,6 +7,7 @@
       @mousemove="handleMouseMove"
       @mouseup="handleMouseUp"
       @scroll="handleScroll"
+      @wheel.prevent="handleWheel"
   >
     <div v-if="leftSpacerWidth > 0" :style="{ minWidth: leftSpacerWidth + 'px', height: '1px' }"></div>
     <div
@@ -189,6 +190,12 @@ const handleGlobalMouseMove = (e) => {
 
   // Direct DOM update for maximum responsiveness (1:1 movement)
   contentRef.value.scrollLeft = scrollLeftVal - walk
+}
+
+const handleWheel = (e) => {
+  if (!contentRef.value) return
+  const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
+  contentRef.value.scrollLeft += delta
 }
 
 // Keep original local handlers for compatibility/safety but they delegate or are replaced
