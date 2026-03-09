@@ -109,6 +109,7 @@ pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
         let screen_size = monitor.size();
         let taskbar_safe_offset = get_taskbar_safe_offset() + bottom_offset.max(0);
 
+        // 使用屏幕宽度
         let window_width = screen_size.width;
         let window_height = 250u32;
 
@@ -122,6 +123,7 @@ pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
     }
 }
 
+/// 获取任务栏安全偏移量
 #[cfg(target_os = "windows")]
 fn get_taskbar_safe_offset() -> i32 {
     unsafe {
@@ -140,6 +142,7 @@ fn get_taskbar_safe_offset() -> i32 {
     CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN
 }
 
+/// 获取任务栏安全偏移量
 #[cfg(not(target_os = "windows"))]
 fn get_taskbar_safe_offset() -> i32 {
     CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN
@@ -190,8 +193,6 @@ pub fn hide_selection_toolbar_impl(app_handle: AppHandle) {
 }
 
 /// 检查并自动关闭划词工具栏
-/// 如果 click_pos 为 Some，则检查点击位置是否在窗口范围内
-/// 如果 click_pos 为 None，则检查窗口是否拥有焦点
 pub fn handle_selection_toolbar_autoclose(app_handle: &AppHandle, click_pos: Option<(i32, i32)>) {
     if let Some(window) = app_handle.get_webview_window("selection_toolbar") {
         if let Ok(true) = window.is_visible() {
@@ -202,14 +203,11 @@ pub fn handle_selection_toolbar_autoclose(app_handle: &AppHandle, click_pos: Opt
                     let ww = size.width as i32;
                     let wh = size.height as i32;
 
-                    // 检查点击是否在窗口外部
                     if mx < wx || mx > wx + ww || my < wy || my > wy + wh {
                         let _ = window.hide();
                     }
                 }
             } else {
-                // 非鼠标点击事件（如键盘），如果窗口未获取焦点则关闭
-                // 这样允许用户在工具栏内输入，但如果在外部操作则关闭
                 if let Ok(false) = window.is_focused() {
                     let _ = window.hide();
                 }
@@ -270,7 +268,6 @@ pub async fn show_result_window(
         return Ok(());
     }
 
-    // 创建新窗口
     let window = tauri::WebviewWindowBuilder::new(
         &app,
         &window_label,

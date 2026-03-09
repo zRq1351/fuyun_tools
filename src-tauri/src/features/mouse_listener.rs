@@ -25,8 +25,8 @@ struct GlobalState {
     ctrl_right_pressed: AtomicBool,
     needs_detection: AtomicBool,
     last_processed_time: Arc<Mutex<std::time::Instant>>,
-    last_mouse_pos: Arc<Mutex<(u64, u64)>>, // 存储最后的鼠标位置
-    last_click: Arc<Mutex<Option<(u64, u64, std::time::Instant)>>>, // 存储上一次点击信息(x, y, time)
+    last_mouse_pos: Arc<Mutex<(u64, u64)>>,
+    last_click: Arc<Mutex<Option<(u64, u64, std::time::Instant)>>>,
 }
 
 lazy_static::lazy_static! {
@@ -44,6 +44,7 @@ lazy_static::lazy_static! {
 static LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 static LISTENER_ENABLED: AtomicBool = AtomicBool::new(true);
 
+/// 设置划词监听器启用状态
 pub fn set_selection_listener_enabled(
     app_handle: AppHandle,
     state: Arc<Mutex<SharedAppState>>,
@@ -58,11 +59,13 @@ pub fn set_selection_listener_enabled(
     }
 }
 
+/// 检查是否有Ctrl键被按下
 fn is_any_ctrl_pressed() -> bool {
     GLOBAL_STATE.ctrl_left_pressed.load(Ordering::SeqCst)
         || GLOBAL_STATE.ctrl_right_pressed.load(Ordering::SeqCst)
 }
 
+/// 重置Ctrl键状态
 pub fn reset_ctrl_key_state() {
     GLOBAL_STATE
         .ctrl_left_pressed
@@ -77,6 +80,7 @@ pub fn reset_ctrl_key_state() {
 pub struct MouseListener;
 
 impl MouseListener {
+    /// 启动鼠标监听器
     pub fn start_mouse_listener(app_handle: AppHandle, state: Arc<Mutex<SharedAppState>>) {
         if LISTENER_STARTED
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -190,7 +194,6 @@ impl MouseListener {
                         *pos_guard
                     };
 
-                    // 检查是否需要自动关闭工具栏
                     handle_selection_toolbar_autoclose(
                         &listener_app_handle,
                         Some((last_x as i32, last_y as i32)),
@@ -227,16 +230,13 @@ impl MouseListener {
                             duration.as_millis()
                         );
 
-                        // 判定是否为拖拽操作
                         let is_drag = is_valid_drag_operation(distance, duration);
 
-                        // 判定是否为双击操作
                         let is_double_click = if !is_drag {
                             let mut last_click_guard = GLOBAL_STATE.last_click.lock().unwrap();
                             let result = if let Some((lx, ly, ltime)) = *last_click_guard {
                                 let click_dist = calculate_distance(lx, ly, last_x, last_y);
                                 let click_interval = up_time.duration_since(ltime);
-                                // 双击判定：两次点击距离小于5px，间隔小于500ms
                                 click_dist < 5.0 && click_interval.as_millis() < 500
                             } else {
                                 false
@@ -244,7 +244,6 @@ impl MouseListener {
                             *last_click_guard = Some((last_x, last_y, up_time));
                             result
                         } else {
-                            // 如果是拖拽，清除上一次点击记录，避免拖拽后立即触发双击
                             *GLOBAL_STATE.last_click.lock().unwrap() = None;
                             false
                         };
@@ -303,6 +302,7 @@ impl MouseListener {
     }
 }
 
+/// 执行划词检测
 fn perform_text_selection_detection(
     app_handle: &AppHandle,
     clipboard_manager: Arc<Mutex<ClipboardManager>>,
@@ -326,15 +326,16 @@ fn perform_text_selection_detection(
     }
 }
 
+/// 计算两点间距离
 fn calculate_distance(x1: u64, y1: u64, x2: u64, y2: u64) -> f64 {
     let dx = x2 as f64 - x1 as f64;
     let dy = y2 as f64 - y1 as f64;
     (dx * dx + dy * dy).sqrt()
 }
 
+/// 验证是否为有效的拖拽操作
 fn is_valid_drag_operation(distance: f64, duration: Duration) -> bool {
     const MIN_DRAG_DISTANCE: f64 = 5.0;
-    /// 最大操作时间限制（毫秒）
     const MAX_OPERATION_TIME: u128 = 5000;
 
     let is_distance_valid = distance >= MIN_DRAG_DISTANCE;
@@ -352,6 +353,7 @@ fn is_valid_drag_operation(distance: f64, duration: Duration) -> bool {
     is_distance_valid && is_duration_valid
 }
 
+/// 检查当前前台窗口是否为命令行窗口
 fn is_foreground_window_console() -> bool {
     {
         unsafe {
@@ -461,6 +463,7 @@ fn is_foreground_window_console() -> bool {
     false
 }
 
+/// 获取选中文本
 fn get_selected_text(
     app_handle: &AppHandle,
     clipboard_manager: Arc<Mutex<ClipboardManager>>,
@@ -473,6 +476,7 @@ fn get_selected_text(
     result
 }
 
+/// 验证选中文本是否有效
 fn is_valid_selection(text: &str) -> bool {
     let trimmed = text.trim();
 
@@ -505,6 +509,7 @@ fn is_valid_selection(text: &str) -> bool {
     true
 }
 
+/// 检查是否为错误文本
 fn is_error_text(text: &str) -> bool {
     let error_texts = [
         "chrome legacy windows",
@@ -525,13 +530,14 @@ fn is_error_text(text: &str) -> bool {
     false
 }
 
+/// 检查是否为电话号码
 fn is_phone_number(text: &str) -> bool {
     let phone_patterns = [
-        r"^\+?[\d\s\-\(\)]{10,}$",        // 一般格式
-        r"^\d{3}-\d{3}-\d{4}$",           // 123-456-7890 格式
-        r"^\d{3}\.\d{3}\.\d{4}$",         // 123.456.7890 格式
-        r"^\(\d{3}\)\s*\d{3}-\d{4}$",     // (123) 456-7890 格式
-        r"^\+1\s*\d{3}\s*\d{3}\s*\d{4}$", // +1 123 456 7890 格式
+        r"^\+?[\d\s\-\(\)]{10,}$",
+        r"^\d{3}-\d{3}-\d{4}$",
+        r"^\d{3}\.\d{3}\.\d{4}$",
+        r"^\(\d{3}\)\s*\d{3}-\d{4}$",
+        r"^\+1\s*\d{3}\s*\d{3}\s*\d{4}$",
     ];
 
     for pattern in &phone_patterns {
@@ -544,6 +550,7 @@ fn is_phone_number(text: &str) -> bool {
     false
 }
 
+/// 检查是否为邮箱地址
 fn is_email_address(text: &str) -> bool {
     let email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$";
 
@@ -554,6 +561,7 @@ fn is_email_address(text: &str) -> bool {
     }
 }
 
+/// 检查是否为URL
 fn is_url(text: &str) -> bool {
     let url_pattern = r"^https?://[^\s/$.?#].\S*$|^www\.\S+$";
 

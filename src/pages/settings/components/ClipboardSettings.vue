@@ -1,0 +1,52 @@
+<template>
+  <el-form :model="form" label-position="top">
+    <el-form-item label="最大历史记录数">
+      <el-input-number v-model="form.maxItems" :max="1000" :min="1"/>
+      <div class="form-hint">设置剪贴板历史记录的最大保存数量 (1-1000)</div>
+    </el-form-item>
+
+    <el-form-item label="打开剪切板窗口快捷键">
+      <el-input
+          v-model="form.toggleShortcut"
+          :class="{ recording: isRecording }"
+          placeholder="例如: Ctrl+Shift+K"
+          readonly
+      >
+        <template #append>
+          <el-button :type="isRecording ? 'danger' : 'primary'" @click="toggleRecording">
+            <el-icon>
+              <component :is="isRecording ? VideoPause : Edit"/>
+            </el-icon>
+          </el-button>
+        </template>
+      </el-input>
+      <div class="form-hint">点击编辑按钮来自定义打开剪切板窗口的快捷键</div>
+    </el-form-item>
+  </el-form>
+</template>
+
+<script setup>
+import {Edit, VideoPause} from '@element-plus/icons-vue'
+import {useShortcutRecorder} from '../composables/useShortcutRecorder'
+
+const props = defineProps({
+  form: {
+    type: Object,
+    required: true
+  }
+})
+
+const {isRecording, toggleRecording} = useShortcutRecorder(props.form)
+</script>
+
+<style scoped>
+.form-hint {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.recording :deep(.el-input__inner) {
+  color: #f56c6c !important;
+}
+</style>

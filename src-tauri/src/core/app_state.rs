@@ -2,11 +2,13 @@ use crate::utils::clipboard::ClipboardManager;
 use crate::utils::utils_helpers::{load_settings, AppSettingsData};
 use std::sync::{Arc, Mutex};
 
+/// 托盘菜单项
 #[derive(Clone)]
 pub struct TrayMenuItems {
     pub autostart_item: tauri::menu::CheckMenuItem<tauri::Wry>,
 }
 
+/// 应用程序全局状态
 pub struct AppState {
     pub clipboard_manager: Arc<Mutex<ClipboardManager>>,
     pub is_visible: bool,
@@ -18,6 +20,7 @@ pub struct AppState {
 }
 
 impl Clone for AppState {
+    /// 克隆状态（托盘菜单项不克隆）
     fn clone(&self) -> Self {
         Self {
             clipboard_manager: self.clipboard_manager.clone(),
@@ -32,6 +35,7 @@ impl Clone for AppState {
 }
 
 impl Default for AppState {
+    /// 默认状态初始化
     fn default() -> Self {
         let saved_settings = load_settings().unwrap_or_default();
 
@@ -49,4 +53,5 @@ impl Default for AppState {
     }
 }
 
+/// 共享应用程序状态别名
 pub type SharedAppState = AppState;

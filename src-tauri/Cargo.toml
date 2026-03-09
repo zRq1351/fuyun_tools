@@ -33,3 +33,4 @@ async-openai = "0.24.1"
 futures-util = "0.3.31"
 base64 = "0.22.1"
 winapi = { version = "0.3.9", features = ["winuser", "winnt", "minwindef", "windef", "libloaderapi", "winbase", "processthreadsapi", "windowsx", "errhandlingapi", "handleapi", "heapapi", "memoryapi", "psapi", "synchapi", "sysinfoapi", "timezoneapi", "tlhelp32", "winioctl", "wingdi", "winerror", "winnls", "winreg", "winsvc", "setupapi", "ioapiset", "fileapi", "consoleapi", "namedpipeapi", "processenv", "stringapiset", "profileapi", "libloaderapi", "dwmapi"] }
+keyring = { version = "3.6.3", features = ["windows-native"] }

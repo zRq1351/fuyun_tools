@@ -71,6 +71,7 @@ pub struct AIClient {
 }
 
 impl AIClient {
+    /// 创建AI客户端
     pub fn new(config: AIConfig) -> Result<Self, String> {
         let openai_config = async_openai::config::OpenAIConfig::new()
             .with_api_key(&config.api_key)
@@ -135,7 +136,6 @@ impl AIClient {
             .await
             .map_err(|e| format!("请求发送失败: {}", e))?;
 
-        // 转换为我们的响应格式
         let chat_response = ChatCompletionResponse {
             id: Some(response.id.clone()),
             choices: response
@@ -171,19 +171,7 @@ impl AIClient {
     where
         F: FnMut(String) -> (),
     {
-        let messages = self.convert_messages(&request.messages);
-
-        let openai_request = CreateChatCompletionRequestArgs::default()
-            .model(&request.model)
-            .messages(messages)
-            .temperature(request.temperature.unwrap_or(0.7))
-            .max_tokens(request.max_tokens.unwrap_or(1000))
-            .top_p(request.top_p.unwrap_or(1.0))
-            .frequency_penalty(request.frequency_penalty.unwrap_or(0.0))
-            .presence_penalty(request.presence_penalty.unwrap_or(0.0))
-            .stream(true)
-            .build()
-            .map_err(|e| format!("构建请求失败: {}", e))?;
+        let openai_request = self.build_chat_request(request, true)?;
 
         let mut stream = self
             .client
@@ -281,14 +269,43 @@ impl AIClient {
 
     /// 测试连接
     pub async fn test_connection(&self) -> Result<bool, String> {
-        let test_prompt = "请输出：连接成功";
-        match self.generate_text(test_prompt, Some(50)).await {
-            Ok(result) => Ok(result.contains("成功")
-                || result.contains("Success")
-                || result.to_lowercase().contains("connected")),
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: "Hi".to_string(),
+        }];
+
+        let request = ChatCompletionRequest {
+            model: self.config.model.clone(),
+            messages,
+            temperature: Some(0.0),
+            max_tokens: Some(1),
+            max_completion_tokens: Some(1),
+            top_p: Some(1.0),
+            frequency_penalty: Some(0.0),
+            presence_penalty: Some(0.0),
+            stream: Some(false),
+        };
+
+        match self.chat_completion(&request).await {
+            Ok(response) => {
+                if !response.choices.is_empty() {
+                    Ok(true)
+                } else {
+                    log::warn!("AI连接测试返回空选项，但网络连接正常");
+                    Ok(true)
+                }
+            },
             Err(e) => {
                 log::error!("AI连接测试失败: {}", e);
-                Err(e)
+                if e.contains("401") {
+                    Err("鉴权失败：API Key 无效".to_string())
+                } else if e.contains("404") {
+                    Err("请求失败：模型不存在或 API 地址错误".to_string())
+                } else if e.contains("timeout") || e.contains("timed out") {
+                    Err("连接超时：请检查网络设置".to_string())
+                } else {
+                    Err(e)
+                }
             }
         }
     }

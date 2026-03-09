@@ -130,7 +130,6 @@ pub fn open_settings(app: &AppHandle) {
 /// 处理退出事件
 pub fn handle_quit_event(app: &AppHandle) {
     log::info!("退出应用");
-    // 清理资源
     cleanup_enigo_instance();
     app.exit(0);
 }
