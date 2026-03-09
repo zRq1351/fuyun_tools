@@ -7,6 +7,8 @@ fuyun_tools is a desktop productivity tool running in the system tray, focused o
 - Better clipboard history management
 - AI text selection translation/explanation on Windows
 
+In addition, this project itself follows an AI full-process development workflow: AI deeply participates in requirement breakdown, solution design, coding implementation, and documentation maintenance.
+
 ---
 
 ## ✨ Feature Overview
@@ -36,6 +38,12 @@ fuyun_tools is a desktop productivity tool running in the system tray, focused o
 - Global hotkey to open the clipboard window
 - Light/Dark theme switching
 - Built-in app update support
+
+### 🧠 AI Full-Process Development
+
+- Requirement analysis and task breakdown are AI-assisted
+- Implementation, refactoring, and bug fixing are iteratively driven by AI
+- Chinese and English documentation is maintained in sync by AI
 
 ---
 
