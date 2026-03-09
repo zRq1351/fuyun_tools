@@ -11,8 +11,6 @@ use crate::services::clipboard_manager::start_clipboard_listener;
 use crate::ui::commands::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{hide_clipboard_window, show_clipboard_window};
-#[cfg(debug_assertions)]
-use crate::utils::utils_helpers::get_logs_dir_path;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -31,6 +29,7 @@ pub fn start_text_selection_listener(app_handle: AppHandle, state: Arc<Mutex<App
     );
 }
 
+/// 运行Tauri应用程序
 pub fn run() {
     let initial_state = AppState::default();
     let state_arc = Arc::new(Mutex::new(initial_state));
@@ -120,27 +119,8 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());
 
-    #[cfg(debug_assertions)]
-    let builder = builder.plugin(
-            tauri_plugin_log::Builder::default()
-                .level(log::LevelFilter::Debug)
-                .target(
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
-                        path: get_logs_dir_path(),
-                        file_name: Some(String::from("fuyun_log")),
-                    })
-                        .filter(|record| {
-                            // 过滤掉 tao 库的特定警告日志
-                            if record.target() == "tao::platform_impl::platform::event_loop::runner" {
-                                return false;
-                            }
-                            record.level() <= log::Level::Error
-                        }),
-                )
-                .max_file_size(1000000) // 1MB
-                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
-                .build(),
-    );
+    // 使用统一的日志配置
+    let builder = builder.plugin(core::logger::build_logger().build());
 
     builder
         .plugin(tauri_plugin_clipboard_manager::init())

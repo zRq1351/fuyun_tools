@@ -30,8 +30,9 @@
 import {onMounted, ref} from 'vue'
 import {ElMessage} from 'element-plus'
 import {ChatLineRound, Collection, DocumentCopy} from '@element-plus/icons-vue'
-import {invoke} from '@tauri-apps/api/core'
 import {listen} from '@tauri-apps/api/event'
+import {AIService, ClipboardService} from '../../services/ipc'
+import {handleAppError} from '../../utils/errorHandler'
 
 const selectedText = ref('')
 
@@ -48,58 +49,33 @@ onMounted(async () => {
 const handleTranslate = async () => {
   if (!selectedText.value) return
   try {
-    await invoke('stream_translate_text', {
-      text: selectedText.value,
-      sourceLanguage: '英文',
-      targetLanguage: '简体中文'
-    })
+    await AIService.streamTranslate(selectedText.value, '英文', '简体中文')
   } catch (error) {
-    handleError('翻译失败', error)
+    handleAppError(error, '翻译请求失败')
   }
 }
 
 const handleExplain = async () => {
   if (!selectedText.value) return
   try {
-    await invoke('stream_explain_text', {
-      text: selectedText.value,
-      targetLanguage: '中文'
-    })
+    await AIService.streamExplain(selectedText.value, '中文')
   } catch (error) {
-    handleError('解释失败', error)
+    handleAppError(error, '解释请求失败')
   }
 }
 
 const handleCopy = async () => {
   if (!selectedText.value) return
   try {
-    await invoke('copy_text', {text: selectedText.value})
+    await ClipboardService.copyText(selectedText.value)
     ElMessage.success('文本已复制')
   } catch (error) {
-    console.error('复制失败:', error)
-  }
-}
-
-const handleError = (context, error) => {
-  console.error(`${context}:`, error)
-  const errorMessage = error.toString()
-
-  if (errorMessage.includes('未配置AI提供商')) {
-    ElMessage.error('未配置 AI 提供商，请在设置中填写 API Key 与 Endpoint 后重试。')
-  } else if (errorMessage.includes('API地址不能为空')) {
-    ElMessage.error('API地址未配置，请在设置中填写正确的API地址。')
-  } else if (errorMessage.includes('API密钥未配置')) {
-    ElMessage.error('API密钥未配置，请在设置中填写正确的API密钥。')
-  } else if (errorMessage.includes('模型名称不能为空')) {
-    ElMessage.error('模型名称未配置，请在设置中填写正确的模型名称。')
-  } else {
-    ElMessage.error(`${context}: ${errorMessage}`)
+    handleAppError(error, '复制失败')
   }
 }
 </script>
 
 <style>
-/* Global reset for this window */
 body {
   margin: 0;
   padding: 0;
@@ -148,15 +124,15 @@ body {
 }
 
 .translate-btn {
-  color: #67c23a; /* Element Plus Success color */
+  color: #67c23a;
 }
 
 .explain-btn {
-  color: #409eff; /* Element Plus Primary color */
+  color: #409eff;
 }
 
 .copy-btn {
-  color: #e6a23c; /* Element Plus Warning color */
+  color: #e6a23c;
 }
 
 .btn-text {

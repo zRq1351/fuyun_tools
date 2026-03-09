@@ -1,7 +1,6 @@
 <template>
   <div class="container">
     <div class="header">
-      <!-- Explanation Mode Selectors -->
       <div v-if="mode === 'explanation'" class="control-group">
         <span class="label">解释语言：</span>
         <el-select v-model="explanationLanguage" size="small" style="width: 100px" @change="handleLanguageChange">
@@ -12,7 +11,6 @@
         </el-select>
       </div>
 
-      <!-- Translation Mode Selectors -->
       <div v-if="mode === 'translation'" class="control-group">
         <div class="flag-icon">🇬🇧</div>
         <el-select v-model="sourceLanguage" size="small" style="width: 100px" @change="handleLanguageChange">
@@ -69,10 +67,11 @@
 <script setup>
 import {computed, nextTick, onMounted, ref} from 'vue'
 import {marked} from 'marked'
-import {invoke} from '@tauri-apps/api/core'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWindow} from '@tauri-apps/api/window'
 import {Close, Hide, View} from '@element-plus/icons-vue'
+import {AIService} from '../../services/ipc'
+import {handleAppError} from '../../utils/errorHandler'
 
 const mode = ref('translation')
 const originalText = ref('')
@@ -140,21 +139,14 @@ const handleLanguageChange = async () => {
   try {
     if (mode.value === 'translation') {
       resultText.value = '正在翻译...'
-      await invoke('stream_translate_text', {
-        text: originalText.value,
-        sourceLanguage: sourceLanguage.value,
-        targetLanguage: targetLanguage.value
-      })
+      await AIService.streamTranslate(originalText.value, sourceLanguage.value, targetLanguage.value)
     } else {
       resultText.value = '正在解释...'
-      await invoke('stream_explain_text', {
-        text: originalText.value,
-        targetLanguage: explanationLanguage.value
-      })
+      await AIService.streamExplain(originalText.value, explanationLanguage.value)
     }
   } catch (error) {
-    console.error('Request failed:', error)
-    resultText.value = `Error: ${error}`
+    handleAppError(error, '请求失败')
+    resultText.value = `Error: ${error.message || error}`
   }
 }
 
@@ -170,7 +162,7 @@ body {
   background: #1e1e1e;
   color: #ffffff;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  overflow: hidden; /* Use internal scrolling */
+  overflow: hidden;
   height: 100vh;
   box-sizing: border-box;
 }
@@ -240,12 +232,12 @@ body {
 }
 
 .toggle-btn:hover {
-  color: #409eff; /* Primary color hover */
+  color: #409eff;
   background: rgba(64, 158, 255, 0.1);
 }
 
 .close-btn:hover {
-  color: #f56c6c; /* Danger color hover */
+  color: #f56c6c;
   background: rgba(245, 108, 108, 0.1);
 }
 
@@ -260,8 +252,8 @@ body {
 }
 
 .original-content {
-  flex: 0 0 auto; /* Don't expand infinitely */
-  max-height: 30%; /* Limit height */
+  flex: 0 0 auto;
+  max-height: 30%;
   background: #252525;
   border-left: 4px solid #4CAF50;
   color: #cccccc;
@@ -272,7 +264,6 @@ body {
   border-left: 4px solid #2196F3;
 }
 
-/* Scrollbar styling */
 .content::-webkit-scrollbar {
   width: 8px;
 }
@@ -290,7 +281,6 @@ body {
   background: #666;
 }
 
-/* Markdown Content Styling (Global for v-html content) */
 :deep(.content h1), :deep(.content h2), :deep(.content h3) {
   margin-top: 0.5em;
   margin-bottom: 0.5em;

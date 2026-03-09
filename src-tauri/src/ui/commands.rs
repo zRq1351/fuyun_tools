@@ -113,7 +113,6 @@ pub async fn select_and_fill(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<String, String> {
-    // 获取要选择的项目内容
     let item_content = {
         let state_guard = state.lock().unwrap();
         let manager = state_guard.clipboard_manager.lock().unwrap();
@@ -128,32 +127,27 @@ pub async fn select_and_fill(
         }
     };
 
-    // 设置处理状态
     {
         let mut state_guard = state.lock().unwrap();
         state_guard.is_updating_clipboard = true;
         state_guard.is_processing_selection = true;
     }
 
-    // 尝试设置剪贴板内容
     let result = {
         let state_guard = state.lock().unwrap();
         let manager = state_guard.clipboard_manager.lock().unwrap();
         manager.set_clipboard_content(&app, &item_content)
     };
 
-    // 清理状态 - 确保无论如何都会清理
     {
         let mut state_guard = state.lock().unwrap();
         state_guard.is_updating_clipboard = false;
-        // 注意：is_processing_selection将在成功路径中保持为true直到粘贴完成
     }
 
     match result {
         Ok(_) => {
             log::info!("成功复制内容到剪贴板");
 
-            // 隐藏窗口
             let app_handle = app.clone();
             let state_clone = state.inner().clone();
             thread::spawn(move || {
@@ -161,13 +155,11 @@ pub async fn select_and_fill(
                 hide_clipboard_window(app_handle, state_clone.clone());
             });
 
-            // 模拟粘贴操作
             let app_handle = app.clone();
             thread::spawn(move || {
                 thread::sleep(Duration::from_millis(100));
                 crate::ui::window_manager::simulate_paste();
 
-                // 在粘贴完成后最终清理状态
                 if let Some(state_guard) = app_handle.try_state::<Arc<Mutex<SharedAppState>>>() {
                     if let Ok(mut guard) = state_guard.lock() {
                         guard.is_processing_selection = false;
@@ -182,7 +174,6 @@ pub async fn select_and_fill(
             let error_msg = format!("复制到剪贴板失败: {}", e);
             log::error!("{}", error_msg);
 
-            // 在错误路径中也要清理所有状态
             {
                 let mut state_guard = state.lock().unwrap();
                 state_guard.is_processing_selection = false;
@@ -263,12 +254,10 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
     // 处理provider_configs，将encrypted_api_key替换为解密后的api_key
     let mut provider_configs_map: HashMap<String, serde_json::Value> = HashMap::new();
 
-    // 先收集所有提供商键名，避免借用冲突
     let provider_keys: Vec<String> = settings.provider_configs.keys().cloned().collect();
 
     for provider_key in provider_keys.iter() {
-        // 解密API密钥
-        if let Ok(api_key) = settings.decrypt_provider_api_key(provider_key) {
+        if let Ok(api_key) = settings.get_provider_api_key(provider_key) {
             if let Some(decrypted_config) = settings.provider_configs.get(provider_key) {
                 let mut config_map = HashMap::new();
                 config_map.insert(
@@ -280,7 +269,6 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
                     serde_json::Value::String(decrypted_config.model_name.clone()),
                 );
                 config_map.insert("api_key".to_string(), serde_json::Value::String(api_key));
-                // 注意：这里不再包含encrypted_api_key字段
 
                 provider_configs_map.insert(
                     provider_key.clone(),
@@ -328,6 +316,11 @@ pub async fn save_app_settings(
     if ai_provider.is_empty() {
         return Err("提供商名称不能为空".to_string());
     }
+
+    if ai_api_key.trim().is_empty() {
+        return Err("API密钥不能为空，请填写有效的API密钥".to_string());
+    }
+
     if hot_key != settings.hot_key {
         if app.global_shortcut().is_registered(hot_key.as_str()) {
             return Err("快捷键冲突".to_string());
@@ -365,11 +358,24 @@ pub async fn save_app_settings(
 
     config.api_url = ai_api_url;
     config.model_name = ai_model_name;
-    // api_key 不再存储在config中，直接用于加密
 
     settings
         .save_current_provider_config(&ai_api_key)
         .map_err(|e| format!("保存提供商配置失败: {}", e))?;
+
+    match settings.get_provider_api_key(&ai_provider) {
+        Ok(key) if key == ai_api_key => {
+            log::info!("密钥保存验证通过");
+        },
+        Ok(_) => {
+            log::warn!("密钥保存验证失败: 读取到的密钥与保存的不一致");
+            return Err("系统凭据管理器异常: 密钥保存验证失败，请重试".to_string());
+        },
+        Err(e) => {
+            log::error!("密钥保存验证错误: {}", e);
+            return Err(format!("系统凭据管理器错误: 无法读取刚保存的密钥 ({})", e));
+        }
+    }
 
     settings
         .validate()

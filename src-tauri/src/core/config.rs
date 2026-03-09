@@ -39,12 +39,14 @@ pub enum AIProvider {
 }
 
 impl Default for AIProvider {
+    /// 默认AI提供商
     fn default() -> Self {
         AIProvider::DeepSeek
     }
 }
 
 impl std::fmt::Display for AIProvider {
+    /// 格式化显示
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             AIProvider::DeepSeek => "deepseek",

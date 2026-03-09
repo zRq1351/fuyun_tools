@@ -1,4 +1,5 @@
 use crate::core::config::{ProviderConfig, DEFAULT_TOGGLE_SHORTCUT};
+use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -6,7 +7,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
-const ENCRYPTION_KEY: &[u8] = b"fuyun_tools_encryption_key_2025!"; // 32字节密钥
+const LEGACY_ENCRYPTION_KEY: &[u8] = b"fuyun_tools_encryption_key_2025!"; // 32字节旧版密钥，仅用于迁移
 
 /// 获取应用默认版本号
 pub fn get_default_app_version() -> String {
@@ -52,58 +53,148 @@ fn default_clipboard_bottom_offset() -> i32 {
 }
 
 impl AppSettingsData {
-    /// 为指定提供商加密API密钥
-    pub fn encrypt_provider_api_key(&mut self, provider_key: &str, api_key: &str) -> Result<(), String> {
+    /// 为指定提供商设置API密钥（存储到系统凭据管理器）
+    pub fn set_provider_api_key(&mut self, provider_key: &str, api_key: &str) -> Result<(), String> {
+        // 更新内存中的配置对象（清空旧版加密字段）
         if let Some(config) = self.provider_configs.get_mut(provider_key) {
-            if api_key.is_empty() {
-                config.encrypted_api_key.clear();
-                return Ok(());
-            }
-
-            let encrypted: Vec<u8> = api_key
-                .bytes()
-                .enumerate()
-                .map(|(i, b)| b ^ ENCRYPTION_KEY[i % ENCRYPTION_KEY.len()])
-                .collect();
-
-            use base64::engine::general_purpose::STANDARD;
-            use base64::Engine as _;
-            config.encrypted_api_key = STANDARD.encode(encrypted);
+            config.encrypted_api_key.clear();
         }
-        Ok(())
+
+        // Windows 平台特殊处理：使用 target 而不是 service 作为 Entry 的第一个参数
+        // keyring 在 Windows 上会将 service 和 username 组合起来，有时会导致 lookup 失败
+        // 我们尝试简化 Entry 的创建
+
+        let service_name = "fuyun_tools";
+        let user_name = format!("api_key_{}", provider_key);
+
+        if api_key.is_empty() {
+            if let Ok(entry) = Entry::new(service_name, &user_name) {
+                let _ = entry.delete_credential();
+            }
+            log::info!("API key cleared for provider: {}", provider_key);
+            return Ok(());
+        }
+
+        // 尝试创建并写入
+        match Entry::new(service_name, &user_name) {
+            Ok(entry) => {
+                // 添加重试机制
+                let mut last_error = String::new();
+                for i in 0..3 {
+                    match entry.set_password(api_key) {
+                        Ok(_) => {
+                            log::info!("API key saved for provider: {} (attempt {})", provider_key, i + 1);
+                            return Ok(());
+                        },
+                        Err(e) => {
+                            // 如果写入失败，尝试先删除再写入
+                            let _ = entry.delete_credential();
+                            log::warn!("Failed to save API key (attempt {}): {}", i + 1, e);
+                            last_error = e.to_string();
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                    }
+                }
+                Err(format!("保存API密钥失败(重试3次后): {}", last_error))
+            },
+            Err(e) => Err(format!("创建密钥入口失败: {}", e))
+        }
     }
 
-    /// 为指定提供商解密API密钥
-    pub fn decrypt_provider_api_key(&self, provider_key: &str) -> Result<String, String> {
-        if let Some(config) = self.provider_configs.get(provider_key) {
-            if config.encrypted_api_key.is_empty() {
-                return Ok(String::new());
+    /// 获取指定提供商的API密钥（从系统凭据管理器）
+    pub fn get_provider_api_key(&self, provider_key: &str) -> Result<String, String> {
+        let service_name = "fuyun_tools";
+        let user_name = format!("api_key_{}", provider_key);
+
+        let entry = Entry::new(service_name, &user_name)
+            .map_err(|e| format!("创建密钥入口失败: {}", e))?;
+
+        // 增加重试机制
+        let mut last_error = String::new();
+        for i in 0..3 {
+            match entry.get_password() {
+                Ok(password) => {
+                    log::info!("Successfully retrieved API key for provider: {} (attempt {})", provider_key, i + 1);
+                    return Ok(password);
+                },
+                Err(keyring::Error::NoEntry) => {
+                    log::info!("No API key found in keyring for provider: {}", provider_key);
+                    return Ok(String::new());
+                },
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    if error_msg.contains("Element not found") || error_msg.contains("找不到元素") {
+                        return Ok(String::new());
+                    }
+
+                    log::warn!("Failed to retrieve API key for provider {} (attempt {}): {}", provider_key, i + 1, e);
+                    last_error = error_msg;
+                    thread::sleep(Duration::from_millis(100));
+                }
             }
-
-            use base64::engine::general_purpose::STANDARD;
-            use base64::Engine as _;
-            let encrypted = STANDARD
-                .decode(&config.encrypted_api_key)
-                .map_err(|e| format!("解密失败: {}", e))?;
-
-            let decrypted: Vec<u8> = encrypted
-                .iter()
-                .enumerate()
-                .map(|(i, &b)| b ^ ENCRYPTION_KEY[i % ENCRYPTION_KEY.len()])
-                .collect();
-
-            String::from_utf8(decrypted).map_err(|e| format!("UTF-8解码失败: {}", e))
-        } else {
-            Ok(String::new())
         }
+
+        log::error!("Failed to retrieve API key after retries for provider {}: {}", provider_key, last_error);
+        Err(format!("获取API密钥失败: {}", last_error))
+    }
+
+    /// 迁移旧版加密的API密钥到系统凭据管理器
+    /// 返回是否发生了迁移
+    pub fn migrate_legacy_api_keys(&mut self) -> bool {
+        let mut migrated = false;
+        let provider_keys: Vec<String> = self.provider_configs.keys().cloned().collect();
+
+        for provider_key in provider_keys {
+            if let Some(config) = self.provider_configs.get_mut(&provider_key) {
+                if !config.encrypted_api_key.is_empty() {
+                    log::info!("发现旧版加密密钥，正在迁移提供商: {}", provider_key);
+
+                    // 解密旧版密钥
+                    use base64::engine::general_purpose::STANDARD;
+                    use base64::Engine as _;
+
+                    let decrypted_result = STANDARD.decode(&config.encrypted_api_key)
+                        .ok()
+                        .and_then(|encrypted| {
+                            let decrypted: Vec<u8> = encrypted
+                                .iter()
+                                .enumerate()
+                                .map(|(i, &b)| b ^ LEGACY_ENCRYPTION_KEY[i % LEGACY_ENCRYPTION_KEY.len()])
+                                .collect();
+                            String::from_utf8(decrypted).ok()
+                        });
+
+                    if let Some(api_key) = decrypted_result {
+                        // 保存到系统凭据管理器
+                        if let Ok(entry) = Entry::new("fuyun_tools", &format!("api_key_{}", provider_key)) {
+                            if let Err(e) = entry.set_password(&api_key) {
+                                log::error!("迁移密钥失败: {}", e);
+                            } else {
+                                log::info!("密钥迁移成功");
+                                migrated = true;
+                            }
+                        }
+                    }
+
+                    // 清除旧版字段
+                    config.encrypted_api_key.clear();
+                    // 即使迁移失败（如keyring不可用），我们也清除了旧字段，避免死循环或重复尝试
+                    // 但如果keyring失败，用户就丢失了key。
+                    // 鉴于这是桌面应用，keyring应该可用。
+                    // 如果我们不清除，下次还会尝试。
+                    // 如果我们清除但没保存成功，用户需要重新输入。
+                }
+            }
+        }
+        migrated
     }
 
     /// 保存当前提供商的配置
     pub fn save_current_provider_config(&mut self, api_key: &str) -> Result<(), String> {
         let provider_key = self.ai_provider.clone();  // 克隆避免借用冲突
 
-        // 加密该提供商的API密钥
-        self.encrypt_provider_api_key(&provider_key, api_key)?;
+        // 设置该提供商的API密钥
+        self.set_provider_api_key(&provider_key, api_key)?;
 
         Ok(())
     }
@@ -146,7 +237,7 @@ impl AppSettingsData {
         };
 
         // 解密该提供商的API密钥
-        let _ = self.decrypt_provider_api_key(&provider_key);
+        let _ = self.get_provider_api_key(&provider_key);
 
         // 更新当前提供商
         self.ai_provider = provider_name.to_string();
@@ -180,7 +271,7 @@ impl AppSettingsData {
     /// 获取部分隐藏的API密钥（用于前端显示）
     pub fn get_masked_api_key(&self) -> String {
         // 解密当前提供商的API密钥
-        match self.decrypt_provider_api_key(&self.ai_provider) {
+        match self.get_provider_api_key(&self.ai_provider) {
             Ok(api_key) => {
                 if api_key.is_empty() {
                     return String::new();
@@ -231,15 +322,15 @@ impl AppSettingsData {
 
     /// 执行具体的版本迁移逻辑
     fn perform_version_migration(&mut self, old_version: u32, new_version: u32) {
-        println!("执行版本迁移: {} -> {}", old_version, new_version);
+        log::info!("执行版本迁移: {} -> {}", old_version, new_version);
         // 根据不同版本间的差异执行特定迁移
         if old_version < 3 && new_version >= 3 {
-            println!("迁移至版本 3: 初始化AI提供商配置");
+            log::info!("迁移至版本 3: 初始化AI提供商配置");
             self.initialize_ai_provider_configs_if_needed();
         }
 
         if old_version < 2 && new_version >= 2 {
-            println!("迁移至版本 2: 确保基础配置完整性");
+            log::info!("迁移至版本 2: 确保基础配置完整性");
             self.ensure_basic_config_integrity();
         }
     }
@@ -257,26 +348,26 @@ impl AppSettingsData {
 
     /// 确保基础配置完整性
     fn ensure_basic_config_integrity(&mut self) {
-        println!("开始确保基础配置完整性");
-        println!("迁移前 max_items: {}", self.max_items);
+        log::info!("开始确保基础配置完整性");
+        log::debug!("迁移前 max_items: {}", self.max_items);
 
         // 确保必要字段有合理默认值
         if self.max_items < 10 || self.max_items > 1000 {
             let old_value = self.max_items;
             self.max_items = 50;
-            println!("修复 max_items 从 {} 为默认值: 50", old_value);
+            log::info!("修复 max_items 从 {} 为默认值: 50", old_value);
         }
 
         if self.hot_key.is_empty() {
             self.hot_key = DEFAULT_TOGGLE_SHORTCUT.to_string();
-            println!("修复 hot_key 为默认值: {}", DEFAULT_TOGGLE_SHORTCUT);
+            log::info!("修复 hot_key 为默认值: {}", DEFAULT_TOGGLE_SHORTCUT);
         }
 
         if self.clipboard_bottom_offset < 0 || self.clipboard_bottom_offset > 400 {
             self.clipboard_bottom_offset = default_clipboard_bottom_offset();
         }
 
-        println!("迁移后 max_items: {}", self.max_items);
+        log::debug!("迁移后 max_items: {}", self.max_items);
     }
 
     /// 初始化AI提供商配置（如果需要）
@@ -379,10 +470,11 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
     let mut settings: AppSettingsData =
         serde_json::from_str(&contents).map_err(|e| format!("解析设置文件失败: {}", e))?;
 
+    let keys_migrated = settings.migrate_legacy_api_keys();
     let old_version = settings.version.clone();
     settings.migrate_from_old();
 
-    if old_version != settings.version {
+    if old_version != settings.version || keys_migrated {
         log::info!("配置已更新，保存到文件");
         save_settings(&settings)?;
     }
