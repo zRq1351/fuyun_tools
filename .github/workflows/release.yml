@@ -47,6 +47,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
-          releaseBody: '1、修复关闭设置窗口卡顿问题。2、修复特定条件下的一些bug'
+          releaseBody: '1、重构剪贴板界面组件结构。2、更新选中状态滚动逻辑，添加键盘导航可见性保证。3、添加鼠标滚轮滚动卡片功能。4、修复剪贴板卡片滚动卡顿问题。5、修复一些bug'
           releaseDraft: false
           prerelease: false
