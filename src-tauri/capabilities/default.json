@@ -4,6 +4,8 @@
   "description": "Capability for the main window",
   "windows": [
     "clipboard",
+    "image_clipboard",
+    "image_preview",
     "selection_toolbar",
     "result_explanation",
     "result_translation",
@@ -31,6 +33,8 @@
     "global-shortcut:default",
     "log:default",
     "clipboard-manager:default",
+    "clipboard-manager:allow-read-image",
+    "clipboard-manager:allow-write-image",
     "opener:default",
     "updater:default",
     "autostart:default"

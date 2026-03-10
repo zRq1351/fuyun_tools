@@ -8,9 +8,13 @@ use crate::core::app_state::AppState;
 use crate::core::config::DEFAULT_HIDE_SHORTCUT;
 use crate::services::ai_services::{stream_explain_text, stream_translate_text};
 use crate::services::clipboard_manager::start_clipboard_listener;
+use crate::services::image_clipboard_manager::start_image_clipboard_listener;
 use crate::ui::commands::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
-use crate::ui::window_manager::{hide_clipboard_window, show_clipboard_window};
+use crate::ui::window_manager::{
+    hide_clipboard_window, hide_image_clipboard_window, show_clipboard_window,
+    show_image_clipboard_window,
+};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -53,15 +57,31 @@ pub fn run() {
             let app_handle_clone = app_handle.clone();
             let hot_key = state_arc
                 .lock().unwrap().settings.hot_key.clone();
+            let image_hot_key = state_arc
+                .lock().unwrap().settings.image_hot_key.clone();
             app.global_shortcut()
                 .on_shortcut(hot_key.as_str(), move |_app, _shortcut, event| {
                     if let ShortcutState::Pressed = event.state {
                         let state_guard = state_clone.lock().unwrap();
-                        if !state_guard.is_visible && !state_guard.is_processing_selection {
+                        if !state_guard.is_visible && !state_guard.is_image_visible && !state_guard.is_processing_selection {
                             drop(state_guard);
                             show_clipboard_window(app_handle_clone.clone(), state_clone.clone());
 
                             features::mouse_listener::reset_ctrl_key_state();
+                        }
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+
+            let state_clone_image = state_arc.clone();
+            let app_handle_clone_image = app_handle.clone();
+            app.global_shortcut()
+                .on_shortcut(image_hot_key.as_str(), move |_app, _shortcut, event| {
+                    if let ShortcutState::Pressed = event.state {
+                        let state_guard = state_clone_image.lock().unwrap();
+                        if !state_guard.is_visible && !state_guard.is_image_visible && !state_guard.is_processing_selection {
+                            drop(state_guard);
+                            show_image_clipboard_window(app_handle_clone_image.clone(), state_clone_image.clone());
                         }
                     }
                 })
@@ -76,6 +96,10 @@ pub fn run() {
                             app_handle_clone_hide.clone(),
                             state_clone_hide.clone(),
                         );
+                        hide_image_clipboard_window(
+                            app_handle_clone_hide.clone(),
+                            state_clone_hide.clone(),
+                        );
 
                         features::mouse_listener::reset_ctrl_key_state();
                     }
@@ -83,6 +107,7 @@ pub fn run() {
                 .map_err(|e| e.to_string())?;
 
             start_clipboard_listener(app_handle.clone(), state_arc.clone());
+            start_image_clipboard_listener(app_handle.clone(), state_arc.clone());
 
             #[cfg(windows)]
             start_text_selection_listener(app_handle.clone(), state_arc.clone());
@@ -96,15 +121,25 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             remove_clipboard_item,
+            remove_image_clipboard_item,
             get_clipboard_history,
+            get_image_clipboard_history,
+            open_image_preview_window,
+            close_image_preview_window,
+            warmup_image_clipboard_item,
             select_and_fill,
+            select_and_fill_image,
             set_item_category,
+            set_image_item_category,
             add_category,
+            add_image_category,
             remove_category,
+            remove_image_category,
             get_clipboard_bottom_offset,
             preview_clipboard_bottom_offset,
             save_clipboard_bottom_offset,
             window_blur,
+            image_window_blur,
             selection_toolbar_blur,
             copy_text,
             get_ai_settings,

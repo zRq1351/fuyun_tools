@@ -36,7 +36,10 @@ impl ClipboardManager {
         match app_handle.clipboard().read_text() {
             Ok(content) => Some(content),
             Err(e) => {
-                log::debug!("获取剪贴板内容失败: {}", e);
+                let msg = e.to_string();
+                if !is_expected_non_text_clipboard_error(&msg) {
+                    log::debug!("获取剪贴板内容失败: {}", msg);
+                }
                 None
             }
         }
@@ -326,6 +329,12 @@ impl ClipboardManager {
         };
         save_history_data_with_retry(&data, 3)
     }
+}
+
+fn is_expected_non_text_clipboard_error(msg: &str) -> bool {
+    msg.contains("requested format")
+        || msg.contains("clipboard is empty")
+        || msg.contains("not available in the requested format")
 }
 
 impl Drop for ClipboardManager {
