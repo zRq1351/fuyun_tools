@@ -80,6 +80,77 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
     }
 }
 
+pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
+    let already_visible = {
+        let state_guard = state.lock().unwrap();
+        state_guard.is_image_visible
+    };
+
+    {
+        let mut state_guard = state.lock().unwrap();
+        state_guard.is_image_visible = true;
+    }
+
+    {
+        let manager_arc = {
+            let state_guard = state.lock().unwrap();
+            state_guard.image_clipboard_manager.clone()
+        };
+        match crate::utils::image_clipboard::ImageClipboardManager::read_clipboard_images_rgba(&app_handle) {
+            Ok(images) => {
+                let manager = manager_arc.lock().unwrap();
+                for (rgba, width, height) in images {
+                    manager.add_rgba_image(rgba, width, height);
+                }
+            }
+            Err(e) => {
+                log::debug!("打开图片窗口时读取系统剪贴板失败: {}", e);
+            }
+        }
+    }
+
+    let selected_index = {
+        let state_guard = state.lock().unwrap();
+        state_guard.image_selected_index
+    };
+
+    let (history, categories, category_list) = {
+        let state_guard = state.lock().unwrap();
+        let manager = state_guard.image_clipboard_manager.lock().unwrap();
+        (
+            manager.get_history_preview(),
+            manager.get_categories(),
+            manager.get_category_list(),
+        )
+    };
+    let bottom_offset = {
+        let state_guard = state.lock().unwrap();
+        state_guard.settings.clipboard_bottom_offset
+    };
+
+    if let Some(_window) = app_handle.get_webview_window("image_clipboard") {
+        let app_handle_clone = app_handle.clone();
+        thread::spawn(move || {
+            if let Some(window) = app_handle_clone.get_webview_window("image_clipboard") {
+                set_window_position(&window, bottom_offset);
+                if (!already_visible && window.show().is_ok()) || already_visible {
+                    if !already_visible {
+                        let _ = window.set_focus();
+                    }
+                    let payload = serde_json::json!({
+                        "history": history,
+                        "categories": categories,
+                        "category_list": category_list,
+                        "bottomOffset": bottom_offset,
+                        "selectedIndex": selected_index
+                    });
+                    let _ = app_handle_clone.emit("show-image-window", payload);
+                }
+            }
+        });
+    }
+}
+
 /// 隐藏剪贴板窗口
 pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     let is_visible = {
@@ -102,6 +173,86 @@ pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
     }
 }
 
+pub fn hide_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
+    let is_visible = {
+        let state_guard = state.lock().unwrap();
+        state_guard.is_image_visible
+    };
+
+    if !is_visible {
+        return;
+    }
+
+    if let Some(window) = app_handle.get_webview_window("image_clipboard") {
+        let _ = window.hide();
+    }
+    {
+        let mut state_guard = state.lock().unwrap();
+        state_guard.is_image_visible = false;
+        state_guard.image_selected_index = 0;
+    }
+}
+
+pub fn show_image_preview_window(
+    app_handle: AppHandle,
+    rgba_base64: String,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    let window = app_handle
+        .get_webview_window("image_preview")
+        .ok_or_else(|| "图片预览窗口不存在".to_string())?;
+    prepare_image_preview_window(&window)?;
+
+    let payload = serde_json::json!({
+        "rgba_base64": rgba_base64,
+        "width": width,
+        "height": height
+    });
+    let _ = window.set_always_on_top(false);
+    let _ = window.show();
+    let _ = window.set_focus();
+    let _ = app_handle.emit("show-image-preview", payload);
+    Ok(())
+}
+
+pub fn show_image_preview_loading_window(app_handle: AppHandle) -> Result<(), String> {
+    let window = app_handle
+        .get_webview_window("image_preview")
+        .ok_or_else(|| "图片预览窗口不存在".to_string())?;
+    prepare_image_preview_window(&window)?;
+    let _ = window.set_always_on_top(false);
+    let _ = window.show();
+    let _ = window.set_focus();
+    let payload = serde_json::json!({
+        "loading": true
+    });
+    let _ = app_handle.emit("show-image-preview", payload);
+    Ok(())
+}
+
+fn prepare_image_preview_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    if let Some(monitor) = window.current_monitor().map_err(|e| e.to_string())? {
+        let monitor_pos = monitor.position();
+        let monitor_size = monitor.size();
+        let mut preview_width = ((monitor_size.width as f64) * 0.86) as u32;
+        let mut preview_height = ((monitor_size.height as f64) * 0.86) as u32;
+        preview_width = preview_width.max(760).min(monitor_size.width);
+        preview_height = preview_height.max(520).min(monitor_size.height);
+        let target_x = monitor_pos.x + ((monitor_size.width - preview_width) / 2) as i32;
+        let target_y = monitor_pos.y + ((monitor_size.height - preview_height) / 2) as i32;
+        let _ = window.set_size(tauri::PhysicalSize::new(preview_width, preview_height));
+        let _ = window.set_position(tauri::PhysicalPosition::new(target_x, target_y));
+    }
+    Ok(())
+}
+
+pub fn hide_image_preview_window(app_handle: AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("image_preview") {
+        let _ = window.hide();
+    }
+}
+
 /// 设置窗口位置和大小
 pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
     if let Some(monitor) = window.current_monitor().unwrap() {
@@ -111,7 +262,7 @@ pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
 
         // 使用屏幕宽度
         let window_width = screen_size.width;
-        let window_height = 250u32;
+        let window_height = 258u32;
 
         let _ = window.set_size(tauri::LogicalSize::new(window_width, window_height));
 

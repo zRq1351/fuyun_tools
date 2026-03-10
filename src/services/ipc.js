@@ -9,18 +9,28 @@ export const IPC_COMMANDS = {
     GET_CLIPBOARD_HISTORY: 'get_clipboard_history',
     REMOVE_CLIPBOARD_ITEM: 'remove_clipboard_item',
     SELECT_AND_FILL: 'select_and_fill',
+    GET_IMAGE_CLIPBOARD_HISTORY: 'get_image_clipboard_history',
+    REMOVE_IMAGE_CLIPBOARD_ITEM: 'remove_image_clipboard_item',
+    SELECT_AND_FILL_IMAGE: 'select_and_fill_image',
+    WARMUP_IMAGE_CLIPBOARD_ITEM: 'warmup_image_clipboard_item',
+    OPEN_IMAGE_PREVIEW_WINDOW: 'open_image_preview_window',
+    CLOSE_IMAGE_PREVIEW_WINDOW: 'close_image_preview_window',
     COPY_TEXT: 'copy_text',
 
     // 分类管理
     SET_ITEM_CATEGORY: 'set_item_category',
     REMOVE_CATEGORY: 'remove_category',
     ADD_CATEGORY: 'add_category',
+    SET_IMAGE_ITEM_CATEGORY: 'set_image_item_category',
+    REMOVE_IMAGE_CATEGORY: 'remove_image_category',
+    ADD_IMAGE_CATEGORY: 'add_image_category',
 
     // 窗口管理
     GET_CLIPBOARD_BOTTOM_OFFSET: 'get_clipboard_bottom_offset',
     PREVIEW_CLIPBOARD_BOTTOM_OFFSET: 'preview_clipboard_bottom_offset',
     SAVE_CLIPBOARD_BOTTOM_OFFSET: 'save_clipboard_bottom_offset',
     WINDOW_BLUR: 'window_blur',
+    IMAGE_WINDOW_BLUR: 'image_window_blur',
     SELECTION_TOOLBAR_BLUR: 'selection_toolbar_blur',
 
     // AI 设置
@@ -68,6 +78,15 @@ export const ClipboardService = {
     copyText: (text) => invoke(IPC_COMMANDS.COPY_TEXT, {text}),
 };
 
+export const ImageClipboardService = {
+    getHistory: () => invoke(IPC_COMMANDS.GET_IMAGE_CLIPBOARD_HISTORY),
+    removeItem: (index) => invoke(IPC_COMMANDS.REMOVE_IMAGE_CLIPBOARD_ITEM, {index}),
+    selectAndFill: (index) => invoke(IPC_COMMANDS.SELECT_AND_FILL_IMAGE, {index}),
+    warmupItem: (index) => invoke(IPC_COMMANDS.WARMUP_IMAGE_CLIPBOARD_ITEM, {index}),
+    openPreviewWindow: (index) => invoke(IPC_COMMANDS.OPEN_IMAGE_PREVIEW_WINDOW, {index}),
+    closePreviewWindow: () => invoke(IPC_COMMANDS.CLOSE_IMAGE_PREVIEW_WINDOW),
+};
+
 /**
  * 分类管理相关的 IPC 服务
  */
@@ -93,6 +112,12 @@ export const CategoryService = {
      * @returns {Promise<void>}
      */
     addCategory: (category) => invoke(IPC_COMMANDS.ADD_CATEGORY, {category}),
+};
+
+export const ImageCategoryService = {
+    setItemCategory: (itemId, category) => invoke(IPC_COMMANDS.SET_IMAGE_ITEM_CATEGORY, {itemId, category}),
+    removeCategory: (category) => invoke(IPC_COMMANDS.REMOVE_IMAGE_CATEGORY, {category}),
+    addCategory: (category) => invoke(IPC_COMMANDS.ADD_IMAGE_CATEGORY, {category}),
 };
 
 /**
@@ -124,6 +149,7 @@ export const WindowService = {
      * @returns {Promise<void>}
      */
     blur: () => invoke(IPC_COMMANDS.WINDOW_BLUR),
+    imageBlur: () => invoke(IPC_COMMANDS.IMAGE_WINDOW_BLUR),
 
     /**
      * 选择工具栏失去焦点通知
@@ -151,10 +177,11 @@ export const AISettingsService = {
      * @param {string} params.aiModelName
      * @param {string} params.aiApiKey
      * @param {string} params.hotKey
+     * @param {string} params.imageHotKey
      * @param {boolean} params.selectionEnabled
      * @returns {Promise<void>}
      */
-    saveSettings: ({maxItems, aiProvider, aiApiUrl, aiModelName, aiApiKey, hotKey, selectionEnabled}) =>
+    saveSettings: ({maxItems, aiProvider, aiApiUrl, aiModelName, aiApiKey, hotKey, imageHotKey, selectionEnabled}) =>
         invoke(IPC_COMMANDS.SAVE_APP_SETTINGS, {
             maxItems,
             aiProvider,
@@ -162,6 +189,7 @@ export const AISettingsService = {
             aiModelName,
             aiApiKey,
             hotKey,
+            imageHotKey,
             selectionEnabled
         }),
 

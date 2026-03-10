@@ -53,6 +53,38 @@
         "width": 850,
         "height": 700,
         "center": true
+      },
+      {
+        "label": "image_clipboard",
+        "title": "图片剪切板",
+        "url": "image_clipboard.html",
+        "visible": false,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": true,
+        "center": false,
+        "resizable": true,
+        "maximizable": false,
+        "minimizable": false
+      },
+      {
+        "label": "image_preview",
+        "title": "图片预览",
+        "url": "image_preview.html",
+        "visible": false,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "focus": true,
+        "center": false,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false
       }
     ],
     "security": {

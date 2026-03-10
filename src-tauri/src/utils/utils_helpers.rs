@@ -1,4 +1,4 @@
-use crate::core::config::{ProviderConfig, DEFAULT_TOGGLE_SHORTCUT};
+use crate::core::config::{ProviderConfig, DEFAULT_IMAGE_TOGGLE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT};
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -19,6 +19,8 @@ pub struct AppSettingsData {
     pub version: String,
     pub max_items: usize,
     pub hot_key: String,
+    #[serde(default = "default_image_hot_key")]
+    pub image_hot_key: String,
     #[serde(default)]
     pub ai_provider: String,  // 改为String类型以支持自定义提供商
     /// 每个AI提供商的独立配置
@@ -36,6 +38,7 @@ impl Default for AppSettingsData {
             version: get_default_app_version(),
             max_items: 50,
             hot_key: DEFAULT_TOGGLE_SHORTCUT.to_string(),
+            image_hot_key: default_image_hot_key(),
             ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
             selection_enabled: true,
@@ -46,6 +49,10 @@ impl Default for AppSettingsData {
 
 fn default_selection_enabled() -> bool {
     true
+}
+
+fn default_image_hot_key() -> String {
+    DEFAULT_IMAGE_TOGGLE_SHORTCUT.to_string()
 }
 
 fn default_clipboard_bottom_offset() -> i32 {
@@ -361,6 +368,10 @@ impl AppSettingsData {
         if self.hot_key.is_empty() {
             self.hot_key = DEFAULT_TOGGLE_SHORTCUT.to_string();
             log::info!("修复 hot_key 为默认值: {}", DEFAULT_TOGGLE_SHORTCUT);
+        }
+
+        if self.image_hot_key.is_empty() {
+            self.image_hot_key = default_image_hot_key();
         }
 
         if self.clipboard_bottom_offset < 0 || self.clipboard_bottom_offset > 400 {

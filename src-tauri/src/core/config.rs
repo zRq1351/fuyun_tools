@@ -14,6 +14,11 @@ pub const DEFAULT_TOGGLE_SHORTCUT: &str = if cfg!(target_os = "macos") {
 } else {
     "Ctrl+Shift+z"
 };
+pub const DEFAULT_IMAGE_TOGGLE_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "Cmd+Shift+x"
+} else {
+    "Ctrl+Shift+x"
+};
 /// 默认隐藏快捷键
 pub const DEFAULT_HIDE_SHORTCUT: &str = "Escape";
 
