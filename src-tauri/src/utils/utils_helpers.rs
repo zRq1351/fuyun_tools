@@ -28,6 +28,8 @@ pub struct AppSettingsData {
     pub provider_configs: HashMap<String, ProviderConfig>,
     #[serde(default = "default_selection_enabled")]
     pub selection_enabled: bool,
+    #[serde(default = "default_grouped_items_protected_from_limit")]
+    pub grouped_items_protected_from_limit: bool,
     #[serde(default = "default_clipboard_bottom_offset")]
     pub clipboard_bottom_offset: i32,
 }
@@ -42,6 +44,7 @@ impl Default for AppSettingsData {
             ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
             selection_enabled: true,
+            grouped_items_protected_from_limit: default_grouped_items_protected_from_limit(),
             clipboard_bottom_offset: default_clipboard_bottom_offset(),
         }
     }
@@ -53,6 +56,10 @@ fn default_selection_enabled() -> bool {
 
 fn default_image_hot_key() -> String {
     DEFAULT_IMAGE_TOGGLE_SHORTCUT.to_string()
+}
+
+fn default_grouped_items_protected_from_limit() -> bool {
+    true
 }
 
 fn default_clipboard_bottom_offset() -> i32 {

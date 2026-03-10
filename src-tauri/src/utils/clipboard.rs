@@ -11,11 +11,12 @@ pub struct ClipboardManager {
     categories: Arc<Mutex<HashMap<String, String>>>,
     category_list: Arc<Mutex<Vec<String>>>,
     max_items: usize,
+    grouped_items_protected_from_limit: bool,
 }
 
 impl ClipboardManager {
     /// 创建剪贴板管理器实例
-    pub fn new(max_items: usize) -> Self {
+    pub fn new(max_items: usize, grouped_items_protected_from_limit: bool) -> Self {
         let history_data = load_history_data().unwrap_or_else(|e| {
             log::error!("加载历史记录失败: {}，使用空历史记录", e);
             ClipboardHistoryData::default()
@@ -26,6 +27,7 @@ impl ClipboardManager {
             categories: Arc::new(Mutex::new(history_data.categories)),
             category_list: Arc::new(Mutex::new(history_data.category_list)),
             max_items,
+            grouped_items_protected_from_limit,
         }
     }
 
@@ -218,11 +220,13 @@ impl ClipboardManager {
             history.insert(0, content);
         }
 
-        if history.len() > self.max_items {
-            history.truncate(self.max_items);
-        }
-
-        let categories = self.categories.lock().unwrap();
+        let mut categories = self.categories.lock().unwrap();
+        shrink_text_history_with_group_protection(
+            &mut history,
+            self.max_items,
+            &mut categories,
+            self.grouped_items_protected_from_limit,
+        );
         let category_list = self.category_list.lock().unwrap();
         let data = ClipboardHistoryData {
             items: history.clone(),
@@ -270,9 +274,13 @@ impl ClipboardManager {
 
         let mut history = self.history.lock().unwrap();
         if history.len() > max_items {
-            history.truncate(max_items);
-
-            let categories = self.categories.lock().unwrap();
+            let mut categories = self.categories.lock().unwrap();
+            shrink_text_history_with_group_protection(
+                &mut history,
+                max_items,
+                &mut categories,
+                self.grouped_items_protected_from_limit,
+            );
             let category_list = self.category_list.lock().unwrap();
 
             let data = ClipboardHistoryData {
@@ -329,6 +337,18 @@ impl ClipboardManager {
         };
         save_history_data_with_retry(&data, 3)
     }
+
+    pub fn set_grouped_items_protected_from_limit(&mut self, enabled: bool) {
+        self.grouped_items_protected_from_limit = enabled;
+        let mut history = self.history.lock().unwrap();
+        let mut categories = self.categories.lock().unwrap();
+        shrink_text_history_with_group_protection(
+            &mut history,
+            self.max_items,
+            &mut categories,
+            self.grouped_items_protected_from_limit,
+        );
+    }
 }
 
 fn is_expected_non_text_clipboard_error(msg: &str) -> bool {
@@ -342,6 +362,34 @@ impl Drop for ClipboardManager {
     fn drop(&mut self) {
         if let Err(e) = self.save_history_on_exit() {
             log::error!("程序退出时保存历史记录失败: {}", e);
+        }
+    }
+}
+
+fn shrink_text_history_with_group_protection(
+    history: &mut Vec<String>,
+    max_items: usize,
+    categories: &mut HashMap<String, String>,
+    grouped_items_protected_from_limit: bool,
+) {
+    if !grouped_items_protected_from_limit {
+        if history.len() > max_items {
+            let removed = history.split_off(max_items);
+            for item in removed {
+                categories.remove(&item);
+            }
+        }
+        return;
+    }
+    while history.len() > max_items {
+        if let Some(pos) = history
+            .iter()
+            .rposition(|item| !categories.contains_key(item))
+        {
+            let removed = history.remove(pos);
+            categories.remove(&removed);
+        } else {
+            break;
         }
     }
 }
