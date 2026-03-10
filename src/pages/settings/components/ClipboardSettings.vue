@@ -8,19 +8,37 @@
     <el-form-item label="打开剪切板窗口快捷键">
       <el-input
           v-model="form.toggleShortcut"
-          :class="{ recording: isRecording }"
+          :class="{ recording: isTextRecording }"
           placeholder="例如: Ctrl+Shift+K"
           readonly
       >
         <template #append>
-          <el-button :type="isRecording ? 'danger' : 'primary'" @click="toggleRecording">
+          <el-button :type="isTextRecording ? 'danger' : 'primary'" @click="toggleTextRecording">
             <el-icon>
-              <component :is="isRecording ? VideoPause : Edit"/>
+              <component :is="isTextRecording ? VideoPause : Edit"/>
             </el-icon>
           </el-button>
         </template>
       </el-input>
       <div class="form-hint">点击编辑按钮来自定义打开剪切板窗口的快捷键</div>
+    </el-form-item>
+
+    <el-form-item label="打开图片剪切板窗口快捷键">
+      <el-input
+          v-model="form.imageToggleShortcut"
+          :class="{ recording: isImageRecording }"
+          placeholder="例如: Ctrl+Shift+X"
+          readonly
+      >
+        <template #append>
+          <el-button :type="isImageRecording ? 'danger' : 'primary'" @click="toggleImageRecording">
+            <el-icon>
+              <component :is="isImageRecording ? VideoPause : Edit"/>
+            </el-icon>
+          </el-button>
+        </template>
+      </el-input>
+      <div class="form-hint">点击编辑按钮来自定义打开图片剪切板窗口的快捷键</div>
     </el-form-item>
   </el-form>
 </template>
@@ -36,7 +54,14 @@ const props = defineProps({
   }
 })
 
-const {isRecording, toggleRecording} = useShortcutRecorder(props.form)
+const {
+  isRecording: isTextRecording,
+  toggleRecording: toggleTextRecording
+} = useShortcutRecorder(props.form, 'toggleShortcut')
+const {
+  isRecording: isImageRecording,
+  toggleRecording: toggleImageRecording
+} = useShortcutRecorder(props.form, 'imageToggleShortcut')
 </script>
 
 <style scoped>

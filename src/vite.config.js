@@ -9,6 +9,8 @@ export default defineConfig({
             input: {
                 settings: resolve(__dirname, 'settings.html'),
                 clipboard: resolve(__dirname, 'clipboard.html'),
+                image_clipboard: resolve(__dirname, 'image_clipboard.html'),
+                image_preview: resolve(__dirname, 'image_preview.html'),
                 selection_toolbar: resolve(__dirname, 'selection_toolbar.html'),
                 result_display: resolve(__dirname, 'result_display.html'),
             },

@@ -1,7 +1,7 @@
 import {ref} from 'vue'
 import {ElMessage} from 'element-plus'
 
-export function useShortcutRecorder(form) {
+export function useShortcutRecorder(form, fieldKey = 'toggleShortcut') {
     const isRecording = ref(false)
     const recordedShortcut = ref('')
 
@@ -9,7 +9,7 @@ export function useShortcutRecorder(form) {
         isRecording.value = false
         document.removeEventListener('keydown', handleKeyDown, true)
         if (recordedShortcut.value) {
-            form.toggleShortcut = recordedShortcut.value
+            form[fieldKey] = recordedShortcut.value
         } else {
         }
     }
@@ -53,7 +53,7 @@ export function useShortcutRecorder(form) {
 
         if (modifiers.length > 0 && key) {
             recordedShortcut.value = [...modifiers, key].join('+')
-            form.toggleShortcut = recordedShortcut.value
+            form[fieldKey] = recordedShortcut.value
             stopRecording()
             ElMessage.success(`已录制快捷键: ${recordedShortcut.value}`)
         }
@@ -62,7 +62,7 @@ export function useShortcutRecorder(form) {
     const startRecording = () => {
         isRecording.value = true
         recordedShortcut.value = ''
-        form.toggleShortcut = '请按下快捷键...'
+        form[fieldKey] = '请按下快捷键...'
         document.addEventListener('keydown', handleKeyDown, true)
         ElMessage.info('开始录制快捷键，请按下组合键')
     }

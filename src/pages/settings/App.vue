@@ -84,6 +84,7 @@ const aiSettingsRef = ref(null)
 const form = reactive({
   maxItems: 100,
   toggleShortcut: '',
+  imageToggleShortcut: '',
   aiProvider: '',
   apiUrl: '',
   modelName: '',
@@ -122,6 +123,7 @@ const saveSettings = async () => {
       aiModelName: form.modelName,
       aiApiKey: form.apiKey,
       hotKey: form.toggleShortcut,
+      imageHotKey: form.imageToggleShortcut,
       selectionEnabled: form.selectionEnabled
     })
 
@@ -161,6 +163,7 @@ onMounted(async () => {
     form.maxItems = settings.max_items || 50
     currentVersion.value = settings.version || '0.3.1'
     form.toggleShortcut = settings.hot_key || ''
+    form.imageToggleShortcut = settings.image_hot_key || ''
     form.selectionEnabled = settings.selection_enabled !== false
 
     if (aiSettingsRef.value) {
@@ -225,4 +228,3 @@ body {
   font-size: 14px;
 }
 </style>
-
