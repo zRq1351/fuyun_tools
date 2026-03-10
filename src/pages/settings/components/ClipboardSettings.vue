@@ -5,6 +5,15 @@
       <div class="form-hint">设置剪贴板历史记录的最大保存数量 (1-1000)</div>
     </el-form-item>
 
+    <el-form-item label="上限策略">
+      <el-switch
+          v-model="form.groupedItemsProtectedFromLimit"
+          active-text="仅限制未分组项"
+          inactive-text="限制全部项"
+      />
+      <div class="form-hint">开启后，已分组的文字和图片不会因上限被自动删除</div>
+    </el-form-item>
+
     <el-form-item label="打开剪切板窗口快捷键">
       <el-input
           v-model="form.toggleShortcut"

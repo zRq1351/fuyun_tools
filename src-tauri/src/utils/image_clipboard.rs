@@ -62,10 +62,11 @@ pub struct ImageClipboardManager {
     save_pending: Arc<AtomicBool>,
     save_running: Arc<AtomicBool>,
     max_items: usize,
+    grouped_items_protected_from_limit: bool,
 }
 
 impl ImageClipboardManager {
-    pub fn new(max_items: usize) -> Self {
+    pub fn new(max_items: usize, grouped_items_protected_from_limit: bool) -> Self {
         let history_data = load_image_history_data().unwrap_or_else(|e| {
             log::error!("加载图片历史记录失败: {}，使用空历史记录", e);
             ImageHistoryData::default()
@@ -78,6 +79,7 @@ impl ImageClipboardManager {
             save_pending: Arc::new(AtomicBool::new(false)),
             save_running: Arc::new(AtomicBool::new(false)),
             max_items,
+            grouped_items_protected_from_limit,
         }
     }
 
@@ -142,11 +144,14 @@ impl ImageClipboardManager {
         self.max_items = max_items;
         let mut history = self.history.lock().unwrap();
         if history.len() > max_items {
-            let overflow = history.split_off(max_items);
-            let overflow_paths = overflow
-                .into_iter()
-                .map(|entry| entry.image_path)
-                .collect::<Vec<_>>();
+            let mut categories = self.categories.lock().unwrap();
+            let overflow_paths =
+                shrink_image_history_with_group_protection(
+                    &mut history,
+                    max_items,
+                    &mut categories,
+                    self.grouped_items_protected_from_limit,
+                );
             cleanup_image_blob_files(overflow_paths);
             drop(history);
             self.schedule_async_save();
@@ -223,21 +228,30 @@ impl ImageClipboardManager {
 
         {
             let mut history = self.history.lock().unwrap();
-            let removed_paths = history
-                .iter()
-                .filter(|entry| entry.signature == signature)
-                .map(|entry| entry.image_path.clone())
-                .collect::<Vec<_>>();
-            history.retain(|entry| entry.signature != signature);
-            history.insert(0, item);
-            if history.len() > self.max_items {
-                let overflow = history.split_off(self.max_items);
-                let overflow_paths = overflow
-                    .into_iter()
-                    .map(|entry| entry.image_path)
-                    .collect::<Vec<_>>();
-                cleanup_image_blob_files(overflow_paths);
+            let mut categories = self.categories.lock().unwrap();
+            let mut removed_paths = Vec::new();
+            let mut removed_ids = Vec::new();
+            history.retain(|entry| {
+                if entry.signature == signature {
+                    removed_paths.push(entry.image_path.clone());
+                    removed_ids.push(entry.id.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            for removed_id in removed_ids {
+                categories.remove(&removed_id);
             }
+            history.insert(0, item);
+            let overflow_paths =
+                shrink_image_history_with_group_protection(
+                    &mut history,
+                    self.max_items,
+                    &mut categories,
+                    self.grouped_items_protected_from_limit,
+                );
+            removed_paths.extend(overflow_paths);
             cleanup_image_blob_files(removed_paths);
         }
 
@@ -367,6 +381,19 @@ impl ImageClipboardManager {
         save_image_history_data_with_retry(&data, 3)
     }
 
+    pub fn set_grouped_items_protected_from_limit(&mut self, enabled: bool) {
+        self.grouped_items_protected_from_limit = enabled;
+        let mut history = self.history.lock().unwrap();
+        let mut categories = self.categories.lock().unwrap();
+        let removed_paths = shrink_image_history_with_group_protection(
+            &mut history,
+            self.max_items,
+            &mut categories,
+            self.grouped_items_protected_from_limit,
+        );
+        cleanup_image_blob_files(removed_paths);
+    }
+
     fn snapshot(&self) -> ImageHistoryData {
         let history = {
             let history = self.history.lock().unwrap();
@@ -457,6 +484,41 @@ fn compact_item_for_persist(item: &ImageHistoryItem) -> ImageHistoryItem {
         rgba_bytes: Vec::new(),
         signature: item.signature.clone(),
     }
+}
+
+fn shrink_image_history_with_group_protection(
+    history: &mut Vec<ImageHistoryItem>,
+    max_items: usize,
+    categories: &mut HashMap<String, String>,
+    grouped_items_protected_from_limit: bool,
+) -> Vec<String> {
+    if !grouped_items_protected_from_limit {
+        if history.len() > max_items {
+            let removed = history.split_off(max_items);
+            return removed
+                .into_iter()
+                .map(|entry| {
+                    categories.remove(&entry.id);
+                    entry.image_path
+                })
+                .collect::<Vec<_>>();
+        }
+        return Vec::new();
+    }
+    let mut removed_paths = Vec::new();
+    while history.len() > max_items {
+        if let Some(pos) = history
+            .iter()
+            .rposition(|entry| !categories.contains_key(&entry.id))
+        {
+            let removed = history.remove(pos);
+            categories.remove(&removed.id);
+            removed_paths.push(removed.image_path);
+        } else {
+            break;
+        }
+    }
+    removed_paths
 }
 
 fn compute_signature(rgba: &[u8], width: u32, height: u32) -> String {

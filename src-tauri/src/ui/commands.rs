@@ -430,6 +430,10 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         "selection_enabled".to_string(),
         serde_json::Value::Bool(settings.selection_enabled),
     );
+    result.insert(
+        "grouped_items_protected_from_limit".to_string(),
+        serde_json::Value::Bool(settings.grouped_items_protected_from_limit),
+    );
 
     // 处理provider_configs，将encrypted_api_key替换为解密后的api_key
     let mut provider_configs_map: HashMap<String, serde_json::Value> = HashMap::new();
@@ -476,6 +480,7 @@ pub async fn save_app_settings(
     hot_key: String,
     image_hot_key: String,
     selection_enabled: bool,
+    grouped_items_protected_from_limit: bool,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -489,6 +494,7 @@ pub async fn save_app_settings(
     settings.version = version;
     settings.max_items = max_items;
     settings.selection_enabled = selection_enabled;
+    settings.grouped_items_protected_from_limit = grouped_items_protected_from_limit;
 
     if hot_key.is_empty() {
         return Err("快捷键不能为空".to_string());
@@ -603,10 +609,12 @@ pub async fn save_app_settings(
         {
             let mut manager = state_guard.clipboard_manager.lock().unwrap();
             manager.set_max_items(max_items);
+            manager.set_grouped_items_protected_from_limit(grouped_items_protected_from_limit);
         }
         {
             let mut manager = state_guard.image_clipboard_manager.lock().unwrap();
             manager.set_max_items(max_items);
+            manager.set_grouped_items_protected_from_limit(grouped_items_protected_from_limit);
         }
         state_guard.settings = settings.clone();
     }

@@ -40,7 +40,11 @@
         </div>
 
         <div v-show="activeTab === 'about'">
-          <AboutSettings :current-version="currentVersion" :toggle-shortcut="form.toggleShortcut"/>
+          <AboutSettings
+              :current-version="currentVersion"
+              :image-toggle-shortcut="form.imageToggleShortcut"
+              :toggle-shortcut="form.toggleShortcut"
+          />
         </div>
       </div>
 
@@ -83,6 +87,7 @@ const aiSettingsRef = ref(null)
 
 const form = reactive({
   maxItems: 100,
+  groupedItemsProtectedFromLimit: true,
   toggleShortcut: '',
   imageToggleShortcut: '',
   aiProvider: '',
@@ -124,7 +129,8 @@ const saveSettings = async () => {
       aiApiKey: form.apiKey,
       hotKey: form.toggleShortcut,
       imageHotKey: form.imageToggleShortcut,
-      selectionEnabled: form.selectionEnabled
+      selectionEnabled: form.selectionEnabled,
+      groupedItemsProtectedFromLimit: form.groupedItemsProtectedFromLimit
     })
 
     if (form.aiProvider === 'custom') {
@@ -165,6 +171,7 @@ onMounted(async () => {
     form.toggleShortcut = settings.hot_key || ''
     form.imageToggleShortcut = settings.image_hot_key || ''
     form.selectionEnabled = settings.selection_enabled !== false
+    form.groupedItemsProtectedFromLimit = settings.grouped_items_protected_from_limit !== false
 
     if (aiSettingsRef.value) {
       aiSettingsRef.value.applyCurrentProviderConfig(settings)

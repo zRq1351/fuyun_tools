@@ -179,9 +179,20 @@ export const AISettingsService = {
      * @param {string} params.hotKey
      * @param {string} params.imageHotKey
      * @param {boolean} params.selectionEnabled
+     * @param {boolean} params.groupedItemsProtectedFromLimit
      * @returns {Promise<void>}
      */
-    saveSettings: ({maxItems, aiProvider, aiApiUrl, aiModelName, aiApiKey, hotKey, imageHotKey, selectionEnabled}) =>
+    saveSettings: ({
+                       maxItems,
+                       aiProvider,
+                       aiApiUrl,
+                       aiModelName,
+                       aiApiKey,
+                       hotKey,
+                       imageHotKey,
+                       selectionEnabled,
+                       groupedItemsProtectedFromLimit
+                   }) =>
         invoke(IPC_COMMANDS.SAVE_APP_SETTINGS, {
             maxItems,
             aiProvider,
@@ -190,7 +201,8 @@ export const AISettingsService = {
             aiApiKey,
             hotKey,
             imageHotKey,
-            selectionEnabled
+            selectionEnabled,
+            groupedItemsProtectedFromLimit
         }),
 
     /**

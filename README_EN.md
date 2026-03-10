@@ -7,6 +7,12 @@ fuyun_tools is a desktop productivity tool running in the system tray, focused o
 - Better clipboard history management
 - AI text selection translation/explanation on Windows
 
+Core positioning:
+
+- One hotkey workflow to manage both text and image clipboard history
+- One selection workflow to translate, explain, and copy in-place
+- One configurable strategy set to balance history limits and key item retention
+
 In addition, this project itself follows an AI full-process development workflow: AI deeply participates in requirement breakdown, solution design, coding implementation, and documentation maintenance.
 
 ---
@@ -113,6 +119,12 @@ Installation steps:
 - Top-right delete button: remove that image history item
 - Top-right fullscreen button: open image fullscreen preview
 - `← / →`: switch image; `Enter`: fill current image; `Esc`: close window
+
+### Limit Strategy (Text + Image)
+
+- You can switch limit strategy in `Settings → Clipboard`
+- When `Limit Ungrouped Items Only` is enabled, grouped items are protected from auto-removal
+- When disabled, the history limit applies to all items
 
 ### Selection Toolbar (Windows)
 
