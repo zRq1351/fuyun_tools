@@ -19,6 +19,14 @@ In addition, this project itself follows an AI full-process development workflow
 - Supports search, categorization, deletion, and history size limits
 - Supports both keyboard and mouse workflows (arrow keys, enter, wheel)
 
+### 🖼️ Image Clipboard Management
+
+- Automatically detects and stores images copied to the clipboard with thumbnail lists
+- Supports image search and category management for quick organization
+- Supports double-click image fill back to the currently focused document/app
+- Supports fullscreen preview with loading animation for large images
+- Image history and categories are persisted locally and available after restart
+
 ### 🔤 AI Text Selection Assistant (Windows)
 
 - Supports drag, double-click, and triple-click selection scenarios
@@ -97,6 +105,14 @@ Installation steps:
 - `Enter`: fill selected item
 - `Esc`: hide window
 - Mouse wheel: scroll list
+
+### Image Clipboard Window
+
+- Click a card: select image
+- Double-click a card: fill image into the currently focused app
+- Top-right delete button: remove that image history item
+- Top-right fullscreen button: open image fullscreen preview
+- `← / →`: switch image; `Enter`: fill current image; `Esc`: close window
 
 ### Selection Toolbar (Windows)
 
