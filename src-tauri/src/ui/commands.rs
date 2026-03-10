@@ -2,7 +2,12 @@ use crate::core::app_state::AppState as SharedAppState;
 use crate::core::config::{AIProvider, ProviderConfig};
 use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
-use crate::ui::window_manager::{hide_clipboard_window, set_window_position, show_clipboard_window};
+use crate::ui::window_manager::{
+    hide_clipboard_window, hide_image_clipboard_window, hide_image_preview_window, set_window_position,
+    show_clipboard_window, show_image_clipboard_window, show_image_preview_loading_window,
+    show_image_preview_window,
+};
+use crate::utils::image_clipboard::ImageHistoryPreviewItem;
 use crate::utils::utils_helpers::{load_settings, save_settings};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -15,6 +20,13 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 #[derive(serde::Serialize)]
 pub struct HistoryResponse {
     history: Vec<String>,
+    categories: HashMap<String, String>,
+    category_list: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+pub struct ImageHistoryResponse {
+    history: Vec<ImageHistoryPreviewItem>,
     categories: HashMap<String, String>,
     category_list: Vec<String>,
 }
@@ -64,6 +76,91 @@ pub async fn add_category(
 }
 
 #[tauri::command]
+pub async fn get_image_clipboard_history(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<ImageHistoryResponse, String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+    Ok(ImageHistoryResponse {
+        history: manager.get_history_preview(),
+        categories: manager.get_categories(),
+        category_list: manager.get_category_list(),
+    })
+}
+
+#[tauri::command]
+pub async fn open_image_preview_window(
+    index: usize,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    show_image_preview_loading_window(app.clone())?;
+    let state_clone = state.inner().clone();
+    let app_clone = app.clone();
+    thread::spawn(move || {
+        let result: Result<(), String> = (|| {
+            let (rgba_base64, width, height) = {
+                let state_guard = state_clone.lock().unwrap();
+                let manager = state_guard.image_clipboard_manager.lock().unwrap();
+                manager.get_preview_window_payload_by_index(index)?
+            };
+            show_image_preview_window(app_clone, rgba_base64, width, height)
+        })();
+        if let Err(e) = result {
+            log::error!("加载预览图片失败: {}", e);
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn close_image_preview_window(app: AppHandle) -> Result<(), String> {
+    hide_image_preview_window(app);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn warmup_image_clipboard_item(
+    index: usize,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+    manager.warmup_image_by_index(index)
+}
+
+#[tauri::command]
+pub async fn set_image_item_category(
+    item_id: String,
+    category: String,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+    manager.set_category(item_id, category)
+}
+
+#[tauri::command]
+pub async fn remove_image_category(
+    category: String,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+    manager.remove_category(category)
+}
+
+#[tauri::command]
+pub async fn add_image_category(
+    category: String,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+    manager.add_category(category)
+}
+
+#[tauri::command]
 pub async fn get_clipboard_bottom_offset(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<i32, String> {
@@ -76,8 +173,12 @@ pub async fn preview_clipboard_bottom_offset(
     offset: i32,
     app: AppHandle,
 ) -> Result<(), String> {
+    let final_offset = offset.max(0);
     if let Some(window) = app.get_webview_window("clipboard") {
-        set_window_position(&window, offset.max(0));
+        set_window_position(&window, final_offset);
+    }
+    if let Some(window) = app.get_webview_window("image_clipboard") {
+        set_window_position(&window, final_offset);
     }
     Ok(())
 }
@@ -102,6 +203,9 @@ pub async fn save_clipboard_bottom_offset(
     }
 
     if let Some(window) = app.get_webview_window("clipboard") {
+        set_window_position(&window, final_offset);
+    }
+    if let Some(window) = app.get_webview_window("image_clipboard") {
         set_window_position(&window, final_offset);
     }
     Ok(())
@@ -198,6 +302,62 @@ pub async fn remove_clipboard_item(
 }
 
 #[tauri::command]
+pub async fn remove_image_clipboard_item(
+    index: usize,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+    manager.remove_from_history(index)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn select_and_fill_image(
+    index: usize,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    {
+        let mut state_guard = state.lock().unwrap();
+        state_guard.is_updating_clipboard = true;
+        state_guard.is_processing_selection = true;
+    }
+
+    let app_handle = app.clone();
+    let state_clone = state.inner().clone();
+    hide_image_clipboard_window(app.clone(), state_clone.clone());
+
+    thread::spawn(move || {
+        let fill_result: Result<(), String> = (|| {
+            let image = {
+                let state_guard = state_clone.lock().unwrap();
+                let manager = state_guard.image_clipboard_manager.lock().unwrap();
+                manager.get_image_by_index(index)?
+            };
+            crate::utils::image_clipboard::ImageClipboardManager::write_clipboard_image(&app_handle, &image)?;
+            Ok(())
+        })();
+
+        if fill_result.is_ok() {
+            thread::sleep(Duration::from_millis(65));
+            crate::ui::window_manager::simulate_paste();
+        } else if let Err(e) = fill_result {
+            log::error!("图片回填失败: {}", e);
+        }
+
+        if let Some(state_guard) = app_handle.try_state::<Arc<Mutex<SharedAppState>>>() {
+            if let Ok(mut guard) = state_guard.lock() {
+                guard.is_processing_selection = false;
+                guard.is_updating_clipboard = false;
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn window_blur(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
@@ -209,6 +369,22 @@ pub async fn window_blur(
     if is_visible {
         let state_clone = state.inner().clone();
         hide_clipboard_window(app, state_clone);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn image_window_blur(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let is_visible = {
+        let state_guard = state.lock().unwrap();
+        state_guard.is_image_visible
+    };
+    if is_visible {
+        let state_clone = state.inner().clone();
+        hide_image_clipboard_window(app, state_clone);
     }
     Ok(())
 }
@@ -245,6 +421,10 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
     result.insert(
         "hot_key".to_string(),
         serde_json::Value::String(settings.hot_key.clone()),
+    );
+    result.insert(
+        "image_hot_key".to_string(),
+        serde_json::Value::String(settings.image_hot_key.clone()),
     );
     result.insert(
         "selection_enabled".to_string(),
@@ -294,6 +474,7 @@ pub async fn save_app_settings(
     ai_model_name: String,
     ai_api_key: String,
     hot_key: String,
+    image_hot_key: String,
     selection_enabled: bool,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
@@ -311,6 +492,14 @@ pub async fn save_app_settings(
 
     if hot_key.is_empty() {
         return Err("快捷键不能为空".to_string());
+    }
+
+    if image_hot_key.is_empty() {
+        return Err("图片窗口快捷键不能为空".to_string());
+    }
+
+    if hot_key == image_hot_key {
+        return Err("文字与图片窗口快捷键不能相同".to_string());
     }
 
     if ai_provider.is_empty() {
@@ -346,7 +535,32 @@ pub async fn save_app_settings(
             .map_err(|e| e.to_string())?;
     }
 
+    if image_hot_key != settings.image_hot_key {
+        if app.global_shortcut().is_registered(image_hot_key.as_str()) {
+            return Err("图片窗口快捷键冲突".to_string());
+        }
+
+        app.global_shortcut()
+            .unregister(settings.image_hot_key.as_str())
+            .map_err(|e| format!("保存配置失败: {}", e))?;
+        let app_clone = app.clone();
+        let state_clone = state.inner().clone();
+        app.global_shortcut()
+            .on_shortcut(image_hot_key.as_str(), move |_app, _shortcut, event| {
+                if let ShortcutState::Pressed = event.state {
+                    let sg = state_clone.lock().unwrap();
+                    if !sg.is_visible && !sg.is_image_visible && !sg.is_processing_selection {
+                        let state_for_window = state_clone.clone();
+                        drop(sg);
+                        show_image_clipboard_window(app_clone.clone(), state_for_window);
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+    }
+
     settings.hot_key = hot_key;
+    settings.image_hot_key = image_hot_key;
     settings.ai_provider = ai_provider.clone();
 
     settings.migrate_from_old();
@@ -386,6 +600,14 @@ pub async fn save_app_settings(
     let selection_enabled = settings.selection_enabled;
     {
         let mut state_guard = state.lock().unwrap();
+        {
+            let mut manager = state_guard.clipboard_manager.lock().unwrap();
+            manager.set_max_items(max_items);
+        }
+        {
+            let mut manager = state_guard.image_clipboard_manager.lock().unwrap();
+            manager.set_max_items(max_items);
+        }
         state_guard.settings = settings.clone();
     }
 
