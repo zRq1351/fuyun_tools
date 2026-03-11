@@ -47,6 +47,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
-          releaseBody: '1、添加图片管理功能。2、修复一些BUG'
+          releaseBody: '1、优化图片与文字自动回填体验。2、修复一些BUG'
           releaseDraft: false
           prerelease: false
