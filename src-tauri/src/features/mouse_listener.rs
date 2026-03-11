@@ -28,6 +28,7 @@ struct GlobalState {
     needs_detection: AtomicBool,
     last_processed_time: Arc<Mutex<std::time::Instant>>,
     last_mouse_pos: Arc<Mutex<(u64, u64)>>,
+    detection_anchor_pos: Arc<Mutex<(i32, i32)>>,
     last_click: Arc<Mutex<Option<(u64, u64, std::time::Instant)>>>,
 }
 
@@ -39,6 +40,7 @@ lazy_static::lazy_static! {
         needs_detection: AtomicBool::new(false),
         last_processed_time: Arc::new(Mutex::new(std::time::Instant::now())),
         last_mouse_pos: Arc::new(Mutex::new((0, 0))),
+        detection_anchor_pos: Arc::new(Mutex::new((0, 0))),
         last_click: Arc::new(Mutex::new(None)),
     };
 }
@@ -169,10 +171,14 @@ impl MouseListener {
                             log::info!("检测到有效的选中文本: '{}'", text);
                             let app_handle_clone = detection_thread_app_handle.clone();
                             let text_clone = text.clone();
+                            let anchor_pos = {
+                                let pos_guard = GLOBAL_STATE.detection_anchor_pos.lock().unwrap();
+                                *pos_guard
+                            };
 
                             tauri::async_runtime::spawn(async move {
                                 log::info!("准备调用 show_selection_toolbar_impl");
-                                show_selection_toolbar_impl(app_handle_clone, text_clone);
+                                show_selection_toolbar_impl(app_handle_clone, text_clone, Some(anchor_pos));
                                 log::info!("已调用 show_selection_toolbar_impl");
                             });
                         }
@@ -315,6 +321,10 @@ impl MouseListener {
                                     if up_time.duration_since(last_processed)
                                         > Duration::from_millis(100)
                                     {
+                                        {
+                                            let mut pos_guard = GLOBAL_STATE.detection_anchor_pos.lock().unwrap();
+                                            *pos_guard = (last_x as i32, last_y as i32);
+                                        }
                                         GLOBAL_STATE.needs_detection.store(true, Ordering::SeqCst);
                                         log::info!("设置划词检测标志");
 
