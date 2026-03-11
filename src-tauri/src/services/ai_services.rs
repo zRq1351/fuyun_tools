@@ -2,6 +2,9 @@ use crate::core::app_state::AppState as SharedAppState;
 use crate::core::error::{AppError, AppResult, ErrorCode};
 use crate::services::ai_client::{AIClient, AIConfig};
 use crate::ui::window_manager::{hide_selection_toolbar_impl, show_result_window, update_result_window};
+use crate::utils::utils_helpers::{
+    default_explanation_prompt_template, default_translation_prompt_template,
+};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -74,6 +77,18 @@ pub async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> AppRe
     Ok(client)
 }
 
+fn fill_prompt_template(
+    template: &str,
+    text: &str,
+    source_language: Option<&str>,
+    target_language: &str,
+) -> String {
+    let mut prompt = template.replace("{text}", text);
+    let source = source_language.unwrap_or("自动识别");
+    prompt = prompt.replace("{source_language}", source);
+    prompt.replace("{target_language}", target_language)
+}
+
 /// 流式翻译文本
 #[tauri::command]
 pub async fn stream_translate_text(
@@ -87,6 +102,10 @@ pub async fn stream_translate_text(
     if text.is_empty() {
         return Err(AppError::new(ErrorCode::ValidationError, "文本为空，无法翻译"));
     }
+    let configured_translation_prompt = {
+        let state_guard = state.lock().unwrap();
+        state_guard.settings.translation_prompt_template.clone()
+    };
     let client: AIClient = get_or_create_ai_client(state.inner().clone()).await?;
 
     show_result_window(
@@ -101,18 +120,21 @@ pub async fn stream_translate_text(
     hide_selection_toolbar_impl(app.clone());
     let source_language_name = source_language.trim().to_string();
     let target_language_name = target_language;
-
-    let messages = if source_language_name.is_empty() || source_language_name == "自动识别" {
-        format!(
-            "请自动识别下面文本的原始语言，并将其直接翻译为{}。不要输出任何额外说明或前后缀，只输出翻译结果：\n\n{}",
-            target_language_name, text
-        )
+    let prompt_template = if configured_translation_prompt.trim().is_empty() {
+        default_translation_prompt_template()
     } else {
-        format!(
-            "请将下面文字从{}直接翻译为{}。不要输出任何额外说明或前后缀，只输出翻译结果：\n\n{}",
-            source_language_name, target_language_name, text
-        )
+        configured_translation_prompt
     };
+    let messages = fill_prompt_template(
+        &prompt_template,
+        &text,
+        if source_language_name.is_empty() {
+            None
+        } else {
+            Some(source_language_name.as_str())
+        },
+        &target_language_name,
+    );
     if let Some(window) = app.clone().get_webview_window("result_translation") {
         let _ = window.emit("result-clean", serde_json::json!({
             "type": "translation"
@@ -156,6 +178,10 @@ pub async fn stream_explain_text(
     if text.is_empty() {
         return Err(AppError::new(ErrorCode::ValidationError, "文本为空，无法解释"));
     }
+    let configured_explanation_prompt = {
+        let state_guard = state.lock().unwrap();
+        state_guard.settings.explanation_prompt_template.clone()
+    };
     let client: AIClient = get_or_create_ai_client(state.inner().clone()).await?;
     show_result_window(
         "解释结果".to_string(),
@@ -169,10 +195,12 @@ pub async fn stream_explain_text(
     hide_selection_toolbar_impl(app.clone());
     let target_language_name = target_language;
 
-    let messages = format!(
-        "请用{}200字内解释这段话：\n\n{}",
-        target_language_name, text
-    );
+    let prompt_template = if configured_explanation_prompt.trim().is_empty() {
+        default_explanation_prompt_template()
+    } else {
+        configured_explanation_prompt
+    };
+    let messages = fill_prompt_template(&prompt_template, &text, None, &target_language_name);
     if let Some(window) = app.clone().get_webview_window("result_explanation") {
         let _ = window.emit("result-clean", serde_json::json!({
             "type": "explanation"
