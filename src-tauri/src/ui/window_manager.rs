@@ -323,7 +323,11 @@ fn get_taskbar_safe_offset() -> i32 {
 }
 
 /// 打开划词工具栏
-pub fn show_selection_toolbar_impl(app_handle: AppHandle, selected_text: String) {
+pub fn show_selection_toolbar_impl(
+    app_handle: AppHandle,
+    selected_text: String,
+    anchor_pos: Option<(i32, i32)>,
+) {
     if let Some(state) = app_handle.try_state::<Arc<Mutex<AppState>>>() {
         if let Ok(state_guard) = state.lock() {
             if !state_guard.settings.selection_enabled {
@@ -336,7 +340,7 @@ pub fn show_selection_toolbar_impl(app_handle: AppHandle, selected_text: String)
         return;
     }
     if let Some(toolbar_window) = app_handle.get_webview_window("selection_toolbar") {
-        set_toolbar_window(&toolbar_window);
+        set_toolbar_window(&toolbar_window, anchor_pos);
         if toolbar_window.show().is_ok() {
             if let Err(e) = app_handle.emit("selected-text", selected_text) {
                 log::error!("未能发送选择文本到前端:{}", e);
@@ -346,9 +350,37 @@ pub fn show_selection_toolbar_impl(app_handle: AppHandle, selected_text: String)
 }
 
 /// 设置工具栏窗口位置
-fn set_toolbar_window(window: &tauri::WebviewWindow) {
-    let _ = window.set_size(tauri::LogicalSize::new(50, 100));
-    let _ = window.move_window(Position::RightCenter);
+fn set_toolbar_window(window: &tauri::WebviewWindow, anchor_pos: Option<(i32, i32)>) {
+    let toolbar_width = 176u32;
+    let toolbar_height = 50u32;
+    let offset = 12i32;
+    let _ = window.set_size(tauri::LogicalSize::new(toolbar_width, toolbar_height));
+    if let Some((mx, my)) = anchor_pos {
+        let mut x = mx - (toolbar_width as i32 / 2);
+        let mut y = my + offset;
+        if let Ok(Some(monitor)) = window.current_monitor() {
+            let monitor_pos = monitor.position();
+            let monitor_size = monitor.size();
+            let min_x = monitor_pos.x;
+            let min_y = monitor_pos.y;
+            let max_x = monitor_pos.x + monitor_size.width as i32 - toolbar_width as i32;
+            let max_y = monitor_pos.y + monitor_size.height as i32 - toolbar_height as i32;
+            let below_y = my + offset;
+            let above_y = my - toolbar_height as i32 - offset;
+            if below_y <= max_y {
+                y = below_y;
+            } else if above_y >= min_y {
+                y = above_y;
+            } else {
+                y = below_y.clamp(min_y, max_y.max(min_y));
+            }
+            x = x.clamp(min_x, max_x.max(min_x));
+            y = y.clamp(min_y, max_y.max(min_y));
+        }
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    } else {
+        let _ = window.move_window(Position::RightCenter);
+    }
 }
 
 /// 隐藏工具栏窗口
@@ -481,6 +513,7 @@ pub async fn show_result_window(
     let window_label = format!("result_{}", window_type);
 
     if let Some(existing_window) = app.get_webview_window(&window_label) {
+        position_result_window_near_toolbar(&existing_window, &app);
         if let Ok(is_visible) = existing_window.is_visible() {
             if !is_visible {
                 let _ = existing_window.show();
@@ -509,9 +542,9 @@ pub async fn show_result_window(
     )
         .title(&title)
         .visible(false)
-        .inner_size(480.0, 300.0)
+        .inner_size(560.0, 360.0)
         .resizable(true)
-        .decorations(false)
+        .decorations(true)
         .on_page_load(move |window, _| {
             let payload = serde_json::json!({
             "type": window_type.clone(),
@@ -524,10 +557,69 @@ pub async fn show_result_window(
         .build()
         .map_err(|e| format!("创建窗口失败: {}", e))?;
 
-    let _ = window.move_window(Position::RightCenter);
+    position_result_window_near_toolbar(&window, &app);
     let _ = window.show();
     let _ = window.set_focus();
     Ok(())
+}
+
+fn position_result_window_near_toolbar(window: &tauri::WebviewWindow, app: &AppHandle) {
+    let Some(toolbar_window) = app.get_webview_window("selection_toolbar") else {
+        let _ = window.move_window(Position::RightCenter);
+        return;
+    };
+
+    let toolbar_pos = match toolbar_window.outer_position() {
+        Ok(v) => v,
+        Err(_) => {
+            let _ = window.move_window(Position::RightCenter);
+            return;
+        }
+    };
+    let toolbar_size = match toolbar_window.outer_size() {
+        Ok(v) => v,
+        Err(_) => {
+            let _ = window.move_window(Position::RightCenter);
+            return;
+        }
+    };
+
+    let result_size = window
+        .outer_size()
+        .unwrap_or(tauri::PhysicalSize::new(560, 360));
+
+    let monitor = toolbar_window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.current_monitor().ok().flatten());
+    let Some(monitor) = monitor else {
+        let _ = window.move_window(Position::RightCenter);
+        return;
+    };
+
+    let gap = 12i32;
+    let monitor_pos = monitor.position();
+    let monitor_size = monitor.size();
+    let min_x = monitor_pos.x;
+    let min_y = monitor_pos.y;
+    let max_x = monitor_pos.x + monitor_size.width as i32 - result_size.width as i32;
+    let max_y = monitor_pos.y + monitor_size.height as i32 - result_size.height as i32;
+
+    let mut x = toolbar_pos.x + (toolbar_size.width as i32 - result_size.width as i32) / 2;
+    let below_y = toolbar_pos.y + toolbar_size.height as i32 + gap;
+    let above_y = toolbar_pos.y - result_size.height as i32 - gap;
+    let y = if below_y <= max_y {
+        below_y
+    } else if above_y >= min_y {
+        above_y
+    } else {
+        below_y.clamp(min_y, max_y.max(min_y))
+    };
+
+    x = x.clamp(min_x, max_x.max(min_x));
+    let clamped_y = y.clamp(min_y, max_y.max(min_y));
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, clamped_y));
 }
 
 /// 更新结果窗口
@@ -539,6 +631,7 @@ pub async fn update_result_window(
     let window_label = format!("result_{}", window_type);
     if let Some(window) = app.get_webview_window(&window_label) {
         let payload = serde_json::json!({
+            "type": window_type,
             "content": content
         });
         match window.emit("result-update", payload) {

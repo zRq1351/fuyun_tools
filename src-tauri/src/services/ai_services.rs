@@ -83,6 +83,10 @@ pub async fn stream_translate_text(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), AppError> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Err(AppError::new(ErrorCode::ValidationError, "文本为空，无法翻译"));
+    }
     let client: AIClient = get_or_create_ai_client(state.inner().clone()).await?;
 
     show_result_window(
@@ -95,15 +99,24 @@ pub async fn stream_translate_text(
         .await
         .map_err(|e| AppError::new(ErrorCode::SystemError, e))?;
     hide_selection_toolbar_impl(app.clone());
-    let source_language_name = source_language;
+    let source_language_name = source_language.trim().to_string();
     let target_language_name = target_language;
 
-    let messages = format!(
-        "直接翻译下面的文字由{}翻译为:{}，不要有任何额外的内容输出文字输出。需要翻译内容为：\n\n{}",
-        source_language_name, target_language_name, text
-    );
+    let messages = if source_language_name.is_empty() || source_language_name == "自动识别" {
+        format!(
+            "请自动识别下面文本的原始语言，并将其直接翻译为{}。不要输出任何额外说明或前后缀，只输出翻译结果：\n\n{}",
+            target_language_name, text
+        )
+    } else {
+        format!(
+            "请将下面文字从{}直接翻译为{}。不要输出任何额外说明或前后缀，只输出翻译结果：\n\n{}",
+            source_language_name, target_language_name, text
+        )
+    };
     if let Some(window) = app.clone().get_webview_window("result_translation") {
-        let _ = window.emit("result-clean", "");
+        let _ = window.emit("result-clean", serde_json::json!({
+            "type": "translation"
+        }));
     }
     let result = client
         .generate_text_stream(messages.as_str(), Some(1000), |content_chunk| {
@@ -139,6 +152,10 @@ pub async fn stream_explain_text(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), AppError> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Err(AppError::new(ErrorCode::ValidationError, "文本为空，无法解释"));
+    }
     let client: AIClient = get_or_create_ai_client(state.inner().clone()).await?;
     show_result_window(
         "解释结果".to_string(),
@@ -157,7 +174,9 @@ pub async fn stream_explain_text(
         target_language_name, text
     );
     if let Some(window) = app.clone().get_webview_window("result_explanation") {
-        let _ = window.emit("result-clean", "");
+        let _ = window.emit("result-clean", serde_json::json!({
+            "type": "explanation"
+        }));
     }
     let result = client
         .generate_text_stream(messages.as_str(), Some(1000), |content_chunk| {
