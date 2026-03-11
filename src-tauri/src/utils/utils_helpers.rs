@@ -22,7 +22,7 @@ pub struct AppSettingsData {
     #[serde(default = "default_image_hot_key")]
     pub image_hot_key: String,
     #[serde(default)]
-    pub ai_provider: String,  // 改为String类型以支持自定义提供商
+    pub ai_provider: String,
     /// 每个AI提供商的独立配置
     #[serde(default)]
     pub provider_configs: HashMap<String, ProviderConfig>,
@@ -32,6 +32,10 @@ pub struct AppSettingsData {
     pub grouped_items_protected_from_limit: bool,
     #[serde(default = "default_clipboard_bottom_offset")]
     pub clipboard_bottom_offset: i32,
+    #[serde(default = "default_translation_prompt_template")]
+    pub translation_prompt_template: String,
+    #[serde(default = "default_explanation_prompt_template")]
+    pub explanation_prompt_template: String,
 }
 
 impl Default for AppSettingsData {
@@ -46,6 +50,8 @@ impl Default for AppSettingsData {
             selection_enabled: true,
             grouped_items_protected_from_limit: default_grouped_items_protected_from_limit(),
             clipboard_bottom_offset: default_clipboard_bottom_offset(),
+            translation_prompt_template: default_translation_prompt_template(),
+            explanation_prompt_template: default_explanation_prompt_template(),
         }
     }
 }
@@ -66,17 +72,20 @@ fn default_clipboard_bottom_offset() -> i32 {
     8
 }
 
+pub fn default_translation_prompt_template() -> String {
+    "你是专业翻译助手。任务：将用户文本翻译为{target_language}。\n要求：\n1) 自动识别源语言（如已提供{source_language}且不是“自动识别”，按其处理）。\n2) 忠实原意，不遗漏、不杜撰。\n3) 保留专有名词、代码、变量、URL、邮箱、数字与单位。\n4) 保持原文段落与换行结构。\n5) 只输出译文，不要任何说明。\n\n待翻译文本：\n{text}".to_string()
+}
+
+pub fn default_explanation_prompt_template() -> String {
+    "你是清晰易懂的讲解助手。请使用{target_language}解释下列内容。\n要求：\n1) 先给一句话总结，再分点说明关键点。\n2) 面向普通用户，术语给简短释义。\n3) 保持准确，不编造；不确定时直接说明。\n4) 控制在180字以内。\n5) 仅输出解释内容。\n\n待解释文本：\n{text}".to_string()
+}
+
 impl AppSettingsData {
     /// 为指定提供商设置API密钥（存储到系统凭据管理器）
     pub fn set_provider_api_key(&mut self, provider_key: &str, api_key: &str) -> Result<(), String> {
-        // 更新内存中的配置对象（清空旧版加密字段）
         if let Some(config) = self.provider_configs.get_mut(provider_key) {
             config.encrypted_api_key.clear();
         }
-
-        // Windows 平台特殊处理：使用 target 而不是 service 作为 Entry 的第一个参数
-        // keyring 在 Windows 上会将 service 和 username 组合起来，有时会导致 lookup 失败
-        // 我们尝试简化 Entry 的创建
 
         let service_name = "fuyun_tools";
         let user_name = format!("api_key_{}", provider_key);
@@ -92,7 +101,6 @@ impl AppSettingsData {
         // 尝试创建并写入
         match Entry::new(service_name, &user_name) {
             Ok(entry) => {
-                // 添加重试机制
                 let mut last_error = String::new();
                 for i in 0..3 {
                     match entry.set_password(api_key) {
@@ -101,7 +109,6 @@ impl AppSettingsData {
                             return Ok(());
                         },
                         Err(e) => {
-                            // 如果写入失败，尝试先删除再写入
                             let _ = entry.delete_credential();
                             log::warn!("Failed to save API key (attempt {}): {}", i + 1, e);
                             last_error = e.to_string();
@@ -189,14 +196,7 @@ impl AppSettingsData {
                             }
                         }
                     }
-
-                    // 清除旧版字段
                     config.encrypted_api_key.clear();
-                    // 即使迁移失败（如keyring不可用），我们也清除了旧字段，避免死循环或重复尝试
-                    // 但如果keyring失败，用户就丢失了key。
-                    // 鉴于这是桌面应用，keyring应该可用。
-                    // 如果我们不清除，下次还会尝试。
-                    // 如果我们清除但没保存成功，用户需要重新输入。
                 }
             }
         }
@@ -207,7 +207,6 @@ impl AppSettingsData {
     pub fn save_current_provider_config(&mut self, api_key: &str) -> Result<(), String> {
         let provider_key = self.ai_provider.clone();  // 克隆避免借用冲突
 
-        // 设置该提供商的API密钥
         self.set_provider_api_key(&provider_key, api_key)?;
 
         Ok(())
@@ -216,7 +215,7 @@ impl AppSettingsData {
     /// 加载指定提供商的配置到当前设置
     pub fn load_provider_config_to_current(
         &mut self,
-        provider_name: &str,  // 改为接受字符串参数
+        provider_name: &str,
     ) -> Result<ProviderConfig, String> {
         let provider_key = provider_name.to_string();
 
@@ -224,7 +223,6 @@ impl AppSettingsData {
         let config_copy = if let Some(config) = self.provider_configs.get(&provider_key) {
             config.clone()
         } else {
-            // 对于内置提供商，获取默认配置
             let (default_url, default_model) = match provider_name {
                 "deepseek" => (
                     "https://api.deepseek.com/v1".to_string(),
@@ -239,7 +237,6 @@ impl AppSettingsData {
                     "mimo-v2-flash".to_string(),
                 ),
                 _ => {
-                    // 自定义提供商使用空默认值
                     (String::new(), String::new())
                 }
             };
@@ -250,13 +247,10 @@ impl AppSettingsData {
             }
         };
 
-        // 解密该提供商的API密钥
         let _ = self.get_provider_api_key(&provider_key);
 
-        // 更新当前提供商
         self.ai_provider = provider_name.to_string();
 
-        // 如果是已存在的配置，需要重新获取解密后的版本
         if self.provider_configs.contains_key(&provider_key) {
             if let Some(decrypted_config) = self.provider_configs.get(&provider_key) {
                 Ok(decrypted_config.clone())
@@ -284,7 +278,6 @@ impl AppSettingsData {
 
     /// 获取部分隐藏的API密钥（用于前端显示）
     pub fn get_masked_api_key(&self) -> String {
-        // 解密当前提供商的API密钥
         match self.get_provider_api_key(&self.ai_provider) {
             Ok(api_key) => {
                 if api_key.is_empty() {
@@ -294,11 +287,9 @@ impl AppSettingsData {
                 let len = api_key.len();
 
                 if len <= 16 {
-                    // 如果密钥长度小于等于16，全部显示为*
                     return "*".repeat(len.min(30));
                 }
 
-                // 前8个字符 + 30个* + 后8个字符
                 let prefix = &api_key[..8.min(len)];
                 let suffix = &api_key[len - 8.min(len - 8)..];
 
@@ -337,7 +328,6 @@ impl AppSettingsData {
     /// 执行具体的版本迁移逻辑
     fn perform_version_migration(&mut self, old_version: u32, new_version: u32) {
         log::info!("执行版本迁移: {} -> {}", old_version, new_version);
-        // 根据不同版本间的差异执行特定迁移
         if old_version < 3 && new_version >= 3 {
             log::info!("迁移至版本 3: 初始化AI提供商配置");
             self.initialize_ai_provider_configs_if_needed();
@@ -353,10 +343,8 @@ impl AppSettingsData {
     fn perform_generic_migration(&mut self) {
         log::info!("执行通用配置迁移");
 
-        // 确保基础配置完整性
         self.ensure_basic_config_integrity();
 
-        // 初始化AI提供商配置
         self.initialize_ai_provider_configs_if_needed();
     }
 
@@ -365,7 +353,6 @@ impl AppSettingsData {
         log::info!("开始确保基础配置完整性");
         log::debug!("迁移前 max_items: {}", self.max_items);
 
-        // 确保必要字段有合理默认值
         if self.max_items < 10 || self.max_items > 1000 {
             let old_value = self.max_items;
             self.max_items = 50;
@@ -383,6 +370,14 @@ impl AppSettingsData {
 
         if self.clipboard_bottom_offset < 0 || self.clipboard_bottom_offset > 400 {
             self.clipboard_bottom_offset = default_clipboard_bottom_offset();
+        }
+
+        if self.translation_prompt_template.trim().is_empty() {
+            self.translation_prompt_template = default_translation_prompt_template();
+        }
+
+        if self.explanation_prompt_template.trim().is_empty() {
+            self.explanation_prompt_template = default_explanation_prompt_template();
         }
 
         log::debug!("迁移后 max_items: {}", self.max_items);
@@ -426,7 +421,6 @@ impl AppSettingsData {
                 "mimo-v2-flash".to_string(),
             ),
             _ => {
-                // 自定义提供商使用空默认值
                 (String::new(), String::new())
             }
         }
@@ -437,9 +431,9 @@ impl AppSettingsData {
 pub struct ClipboardHistoryData {
     pub items: Vec<String>,
     #[serde(default)]
-    pub categories: HashMap<String, String>, // item -> category_name
+    pub categories: HashMap<String, String>,
     #[serde(default)]
-    pub category_list: Vec<String>, // ordered list of categories
+    pub category_list: Vec<String>,
 }
 /// 获取设置文件路径
 pub fn get_settings_file_path() -> PathBuf {

@@ -8,7 +8,10 @@ use crate::ui::window_manager::{
     show_image_preview_window,
 };
 use crate::utils::image_clipboard::ImageHistoryPreviewItem;
-use crate::utils::utils_helpers::{load_settings, save_settings};
+use crate::utils::utils_helpers::{
+    default_explanation_prompt_template, default_translation_prompt_template, load_settings,
+    save_settings,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -575,6 +578,14 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         "grouped_items_protected_from_limit".to_string(),
         serde_json::Value::Bool(settings.grouped_items_protected_from_limit),
     );
+    result.insert(
+        "translation_prompt_template".to_string(),
+        serde_json::Value::String(settings.translation_prompt_template.clone()),
+    );
+    result.insert(
+        "explanation_prompt_template".to_string(),
+        serde_json::Value::String(settings.explanation_prompt_template.clone()),
+    );
 
     // 处理provider_configs，将encrypted_api_key替换为解密后的api_key
     let mut provider_configs_map: HashMap<String, serde_json::Value> = HashMap::new();
@@ -622,6 +633,8 @@ pub async fn save_app_settings(
     image_hot_key: String,
     selection_enabled: bool,
     grouped_items_protected_from_limit: bool,
+    translation_prompt_template: String,
+    explanation_prompt_template: String,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -636,6 +649,16 @@ pub async fn save_app_settings(
     settings.max_items = max_items;
     settings.selection_enabled = selection_enabled;
     settings.grouped_items_protected_from_limit = grouped_items_protected_from_limit;
+    settings.translation_prompt_template = if translation_prompt_template.trim().is_empty() {
+        default_translation_prompt_template()
+    } else {
+        translation_prompt_template
+    };
+    settings.explanation_prompt_template = if explanation_prompt_template.trim().is_empty() {
+        default_explanation_prompt_template()
+    } else {
+        explanation_prompt_template
+    };
 
     if hot_key.is_empty() {
         return Err("快捷键不能为空".to_string());
