@@ -20,6 +20,8 @@ pub struct AppState {
     pub settings: AppSettingsData,
     pub is_updating_clipboard: bool,
     pub is_processing_selection: bool,
+    pub text_fill_seq: u64,
+    pub image_fill_seq: u64,
     pub tray_menu_items: Option<TrayMenuItems>,
 }
 
@@ -36,6 +38,8 @@ impl Clone for AppState {
             settings: self.settings.clone(),
             is_updating_clipboard: self.is_updating_clipboard,
             is_processing_selection: self.is_processing_selection,
+            text_fill_seq: self.text_fill_seq,
+            image_fill_seq: self.image_fill_seq,
             tray_menu_items: None,
         }
     }
@@ -62,6 +66,8 @@ impl Default for AppState {
             settings: saved_settings,
             is_updating_clipboard: false,
             is_processing_selection: false,
+            text_fill_seq: 0,
+            image_fill_seq: 0,
             tray_menu_items: None,
         }
     }

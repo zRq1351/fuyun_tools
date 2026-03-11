@@ -28,10 +28,9 @@
 
 <script setup>
 import {onMounted, ref} from 'vue'
-import {ElMessage} from 'element-plus'
 import {ChatLineRound, Collection, DocumentCopy} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
-import {AIService, ClipboardService} from '../../services/ipc'
+import {AIService, ClipboardService, WindowService} from '../../services/ipc'
 import {handleAppError} from '../../utils/errorHandler'
 
 const selectedText = ref('')
@@ -68,7 +67,7 @@ const handleCopy = async () => {
   if (!selectedText.value) return
   try {
     await ClipboardService.copyText(selectedText.value)
-    ElMessage.success('文本已复制')
+    await WindowService.selectionToolbarBlur()
   } catch (error) {
     handleAppError(error, '复制失败')
   }

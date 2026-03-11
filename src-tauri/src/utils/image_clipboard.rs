@@ -10,10 +10,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::image::Image;
-#[cfg(target_os = "windows")]
-use winapi::um::shellapi::{DragQueryFileW, HDROP};
-#[cfg(target_os = "windows")]
-use winapi::um::winuser::{CloseClipboard, GetClipboardData, OpenClipboard, CF_HDROP};
 
 const MAX_PREVIEW_WIDTH: u32 = 160;
 const MAX_PREVIEW_HEIGHT: u32 = 90;
@@ -258,14 +254,14 @@ impl ImageClipboardManager {
         self.schedule_async_save();
     }
 
-    pub fn remove_from_history(&self, index: usize) -> Result<(), String> {
-        let (removed_id, removed_path) = {
+    pub fn remove_from_history(&self, index: usize) -> Result<(String, String, String), String> {
+        let (removed_id, removed_path, removed_signature) = {
             let mut history = self.history.lock().unwrap();
             if index >= history.len() {
                 return Err("索引超出范围".to_string());
             }
             let removed = history.remove(index);
-            (removed.id, removed.image_path)
+            (removed.id, removed.image_path, removed.signature)
         };
 
         {
@@ -273,7 +269,21 @@ impl ImageClipboardManager {
             categories.remove(&removed_id);
         }
 
-        cleanup_image_blob_files(vec![removed_path]);
+        cleanup_image_blob_files(vec![removed_path.clone()]);
+        self.schedule_async_save();
+        Ok((removed_id, removed_path, removed_signature))
+    }
+
+    pub fn promote_to_top(&self, index: usize) -> Result<(), String> {
+        let mut history = self.history.lock().unwrap();
+        if index >= history.len() {
+            return Err("索引超出范围".to_string());
+        }
+        if index == 0 {
+            return Ok(());
+        }
+        let moved = history.remove(index);
+        history.insert(0, moved);
         self.schedule_async_save();
         Ok(())
     }
@@ -319,7 +329,8 @@ impl ImageClipboardManager {
         app_handle: &tauri::AppHandle,
     ) -> Result<Vec<(Vec<u8>, u32, u32)>, String> {
         use tauri_plugin_clipboard_manager::ClipboardExt;
-        for _ in 0..3 {
+        let retry_delays = [12u64, 18, 26, 36, 48, 62, 78, 96];
+        for (attempt, delay_ms) in retry_delays.iter().enumerate() {
             match app_handle.clipboard().read_image() {
                 Ok(image) => {
                     let width = image.width();
@@ -331,25 +342,21 @@ impl ImageClipboardManager {
                 }
                 Err(_) => {}
             }
-            std::thread::sleep(std::time::Duration::from_millis(30));
-        }
-        #[cfg(target_os = "windows")]
-        {
-            let mut images: Vec<(Vec<u8>, u32, u32)> = Vec::new();
-            for path in read_image_paths_from_windows_file_drop() {
-                if let Ok((rgba, width, height)) = read_local_image_rgba(&path) {
-                    images.push((rgba, width, height));
-                }
-            }
-            if !images.is_empty() {
-                return Ok(images);
+            if attempt < retry_delays.len() - 1 {
+                std::thread::sleep(std::time::Duration::from_millis(*delay_ms));
             }
         }
         if let Ok(text) = app_handle.clipboard().read_text() {
+            if let Some((rgba, width, height)) = parse_image_from_text_payload(&text) {
+                return Ok(vec![(rgba, width, height)]);
+            }
             if let Some(path) = parse_local_image_path_from_text(&text) {
                 if let Ok((rgba, width, height)) = read_local_image_rgba(&path) {
                     return Ok(vec![(rgba, width, height)]);
                 }
+            }
+            if text_contains_remote_image_url(&text) {
+                return Err("检测到网页图片链接，但剪贴板中没有位图数据。请在网页中使用“复制图片”而不是“复制图片地址”".to_string());
             }
         }
         Err("当前剪贴板不是位图格式，可能是文件对象/路径/网页元素".to_string())
@@ -361,16 +368,34 @@ impl ImageClipboardManager {
     ) -> Result<(), String> {
         use tauri_plugin_clipboard_manager::ClipboardExt;
         let mut last_error = String::new();
-        let retry_delays = [4u64, 8, 12, 18, 25, 35, 50];
+        let retry_delays = [8u64, 12, 18, 26, 36, 50, 70, 95, 125];
         for (attempt, delay_ms) in retry_delays.iter().enumerate() {
             match app_handle.clipboard().write_image(image) {
-                Ok(_) => return Ok(()),
+                Ok(_) => {
+                    let verify_delays = [10u64, 18, 28, 42];
+                    let mut verified = false;
+                    for (verify_index, verify_delay) in verify_delays.iter().enumerate() {
+                        if let Ok(read_back) = app_handle.clipboard().read_image() {
+                            if read_back.width() > 0 && read_back.height() > 0 && !read_back.rgba().is_empty() {
+                                verified = true;
+                                break;
+                            }
+                        }
+                        if verify_index < verify_delays.len() - 1 {
+                            std::thread::sleep(std::time::Duration::from_millis(*verify_delay));
+                        }
+                    }
+                    if verified {
+                        return Ok(());
+                    }
+                    last_error = "写入后校验失败：剪贴板位图尚未稳定".to_string();
+                }
                 Err(e) => {
                     last_error = e.to_string();
-                    if attempt < retry_delays.len() - 1 {
-                        std::thread::sleep(std::time::Duration::from_millis(*delay_ms));
-                    }
                 }
+            }
+            if attempt < retry_delays.len() - 1 {
+                std::thread::sleep(std::time::Duration::from_millis(*delay_ms));
             }
         }
         Err(format!("写入剪贴板图片失败: {}", last_error))
@@ -521,7 +546,7 @@ fn shrink_image_history_with_group_protection(
     removed_paths
 }
 
-fn compute_signature(rgba: &[u8], width: u32, height: u32) -> String {
+pub(crate) fn compute_signature(rgba: &[u8], width: u32, height: u32) -> String {
     let mut hasher = DefaultHasher::new();
     width.hash(&mut hasher);
     height.hash(&mut hasher);
@@ -683,7 +708,7 @@ fn parse_local_image_path_from_text(text: &str) -> Option<String> {
         return None;
     }
     let normalized = if let Some(rest) = trimmed.strip_prefix("file:///") {
-        rest.replace('/', "\\")
+        rest.replace('/', "\\").replace("%20", " ")
     } else {
         trimmed.to_string()
     };
@@ -695,6 +720,81 @@ fn parse_local_image_path_from_text(text: &str) -> Option<String> {
         return None;
     }
     Some(normalized)
+}
+
+fn parse_image_from_text_payload(text: &str) -> Option<(Vec<u8>, u32, u32)> {
+    if let Some((rgba, width, height)) = parse_data_url_image(text) {
+        return Some((rgba, width, height));
+    }
+    if let Some(src) = extract_img_src_from_html(text) {
+        if let Some((rgba, width, height)) = parse_data_url_image(&src) {
+            return Some((rgba, width, height));
+        }
+        if let Some(path) = parse_local_image_path_from_text(&src) {
+            if let Ok((rgba, width, height)) = read_local_image_rgba(&path) {
+                return Some((rgba, width, height));
+            }
+        }
+    }
+    None
+}
+
+fn parse_data_url_image(text: &str) -> Option<(Vec<u8>, u32, u32)> {
+    let trimmed = text.trim();
+    let data_url = if trimmed.starts_with("data:image/") {
+        trimmed
+    } else if let Some(start) = trimmed.find("data:image/") {
+        let candidate = &trimmed[start..];
+        let end = candidate
+            .find(|c: char| c == '"' || c == '\'' || c == ')' || c.is_whitespace())
+            .unwrap_or(candidate.len());
+        &candidate[..end]
+    } else {
+        return None;
+    };
+
+    let comma_pos = data_url.find(',')?;
+    let (meta, data) = data_url.split_at(comma_pos);
+    let payload = data.get(1..)?;
+    let bytes = if meta.contains(";base64") {
+        BASE64_STANDARD.decode(payload).ok()?
+    } else {
+        return None;
+    };
+    let dyn_img = ::image::load_from_memory(&bytes).ok()?;
+    let rgba8 = dyn_img.to_rgba8();
+    let (width, height) = rgba8.dimensions();
+    if width == 0 || height == 0 {
+        return None;
+    }
+    Some((rgba8.into_raw(), width, height))
+}
+
+fn extract_img_src_from_html(text: &str) -> Option<String> {
+    let lower = text.to_lowercase();
+    let img_pos = lower.find("<img")?;
+    let src_pos_rel = lower[img_pos..].find("src=")?;
+    let src_start = img_pos + src_pos_rel + 4;
+    let bytes = text.as_bytes();
+    let quote = *bytes.get(src_start)? as char;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let value_start = src_start + 1;
+    let value_rel_end = text.get(value_start..)?.find(quote)?;
+    let value_end = value_start + value_rel_end;
+    Some(text[value_start..value_end].to_string())
+}
+
+fn text_contains_remote_image_url(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    (lower.contains("http://") || lower.contains("https://"))
+        && (lower.contains(".png")
+            || lower.contains(".jpg")
+            || lower.contains(".jpeg")
+            || lower.contains(".webp")
+            || lower.contains(".gif")
+            || lower.contains("<img"))
 }
 
 fn looks_like_image_file_path(path: &str) -> bool {
@@ -716,48 +816,4 @@ fn read_local_image_rgba(path: &str) -> Result<(Vec<u8>, u32, u32), String> {
         return Err("本地图片为空".to_string());
     }
     Ok((rgba, width, height))
-}
-
-#[cfg(target_os = "windows")]
-fn read_image_paths_from_windows_file_drop() -> Vec<String> {
-    unsafe {
-        if OpenClipboard(std::ptr::null_mut()) == 0 {
-            return Vec::new();
-        }
-
-        let handle = GetClipboardData(CF_HDROP);
-        if handle.is_null() {
-            let _ = CloseClipboard();
-            return Vec::new();
-        }
-
-        let hdrop = handle as HDROP;
-        let count = DragQueryFileW(hdrop, 0xFFFF_FFFF, std::ptr::null_mut(), 0);
-        if count == 0 {
-            let _ = CloseClipboard();
-            return Vec::new();
-        }
-
-        let mut paths = Vec::new();
-        for index in 0..count {
-            let len = DragQueryFileW(hdrop, index, std::ptr::null_mut(), 0);
-            if len == 0 {
-                continue;
-            }
-            let mut buf = vec![0u16; (len + 1) as usize];
-            let wrote = DragQueryFileW(hdrop, index, buf.as_mut_ptr(), len + 1);
-            if wrote == 0 {
-                continue;
-            }
-            let path = String::from_utf16_lossy(&buf[..wrote as usize]);
-            if looks_like_image_file_path(&path) {
-                let p = Path::new(&path);
-                if p.exists() && p.is_file() {
-                    paths.push(path);
-                }
-            }
-        }
-        let _ = CloseClipboard();
-        paths
-    }
 }
