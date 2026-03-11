@@ -298,7 +298,7 @@ impl ClipboardManager {
     }
 
     /// 移除指定历史记录
-    pub fn remove_from_history(&self, index: usize) -> Result<(), String> {
+    pub fn remove_from_history(&self, index: usize) -> Result<String, String> {
         let mut history = self.history.lock().unwrap();
         if index < history.len() {
             let item = history.remove(index);
@@ -318,10 +318,42 @@ impl ClipboardManager {
                     log::error!("异步保存历史记录失败: {}", e);
                 }
             });
-            Ok(())
+            Ok(item)
         } else {
             Err("索引超出范围".to_string())
         }
+    }
+
+    pub fn promote_to_top(&self, index: usize) -> Result<String, String> {
+        let (item, categories_clone, category_list_clone, history_clone) = {
+            let mut history = self.history.lock().unwrap();
+            if index >= history.len() {
+                return Err("索引超出范围".to_string());
+            }
+            if index == 0 {
+                let item = history[0].clone();
+                return Ok(item);
+            }
+            let item = history.remove(index);
+            history.insert(0, item.clone());
+
+            let categories = self.categories.lock().unwrap().clone();
+            let category_list = self.category_list.lock().unwrap().clone();
+            (item, categories, category_list, history.clone())
+        };
+
+        std::thread::spawn(move || {
+            let data = ClipboardHistoryData {
+                items: history_clone,
+                categories: categories_clone,
+                category_list: category_list_clone,
+            };
+            if let Err(e) = save_history_data_with_retry(&data, 3) {
+                log::error!("异步保存历史记录失败: {}", e);
+            }
+        });
+
+        Ok(item)
     }
 
     /// 退出时保存历史记录

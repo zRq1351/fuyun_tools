@@ -9,7 +9,10 @@ use tauri_plugin_positioner::{Position, WindowExt};
 #[cfg(target_os = "windows")]
 use winapi::shared::windef::RECT;
 #[cfg(target_os = "windows")]
-use winapi::um::winuser::{GetSystemMetrics, SystemParametersInfoW, SM_CYSCREEN, SPI_GETWORKAREA};
+use winapi::um::winuser::{
+    GetForegroundWindow, GetSystemMetrics, GetWindowTextW, SystemParametersInfoW, SM_CYSCREEN,
+    SPI_GETWORKAREA,
+};
 
 lazy_static! {
     pub static ref ENIGO_INSTANCE: Arc<Mutex<Option<enigo::Enigo>>> = Arc::new(Mutex::new(None));
@@ -169,7 +172,6 @@ pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
         let mut state_guard = state.lock().unwrap();
         state_guard.is_visible = false;
         state_guard.selected_index = 0;
-        state_guard.is_processing_selection = false;
     }
 }
 
@@ -190,6 +192,27 @@ pub fn hide_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
         let mut state_guard = state.lock().unwrap();
         state_guard.is_image_visible = false;
         state_guard.image_selected_index = 0;
+    }
+}
+
+pub fn wait_for_window_hidden(
+    app_handle: &AppHandle,
+    window_label: &str,
+    timeout: Duration,
+) -> Result<(), String> {
+    let start = std::time::Instant::now();
+    loop {
+        if start.elapsed() > timeout {
+            return Err(format!("等待窗口隐藏超时: {}", window_label));
+        }
+        let Some(window) = app_handle.get_webview_window(window_label) else {
+            return Ok(());
+        };
+        let is_visible = window.is_visible().map_err(|e| e.to_string())?;
+        if !is_visible {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(20));
     }
 }
 
@@ -324,7 +347,7 @@ pub fn show_selection_toolbar_impl(app_handle: AppHandle, selected_text: String)
 
 /// 设置工具栏窗口位置
 fn set_toolbar_window(window: &tauri::WebviewWindow) {
-    let _ = window.set_size(tauri::LogicalSize::new(50, 103));
+    let _ = window.set_size(tauri::LogicalSize::new(50, 100));
     let _ = window.move_window(Position::RightCenter);
 }
 
@@ -368,23 +391,83 @@ pub fn handle_selection_toolbar_autoclose(app_handle: &AppHandle, click_pos: Opt
 }
 
 /// 模拟粘贴操作
-pub fn simulate_paste() {
+pub fn simulate_paste() -> Result<(), String> {
     use crate::core::config::CTRL_KEY;
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+    wait_for_foreground_ready_for_paste()?;
 
     {
         let mut enigo_guard = ENIGO_INSTANCE.lock().unwrap();
         if enigo_guard.is_none() {
-            *enigo_guard = Some(Enigo::new(&Settings::default()).expect("未能初始化enigo"));
+            *enigo_guard = Some(Enigo::new(&Settings::default()).map_err(|e| format!("初始化粘贴输入器失败: {}", e))?);
         }
 
         if let Some(ref mut enigo) = *enigo_guard {
-            let _ = enigo.key(CTRL_KEY, Direction::Press);
-            let _ = enigo.key(Key::Unicode('v'), Direction::Click);
-            thread::sleep(Duration::from_millis(100));
-            let _ = enigo.key(CTRL_KEY, Direction::Release);
+            thread::sleep(Duration::from_millis(10));
+            enigo
+                .key(CTRL_KEY, Direction::Press)
+                .map_err(|e| format!("按下Ctrl失败: {}", e))?;
+            thread::sleep(Duration::from_millis(12));
+            enigo
+                .key(Key::Unicode('v'), Direction::Press)
+                .map_err(|e| format!("发送V键失败: {}", e))?;
+            thread::sleep(Duration::from_millis(12));
+            enigo
+                .key(Key::Unicode('v'), Direction::Release)
+                .map_err(|e| format!("释放V键失败: {}", e))?;
+            thread::sleep(Duration::from_millis(85));
+            enigo
+                .key(CTRL_KEY, Direction::Release)
+                .map_err(|e| format!("释放Ctrl失败: {}", e))?;
         }
     }
+    Ok(())
+}
+
+fn wait_for_foreground_ready_for_paste() -> Result<(), String> {
+    let mut stable_not_fuyun_count = 0usize;
+    let mut last_title = String::new();
+    for _ in 0..24 {
+        let (is_fuyun, title) = foreground_window_info();
+        if !is_fuyun {
+            if title == last_title {
+                stable_not_fuyun_count += 1;
+            } else {
+                stable_not_fuyun_count = 1;
+                last_title = title;
+            }
+            if stable_not_fuyun_count >= 2 {
+                return Ok(());
+            }
+        } else {
+            stable_not_fuyun_count = 0;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    let (_, title) = foreground_window_info();
+    Err(format!("前台窗口未就绪，当前窗口标题: {}", title))
+}
+
+#[cfg(target_os = "windows")]
+fn foreground_window_info() -> (bool, String) {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return (false, "unknown".to_string());
+        }
+        let mut title_buffer = [0u16; 512];
+        let title_len = GetWindowTextW(hwnd, title_buffer.as_mut_ptr(), title_buffer.len() as i32);
+        if title_len <= 0 {
+            return (false, "untitled".to_string());
+        }
+        let title = String::from_utf16_lossy(&title_buffer[..title_len as usize]).to_lowercase();
+        (title.contains("fuyun") || title.contains("clipboard"), title)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn foreground_window_info() -> (bool, String) {
+    (false, "unknown".to_string())
 }
 
 /// 显示结果窗口

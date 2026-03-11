@@ -11,6 +11,8 @@ use crate::ui::window_manager::{
     handle_selection_toolbar_autoclose, hide_selection_toolbar_impl, show_selection_toolbar_impl,
 };
 use crate::utils::clipboard::ClipboardManager;
+#[cfg(target_os = "windows")]
+use winapi::um::winuser::{GetAsyncKeyState, VK_LCONTROL, VK_RCONTROL};
 
 #[derive(Debug, Clone, PartialEq)]
 enum MouseActionState {
@@ -65,14 +67,42 @@ fn is_any_ctrl_pressed() -> bool {
         || GLOBAL_STATE.ctrl_right_pressed.load(Ordering::SeqCst)
 }
 
-/// 重置Ctrl键状态
-pub fn reset_ctrl_key_state() {
+#[cfg(target_os = "windows")]
+fn is_ctrl_pressed_by_os() -> bool {
+    unsafe {
+        (GetAsyncKeyState(VK_LCONTROL) as u16 & 0x8000) != 0
+            || (GetAsyncKeyState(VK_RCONTROL) as u16 & 0x8000) != 0
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_ctrl_pressed_by_os() -> bool {
+    false
+}
+
+fn clear_ctrl_key_state_silent() {
     GLOBAL_STATE
         .ctrl_left_pressed
         .store(false, Ordering::SeqCst);
     GLOBAL_STATE
         .ctrl_right_pressed
         .store(false, Ordering::SeqCst);
+}
+
+fn is_ctrl_effectively_pressed() -> bool {
+    let tracked_pressed = is_any_ctrl_pressed();
+    let os_pressed = is_ctrl_pressed_by_os();
+    if tracked_pressed && !os_pressed {
+        clear_ctrl_key_state_silent();
+        log::warn!("检测到Ctrl状态滞留，已自动纠正为释放");
+        return false;
+    }
+    tracked_pressed || os_pressed
+}
+
+/// 重置Ctrl键状态
+pub fn reset_ctrl_key_state() {
+    clear_ctrl_key_state_silent();
     log::info!("已重置Ctrl键状态");
 }
 
@@ -104,12 +134,23 @@ impl MouseListener {
             if GLOBAL_STATE.needs_detection.load(Ordering::SeqCst) {
                 GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
 
-                let selection_enabled = {
+                let (selection_enabled, should_skip_detection) = {
                     let state_guard = detection_state.lock().unwrap();
-                    state_guard.settings.selection_enabled
+                    (
+                        state_guard.settings.selection_enabled,
+                        state_guard.is_visible
+                            || state_guard.is_image_visible
+                            || state_guard.is_processing_selection
+                            || state_guard.is_updating_clipboard,
+                    )
                 };
 
                 if !selection_enabled {
+                    thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+
+                if should_skip_detection {
                     thread::sleep(Duration::from_millis(50));
                     continue;
                 }
@@ -254,7 +295,19 @@ impl MouseListener {
                             }
 
                             if !is_foreground_window_console() {
-                                if !is_any_ctrl_pressed() {
+                                if !is_ctrl_effectively_pressed() {
+                                    let app_busy_or_visible = {
+                                        let state_guard = listener_state.lock().unwrap();
+                                        state_guard.is_visible
+                                            || state_guard.is_image_visible
+                                            || state_guard.is_processing_selection
+                                            || state_guard.is_updating_clipboard
+                                    };
+                                    if app_busy_or_visible {
+                                        log::info!("当前应用窗口可见或正在处理回填，跳过划词检测触发");
+                                        return;
+                                    }
+
                                     let last_processed = {
                                         GLOBAL_STATE.last_processed_time.lock().unwrap().clone()
                                     };

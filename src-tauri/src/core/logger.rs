@@ -15,16 +15,13 @@ pub struct LogConfig {
 impl Default for LogConfig {
     fn default() -> Self {
         #[cfg(debug_assertions)]
-        let targets = vec![
-            Target::new(TargetKind::Stdout),
-            Target::new(TargetKind::Folder {
-                path: get_logs_dir_path(),
-                file_name: Some(String::from("fuyun_dev")),
-            }),
-        ];
+        let targets = vec![Target::new(TargetKind::Folder {
+            path: get_logs_dir_path(),
+            file_name: Some(String::from("fuyun_dev")),
+        })];
 
         #[cfg(not(debug_assertions))]
-        let targets = vec![Target::new(TargetKind::Stdout)];
+        let targets: Vec<Target> = Vec::new();
 
         Self {
             level: if cfg!(debug_assertions) {
@@ -42,7 +39,7 @@ impl Default for LogConfig {
 pub fn build_logger() -> tauri_plugin_log::Builder {
     let config = LogConfig::default();
 
-    let mut builder = tauri_plugin_log::Builder::default()
+    let mut builder = tauri_plugin_log::Builder::new()
         .level(config.level)
         .max_file_size(config.max_file_size)
         .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)

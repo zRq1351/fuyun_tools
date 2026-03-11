@@ -52,7 +52,11 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                 }
             } else if let Err(e) = image {
                 if e != last_error {
-                    log::debug!("图片剪贴板监听读取失败: {}", e);
+                    if e.contains("当前剪贴板不是位图格式") {
+                        log::trace!("图片剪贴板监听读取提示: {}", e);
+                    } else {
+                        log::debug!("图片剪贴板监听读取失败: {}", e);
+                    }
                     last_error = e;
                 }
                 check_interval = CLIPBOARD_POLL_INTERVAL;

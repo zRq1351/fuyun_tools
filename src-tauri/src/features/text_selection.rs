@@ -7,9 +7,6 @@ use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
 
-#[cfg(target_os = "windows")]
-use winapi::um::winuser::GetClipboardSequenceNumber;
-
 /// 划词捕获最大重试时长
 const CAPTURE_RETRY_MAX_DURATION: Duration = Duration::from_millis(600);
 /// 轮询间隔，使用序列号检测时可以更频繁
@@ -27,24 +24,6 @@ pub fn get_selected_text_with_app(
     clipboard_manager: Arc<Mutex<ClipboardManager>>,
 ) -> Option<String> {
     get_selected_text_windows(app_handle, clipboard_manager)
-}
-
-/// 获取当前剪贴板序列号 (Windows only)
-#[cfg(target_os = "windows")]
-fn get_clipboard_seq_num() -> Option<u32> {
-    unsafe {
-        let seq = GetClipboardSequenceNumber();
-        if seq != 0 {
-            Some(seq)
-        } else {
-            None
-        }
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn get_clipboard_seq_num() -> Option<u32> {
-    None
 }
 
 /// Windows平台获取选中文本实现
@@ -65,9 +44,6 @@ fn get_selected_text_windows(
     // 1. 获取原始剪贴板内容（用于后续恢复）
     let original_content =
         get_current_clipboard_content_with_manager(&clipboard_manager, app_handle);
-
-    // 2. 获取当前剪贴板序列号
-    let start_seq = get_clipboard_seq_num();
 
     // 3. 模拟 Ctrl+C
     let mut enigo_guard = ENIGO_INSTANCE.lock().unwrap();
@@ -91,12 +67,7 @@ fn get_selected_text_windows(
     crate::features::mouse_listener::reset_ctrl_key_state();
 
     // 4. 等待剪贴板更新并获取新内容
-    let new_content = wait_for_clipboard_update(
-        &clipboard_manager,
-        app_handle,
-        start_seq,
-        &original_content,
-    );
+    let new_content = wait_for_clipboard_update(&clipboard_manager, app_handle, &original_content);
 
     // 5. 恢复原始剪贴板内容
     if let Some(ref original) = original_content {
@@ -140,39 +111,15 @@ fn get_current_clipboard_content_with_manager(
 
 /// 等待剪贴板更新
 ///
-/// 优先使用 Windows 剪贴板序列号检测变化，如果不支持则回退到内容轮询
 fn wait_for_clipboard_update(
     clipboard_manager: &Arc<Mutex<ClipboardManager>>,
     app_handle: &AppHandle,
-    start_seq: Option<u32>,
     original_content: &Option<String>,
 ) -> Option<String> {
     let start_time = std::time::Instant::now();
     let mut attempts = 0;
 
-    // 如果能获取到序列号，使用序列号检测模式
-    if let Some(initial_seq) = start_seq {
-        log::info!("使用剪贴板序列号检测模式 (初始Seq: {})", initial_seq);
-        while start_time.elapsed() < CAPTURE_RETRY_MAX_DURATION {
-            thread::sleep(CAPTURE_RETRY_INTERVAL);
-
-            if let Some(current_seq) = get_clipboard_seq_num() {
-                if current_seq != initial_seq {
-                    log::info!("检测到剪贴板序列号变化 ({} -> {})，耗时: {:?}", 
-                              initial_seq, current_seq, start_time.elapsed());
-
-                    // 序列号变化后，稍作等待确保写入完成
-                    thread::sleep(Duration::from_millis(10));
-                    return get_current_clipboard_content_with_manager(clipboard_manager, app_handle);
-                }
-            }
-        }
-        log::debug!("剪贴板序列号未变化，超时退出");
-        return None;
-    }
-
-    // 回退模式：内容轮询（适用于无法获取序列号的情况）
-    log::info!("回退到内容轮询检测模式");
+    log::info!("使用内容轮询检测模式");
     const SAME_CONTENT_THRESHOLD: Duration = Duration::from_millis(200);
     
     while start_time.elapsed() < CAPTURE_RETRY_MAX_DURATION {
