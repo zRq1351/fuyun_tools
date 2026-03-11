@@ -1603,7 +1603,7 @@ dependencies = [
 
 [[package]]
 name = "fuyun_tools"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "async-openai",
  "base64 0.22.1",
