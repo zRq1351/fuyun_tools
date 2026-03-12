@@ -47,6 +47,9 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
-          releaseBody: '1、优化划词体验。2、修复一些奇奇怪怪BUG'
+          releaseBody: '
+                        1、划词工具栏防抖机制和剪贴板序列号检测。
+                        2、修复一些奇奇怪怪BUG
+          '
           releaseDraft: false
           prerelease: false
