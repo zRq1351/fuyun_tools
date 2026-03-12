@@ -29,6 +29,7 @@ struct GlobalState {
     last_processed_time: Arc<Mutex<std::time::Instant>>,
     last_mouse_pos: Arc<Mutex<(u64, u64)>>,
     detection_anchor_pos: Arc<Mutex<(i32, i32)>>,
+    last_toolbar_emit: Arc<Mutex<Option<(String, (i32, i32), std::time::Instant)>>>,
     last_click: Arc<Mutex<Option<(u64, u64, std::time::Instant)>>>,
 }
 
@@ -41,6 +42,7 @@ lazy_static::lazy_static! {
         last_processed_time: Arc::new(Mutex::new(std::time::Instant::now())),
         last_mouse_pos: Arc::new(Mutex::new((0, 0))),
         detection_anchor_pos: Arc::new(Mutex::new((0, 0))),
+        last_toolbar_emit: Arc::new(Mutex::new(None)),
         last_click: Arc::new(Mutex::new(None)),
     };
 }
@@ -175,6 +177,28 @@ impl MouseListener {
                                 let pos_guard = GLOBAL_STATE.detection_anchor_pos.lock().unwrap();
                                 *pos_guard
                             };
+                            let should_debounce = {
+                                let mut last_emit_guard = GLOBAL_STATE.last_toolbar_emit.lock().unwrap();
+                                let now = std::time::Instant::now();
+                                let should_skip = if let Some((last_text, last_anchor, last_time)) =
+                                    last_emit_guard.as_ref()
+                                {
+                                    (last_anchor.0 - anchor_pos.0).abs() <= 6
+                                        && (last_anchor.1 - anchor_pos.1).abs() <= 6
+                                        && *last_text == text
+                                        && now.duration_since(*last_time) <= Duration::from_millis(300)
+                                } else {
+                                    false
+                                };
+                                if !should_skip {
+                                    *last_emit_guard = Some((text.clone(), anchor_pos, now));
+                                }
+                                should_skip
+                            };
+                            if should_debounce {
+                                log::info!("命中划词工具栏去抖策略，跳过重复弹窗");
+                                continue;
+                            }
 
                             tauri::async_runtime::spawn(async move {
                                 log::info!("准备调用 show_selection_toolbar_impl");
