@@ -7,6 +7,12 @@
       </el-icon>
       <span class="window-offset-label">调高</span>
     </div>
+    <button class="ai-toggle-btn" type="button" @click.stop @mousedown.stop="toggleAiSettings">
+      <el-icon class="ai-toggle-arrow">
+        <ArrowRight v-if="isAiSettingsCollapsed"/>
+        <ArrowDown v-else/>
+      </el-icon>
+    </button>
     <el-input
         v-model="searchKeyword"
         class="search-input"
@@ -72,7 +78,7 @@
 </template>
 
 <script setup>
-import {Close, Plus, Rank, Search} from '@element-plus/icons-vue'
+import {ArrowDown, ArrowRight, Close, Plus, Rank, Search} from '@element-plus/icons-vue'
 import {computed} from 'vue'
 
 const props = defineProps({
@@ -84,6 +90,10 @@ const props = defineProps({
   newCategoryInputRef: Object,
   canDeleteCategory: Function,
   startWindowOffsetDrag: Function,
+  isAiSettingsCollapsed: Boolean,
+  toggleAiSettings: Function,
+  translationTargetLanguage: String,
+  explanationTargetLanguage: String,
   removeCategory: Function,
   startCreateCategory: Function,
   confirmCreateCategory: Function,
@@ -166,6 +176,32 @@ const handleDragLeave = (event) => {
   color: #fff;
   background: rgba(245, 108, 108, 0.2);
   box-shadow: 0 4px 14px rgba(245, 108, 108, 0.35);
+}
+
+.ai-toggle-btn {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(135deg, rgba(19, 25, 37, 0.86), rgba(26, 33, 48, 0.78));
+  color: #dce8ff;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ai-toggle-btn:hover {
+  background: linear-gradient(135deg, rgba(28, 36, 52, 0.9), rgba(35, 45, 63, 0.84));
+  border-color: rgba(127, 194, 255, 0.5);
+  box-shadow: 0 0 0 1px rgba(127, 194, 255, 0.18);
+}
+
+.ai-toggle-arrow {
+  font-size: 14px;
+  color: #9cd4ff;
 }
 
 .search-input {

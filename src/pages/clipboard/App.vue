@@ -1,5 +1,11 @@
 <template>
-  <div ref="containerRef" class="container" tabindex="-1" @click="closeContextMenu" @keydown="handleKeydown">
+  <div
+      ref="containerRef"
+      class="container"
+      tabindex="-1"
+      @mousedown="handleContainerMouseDown"
+      @keydown="handleKeydown"
+  >
     <ClipboardToolbar
         v-model:category-filter="categoryFilter"
         v-model:new-category-name="newCategoryName"
@@ -14,7 +20,49 @@
         :remove-category="removeCategory"
         :start-create-category="startCreateCategory"
         :start-window-offset-drag="startWindowOffsetDrag"
+        :is-ai-settings-collapsed="isAiSettingsCollapsed"
+        :toggle-ai-settings="toggleAiSettings"
+        :translation-target-language="translationTargetLanguage"
+        :explanation-target-language="explanationTargetLanguage"
     />
+    <div v-show="!isAiSettingsCollapsed" class="ai-quick-panel-wrap" @click.stop>
+      <div class="ai-quick-panel">
+        <div class="ai-quick-top">
+        <div class="ai-control-item ai-select-item">
+          <span class="ai-control-label">翻译目标</span>
+          <el-select
+              v-model="translationTargetLanguage"
+              class="ai-select"
+              size="small"
+              popper-class="clipboard-ai-select-popper"
+          >
+            <el-option label="简体中文" value="简体中文"/>
+            <el-option label="繁体中文" value="繁体中文"/>
+            <el-option label="英语" value="英语"/>
+            <el-option label="日语" value="日语"/>
+            <el-option label="韩语" value="韩语"/>
+            <el-option label="法语" value="法语"/>
+            <el-option label="德语" value="德语"/>
+          </el-select>
+        </div>
+        <div class="ai-control-item ai-select-item">
+          <span class="ai-control-label">解释语言</span>
+          <el-select
+              v-model="explanationTargetLanguage"
+              class="ai-select"
+              size="small"
+              popper-class="clipboard-ai-select-popper"
+          >
+            <el-option label="中文" value="中文"/>
+            <el-option label="英文" value="英文"/>
+            <el-option label="日文" value="日文"/>
+            <el-option label="韩文" value="韩文"/>
+          </el-select>
+        </div>
+        <div class="ai-shortcut-tip">选中记录后按：T 翻译 / E 解释</div>
+      </div>
+      </div>
+    </div>
 
     <div v-if="visibleHistory.length === 0" class="empty-state">
       <el-empty :image-size="100" description="暂无剪切板记录">
@@ -28,6 +76,7 @@
     <ClipboardList
         v-else
         ref="clipboardListRef"
+        class="history-list"
         :delete-item="deleteItem"
         :get-item-category="getItemCategory"
         :handle-drag-end="handleDragEnd"
@@ -44,7 +93,18 @@
         :style="{ top: contextMenuY + 'px', left: contextMenuX + 'px' }"
         class="context-menu"
         @click.stop
+        @mousedown.stop
     >
+      <div class="context-menu-header">AI 快捷处理</div>
+      <div class="context-menu-item" @click="triggerAiFromContextMenu('translate')">
+        翻译
+        <span class="shortcut-hint">T</span>
+      </div>
+      <div class="context-menu-item" @click="triggerAiFromContextMenu('explain')">
+        解释
+        <span class="shortcut-hint">E</span>
+      </div>
+      <div class="context-menu-divider"></div>
       <div class="context-menu-header">添加到分类</div>
       <div
           v-for="category in categories"
@@ -65,7 +125,8 @@
 import {nextTick, onMounted, ref} from 'vue'
 import {Check} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
-import {ClipboardService, WindowService} from '../../services/ipc'
+import {AIService, ClipboardService, WindowService} from '../../services/ipc'
+import {handleAppError} from '../../utils/errorHandler'
 import ClipboardToolbar from './components/ClipboardToolbar.vue'
 import ClipboardList from './components/ClipboardList.vue'
 import {useClipboardHistory} from './composables/useClipboardHistory'
@@ -82,6 +143,10 @@ const contextMenuX = ref(0)
 const contextMenuY = ref(0)
 const contextMenuItem = ref(null)
 const dragItem = ref(null)
+const aiActionLoading = ref(false)
+const isAiSettingsCollapsed = ref(true)
+const translationTargetLanguage = ref(localStorage.getItem('clipboard_ai_target_language') || '简体中文')
+const explanationTargetLanguage = ref(localStorage.getItem('clipboard_ai_explain_language') || '中文')
 
 const {
   history,
@@ -119,6 +184,15 @@ const deleteItem = async (index) => {
   await originalDeleteItem(index)
 }
 
+const toggleAiSettings = () => {
+  isAiSettingsCollapsed.value = !isAiSettingsCollapsed.value
+}
+
+const hideClipboardWindow = () => {
+  isVisible.value = false
+  isAiSettingsCollapsed.value = true
+}
+
 const init = async () => {
   try {
     await listen('show-window', (event) => {
@@ -128,7 +202,7 @@ const init = async () => {
     window.addEventListener('blur', async () => {
       try {
         await WindowService.blur()
-        isVisible.value = false
+        hideClipboardWindow()
       } catch (error) {
         console.error('调用 window_blur 失败:', error)
       }
@@ -177,7 +251,7 @@ const showWindow = (data) => {
 const selectAndFillDirect = async (index) => {
   try {
     await ClipboardService.selectAndFill(index)
-    isVisible.value = false
+    hideClipboardWindow()
   } catch (error) {
     console.error('填充内容失败:', error)
   }
@@ -210,6 +284,16 @@ const closeContextMenu = () => {
   contextMenuItem.value = null
 }
 
+const closeFloatingPanels = () => {
+  closeContextMenu()
+  isAiSettingsCollapsed.value = true
+}
+
+const handleContainerMouseDown = (event) => {
+  if (event.button !== 0) return
+  closeFloatingPanels()
+}
+
 const assignToCategory = (category) => {
   if (contextMenuItem.value && category !== '全部') {
     setItemCategory(contextMenuItem.value, category)
@@ -240,6 +324,62 @@ const handleDrop = (event, category) => {
   }
 }
 
+const buildOpId = () => Date.now() * 1000 + Math.floor(Math.random() * 1000)
+
+const resolveSelectedText = () => {
+  if (selectedIndex.value < 0 || selectedIndex.value >= history.value.length) {
+    return ''
+  }
+  return history.value[selectedIndex.value] || ''
+}
+
+const triggerAiFlow = async (rawText, mode) => {
+  const text = typeof rawText === 'string' ? rawText.trim() : ''
+  if (!text || aiActionLoading.value) return
+  aiActionLoading.value = true
+  try {
+    await WindowService.blur()
+    hideClipboardWindow()
+    const opId = buildOpId()
+    localStorage.setItem('clipboard_ai_target_language', translationTargetLanguage.value)
+    localStorage.setItem('clipboard_ai_explain_language', explanationTargetLanguage.value)
+    if (mode === 'translate') {
+      await AIService.streamTranslate(
+          text,
+          '自动识别',
+          translationTargetLanguage.value,
+          opId
+      )
+    } else {
+      await AIService.streamExplain(
+          text,
+          explanationTargetLanguage.value,
+          opId
+      )
+    }
+  } catch (error) {
+    handleAppError(error, mode === 'translate' ? '剪贴板翻译失败' : '剪贴板解释失败')
+  } finally {
+    aiActionLoading.value = false
+  }
+}
+
+const triggerAiFromSelection = async (mode) => {
+  const text = resolveSelectedText()
+  await triggerAiFlow(text, mode)
+}
+
+const triggerAiFromContextMenu = async (mode) => {
+  const text = contextMenuItem.value || ''
+  closeContextMenu()
+  await triggerAiFlow(text, mode)
+}
+
+const isInputLikeTarget = (target) => {
+  const tagName = target?.tagName?.toLowerCase?.()
+  return tagName === 'input' || tagName === 'textarea' || target?.isContentEditable
+}
+
 const ensureKeyboardSelectionVisible = async () => {
   await nextTick()
   const selected = selectedIndex.value
@@ -256,6 +396,7 @@ const ensureKeyboardSelectionVisible = async () => {
 
 const handleKeydown = async (event) => {
   if (!isVisible.value) return
+  if (isInputLikeTarget(event.target)) return
 
   if (contextMenuVisible.value && event.key === 'Escape') {
     closeContextMenu()
@@ -281,6 +422,16 @@ const handleKeydown = async (event) => {
           selectAndFillDirect(selectedIndex.value)
         }
       }
+      break
+    case 't':
+    case 'T':
+      event.preventDefault()
+      await triggerAiFromSelection('translate')
+      break
+    case 'e':
+    case 'E':
+      event.preventDefault()
+      await triggerAiFromSelection('explain')
       break
   }
 }
@@ -312,6 +463,31 @@ html, body {
   width: 100%;
   height: 100%;
 }
+
+.clipboard-ai-select-popper {
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 10px !important;
+  background: linear-gradient(150deg, rgba(30, 36, 50, 0.98), rgba(21, 27, 40, 0.96)) !important;
+  backdrop-filter: blur(10px);
+}
+
+.clipboard-ai-select-popper .el-select-dropdown__item {
+  color: #d5e0f4 !important;
+}
+
+.clipboard-ai-select-popper .el-select-dropdown__item.hover,
+.clipboard-ai-select-popper .el-select-dropdown__item:hover {
+  background: rgba(64, 158, 255, 0.2) !important;
+  color: #ffffff !important;
+}
+
+.clipboard-ai-select-popper .el-select-dropdown__item.selected,
+.clipboard-ai-select-popper .el-select-dropdown__item.is-selected {
+  color: #a9d7ff !important;
+  font-weight: 700;
+  background: rgba(64, 158, 255, 0.26) !important;
+}
+
 </style>
 
 <style scoped>
@@ -329,12 +505,103 @@ html, body {
   outline: none;
 }
 
+.container > * {
+  min-width: 0;
+}
+
 .empty-state {
+  flex: 1;
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100%;
+  min-height: 0;
   color: #fff;
+}
+
+.ai-quick-panel-wrap {
+  position: relative;
+  height: 0;
+  margin: 0 8px;
+  z-index: 50;
+}
+
+.ai-quick-panel {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  width: min(560px, calc(100vw - 36px));
+  padding: 8px;
+  border-radius: 10px;
+  background: linear-gradient(150deg, rgba(32, 39, 55, 0.96), rgba(20, 25, 36, 0.94));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(10px);
+}
+
+.history-list {
+  flex: 1;
+  min-height: 0;
+}
+
+.ai-quick-top {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.ai-control-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #cfd8ea;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.ai-select-item {
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(16, 21, 31, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  flex: 0 0 auto;
+}
+
+.ai-control-label {
+  color: #b8c6de;
+  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.ai-shortcut-tip {
+  margin-top: 0;
+  justify-self: end;
+  white-space: nowrap;
+  font-size: 11px;
+  color: rgba(208, 220, 241, 0.72);
+}
+
+:deep(.ai-select) {
+  width: 112px;
+}
+
+:deep(.ai-select .el-select__wrapper) {
+  background: rgba(17, 23, 34, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+:deep(.ai-select .el-select__selected-item) {
+  color: #e7efff;
+  font-size: 12px;
+}
+
+:deep(.ai-select .el-select__placeholder) {
+  color: rgba(215, 226, 244, 0.62);
 }
 
 .hint {
@@ -376,6 +643,17 @@ html, body {
 .context-menu-item:hover {
   background: var(--el-color-primary, #409eff);
   color: #fff;
+}
+
+.context-menu-divider {
+  height: 1px;
+  margin: 4px 0;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.shortcut-hint {
+  font-size: 11px;
+  opacity: 0.75;
 }
 
 .check-icon {

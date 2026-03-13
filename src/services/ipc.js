@@ -1,5 +1,21 @@
 import {invoke} from '@tauri-apps/api/core';
 
+const buildSelectAndFillRequest = (index, opId) => ({index, opId});
+const buildSelectAndFillImageRequest = (index, opId) => ({index, opId});
+const buildStreamTranslateRequest = (text, sourceLanguage, targetLanguage, opId, sceneHint) => ({
+    text,
+    sourceLanguage,
+    targetLanguage,
+    opId,
+    sceneHint
+});
+const buildStreamExplainRequest = (text, targetLanguage, opId, sceneHint) => ({
+    text,
+    targetLanguage,
+    opId,
+    sceneHint
+});
+
 /**
  * IPC 命令常量定义
  * @enum {string}
@@ -16,6 +32,7 @@ export const IPC_COMMANDS = {
     OPEN_IMAGE_PREVIEW_WINDOW: 'open_image_preview_window',
     CLOSE_IMAGE_PREVIEW_WINDOW: 'close_image_preview_window',
     COPY_TEXT: 'copy_text',
+    COPY_AND_PASTE_TEXT: 'copy_and_paste_text',
 
     // 分类管理
     SET_ITEM_CATEGORY: 'set_item_category',
@@ -68,7 +85,8 @@ export const ClipboardService = {
      * @param {number} index
      * @returns {Promise<void>}
      */
-    selectAndFill: (index) => invoke(IPC_COMMANDS.SELECT_AND_FILL, {index}),
+    selectAndFill: (index, opId) =>
+        invoke(IPC_COMMANDS.SELECT_AND_FILL, {request: buildSelectAndFillRequest(index, opId)}),
 
     /**
      * 复制文本到剪贴板
@@ -76,12 +94,14 @@ export const ClipboardService = {
      * @returns {Promise<void>}
      */
     copyText: (text) => invoke(IPC_COMMANDS.COPY_TEXT, {text}),
+    copyAndPasteText: (text) => invoke(IPC_COMMANDS.COPY_AND_PASTE_TEXT, {text}),
 };
 
 export const ImageClipboardService = {
     getHistory: () => invoke(IPC_COMMANDS.GET_IMAGE_CLIPBOARD_HISTORY),
     removeItem: (index) => invoke(IPC_COMMANDS.REMOVE_IMAGE_CLIPBOARD_ITEM, {index}),
-    selectAndFill: (index) => invoke(IPC_COMMANDS.SELECT_AND_FILL_IMAGE, {index}),
+    selectAndFill: (index, opId) =>
+        invoke(IPC_COMMANDS.SELECT_AND_FILL_IMAGE, {request: buildSelectAndFillImageRequest(index, opId)}),
     warmupItem: (index) => invoke(IPC_COMMANDS.WARMUP_IMAGE_CLIPBOARD_ITEM, {index}),
     openPreviewWindow: (index) => invoke(IPC_COMMANDS.OPEN_IMAGE_PREVIEW_WINDOW, {index}),
     closePreviewWindow: () => invoke(IPC_COMMANDS.CLOSE_IMAGE_PREVIEW_WINDOW),
@@ -254,8 +274,10 @@ export const AIService = {
      * @param {string} targetLanguage
      * @returns {Promise<void>}
      */
-    streamTranslate: (text, sourceLanguage, targetLanguage) =>
-        invoke(IPC_COMMANDS.STREAM_TRANSLATE_TEXT, {text, sourceLanguage, targetLanguage}),
+    streamTranslate: (text, sourceLanguage, targetLanguage, opId, sceneHint) =>
+        invoke(IPC_COMMANDS.STREAM_TRANSLATE_TEXT, {
+            request: buildStreamTranslateRequest(text, sourceLanguage, targetLanguage, opId, sceneHint)
+        }),
 
     /**
      * 流式解释文本
@@ -263,6 +285,8 @@ export const AIService = {
      * @param {string} targetLanguage
      * @returns {Promise<void>}
      */
-    streamExplain: (text, targetLanguage) =>
-        invoke(IPC_COMMANDS.STREAM_EXPLAIN_TEXT, {text, targetLanguage}),
+    streamExplain: (text, targetLanguage, opId, sceneHint) =>
+        invoke(IPC_COMMANDS.STREAM_EXPLAIN_TEXT, {
+            request: buildStreamExplainRequest(text, targetLanguage, opId, sceneHint)
+        }),
 };
