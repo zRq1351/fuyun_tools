@@ -50,6 +50,7 @@ jobs:
           releaseBody: '
                         1、统一窗口标签和标题管理，改进用户体验
                         2、打通剪切板与翻译/解释功能
-          '             3、修复一些BUG，优化用户体验
+                        3、修复一些BUG，优化用户体验
+          '
           releaseDraft: false
           prerelease: false
