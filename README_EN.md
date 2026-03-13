@@ -24,6 +24,9 @@ In addition, this project itself follows an AI full-process development workflow
 - Automatically records clipboard history for quick reuse
 - Supports search, categorization, deletion, and history size limits
 - Supports both keyboard and mouse workflows (arrow keys, enter, wheel)
+- Supports in-window AI actions (`T` translate / `E` explain)
+- Supports one-click right-click menu actions to translate/explain the current item
+- Supports configurable translation target language and explanation language
 
 ### 🖼️ Image Clipboard Management
 
@@ -38,6 +41,7 @@ In addition, this project itself follows an AI full-process development workflow
 - Supports drag, double-click, and triple-click selection scenarios
 - Automatically shows a selection toolbar for translate/explain/copy
 - Result windows support streaming output for faster feedback
+- Result windows support one-click write-back to the source app (copy + auto paste)
 
 ### 🤖 AI Service Configuration
 
@@ -111,6 +115,9 @@ Installation steps:
 - `Enter`: fill selected item
 - `Esc`: hide window
 - Mouse wheel: scroll list
+- `T / E`: translate/explain the currently selected item
+- Supports expanding the language settings panel between the “Raise” handle and the search box
+- Supports auto-collapsing the language settings panel when clicking elsewhere in the window
 
 ### Image Clipboard Window
 
@@ -131,6 +138,7 @@ Installation steps:
 - Appears automatically after text selection
 - Click translate/explain to view streaming results
 - Click outside to close
+- The result window supports one-click write-back to the currently focused app
 
 ### AI Configuration Tips
 
