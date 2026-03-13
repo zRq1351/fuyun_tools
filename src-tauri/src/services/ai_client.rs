@@ -169,7 +169,7 @@ impl AIClient {
         mut callback: F,
     ) -> Result<(), String>
     where
-        F: FnMut(String) -> (),
+        F: FnMut(String) -> bool,
     {
         let openai_request = self.build_chat_request(request, true)?;
 
@@ -187,7 +187,9 @@ impl AIClient {
                     for choice in response.choices {
                         if let Some(content) = choice.delta.content {
                             if !content.is_empty() {
-                                callback(content);
+                                if !callback(content) {
+                                    return Ok(());
+                                }
                             }
                         }
                         if let Some(finish_reason) = choice.finish_reason {
@@ -246,7 +248,7 @@ impl AIClient {
         callback: F,
     ) -> Result<(), String>
     where
-        F: FnMut(String) -> (),
+        F: FnMut(String) -> bool,
     {
         let messages = vec![Message {
             role: "user".to_string(),

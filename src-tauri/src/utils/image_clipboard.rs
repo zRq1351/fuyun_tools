@@ -1,8 +1,9 @@
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
+use crate::utils::utils_helpers::{atomic_write_with_backup, read_text_with_backup};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -586,7 +587,7 @@ fn persist_image_blob(item_id: &str, rgba: &[u8]) -> Result<String, String> {
     let dir = get_image_blobs_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建图片存储目录失败: {}", e))?;
     let path = image_blob_path(item_id);
-    std::fs::write(&path, rgba).map_err(|e| format!("写入图片数据失败: {}", e))?;
+    atomic_write_with_backup(&path, rgba).map_err(|e| format!("写入图片数据失败: {}", e))?;
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -617,7 +618,7 @@ fn load_image_history_data() -> Result<ImageHistoryData, String> {
         return Ok(ImageHistoryData::default());
     }
     let contents =
-        std::fs::read_to_string(&history_path).map_err(|e| format!("读取图片历史文件失败: {}", e))?;
+        read_text_with_backup(&history_path).map_err(|e| format!("读取图片历史文件失败: {}", e))?;
     let mut data = serde_json::from_str::<ImageHistoryData>(&contents)
         .map_err(|e| format!("解析图片历史文件失败: {}", e))?;
     let mut changed = false;
@@ -642,9 +643,18 @@ fn load_image_history_data() -> Result<ImageHistoryData, String> {
             }
         }
     }
+    let previous_len = data.items.len();
     data.items.retain(|item| {
         !item.image_path.trim().is_empty() && Path::new(&item.image_path).exists()
     });
+    if data.items.len() != previous_len {
+        changed = true;
+    }
+    let orphan_paths = collect_orphan_blob_paths(&data);
+    if !orphan_paths.is_empty() {
+        cleanup_image_blob_files(orphan_paths);
+        changed = true;
+    }
     if changed {
         let _ = save_image_history_data_with_retry(&data, 2);
     }
@@ -655,7 +665,7 @@ fn save_image_history_data_with_retry(data: &ImageHistoryData, max_retries: u32)
     let history_path = get_image_history_file_path();
     let json = serde_json::to_string_pretty(data).map_err(|e| format!("序列化图片历史失败: {}", e))?;
     for i in 0..max_retries {
-        match std::fs::write(&history_path, &json) {
+        match atomic_write_with_backup(&history_path, json.as_bytes()) {
             Ok(_) => return Ok(()),
             Err(e) => {
                 if i == max_retries - 1 {
@@ -666,6 +676,34 @@ fn save_image_history_data_with_retry(data: &ImageHistoryData, max_retries: u32)
         }
     }
     Ok(())
+}
+
+fn collect_orphan_blob_paths(data: &ImageHistoryData) -> Vec<String> {
+    let blobs_dir = get_image_blobs_dir();
+    if !blobs_dir.exists() {
+        return Vec::new();
+    }
+
+    let referenced: HashSet<String> = data
+        .items
+        .iter()
+        .map(|item| item.image_path.clone())
+        .collect();
+
+    let mut orphans = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&blobs_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let normalized = path.to_string_lossy().to_string();
+            if !referenced.contains(&normalized) {
+                orphans.push(normalized);
+            }
+        }
+    }
+    orphans
 }
 
 fn generate_preview_rgba(rgba: &[u8], width: u32, height: u32) -> (Vec<u8>, u32, u32) {

@@ -34,6 +34,379 @@ pub struct ImageHistoryResponse {
     category_list: Vec<String>,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectAndFillRequest {
+    index: usize,
+    #[serde(default)]
+    op_id: Option<u64>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectAndFillImageRequest {
+    index: usize,
+    #[serde(default)]
+    op_id: Option<u64>,
+}
+
+#[derive(Clone, Copy)]
+enum FillKind {
+    Text,
+    Image,
+}
+
+impl FillKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Text => "文本",
+            Self::Image => "图片",
+        }
+    }
+
+    fn window_label(self) -> &'static str {
+        match self {
+            Self::Text => "clipboard",
+            Self::Image => "image_clipboard",
+        }
+    }
+
+    fn current_seq(self, state: &SharedAppState) -> u64 {
+        match self {
+            Self::Text => state.text_fill_seq,
+            Self::Image => state.image_fill_seq,
+        }
+    }
+}
+
+fn begin_fill_sequence(state: &Arc<Mutex<SharedAppState>>, kind: FillKind) -> u64 {
+    let mut state_guard = state.lock().unwrap();
+    state_guard.is_updating_clipboard = true;
+    state_guard.is_processing_selection = true;
+    match kind {
+        FillKind::Text => {
+            state_guard.text_fill_seq = state_guard.text_fill_seq.wrapping_add(1);
+            state_guard.text_fill_seq
+        }
+        FillKind::Image => {
+            state_guard.image_fill_seq = state_guard.image_fill_seq.wrapping_add(1);
+            state_guard.image_fill_seq
+        }
+    }
+}
+
+fn is_fill_latest(state: &Arc<Mutex<SharedAppState>>, kind: FillKind, fill_seq: u64) -> bool {
+    let guard = state.lock().unwrap();
+    kind.current_seq(&guard) == fill_seq
+}
+
+fn finish_fill_if_latest(state: &Arc<Mutex<SharedAppState>>, kind: FillKind, fill_seq: u64) {
+    if let Ok(mut guard) = state.lock() {
+        if kind.current_seq(&guard) == fill_seq {
+            guard.is_processing_selection = false;
+            guard.is_updating_clipboard = false;
+        }
+    }
+}
+
+fn wait_for_fill_window_hidden(app: &AppHandle, window_label: &str, label: &str) {
+    if let Err(e) = crate::ui::window_manager::wait_for_window_hidden(
+        app,
+        window_label,
+        Duration::from_millis(900),
+    ) {
+        log::warn!("等待{}窗口隐藏失败: {}", label, e);
+    } else {
+        thread::sleep(Duration::from_millis(40));
+    }
+}
+
+fn spawn_fill_task<F>(
+    kind: FillKind,
+    app_handle: AppHandle,
+    state: Arc<Mutex<SharedAppState>>,
+    fill_seq: u64,
+    operation_id: u64,
+    write_stage: F,
+) where
+    F: FnOnce(&AppHandle, &Arc<Mutex<SharedAppState>>) -> Result<(), String> + Send + 'static,
+{
+    thread::spawn(move || {
+        let started_at = std::time::Instant::now();
+        wait_for_fill_window_hidden(&app_handle, kind.window_label(), kind.label());
+
+        if !is_fill_latest(&state, kind, fill_seq) {
+            log::info!("{}回填请求过期，跳过执行: op_id={}", kind.label(), operation_id);
+            return;
+        }
+
+        let fill_result = write_stage(&app_handle, &state);
+        if fill_result.is_ok() {
+            if !is_fill_latest(&state, kind, fill_seq) {
+                log::info!(
+                    "{}回填请求被新请求替代: op_id={}",
+                    kind.label(),
+                    operation_id
+                );
+                return;
+            }
+            simulate_paste_with_retry(kind.label(), Some(operation_id), started_at);
+        } else if let Err(e) = fill_result {
+            log::error!("{}回填失败（写入阶段）: op_id={}, {}", kind.label(), operation_id, e);
+        }
+
+        finish_fill_if_latest(&state, kind, fill_seq);
+    });
+}
+
+fn simulate_paste_with_retry(
+    label: &str,
+    operation_id: Option<u64>,
+    started_at: std::time::Instant,
+) {
+    thread::sleep(Duration::from_millis(135));
+    match crate::ui::window_manager::simulate_paste() {
+        Ok(_) => {
+            if let Some(op_id) = operation_id {
+                log::info!(
+                    "{}回填完成: op_id={}, 耗时: {}ms",
+                    label,
+                    op_id,
+                    started_at.elapsed().as_millis()
+                );
+            } else {
+                log::info!("{}回填完成，耗时: {}ms", label, started_at.elapsed().as_millis());
+            }
+        }
+        Err(first_error) => {
+            thread::sleep(Duration::from_millis(140));
+            match crate::ui::window_manager::simulate_paste() {
+                Ok(_) => {
+                    if let Some(op_id) = operation_id {
+                        log::warn!(
+                            "{}回填首次粘贴失败，二次重试成功: op_id={}, {}，总耗时: {}ms",
+                            label,
+                            op_id,
+                            first_error,
+                            started_at.elapsed().as_millis()
+                        );
+                    } else {
+                        log::warn!(
+                            "{}回填首次粘贴失败，二次重试成功: {}，总耗时: {}ms",
+                            label,
+                            first_error,
+                            started_at.elapsed().as_millis()
+                        );
+                    }
+                }
+                Err(second_error) => {
+                    if let Some(op_id) = operation_id {
+                        log::error!(
+                            "{}回填粘贴失败: op_id={}, 首次错误: {}，二次错误: {}",
+                            label,
+                            op_id,
+                            first_error,
+                            second_error
+                        );
+                    } else {
+                        log::error!(
+                            "{}回填粘贴失败，首次错误: {}，二次错误: {}",
+                            label,
+                            first_error,
+                            second_error
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn set_updating_clipboard(state: &Arc<Mutex<SharedAppState>>, updating: bool) {
+    if let Ok(mut state_guard) = state.lock() {
+        state_guard.is_updating_clipboard = updating;
+    }
+}
+
+fn with_updating_clipboard<T, F>(
+    state: &Arc<Mutex<SharedAppState>>,
+    operation: F,
+) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String>,
+{
+    set_updating_clipboard(state, true);
+    let result = operation();
+    set_updating_clipboard(state, false);
+    result
+}
+
+fn try_replace_text_clipboard_after_remove(
+    state: &Arc<Mutex<SharedAppState>>,
+    app: &AppHandle,
+    removed_item: &str,
+) {
+    let current_clipboard = {
+        let state_guard = state.lock().unwrap();
+        let manager = state_guard.clipboard_manager.lock().unwrap();
+        manager.get_content(app)
+    };
+
+    if current_clipboard.as_deref() != Some(removed_item) {
+        return;
+    }
+
+    let next_item = {
+        let state_guard = state.lock().unwrap();
+        let manager = state_guard.clipboard_manager.lock().unwrap();
+        manager.get_history().first().cloned()
+    };
+    if let Some(next) = next_item {
+        let state_guard = state.lock().unwrap();
+        let manager = state_guard.clipboard_manager.lock().unwrap();
+        if let Err(e) = manager.set_clipboard_content(app, &next) {
+            log::warn!("删除文本后写入下一条到剪贴板失败: {}", e);
+        }
+    }
+}
+
+fn try_replace_image_clipboard_after_remove(
+    state: &Arc<Mutex<SharedAppState>>,
+    app: &AppHandle,
+    removed_signature: &str,
+) {
+    let should_replace_clipboard =
+        match crate::utils::image_clipboard::ImageClipboardManager::read_clipboard_images_rgba(app) {
+            Ok(images) if !images.is_empty() => {
+                let (rgba, width, height) = &images[0];
+                crate::utils::image_clipboard::compute_signature(rgba, *width, *height)
+                    == removed_signature
+            }
+            _ => false,
+        };
+
+    if !should_replace_clipboard {
+        return;
+    }
+
+    let next_image = {
+        let state_guard = state.lock().unwrap();
+        let manager = state_guard.image_clipboard_manager.lock().unwrap();
+        manager.get_image_by_index(0).ok()
+    };
+    if let Some(image) = next_image {
+        if let Err(e) =
+            crate::utils::image_clipboard::ImageClipboardManager::write_clipboard_image(app, &image)
+        {
+            log::warn!("删除图片后写入下一张到剪贴板失败: {}", e);
+        }
+    }
+}
+
+fn execute_select_and_fill_text(
+    request: SelectAndFillRequest,
+    state: Arc<Mutex<SharedAppState>>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let index = request.index;
+    let fill_seq = begin_fill_sequence(&state, FillKind::Text);
+    let operation_id = request.op_id.unwrap_or(fill_seq);
+
+    let item_content = {
+        let state_guard = state.lock().unwrap();
+        let manager = state_guard.clipboard_manager.lock().unwrap();
+        manager
+            .promote_to_top(index)
+            .map_err(|e| format!("索引 {} 超出范围: {}", index, e))?
+    };
+
+    hide_clipboard_window(app.clone(), state.clone());
+
+    let item_content_clone = item_content.clone();
+    spawn_fill_task(
+        FillKind::Text,
+        app,
+        state,
+        fill_seq,
+        operation_id,
+        move |app_handle, state_ref| {
+            let state_guard = state_ref.lock().unwrap();
+            let manager = state_guard.clipboard_manager.lock().unwrap();
+            manager.set_clipboard_content(app_handle, &item_content_clone)
+        },
+    );
+
+    Ok(item_content)
+}
+
+fn execute_remove_clipboard_item(
+    index: usize,
+    state: Arc<Mutex<SharedAppState>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    log::info!("删除剪贴板项目，索引: {}", index);
+    with_updating_clipboard(&state, || {
+        let removed_item = {
+            let state_guard = state.lock().unwrap();
+            let manager = state_guard.clipboard_manager.lock().unwrap();
+            manager.remove_from_history(index)?
+        };
+        try_replace_text_clipboard_after_remove(&state, &app, &removed_item);
+        Ok(())
+    })
+}
+
+fn execute_remove_image_clipboard_item(
+    index: usize,
+    state: Arc<Mutex<SharedAppState>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    with_updating_clipboard(&state, || {
+        let removed_signature = {
+            let state_guard = state.lock().unwrap();
+            let manager = state_guard.image_clipboard_manager.lock().unwrap();
+            let (_, _, signature) = manager.remove_from_history(index)?;
+            signature
+        };
+        try_replace_image_clipboard_after_remove(&state, &app, &removed_signature);
+        Ok(())
+    })
+}
+
+fn execute_select_and_fill_image(
+    request: SelectAndFillImageRequest,
+    state: Arc<Mutex<SharedAppState>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let index = request.index;
+    let fill_seq = begin_fill_sequence(&state, FillKind::Image);
+    let operation_id = request.op_id.unwrap_or(fill_seq);
+
+    hide_image_clipboard_window(app.clone(), state.clone());
+
+    spawn_fill_task(
+        FillKind::Image,
+        app,
+        state,
+        fill_seq,
+        operation_id,
+        move |app_handle, state_ref| {
+            let image = {
+                let state_guard = state_ref.lock().unwrap();
+                let manager = state_guard.image_clipboard_manager.lock().unwrap();
+                manager.promote_to_top(index)?;
+                manager.get_image_by_index(0)?
+            };
+            crate::utils::image_clipboard::ImageClipboardManager::write_clipboard_image(
+                app_handle, &image,
+            )?;
+            Ok(())
+        },
+    );
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn get_clipboard_history(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
@@ -216,102 +589,11 @@ pub async fn save_clipboard_bottom_offset(
 
 #[tauri::command]
 pub async fn select_and_fill(
-    index: usize,
+    request: SelectAndFillRequest,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<String, String> {
-    let fill_seq = {
-        let mut state_guard = state.lock().unwrap();
-        state_guard.is_updating_clipboard = true;
-        state_guard.is_processing_selection = true;
-        state_guard.text_fill_seq = state_guard.text_fill_seq.wrapping_add(1);
-        state_guard.text_fill_seq
-    };
-
-    let item_content = {
-        let state_guard = state.lock().unwrap();
-        let manager = state_guard.clipboard_manager.lock().unwrap();
-        manager
-            .promote_to_top(index)
-            .map_err(|e| format!("索引 {} 超出范围: {}", index, e))?
-    };
-
-    let state_clone = state.inner().clone();
-    hide_clipboard_window(app.clone(), state_clone.clone());
-
-    let app_handle = app.clone();
-    let state_clone = state.inner().clone();
-    let item_content_clone = item_content.clone();
-    thread::spawn(move || {
-        let started_at = std::time::Instant::now();
-        if let Err(e) = crate::ui::window_manager::wait_for_window_hidden(
-            &app_handle,
-            "clipboard",
-            Duration::from_millis(900),
-        ) {
-            log::warn!("等待文字窗口隐藏失败: {}", e);
-        } else {
-            thread::sleep(Duration::from_millis(40));
-        }
-
-        let is_latest = {
-            let guard = state_clone.lock().unwrap();
-            guard.text_fill_seq == fill_seq
-        };
-        if !is_latest {
-            return;
-        }
-
-        let write_result = {
-            let state_guard = state_clone.lock().unwrap();
-            let manager = state_guard.clipboard_manager.lock().unwrap();
-            manager.set_clipboard_content(&app_handle, &item_content_clone)
-        };
-
-        if let Ok(()) = write_result {
-            let is_latest = {
-                let guard = state_clone.lock().unwrap();
-                guard.text_fill_seq == fill_seq
-            };
-            if !is_latest {
-                return;
-            }
-            thread::sleep(Duration::from_millis(135));
-            match crate::ui::window_manager::simulate_paste() {
-                Ok(_) => log::info!("文本回填完成，耗时: {}ms", started_at.elapsed().as_millis()),
-                Err(first_error) => {
-                    thread::sleep(Duration::from_millis(140));
-                    match crate::ui::window_manager::simulate_paste() {
-                        Ok(_) => {
-                            log::warn!(
-                                "文本回填首次粘贴失败，二次重试成功: {}，总耗时: {}ms",
-                                first_error,
-                                started_at.elapsed().as_millis()
-                            );
-                        }
-                        Err(second_error) => {
-                            log::error!(
-                                "文本回填粘贴失败，首次错误: {}，二次错误: {}",
-                                first_error,
-                                second_error
-                            );
-                        }
-                    }
-                }
-            }
-        } else if let Err(e) = write_result {
-            log::error!("文本回填失败（写入阶段）: {}", e);
-        }
-
-        if let Ok(mut guard) = state_clone.lock() {
-            if guard.text_fill_seq == fill_seq {
-                guard.is_processing_selection = false;
-                guard.is_updating_clipboard = false;
-            }
-        }
-    });
-
-    Ok(item_content)
+    execute_select_and_fill_text(request, state.inner().clone(), app)
 }
 
 #[tauri::command]
@@ -320,44 +602,7 @@ pub async fn remove_clipboard_item(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    log::info!("删除剪贴板项目，索引: {}", index);
-    {
-        let mut state_guard = state.lock().unwrap();
-        state_guard.is_updating_clipboard = true;
-    }
-
-    let removed_item = {
-        let state_guard = state.lock().unwrap();
-        let manager = state_guard.clipboard_manager.lock().unwrap();
-        manager.remove_from_history(index)?
-    };
-
-    let current_clipboard = {
-        let state_guard = state.lock().unwrap();
-        let manager = state_guard.clipboard_manager.lock().unwrap();
-        manager.get_content(&app)
-    };
-
-    if current_clipboard.as_deref() == Some(removed_item.as_str()) {
-        let next_item = {
-            let state_guard = state.lock().unwrap();
-            let manager = state_guard.clipboard_manager.lock().unwrap();
-            manager.get_history().first().cloned()
-        };
-        if let Some(next) = next_item {
-            let state_guard = state.lock().unwrap();
-            let manager = state_guard.clipboard_manager.lock().unwrap();
-            if let Err(e) = manager.set_clipboard_content(&app, &next) {
-                log::warn!("删除文本后写入下一条到剪贴板失败: {}", e);
-            }
-        }
-    }
-
-    {
-        let mut state_guard = state.lock().unwrap();
-        state_guard.is_updating_clipboard = false;
-    }
-    Ok(())
+    execute_remove_clipboard_item(index, state.inner().clone(), app)
 }
 
 #[tauri::command]
@@ -366,139 +611,16 @@ pub async fn remove_image_clipboard_item(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    {
-        let mut state_guard = state.lock().unwrap();
-        state_guard.is_updating_clipboard = true;
-    }
-
-    let removed_signature = {
-        let state_guard = state.lock().unwrap();
-        let manager = state_guard.image_clipboard_manager.lock().unwrap();
-        let (_, _, signature) = manager.remove_from_history(index)?;
-        signature
-    };
-
-    let should_replace_clipboard = match crate::utils::image_clipboard::ImageClipboardManager::read_clipboard_images_rgba(&app) {
-        Ok(images) if !images.is_empty() => {
-            let (rgba, width, height) = &images[0];
-            crate::utils::image_clipboard::compute_signature(rgba, *width, *height) == removed_signature
-        }
-        _ => false,
-    };
-
-    if should_replace_clipboard {
-        let next_image = {
-            let state_guard = state.lock().unwrap();
-            let manager = state_guard.image_clipboard_manager.lock().unwrap();
-            manager.get_image_by_index(0).ok()
-        };
-        if let Some(image) = next_image {
-            if let Err(e) = crate::utils::image_clipboard::ImageClipboardManager::write_clipboard_image(&app, &image) {
-                log::warn!("删除图片后写入下一张到剪贴板失败: {}", e);
-            }
-        }
-    }
-
-    {
-        let mut state_guard = state.lock().unwrap();
-        state_guard.is_updating_clipboard = false;
-    }
-    Ok(())
+    execute_remove_image_clipboard_item(index, state.inner().clone(), app)
 }
 
 #[tauri::command]
 pub async fn select_and_fill_image(
-    index: usize,
+    request: SelectAndFillImageRequest,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let fill_seq = {
-        let mut state_guard = state.lock().unwrap();
-        state_guard.is_updating_clipboard = true;
-        state_guard.is_processing_selection = true;
-        state_guard.image_fill_seq = state_guard.image_fill_seq.wrapping_add(1);
-        state_guard.image_fill_seq
-    };
-
-    let app_handle = app.clone();
-    let state_clone = state.inner().clone();
-    hide_image_clipboard_window(app.clone(), state_clone.clone());
-
-    thread::spawn(move || {
-        if let Err(e) = crate::ui::window_manager::wait_for_window_hidden(
-            &app_handle,
-            "image_clipboard",
-            Duration::from_millis(900),
-        ) {
-            log::warn!("等待图片窗口隐藏失败: {}", e);
-        } else {
-            thread::sleep(Duration::from_millis(40));
-        }
-        let is_latest = {
-            let guard = state_clone.lock().unwrap();
-            guard.image_fill_seq == fill_seq
-        };
-        if !is_latest {
-            return;
-        }
-        let started_at = std::time::Instant::now();
-        let fill_result: Result<(), String> = (|| {
-            let image = {
-                let state_guard = state_clone.lock().unwrap();
-                let manager = state_guard.image_clipboard_manager.lock().unwrap();
-                manager.promote_to_top(index)?;
-                manager.get_image_by_index(0)?
-            };
-            crate::utils::image_clipboard::ImageClipboardManager::write_clipboard_image(&app_handle, &image)?;
-            Ok(())
-        })();
-
-        if fill_result.is_ok() {
-            let is_latest = {
-                let guard = state_clone.lock().unwrap();
-                guard.image_fill_seq == fill_seq
-            };
-            if !is_latest {
-                return;
-            }
-            thread::sleep(Duration::from_millis(135));
-            match crate::ui::window_manager::simulate_paste() {
-                Ok(_) => log::info!("图片回填完成，耗时: {}ms", started_at.elapsed().as_millis()),
-                Err(first_error) => {
-                    thread::sleep(Duration::from_millis(140));
-                    match crate::ui::window_manager::simulate_paste() {
-                        Ok(_) => {
-                            log::warn!(
-                                "图片回填首次粘贴失败，二次重试成功: {}，总耗时: {}ms",
-                                first_error,
-                                started_at.elapsed().as_millis()
-                            );
-                        }
-                        Err(second_error) => {
-                            log::error!(
-                                "图片回填粘贴失败，首次错误: {}，二次错误: {}",
-                                first_error,
-                                second_error
-                            );
-                        }
-                    }
-                }
-            }
-        } else if let Err(e) = fill_result {
-            log::error!("图片回填失败（写入阶段）: {}", e);
-        }
-
-        if let Some(state_guard) = app_handle.try_state::<Arc<Mutex<SharedAppState>>>() {
-            if let Ok(mut guard) = state_guard.lock() {
-                if guard.image_fill_seq == fill_seq {
-                    guard.is_processing_selection = false;
-                    guard.is_updating_clipboard = false;
-                }
-            }
-        }
-    });
-
-    Ok(())
+    execute_select_and_fill_image(request, state.inner().clone(), app)
 }
 
 #[tauri::command]
@@ -839,6 +961,24 @@ pub async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
             Err(error_msg)
         }
     }
+}
+
+#[tauri::command]
+pub async fn copy_and_paste_text(text: String, app: AppHandle) -> Result<(), String> {
+    app.clipboard()
+        .write_text(text)
+        .map_err(|e| format!("复制文本失败: {}", e))?;
+
+    if let Some(window) = app.get_webview_window("result_translation") {
+        let _ = window.hide();
+    }
+    if let Some(window) = app.get_webview_window("result_explanation") {
+        let _ = window.hide();
+    }
+
+    thread::sleep(Duration::from_millis(80));
+    crate::ui::window_manager::simulate_paste().map_err(|e| format!("自动粘贴失败: {}", e))?;
+    Ok(())
 }
 
 #[tauri::command]

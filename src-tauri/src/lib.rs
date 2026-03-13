@@ -142,6 +142,7 @@ pub fn run() {
             image_window_blur,
             selection_toolbar_blur,
             copy_text,
+            copy_and_paste_text,
             get_ai_settings,
             save_app_settings,
             test_ai_connection,

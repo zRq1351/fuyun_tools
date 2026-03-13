@@ -5,6 +5,7 @@ use crate::ui::window_manager::{hide_selection_toolbar_impl, show_result_window,
 use crate::utils::utils_helpers::{
     default_explanation_prompt_template, default_translation_prompt_template,
 };
+use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -89,144 +90,277 @@ fn fill_prompt_template(
     prompt.replace("{target_language}", target_language)
 }
 
-/// 流式翻译文本
-#[tauri::command]
-pub async fn stream_translate_text(
-    text: String,
-    source_language: String,
-    target_language: String,
-    app: AppHandle,
-    state: State<'_, Arc<Mutex<SharedAppState>>>,
-) -> Result<(), AppError> {
-    let text = text.trim().to_string();
-    if text.is_empty() {
-        return Err(AppError::new(ErrorCode::ValidationError, "文本为空，无法翻译"));
+fn next_ai_operation_id(state: &Arc<Mutex<SharedAppState>>) -> u64 {
+    let mut state_guard = state.lock().unwrap();
+    state_guard.ai_request_seq = state_guard.ai_request_seq.wrapping_add(1);
+    state_guard.ai_request_seq
+}
+
+#[derive(Clone, Copy)]
+enum AiStreamKind {
+    Translation,
+    Explanation,
+}
+
+impl AiStreamKind {
+    fn kind_name(self) -> &'static str {
+        match self {
+            Self::Translation => "translation",
+            Self::Explanation => "explanation",
+        }
     }
-    let configured_translation_prompt = {
-        let state_guard = state.lock().unwrap();
-        state_guard.settings.translation_prompt_template.clone()
+
+    fn window_label(self) -> &'static str {
+        match self {
+            Self::Translation => "result_translation",
+            Self::Explanation => "result_explanation",
+        }
+    }
+
+    fn window_title(self) -> &'static str {
+        match self {
+            Self::Translation => "翻译结果",
+            Self::Explanation => "解释结果",
+        }
+    }
+
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::Translation => "翻译",
+            Self::Explanation => "解释",
+        }
+    }
+}
+
+fn set_active_operation(state: &Arc<Mutex<SharedAppState>>, kind: AiStreamKind, operation_id: u64) {
+    let mut state_guard = state.lock().unwrap();
+    match kind {
+        AiStreamKind::Translation => state_guard.active_translation_op_id = operation_id,
+        AiStreamKind::Explanation => state_guard.active_explanation_op_id = operation_id,
+    }
+}
+
+fn is_operation_active(state: &Arc<Mutex<SharedAppState>>, kind: AiStreamKind, operation_id: u64) -> bool {
+    let state_guard = state.lock().unwrap();
+    match kind {
+        AiStreamKind::Translation => state_guard.active_translation_op_id == operation_id,
+        AiStreamKind::Explanation => state_guard.active_explanation_op_id == operation_id,
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamTranslateRequest {
+    pub text: String,
+    pub source_language: String,
+    pub target_language: String,
+    #[serde(default)]
+    pub scene_hint: Option<String>,
+    #[serde(default)]
+    pub op_id: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamExplainRequest {
+    pub text: String,
+    pub target_language: String,
+    #[serde(default)]
+    pub scene_hint: Option<String>,
+    #[serde(default)]
+    pub op_id: Option<u64>,
+}
+
+struct StreamExecutionRequest {
+    text: String,
+    source_language: Option<String>,
+    target_language: String,
+    scene_hint: Option<String>,
+    op_id: Option<u64>,
+}
+
+async fn execute_stream_request(
+    kind: AiStreamKind,
+    request: StreamExecutionRequest,
+    app: AppHandle,
+    state_arc: Arc<Mutex<SharedAppState>>,
+) -> Result<(), AppError> {
+    let text = request.text.trim().to_string();
+    if text.is_empty() {
+        let msg = match kind {
+            AiStreamKind::Translation => "文本为空，无法翻译",
+            AiStreamKind::Explanation => "文本为空，无法解释",
+        };
+        return Err(AppError::new(ErrorCode::ValidationError, msg));
+    }
+
+    let configured_prompt = {
+        let state_guard = state_arc.lock().unwrap();
+        match kind {
+            AiStreamKind::Translation => state_guard.settings.translation_prompt_template.clone(),
+            AiStreamKind::Explanation => state_guard.settings.explanation_prompt_template.clone(),
+        }
     };
-    let client: AIClient = get_or_create_ai_client(state.inner().clone()).await?;
+
+    let operation_id = request.op_id.unwrap_or_else(|| next_ai_operation_id(&state_arc));
+    set_active_operation(&state_arc, kind, operation_id);
+    let client: AIClient = get_or_create_ai_client(state_arc.clone()).await?;
 
     show_result_window(
-        "翻译结果".to_string(),
+        kind.window_title().to_string(),
         "".to_string(),
-        "translation".to_string(),
+        kind.kind_name().to_string(),
         text.clone(),
+        request.target_language.clone(),
         app.clone(),
     )
-        .await
-        .map_err(|e| AppError::new(ErrorCode::SystemError, e))?;
+    .await
+    .map_err(|e| AppError::new(ErrorCode::SystemError, e))?;
+
     hide_selection_toolbar_impl(app.clone());
-    let source_language_name = source_language.trim().to_string();
-    let target_language_name = target_language;
-    let prompt_template = if configured_translation_prompt.trim().is_empty() {
-        default_translation_prompt_template()
+
+    let source_language_name = request
+        .source_language
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let prompt_template = if configured_prompt.trim().is_empty() {
+        match kind {
+            AiStreamKind::Translation => default_translation_prompt_template(),
+            AiStreamKind::Explanation => default_explanation_prompt_template(),
+        }
     } else {
-        configured_translation_prompt
+        configured_prompt
     };
+
+    let text_for_prompt = if let Some(scene_hint) = request.scene_hint {
+        let hint = scene_hint.trim();
+        if hint.is_empty() {
+            text.clone()
+        } else {
+            format!("{}\n\n附加要求：\n{}", text, hint)
+        }
+    } else {
+        text.clone()
+    };
+
     let messages = fill_prompt_template(
         &prompt_template,
-        &text,
+        &text_for_prompt,
         if source_language_name.is_empty() {
             None
         } else {
             Some(source_language_name.as_str())
         },
-        &target_language_name,
+        &request.target_language,
     );
-    if let Some(window) = app.clone().get_webview_window("result_translation") {
-        let _ = window.emit("result-clean", serde_json::json!({
-            "type": "translation"
-        }));
+
+    if let Some(window) = app.clone().get_webview_window(kind.window_label()) {
+        let _ = window.emit(
+            "result-clean",
+            serde_json::json!({
+                "type": kind.kind_name(),
+                "opId": operation_id
+            }),
+        );
     }
+
+    let state_for_stream = state_arc.clone();
     let result = client
         .generate_text_stream(messages.as_str(), Some(1000), |content_chunk| {
+            if !is_operation_active(&state_for_stream, kind, operation_id) {
+                log::info!(
+                    "{}流已被新请求接管，停止旧流: op_id={}",
+                    kind.display_name(),
+                    operation_id
+                );
+                return false;
+            }
             let app_clone = app.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) =
-                    update_result_window(content_chunk, "translation".to_string(), app_clone).await
+                    update_result_window(content_chunk, kind.kind_name().to_string(), app_clone).await
                 {
-                    log::error!("发送数据失败:{}", e);
+                    log::error!("更新{}结果窗口失败: {}", kind.display_name(), e);
                 }
             });
+            true
         })
         .await;
+
     match result {
         Ok(()) => {
-            log::info!("翻译完成");
+            if is_operation_active(&state_arc, kind, operation_id) {
+                log::info!("{}完成: op_id={}", kind.display_name(), operation_id);
+            } else {
+                log::info!(
+                    "{}请求已过期并结束: op_id={}",
+                    kind.display_name(),
+                    operation_id
+                );
+            }
         }
         Err(e) => {
-            let error_msg = format!("翻译失败: {}", e);
-            update_result_window(error_msg.clone(), "translation".to_string(), app).await
+            if !is_operation_active(&state_arc, kind, operation_id) {
+                log::info!(
+                    "忽略过期{}错误: op_id={}, error={}",
+                    kind.display_name(),
+                    operation_id,
+                    e
+                );
+                return Ok(());
+            }
+            let error_msg = format!("{}失败: {}", kind.display_name(), e);
+            update_result_window(error_msg.clone(), kind.kind_name().to_string(), app)
+                .await
                 .map_err(|e| AppError::new(ErrorCode::SystemError, e))?;
-            log::error!("翻译失败: {}", error_msg);
+            log::error!("{}", error_msg);
         }
     }
+
     Ok(())
+}
+
+/// 流式翻译文本
+#[tauri::command]
+pub async fn stream_translate_text(
+    request: StreamTranslateRequest,
+    app: AppHandle,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), AppError> {
+    execute_stream_request(
+        AiStreamKind::Translation,
+        StreamExecutionRequest {
+            text: request.text,
+            source_language: Some(request.source_language),
+            target_language: request.target_language,
+            scene_hint: request.scene_hint,
+            op_id: request.op_id,
+        },
+        app,
+        state.inner().clone(),
+    )
+    .await
 }
 
 /// 流式解释文本
 #[tauri::command]
 pub async fn stream_explain_text(
-    text: String,
-    target_language: String,
+    request: StreamExplainRequest,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), AppError> {
-    let text = text.trim().to_string();
-    if text.is_empty() {
-        return Err(AppError::new(ErrorCode::ValidationError, "文本为空，无法解释"));
-    }
-    let configured_explanation_prompt = {
-        let state_guard = state.lock().unwrap();
-        state_guard.settings.explanation_prompt_template.clone()
-    };
-    let client: AIClient = get_or_create_ai_client(state.inner().clone()).await?;
-    show_result_window(
-        "解释结果".to_string(),
-        "".to_string(),
-        "explanation".to_string(),
-        text.clone(),
-        app.clone(),
+    execute_stream_request(
+        AiStreamKind::Explanation,
+        StreamExecutionRequest {
+            text: request.text,
+            source_language: None,
+            target_language: request.target_language,
+            scene_hint: request.scene_hint,
+            op_id: request.op_id,
+        },
+        app,
+        state.inner().clone(),
     )
-        .await
-        .map_err(|e| AppError::new(ErrorCode::SystemError, e))?;
-    hide_selection_toolbar_impl(app.clone());
-    let target_language_name = target_language;
-
-    let prompt_template = if configured_explanation_prompt.trim().is_empty() {
-        default_explanation_prompt_template()
-    } else {
-        configured_explanation_prompt
-    };
-    let messages = fill_prompt_template(&prompt_template, &text, None, &target_language_name);
-    if let Some(window) = app.clone().get_webview_window("result_explanation") {
-        let _ = window.emit("result-clean", serde_json::json!({
-            "type": "explanation"
-        }));
-    }
-    let result = client
-        .generate_text_stream(messages.as_str(), Some(1000), |content_chunk| {
-            let app_clone = app.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) =
-                    update_result_window(content_chunk, "explanation".to_string(), app_clone).await
-                {
-                    log::error!("更新解释结果窗口失败: {}", e);
-                }
-            });
-        })
-        .await;
-    match result {
-        Ok(()) => {
-            log::info!("解释完成");
-        }
-        Err(e) => {
-            let error_msg = format!("解释失败: {}", e);
-            update_result_window(error_msg, "explanation".to_string(), app).await
-                .map_err(|e| AppError::new(ErrorCode::SystemError, e))?;
-        }
-    }
-    Ok(())
+    .await
 }

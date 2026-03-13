@@ -29,6 +29,17 @@
 
       <div class="right-controls">
         <el-tooltip
+            content="回写到原应用"
+            :show-after="500"
+            placement="bottom"
+        >
+          <div class="icon-btn writeback-btn" @click="handleWriteBack">
+            <el-icon>
+              <Position/>
+            </el-icon>
+          </div>
+        </el-tooltip>
+        <el-tooltip
             :content="showOriginal ? '隐藏原文' : '显示原文'"
             :show-after="500"
             placement="bottom"
@@ -72,8 +83,8 @@
 import {computed, nextTick, onMounted, ref} from 'vue'
 import {marked} from 'marked'
 import {listen} from '@tauri-apps/api/event'
-import {Hide, View} from '@element-plus/icons-vue'
-import {AIService} from '../../services/ipc'
+import {Hide, Position, View} from '@element-plus/icons-vue'
+import {AIService, ClipboardService} from '../../services/ipc'
 import {handleAppError} from '../../utils/errorHandler'
 
 const mode = ref('translation')
@@ -100,6 +111,13 @@ onMounted(async () => {
       mode.value = initialData.type || 'translation'
       originalText.value = initialData.original || ''
       resultText.value = initialData.content || ''
+      if (initialData.targetLanguage) {
+        if (mode.value === 'translation') {
+          targetLanguage.value = initialData.targetLanguage
+        } else {
+          explanationLanguage.value = initialData.targetLanguage
+        }
+      }
       isWaitingResult.value = !resultText.value
       if (isWaitingResult.value) {
         loadingStartedAt.value = Date.now()
@@ -190,6 +208,16 @@ const handleLanguageChange = async () => {
     isWaitingResult.value = false
     handleAppError(error, '请求失败')
     resultText.value = `Error: ${error.message || error}`
+  }
+}
+
+const handleWriteBack = async () => {
+  const text = resultText.value.trim()
+  if (!text) return
+  try {
+    await ClipboardService.copyAndPasteText(text)
+  } catch (error) {
+    handleAppError(error, '回写失败')
   }
 }
 
@@ -301,6 +329,11 @@ body {
 .toggle-btn:hover {
   color: #409eff;
   background: rgba(64, 158, 255, 0.18);
+}
+
+.writeback-btn:hover {
+  color: #67c23a;
+  background: rgba(103, 194, 58, 0.18);
 }
 
 .content {

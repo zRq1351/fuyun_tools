@@ -508,6 +508,7 @@ pub async fn show_result_window(
     content: String,
     window_type: String,
     original: String,
+    target_language: String,
     app: AppHandle,
 ) -> Result<(), String> {
     let window_label = format!("result_{}", window_type);
@@ -527,7 +528,8 @@ pub async fn show_result_window(
         let payload = serde_json::json!({
             "type": window_type.clone(),
             "original": original.clone(),
-            "content": content.clone()
+            "content": content.clone(),
+            "targetLanguage": target_language.clone()
         });
         let script = format!("window.__INITIAL_DATA__ = {}; window.dispatchEvent(new Event('init-data'));", payload);
         let _ = existing_window.eval(&script);
@@ -549,7 +551,8 @@ pub async fn show_result_window(
             let payload = serde_json::json!({
             "type": window_type.clone(),
             "original": original.clone(),
-            "content": content.clone()
+            "content": content.clone(),
+            "targetLanguage": target_language.clone()
         });
             let script = format!("window.__INITIAL_DATA__ = {};", payload);
             let _ = window.eval(&script);

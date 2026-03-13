@@ -22,6 +22,9 @@ pub struct AppState {
     pub is_processing_selection: bool,
     pub text_fill_seq: u64,
     pub image_fill_seq: u64,
+    pub ai_request_seq: u64,
+    pub active_translation_op_id: u64,
+    pub active_explanation_op_id: u64,
     pub tray_menu_items: Option<TrayMenuItems>,
 }
 
@@ -40,6 +43,9 @@ impl Clone for AppState {
             is_processing_selection: self.is_processing_selection,
             text_fill_seq: self.text_fill_seq,
             image_fill_seq: self.image_fill_seq,
+            ai_request_seq: self.ai_request_seq,
+            active_translation_op_id: self.active_translation_op_id,
+            active_explanation_op_id: self.active_explanation_op_id,
             tray_menu_items: None,
         }
     }
@@ -68,6 +74,9 @@ impl Default for AppState {
             is_processing_selection: false,
             text_fill_seq: 0,
             image_fill_seq: 0,
+            ai_request_seq: 0,
+            active_translation_op_id: 0,
+            active_explanation_op_id: 0,
             tray_menu_items: None,
         }
     }

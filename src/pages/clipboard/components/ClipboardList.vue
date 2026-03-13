@@ -18,7 +18,7 @@
         class="clipboard-item"
         @click="handleClick(entry.index)"
         @dblclick="handleDoubleClick(entry.index)"
-        @contextmenu.prevent="showContextMenu($event, entry.item)"
+        @contextmenu.prevent="showContextMenu($event, entry.item, entry.index)"
     >
       <div v-if="isWebUrl(entry.item)" class="open-btn" @click.stop="openWebUrl(entry.item)">
         <el-icon>
@@ -92,6 +92,18 @@ let scrollLeftVal = 0
 const handleScroll = () => {
 }
 
+const stopDragging = () => {
+  if (!isDown) return
+  isDown = false
+  if (contentRef.value) {
+    contentRef.value.style.cursor = 'default'
+  }
+  document.body.style.removeProperty('user-select')
+  window.removeEventListener('mousemove', handleGlobalMouseMove)
+  window.removeEventListener('mouseup', handleGlobalMouseUp, true)
+  window.removeEventListener('dragend', handleGlobalDragEnd)
+}
+
 const virtualItems = computed(() => {
   return props.visibleHistory
 })
@@ -100,6 +112,9 @@ const leftSpacerWidth = computed(() => 0)
 const rightSpacerWidth = computed(() => 0)
 
 onUnmounted(() => {
+  stopDragging()
+  window.removeEventListener('blur', stopDragging)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   window.removeEventListener('mousemove', handleGlobalMouseMove)
   window.removeEventListener('mouseup', handleGlobalMouseUp, true)
   window.removeEventListener('dragend', handleGlobalDragEnd)
@@ -162,28 +177,15 @@ const handleMouseDown = (e) => {
 }
 
 const handleGlobalMouseUp = () => {
-  if (!isDown) return
-  isDown = false
-  if (contentRef.value) {
-    contentRef.value.style.cursor = 'default'
-  }
-  // 恢复选中
-  document.body.style.removeProperty('user-select')
-
-  // Remove global listeners
-  window.removeEventListener('mousemove', handleGlobalMouseMove)
-  window.removeEventListener('mouseup', handleGlobalMouseUp, true)
-  window.removeEventListener('dragend', handleGlobalDragEnd)
+  stopDragging()
 }
 
 const handleGlobalDragEnd = () => {
-  handleGlobalMouseUp()
+  stopDragging()
 }
 
 const handleGlobalMouseMove = (e) => {
   if (!isDown || !contentRef.value) return
-  e.preventDefault()
-
   const x = e.pageX
   // Calculate delta from initial click position
   const walk = (x - startX)
@@ -191,6 +193,15 @@ const handleGlobalMouseMove = (e) => {
   // Direct DOM update for maximum responsiveness (1:1 movement)
   contentRef.value.scrollLeft = scrollLeftVal - walk
 }
+
+const handleVisibilityChange = () => {
+  if (document.hidden) {
+    stopDragging()
+  }
+}
+
+window.addEventListener('blur', stopDragging)
+document.addEventListener('visibilitychange', handleVisibilityChange)
 
 const handleWheel = (e) => {
   if (!contentRef.value) return
@@ -219,6 +230,7 @@ defineExpose({
 <style scoped>
 .content {
   flex: 1;
+  min-height: 0;
   display: flex;
   gap: 8px;
   padding: 8px;
