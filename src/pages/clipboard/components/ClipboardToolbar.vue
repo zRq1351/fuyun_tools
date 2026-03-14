@@ -7,7 +7,8 @@
       </el-icon>
       <span class="window-offset-label">调高</span>
     </div>
-    <button class="ai-toggle-btn" type="button" @click.stop @mousedown.stop="toggleAiSettings">
+    <button v-if="showAiToggle" class="ai-toggle-btn" type="button" @click.stop
+            @mousedown.stop="handleToggleAiSettings">
       <el-icon class="ai-toggle-arrow">
         <ArrowRight v-if="isAiSettingsCollapsed"/>
         <ArrowDown v-else/>
@@ -90,6 +91,10 @@ const props = defineProps({
   newCategoryInputRef: Object,
   canDeleteCategory: Function,
   startWindowOffsetDrag: Function,
+  showAiToggle: {
+    type: Boolean,
+    default: true
+  },
   isAiSettingsCollapsed: Boolean,
   toggleAiSettings: Function,
   translationTargetLanguage: String,
@@ -134,6 +139,12 @@ const handleDragLeave = (event) => {
   const target = event.currentTarget
   if (target && target.classList.contains('category-pill')) {
     target.classList.remove('drag-over')
+  }
+}
+
+const handleToggleAiSettings = () => {
+  if (typeof props.toggleAiSettings === 'function') {
+    props.toggleAiSettings()
   }
 }
 </script>
@@ -187,7 +198,7 @@ const handleDragLeave = (event) => {
   padding: 0;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: linear-gradient(135deg, rgba(19, 25, 37, 0.86), rgba(26, 33, 48, 0.78));
+  background: transparent;
   color: #dce8ff;
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;

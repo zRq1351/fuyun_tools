@@ -88,6 +88,20 @@
         :visible-history="visibleHistory"
     />
 
+    <div class="status-footer" @click.stop @mousedown.stop>
+      <div class="status-text">
+        <span class="status-label">{{ selectedStatusText }}</span>
+        <div class="status-actions">
+          <button aria-label="回到开头" class="nav-action-btn icon-btn" title="回到开头" type="button"
+                  @click="scrollToStart">←
+          </button>
+          <button aria-label="滑动到最后" class="nav-action-btn icon-btn" title="滑动到最后" type="button"
+                  @click="scrollToEnd">→
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div
         v-if="contextMenuVisible"
         :style="{ top: contextMenuY + 'px', left: contextMenuX + 'px' }"
@@ -122,7 +136,7 @@
 </template>
 
 <script setup>
-import {nextTick, onMounted, ref} from 'vue'
+import {computed, nextTick, onMounted, ref} from 'vue'
 import {Check} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
 import {AIService, ClipboardService, WindowService} from '../../services/ipc'
@@ -193,6 +207,14 @@ const hideClipboardWindow = () => {
   isAiSettingsCollapsed.value = true
 }
 
+const selectedStatusText = computed(() => {
+  const total = visibleHistory.value.length
+  if (total === 0) return '当前无选中项'
+  const current = visibleHistory.value.findIndex((entry) => entry.index === selectedIndex.value)
+  const display = current >= 0 ? current + 1 : 1
+  return `当前选中：第 ${display} / ${total} 条`
+})
+
 const init = async () => {
   try {
     await listen('show-window', (event) => {
@@ -231,7 +253,7 @@ const showWindow = (data) => {
       categories.value = ['未分类', ...uniqueList]
     }
   }
-  
+
   selectedIndex.value = data.selectedIndex !== undefined ? data.selectedIndex : 0
   isVisible.value = true
 
@@ -398,6 +420,33 @@ const ensureKeyboardSelectionVisible = async () => {
   container.scrollLeft = Math.min(maxScrollLeft, targetLeft)
 }
 
+const getContentContainer = () => {
+  const containerRefOrEl = clipboardListRef.value?.contentRef
+  return containerRefOrEl?.value || containerRefOrEl || null
+}
+
+const scrollToStart = async () => {
+  const container = getContentContainer()
+  if (container) {
+    container.scrollLeft = 0
+  }
+  if (visibleHistory.value.length > 0) {
+    selectedIndex.value = visibleHistory.value[0].index
+    await ensureKeyboardSelectionVisible()
+  }
+}
+
+const scrollToEnd = async () => {
+  const container = getContentContainer()
+  if (container) {
+    container.scrollLeft = Math.max(0, container.scrollWidth - container.clientWidth)
+  }
+  if (visibleHistory.value.length > 0) {
+    selectedIndex.value = visibleHistory.value[visibleHistory.value.length - 1].index
+    await ensureKeyboardSelectionVisible()
+  }
+}
+
 const handleKeydown = async (event) => {
   if (!isVisible.value) return
   if (isInputLikeTarget(event.target)) return
@@ -547,6 +596,99 @@ html, body {
   min-height: 0;
 }
 
+.status-footer {
+  flex: 0 0 auto;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(180deg, rgba(13, 20, 33, 0.96), rgba(10, 16, 26, 0.94));
+  border-top: 1px solid rgba(167, 214, 255, 0.36);
+  z-index: 120;
+}
+
+.status-text {
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(233, 244, 255, 0.92);
+}
+
+.status-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+
+.nav-action-btn {
+  appearance: none;
+  border: 1px solid rgba(178, 223, 255, 0.95);
+  background: rgba(51, 112, 201, 0.18);
+  color: #f1f7ff;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 700;
+  padding: 9px 14px;
+  min-height: 32px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
+  box-shadow: none;
+}
+
+.icon-btn {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 34px;
+  min-width: 36px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 16px;
+  line-height: 1;
+  justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  font-weight: 800;
+}
+
+.nav-action-btn:hover {
+  border-color: rgba(178, 223, 255, 0.95);
+  background: linear-gradient(160deg, rgba(66, 146, 238, 0.98), rgba(51, 112, 201, 0.95));
+  color: #ffffff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 6px 14px rgba(20, 56, 105, 0.52);
+  transform: translateY(-1px);
+}
+
+.nav-action-btn:active {
+  transform: translateY(0);
+}
+
+.nav-action-btn:focus-visible {
+  outline: 2px solid rgba(180, 226, 255, 0.95);
+  outline-offset: 2px;
+}
+
 .ai-quick-top {
   display: grid;
   grid-template-columns: max-content max-content minmax(0, 1fr);
@@ -568,7 +710,7 @@ html, body {
 .ai-select-item {
   padding: 4px 8px;
   border-radius: 8px;
-  background: rgba(16, 21, 31, 0.45);
+  background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.08);
   flex: 0 0 auto;
 }
@@ -593,10 +735,16 @@ html, body {
 }
 
 :deep(.ai-select .el-select__wrapper) {
-  background: rgba(17, 23, 34, 0.88);
+  background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 8px;
   box-shadow: none;
+}
+
+:deep(.ai-select .el-select__wrapper:hover),
+:deep(.ai-select .el-select__wrapper.is-focused) {
+  background: rgba(17, 23, 34, 0.78);
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
 :deep(.ai-select .el-select__selected-item) {

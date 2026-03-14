@@ -285,7 +285,7 @@ pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
 
         // 使用屏幕宽度
         let window_width = screen_size.width;
-        let window_height = 258u32;
+        let window_height = 360u32;
 
         let _ = window.set_size(tauri::LogicalSize::new(window_width, window_height));
 

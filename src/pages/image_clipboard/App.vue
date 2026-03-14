@@ -14,12 +14,22 @@
         :remove-category="removeCategory"
         :start-create-category="startCreateCategory"
         :start-window-offset-drag="startWindowOffsetDrag"
+        :show-ai-toggle="false"
     />
     <div v-if="filteredHistory.length === 0" class="empty-state">
       <el-empty :image-size="100" description="暂无图片剪切板记录"/>
     </div>
 
-    <div v-else class="content">
+    <div
+        v-else
+        ref="contentRef"
+        class="content"
+        @mousedown="handleContentMouseDown"
+        @mouseleave="handleContentMouseLeave"
+        @mousemove="handleContentMouseMove"
+        @mouseup="handleContentMouseUp"
+        @wheel.prevent="handleContentWheel"
+    >
       <div
           v-for="entry in filteredHistory"
           :id="`image-item-${entry.index}`"
@@ -51,11 +61,25 @@
           <div class="category-chip">{{ getItemCategory(entry.item.id) }}</div>
         </div>
         <div class="item-content">
-          <img :src="getPreviewDataUrl(entry.item)" alt="" class="image-preview"/>
+          <img :src="getPreviewDataUrl(entry.item)" alt="" class="image-preview" draggable="false" @dragstart.prevent/>
           <div class="image-meta">{{ entry.item.width }} × {{ entry.item.height }}</div>
         </div>
       </div>
       <div class="spacer"></div>
+    </div>
+
+    <div class="status-footer" @click.stop @mousedown.stop>
+      <div class="status-text">
+        <span class="status-label">{{ selectedStatusText }}</span>
+        <div class="status-actions">
+          <button aria-label="回到开头" class="nav-action-btn icon-btn" title="回到开头" type="button"
+                  @click="scrollToStart">←
+          </button>
+          <button aria-label="滑动到最后" class="nav-action-btn icon-btn" title="滑动到最后" type="button"
+                  @click="scrollToEnd">→
+          </button>
+        </div>
+      </div>
     </div>
 
     <div
@@ -90,6 +114,7 @@ import ClipboardToolbar from '../clipboard/components/ClipboardToolbar.vue'
 import {useWindowOffset} from '../clipboard/composables/useWindowOffset'
 
 const containerRef = ref(null)
+const contentRef = ref(null)
 const history = ref([])
 const categoryMap = ref({})
 const categories = ref(['未分类'])
@@ -106,12 +131,88 @@ const contextMenuY = ref(0)
 const contextMenuItemId = ref('')
 const dragItemId = ref('')
 const isFilling = ref(false)
+const categoryInputOpenedAt = ref(0)
 const previewCache = new Map()
 const warmedIndices = new Set()
 const warmingIndices = new Set()
 let refreshTimer = null
 let unlistenShowWindow = null
 let unlistenHistoryUpdated = null
+const SHORT_POLL_INTERVAL_MS = 1500
+const SHORT_POLL_DURATION_MS = 12000
+let shortPollUntil = 0
+let isPointerDown = false
+let isContentDragging = false
+let dragStartX = 0
+let dragStartScrollLeft = 0
+
+const stopContentDragging = () => {
+  isPointerDown = false
+  isContentDragging = false
+  if (contentRef.value) {
+    contentRef.value.style.cursor = 'default'
+  }
+  document.body.style.removeProperty('user-select')
+  window.removeEventListener('mousemove', handleGlobalMouseMove)
+  window.removeEventListener('mouseup', handleGlobalMouseUp, true)
+}
+
+const handleGlobalMouseMove = (event) => {
+  if (!isPointerDown || !contentRef.value) return
+  const delta = event.pageX - dragStartX
+  if (!isContentDragging && Math.abs(delta) > 4) {
+    isContentDragging = true
+    contentRef.value.style.cursor = 'grabbing'
+    document.body.style.userSelect = 'none'
+  }
+  if (isContentDragging) {
+    contentRef.value.scrollLeft = dragStartScrollLeft - delta
+  }
+}
+
+const handleGlobalMouseUp = () => {
+  stopContentDragging()
+}
+
+const handleContentMouseDown = (event) => {
+  if (event.button !== 0) return
+  if (event.target.closest('.delete-btn') || event.target.closest('.fullscreen-btn')) {
+    return
+  }
+  if (!contentRef.value) return
+  isPointerDown = true
+  isContentDragging = false
+  dragStartX = event.pageX
+  dragStartScrollLeft = contentRef.value.scrollLeft
+  window.addEventListener('mousemove', handleGlobalMouseMove)
+  window.addEventListener('mouseup', handleGlobalMouseUp, true)
+}
+
+const handleContentMouseMove = () => {
+}
+const handleContentMouseUp = () => {
+}
+const handleContentMouseLeave = () => {
+}
+
+const handleContentWheel = (event) => {
+  if (!contentRef.value) return
+  const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
+  contentRef.value.scrollLeft += delta
+}
+
+const ensureKeyboardSelectionVisible = async () => {
+  await nextTick()
+  const selected = selectedIndex.value
+  if (selected < 0) return
+  const element = document.getElementById(`image-item-${selected}`)
+  const container = contentRef.value || element?.closest('.content')
+  if (!element || !container) return
+  const EDGE_PADDING = 8
+  const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth)
+  const targetLeft = Math.max(0, element.offsetLeft - EDGE_PADDING)
+  container.scrollLeft = Math.min(maxScrollLeft, targetLeft)
+}
 
 const {
   bottomOffset,
@@ -141,6 +242,14 @@ const filteredHistory = computed(() => {
         }
         return category.toLowerCase().includes(keyword)
       })
+})
+
+const selectedStatusText = computed(() => {
+  const total = filteredHistory.value.length
+  if (total === 0) return '当前无选中项'
+  const current = filteredHistory.value.findIndex((entry) => entry.index === selectedIndex.value)
+  const display = current >= 0 ? current + 1 : 1
+  return `当前选中：第 ${display} / ${total} 条`
 })
 
 const decodeBase64ToRgba = (base64) => {
@@ -217,6 +326,28 @@ const handleItemHover = (index) => {
   warmupAround(index)
 }
 
+const scrollToStart = async () => {
+  if (contentRef.value) {
+    contentRef.value.scrollLeft = 0
+  }
+  if (filteredHistory.value.length > 0) {
+    const firstIndex = filteredHistory.value[0].index
+    selectedIndex.value = firstIndex
+    await ensureKeyboardSelectionVisible()
+  }
+}
+
+const scrollToEnd = async () => {
+  if (contentRef.value) {
+    contentRef.value.scrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+  }
+  if (filteredHistory.value.length > 0) {
+    const lastIndex = filteredHistory.value[filteredHistory.value.length - 1].index
+    selectedIndex.value = lastIndex
+    await ensureKeyboardSelectionVisible()
+  }
+}
+
 const fillByIndex = async (index) => {
   if (isFilling.value) return
   isFilling.value = true
@@ -281,6 +412,11 @@ const assignToCategory = async (category) => {
 }
 
 const handleDragStart = (event, itemId) => {
+  if (!event.ctrlKey || isContentDragging) {
+    event.preventDefault()
+    return
+  }
+  stopContentDragging()
   dragItemId.value = itemId
   event.dataTransfer.effectAllowed = 'copy'
   event.dataTransfer.setData('text/plain', itemId)
@@ -296,10 +432,11 @@ const handleDrop = async (event, category) => {
   if (target && target.classList.contains('category-pill')) {
     target.classList.remove('drag-over')
   }
-  if (!dragItemId.value || category === '全部') return
-  categoryMap.value[dragItemId.value] = category
+  const droppedItemId = dragItemId.value || event.dataTransfer?.getData('text/plain') || ''
+  if (!droppedItemId || category === '全部') return
+  categoryMap.value[droppedItemId] = category
   try {
-    await ImageCategoryService.setItemCategory(dragItemId.value, category)
+    await ImageCategoryService.setItemCategory(droppedItemId, category)
   } catch (error) {
     console.error('拖拽设置图片分类失败:', error)
   }
@@ -307,13 +444,21 @@ const handleDrop = async (event, category) => {
 
 const startCreateCategory = () => {
   isAddingCategory.value = true
+  categoryInputOpenedAt.value = Date.now()
   newCategoryName.value = ''
   nextTick(() => {
     newCategoryInputRef.value?.focus()
   })
 }
 
-const confirmCreateCategory = async () => {
+const confirmCreateCategory = async (event) => {
+  const isBlurEvent = event?.type === 'blur'
+  if (isBlurEvent && Date.now() - categoryInputOpenedAt.value < 250) {
+    nextTick(() => {
+      newCategoryInputRef.value?.focus()
+    })
+    return
+  }
   const category = newCategoryName.value.trim()
   if (category && category !== '未分类' && category !== '全部' && !categories.value.includes(category)) {
     categories.value.push(category)
@@ -325,11 +470,13 @@ const confirmCreateCategory = async () => {
   }
   isAddingCategory.value = false
   newCategoryName.value = ''
+  categoryInputOpenedAt.value = 0
 }
 
 const cancelCreateCategory = () => {
   isAddingCategory.value = false
   newCategoryName.value = ''
+  categoryInputOpenedAt.value = 0
 }
 
 const removeCategory = async (category) => {
@@ -350,19 +497,22 @@ const removeCategory = async (category) => {
   }
 }
 
-const applyPayload = (data) => {
+const applyPayload = (data, options = {}) => {
+  const {refocus = false} = options
   history.value = Array.isArray(data.history) ? data.history : []
   warmedIndices.clear()
   warmingIndices.clear()
   if (typeof data.bottomOffset === 'number') {
     bottomOffset.value = clampBottomOffset(data.bottomOffset)
   }
-  categoryMap.value = data.categories || {}
-  if (Array.isArray(data.category_list)) {
-    const list = data.category_list.filter((c) => c !== '未分类' && c !== '全部')
-    categories.value = ['未分类', ...Array.from(new Set(list))]
-  } else {
-    categories.value = ['未分类']
+  if (!isAddingCategory.value) {
+    categoryMap.value = data.categories || {}
+    if (Array.isArray(data.category_list)) {
+      const list = data.category_list.filter((c) => c !== '未分类' && c !== '全部')
+      categories.value = ['未分类', ...Array.from(new Set(list))]
+    } else {
+      categories.value = ['未分类']
+    }
   }
   selectedIndex.value = typeof data.selectedIndex === 'number' ? data.selectedIndex : 0
   if (selectedIndex.value < 0 || selectedIndex.value >= history.value.length) {
@@ -370,9 +520,11 @@ const applyPayload = (data) => {
   }
   warmupOne(selectedIndex.value)
   isVisible.value = true
-  nextTick(() => {
-    containerRef.value?.focus()
-  })
+  if (refocus && !isAddingCategory.value) {
+    nextTick(() => {
+      containerRef.value?.focus()
+    })
+  }
 }
 
 const syncHistory = async () => {
@@ -381,14 +533,31 @@ const syncHistory = async () => {
     applyPayload({
       ...data,
       selectedIndex: typeof selectedIndex.value === 'number' ? selectedIndex.value : 0
-    })
+    }, {refocus: false})
   } catch (error) {
     console.error('同步图片历史失败:', error)
   }
 }
 
+const startShortPolling = () => {
+  shortPollUntil = Date.now() + SHORT_POLL_DURATION_MS
+  if (refreshTimer) return
+  refreshTimer = window.setInterval(async () => {
+    if (!isVisible.value || isAddingCategory.value) return
+    if (Date.now() > shortPollUntil) {
+      if (refreshTimer) {
+        window.clearInterval(refreshTimer)
+        refreshTimer = null
+      }
+      return
+    }
+    await syncHistory()
+  }, SHORT_POLL_INTERVAL_MS)
+}
+
 const handleKeydown = async (event) => {
   if (!isVisible.value) return
+  if (isInputLikeTarget(event.target)) return
 
   if (contextMenuVisible.value && event.key === 'Escape') {
     closeContextMenu()
@@ -403,10 +572,12 @@ const handleKeydown = async (event) => {
     event.preventDefault()
     currentVisibleIndex = Math.max(0, currentVisibleIndex - 1)
     selectedIndex.value = visible[currentVisibleIndex].index
+    await ensureKeyboardSelectionVisible()
   } else if (event.key === 'ArrowRight') {
     event.preventDefault()
     currentVisibleIndex = Math.min(visible.length - 1, currentVisibleIndex + 1)
     selectedIndex.value = visible[currentVisibleIndex].index
+    await ensureKeyboardSelectionVisible()
   } else if (event.key === 'Enter') {
     event.preventDefault()
     if (selectedIndex.value >= 0 && selectedIndex.value < history.value.length) {
@@ -418,21 +589,22 @@ const handleKeydown = async (event) => {
   }
 }
 
+const isInputLikeTarget = (target) => {
+  const tagName = target?.tagName?.toLowerCase?.()
+  return tagName === 'input' || tagName === 'textarea' || target?.isContentEditable
+}
+
 onMounted(async () => {
   await syncHistory()
   unlistenShowWindow = await listen('show-image-window', (event) => {
-    applyPayload(event.payload)
+    applyPayload(event.payload, {refocus: true})
+    startShortPolling()
   })
   unlistenHistoryUpdated = await listen('image-history-updated', async () => {
-    if (isVisible.value) {
+    if (isVisible.value && !isAddingCategory.value) {
       await syncHistory()
     }
   })
-  refreshTimer = window.setInterval(async () => {
-    if (isVisible.value) {
-      await syncHistory()
-    }
-  }, 1500)
 
   window.addEventListener('blur', async () => {
     try {
@@ -445,6 +617,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  stopContentDragging()
   if (refreshTimer) {
     window.clearInterval(refreshTimer)
     refreshTimer = null
@@ -457,6 +630,8 @@ onBeforeUnmount(() => {
     unlistenHistoryUpdated()
     unlistenHistoryUpdated = null
   }
+  window.removeEventListener('mousemove', handleGlobalMouseMove)
+  window.removeEventListener('mouseup', handleGlobalMouseUp, true)
 })
 
 watch(selectedIndex, (value) => {
@@ -503,6 +678,10 @@ html, body {
   outline: none;
 }
 
+.container > * {
+  min-width: 0;
+}
+
 .empty-state {
   display: flex;
   justify-content: center;
@@ -513,6 +692,8 @@ html, body {
 
 .content {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   gap: 8px;
   padding: 8px;
@@ -541,7 +722,6 @@ html, body {
   position: relative;
   user-select: none;
   width: 250px;
-  height: 180px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -737,4 +917,99 @@ html, body {
 .check-icon {
   font-size: 12px;
 }
+
+.status-footer {
+  flex: 0 0 auto;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(180deg, rgba(13, 20, 33, 0.96), rgba(10, 16, 26, 0.94));
+  border-top: 1px solid rgba(167, 214, 255, 0.36);
+  z-index: 120;
+}
+
+.status-text {
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(233, 244, 255, 0.92);
+}
+
+.status-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  width: 150px;
+  max-width: calc(100% - 90px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+
+.nav-action-btn {
+  appearance: none;
+  border: 1px solid rgba(178, 223, 255, 0.95);
+  background: rgba(51, 112, 201, 0.18);
+  color: #f1f7ff;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 700;
+  padding: 9px 14px;
+  min-height: 32px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
+  box-shadow: none;
+}
+
+.icon-btn {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 34px;
+  min-width: 36px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 16px;
+  line-height: 1;
+  justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  font-weight: 800;
+}
+
+.nav-action-btn:hover {
+  border-color: rgba(178, 223, 255, 0.95);
+  background: linear-gradient(160deg, rgba(66, 146, 238, 0.98), rgba(51, 112, 201, 0.95));
+  color: #ffffff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 6px 14px rgba(20, 56, 105, 0.52);
+  transform: translateY(-1px);
+}
+
+.nav-action-btn:active {
+  transform: translateY(0);
+}
+
+.nav-action-btn:focus-visible {
+  outline: 2px solid rgba(180, 226, 255, 0.95);
+  outline-offset: 2px;
+}
+
 </style>
