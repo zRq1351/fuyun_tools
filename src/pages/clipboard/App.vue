@@ -25,7 +25,7 @@
         :translation-target-language="translationTargetLanguage"
         :explanation-target-language="explanationTargetLanguage"
     />
-    <div v-show="!isAiSettingsCollapsed" class="ai-quick-panel-wrap" @click.stop>
+    <div v-show="!isAiSettingsCollapsed" class="ai-quick-panel-wrap" @click.stop @mousedown.stop>
       <div class="ai-quick-panel">
         <div class="ai-quick-top">
         <div class="ai-control-item ai-select-item">
@@ -291,6 +291,10 @@ const closeFloatingPanels = () => {
 
 const handleContainerMouseDown = (event) => {
   if (event.button !== 0) return
+  const target = event.target
+  if (target instanceof Element && target.closest('.clipboard-ai-select-popper')) {
+    return
+  }
   closeFloatingPanels()
 }
 
