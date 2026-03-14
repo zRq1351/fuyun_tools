@@ -259,7 +259,6 @@ defineExpose({
   position: relative;
   user-select: none;
   width: 250px;
-  height: 180px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;

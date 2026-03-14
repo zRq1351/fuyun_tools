@@ -54,6 +54,8 @@ pub struct ImageHistoryData {
 
 pub struct ImageClipboardManager {
     history: Arc<Mutex<Vec<ImageHistoryItem>>>,
+    signature_index: Arc<Mutex<HashMap<String, usize>>>,
+    signature_index_dirty: Arc<AtomicBool>,
     categories: Arc<Mutex<HashMap<String, String>>>,
     category_list: Arc<Mutex<Vec<String>>>,
     save_pending: Arc<AtomicBool>,
@@ -69,8 +71,11 @@ impl ImageClipboardManager {
             ImageHistoryData::default()
         });
 
+        let signature_index = build_signature_index(&history_data.items);
         Self {
             history: Arc::new(Mutex::new(history_data.items)),
+            signature_index: Arc::new(Mutex::new(signature_index)),
+            signature_index_dirty: Arc::new(AtomicBool::new(false)),
             categories: Arc::new(Mutex::new(history_data.categories)),
             category_list: Arc::new(Mutex::new(history_data.category_list)),
             save_pending: Arc::new(AtomicBool::new(false)),
@@ -149,8 +154,9 @@ impl ImageClipboardManager {
                     &mut categories,
                     self.grouped_items_protected_from_limit,
                 );
-            cleanup_image_blob_files(overflow_paths);
+            cleanup_image_blob_files_async(overflow_paths);
             drop(history);
+            self.signature_index_dirty.store(true, Ordering::SeqCst);
             self.schedule_async_save();
         }
     }
@@ -202,6 +208,27 @@ impl ImageClipboardManager {
 
     pub fn add_rgba_image(&self, rgba: Vec<u8>, width: u32, height: u32) {
         let signature = compute_signature(&rgba, width, height);
+        {
+            let mut history = self.history.lock().unwrap();
+            let mut signature_index = self.signature_index.lock().unwrap();
+            if self.signature_index_dirty.load(Ordering::SeqCst) || signature_index.len() != history.len()
+            {
+                *signature_index = build_signature_index(&history);
+                self.signature_index_dirty.store(false, Ordering::SeqCst);
+            }
+            if let Some(&existing_index) = signature_index.get(&signature) {
+                if existing_index < history.len() {
+                    if existing_index != 0 {
+                        let moved = history.remove(existing_index);
+                        history.insert(0, moved);
+                        *signature_index = build_signature_index(&history);
+                        self.schedule_async_save();
+                    }
+                    return;
+                }
+            }
+        }
+
         let id = generate_item_id(&signature);
         let (preview_rgba, preview_width, preview_height) = generate_preview_rgba(&rgba, width, height);
         let image_path = match persist_image_blob(&id, &rgba) {
@@ -226,20 +253,6 @@ impl ImageClipboardManager {
         {
             let mut history = self.history.lock().unwrap();
             let mut categories = self.categories.lock().unwrap();
-            let mut removed_paths = Vec::new();
-            let mut removed_ids = Vec::new();
-            history.retain(|entry| {
-                if entry.signature == signature {
-                    removed_paths.push(entry.image_path.clone());
-                    removed_ids.push(entry.id.clone());
-                    false
-                } else {
-                    true
-                }
-            });
-            for removed_id in removed_ids {
-                categories.remove(&removed_id);
-            }
             history.insert(0, item);
             let overflow_paths =
                 shrink_image_history_with_group_protection(
@@ -248,8 +261,10 @@ impl ImageClipboardManager {
                     &mut categories,
                     self.grouped_items_protected_from_limit,
                 );
-            removed_paths.extend(overflow_paths);
-            cleanup_image_blob_files(removed_paths);
+            cleanup_image_blob_files_async(overflow_paths);
+            let mut signature_index = self.signature_index.lock().unwrap();
+            *signature_index = build_signature_index(&history);
+            self.signature_index_dirty.store(false, Ordering::SeqCst);
         }
 
         self.schedule_async_save();
@@ -270,7 +285,8 @@ impl ImageClipboardManager {
             categories.remove(&removed_id);
         }
 
-        cleanup_image_blob_files(vec![removed_path.clone()]);
+        cleanup_image_blob_files_async(vec![removed_path.clone()]);
+        self.signature_index_dirty.store(true, Ordering::SeqCst);
         self.schedule_async_save();
         Ok((removed_id, removed_path, removed_signature))
     }
@@ -285,6 +301,7 @@ impl ImageClipboardManager {
         }
         let moved = history.remove(index);
         history.insert(0, moved);
+        self.signature_index_dirty.store(true, Ordering::SeqCst);
         self.schedule_async_save();
         Ok(())
     }
@@ -417,7 +434,8 @@ impl ImageClipboardManager {
             &mut categories,
             self.grouped_items_protected_from_limit,
         );
-        cleanup_image_blob_files(removed_paths);
+        cleanup_image_blob_files_async(removed_paths);
+        self.signature_index_dirty.store(true, Ordering::SeqCst);
     }
 
     fn snapshot(&self) -> ImageHistoryData {
@@ -510,6 +528,14 @@ fn compact_item_for_persist(item: &ImageHistoryItem) -> ImageHistoryItem {
         rgba_bytes: Vec::new(),
         signature: item.signature.clone(),
     }
+}
+
+fn build_signature_index(history: &[ImageHistoryItem]) -> HashMap<String, usize> {
+    history
+        .iter()
+        .enumerate()
+        .map(|(idx, item)| (item.signature.clone(), idx))
+        .collect()
 }
 
 fn shrink_image_history_with_group_protection(
@@ -610,6 +636,13 @@ fn cleanup_image_blob_files(paths: Vec<String>) {
         }
         let _ = std::fs::remove_file(path);
     }
+}
+
+fn cleanup_image_blob_files_async(paths: Vec<String>) {
+    if paths.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || cleanup_image_blob_files(paths));
 }
 
 fn load_image_history_data() -> Result<ImageHistoryData, String> {
