@@ -93,10 +93,16 @@
         <span class="status-label">{{ selectedStatusText }}</span>
         <div class="status-actions">
           <button aria-label="回到开头" class="nav-action-btn icon-btn" title="回到开头" type="button"
-                  @click="scrollToStart">←
+                  @click="scrollToStart">
+            <el-icon>
+              <ArrowLeftBold/>
+            </el-icon>
           </button>
           <button aria-label="滑动到最后" class="nav-action-btn icon-btn" title="滑动到最后" type="button"
-                  @click="scrollToEnd">→
+                  @click="scrollToEnd">
+            <el-icon>
+              <ArrowRightBold/>
+            </el-icon>
           </button>
         </div>
       </div>
@@ -137,7 +143,7 @@
 
 <script setup>
 import {computed, nextTick, onMounted, ref} from 'vue'
-import {Check} from '@element-plus/icons-vue'
+import {ArrowLeftBold, ArrowRightBold, Check} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
 import {AIService, ClipboardService, WindowService} from '../../services/ipc'
 import {handleAppError} from '../../utils/errorHandler'
@@ -608,8 +614,6 @@ html, body {
   bottom: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(180deg, rgba(13, 20, 33, 0.96), rgba(10, 16, 26, 0.94));
-  border-top: 1px solid rgba(167, 214, 255, 0.36);
   z-index: 120;
 }
 
@@ -643,8 +647,8 @@ html, body {
 
 .nav-action-btn {
   appearance: none;
-  border: 1px solid rgba(178, 223, 255, 0.95);
-  background: rgba(51, 112, 201, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
   color: #f1f7ff;
   border-radius: 7px;
   font-size: 12px;
@@ -653,7 +657,7 @@ html, body {
   padding: 9px 14px;
   min-height: 32px;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   box-shadow: none;
 }
 
@@ -673,15 +677,10 @@ html, body {
 }
 
 .nav-action-btn:hover {
-  border-color: rgba(178, 223, 255, 0.95);
-  background: linear-gradient(160deg, rgba(66, 146, 238, 0.98), rgba(51, 112, 201, 0.95));
+  border-color: rgba(127, 194, 255, 0.5);
+  background: linear-gradient(135deg, rgba(28, 36, 52, 0.9), rgba(35, 45, 63, 0.84));
   color: #ffffff;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 6px 14px rgba(20, 56, 105, 0.52);
-  transform: translateY(-1px);
-}
-
-.nav-action-btn:active {
-  transform: translateY(0);
+  box-shadow: 0 0 0 1px rgba(127, 194, 255, 0.18);
 }
 
 .nav-action-btn:focus-visible {
