@@ -49,7 +49,11 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
             autostart_item: autostart_item.clone(),
         });
 
+        #[cfg(debug_assertions)]
         let mut clear_submenu_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+            vec![&clear_history_item];
+        #[cfg(not(debug_assertions))]
+        let clear_submenu_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
             vec![&clear_history_item];
 
         #[cfg(debug_assertions)]

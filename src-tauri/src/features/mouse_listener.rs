@@ -223,15 +223,6 @@ impl MouseListener {
                     return;
                 }
 
-                let selection_enabled = {
-                    let state_guard = listener_state.lock().unwrap();
-                    state_guard.settings.selection_enabled
-                };
-
-                if !selection_enabled {
-                    return;
-                }
-
                 match event.event_type {
                 EventType::KeyPress(key) => {
                     if key == Key::ControlLeft {
@@ -371,13 +362,11 @@ impl MouseListener {
                     let mouse_x = x as u64;
                     let mouse_y = y as u64;
 
-                    {
-                        let mut pos_guard = GLOBAL_STATE.last_mouse_pos.lock().unwrap();
+                    if let Ok(mut pos_guard) = GLOBAL_STATE.last_mouse_pos.try_lock() {
                         *pos_guard = (mouse_x, mouse_y);
                     }
                 }
                 _ => {
-                    hide_selection_toolbar_impl(app_handle.clone());
                 }
                 }
             }) {

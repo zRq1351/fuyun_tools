@@ -2,6 +2,7 @@ use crate::core::app_state::AppState as SharedAppState;
 use crate::core::config::{AIProvider, ProviderConfig};
 use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
+use crate::services::poll_metrics;
 use crate::ui::window_manager::{
     hide_clipboard_window, hide_image_clipboard_window, hide_image_preview_window, set_window_position,
     show_clipboard_window, show_image_clipboard_window, show_image_preview_loading_window,
@@ -10,9 +11,10 @@ use crate::ui::window_manager::{
 use crate::utils::image_clipboard::ImageHistoryPreviewItem;
 use crate::utils::utils_helpers::{
     default_explanation_prompt_template, default_translation_prompt_template, load_settings,
-    save_settings,
+    save_settings, get_dedup_scan_metrics,
 };
 use std::collections::HashMap;
+use std::fs;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -708,6 +710,44 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         "explanation_prompt_template".to_string(),
         serde_json::Value::String(settings.explanation_prompt_template.clone()),
     );
+    result.insert(
+        "clipboard_poll_min_interval_ms".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(
+            settings.clipboard_poll_min_interval_ms,
+        )),
+    );
+    result.insert(
+        "clipboard_poll_warm_interval_ms".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(
+            settings.clipboard_poll_warm_interval_ms,
+        )),
+    );
+    result.insert(
+        "clipboard_poll_idle_interval_ms".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(
+            settings.clipboard_poll_idle_interval_ms,
+        )),
+    );
+    result.insert(
+        "clipboard_poll_max_interval_ms".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(
+            settings.clipboard_poll_max_interval_ms,
+        )),
+    );
+    result.insert(
+        "clipboard_poll_report_interval_secs".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(
+            settings.clipboard_poll_report_interval_secs,
+        )),
+    );
+    result.insert(
+        "clipboard_poll_metrics_enabled".to_string(),
+        serde_json::Value::Bool(settings.clipboard_poll_metrics_enabled),
+    );
+    result.insert(
+        "clipboard_poll_metrics_log_level".to_string(),
+        serde_json::Value::String(settings.clipboard_poll_metrics_log_level.clone()),
+    );
 
     // 处理provider_configs，将encrypted_api_key替换为解密后的api_key
     let mut provider_configs_map: HashMap<String, serde_json::Value> = HashMap::new();
@@ -745,6 +785,72 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
 }
 
 #[tauri::command]
+pub async fn get_poll_metrics_history(limit: Option<usize>) -> Result<Vec<serde_json::Value>, String> {
+    if !cfg!(debug_assertions) {
+        return Err("仅开发环境可用".to_string());
+    }
+    let points = poll_metrics::list(limit.unwrap_or(120));
+    let mapped = points
+        .into_iter()
+        .filter_map(|item| serde_json::to_value(item).ok())
+        .collect();
+    Ok(mapped)
+}
+
+#[tauri::command]
+pub async fn get_poll_metrics_minute_aggregates(
+    limit_minutes: Option<usize>,
+) -> Result<Vec<serde_json::Value>, String> {
+    if !cfg!(debug_assertions) {
+        return Err("仅开发环境可用".to_string());
+    }
+    let rows = poll_metrics::aggregate_by_minute(limit_minutes.unwrap_or(60));
+    let mapped = rows
+        .into_iter()
+        .filter_map(|item| serde_json::to_value(item).ok())
+        .collect();
+    Ok(mapped)
+}
+
+#[tauri::command]
+pub async fn export_poll_metrics(format: String, limit: Option<usize>) -> Result<String, String> {
+    if !cfg!(debug_assertions) {
+        return Err("仅开发环境可用".to_string());
+    }
+    let limit = limit.unwrap_or(720);
+    match format.as_str() {
+        "json" => poll_metrics::export_json(limit),
+        "csv" => Ok(poll_metrics::export_csv(limit)),
+        _ => Err("不支持的导出格式，仅支持 json/csv".to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn export_poll_metrics_to_file(
+    format: String,
+    limit: Option<usize>,
+    file_path: String,
+) -> Result<String, String> {
+    if !cfg!(debug_assertions) {
+        return Err("仅开发环境可用".to_string());
+    }
+    if file_path.trim().is_empty() {
+        return Err("导出路径不能为空".to_string());
+    }
+    let content = export_poll_metrics(format, limit).await?;
+    fs::write(&file_path, content).map_err(|e| format!("写入导出文件失败: {}", e))?;
+    Ok(file_path)
+}
+
+#[tauri::command]
+pub async fn get_text_dedup_metrics() -> Result<serde_json::Value, String> {
+    if !cfg!(debug_assertions) {
+        return Err("仅开发环境可用".to_string());
+    }
+    serde_json::to_value(get_dedup_scan_metrics()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn save_app_settings(
     max_items: usize,
     ai_provider: String,
@@ -757,6 +863,13 @@ pub async fn save_app_settings(
     grouped_items_protected_from_limit: bool,
     translation_prompt_template: String,
     explanation_prompt_template: String,
+    clipboard_poll_min_interval_ms: u64,
+    clipboard_poll_warm_interval_ms: u64,
+    clipboard_poll_idle_interval_ms: u64,
+    clipboard_poll_max_interval_ms: u64,
+    clipboard_poll_report_interval_secs: u64,
+    clipboard_poll_metrics_enabled: bool,
+    clipboard_poll_metrics_log_level: String,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -771,6 +884,13 @@ pub async fn save_app_settings(
     settings.max_items = max_items;
     settings.selection_enabled = selection_enabled;
     settings.grouped_items_protected_from_limit = grouped_items_protected_from_limit;
+    settings.clipboard_poll_min_interval_ms = clipboard_poll_min_interval_ms;
+    settings.clipboard_poll_warm_interval_ms = clipboard_poll_warm_interval_ms;
+    settings.clipboard_poll_idle_interval_ms = clipboard_poll_idle_interval_ms;
+    settings.clipboard_poll_max_interval_ms = clipboard_poll_max_interval_ms;
+    settings.clipboard_poll_report_interval_secs = clipboard_poll_report_interval_secs;
+    settings.clipboard_poll_metrics_enabled = clipboard_poll_metrics_enabled;
+    settings.clipboard_poll_metrics_log_level = clipboard_poll_metrics_log_level;
     settings.translation_prompt_template = if translation_prompt_template.trim().is_empty() {
         default_translation_prompt_template()
     } else {

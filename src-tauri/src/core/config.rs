@@ -6,6 +6,18 @@ use std::time::Duration;
 
 /// 剪贴板轮询间隔时间
 pub const CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(100);
+pub const CLIPBOARD_POLL_MIN_INTERVAL: Duration = Duration::from_millis(50);
+pub const CLIPBOARD_POLL_WARM_INTERVAL: Duration = Duration::from_millis(200);
+pub const CLIPBOARD_POLL_IDLE_INTERVAL: Duration = Duration::from_millis(1200);
+pub const CLIPBOARD_POLL_MAX_INTERVAL: Duration = Duration::from_millis(3000);
+pub const CLIPBOARD_POLL_REPORT_INTERVAL: Duration = Duration::from_secs(60);
+pub const DEFAULT_CLIPBOARD_POLL_MIN_INTERVAL_MS: u64 = 50;
+pub const DEFAULT_CLIPBOARD_POLL_WARM_INTERVAL_MS: u64 = 200;
+pub const DEFAULT_CLIPBOARD_POLL_IDLE_INTERVAL_MS: u64 = 1200;
+pub const DEFAULT_CLIPBOARD_POLL_MAX_INTERVAL_MS: u64 = 3000;
+pub const DEFAULT_CLIPBOARD_POLL_REPORT_INTERVAL_SECS: u64 = 60;
+pub const DEFAULT_CLIPBOARD_POLL_METRICS_ENABLED: bool = true;
+pub const DEFAULT_CLIPBOARD_POLL_METRICS_LOG_LEVEL: &str = "info";
 /// 剪贴板窗口与任务栏之间的额外安全边距（像素）
 pub const CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN: i32 = 8;
 /// 默认切换快捷键（根据操作系统自动适配）

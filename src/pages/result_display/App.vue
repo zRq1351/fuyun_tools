@@ -101,8 +101,78 @@ const originalRef = ref(null)
 const isWaitingResult = ref(false)
 const loadingStartedAt = ref(0)
 
-const originalHtml = computed(() => marked.parse(originalText.value))
-const resultHtml = computed(() => marked.parse(resultText.value))
+const escapeHtml = (value = '') =>
+    value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;')
+
+const isSafeUrl = (rawUrl) => {
+  if (!rawUrl) return false
+  if (rawUrl.startsWith('#') || rawUrl.startsWith('/')) return true
+  try {
+    const parsed = new URL(rawUrl, 'https://local.invalid')
+    return ['http:', 'https:', 'mailto:', 'tel:'].includes(parsed.protocol)
+  } catch {
+    return false
+  }
+}
+
+const renderer = new marked.Renderer()
+renderer.html = (...args) => {
+  const raw = typeof args[0] === 'string' ? args[0] : (args[0]?.text || '')
+  return escapeHtml(raw)
+}
+renderer.link = (...args) => {
+  let href = ''
+  let title = ''
+  let text = ''
+  if (args.length === 1 && typeof args[0] === 'object') {
+    href = args[0]?.href || ''
+    title = args[0]?.title || ''
+    text = args[0]?.text || ''
+  } else {
+    href = args[0] || ''
+    title = args[1] || ''
+    text = args[2] || ''
+  }
+  if (!isSafeUrl(href)) {
+    return `<span>${escapeHtml(text || href)}</span>`
+  }
+  const safeTitle = title ? ` title="${escapeHtml(title)}"` : ''
+  return `<a href="${escapeHtml(href)}"${safeTitle} target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(text || href)}</a>`
+}
+renderer.image = (...args) => {
+  let href = ''
+  let title = ''
+  let text = ''
+  if (args.length === 1 && typeof args[0] === 'object') {
+    href = args[0]?.href || ''
+    title = args[0]?.title || ''
+    text = args[0]?.text || ''
+  } else {
+    href = args[0] || ''
+    title = args[1] || ''
+    text = args[2] || ''
+  }
+  if (!isSafeUrl(href)) {
+    return ''
+  }
+  const safeTitle = title ? ` title="${escapeHtml(title)}"` : ''
+  return `<img src="${escapeHtml(href)}" alt="${escapeHtml(text || '')}"${safeTitle} loading="lazy">`
+}
+
+const renderMarkdownSafely = (markdownText) =>
+    marked.parse(markdownText || '', {
+      renderer,
+      gfm: true,
+      breaks: true
+    })
+
+const originalHtml = computed(() => renderMarkdownSafely(originalText.value))
+const resultHtml = computed(() => renderMarkdownSafely(resultText.value))
 
 onMounted(async () => {
   const loadInitialData = () => {
