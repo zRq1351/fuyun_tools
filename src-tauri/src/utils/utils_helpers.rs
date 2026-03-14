@@ -1,11 +1,17 @@
-use crate::core::config::{ProviderConfig, DEFAULT_IMAGE_TOGGLE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT};
+use crate::core::config::{
+    ProviderConfig, DEFAULT_CLIPBOARD_POLL_IDLE_INTERVAL_MS, DEFAULT_CLIPBOARD_POLL_MAX_INTERVAL_MS,
+    DEFAULT_CLIPBOARD_POLL_METRICS_ENABLED, DEFAULT_CLIPBOARD_POLL_METRICS_LOG_LEVEL,
+    DEFAULT_CLIPBOARD_POLL_MIN_INTERVAL_MS, DEFAULT_CLIPBOARD_POLL_REPORT_INTERVAL_SECS,
+    DEFAULT_CLIPBOARD_POLL_WARM_INTERVAL_MS, DEFAULT_IMAGE_TOGGLE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT,
+};
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::fs;
 
 const LEGACY_ENCRYPTION_KEY: &[u8] = b"fuyun_tools_encryption_key_2025!"; // 32字节旧版密钥，仅用于迁移
@@ -37,6 +43,20 @@ pub struct AppSettingsData {
     pub translation_prompt_template: String,
     #[serde(default = "default_explanation_prompt_template")]
     pub explanation_prompt_template: String,
+    #[serde(default = "default_clipboard_poll_min_interval_ms")]
+    pub clipboard_poll_min_interval_ms: u64,
+    #[serde(default = "default_clipboard_poll_warm_interval_ms")]
+    pub clipboard_poll_warm_interval_ms: u64,
+    #[serde(default = "default_clipboard_poll_idle_interval_ms")]
+    pub clipboard_poll_idle_interval_ms: u64,
+    #[serde(default = "default_clipboard_poll_max_interval_ms")]
+    pub clipboard_poll_max_interval_ms: u64,
+    #[serde(default = "default_clipboard_poll_report_interval_secs")]
+    pub clipboard_poll_report_interval_secs: u64,
+    #[serde(default = "default_clipboard_poll_metrics_enabled")]
+    pub clipboard_poll_metrics_enabled: bool,
+    #[serde(default = "default_clipboard_poll_metrics_log_level")]
+    pub clipboard_poll_metrics_log_level: String,
 }
 
 impl Default for AppSettingsData {
@@ -53,6 +73,13 @@ impl Default for AppSettingsData {
             clipboard_bottom_offset: default_clipboard_bottom_offset(),
             translation_prompt_template: default_translation_prompt_template(),
             explanation_prompt_template: default_explanation_prompt_template(),
+            clipboard_poll_min_interval_ms: default_clipboard_poll_min_interval_ms(),
+            clipboard_poll_warm_interval_ms: default_clipboard_poll_warm_interval_ms(),
+            clipboard_poll_idle_interval_ms: default_clipboard_poll_idle_interval_ms(),
+            clipboard_poll_max_interval_ms: default_clipboard_poll_max_interval_ms(),
+            clipboard_poll_report_interval_secs: default_clipboard_poll_report_interval_secs(),
+            clipboard_poll_metrics_enabled: default_clipboard_poll_metrics_enabled(),
+            clipboard_poll_metrics_log_level: default_clipboard_poll_metrics_log_level(),
         }
     }
 }
@@ -73,12 +100,79 @@ fn default_clipboard_bottom_offset() -> i32 {
     8
 }
 
+fn default_clipboard_poll_min_interval_ms() -> u64 {
+    DEFAULT_CLIPBOARD_POLL_MIN_INTERVAL_MS
+}
+
+fn default_clipboard_poll_warm_interval_ms() -> u64 {
+    DEFAULT_CLIPBOARD_POLL_WARM_INTERVAL_MS
+}
+
+fn default_clipboard_poll_idle_interval_ms() -> u64 {
+    DEFAULT_CLIPBOARD_POLL_IDLE_INTERVAL_MS
+}
+
+fn default_clipboard_poll_max_interval_ms() -> u64 {
+    DEFAULT_CLIPBOARD_POLL_MAX_INTERVAL_MS
+}
+
+fn default_clipboard_poll_report_interval_secs() -> u64 {
+    DEFAULT_CLIPBOARD_POLL_REPORT_INTERVAL_SECS
+}
+
+fn default_clipboard_poll_metrics_enabled() -> bool {
+    DEFAULT_CLIPBOARD_POLL_METRICS_ENABLED
+}
+
+fn default_clipboard_poll_metrics_log_level() -> String {
+    DEFAULT_CLIPBOARD_POLL_METRICS_LOG_LEVEL.to_string()
+}
+
 pub fn default_translation_prompt_template() -> String {
     "你是专业翻译助手。任务：将用户文本翻译为{target_language}。\n要求：\n1) 自动识别源语言（如已提供{source_language}且不是“自动识别”，按其处理）。\n2) 忠实原意，不遗漏、不杜撰。\n3) 保留专有名词、代码、变量、URL、邮箱、数字与单位。\n4) 保持原文段落与换行结构。\n5) 只输出译文，不要任何说明。\n\n待翻译文本：\n{text}".to_string()
 }
 
 pub fn default_explanation_prompt_template() -> String {
     "你是清晰易懂的讲解助手。请使用{target_language}解释下列内容。\n要求：\n1) 先给一句话总结，再分点说明关键点。\n2) 面向普通用户，术语给简短释义。\n3) 保持准确，不编造；不确定时直接说明。\n4) 控制在180字以内。\n5) 仅输出解释内容。\n\n待解释文本：\n{text}".to_string()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct MigrationVersion {
+    major: u32,
+    minor: u32,
+    patch: u32,
+}
+
+impl MigrationVersion {
+    const fn new(major: u32, minor: u32, patch: u32) -> Self {
+        Self { major, minor, patch }
+    }
+}
+
+fn parse_migration_version(raw: &str) -> Option<MigrationVersion> {
+    let trimmed = raw.trim().trim_start_matches('v');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if !trimmed.contains('.') {
+        if let Ok(legacy) = trimmed.parse::<u32>() {
+            return Some(MigrationVersion::new(0, legacy, 0));
+        }
+    }
+
+    let core = trimmed
+        .split_once('-')
+        .map(|(left, _)| left)
+        .unwrap_or(trimmed)
+        .split_once('+')
+        .map(|(left, _)| left)
+        .unwrap_or(trimmed);
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse::<u32>().ok()?;
+    let minor = parts.next().unwrap_or("0").parse::<u32>().ok()?;
+    let patch = parts.next().unwrap_or("0").parse::<u32>().ok()?;
+    Some(MigrationVersion::new(major, minor, patch))
 }
 
 impl AppSettingsData {
@@ -273,6 +367,33 @@ impl AppSettingsData {
         if self.max_items == 0 || self.max_items > 1000 {
             return Err("max_items必须在1-1000之间".to_string());
         }
+        if self.clipboard_poll_min_interval_ms < 20 || self.clipboard_poll_min_interval_ms > 3000 {
+            return Err("clipboard_poll_min_interval_ms必须在20-3000之间".to_string());
+        }
+        if self.clipboard_poll_warm_interval_ms < self.clipboard_poll_min_interval_ms
+            || self.clipboard_poll_warm_interval_ms > 8000
+        {
+            return Err("clipboard_poll_warm_interval_ms必须在[min_interval,8000]之间".to_string());
+        }
+        if self.clipboard_poll_idle_interval_ms < self.clipboard_poll_warm_interval_ms
+            || self.clipboard_poll_idle_interval_ms > 20000
+        {
+            return Err("clipboard_poll_idle_interval_ms必须在[warm_interval,20000]之间".to_string());
+        }
+        if self.clipboard_poll_max_interval_ms < self.clipboard_poll_idle_interval_ms
+            || self.clipboard_poll_max_interval_ms > 60000
+        {
+            return Err("clipboard_poll_max_interval_ms必须在[idle_interval,60000]之间".to_string());
+        }
+        if self.clipboard_poll_report_interval_secs < 5
+            || self.clipboard_poll_report_interval_secs > 3600
+        {
+            return Err("clipboard_poll_report_interval_secs必须在5-3600之间".to_string());
+        }
+        let level = self.clipboard_poll_metrics_log_level.as_str();
+        if level != "trace" && level != "debug" && level != "info" && level != "warn" {
+            return Err("clipboard_poll_metrics_log_level仅支持trace/debug/info/warn".to_string());
+        }
 
         Ok(())
     }
@@ -309,10 +430,13 @@ impl AppSettingsData {
             return;
         }
 
-        match (self.version.parse::<u32>(), current_version.parse::<u32>()) {
-            (Ok(old_ver), Ok(new_ver)) => {
+        match (
+            parse_migration_version(&self.version),
+            parse_migration_version(&current_version),
+        ) {
+            (Some(old_ver), Some(new_ver)) => {
                 if old_ver < new_ver {
-                    log::debug!("执行版本 {} 到 {} 的迁移", old_ver, new_ver);
+                    log::debug!("执行版本 {} 到 {} 的迁移", self.version, current_version);
                     self.perform_version_migration(old_ver, new_ver);
                 }
             }
@@ -327,14 +451,18 @@ impl AppSettingsData {
     }
 
     /// 执行具体的版本迁移逻辑
-    fn perform_version_migration(&mut self, old_version: u32, new_version: u32) {
-        log::info!("执行版本迁移: {} -> {}", old_version, new_version);
-        if old_version < 3 && new_version >= 3 {
+    fn perform_version_migration(&mut self, old_version: MigrationVersion, new_version: MigrationVersion) {
+        log::info!("执行版本迁移: {:?} -> {:?}", old_version, new_version);
+        if old_version < MigrationVersion::new(0, 3, 0)
+            && new_version >= MigrationVersion::new(0, 3, 0)
+        {
             log::info!("迁移至版本 3: 初始化AI提供商配置");
             self.initialize_ai_provider_configs_if_needed();
         }
 
-        if old_version < 2 && new_version >= 2 {
+        if old_version < MigrationVersion::new(0, 2, 0)
+            && new_version >= MigrationVersion::new(0, 2, 0)
+        {
             log::info!("迁移至版本 2: 确保基础配置完整性");
             self.ensure_basic_config_integrity();
         }
@@ -379,6 +507,36 @@ impl AppSettingsData {
 
         if self.explanation_prompt_template.trim().is_empty() {
             self.explanation_prompt_template = default_explanation_prompt_template();
+        }
+        if self.clipboard_poll_min_interval_ms < 20 || self.clipboard_poll_min_interval_ms > 3000 {
+            self.clipboard_poll_min_interval_ms = default_clipboard_poll_min_interval_ms();
+        }
+        if self.clipboard_poll_warm_interval_ms < self.clipboard_poll_min_interval_ms
+            || self.clipboard_poll_warm_interval_ms > 8000
+        {
+            self.clipboard_poll_warm_interval_ms = default_clipboard_poll_warm_interval_ms();
+        }
+        if self.clipboard_poll_idle_interval_ms < self.clipboard_poll_warm_interval_ms
+            || self.clipboard_poll_idle_interval_ms > 20000
+        {
+            self.clipboard_poll_idle_interval_ms = default_clipboard_poll_idle_interval_ms();
+        }
+        if self.clipboard_poll_max_interval_ms < self.clipboard_poll_idle_interval_ms
+            || self.clipboard_poll_max_interval_ms > 60000
+        {
+            self.clipboard_poll_max_interval_ms = default_clipboard_poll_max_interval_ms();
+        }
+        if self.clipboard_poll_report_interval_secs < 5
+            || self.clipboard_poll_report_interval_secs > 3600
+        {
+            self.clipboard_poll_report_interval_secs = default_clipboard_poll_report_interval_secs();
+        }
+        let valid_level = matches!(
+            self.clipboard_poll_metrics_log_level.as_str(),
+            "trace" | "debug" | "info" | "warn"
+        );
+        if !valid_level {
+            self.clipboard_poll_metrics_log_level = default_clipboard_poll_metrics_log_level();
         }
 
         log::debug!("迁移后 max_items: {}", self.max_items);
@@ -700,6 +858,13 @@ pub fn get_logs_dir_path() -> PathBuf {
     logs_dir
 }
 
+pub fn get_poll_metrics_file_path() -> PathBuf {
+    let mut metrics_path = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    metrics_path.pop();
+    metrics_path.push("poll_metrics_history.json");
+    metrics_path
+}
+
 /// 初始化内置提供商配置
 fn initialize_builtin_providers(settings: &mut AppSettingsData) {
     use crate::core::config::{AIProvider, ProviderConfig};
@@ -755,6 +920,118 @@ pub struct VersionComparison {
     pub reason: String,
 }
 
+const LCS_MAX_CHARS_EACH: usize = 1400;
+const LCS_MAX_PRODUCT: usize = 1_600_000;
+const FIND_BEST_CANDIDATE_BUDGET_MS: u64 = 18;
+const FIND_BEST_CANDIDATE_BUDGET_MIN_MS: u64 = 12;
+const FIND_BEST_CANDIDATE_BUDGET_MAX_MS: u64 = 30;
+const CANDIDATE_LEN_RATIO_MIN: f64 = 0.22;
+const CANDIDATE_EDGE_MATCH_MIN: f64 = 0.06;
+static FIND_BEST_CANDIDATE_DYNAMIC_BUDGET_MS: AtomicU64 =
+    AtomicU64::new(FIND_BEST_CANDIDATE_BUDGET_MS);
+static DEDUP_SCAN_TOTAL: AtomicU64 = AtomicU64::new(0);
+static DEDUP_SCAN_TIMEOUTS: AtomicU64 = AtomicU64::new(0);
+static DEDUP_SCAN_ELAPSED_TOTAL_MS: AtomicU64 = AtomicU64::new(0);
+static DEDUP_SCAN_ITEMS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static DEDUP_SCAN_LAST_ELAPSED_MS: AtomicU64 = AtomicU64::new(0);
+static DEDUP_SCAN_LAST_SCANNED_ITEMS: AtomicU64 = AtomicU64::new(0);
+static DEDUP_SCAN_LAST_TIMEOUT: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Serialize)]
+pub struct DedupScanMetrics {
+    pub budget_ms_current: u64,
+    pub total_scans: u64,
+    pub timeout_scans: u64,
+    pub timeout_ratio: f64,
+    pub avg_elapsed_ms: f64,
+    pub avg_scanned_items: f64,
+    pub last_elapsed_ms: u64,
+    pub last_scanned_items: u64,
+    pub last_timeout: bool,
+}
+
+pub fn get_dedup_scan_metrics() -> DedupScanMetrics {
+    let total_scans = DEDUP_SCAN_TOTAL.load(Ordering::Relaxed);
+    let timeout_scans = DEDUP_SCAN_TIMEOUTS.load(Ordering::Relaxed);
+    let elapsed_total = DEDUP_SCAN_ELAPSED_TOTAL_MS.load(Ordering::Relaxed);
+    let items_total = DEDUP_SCAN_ITEMS_TOTAL.load(Ordering::Relaxed);
+    let timeout_ratio = if total_scans == 0 {
+        0.0
+    } else {
+        timeout_scans as f64 / total_scans as f64
+    };
+    let avg_elapsed_ms = if total_scans == 0 {
+        0.0
+    } else {
+        elapsed_total as f64 / total_scans as f64
+    };
+    let avg_scanned_items = if total_scans == 0 {
+        0.0
+    } else {
+        items_total as f64 / total_scans as f64
+    };
+    DedupScanMetrics {
+        budget_ms_current: FIND_BEST_CANDIDATE_DYNAMIC_BUDGET_MS.load(Ordering::Relaxed),
+        total_scans,
+        timeout_scans,
+        timeout_ratio,
+        avg_elapsed_ms,
+        avg_scanned_items,
+        last_elapsed_ms: DEDUP_SCAN_LAST_ELAPSED_MS.load(Ordering::Relaxed),
+        last_scanned_items: DEDUP_SCAN_LAST_SCANNED_ITEMS.load(Ordering::Relaxed),
+        last_timeout: DEDUP_SCAN_LAST_TIMEOUT.load(Ordering::Relaxed) == 1,
+    }
+}
+
+fn prefix_match_ratio(text1: &str, text2: &str, sample_len: usize) -> f64 {
+    let a: Vec<char> = text1.chars().take(sample_len).collect();
+    let b: Vec<char> = text2.chars().take(sample_len).collect();
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+    let mut same = 0usize;
+    for i in 0..n {
+        if a[i] == b[i] {
+            same += 1;
+        }
+    }
+    same as f64 / n as f64
+}
+
+fn suffix_match_ratio(text1: &str, text2: &str, sample_len: usize) -> f64 {
+    let mut a: Vec<char> = text1.chars().rev().take(sample_len).collect();
+    let mut b: Vec<char> = text2.chars().rev().take(sample_len).collect();
+    a.reverse();
+    b.reverse();
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+    let mut same = 0usize;
+    for i in 0..n {
+        if a[i] == b[i] {
+            same += 1;
+        }
+    }
+    same as f64 / n as f64
+}
+
+fn calculate_text_similarity_fast(text1: &str, text2: &str, len1: usize, len2: usize) -> f64 {
+    if text1 == text2 {
+        return 1.0;
+    }
+    let max_len = len1.max(len2) as f64;
+    let min_len = len1.min(len2) as f64;
+    let length_ratio = if max_len == 0.0 { 0.0 } else { min_len / max_len };
+    if text1.contains(text2) || text2.contains(text1) {
+        return length_ratio.max(0.85);
+    }
+    let head = prefix_match_ratio(text1, text2, 256);
+    let tail = suffix_match_ratio(text1, text2, 256);
+    (head * 0.35 + tail * 0.35 + length_ratio * 0.30).min(1.0)
+}
+
 /// 计算两个文本的相似度
 /// 使用最长公共子序列(LCS)算法计算相似度
 pub fn calculate_text_similarity(text1: &str, text2: &str) -> f64 {
@@ -771,8 +1048,14 @@ pub fn calculate_text_similarity(text1: &str, text2: &str) -> f64 {
     let len1 = chars1.len();
     let len2 = chars2.len();
 
-    log::debug!("计算相似度: '{}' vs '{}'", text1, text2);
-    log::debug!("长度: {} vs {}", len1, len2);
+    log::debug!("计算相似度，长度: {} vs {}", len1, len2);
+
+    if len1 > LCS_MAX_CHARS_EACH
+        || len2 > LCS_MAX_CHARS_EACH
+        || len1.saturating_mul(len2) > LCS_MAX_PRODUCT
+    {
+        return calculate_text_similarity_fast(text1, text2, len1, len2);
+    }
 
     // 创建DP表
     let mut dp = vec![vec![0; len2 + 1]; len1 + 1];
@@ -804,9 +1087,37 @@ pub fn calculate_text_similarity(text1: &str, text2: &str) -> f64 {
     similarity
 }
 
+fn candidate_prefilter(old_text: &str, new_text: &str) -> bool {
+    if old_text.is_empty() || new_text.is_empty() {
+        return true;
+    }
+    if old_text.contains(new_text) || new_text.contains(old_text) {
+        return true;
+    }
+    let len_old = old_text.chars().count();
+    let len_new = new_text.chars().count();
+    let min_len = len_old.min(len_new) as f64;
+    let max_len = len_old.max(len_new) as f64;
+    if max_len > 0.0 && (min_len / max_len) < CANDIDATE_LEN_RATIO_MIN {
+        return false;
+    }
+    let head = prefix_match_ratio(old_text, new_text, 32);
+    let tail = suffix_match_ratio(old_text, new_text, 32);
+    head >= CANDIDATE_EDGE_MATCH_MIN || tail >= CANDIDATE_EDGE_MATCH_MIN
+}
+
 /// 检测文本完整性
 /// 分析文本是否可能是截断版本
 pub fn detect_text_completeness(text: &str, reference_text: &str) -> TextCompleteness {
+    let similarity = calculate_text_similarity(text, reference_text);
+    detect_text_completeness_with_similarity(text, reference_text, similarity)
+}
+
+fn detect_text_completeness_with_similarity(
+    text: &str,
+    reference_text: &str,
+    similarity: f64,
+) -> TextCompleteness {
     if text.is_empty() || reference_text.is_empty() {
         return TextCompleteness::Unknown;
     }
@@ -837,7 +1148,6 @@ pub fn detect_text_completeness(text: &str, reference_text: &str) -> TextComplet
     }
 
     // 检查相似度，如果很高但不是上述情况，可能是部分内容缺失
-    let similarity = calculate_text_similarity(text, reference_text);
     if similarity > 0.8 {
         // 通过字符位置分析判断缺失类型
         let text_chars: Vec<char> = text.chars().collect();
@@ -945,9 +1255,13 @@ fn is_subset_of(new_text: &str, old_text: &str) -> bool {
 /// 比较两个版本并决定是否应该替换
 pub fn compare_versions(old_text: &str, new_text: &str, similarity_threshold: f64) -> VersionComparison {
     let similarity = calculate_text_similarity(old_text, new_text);
-    let completeness = detect_text_completeness(new_text, old_text);
+    let completeness = detect_text_completeness_with_similarity(new_text, old_text, similarity);
 
-    log::debug!("版本对比 - 旧:'{}' 新:'{}'", old_text, new_text);
+    log::debug!(
+        "版本对比 - 长度 old={} new={}",
+        old_text.chars().count(),
+        new_text.chars().count()
+    );
     log::debug!("相似度: {:.4}, 完整性: {:?}", similarity, completeness);
 
     let (should_replace, reason) = if similarity >= similarity_threshold {
@@ -1025,8 +1339,32 @@ pub fn find_best_replacement_candidate(
     similarity_threshold: f64,
 ) -> Option<(usize, VersionComparison)> {
     let mut best_candidate: Option<(usize, VersionComparison)> = None;
+    let started = Instant::now();
+    let budget_ms = FIND_BEST_CANDIDATE_DYNAMIC_BUDGET_MS
+        .load(Ordering::Relaxed)
+        .clamp(
+            FIND_BEST_CANDIDATE_BUDGET_MIN_MS,
+            FIND_BEST_CANDIDATE_BUDGET_MAX_MS,
+        );
+    let budget = Duration::from_millis(budget_ms);
+    let mut scanned = 0usize;
+    let mut timed_out = false;
 
     for (index, old_text) in history.iter().enumerate() {
+        if started.elapsed() >= budget {
+            timed_out = true;
+            log::debug!(
+                "候选扫描命中耗时预算{}ms，已扫描 {} 条，耗时 {:?}",
+                budget_ms,
+                scanned,
+                started.elapsed()
+            );
+            break;
+        }
+        if !candidate_prefilter(old_text, new_text) {
+            continue;
+        }
+        scanned += 1;
         let comparison = compare_versions(old_text, new_text, similarity_threshold);
 
         if comparison.should_replace {
@@ -1045,6 +1383,29 @@ pub fn find_best_replacement_candidate(
                 }
             }
         }
+    }
+
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    DEDUP_SCAN_TOTAL.fetch_add(1, Ordering::Relaxed);
+    DEDUP_SCAN_ELAPSED_TOTAL_MS.fetch_add(elapsed_ms, Ordering::Relaxed);
+    DEDUP_SCAN_ITEMS_TOTAL.fetch_add(scanned as u64, Ordering::Relaxed);
+    DEDUP_SCAN_LAST_ELAPSED_MS.store(elapsed_ms, Ordering::Relaxed);
+    DEDUP_SCAN_LAST_SCANNED_ITEMS.store(scanned as u64, Ordering::Relaxed);
+    DEDUP_SCAN_LAST_TIMEOUT.store(if timed_out { 1 } else { 0 }, Ordering::Relaxed);
+    if timed_out {
+        DEDUP_SCAN_TIMEOUTS.fetch_add(1, Ordering::Relaxed);
+    }
+    let next_budget_ms = if timed_out {
+        (budget_ms + 2).min(FIND_BEST_CANDIDATE_BUDGET_MAX_MS)
+    } else if elapsed_ms.saturating_mul(2) < budget_ms {
+        budget_ms
+            .saturating_sub(1)
+            .max(FIND_BEST_CANDIDATE_BUDGET_MIN_MS)
+    } else {
+        budget_ms
+    };
+    if next_budget_ms != budget_ms {
+        FIND_BEST_CANDIDATE_DYNAMIC_BUDGET_MS.store(next_budget_ms, Ordering::Relaxed);
     }
 
     best_candidate

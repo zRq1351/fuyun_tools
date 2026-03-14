@@ -1,5 +1,10 @@
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crate::utils::utils_helpers::{
     find_best_replacement_candidate, load_history_data, save_history_data_with_retry,
@@ -8,10 +13,29 @@ use crate::utils::utils_helpers::{
 
 pub struct ClipboardManager {
     history: Arc<Mutex<Vec<String>>>,
+    history_fingerprints: Arc<Mutex<Vec<(usize, u64)>>>,
+    history_cache_dirty: Arc<AtomicBool>,
+    persist_tx: Sender<ClipboardHistoryData>,
     categories: Arc<Mutex<HashMap<String, String>>>,
     category_list: Arc<Mutex<Vec<String>>>,
     max_items: usize,
     grouped_items_protected_from_limit: bool,
+}
+
+const LONG_TEXT_DEDUP_THRESHOLD: usize = 4000;
+const LONG_TEXT_DEDUP_SCAN_LIMIT: usize = 24;
+
+fn stable_text_hash(text: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn build_history_fingerprints(history: &[String]) -> Vec<(usize, u64)> {
+    history
+        .iter()
+        .map(|item| (item.chars().count(), stable_text_hash(item)))
+        .collect()
 }
 
 impl ClipboardManager {
@@ -21,13 +45,46 @@ impl ClipboardManager {
             log::error!("加载历史记录失败: {}，使用空历史记录", e);
             ClipboardHistoryData::default()
         });
+        let history_fingerprints = build_history_fingerprints(&history_data.items);
+        let (persist_tx, persist_rx) = mpsc::channel::<ClipboardHistoryData>();
+        std::thread::spawn(move || {
+            const DEBOUNCE_MS: u64 = 180;
+            loop {
+                let mut latest = match persist_rx.recv() {
+                    Ok(data) => data,
+                    Err(_) => break,
+                };
+                loop {
+                    match persist_rx.recv_timeout(Duration::from_millis(DEBOUNCE_MS)) {
+                        Ok(newer) => latest = newer,
+                        Err(RecvTimeoutError::Timeout) => break,
+                        Err(RecvTimeoutError::Disconnected) => {
+                            let _ = save_history_data_with_retry(&latest, 3);
+                            return;
+                        }
+                    }
+                }
+                if let Err(e) = save_history_data_with_retry(&latest, 3) {
+                    log::error!("异步保存历史记录失败: {}", e);
+                }
+            }
+        });
 
         Self {
             history: Arc::new(Mutex::new(history_data.items)),
+            history_fingerprints: Arc::new(Mutex::new(history_fingerprints)),
+            history_cache_dirty: Arc::new(AtomicBool::new(false)),
+            persist_tx,
             categories: Arc::new(Mutex::new(history_data.categories)),
             category_list: Arc::new(Mutex::new(history_data.category_list)),
             max_items,
             grouped_items_protected_from_limit,
+        }
+    }
+
+    fn enqueue_persist(&self, data: ClipboardHistoryData) {
+        if let Err(e) = self.persist_tx.send(data) {
+            log::error!("提交历史记录保存任务失败: {}", e);
         }
     }
 
@@ -106,15 +163,10 @@ impl ClipboardManager {
 
         let history = self.history.lock().unwrap().clone();
 
-        std::thread::spawn(move || {
-            let data = ClipboardHistoryData {
-                items: history,
-                categories: categories_clone,
-                category_list: category_list_clone,
-            };
-            if let Err(e) = save_history_data_with_retry(&data, 3) {
-                log::error!("异步保存历史数据失败: {}", e);
-            }
+        self.enqueue_persist(ClipboardHistoryData {
+            items: history,
+            categories: categories_clone,
+            category_list: category_list_clone,
         });
 
         Ok(())
@@ -141,15 +193,10 @@ impl ClipboardManager {
 
         let history = self.history.lock().unwrap().clone();
 
-        std::thread::spawn(move || {
-            let data = ClipboardHistoryData {
-                items: history,
-                categories: categories_clone,
-                category_list: category_list_clone,
-            };
-            if let Err(e) = save_history_data_with_retry(&data, 3) {
-                log::error!("异步保存历史数据失败: {}", e);
-            }
+        self.enqueue_persist(ClipboardHistoryData {
+            items: history,
+            categories: categories_clone,
+            category_list: category_list_clone,
         });
 
         Ok(())
@@ -168,15 +215,10 @@ impl ClipboardManager {
 
         let history = self.history.lock().unwrap().clone();
 
-        std::thread::spawn(move || {
-            let data = ClipboardHistoryData {
-                items: history,
-                categories: categories_clone,
-                category_list: category_list_clone,
-            };
-            if let Err(e) = save_history_data_with_retry(&data, 3) {
-                log::error!("异步保存历史数据失败: {}", e);
-            }
+        self.enqueue_persist(ClipboardHistoryData {
+            items: history,
+            categories: categories_clone,
+            category_list: category_list_clone,
         });
 
         Ok(())
@@ -186,17 +228,59 @@ impl ClipboardManager {
     pub fn add_to_history(&self, content: String) {
         let mut history = self.history.lock().unwrap();
 
-        log::debug!("添加到历史记录: '{}'", content);
-        log::debug!("当前历史记录数量: {}", history.len());
+        let content_len = content.chars().count();
+        log::debug!("添加到历史记录，长度: {}, 当前数量: {}", content_len, history.len());
+
+        let content_hash = stable_text_hash(&content);
+        let mut fingerprints = self.history_fingerprints.lock().unwrap();
+        let cache_dirty = self.history_cache_dirty.load(Ordering::Relaxed);
+        if cache_dirty || fingerprints.len() != history.len() {
+            *fingerprints = build_history_fingerprints(&history);
+            self.history_cache_dirty.store(false, Ordering::Relaxed);
+        }
+        if let Some(exact_index) = fingerprints
+            .iter()
+            .enumerate()
+            .position(|(idx, (item_len, item_hash))| {
+                *item_len == content_len
+                    && *item_hash == content_hash
+                    && history.get(idx).is_some_and(|item| item == &content)
+            })
+        {
+            if exact_index != 0 {
+                let exact_item = history.remove(exact_index);
+                history.insert(0, exact_item);
+            }
+            let mut categories = self.categories.lock().unwrap();
+            shrink_text_history_with_group_protection(
+                &mut history,
+                self.max_items,
+                &mut categories,
+                self.grouped_items_protected_from_limit,
+            );
+            let category_list = self.category_list.lock().unwrap();
+            let data = ClipboardHistoryData {
+                items: history.clone(),
+                categories: categories.clone(),
+                category_list: category_list.clone(),
+            };
+            self.enqueue_persist(data);
+            *fingerprints = build_history_fingerprints(&history);
+            self.history_cache_dirty.store(false, Ordering::Relaxed);
+            return;
+        }
 
         let similarity_threshold = 0.8;
 
-        for (i, item) in history.iter().enumerate() {
-            log::debug!("历史记录[{}]: '{}'", i, item);
-        }
+        let scan_len = if content_len >= LONG_TEXT_DEDUP_THRESHOLD {
+            history.len().min(LONG_TEXT_DEDUP_SCAN_LIMIT)
+        } else {
+            history.len()
+        };
+        let candidate_history = &history[..scan_len];
 
         if let Some((replace_index, comparison)) =
-            find_best_replacement_candidate(&content, &history, similarity_threshold)
+            find_best_replacement_candidate(&content, candidate_history, similarity_threshold)
         {
             log::info!("检测到相似版本，正在处理: {}", comparison.reason);
             log::info!("相似度: {:.4}, 完整性: {:?}", 
@@ -234,17 +318,16 @@ impl ClipboardManager {
             category_list: category_list.clone(),
         };
 
-        std::thread::spawn(move || {
-            if let Err(e) = save_history_data_with_retry(&data, 3) {
-                log::error!("异步保存历史记录失败: {}", e);
-            }
-        });
+        self.enqueue_persist(data);
+        *fingerprints = build_history_fingerprints(&history);
+        self.history_cache_dirty.store(false, Ordering::Relaxed);
     }
 
     /// 清空历史记录
     pub fn clear_history(&self) -> Result<(), String> {
         let mut history = self.history.lock().unwrap();
         history.clear();
+        self.history_cache_dirty.store(true, Ordering::Relaxed);
 
         let mut categories = self.categories.lock().unwrap();
         categories.clear();
@@ -252,15 +335,10 @@ impl ClipboardManager {
         let mut category_list = self.category_list.lock().unwrap();
         category_list.clear();
 
-        std::thread::spawn(move || {
-            let data = ClipboardHistoryData {
-                items: Vec::new(),
-                categories: HashMap::new(),
-                category_list: Vec::new(),
-            };
-            if let Err(e) = save_history_data_with_retry(&data, 3) {
-                log::error!("异步清空历史记录保存失败: {}", e);
-            }
+        self.enqueue_persist(ClipboardHistoryData {
+            items: Vec::new(),
+            categories: HashMap::new(),
+            category_list: Vec::new(),
         });
         
         log::info!("历史记录已清空");
@@ -289,11 +367,8 @@ impl ClipboardManager {
                 category_list: category_list.clone(),
             };
 
-            std::thread::spawn(move || {
-                if let Err(e) = save_history_data_with_retry(&data, 3) {
-                    log::error!("截断历史记录时保存失败: {}", e);
-                }
-            });
+            self.enqueue_persist(data);
+            self.history_cache_dirty.store(true, Ordering::Relaxed);
         }
     }
 
@@ -302,6 +377,7 @@ impl ClipboardManager {
         let mut history = self.history.lock().unwrap();
         if index < history.len() {
             let item = history.remove(index);
+            self.history_cache_dirty.store(true, Ordering::Relaxed);
 
             let mut categories = self.categories.lock().unwrap();
             categories.remove(&item);
@@ -313,11 +389,7 @@ impl ClipboardManager {
                 category_list: category_list.clone(),
             };
 
-            std::thread::spawn(move || {
-                if let Err(e) = save_history_data_with_retry(&data, 3) {
-                    log::error!("异步保存历史记录失败: {}", e);
-                }
-            });
+            self.enqueue_persist(data);
             Ok(item)
         } else {
             Err("索引超出范围".to_string())
@@ -336,21 +408,17 @@ impl ClipboardManager {
             }
             let item = history.remove(index);
             history.insert(0, item.clone());
+            self.history_cache_dirty.store(true, Ordering::Relaxed);
 
             let categories = self.categories.lock().unwrap().clone();
             let category_list = self.category_list.lock().unwrap().clone();
             (item, categories, category_list, history.clone())
         };
 
-        std::thread::spawn(move || {
-            let data = ClipboardHistoryData {
-                items: history_clone,
-                categories: categories_clone,
-                category_list: category_list_clone,
-            };
-            if let Err(e) = save_history_data_with_retry(&data, 3) {
-                log::error!("异步保存历史记录失败: {}", e);
-            }
+        self.enqueue_persist(ClipboardHistoryData {
+            items: history_clone,
+            categories: categories_clone,
+            category_list: category_list_clone,
         });
 
         Ok(item)
@@ -380,6 +448,7 @@ impl ClipboardManager {
             &mut categories,
             self.grouped_items_protected_from_limit,
         );
+        self.history_cache_dirty.store(true, Ordering::Relaxed);
     }
 }
 

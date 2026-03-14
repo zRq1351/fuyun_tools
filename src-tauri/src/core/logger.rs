@@ -1,6 +1,8 @@
 use log::LevelFilter;
 use std::time::Instant;
-use tauri_plugin_log::{Target, TargetKind};
+use tauri_plugin_log::Target;
+#[cfg(debug_assertions)]
+use tauri_plugin_log::TargetKind;
 
 #[cfg(debug_assertions)]
 use crate::utils::utils_helpers::get_logs_dir_path;

@@ -57,6 +57,11 @@ export const IPC_COMMANDS = {
     GET_PROVIDER_CONFIG: 'get_provider_config',
     REMOVE_AI_PROVIDER: 'remove_ai_provider',
     GET_ALL_CONFIGURED_PROVIDERS: 'get_all_configured_providers',
+    GET_POLL_METRICS_HISTORY: 'get_poll_metrics_history',
+    GET_POLL_METRICS_MINUTE_AGGREGATES: 'get_poll_metrics_minute_aggregates',
+    EXPORT_POLL_METRICS: 'export_poll_metrics',
+    EXPORT_POLL_METRICS_TO_FILE: 'export_poll_metrics_to_file',
+    GET_TEXT_DEDUP_METRICS: 'get_text_dedup_metrics',
 
     // AI 功能
     STREAM_TRANSLATE_TEXT: 'stream_translate_text',
@@ -202,6 +207,13 @@ export const AISettingsService = {
      * @param {boolean} params.groupedItemsProtectedFromLimit
      * @param {string} params.translationPromptTemplate
      * @param {string} params.explanationPromptTemplate
+     * @param {number} params.clipboardPollMinIntervalMs
+     * @param {number} params.clipboardPollWarmIntervalMs
+     * @param {number} params.clipboardPollIdleIntervalMs
+     * @param {number} params.clipboardPollMaxIntervalMs
+     * @param {number} params.clipboardPollReportIntervalSecs
+     * @param {boolean} params.clipboardPollMetricsEnabled
+     * @param {string} params.clipboardPollMetricsLogLevel
      * @returns {Promise<void>}
      */
     saveSettings: ({
@@ -215,7 +227,14 @@ export const AISettingsService = {
                        selectionEnabled,
                        groupedItemsProtectedFromLimit,
                        translationPromptTemplate,
-                       explanationPromptTemplate
+                       explanationPromptTemplate,
+                       clipboardPollMinIntervalMs,
+                       clipboardPollWarmIntervalMs,
+                       clipboardPollIdleIntervalMs,
+                       clipboardPollMaxIntervalMs,
+                       clipboardPollReportIntervalSecs,
+                       clipboardPollMetricsEnabled,
+                       clipboardPollMetricsLogLevel
                    }) =>
         invoke(IPC_COMMANDS.SAVE_APP_SETTINGS, {
             maxItems,
@@ -228,7 +247,14 @@ export const AISettingsService = {
             selectionEnabled,
             groupedItemsProtectedFromLimit,
             translationPromptTemplate,
-            explanationPromptTemplate
+            explanationPromptTemplate,
+            clipboardPollMinIntervalMs,
+            clipboardPollWarmIntervalMs,
+            clipboardPollIdleIntervalMs,
+            clipboardPollMaxIntervalMs,
+            clipboardPollReportIntervalSecs,
+            clipboardPollMetricsEnabled,
+            clipboardPollMetricsLogLevel
         }),
 
     /**
@@ -261,6 +287,16 @@ export const AISettingsService = {
      * @returns {Promise<Array<[string, string]>>}
      */
     getAllConfiguredProviders: () => invoke(IPC_COMMANDS.GET_ALL_CONFIGURED_PROVIDERS),
+    getPollMetricsHistory: (limit = 120) =>
+        invoke(IPC_COMMANDS.GET_POLL_METRICS_HISTORY, {limit}),
+    getPollMetricsMinuteAggregates: (limitMinutes = 60) =>
+        invoke(IPC_COMMANDS.GET_POLL_METRICS_MINUTE_AGGREGATES, {limitMinutes}),
+    exportPollMetrics: (format = 'json', limit = 720) =>
+        invoke(IPC_COMMANDS.EXPORT_POLL_METRICS, {format, limit}),
+    exportPollMetricsToFile: ({format = 'json', limit = 720, filePath}) =>
+        invoke(IPC_COMMANDS.EXPORT_POLL_METRICS_TO_FILE, {format, limit, filePath}),
+    getTextDedupMetrics: () =>
+        invoke(IPC_COMMANDS.GET_TEXT_DEDUP_METRICS),
 };
 
 /**

@@ -1,6 +1,8 @@
 use async_openai::{
     types::{
+        ChatCompletionRequestAssistantMessageArgs,
         ChatCompletionRequestMessage,
+        ChatCompletionRequestUserMessageArgs,
         ChatCompletionRequestSystemMessageArgs,
         CreateChatCompletionRequestArgs,
     },
@@ -87,12 +89,26 @@ impl AIClient {
         messages
             .iter()
             .map(|msg| {
-                ChatCompletionRequestMessage::System(
-                    ChatCompletionRequestSystemMessageArgs::default()
-                        .content(msg.content.clone())
-                        .build()
-                        .unwrap()
-                )
+                match msg.role.to_lowercase().as_str() {
+                    "assistant" => ChatCompletionRequestMessage::Assistant(
+                        ChatCompletionRequestAssistantMessageArgs::default()
+                            .content(msg.content.clone())
+                            .build()
+                            .unwrap(),
+                    ),
+                    "system" => ChatCompletionRequestMessage::System(
+                        ChatCompletionRequestSystemMessageArgs::default()
+                            .content(msg.content.clone())
+                            .build()
+                            .unwrap(),
+                    ),
+                    _ => ChatCompletionRequestMessage::User(
+                        ChatCompletionRequestUserMessageArgs::default()
+                            .content(msg.content.clone())
+                            .build()
+                            .unwrap(),
+                    ),
+                }
             })
             .collect()
     }

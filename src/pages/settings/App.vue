@@ -97,7 +97,14 @@ const form = reactive({
   customProviderName: '',
   selectionEnabled: true,
   translationPromptTemplate: '',
-  explanationPromptTemplate: ''
+  explanationPromptTemplate: '',
+  clipboardPollMinIntervalMs: 50,
+  clipboardPollWarmIntervalMs: 200,
+  clipboardPollIdleIntervalMs: 1200,
+  clipboardPollMaxIntervalMs: 3000,
+  clipboardPollReportIntervalSecs: 60,
+  clipboardPollMetricsEnabled: true,
+  clipboardPollMetricsLogLevel: 'info'
 })
 
 const toggleTheme = () => {
@@ -134,7 +141,14 @@ const saveSettings = async () => {
       selectionEnabled: form.selectionEnabled,
       groupedItemsProtectedFromLimit: form.groupedItemsProtectedFromLimit,
       translationPromptTemplate: form.translationPromptTemplate,
-      explanationPromptTemplate: form.explanationPromptTemplate
+      explanationPromptTemplate: form.explanationPromptTemplate,
+      clipboardPollMinIntervalMs: form.clipboardPollMinIntervalMs,
+      clipboardPollWarmIntervalMs: form.clipboardPollWarmIntervalMs,
+      clipboardPollIdleIntervalMs: form.clipboardPollIdleIntervalMs,
+      clipboardPollMaxIntervalMs: form.clipboardPollMaxIntervalMs,
+      clipboardPollReportIntervalSecs: form.clipboardPollReportIntervalSecs,
+      clipboardPollMetricsEnabled: form.clipboardPollMetricsEnabled,
+      clipboardPollMetricsLogLevel: form.clipboardPollMetricsLogLevel
     })
 
     if (form.aiProvider === 'custom') {
@@ -178,6 +192,13 @@ onMounted(async () => {
     form.groupedItemsProtectedFromLimit = settings.grouped_items_protected_from_limit !== false
     form.translationPromptTemplate = settings.translation_prompt_template || ''
     form.explanationPromptTemplate = settings.explanation_prompt_template || ''
+    form.clipboardPollMinIntervalMs = settings.clipboard_poll_min_interval_ms || 50
+    form.clipboardPollWarmIntervalMs = settings.clipboard_poll_warm_interval_ms || 200
+    form.clipboardPollIdleIntervalMs = settings.clipboard_poll_idle_interval_ms || 1200
+    form.clipboardPollMaxIntervalMs = settings.clipboard_poll_max_interval_ms || 3000
+    form.clipboardPollReportIntervalSecs = settings.clipboard_poll_report_interval_secs || 60
+    form.clipboardPollMetricsEnabled = settings.clipboard_poll_metrics_enabled !== false
+    form.clipboardPollMetricsLogLevel = settings.clipboard_poll_metrics_log_level || 'info'
 
     if (aiSettingsRef.value) {
       aiSettingsRef.value.applyCurrentProviderConfig(settings)
