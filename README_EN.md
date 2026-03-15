@@ -48,7 +48,7 @@ In addition, this project itself follows an AI full-process development workflow
 - Built-in DeepSeek / Qwen / Xiaomi Mimo providers
 - Supports adding any OpenAI-compatible custom provider
 - Supports deleting custom providers directly in dropdown options
-- API keys are stored locally in encrypted form
+- API keys are stored in the system credential manager (keyring)
 
 ### ⚙️ System Integration
 
@@ -111,7 +111,7 @@ Installation steps:
 
 ### Clipboard Window
 
-- `↑ / ↓`: move selection
+- `← / →`: move selection
 - `Enter`: fill selected item
 - `Esc`: hide window
 - Mouse wheel: scroll list
@@ -166,7 +166,7 @@ Extra entries in development builds:
 
 ## 🔒 Data & Security
 
-- API keys are saved locally in encrypted form
+- API keys are stored in the system credential manager (keyring), not written as plain text in config files
 - History and settings are saved locally in app files
 - Production builds do not write log files by default (log file features are for development/debugging)
 

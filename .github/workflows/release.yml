@@ -47,9 +47,10 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
-          releaseBody: '
-                        1、解决AI设置面板点击穿透问题
-                        2、修复一些BUG，优化用户体验
-          '
+          releaseBody: |
+            ## 本次更新
+            - 优化剪贴板与图片剪贴板交互体验
+            - 修复已知问题并提升稳定性
+            - 改进 AI 相关功能与设置流程
           releaseDraft: false
           prerelease: false
