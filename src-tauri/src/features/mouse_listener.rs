@@ -432,6 +432,7 @@ fn is_valid_drag_operation(distance: f64, duration: Duration) -> bool {
 /// 检查当前前台窗口是否为命令行窗口
 fn is_foreground_window_console() -> bool {
     {
+        #[cfg(target_os = "windows")]
         unsafe {
             use winapi::um::winuser::{GetClassNameW, GetForegroundWindow, GetWindowTextW};
 
