@@ -27,7 +27,6 @@ serde_json = "1"
 log = "0.4.29"
 lazy_static = "1.5.0"
 regex = "1.11.1"
-enigo = { version = "0.6.1", default-features = false }
 rdev = "0.5.3"
 async-openai = "0.24.1"
 futures-util = "0.3.31"
@@ -36,5 +35,8 @@ winapi = { version = "0.3.9", features = ["winuser", "winnt", "minwindef", "wind
 keyring = { version = "3.6.3", features = ["windows-native"] }
 image = { version = "0.25.5", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp"] }
 
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+enigo = { version = "0.6.1", default-features = false }
+
 [target.'cfg(target_os = "linux")'.dependencies]
-enigo = { version = "0.6", features = ["x11rb"] }
+enigo = { version = "0.6.1", features = ["x11rb"] }
