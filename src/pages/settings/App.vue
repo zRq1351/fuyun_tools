@@ -22,15 +22,25 @@
             关于
           </el-radio-button>
         </el-radio-group>
-        <el-button @click="toggleTheme">
-          <template #icon>
-            <component :is="isDark ? Sunny : Moon"/>
-          </template>
-          {{ isDark ? '白天' : '黑夜' }}
-        </el-button>
+        <div class="header-actions">
+          <span :class="['autosave-status', `autosave-${autoSaveState}`]">{{ autoSaveText }}</span>
+          <el-button @click="toggleTheme">
+            <template #icon>
+              <component :is="isDark ? Sunny : Moon"/>
+            </template>
+            {{ isDark ? '白天' : '黑夜' }}
+          </el-button>
+        </div>
       </div>
 
       <div class="content">
+        <el-alert
+            v-if="shortcutConflictMessage"
+            :closable="false"
+            :title="shortcutConflictMessage"
+            show-icon
+            type="error"
+        />
         <div v-show="activeTab === 'clipboard'">
           <ClipboardSettings :form="form"/>
         </div>
@@ -48,13 +58,6 @@
         </div>
       </div>
 
-      <div v-if="activeTab !== 'about'" class="footer">
-        <el-button size="large" type="success" @click="saveSettings">
-          <el-icon><Select/></el-icon>
-          保存设置
-        </el-button>
-      </div>
-
       <div class="footer-links">
         <p>
           需要帮助？
@@ -70,11 +73,12 @@
 </template>
 
 <script setup>
-import {onMounted, reactive, ref} from 'vue'
+import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from 'vue'
 import {ElMessage} from 'element-plus'
 import zhCn from 'element-plus/dist/locale/zh-cn'
-import {Cpu, DocumentCopy, InfoFilled, Moon, Select, Sunny} from '@element-plus/icons-vue'
+import {Cpu, DocumentCopy, InfoFilled, Moon, Sunny} from '@element-plus/icons-vue'
 import {openUrl} from '@tauri-apps/plugin-opener'
+import {listen} from '@tauri-apps/api/event'
 import {AISettingsService} from '../../services/ipc'
 import ClipboardSettings from './components/ClipboardSettings.vue'
 import AISettings from './components/AISettings.vue'
@@ -84,9 +88,19 @@ const activeTab = ref('clipboard')
 const isDark = ref(false)
 const currentVersion = ref('0.0.0')
 const aiSettingsRef = ref(null)
+const shortcutConflictMessage = ref('')
+let unlistenShortcutConflict = null
+let saveTimer = null
+let autoSaveStateResetTimer = null
+const isInitializing = ref(true)
+const isAutoSaving = ref(false)
+const suppressNextAutoSave = ref(false)
+const autoSaveState = ref('idle')
 
 const form = reactive({
-  maxItems: 100,
+  textMaxItems: 100,
+  imageMaxItems: 100,
+  imageDiskLimitMb: 2048,
   groupedItemsProtectedFromLimit: true,
   toggleShortcut: '',
   imageToggleShortcut: '',
@@ -97,14 +111,7 @@ const form = reactive({
   customProviderName: '',
   selectionEnabled: true,
   translationPromptTemplate: '',
-  explanationPromptTemplate: '',
-  clipboardPollMinIntervalMs: 50,
-  clipboardPollWarmIntervalMs: 200,
-  clipboardPollIdleIntervalMs: 1200,
-  clipboardPollMaxIntervalMs: 3000,
-  clipboardPollReportIntervalSecs: 60,
-  clipboardPollMetricsEnabled: true,
-  clipboardPollMetricsLogLevel: 'info'
+  explanationPromptTemplate: ''
 })
 
 const toggleTheme = () => {
@@ -119,19 +126,37 @@ const toggleTheme = () => {
   }
 }
 
-const saveSettings = async () => {
+const autoSaveText = computed(() => {
+  if (autoSaveState.value === 'pending') return '有未保存变更'
+  if (autoSaveState.value === 'saving') return '自动保存中...'
+  if (autoSaveState.value === 'saved') return '已自动保存'
+  if (autoSaveState.value === 'error') return '自动保存失败'
+  return '已同步'
+})
+
+const persistSettings = async (silent = false) => {
+  if (isInitializing.value || isAutoSaving.value) {
+    return
+  }
   let selectedProvider = form.aiProvider
   if (selectedProvider === 'custom') {
     if (!form.customProviderName) {
-      ElMessage.warning('请输入自定义提供商名称')
       return
     }
     selectedProvider = form.customProviderName
   }
 
   try {
+    isAutoSaving.value = true
+    if (autoSaveStateResetTimer) {
+      clearTimeout(autoSaveStateResetTimer)
+      autoSaveStateResetTimer = null
+    }
+    autoSaveState.value = 'saving'
     await AISettingsService.saveSettings({
-      maxItems: form.maxItems,
+      textMaxItems: form.textMaxItems,
+      imageMaxItems: form.imageMaxItems,
+      imageDiskLimitMb: form.imageDiskLimitMb,
       aiProvider: selectedProvider,
       aiApiUrl: form.apiUrl,
       aiModelName: form.modelName,
@@ -141,27 +166,37 @@ const saveSettings = async () => {
       selectionEnabled: form.selectionEnabled,
       groupedItemsProtectedFromLimit: form.groupedItemsProtectedFromLimit,
       translationPromptTemplate: form.translationPromptTemplate,
-      explanationPromptTemplate: form.explanationPromptTemplate,
-      clipboardPollMinIntervalMs: form.clipboardPollMinIntervalMs,
-      clipboardPollWarmIntervalMs: form.clipboardPollWarmIntervalMs,
-      clipboardPollIdleIntervalMs: form.clipboardPollIdleIntervalMs,
-      clipboardPollMaxIntervalMs: form.clipboardPollMaxIntervalMs,
-      clipboardPollReportIntervalSecs: form.clipboardPollReportIntervalSecs,
-      clipboardPollMetricsEnabled: form.clipboardPollMetricsEnabled,
-      clipboardPollMetricsLogLevel: form.clipboardPollMetricsLogLevel
+      explanationPromptTemplate: form.explanationPromptTemplate
     })
 
-    if (form.aiProvider === 'custom') {
-      ElMessage.success(`自定义提供商 '${selectedProvider}' 添加成功`)
+    if (form.aiProvider === 'custom' && form.customProviderName === selectedProvider) {
       if (aiSettingsRef.value) {
+        suppressNextAutoSave.value = true
         await aiSettingsRef.value.loadAiProviders()
       }
       form.aiProvider = selectedProvider
-    } else {
-      ElMessage.success('保存成功')
     }
+    shortcutConflictMessage.value = ''
+    if (!silent) {
+      ElMessage.success('已自动保存')
+    }
+    autoSaveState.value = 'saved'
+    autoSaveStateResetTimer = window.setTimeout(() => {
+      if (autoSaveState.value === 'saved') {
+        autoSaveState.value = 'idle'
+      }
+      autoSaveStateResetTimer = null
+    }, 1500)
   } catch (error) {
+    const raw = String(error || '')
+    if (raw.includes('快捷键被占用')) {
+      shortcutConflictMessage.value = raw.replace(/^Error:\s*/i, '')
+      activeTab.value = 'clipboard'
+    }
     ElMessage.error(`保存失败: ${error}`)
+    autoSaveState.value = 'error'
+  } finally {
+    isAutoSaving.value = false
   }
 }
 
@@ -173,7 +208,33 @@ const openExternal = async (url) => {
   }
 }
 
+const normalizeShortcutConflicts = (payload) => {
+  if (Array.isArray(payload)) {
+    return payload.filter((item) => typeof item === 'string' && item.trim())
+  }
+  if (payload && Array.isArray(payload.conflicts)) {
+    return payload.conflicts.filter((item) => typeof item === 'string' && item.trim())
+  }
+  return []
+}
+
+const showShortcutConflictWarning = (payload) => {
+  const conflicts = normalizeShortcutConflicts(payload)
+  if (conflicts.length === 0) return
+  activeTab.value = 'clipboard'
+  shortcutConflictMessage.value = `快捷键被占用：${conflicts.join('；')}`
+}
+
 onMounted(async () => {
+  unlistenShortcutConflict = await listen('shortcut-conflict-warning', (event) => {
+    showShortcutConflictWarning(event.payload)
+  })
+
+  if (window.__SHORTCUT_CONFLICT__) {
+    showShortcutConflictWarning(window.__SHORTCUT_CONFLICT__)
+    window.__SHORTCUT_CONFLICT__ = null
+  }
+
   const savedTheme = localStorage.getItem('settings-theme')
   const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
   if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
@@ -184,7 +245,9 @@ onMounted(async () => {
   try {
     const settings = await AISettingsService.getSettings()
 
-    form.maxItems = settings.max_items || 50
+    form.textMaxItems = settings.text_max_items || settings.max_items || 50
+    form.imageMaxItems = settings.image_max_items || settings.max_items || 50
+    form.imageDiskLimitMb = settings.image_disk_limit_mb || 2048
     currentVersion.value = settings.version || '0.3.1'
     form.toggleShortcut = settings.hot_key || ''
     form.imageToggleShortcut = settings.image_hot_key || ''
@@ -192,13 +255,6 @@ onMounted(async () => {
     form.groupedItemsProtectedFromLimit = settings.grouped_items_protected_from_limit !== false
     form.translationPromptTemplate = settings.translation_prompt_template || ''
     form.explanationPromptTemplate = settings.explanation_prompt_template || ''
-    form.clipboardPollMinIntervalMs = settings.clipboard_poll_min_interval_ms || 50
-    form.clipboardPollWarmIntervalMs = settings.clipboard_poll_warm_interval_ms || 200
-    form.clipboardPollIdleIntervalMs = settings.clipboard_poll_idle_interval_ms || 1200
-    form.clipboardPollMaxIntervalMs = settings.clipboard_poll_max_interval_ms || 3000
-    form.clipboardPollReportIntervalSecs = settings.clipboard_poll_report_interval_secs || 60
-    form.clipboardPollMetricsEnabled = settings.clipboard_poll_metrics_enabled !== false
-    form.clipboardPollMetricsLogLevel = settings.clipboard_poll_metrics_log_level || 'info'
 
     if (aiSettingsRef.value) {
       aiSettingsRef.value.applyCurrentProviderConfig(settings)
@@ -215,6 +271,47 @@ onMounted(async () => {
     }
   } catch (error) {
     ElMessage.error(`加载设置失败: ${error}`)
+    autoSaveState.value = 'error'
+  } finally {
+    isInitializing.value = false
+  }
+})
+
+watch(form, () => {
+  if (isInitializing.value) return
+  if (suppressNextAutoSave.value) {
+    suppressNextAutoSave.value = false
+    return
+  }
+  if (!isAutoSaving.value) {
+    if (autoSaveStateResetTimer) {
+      clearTimeout(autoSaveStateResetTimer)
+      autoSaveStateResetTimer = null
+    }
+    autoSaveState.value = 'pending'
+  }
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  saveTimer = window.setTimeout(() => {
+    persistSettings(true)
+    saveTimer = null
+  }, 450)
+}, {deep: true})
+
+onBeforeUnmount(() => {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  if (autoSaveStateResetTimer) {
+    clearTimeout(autoSaveStateResetTimer)
+    autoSaveStateResetTimer = null
+  }
+  if (unlistenShortcutConflict) {
+    unlistenShortcutConflict()
+    unlistenShortcutConflict = null
   }
 })
 </script>
@@ -238,6 +335,36 @@ body {
   margin-bottom: 20px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.autosave-status {
+  font-size: 12px;
+}
+
+.autosave-idle {
+  color: #909399;
+}
+
+.autosave-pending {
+  color: #e6a23c;
+}
+
+.autosave-saving {
+  color: #409eff;
+}
+
+.autosave-saved {
+  color: #67c23a;
+}
+
+.autosave-error {
+  color: #f56c6c;
+}
+
 .content {
   background: #fff;
   padding: 20px;
@@ -248,11 +375,6 @@ body {
 .dark .content {
   background: #1d1e1f;
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.3);
-}
-
-.footer {
-  margin-top: 20px;
-  text-align: right;
 }
 
 .footer-links {

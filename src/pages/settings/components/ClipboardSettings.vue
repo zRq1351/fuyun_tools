@@ -1,8 +1,18 @@
 <template>
   <el-form :model="form" label-position="top">
-    <el-form-item label="最大历史记录数">
-      <el-input-number v-model="form.maxItems" :max="1000" :min="1"/>
-      <div class="form-hint">设置剪贴板历史记录的最大保存数量 (1-1000)</div>
+    <el-form-item label="文字历史记录上限">
+      <el-input-number v-model="form.textMaxItems" :max="1000" :min="1"/>
+      <div class="form-hint">设置文字剪贴板历史记录最大保存数量 (1-1000)</div>
+    </el-form-item>
+
+    <el-form-item label="图片历史记录上限">
+      <el-input-number v-model="form.imageMaxItems" :max="1000" :min="1"/>
+      <div class="form-hint">设置图片剪贴板历史记录最大保存数量 (1-1000)</div>
+    </el-form-item>
+
+    <el-form-item label="图片历史磁盘上限（MB）">
+      <el-input-number v-model="form.imageDiskLimitMb" :max="102400" :min="100"/>
+      <div class="form-hint">超过上限后自动清理最旧未置顶图片，建议 2048MB</div>
     </el-form-item>
 
     <el-form-item label="上限策略">
@@ -50,123 +60,60 @@
       <div class="form-hint">点击编辑按钮来自定义打开图片剪切板窗口的快捷键</div>
     </el-form-item>
 
-    <el-divider>监听性能策略</el-divider>
+    <el-divider>数据清理</el-divider>
 
-    <el-form-item label="最小轮询间隔（ms）">
-      <el-input-number v-model="form.clipboardPollMinIntervalMs" :max="3000" :min="20"/>
+    <el-form-item label="文字记录">
+      <el-button type="warning" @click="clearTextHistory('unclassified_unpinned')">清除未分类未置顶</el-button>
+      <el-button type="danger" @click="clearTextHistory('all')">清除全部</el-button>
     </el-form-item>
-    <el-form-item label="温和轮询间隔（ms）">
-      <el-input-number v-model="form.clipboardPollWarmIntervalMs" :max="8000" :min="20"/>
+    <el-form-item label="图片记录">
+      <el-button type="warning" @click="clearImageHistory('untagged_unclassified_unpinned')">清除未分类未置顶无标签
+      </el-button>
+      <el-button type="danger" @click="clearImageHistory('all')">清除全部</el-button>
     </el-form-item>
-    <el-form-item label="空闲轮询上限（ms）">
-      <el-input-number v-model="form.clipboardPollIdleIntervalMs" :max="20000" :min="50"/>
+    <el-form-item label="导入图片">
+      <el-button :loading="importingImages" type="primary" @click="importImageFiles">导入图片</el-button>
+      <el-button :loading="importingImages" type="primary" @click="importImageFolders">导入文件夹</el-button>
     </el-form-item>
-    <el-form-item label="最大轮询间隔（ms）">
-      <el-input-number v-model="form.clipboardPollMaxIntervalMs" :max="60000" :min="100"/>
+    <el-form-item v-if="importingImages || importTotal > 0">
+      <div class="metrics-card">
+        <div class="metrics-line">导入进度 {{ importProcessed }} / {{ importTotal }}</div>
+        <div class="metrics-line">成功 {{ importImported }}，失败 {{ importFailed }}</div>
+        <el-progress :percentage="importProgressPercent" :stroke-width="12" status="success"/>
+      </div>
     </el-form-item>
-    <el-form-item label="指标采样周期（秒）">
-      <el-input-number v-model="form.clipboardPollReportIntervalSecs" :max="3600" :min="5"/>
-    </el-form-item>
-    <el-form-item label="性能指标日志">
-      <el-switch
-          v-model="form.clipboardPollMetricsEnabled"
-          active-text="开启"
-          inactive-text="关闭"
-      />
-    </el-form-item>
-    <el-form-item label="指标日志级别">
-      <el-select
-          v-model="form.clipboardPollMetricsLogLevel"
-          :disabled="!form.clipboardPollMetricsEnabled"
-          style="width: 160px"
-      >
-        <el-option label="trace" value="trace"/>
-        <el-option label="debug" value="debug"/>
-        <el-option label="info" value="info"/>
-        <el-option label="warn" value="warn"/>
-      </el-select>
-      <div class="form-hint">建议默认 info，排查问题时切到 debug 或 trace</div>
-    </el-form-item>
+    <div class="form-hint">“清除全部”会删除对应类型的全部历史记录，请谨慎操作。</div>
 
-    <template v-if="isDev">
-      <el-divider>监听指标看板</el-divider>
+    <el-divider>图片存储占用</el-divider>
 
-      <el-form-item>
-        <el-button size="small" @click="refreshMetrics">刷新</el-button>
-        <el-button size="small" @click="exportMetrics('json')">导出 JSON</el-button>
-        <el-button size="small" @click="exportMetrics('csv')">导出 CSV</el-button>
-        <span class="metrics-meta">最近 {{ metricPoints.length }} 个采样点</span>
-      </el-form-item>
-
-      <el-form-item label="文本监听">
-        <div class="metrics-card">
-          <div class="metrics-line">wakeups/s {{ textLatest.wakeups_per_sec?.toFixed?.(2) || '0.00' }}</div>
-          <div class="metrics-line">change_ratio {{ textLatest.change_ratio?.toFixed?.(3) || '0.000' }}</div>
-          <div class="metrics-line">busy_skips {{ textLatest.busy_skips ?? 0 }}</div>
-          <div class="sparkline">{{ textWakeupsSparkline }}</div>
+    <el-form-item>
+      <el-button size="small" @click="refreshImageStorageMetrics">刷新占用</el-button>
+    </el-form-item>
+    <el-form-item>
+      <div class="metrics-card">
+        <div class="metrics-line">内存缓存 {{ formatBytes(imageStorageMetrics.memory_bytes) }} /
+          {{ formatBytes(imageStorageMetrics.memory_budget_bytes) }}
         </div>
-      </el-form-item>
-
-      <el-form-item label="图片监听">
-        <div class="metrics-card">
-          <div class="metrics-line">wakeups/s {{ imageLatest.wakeups_per_sec?.toFixed?.(2) || '0.00' }}</div>
-          <div class="metrics-line">change_ratio {{ imageLatest.change_ratio?.toFixed?.(3) || '0.000' }}</div>
-          <div class="metrics-line">busy_skips {{ imageLatest.busy_skips ?? 0 }}</div>
-          <div class="sparkline">{{ imageWakeupsSparkline }}</div>
+        <div class="metrics-line">磁盘占用 {{ formatBytes(imageStorageMetrics.disk_bytes) }} /
+          {{ formatBytes(imageStorageMetrics.disk_limit_bytes) }}
         </div>
-      </el-form-item>
-
-      <el-form-item label="分钟聚合（最近60分钟）">
-        <div class="metrics-card">
-          <div class="metrics-line">文本高命中桶占比 {{ textAggHighRatio }}</div>
-          <div class="metrics-line">图片高命中桶占比 {{ imageAggHighRatio }}</div>
+        <div class="metrics-line">图片条目 {{ Number(imageStorageMetrics.item_count || 0) }}（置顶
+          {{ Number(imageStorageMetrics.pinned_count || 0) }}）
         </div>
-      </el-form-item>
-      <el-form-item>
-        <el-table :data="aggregatePoints.slice(-12)" border size="small" style="width: 100%">
-          <el-table-column label="分钟" min-width="120">
-            <template #default="scope">
-              {{ formatMinute(scope.row.minute_epoch_ms) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="源" prop="source" width="70"/>
-          <el-table-column label="samples" prop="samples" width="80"/>
-          <el-table-column label="wakeups/s(avg)" min-width="120">
-            <template #default="scope">
-              {{ Number(scope.row.wakeups_per_sec_avg || 0).toFixed(2) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="change_ratio(avg)" min-width="130">
-            <template #default="scope">
-              {{ Number(scope.row.change_ratio_avg || 0).toFixed(3) }}
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-form-item>
+      </div>
+    </el-form-item>
 
-      <el-form-item label="文本入库预算观测">
-        <div class="metrics-card">
-          <div class="metrics-line">budget(ms) {{ Number(dedupMetrics.budget_ms_current || 0) }}</div>
-          <div class="metrics-line">total_scans {{ Number(dedupMetrics.total_scans || 0) }}</div>
-          <div class="metrics-line">timeout_ratio {{
-              (Number(dedupMetrics.timeout_ratio || 0) * 100).toFixed(1)
-            }}%
-          </div>
-          <div class="metrics-line">avg_elapsed(ms) {{ Number(dedupMetrics.avg_elapsed_ms || 0).toFixed(2) }}</div>
-          <div class="metrics-line">avg_scanned {{ Number(dedupMetrics.avg_scanned_items || 0).toFixed(2) }}</div>
-        </div>
-      </el-form-item>
-    </template>
   </el-form>
 </template>
 
 <script setup>
 import {computed, onMounted, onUnmounted, ref} from 'vue'
-import {ElMessage} from 'element-plus'
+import {ElMessage, ElMessageBox} from 'element-plus'
 import {Edit, VideoPause} from '@element-plus/icons-vue'
-import {save} from '@tauri-apps/plugin-dialog'
+import {open} from '@tauri-apps/plugin-dialog'
+import {listen} from '@tauri-apps/api/event'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
-import {AISettingsService} from '../../../services/ipc'
+import {AISettingsService, ClipboardService, ImageClipboardService} from '../../../services/ipc'
 
 const props = defineProps({
   form: {
@@ -174,7 +121,6 @@ const props = defineProps({
     required: true
   }
 })
-const isDev = import.meta.env.DEV
 
 const {
   isRecording: isTextRecording,
@@ -185,111 +131,156 @@ const {
   toggleRecording: toggleImageRecording
 } = useShortcutRecorder(props.form, 'imageToggleShortcut')
 
-const metricPoints = ref([])
-const aggregatePoints = ref([])
-const dedupMetrics = ref({})
+const imageStorageMetrics = ref({})
 let metricsTimer = null
+let unlistenImportProgress = null
+const importingImages = ref(false)
+const importTotal = ref(0)
+const importProcessed = ref(0)
+const importImported = ref(0)
+const importFailed = ref(0)
 
-const textPoints = computed(() => metricPoints.value.filter(item => item.source === 'text'))
-const imagePoints = computed(() => metricPoints.value.filter(item => item.source === 'image'))
-const textAggPoints = computed(() => aggregatePoints.value.filter(item => item.source === 'text'))
-const imageAggPoints = computed(() => aggregatePoints.value.filter(item => item.source === 'image'))
-const textLatest = computed(() => textPoints.value[textPoints.value.length - 1] || {})
-const imageLatest = computed(() => imagePoints.value[imagePoints.value.length - 1] || {})
+const importProgressPercent = computed(() => {
+  const total = Number(importTotal.value || 0)
+  if (!total) return 0
+  const processed = Number(importProcessed.value || 0)
+  return Math.min(100, Math.max(0, Math.round((processed / total) * 100)))
+})
 
-const computeHighRatio = (rows) => {
-  if (!rows.length) return '0.0%'
-  const high = rows.reduce((acc, item) => acc + Number(item.hit_bucket_high || 0), 0)
-  const total = rows.reduce((acc, item) => acc + Number(item.samples || 0), 0)
-  if (!total) return '0.0%'
-  return `${((high / total) * 100).toFixed(1)}%`
+const refreshImageStorageMetrics = async () => {
+  const metrics = await AISettingsService.getImageStorageMetrics()
+  imageStorageMetrics.value = metrics || {}
 }
-const textAggHighRatio = computed(() => computeHighRatio(textAggPoints.value.slice(-60)))
-const imageAggHighRatio = computed(() => computeHighRatio(imageAggPoints.value.slice(-60)))
 
-const buildSparkline = (values) => {
-  if (!values.length) return '暂无数据'
-  const chars = '▁▂▃▄▅▆▇█'
-  let min = Math.min(...values)
-  let max = Math.max(...values)
-  if (min === max) {
-    min = 0
-    max = max || 1
+const formatBytes = (bytes) => {
+  const val = Number(bytes || 0)
+  if (val <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let idx = 0
+  let current = val
+  while (current >= 1024 && idx < units.length - 1) {
+    current /= 1024
+    idx += 1
   }
-  return values.map(v => {
-    const ratio = (v - min) / (max - min)
-    const idx = Math.min(chars.length - 1, Math.max(0, Math.round(ratio * (chars.length - 1))))
-    return chars[idx]
-  }).join('')
+  return `${current.toFixed(current >= 100 || idx === 0 ? 0 : 1)} ${units[idx]}`
 }
 
-const textWakeupsSparkline = computed(() =>
-    buildSparkline(textPoints.value.slice(-30).map(item => Number(item.wakeups_per_sec || 0)))
-)
-
-const imageWakeupsSparkline = computed(() =>
-    buildSparkline(imagePoints.value.slice(-30).map(item => Number(item.wakeups_per_sec || 0)))
-)
-
-const refreshMetrics = async () => {
-  const [points, aggregate, dedup] = await Promise.all([
-    AISettingsService.getPollMetricsHistory(240),
-    AISettingsService.getPollMetricsMinuteAggregates(60),
-    AISettingsService.getTextDedupMetrics()
-  ])
-  metricPoints.value = Array.isArray(points) ? points : []
-  aggregatePoints.value = Array.isArray(aggregate) ? aggregate : []
-  dedupMetrics.value = dedup || {}
-}
-
-const formatMinute = (epochMs) => {
-  const d = new Date(epochMs || 0)
-  const hh = `${d.getHours()}`.padStart(2, '0')
-  const mm = `${d.getMinutes()}`.padStart(2, '0')
-  return `${hh}:${mm}`
-}
-
-const exportMetrics = async (format) => {
+const clearTextHistory = async (mode) => {
   try {
-    const now = new Date()
-    const pad = (n, len = 2) => `${n}`.padStart(len, '0')
-    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}_${pad(now.getMilliseconds(), 3)}`
-    const fileName = `poll_metrics_${stamp}.${format}`
-    const selectedPath = await save({
-      defaultPath: fileName,
-      filters: [
-        format === 'csv'
-            ? {name: 'CSV', extensions: ['csv']}
-            : {name: 'JSON', extensions: ['json']}
-      ]
-    })
-    if (!selectedPath) {
-      return
+    if (mode === 'all') {
+      await ElMessageBox.confirm('将清除全部文字历史记录，且不可恢复，是否继续？', '警告', {
+        type: 'warning',
+        confirmButtonText: '继续清除',
+        cancelButtonText: '取消'
+      })
     }
-    const finalPath = selectedPath.toLowerCase().endsWith(`.${format}`)
-        ? selectedPath
-        : `${selectedPath}.${format}`
-    await AISettingsService.exportPollMetricsToFile({
-      format,
-      limit: 720,
-      filePath: finalPath
-    })
-    ElMessage.success(`已导出 ${format.toUpperCase()}`)
+    const removed = await ClipboardService.clearHistory(mode)
+    ElMessage.success(`已清理 ${removed} 条文字记录`)
   } catch (error) {
-    ElMessage.error(`导出失败: ${error}`)
+    if (error !== 'cancel') {
+      ElMessage.error(`清理失败: ${error}`)
+    }
+  }
+}
+
+const clearImageHistory = async (mode) => {
+  try {
+    if (mode === 'all') {
+      await ElMessageBox.confirm('将清除全部图片历史记录，且不可恢复，是否继续？', '警告', {
+        type: 'warning',
+        confirmButtonText: '继续清除',
+        cancelButtonText: '取消'
+      })
+    }
+    const removed = await ImageClipboardService.clearHistory(mode)
+    ElMessage.success(`已清理 ${removed} 条图片记录`)
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(`清理失败: ${error}`)
+    }
+  }
+}
+
+const resetImportProgress = () => {
+  importTotal.value = 0
+  importProcessed.value = 0
+  importImported.value = 0
+  importFailed.value = 0
+}
+
+const runImageImport = async (paths) => {
+  if (!paths || !paths.length) return
+  importingImages.value = true
+  resetImportProgress()
+  try {
+    const imported = await ImageClipboardService.importImageFiles(paths)
+    ElMessage.success(`已导入 ${imported} 张图片`)
+    await refreshImageStorageMetrics()
+  } catch (error) {
+    ElMessage.error(`导入失败: ${error}`)
+  } finally {
+    importingImages.value = false
+  }
+}
+
+const importImageFiles = async () => {
+  const selected = await open({
+    multiple: true,
+    filters: [
+      {name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'gif', 'tif', 'tiff']}
+    ]
+  })
+  if (!selected) return
+  const paths = Array.isArray(selected) ? selected : [selected]
+  await runImageImport(paths)
+}
+
+const importImageFolders = async () => {
+  const selected = await open({
+    directory: true,
+    multiple: true
+  })
+  if (!selected) return
+  const paths = Array.isArray(selected) ? selected : [selected]
+  await runImageImport(paths)
+}
+
+const handleDocumentVisibilityChange = () => {
+  if (document.hidden) {
+    importingImages.value = false
+    resetImportProgress()
   }
 }
 
 onMounted(async () => {
-  if (!isDev) return
-  await refreshMetrics()
-  metricsTimer = setInterval(refreshMetrics, 10000)
+  document.addEventListener('visibilitychange', handleDocumentVisibilityChange)
+  unlistenImportProgress = await listen('image-import-progress', (event) => {
+    const payload = event.payload || {}
+    importTotal.value = Number(payload.total || 0)
+    importProcessed.value = Number(payload.processed || 0)
+    importImported.value = Number(payload.imported || 0)
+    importFailed.value = Number(payload.failed || 0)
+    if (payload.status === 'start') {
+      importingImages.value = true
+    } else if (payload.status === 'finish') {
+      importingImages.value = false
+    }
+  })
+  await refreshImageStorageMetrics()
+  metricsTimer = setInterval(async () => {
+    await refreshImageStorageMetrics()
+  }, 10000)
 })
 
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
   if (metricsTimer) {
     clearInterval(metricsTimer)
     metricsTimer = null
+  }
+  if (unlistenImportProgress) {
+    unlistenImportProgress()
+    unlistenImportProgress = null
   }
 })
 </script>

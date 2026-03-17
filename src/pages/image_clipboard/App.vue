@@ -1,5 +1,6 @@
 <template>
-  <div ref="containerRef" class="container" tabindex="-1" @click="closeContextMenu" @keydown="handleKeydown">
+  <div ref="containerRef" class="container" tabindex="-1" @click="closeContextMenu" @keydown="handleKeydown"
+       @mousedown="handleContainerMouseDown">
     <ClipboardToolbar
         v-model:category-filter="categoryFilter"
         v-model:new-category-name="newCategoryName"
@@ -12,6 +13,8 @@
         :is-adding-category="isAddingCategory"
         :new-category-input-ref="newCategoryInputRef"
         :remove-category="removeCategory"
+        create-category-text="新增分类"
+        search-placeholder="搜索分类/标签"
         :start-create-category="startCreateCategory"
         :start-window-offset-drag="startWindowOffsetDrag"
         :show-ai-toggle="false"
@@ -25,34 +28,37 @@
         ref="contentRef"
         class="content"
         @mousedown="handleContentMouseDown"
-        @mouseleave="handleContentMouseLeave"
-        @mousemove="handleContentMouseMove"
-        @mouseup="handleContentMouseUp"
+        @scroll="handleContentScroll"
         @wheel.prevent="handleContentWheel"
     >
+      <div :style="{ width: `${leadingSpacerWidth}px` }" class="virtual-spacer"></div>
       <div
-          v-for="entry in filteredHistory"
+          v-for="entry in renderedHistory"
           :id="`image-item-${entry.index}`"
           :key="entry.item.id"
           :class="{ selected: selectedIndex === entry.index }"
           class="clipboard-item"
-          draggable="true"
+          :draggable="isCtrlKeyPressed"
           @click="selectByIndex(entry.index)"
-          @dblclick="fillByIndex(entry.index)"
+          @dblclick="fillById(entry.item.id)"
           @dragend="handleDragEnd"
           @dragstart="handleDragStart($event, entry.item.id)"
           @mouseenter="handleItemHover(entry.index)"
           @contextmenu.prevent="showContextMenu($event, entry.item.id)"
       >
-        <div class="delete-btn" @click.stop="deleteItem(entry.index)">
+        <div class="delete-btn" @click.stop="deleteItem(entry.item.id, entry.index)">
           <el-icon>
             <Close/>
           </el-icon>
         </div>
-        <button class="fullscreen-btn" title="全屏预览" @click.stop="openFullscreen(entry.index)">
+        <button class="fullscreen-btn" title="全屏预览" @click.stop="openFullscreen(entry.item.id)">
           <el-icon>
             <FullScreen/>
           </el-icon>
+        </button>
+        <button :class="{ active: isPinned(entry.item.id) }" class="pin-btn" title="置顶"
+                @click.stop="promoteImageItem(entry.item.id)">
+          <Pin class="pin-lucide"/>
         </button>
         <div class="index-tools">
           <div class="index">{{ entry.index + 1 }}</div>
@@ -60,18 +66,35 @@
         <div class="category-wrap">
           <div class="category-chip">{{ getItemCategory(entry.item.id) }}</div>
         </div>
+        <div class="tag-wrap">
+          <div v-if="getItemTags(entry.item.id).length" class="tag-chip-list">
+            <span v-for="tag in getItemTags(entry.item.id)" :key="`${entry.item.id}-${tag}`" class="tag-chip">#{{
+                tag
+              }}</span>
+          </div>
+          <div v-else class="tag-chip-empty">无标签</div>
+        </div>
         <div class="item-content">
           <img :src="getPreviewDataUrl(entry.item)" alt="" class="image-preview" draggable="false" @dragstart.prevent/>
           <div class="image-meta">{{ entry.item.width }} × {{ entry.item.height }}</div>
         </div>
       </div>
-      <div class="spacer"></div>
+      <div :style="{ width: `${trailingSpacerWidth}px` }" class="virtual-spacer"></div>
     </div>
 
     <div class="status-footer" @click.stop @mousedown.stop>
       <div class="status-text">
         <span class="status-label">{{ selectedStatusText }}</span>
+        <span class="status-meta">{{ loadStatusText }}</span>
         <div class="status-actions">
+          <button
+              :title="`切换分页大小（当前每页 ${pageSize} 条）`"
+              class="nav-action-btn"
+              type="button"
+              @click="cyclePageSize"
+          >
+            每页{{ pageSize }}
+          </button>
           <button aria-label="回到开头" class="nav-action-btn icon-btn" title="回到开头" type="button"
                   @click="scrollToStart">
             <el-icon>
@@ -106,6 +129,10 @@
           <Check/>
         </el-icon>
       </div>
+      <div class="context-menu-divider"></div>
+      <div class="context-menu-item" @click="editItemTags">
+        编辑标签
+      </div>
     </div>
 
   </div>
@@ -114,7 +141,10 @@
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ArrowLeftBold, ArrowRightBold, Check, Close, FullScreen} from '@element-plus/icons-vue'
+import {Pin} from 'lucide-vue-next'
 import {listen} from '@tauri-apps/api/event'
+import {convertFileSrc} from '@tauri-apps/api/core'
+import {ElMessage, ElMessageBox} from 'element-plus'
 import {ImageCategoryService, ImageClipboardService, WindowService} from '../../services/ipc'
 import ClipboardToolbar from '../clipboard/components/ClipboardToolbar.vue'
 import {useWindowOffset} from '../clipboard/composables/useWindowOffset'
@@ -123,10 +153,18 @@ const containerRef = ref(null)
 const contentRef = ref(null)
 const history = ref([])
 const categoryMap = ref({})
+const tagMap = ref({})
+const pinnedItems = ref([])
 const categories = ref(['未分类'])
 const categoryFilter = ref('全部')
 const selectedIndex = ref(0)
 const searchKeyword = ref('')
+const totalCount = ref(0)
+const pageOffset = ref(0)
+const pageSize = ref(30)
+const hasMore = ref(false)
+const isLoadingPage = ref(false)
+const sortOrder = ref('asc')
 const isVisible = ref(false)
 const isAddingCategory = ref(false)
 const newCategoryName = ref('')
@@ -141,26 +179,47 @@ const categoryInputOpenedAt = ref(0)
 const previewCache = new Map()
 const warmedIndices = new Set()
 const warmingIndices = new Set()
-let refreshTimer = null
 let unlistenShowWindow = null
 let unlistenHistoryUpdated = null
-const SHORT_POLL_INTERVAL_MS = 1500
-const SHORT_POLL_DURATION_MS = 12000
-let shortPollUntil = 0
 let isPointerDown = false
 let isContentDragging = false
+let pendingHistorySync = false
 let dragStartX = 0
 let dragStartScrollLeft = 0
+let dragTargetScrollLeft = 0
+let dragScrollRafId = 0
+const isCtrlKeyPressed = ref(false)
+const contentScrollLeft = ref(0)
+const contentViewportWidth = ref(0)
+
+const IMAGE_ITEM_WIDTH = 250
+const IMAGE_ITEM_GAP = 8
+const IMAGE_ITEM_UNIT = IMAGE_ITEM_WIDTH + IMAGE_ITEM_GAP
+const IMAGE_TAIL_SPACER = 742
+const IMAGE_VIRTUAL_OVERSCAN = 4
+const IMAGE_PREVIEW_CACHE_MARGIN = 24
+const IMAGE_PREVIEW_CACHE_MAX_ITEMS = 260
 
 const stopContentDragging = () => {
   isPointerDown = false
   isContentDragging = false
+  if (dragScrollRafId) {
+    cancelAnimationFrame(dragScrollRafId)
+    dragScrollRafId = 0
+  }
+  if (contentRef.value) {
+    contentRef.value.classList.remove('is-dragging')
+  }
   if (contentRef.value) {
     contentRef.value.style.cursor = 'default'
   }
   document.body.style.removeProperty('user-select')
   window.removeEventListener('mousemove', handleGlobalMouseMove)
   window.removeEventListener('mouseup', handleGlobalMouseUp, true)
+  if (pendingHistorySync && isVisible.value) {
+    pendingHistorySync = false
+    syncHistory()
+  }
 }
 
 const handleGlobalMouseMove = (event) => {
@@ -169,10 +228,19 @@ const handleGlobalMouseMove = (event) => {
   if (!isContentDragging && Math.abs(delta) > 4) {
     isContentDragging = true
     contentRef.value.style.cursor = 'grabbing'
+    contentRef.value.classList.add('is-dragging')
     document.body.style.userSelect = 'none'
   }
   if (isContentDragging) {
-    contentRef.value.scrollLeft = dragStartScrollLeft - delta
+    dragTargetScrollLeft = dragStartScrollLeft - delta
+    if (!dragScrollRafId) {
+      dragScrollRafId = requestAnimationFrame(() => {
+        dragScrollRafId = 0
+        if (contentRef.value) {
+          contentRef.value.scrollLeft = dragTargetScrollLeft
+        }
+      })
+    }
   }
 }
 
@@ -182,7 +250,7 @@ const handleGlobalMouseUp = () => {
 
 const handleContentMouseDown = (event) => {
   if (event.button !== 0) return
-  if (event.target.closest('.delete-btn') || event.target.closest('.fullscreen-btn')) {
+  if (event.target.closest('.delete-btn') || event.target.closest('.fullscreen-btn') || event.target.closest('.pin-btn')) {
     return
   }
   if (!contentRef.value) return
@@ -190,33 +258,56 @@ const handleContentMouseDown = (event) => {
   isContentDragging = false
   dragStartX = event.pageX
   dragStartScrollLeft = contentRef.value.scrollLeft
+  dragTargetScrollLeft = dragStartScrollLeft
   window.addEventListener('mousemove', handleGlobalMouseMove)
   window.addEventListener('mouseup', handleGlobalMouseUp, true)
 }
 
-const handleContentMouseMove = () => {
+const handleContainerMouseDown = (event) => {
+  if (event.button !== 0) return
+  const target = event.target
+  if (isAddingCategory.value && target instanceof Element && !target.closest('.category-input')) {
+    cancelCreateCategory()
+  }
 }
-const handleContentMouseUp = () => {
-}
-const handleContentMouseLeave = () => {
+
+const syncContentMetrics = () => {
+  if (!contentRef.value) return
+  contentScrollLeft.value = contentRef.value.scrollLeft
+  contentViewportWidth.value = contentRef.value.clientWidth
 }
 
 const handleContentWheel = (event) => {
   if (!contentRef.value) return
   const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
   contentRef.value.scrollLeft += delta
+  void tryLoadMoreByScroll()
+}
+
+const handleContentScroll = () => {
+  syncContentMetrics()
+  void tryLoadMoreByScroll()
+}
+
+const tryLoadMoreByScroll = async () => {
+  if (!hasMore.value || isLoadingPage.value || !contentRef.value) return
+  const remaining = contentRef.value.scrollWidth - contentRef.value.clientWidth - contentRef.value.scrollLeft
+  if (remaining <= 240) {
+    await loadHistoryPage({reset: false})
+  }
 }
 
 const ensureKeyboardSelectionVisible = async () => {
   await nextTick()
+  const container = contentRef.value
+  if (!container) return
   const selected = selectedIndex.value
   if (selected < 0) return
-  const element = document.getElementById(`image-item-${selected}`)
-  const container = contentRef.value || element?.closest('.content')
-  if (!element || !container) return
+  const orderIndex = filteredHistory.value.findIndex((entry) => entry.index === selected)
+  if (orderIndex < 0) return
   const EDGE_PADDING = 8
+  const targetLeft = Math.max(0, orderIndex * IMAGE_ITEM_UNIT - EDGE_PADDING)
   const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth)
-  const targetLeft = Math.max(0, element.offsetLeft - EDGE_PADDING)
   container.scrollLeft = Math.min(maxScrollLeft, targetLeft)
 }
 
@@ -234,68 +325,130 @@ const getItemCategory = (itemId) => {
   return categoryMap.value[itemId] || '未分类'
 }
 
+const getItemTags = (itemId) => {
+  const tags = tagMap.value[itemId]
+  return Array.isArray(tags) ? tags : []
+}
+
+const isPinned = (itemId) => pinnedItems.value.includes(itemId)
+
 const filteredHistory = computed(() => {
-  const keyword = searchKeyword.value.trim().toLowerCase()
   return history.value
       .map((item, index) => ({item, index}))
-      .filter((entry) => {
-        const category = getItemCategory(entry.item.id)
-        if (categoryFilter.value !== '全部' && category !== categoryFilter.value) {
-          return false
-        }
-        if (!keyword) {
-          return true
-        }
-        return category.toLowerCase().includes(keyword)
-      })
+      .filter((entry) => Boolean(entry.item))
+})
+
+const virtualRange = computed(() => {
+  const total = filteredHistory.value.length
+  if (total === 0) {
+    return {start: 0, end: 0}
+  }
+  const viewport = Math.max(contentViewportWidth.value, IMAGE_ITEM_UNIT)
+  const scroll = Math.max(0, contentScrollLeft.value)
+  const start = Math.max(0, Math.floor(scroll / IMAGE_ITEM_UNIT) - IMAGE_VIRTUAL_OVERSCAN)
+  const visibleCount = Math.ceil(viewport / IMAGE_ITEM_UNIT) + IMAGE_VIRTUAL_OVERSCAN * 2
+  const end = Math.min(total, start + visibleCount)
+  return {start, end}
+})
+
+const renderedHistory = computed(() => {
+  const {start, end} = virtualRange.value
+  return filteredHistory.value.slice(start, end)
+})
+
+const previewCacheKeepIds = computed(() => {
+  const total = filteredHistory.value.length
+  if (total === 0) return []
+  const start = Math.max(0, virtualRange.value.start - IMAGE_PREVIEW_CACHE_MARGIN)
+  const end = Math.min(total, virtualRange.value.end + IMAGE_PREVIEW_CACHE_MARGIN)
+  const ids = filteredHistory.value
+      .slice(start, end)
+      .map((entry) => entry.item?.id)
+      .filter(Boolean)
+  const selectedId = history.value[selectedIndex.value]?.id
+  if (selectedId) {
+    ids.push(selectedId)
+  }
+  return Array.from(new Set(ids))
+})
+
+const leadingSpacerWidth = computed(() => virtualRange.value.start * IMAGE_ITEM_UNIT)
+
+const trailingSpacerWidth = computed(() => {
+  const total = filteredHistory.value.length
+  const trailing = Math.max(0, total - virtualRange.value.end) * IMAGE_ITEM_UNIT
+  return trailing + IMAGE_TAIL_SPACER
 })
 
 const selectedStatusText = computed(() => {
-  const total = filteredHistory.value.length
+  const total = totalCount.value || filteredHistory.value.length
   if (total === 0) return '当前无选中项'
   const current = filteredHistory.value.findIndex((entry) => entry.index === selectedIndex.value)
   const display = current >= 0 ? current + 1 : 1
   return `当前选中：第 ${display} / ${total} 条`
 })
 
-const decodeBase64ToRgba = (base64) => {
-  const binary = atob(base64)
-  const rgba = new Uint8ClampedArray(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    rgba[i] = binary.charCodeAt(i)
-  }
-  return rgba
+const loadStatusText = computed(() => {
+  if (isLoadingPage.value) return '正在加载...'
+  if (hasMore.value) return `已加载 ${filteredHistory.value.length} / ${totalCount.value || filteredHistory.value.length}`
+  return `已全部加载 ${filteredHistory.value.length} 条`
+})
+
+const IMAGE_PAGE_SIZE_OPTIONS = [10, 30, 50]
+const normalizeImagePageSize = (value) => {
+  const parsed = Number(value)
+  return IMAGE_PAGE_SIZE_OPTIONS.includes(parsed) ? parsed : 30
 }
 
-const buildDataUrlFromRgba = (rgbaBase64, width, height) => {
-  if (!rgbaBase64 || !width || !height) {
+const cyclePageSize = async () => {
+  const current = normalizeImagePageSize(pageSize.value)
+  const index = IMAGE_PAGE_SIZE_OPTIONS.indexOf(current)
+  const next = IMAGE_PAGE_SIZE_OPTIONS[(index + 1) % IMAGE_PAGE_SIZE_OPTIONS.length]
+  pageSize.value = next
+  localStorage.setItem('image_history_page_size', String(next))
+  await syncHistory()
+}
+
+const buildFileUrlFromPath = (imagePath) => {
+  if (!imagePath) return ''
+  try {
+    return convertFileSrc(imagePath)
+  } catch (_) {
     return ''
   }
-  const rgba = decodeBase64ToRgba(rgbaBase64)
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    return ''
+}
+
+const enforcePreviewCacheSize = () => {
+  while (previewCache.size > IMAGE_PREVIEW_CACHE_MAX_ITEMS) {
+    const oldestKey = previewCache.keys().next().value
+    if (!oldestKey) break
+    previewCache.delete(oldestKey)
   }
-  const imageData = new ImageData(rgba, width, height)
-  ctx.putImageData(imageData, 0, 0)
-  return canvas.toDataURL('image/png')
+}
+
+const prunePreviewCache = (keepIds) => {
+  if (!Array.isArray(keepIds)) return
+  const keepSet = new Set(keepIds)
+  for (const key of previewCache.keys()) {
+    if (!keepSet.has(key)) {
+      previewCache.delete(key)
+    }
+  }
+  enforcePreviewCacheSize()
 }
 
 const getPreviewDataUrl = (item) => {
   if (previewCache.has(item.id)) {
-    return previewCache.get(item.id)
+    const cached = previewCache.get(item.id)
+    previewCache.delete(item.id)
+    previewCache.set(item.id, cached)
+    return cached
   }
   try {
-    const hasPreview = item.preview_rgba_base64 && item.preview_width && item.preview_height
-    const rgbaBase64 = hasPreview ? item.preview_rgba_base64 : item.rgba_base64
-    const drawWidth = hasPreview ? item.preview_width : item.width
-    const drawHeight = hasPreview ? item.preview_height : item.height
-    const dataUrl = buildDataUrlFromRgba(rgbaBase64, drawWidth, drawHeight)
-    previewCache.set(item.id, dataUrl)
-    return dataUrl
+    const fileUrl = buildFileUrlFromPath(item.image_path)
+    previewCache.set(item.id, fileUrl)
+    enforcePreviewCacheSize()
+    return fileUrl
   } catch (error) {
     console.error('图片预览生成失败:', error)
     return ''
@@ -311,7 +464,13 @@ const warmupOne = (index) => {
   if (index < 0 || index >= history.value.length) return
   if (warmedIndices.has(index) || warmingIndices.has(index)) return
   warmingIndices.add(index)
-  ImageClipboardService.warmupItem(index)
+  const itemId = history.value[index]?.id
+  if (!itemId) {
+    warmingIndices.delete(index)
+    return
+  }
+  const warmupTask = ImageClipboardService.warmupItemById(itemId)
+  warmupTask
       .then(() => {
         warmedIndices.add(index)
       })
@@ -329,6 +488,7 @@ const warmupAround = (index) => {
 }
 
 const handleItemHover = (index) => {
+  if (isPointerDown || isContentDragging) return
   warmupAround(index)
 }
 
@@ -347,6 +507,7 @@ const scrollToEnd = async () => {
   if (contentRef.value) {
     contentRef.value.scrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
   }
+  await tryLoadMoreByScroll()
   if (filteredHistory.value.length > 0) {
     const lastIndex = filteredHistory.value[filteredHistory.value.length - 1].index
     selectedIndex.value = lastIndex
@@ -354,12 +515,13 @@ const scrollToEnd = async () => {
   }
 }
 
-const fillByIndex = async (index) => {
+const fillById = async (itemId) => {
   if (isFilling.value) return
   isFilling.value = true
   isVisible.value = false
   try {
-    await ImageClipboardService.selectAndFill(index)
+    if (!itemId) return
+    await ImageClipboardService.selectAndFillById(itemId)
   } catch (error) {
     console.error('回填图片失败:', error)
   } finally {
@@ -369,26 +531,41 @@ const fillByIndex = async (index) => {
   }
 }
 
-const openFullscreen = async (index) => {
+const openFullscreen = async (itemId) => {
   try {
-    await ImageClipboardService.openPreviewWindow(index)
+    if (!itemId) return
+    await ImageClipboardService.openPreviewWindowById(itemId)
   } catch (error) {
     console.error('打开预览窗口失败:', error)
   }
 }
 
-const deleteItem = async (index) => {
+const promoteImageItem = async (itemId) => {
   try {
-    const removed = history.value[index]
-    if (removed) {
-      previewCache.delete(removed.id)
-      delete categoryMap.value[removed.id]
+    const shouldPin = !isPinned(itemId)
+    await ImageClipboardService.setItemPinned(itemId, shouldPin)
+    await syncHistory()
+  } catch (error) {
+    console.error('置顶图片失败:', error)
+  }
+}
+
+const deleteItem = async (itemId, index) => {
+  try {
+    if (itemId) {
+      previewCache.delete(itemId)
+      delete categoryMap.value[itemId]
+      delete tagMap.value[itemId]
     }
-    history.value.splice(index, 1)
-    if (selectedIndex.value >= history.value.length) {
-      selectedIndex.value = Math.max(0, history.value.length - 1)
+    if (Number.isInteger(index) && index >= 0 && index < history.value.length) {
+      history.value.splice(index, 1)
+      if (selectedIndex.value >= history.value.length) {
+        selectedIndex.value = Math.max(0, history.value.length - 1)
+      }
     }
-    await ImageClipboardService.removeItem(index)
+    if (!itemId) return
+    await ImageClipboardService.removeItemById(itemId)
+    await syncHistory()
   } catch (error) {
     console.error('删除图片记录失败:', error)
   }
@@ -411,14 +588,43 @@ const assignToCategory = async (category) => {
   categoryMap.value[contextMenuItemId.value] = category
   try {
     await ImageCategoryService.setItemCategory(contextMenuItemId.value, category)
+    if (category === '未分类') {
+      tagMap.value[contextMenuItemId.value] = []
+      await ImageClipboardService.setItemTags(contextMenuItemId.value, [])
+    }
   } catch (error) {
     console.error('设置图片分类失败:', error)
   }
   closeContextMenu()
 }
 
+const editItemTags = async () => {
+  const itemId = contextMenuItemId.value
+  if (!itemId) return
+  const current = getItemTags(itemId).join(', ')
+  try {
+    const {value} = await ElMessageBox.prompt('请输入标签（多个标签用英文逗号分隔）', '编辑标签', {
+      inputValue: current,
+      confirmButtonText: '保存',
+      cancelButtonText: '取消'
+    })
+    const tags = String(value || '')
+        .split(/[,，]/)
+        .map((item) => item.trim())
+        .filter((item, idx, arr) => item && arr.indexOf(item) === idx)
+    tagMap.value[itemId] = tags
+    await ImageClipboardService.setItemTags(itemId, tags)
+    closeContextMenu()
+    ElMessage.success('标签已更新')
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(`更新标签失败: ${error}`)
+    }
+  }
+}
+
 const handleDragStart = (event, itemId) => {
-  if (!event.ctrlKey || isContentDragging) {
+  if (!isCtrlKeyPressed.value || isContentDragging) {
     event.preventDefault()
     return
   }
@@ -457,15 +663,11 @@ const startCreateCategory = () => {
   })
 }
 
-const confirmCreateCategory = async (event) => {
-  const isBlurEvent = event?.type === 'blur'
-  if (isBlurEvent && Date.now() - categoryInputOpenedAt.value < 250) {
-    nextTick(() => {
-      newCategoryInputRef.value?.focus()
-    })
-    return
-  }
+const confirmCreateCategory = async () => {
   const category = newCategoryName.value.trim()
+  isAddingCategory.value = false
+  newCategoryName.value = ''
+  categoryInputOpenedAt.value = 0
   if (category && category !== '未分类' && category !== '全部' && !categories.value.includes(category)) {
     categories.value.push(category)
     try {
@@ -474,9 +676,6 @@ const confirmCreateCategory = async (event) => {
       console.error('添加图片分类失败:', error)
     }
   }
-  isAddingCategory.value = false
-  newCategoryName.value = ''
-  categoryInputOpenedAt.value = 0
 }
 
 const cancelCreateCategory = () => {
@@ -491,6 +690,7 @@ const removeCategory = async (category) => {
   Object.keys(categoryMap.value).forEach((key) => {
     if (categoryMap.value[key] === category) {
       delete categoryMap.value[key]
+      tagMap.value[key] = []
     }
   })
   if (categoryFilter.value === category) {
@@ -506,6 +706,9 @@ const removeCategory = async (category) => {
 const applyPayload = (data, options = {}) => {
   const {refocus = false} = options
   history.value = Array.isArray(data.history) ? data.history : []
+  totalCount.value = history.value.filter(Boolean).length
+  pageOffset.value = totalCount.value
+  hasMore.value = false
   warmedIndices.clear()
   warmingIndices.clear()
   if (typeof data.bottomOffset === 'number') {
@@ -513,6 +716,8 @@ const applyPayload = (data, options = {}) => {
   }
   if (!isAddingCategory.value) {
     categoryMap.value = data.categories || {}
+    tagMap.value = data.image_tags || {}
+    pinnedItems.value = Array.isArray(data.pinned_items) ? data.pinned_items : []
     if (Array.isArray(data.category_list)) {
       const list = data.category_list.filter((c) => c !== '未分类' && c !== '全部')
       categories.value = ['未分类', ...Array.from(new Set(list))]
@@ -533,32 +738,81 @@ const applyPayload = (data, options = {}) => {
   }
 }
 
-const syncHistory = async () => {
-  try {
-    const data = await ImageClipboardService.getHistory()
-    applyPayload({
-      ...data,
-      selectedIndex: typeof selectedIndex.value === 'number' ? selectedIndex.value : 0
-    }, {refocus: false})
-  } catch (error) {
-    console.error('同步图片历史失败:', error)
+const mergeImagePageIntoState = (data, reset = false) => {
+  const items = Array.isArray(data?.items) ? data.items : []
+  if (reset) {
+    history.value = []
+    categoryMap.value = {}
+    tagMap.value = {}
+    pinnedItems.value = []
+    previewCache.clear()
+    warmedIndices.clear()
+    warmingIndices.clear()
+  }
+  for (const item of items) {
+    const position = Number(item.position)
+    if (!Number.isFinite(position) || position < 0) continue
+    history.value[position] = {
+      id: item.id,
+      width: item.width,
+      height: item.height,
+      image_path: item.imagePath
+    }
+    categoryMap.value[item.id] = item.category || '未分类'
+    tagMap.value[item.id] = Array.isArray(item.tags) ? item.tags : []
+  }
+  const pinnedSet = new Set(pinnedItems.value)
+  items.forEach((row) => {
+    if (row?.pinned && row.id) {
+      pinnedSet.add(row.id)
+    }
+  })
+  const loadedItems = history.value.filter(Boolean)
+  pinnedItems.value = loadedItems
+      .filter((item) => pinnedSet.has(item.id))
+      .map((item) => item.id)
+  totalCount.value = Number.isFinite(data?.total) ? data.total : loadedItems.length
+  const nextOffset = (reset ? 0 : pageOffset.value) + items.length
+  pageOffset.value = nextOffset
+  hasMore.value = nextOffset < totalCount.value
+  if (Array.isArray(data?.categoryList)) {
+    const list = data.categoryList.filter((c) => c !== '未分类' && c !== '全部')
+    categories.value = ['未分类', ...Array.from(new Set(list))]
   }
 }
 
-const startShortPolling = () => {
-  shortPollUntil = Date.now() + SHORT_POLL_DURATION_MS
-  if (refreshTimer) return
-  refreshTimer = window.setInterval(async () => {
-    if (!isVisible.value || isAddingCategory.value) return
-    if (Date.now() > shortPollUntil) {
-      if (refreshTimer) {
-        window.clearInterval(refreshTimer)
-        refreshTimer = null
-      }
-      return
+const loadHistoryPage = async ({reset = false} = {}) => {
+  if (isLoadingPage.value) return
+  isLoadingPage.value = true
+  try {
+    const offset = reset ? 0 : pageOffset.value
+    const data = await ImageClipboardService.getHistoryPage({
+      offset,
+      limit: pageSize.value,
+      category: categoryFilter.value === '全部' ? null : categoryFilter.value,
+      keyword: searchKeyword.value.trim() || null,
+      pinnedOnly: false,
+      sortOrder: sortOrder.value
+    })
+    mergeImagePageIntoState(data, reset)
+    if (selectedIndex.value < 0 || !history.value[selectedIndex.value]) {
+      const firstLoaded = filteredHistory.value[0]
+      selectedIndex.value = firstLoaded ? firstLoaded.index : -1
     }
-    await syncHistory()
-  }, SHORT_POLL_INTERVAL_MS)
+    await nextTick()
+    syncContentMetrics()
+  } catch (error) {
+    console.error('同步图片历史失败:', error)
+  } finally {
+    isLoadingPage.value = false
+  }
+}
+
+const syncHistory = async () => {
+  pageOffset.value = 0
+  totalCount.value = 0
+  hasMore.value = false
+  await loadHistoryPage({reset: true})
 }
 
 const handleKeydown = async (event) => {
@@ -583,15 +837,18 @@ const handleKeydown = async (event) => {
     event.preventDefault()
     currentVisibleIndex = Math.min(visible.length - 1, currentVisibleIndex + 1)
     selectedIndex.value = visible[currentVisibleIndex].index
+    await tryLoadMoreByScroll()
     await ensureKeyboardSelectionVisible()
   } else if (event.key === 'Enter') {
     event.preventDefault()
     if (selectedIndex.value >= 0 && selectedIndex.value < history.value.length) {
-      await fillByIndex(selectedIndex.value)
+      await fillById(history.value[selectedIndex.value]?.id)
     }
   } else if (event.key === 'Escape') {
     event.preventDefault()
-    await WindowService.imageBlur()
+    isVisible.value = false
+    WindowService.imageBlur().catch(() => {
+    })
   }
 }
 
@@ -600,33 +857,55 @@ const isInputLikeTarget = (target) => {
   return tagName === 'input' || tagName === 'textarea' || target?.isContentEditable
 }
 
+const handleWindowKeydown = (event) => {
+  if (event.ctrlKey) {
+    isCtrlKeyPressed.value = true
+  }
+}
+
+const handleWindowKeyup = (event) => {
+  if (!event.ctrlKey) {
+    isCtrlKeyPressed.value = false
+  }
+}
+
+const handleWindowBlur = () => {
+  isCtrlKeyPressed.value = false
+  isVisible.value = false
+  WindowService.imageBlur().catch(() => {
+  })
+}
+
 onMounted(async () => {
+  pageSize.value = normalizeImagePageSize(localStorage.getItem('image_history_page_size'))
   await syncHistory()
   unlistenShowWindow = await listen('show-image-window', (event) => {
     applyPayload(event.payload, {refocus: true})
-    startShortPolling()
+    queueMicrotask(() => {
+      syncHistory()
+    })
   })
   unlistenHistoryUpdated = await listen('image-history-updated', async () => {
     if (isVisible.value && !isAddingCategory.value) {
+      if (isPointerDown || isContentDragging) {
+        pendingHistorySync = true
+        return
+      }
       await syncHistory()
     }
   })
-
-  window.addEventListener('blur', async () => {
-    try {
-      await WindowService.imageBlur()
-      isVisible.value = false
-    } catch (error) {
-      console.error('调用 image_window_blur 失败:', error)
-    }
-  })
+  window.addEventListener('keydown', handleWindowKeydown)
+  window.addEventListener('keyup', handleWindowKeyup)
+  window.addEventListener('blur', handleWindowBlur)
+  window.addEventListener('resize', syncContentMetrics)
 })
 
 onBeforeUnmount(() => {
   stopContentDragging()
-  if (refreshTimer) {
-    window.clearInterval(refreshTimer)
-    refreshTimer = null
+  previewCache.clear()
+  if (filterDebounceTimer) {
+    clearTimeout(filterDebounceTimer)
+    filterDebounceTimer = null
   }
   if (unlistenShowWindow) {
     unlistenShowWindow()
@@ -636,12 +915,31 @@ onBeforeUnmount(() => {
     unlistenHistoryUpdated()
     unlistenHistoryUpdated = null
   }
+  window.removeEventListener('keydown', handleWindowKeydown)
+  window.removeEventListener('keyup', handleWindowKeyup)
+  window.removeEventListener('blur', handleWindowBlur)
+  window.removeEventListener('resize', syncContentMetrics)
   window.removeEventListener('mousemove', handleGlobalMouseMove)
   window.removeEventListener('mouseup', handleGlobalMouseUp, true)
 })
 
 watch(selectedIndex, (value) => {
   warmupOne(value)
+})
+
+watch(previewCacheKeepIds, (ids) => {
+  prunePreviewCache(ids)
+}, {immediate: true})
+
+let filterDebounceTimer = null
+watch([searchKeyword, categoryFilter], () => {
+  if (!isVisible.value) return
+  if (filterDebounceTimer) {
+    clearTimeout(filterDebounceTimer)
+  }
+  filterDebounceTimer = setTimeout(() => {
+    syncHistory()
+  }, 180)
 })
 </script>
 
@@ -714,8 +1012,25 @@ html, body {
   display: none;
 }
 
-.spacer {
-  flex: 0 0 742px;
+.content.is-dragging .clipboard-item {
+  transition: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.content.is-dragging .clipboard-item:hover,
+.content.is-dragging .clipboard-item.selected {
+  box-shadow: none !important;
+}
+
+.content.is-dragging .delete-btn,
+.content.is-dragging .fullscreen-btn,
+.content.is-dragging .pin-btn {
+  opacity: 0 !important;
+}
+
+.virtual-spacer {
+  flex: 0 0 auto;
   height: 1px;
 }
 
@@ -796,6 +1111,45 @@ html, body {
   padding: 0;
 }
 
+.pin-btn {
+  position: absolute;
+  top: 5px;
+  right: 53px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.75);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s, border-color 0.2s, color 0.2s, background-color 0.2s;
+  z-index: 10;
+  padding: 0;
+}
+
+.pin-lucide {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2;
+}
+
+.pin-btn:hover {
+  border-color: var(--el-color-primary, #409eff);
+  color: #fff;
+  background: var(--el-color-primary, #409eff);
+}
+
+.pin-btn.active {
+  opacity: 1;
+  border-color: #f7b955;
+  color: #fff;
+  background: rgba(247, 185, 85, 0.75);
+}
+
 .fullscreen-btn:hover {
   border-color: var(--el-color-primary, #409eff);
   color: #fff;
@@ -803,6 +1157,10 @@ html, body {
 }
 
 .clipboard-item:hover .fullscreen-btn {
+  opacity: 1;
+}
+
+.clipboard-item:hover .pin-btn {
   opacity: 1;
 }
 
@@ -832,7 +1190,7 @@ html, body {
 .category-wrap {
   position: absolute;
   left: 36px;
-  right: 36px;
+  right: 62px;
   top: 5px;
   display: flex;
   justify-content: center;
@@ -857,8 +1215,42 @@ html, body {
   text-overflow: ellipsis;
 }
 
+.tag-wrap {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 32px;
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  z-index: 8;
+}
+
+.tag-chip-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #d9ecff;
+  background: rgba(64, 158, 255, 0.2);
+  border: 1px solid rgba(64, 158, 255, 0.45);
+}
+
+.tag-chip-empty {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
 .item-content {
-  margin-top: 38px;
+  margin-top: 56px;
   flex: 1;
   min-height: 0;
   position: relative;
@@ -920,6 +1312,11 @@ html, body {
   color: #fff;
 }
 
+.context-menu-divider {
+  margin: 4px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 .check-icon {
   font-size: 12px;
 }
@@ -958,6 +1355,15 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
+}
+
+.status-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: rgba(166, 213, 255, 0.88);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-actions {

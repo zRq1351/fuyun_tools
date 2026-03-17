@@ -1,7 +1,7 @@
 import {invoke} from '@tauri-apps/api/core';
 
 const buildSelectAndFillRequest = (index, opId) => ({index, opId});
-const buildSelectAndFillImageRequest = (index, opId) => ({index, opId});
+const buildSelectAndFillImageByIdRequest = (itemId, opId) => ({itemId, opId});
 const buildStreamTranslateRequest = (text, sourceLanguage, targetLanguage, opId, sceneHint) => ({
     text,
     sourceLanguage,
@@ -23,13 +23,21 @@ const buildStreamExplainRequest = (text, targetLanguage, opId, sceneHint) => ({
 export const IPC_COMMANDS = {
     // 剪贴板管理
     GET_CLIPBOARD_HISTORY: 'get_clipboard_history',
+    GET_CLIPBOARD_HISTORY_PAGE: 'get_clipboard_history_page',
     REMOVE_CLIPBOARD_ITEM: 'remove_clipboard_item',
+    SET_CLIPBOARD_ITEM_PINNED: 'set_clipboard_item_pinned',
+    PROMOTE_CLIPBOARD_ITEM: 'promote_clipboard_item',
+    CLEAR_TEXT_HISTORY: 'clear_text_history',
     SELECT_AND_FILL: 'select_and_fill',
     GET_IMAGE_CLIPBOARD_HISTORY: 'get_image_clipboard_history',
-    REMOVE_IMAGE_CLIPBOARD_ITEM: 'remove_image_clipboard_item',
-    SELECT_AND_FILL_IMAGE: 'select_and_fill_image',
-    WARMUP_IMAGE_CLIPBOARD_ITEM: 'warmup_image_clipboard_item',
-    OPEN_IMAGE_PREVIEW_WINDOW: 'open_image_preview_window',
+    GET_IMAGE_CLIPBOARD_HISTORY_PAGE: 'get_image_clipboard_history_page',
+    REMOVE_IMAGE_CLIPBOARD_ITEM_BY_ID: 'remove_image_clipboard_item_by_id',
+    PROMOTE_IMAGE_CLIPBOARD_ITEM_BY_ID: 'promote_image_clipboard_item_by_id',
+    CLEAR_IMAGE_HISTORY: 'clear_image_history',
+    IMPORT_IMAGE_FILES: 'import_image_files',
+    SELECT_AND_FILL_IMAGE_BY_ID: 'select_and_fill_image_by_id',
+    WARMUP_IMAGE_CLIPBOARD_ITEM_BY_ID: 'warmup_image_clipboard_item_by_id',
+    OPEN_IMAGE_PREVIEW_WINDOW_BY_ID: 'open_image_preview_window_by_id',
     CLOSE_IMAGE_PREVIEW_WINDOW: 'close_image_preview_window',
     COPY_TEXT: 'copy_text',
     COPY_AND_PASTE_TEXT: 'copy_and_paste_text',
@@ -39,6 +47,8 @@ export const IPC_COMMANDS = {
     REMOVE_CATEGORY: 'remove_category',
     ADD_CATEGORY: 'add_category',
     SET_IMAGE_ITEM_CATEGORY: 'set_image_item_category',
+    SET_IMAGE_ITEM_TAGS: 'set_image_item_tags',
+    SET_IMAGE_ITEM_PINNED: 'set_image_item_pinned',
     REMOVE_IMAGE_CATEGORY: 'remove_image_category',
     ADD_IMAGE_CATEGORY: 'add_image_category',
 
@@ -62,6 +72,7 @@ export const IPC_COMMANDS = {
     EXPORT_POLL_METRICS: 'export_poll_metrics',
     EXPORT_POLL_METRICS_TO_FILE: 'export_poll_metrics_to_file',
     GET_TEXT_DEDUP_METRICS: 'get_text_dedup_metrics',
+    GET_IMAGE_STORAGE_METRICS: 'get_image_storage_metrics',
 
     // AI 功能
     STREAM_TRANSLATE_TEXT: 'stream_translate_text',
@@ -77,6 +88,18 @@ export const ClipboardService = {
      * @returns {Promise<{history: string[], categories: Object, category_list: string[]}>}
      */
     getHistory: () => invoke(IPC_COMMANDS.GET_CLIPBOARD_HISTORY),
+    getHistoryPage: ({
+                         offset = 0,
+                         limit = 50,
+                         category = null,
+                         pinnedOnly = false,
+                         keyword = null,
+                         sortBy = null,
+                         sortOrder = null
+                     } = {}) =>
+        invoke(IPC_COMMANDS.GET_CLIPBOARD_HISTORY_PAGE, {
+            request: {offset, limit, category, pinnedOnly, keyword, sortBy, sortOrder}
+        }),
 
     /**
      * 删除剪贴板条目
@@ -84,6 +107,9 @@ export const ClipboardService = {
      * @returns {Promise<void>}
      */
     removeItem: (index) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, {index}),
+    setItemPinned: (index, item, pinned) => invoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, {index, item, pinned}),
+    promoteItem: (index) => invoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, {index}),
+    clearHistory: (mode) => invoke(IPC_COMMANDS.CLEAR_TEXT_HISTORY, {mode}),
 
     /**
      * 选择并填充内容
@@ -104,12 +130,33 @@ export const ClipboardService = {
 
 export const ImageClipboardService = {
     getHistory: () => invoke(IPC_COMMANDS.GET_IMAGE_CLIPBOARD_HISTORY),
-    removeItem: (index) => invoke(IPC_COMMANDS.REMOVE_IMAGE_CLIPBOARD_ITEM, {index}),
-    selectAndFill: (index, opId) =>
-        invoke(IPC_COMMANDS.SELECT_AND_FILL_IMAGE, {request: buildSelectAndFillImageRequest(index, opId)}),
-    warmupItem: (index) => invoke(IPC_COMMANDS.WARMUP_IMAGE_CLIPBOARD_ITEM, {index}),
-    openPreviewWindow: (index) => invoke(IPC_COMMANDS.OPEN_IMAGE_PREVIEW_WINDOW, {index}),
+    getHistoryPage: ({
+                         offset = 0,
+                         limit = 50,
+                         category = null,
+                         keyword = null,
+                         pinnedOnly = false,
+                         sortOrder = null
+                     } = {}) =>
+        invoke(IPC_COMMANDS.GET_IMAGE_CLIPBOARD_HISTORY_PAGE, {
+            request: {offset, limit, category, keyword, pinnedOnly, sortOrder}
+        }),
+    removeItemById: (itemId) => invoke(IPC_COMMANDS.REMOVE_IMAGE_CLIPBOARD_ITEM_BY_ID, {itemId}),
+    promoteItemById: (itemId) =>
+        invoke(IPC_COMMANDS.PROMOTE_IMAGE_CLIPBOARD_ITEM_BY_ID, {request: {itemId}}),
+    setItemPinned: (itemId, pinned) => invoke(IPC_COMMANDS.SET_IMAGE_ITEM_PINNED, {itemId, pinned}),
+    clearHistory: (mode) => invoke(IPC_COMMANDS.CLEAR_IMAGE_HISTORY, {mode}),
+    importImageFiles: (paths) => invoke(IPC_COMMANDS.IMPORT_IMAGE_FILES, {paths}),
+    selectAndFillById: (itemId, opId) =>
+        invoke(IPC_COMMANDS.SELECT_AND_FILL_IMAGE_BY_ID, {
+            request: buildSelectAndFillImageByIdRequest(itemId, opId)
+        }),
+    warmupItemById: (itemId) =>
+        invoke(IPC_COMMANDS.WARMUP_IMAGE_CLIPBOARD_ITEM_BY_ID, {request: {itemId}}),
+    openPreviewWindowById: (itemId) =>
+        invoke(IPC_COMMANDS.OPEN_IMAGE_PREVIEW_WINDOW_BY_ID, {request: {itemId}}),
     closePreviewWindow: () => invoke(IPC_COMMANDS.CLOSE_IMAGE_PREVIEW_WINDOW),
+    setItemTags: (itemId, tags) => invoke(IPC_COMMANDS.SET_IMAGE_ITEM_TAGS, {itemId, tags}),
 };
 
 /**
@@ -196,7 +243,9 @@ export const AISettingsService = {
     /**
      * 保存应用设置
      * @param {Object} params
-     * @param {number} params.maxItems
+     * @param {number} params.textMaxItems
+     * @param {number} params.imageMaxItems
+     * @param {number} params.imageDiskLimitMb
      * @param {string} params.aiProvider
      * @param {string} params.aiApiUrl
      * @param {string} params.aiModelName
@@ -207,17 +256,12 @@ export const AISettingsService = {
      * @param {boolean} params.groupedItemsProtectedFromLimit
      * @param {string} params.translationPromptTemplate
      * @param {string} params.explanationPromptTemplate
-     * @param {number} params.clipboardPollMinIntervalMs
-     * @param {number} params.clipboardPollWarmIntervalMs
-     * @param {number} params.clipboardPollIdleIntervalMs
-     * @param {number} params.clipboardPollMaxIntervalMs
-     * @param {number} params.clipboardPollReportIntervalSecs
-     * @param {boolean} params.clipboardPollMetricsEnabled
-     * @param {string} params.clipboardPollMetricsLogLevel
      * @returns {Promise<void>}
      */
     saveSettings: ({
-                       maxItems,
+                       textMaxItems,
+                       imageMaxItems,
+                       imageDiskLimitMb,
                        aiProvider,
                        aiApiUrl,
                        aiModelName,
@@ -227,17 +271,12 @@ export const AISettingsService = {
                        selectionEnabled,
                        groupedItemsProtectedFromLimit,
                        translationPromptTemplate,
-                       explanationPromptTemplate,
-                       clipboardPollMinIntervalMs,
-                       clipboardPollWarmIntervalMs,
-                       clipboardPollIdleIntervalMs,
-                       clipboardPollMaxIntervalMs,
-                       clipboardPollReportIntervalSecs,
-                       clipboardPollMetricsEnabled,
-                       clipboardPollMetricsLogLevel
+                       explanationPromptTemplate
                    }) =>
         invoke(IPC_COMMANDS.SAVE_APP_SETTINGS, {
-            maxItems,
+            textMaxItems,
+            imageMaxItems,
+            imageDiskLimitMb,
             aiProvider,
             aiApiUrl,
             aiModelName,
@@ -247,14 +286,7 @@ export const AISettingsService = {
             selectionEnabled,
             groupedItemsProtectedFromLimit,
             translationPromptTemplate,
-            explanationPromptTemplate,
-            clipboardPollMinIntervalMs,
-            clipboardPollWarmIntervalMs,
-            clipboardPollIdleIntervalMs,
-            clipboardPollMaxIntervalMs,
-            clipboardPollReportIntervalSecs,
-            clipboardPollMetricsEnabled,
-            clipboardPollMetricsLogLevel
+            explanationPromptTemplate
         }),
 
     /**
@@ -297,6 +329,8 @@ export const AISettingsService = {
         invoke(IPC_COMMANDS.EXPORT_POLL_METRICS_TO_FILE, {format, limit, filePath}),
     getTextDedupMetrics: () =>
         invoke(IPC_COMMANDS.GET_TEXT_DEDUP_METRICS),
+    getImageStorageMetrics: () =>
+        invoke(IPC_COMMANDS.GET_IMAGE_STORAGE_METRICS),
 };
 
 /**

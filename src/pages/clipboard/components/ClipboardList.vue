@@ -25,6 +25,11 @@
           <Link/>
         </el-icon>
       </div>
+      <div :class="{ active: isPinned(entry.item) }" class="pin-btn" @click.stop="promoteItem(entry.index, entry.item)">
+        <el-icon>
+          <Pin/>
+        </el-icon>
+      </div>
       <div class="delete-btn" @click.stop="deleteItem(entry.index)">
         <el-icon>
           <Close/>
@@ -35,6 +40,12 @@
         <div class="category-chip">{{ getItemCategory(entry.item) }}</div>
       </div>
       <div class="item-content">{{ entry.item }}</div>
+      <div v-if="entry.snippet" class="item-snippet">
+        <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
+          <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
+          <span v-else>{{ part.text }}</span>
+        </template>
+      </div>
     </div>
     <div v-if="rightSpacerWidth > 0" :style="{ minWidth: rightSpacerWidth + 'px', height: '1px' }"></div>
     <div class="spacer"></div>
@@ -44,6 +55,7 @@
 <script setup>
 import {computed, onUnmounted, ref} from 'vue'
 import {Close, Link} from '@element-plus/icons-vue'
+import {Pin} from 'lucide-vue-next'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
 
 const props = defineProps({
@@ -82,14 +94,67 @@ const props = defineProps({
   handleDragEnd: {
     type: Function,
     required: true
+  },
+  promoteItem: {
+    type: Function,
+    required: true
+  },
+  isPinned: {
+    type: Function,
+    required: true
+  },
+  highlightKeyword: {
+    type: String,
+    default: ''
   }
 })
+const emit = defineEmits(['content-scroll'])
 
 const contentRef = ref(null)
 let isDown = false
 let startX = 0
 let scrollLeftVal = 0
 const handleScroll = () => {
+  emit('content-scroll')
+}
+
+const renderHighlightParts = (text) => {
+  const value = typeof text === 'string' ? text : ''
+  const keyword = (props.highlightKeyword || '').trim()
+  const tokens = Array.from(new Set(keyword.split(/\s+/).map((v) => v.trim()).filter(Boolean)))
+      .sort((a, b) => b.length - a.length)
+  if (!value || tokens.length === 0) {
+    return [{text: value, hit: false}]
+  }
+
+  const sourceLower = value.toLowerCase()
+  const tokenLowers = tokens.map((t) => t.toLowerCase())
+  const out = []
+  let start = 0
+  while (start < value.length) {
+    let bestIndex = -1
+    let bestToken = ''
+    for (let i = 0; i < tokenLowers.length; i += 1) {
+      const token = tokenLowers[i]
+      const idx = sourceLower.indexOf(token, start)
+      if (idx === -1) continue
+      if (bestIndex === -1 || idx < bestIndex || (idx === bestIndex && token.length > bestToken.length)) {
+        bestIndex = idx
+        bestToken = token
+      }
+    }
+    if (bestIndex === -1) {
+      out.push({text: value.slice(start), hit: false})
+      break
+    }
+    if (bestIndex > start) {
+      out.push({text: value.slice(start, bestIndex), hit: false})
+    }
+    const hitEnd = bestIndex + bestToken.length
+    out.push({text: value.slice(bestIndex, hitEnd), hit: true})
+    start = hitEnd
+  }
+  return out.length > 0 ? out : [{text: value, hit: false}]
 }
 
 const stopDragging = () => {
@@ -156,7 +221,7 @@ const openWebUrl = async (value) => {
 
 const handleMouseDown = (e) => {
   // 如果点击的是删除按钮或链接按钮，不触发拖拽
-  if (e.target.closest('.delete-btn') || e.target.closest('.open-btn')) {
+  if (e.target.closest('.delete-btn') || e.target.closest('.open-btn') || e.target.closest('.pin-btn')) {
     return
   }
 
@@ -312,12 +377,40 @@ defineExpose({
   z-index: 10;
 }
 
+.pin-btn {
+  position: absolute;
+  top: 5px;
+  right: 55px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 12;
+}
+
 .open-btn .el-icon {
   font-size: 12px;
 }
 
 .clipboard-item:hover .open-btn {
   opacity: 1;
+}
+
+.clipboard-item:hover .pin-btn {
+  opacity: 1;
+}
+
+.pin-btn.active {
+  opacity: 1;
+  background: rgba(247, 185, 85, 0.75);
+  color: #fff6d1;
+  border: 1px solid rgba(247, 185, 85, 0.9);
 }
 
 .open-btn:hover {
@@ -360,6 +453,7 @@ defineExpose({
   display: flex;
   justify-content: center;
   z-index: 10;
+  pointer-events: none;
 }
 
 .category-chip {
@@ -399,5 +493,25 @@ defineExpose({
 
 .item-content::-webkit-scrollbar {
   display: none;
+}
+
+.item-snippet {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.14);
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(166, 213, 255, 0.9);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 52px;
+  overflow: hidden;
+}
+
+.snippet-hit {
+  background: rgba(247, 185, 85, 0.35);
+  color: #fff2c2;
+  border-radius: 2px;
+  padding: 0 1px;
 }
 </style>

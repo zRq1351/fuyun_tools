@@ -25,6 +25,7 @@
 import {onBeforeUnmount, onMounted, ref} from 'vue'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWindow} from '@tauri-apps/api/window'
+import {convertFileSrc} from '@tauri-apps/api/core'
 import {ImageClipboardService} from '../../services/ipc'
 
 const currentWindow = getCurrentWindow()
@@ -32,31 +33,19 @@ const imageUrl = ref('')
 const isImageReady = ref(false)
 const animationState = ref('closed')
 const loadingStartedAt = ref(0)
+const activeRequestId = ref('')
 const MIN_LOADING_MS = 180
 let unlistenShowPreview = null
 let closeTimer = null
 let revealTimer = null
 
-const decodeBase64ToRgba = (base64) => {
-  const binary = atob(base64)
-  const rgba = new Uint8ClampedArray(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    rgba[i] = binary.charCodeAt(i)
+const buildFileUrlFromPath = (imagePath) => {
+  if (!imagePath) return ''
+  try {
+    return convertFileSrc(imagePath)
+  } catch (_) {
+    return ''
   }
-  return rgba
-}
-
-const buildDataUrlFromRgba = (rgbaBase64, width, height) => {
-  if (!rgbaBase64 || !width || !height) return ''
-  const rgba = decodeBase64ToRgba(rgbaBase64)
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return ''
-  const imageData = new ImageData(rgba, width, height)
-  ctx.putImageData(imageData, 0, 0)
-  return canvas.toDataURL('image/png')
 }
 
 const playOpenAnimation = () => {
@@ -109,21 +98,32 @@ const requestClose = (immediate = false) => {
 onMounted(async () => {
   unlistenShowPreview = await listen('show-image-preview', (event) => {
     const payload = event.payload || {}
+    const payloadRequestId = String(payload.request_id || '')
+    if (payload.loading) {
+      activeRequestId.value = payloadRequestId
+    } else if (payloadRequestId && payloadRequestId !== activeRequestId.value) {
+      return
+    }
     if (revealTimer) {
       window.clearTimeout(revealTimer)
       revealTimer = null
     }
-    loadingStartedAt.value = performance.now()
-    isImageReady.value = false
     if (payload.loading) {
+      loadingStartedAt.value = performance.now()
+      isImageReady.value = false
       imageUrl.value = ''
       playOpenAnimation()
       return
     }
+    const keepVisible = !!imageUrl.value && payload.is_final === true && isImageReady.value
+    if (!keepVisible) {
+      loadingStartedAt.value = performance.now()
+      isImageReady.value = false
+    }
     imageUrl.value = ''
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        const nextUrl = buildDataUrlFromRgba(payload.rgba_base64, payload.width, payload.height)
+        const nextUrl = buildFileUrlFromPath(payload.image_path)
         imageUrl.value = nextUrl
         if (!nextUrl) {
           onImageLoaded()

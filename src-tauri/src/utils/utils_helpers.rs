@@ -1,18 +1,18 @@
 use crate::core::config::{
-    ProviderConfig, DEFAULT_CLIPBOARD_POLL_IDLE_INTERVAL_MS, DEFAULT_CLIPBOARD_POLL_MAX_INTERVAL_MS,
-    DEFAULT_CLIPBOARD_POLL_METRICS_ENABLED, DEFAULT_CLIPBOARD_POLL_METRICS_LOG_LEVEL,
-    DEFAULT_CLIPBOARD_POLL_MIN_INTERVAL_MS, DEFAULT_CLIPBOARD_POLL_REPORT_INTERVAL_SECS,
-    DEFAULT_CLIPBOARD_POLL_WARM_INTERVAL_MS, DEFAULT_IMAGE_TOGGLE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT,
+    ProviderConfig, DEFAULT_IMAGE_TOGGLE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT,
 };
 use keyring::Entry;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::env;
+use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::{Duration, Instant};
-use std::fs;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const LEGACY_ENCRYPTION_KEY: &[u8] = b"fuyun_tools_encryption_key_2025!"; // 32字节旧版密钥，仅用于迁移
 
@@ -25,6 +25,12 @@ pub fn get_default_app_version() -> String {
 pub struct AppSettingsData {
     pub version: String,
     pub max_items: usize,
+    #[serde(default = "default_text_max_items")]
+    pub text_max_items: usize,
+    #[serde(default = "default_image_max_items")]
+    pub image_max_items: usize,
+    #[serde(default = "default_image_disk_limit_mb")]
+    pub image_disk_limit_mb: u64,
     pub hot_key: String,
     #[serde(default = "default_image_hot_key")]
     pub image_hot_key: String,
@@ -43,20 +49,6 @@ pub struct AppSettingsData {
     pub translation_prompt_template: String,
     #[serde(default = "default_explanation_prompt_template")]
     pub explanation_prompt_template: String,
-    #[serde(default = "default_clipboard_poll_min_interval_ms")]
-    pub clipboard_poll_min_interval_ms: u64,
-    #[serde(default = "default_clipboard_poll_warm_interval_ms")]
-    pub clipboard_poll_warm_interval_ms: u64,
-    #[serde(default = "default_clipboard_poll_idle_interval_ms")]
-    pub clipboard_poll_idle_interval_ms: u64,
-    #[serde(default = "default_clipboard_poll_max_interval_ms")]
-    pub clipboard_poll_max_interval_ms: u64,
-    #[serde(default = "default_clipboard_poll_report_interval_secs")]
-    pub clipboard_poll_report_interval_secs: u64,
-    #[serde(default = "default_clipboard_poll_metrics_enabled")]
-    pub clipboard_poll_metrics_enabled: bool,
-    #[serde(default = "default_clipboard_poll_metrics_log_level")]
-    pub clipboard_poll_metrics_log_level: String,
 }
 
 impl Default for AppSettingsData {
@@ -64,6 +56,9 @@ impl Default for AppSettingsData {
         Self {
             version: get_default_app_version(),
             max_items: 50,
+            text_max_items: default_text_max_items(),
+            image_max_items: default_image_max_items(),
+            image_disk_limit_mb: default_image_disk_limit_mb(),
             hot_key: DEFAULT_TOGGLE_SHORTCUT.to_string(),
             image_hot_key: default_image_hot_key(),
             ai_provider: "deepseek".to_string(),
@@ -73,19 +68,24 @@ impl Default for AppSettingsData {
             clipboard_bottom_offset: default_clipboard_bottom_offset(),
             translation_prompt_template: default_translation_prompt_template(),
             explanation_prompt_template: default_explanation_prompt_template(),
-            clipboard_poll_min_interval_ms: default_clipboard_poll_min_interval_ms(),
-            clipboard_poll_warm_interval_ms: default_clipboard_poll_warm_interval_ms(),
-            clipboard_poll_idle_interval_ms: default_clipboard_poll_idle_interval_ms(),
-            clipboard_poll_max_interval_ms: default_clipboard_poll_max_interval_ms(),
-            clipboard_poll_report_interval_secs: default_clipboard_poll_report_interval_secs(),
-            clipboard_poll_metrics_enabled: default_clipboard_poll_metrics_enabled(),
-            clipboard_poll_metrics_log_level: default_clipboard_poll_metrics_log_level(),
         }
     }
 }
 
 fn default_selection_enabled() -> bool {
     true
+}
+
+fn default_text_max_items() -> usize {
+    50
+}
+
+fn default_image_max_items() -> usize {
+    50
+}
+
+fn default_image_disk_limit_mb() -> u64 {
+    2048
 }
 
 fn default_image_hot_key() -> String {
@@ -98,34 +98,6 @@ fn default_grouped_items_protected_from_limit() -> bool {
 
 fn default_clipboard_bottom_offset() -> i32 {
     8
-}
-
-fn default_clipboard_poll_min_interval_ms() -> u64 {
-    DEFAULT_CLIPBOARD_POLL_MIN_INTERVAL_MS
-}
-
-fn default_clipboard_poll_warm_interval_ms() -> u64 {
-    DEFAULT_CLIPBOARD_POLL_WARM_INTERVAL_MS
-}
-
-fn default_clipboard_poll_idle_interval_ms() -> u64 {
-    DEFAULT_CLIPBOARD_POLL_IDLE_INTERVAL_MS
-}
-
-fn default_clipboard_poll_max_interval_ms() -> u64 {
-    DEFAULT_CLIPBOARD_POLL_MAX_INTERVAL_MS
-}
-
-fn default_clipboard_poll_report_interval_secs() -> u64 {
-    DEFAULT_CLIPBOARD_POLL_REPORT_INTERVAL_SECS
-}
-
-fn default_clipboard_poll_metrics_enabled() -> bool {
-    DEFAULT_CLIPBOARD_POLL_METRICS_ENABLED
-}
-
-fn default_clipboard_poll_metrics_log_level() -> String {
-    DEFAULT_CLIPBOARD_POLL_METRICS_LOG_LEVEL.to_string()
 }
 
 pub fn default_translation_prompt_template() -> String {
@@ -367,32 +339,14 @@ impl AppSettingsData {
         if self.max_items == 0 || self.max_items > 1000 {
             return Err("max_items必须在1-1000之间".to_string());
         }
-        if self.clipboard_poll_min_interval_ms < 20 || self.clipboard_poll_min_interval_ms > 3000 {
-            return Err("clipboard_poll_min_interval_ms必须在20-3000之间".to_string());
+        if self.text_max_items == 0 || self.text_max_items > 1000 {
+            return Err("text_max_items必须在1-1000之间".to_string());
         }
-        if self.clipboard_poll_warm_interval_ms < self.clipboard_poll_min_interval_ms
-            || self.clipboard_poll_warm_interval_ms > 8000
-        {
-            return Err("clipboard_poll_warm_interval_ms必须在[min_interval,8000]之间".to_string());
+        if self.image_max_items == 0 || self.image_max_items > 1000 {
+            return Err("image_max_items必须在1-1000之间".to_string());
         }
-        if self.clipboard_poll_idle_interval_ms < self.clipboard_poll_warm_interval_ms
-            || self.clipboard_poll_idle_interval_ms > 20000
-        {
-            return Err("clipboard_poll_idle_interval_ms必须在[warm_interval,20000]之间".to_string());
-        }
-        if self.clipboard_poll_max_interval_ms < self.clipboard_poll_idle_interval_ms
-            || self.clipboard_poll_max_interval_ms > 60000
-        {
-            return Err("clipboard_poll_max_interval_ms必须在[idle_interval,60000]之间".to_string());
-        }
-        if self.clipboard_poll_report_interval_secs < 5
-            || self.clipboard_poll_report_interval_secs > 3600
-        {
-            return Err("clipboard_poll_report_interval_secs必须在5-3600之间".to_string());
-        }
-        let level = self.clipboard_poll_metrics_log_level.as_str();
-        if level != "trace" && level != "debug" && level != "info" && level != "warn" {
-            return Err("clipboard_poll_metrics_log_level仅支持trace/debug/info/warn".to_string());
+        if self.image_disk_limit_mb < 100 || self.image_disk_limit_mb > 102400 {
+            return Err("image_disk_limit_mb必须在100-102400之间".to_string());
         }
 
         Ok(())
@@ -487,6 +441,24 @@ impl AppSettingsData {
             self.max_items = 50;
             log::info!("修复 max_items 从 {} 为默认值: 50", old_value);
         }
+        if self.text_max_items == default_text_max_items()
+            && self.image_max_items == default_image_max_items()
+            && self.max_items >= 10
+            && self.max_items <= 1000
+        {
+            self.text_max_items = self.max_items;
+            self.image_max_items = self.max_items;
+        }
+        if self.text_max_items < 10 || self.text_max_items > 1000 {
+            self.text_max_items = default_text_max_items();
+        }
+        if self.image_max_items < 10 || self.image_max_items > 1000 {
+            self.image_max_items = default_image_max_items();
+        }
+        if self.image_disk_limit_mb < 100 || self.image_disk_limit_mb > 102400 {
+            self.image_disk_limit_mb = default_image_disk_limit_mb();
+        }
+        self.max_items = self.text_max_items;
 
         if self.hot_key.is_empty() {
             self.hot_key = DEFAULT_TOGGLE_SHORTCUT.to_string();
@@ -508,38 +480,14 @@ impl AppSettingsData {
         if self.explanation_prompt_template.trim().is_empty() {
             self.explanation_prompt_template = default_explanation_prompt_template();
         }
-        if self.clipboard_poll_min_interval_ms < 20 || self.clipboard_poll_min_interval_ms > 3000 {
-            self.clipboard_poll_min_interval_ms = default_clipboard_poll_min_interval_ms();
-        }
-        if self.clipboard_poll_warm_interval_ms < self.clipboard_poll_min_interval_ms
-            || self.clipboard_poll_warm_interval_ms > 8000
-        {
-            self.clipboard_poll_warm_interval_ms = default_clipboard_poll_warm_interval_ms();
-        }
-        if self.clipboard_poll_idle_interval_ms < self.clipboard_poll_warm_interval_ms
-            || self.clipboard_poll_idle_interval_ms > 20000
-        {
-            self.clipboard_poll_idle_interval_ms = default_clipboard_poll_idle_interval_ms();
-        }
-        if self.clipboard_poll_max_interval_ms < self.clipboard_poll_idle_interval_ms
-            || self.clipboard_poll_max_interval_ms > 60000
-        {
-            self.clipboard_poll_max_interval_ms = default_clipboard_poll_max_interval_ms();
-        }
-        if self.clipboard_poll_report_interval_secs < 5
-            || self.clipboard_poll_report_interval_secs > 3600
-        {
-            self.clipboard_poll_report_interval_secs = default_clipboard_poll_report_interval_secs();
-        }
-        let valid_level = matches!(
-            self.clipboard_poll_metrics_log_level.as_str(),
-            "trace" | "debug" | "info" | "warn"
-        );
-        if !valid_level {
-            self.clipboard_poll_metrics_log_level = default_clipboard_poll_metrics_log_level();
-        }
 
-        log::debug!("迁移后 max_items: {}", self.max_items);
+        log::debug!(
+            "迁移后 max_items: {}, text_max_items: {}, image_max_items: {}, image_disk_limit_mb: {}",
+            self.max_items,
+            self.text_max_items,
+            self.image_max_items,
+            self.image_disk_limit_mb
+        );
     }
 
     /// 初始化AI提供商配置（如果需要）
@@ -593,6 +541,29 @@ pub struct ClipboardHistoryData {
     pub categories: HashMap<String, String>,
     #[serde(default)]
     pub category_list: Vec<String>,
+    #[serde(default)]
+    pub pinned_items: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardHistoryPageItem {
+    pub position: usize,
+    pub id: String,
+    pub content: String,
+    pub category: String,
+    pub pinned: bool,
+    pub updated_at: i64,
+    pub snippet: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardHistoryPageData {
+    pub total: usize,
+    pub offset: usize,
+    pub limit: usize,
+    pub items: Vec<ClipboardHistoryPageItem>,
 }
 /// 获取设置文件路径
 pub fn get_settings_file_path() -> PathBuf {
@@ -608,6 +579,668 @@ pub fn get_history_file_path() -> PathBuf {
     history_dir.pop();
     history_dir.push("history.json");
     history_dir
+}
+
+pub fn get_history_db_path() -> PathBuf {
+    let mut history_dir = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    history_dir.pop();
+    history_dir.push("history.db");
+    history_dir
+}
+
+fn open_history_db() -> Result<Connection, String> {
+    let db_path = get_history_db_path();
+    if let Some(parent) = db_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建历史数据库目录失败: {}", e))?;
+    }
+    let conn = Connection::open(db_path).map_err(|e| format!("打开历史数据库失败: {}", e))?;
+    conn.busy_timeout(Duration::from_millis(1200))
+        .map_err(|e| format!("设置历史数据库超时失败: {}", e))?;
+    conn.execute_batch(
+        "
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        PRAGMA temp_store = MEMORY;
+        ",
+    )
+    .map_err(|e| format!("设置历史数据库参数失败: {}", e))?;
+    ensure_history_db_schema(&conn)?;
+    Ok(conn)
+}
+
+fn ensure_history_db_schema(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS history_items (
+            position INTEGER PRIMARY KEY,
+            content TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS categories (
+            item TEXT PRIMARY KEY,
+            category TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS category_list (
+            position INTEGER PRIMARY KEY,
+            category TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS pinned_items (
+            position INTEGER PRIMARY KEY,
+            item TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_history_items_position ON history_items(position);
+        CREATE INDEX IF NOT EXISTS idx_categories_category ON categories(category);
+        ",
+    )
+    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+
+    ensure_sqlite_column(conn, "history_items", "item_id", "TEXT")?;
+    ensure_sqlite_column(conn, "history_items", "content_hash", "TEXT")?;
+    ensure_sqlite_column(conn, "history_items", "created_at", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_sqlite_column(conn, "history_items", "updated_at", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_sqlite_column(conn, "categories", "item_id", "TEXT")?;
+    ensure_sqlite_column(conn, "pinned_items", "item_id", "TEXT")?;
+
+    conn.execute(
+        "UPDATE history_items
+         SET created_at = CAST(strftime('%s','now') AS INTEGER) * 1000
+         WHERE created_at <= 0",
+        [],
+    )
+    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+    conn.execute(
+        "UPDATE history_items
+         SET updated_at = created_at
+         WHERE updated_at <= 0",
+        [],
+    )
+    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+    conn.execute(
+        "
+        UPDATE categories
+        SET item_id = (
+            SELECT hi.item_id
+            FROM history_items hi
+            WHERE hi.content = categories.item
+            LIMIT 1
+        )
+        WHERE item_id IS NULL OR item_id = ''
+        ",
+        [],
+    )
+    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+    conn.execute(
+        "
+        UPDATE pinned_items
+        SET item_id = (
+            SELECT hi.item_id
+            FROM history_items hi
+            WHERE hi.content = pinned_items.item
+            LIMIT 1
+        )
+        WHERE item_id IS NULL OR item_id = ''
+        ",
+        [],
+    )
+    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+    conn.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS idx_history_items_item_id ON history_items(item_id);
+        CREATE INDEX IF NOT EXISTS idx_history_items_updated_at ON history_items(updated_at);
+        CREATE INDEX IF NOT EXISTS idx_categories_item_id ON categories(item_id);
+        CREATE INDEX IF NOT EXISTS idx_pinned_items_item_id ON pinned_items(item_id);
+        ",
+    )
+    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+    ensure_history_fts(conn);
+    Ok(())
+}
+
+fn ensure_history_fts(conn: &Connection) {
+    let create_result = conn.execute_batch(
+        "
+        CREATE VIRTUAL TABLE IF NOT EXISTS history_items_fts USING fts5(
+            item_id UNINDEXED,
+            content,
+            tokenize = 'unicode61'
+        );
+        ",
+    );
+    if create_result.is_err() {
+        return;
+    }
+
+    let _ = conn.execute(
+        "
+        INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content)
+        SELECT position + 1, COALESCE(item_id, ''), content
+        FROM history_items
+        ",
+        [],
+    );
+    let _ = conn.execute(
+        "
+        DELETE FROM history_items_fts
+        WHERE rowid NOT IN (SELECT position + 1 FROM history_items)
+        ",
+        [],
+    );
+}
+
+fn ensure_sqlite_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), String> {
+    let pragma_sql = format!("PRAGMA table_info({})", table);
+    let mut stmt = conn
+        .prepare(&pragma_sql)
+        .map_err(|e| format!("读取历史数据库结构失败: {}", e))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| format!("读取历史数据库结构失败: {}", e))?;
+    let mut exists = false;
+    for row in rows {
+        if row.map_err(|e| format!("读取历史数据库结构失败: {}", e))? == column {
+            exists = true;
+            break;
+        }
+    }
+    drop(stmt);
+
+    if !exists {
+        let sql = format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, definition);
+        conn.execute(&sql, [])
+            .map_err(|e| format!("升级历史数据库结构失败: {}", e))?;
+    }
+    Ok(())
+}
+
+fn now_unix_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn stable_history_item_id(content: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    let hash = hasher.finish();
+    format!("{:016x}-{}", hash, content.chars().count())
+}
+
+fn stable_history_content_hash(content: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn sqlite_history_has_any_data(conn: &Connection) -> Result<bool, String> {
+    let history_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM history_items", [], |row| row.get(0))
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let categories_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM categories", [], |row| row.get(0))
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let category_list_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM category_list", [], |row| row.get(0))
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let pinned_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM pinned_items", [], |row| row.get(0))
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    Ok(history_count + categories_count + category_list_count + pinned_count > 0)
+}
+
+fn load_history_data_from_sqlite() -> Result<Option<ClipboardHistoryData>, String> {
+    let db_path = get_history_db_path();
+    if !db_path.exists() {
+        return Ok(None);
+    }
+    let conn = open_history_db()?;
+    if !sqlite_history_has_any_data(&conn)? {
+        return Ok(None);
+    }
+
+    let mut items_stmt = conn
+        .prepare("SELECT content FROM history_items ORDER BY position ASC")
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let items_iter = items_stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let mut items = Vec::new();
+    for row in items_iter {
+        items.push(row.map_err(|e| format!("读取历史数据库失败: {}", e))?);
+    }
+
+    let mut categories_stmt = conn
+        .prepare("SELECT item, category FROM categories")
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let categories_iter = categories_stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let mut categories = HashMap::new();
+    for row in categories_iter {
+        let (item, category) = row.map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        categories.insert(item, category);
+    }
+
+    let mut category_list_stmt = conn
+        .prepare("SELECT category FROM category_list ORDER BY position ASC")
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let category_list_iter = category_list_stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let mut category_list = Vec::new();
+    for row in category_list_iter {
+        category_list.push(row.map_err(|e| format!("读取历史数据库失败: {}", e))?);
+    }
+
+    let mut pinned_stmt = conn
+        .prepare("SELECT item FROM pinned_items ORDER BY position ASC")
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let pinned_iter = pinned_stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let mut pinned_items = Vec::new();
+    for row in pinned_iter {
+        pinned_items.push(row.map_err(|e| format!("读取历史数据库失败: {}", e))?);
+    }
+
+    Ok(Some(ClipboardHistoryData {
+        items,
+        categories,
+        category_list,
+        pinned_items,
+    }))
+}
+
+fn load_indexed_values_from_table(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+    value_column: &str,
+) -> Result<Vec<String>, String> {
+    let sql = format!(
+        "SELECT {} FROM {} ORDER BY position ASC",
+        value_column, table
+    );
+    let mut stmt = tx
+        .prepare(&sql)
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| format!("读取历史数据库失败: {}", e))?);
+    }
+    Ok(out)
+}
+
+fn sync_indexed_values_table(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+    value_column: &str,
+    values: &[String],
+) -> Result<(), String> {
+    let existing = load_indexed_values_from_table(tx, table, value_column)?;
+    let shared_len = existing.len().min(values.len());
+    let update_sql = format!(
+        "UPDATE {} SET {} = ?1 WHERE position = ?2",
+        table, value_column
+    );
+    let insert_sql = format!(
+        "INSERT INTO {}(position, {}) VALUES(?1, ?2)",
+        table, value_column
+    );
+    let delete_sql = format!("DELETE FROM {} WHERE position >= ?1", table);
+
+    for idx in 0..shared_len {
+        if existing[idx] != values[idx] {
+            tx.execute(&update_sql, params![values[idx], idx as i64])
+                .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+        }
+    }
+
+    if values.len() > existing.len() {
+        for idx in existing.len()..values.len() {
+            tx.execute(&insert_sql, params![idx as i64, values[idx]])
+                .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+        }
+    } else if existing.len() > values.len() {
+        tx.execute(&delete_sql, params![values.len() as i64])
+            .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+    }
+
+    Ok(())
+}
+
+fn load_history_item_rows(
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<Vec<(String, String, i64, i64)>, String> {
+    let mut stmt = tx
+        .prepare(
+            "
+            SELECT content, COALESCE(item_id, ''), COALESCE(created_at, 0), COALESCE(updated_at, 0)
+            FROM history_items
+            ORDER BY position ASC
+            ",
+        )
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| format!("读取历史数据库失败: {}", e))?);
+    }
+    Ok(out)
+}
+
+fn sync_history_items_table(
+    tx: &rusqlite::Transaction<'_>,
+    values: &[String],
+) -> Result<(), String> {
+    let existing = load_history_item_rows(tx)?;
+    let shared_len = existing.len().min(values.len());
+    let now_ms = now_unix_ms();
+    let fts_enabled = history_fts_enabled(tx)?;
+
+    for idx in 0..shared_len {
+        let new_content = &values[idx];
+        let (old_content, old_id, old_created_at, _) = &existing[idx];
+        if old_content == new_content {
+            if old_id.is_empty() {
+                let new_item_id = stable_history_item_id(new_content);
+                tx.execute(
+                    "UPDATE history_items
+                     SET item_id = ?1, content_hash = ?2, updated_at = CASE WHEN updated_at > 0 THEN updated_at ELSE ?3 END
+                     WHERE position = ?4",
+                    params![
+                        new_item_id,
+                        stable_history_content_hash(new_content),
+                        now_ms,
+                        idx as i64
+                    ],
+                )
+                .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+                sync_history_fts_row(tx, fts_enabled, idx as i64, &new_item_id, new_content)?;
+            }
+            continue;
+        }
+        let new_item_id = stable_history_item_id(new_content);
+
+        tx.execute(
+            "UPDATE history_items
+             SET content = ?1, item_id = ?2, content_hash = ?3, created_at = ?4, updated_at = ?5
+             WHERE position = ?6",
+            params![
+                new_content,
+                new_item_id,
+                stable_history_content_hash(new_content),
+                if *old_created_at > 0 { *old_created_at } else { now_ms },
+                now_ms,
+                idx as i64
+            ],
+        )
+        .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+        sync_history_fts_row(tx, fts_enabled, idx as i64, &new_item_id, new_content)?;
+    }
+
+    if values.len() > existing.len() {
+        for idx in existing.len()..values.len() {
+            let content = &values[idx];
+            let item_id = stable_history_item_id(content);
+            tx.execute(
+                "INSERT INTO history_items(position, content, item_id, content_hash, created_at, updated_at)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    idx as i64,
+                    content,
+                    item_id,
+                    stable_history_content_hash(content),
+                    now_ms,
+                    now_ms
+                ],
+            )
+            .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+            sync_history_fts_row(tx, fts_enabled, idx as i64, &item_id, content)?;
+        }
+    } else if existing.len() > values.len() {
+        tx.execute(
+            "DELETE FROM history_items WHERE position >= ?1",
+            params![values.len() as i64],
+        )
+        .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+        if fts_enabled {
+            tx.execute(
+                "DELETE FROM history_items_fts WHERE rowid > ?1",
+                params![values.len() as i64],
+            )
+            .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn history_fts_enabled(tx: &rusqlite::Transaction<'_>) -> Result<bool, String> {
+    let count: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'history_items_fts'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    Ok(count > 0)
+}
+
+fn history_fts_enabled_conn(conn: &Connection) -> Result<bool, String> {
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'history_items_fts'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    Ok(count > 0)
+}
+
+fn sync_history_fts_row(
+    tx: &rusqlite::Transaction<'_>,
+    fts_enabled: bool,
+    position: i64,
+    item_id: &str,
+    content: &str,
+) -> Result<(), String> {
+    if !fts_enabled {
+        return Ok(());
+    }
+    tx.execute(
+        "INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content) VALUES(?1, ?2, ?3)",
+        params![position + 1, item_id, content],
+    )
+    .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+    Ok(())
+}
+
+fn build_fts_query(keyword: &str) -> String {
+    let normalized = keyword.trim().replace('"', " ");
+    format!("\"{}\"", normalized)
+}
+
+fn resolve_history_sort(_sort_by: Option<String>, sort_order: Option<String>) -> String {
+    let order = match sort_order.as_deref() {
+        Some("desc") | Some("DESC") => "DESC",
+        _ => "ASC",
+    };
+    format!(
+        "CASE WHEN p.item IS NULL THEN 1 ELSE 0 END ASC, CASE WHEN p.item IS NOT NULL THEN hi.position END ASC, CASE WHEN p.item IS NULL THEN hi.position END {}",
+        order,
+    )
+}
+
+fn build_keyword_snippet(content: &str, keyword: &str) -> String {
+    let text = content.trim();
+    if text.is_empty() {
+        return String::new();
+    }
+    let key = keyword.trim();
+    if key.is_empty() {
+        return text.chars().take(120).collect();
+    }
+
+    if let Some(pos) = text.find(key) {
+        let center = text[..pos].chars().count();
+        let chars: Vec<char> = text.chars().collect();
+        let key_len = key.chars().count().max(1);
+        let start = center.saturating_sub(36);
+        let end = (center + key_len + 84).min(chars.len());
+        chars[start..end].iter().collect()
+    } else {
+        text.chars().take(120).collect()
+    }
+}
+
+fn sync_categories_table(
+    tx: &rusqlite::Transaction<'_>,
+    categories: &HashMap<String, String>,
+    item_id_by_content: &HashMap<String, String>,
+) -> Result<(), String> {
+    let mut stmt = tx
+        .prepare("SELECT item, category, COALESCE(item_id, '') FROM categories")
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let mut existing: HashMap<String, (String, String)> = HashMap::new();
+    for row in rows {
+        let (item, category, item_id) = row.map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        existing.insert(item, (category, item_id));
+    }
+    drop(stmt);
+
+    for (item, category) in categories {
+        let new_item_id = item_id_by_content
+            .get(item)
+            .cloned()
+            .unwrap_or_else(|| stable_history_item_id(item));
+        match existing.get(item) {
+            Some((current_category, current_item_id))
+                if current_category == category && current_item_id == &new_item_id => {}
+            Some(_) => {
+                tx.execute(
+                    "UPDATE categories SET category = ?1, item_id = ?2 WHERE item = ?3",
+                    params![category, new_item_id, item],
+                )
+                .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+            }
+            None => {
+                tx.execute(
+                    "INSERT INTO categories(item, category, item_id) VALUES(?1, ?2, ?3)",
+                    params![item, category, new_item_id],
+                )
+                .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+            }
+        }
+    }
+
+    for item in existing.keys() {
+        if !categories.contains_key(item) {
+            tx.execute("DELETE FROM categories WHERE item = ?1", params![item])
+                .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn load_pinned_item_rows(tx: &rusqlite::Transaction<'_>) -> Result<Vec<(String, String)>, String> {
+    let mut stmt = tx
+        .prepare("SELECT item, COALESCE(item_id, '') FROM pinned_items ORDER BY position ASC")
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| format!("读取历史数据库失败: {}", e))?);
+    }
+    Ok(out)
+}
+
+fn sync_pinned_items_table(
+    tx: &rusqlite::Transaction<'_>,
+    pinned_items: &[String],
+    item_id_by_content: &HashMap<String, String>,
+) -> Result<(), String> {
+    let existing = load_pinned_item_rows(tx)?;
+    let shared_len = existing.len().min(pinned_items.len());
+    let update_sql = "UPDATE pinned_items SET item = ?1, item_id = ?2 WHERE position = ?3";
+    let insert_sql = "INSERT INTO pinned_items(position, item, item_id) VALUES(?1, ?2, ?3)";
+    let delete_sql = "DELETE FROM pinned_items WHERE position >= ?1";
+
+    for idx in 0..shared_len {
+        let item = &pinned_items[idx];
+        let item_id = item_id_by_content
+            .get(item)
+            .cloned()
+            .unwrap_or_else(|| stable_history_item_id(item));
+        if existing[idx].0 != *item || existing[idx].1 != item_id {
+            tx.execute(update_sql, params![item, item_id, idx as i64])
+                .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+        }
+    }
+
+    if pinned_items.len() > existing.len() {
+        for idx in existing.len()..pinned_items.len() {
+            let item = &pinned_items[idx];
+            let item_id = item_id_by_content
+                .get(item)
+                .cloned()
+                .unwrap_or_else(|| stable_history_item_id(item));
+            tx.execute(insert_sql, params![idx as i64, item, item_id])
+                .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+        }
+    } else if existing.len() > pinned_items.len() {
+        tx.execute(delete_sql, params![pinned_items.len() as i64])
+            .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+    }
+
+    Ok(())
+}
+
+fn save_history_data_to_sqlite(data: &ClipboardHistoryData) -> Result<(), String> {
+    let mut conn = open_history_db()?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("创建历史数据库事务失败: {}", e))?;
+
+    sync_history_items_table(&tx, &data.items)?;
+    let item_id_by_content: HashMap<String, String> = data
+        .items
+        .iter()
+        .map(|content| (content.clone(), stable_history_item_id(content)))
+        .collect();
+    sync_categories_table(&tx, &data.categories, &item_id_by_content)?;
+    sync_indexed_values_table(&tx, "category_list", "category", &data.category_list)?;
+    sync_pinned_items_table(&tx, &data.pinned_items, &item_id_by_content)?;
+
+    tx.commit()
+        .map_err(|e| format!("提交历史数据库事务失败: {}", e))
 }
 
 fn get_backup_file_path(path: &Path) -> PathBuf {
@@ -721,21 +1354,13 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
 
 /// 保存剪切板历史记录到文件
 pub fn save_history(history: &[String]) -> Result<(), String> {
-    let history_path = get_history_file_path();
-
     let history_data = ClipboardHistoryData {
         items: history.to_vec(),
         categories: HashMap::new(),
         category_list: Vec::new(),
+        pinned_items: Vec::new(),
     };
-
-    let json = serde_json::to_string_pretty(&history_data)
-        .map_err(|e| format!("序列化历史记录失败: {}", e))?;
-
-    atomic_write_with_backup(&history_path, json.as_bytes())
-        .map_err(|e| format!("写入历史记录文件失败: {}", e))?;
-
-    Ok(())
+    save_history_data_with_retry(&history_data, 3)
 }
 
 /// 保存历史记录到文件（带重试）
@@ -745,6 +1370,7 @@ pub fn save_history_with_retry(history: &Vec<String>, max_retries: u32) -> Resul
             items: history.clone(),
             categories: HashMap::new(),
             category_list: Vec::new(),
+            pinned_items: Vec::new(),
         },
         max_retries,
     )
@@ -755,17 +1381,14 @@ pub fn save_history_data_with_retry(
     data: &ClipboardHistoryData,
     max_retries: u32,
 ) -> Result<(), String> {
-    let history_path = get_history_file_path();
-    let json = serde_json::to_string_pretty(data).map_err(|e| format!("序列化历史记录失败: {}", e))?;
-
     for i in 0..max_retries {
-        match atomic_write_with_backup(&history_path, json.as_bytes()) {
+        match save_history_data_to_sqlite(data) {
             Ok(_) => return Ok(()),
             Err(e) => {
                 if i == max_retries - 1 {
-                    return Err(format!("写入历史记录文件失败: {}", e));
+                    return Err(e);
                 }
-                log::warn!("写入历史记录失败 (重试 {}/{}): {}", i + 1, max_retries, e);
+                log::warn!("写入历史数据库失败 (重试 {}/{}): {}", i + 1, max_retries, e);
                 thread::sleep(Duration::from_millis(50));
             }
         }
@@ -780,6 +1403,10 @@ pub fn load_history() -> Result<Vec<String>, String> {
 
 /// 从文件加载完整的历史数据（包含分类）
 pub fn load_history_data() -> Result<ClipboardHistoryData, String> {
+    if let Some(sqlite_data) = load_history_data_from_sqlite()? {
+        return Ok(sqlite_data);
+    }
+
     let history_path = get_history_file_path();
 
     if !history_path.exists() {
@@ -791,31 +1418,32 @@ pub fn load_history_data() -> Result<ClipboardHistoryData, String> {
 
     // 尝试解析为新结构
     if let Ok(mut data) = serde_json::from_str::<ClipboardHistoryData>(&contents) {
-        // 确保 category_list 不为空，如果 categories 有数据但 category_list 为空，则从 categories 恢复
         if data.category_list.is_empty() && !data.categories.is_empty() {
             let mut unique_categories: Vec<String> = data.categories.values().cloned().collect();
             unique_categories.sort();
             unique_categories.dedup();
-            // 过滤掉 "未分类" 和 "全部"，因为它们由前端自动添加
             data.category_list = unique_categories
                 .into_iter()
                 .filter(|c| c != "未分类" && c != "全部")
                 .collect();
         }
+        let _ = save_history_data_with_retry(&data, 3);
         Ok(data)
     } else {
-        // 尝试解析为旧的 Vec<String> 格式
         match serde_json::from_str::<Vec<String>>(&contents) {
-            Ok(items) => Ok(ClipboardHistoryData {
-                items,
-                categories: HashMap::new(),
-                category_list: Vec::new(),
-            }),
+            Ok(items) => {
+                let data = ClipboardHistoryData {
+                    items,
+                    categories: HashMap::new(),
+                    category_list: Vec::new(),
+                    pinned_items: Vec::new(),
+                };
+                let _ = save_history_data_with_retry(&data, 3);
+                Ok(data)
+            }
             Err(_) => {
-                // 如果既不是新结构也不是旧结构，可能是文件损坏，或者是一个空的 JSON 对象
                 if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&contents) {
                     if let Some(obj) = json_val.as_object() {
-                        // 尝试手动提取字段，兼容部分字段缺失的情况
                         let items = obj.get("items")
                             .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
                             .unwrap_or_default();
@@ -827,8 +1455,10 @@ pub fn load_history_data() -> Result<ClipboardHistoryData, String> {
                         let mut category_list = obj.get("category_list")
                             .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
                             .unwrap_or_default();
+                        let pinned_items = obj.get("pinned_items")
+                            .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
+                            .unwrap_or_default();
 
-                        // 如果列表为空但有分类数据，尝试恢复
                         if category_list.is_empty() && !categories.is_empty() {
                             let mut unique: Vec<String> = categories.values().cloned().collect();
                             unique.sort();
@@ -836,18 +1466,237 @@ pub fn load_history_data() -> Result<ClipboardHistoryData, String> {
                             category_list = unique.into_iter().filter(|c| c != "未分类" && c != "全部").collect();
                         }
 
-                        return Ok(ClipboardHistoryData {
+                        let data = ClipboardHistoryData {
                             items,
                             categories,
                             category_list,
-                        });
+                            pinned_items,
+                        };
+                        let _ = save_history_data_with_retry(&data, 3);
+                        return Ok(data);
                     }
                 }
 
-                Err(format!("无法解析历史记录文件"))
+                Err("无法解析历史记录文件".to_string())
             },
         }
     }
+}
+
+pub fn load_history_page_data(
+    offset: usize,
+    limit: usize,
+    category: Option<String>,
+    pinned_only: bool,
+    keyword: Option<String>,
+    sort_by: Option<String>,
+    sort_order: Option<String>,
+) -> Result<ClipboardHistoryPageData, String> {
+    let db_path = get_history_db_path();
+    if !db_path.exists() {
+        return Ok(ClipboardHistoryPageData {
+            total: 0,
+            offset,
+            limit: limit.clamp(1, 200),
+            items: Vec::new(),
+        });
+    }
+
+    let conn = open_history_db()?;
+    let effective_limit = limit.clamp(1, 200);
+    let category_filter = category
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty() && v != "全部");
+    let keyword_filter = keyword
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let fts_keyword = keyword_filter.as_ref().map(|v| build_fts_query(v));
+    let pinned_flag = if pinned_only { 1 } else { 0 };
+    let offset_i64 = offset as i64;
+    let limit_i64 = effective_limit as i64;
+    let fts_enabled = history_fts_enabled_conn(&conn)?;
+    let order_clause = resolve_history_sort(sort_by, sort_order);
+
+    let (total, items) = if fts_enabled {
+        let total: i64 = conn
+            .query_row(
+                "
+                SELECT COUNT(*)
+                FROM history_items hi
+                LEFT JOIN categories c ON (c.item_id = hi.item_id OR c.item = hi.content)
+                LEFT JOIN pinned_items p ON (p.item_id = hi.item_id OR p.item = hi.content)
+                WHERE
+                  (?1 IS NULL OR (CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END) = ?1)
+                  AND (?2 = 0 OR p.item IS NOT NULL)
+                  AND (
+                    ?3 IS NULL
+                    OR EXISTS (
+                        SELECT 1 FROM history_items_fts
+                        WHERE history_items_fts.rowid = hi.position + 1
+                          AND history_items_fts MATCH ?3
+                    )
+                  )
+                ",
+                params![category_filter.as_deref(), pinned_flag, fts_keyword.as_deref()],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+
+        let query_sql = format!(
+            "
+                SELECT
+                  hi.position,
+                  COALESCE(hi.item_id, ''),
+                  hi.content,
+                  CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END,
+                  CASE WHEN p.item IS NULL THEN 0 ELSE 1 END,
+                  COALESCE(hi.updated_at, 0)
+                FROM history_items hi
+                LEFT JOIN categories c ON (c.item_id = hi.item_id OR c.item = hi.content)
+                LEFT JOIN pinned_items p ON (p.item_id = hi.item_id OR p.item = hi.content)
+                WHERE
+                  (?1 IS NULL OR (CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END) = ?1)
+                  AND (?2 = 0 OR p.item IS NOT NULL)
+                  AND (
+                    ?3 IS NULL
+                    OR EXISTS (
+                        SELECT 1 FROM history_items_fts
+                        WHERE history_items_fts.rowid = hi.position + 1
+                          AND history_items_fts MATCH ?3
+                    )
+                  )
+                ORDER BY {}
+                LIMIT ?4 OFFSET ?5
+                ",
+            order_clause
+        );
+        let mut stmt = conn
+            .prepare(&query_sql)
+            .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        let rows = stmt
+            .query_map(
+                params![
+                    category_filter.as_deref(),
+                    pinned_flag,
+                    fts_keyword.as_deref(),
+                    limit_i64,
+                    offset_i64
+                ],
+                |row| {
+                    Ok(ClipboardHistoryPageItem {
+                        position: row.get::<_, i64>(0)? as usize,
+                        id: row.get::<_, String>(1)?,
+                        content: row.get::<_, String>(2)?,
+                        category: row.get::<_, String>(3)?,
+                        pinned: row.get::<_, i64>(4)? == 1,
+                        updated_at: row.get::<_, i64>(5)?,
+                        snippet: None,
+                    })
+                },
+            )
+            .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        let mut items = Vec::new();
+        for row in rows {
+            let mut item = row.map_err(|e| format!("读取历史数据库失败: {}", e))?;
+            if item.id.is_empty() {
+                item.id = stable_history_item_id(&item.content);
+            }
+            items.push(item);
+        }
+        (total, items)
+    } else {
+        let total: i64 = conn
+            .query_row(
+                "
+                SELECT COUNT(*)
+                FROM history_items hi
+                LEFT JOIN categories c ON (c.item_id = hi.item_id OR c.item = hi.content)
+                LEFT JOIN pinned_items p ON (p.item_id = hi.item_id OR p.item = hi.content)
+                WHERE
+                  (?1 IS NULL OR (CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END) = ?1)
+                  AND (?2 = 0 OR p.item IS NOT NULL)
+                  AND (?3 IS NULL OR hi.content LIKE '%' || ?3 || '%')
+                ",
+                params![category_filter.as_deref(), pinned_flag, keyword_filter.as_deref()],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+
+        let query_sql = format!(
+            "
+                SELECT
+                  hi.position,
+                  COALESCE(hi.item_id, ''),
+                  hi.content,
+                  CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END,
+                  CASE WHEN p.item IS NULL THEN 0 ELSE 1 END,
+                  COALESCE(hi.updated_at, 0)
+                FROM history_items hi
+                LEFT JOIN categories c ON (c.item_id = hi.item_id OR c.item = hi.content)
+                LEFT JOIN pinned_items p ON (p.item_id = hi.item_id OR p.item = hi.content)
+                WHERE
+                  (?1 IS NULL OR (CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END) = ?1)
+                  AND (?2 = 0 OR p.item IS NOT NULL)
+                  AND (?3 IS NULL OR hi.content LIKE '%' || ?3 || '%')
+                ORDER BY {}
+                LIMIT ?4 OFFSET ?5
+                ",
+            order_clause
+        );
+        let mut stmt = conn
+            .prepare(&query_sql)
+            .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        let rows = stmt
+            .query_map(
+                params![
+                    category_filter.as_deref(),
+                    pinned_flag,
+                    keyword_filter.as_deref(),
+                    limit_i64,
+                    offset_i64
+                ],
+                |row| {
+                    Ok(ClipboardHistoryPageItem {
+                        position: row.get::<_, i64>(0)? as usize,
+                        id: row.get::<_, String>(1)?,
+                        content: row.get::<_, String>(2)?,
+                        category: row.get::<_, String>(3)?,
+                        pinned: row.get::<_, i64>(4)? == 1,
+                        updated_at: row.get::<_, i64>(5)?,
+                        snippet: None,
+                    })
+                },
+            )
+            .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        let mut items = Vec::new();
+        for row in rows {
+            let mut item = row.map_err(|e| format!("读取历史数据库失败: {}", e))?;
+            if item.id.is_empty() {
+                item.id = stable_history_item_id(&item.content);
+            }
+            items.push(item);
+        }
+        (total, items)
+    };
+
+    let items = if let Some(key) = keyword_filter.as_deref() {
+        items
+            .into_iter()
+            .map(|mut item| {
+                item.snippet = Some(build_keyword_snippet(&item.content, key));
+                item
+            })
+            .collect()
+    } else {
+        items
+    };
+
+    Ok(ClipboardHistoryPageData {
+        total: total as usize,
+        offset,
+        limit: effective_limit,
+        items,
+    })
 }
 
 /// 获取日志目录路径

@@ -18,7 +18,7 @@
         v-model="searchKeyword"
         class="search-input"
         clearable
-        placeholder="搜索剪切板历史"
+        :placeholder="searchPlaceholder"
         size="small"
     >
       <template #prefix>
@@ -61,7 +61,7 @@
         <el-icon>
           <Plus/>
         </el-icon>
-        <span>新增分类</span>
+        <span>{{ createCategoryText }}</span>
       </div>
       <el-input
           v-else
@@ -104,6 +104,15 @@ const props = defineProps({
   confirmCreateCategory: Function,
   cancelCreateCategory: Function,
   handleDrop: Function
+  ,
+  searchPlaceholder: {
+    type: String,
+    default: '搜索历史/标签'
+  },
+  createCategoryText: {
+    type: String,
+    default: '新增分类'
+  }
 })
 
 const emit = defineEmits(['update:searchKeyword', 'update:categoryFilter', 'update:newCategoryName'])
