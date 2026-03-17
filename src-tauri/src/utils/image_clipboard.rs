@@ -1,8 +1,9 @@
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use base64::Engine;
 use crate::utils::image_store;
 use crate::utils::utils_helpers::atomic_write_with_backup;
-use image::ImageEncoder;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
+use image::imageops::FilterType;
+use image::{DynamicImage, ImageEncoder, RgbaImage};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
@@ -25,6 +26,28 @@ const MAX_UI_HISTORY_ITEMS: usize = 30;
 const IMAGE_FULL_RES_MEMORY_BUDGET_BYTES: usize = 256 * 1024 * 1024;
 const IMAGE_FULL_RES_CACHE_KEEP_RECENT: usize = 6;
 const IMAGE_PERSIST_QUEUE_SIZE: usize = 6;
+const IMAGE_PREVIEW_MAX_EDGE: u32 = 320;
+const IMAGE_FILL_VERIFY_MODE_STRICT: u8 = 0;
+const IMAGE_FILL_VERIFY_MODE_FAST: u8 = 1;
+static IMAGE_FILL_VERIFY_MODE: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(IMAGE_FILL_VERIFY_MODE_STRICT);
+
+pub fn set_image_fill_verify_mode(mode: &str) {
+    let value = if mode == "fast" {
+        IMAGE_FILL_VERIFY_MODE_FAST
+    } else {
+        IMAGE_FILL_VERIFY_MODE_STRICT
+    };
+    IMAGE_FILL_VERIFY_MODE.store(value, Ordering::SeqCst);
+}
+
+fn is_fast_fill_verify_mode() -> bool {
+    IMAGE_FILL_VERIFY_MODE.load(Ordering::SeqCst) == IMAGE_FILL_VERIFY_MODE_FAST
+}
+
+pub fn is_fast_fill_verify_mode_enabled() -> bool {
+    is_fast_fill_verify_mode()
+}
 
 #[derive(Clone)]
 struct PendingImageData {
@@ -80,6 +103,7 @@ pub struct ImageHistoryPageItem {
     pub preview_width: u32,
     pub preview_height: u32,
     pub preview_rgba_base64: String,
+    pub preview_png_base64: String,
     pub image_path: String,
     pub category: String,
     pub tags: Vec<String>,
@@ -229,6 +253,19 @@ impl ImageClipboardManager {
                     .unwrap_or_else(|| "未分类".to_string());
                 let tags = image_tags.get(&item.id).cloned().unwrap_or_default();
                 let pinned = pinned_set.contains(&item.id);
+                let preview_png_base64 = if item.preview_rgba_base64.is_empty()
+                    || item.preview_width == 0
+                    || item.preview_height == 0
+                {
+                    String::new()
+                } else {
+                    rgba_base64_to_png_base64(
+                        &item.preview_rgba_base64,
+                        item.preview_width,
+                        item.preview_height,
+                    )
+                        .unwrap_or_default()
+                };
                 ImageHistoryPageItem {
                     position,
                     id: item.id.clone(),
@@ -237,6 +274,7 @@ impl ImageClipboardManager {
                     preview_width: item.preview_width,
                     preview_height: item.preview_height,
                     preview_rgba_base64: item.preview_rgba_base64.clone(),
+                    preview_png_base64,
                     image_path: item.image_path.clone(),
                     category,
                     tags,
@@ -499,6 +537,8 @@ impl ImageClipboardManager {
         }
 
         let id = generate_item_id(&signature);
+        let (preview_width, preview_height, preview_rgba_base64) =
+            build_preview_from_rgba(&rgba, width, height);
         let blob_ext = source_blob
             .as_ref()
             .map(|(_, ext)| ext.as_str())
@@ -508,9 +548,9 @@ impl ImageClipboardManager {
             id: id.clone(),
             width,
             height,
-            preview_width: 0,
-            preview_height: 0,
-            preview_rgba_base64: String::new(),
+            preview_width,
+            preview_height,
+            preview_rgba_base64,
             image_path: image_path.clone(),
             rgba_bytes: Vec::new(),
             signature: signature.clone(),
@@ -772,6 +812,21 @@ impl ImageClipboardManager {
         self.promote_to_top(index)
     }
 
+    pub fn promote_to_top_in_memory_by_id(&self, item_id: &str) -> Result<(), String> {
+        let mut history = self.history.lock().unwrap();
+        let index = history
+            .iter()
+            .position(|item| item.id == item_id)
+            .ok_or_else(|| "目标图片不存在".to_string())?;
+        if index == 0 {
+            return Ok(());
+        }
+        let moved = history.remove(index);
+        history.insert(0, moved);
+        self.signature_index_dirty.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
     pub fn set_pinned(&self, item_id: String, pinned: bool) -> Result<(), String> {
         let mut history = self.history.lock().unwrap();
         if !history.iter().any(|item| item.id == item_id) {
@@ -923,15 +978,32 @@ impl ImageClipboardManager {
     }
 
     pub fn get_image_by_index_for_fill(&self, index: usize) -> Result<Image<'static>, String> {
-        let item = {
+        let (bytes, width, height) = {
+            let mut history = self.history.lock().unwrap();
+            let item = history
+                .get_mut(index)
+                .ok_or_else(|| format!("索引 {} 超出范围", index))?;
+            if item.rgba_bytes.is_empty() {
+                item.rgba_bytes = self.read_item_rgba(item)?;
+            }
+            let bytes = item.rgba_bytes.clone();
+            let width = item.width;
+            let height = item.height;
+            enforce_full_res_cache_budget(&mut history);
+            (bytes, width, height)
+        };
+        Ok(Image::new_owned(bytes, width, height))
+    }
+
+    pub fn get_image_by_id_for_fill(&self, item_id: &str) -> Result<Image<'static>, String> {
+        let index = {
             let history = self.history.lock().unwrap();
             history
-                .get(index)
-                .cloned()
-                .ok_or_else(|| format!("索引 {} 超出范围", index))?
+                .iter()
+                .position(|item| item.id == item_id)
+                .ok_or_else(|| "目标图片不存在".to_string())?
         };
-        let bytes = self.read_item_rgba(&item)?;
-        Ok(Image::new_owned(bytes, item.width, item.height))
+        self.get_image_by_index_for_fill(index)
     }
 
     pub fn warmup_image_by_index(&self, index: usize) -> Result<(), String> {
@@ -1061,6 +1133,9 @@ impl ImageClipboardManager {
         for (attempt, delay_ms) in retry_delays.iter().enumerate() {
             match app_handle.clipboard().write_image(image) {
                 Ok(_) => {
+                    if is_fast_fill_verify_mode() {
+                        return Ok(());
+                    }
                     let verify_delays = [10u64, 18, 28, 42];
                     let mut verified = false;
                     for (verify_index, verify_delay) in verify_delays.iter().enumerate() {
@@ -1465,7 +1540,7 @@ fn read_image_png_base64(path: &str) -> Result<String, String> {
     Ok(BASE64_STANDARD.encode(&bytes))
 }
 
-fn rgba_base64_to_png_base64(rgba_base64: &str, width: u32, height: u32) -> Result<String, String> {
+pub(crate) fn rgba_base64_to_png_base64(rgba_base64: &str, width: u32, height: u32) -> Result<String, String> {
     let rgba = BASE64_STANDARD
         .decode(rgba_base64)
         .map_err(|e| format!("解析预览图数据失败: {}", e))?;
@@ -1790,6 +1865,27 @@ fn read_local_image_for_import(path: &str) -> Result<(Vec<u8>, u32, u32, Vec<u8>
         .map(|s| s.to_lowercase())
         .unwrap_or_else(|| "png".to_string());
     Ok((rgba, width, height, source_bytes, ext))
+}
+
+fn build_preview_from_rgba(rgba: &[u8], width: u32, height: u32) -> (u32, u32, String) {
+    if width == 0 || height == 0 {
+        return (0, 0, String::new());
+    }
+    let Some(image) = RgbaImage::from_raw(width, height, rgba.to_vec()) else {
+        return (0, 0, String::new());
+    };
+    let mut dynamic = DynamicImage::ImageRgba8(image);
+    if width > IMAGE_PREVIEW_MAX_EDGE || height > IMAGE_PREVIEW_MAX_EDGE {
+        dynamic = dynamic.resize(IMAGE_PREVIEW_MAX_EDGE, IMAGE_PREVIEW_MAX_EDGE, FilterType::Triangle);
+    }
+    let preview = dynamic.to_rgba8();
+    let preview_width = preview.width();
+    let preview_height = preview.height();
+    if preview_width == 0 || preview_height == 0 {
+        return (0, 0, String::new());
+    }
+    let payload = BASE64_STANDARD.encode(preview.into_raw());
+    (preview_width, preview_height, payload)
 }
 
 fn collect_text_path_candidates(text: &str) -> Vec<String> {

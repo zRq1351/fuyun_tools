@@ -3,9 +3,6 @@
       ref="contentRef"
       class="content"
       @mousedown="handleMouseDown"
-      @mouseleave="handleMouseLeave"
-      @mousemove="handleMouseMove"
-      @mouseup="handleMouseUp"
       @scroll="handleScroll"
       @wheel.prevent="handleWheel"
   >
@@ -47,6 +44,15 @@
         </template>
       </div>
     </div>
+    <div v-if="showTailLoadMoreHint" class="load-more-tail-indicator">
+      <el-icon v-if="isLoadingMore" class="load-more-tail-spinner is-loading">
+        <Loading/>
+      </el-icon>
+      <div class="load-more-tail-text">
+        <span>左滑</span>
+        <span>{{ isLoadingMore ? '加载中' : '加载更多' }}</span>
+      </div>
+    </div>
     <div v-if="rightSpacerWidth > 0" :style="{ minWidth: rightSpacerWidth + 'px', height: '1px' }"></div>
     <div class="spacer"></div>
   </div>
@@ -54,7 +60,7 @@
 
 <script setup>
 import {computed, onUnmounted, ref} from 'vue'
-import {Close, Link} from '@element-plus/icons-vue'
+import {Close, Link, Loading} from '@element-plus/icons-vue'
 import {Pin} from 'lucide-vue-next'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
 
@@ -106,14 +112,25 @@ const props = defineProps({
   highlightKeyword: {
     type: String,
     default: ''
+  },
+  hasMore: {
+    type: Boolean,
+    default: false
+  },
+  isLoadingPage: {
+    type: Boolean,
+    default: false
   }
 })
-const emit = defineEmits(['content-scroll'])
+const emit = defineEmits(['content-scroll', 'load-more-intent'])
 
 const contentRef = ref(null)
 let isDown = false
+let isDragging = false
 let startX = 0
 let scrollLeftVal = 0
+let dragTargetScrollLeft = 0
+let dragScrollRafId = 0
 const handleScroll = () => {
   emit('content-scroll')
 }
@@ -160,7 +177,13 @@ const renderHighlightParts = (text) => {
 const stopDragging = () => {
   if (!isDown) return
   isDown = false
+  isDragging = false
+  if (dragScrollRafId) {
+    cancelAnimationFrame(dragScrollRafId)
+    dragScrollRafId = 0
+  }
   if (contentRef.value) {
+    contentRef.value.classList.remove('is-dragging')
     contentRef.value.style.cursor = 'default'
   }
   document.body.style.removeProperty('user-select')
@@ -172,6 +195,8 @@ const stopDragging = () => {
 const virtualItems = computed(() => {
   return props.visibleHistory
 })
+const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
+const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
 const leftSpacerWidth = computed(() => 0)
 const rightSpacerWidth = computed(() => 0)
@@ -220,24 +245,20 @@ const openWebUrl = async (value) => {
 }
 
 const handleMouseDown = (e) => {
-  // 如果点击的是删除按钮或链接按钮，不触发拖拽
   if (e.target.closest('.delete-btn') || e.target.closest('.open-btn') || e.target.closest('.pin-btn')) {
     return
   }
 
   isDown = true
+  isDragging = false
   startX = e.pageX
   if (contentRef.value) {
     scrollLeftVal = contentRef.value.scrollLeft
-    contentRef.value.style.cursor = 'grabbing'
-    // 强制禁用选中，防止滑动时选中文本
-    document.body.style.userSelect = 'none'
+    dragTargetScrollLeft = scrollLeftVal
   }
 
-  // Attach global listeners
   window.addEventListener('mousemove', handleGlobalMouseMove)
   window.addEventListener('mouseup', handleGlobalMouseUp, true)
-  // 监听 dragend 以防止原生拖拽导致 mouseup 丢失
   window.addEventListener('dragend', handleGlobalDragEnd)
 }
 
@@ -251,12 +272,29 @@ const handleGlobalDragEnd = () => {
 
 const handleGlobalMouseMove = (e) => {
   if (!isDown || !contentRef.value) return
-  const x = e.pageX
-  // Calculate delta from initial click position
-  const walk = (x - startX)
+  const walk = e.pageX - startX
 
-  // Direct DOM update for maximum responsiveness (1:1 movement)
-  contentRef.value.scrollLeft = scrollLeftVal - walk
+  if (!isDragging && Math.abs(walk) > 4) {
+    isDragging = true
+    contentRef.value.style.cursor = 'grabbing'
+    contentRef.value.classList.add('is-dragging')
+    document.body.style.userSelect = 'none'
+  }
+
+  if (!isDragging) return
+  dragTargetScrollLeft = scrollLeftVal - walk
+  const maxScrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+  if (dragTargetScrollLeft > maxScrollLeft + 36) {
+    emit('load-more-intent')
+  }
+  if (!dragScrollRafId) {
+    dragScrollRafId = requestAnimationFrame(() => {
+      dragScrollRafId = 0
+      if (contentRef.value) {
+        contentRef.value.scrollLeft = dragTargetScrollLeft
+      }
+    })
+  }
 }
 
 const handleVisibilityChange = () => {
@@ -271,20 +309,12 @@ document.addEventListener('visibilitychange', handleVisibilityChange)
 const handleWheel = (e) => {
   if (!contentRef.value) return
   const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
+  const maxScrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+  const nearEnd = contentRef.value.scrollLeft >= maxScrollLeft - 8
+  if (delta > 0 && nearEnd) {
+    emit('load-more-intent')
+  }
   contentRef.value.scrollLeft += delta
-}
-
-// Keep original local handlers for compatibility/safety but they delegate or are replaced
-const handleMouseLeave = () => {
-  // No-op: dragging should continue even if mouse leaves the element
-}
-
-const handleMouseUp = () => {
-  // Handled by global listener, but keeping for safety if event bubbling happens
-}
-
-const handleMouseMove = (e) => {
-  // Handled by global listener
 }
 
 defineExpose({
@@ -310,9 +340,55 @@ defineExpose({
   display: none;
 }
 
+.content.is-dragging .clipboard-item {
+  transition: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.content.is-dragging .clipboard-item:hover,
+.content.is-dragging .clipboard-item.selected {
+  box-shadow: none !important;
+}
+
+.content.is-dragging .delete-btn,
+.content.is-dragging .open-btn,
+.content.is-dragging .pin-btn {
+  opacity: 0 !important;
+}
+
 .spacer {
   flex: 0 0 742px;
   height: 1px;
+}
+
+.load-more-tail-indicator {
+  width: 56px;
+  flex: 0 0 56px;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: rgba(166, 213, 255, 0.9);
+  user-select: none;
+  pointer-events: none;
+}
+
+.load-more-tail-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  line-height: 1;
+}
+
+.load-more-tail-spinner {
+  font-size: 16px;
+  color: rgba(220, 240, 255, 0.95);
 }
 
 .clipboard-item {

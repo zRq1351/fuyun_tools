@@ -75,8 +75,18 @@
           <div v-else class="tag-chip-empty">无标签</div>
         </div>
         <div class="item-content">
-          <img :src="getPreviewDataUrl(entry.item)" alt="" class="image-preview" draggable="false" @dragstart.prevent/>
+          <img :src="getPreviewDataUrl(entry.item)" alt="" class="image-preview" decoding="async" draggable="false"
+               loading="lazy" @dragstart.prevent/>
           <div class="image-meta">{{ entry.item.width }} × {{ entry.item.height }}</div>
+        </div>
+      </div>
+      <div v-if="showTailLoadMoreHint" class="load-more-tail-indicator">
+        <el-icon v-if="isLoadingMore" class="load-more-tail-spinner is-loading">
+          <Loading/>
+        </el-icon>
+        <div class="load-more-tail-text">
+          <span>左滑</span>
+          <span>{{ isLoadingMore ? '加载中' : '加载更多' }}</span>
         </div>
       </div>
       <div :style="{ width: `${trailingSpacerWidth}px` }" class="virtual-spacer"></div>
@@ -140,7 +150,7 @@
 
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
-import {ArrowLeftBold, ArrowRightBold, Check, Close, FullScreen} from '@element-plus/icons-vue'
+import {ArrowLeftBold, ArrowRightBold, Check, Close, FullScreen, Loading} from '@element-plus/icons-vue'
 import {Pin} from 'lucide-vue-next'
 import {listen} from '@tauri-apps/api/event'
 import {convertFileSrc} from '@tauri-apps/api/core'
@@ -161,7 +171,7 @@ const selectedIndex = ref(0)
 const searchKeyword = ref('')
 const totalCount = ref(0)
 const pageOffset = ref(0)
-const pageSize = ref(30)
+const pageSize = ref(10)
 const hasMore = ref(false)
 const isLoadingPage = ref(false)
 const sortOrder = ref('asc')
@@ -181,6 +191,8 @@ const warmedIndices = new Set()
 const warmingIndices = new Set()
 let unlistenShowWindow = null
 let unlistenHistoryUpdated = null
+let unlistenItemPromoted = null
+let unlistenHistoryPayloadUpdated = null
 let isPointerDown = false
 let isContentDragging = false
 let pendingHistorySync = false
@@ -188,9 +200,13 @@ let dragStartX = 0
 let dragStartScrollLeft = 0
 let dragTargetScrollLeft = 0
 let dragScrollRafId = 0
+let contentMetricsRafId = 0
+let loadMorePending = false
+let historyUpdateTimer = null
 const isCtrlKeyPressed = ref(false)
 const contentScrollLeft = ref(0)
 const contentViewportWidth = ref(0)
+const loadMoreIntent = ref(false)
 
 const IMAGE_ITEM_WIDTH = 250
 const IMAGE_ITEM_GAP = 8
@@ -207,6 +223,11 @@ const stopContentDragging = () => {
     cancelAnimationFrame(dragScrollRafId)
     dragScrollRafId = 0
   }
+  if (contentMetricsRafId) {
+    cancelAnimationFrame(contentMetricsRafId)
+    contentMetricsRafId = 0
+  }
+  loadMorePending = false
   if (contentRef.value) {
     contentRef.value.classList.remove('is-dragging')
   }
@@ -216,9 +237,9 @@ const stopContentDragging = () => {
   document.body.style.removeProperty('user-select')
   window.removeEventListener('mousemove', handleGlobalMouseMove)
   window.removeEventListener('mouseup', handleGlobalMouseUp, true)
-  if (pendingHistorySync && isVisible.value) {
+  if (pendingHistorySync) {
     pendingHistorySync = false
-    syncHistory()
+    scheduleHistorySync(0)
   }
 }
 
@@ -233,6 +254,10 @@ const handleGlobalMouseMove = (event) => {
   }
   if (isContentDragging) {
     dragTargetScrollLeft = dragStartScrollLeft - delta
+    const maxScrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+    if (dragTargetScrollLeft > maxScrollLeft + 36 && hasMore.value && !isLoadingPage.value) {
+      loadMoreIntent.value = true
+    }
     if (!dragScrollRafId) {
       dragScrollRafId = requestAnimationFrame(() => {
         dragScrollRafId = 0
@@ -280,19 +305,34 @@ const syncContentMetrics = () => {
 const handleContentWheel = (event) => {
   if (!contentRef.value) return
   const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
+  const maxScrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+  const nearEnd = contentRef.value.scrollLeft >= maxScrollLeft - 8
+  if (delta > 0 && nearEnd && hasMore.value && !isLoadingPage.value) {
+    loadMoreIntent.value = true
+  }
   contentRef.value.scrollLeft += delta
   void tryLoadMoreByScroll()
 }
 
 const handleContentScroll = () => {
-  syncContentMetrics()
-  void tryLoadMoreByScroll()
+  if (contentMetricsRafId) return
+  contentMetricsRafId = requestAnimationFrame(() => {
+    contentMetricsRafId = 0
+    syncContentMetrics()
+    if (!loadMorePending) {
+      loadMorePending = true
+      Promise.resolve(tryLoadMoreByScroll()).finally(() => {
+        loadMorePending = false
+      })
+    }
+  })
 }
 
 const tryLoadMoreByScroll = async () => {
   if (!hasMore.value || isLoadingPage.value || !contentRef.value) return
   const remaining = contentRef.value.scrollWidth - contentRef.value.clientWidth - contentRef.value.scrollLeft
-  if (remaining <= 240) {
+  if (remaining <= 240 && loadMoreIntent.value) {
+    loadMoreIntent.value = false
     await loadHistoryPage({reset: false})
   }
 }
@@ -394,10 +434,17 @@ const loadStatusText = computed(() => {
   return `已全部加载 ${filteredHistory.value.length} 条`
 })
 
+const isLoadingMore = computed(() => isLoadingPage.value && filteredHistory.value.length > 0)
+
+const showTailLoadMoreHint = computed(() => {
+  if (!(hasMore.value || isLoadingMore.value) || filteredHistory.value.length === 0) return false
+  return virtualRange.value.end >= filteredHistory.value.length
+})
+
 const IMAGE_PAGE_SIZE_OPTIONS = [10, 30, 50]
 const normalizeImagePageSize = (value) => {
   const parsed = Number(value)
-  return IMAGE_PAGE_SIZE_OPTIONS.includes(parsed) ? parsed : 30
+  return IMAGE_PAGE_SIZE_OPTIONS.includes(parsed) ? parsed : 10
 }
 
 const cyclePageSize = async () => {
@@ -439,16 +486,14 @@ const prunePreviewCache = (keepIds) => {
 
 const getPreviewDataUrl = (item) => {
   if (previewCache.has(item.id)) {
-    const cached = previewCache.get(item.id)
-    previewCache.delete(item.id)
-    previewCache.set(item.id, cached)
-    return cached
+    return previewCache.get(item.id)
   }
   try {
-    const fileUrl = buildFileUrlFromPath(item.image_path)
-    previewCache.set(item.id, fileUrl)
+    const lowresBase64 = typeof item.preview_png_base64 === 'string' ? item.preview_png_base64.trim() : ''
+    const previewUrl = lowresBase64 ? `data:image/png;base64,${lowresBase64}` : buildFileUrlFromPath(item.image_path)
+    previewCache.set(item.id, previewUrl)
     enforcePreviewCacheSize()
-    return fileUrl
+    return previewUrl
   } catch (error) {
     console.error('图片预览生成失败:', error)
     return ''
@@ -507,6 +552,7 @@ const scrollToEnd = async () => {
   if (contentRef.value) {
     contentRef.value.scrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
   }
+  loadMoreIntent.value = true
   await tryLoadMoreByScroll()
   if (filteredHistory.value.length > 0) {
     const lastIndex = filteredHistory.value[filteredHistory.value.length - 1].index
@@ -738,6 +784,61 @@ const applyPayload = (data, options = {}) => {
   }
 }
 
+const mergeShowWindowPayload = (data) => {
+  const incoming = Array.isArray(data?.history) ? data.history.filter((item) => item?.id) : []
+  if (incoming.length > 0) {
+    const existingById = new Map(history.value.filter(Boolean).map((item) => [item.id, item]))
+    const incomingIds = new Set()
+    const front = incoming.map((item) => {
+      incomingIds.add(item.id)
+      const existing = existingById.get(item.id) || {}
+      return {
+        ...existing,
+        id: item.id,
+        width: item.width ?? existing.width ?? 0,
+        height: item.height ?? existing.height ?? 0,
+        preview_width: item.preview_width ?? item.previewWidth ?? existing.preview_width ?? 0,
+        preview_height: item.preview_height ?? item.previewHeight ?? existing.preview_height ?? 0,
+        preview_rgba_base64: item.preview_rgba_base64 ?? item.previewRgbaBase64 ?? existing.preview_rgba_base64 ?? '',
+        preview_png_base64: item.preview_png_base64 ?? item.previewPngBase64 ?? existing.preview_png_base64 ?? '',
+        image_path: item.image_path ?? item.imagePath ?? existing.image_path ?? ''
+      }
+    })
+    const rest = history.value.filter((item) => item && !incomingIds.has(item.id))
+    history.value = [...front, ...rest]
+    const loadedCount = history.value.filter(Boolean).length
+    totalCount.value = Math.max(totalCount.value || 0, loadedCount)
+    pageOffset.value = Math.max(pageOffset.value || 0, loadedCount)
+  }
+  if (!isAddingCategory.value) {
+    if (data?.categories) {
+      categoryMap.value = data.categories
+    }
+    if (data?.image_tags) {
+      tagMap.value = data.image_tags
+    }
+    if (Array.isArray(data?.pinned_items)) {
+      pinnedItems.value = data.pinned_items
+    }
+  }
+}
+
+const promoteLocalItemToTop = (itemId) => {
+  if (!itemId || !Array.isArray(history.value) || history.value.length < 2) return
+  const currentIndex = history.value.findIndex((item) => item?.id === itemId)
+  if (currentIndex <= 0) return
+  const selectedId = history.value[selectedIndex.value]?.id
+  const [moved] = history.value.splice(currentIndex, 1)
+  if (!moved) return
+  history.value.unshift(moved)
+  if (selectedId) {
+    const nextSelectedIndex = history.value.findIndex((item) => item?.id === selectedId)
+    selectedIndex.value = nextSelectedIndex >= 0 ? nextSelectedIndex : 0
+  } else {
+    selectedIndex.value = 0
+  }
+}
+
 const mergeImagePageIntoState = (data, reset = false) => {
   const items = Array.isArray(data?.items) ? data.items : []
   if (reset) {
@@ -756,6 +857,10 @@ const mergeImagePageIntoState = (data, reset = false) => {
       id: item.id,
       width: item.width,
       height: item.height,
+      preview_width: item.previewWidth,
+      preview_height: item.previewHeight,
+      preview_rgba_base64: item.previewRgbaBase64,
+      preview_png_base64: item.previewPngBase64,
       image_path: item.imagePath
     }
     categoryMap.value[item.id] = item.category || '未分类'
@@ -805,6 +910,10 @@ const loadHistoryPage = async ({reset = false} = {}) => {
     console.error('同步图片历史失败:', error)
   } finally {
     isLoadingPage.value = false
+    if (pendingHistorySync && !isPointerDown && !isContentDragging) {
+      pendingHistorySync = false
+      scheduleHistorySync(0)
+    }
   }
 }
 
@@ -812,7 +921,20 @@ const syncHistory = async () => {
   pageOffset.value = 0
   totalCount.value = 0
   hasMore.value = false
+  loadMoreIntent.value = false
   await loadHistoryPage({reset: true})
+}
+
+const scheduleHistorySync = (delay = 80) => {
+  if (historyUpdateTimer) return
+  historyUpdateTimer = window.setTimeout(async () => {
+    historyUpdateTimer = null
+    if (isPointerDown || isContentDragging || isLoadingPage.value) {
+      pendingHistorySync = true
+      return
+    }
+    await syncHistory()
+  }, delay)
 }
 
 const handleKeydown = async (event) => {
@@ -837,6 +959,7 @@ const handleKeydown = async (event) => {
     event.preventDefault()
     currentVisibleIndex = Math.min(visible.length - 1, currentVisibleIndex + 1)
     selectedIndex.value = visible[currentVisibleIndex].index
+    loadMoreIntent.value = true
     await tryLoadMoreByScroll()
     await ensureKeyboardSelectionVisible()
   } else if (event.key === 'Enter') {
@@ -880,19 +1003,40 @@ onMounted(async () => {
   pageSize.value = normalizeImagePageSize(localStorage.getItem('image_history_page_size'))
   await syncHistory()
   unlistenShowWindow = await listen('show-image-window', (event) => {
-    applyPayload(event.payload, {refocus: true})
-    queueMicrotask(() => {
-      syncHistory()
-    })
+    const payload = event.payload || {}
+    if (history.value.length === 0) {
+      applyPayload(payload, {refocus: true})
+      return
+    }
+    mergeShowWindowPayload(payload)
+    if (typeof payload.bottomOffset === 'number') {
+      bottomOffset.value = clampBottomOffset(payload.bottomOffset)
+    }
+    if (typeof payload.selectedIndex === 'number') {
+      selectedIndex.value = payload.selectedIndex
+    }
+    if (selectedIndex.value < 0 || selectedIndex.value >= history.value.length) {
+      selectedIndex.value = history.value.length > 0 ? 0 : -1
+    }
+    warmupOne(selectedIndex.value)
+    isVisible.value = true
+    if (!isAddingCategory.value) {
+      nextTick(() => {
+        containerRef.value?.focus()
+      })
+    }
   })
   unlistenHistoryUpdated = await listen('image-history-updated', async () => {
-    if (isVisible.value && !isAddingCategory.value) {
-      if (isPointerDown || isContentDragging) {
-        pendingHistorySync = true
-        return
-      }
-      await syncHistory()
-    }
+    if (isAddingCategory.value) return
+    scheduleHistorySync(80)
+  })
+  unlistenHistoryPayloadUpdated = await listen('image-history-payload-updated', (event) => {
+    if (isAddingCategory.value) return
+    mergeShowWindowPayload(event.payload || {})
+  })
+  unlistenItemPromoted = await listen('image-item-promoted', (event) => {
+    const itemId = event?.payload?.itemId
+    promoteLocalItemToTop(itemId)
   })
   window.addEventListener('keydown', handleWindowKeydown)
   window.addEventListener('keyup', handleWindowKeyup)
@@ -902,10 +1046,19 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopContentDragging()
+  if (contentMetricsRafId) {
+    cancelAnimationFrame(contentMetricsRafId)
+    contentMetricsRafId = 0
+  }
+  loadMorePending = false
   previewCache.clear()
   if (filterDebounceTimer) {
     clearTimeout(filterDebounceTimer)
     filterDebounceTimer = null
+  }
+  if (historyUpdateTimer) {
+    clearTimeout(historyUpdateTimer)
+    historyUpdateTimer = null
   }
   if (unlistenShowWindow) {
     unlistenShowWindow()
@@ -914,6 +1067,14 @@ onBeforeUnmount(() => {
   if (unlistenHistoryUpdated) {
     unlistenHistoryUpdated()
     unlistenHistoryUpdated = null
+  }
+  if (unlistenHistoryPayloadUpdated) {
+    unlistenHistoryPayloadUpdated()
+    unlistenHistoryPayloadUpdated = null
+  }
+  if (unlistenItemPromoted) {
+    unlistenItemPromoted()
+    unlistenItemPromoted = null
   }
   window.removeEventListener('keydown', handleWindowKeydown)
   window.removeEventListener('keyup', handleWindowKeyup)
@@ -938,7 +1099,7 @@ watch([searchKeyword, categoryFilter], () => {
     clearTimeout(filterDebounceTimer)
   }
   filterDebounceTimer = setTimeout(() => {
-    syncHistory()
+    scheduleHistorySync(0)
   }, 180)
 })
 </script>
@@ -1023,15 +1184,52 @@ html, body {
   box-shadow: none !important;
 }
 
+.content.is-dragging .clipboard-item.selected {
+  transform: none !important;
+}
+
 .content.is-dragging .delete-btn,
 .content.is-dragging .fullscreen-btn,
 .content.is-dragging .pin-btn {
   opacity: 0 !important;
 }
 
+.content.is-dragging .clipboard-item {
+  pointer-events: none;
+}
+
 .virtual-spacer {
   flex: 0 0 auto;
   height: 1px;
+}
+
+.load-more-tail-indicator {
+  width: 56px;
+  flex: 0 0 56px;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: rgba(166, 213, 255, 0.9);
+  user-select: none;
+  pointer-events: none;
+}
+
+.load-more-tail-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  line-height: 1;
+}
+
+.load-more-tail-spinner {
+  font-size: 16px;
+  color: rgba(220, 240, 255, 0.95);
 }
 
 .clipboard-item {

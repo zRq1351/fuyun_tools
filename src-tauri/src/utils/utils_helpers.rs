@@ -49,6 +49,8 @@ pub struct AppSettingsData {
     pub translation_prompt_template: String,
     #[serde(default = "default_explanation_prompt_template")]
     pub explanation_prompt_template: String,
+    #[serde(default = "default_image_fill_verify_mode")]
+    pub image_fill_verify_mode: String,
 }
 
 impl Default for AppSettingsData {
@@ -68,6 +70,7 @@ impl Default for AppSettingsData {
             clipboard_bottom_offset: default_clipboard_bottom_offset(),
             translation_prompt_template: default_translation_prompt_template(),
             explanation_prompt_template: default_explanation_prompt_template(),
+            image_fill_verify_mode: default_image_fill_verify_mode(),
         }
     }
 }
@@ -98,6 +101,10 @@ fn default_grouped_items_protected_from_limit() -> bool {
 
 fn default_clipboard_bottom_offset() -> i32 {
     8
+}
+
+fn default_image_fill_verify_mode() -> String {
+    "fast".to_string()
 }
 
 pub fn default_translation_prompt_template() -> String {
@@ -348,6 +355,9 @@ impl AppSettingsData {
         if self.image_disk_limit_mb < 100 || self.image_disk_limit_mb > 102400 {
             return Err("image_disk_limit_mb必须在100-102400之间".to_string());
         }
+        if self.image_fill_verify_mode != "strict" && self.image_fill_verify_mode != "fast" {
+            return Err("image_fill_verify_mode必须是strict或fast".to_string());
+        }
 
         Ok(())
     }
@@ -479,6 +489,9 @@ impl AppSettingsData {
 
         if self.explanation_prompt_template.trim().is_empty() {
             self.explanation_prompt_template = default_explanation_prompt_template();
+        }
+        if self.image_fill_verify_mode != "strict" && self.image_fill_verify_mode != "fast" {
+            self.image_fill_verify_mode = default_image_fill_verify_mode();
         }
 
         log::debug!(

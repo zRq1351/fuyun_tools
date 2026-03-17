@@ -3,7 +3,7 @@ use crate::services::clipboard_wakeup::{ClipboardWakeBackend, WakeSignal};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 /// 启动剪贴板监听器
 pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
@@ -38,7 +38,7 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
 
             if let Some(current_content) = current_content {
                 if !current_content.is_empty() && current_content != last_content {
-                    add_to_clipboard_history(current_content.clone(), state.clone());
+                    add_to_clipboard_history(&app_handle, current_content.clone(), state.clone());
                     last_content = current_content.clone();
                     log::info!("检测到剪贴板内容变化，已添加到历史记录");
                 }
@@ -48,7 +48,7 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
 }
 
 /// 添加到剪贴板历史记录
-pub fn add_to_clipboard_history(content: String, state: Arc<Mutex<AppState>>) {
+pub fn add_to_clipboard_history(app_handle: &AppHandle, content: String, state: Arc<Mutex<AppState>>) {
     if content.trim().is_empty() {
         return;
     }
@@ -72,4 +72,16 @@ pub fn add_to_clipboard_history(content: String, state: Arc<Mutex<AppState>>) {
         let manager = manager_result.lock().unwrap();
         manager.add_to_history(content);
     }
+
+    let payload = {
+        let state_guard = state.lock().unwrap();
+        let manager = state_guard.clipboard_manager.lock().unwrap();
+        serde_json::json!({
+            "history": manager.get_history(),
+            "categories": manager.get_categories(),
+            "category_list": manager.get_category_list(),
+            "pinned_items": manager.get_pinned_items()
+        })
+    };
+    let _ = app_handle.emit("clipboard-history-payload-updated", payload);
 }

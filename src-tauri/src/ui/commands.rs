@@ -8,7 +8,10 @@ use crate::ui::window_manager::{
     show_clipboard_window, show_image_clipboard_window, show_image_preview_loading_window,
     show_image_preview_window,
 };
-use crate::utils::image_clipboard::{ImageHistoryPageData, ImageHistoryPreviewItem};
+use crate::utils::image_clipboard::{
+    is_fast_fill_verify_mode_enabled, set_image_fill_verify_mode, ImageHistoryPageData,
+    ImageHistoryPreviewItem,
+};
 use crate::utils::utils_helpers::{
     default_explanation_prompt_template, default_translation_prompt_template, get_dedup_scan_metrics,
     load_history_page_data, load_settings, save_settings, ClipboardHistoryPageData,
@@ -16,7 +19,9 @@ use crate::utils::utils_helpers::{
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -111,7 +116,7 @@ pub async fn open_image_preview_window_by_id(
     execute_open_image_preview_window_by_id(request.item_id, state.inner().clone(), app)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum FillKind {
     Text,
     Image,
@@ -170,14 +175,88 @@ fn finish_fill_if_latest(state: &Arc<Mutex<SharedAppState>>, kind: FillKind, fil
     }
 }
 
-fn wait_for_fill_window_hidden(app: &AppHandle, window_label: &str, label: &str) {
+static IMAGE_PROMOTE_PENDING_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static IMAGE_PROMOTE_WORKER_RUNNING: AtomicBool = AtomicBool::new(false);
+
+fn get_image_promote_pending_id_slot() -> &'static Mutex<Option<String>> {
+    IMAGE_PROMOTE_PENDING_ID.get_or_init(|| Mutex::new(None))
+}
+
+pub fn interrupt_text_fill_flow(state: &Arc<Mutex<SharedAppState>>) {
+    if let Ok(mut state_guard) = state.lock() {
+        state_guard.text_fill_seq = state_guard.text_fill_seq.wrapping_add(1);
+        state_guard.is_processing_selection = false;
+        state_guard.is_updating_clipboard = false;
+    }
+}
+
+pub fn interrupt_image_fill_flow(state: &Arc<Mutex<SharedAppState>>) {
+    if let Ok(mut state_guard) = state.lock() {
+        state_guard.image_fill_seq = state_guard.image_fill_seq.wrapping_add(1);
+        state_guard.is_processing_selection = false;
+        state_guard.is_updating_clipboard = false;
+    }
+    let slot = get_image_promote_pending_id_slot();
+    let mut guard = slot.lock().unwrap();
+    *guard = None;
+}
+
+fn schedule_image_promote_to_top(state: Arc<Mutex<SharedAppState>>, item_id: String) {
+    {
+        let slot = get_image_promote_pending_id_slot();
+        let mut guard = slot.lock().unwrap();
+        *guard = Some(item_id);
+    }
+    if IMAGE_PROMOTE_WORKER_RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    thread::spawn(move || {
+        loop {
+            thread::sleep(Duration::from_millis(120));
+            let next_item_id = {
+                let slot = get_image_promote_pending_id_slot();
+                let mut guard = slot.lock().unwrap();
+                guard.take()
+            };
+            if let Some(item_id) = next_item_id {
+                if let Ok(state_guard) = state.lock() {
+                    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+                    if let Err(e) = manager.promote_to_top_by_id(&item_id) {
+                        log::warn!("极速模式异步置顶图片失败: {}", e);
+                    }
+                }
+                continue;
+            }
+            IMAGE_PROMOTE_WORKER_RUNNING.store(false, Ordering::SeqCst);
+            let has_pending = {
+                let slot = get_image_promote_pending_id_slot();
+                let guard = slot.lock().unwrap();
+                guard.is_some()
+            };
+            if has_pending
+                && IMAGE_PROMOTE_WORKER_RUNNING
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                continue;
+            }
+            break;
+        }
+    });
+}
+
+fn wait_for_fill_window_hidden(app: &AppHandle, window_label: &str, label: &str, fast_path: bool) {
+    let timeout_ms = if fast_path { 220 } else { 900 };
     if let Err(e) = crate::ui::window_manager::wait_for_window_hidden(
         app,
         window_label,
-        Duration::from_millis(900),
+        Duration::from_millis(timeout_ms),
     ) {
         log::warn!("等待{}窗口隐藏失败: {}", label, e);
-    } else {
+    } else if !fast_path {
         thread::sleep(Duration::from_millis(40));
     }
 }
@@ -194,7 +273,8 @@ fn spawn_fill_task<F>(
 {
     thread::spawn(move || {
         let started_at = std::time::Instant::now();
-        wait_for_fill_window_hidden(&app_handle, kind.window_label(), kind.label());
+        let fast_path = kind == FillKind::Image && is_fast_fill_verify_mode_enabled();
+        wait_for_fill_window_hidden(&app_handle, kind.window_label(), kind.label(), fast_path);
 
         if !is_fill_latest(&state, kind, fill_seq) {
             log::info!("{}回填请求过期，跳过执行: op_id={}", kind.label(), operation_id);
@@ -211,7 +291,7 @@ fn spawn_fill_task<F>(
                 );
                 return;
             }
-            simulate_paste_with_retry(kind.label(), Some(operation_id), started_at);
+            simulate_paste_with_retry(kind.label(), Some(operation_id), started_at, fast_path);
         } else if let Err(e) = fill_result {
             log::error!("{}回填失败（写入阶段）: op_id={}, {}", kind.label(), operation_id, e);
         }
@@ -224,7 +304,68 @@ fn simulate_paste_with_retry(
     label: &str,
     operation_id: Option<u64>,
     started_at: std::time::Instant,
+    fast_path: bool,
 ) {
+    if fast_path {
+        match crate::ui::window_manager::simulate_paste() {
+            Ok(_) => {
+                if let Some(op_id) = operation_id {
+                    log::info!(
+                        "{}回填完成: op_id={}, 耗时: {}ms",
+                        label,
+                        op_id,
+                        started_at.elapsed().as_millis()
+                    );
+                } else {
+                    log::info!("{}回填完成，耗时: {}ms", label, started_at.elapsed().as_millis());
+                }
+                return;
+            }
+            Err(first_error) => {
+                thread::sleep(Duration::from_millis(35));
+                match crate::ui::window_manager::simulate_paste() {
+                    Ok(_) => {
+                        if let Some(op_id) = operation_id {
+                            log::warn!(
+                                "{}回填极速模式首次粘贴失败，快速重试成功: op_id={}, {}，总耗时: {}ms",
+                                label,
+                                op_id,
+                                first_error,
+                                started_at.elapsed().as_millis()
+                            );
+                        } else {
+                            log::warn!(
+                                "{}回填极速模式首次粘贴失败，快速重试成功: {}，总耗时: {}ms",
+                                label,
+                                first_error,
+                                started_at.elapsed().as_millis()
+                            );
+                        }
+                        return;
+                    }
+                    Err(second_error) => {
+                        if let Some(op_id) = operation_id {
+                            log::error!(
+                                "{}回填极速模式粘贴失败: op_id={}, 首次错误: {}，二次错误: {}",
+                                label,
+                                op_id,
+                                first_error,
+                                second_error
+                            );
+                        } else {
+                            log::error!(
+                                "{}回填极速模式粘贴失败，首次错误: {}，二次错误: {}",
+                                label,
+                                first_error,
+                                second_error
+                            );
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+    }
     thread::sleep(Duration::from_millis(135));
     match crate::ui::window_manager::simulate_paste() {
         Ok(_) => {
@@ -393,7 +534,14 @@ fn execute_select_and_fill_text(
         move |app_handle, state_ref| {
             let state_guard = state_ref.lock().unwrap();
             let manager = state_guard.clipboard_manager.lock().unwrap();
-            manager.set_clipboard_content(app_handle, &item_content_clone)
+            manager.set_clipboard_content(app_handle, &item_content_clone)?;
+            let _ = app_handle.emit(
+                "text-item-promoted",
+                serde_json::json!({
+                    "content": item_content_clone,
+                }),
+            );
+            Ok(())
         },
     );
 
@@ -500,15 +648,30 @@ fn execute_select_and_fill_image_by_id(
         fill_seq,
         operation_id,
         move |app_handle, state_ref| {
+            let fast_mode = is_fast_fill_verify_mode_enabled();
             let image = {
                 let state_guard = state_ref.lock().unwrap();
                 let manager = state_guard.image_clipboard_manager.lock().unwrap();
-                manager.promote_to_top_by_id(&item_id)?;
-                manager.get_image_by_index_for_fill(0)?
+                if fast_mode {
+                    manager.promote_to_top_in_memory_by_id(&item_id)?;
+                    manager.get_image_by_index_for_fill(0)?
+                } else {
+                    manager.promote_to_top_by_id(&item_id)?;
+                    manager.get_image_by_index_for_fill(0)?
+                }
             };
             crate::utils::image_clipboard::ImageClipboardManager::write_clipboard_image(
                 app_handle, &image,
             )?;
+            let _ = app_handle.emit(
+                "image-item-promoted",
+                serde_json::json!({
+                    "itemId": item_id,
+                }),
+            );
+            if fast_mode {
+                schedule_image_promote_to_top(state_ref.clone(), item_id.clone());
+            }
             Ok(())
         },
     );
@@ -1051,6 +1214,10 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         "explanation_prompt_template".to_string(),
         serde_json::Value::String(settings.explanation_prompt_template.clone()),
     );
+    result.insert(
+        "image_fill_verify_mode".to_string(),
+        serde_json::Value::String(settings.image_fill_verify_mode.clone()),
+    );
 
     // 处理provider_configs，将encrypted_api_key替换为解密后的api_key
     let mut provider_configs_map: HashMap<String, serde_json::Value> = HashMap::new();
@@ -1180,6 +1347,7 @@ pub async fn save_app_settings(
     grouped_items_protected_from_limit: bool,
     translation_prompt_template: String,
     explanation_prompt_template: String,
+    image_fill_verify_mode: String,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -1206,6 +1374,11 @@ pub async fn save_app_settings(
         default_explanation_prompt_template()
     } else {
         explanation_prompt_template
+    };
+    settings.image_fill_verify_mode = if image_fill_verify_mode == "fast" {
+        "fast".to_string()
+    } else {
+        "strict".to_string()
     };
 
     if hot_key.is_empty() {
@@ -1242,9 +1415,10 @@ pub async fn save_app_settings(
             .on_shortcut(hot_key.as_str(), move |_app, _shortcut, event| {
                 if let ShortcutState::Pressed = event.state {
                     let sg = state_clone.lock().unwrap();
-                    if !sg.is_visible && !sg.is_processing_selection {
+                    if !sg.is_visible {
                         let state_for_window = state_clone.clone();
                         drop(sg);
+                        interrupt_text_fill_flow(&state_for_window);
                         show_clipboard_window(app_clone.clone(), state_for_window);
                         features::mouse_listener::reset_ctrl_key_state();
                     }
@@ -1267,9 +1441,10 @@ pub async fn save_app_settings(
             .on_shortcut(image_hot_key.as_str(), move |_app, _shortcut, event| {
                 if let ShortcutState::Pressed = event.state {
                     let sg = state_clone.lock().unwrap();
-                    if !sg.is_visible && !sg.is_image_visible && !sg.is_processing_selection {
+                    if !sg.is_visible && !sg.is_image_visible {
                         let state_for_window = state_clone.clone();
                         drop(sg);
+                        interrupt_image_fill_flow(&state_for_window);
                         show_image_clipboard_window(app_clone.clone(), state_for_window);
                     }
                 }
@@ -1314,6 +1489,7 @@ pub async fn save_app_settings(
         .map_err(|e| format!("设置验证失败: {}", e))?;
 
     save_settings(&settings).map_err(|e| e.to_string())?;
+    set_image_fill_verify_mode(&settings.image_fill_verify_mode);
 
     let selection_enabled = settings.selection_enabled;
     {

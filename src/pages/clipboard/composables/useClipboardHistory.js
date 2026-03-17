@@ -172,6 +172,37 @@ export function useClipboardHistory() {
         updateSelection(visible[nextVisibleIndex].index, true, contentRef, nextVisibleIndex)
     }
 
+    const applyPayloadSnapshot = (payload = {}) => {
+        const incomingHistory = Array.isArray(payload.history) ? payload.history : []
+        if (incomingHistory.length === 0) return
+        history.value = incomingHistory.slice()
+        const loadedTarget = Math.max(pageOffset.value || 0, pageSize.value)
+        const loadedCount = Math.min(incomingHistory.length, loadedTarget)
+        const pinnedSet = new Set(Array.isArray(payload.pinned_items) ? payload.pinned_items : [])
+        pagedHistory.value = incomingHistory.slice(0, loadedCount).map((content, position) => ({
+            content,
+            position,
+            snippet: '',
+            pinned: pinnedSet.has(content)
+        }))
+        totalCount.value = incomingHistory.length
+        pageOffset.value = loadedCount
+        hasMore.value = loadedCount < incomingHistory.length
+        if (selectedIndex.value < 0 || selectedIndex.value >= incomingHistory.length) {
+            selectedIndex.value = incomingHistory.length > 0 ? 0 : -1
+        }
+    }
+
+    const promoteLocalByContent = (content) => {
+        if (!content || pagedHistory.value.length < 2) return
+        const targetIndex = pagedHistory.value.findIndex((entry) => entry.content === content)
+        if (targetIndex <= 0) return
+        const [moved] = pagedHistory.value.splice(targetIndex, 1)
+        if (!moved) return
+        pagedHistory.value.unshift(moved)
+        rebuildHistoryArray()
+    }
+
     return {
         history,
         selectedIndex,
@@ -192,6 +223,8 @@ export function useClipboardHistory() {
         resetAndReloadHistory,
         loadMoreHistory,
         setSort,
-        setPageSize
+        setPageSize,
+        promoteLocalByContent,
+        applyPayloadSnapshot
     }
 }

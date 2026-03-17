@@ -15,6 +15,14 @@
       <div class="form-hint">超过上限后自动清理最旧未置顶图片，建议 2048MB</div>
     </el-form-item>
 
+    <el-form-item label="图片回填模式">
+      <el-select v-model="form.imageFillVerifyMode" style="width: 220px">
+        <el-option label="严格模式（写后校验）" value="strict"/>
+        <el-option label="极速模式（完全不校验）" value="fast"/>
+      </el-select>
+      <div class="form-hint">极速模式写入系统剪贴板后立即粘贴，速度更快但成功率更依赖目标应用</div>
+    </el-form-item>
+
     <el-form-item label="上限策略">
       <el-switch
           v-model="form.groupedItemsProtectedFromLimit"

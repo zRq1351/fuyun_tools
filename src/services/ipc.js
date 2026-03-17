@@ -256,6 +256,7 @@ export const AISettingsService = {
      * @param {boolean} params.groupedItemsProtectedFromLimit
      * @param {string} params.translationPromptTemplate
      * @param {string} params.explanationPromptTemplate
+     * @param {string} params.imageFillVerifyMode
      * @returns {Promise<void>}
      */
     saveSettings: ({
@@ -271,7 +272,8 @@ export const AISettingsService = {
                        selectionEnabled,
                        groupedItemsProtectedFromLimit,
                        translationPromptTemplate,
-                       explanationPromptTemplate
+                       explanationPromptTemplate,
+                       imageFillVerifyMode
                    }) =>
         invoke(IPC_COMMANDS.SAVE_APP_SETTINGS, {
             textMaxItems,
@@ -286,7 +288,8 @@ export const AISettingsService = {
             selectionEnabled,
             groupedItemsProtectedFromLimit,
             translationPromptTemplate,
-            explanationPromptTemplate
+            explanationPromptTemplate,
+            imageFillVerifyMode
         }),
 
     /**
