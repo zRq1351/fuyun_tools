@@ -1,4 +1,6 @@
-use crate::utils::image_clipboard::{ImageHistoryData, ImageHistoryPageData, ImageHistoryPageItem};
+use crate::utils::image_clipboard::{
+    rgba_base64_to_png_base64, ImageHistoryData, ImageHistoryPageData, ImageHistoryPageItem,
+};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, ToSql};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -304,6 +306,9 @@ pub fn load_all_data() -> Result<ImageHistoryData, String> {
               hi.item_id,
               hi.width,
               hi.height,
+              hi.preview_width,
+              hi.preview_height,
+              hi.preview_rgba_base64,
               hi.image_path
             FROM image_items hi
             ORDER BY hi.position ASC
@@ -316,22 +321,25 @@ pub fn load_all_data() -> Result<ImageHistoryData, String> {
                 row.get::<_, String>(0)?,
                 row.get::<_, i64>(1)?,
                 row.get::<_, i64>(2)?,
-                row.get::<_, String>(3)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
             ))
         })
         .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
 
     let mut items = Vec::new();
     for row in item_rows {
-        let (id, width, height, image_path) =
+        let (id, width, height, preview_width, preview_height, preview_rgba_base64, image_path) =
             row.map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
         items.push(crate::utils::image_clipboard::ImageHistoryItem {
             id: id.clone(),
             width: width.max(0) as u32,
             height: height.max(0) as u32,
-            preview_width: 0,
-            preview_height: 0,
-            preview_rgba_base64: String::new(),
+            preview_width: preview_width.max(0) as u32,
+            preview_height: preview_height.max(0) as u32,
+            preview_rgba_base64,
             image_path,
             rgba_bytes: Vec::new(),
             signature: id,
@@ -448,9 +456,9 @@ pub fn load_history_page(
           hi.item_id,
           hi.width,
           hi.height,
-          0 AS preview_width,
-          0 AS preview_height,
-          '' AS preview_rgba_base64,
+          hi.preview_width,
+          hi.preview_height,
+          hi.preview_rgba_base64,
           hi.image_path,
           COALESCE(c.category, '未分类') AS category,
           CASE WHEN p.item_id IS NULL THEN 0 ELSE 1 END AS pinned
@@ -490,15 +498,33 @@ pub fn load_history_page(
                 offset as i64
             ],
             |row| {
+                let preview_width = row.get::<_, i64>(4)? as u32;
+                let preview_height = row.get::<_, i64>(5)? as u32;
+                let preview_rgba_base64 = row.get::<_, String>(6)?;
+                let image_path = row.get::<_, String>(7)?;
+                let preview_png_base64 = if preview_width > 0
+                    && preview_height > 0
+                    && !preview_rgba_base64.is_empty()
+                {
+                    rgba_base64_to_png_base64(
+                        &preview_rgba_base64,
+                        preview_width,
+                        preview_height,
+                    )
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
                 Ok(ImageHistoryPageItem {
                     position: row.get::<_, i64>(0)? as usize,
                     id: row.get::<_, String>(1)?,
                     width: row.get::<_, i64>(2)? as u32,
                     height: row.get::<_, i64>(3)? as u32,
-                    preview_width: row.get::<_, i64>(4)? as u32,
-                    preview_height: row.get::<_, i64>(5)? as u32,
-                    preview_rgba_base64: row.get::<_, String>(6)?,
-                    image_path: row.get::<_, String>(7)?,
+                    preview_width,
+                    preview_height,
+                    preview_rgba_base64,
+                    preview_png_base64,
+                    image_path,
                     category: row.get::<_, String>(8)?,
                     tags: Vec::new(),
                     pinned: row.get::<_, i64>(9)? == 1,

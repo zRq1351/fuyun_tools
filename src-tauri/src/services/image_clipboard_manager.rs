@@ -82,6 +82,14 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                         manager.add_rgba_image(rgba, width, height);
                         let _ = app_handle.emit("image-history-updated", serde_json::json!({}));
                     }
+                    let payload = serde_json::json!({
+                        "history": manager.get_history_preview(),
+                        "categories": manager.get_categories(),
+                        "category_list": manager.get_category_list(),
+                        "image_tags": manager.get_image_tags(),
+                        "pinned_items": manager.get_pinned_items()
+                    });
+                    let _ = app_handle.emit("image-history-payload-updated", payload);
                     last_signature = signature;
                 }
             } else if let Err(e) = image {

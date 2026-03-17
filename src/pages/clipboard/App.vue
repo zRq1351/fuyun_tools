@@ -89,7 +89,10 @@
         :is-pinned="isItemPinned"
         :promote-item="promoteItem"
         :update-selection="updateSelection"
+        :has-more="hasMore"
+        :is-loading-page="isLoadingPage"
         @content-scroll="tryLoadMoreByScroll"
+        @load-more-intent="handleLoadMoreIntent"
         :visible-history="visibleHistory"
     />
 
@@ -191,6 +194,7 @@ const aiActionLoading = ref(false)
 const isAiSettingsCollapsed = ref(true)
 const translationTargetLanguage = ref(localStorage.getItem('clipboard_ai_target_language') || '简体中文')
 const explanationTargetLanguage = ref(localStorage.getItem('clipboard_ai_explain_language') || '中文')
+const loadMoreIntent = ref(false)
 
 const {
   history,
@@ -212,7 +216,9 @@ const {
   resetAndReloadHistory,
   loadMoreHistory,
   setSort,
-  setPageSize
+  setPageSize,
+  promoteLocalByContent,
+  applyPayloadSnapshot
 } = useClipboardHistory()
 
 const {
@@ -324,6 +330,24 @@ const init = async () => {
     await listen('show-window', (event) => {
       void showWindow(event.payload)
     })
+    await listen('clipboard-history-payload-updated', (event) => {
+      const payload = event.payload || {}
+      applyPayloadSnapshot(payload)
+      if (payload.categories) {
+        categoryMap.value = payload.categories
+      }
+      if (Array.isArray(payload.pinned_items)) {
+        pinnedItems.value = payload.pinned_items
+      }
+      if (Array.isArray(payload.category_list)) {
+        const list = payload.category_list.filter(c => c !== '未分类' && c !== '全部')
+        categories.value = ['未分类', ...Array.from(new Set(list))]
+      }
+    })
+    await listen('text-item-promoted', (event) => {
+      const content = event?.payload?.content
+      promoteLocalByContent(content)
+    })
 
     window.addEventListener('blur', async () => {
       try {
@@ -360,7 +384,11 @@ const showWindow = async (data) => {
 
   selectedIndex.value = data.selectedIndex !== undefined ? data.selectedIndex : 0
   isVisible.value = true
-  await resetAndReloadHistory()
+  loadMoreIntent.value = false
+  if (history.value.length === 0) {
+    applyPayloadSnapshot(data)
+    await resetAndReloadHistory()
+  }
 
   if (visibleHistory.value.length > 0) {
     if (!visibleHistory.value.some((entry) => entry.index === selectedIndex.value)) {
@@ -538,9 +566,16 @@ const tryLoadMoreByScroll = async () => {
   const container = getContentContainer()
   if (!container) return
   const remaining = container.scrollWidth - container.clientWidth - container.scrollLeft
-  if (remaining <= 240) {
+  if (remaining <= 240 && loadMoreIntent.value) {
+    loadMoreIntent.value = false
     await loadMoreHistory()
   }
+}
+
+const handleLoadMoreIntent = () => {
+  if (!hasMore.value || isLoadingPage.value) return
+  loadMoreIntent.value = true
+  void tryLoadMoreByScroll()
 }
 
 const scrollToStart = async () => {
@@ -559,6 +594,7 @@ const scrollToEnd = async () => {
   if (container) {
     container.scrollLeft = Math.max(0, container.scrollWidth - container.clientWidth)
   }
+  loadMoreIntent.value = true
   await tryLoadMoreByScroll()
   if (visibleHistory.value.length > 0) {
     selectedIndex.value = visibleHistory.value[visibleHistory.value.length - 1].index
@@ -584,6 +620,7 @@ const handleKeydown = async (event) => {
     case 'ArrowRight':
       event.preventDefault()
       moveSelection(1, clipboardListRef.value?.contentRef)
+      loadMoreIntent.value = true
       await tryLoadMoreByScroll()
       await ensureKeyboardSelectionVisible()
       break
@@ -616,6 +653,7 @@ watch([searchKeyword, categoryFilter], () => {
     clearTimeout(filterDebounceTimer)
   }
   filterDebounceTimer = setTimeout(() => {
+    loadMoreIntent.value = false
     resetAndReloadHistory()
   }, 160)
 })

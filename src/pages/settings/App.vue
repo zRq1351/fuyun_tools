@@ -111,7 +111,8 @@ const form = reactive({
   customProviderName: '',
   selectionEnabled: true,
   translationPromptTemplate: '',
-  explanationPromptTemplate: ''
+  explanationPromptTemplate: '',
+  imageFillVerifyMode: 'fast'
 })
 
 const toggleTheme = () => {
@@ -166,7 +167,8 @@ const persistSettings = async (silent = false) => {
       selectionEnabled: form.selectionEnabled,
       groupedItemsProtectedFromLimit: form.groupedItemsProtectedFromLimit,
       translationPromptTemplate: form.translationPromptTemplate,
-      explanationPromptTemplate: form.explanationPromptTemplate
+      explanationPromptTemplate: form.explanationPromptTemplate,
+      imageFillVerifyMode: form.imageFillVerifyMode
     })
 
     if (form.aiProvider === 'custom' && form.customProviderName === selectedProvider) {
@@ -255,6 +257,7 @@ onMounted(async () => {
     form.groupedItemsProtectedFromLimit = settings.grouped_items_protected_from_limit !== false
     form.translationPromptTemplate = settings.translation_prompt_template || ''
     form.explanationPromptTemplate = settings.explanation_prompt_template || ''
+    form.imageFillVerifyMode = settings.image_fill_verify_mode === 'strict' ? 'strict' : 'fast'
 
     if (aiSettingsRef.value) {
       aiSettingsRef.value.applyCurrentProviderConfig(settings)

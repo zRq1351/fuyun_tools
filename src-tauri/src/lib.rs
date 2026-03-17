@@ -60,8 +60,9 @@ pub fn run() {
                 .on_shortcut(hot_key.as_str(), move |_app, _shortcut, event| {
                     if let ShortcutState::Pressed = event.state {
                         let state_guard = state_clone.lock().unwrap();
-                        if !state_guard.is_visible && !state_guard.is_image_visible && !state_guard.is_processing_selection {
+                        if !state_guard.is_visible && !state_guard.is_image_visible {
                             drop(state_guard);
+                            crate::ui::commands::interrupt_text_fill_flow(&state_clone);
                             show_clipboard_window(app_handle_clone.clone(), state_clone.clone());
 
                             features::mouse_listener::reset_ctrl_key_state();
@@ -79,8 +80,9 @@ pub fn run() {
                 .on_shortcut(image_hot_key.as_str(), move |_app, _shortcut, event| {
                     if let ShortcutState::Pressed = event.state {
                         let state_guard = state_clone_image.lock().unwrap();
-                        if !state_guard.is_visible && !state_guard.is_image_visible && !state_guard.is_processing_selection {
+                        if !state_guard.is_visible && !state_guard.is_image_visible {
                             drop(state_guard);
+                            crate::ui::commands::interrupt_image_fill_flow(&state_clone_image);
                             show_image_clipboard_window(app_handle_clone_image.clone(), state_clone_image.clone());
                         }
                     }

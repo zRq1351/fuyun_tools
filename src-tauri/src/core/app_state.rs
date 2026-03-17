@@ -1,5 +1,5 @@
 use crate::utils::clipboard::ClipboardManager;
-use crate::utils::image_clipboard::ImageClipboardManager;
+use crate::utils::image_clipboard::{set_image_fill_verify_mode, ImageClipboardManager};
 use crate::utils::utils_helpers::{load_settings, AppSettingsData};
 use std::sync::{Arc, Mutex};
 
@@ -55,6 +55,7 @@ impl Default for AppState {
     /// 默认状态初始化
     fn default() -> Self {
         let saved_settings = load_settings().unwrap_or_default();
+        set_image_fill_verify_mode(&saved_settings.image_fill_verify_mode);
 
         Self {
             clipboard_manager: Arc::new(Mutex::new(ClipboardManager::new(
