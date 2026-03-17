@@ -5,7 +5,7 @@ use crate::utils::utils_helpers::get_logs_dir_path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::menu::{Menu, MenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{menu::CheckMenuItemBuilder, AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
@@ -33,7 +33,6 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
         };
 
         let quit_item = create_menu_item("quit", "退出");
-        let clear_history_item = create_menu_item("clear_history", "清除记录");
         #[cfg(debug_assertions)]
         let clear_logs_item = create_menu_item("clear_logs", "清除日志");
         #[cfg(debug_assertions)]
@@ -49,22 +48,11 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
             autostart_item: autostart_item.clone(),
         });
 
-        #[cfg(debug_assertions)]
-        let mut clear_submenu_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
-            vec![&clear_history_item];
-        #[cfg(not(debug_assertions))]
-        let clear_submenu_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
-            vec![&clear_history_item];
-
-        #[cfg(debug_assertions)]
-        clear_submenu_items.push(&clear_logs_item);
-
-        let clear_submenu =
-            Submenu::with_items(app_handle, "清除", true, &clear_submenu_items)
-                .expect("未能创建清除子菜单");
-
         let mut menu_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
-            vec![&autostart_item, &clear_submenu];
+            vec![&autostart_item];
+
+        #[cfg(debug_assertions)]
+        menu_items.push(&clear_logs_item);
 
         #[cfg(debug_assertions)]
         menu_items.push(&open_logs_item);
@@ -101,9 +89,6 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
                                 log::error!("打开日志目录失败: {}", e);
                             }
                         }
-                        "clear_history" => {
-                            handle_clear_history_event(&state_for_events);
-                        }
                         #[cfg(debug_assertions)]
                         "clear_logs" => {
                             if let Err(e) = clear_log_files() {
@@ -128,6 +113,7 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
 pub fn open_settings(app: &AppHandle) {
     if let Some(settings_window) = app.get_webview_window("settings") {
         let _ = settings_window.show();
+        let _ = settings_window.set_focus();
     }
 }
 
@@ -177,15 +163,6 @@ pub fn handle_autostart_event(app: &AppHandle, state: &Arc<Mutex<AppState>>) {
             thread::sleep(Duration::from_millis(100));
             rebuild_tray_menu(&app_handle, state_clone);
         });
-    }
-}
-
-/// 处理清除历史记录事件
-pub fn handle_clear_history_event(state: &Arc<Mutex<AppState>>) {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.clipboard_manager.lock().unwrap();
-    if let Err(e) = manager.clear_history() {
-        log::error!("清除历史记录失败: {}", e);
     }
 }
 

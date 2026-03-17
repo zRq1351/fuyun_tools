@@ -24,6 +24,7 @@
         :toggle-ai-settings="toggleAiSettings"
         :translation-target-language="translationTargetLanguage"
         :explanation-target-language="explanationTargetLanguage"
+        search-placeholder="搜索剪切板历史"
     />
     <div v-show="!isAiSettingsCollapsed" class="ai-quick-panel-wrap" @click.stop @mousedown.stop>
       <div class="ai-quick-panel">
@@ -77,6 +78,7 @@
         v-else
         ref="clipboardListRef"
         class="history-list"
+        :highlight-keyword="searchKeyword"
         :delete-item="deleteItem"
         :get-item-category="getItemCategory"
         :handle-drag-end="handleDragEnd"
@@ -84,14 +86,35 @@
         :select-and-fill-direct="selectAndFillDirect"
         :selected-index="selectedIndex"
         :show-context-menu="showContextMenu"
+        :is-pinned="isItemPinned"
+        :promote-item="promoteItem"
         :update-selection="updateSelection"
+        @content-scroll="tryLoadMoreByScroll"
         :visible-history="visibleHistory"
     />
 
     <div class="status-footer" @click.stop @mousedown.stop>
       <div class="status-text">
         <span class="status-label">{{ selectedStatusText }}</span>
+        <span class="status-meta">{{ loadStatusText }}</span>
+        <span v-if="searchKeyword.trim()" class="status-meta">命中 {{ keywordHitCount }} 条</span>
         <div class="status-actions">
+          <button
+              :title="`切换分页大小（当前每页 ${pageSize} 条）`"
+              class="nav-action-btn"
+              type="button"
+              @click="cyclePageSize"
+          >
+            每页{{ pageSize }}
+          </button>
+          <button
+              :title="`切换排序方向（当前：${sortOrderText}）`"
+              class="nav-action-btn"
+              type="button"
+              @click="toggleSortOrder"
+          >
+            {{ sortOrderText }}
+          </button>
           <button aria-label="回到开头" class="nav-action-btn icon-btn" title="回到开头" type="button"
                   @click="scrollToStart">
             <el-icon>
@@ -142,7 +165,7 @@
 </template>
 
 <script setup>
-import {computed, nextTick, onMounted, ref} from 'vue'
+import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ArrowLeftBold, ArrowRightBold, Check} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
 import {AIService, ClipboardService, WindowService} from '../../services/ipc'
@@ -157,6 +180,7 @@ const containerRef = ref(null)
 const clipboardListRef = ref(null)
 const isVisible = ref(false)
 const categories = ref(['未分类'])
+const pinnedItems = ref([])
 
 const contextMenuVisible = ref(false)
 const contextMenuX = ref(0)
@@ -175,10 +199,20 @@ const {
   categoryFilter,
   categoryMap,
   visibleHistory,
+  pageSize,
+  totalCount,
+  hasMore,
+  isLoadingPage,
+  sortBy,
+  sortOrder,
   getItemCategory,
   updateSelection,
   deleteItem: originalDeleteItem,
-  moveSelection
+  moveSelection,
+  resetAndReloadHistory,
+  loadMoreHistory,
+  setSort,
+  setPageSize
 } = useClipboardHistory()
 
 const {
@@ -204,6 +238,24 @@ const deleteItem = async (index) => {
   await originalDeleteItem(index)
 }
 
+const isItemPinned = (item) => pinnedItems.value.includes(item)
+
+const promoteItem = async (index, item) => {
+  try {
+    const shouldPin = !isItemPinned(item)
+    await ClipboardService.setItemPinned(index, item, shouldPin)
+    const payload = await ClipboardService.getHistory()
+    const nextIndex = payload.history.findIndex((text) => text === item)
+    await showWindow({
+      ...payload,
+      selectedIndex: nextIndex >= 0 ? nextIndex : 0,
+      bottomOffset: bottomOffset.value
+    })
+  } catch (error) {
+    console.error('置顶失败:', error)
+  }
+}
+
 const toggleAiSettings = () => {
   isAiSettingsCollapsed.value = !isAiSettingsCollapsed.value
 }
@@ -214,17 +266,63 @@ const hideClipboardWindow = () => {
 }
 
 const selectedStatusText = computed(() => {
-  const total = visibleHistory.value.length
+  const total = totalCount.value || visibleHistory.value.length
   if (total === 0) return '当前无选中项'
   const current = visibleHistory.value.findIndex((entry) => entry.index === selectedIndex.value)
   const display = current >= 0 ? current + 1 : 1
   return `当前选中：第 ${display} / ${total} 条`
 })
 
+const loadStatusText = computed(() => {
+  if (isLoadingPage.value) return '正在加载...'
+  if (hasMore.value) return `已加载 ${visibleHistory.value.length} / ${totalCount.value || visibleHistory.value.length}`
+  return `已全部加载 ${visibleHistory.value.length} 条`
+})
+
+const keywordHitCount = computed(() => {
+  const tokens = searchKeyword.value
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean)
+  if (tokens.length === 0) return 0
+  return visibleHistory.value.filter((entry) => {
+    const text = `${entry.item || ''}\n${entry.snippet || ''}`.toLowerCase()
+    return tokens.some((token) => text.includes(token))
+  }).length
+})
+
+const sortOrderText = computed(() => sortOrder.value === 'desc' ? '降序' : '升序')
+
+const PAGE_SIZE_OPTIONS = [10, 30, 50]
+const normalizePageSize = (value) => {
+  const parsed = Number(value)
+  return PAGE_SIZE_OPTIONS.includes(parsed) ? parsed : 50
+}
+
+const cyclePageSize = async () => {
+  const current = normalizePageSize(pageSize.value)
+  const currentIndex = PAGE_SIZE_OPTIONS.indexOf(current)
+  const next = PAGE_SIZE_OPTIONS[(currentIndex + 1) % PAGE_SIZE_OPTIONS.length]
+  await setPageSize(next)
+  localStorage.setItem('clipboard_history_page_size', String(next))
+}
+
+const persistSortState = () => {
+  localStorage.setItem('clipboard_history_sort_order', sortOrder.value)
+}
+
+const toggleSortOrder = async () => {
+  const nextSortOrder = sortOrder.value === 'desc' ? 'asc' : 'desc'
+  await setSort('pinnedFirst', nextSortOrder)
+  persistSortState()
+}
+
 const init = async () => {
   try {
     await listen('show-window', (event) => {
-      showWindow(event.payload)
+      void showWindow(event.payload)
     })
 
     window.addEventListener('blur', async () => {
@@ -240,8 +338,7 @@ const init = async () => {
   }
 }
 
-const showWindow = (data) => {
-  history.value = Array.isArray(data.history) ? data.history : []
+const showWindow = async (data) => {
   if (typeof data.bottomOffset === 'number') {
     bottomOffset.value = clampBottomOffset(data.bottomOffset)
   }
@@ -259,13 +356,15 @@ const showWindow = (data) => {
       categories.value = ['未分类', ...uniqueList]
     }
   }
+  pinnedItems.value = Array.isArray(data.pinned_items) ? data.pinned_items : []
 
   selectedIndex.value = data.selectedIndex !== undefined ? data.selectedIndex : 0
   isVisible.value = true
+  await resetAndReloadHistory()
 
-  if (history.value.length > 0) {
-    if (selectedIndex.value < 0 || selectedIndex.value >= history.value.length) {
-      selectedIndex.value = 0
+  if (visibleHistory.value.length > 0) {
+    if (!visibleHistory.value.some((entry) => entry.index === selectedIndex.value)) {
+      selectedIndex.value = visibleHistory.value[0].index
     }
     const contentRef = clipboardListRef.value?.contentRef
     updateSelection(selectedIndex.value, true, contentRef)
@@ -320,6 +419,9 @@ const closeFloatingPanels = () => {
 const handleContainerMouseDown = (event) => {
   if (event.button !== 0) return
   const target = event.target
+  if (isAddingCategory.value && target instanceof Element && !target.closest('.category-input')) {
+    cancelCreateCategory()
+  }
   if (target instanceof Element && target.closest('.clipboard-ai-select-popper')) {
     return
   }
@@ -431,6 +533,16 @@ const getContentContainer = () => {
   return containerRefOrEl?.value || containerRefOrEl || null
 }
 
+const tryLoadMoreByScroll = async () => {
+  if (!hasMore.value || isLoadingPage.value) return
+  const container = getContentContainer()
+  if (!container) return
+  const remaining = container.scrollWidth - container.clientWidth - container.scrollLeft
+  if (remaining <= 240) {
+    await loadMoreHistory()
+  }
+}
+
 const scrollToStart = async () => {
   const container = getContentContainer()
   if (container) {
@@ -447,6 +559,7 @@ const scrollToEnd = async () => {
   if (container) {
     container.scrollLeft = Math.max(0, container.scrollWidth - container.clientWidth)
   }
+  await tryLoadMoreByScroll()
   if (visibleHistory.value.length > 0) {
     selectedIndex.value = visibleHistory.value[visibleHistory.value.length - 1].index
     await ensureKeyboardSelectionVisible()
@@ -471,6 +584,7 @@ const handleKeydown = async (event) => {
     case 'ArrowRight':
       event.preventDefault()
       moveSelection(1, clipboardListRef.value?.contentRef)
+      await tryLoadMoreByScroll()
       await ensureKeyboardSelectionVisible()
       break
     case 'Enter':
@@ -495,8 +609,31 @@ const handleKeydown = async (event) => {
   }
 }
 
+let filterDebounceTimer = null
+watch([searchKeyword, categoryFilter], () => {
+  if (!isVisible.value) return
+  if (filterDebounceTimer) {
+    clearTimeout(filterDebounceTimer)
+  }
+  filterDebounceTimer = setTimeout(() => {
+    resetAndReloadHistory()
+  }, 160)
+})
+
 onMounted(() => {
+  const savedSortOrder = localStorage.getItem('clipboard_history_sort_order')
+  const savedPageSize = localStorage.getItem('clipboard_history_page_size')
+  sortBy.value = 'pinnedFirst'
+  sortOrder.value = savedSortOrder === 'desc' ? 'desc' : 'asc'
+  pageSize.value = normalizePageSize(savedPageSize)
   init()
+})
+
+onBeforeUnmount(() => {
+  if (filterDebounceTimer) {
+    clearTimeout(filterDebounceTimer)
+    filterDebounceTimer = null
+  }
 })
 </script>
 
@@ -635,6 +772,15 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
+}
+
+.status-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: rgba(166, 213, 255, 0.88);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-actions {

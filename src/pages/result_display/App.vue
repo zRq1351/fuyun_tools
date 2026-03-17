@@ -40,6 +40,28 @@
           </div>
         </el-tooltip>
         <el-tooltip
+            :show-after="500"
+            content="复制原文"
+            placement="bottom"
+        >
+          <div class="icon-btn copy-btn" @click="copyOriginalText">
+            <el-icon>
+              <DocumentCopy/>
+            </el-icon>
+          </div>
+        </el-tooltip>
+        <el-tooltip
+            :show-after="500"
+            content="复制结果"
+            placement="bottom"
+        >
+          <div class="icon-btn copy-btn" @click="copyResultText">
+            <el-icon>
+              <DocumentCopy/>
+            </el-icon>
+          </div>
+        </el-tooltip>
+        <el-tooltip
             :content="showOriginal ? '隐藏原文' : '显示原文'"
             :show-after="500"
             placement="bottom"
@@ -83,7 +105,8 @@
 import {computed, nextTick, onMounted, ref} from 'vue'
 import {marked} from 'marked'
 import {listen} from '@tauri-apps/api/event'
-import {Hide, Position, View} from '@element-plus/icons-vue'
+import {DocumentCopy, Hide, Position, View} from '@element-plus/icons-vue'
+import {ElMessage} from 'element-plus'
 import {AIService, ClipboardService} from '../../services/ipc'
 import {handleAppError} from '../../utils/errorHandler'
 
@@ -288,6 +311,28 @@ const handleWriteBack = async () => {
     await ClipboardService.copyAndPasteText(text)
   } catch (error) {
     handleAppError(error, '回写失败')
+  }
+}
+
+const copyOriginalText = async () => {
+  const text = originalText.value.trim()
+  if (!text) return
+  try {
+    await ClipboardService.copyText(text)
+    ElMessage.success('已复制原文')
+  } catch (error) {
+    handleAppError(error, '复制原文失败')
+  }
+}
+
+const copyResultText = async () => {
+  const text = resultText.value.trim()
+  if (!text) return
+  try {
+    await ClipboardService.copyText(text)
+    ElMessage.success('已复制结果')
+  } catch (error) {
+    handleAppError(error, '复制结果失败')
   }
 }
 

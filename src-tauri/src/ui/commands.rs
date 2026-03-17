@@ -8,17 +8,18 @@ use crate::ui::window_manager::{
     show_clipboard_window, show_image_clipboard_window, show_image_preview_loading_window,
     show_image_preview_window,
 };
-use crate::utils::image_clipboard::ImageHistoryPreviewItem;
+use crate::utils::image_clipboard::{ImageHistoryPageData, ImageHistoryPreviewItem};
 use crate::utils::utils_helpers::{
-    default_explanation_prompt_template, default_translation_prompt_template, load_settings,
-    save_settings, get_dedup_scan_metrics,
+    default_explanation_prompt_template, default_translation_prompt_template, get_dedup_scan_metrics,
+    load_history_page_data, load_settings, save_settings, ClipboardHistoryPageData,
 };
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
@@ -27,6 +28,47 @@ pub struct HistoryResponse {
     history: Vec<String>,
     categories: HashMap<String, String>,
     category_list: Vec<String>,
+    pinned_items: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardHistoryPageRequest {
+    #[serde(default)]
+    offset: usize,
+    #[serde(default = "default_history_page_limit")]
+    limit: usize,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    pinned_only: bool,
+    #[serde(default)]
+    keyword: Option<String>,
+    #[serde(default)]
+    sort_by: Option<String>,
+    #[serde(default)]
+    sort_order: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_image_clipboard_history_page(
+    request: ImageHistoryPageRequest,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<ImageHistoryPageData, String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+    Ok(manager.get_history_preview_page(
+        request.offset,
+        request.limit,
+        request.category,
+        request.keyword,
+        request.pinned_only,
+        request.sort_order,
+    ))
+}
+
+fn default_history_page_limit() -> usize {
+    50
 }
 
 #[derive(serde::Serialize)]
@@ -34,6 +76,8 @@ pub struct ImageHistoryResponse {
     history: Vec<ImageHistoryPreviewItem>,
     categories: HashMap<String, String>,
     category_list: Vec<String>,
+    image_tags: HashMap<String, Vec<String>>,
+    pinned_items: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -46,10 +90,25 @@ pub struct SelectAndFillRequest {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SelectAndFillImageRequest {
-    index: usize,
+pub struct SelectAndFillImageByIdRequest {
+    item_id: String,
     #[serde(default)]
     op_id: Option<u64>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemIdRequest {
+    item_id: String,
+}
+
+#[tauri::command]
+pub async fn open_image_preview_window_by_id(
+    request: ItemIdRequest,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    execute_open_image_preview_window_by_id(request.item_id, state.inner().clone(), app)
 }
 
 #[derive(Clone, Copy)]
@@ -358,8 +417,56 @@ fn execute_remove_clipboard_item(
     })
 }
 
-fn execute_remove_image_clipboard_item(
-    index: usize,
+fn execute_open_image_preview_window_by_id(
+    item_id: String,
+    state: Arc<Mutex<SharedAppState>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let request_id = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis()
+        .to_string();
+    show_image_preview_loading_window(app.clone(), request_id.clone())?;
+    let state_clone = state;
+    let app_clone = app;
+    let request_id_clone = request_id;
+    thread::spawn(move || {
+        let result: Result<(), String> = (|| {
+            let image_path = {
+                let state_guard = state_clone.lock().unwrap();
+                let manager = state_guard.image_clipboard_manager.lock().unwrap();
+                manager.get_preview_image_path_by_id(&item_id)?
+            };
+            show_image_preview_window(app_clone, request_id_clone, image_path)
+        })();
+        if let Err(e) = result {
+            log::error!("加载预览图片失败: {}", e);
+        }
+    });
+    Ok(())
+}
+
+fn execute_warmup_image_clipboard_item_by_id(
+    item_id: String,
+    state: Arc<Mutex<SharedAppState>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+    manager.warmup_image_by_id(&item_id)
+}
+
+fn execute_promote_image_clipboard_item_by_id(
+    item_id: String,
+    state: Arc<Mutex<SharedAppState>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+    manager.promote_to_top_by_id(&item_id)
+}
+
+fn execute_remove_image_clipboard_item_by_id(
+    item_id: String,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
 ) -> Result<(), String> {
@@ -367,7 +474,7 @@ fn execute_remove_image_clipboard_item(
         let removed_signature = {
             let state_guard = state.lock().unwrap();
             let manager = state_guard.image_clipboard_manager.lock().unwrap();
-            let (_, _, signature) = manager.remove_from_history(index)?;
+            let (_, _, signature) = manager.remove_from_history_by_id(&item_id)?;
             signature
         };
         try_replace_image_clipboard_after_remove(&state, &app, &removed_signature);
@@ -375,12 +482,12 @@ fn execute_remove_image_clipboard_item(
     })
 }
 
-fn execute_select_and_fill_image(
-    request: SelectAndFillImageRequest,
+fn execute_select_and_fill_image_by_id(
+    request: SelectAndFillImageByIdRequest,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let index = request.index;
+    let item_id = request.item_id;
     let fill_seq = begin_fill_sequence(&state, FillKind::Image);
     let operation_id = request.op_id.unwrap_or(fill_seq);
 
@@ -396,8 +503,8 @@ fn execute_select_and_fill_image(
             let image = {
                 let state_guard = state_ref.lock().unwrap();
                 let manager = state_guard.image_clipboard_manager.lock().unwrap();
-                manager.promote_to_top(index)?;
-                manager.get_image_by_index(0)?
+                manager.promote_to_top_by_id(&item_id)?;
+                manager.get_image_by_index_for_fill(0)?
             };
             crate::utils::image_clipboard::ImageClipboardManager::write_clipboard_image(
                 app_handle, &image,
@@ -419,7 +526,44 @@ pub async fn get_clipboard_history(
         history: manager.get_history(),
         categories: manager.get_categories(),
         category_list: manager.get_category_list(),
+        pinned_items: manager.get_pinned_items(),
     })
+}
+
+#[tauri::command]
+pub async fn get_clipboard_history_page(
+    request: ClipboardHistoryPageRequest,
+) -> Result<ClipboardHistoryPageData, String> {
+    load_history_page_data(
+        request.offset,
+        request.limit,
+        request.category,
+        request.pinned_only,
+        request.keyword,
+        request.sort_by,
+        request.sort_order,
+    )
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageHistoryPageRequest {
+    #[serde(default)]
+    offset: usize,
+    #[serde(default = "default_image_page_limit")]
+    limit: usize,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    keyword: Option<String>,
+    #[serde(default)]
+    pinned_only: bool,
+    #[serde(default)]
+    sort_order: Option<String>,
+}
+
+fn default_image_page_limit() -> usize {
+    50
 }
 
 #[tauri::command]
@@ -463,32 +607,9 @@ pub async fn get_image_clipboard_history(
         history: manager.get_history_preview(),
         categories: manager.get_categories(),
         category_list: manager.get_category_list(),
+        image_tags: manager.get_image_tags(),
+        pinned_items: manager.get_pinned_items(),
     })
-}
-
-#[tauri::command]
-pub async fn open_image_preview_window(
-    index: usize,
-    state: State<'_, Arc<Mutex<SharedAppState>>>,
-    app: AppHandle,
-) -> Result<(), String> {
-    show_image_preview_loading_window(app.clone())?;
-    let state_clone = state.inner().clone();
-    let app_clone = app.clone();
-    thread::spawn(move || {
-        let result: Result<(), String> = (|| {
-            let (rgba_base64, width, height) = {
-                let state_guard = state_clone.lock().unwrap();
-                let manager = state_guard.image_clipboard_manager.lock().unwrap();
-                manager.get_preview_window_payload_by_index(index)?
-            };
-            show_image_preview_window(app_clone, rgba_base64, width, height)
-        })();
-        if let Err(e) = result {
-            log::error!("加载预览图片失败: {}", e);
-        }
-    });
-    Ok(())
 }
 
 #[tauri::command]
@@ -498,13 +619,11 @@ pub async fn close_image_preview_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn warmup_image_clipboard_item(
-    index: usize,
+pub async fn warmup_image_clipboard_item_by_id(
+    request: ItemIdRequest,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.image_clipboard_manager.lock().unwrap();
-    manager.warmup_image_by_index(index)
+    execute_warmup_image_clipboard_item_by_id(request.item_id, state.inner().clone())
 }
 
 #[tauri::command]
@@ -526,6 +645,216 @@ pub async fn remove_image_category(
     let state_guard = state.lock().unwrap();
     let manager = state_guard.image_clipboard_manager.lock().unwrap();
     manager.remove_category(category)
+}
+
+#[tauri::command]
+pub async fn set_image_item_tags(
+    item_id: String,
+    tags: Vec<String>,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+    manager.set_tags(item_id, tags)
+}
+
+#[tauri::command]
+pub async fn set_clipboard_item_pinned(
+    index: Option<usize>,
+    item: Option<String>,
+    pinned: bool,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.clipboard_manager.lock().unwrap();
+    let resolved_item = if let Some(idx) = index {
+        manager.get_history().get(idx).cloned()
+    } else {
+        item
+    }
+    .ok_or_else(|| "索引超出范围".to_string())?;
+    manager.set_pinned(resolved_item, pinned)
+}
+
+#[tauri::command]
+pub async fn set_image_item_pinned(
+    item_id: String,
+    pinned: bool,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+    manager.set_pinned(item_id, pinned)
+}
+
+#[tauri::command]
+pub async fn promote_clipboard_item(
+    index: usize,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.clipboard_manager.lock().unwrap();
+    manager.promote_to_top(index).map(|_| ())
+}
+
+#[tauri::command]
+pub async fn promote_image_clipboard_item_by_id(
+    request: ItemIdRequest,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    execute_promote_image_clipboard_item_by_id(request.item_id, state.inner().clone())
+}
+
+#[tauri::command]
+pub async fn clear_text_history(
+    mode: String,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<usize, String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.clipboard_manager.lock().unwrap();
+    manager.clear_history_by_mode(mode.as_str())
+}
+
+#[tauri::command]
+pub async fn clear_image_history(
+    mode: String,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<usize, String> {
+    let state_guard = state.lock().unwrap();
+    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+    manager.clear_history_by_mode(mode.as_str())
+}
+
+#[tauri::command]
+pub async fn import_image_files(
+    paths: Vec<String>,
+    app: AppHandle,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<usize, String> {
+    if paths.is_empty() {
+        return Err("未选择任何文件或文件夹".to_string());
+    }
+    let image_paths = collect_import_image_paths(paths)?;
+    if image_paths.is_empty() {
+        return Err("未找到可导入的图片".to_string());
+    }
+    let total = image_paths.len();
+    let manager = {
+        let state_guard = state.lock().unwrap();
+        let manager_guard = state_guard.image_clipboard_manager.lock().unwrap();
+        manager_guard.clone()
+    };
+    let _ = app.emit(
+        "image-import-progress",
+        serde_json::json!({
+            "status": "start",
+            "total": total,
+            "processed": 0,
+            "imported": 0,
+            "failed": 0
+        }),
+    );
+    let mut imported = 0usize;
+    let mut failed = 0usize;
+    let mut processed = 0usize;
+    let mut last_error = String::new();
+    for path in image_paths {
+        match manager.import_local_image_paths(vec![path.clone()]) {
+            Ok(count) => {
+                imported = imported.saturating_add(count);
+                if count > 0 {
+                    let _ = app.emit("image-history-updated", serde_json::json!({}));
+                }
+            }
+            Err(e) => {
+                failed = failed.saturating_add(1);
+                last_error = e;
+            }
+        }
+        processed = processed.saturating_add(1);
+        let _ = app.emit(
+            "image-import-progress",
+            serde_json::json!({
+                "status": "progress",
+                "total": total,
+                "processed": processed,
+                "imported": imported,
+                "failed": failed
+            }),
+        );
+    }
+    let _ = app.emit(
+        "image-import-progress",
+        serde_json::json!({
+            "status": "finish",
+            "total": total,
+            "processed": processed,
+            "imported": imported,
+            "failed": failed
+        }),
+    );
+    if imported == 0 {
+        if last_error.is_empty() {
+            Err("未导入任何图片".to_string())
+        } else {
+            Err(last_error)
+        }
+    } else {
+        Ok(imported)
+    }
+}
+
+fn collect_import_image_paths(entries: Vec<String>) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for raw in entries {
+        let path = raw.trim();
+        if path.is_empty() {
+            continue;
+        }
+        let p = Path::new(path);
+        if p.is_file() {
+            if is_importable_image_file(p) {
+                out.push(path.to_string());
+            }
+            continue;
+        }
+        if p.is_dir() {
+            collect_images_from_dir(p, &mut out)?;
+        }
+    }
+    Ok(out)
+}
+
+fn collect_images_from_dir(dir: &Path, out: &mut Vec<String>) -> Result<(), String> {
+    let entries = fs::read_dir(dir).map_err(|e| format!("读取目录失败: {}", e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_images_from_dir(&path, out)?;
+        } else if path.is_file() && is_importable_image_file(&path) {
+            out.push(path.to_string_lossy().to_string());
+        }
+    }
+    Ok(())
+}
+
+fn is_importable_image_file(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase());
+    matches!(
+        ext.as_deref(),
+        Some("png")
+            | Some("jpg")
+            | Some("jpeg")
+            | Some("bmp")
+            | Some("gif")
+            | Some("webp")
+            | Some("tif")
+            | Some("tiff")
+    )
 }
 
 #[tauri::command]
@@ -608,21 +937,21 @@ pub async fn remove_clipboard_item(
 }
 
 #[tauri::command]
-pub async fn remove_image_clipboard_item(
-    index: usize,
+pub async fn remove_image_clipboard_item_by_id(
+    item_id: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    execute_remove_image_clipboard_item(index, state.inner().clone(), app)
+    execute_remove_image_clipboard_item_by_id(item_id, state.inner().clone(), app)
 }
 
 #[tauri::command]
-pub async fn select_and_fill_image(
-    request: SelectAndFillImageRequest,
+pub async fn select_and_fill_image_by_id(
+    request: SelectAndFillImageByIdRequest,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    execute_select_and_fill_image(request, state.inner().clone(), app)
+    execute_select_and_fill_image_by_id(request, state.inner().clone(), app)
 }
 
 #[tauri::command]
@@ -683,6 +1012,18 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         serde_json::Value::Number(serde_json::Number::from(settings.max_items)),
     );
     result.insert(
+        "text_max_items".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(settings.text_max_items)),
+    );
+    result.insert(
+        "image_max_items".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(settings.image_max_items)),
+    );
+    result.insert(
+        "image_disk_limit_mb".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(settings.image_disk_limit_mb)),
+    );
+    result.insert(
         "ai_provider".to_string(),
         serde_json::Value::String(settings.ai_provider.clone()),
     );
@@ -709,44 +1050,6 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
     result.insert(
         "explanation_prompt_template".to_string(),
         serde_json::Value::String(settings.explanation_prompt_template.clone()),
-    );
-    result.insert(
-        "clipboard_poll_min_interval_ms".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(
-            settings.clipboard_poll_min_interval_ms,
-        )),
-    );
-    result.insert(
-        "clipboard_poll_warm_interval_ms".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(
-            settings.clipboard_poll_warm_interval_ms,
-        )),
-    );
-    result.insert(
-        "clipboard_poll_idle_interval_ms".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(
-            settings.clipboard_poll_idle_interval_ms,
-        )),
-    );
-    result.insert(
-        "clipboard_poll_max_interval_ms".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(
-            settings.clipboard_poll_max_interval_ms,
-        )),
-    );
-    result.insert(
-        "clipboard_poll_report_interval_secs".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(
-            settings.clipboard_poll_report_interval_secs,
-        )),
-    );
-    result.insert(
-        "clipboard_poll_metrics_enabled".to_string(),
-        serde_json::Value::Bool(settings.clipboard_poll_metrics_enabled),
-    );
-    result.insert(
-        "clipboard_poll_metrics_log_level".to_string(),
-        serde_json::Value::String(settings.clipboard_poll_metrics_log_level.clone()),
     );
 
     // 处理provider_configs，将encrypted_api_key替换为解密后的api_key
@@ -851,8 +1154,22 @@ pub async fn get_text_dedup_metrics() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
+pub async fn get_image_storage_metrics(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<serde_json::Value, String> {
+    let metrics = {
+        let state_guard = state.lock().unwrap();
+        let manager = state_guard.image_clipboard_manager.lock().unwrap();
+        manager.get_storage_metrics()
+    };
+    serde_json::to_value(metrics).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn save_app_settings(
-    max_items: usize,
+    text_max_items: usize,
+    image_max_items: usize,
+    image_disk_limit_mb: u64,
     ai_provider: String,
     ai_api_url: String,
     ai_model_name: String,
@@ -863,13 +1180,6 @@ pub async fn save_app_settings(
     grouped_items_protected_from_limit: bool,
     translation_prompt_template: String,
     explanation_prompt_template: String,
-    clipboard_poll_min_interval_ms: u64,
-    clipboard_poll_warm_interval_ms: u64,
-    clipboard_poll_idle_interval_ms: u64,
-    clipboard_poll_max_interval_ms: u64,
-    clipboard_poll_report_interval_secs: u64,
-    clipboard_poll_metrics_enabled: bool,
-    clipboard_poll_metrics_log_level: String,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -881,16 +1191,12 @@ pub async fn save_app_settings(
     };
 
     settings.version = version;
-    settings.max_items = max_items;
+    settings.max_items = text_max_items;
+    settings.text_max_items = text_max_items;
+    settings.image_max_items = image_max_items;
+    settings.image_disk_limit_mb = image_disk_limit_mb;
     settings.selection_enabled = selection_enabled;
     settings.grouped_items_protected_from_limit = grouped_items_protected_from_limit;
-    settings.clipboard_poll_min_interval_ms = clipboard_poll_min_interval_ms;
-    settings.clipboard_poll_warm_interval_ms = clipboard_poll_warm_interval_ms;
-    settings.clipboard_poll_idle_interval_ms = clipboard_poll_idle_interval_ms;
-    settings.clipboard_poll_max_interval_ms = clipboard_poll_max_interval_ms;
-    settings.clipboard_poll_report_interval_secs = clipboard_poll_report_interval_secs;
-    settings.clipboard_poll_metrics_enabled = clipboard_poll_metrics_enabled;
-    settings.clipboard_poll_metrics_log_level = clipboard_poll_metrics_log_level;
     settings.translation_prompt_template = if translation_prompt_template.trim().is_empty() {
         default_translation_prompt_template()
     } else {
@@ -924,7 +1230,7 @@ pub async fn save_app_settings(
 
     if hot_key != settings.hot_key {
         if app.global_shortcut().is_registered(hot_key.as_str()) {
-            return Err("快捷键冲突".to_string());
+            return Err(format!("快捷键被占用：{}", hot_key));
         }
 
         app.global_shortcut()
@@ -949,7 +1255,7 @@ pub async fn save_app_settings(
 
     if image_hot_key != settings.image_hot_key {
         if app.global_shortcut().is_registered(image_hot_key.as_str()) {
-            return Err("图片窗口快捷键冲突".to_string());
+            return Err(format!("图片窗口快捷键被占用：{}", image_hot_key));
         }
 
         app.global_shortcut()
@@ -1014,12 +1320,13 @@ pub async fn save_app_settings(
         let mut state_guard = state.lock().unwrap();
         {
             let mut manager = state_guard.clipboard_manager.lock().unwrap();
-            manager.set_max_items(max_items);
+            manager.set_max_items(text_max_items);
             manager.set_grouped_items_protected_from_limit(grouped_items_protected_from_limit);
         }
         {
             let mut manager = state_guard.image_clipboard_manager.lock().unwrap();
-            manager.set_max_items(max_items);
+            manager.set_max_items(image_max_items);
+            manager.set_disk_limit_mb(image_disk_limit_mb);
             manager.set_grouped_items_protected_from_limit(grouped_items_protected_from_limit);
         }
         state_guard.settings = settings.clone();
@@ -1032,8 +1339,10 @@ pub async fn save_app_settings(
     );
 
     log::info!(
-        "设置保存成功: max_items={}, provider={}",
-        max_items,
+        "设置保存成功: text_max_items={}, image_max_items={}, image_disk_limit_mb={}, provider={}",
+        text_max_items,
+        image_max_items,
+        image_disk_limit_mb,
         ai_provider
     );
     Ok(())

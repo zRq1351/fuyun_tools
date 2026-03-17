@@ -72,6 +72,8 @@ export function useCategoryManager(categories, categoryMap, categoryFilter) {
 
     const confirmCreateCategory = async () => {
         const category = newCategoryName.value.trim()
+        isAddingCategory.value = false
+        newCategoryName.value = ''
         if (category && category !== '未分类' && category !== '全部') {
             if (!categories.value.includes(category)) {
                 categories.value.push(category)
@@ -82,8 +84,6 @@ export function useCategoryManager(categories, categoryMap, categoryFilter) {
                 }
             }
         }
-        isAddingCategory.value = false
-        newCategoryName.value = ''
     }
 
     const cancelCreateCategory = () => {

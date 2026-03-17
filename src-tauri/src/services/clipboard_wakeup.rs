@@ -2,8 +2,26 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
 
+#[cfg(target_os = "windows")]
+static CLIPBOARD_WAKE_EVENT_COUNT: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(target_os = "windows")]
+fn wake_window_senders() -> &'static std::sync::Mutex<std::collections::HashMap<isize, mpsc::Sender<()>>> {
+    static SENDERS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<isize, mpsc::Sender<()>>>> =
+        std::sync::OnceLock::new();
+    SENDERS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
 pub struct ClipboardWakeBackend {
     mode: WakeMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WakeSignal {
+    Event,
+    Timeout,
+    Fallback,
 }
 
 enum WakeMode {
@@ -30,17 +48,27 @@ impl ClipboardWakeBackend {
     }
 
     pub fn wait(&mut self, timeout: Duration) {
+        let _ = self.wait_with_signal(timeout);
+    }
+
+    pub fn wait_with_signal(&mut self, timeout: Duration) -> WakeSignal {
         match &mut self.mode {
             #[cfg(target_os = "windows")]
             WakeMode::Event(backend) => {
-                if !backend.wait(timeout) {
-                    log::warn!("Windows 事件后端不可用，已降级到自适应轮询");
-                    self.mode = WakeMode::Fallback;
-                    thread::sleep(timeout);
+                match backend.wait(timeout) {
+                    WakeSignal::Event => WakeSignal::Event,
+                    WakeSignal::Timeout => WakeSignal::Timeout,
+                    WakeSignal::Fallback => {
+                        log::warn!("Windows 事件后端不可用，已降级到自适应轮询");
+                        self.mode = WakeMode::Fallback;
+                        thread::sleep(timeout);
+                        WakeSignal::Fallback
+                    }
                 }
             }
             WakeMode::Fallback => {
                 thread::sleep(timeout);
+                WakeSignal::Fallback
             }
         }
     }
@@ -57,7 +85,8 @@ impl WindowsClipboardEventBackend {
         use std::sync::mpsc::RecvTimeoutError;
         let (event_tx, event_rx) = mpsc::channel::<()>();
         let (ready_tx, ready_rx) = mpsc::channel::<bool>();
-        thread::spawn(move || unsafe {
+        thread::spawn(move || {
+            let run_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
             use std::mem;
             use std::ptr;
             use winapi::shared::minwindef::{LPARAM, LRESULT, UINT, WPARAM};
@@ -65,8 +94,8 @@ impl WindowsClipboardEventBackend {
             use winapi::um::libloaderapi::GetModuleHandleW;
             use winapi::um::winuser::{
                 AddClipboardFormatListener, CreateWindowExW, DestroyWindow, DispatchMessageW,
-                GetMessageW, RegisterClassW, RemoveClipboardFormatListener, SetWindowLongPtrW,
-                TranslateMessage, WNDCLASSW, GWLP_USERDATA, HWND_MESSAGE, MSG,
+                GetMessageW, RegisterClassW, RemoveClipboardFormatListener, TranslateMessage,
+                WNDCLASSW, HWND_MESSAGE, MSG,
             };
 
             unsafe extern "system" fn wndproc(
@@ -75,22 +104,29 @@ impl WindowsClipboardEventBackend {
                 wparam: WPARAM,
                 lparam: LPARAM,
             ) -> LRESULT {
-                use winapi::um::winuser::{
-                    DefWindowProcW, GetWindowLongPtrW, PostQuitMessage, SetWindowLongPtrW,
-                    WM_CLIPBOARDUPDATE, WM_DESTROY, WM_NCDESTROY, GWLP_USERDATA,
-                };
-                let sender_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA)
-                    as *mut std::sync::mpsc::Sender<()>;
+                use winapi::um::winuser::{DefWindowProcW, PostQuitMessage, WM_CLIPBOARDUPDATE, WM_DESTROY, WM_NCDESTROY};
                 if msg == WM_CLIPBOARDUPDATE {
-                    if !sender_ptr.is_null() {
-                        let _ = (*sender_ptr).send(());
+                    let count = CLIPBOARD_WAKE_EVENT_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    if count == 1 || count % 200 == 0 {
+                        log::debug!("剪贴板消息监听事件计数: {}", count);
+                    }
+                    let key = hwnd as isize;
+                    let sender = {
+                        if let Ok(guard) = wake_window_senders().lock() {
+                            guard.get(&key).cloned()
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(sender) = sender {
+                        let _ = sender.send(());
                     }
                     return 0;
                 }
                 if msg == WM_NCDESTROY {
-                    if !sender_ptr.is_null() {
-                        let _ = Box::from_raw(sender_ptr);
-                        SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                    let key = hwnd as isize;
+                    if let Ok(mut guard) = wake_window_senders().lock() {
+                        guard.remove(&key);
                     }
                     return DefWindowProcW(hwnd, msg, wparam, lparam);
                 }
@@ -133,17 +169,31 @@ impl WindowsClipboardEventBackend {
             );
 
             if hwnd.is_null() {
+                log::error!("创建剪贴板消息窗口失败");
                 let _ = ready_tx.send(false);
                 return;
             }
+            log::info!("剪贴板消息窗口创建成功: hwnd={}", hwnd as isize);
 
-            let sender_ptr = Box::into_raw(Box::new(event_tx));
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, sender_ptr as isize);
+            {
+                if let Ok(mut guard) = wake_window_senders().lock() {
+                    guard.insert(hwnd as isize, event_tx);
+                } else {
+                    log::error!("剪贴板消息窗口映射注册失败");
+                    let _ = ready_tx.send(false);
+                    DestroyWindow(hwnd);
+                    return;
+                }
+            }
 
             if AddClipboardFormatListener(hwnd) == 0 {
+                log::error!("AddClipboardFormatListener 注册失败");
                 let _ = ready_tx.send(false);
-                let _ = Box::from_raw(sender_ptr);
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                {
+                    if let Ok(mut guard) = wake_window_senders().lock() {
+                        guard.remove(&(hwnd as isize));
+                    }
+                }
                 DestroyWindow(hwnd);
                 return;
             }
@@ -151,13 +201,32 @@ impl WindowsClipboardEventBackend {
             let _ = ready_tx.send(true);
 
             let mut msg: MSG = mem::zeroed();
-            while GetMessageW(&mut msg as *mut MSG, ptr::null_mut(), 0, 0) > 0 {
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
+            loop {
+                let code = GetMessageW(&mut msg as *mut MSG, ptr::null_mut(), 0, 0);
+                if code > 0 {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                    continue;
+                }
+                if code == 0 {
+                    break;
+                }
+                log::error!("GetMessageW 返回错误，剪贴板监听线程退出");
+                break;
             }
 
+            {
+                if let Ok(mut guard) = wake_window_senders().lock() {
+                    guard.remove(&(hwnd as isize));
+                }
+            }
             let _ = RemoveClipboardFormatListener(hwnd);
             DestroyWindow(hwnd);
+            }));
+            if run_result.is_err() {
+                log::error!("剪贴板消息监听线程异常崩溃，自动降级为轮询后端");
+                let _ = ready_tx.send(false);
+            }
         });
 
         match ready_rx.recv_timeout(Duration::from_millis(600)) {
@@ -168,12 +237,12 @@ impl WindowsClipboardEventBackend {
         }
     }
 
-    fn wait(&mut self, timeout: Duration) -> bool {
+    fn wait(&mut self, timeout: Duration) -> WakeSignal {
         use std::sync::mpsc::RecvTimeoutError;
         match self.rx.recv_timeout(timeout) {
-            Ok(_) => true,
-            Err(RecvTimeoutError::Timeout) => true,
-            Err(RecvTimeoutError::Disconnected) => false,
+            Ok(_) => WakeSignal::Event,
+            Err(RecvTimeoutError::Timeout) => WakeSignal::Timeout,
+            Err(RecvTimeoutError::Disconnected) => WakeSignal::Fallback,
         }
     }
 }

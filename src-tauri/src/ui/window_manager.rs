@@ -44,13 +44,14 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
         state_guard.selected_index
     };
 
-    let (history, categories, category_list) = {
+    let (history, categories, category_list, pinned_items) = {
         let state_guard = state.lock().unwrap();
         let manager = state_guard.clipboard_manager.lock().unwrap();
         (
             manager.get_history(),
             manager.get_categories(),
             manager.get_category_list(),
+            manager.get_pinned_items(),
         )
     };
 
@@ -64,6 +65,7 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
         let history_clone = history.clone();
         let categories_clone = categories.clone();
         let category_list_clone = category_list.clone();
+        let pinned_items_clone = pinned_items.clone();
         thread::spawn(move || {
             if let Some(window) = app_handle_clone.get_webview_window("clipboard") {
                 set_window_position(&window, bottom_offset);
@@ -73,6 +75,7 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
                         "history": history_clone,
                         "categories": categories_clone,
                         "category_list": category_list_clone,
+                        "pinned_items": pinned_items_clone,
                         "bottomOffset": bottom_offset,
                         "selectedIndex": selected_index
                     });
@@ -94,36 +97,20 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
         state_guard.is_image_visible = true;
     }
 
-    {
-        let manager_arc = {
-            let state_guard = state.lock().unwrap();
-            state_guard.image_clipboard_manager.clone()
-        };
-        match crate::utils::image_clipboard::ImageClipboardManager::read_clipboard_images_rgba(&app_handle) {
-            Ok(images) => {
-                let manager = manager_arc.lock().unwrap();
-                for (rgba, width, height) in images {
-                    manager.add_rgba_image(rgba, width, height);
-                }
-            }
-            Err(e) => {
-                log::debug!("打开图片窗口时读取系统剪贴板失败: {}", e);
-            }
-        }
-    }
-
     let selected_index = {
         let state_guard = state.lock().unwrap();
         state_guard.image_selected_index
     };
 
-    let (history, categories, category_list) = {
+    let (history, categories, category_list, image_tags, pinned_items) = {
         let state_guard = state.lock().unwrap();
         let manager = state_guard.image_clipboard_manager.lock().unwrap();
         (
             manager.get_history_preview(),
             manager.get_categories(),
             manager.get_category_list(),
+            manager.get_image_tags(),
+            manager.get_pinned_items(),
         )
     };
     let bottom_offset = {
@@ -144,6 +131,8 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
                         "history": history,
                         "categories": categories,
                         "category_list": category_list,
+                        "image_tags": image_tags,
+                        "pinned_items": pinned_items,
                         "bottomOffset": bottom_offset,
                         "selectedIndex": selected_index
                     });
@@ -218,9 +207,8 @@ pub fn wait_for_window_hidden(
 
 pub fn show_image_preview_window(
     app_handle: AppHandle,
-    rgba_base64: String,
-    width: u32,
-    height: u32,
+    request_id: String,
+    image_path: String,
 ) -> Result<(), String> {
     let window = app_handle
         .get_webview_window("image_preview")
@@ -228,9 +216,9 @@ pub fn show_image_preview_window(
     prepare_image_preview_window(&window)?;
 
     let payload = serde_json::json!({
-        "rgba_base64": rgba_base64,
-        "width": width,
-        "height": height
+        "request_id": request_id,
+        "image_path": image_path,
+        "is_final": true
     });
     let _ = window.set_always_on_top(false);
     let _ = window.show();
@@ -239,7 +227,28 @@ pub fn show_image_preview_window(
     Ok(())
 }
 
-pub fn show_image_preview_loading_window(app_handle: AppHandle) -> Result<(), String> {
+pub fn show_image_preview_lowres_window(
+    app_handle: AppHandle,
+    request_id: String,
+    image_png_base64: String,
+) -> Result<(), String> {
+    let window = app_handle
+        .get_webview_window("image_preview")
+        .ok_or_else(|| "图片预览窗口不存在".to_string())?;
+    prepare_image_preview_window(&window)?;
+    let payload = serde_json::json!({
+        "request_id": request_id,
+        "image_png_base64": image_png_base64,
+        "is_final": false
+    });
+    let _ = window.set_always_on_top(false);
+    let _ = window.show();
+    let _ = window.set_focus();
+    let _ = app_handle.emit("show-image-preview", payload);
+    Ok(())
+}
+
+pub fn show_image_preview_loading_window(app_handle: AppHandle, request_id: String) -> Result<(), String> {
     let window = app_handle
         .get_webview_window("image_preview")
         .ok_or_else(|| "图片预览窗口不存在".to_string())?;
@@ -248,6 +257,7 @@ pub fn show_image_preview_loading_window(app_handle: AppHandle) -> Result<(), St
     let _ = window.show();
     let _ = window.set_focus();
     let payload = serde_json::json!({
+        "request_id": request_id,
         "loading": true
     });
     let _ = app_handle.emit("show-image-preview", payload);

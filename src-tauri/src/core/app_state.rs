@@ -58,11 +58,12 @@ impl Default for AppState {
 
         Self {
             clipboard_manager: Arc::new(Mutex::new(ClipboardManager::new(
-                saved_settings.max_items,
+                saved_settings.text_max_items,
                 saved_settings.grouped_items_protected_from_limit,
             ))),
             image_clipboard_manager: Arc::new(Mutex::new(ImageClipboardManager::new(
-                saved_settings.max_items,
+                saved_settings.image_max_items,
+                saved_settings.image_disk_limit_mb,
                 saved_settings.grouped_items_protected_from_limit,
             ))),
             is_visible: false,

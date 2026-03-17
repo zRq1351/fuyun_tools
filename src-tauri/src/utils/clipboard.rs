@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -18,6 +18,7 @@ pub struct ClipboardManager {
     persist_tx: Sender<ClipboardHistoryData>,
     categories: Arc<Mutex<HashMap<String, String>>>,
     category_list: Arc<Mutex<Vec<String>>>,
+    pinned_items: Arc<Mutex<Vec<String>>>,
     max_items: usize,
     grouped_items_protected_from_limit: bool,
 }
@@ -45,6 +46,8 @@ impl ClipboardManager {
             log::error!("加载历史记录失败: {}，使用空历史记录", e);
             ClipboardHistoryData::default()
         });
+        let mut pinned_items = history_data.pinned_items.clone();
+        normalize_pinned_items(&mut pinned_items, &history_data.items);
         let history_fingerprints = build_history_fingerprints(&history_data.items);
         let (persist_tx, persist_rx) = mpsc::channel::<ClipboardHistoryData>();
         std::thread::spawn(move || {
@@ -77,6 +80,7 @@ impl ClipboardManager {
             persist_tx,
             categories: Arc::new(Mutex::new(history_data.categories)),
             category_list: Arc::new(Mutex::new(history_data.category_list)),
+            pinned_items: Arc::new(Mutex::new(pinned_items)),
             max_items,
             grouped_items_protected_from_limit,
         }
@@ -92,7 +96,9 @@ impl ClipboardManager {
     pub fn get_content(&self, app_handle: &tauri::AppHandle) -> Option<String> {
         use tauri_plugin_clipboard_manager::ClipboardExt;
 
-        match app_handle.clipboard().read_text() {
+        match crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
+            app_handle.clipboard().read_text()
+        }) {
             Ok(content) => Some(content),
             Err(e) => {
                 let msg = e.to_string();
@@ -143,6 +149,11 @@ impl ClipboardManager {
         list.clone()
     }
 
+    pub fn get_pinned_items(&self) -> Vec<String> {
+        let pinned_items = self.pinned_items.lock().unwrap();
+        pinned_items.clone()
+    }
+
     /// 添加新分类
     pub fn add_category(&self, category: String) -> Result<(), String> {
         let (categories_clone, category_list_clone) = {
@@ -162,11 +173,13 @@ impl ClipboardManager {
         };
 
         let history = self.history.lock().unwrap().clone();
+        let pinned_items = self.pinned_items.lock().unwrap().clone();
 
         self.enqueue_persist(ClipboardHistoryData {
             items: history,
             categories: categories_clone,
             category_list: category_list_clone,
+            pinned_items,
         });
 
         Ok(())
@@ -192,11 +205,13 @@ impl ClipboardManager {
         };
 
         let history = self.history.lock().unwrap().clone();
+        let pinned_items = self.pinned_items.lock().unwrap().clone();
 
         self.enqueue_persist(ClipboardHistoryData {
             items: history,
             categories: categories_clone,
             category_list: category_list_clone,
+            pinned_items,
         });
 
         Ok(())
@@ -214,11 +229,13 @@ impl ClipboardManager {
         };
 
         let history = self.history.lock().unwrap().clone();
+        let pinned_items = self.pinned_items.lock().unwrap().clone();
 
         self.enqueue_persist(ClipboardHistoryData {
             items: history,
             categories: categories_clone,
             category_list: category_list_clone,
+            pinned_items,
         });
 
         Ok(())
@@ -252,17 +269,21 @@ impl ClipboardManager {
                 history.insert(0, exact_item);
             }
             let mut categories = self.categories.lock().unwrap();
+            let mut pinned_items = self.pinned_items.lock().unwrap();
             shrink_text_history_with_group_protection(
                 &mut history,
                 self.max_items,
                 &mut categories,
                 self.grouped_items_protected_from_limit,
             );
+            normalize_pinned_items(&mut pinned_items, &history);
+            apply_pin_order(&mut history, &pinned_items);
             let category_list = self.category_list.lock().unwrap();
             let data = ClipboardHistoryData {
                 items: history.clone(),
                 categories: categories.clone(),
                 category_list: category_list.clone(),
+                pinned_items: pinned_items.clone(),
             };
             self.enqueue_persist(data);
             *fingerprints = build_history_fingerprints(&history);
@@ -305,17 +326,21 @@ impl ClipboardManager {
         }
 
         let mut categories = self.categories.lock().unwrap();
+        let mut pinned_items = self.pinned_items.lock().unwrap();
         shrink_text_history_with_group_protection(
             &mut history,
             self.max_items,
             &mut categories,
             self.grouped_items_protected_from_limit,
         );
+        normalize_pinned_items(&mut pinned_items, &history);
+        apply_pin_order(&mut history, &pinned_items);
         let category_list = self.category_list.lock().unwrap();
         let data = ClipboardHistoryData {
             items: history.clone(),
             categories: categories.clone(),
             category_list: category_list.clone(),
+            pinned_items: pinned_items.clone(),
         };
 
         self.enqueue_persist(data);
@@ -334,11 +359,14 @@ impl ClipboardManager {
 
         let mut category_list = self.category_list.lock().unwrap();
         category_list.clear();
+        let mut pinned_items = self.pinned_items.lock().unwrap();
+        pinned_items.clear();
 
         self.enqueue_persist(ClipboardHistoryData {
             items: Vec::new(),
             categories: HashMap::new(),
             category_list: Vec::new(),
+            pinned_items: Vec::new(),
         });
         
         log::info!("历史记录已清空");
@@ -353,18 +381,22 @@ impl ClipboardManager {
         let mut history = self.history.lock().unwrap();
         if history.len() > max_items {
             let mut categories = self.categories.lock().unwrap();
+            let mut pinned_items = self.pinned_items.lock().unwrap();
             shrink_text_history_with_group_protection(
                 &mut history,
                 max_items,
                 &mut categories,
                 self.grouped_items_protected_from_limit,
             );
+            normalize_pinned_items(&mut pinned_items, &history);
+            apply_pin_order(&mut history, &pinned_items);
             let category_list = self.category_list.lock().unwrap();
 
             let data = ClipboardHistoryData {
                 items: history.clone(),
                 categories: categories.clone(),
                 category_list: category_list.clone(),
+                pinned_items: pinned_items.clone(),
             };
 
             self.enqueue_persist(data);
@@ -381,12 +413,15 @@ impl ClipboardManager {
 
             let mut categories = self.categories.lock().unwrap();
             categories.remove(&item);
+            let mut pinned_items = self.pinned_items.lock().unwrap();
+            normalize_pinned_items(&mut pinned_items, &history);
 
             let category_list = self.category_list.lock().unwrap();
             let data = ClipboardHistoryData {
                 items: history.clone(),
                 categories: categories.clone(),
                 category_list: category_list.clone(),
+                pinned_items: pinned_items.clone(),
             };
 
             self.enqueue_persist(data);
@@ -397,7 +432,7 @@ impl ClipboardManager {
     }
 
     pub fn promote_to_top(&self, index: usize) -> Result<String, String> {
-        let (item, categories_clone, category_list_clone, history_clone) = {
+        let (item, categories_clone, category_list_clone, history_clone, pinned_items) = {
             let mut history = self.history.lock().unwrap();
             if index >= history.len() {
                 return Err("索引超出范围".to_string());
@@ -412,16 +447,81 @@ impl ClipboardManager {
 
             let categories = self.categories.lock().unwrap().clone();
             let category_list = self.category_list.lock().unwrap().clone();
-            (item, categories, category_list, history.clone())
+            let pinned_items = self.pinned_items.lock().unwrap().clone();
+            (item, categories, category_list, history.clone(), pinned_items)
         };
 
         self.enqueue_persist(ClipboardHistoryData {
             items: history_clone,
             categories: categories_clone,
             category_list: category_list_clone,
+            pinned_items,
         });
 
         Ok(item)
+    }
+
+    pub fn set_pinned(&self, item: String, pinned: bool) -> Result<(), String> {
+        let mut history = self.history.lock().unwrap();
+        if !history.iter().any(|existing| existing == &item) {
+            return Err("目标条目不存在".to_string());
+        }
+        let mut pinned_items = self.pinned_items.lock().unwrap();
+        if pinned {
+            if !pinned_items.iter().any(|p| p == &item) {
+                pinned_items.insert(0, item.clone());
+            }
+        } else {
+            pinned_items.retain(|p| p != &item);
+        }
+        normalize_pinned_items(&mut pinned_items, &history);
+        apply_pin_order(&mut history, &pinned_items);
+        self.history_cache_dirty.store(true, Ordering::Relaxed);
+
+        let categories = self.categories.lock().unwrap().clone();
+        let category_list = self.category_list.lock().unwrap().clone();
+        self.enqueue_persist(ClipboardHistoryData {
+            items: history.clone(),
+            categories,
+            category_list,
+            pinned_items: pinned_items.clone(),
+        });
+        Ok(())
+    }
+
+    pub fn clear_history_by_mode(&self, mode: &str) -> Result<usize, String> {
+        let mut history = self.history.lock().unwrap();
+        let mut categories = self.categories.lock().unwrap();
+        let mut category_list = self.category_list.lock().unwrap();
+        let mut pinned_items = self.pinned_items.lock().unwrap();
+        let before = history.len();
+
+        match mode {
+            "all" => {
+                history.clear();
+                categories.clear();
+                category_list.clear();
+                pinned_items.clear();
+            }
+            "unclassified" | "unclassified_unpinned" => {
+                let classified: HashSet<String> = categories.keys().cloned().collect();
+                let pinned: HashSet<String> = pinned_items.iter().cloned().collect();
+                history.retain(|item| classified.contains(item) || pinned.contains(item));
+                categories.retain(|item, _| history.contains(item));
+                normalize_pinned_items(&mut pinned_items, &history);
+                apply_pin_order(&mut history, &pinned_items);
+            }
+            _ => return Err("不支持的清理模式".to_string()),
+        }
+
+        self.history_cache_dirty.store(true, Ordering::Relaxed);
+        self.enqueue_persist(ClipboardHistoryData {
+            items: history.clone(),
+            categories: categories.clone(),
+            category_list: category_list.clone(),
+            pinned_items: pinned_items.clone(),
+        });
+        Ok(before.saturating_sub(history.len()))
     }
 
     /// 退出时保存历史记录
@@ -434,6 +534,7 @@ impl ClipboardManager {
             items: history.clone(),
             categories: categories.clone(),
             category_list: category_list.clone(),
+            pinned_items: self.pinned_items.lock().unwrap().clone(),
         };
         save_history_data_with_retry(&data, 3)
     }
@@ -442,12 +543,15 @@ impl ClipboardManager {
         self.grouped_items_protected_from_limit = enabled;
         let mut history = self.history.lock().unwrap();
         let mut categories = self.categories.lock().unwrap();
+        let mut pinned_items = self.pinned_items.lock().unwrap();
         shrink_text_history_with_group_protection(
             &mut history,
             self.max_items,
             &mut categories,
             self.grouped_items_protected_from_limit,
         );
+        normalize_pinned_items(&mut pinned_items, &history);
+        apply_pin_order(&mut history, &pinned_items);
         self.history_cache_dirty.store(true, Ordering::Relaxed);
     }
 }
@@ -493,4 +597,24 @@ fn shrink_text_history_with_group_protection(
             break;
         }
     }
+}
+
+fn normalize_pinned_items(pinned_items: &mut Vec<String>, history: &[String]) {
+    let existing: HashSet<&String> = history.iter().collect();
+    let mut seen = HashSet::new();
+    pinned_items.retain(|item| existing.contains(item) && seen.insert(item.clone()));
+}
+
+fn apply_pin_order(history: &mut Vec<String>, pinned_items: &[String]) {
+    if pinned_items.is_empty() || history.is_empty() {
+        return;
+    }
+    let mut ordered = Vec::with_capacity(history.len());
+    for pinned in pinned_items {
+        if let Some(pos) = history.iter().position(|item| item == pinned) {
+            ordered.push(history.remove(pos));
+        }
+    }
+    ordered.append(history);
+    *history = ordered;
 }

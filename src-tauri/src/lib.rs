@@ -5,18 +5,14 @@ pub mod utils;
 pub mod features;
 
 use crate::core::app_state::AppState;
-use crate::core::config::DEFAULT_HIDE_SHORTCUT;
 use crate::services::ai_services::{stream_explain_text, stream_translate_text};
 use crate::services::clipboard_manager::start_clipboard_listener;
 use crate::services::image_clipboard_manager::start_image_clipboard_listener;
 use crate::ui::commands::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
-use crate::ui::window_manager::{
-    hide_clipboard_window, hide_image_clipboard_window, show_clipboard_window,
-    show_image_clipboard_window,
-};
+use crate::ui::window_manager::{show_clipboard_window, show_image_clipboard_window};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 /// 启动划词选择监听器
@@ -59,7 +55,8 @@ pub fn run() {
                 .lock().unwrap().settings.hot_key.clone();
             let image_hot_key = state_arc
                 .lock().unwrap().settings.image_hot_key.clone();
-            app.global_shortcut()
+            let mut shortcut_conflicts: Vec<String> = Vec::new();
+            if let Err(e) = app.global_shortcut()
                 .on_shortcut(hot_key.as_str(), move |_app, _shortcut, event| {
                     if let ShortcutState::Pressed = event.state {
                         let state_guard = state_clone.lock().unwrap();
@@ -71,11 +68,14 @@ pub fn run() {
                         }
                     }
                 })
-                .map_err(|e| e.to_string())?;
+            {
+                log::warn!("文字窗口快捷键 '{}' 注册失败: {}", hot_key, e);
+                shortcut_conflicts.push(format!("文字窗口：{}", hot_key));
+            }
 
             let state_clone_image = state_arc.clone();
             let app_handle_clone_image = app_handle.clone();
-            app.global_shortcut()
+            if let Err(e) = app.global_shortcut()
                 .on_shortcut(image_hot_key.as_str(), move |_app, _shortcut, event| {
                     if let ShortcutState::Pressed = event.state {
                         let state_guard = state_clone_image.lock().unwrap();
@@ -85,26 +85,23 @@ pub fn run() {
                         }
                     }
                 })
-                .map_err(|e| e.to_string())?;
+            {
+                log::warn!("图片窗口快捷键 '{}' 注册失败: {}", image_hot_key, e);
+                shortcut_conflicts.push(format!("图片窗口：{}", image_hot_key));
+            }
 
-            let state_clone_hide = state_arc.clone();
-            let app_handle_clone_hide = app_handle.clone();
-            app.global_shortcut()
-                .on_shortcut(DEFAULT_HIDE_SHORTCUT, move |_app, _shortcut, event| {
-                    if let ShortcutState::Pressed = event.state {
-                        hide_clipboard_window(
-                            app_handle_clone_hide.clone(),
-                            state_clone_hide.clone(),
-                        );
-                        hide_image_clipboard_window(
-                            app_handle_clone_hide.clone(),
-                            state_clone_hide.clone(),
-                        );
-
-                        features::mouse_listener::reset_ctrl_key_state();
-                    }
-                })
-                .map_err(|e| e.to_string())?;
+            if !shortcut_conflicts.is_empty() {
+                let payload = serde_json::json!({
+                    "conflicts": shortcut_conflicts.clone()
+                });
+                let _ = app_handle.emit("shortcut-conflict-warning", payload.clone());
+                if let Some(settings_window) = app.get_webview_window("settings") {
+                    let _ = settings_window.show();
+                    let _ = settings_window.set_focus();
+                    let script = format!("window.__SHORTCUT_CONFLICT__ = {};", payload);
+                    let _ = settings_window.eval(&script);
+                }
+            }
 
             start_clipboard_listener(app_handle.clone(), state_arc.clone());
             start_image_clipboard_listener(app_handle.clone(), state_arc.clone());
@@ -121,20 +118,30 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             remove_clipboard_item,
-            remove_image_clipboard_item,
+            remove_image_clipboard_item_by_id,
             get_clipboard_history,
+            get_clipboard_history_page,
             get_image_clipboard_history,
-            open_image_preview_window,
+            get_image_clipboard_history_page,
+            open_image_preview_window_by_id,
             close_image_preview_window,
-            warmup_image_clipboard_item,
+            warmup_image_clipboard_item_by_id,
             select_and_fill,
-            select_and_fill_image,
+            select_and_fill_image_by_id,
             set_item_category,
             set_image_item_category,
             add_category,
             add_image_category,
             remove_category,
             remove_image_category,
+            set_image_item_tags,
+            set_clipboard_item_pinned,
+            set_image_item_pinned,
+            promote_clipboard_item,
+            promote_image_clipboard_item_by_id,
+            clear_text_history,
+            clear_image_history,
+            import_image_files,
             get_clipboard_bottom_offset,
             preview_clipboard_bottom_offset,
             save_clipboard_bottom_offset,
@@ -149,6 +156,7 @@ pub fn run() {
             export_poll_metrics,
             export_poll_metrics_to_file,
             get_text_dedup_metrics,
+            get_image_storage_metrics,
             save_app_settings,
             test_ai_connection,
             stream_translate_text,
