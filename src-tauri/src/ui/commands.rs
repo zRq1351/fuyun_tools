@@ -2,7 +2,6 @@ use crate::core::app_state::AppState as SharedAppState;
 use crate::core::config::{AIProvider, ProviderConfig};
 use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
-use crate::services::poll_metrics;
 use crate::ui::window_manager::{
     hide_clipboard_window, hide_image_clipboard_window, hide_image_preview_window, set_window_position,
     show_clipboard_window, show_image_clipboard_window, show_image_preview_loading_window,
@@ -480,7 +479,7 @@ fn try_replace_image_clipboard_after_remove(
     let should_replace_clipboard =
         match crate::utils::image_clipboard::ImageClipboardManager::read_clipboard_images_rgba(app) {
             Ok(images) if !images.is_empty() => {
-                let (rgba, width, height) = &images[0];
+                let (rgba, width, height, _) = &images[0];
                 crate::utils::image_clipboard::compute_signature(rgba, *width, *height)
                     == removed_signature
             }
@@ -1252,64 +1251,6 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
     );
 
     Ok(result)
-}
-
-#[tauri::command]
-pub async fn get_poll_metrics_history(limit: Option<usize>) -> Result<Vec<serde_json::Value>, String> {
-    if !cfg!(debug_assertions) {
-        return Err("仅开发环境可用".to_string());
-    }
-    let points = poll_metrics::list(limit.unwrap_or(120));
-    let mapped = points
-        .into_iter()
-        .filter_map(|item| serde_json::to_value(item).ok())
-        .collect();
-    Ok(mapped)
-}
-
-#[tauri::command]
-pub async fn get_poll_metrics_minute_aggregates(
-    limit_minutes: Option<usize>,
-) -> Result<Vec<serde_json::Value>, String> {
-    if !cfg!(debug_assertions) {
-        return Err("仅开发环境可用".to_string());
-    }
-    let rows = poll_metrics::aggregate_by_minute(limit_minutes.unwrap_or(60));
-    let mapped = rows
-        .into_iter()
-        .filter_map(|item| serde_json::to_value(item).ok())
-        .collect();
-    Ok(mapped)
-}
-
-#[tauri::command]
-pub async fn export_poll_metrics(format: String, limit: Option<usize>) -> Result<String, String> {
-    if !cfg!(debug_assertions) {
-        return Err("仅开发环境可用".to_string());
-    }
-    let limit = limit.unwrap_or(720);
-    match format.as_str() {
-        "json" => poll_metrics::export_json(limit),
-        "csv" => Ok(poll_metrics::export_csv(limit)),
-        _ => Err("不支持的导出格式，仅支持 json/csv".to_string()),
-    }
-}
-
-#[tauri::command]
-pub async fn export_poll_metrics_to_file(
-    format: String,
-    limit: Option<usize>,
-    file_path: String,
-) -> Result<String, String> {
-    if !cfg!(debug_assertions) {
-        return Err("仅开发环境可用".to_string());
-    }
-    if file_path.trim().is_empty() {
-        return Err("导出路径不能为空".to_string());
-    }
-    let content = export_poll_metrics(format, limit).await?;
-    fs::write(&file_path, content).map_err(|e| format!("写入导出文件失败: {}", e))?;
-    Ok(file_path)
 }
 
 #[tauri::command]

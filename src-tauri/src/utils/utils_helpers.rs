@@ -586,14 +586,6 @@ pub fn get_settings_file_path() -> PathBuf {
     settings_dir
 }
 
-/// 获取历史记录文件路径
-pub fn get_history_file_path() -> PathBuf {
-    let mut history_dir = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-    history_dir.pop();
-    history_dir.push("history.json");
-    history_dir
-}
-
 pub fn get_history_db_path() -> PathBuf {
     let mut history_dir = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
     history_dir.pop();
@@ -1365,7 +1357,7 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
     Ok(settings)
 }
 
-/// 保存剪切板历史记录到文件
+/// 保存剪切板历史记录到数据库
 pub fn save_history(history: &[String]) -> Result<(), String> {
     let history_data = ClipboardHistoryData {
         items: history.to_vec(),
@@ -1376,7 +1368,7 @@ pub fn save_history(history: &[String]) -> Result<(), String> {
     save_history_data_with_retry(&history_data, 3)
 }
 
-/// 保存历史记录到文件（带重试）
+/// 保存历史记录到数据库（带重试）
 pub fn save_history_with_retry(history: &Vec<String>, max_retries: u32) -> Result<(), String> {
     save_history_data_with_retry(
         &ClipboardHistoryData {
@@ -1389,7 +1381,7 @@ pub fn save_history_with_retry(history: &Vec<String>, max_retries: u32) -> Resul
     )
 }
 
-/// 保存完整的历史数据（包含分类）到文件（带重试）
+/// 保存完整的历史数据（包含分类）到数据库（带重试）
 pub fn save_history_data_with_retry(
     data: &ClipboardHistoryData,
     max_retries: u32,
@@ -1409,91 +1401,17 @@ pub fn save_history_data_with_retry(
     Ok(())
 }
 
-/// 从文件加载历史记录
+/// 从数据库加载历史记录
 pub fn load_history() -> Result<Vec<String>, String> {
     load_history_data().map(|data| data.items)
 }
 
-/// 从文件加载完整的历史数据（包含分类）
+/// 从数据库加载完整的历史数据（包含分类）
 pub fn load_history_data() -> Result<ClipboardHistoryData, String> {
     if let Some(sqlite_data) = load_history_data_from_sqlite()? {
         return Ok(sqlite_data);
     }
-
-    let history_path = get_history_file_path();
-
-    if !history_path.exists() {
-        return Ok(ClipboardHistoryData::default());
-    }
-
-    let contents = read_text_with_backup(&history_path)
-        .map_err(|e| format!("读取历史记录文件失败: {}", e))?;
-
-    // 尝试解析为新结构
-    if let Ok(mut data) = serde_json::from_str::<ClipboardHistoryData>(&contents) {
-        if data.category_list.is_empty() && !data.categories.is_empty() {
-            let mut unique_categories: Vec<String> = data.categories.values().cloned().collect();
-            unique_categories.sort();
-            unique_categories.dedup();
-            data.category_list = unique_categories
-                .into_iter()
-                .filter(|c| c != "未分类" && c != "全部")
-                .collect();
-        }
-        let _ = save_history_data_with_retry(&data, 3);
-        Ok(data)
-    } else {
-        match serde_json::from_str::<Vec<String>>(&contents) {
-            Ok(items) => {
-                let data = ClipboardHistoryData {
-                    items,
-                    categories: HashMap::new(),
-                    category_list: Vec::new(),
-                    pinned_items: Vec::new(),
-                };
-                let _ = save_history_data_with_retry(&data, 3);
-                Ok(data)
-            }
-            Err(_) => {
-                if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&contents) {
-                    if let Some(obj) = json_val.as_object() {
-                        let items = obj.get("items")
-                            .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
-                            .unwrap_or_default();
-
-                        let categories = obj.get("categories")
-                            .and_then(|v| serde_json::from_value::<HashMap<String, String>>(v.clone()).ok())
-                            .unwrap_or_default();
-
-                        let mut category_list = obj.get("category_list")
-                            .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
-                            .unwrap_or_default();
-                        let pinned_items = obj.get("pinned_items")
-                            .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
-                            .unwrap_or_default();
-
-                        if category_list.is_empty() && !categories.is_empty() {
-                            let mut unique: Vec<String> = categories.values().cloned().collect();
-                            unique.sort();
-                            unique.dedup();
-                            category_list = unique.into_iter().filter(|c| c != "未分类" && c != "全部").collect();
-                        }
-
-                        let data = ClipboardHistoryData {
-                            items,
-                            categories,
-                            category_list,
-                            pinned_items,
-                        };
-                        let _ = save_history_data_with_retry(&data, 3);
-                        return Ok(data);
-                    }
-                }
-
-                Err("无法解析历史记录文件".to_string())
-            },
-        }
-    }
+    Ok(ClipboardHistoryData::default())
 }
 
 pub fn load_history_page_data(
@@ -1718,13 +1636,6 @@ pub fn get_logs_dir_path() -> PathBuf {
     logs_dir.pop();
     logs_dir.push("logs");
     logs_dir
-}
-
-pub fn get_poll_metrics_file_path() -> PathBuf {
-    let mut metrics_path = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-    metrics_path.pop();
-    metrics_path.push("poll_metrics_history.json");
-    metrics_path
 }
 
 /// 初始化内置提供商配置
