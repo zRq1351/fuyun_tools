@@ -3,6 +3,7 @@ use crate::core::config::{AIProvider, ProviderConfig};
 use crate::core::error::{to_frontend_error_string, AppError, AppResult, ErrorCode};
 use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
+use crate::services::image_clipboard_manager::emit_image_history_payload;
 use crate::ui::window_manager::{
     hide_clipboard_window, hide_image_clipboard_window, hide_image_preview_window, set_window_position,
     show_clipboard_window, show_image_clipboard_window, show_image_preview_loading_window,
@@ -1071,9 +1072,6 @@ pub async fn import_image_files(
         match manager.import_local_image_paths_async(vec![path.clone()]).await {
             Ok(count) => {
                 imported = imported.saturating_add(count);
-                if count > 0 {
-                    let _ = app.emit("image-history-updated", serde_json::json!({}));
-                }
             }
             Err(e) => {
                 failed = failed.saturating_add(1);
@@ -1102,6 +1100,9 @@ pub async fn import_image_files(
             "failed": failed
         }),
     );
+    if imported > 0 {
+        emit_image_history_payload(&app, state.inner().clone());
+    }
     if imported == 0 {
         if last_error.is_empty() {
             Err(frontend_error(

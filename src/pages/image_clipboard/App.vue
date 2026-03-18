@@ -190,7 +190,6 @@ const previewCache = new Map()
 const warmedIndices = new Set()
 const warmingIndices = new Set()
 let unlistenShowWindow = null
-let unlistenHistoryUpdated = null
 let unlistenItemPromoted = null
 let unlistenHistoryPayloadUpdated = null
 let isPointerDown = false
@@ -203,10 +202,15 @@ let dragScrollRafId = 0
 let contentMetricsRafId = 0
 let loadMorePending = false
 let historyUpdateTimer = null
+let initialPageRetryTimer = null
 const isCtrlKeyPressed = ref(false)
 const contentScrollLeft = ref(0)
 const contentViewportWidth = ref(0)
 const loadMoreIntent = ref(false)
+const prefetchedPage = ref(null)
+const isPrefetchingPage = ref(false)
+let prefetchRequestSeq = 0
+let prefetchPromise = null
 
 const IMAGE_ITEM_WIDTH = 250
 const IMAGE_ITEM_GAP = 8
@@ -215,6 +219,64 @@ const IMAGE_TAIL_SPACER = 742
 const IMAGE_VIRTUAL_OVERSCAN = 4
 const IMAGE_PREVIEW_CACHE_MARGIN = 24
 const IMAGE_PREVIEW_CACHE_MAX_ITEMS = 260
+
+const currentPageQuerySignature = () =>
+    JSON.stringify({
+      pageSize: pageSize.value,
+      category: categoryFilter.value === '全部' ? null : categoryFilter.value,
+      keyword: searchKeyword.value.trim() || null,
+      sortOrder: sortOrder.value
+    })
+
+const clearPrefetchedPage = () => {
+  prefetchRequestSeq += 1
+  prefetchedPage.value = null
+  isPrefetchingPage.value = false
+  prefetchPromise = null
+}
+
+const prefetchNextPage = async () => {
+  if (isLoadingPage.value || isPrefetchingPage.value || !hasMore.value) return
+  const offset = pageOffset.value
+  const signature = currentPageQuerySignature()
+  if (
+      prefetchedPage.value
+      && prefetchedPage.value.offset === offset
+      && prefetchedPage.value.signature === signature
+  ) {
+    return
+  }
+  const requestSeq = ++prefetchRequestSeq
+  isPrefetchingPage.value = true
+  prefetchPromise = (async () => {
+    try {
+      const data = await ImageClipboardService.getHistoryPage({
+        offset,
+        limit: pageSize.value,
+        category: categoryFilter.value === '全部' ? null : categoryFilter.value,
+        keyword: searchKeyword.value.trim() || null,
+        pinnedOnly: false,
+        sortOrder: sortOrder.value
+      })
+      if (requestSeq !== prefetchRequestSeq) return
+      prefetchedPage.value = {
+        offset,
+        signature,
+        data
+      }
+    } catch (_) {
+      if (requestSeq === prefetchRequestSeq) {
+        prefetchedPage.value = null
+      }
+    } finally {
+      if (requestSeq === prefetchRequestSeq) {
+        isPrefetchingPage.value = false
+        prefetchPromise = null
+      }
+    }
+  })()
+  await prefetchPromise
+}
 
 const stopContentDragging = () => {
   isPointerDown = false
@@ -453,6 +515,7 @@ const cyclePageSize = async () => {
   const next = IMAGE_PAGE_SIZE_OPTIONS[(index + 1) % IMAGE_PAGE_SIZE_OPTIONS.length]
   pageSize.value = next
   localStorage.setItem('image_history_page_size', String(next))
+  clearPrefetchedPage()
   await syncHistory()
 }
 
@@ -484,13 +547,37 @@ const prunePreviewCache = (keepIds) => {
   enforcePreviewCacheSize()
 }
 
+const rgbaBase64ToPngDataUrl = (rgbaBase64, width, height) => {
+  if (!rgbaBase64 || width <= 0 || height <= 0) return ''
+  const binary = window.atob(rgbaBase64)
+  const bytes = new Uint8ClampedArray(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  if (bytes.length !== width * height * 4) {
+    return ''
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return ''
+  const imageData = new ImageData(bytes, width, height)
+  ctx.putImageData(imageData, 0, 0)
+  return canvas.toDataURL('image/png')
+}
+
 const getPreviewDataUrl = (item) => {
   if (previewCache.has(item.id)) {
     return previewCache.get(item.id)
   }
   try {
     const lowresBase64 = typeof item.preview_png_base64 === 'string' ? item.preview_png_base64.trim() : ''
-    const previewUrl = lowresBase64 ? `data:image/png;base64,${lowresBase64}` : buildFileUrlFromPath(item.image_path)
+    const rgbaBase64 = typeof item.preview_rgba_base64 === 'string' ? item.preview_rgba_base64.trim() : ''
+    const previewUrl = lowresBase64
+        ? `data:image/png;base64,${lowresBase64}`
+        : rgbaBase64ToPngDataUrl(rgbaBase64, Number(item.preview_width) || 0, Number(item.preview_height) || 0)
+            || buildFileUrlFromPath(item.image_path)
     previewCache.set(item.id, previewUrl)
     enforcePreviewCacheSize()
     return previewUrl
@@ -751,6 +838,7 @@ const removeCategory = async (category) => {
 
 const applyPayload = (data, options = {}) => {
   const {refocus = false} = options
+  clearPrefetchedPage()
   history.value = Array.isArray(data.history) ? data.history : []
   totalCount.value = history.value.filter(Boolean).length
   pageOffset.value = totalCount.value
@@ -785,10 +873,12 @@ const applyPayload = (data, options = {}) => {
 }
 
 const mergeShowWindowPayload = (data) => {
+  clearPrefetchedPage()
   const incoming = Array.isArray(data?.history) ? data.history.filter((item) => item?.id) : []
   if (incoming.length > 0) {
     const existingById = new Map(history.value.filter(Boolean).map((item) => [item.id, item]))
     const incomingIds = new Set()
+    const keepCount = Math.max(1, Number(pageOffset.value) || Number(pageSize.value) || 10)
     const front = incoming.map((item) => {
       incomingIds.add(item.id)
       const existing = existingById.get(item.id) || {}
@@ -805,7 +895,7 @@ const mergeShowWindowPayload = (data) => {
       }
     })
     const rest = history.value.filter((item) => item && !incomingIds.has(item.id))
-    history.value = [...front, ...rest]
+    history.value = [...front, ...rest].slice(0, keepCount)
     const loadedCount = history.value.filter(Boolean).length
     totalCount.value = Math.max(totalCount.value || 0, loadedCount)
     pageOffset.value = Math.max(pageOffset.value || 0, loadedCount)
@@ -842,6 +932,7 @@ const promoteLocalItemToTop = (itemId) => {
 const mergeImagePageIntoState = (data, reset = false) => {
   const items = Array.isArray(data?.items) ? data.items : []
   if (reset) {
+    clearPrefetchedPage()
     history.value = []
     categoryMap.value = {}
     tagMap.value = {}
@@ -886,23 +977,44 @@ const mergeImagePageIntoState = (data, reset = false) => {
   }
 }
 
-const loadHistoryPage = async ({reset = false} = {}) => {
-  if (isLoadingPage.value) return
+const loadHistoryPage = async ({reset = false, force = false} = {}) => {
+  if (isLoadingPage.value && !force) return
   isLoadingPage.value = true
   try {
     const offset = reset ? 0 : pageOffset.value
-    const data = await withTimeout(
-        ImageClipboardService.getHistoryPage({
+    const signature = currentPageQuerySignature()
+    let data = null
+    if (
+        !reset
+        && prefetchedPage.value
+        && prefetchedPage.value.offset === offset
+        && prefetchedPage.value.signature === signature
+    ) {
+      data = prefetchedPage.value.data
+      prefetchedPage.value = null
+    } else {
+      if (!reset && isPrefetchingPage.value && prefetchPromise) {
+        await prefetchPromise
+        if (
+            prefetchedPage.value
+            && prefetchedPage.value.offset === offset
+            && prefetchedPage.value.signature === signature
+        ) {
+          data = prefetchedPage.value.data
+          prefetchedPage.value = null
+        }
+      }
+      if (!data) {
+        data = await ImageClipboardService.getHistoryPage({
           offset,
           limit: pageSize.value,
           category: categoryFilter.value === '全部' ? null : categoryFilter.value,
           keyword: searchKeyword.value.trim() || null,
           pinnedOnly: false,
           sortOrder: sortOrder.value
-        }),
-        12000,
-        '加载图片历史超时'
-    )
+        })
+      }
+    }
     mergeImagePageIntoState(data, reset)
     if (selectedIndex.value < 0 || !history.value[selectedIndex.value]) {
       const firstLoaded = filteredHistory.value[0]
@@ -910,8 +1022,18 @@ const loadHistoryPage = async ({reset = false} = {}) => {
     }
     await nextTick()
     syncContentMetrics()
+    if (hasMore.value) {
+      void prefetchNextPage()
+    }
   } catch (error) {
     console.error('同步图片历史失败:', error)
+    if (reset && history.value.filter(Boolean).length === 0 && !initialPageRetryTimer) {
+      initialPageRetryTimer = setTimeout(() => {
+        initialPageRetryTimer = null
+        loadHistoryPage({reset: true}).catch(() => {
+        })
+      }, 800)
+    }
   } finally {
     isLoadingPage.value = false
     if (pendingHistorySync && !isPointerDown && !isContentDragging) {
@@ -921,21 +1043,27 @@ const loadHistoryPage = async ({reset = false} = {}) => {
   }
 }
 
+const ensureInitialPageLoaded = (force = false) => {
+  if (isLoadingPage.value && !force) return
+  if (history.value.filter(Boolean).length > 0) return
+  loadHistoryPage({reset: true, force}).catch((error) => {
+    console.error('初始化图片历史失败:', error)
+  })
+}
+
+const waitForFirstPaint = () =>
+    new Promise((resolve) => {
+      requestAnimationFrame(() => resolve())
+    })
+
 const syncHistory = async () => {
+  clearPrefetchedPage()
   pageOffset.value = 0
   totalCount.value = 0
   hasMore.value = false
   loadMoreIntent.value = false
   await loadHistoryPage({reset: true})
 }
-
-const withTimeout = (promise, timeoutMs, message) =>
-    Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        window.setTimeout(() => reject(new Error(message)), timeoutMs)
-      })
-    ])
 
 const scheduleHistorySync = (delay = 80) => {
   if (historyUpdateTimer) return
@@ -952,11 +1080,6 @@ const scheduleHistorySync = (delay = 80) => {
 const handleKeydown = async (event) => {
   if (!isVisible.value) return
   if (isInputLikeTarget(event.target)) return
-
-  if (contextMenuVisible.value && event.key === 'Escape') {
-    closeContextMenu()
-    return
-  }
 
   const visible = filteredHistory.value
   if (visible.length === 0) return
@@ -979,11 +1102,6 @@ const handleKeydown = async (event) => {
     if (selectedIndex.value >= 0 && selectedIndex.value < history.value.length) {
       await fillById(history.value[selectedIndex.value]?.id)
     }
-  } else if (event.key === 'Escape') {
-    event.preventDefault()
-    isVisible.value = false
-    WindowService.imageBlur().catch(() => {
-    })
   }
 }
 
@@ -1012,15 +1130,24 @@ const handleWindowBlur = () => {
 }
 
 onMounted(async () => {
+  window.addEventListener('keydown', handleWindowKeydown)
+  window.addEventListener('keyup', handleWindowKeyup)
+  window.addEventListener('blur', handleWindowBlur)
+  window.addEventListener('resize', syncContentMetrics)
   pageSize.value = normalizeImagePageSize(localStorage.getItem('image_history_page_size'))
-  await syncHistory()
+  await nextTick()
+  await waitForFirstPaint()
+  ensureInitialPageLoaded()
   unlistenShowWindow = await listen('show-image-window', (event) => {
     const payload = event.payload || {}
-    if (history.value.length === 0) {
-      applyPayload(payload, {refocus: true})
-      return
+    ensureInitialPageLoaded(true)
+    if (Array.isArray(payload.history) && payload.history.length > 0) {
+      if (history.value.length === 0) {
+        applyPayload(payload, {refocus: true})
+        return
+      }
+      mergeShowWindowPayload(payload)
     }
-    mergeShowWindowPayload(payload)
     if (typeof payload.bottomOffset === 'number') {
       bottomOffset.value = clampBottomOffset(payload.bottomOffset)
     }
@@ -1038,10 +1165,6 @@ onMounted(async () => {
       })
     }
   })
-  unlistenHistoryUpdated = await listen('image-history-updated', async () => {
-    if (isAddingCategory.value) return
-    scheduleHistorySync(80)
-  })
   unlistenHistoryPayloadUpdated = await listen('image-history-payload-updated', (event) => {
     if (isAddingCategory.value) return
     mergeShowWindowPayload(event.payload || {})
@@ -1050,10 +1173,6 @@ onMounted(async () => {
     const itemId = event?.payload?.itemId
     promoteLocalItemToTop(itemId)
   })
-  window.addEventListener('keydown', handleWindowKeydown)
-  window.addEventListener('keyup', handleWindowKeyup)
-  window.addEventListener('blur', handleWindowBlur)
-  window.addEventListener('resize', syncContentMetrics)
 })
 
 onBeforeUnmount(() => {
@@ -1072,13 +1191,13 @@ onBeforeUnmount(() => {
     clearTimeout(historyUpdateTimer)
     historyUpdateTimer = null
   }
+  if (initialPageRetryTimer) {
+    clearTimeout(initialPageRetryTimer)
+    initialPageRetryTimer = null
+  }
   if (unlistenShowWindow) {
     unlistenShowWindow()
     unlistenShowWindow = null
-  }
-  if (unlistenHistoryUpdated) {
-    unlistenHistoryUpdated()
-    unlistenHistoryUpdated = null
   }
   if (unlistenHistoryPayloadUpdated) {
     unlistenHistoryPayloadUpdated()
