@@ -9,7 +9,9 @@ use crate::core::app_state::AppState;
 use crate::core::error::install_global_panic_hook;
 use crate::services::ai_services::{stream_explain_text, stream_translate_text};
 use crate::services::clipboard_manager::start_clipboard_listener;
-use crate::services::image_clipboard_manager::start_image_clipboard_listener;
+use crate::services::image_clipboard_manager::{
+    emit_image_history_payload, start_image_clipboard_listener,
+};
 use crate::sync::Mutex;
 use crate::ui::commands::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
@@ -56,6 +58,9 @@ pub fn run() {
                         let _ = settings_window_clone.hide();
                     }
                 });
+            }
+            if let Some(image_window) = app.get_webview_window("image_clipboard") {
+                let _ = image_window.hide();
             }
 
             let app_handle = app.handle();
@@ -122,6 +127,7 @@ pub fn run() {
 
             start_clipboard_listener(app_handle.clone(), state_arc.clone());
             start_image_clipboard_listener(app_handle.clone(), state_arc.clone());
+            emit_image_history_payload(&app_handle, state_arc.clone());
 
             #[cfg(windows)]
             start_text_selection_listener(app_handle.clone(), state_arc.clone());

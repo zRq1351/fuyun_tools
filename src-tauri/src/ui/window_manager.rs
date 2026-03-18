@@ -83,7 +83,7 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
 }
 
 pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
-    let (already_visible, selected_index, bottom_offset, manager_arc) = {
+    let (already_visible, selected_index, bottom_offset) = {
         let mut state_guard = lock_arc_mutex(&state);
         let already_visible = state_guard.is_image_visible;
         state_guard.is_image_visible = true;
@@ -91,18 +91,6 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
             already_visible,
             state_guard.image_selected_index,
             state_guard.settings.clipboard_bottom_offset,
-            state_guard.image_clipboard_manager.clone(),
-        )
-    };
-
-    let (history, categories, category_list, image_tags, pinned_items) = {
-        let manager = lock_arc_mutex(&manager_arc);
-        (
-            manager.get_history_preview(),
-            manager.get_categories(),
-            manager.get_category_list(),
-            manager.get_image_tags(),
-            manager.get_pinned_items(),
         )
     };
 
@@ -116,11 +104,6 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
                         let _ = window.set_focus();
                     }
                     let payload = serde_json::json!({
-                        "history": history,
-                        "categories": categories,
-                        "category_list": category_list,
-                        "image_tags": image_tags,
-                        "pinned_items": pinned_items,
                         "bottomOffset": bottom_offset,
                         "selectedIndex": selected_index
                     });

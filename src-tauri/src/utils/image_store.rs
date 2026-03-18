@@ -1,43 +1,20 @@
 use crate::utils::image_clipboard::{
-    rgba_base64_to_png_base64, ImageHistoryData, ImageHistoryItem, ImageHistoryPageData,
-    ImageHistoryPageItem,
+    ImageHistoryData, ImageHistoryItem, ImageHistoryPageData, ImageHistoryPageItem,
 };
-use lru::LruCache;
-use parking_lot::Mutex;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous};
 use sqlx::{Connection, Row, SqliteConnection};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::future::Future;
-use std::hash::{Hash, Hasher};
-use std::num::NonZeroUsize;
 use std::path::PathBuf;
-use std::sync::LazyLock;
 use std::time::Duration;
-
-const PREVIEW_PNG_CACHE_CAPACITY: usize = 1024;
-static PREVIEW_PNG_CACHE: LazyLock<Mutex<LruCache<u64, String>>> = LazyLock::new(|| {
-    Mutex::new(LruCache::new(
-        NonZeroUsize::new(PREVIEW_PNG_CACHE_CAPACITY).unwrap_or(NonZeroUsize::MIN),
-    ))
-});
 
 fn get_image_store_db_path() -> PathBuf {
     let mut db_path = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
     db_path.pop();
     db_path.push("image_history.db");
     db_path
-}
-
-fn build_preview_png_cache_key(item_id: &str, width: u32, height: u32, rgba_base64: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    item_id.hash(&mut hasher);
-    width.hash(&mut hasher);
-    height.hash(&mut hasher);
-    rgba_base64.hash(&mut hasher);
-    hasher.finish()
 }
 
 fn image_store_options(db_path: &PathBuf) -> SqliteConnectOptions {
@@ -571,35 +548,8 @@ pub async fn load_history_page_async(
         _ => "ASC",
     };
     let keyword_like = keyword_filter.as_ref().map(|v| format!("%{}%", v));
-
-    let total: i64 = sqlx::query_scalar(
-        "
-        SELECT COUNT(*)
-        FROM image_items hi
-        LEFT JOIN image_categories c ON c.item_id = hi.item_id
-        LEFT JOIN image_pinned p ON p.item_id = hi.item_id
-        WHERE
-          (?1 IS NULL OR COALESCE(c.category, '未分类') = ?1)
-          AND (?2 = 0 OR p.item_id IS NOT NULL)
-          AND (
-            ?3 IS NULL
-            OR LOWER(COALESCE(c.category, '未分类')) LIKE ?3
-            OR EXISTS (
-                SELECT 1 FROM image_tags t
-                WHERE t.item_id = hi.item_id
-                  AND LOWER(t.tag) LIKE ?3
-            )
-          )
-        ",
-    )
-        .bind(category_filter.as_deref())
-        .bind(pinned_flag)
-        .bind(keyword_like.as_deref())
-        .fetch_one(&mut conn)
-        .await
-        .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-
     let effective_limit = limit.clamp(1, 200);
+    let fetch_limit = effective_limit.saturating_add(1);
     let query_sql = format!(
         "
         SELECT
@@ -640,47 +590,21 @@ pub async fn load_history_page_async(
         .bind(category_filter.as_deref())
         .bind(pinned_flag)
         .bind(keyword_like.as_deref())
-        .bind(effective_limit as i64)
+        .bind(fetch_limit as i64)
         .bind(offset as i64)
         .fetch_all(&mut conn)
         .await
         .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-
+    let has_more = rows.len() > effective_limit;
     let mut items = rows
         .into_iter()
+        .take(effective_limit)
         .map(|row| {
             let preview_width = row.try_get::<i64, _>(4).unwrap_or(0).max(0) as u32;
             let preview_height = row.try_get::<i64, _>(5).unwrap_or(0).max(0) as u32;
             let preview_rgba_base64 = row.try_get::<String, _>(6).unwrap_or_default();
             let item_id = row.try_get::<String, _>(1).unwrap_or_default();
             let image_path = row.try_get::<String, _>(7).unwrap_or_default();
-            let preview_png_base64 = if preview_width > 0
-                && preview_height > 0
-                && !preview_rgba_base64.is_empty()
-            {
-                let cache_key = build_preview_png_cache_key(
-                    &item_id,
-                    preview_width,
-                    preview_height,
-                    &preview_rgba_base64,
-                );
-                if let Some(hit) = PREVIEW_PNG_CACHE.lock().get(&cache_key).cloned() {
-                    hit
-                } else {
-                    let encoded = rgba_base64_to_png_base64(
-                        &preview_rgba_base64,
-                        preview_width,
-                        preview_height,
-                    )
-                        .unwrap_or_default();
-                    if !encoded.is_empty() {
-                        PREVIEW_PNG_CACHE.lock().put(cache_key, encoded.clone());
-                    }
-                    encoded
-                }
-            } else {
-                String::new()
-            };
             ImageHistoryPageItem {
                 position: row.try_get::<i64, _>(0).unwrap_or(0).max(0) as usize,
                 id: item_id,
@@ -689,7 +613,7 @@ pub async fn load_history_page_async(
                 preview_width,
                 preview_height,
                 preview_rgba_base64,
-                preview_png_base64,
+                preview_png_base64: String::new(),
                 image_path,
                 category: row
                     .try_get::<String, _>(8)
@@ -741,7 +665,11 @@ pub async fn load_history_page_async(
         .collect::<Vec<_>>();
 
     Ok(ImageHistoryPageData {
-        total: total.max(0) as usize,
+        total: if has_more {
+            offset.saturating_add(effective_limit).saturating_add(1)
+        } else {
+            offset.saturating_add(items.len())
+        },
         offset,
         limit: effective_limit,
         items,

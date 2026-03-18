@@ -15,6 +15,25 @@ fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a
     }
 }
 
+pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
+    let manager_arc = {
+        let state_guard = lock_state(&state);
+        state_guard.image_clipboard_manager.clone()
+    };
+    let manager = match manager_arc.lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    };
+    let payload = serde_json::json!({
+        "history": manager.get_history_preview(),
+        "categories": manager.get_categories(),
+        "category_list": manager.get_category_list(),
+        "image_tags": manager.get_image_tags(),
+        "pinned_items": manager.get_pinned_items()
+    });
+    let _ = app_handle.emit("image-history-payload-updated", payload);
+}
+
 const IMAGE_CLIPBOARD_EVENT_SETTLE_MS: u64 = 120;
 static IMAGE_CLIPBOARD_PROCESSING: AtomicBool = AtomicBool::new(false);
 
@@ -90,16 +109,9 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                     };
                     for (rgba, width, height, source_blob) in images {
                         manager.add_rgba_image_with_source_blob(rgba, width, height, source_blob);
-                        let _ = app_handle.emit("image-history-updated", serde_json::json!({}));
                     }
-                    let payload = serde_json::json!({
-                        "history": manager.get_history_preview(),
-                        "categories": manager.get_categories(),
-                        "category_list": manager.get_category_list(),
-                        "image_tags": manager.get_image_tags(),
-                        "pinned_items": manager.get_pinned_items()
-                    });
-                    let _ = app_handle.emit("image-history-payload-updated", payload);
+                    drop(manager);
+                    emit_image_history_payload(&app_handle, state.clone());
                     last_signature = signature;
                 }
             } else if let Err(e) = image {

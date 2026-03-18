@@ -331,19 +331,6 @@ impl ImageClipboardManager {
                     .unwrap_or_else(|| "未分类".to_string());
                 let tags = image_tags.get(&item.id).cloned().unwrap_or_default();
                 let pinned = pinned_set.contains(&item.id);
-                let preview_png_base64 = if item.preview_rgba_base64.is_empty()
-                    || item.preview_width == 0
-                    || item.preview_height == 0
-                {
-                    String::new()
-                } else {
-                    rgba_base64_to_png_base64(
-                        &item.preview_rgba_base64,
-                        item.preview_width,
-                        item.preview_height,
-                    )
-                        .unwrap_or_default()
-                };
                 ImageHistoryPageItem {
                     position,
                     id: item.id.clone(),
@@ -352,7 +339,7 @@ impl ImageClipboardManager {
                     preview_width: item.preview_width,
                     preview_height: item.preview_height,
                     preview_rgba_base64: item.preview_rgba_base64.clone(),
-                    preview_png_base64,
+                    preview_png_base64: String::new(),
                     image_path: item.image_path.clone(),
                     category,
                     tags,
