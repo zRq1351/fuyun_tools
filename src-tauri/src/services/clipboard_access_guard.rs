@@ -1,4 +1,5 @@
-use std::sync::{Mutex, OnceLock};
+use crate::sync::Mutex;
+use std::sync::OnceLock;
 
 fn clipboard_access_mutex() -> &'static Mutex<()> {
     static ACCESS_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
@@ -6,6 +7,9 @@ fn clipboard_access_mutex() -> &'static Mutex<()> {
 }
 
 pub fn with_clipboard_access_lock<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = clipboard_access_mutex().lock().unwrap();
+    let _guard = match clipboard_access_mutex().lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    };
     f()
 }

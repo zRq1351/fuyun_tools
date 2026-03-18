@@ -1,8 +1,9 @@
 use crate::core::app_state::{AppState, TrayMenuItems};
+use crate::sync::Mutex;
 use crate::ui::window_manager::cleanup_enigo_instance;
 #[cfg(debug_assertions)]
 use crate::utils::utils_helpers::get_logs_dir_path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
@@ -12,9 +13,16 @@ use tauri_plugin_autostart::ManagerExt;
 #[cfg(debug_assertions)]
 use tauri_plugin_opener::OpenerExt;
 
+fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    }
+}
+
 /// 重建托盘菜单
 pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
-    let mut state_guard = state.lock().unwrap();
+    let mut state_guard = lock_arc_mutex(&state);
     let tray_menu_items = &mut state_guard.tray_menu_items;
     if let Some(ref mut items) = *tray_menu_items {
         match app_handle.autolaunch().is_enabled() {
@@ -27,22 +35,45 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
             }
         }
     } else {
-        let create_menu_item = |id: &str, label: &str| -> MenuItem<tauri::Wry> {
-            MenuItem::with_id(app_handle, id, label, true, None::<&str>)
-                .unwrap_or_else(|_| panic!("创建菜单项 '{}' 失败", label))
+        let create_menu_item = |id: &str, label: &str| -> Option<MenuItem<tauri::Wry>> {
+            match MenuItem::with_id(app_handle, id, label, true, None::<&str>) {
+                Ok(item) => Some(item),
+                Err(e) => {
+                    log::error!("创建菜单项失败: id={}, label={}, error={}", id, label, e);
+                    None
+                }
+            }
         };
 
-        let quit_item = create_menu_item("quit", "退出");
+        let quit_item = match create_menu_item("quit", "退出") {
+            Some(item) => item,
+            None => return,
+        };
         #[cfg(debug_assertions)]
-        let clear_logs_item = create_menu_item("clear_logs", "清除日志");
+        let clear_logs_item = match create_menu_item("clear_logs", "清除日志") {
+            Some(item) => item,
+            None => return,
+        };
         #[cfg(debug_assertions)]
-        let open_logs_item = create_menu_item("open_logs", "打开日志目录");
-        let settings_item = create_menu_item("settings", "设置");
+        let open_logs_item = match create_menu_item("open_logs", "打开日志目录") {
+            Some(item) => item,
+            None => return,
+        };
+        let settings_item = match create_menu_item("settings", "设置") {
+            Some(item) => item,
+            None => return,
+        };
         let autostart_enabled = app_handle.autolaunch().is_enabled().unwrap_or(false);
-        let autostart_item = CheckMenuItemBuilder::with_id("autostart", "开机自启")
+        let autostart_item = match CheckMenuItemBuilder::with_id("autostart", "开机自启")
             .checked(autostart_enabled)
             .build(app_handle)
-            .expect("创建开机自启菜单项失败");
+        {
+            Ok(item) => item,
+            Err(e) => {
+                log::error!("创建开机自启菜单项失败: {}", e);
+                return;
+            }
+        };
 
         *tray_menu_items = Some(TrayMenuItems {
             autostart_item: autostart_item.clone(),
@@ -60,14 +91,27 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
         menu_items.push(&settings_item);
         menu_items.push(&quit_item);
 
-        let menu = Menu::with_items(app_handle, &menu_items).expect("创建主菜单失败");
+        let menu = match Menu::with_items(app_handle, &menu_items) {
+            Ok(menu) => menu,
+            Err(e) => {
+                log::error!("创建主菜单失败: {}", e);
+                return;
+            }
+        };
 
         if let Some(_old_tray) = app_handle.tray_by_id("main") {
             let _ = app_handle.remove_tray_by_id("main");
         }
         let version = app_handle.package_info().version.clone();
+        let icon = match app_handle.default_window_icon() {
+            Some(icon) => icon.clone(),
+            None => {
+                log::error!("创建托盘图标失败: 默认窗口图标不存在");
+                return;
+            }
+        };
         let tray_builder = TrayIconBuilder::with_id("main")
-            .icon(app_handle.default_window_icon().unwrap().clone())
+            .icon(icon)
             .tooltip(&format!("fy_tools v{}", version))
             .menu(&menu);
 
@@ -105,7 +149,11 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
                 }
             })
             .build(app_handle)
-            .expect("创建托盘图标失败");
+            .map_err(|e| {
+                log::error!("创建托盘图标失败: {}", e);
+                e
+            })
+            .ok();
     }
 }
 

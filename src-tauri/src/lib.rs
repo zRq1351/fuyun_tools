@@ -3,22 +3,32 @@ pub mod services;
 pub mod ui;
 pub mod utils;
 pub mod features;
+pub mod sync;
 
 use crate::core::app_state::AppState;
+use crate::core::error::install_global_panic_hook;
 use crate::services::ai_services::{stream_explain_text, stream_translate_text};
 use crate::services::clipboard_manager::start_clipboard_listener;
 use crate::services::image_clipboard_manager::start_image_clipboard_listener;
+use crate::sync::Mutex;
 use crate::ui::commands::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{show_clipboard_window, show_image_clipboard_window};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
+    match state.lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    }
+}
 
 /// 启动划词选择监听器
 pub fn start_text_selection_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     let selection_enabled = {
-        let state_guard = state.lock().unwrap();
+        let state_guard = lock_state(&state);
         state_guard.settings.selection_enabled
     };
 
@@ -31,6 +41,7 @@ pub fn start_text_selection_listener(app_handle: AppHandle, state: Arc<Mutex<App
 
 /// 运行Tauri应用程序
 pub fn run() {
+    install_global_panic_hook();
     let initial_state = AppState::default();
     let state_arc = Arc::new(Mutex::new(initial_state));
 
@@ -51,15 +62,19 @@ pub fn run() {
             rebuild_tray_menu(&app_handle, state_arc.clone());
             let state_clone = state_arc.clone();
             let app_handle_clone = app_handle.clone();
-            let hot_key = state_arc
-                .lock().unwrap().settings.hot_key.clone();
-            let image_hot_key = state_arc
-                .lock().unwrap().settings.image_hot_key.clone();
+            let hot_key = {
+                let guard = lock_state(&state_arc);
+                guard.settings.hot_key.clone()
+            };
+            let image_hot_key = {
+                let guard = lock_state(&state_arc);
+                guard.settings.image_hot_key.clone()
+            };
             let mut shortcut_conflicts: Vec<String> = Vec::new();
             if let Err(e) = app.global_shortcut()
                 .on_shortcut(hot_key.as_str(), move |_app, _shortcut, event| {
                     if let ShortcutState::Pressed = event.state {
-                        let state_guard = state_clone.lock().unwrap();
+                        let state_guard = lock_state(&state_clone);
                         if !state_guard.is_visible && !state_guard.is_image_visible {
                             drop(state_guard);
                             crate::ui::commands::interrupt_text_fill_flow(&state_clone);
@@ -79,7 +94,7 @@ pub fn run() {
             if let Err(e) = app.global_shortcut()
                 .on_shortcut(image_hot_key.as_str(), move |_app, _shortcut, event| {
                     if let ShortcutState::Pressed = event.state {
-                        let state_guard = state_clone_image.lock().unwrap();
+                        let state_guard = lock_state(&state_clone_image);
                         if !state_guard.is_visible && !state_guard.is_image_visible {
                             drop(state_guard);
                             crate::ui::commands::interrupt_image_fill_flow(&state_clone_image);
@@ -169,13 +184,20 @@ pub fn run() {
     // 使用统一的日志配置
     let builder = builder.plugin(core::logger::build_logger().build());
 
-    builder
+    let app = builder
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())
-        .build(tauri::generate_context!())
-        .expect("构建Tauri应用时出错")
-        .run(|_app_handle, _event| {});
+        .build(tauri::generate_context!());
+
+    match app {
+        Ok(app) => {
+            app.run(|_app_handle, _event| {});
+        }
+        Err(e) => {
+            log::error!("构建Tauri应用失败: {}", e);
+        }
+    }
 }

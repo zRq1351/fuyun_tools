@@ -25,15 +25,16 @@ tauri-plugin-positioner = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4.29"
-lazy_static = "1.5.0"
 regex = "1.11.1"
 rdev = "0.5.3"
-async-openai = "0.24.1"
+async-openai = { version = "0.33.1", features = ["chat-completion"] }
 futures-util = "0.3.31"
 base64 = "0.22.1"
 keyring = { version = "3.6.3", features = ["windows-native"] }
 image = { version = "0.25.5", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp"] }
-rusqlite = { version = "0.32.1", features = ["bundled"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "sqlite"] }
+lru = "0.16.3"
+parking_lot = "0.12.5"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.9", features = ["winuser", "winnt", "minwindef", "windef", "libloaderapi", "winbase", "processthreadsapi", "windowsx", "errhandlingapi", "handleapi", "heapapi", "memoryapi", "psapi", "synchapi", "sysinfoapi", "timezoneapi", "tlhelp32", "winioctl", "wingdi", "winerror", "winnls", "winreg", "winsvc", "setupapi", "ioapiset", "fileapi", "consoleapi", "namedpipeapi", "processenv", "stringapiset", "profileapi", "libloaderapi", "dwmapi", "shellapi"] }

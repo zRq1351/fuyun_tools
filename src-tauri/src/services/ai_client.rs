@@ -1,9 +1,10 @@
+use crate::core::error::{AppError, AppResult, ErrorCode};
 use async_openai::{
-    types::{
+    types::chat::{
         ChatCompletionRequestAssistantMessageArgs,
         ChatCompletionRequestMessage,
-        ChatCompletionRequestUserMessageArgs,
         ChatCompletionRequestSystemMessageArgs,
+        ChatCompletionRequestUserMessageArgs,
         CreateChatCompletionRequestArgs,
     },
     Client,
@@ -74,7 +75,7 @@ pub struct AIClient {
 
 impl AIClient {
     /// 创建AI客户端
-    pub fn new(config: AIConfig) -> Result<Self, String> {
+    pub fn new(config: AIConfig) -> AppResult<Self> {
         let openai_config = async_openai::config::OpenAIConfig::new()
             .with_api_key(&config.api_key)
             .with_api_base(&config.base_url);
@@ -85,29 +86,26 @@ impl AIClient {
     }
 
     /// 将内部消息格式转换为OpenAI消息格式
-    fn convert_messages(&self, messages: &[Message]) -> Vec<ChatCompletionRequestMessage> {
+    fn convert_messages(&self, messages: &[Message]) -> AppResult<Vec<ChatCompletionRequestMessage>> {
         messages
             .iter()
             .map(|msg| {
                 match msg.role.to_lowercase().as_str() {
-                    "assistant" => ChatCompletionRequestMessage::Assistant(
-                        ChatCompletionRequestAssistantMessageArgs::default()
-                            .content(msg.content.clone())
-                            .build()
-                            .unwrap(),
-                    ),
-                    "system" => ChatCompletionRequestMessage::System(
-                        ChatCompletionRequestSystemMessageArgs::default()
-                            .content(msg.content.clone())
-                            .build()
-                            .unwrap(),
-                    ),
-                    _ => ChatCompletionRequestMessage::User(
-                        ChatCompletionRequestUserMessageArgs::default()
-                            .content(msg.content.clone())
-                            .build()
-                            .unwrap(),
-                    ),
+                    "assistant" => ChatCompletionRequestAssistantMessageArgs::default()
+                        .content(msg.content.clone())
+                        .build()
+                        .map(ChatCompletionRequestMessage::Assistant)
+                        .map_err(|e| AppError::new(ErrorCode::ValidationError, "构建assistant消息失败").with_details(e.to_string())),
+                    "system" => ChatCompletionRequestSystemMessageArgs::default()
+                        .content(msg.content.clone())
+                        .build()
+                        .map(ChatCompletionRequestMessage::System)
+                        .map_err(|e| AppError::new(ErrorCode::ValidationError, "构建system消息失败").with_details(e.to_string())),
+                    _ => ChatCompletionRequestUserMessageArgs::default()
+                        .content(msg.content.clone())
+                        .build()
+                        .map(ChatCompletionRequestMessage::User)
+                        .map_err(|e| AppError::new(ErrorCode::ValidationError, "构建user消息失败").with_details(e.to_string())),
                 }
             })
             .collect()
@@ -118,8 +116,8 @@ impl AIClient {
         &self,
         request: &ChatCompletionRequest,
         stream: bool,
-    ) -> Result<async_openai::types::CreateChatCompletionRequest, String> {
-        let messages = self.convert_messages(&request.messages);
+    ) -> AppResult<async_openai::types::chat::CreateChatCompletionRequest> {
+        let messages = self.convert_messages(&request.messages)?;
 
         let mut binding = CreateChatCompletionRequestArgs::default();
         let mut builder = binding
@@ -135,14 +133,16 @@ impl AIClient {
             builder = builder.stream(true);
         }
 
-        builder.build().map_err(|e| format!("构建请求失败: {}", e))
+        builder
+            .build()
+            .map_err(|e| AppError::new(ErrorCode::ValidationError, "构建请求失败").with_details(e.to_string()))
     }
 
     /// 发送聊天完成请求
     pub async fn chat_completion(
         &self,
         request: &ChatCompletionRequest,
-    ) -> Result<ChatCompletionResponse, String> {
+    ) -> AppResult<ChatCompletionResponse> {
         let openai_request = self.build_chat_request(request, false)?;
 
         let response = self
@@ -150,7 +150,7 @@ impl AIClient {
             .chat()
             .create(openai_request)
             .await
-            .map_err(|e| format!("请求发送失败: {}", e))?;
+            .map_err(|e| AppError::new(ErrorCode::NetworkError, "请求发送失败").with_details(e.to_string()))?;
 
         let chat_response = ChatCompletionResponse {
             id: Some(response.id.clone()),
@@ -183,7 +183,7 @@ impl AIClient {
         &self,
         request: &ChatCompletionRequest,
         mut callback: F,
-    ) -> Result<(), String>
+    ) -> AppResult<()>
     where
         F: FnMut(String) -> bool,
     {
@@ -194,7 +194,7 @@ impl AIClient {
             .chat()
             .create_stream(openai_request)
             .await
-            .map_err(|e| format!("请求发送失败: {}", e))?;
+            .map_err(|e| AppError::new(ErrorCode::NetworkError, "请求发送失败").with_details(e.to_string()))?;
 
         use futures_util::StreamExt;
         while let Some(result) = stream.next().await {
@@ -216,7 +216,7 @@ impl AIClient {
                     }
                 }
                 Err(e) => {
-                    return Err(format!("流式响应错误: {}", e));
+                    return Err(AppError::new(ErrorCode::NetworkError, "流式响应错误").with_details(e.to_string()));
                 }
             }
         }
@@ -229,7 +229,7 @@ impl AIClient {
         &self,
         prompt: &str,
         max_tokens: Option<u32>,
-    ) -> Result<String, String> {
+    ) -> AppResult<String> {
         let messages = vec![Message {
             role: "user".to_string(),
             content: prompt.to_string(),
@@ -252,7 +252,7 @@ impl AIClient {
         if let Some(choice) = response.choices.first() {
             Ok(choice.message.content.clone())
         } else {
-            Err("API返回空结果".to_string())
+            Err(AppError::new(ErrorCode::NetworkError, "API返回空结果"))
         }
     }
 
@@ -262,7 +262,7 @@ impl AIClient {
         prompt: &str,
         max_tokens: Option<u32>,
         callback: F,
-    ) -> Result<(), String>
+    ) -> AppResult<()>
     where
         F: FnMut(String) -> bool,
     {
@@ -286,7 +286,7 @@ impl AIClient {
     }
 
     /// 测试连接
-    pub async fn test_connection(&self) -> Result<bool, String> {
+    pub async fn test_connection(&self) -> AppResult<bool> {
         let messages = vec![Message {
             role: "user".to_string(),
             content: "Hi".to_string(),
@@ -315,12 +315,17 @@ impl AIClient {
             },
             Err(e) => {
                 log::error!("AI连接测试失败: {}", e);
-                if e.contains("401") {
-                    Err("鉴权失败：API Key 无效".to_string())
-                } else if e.contains("404") {
-                    Err("请求失败：模型不存在或 API 地址错误".to_string())
-                } else if e.contains("timeout") || e.contains("timed out") {
-                    Err("连接超时：请检查网络设置".to_string())
+                let raw = e
+                    .details
+                    .clone()
+                    .unwrap_or_else(|| e.message.clone())
+                    .to_lowercase();
+                if raw.contains("401") {
+                    Err(AppError::new(ErrorCode::ValidationError, "鉴权失败：API Key 无效"))
+                } else if raw.contains("404") {
+                    Err(AppError::new(ErrorCode::ValidationError, "请求失败：模型不存在或 API 地址错误"))
+                } else if raw.contains("timeout") || raw.contains("timed out") {
+                    Err(AppError::new(ErrorCode::NetworkError, "连接超时：请检查网络设置"))
                 } else {
                     Err(e)
                 }

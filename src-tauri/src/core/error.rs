@@ -1,5 +1,7 @@
 use serde::Serialize;
 use std::fmt;
+use std::panic;
+use std::sync::OnceLock;
 
 /// 应用程序错误代码
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
@@ -70,6 +72,39 @@ impl std::error::Error for AppError {}
 
 /// 方便的 Result 类型别名
 pub type AppResult<T> = Result<T, AppError>;
+
+pub fn to_frontend_error_string(err: AppError) -> String {
+    format!("[{}] {}", err.code, err.message)
+}
+
+static PANIC_HOOK_INSTALLED: OnceLock<()> = OnceLock::new();
+
+pub fn install_global_panic_hook() {
+    PANIC_HOOK_INSTALLED.get_or_init(|| {
+        let default_hook = panic::take_hook();
+        panic::set_hook(Box::new(move |panic_info| {
+            let location = panic_info
+                .location()
+                .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()))
+                .unwrap_or_else(|| "unknown".to_string());
+            let payload = if let Some(msg) = panic_info.payload().downcast_ref::<&str>() {
+                msg.to_string()
+            } else if let Some(msg) = panic_info.payload().downcast_ref::<String>() {
+                msg.clone()
+            } else {
+                "unknown panic payload".to_string()
+            };
+            let bt = std::backtrace::Backtrace::force_capture();
+            log::error!(
+                "全局未捕获panic: location={}, payload={}, backtrace={}",
+                location,
+                payload,
+                bt
+            );
+            default_hook(panic_info);
+        }));
+    });
+}
 
 // 实现从 String 到 AppError 的转换（默认为 SystemError）
 impl From<String> for AppError {

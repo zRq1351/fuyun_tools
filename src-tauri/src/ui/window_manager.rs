@@ -1,7 +1,7 @@
 use crate::core::app_state::AppState;
 use crate::core::config::CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN;
-use lazy_static::lazy_static;
-use std::sync::{Arc, Mutex};
+use crate::sync::Mutex;
+use std::sync::{Arc, LazyLock};
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -14,50 +14,46 @@ use winapi::um::winuser::{
     SPI_GETWORKAREA,
 };
 
-lazy_static! {
-    pub static ref ENIGO_INSTANCE: Arc<Mutex<Option<enigo::Enigo>>> = Arc::new(Mutex::new(None));
+pub static ENIGO_INSTANCE: LazyLock<Arc<Mutex<Option<enigo::Enigo>>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(None)));
+
+fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    }
 }
 
 /// 清理ENIGO实例资源
 pub fn cleanup_enigo_instance() {
-    let mut enigo_guard = ENIGO_INSTANCE.lock().unwrap();
+    let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);
     *enigo_guard = None;
     log::info!("已清理ENIGO实例资源");
 }
 
 /// 显示剪贴板窗口
 pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
-    {
-        let state_guard = state.lock().unwrap();
+    let (selected_index, bottom_offset, manager_arc) = {
+        let mut state_guard = lock_arc_mutex(&state);
         if state_guard.is_visible {
             return;
         }
-    }
-
-    {
-        let mut state_guard = state.lock().unwrap();
         state_guard.is_visible = true;
-    }
-
-    let selected_index = {
-        let state_guard = state.lock().unwrap();
-        state_guard.selected_index
+        (
+            state_guard.selected_index,
+            state_guard.settings.clipboard_bottom_offset,
+            state_guard.clipboard_manager.clone(),
+        )
     };
 
     let (history, categories, category_list, pinned_items) = {
-        let state_guard = state.lock().unwrap();
-        let manager = state_guard.clipboard_manager.lock().unwrap();
+        let manager = lock_arc_mutex(&manager_arc);
         (
             manager.get_history(),
             manager.get_categories(),
             manager.get_category_list(),
             manager.get_pinned_items(),
         )
-    };
-
-    let bottom_offset = {
-        let state_guard = state.lock().unwrap();
-        state_guard.settings.clipboard_bottom_offset
     };
 
     if let Some(_window) = app_handle.get_webview_window("clipboard") {
@@ -87,24 +83,20 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
 }
 
 pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
-    let already_visible = {
-        let state_guard = state.lock().unwrap();
-        state_guard.is_image_visible
-    };
-
-    {
-        let mut state_guard = state.lock().unwrap();
+    let (already_visible, selected_index, bottom_offset, manager_arc) = {
+        let mut state_guard = lock_arc_mutex(&state);
+        let already_visible = state_guard.is_image_visible;
         state_guard.is_image_visible = true;
-    }
-
-    let selected_index = {
-        let state_guard = state.lock().unwrap();
-        state_guard.image_selected_index
+        (
+            already_visible,
+            state_guard.image_selected_index,
+            state_guard.settings.clipboard_bottom_offset,
+            state_guard.image_clipboard_manager.clone(),
+        )
     };
 
     let (history, categories, category_list, image_tags, pinned_items) = {
-        let state_guard = state.lock().unwrap();
-        let manager = state_guard.image_clipboard_manager.lock().unwrap();
+        let manager = lock_arc_mutex(&manager_arc);
         (
             manager.get_history_preview(),
             manager.get_categories(),
@@ -112,10 +104,6 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
             manager.get_image_tags(),
             manager.get_pinned_items(),
         )
-    };
-    let bottom_offset = {
-        let state_guard = state.lock().unwrap();
-        state_guard.settings.clipboard_bottom_offset
     };
 
     if let Some(_window) = app_handle.get_webview_window("image_clipboard") {
@@ -146,7 +134,7 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
 /// 隐藏剪贴板窗口
 pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     let is_visible = {
-        let state_guard = state.lock().unwrap();
+        let state_guard = lock_arc_mutex(&state);
         state_guard.is_visible
     };
 
@@ -158,7 +146,7 @@ pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
         let _ = window.hide();
     }
     {
-        let mut state_guard = state.lock().unwrap();
+        let mut state_guard = lock_arc_mutex(&state);
         state_guard.is_visible = false;
         state_guard.selected_index = 0;
     }
@@ -166,7 +154,7 @@ pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
 
 pub fn hide_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     let is_visible = {
-        let state_guard = state.lock().unwrap();
+        let state_guard = lock_arc_mutex(&state);
         state_guard.is_image_visible
     };
 
@@ -178,7 +166,7 @@ pub fn hide_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
         let _ = window.hide();
     }
     {
-        let mut state_guard = state.lock().unwrap();
+        let mut state_guard = lock_arc_mutex(&state);
         state_guard.is_image_visible = false;
         state_guard.image_selected_index = 0;
     }
@@ -288,7 +276,7 @@ pub fn hide_image_preview_window(app_handle: AppHandle) {
 
 /// 设置窗口位置和大小
 pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
-    if let Some(monitor) = window.current_monitor().unwrap() {
+    if let Ok(Some(monitor)) = window.current_monitor() {
         let monitor_position = monitor.position();
         let screen_size = monitor.size();
         let taskbar_safe_offset = get_taskbar_safe_offset() + bottom_offset.max(0);
@@ -339,11 +327,8 @@ pub fn show_selection_toolbar_impl(
     anchor_pos: Option<(i32, i32)>,
 ) {
     if let Some(state) = app_handle.try_state::<Arc<Mutex<AppState>>>() {
-        if let Ok(state_guard) = state.lock() {
-            if !state_guard.settings.selection_enabled {
-                return;
-            }
-        } else {
+        let state_guard = lock_arc_mutex(state.inner());
+        if !state_guard.settings.selection_enabled {
             return;
         }
     } else {
@@ -439,7 +424,7 @@ pub fn simulate_paste() -> Result<(), String> {
     wait_for_foreground_ready_for_paste()?;
 
     {
-        let mut enigo_guard = ENIGO_INSTANCE.lock().unwrap();
+        let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);
         if enigo_guard.is_none() {
             *enigo_guard = Some(Enigo::new(&Settings::default()).map_err(|e| format!("初始化粘贴输入器失败: {}", e))?);
         }

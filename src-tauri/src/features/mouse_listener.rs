@@ -1,7 +1,8 @@
+use crate::sync::Mutex;
 use log;
 use rdev::{listen, Button, EventType, Key};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock};
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -33,8 +34,8 @@ struct GlobalState {
     last_click: Arc<Mutex<Option<(u64, u64, std::time::Instant)>>>,
 }
 
-lazy_static::lazy_static! {
-    static ref  GLOBAL_STATE: GlobalState = GlobalState {
+static GLOBAL_STATE: LazyLock<GlobalState> = LazyLock::new(|| {
+    GlobalState {
         mouse_action_state: Arc::new(Mutex::new(MouseActionState::Idle)),
         ctrl_left_pressed: AtomicBool::new(false),
         ctrl_right_pressed: AtomicBool::new(false),
@@ -44,11 +45,18 @@ lazy_static::lazy_static! {
         detection_anchor_pos: Arc::new(Mutex::new((0, 0))),
         last_toolbar_emit: Arc::new(Mutex::new(None)),
         last_click: Arc::new(Mutex::new(None)),
-    };
-}
+    }
+});
 
 static LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 static LISTENER_ENABLED: AtomicBool = AtomicBool::new(true);
+
+fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    }
+}
 
 /// 设置划词监听器启用状态
 pub fn set_selection_listener_enabled(
@@ -139,7 +147,7 @@ impl MouseListener {
                 GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
 
                 let (selection_enabled, should_skip_detection) = {
-                    let state_guard = detection_state.lock().unwrap();
+                    let state_guard = lock_arc_mutex(&detection_state);
                     (
                         state_guard.settings.selection_enabled,
                         state_guard.is_visible
@@ -160,7 +168,7 @@ impl MouseListener {
                 }
 
                 let clipboard_manager = {
-                    let state_guard = detection_state.lock().unwrap();
+                    let state_guard = lock_arc_mutex(&detection_state);
                     state_guard.clipboard_manager.clone()
                 };
 
@@ -174,11 +182,11 @@ impl MouseListener {
                             let app_handle_clone = detection_thread_app_handle.clone();
                             let text_clone = text.clone();
                             let anchor_pos = {
-                                let pos_guard = GLOBAL_STATE.detection_anchor_pos.lock().unwrap();
+                                let pos_guard = lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
                                 *pos_guard
                             };
                             let should_debounce = {
-                                let mut last_emit_guard = GLOBAL_STATE.last_toolbar_emit.lock().unwrap();
+                                let mut last_emit_guard = lock_arc_mutex(&GLOBAL_STATE.last_toolbar_emit);
                                 let now = std::time::Instant::now();
                                 let should_skip = if let Some((last_text, last_anchor, last_time)) =
                                     last_emit_guard.as_ref()
@@ -252,7 +260,7 @@ impl MouseListener {
                     let current_time = std::time::Instant::now();
 
                     let (last_x, last_y) = {
-                        let pos_guard = GLOBAL_STATE.last_mouse_pos.lock().unwrap();
+                        let pos_guard = lock_arc_mutex(&GLOBAL_STATE.last_mouse_pos);
                         *pos_guard
                     };
 
@@ -263,20 +271,20 @@ impl MouseListener {
 
                     log::info!("检测到鼠标左键按下 at ({}, {})", last_x, last_y);
 
-                    let mut state_guard = GLOBAL_STATE.mouse_action_state.lock().unwrap();
+                    let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
                     *state_guard = MouseActionState::MouseDown(last_x, last_y, current_time);
                 }
                 EventType::ButtonRelease(Button::Left) => {
                     let current_time = std::time::Instant::now();
 
                     let (last_x, last_y) = {
-                        let pos_guard = GLOBAL_STATE.last_mouse_pos.lock().unwrap();
+                        let pos_guard = lock_arc_mutex(&GLOBAL_STATE.last_mouse_pos);
                         *pos_guard
                     };
 
                     log::info!("检测到鼠标左键释放 at ({}, {})", last_x, last_y);
 
-                    let mut state_guard = GLOBAL_STATE.mouse_action_state.lock().unwrap();
+                    let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
                     let prev_state = std::mem::replace(&mut *state_guard, MouseActionState::Idle);
 
                     if let MouseActionState::MouseDown(down_x, down_y, down_time) = prev_state {
@@ -295,7 +303,7 @@ impl MouseListener {
                         let is_drag = is_valid_drag_operation(distance, duration);
 
                         let is_double_click = if !is_drag {
-                            let mut last_click_guard = GLOBAL_STATE.last_click.lock().unwrap();
+                            let mut last_click_guard = lock_arc_mutex(&GLOBAL_STATE.last_click);
                             let result = if let Some((lx, ly, ltime)) = *last_click_guard {
                                 let click_dist = calculate_distance(lx, ly, last_x, last_y);
                                 let click_interval = up_time.duration_since(ltime);
@@ -306,7 +314,7 @@ impl MouseListener {
                             *last_click_guard = Some((last_x, last_y, up_time));
                             result
                         } else {
-                            *GLOBAL_STATE.last_click.lock().unwrap() = None;
+                            *lock_arc_mutex(&GLOBAL_STATE.last_click) = None;
                             false
                         };
 
@@ -318,7 +326,7 @@ impl MouseListener {
                             if !is_foreground_window_console() {
                                 if !is_ctrl_effectively_pressed() {
                                     let app_busy_or_visible = {
-                                        let state_guard = listener_state.lock().unwrap();
+                                        let state_guard = lock_arc_mutex(&listener_state);
                                         state_guard.is_visible
                                             || state_guard.is_image_visible
                                             || state_guard.is_processing_selection
@@ -330,20 +338,20 @@ impl MouseListener {
                                     }
 
                                     let last_processed = {
-                                        GLOBAL_STATE.last_processed_time.lock().unwrap().clone()
+                                        lock_arc_mutex(&GLOBAL_STATE.last_processed_time).clone()
                                     };
 
                                     if up_time.duration_since(last_processed)
                                         > Duration::from_millis(100)
                                     {
                                         {
-                                            let mut pos_guard = GLOBAL_STATE.detection_anchor_pos.lock().unwrap();
+                                            let mut pos_guard = lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
                                             *pos_guard = (last_x as i32, last_y as i32);
                                         }
                                         GLOBAL_STATE.needs_detection.store(true, Ordering::SeqCst);
                                         log::info!("设置划词检测标志");
 
-                                        *GLOBAL_STATE.last_processed_time.lock().unwrap() = up_time;
+                                        *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) = up_time;
                                     } else {
                                         log::info!("操作过于频繁，跳过此次检测");
                                     }

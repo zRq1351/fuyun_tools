@@ -1,11 +1,19 @@
 use crate::core::app_state::AppState;
 use crate::services::clipboard_wakeup::{ClipboardWakeBackend, WakeSignal};
+use crate::sync::Mutex;
 use crate::utils::image_clipboard::ImageClipboardManager;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+
+fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
+    match state.lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    }
+}
 
 const IMAGE_CLIPBOARD_EVENT_SETTLE_MS: u64 = 120;
 static IMAGE_CLIPBOARD_PROCESSING: AtomicBool = AtomicBool::new(false);
@@ -45,11 +53,14 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
             #[cfg(target_os = "windows")]
             std::thread::sleep(Duration::from_millis(IMAGE_CLIPBOARD_EVENT_SETTLE_MS));
 
-            let should_skip = {
-                let state_guard = state.lock().unwrap();
-                state_guard.is_updating_clipboard
-                    || state_guard.is_processing_selection
-                    || state_guard.is_visible
+            let (should_skip, manager_arc) = {
+                let state_guard = lock_state(&state);
+                (
+                    state_guard.is_updating_clipboard
+                        || state_guard.is_processing_selection
+                        || state_guard.is_visible,
+                    state_guard.image_clipboard_manager.clone(),
+                )
             };
 
             if should_skip {
@@ -73,10 +84,9 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                 let signature = build_fast_signature(&images);
 
                 if signature != last_signature {
-                    let manager = {
-                        let state_guard = state.lock().unwrap();
-                        let manager_guard = state_guard.image_clipboard_manager.lock().unwrap();
-                        manager_guard.clone()
+                    let manager = match manager_arc.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => match e {},
                     };
                     for (rgba, width, height, source_blob) in images {
                         manager.add_rgba_image_with_source_blob(rgba, width, height, source_blob);

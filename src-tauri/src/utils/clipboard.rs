@@ -1,19 +1,26 @@
-use std::collections::{HashMap, HashSet};
+use crate::sync::Mutex;
+use lru::LruCache;
+use parking_lot::Mutex as ParkingMutex;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::utils::utils_helpers::{
     find_best_replacement_candidate, load_history_data, save_history_data_with_retry,
+    save_history_data_with_retry_async,
     ClipboardHistoryData,
 };
 
+#[derive(Clone)]
 pub struct ClipboardManager {
     history: Arc<Mutex<Vec<String>>>,
     history_fingerprints: Arc<Mutex<Vec<(usize, u64)>>>,
+    exact_index_cache: Arc<ParkingMutex<LruCache<u64, usize>>>,
     history_cache_dirty: Arc<AtomicBool>,
     persist_tx: Sender<ClipboardHistoryData>,
     categories: Arc<Mutex<HashMap<String, String>>>,
@@ -25,6 +32,14 @@ pub struct ClipboardManager {
 
 const LONG_TEXT_DEDUP_THRESHOLD: usize = 4000;
 const LONG_TEXT_DEDUP_SCAN_LIMIT: usize = 24;
+const EXACT_INDEX_CACHE_CAPACITY: usize = 2048;
+
+fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    }
+}
 
 fn stable_text_hash(text: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -76,6 +91,9 @@ impl ClipboardManager {
         Self {
             history: Arc::new(Mutex::new(history_data.items)),
             history_fingerprints: Arc::new(Mutex::new(history_fingerprints)),
+            exact_index_cache: Arc::new(ParkingMutex::new(LruCache::new(
+                NonZeroUsize::new(EXACT_INDEX_CACHE_CAPACITY).unwrap_or(NonZeroUsize::MIN),
+            ))),
             history_cache_dirty: Arc::new(AtomicBool::new(false)),
             persist_tx,
             categories: Arc::new(Mutex::new(history_data.categories)),
@@ -133,32 +151,32 @@ impl ClipboardManager {
 
     /// 获取历史记录
     pub fn get_history(&self) -> Vec<String> {
-        let history = self.history.lock().unwrap();
+        let history = lock_arc_mutex(&self.history);
         history.clone()
     }
 
     /// 获取分类映射
     pub fn get_categories(&self) -> HashMap<String, String> {
-        let categories = self.categories.lock().unwrap();
+        let categories = lock_arc_mutex(&self.categories);
         categories.clone()
     }
 
     /// 获取分类列表
     pub fn get_category_list(&self) -> Vec<String> {
-        let list = self.category_list.lock().unwrap();
+        let list = lock_arc_mutex(&self.category_list);
         list.clone()
     }
 
     pub fn get_pinned_items(&self) -> Vec<String> {
-        let pinned_items = self.pinned_items.lock().unwrap();
+        let pinned_items = lock_arc_mutex(&self.pinned_items);
         pinned_items.clone()
     }
 
     /// 添加新分类
     pub fn add_category(&self, category: String) -> Result<(), String> {
         let (categories_clone, category_list_clone) = {
-            let categories = self.categories.lock().unwrap();
-            let mut category_list = self.category_list.lock().unwrap();
+            let categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
 
             let normalized_category = category.trim().to_string();
 
@@ -172,8 +190,8 @@ impl ClipboardManager {
             (categories.clone(), category_list.clone())
         };
 
-        let history = self.history.lock().unwrap().clone();
-        let pinned_items = self.pinned_items.lock().unwrap().clone();
+        let history = lock_arc_mutex(&self.history).clone();
+        let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
 
         self.enqueue_persist(ClipboardHistoryData {
             items: history,
@@ -185,11 +203,32 @@ impl ClipboardManager {
         Ok(())
     }
 
+    pub async fn add_category_async(&self, category: String) -> Result<(), String> {
+        let data = {
+            let categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
+            let normalized_category = category.trim().to_string();
+            if !normalized_category.is_empty()
+                && normalized_category != "未分类"
+                && normalized_category != "全部"
+                && !category_list.contains(&normalized_category) {
+                category_list.push(normalized_category);
+            }
+            ClipboardHistoryData {
+                items: lock_arc_mutex(&self.history).clone(),
+                categories: categories.clone(),
+                category_list: category_list.clone(),
+                pinned_items: lock_arc_mutex(&self.pinned_items).clone(),
+            }
+        };
+        save_history_data_with_retry_async(&data, 3).await
+    }
+
     /// 设置条目分类
     pub fn set_category(&self, item: String, category: String) -> Result<(), String> {
         let (categories_clone, category_list_clone) = {
-            let mut categories = self.categories.lock().unwrap();
-            let mut category_list = self.category_list.lock().unwrap();
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
 
             let normalized_category = category.trim().to_string();
 
@@ -204,8 +243,8 @@ impl ClipboardManager {
             (categories.clone(), category_list.clone())
         };
 
-        let history = self.history.lock().unwrap().clone();
-        let pinned_items = self.pinned_items.lock().unwrap().clone();
+        let history = lock_arc_mutex(&self.history).clone();
+        let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
 
         self.enqueue_persist(ClipboardHistoryData {
             items: history,
@@ -217,19 +256,42 @@ impl ClipboardManager {
         Ok(())
     }
 
+    pub async fn set_category_async(&self, item: String, category: String) -> Result<(), String> {
+        let data = {
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
+            let normalized_category = category.trim().to_string();
+            if normalized_category.is_empty() || normalized_category == "未分类" || normalized_category == "全部" {
+                categories.remove(&item);
+            } else {
+                categories.insert(item, normalized_category.clone());
+                if !category_list.contains(&normalized_category) {
+                    category_list.push(normalized_category);
+                }
+            }
+            ClipboardHistoryData {
+                items: lock_arc_mutex(&self.history).clone(),
+                categories: categories.clone(),
+                category_list: category_list.clone(),
+                pinned_items: lock_arc_mutex(&self.pinned_items).clone(),
+            }
+        };
+        save_history_data_with_retry_async(&data, 3).await
+    }
+
     /// 移除分类
     pub fn remove_category(&self, category: String) -> Result<(), String> {
         let (categories_clone, category_list_clone) = {
-            let mut categories = self.categories.lock().unwrap();
-            let mut category_list = self.category_list.lock().unwrap();
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
 
             category_list.retain(|c| c != &category);
             categories.retain(|_, v| v != &category);
             (categories.clone(), category_list.clone())
         };
 
-        let history = self.history.lock().unwrap().clone();
-        let pinned_items = self.pinned_items.lock().unwrap().clone();
+        let history = lock_arc_mutex(&self.history).clone();
+        let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
 
         self.enqueue_persist(ClipboardHistoryData {
             items: history,
@@ -241,15 +303,64 @@ impl ClipboardManager {
         Ok(())
     }
 
+    pub async fn remove_category_async(&self, category: String) -> Result<(), String> {
+        let data = {
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
+            category_list.retain(|c| c != &category);
+            categories.retain(|_, v| v != &category);
+            ClipboardHistoryData {
+                items: lock_arc_mutex(&self.history).clone(),
+                categories: categories.clone(),
+                category_list: category_list.clone(),
+                pinned_items: lock_arc_mutex(&self.pinned_items).clone(),
+            }
+        };
+        save_history_data_with_retry_async(&data, 3).await
+    }
+
     /// 将内容添加到剪贴板历史记录中
     pub fn add_to_history(&self, content: String) {
-        let mut history = self.history.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
 
         let content_len = content.chars().count();
         log::debug!("添加到历史记录，长度: {}, 当前数量: {}", content_len, history.len());
 
         let content_hash = stable_text_hash(&content);
-        let mut fingerprints = self.history_fingerprints.lock().unwrap();
+        let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
+        let mut exact_index_cache = self.exact_index_cache.lock();
+        if let Some(cached_index) = exact_index_cache.get(&content_hash).copied() {
+            if history.get(cached_index).is_some_and(|item| item == &content) {
+                if cached_index != 0 {
+                    let exact_item = history.remove(cached_index);
+                    history.insert(0, exact_item);
+                }
+                exact_index_cache.clear();
+                exact_index_cache.put(content_hash, 0);
+                let mut categories = lock_arc_mutex(&self.categories);
+                let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+                shrink_text_history_with_group_protection(
+                    &mut history,
+                    self.max_items,
+                    &mut categories,
+                    self.grouped_items_protected_from_limit,
+                );
+                normalize_pinned_items(&mut pinned_items, &history);
+                apply_pin_order(&mut history, &pinned_items);
+                let category_list = lock_arc_mutex(&self.category_list);
+                let data = ClipboardHistoryData {
+                    items: history.clone(),
+                    categories: categories.clone(),
+                    category_list: category_list.clone(),
+                    pinned_items: pinned_items.clone(),
+                };
+                self.enqueue_persist(data);
+                *fingerprints = build_history_fingerprints(&history);
+                self.history_cache_dirty.store(false, Ordering::Relaxed);
+                return;
+            }
+            exact_index_cache.pop(&content_hash);
+        }
         let cache_dirty = self.history_cache_dirty.load(Ordering::Relaxed);
         if cache_dirty || fingerprints.len() != history.len() {
             *fingerprints = build_history_fingerprints(&history);
@@ -268,8 +379,10 @@ impl ClipboardManager {
                 let exact_item = history.remove(exact_index);
                 history.insert(0, exact_item);
             }
-            let mut categories = self.categories.lock().unwrap();
-            let mut pinned_items = self.pinned_items.lock().unwrap();
+            exact_index_cache.clear();
+            exact_index_cache.put(content_hash, 0);
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             shrink_text_history_with_group_protection(
                 &mut history,
                 self.max_items,
@@ -278,7 +391,7 @@ impl ClipboardManager {
             );
             normalize_pinned_items(&mut pinned_items, &history);
             apply_pin_order(&mut history, &pinned_items);
-            let category_list = self.category_list.lock().unwrap();
+            let category_list = lock_arc_mutex(&self.category_list);
             let data = ClipboardHistoryData {
                 items: history.clone(),
                 categories: categories.clone(),
@@ -325,8 +438,8 @@ impl ClipboardManager {
             history.insert(0, content);
         }
 
-        let mut categories = self.categories.lock().unwrap();
-        let mut pinned_items = self.pinned_items.lock().unwrap();
+        let mut categories = lock_arc_mutex(&self.categories);
+        let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         shrink_text_history_with_group_protection(
             &mut history,
             self.max_items,
@@ -335,7 +448,7 @@ impl ClipboardManager {
         );
         normalize_pinned_items(&mut pinned_items, &history);
         apply_pin_order(&mut history, &pinned_items);
-        let category_list = self.category_list.lock().unwrap();
+        let category_list = lock_arc_mutex(&self.category_list);
         let data = ClipboardHistoryData {
             items: history.clone(),
             categories: categories.clone(),
@@ -344,22 +457,27 @@ impl ClipboardManager {
         };
 
         self.enqueue_persist(data);
+        exact_index_cache.clear();
+        if let Some(first) = history.first() {
+            exact_index_cache.put(stable_text_hash(first), 0);
+        }
         *fingerprints = build_history_fingerprints(&history);
         self.history_cache_dirty.store(false, Ordering::Relaxed);
     }
 
     /// 清空历史记录
     pub fn clear_history(&self) -> Result<(), String> {
-        let mut history = self.history.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
         history.clear();
+        self.exact_index_cache.lock().clear();
         self.history_cache_dirty.store(true, Ordering::Relaxed);
 
-        let mut categories = self.categories.lock().unwrap();
+        let mut categories = lock_arc_mutex(&self.categories);
         categories.clear();
 
-        let mut category_list = self.category_list.lock().unwrap();
+        let mut category_list = lock_arc_mutex(&self.category_list);
         category_list.clear();
-        let mut pinned_items = self.pinned_items.lock().unwrap();
+        let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         pinned_items.clear();
 
         self.enqueue_persist(ClipboardHistoryData {
@@ -378,10 +496,10 @@ impl ClipboardManager {
         self.max_items = max_items;
         log::info!("更新最大记录数为{}", max_items);
 
-        let mut history = self.history.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
         if history.len() > max_items {
-            let mut categories = self.categories.lock().unwrap();
-            let mut pinned_items = self.pinned_items.lock().unwrap();
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             shrink_text_history_with_group_protection(
                 &mut history,
                 max_items,
@@ -390,7 +508,7 @@ impl ClipboardManager {
             );
             normalize_pinned_items(&mut pinned_items, &history);
             apply_pin_order(&mut history, &pinned_items);
-            let category_list = self.category_list.lock().unwrap();
+            let category_list = lock_arc_mutex(&self.category_list);
 
             let data = ClipboardHistoryData {
                 items: history.clone(),
@@ -400,23 +518,25 @@ impl ClipboardManager {
             };
 
             self.enqueue_persist(data);
+            self.exact_index_cache.lock().clear();
             self.history_cache_dirty.store(true, Ordering::Relaxed);
         }
     }
 
     /// 移除指定历史记录
     pub fn remove_from_history(&self, index: usize) -> Result<String, String> {
-        let mut history = self.history.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
         if index < history.len() {
             let item = history.remove(index);
+            self.exact_index_cache.lock().clear();
             self.history_cache_dirty.store(true, Ordering::Relaxed);
 
-            let mut categories = self.categories.lock().unwrap();
+            let mut categories = lock_arc_mutex(&self.categories);
             categories.remove(&item);
-            let mut pinned_items = self.pinned_items.lock().unwrap();
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             normalize_pinned_items(&mut pinned_items, &history);
 
-            let category_list = self.category_list.lock().unwrap();
+            let category_list = lock_arc_mutex(&self.category_list);
             let data = ClipboardHistoryData {
                 items: history.clone(),
                 categories: categories.clone(),
@@ -433,7 +553,7 @@ impl ClipboardManager {
 
     pub fn promote_to_top(&self, index: usize) -> Result<String, String> {
         let (item, categories_clone, category_list_clone, history_clone, pinned_items) = {
-            let mut history = self.history.lock().unwrap();
+            let mut history = lock_arc_mutex(&self.history);
             if index >= history.len() {
                 return Err("索引超出范围".to_string());
             }
@@ -443,11 +563,12 @@ impl ClipboardManager {
             }
             let item = history.remove(index);
             history.insert(0, item.clone());
+            self.exact_index_cache.lock().clear();
             self.history_cache_dirty.store(true, Ordering::Relaxed);
 
-            let categories = self.categories.lock().unwrap().clone();
-            let category_list = self.category_list.lock().unwrap().clone();
-            let pinned_items = self.pinned_items.lock().unwrap().clone();
+            let categories = lock_arc_mutex(&self.categories).clone();
+            let category_list = lock_arc_mutex(&self.category_list).clone();
+            let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
             (item, categories, category_list, history.clone(), pinned_items)
         };
 
@@ -461,12 +582,42 @@ impl ClipboardManager {
         Ok(item)
     }
 
+    pub async fn promote_to_top_async(&self, index: usize) -> Result<String, String> {
+        let (item, data) = {
+            let mut history = lock_arc_mutex(&self.history);
+            if index >= history.len() {
+                return Err("索引超出范围".to_string());
+            }
+            if index == 0 {
+                return Ok(history[0].clone());
+            }
+            let item = history.remove(index);
+            history.insert(0, item.clone());
+            self.exact_index_cache.lock().clear();
+            self.history_cache_dirty.store(true, Ordering::Relaxed);
+            let categories = lock_arc_mutex(&self.categories).clone();
+            let category_list = lock_arc_mutex(&self.category_list).clone();
+            let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
+            (
+                item,
+                ClipboardHistoryData {
+                    items: history.clone(),
+                    categories,
+                    category_list,
+                    pinned_items,
+                },
+            )
+        };
+        save_history_data_with_retry_async(&data, 3).await?;
+        Ok(item)
+    }
+
     pub fn set_pinned(&self, item: String, pinned: bool) -> Result<(), String> {
-        let mut history = self.history.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
         if !history.iter().any(|existing| existing == &item) {
             return Err("目标条目不存在".to_string());
         }
-        let mut pinned_items = self.pinned_items.lock().unwrap();
+        let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         if pinned {
             if !pinned_items.iter().any(|p| p == &item) {
                 pinned_items.insert(0, item.clone());
@@ -478,8 +629,8 @@ impl ClipboardManager {
         apply_pin_order(&mut history, &pinned_items);
         self.history_cache_dirty.store(true, Ordering::Relaxed);
 
-        let categories = self.categories.lock().unwrap().clone();
-        let category_list = self.category_list.lock().unwrap().clone();
+        let categories = lock_arc_mutex(&self.categories).clone();
+        let category_list = lock_arc_mutex(&self.category_list).clone();
         self.enqueue_persist(ClipboardHistoryData {
             items: history.clone(),
             categories,
@@ -489,11 +640,53 @@ impl ClipboardManager {
         Ok(())
     }
 
+    pub async fn set_pinned_async(&self, item: String, pinned: bool) -> Result<(), String> {
+        let data = {
+            let mut history = lock_arc_mutex(&self.history);
+            if !history.iter().any(|existing| existing == &item) {
+                return Err("目标条目不存在".to_string());
+            }
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+            if pinned {
+                if !pinned_items.iter().any(|p| p == &item) {
+                    pinned_items.insert(0, item.clone());
+                }
+            } else {
+                pinned_items.retain(|p| p != &item);
+            }
+            normalize_pinned_items(&mut pinned_items, &history);
+            apply_pin_order(&mut history, &pinned_items);
+            self.history_cache_dirty.store(true, Ordering::Relaxed);
+            ClipboardHistoryData {
+                items: history.clone(),
+                categories: lock_arc_mutex(&self.categories).clone(),
+                category_list: lock_arc_mutex(&self.category_list).clone(),
+                pinned_items: pinned_items.clone(),
+            }
+        };
+        save_history_data_with_retry_async(&data, 3).await
+    }
+
+    pub async fn set_pinned_by_selector_async(
+        &self,
+        index: Option<usize>,
+        item: Option<String>,
+        pinned: bool,
+    ) -> Result<(), String> {
+        let resolved_item = if let Some(idx) = index {
+            self.get_history().get(idx).cloned()
+        } else {
+            item
+        }
+            .ok_or_else(|| "索引超出范围".to_string())?;
+        self.set_pinned_async(resolved_item, pinned).await
+    }
+
     pub fn clear_history_by_mode(&self, mode: &str) -> Result<usize, String> {
-        let mut history = self.history.lock().unwrap();
-        let mut categories = self.categories.lock().unwrap();
-        let mut category_list = self.category_list.lock().unwrap();
-        let mut pinned_items = self.pinned_items.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
+        let mut categories = lock_arc_mutex(&self.categories);
+        let mut category_list = lock_arc_mutex(&self.category_list);
+        let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         let before = history.len();
 
         match mode {
@@ -524,26 +717,65 @@ impl ClipboardManager {
         Ok(before.saturating_sub(history.len()))
     }
 
+    pub async fn clear_history_by_mode_async(&self, mode: &str) -> Result<usize, String> {
+        let (removed_count, data) = {
+            let mut history = lock_arc_mutex(&self.history);
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+            let before = history.len();
+            match mode {
+                "all" => {
+                    history.clear();
+                    categories.clear();
+                    category_list.clear();
+                    pinned_items.clear();
+                }
+                "unclassified" | "unclassified_unpinned" => {
+                    let classified: HashSet<String> = categories.keys().cloned().collect();
+                    let pinned: HashSet<String> = pinned_items.iter().cloned().collect();
+                    history.retain(|item| classified.contains(item) || pinned.contains(item));
+                    categories.retain(|item, _| history.contains(item));
+                    normalize_pinned_items(&mut pinned_items, &history);
+                    apply_pin_order(&mut history, &pinned_items);
+                }
+                _ => return Err("不支持的清理模式".to_string()),
+            }
+            self.history_cache_dirty.store(true, Ordering::Relaxed);
+            (
+                before.saturating_sub(history.len()),
+                ClipboardHistoryData {
+                    items: history.clone(),
+                    categories: categories.clone(),
+                    category_list: category_list.clone(),
+                    pinned_items: pinned_items.clone(),
+                },
+            )
+        };
+        save_history_data_with_retry_async(&data, 3).await?;
+        Ok(removed_count)
+    }
+
     /// 退出时保存历史记录
     pub fn save_history_on_exit(&self) -> Result<(), String> {
-        let history = self.history.lock().unwrap();
-        let categories = self.categories.lock().unwrap();
-        let category_list = self.category_list.lock().unwrap();
+        let history = lock_arc_mutex(&self.history);
+        let categories = lock_arc_mutex(&self.categories);
+        let category_list = lock_arc_mutex(&self.category_list);
 
         let data = ClipboardHistoryData {
             items: history.clone(),
             categories: categories.clone(),
             category_list: category_list.clone(),
-            pinned_items: self.pinned_items.lock().unwrap().clone(),
+            pinned_items: lock_arc_mutex(&self.pinned_items).clone(),
         };
         save_history_data_with_retry(&data, 3)
     }
 
     pub fn set_grouped_items_protected_from_limit(&mut self, enabled: bool) {
         self.grouped_items_protected_from_limit = enabled;
-        let mut history = self.history.lock().unwrap();
-        let mut categories = self.categories.lock().unwrap();
-        let mut pinned_items = self.pinned_items.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
+        let mut categories = lock_arc_mutex(&self.categories);
+        let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         shrink_text_history_with_group_protection(
             &mut history,
             self.max_items,
