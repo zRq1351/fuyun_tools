@@ -5,4 +5,3 @@ pub mod clipboard_access_guard;
 pub mod clipboard_wakeup;
 pub mod clipboard_manager;
 pub mod image_clipboard_manager;
-pub mod poll_metrics;

@@ -78,8 +78,8 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                         let manager_guard = state_guard.image_clipboard_manager.lock().unwrap();
                         manager_guard.clone()
                     };
-                    for (rgba, width, height) in images {
-                        manager.add_rgba_image(rgba, width, height);
+                    for (rgba, width, height, source_blob) in images {
+                        manager.add_rgba_image_with_source_blob(rgba, width, height, source_blob);
                         let _ = app_handle.emit("image-history-updated", serde_json::json!({}));
                     }
                     let payload = serde_json::json!({
@@ -112,11 +112,11 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
     });
 }
 
-fn build_fast_signature(images: &[(Vec<u8>, u32, u32)]) -> String {
+fn build_fast_signature(images: &[crate::utils::image_clipboard::ClipboardImagePayload]) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     images.len().hash(&mut hasher);
-    for (rgba, width, height) in images {
+    for (rgba, width, height, _) in images {
         width.hash(&mut hasher);
         height.hash(&mut hasher);
         rgba.len().hash(&mut hasher);

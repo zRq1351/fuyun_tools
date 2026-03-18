@@ -27,10 +27,12 @@ const IMAGE_FULL_RES_MEMORY_BUDGET_BYTES: usize = 256 * 1024 * 1024;
 const IMAGE_FULL_RES_CACHE_KEEP_RECENT: usize = 6;
 const IMAGE_PERSIST_QUEUE_SIZE: usize = 6;
 const IMAGE_PREVIEW_MAX_EDGE: u32 = 320;
+const BITMAP_STORAGE_USE_LOSSLESS_WEBP: bool = true;
 const IMAGE_FILL_VERIFY_MODE_STRICT: u8 = 0;
 const IMAGE_FILL_VERIFY_MODE_FAST: u8 = 1;
 static IMAGE_FILL_VERIFY_MODE: std::sync::atomic::AtomicU8 =
     std::sync::atomic::AtomicU8::new(IMAGE_FILL_VERIFY_MODE_STRICT);
+pub type ClipboardImagePayload = (Vec<u8>, u32, u32, Option<(Vec<u8>, String)>);
 
 pub fn set_image_fill_verify_mode(mode: &str) {
     let value = if mode == "fast" {
@@ -504,6 +506,16 @@ impl ImageClipboardManager {
         self.add_image_with_source_blob(rgba, width, height, None);
     }
 
+    pub fn add_rgba_image_with_source_blob(
+        &self,
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+        source_blob: Option<(Vec<u8>, String)>,
+    ) {
+        self.add_image_with_source_blob(rgba, width, height, source_blob);
+    }
+
     fn add_image_with_source_blob(
         &self,
         rgba: Vec<u8>,
@@ -539,10 +551,13 @@ impl ImageClipboardManager {
         let id = generate_item_id(&signature);
         let (preview_width, preview_height, preview_rgba_base64) =
             build_preview_from_rgba(&rgba, width, height);
-        let blob_ext = source_blob
-            .as_ref()
-            .map(|(_, ext)| ext.as_str())
-            .unwrap_or("png");
+        let blob_ext = source_blob.as_ref().map(|(_, ext)| ext.as_str()).unwrap_or(
+            if BITMAP_STORAGE_USE_LOSSLESS_WEBP {
+                "webp"
+            } else {
+                "png"
+            },
+        );
         let image_path = image_blob_path(&id, blob_ext).to_string_lossy().to_string();
         let item = ImageHistoryItem {
             id: id.clone(),
@@ -1074,7 +1089,7 @@ impl ImageClipboardManager {
 
     pub fn read_clipboard_images_rgba(
         app_handle: &tauri::AppHandle,
-    ) -> Result<Vec<(Vec<u8>, u32, u32)>, String> {
+    ) -> Result<Vec<ClipboardImagePayload>, String> {
         use tauri_plugin_clipboard_manager::ClipboardExt;
         let retry_delays = [12u64, 18, 26, 36, 48, 62, 78, 96];
         for (attempt, delay_ms) in retry_delays.iter().enumerate() {
@@ -1087,7 +1102,7 @@ impl ImageClipboardManager {
                     let height = image.height();
                     let rgba = image.rgba().to_vec();
                     if !rgba.is_empty() && width > 0 && height > 0 {
-                        return Ok(vec![(rgba, width, height)]);
+                        return Ok(vec![(rgba, width, height, None)]);
                     }
                 }
                 Err(_) => {}
@@ -1099,12 +1114,14 @@ impl ImageClipboardManager {
         if let Ok(text) = crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
             app_handle.clipboard().read_text()
         }) {
-            if let Some((rgba, width, height)) = parse_image_from_text_payload(&text) {
-                return Ok(vec![(rgba, width, height)]);
+            if let Some(payload) = parse_image_from_text_payload(&text) {
+                return Ok(vec![payload]);
             }
             if let Some(path) = parse_local_image_path_from_text(&text) {
-                if let Ok((rgba, width, height)) = read_local_image_rgba(&path) {
-                    return Ok(vec![(rgba, width, height)]);
+                if let Ok((rgba, width, height, source_bytes, source_ext)) =
+                    read_local_image_for_import(&path)
+                {
+                    return Ok(vec![(rgba, width, height, Some((source_bytes, source_ext)))]);
                 }
             }
             if text_contains_remote_image_url(&text) {
@@ -1479,7 +1496,7 @@ fn start_image_persist_worker(
                 atomic_write_with_backup(Path::new(&task.image_path), encoded_bytes)
                     .map_err(|e| format!("写入图片数据失败: {}", e))
             } else {
-                persist_png_to_path(&task.image_path, &task.rgba, task.width, task.height)
+                persist_generated_image_to_path(&task.image_path, &task.rgba, task.width, task.height)
             };
             if let Err(e) = persist_result {
                 log::error!("异步落盘图片失败: {}", e);
@@ -1490,11 +1507,40 @@ fn start_image_persist_worker(
     });
 }
 
-fn persist_png_to_path(path: &str, rgba: &[u8], width: u32, height: u32) -> Result<(), String> {
+fn persist_generated_image_to_path(path: &str, rgba: &[u8], width: u32, height: u32) -> Result<(), String> {
     let dir = get_image_blobs_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建图片存储目录失败: {}", e))?;
-    let encoded = rgba_to_png_bytes(rgba, width, height)?;
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_else(|| "png".to_string());
+    let encoded = if ext == "webp" {
+        rgba_to_lossless_webp_bytes(rgba, width, height)?
+    } else {
+        rgba_to_png_bytes_for_storage(rgba, width, height)?
+    };
     atomic_write_with_backup(Path::new(path), &encoded).map_err(|e| format!("写入图片数据失败: {}", e))
+}
+
+fn rgba_to_lossless_webp_bytes(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+    let mut encoded = Vec::new();
+    image::codecs::webp::WebPEncoder::new_lossless(&mut encoded)
+        .write_image(rgba, width, height, image::ColorType::Rgba8.into())
+        .map_err(|e| format!("编码存储WebP失败: {}", e))?;
+    Ok(encoded)
+}
+
+fn rgba_to_png_bytes_for_storage(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+    let mut encoded = Vec::new();
+    image::codecs::png::PngEncoder::new_with_quality(
+        &mut encoded,
+        image::codecs::png::CompressionType::Best,
+        image::codecs::png::FilterType::Adaptive,
+    )
+    .write_image(rgba, width, height, image::ColorType::Rgba8.into())
+    .map_err(|e| format!("编码存储PNG失败: {}", e))?;
+    Ok(encoded)
 }
 
 fn rgba_to_png_bytes(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
@@ -1754,24 +1800,24 @@ fn parse_local_image_path_from_text(text: &str) -> Option<String> {
     None
 }
 
-fn parse_image_from_text_payload(text: &str) -> Option<(Vec<u8>, u32, u32)> {
-    if let Some((rgba, width, height)) = parse_data_url_image(text) {
-        return Some((rgba, width, height));
+fn parse_image_from_text_payload(text: &str) -> Option<(Vec<u8>, u32, u32, Option<(Vec<u8>, String)>)> {
+    if let Some(payload) = parse_data_url_image(text) {
+        return Some(payload);
     }
     if let Some(src) = extract_img_src_from_html(text) {
-        if let Some((rgba, width, height)) = parse_data_url_image(&src) {
-            return Some((rgba, width, height));
+        if let Some(payload) = parse_data_url_image(&src) {
+            return Some(payload);
         }
         if let Some(path) = parse_local_image_path_from_text(&src) {
-            if let Ok((rgba, width, height)) = read_local_image_rgba(&path) {
-                return Some((rgba, width, height));
+            if let Ok((rgba, width, height, source_bytes, source_ext)) = read_local_image_for_import(&path) {
+                return Some((rgba, width, height, Some((source_bytes, source_ext))));
             }
         }
     }
     None
 }
 
-fn parse_data_url_image(text: &str) -> Option<(Vec<u8>, u32, u32)> {
+fn parse_data_url_image(text: &str) -> Option<(Vec<u8>, u32, u32, Option<(Vec<u8>, String)>)> {
     let trimmed = text.trim();
     let data_url = if trimmed.starts_with("data:image/") {
         trimmed
@@ -1793,13 +1839,32 @@ fn parse_data_url_image(text: &str) -> Option<(Vec<u8>, u32, u32)> {
     } else {
         return None;
     };
+    let source_ext = parse_image_ext_from_data_url_meta(meta).unwrap_or_else(|| "png".to_string());
     let dyn_img = ::image::load_from_memory(&bytes).ok()?;
     let rgba8 = dyn_img.to_rgba8();
     let (width, height) = rgba8.dimensions();
     if width == 0 || height == 0 {
         return None;
     }
-    Some((rgba8.into_raw(), width, height))
+    Some((rgba8.into_raw(), width, height, Some((bytes, source_ext))))
+}
+
+fn parse_image_ext_from_data_url_meta(meta: &str) -> Option<String> {
+    let normalized = meta.trim().to_lowercase();
+    let prefix = "data:image/";
+    if !normalized.starts_with(prefix) {
+        return None;
+    }
+    let body = &normalized[prefix.len()..];
+    let ext = body.split(';').next().unwrap_or("png").trim();
+    if ext.is_empty() {
+        return None;
+    }
+    Some(match ext {
+        "jpeg" => "jpg".to_string(),
+        "svg+xml" => "png".to_string(),
+        other => other.to_string(),
+    })
 }
 
 fn extract_img_src_from_html(text: &str) -> Option<String> {
@@ -1837,17 +1902,6 @@ fn looks_like_image_file_path(path: &str) -> bool {
         || lower.ends_with(".bmp")
         || lower.ends_with(".gif")
         || lower.ends_with(".webp")
-}
-
-fn read_local_image_rgba(path: &str) -> Result<(Vec<u8>, u32, u32), String> {
-    let dyn_img = ::image::open(path).map_err(|e| format!("读取本地图片失败: {}", e))?;
-    let rgba8 = dyn_img.to_rgba8();
-    let (width, height) = rgba8.dimensions();
-    let rgba = rgba8.into_raw();
-    if rgba.is_empty() || width == 0 || height == 0 {
-        return Err("本地图片为空".to_string());
-    }
-    Ok((rgba, width, height))
 }
 
 fn read_local_image_for_import(path: &str) -> Result<(Vec<u8>, u32, u32, Vec<u8>, String), String> {
@@ -1987,7 +2041,7 @@ fn hex_val(c: u8) -> Option<u8> {
 }
 
 #[cfg(target_os = "windows")]
-fn read_images_from_windows_file_clipboard() -> Vec<(Vec<u8>, u32, u32)> {
+fn read_images_from_windows_file_clipboard() -> Vec<ClipboardImagePayload> {
     unsafe {
         if IsClipboardFormatAvailable(CF_HDROP as UINT) == 0 {
             return Vec::new();
@@ -2005,7 +2059,7 @@ fn read_images_from_windows_file_clipboard() -> Vec<(Vec<u8>, u32, u32)> {
             CloseClipboard();
             return Vec::new();
         }
-        let mut result: Vec<(Vec<u8>, u32, u32)> = Vec::new();
+        let mut result: Vec<ClipboardImagePayload> = Vec::new();
         let mut index = 0;
         while index < count {
             let len = DragQueryFileW(handle as *mut _, index, std::ptr::null_mut(), 0);
@@ -2015,8 +2069,10 @@ fn read_images_from_windows_file_clipboard() -> Vec<(Vec<u8>, u32, u32)> {
                 if written > 0 {
                     let path = String::from_utf16_lossy(&buf[..written as usize]);
                     if looks_like_image_file_path(&path) {
-                        if let Ok((rgba, width, height)) = read_local_image_rgba(&path) {
-                            result.push((rgba, width, height));
+                        if let Ok((rgba, width, height, source_bytes, source_ext)) =
+                            read_local_image_for_import(&path)
+                        {
+                            result.push((rgba, width, height, Some((source_bytes, source_ext))));
                         }
                     }
                 }
