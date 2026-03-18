@@ -1,5 +1,6 @@
 use crate::core::app_state::AppState as SharedAppState;
 use crate::core::config::{AIProvider, ProviderConfig};
+use crate::core::error::{to_frontend_error_string, AppError, AppResult, ErrorCode};
 use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
 use crate::ui::window_manager::{
@@ -7,19 +8,21 @@ use crate::ui::window_manager::{
     show_clipboard_window, show_image_clipboard_window, show_image_preview_loading_window,
     show_image_preview_window,
 };
+use crate::utils::clipboard::ClipboardManager;
 use crate::utils::image_clipboard::{
-    is_fast_fill_verify_mode_enabled, set_image_fill_verify_mode, ImageHistoryPageData,
-    ImageHistoryPreviewItem,
+    is_fast_fill_verify_mode_enabled, set_image_fill_verify_mode, ImageClipboardManager,
+    ImageHistoryPageData, ImageHistoryPreviewItem,
 };
+use crate::sync::Mutex;
 use crate::utils::utils_helpers::{
     default_explanation_prompt_template, default_translation_prompt_template, get_dedup_scan_metrics,
-    load_history_page_data, load_settings, save_settings, ClipboardHistoryPageData,
+    load_history_page_data_async, load_settings, save_settings, ClipboardHistoryPageData,
 };
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -59,16 +62,23 @@ pub async fn get_image_clipboard_history_page(
     request: ImageHistoryPageRequest,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<ImageHistoryPageData, String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.image_clipboard_manager.lock().unwrap();
-    Ok(manager.get_history_preview_page(
-        request.offset,
-        request.limit,
-        request.category,
-        request.keyword,
-        request.pinned_only,
-        request.sort_order,
-    ))
+    let manager_arc = get_image_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    Ok(
+        manager
+            .get_history_preview_page_async(
+                request.offset,
+                request.limit,
+                request.category,
+                request.keyword,
+                request.pinned_only,
+                request.sort_order,
+            )
+            .await,
+    )
 }
 
 fn default_history_page_limit() -> usize {
@@ -112,7 +122,13 @@ pub async fn open_image_preview_window_by_id(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    execute_open_image_preview_window_by_id(request.item_id, state.inner().clone(), app)
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_open_image_preview_window_by_id(request.item_id, state_arc, app)
+            .map_err(to_frontend_error_string)
+    })
+        .await
+        .map_err(|e| frontend_error(ErrorCode::SystemError, "打开图片预览任务执行失败", e.to_string()))?
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -144,8 +160,22 @@ impl FillKind {
     }
 }
 
+fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    }
+}
+
+fn lock_mutex<'a, T>(mutex: &'a Mutex<T>) -> crate::sync::MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    }
+}
+
 fn begin_fill_sequence(state: &Arc<Mutex<SharedAppState>>, kind: FillKind) -> u64 {
-    let mut state_guard = state.lock().unwrap();
+    let mut state_guard = lock_arc_mutex(state);
     state_guard.is_updating_clipboard = true;
     state_guard.is_processing_selection = true;
     match kind {
@@ -161,16 +191,15 @@ fn begin_fill_sequence(state: &Arc<Mutex<SharedAppState>>, kind: FillKind) -> u6
 }
 
 fn is_fill_latest(state: &Arc<Mutex<SharedAppState>>, kind: FillKind, fill_seq: u64) -> bool {
-    let guard = state.lock().unwrap();
+    let guard = lock_arc_mutex(state);
     kind.current_seq(&guard) == fill_seq
 }
 
 fn finish_fill_if_latest(state: &Arc<Mutex<SharedAppState>>, kind: FillKind, fill_seq: u64) {
-    if let Ok(mut guard) = state.lock() {
-        if kind.current_seq(&guard) == fill_seq {
-            guard.is_processing_selection = false;
-            guard.is_updating_clipboard = false;
-        }
+    let mut guard = lock_arc_mutex(state);
+    if kind.current_seq(&guard) == fill_seq {
+        guard.is_processing_selection = false;
+        guard.is_updating_clipboard = false;
     }
 }
 
@@ -182,28 +211,26 @@ fn get_image_promote_pending_id_slot() -> &'static Mutex<Option<String>> {
 }
 
 pub fn interrupt_text_fill_flow(state: &Arc<Mutex<SharedAppState>>) {
-    if let Ok(mut state_guard) = state.lock() {
-        state_guard.text_fill_seq = state_guard.text_fill_seq.wrapping_add(1);
-        state_guard.is_processing_selection = false;
-        state_guard.is_updating_clipboard = false;
-    }
+    let mut state_guard = lock_arc_mutex(state);
+    state_guard.text_fill_seq = state_guard.text_fill_seq.wrapping_add(1);
+    state_guard.is_processing_selection = false;
+    state_guard.is_updating_clipboard = false;
 }
 
 pub fn interrupt_image_fill_flow(state: &Arc<Mutex<SharedAppState>>) {
-    if let Ok(mut state_guard) = state.lock() {
-        state_guard.image_fill_seq = state_guard.image_fill_seq.wrapping_add(1);
-        state_guard.is_processing_selection = false;
-        state_guard.is_updating_clipboard = false;
-    }
+    let mut state_guard = lock_arc_mutex(state);
+    state_guard.image_fill_seq = state_guard.image_fill_seq.wrapping_add(1);
+    state_guard.is_processing_selection = false;
+    state_guard.is_updating_clipboard = false;
     let slot = get_image_promote_pending_id_slot();
-    let mut guard = slot.lock().unwrap();
+    let mut guard = lock_mutex(slot);
     *guard = None;
 }
 
 fn schedule_image_promote_to_top(state: Arc<Mutex<SharedAppState>>, item_id: String) {
     {
         let slot = get_image_promote_pending_id_slot();
-        let mut guard = slot.lock().unwrap();
+        let mut guard = lock_mutex(slot);
         *guard = Some(item_id);
     }
     if IMAGE_PROMOTE_WORKER_RUNNING
@@ -217,22 +244,24 @@ fn schedule_image_promote_to_top(state: Arc<Mutex<SharedAppState>>, item_id: Str
             thread::sleep(Duration::from_millis(120));
             let next_item_id = {
                 let slot = get_image_promote_pending_id_slot();
-                let mut guard = slot.lock().unwrap();
+                let mut guard = lock_mutex(slot);
                 guard.take()
             };
             if let Some(item_id) = next_item_id {
-                if let Ok(state_guard) = state.lock() {
-                    let manager = state_guard.image_clipboard_manager.lock().unwrap();
-                    if let Err(e) = manager.promote_to_top_by_id(&item_id) {
-                        log::warn!("极速模式异步置顶图片失败: {}", e);
-                    }
+                let manager_arc = {
+                    let state_guard = lock_arc_mutex(&state);
+                    state_guard.image_clipboard_manager.clone()
+                };
+                let manager = lock_arc_mutex(&manager_arc);
+                if let Err(e) = manager.promote_to_top_by_id(&item_id) {
+                    log::warn!("极速模式异步置顶图片失败: {}", e);
                 }
                 continue;
             }
             IMAGE_PROMOTE_WORKER_RUNNING.store(false, Ordering::SeqCst);
             let has_pending = {
                 let slot = get_image_promote_pending_id_slot();
-                let guard = slot.lock().unwrap();
+                let guard = lock_mutex(slot);
                 guard.is_some()
             };
             if has_pending
@@ -424,9 +453,24 @@ fn simulate_paste_with_retry(
 }
 
 fn set_updating_clipboard(state: &Arc<Mutex<SharedAppState>>, updating: bool) {
-    if let Ok(mut state_guard) = state.lock() {
-        state_guard.is_updating_clipboard = updating;
-    }
+    let mut state_guard = lock_arc_mutex(state);
+    state_guard.is_updating_clipboard = updating;
+}
+
+fn get_clipboard_manager_arc(state: &Arc<Mutex<SharedAppState>>) -> Arc<Mutex<ClipboardManager>> {
+    let state_guard = lock_arc_mutex(state);
+    state_guard.clipboard_manager.clone()
+}
+
+fn get_image_clipboard_manager_arc(
+    state: &Arc<Mutex<SharedAppState>>,
+) -> Arc<Mutex<ImageClipboardManager>> {
+    let state_guard = lock_arc_mutex(state);
+    state_guard.image_clipboard_manager.clone()
+}
+
+fn frontend_error(code: ErrorCode, message: impl Into<String>, details: impl Into<String>) -> String {
+    to_frontend_error_string(AppError::new(code, message).with_details(details.into()))
 }
 
 fn with_updating_clipboard<T, F>(
@@ -447,9 +491,9 @@ fn try_replace_text_clipboard_after_remove(
     app: &AppHandle,
     removed_item: &str,
 ) {
+    let manager_arc = get_clipboard_manager_arc(state);
     let current_clipboard = {
-        let state_guard = state.lock().unwrap();
-        let manager = state_guard.clipboard_manager.lock().unwrap();
+        let manager = lock_arc_mutex(&manager_arc);
         manager.get_content(app)
     };
 
@@ -458,13 +502,11 @@ fn try_replace_text_clipboard_after_remove(
     }
 
     let next_item = {
-        let state_guard = state.lock().unwrap();
-        let manager = state_guard.clipboard_manager.lock().unwrap();
+        let manager = lock_arc_mutex(&manager_arc);
         manager.get_history().first().cloned()
     };
     if let Some(next) = next_item {
-        let state_guard = state.lock().unwrap();
-        let manager = state_guard.clipboard_manager.lock().unwrap();
+        let manager = lock_arc_mutex(&manager_arc);
         if let Err(e) = manager.set_clipboard_content(app, &next) {
             log::warn!("删除文本后写入下一条到剪贴板失败: {}", e);
         }
@@ -476,6 +518,7 @@ fn try_replace_image_clipboard_after_remove(
     app: &AppHandle,
     removed_signature: &str,
 ) {
+    let manager_arc = get_image_clipboard_manager_arc(state);
     let should_replace_clipboard =
         match crate::utils::image_clipboard::ImageClipboardManager::read_clipboard_images_rgba(app) {
             Ok(images) if !images.is_empty() => {
@@ -491,8 +534,7 @@ fn try_replace_image_clipboard_after_remove(
     }
 
     let next_image = {
-        let state_guard = state.lock().unwrap();
-        let manager = state_guard.image_clipboard_manager.lock().unwrap();
+        let manager = lock_arc_mutex(&manager_arc);
         manager.get_image_by_index(0).ok()
     };
     if let Some(image) = next_image {
@@ -508,22 +550,26 @@ fn execute_select_and_fill_text(
     request: SelectAndFillRequest,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
-) -> Result<String, String> {
+) -> AppResult<String> {
     let index = request.index;
     let fill_seq = begin_fill_sequence(&state, FillKind::Text);
     let operation_id = request.op_id.unwrap_or(fill_seq);
+    let manager_arc = get_clipboard_manager_arc(&state);
 
     let item_content = {
-        let state_guard = state.lock().unwrap();
-        let manager = state_guard.clipboard_manager.lock().unwrap();
+        let manager = lock_arc_mutex(&manager_arc);
         manager
             .promote_to_top(index)
-            .map_err(|e| format!("索引 {} 超出范围: {}", index, e))?
+            .map_err(|e| {
+                AppError::new(ErrorCode::ClipboardError, format!("索引 {} 超出范围", index))
+                    .with_details(e)
+            })?
     };
 
     hide_clipboard_window(app.clone(), state.clone());
 
     let item_content_clone = item_content.clone();
+    let manager_arc_for_fill = manager_arc.clone();
     spawn_fill_task(
         FillKind::Text,
         app,
@@ -531,8 +577,8 @@ fn execute_select_and_fill_text(
         fill_seq,
         operation_id,
         move |app_handle, state_ref| {
-            let state_guard = state_ref.lock().unwrap();
-            let manager = state_guard.clipboard_manager.lock().unwrap();
+            let _ = state_ref;
+            let manager = lock_arc_mutex(&manager_arc_for_fill);
             manager.set_clipboard_content(app_handle, &item_content_clone)?;
             let _ = app_handle.emit(
                 "text-item-promoted",
@@ -551,38 +597,40 @@ fn execute_remove_clipboard_item(
     index: usize,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> AppResult<()> {
     log::info!("删除剪贴板项目，索引: {}", index);
-    with_updating_clipboard(&state, || {
+    let manager_arc = get_clipboard_manager_arc(&state);
+    with_updating_clipboard(&state, || -> Result<(), String> {
         let removed_item = {
-            let state_guard = state.lock().unwrap();
-            let manager = state_guard.clipboard_manager.lock().unwrap();
+            let manager = lock_arc_mutex(&manager_arc);
             manager.remove_from_history(index)?
         };
         try_replace_text_clipboard_after_remove(&state, &app, &removed_item);
         Ok(())
     })
+        .map_err(|e| AppError::new(ErrorCode::ClipboardError, "删除文本历史失败").with_details(e))
 }
 
 fn execute_open_image_preview_window_by_id(
     item_id: String,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> AppResult<()> {
     let request_id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis()
         .to_string();
-    show_image_preview_loading_window(app.clone(), request_id.clone())?;
+    show_image_preview_loading_window(app.clone(), request_id.clone())
+        .map_err(|e| AppError::new(ErrorCode::SystemError, "打开预览加载窗口失败").with_details(e))?;
     let state_clone = state;
     let app_clone = app;
     let request_id_clone = request_id;
     thread::spawn(move || {
         let result: Result<(), String> = (|| {
+            let manager_arc = get_image_clipboard_manager_arc(&state_clone);
             let image_path = {
-                let state_guard = state_clone.lock().unwrap();
-                let manager = state_guard.image_clipboard_manager.lock().unwrap();
+                let manager = lock_arc_mutex(&manager_arc);
                 manager.get_preview_image_path_by_id(&item_id)?
             };
             show_image_preview_window(app_clone, request_id_clone, image_path)
@@ -597,46 +645,52 @@ fn execute_open_image_preview_window_by_id(
 fn execute_warmup_image_clipboard_item_by_id(
     item_id: String,
     state: Arc<Mutex<SharedAppState>>,
-) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.image_clipboard_manager.lock().unwrap();
-    manager.warmup_image_by_id(&item_id)
+) -> AppResult<()> {
+    let manager_arc = get_image_clipboard_manager_arc(&state);
+    let manager = lock_arc_mutex(&manager_arc);
+    manager
+        .warmup_image_by_id(&item_id)
+        .map_err(|e| AppError::new(ErrorCode::ClipboardError, "预热图片失败").with_details(e))
 }
 
 fn execute_promote_image_clipboard_item_by_id(
     item_id: String,
     state: Arc<Mutex<SharedAppState>>,
-) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.image_clipboard_manager.lock().unwrap();
-    manager.promote_to_top_by_id(&item_id)
+) -> AppResult<()> {
+    let manager_arc = get_image_clipboard_manager_arc(&state);
+    let manager = lock_arc_mutex(&manager_arc);
+    manager
+        .promote_to_top_by_id(&item_id)
+        .map_err(|e| AppError::new(ErrorCode::ClipboardError, "置顶图片失败").with_details(e))
 }
 
 fn execute_remove_image_clipboard_item_by_id(
     item_id: String,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
-) -> Result<(), String> {
-    with_updating_clipboard(&state, || {
+) -> AppResult<()> {
+    let manager_arc = get_image_clipboard_manager_arc(&state);
+    with_updating_clipboard(&state, || -> Result<(), String> {
         let removed_signature = {
-            let state_guard = state.lock().unwrap();
-            let manager = state_guard.image_clipboard_manager.lock().unwrap();
+            let manager = lock_arc_mutex(&manager_arc);
             let (_, _, signature) = manager.remove_from_history_by_id(&item_id)?;
             signature
         };
         try_replace_image_clipboard_after_remove(&state, &app, &removed_signature);
         Ok(())
     })
+        .map_err(|e| AppError::new(ErrorCode::ClipboardError, "删除图片历史失败").with_details(e))
 }
 
 fn execute_select_and_fill_image_by_id(
     request: SelectAndFillImageByIdRequest,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> AppResult<()> {
     let item_id = request.item_id;
     let fill_seq = begin_fill_sequence(&state, FillKind::Image);
     let operation_id = request.op_id.unwrap_or(fill_seq);
+    let manager_arc = get_image_clipboard_manager_arc(&state);
 
     hide_image_clipboard_window(app.clone(), state.clone());
 
@@ -649,8 +703,8 @@ fn execute_select_and_fill_image_by_id(
         move |app_handle, state_ref| {
             let fast_mode = is_fast_fill_verify_mode_enabled();
             let image = {
-                let state_guard = state_ref.lock().unwrap();
-                let manager = state_guard.image_clipboard_manager.lock().unwrap();
+                let _ = state_ref;
+                let manager = lock_arc_mutex(&manager_arc);
                 if fast_mode {
                     manager.promote_to_top_in_memory_by_id(&item_id)?;
                     manager.get_image_by_index_for_fill(0)?
@@ -682,8 +736,8 @@ fn execute_select_and_fill_image_by_id(
 pub async fn get_clipboard_history(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<HistoryResponse, String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.clipboard_manager.lock().unwrap();
+    let manager_arc = get_clipboard_manager_arc(state.inner());
+    let manager = lock_arc_mutex(&manager_arc);
     Ok(HistoryResponse {
         history: manager.get_history(),
         categories: manager.get_categories(),
@@ -696,7 +750,7 @@ pub async fn get_clipboard_history(
 pub async fn get_clipboard_history_page(
     request: ClipboardHistoryPageRequest,
 ) -> Result<ClipboardHistoryPageData, String> {
-    load_history_page_data(
+    load_history_page_data_async(
         request.offset,
         request.limit,
         request.category,
@@ -705,6 +759,7 @@ pub async fn get_clipboard_history_page(
         request.sort_by,
         request.sort_order,
     )
+        .await
 }
 
 #[derive(serde::Deserialize)]
@@ -734,9 +789,15 @@ pub async fn set_item_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.clipboard_manager.lock().unwrap();
-    manager.set_category(item, category)
+    let manager_arc = get_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager
+        .set_category_async(item, category)
+        .await
+        .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "设置文本分类失败").with_details(e)))
 }
 
 #[tauri::command]
@@ -744,9 +805,15 @@ pub async fn remove_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.clipboard_manager.lock().unwrap();
-    manager.remove_category(category)
+    let manager_arc = get_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager
+        .remove_category_async(category)
+        .await
+        .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "删除文本分类失败").with_details(e)))
 }
 
 #[tauri::command]
@@ -754,17 +821,26 @@ pub async fn add_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.clipboard_manager.lock().unwrap();
-    manager.add_category(category)
+    let manager_arc = get_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager
+        .add_category_async(category)
+        .await
+        .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "新增文本分类失败").with_details(e)))
 }
 
 #[tauri::command]
 pub async fn get_image_clipboard_history(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<ImageHistoryResponse, String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.image_clipboard_manager.lock().unwrap();
+    let manager_arc = get_image_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
     Ok(ImageHistoryResponse {
         history: manager.get_history_preview(),
         categories: manager.get_categories(),
@@ -785,7 +861,13 @@ pub async fn warmup_image_clipboard_item_by_id(
     request: ItemIdRequest,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    execute_warmup_image_clipboard_item_by_id(request.item_id, state.inner().clone())
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_warmup_image_clipboard_item_by_id(request.item_id, state_arc)
+            .map_err(to_frontend_error_string)
+    })
+        .await
+        .map_err(|e| frontend_error(ErrorCode::SystemError, "预热图片任务执行失败", e.to_string()))?
 }
 
 #[tauri::command]
@@ -794,9 +876,15 @@ pub async fn set_image_item_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.image_clipboard_manager.lock().unwrap();
-    manager.set_category(item_id, category)
+    let manager_arc = get_image_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager
+        .set_category_async(item_id, category)
+        .await
+        .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "设置图片分类失败").with_details(e)))
 }
 
 #[tauri::command]
@@ -804,9 +892,15 @@ pub async fn remove_image_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.image_clipboard_manager.lock().unwrap();
-    manager.remove_category(category)
+    let manager_arc = get_image_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager
+        .remove_category_async(category)
+        .await
+        .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "删除图片分类失败").with_details(e)))
 }
 
 #[tauri::command]
@@ -815,9 +909,15 @@ pub async fn set_image_item_tags(
     tags: Vec<String>,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.image_clipboard_manager.lock().unwrap();
-    manager.set_tags(item_id, tags)
+    let manager_arc = get_image_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager
+        .set_tags_async(item_id, tags)
+        .await
+        .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "设置图片标签失败").with_details(e)))
 }
 
 #[tauri::command]
@@ -827,15 +927,21 @@ pub async fn set_clipboard_item_pinned(
     pinned: bool,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.clipboard_manager.lock().unwrap();
-    let resolved_item = if let Some(idx) = index {
-        manager.get_history().get(idx).cloned()
-    } else {
-        item
-    }
-    .ok_or_else(|| "索引超出范围".to_string())?;
-    manager.set_pinned(resolved_item, pinned)
+    let manager_arc = get_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager
+        .set_pinned_by_selector_async(index, item, pinned)
+        .await
+        .map_err(|e| {
+            if e == "索引超出范围" {
+                to_frontend_error_string(AppError::new(ErrorCode::ValidationError, "索引超出范围"))
+            } else {
+                to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "设置置顶状态失败").with_details(e))
+            }
+        })
 }
 
 #[tauri::command]
@@ -844,9 +950,15 @@ pub async fn set_image_item_pinned(
     pinned: bool,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.image_clipboard_manager.lock().unwrap();
-    manager.set_pinned(item_id, pinned)
+    let manager_arc = get_image_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager
+        .set_pinned_async(item_id, pinned)
+        .await
+        .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "设置图片置顶状态失败").with_details(e)))
 }
 
 #[tauri::command]
@@ -854,9 +966,16 @@ pub async fn promote_clipboard_item(
     index: usize,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.clipboard_manager.lock().unwrap();
-    manager.promote_to_top(index).map(|_| ())
+    let manager_arc = get_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager
+        .promote_to_top_async(index)
+        .await
+        .map(|_| ())
+        .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "置顶文本失败").with_details(e)))
 }
 
 #[tauri::command]
@@ -864,7 +983,13 @@ pub async fn promote_image_clipboard_item_by_id(
     request: ItemIdRequest,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    execute_promote_image_clipboard_item_by_id(request.item_id, state.inner().clone())
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_promote_image_clipboard_item_by_id(request.item_id, state_arc)
+            .map_err(to_frontend_error_string)
+    })
+        .await
+        .map_err(|e| frontend_error(ErrorCode::SystemError, "置顶图片任务执行失败", e.to_string()))?
 }
 
 #[tauri::command]
@@ -872,9 +997,15 @@ pub async fn clear_text_history(
     mode: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<usize, String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.clipboard_manager.lock().unwrap();
-    manager.clear_history_by_mode(mode.as_str())
+    let manager_arc = get_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager
+        .clear_history_by_mode_async(mode.as_str())
+        .await
+        .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "清理文本历史失败").with_details(e)))
 }
 
 #[tauri::command]
@@ -882,9 +1013,15 @@ pub async fn clear_image_history(
     mode: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<usize, String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.image_clipboard_manager.lock().unwrap();
-    manager.clear_history_by_mode(mode.as_str())
+    let manager_arc = get_image_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager
+        .clear_history_by_mode_async(mode.as_str())
+        .await
+        .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "清理图片历史失败").with_details(e)))
 }
 
 #[tauri::command]
@@ -894,16 +1031,26 @@ pub async fn import_image_files(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<usize, String> {
     if paths.is_empty() {
-        return Err("未选择任何文件或文件夹".to_string());
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "未选择任何文件或文件夹",
+            "paths is empty",
+        ));
     }
-    let image_paths = collect_import_image_paths(paths)?;
+    let image_paths = collect_import_image_paths(paths).map_err(|e| {
+        frontend_error(ErrorCode::IoError, "收集可导入图片路径失败", e)
+    })?;
     if image_paths.is_empty() {
-        return Err("未找到可导入的图片".to_string());
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "未找到可导入的图片",
+            "collected image paths is empty",
+        ));
     }
     let total = image_paths.len();
     let manager = {
-        let state_guard = state.lock().unwrap();
-        let manager_guard = state_guard.image_clipboard_manager.lock().unwrap();
+        let state_guard = lock_arc_mutex(state.inner());
+        let manager_guard = lock_arc_mutex(&state_guard.image_clipboard_manager);
         manager_guard.clone()
     };
     let _ = app.emit(
@@ -921,7 +1068,7 @@ pub async fn import_image_files(
     let mut processed = 0usize;
     let mut last_error = String::new();
     for path in image_paths {
-        match manager.import_local_image_paths(vec![path.clone()]) {
+        match manager.import_local_image_paths_async(vec![path.clone()]).await {
             Ok(count) => {
                 imported = imported.saturating_add(count);
                 if count > 0 {
@@ -957,9 +1104,17 @@ pub async fn import_image_files(
     );
     if imported == 0 {
         if last_error.is_empty() {
-            Err("未导入任何图片".to_string())
+            Err(frontend_error(
+                ErrorCode::ClipboardError,
+                "未导入任何图片",
+                "imported == 0 and no detailed error",
+            ))
         } else {
-            Err(last_error)
+            Err(frontend_error(
+                ErrorCode::ClipboardError,
+                "导入图片失败",
+                last_error,
+            ))
         }
     } else {
         Ok(imported)
@@ -1024,16 +1179,22 @@ pub async fn add_image_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let manager = state_guard.image_clipboard_manager.lock().unwrap();
-    manager.add_category(category)
+    let manager_arc = get_image_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager
+        .add_category_async(category)
+        .await
+        .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "新增图片分类失败").with_details(e)))
 }
 
 #[tauri::command]
 pub async fn get_clipboard_bottom_offset(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<i32, String> {
-    let state_guard = state.lock().unwrap();
+    let state_guard = lock_arc_mutex(state.inner());
     Ok(state_guard.settings.clipboard_bottom_offset)
 }
 
@@ -1060,14 +1221,14 @@ pub async fn save_clipboard_bottom_offset(
 ) -> Result<(), String> {
     let final_offset = offset.clamp(0, 400);
     let mut settings = {
-        let state_guard = state.lock().unwrap();
+        let state_guard = lock_arc_mutex(state.inner());
         state_guard.settings.clone()
     };
     settings.clipboard_bottom_offset = final_offset;
     save_settings(&settings).map_err(|e| e.to_string())?;
 
     {
-        let mut state_guard = state.lock().unwrap();
+        let mut state_guard = lock_arc_mutex(state.inner());
         state_guard.settings = settings;
     }
 
@@ -1086,7 +1247,12 @@ pub async fn select_and_fill(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<String, String> {
-    execute_select_and_fill_text(request, state.inner().clone(), app)
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_select_and_fill_text(request, state_arc, app).map_err(to_frontend_error_string)
+    })
+        .await
+        .map_err(|e| frontend_error(ErrorCode::SystemError, "文本回填任务执行失败", e.to_string()))?
 }
 
 #[tauri::command]
@@ -1095,7 +1261,12 @@ pub async fn remove_clipboard_item(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    execute_remove_clipboard_item(index, state.inner().clone(), app)
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_remove_clipboard_item(index, state_arc, app).map_err(to_frontend_error_string)
+    })
+        .await
+        .map_err(|e| frontend_error(ErrorCode::SystemError, "删除文本历史任务执行失败", e.to_string()))?
 }
 
 #[tauri::command]
@@ -1104,7 +1275,13 @@ pub async fn remove_image_clipboard_item_by_id(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    execute_remove_image_clipboard_item_by_id(item_id, state.inner().clone(), app)
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_remove_image_clipboard_item_by_id(item_id, state_arc, app)
+            .map_err(to_frontend_error_string)
+    })
+        .await
+        .map_err(|e| frontend_error(ErrorCode::SystemError, "删除图片历史任务执行失败", e.to_string()))?
 }
 
 #[tauri::command]
@@ -1113,7 +1290,13 @@ pub async fn select_and_fill_image_by_id(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    execute_select_and_fill_image_by_id(request, state.inner().clone(), app)
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_select_and_fill_image_by_id(request, state_arc, app)
+            .map_err(to_frontend_error_string)
+    })
+        .await
+        .map_err(|e| frontend_error(ErrorCode::SystemError, "图片回填任务执行失败", e.to_string()))?
 }
 
 #[tauri::command]
@@ -1122,7 +1305,7 @@ pub async fn window_blur(
     app: AppHandle,
 ) -> Result<(), String> {
     let is_visible = {
-        let state_guard = state.lock().unwrap();
+        let state_guard = lock_arc_mutex(state.inner());
         state_guard.is_visible
     };
     if is_visible {
@@ -1138,7 +1321,7 @@ pub async fn image_window_blur(
     app: AppHandle,
 ) -> Result<(), String> {
     let is_visible = {
-        let state_guard = state.lock().unwrap();
+        let state_guard = lock_arc_mutex(state.inner());
         state_guard.is_image_visible
     };
     if is_visible {
@@ -1159,7 +1342,9 @@ pub async fn selection_toolbar_blur(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, String> {
-    let settings = load_settings()?;
+    let settings = load_settings().map_err(|e| {
+        frontend_error(ErrorCode::ConfigError, "读取AI设置失败", e)
+    })?;
 
     // 转换为HashMap格式，便于前端处理
     let mut result = HashMap::new();
@@ -1256,21 +1441,37 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
 #[tauri::command]
 pub async fn get_text_dedup_metrics() -> Result<serde_json::Value, String> {
     if !cfg!(debug_assertions) {
-        return Err("仅开发环境可用".to_string());
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "仅开发环境可用",
+            "debug_assertions is false",
+        ));
     }
-    serde_json::to_value(get_dedup_scan_metrics()).map_err(|e| e.to_string())
+    serde_json::to_value(get_dedup_scan_metrics()).map_err(|e| {
+        frontend_error(
+            ErrorCode::SystemError,
+            "序列化去重指标失败",
+            e.to_string(),
+        )
+    })
 }
 
 #[tauri::command]
 pub async fn get_image_storage_metrics(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<serde_json::Value, String> {
-    let metrics = {
-        let state_guard = state.lock().unwrap();
-        let manager = state_guard.image_clipboard_manager.lock().unwrap();
-        manager.get_storage_metrics()
+    let manager_arc = get_image_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
     };
-    serde_json::to_value(metrics).map_err(|e| e.to_string())
+    let metrics = manager.get_storage_metrics();
+    serde_json::to_value(metrics).map_err(|e| {
+        to_frontend_error_string(
+            AppError::new(ErrorCode::SystemError, "序列化图片存储指标失败")
+                .with_details(e.to_string()),
+        )
+    })
 }
 
 #[tauri::command]
@@ -1295,7 +1496,7 @@ pub async fn save_app_settings(
     let version = app.package_info().version.to_string();
 
     let mut settings = {
-        let state_guard = state.lock().unwrap();
+        let state_guard = lock_arc_mutex(state.inner());
         state_guard.settings.clone()
     };
 
@@ -1323,39 +1524,63 @@ pub async fn save_app_settings(
     };
 
     if hot_key.is_empty() {
-        return Err("快捷键不能为空".to_string());
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "快捷键不能为空",
+            "hot_key is empty",
+        ));
     }
 
     if image_hot_key.is_empty() {
-        return Err("图片窗口快捷键不能为空".to_string());
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "图片窗口快捷键不能为空",
+            "image_hot_key is empty",
+        ));
     }
 
     if hot_key == image_hot_key {
-        return Err("文字与图片窗口快捷键不能相同".to_string());
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "文字与图片窗口快捷键不能相同",
+            format!("hot_key={}, image_hot_key={}", hot_key, image_hot_key),
+        ));
     }
 
     if ai_provider.is_empty() {
-        return Err("提供商名称不能为空".to_string());
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "提供商名称不能为空",
+            "ai_provider is empty",
+        ));
     }
 
     if ai_api_key.trim().is_empty() {
-        return Err("API密钥不能为空，请填写有效的API密钥".to_string());
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "API密钥不能为空，请填写有效的API密钥",
+            "ai_api_key is empty",
+        ));
     }
 
     if hot_key != settings.hot_key {
         if app.global_shortcut().is_registered(hot_key.as_str()) {
-            return Err(format!("快捷键被占用：{}", hot_key));
+            return Err(frontend_error(
+                ErrorCode::ValidationError,
+                format!("快捷键被占用：{}", hot_key),
+                "global shortcut already registered",
+            ));
         }
 
         app.global_shortcut()
             .unregister(settings.hot_key.as_str())
-            .map_err(|e| format!("保存配置失败: {}", e.to_string()))?;
+            .map_err(|e| frontend_error(ErrorCode::SystemError, "保存配置失败", e.to_string()))?;
         let app_clone = app.clone();
         let state_clone = state.inner().clone();
         app.global_shortcut()
             .on_shortcut(hot_key.as_str(), move |_app, _shortcut, event| {
                 if let ShortcutState::Pressed = event.state {
-                    let sg = state_clone.lock().unwrap();
+                    let sg = lock_arc_mutex(&state_clone);
                     if !sg.is_visible {
                         let state_for_window = state_clone.clone();
                         drop(sg);
@@ -1365,23 +1590,27 @@ pub async fn save_app_settings(
                     }
                 }
             })
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| frontend_error(ErrorCode::SystemError, "注册文字窗口快捷键失败", e.to_string()))?;
     }
 
     if image_hot_key != settings.image_hot_key {
         if app.global_shortcut().is_registered(image_hot_key.as_str()) {
-            return Err(format!("图片窗口快捷键被占用：{}", image_hot_key));
+            return Err(frontend_error(
+                ErrorCode::ValidationError,
+                format!("图片窗口快捷键被占用：{}", image_hot_key),
+                "image global shortcut already registered",
+            ));
         }
 
         app.global_shortcut()
             .unregister(settings.image_hot_key.as_str())
-            .map_err(|e| format!("保存配置失败: {}", e))?;
+            .map_err(|e| frontend_error(ErrorCode::SystemError, "保存配置失败", e.to_string()))?;
         let app_clone = app.clone();
         let state_clone = state.inner().clone();
         app.global_shortcut()
             .on_shortcut(image_hot_key.as_str(), move |_app, _shortcut, event| {
                 if let ShortcutState::Pressed = event.state {
-                    let sg = state_clone.lock().unwrap();
+                    let sg = lock_arc_mutex(&state_clone);
                     if !sg.is_visible && !sg.is_image_visible {
                         let state_for_window = state_clone.clone();
                         drop(sg);
@@ -1390,7 +1619,7 @@ pub async fn save_app_settings(
                     }
                 }
             })
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| frontend_error(ErrorCode::SystemError, "注册图片窗口快捷键失败", e.to_string()))?;
     }
 
     settings.hot_key = hot_key;
@@ -1409,7 +1638,7 @@ pub async fn save_app_settings(
 
     settings
         .save_current_provider_config(&ai_api_key)
-        .map_err(|e| format!("保存提供商配置失败: {}", e))?;
+        .map_err(|e| frontend_error(ErrorCode::ConfigError, "保存提供商配置失败", e))?;
 
     match settings.get_provider_api_key(&ai_provider) {
         Ok(key) if key == ai_api_key => {
@@ -1417,31 +1646,39 @@ pub async fn save_app_settings(
         },
         Ok(_) => {
             log::warn!("密钥保存验证失败: 读取到的密钥与保存的不一致");
-            return Err("系统凭据管理器异常: 密钥保存验证失败，请重试".to_string());
+            return Err(frontend_error(
+                ErrorCode::SystemError,
+                "系统凭据管理器异常: 密钥保存验证失败，请重试",
+                "saved key mismatch",
+            ));
         },
         Err(e) => {
             log::error!("密钥保存验证错误: {}", e);
-            return Err(format!("系统凭据管理器错误: 无法读取刚保存的密钥 ({})", e));
+            return Err(frontend_error(
+                ErrorCode::SystemError,
+                "系统凭据管理器错误: 无法读取刚保存的密钥",
+                e,
+            ));
         }
     }
 
     settings
         .validate()
-        .map_err(|e| format!("设置验证失败: {}", e))?;
+        .map_err(|e| frontend_error(ErrorCode::ValidationError, "设置验证失败", e))?;
 
-    save_settings(&settings).map_err(|e| e.to_string())?;
+    save_settings(&settings).map_err(|e| frontend_error(ErrorCode::ConfigError, "保存设置失败", e))?;
     set_image_fill_verify_mode(&settings.image_fill_verify_mode);
 
     let selection_enabled = settings.selection_enabled;
     {
-        let mut state_guard = state.lock().unwrap();
+        let mut state_guard = lock_arc_mutex(state.inner());
         {
-            let mut manager = state_guard.clipboard_manager.lock().unwrap();
+            let mut manager = lock_arc_mutex(&state_guard.clipboard_manager);
             manager.set_max_items(text_max_items);
             manager.set_grouped_items_protected_from_limit(grouped_items_protected_from_limit);
         }
         {
-            let mut manager = state_guard.image_clipboard_manager.lock().unwrap();
+            let mut manager = lock_arc_mutex(&state_guard.image_clipboard_manager);
             manager.set_max_items(image_max_items);
             manager.set_disk_limit_mb(image_disk_limit_mb);
             manager.set_grouped_items_protected_from_limit(grouped_items_protected_from_limit);
@@ -1477,19 +1714,24 @@ pub async fn test_ai_connection(
         model: ai_model_name,
     };
 
-    let client = AIClient::new(config).map_err(|e| format!("客户端初始化失败: {}", e))?;
+    let client = AIClient::new(config)
+        .map_err(|e| frontend_error(ErrorCode::NetworkError, "客户端初始化失败", e.to_string()))?;
 
     match client.test_connection().await {
         Ok(success) => {
             if success {
                 Ok("连接成功".to_string())
             } else {
-                Err("连接测试未返回预期结果".to_string())
+                Err(frontend_error(
+                    ErrorCode::NetworkError,
+                    "连接测试未返回预期结果",
+                    "test_connection returned false",
+                ))
             }
         }
         Err(e) => {
             log::error!("AI连接测试失败: {}", e);
-            Err(format!("连接测试失败: {}", e))
+            Err(frontend_error(ErrorCode::NetworkError, "连接测试失败", e.to_string()))
         }
     }
 }
@@ -1502,7 +1744,7 @@ pub async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
             Ok(())
         }
         Err(e) => {
-            let error_msg = format!("复制文本失败: {}", e);
+            let error_msg = frontend_error(ErrorCode::ClipboardError, "复制文本失败", e.to_string());
             log::error!("{}", error_msg);
             Err(error_msg)
         }
@@ -1513,7 +1755,7 @@ pub async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
 pub async fn copy_and_paste_text(text: String, app: AppHandle) -> Result<(), String> {
     app.clipboard()
         .write_text(text)
-        .map_err(|e| format!("复制文本失败: {}", e))?;
+        .map_err(|e| frontend_error(ErrorCode::ClipboardError, "复制文本失败", e.to_string()))?;
 
     if let Some(window) = app.get_webview_window("result_translation") {
         let _ = window.hide();
@@ -1522,8 +1764,13 @@ pub async fn copy_and_paste_text(text: String, app: AppHandle) -> Result<(), Str
         let _ = window.hide();
     }
 
-    thread::sleep(Duration::from_millis(80));
-    crate::ui::window_manager::simulate_paste().map_err(|e| format!("自动粘贴失败: {}", e))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        thread::sleep(Duration::from_millis(80));
+        crate::ui::window_manager::simulate_paste()
+    })
+        .await
+        .map_err(|e| frontend_error(ErrorCode::SystemError, "自动粘贴任务执行失败", e.to_string()))?
+        .map_err(|e| frontend_error(ErrorCode::ClipboardError, "自动粘贴失败", e))?;
     Ok(())
 }
 
@@ -1539,21 +1786,33 @@ pub async fn remove_ai_provider(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
     if provider.is_empty() {
-        return Err("提供商名称不能为空".to_string());
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "提供商名称不能为空",
+            "provider is empty",
+        ));
     }
 
     let is_builtin = matches!(provider.as_str(), "deepseek" | "qwen" | "xiaomimimo");
     if is_builtin {
-        return Err("内置提供商不支持删除".to_string());
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "内置提供商不支持删除",
+            provider.clone(),
+        ));
     }
 
     let mut settings = {
-        let state_guard = state.lock().unwrap();
+        let state_guard = lock_arc_mutex(state.inner());
         state_guard.settings.clone()
     };
 
     if settings.provider_configs.remove(&provider).is_none() {
-        return Err("未找到该提供商配置".to_string());
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "未找到该提供商配置",
+            provider.clone(),
+        ));
     }
 
     if settings.ai_provider == provider {
@@ -1567,10 +1826,10 @@ pub async fn remove_ai_provider(
         }
     }
 
-    save_settings(&settings).map_err(|e| e.to_string())?;
+    save_settings(&settings).map_err(|e| frontend_error(ErrorCode::ConfigError, "保存设置失败", e))?;
 
     {
-        let mut state_guard = state.lock().unwrap();
+        let mut state_guard = lock_arc_mutex(state.inner());
         state_guard.settings = settings;
     }
 
@@ -1582,7 +1841,7 @@ pub async fn remove_ai_provider(
 pub async fn get_all_configured_providers(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<Vec<(String, String)>, String> {
-    let state_guard = state.lock().unwrap();
+    let state_guard = lock_arc_mutex(state.inner());
     let settings = &state_guard.settings;
 
     let mut providers: Vec<(String, String)> = Vec::new();

@@ -1,17 +1,25 @@
 use crate::core::app_state::AppState as SharedAppState;
 use crate::core::error::{AppError, AppResult, ErrorCode};
 use crate::services::ai_client::{AIClient, AIConfig};
+use crate::sync::Mutex;
 use crate::ui::window_manager::{hide_selection_toolbar_impl, show_result_window, update_result_window};
 use crate::utils::utils_helpers::{
     default_explanation_prompt_template, default_translation_prompt_template,
 };
 use serde::Deserialize;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+fn lock_state<'a>(state: &'a Arc<Mutex<SharedAppState>>) -> crate::sync::MutexGuard<'a, SharedAppState> {
+    match state.lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    }
+}
 
 /// 验证AI提供商配置
 fn validate_provider_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<()> {
-    let state_guard = state.lock().unwrap();
+    let state_guard = lock_state(state);
     let settings = &state_guard.settings;
 
     if settings.ai_provider.is_empty() {
@@ -58,7 +66,7 @@ pub async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> AppRe
     validate_provider_config(&state)?;
     
     let current_config = {
-        let state_guard = state.lock().unwrap();
+        let state_guard = lock_state(&state);
         let api_key = state_guard
             .settings
             .get_provider_api_key(&state_guard.settings.ai_provider)
@@ -74,7 +82,9 @@ pub async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> AppRe
             model: provider_config.model_name.clone(),
         }
     };
-    let client = AIClient::new(current_config).map_err(|e| AppError::new(ErrorCode::SystemError, format!("客户端初始化失败: {}", e)))?;
+    let client = AIClient::new(current_config).map_err(|e| {
+        AppError::new(ErrorCode::SystemError, "客户端初始化失败").with_details(e.to_string())
+    })?;
     Ok(client)
 }
 
@@ -91,7 +101,7 @@ fn fill_prompt_template(
 }
 
 fn next_ai_operation_id(state: &Arc<Mutex<SharedAppState>>) -> u64 {
-    let mut state_guard = state.lock().unwrap();
+    let mut state_guard = lock_state(state);
     state_guard.ai_request_seq = state_guard.ai_request_seq.wrapping_add(1);
     state_guard.ai_request_seq
 }
@@ -133,7 +143,7 @@ impl AiStreamKind {
 }
 
 fn set_active_operation(state: &Arc<Mutex<SharedAppState>>, kind: AiStreamKind, operation_id: u64) {
-    let mut state_guard = state.lock().unwrap();
+    let mut state_guard = lock_state(state);
     match kind {
         AiStreamKind::Translation => state_guard.active_translation_op_id = operation_id,
         AiStreamKind::Explanation => state_guard.active_explanation_op_id = operation_id,
@@ -141,7 +151,7 @@ fn set_active_operation(state: &Arc<Mutex<SharedAppState>>, kind: AiStreamKind, 
 }
 
 fn is_operation_active(state: &Arc<Mutex<SharedAppState>>, kind: AiStreamKind, operation_id: u64) -> bool {
-    let state_guard = state.lock().unwrap();
+    let state_guard = lock_state(state);
     match kind {
         AiStreamKind::Translation => state_guard.active_translation_op_id == operation_id,
         AiStreamKind::Explanation => state_guard.active_explanation_op_id == operation_id,
@@ -195,7 +205,7 @@ async fn execute_stream_request(
     }
 
     let configured_prompt = {
-        let state_guard = state_arc.lock().unwrap();
+        let state_guard = lock_state(&state_arc);
         match kind {
             AiStreamKind::Translation => state_guard.settings.translation_prompt_template.clone(),
             AiStreamKind::Explanation => state_guard.settings.explanation_prompt_template.clone(),
@@ -310,7 +320,7 @@ async fn execute_stream_request(
                 );
                 return Ok(());
             }
-            let error_msg = format!("{}失败: {}", kind.display_name(), e);
+            let error_msg = format!("{}失败: {}", kind.display_name(), e.message);
             update_result_window(error_msg.clone(), kind.kind_name().to_string(), app)
                 .await
                 .map_err(|e| AppError::new(ErrorCode::SystemError, e))?;

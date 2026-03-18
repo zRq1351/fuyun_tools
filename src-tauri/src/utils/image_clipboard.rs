@@ -1,18 +1,22 @@
+use crate::sync::Mutex;
 use crate::utils::image_store;
 use crate::utils::utils_helpers::atomic_write_with_backup;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageEncoder, RgbaImage};
+use lru::LruCache;
+use parking_lot::Mutex as ParkingMutex;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::hash::{Hash, Hasher};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::image::Image;
 #[cfg(target_os = "windows")]
@@ -25,14 +29,29 @@ use winapi::um::winuser::{CloseClipboard, GetClipboardData, IsClipboardFormatAva
 const MAX_UI_HISTORY_ITEMS: usize = 30;
 const IMAGE_FULL_RES_MEMORY_BUDGET_BYTES: usize = 256 * 1024 * 1024;
 const IMAGE_FULL_RES_CACHE_KEEP_RECENT: usize = 6;
+const IMAGE_FULL_RES_LRU_MAX_CAPACITY: usize = 4096;
 const IMAGE_PERSIST_QUEUE_SIZE: usize = 6;
 const IMAGE_PREVIEW_MAX_EDGE: u32 = 320;
 const BITMAP_STORAGE_USE_LOSSLESS_WEBP: bool = true;
+const IMAGE_PNG_BASE64_CACHE_CAPACITY: usize = 64;
 const IMAGE_FILL_VERIFY_MODE_STRICT: u8 = 0;
 const IMAGE_FILL_VERIFY_MODE_FAST: u8 = 1;
 static IMAGE_FILL_VERIFY_MODE: std::sync::atomic::AtomicU8 =
     std::sync::atomic::AtomicU8::new(IMAGE_FILL_VERIFY_MODE_STRICT);
+static IMAGE_PNG_BASE64_CACHE: LazyLock<ParkingMutex<LruCache<String, (u64, String)>>> =
+    LazyLock::new(|| {
+        ParkingMutex::new(LruCache::new(
+            NonZeroUsize::new(IMAGE_PNG_BASE64_CACHE_CAPACITY).unwrap_or(NonZeroUsize::MIN),
+        ))
+    });
 pub type ClipboardImagePayload = (Vec<u8>, u32, u32, Option<(Vec<u8>, String)>);
+
+fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    }
+}
 
 pub fn set_image_fill_verify_mode(mode: &str) {
     let value = if mode == "fast" {
@@ -145,6 +164,7 @@ pub struct ImageClipboardManager {
     image_tags: Arc<Mutex<HashMap<String, Vec<String>>>>,
     pinned_items: Arc<Mutex<Vec<String>>>,
     pending_images: Arc<Mutex<HashMap<String, PendingImageData>>>,
+    full_res_lru: Arc<Mutex<LruCache<String, ()>>>,
     persist_tx: SyncSender<PersistTask>,
     max_items: usize,
     image_disk_limit_bytes: u64,
@@ -168,6 +188,10 @@ impl ImageClipboardManager {
         let pending_images = Arc::new(Mutex::new(HashMap::new()));
         let (persist_tx, persist_rx) = sync_channel::<PersistTask>(IMAGE_PERSIST_QUEUE_SIZE);
         start_image_persist_worker(persist_rx, pending_images.clone());
+        let full_res_lru_capacity = max_items
+            .max(IMAGE_FULL_RES_CACHE_KEEP_RECENT)
+            .min(IMAGE_FULL_RES_LRU_MAX_CAPACITY)
+            .max(1);
         let manager = Self {
             history: Arc::new(Mutex::new(history_data.items)),
             signature_index: Arc::new(Mutex::new(signature_index)),
@@ -177,6 +201,9 @@ impl ImageClipboardManager {
             image_tags: Arc::new(Mutex::new(history_data.image_tags)),
             pinned_items: Arc::new(Mutex::new(pinned_items)),
             pending_images,
+            full_res_lru: Arc::new(Mutex::new(LruCache::new(
+                NonZeroUsize::new(full_res_lru_capacity).unwrap_or(NonZeroUsize::MIN),
+            ))),
             persist_tx,
             max_items,
             image_disk_limit_bytes: image_disk_limit_mb.saturating_mul(1024 * 1024),
@@ -190,11 +217,11 @@ impl ImageClipboardManager {
     }
 
     pub fn get_history(&self) -> Vec<ImageHistoryItem> {
-        self.history.lock().unwrap().clone()
+        lock_arc_mutex(&self.history).clone()
     }
 
     pub fn get_history_preview(&self) -> Vec<ImageHistoryPreviewItem> {
-        let history = self.history.lock().unwrap();
+        let history = lock_arc_mutex(&self.history);
         history
             .iter()
             .take(MAX_UI_HISTORY_ITEMS)
@@ -229,12 +256,61 @@ impl ImageClipboardManager {
         ) {
             return page;
         }
+        self.get_history_preview_page_fallback(
+            offset,
+            limit,
+            category,
+            keyword,
+            pinned_only,
+            sort_order,
+        )
+    }
 
-        let history = self.history.lock().unwrap().clone();
-        let categories = self.categories.lock().unwrap().clone();
-        let image_tags = self.image_tags.lock().unwrap().clone();
-        let pinned_items = self.pinned_items.lock().unwrap().clone();
-        let category_list = self.category_list.lock().unwrap().clone();
+    pub async fn get_history_preview_page_async(
+        &self,
+        offset: usize,
+        limit: usize,
+        category: Option<String>,
+        keyword: Option<String>,
+        pinned_only: bool,
+        sort_order: Option<String>,
+    ) -> ImageHistoryPageData {
+        if let Ok(page) = image_store::load_history_page_async(
+            offset,
+            limit,
+            category.clone(),
+            keyword.clone(),
+            pinned_only,
+            sort_order.clone(),
+        )
+            .await
+        {
+            return page;
+        }
+        self.get_history_preview_page_fallback(
+            offset,
+            limit,
+            category,
+            keyword,
+            pinned_only,
+            sort_order,
+        )
+    }
+
+    fn get_history_preview_page_fallback(
+        &self,
+        offset: usize,
+        limit: usize,
+        category: Option<String>,
+        keyword: Option<String>,
+        pinned_only: bool,
+        sort_order: Option<String>,
+    ) -> ImageHistoryPageData {
+        let history = lock_arc_mutex(&self.history).clone();
+        let categories = lock_arc_mutex(&self.categories).clone();
+        let image_tags = lock_arc_mutex(&self.image_tags).clone();
+        let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
+        let category_list = lock_arc_mutex(&self.category_list).clone();
 
         let category_filter = category
             .map(|v| v.trim().to_string())
@@ -339,28 +415,28 @@ impl ImageClipboardManager {
     }
 
     pub fn get_categories(&self) -> HashMap<String, String> {
-        self.categories.lock().unwrap().clone()
+        lock_arc_mutex(&self.categories).clone()
     }
 
     pub fn get_category_list(&self) -> Vec<String> {
-        self.category_list.lock().unwrap().clone()
+        lock_arc_mutex(&self.category_list).clone()
     }
 
     pub fn get_image_tags(&self) -> HashMap<String, Vec<String>> {
-        self.image_tags.lock().unwrap().clone()
+        lock_arc_mutex(&self.image_tags).clone()
     }
 
     pub fn get_pinned_items(&self) -> Vec<String> {
-        self.pinned_items.lock().unwrap().clone()
+        lock_arc_mutex(&self.pinned_items).clone()
     }
 
     pub fn set_max_items(&mut self, max_items: usize) {
         self.max_items = max_items;
-        let mut history = self.history.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
         if history.len() > max_items {
             let before_ids = history.iter().map(|item| item.id.clone()).collect::<HashSet<_>>();
-            let mut categories = self.categories.lock().unwrap();
-            let mut pinned_items = self.pinned_items.lock().unwrap();
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             let overflow_paths =
                 shrink_image_history_with_group_protection(
                     &mut history,
@@ -372,6 +448,7 @@ impl ImageClipboardManager {
             normalize_pinned_items(&mut pinned_items, &history);
             apply_pin_order(&mut history, &pinned_items);
             self.prune_pending_images_by_history(&history);
+            self.prune_full_res_cache_access_by_history(&history);
             let items_for_store = history.iter().map(compact_item_for_persist).collect::<Vec<_>>();
             let after_ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
             let after_id_set = after_ids.iter().cloned().collect::<HashSet<_>>();
@@ -409,7 +486,7 @@ impl ImageClipboardManager {
 
     pub fn add_category(&self, category: String) -> Result<(), String> {
         {
-            let mut list = self.category_list.lock().unwrap();
+            let mut list = lock_arc_mutex(&self.category_list);
             let normalized = category.trim().to_string();
             if !normalized.is_empty()
                 && normalized != "未分类"
@@ -419,8 +496,27 @@ impl ImageClipboardManager {
                 list.push(normalized);
             }
         }
-        let list = self.category_list.lock().unwrap().clone();
+        let list = lock_arc_mutex(&self.category_list).clone();
         if let Err(e) = image_store::sync_category_list_order(&list) {
+            log::error!("同步分类列表失败: {}", e);
+        }
+        Ok(())
+    }
+
+    pub async fn add_category_async(&self, category: String) -> Result<(), String> {
+        {
+            let mut list = lock_arc_mutex(&self.category_list);
+            let normalized = category.trim().to_string();
+            if !normalized.is_empty()
+                && normalized != "未分类"
+                && normalized != "全部"
+                && !list.contains(&normalized)
+            {
+                list.push(normalized);
+            }
+        }
+        let list = lock_arc_mutex(&self.category_list).clone();
+        if let Err(e) = image_store::sync_category_list_order_async(&list).await {
             log::error!("同步分类列表失败: {}", e);
         }
         Ok(())
@@ -428,16 +524,33 @@ impl ImageClipboardManager {
 
     pub fn remove_category(&self, category: String) -> Result<(), String> {
         {
-            let mut categories = self.categories.lock().unwrap();
-            let mut category_list = self.category_list.lock().unwrap();
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
             category_list.retain(|c| c != &category);
             categories.retain(|_, v| v != &category);
         }
         if let Err(e) = image_store::delete_categories_by_category(&category) {
             log::error!("删除分类失败: {}", e);
         }
-        let list = self.category_list.lock().unwrap().clone();
+        let list = lock_arc_mutex(&self.category_list).clone();
         if let Err(e) = image_store::sync_category_list_order(&list) {
+            log::error!("同步分类列表失败: {}", e);
+        }
+        Ok(())
+    }
+
+    pub async fn remove_category_async(&self, category: String) -> Result<(), String> {
+        {
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
+            category_list.retain(|c| c != &category);
+            categories.retain(|_, v| v != &category);
+        }
+        if let Err(e) = image_store::delete_categories_by_category_async(&category).await {
+            log::error!("删除分类失败: {}", e);
+        }
+        let list = lock_arc_mutex(&self.category_list).clone();
+        if let Err(e) = image_store::sync_category_list_order_async(&list).await {
             log::error!("同步分类列表失败: {}", e);
         }
         Ok(())
@@ -447,8 +560,8 @@ impl ImageClipboardManager {
         let mut added_to_category_list = false;
         let normalized = category.trim().to_string();
         {
-            let mut categories = self.categories.lock().unwrap();
-            let mut category_list = self.category_list.lock().unwrap();
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
             if normalized.is_empty() || normalized == "未分类" || normalized == "全部" {
                 categories.remove(&item_id);
             } else {
@@ -467,8 +580,40 @@ impl ImageClipboardManager {
             log::error!("写入分类失败: {}", e);
         }
         if added_to_category_list {
-            let list = self.category_list.lock().unwrap().clone();
+            let list = lock_arc_mutex(&self.category_list).clone();
             if let Err(e) = image_store::sync_category_list_order(&list) {
+                log::error!("同步分类列表失败: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn set_category_async(&self, item_id: String, category: String) -> Result<(), String> {
+        let mut added_to_category_list = false;
+        let normalized = category.trim().to_string();
+        {
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
+            if normalized.is_empty() || normalized == "未分类" || normalized == "全部" {
+                categories.remove(&item_id);
+            } else {
+                categories.insert(item_id.clone(), normalized.clone());
+                if !category_list.contains(&normalized) {
+                    category_list.push(normalized.clone());
+                    added_to_category_list = true;
+                }
+            }
+        }
+        if normalized.is_empty() || normalized == "未分类" || normalized == "全部" {
+            if let Err(e) = image_store::delete_category_async(&item_id).await {
+                log::error!("删除分类失败: {}", e);
+            }
+        } else if let Err(e) = image_store::upsert_category_async(&item_id, &normalized).await {
+            log::error!("写入分类失败: {}", e);
+        }
+        if added_to_category_list {
+            let list = lock_arc_mutex(&self.category_list).clone();
+            if let Err(e) = image_store::sync_category_list_order_async(&list).await {
                 log::error!("同步分类列表失败: {}", e);
             }
         }
@@ -477,7 +622,7 @@ impl ImageClipboardManager {
 
     pub fn set_tags(&self, item_id: String, tags: Vec<String>) -> Result<(), String> {
         let exists = {
-            let history = self.history.lock().unwrap();
+            let history = lock_arc_mutex(&self.history);
             history.iter().any(|item| item.id == item_id)
         };
         if !exists {
@@ -485,7 +630,7 @@ impl ImageClipboardManager {
         }
         let normalized = normalize_tags(tags);
         {
-            let mut image_tags = self.image_tags.lock().unwrap();
+            let mut image_tags = lock_arc_mutex(&self.image_tags);
             if normalized.is_empty() {
                 image_tags.remove(&item_id);
             } else {
@@ -497,6 +642,33 @@ impl ImageClipboardManager {
                 log::error!("删除标签失败: {}", e);
             }
         } else if let Err(e) = image_store::sync_tags_for_item(&item_id, &normalized) {
+            log::error!("同步标签失败: {}", e);
+        }
+        Ok(())
+    }
+
+    pub async fn set_tags_async(&self, item_id: String, tags: Vec<String>) -> Result<(), String> {
+        let exists = {
+            let history = lock_arc_mutex(&self.history);
+            history.iter().any(|item| item.id == item_id)
+        };
+        if !exists {
+            return Err("目标图片不存在".to_string());
+        }
+        let normalized = normalize_tags(tags);
+        {
+            let mut image_tags = lock_arc_mutex(&self.image_tags);
+            if normalized.is_empty() {
+                image_tags.remove(&item_id);
+            } else {
+                image_tags.insert(item_id.clone(), normalized.clone());
+            }
+        }
+        if normalized.is_empty() {
+            if let Err(e) = image_store::delete_tags_for_item_async(&item_id).await {
+                log::error!("删除标签失败: {}", e);
+            }
+        } else if let Err(e) = image_store::sync_tags_for_item_async(&item_id, &normalized).await {
             log::error!("同步标签失败: {}", e);
         }
         Ok(())
@@ -524,30 +696,6 @@ impl ImageClipboardManager {
         source_blob: Option<(Vec<u8>, String)>,
     ) {
         let signature = compute_signature(&rgba, width, height);
-        {
-            let mut history = self.history.lock().unwrap();
-            let mut signature_index = self.signature_index.lock().unwrap();
-            if self.signature_index_dirty.load(Ordering::SeqCst) || signature_index.len() != history.len()
-            {
-                *signature_index = build_signature_index(&history);
-                self.signature_index_dirty.store(false, Ordering::SeqCst);
-            }
-            if let Some(&existing_index) = signature_index.get(&signature) {
-                if existing_index < history.len() {
-                    if existing_index != 0 {
-                        let moved = history.remove(existing_index);
-                        history.insert(0, moved);
-                        *signature_index = build_signature_index(&history);
-                        let item_ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
-                        if let Err(e) = image_store::sync_item_positions(&item_ids) {
-                            log::error!("同步图片位置失败: {}", e);
-                        }
-                    }
-                    return;
-                }
-            }
-        }
-
         let id = generate_item_id(&signature);
         let (preview_width, preview_height, preview_rgba_base64) =
             build_preview_from_rgba(&rgba, width, height);
@@ -571,10 +719,10 @@ impl ImageClipboardManager {
             signature: signature.clone(),
         };
         let removed_ids_after_insert = {
-            let mut history = self.history.lock().unwrap();
-            let mut categories = self.categories.lock().unwrap();
-            let mut pinned_items = self.pinned_items.lock().unwrap();
-            let mut signature_index = self.signature_index.lock().unwrap();
+            let mut history = lock_arc_mutex(&self.history);
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+            let mut signature_index = lock_arc_mutex(&self.signature_index);
             let before_ids = history.iter().map(|item| item.id.clone()).collect::<HashSet<_>>();
             if self.signature_index_dirty.load(Ordering::SeqCst) || signature_index.len() != history.len()
             {
@@ -584,9 +732,14 @@ impl ImageClipboardManager {
             if let Some(&existing_index) = signature_index.get(&signature) {
                 if existing_index < history.len() {
                     if existing_index != 0 {
+                        let moved_signature = history[existing_index].signature.clone();
                         let moved = history.remove(existing_index);
                         history.insert(0, moved);
-                        *signature_index = build_signature_index(&history);
+                        signature_index_move_to_front(
+                            &mut signature_index,
+                            &moved_signature,
+                            existing_index,
+                        );
                     }
                     let items_for_store = history.iter().map(compact_item_for_persist).collect::<Vec<_>>();
                     let item_ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
@@ -625,8 +778,9 @@ impl ImageClipboardManager {
             cleanup_image_blob_files_async(disk_removed_paths);
             *signature_index = build_signature_index(&history);
             self.signature_index_dirty.store(false, Ordering::SeqCst);
-            enforce_full_res_cache_budget(&mut history);
+            self.enforce_full_res_cache_budget_lru(&mut history);
             self.prune_pending_images_by_history(&history);
+            self.prune_full_res_cache_access_by_history(&history);
             let after_id_set = history.iter().map(|item| item.id.clone()).collect::<HashSet<_>>();
             before_ids
                 .into_iter()
@@ -636,7 +790,7 @@ impl ImageClipboardManager {
 
         let rgba_arc = Arc::new(rgba);
         {
-            let mut pending = self.pending_images.lock().unwrap();
+            let mut pending = lock_arc_mutex(&self.pending_images);
             pending.insert(
                 id.clone(),
                 PendingImageData {
@@ -660,19 +814,19 @@ impl ImageClipboardManager {
                 if let Err(send_err) = self.persist_tx.send(task) {
                     let failed_task = send_err.0;
                     log::error!("图片持久化队列阻塞后发送失败: {}", failed_task.item_id);
-                    let mut pending = self.pending_images.lock().unwrap();
+                    let mut pending = lock_arc_mutex(&self.pending_images);
                     pending.remove(&failed_task.item_id);
                 }
             }
             Err(TrySendError::Disconnected(task)) => {
                 log::error!("图片持久化队列不可用: {}", task.item_id);
-                let mut pending = self.pending_images.lock().unwrap();
+                let mut pending = lock_arc_mutex(&self.pending_images);
                 pending.remove(&task.item_id);
             }
         }
         let (items_snapshot, item_ids_snapshot, pinned_snapshot) = {
-            let history = self.history.lock().unwrap();
-            let pinned = self.pinned_items.lock().unwrap();
+            let history = lock_arc_mutex(&self.history);
+            let pinned = lock_arc_mutex(&self.pinned_items);
             let item_ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
             (
                 history.iter().map(compact_item_for_persist).collect::<Vec<_>>(),
@@ -738,33 +892,45 @@ impl ImageClipboardManager {
         }
     }
 
+    pub async fn import_local_image_paths_async(&self, paths: Vec<String>) -> Result<usize, String> {
+        let manager = self.clone();
+        tauri::async_runtime::spawn_blocking(move || manager.import_local_image_paths(paths))
+            .await
+            .map_err(|e| format!("导入图片任务执行失败: {}", e))?
+    }
+
     pub fn remove_from_history(&self, index: usize) -> Result<(String, String, String), String> {
         let (removed_id, removed_path, removed_signature, item_ids_after_remove) = {
-            let mut history = self.history.lock().unwrap();
+            let mut history = lock_arc_mutex(&self.history);
+            let mut signature_index = lock_arc_mutex(&self.signature_index);
             if index >= history.len() {
                 return Err("索引超出范围".to_string());
             }
             let removed = history.remove(index);
+            signature_index_remove(
+                &mut signature_index,
+                &removed.signature,
+                index,
+            );
             let ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
             (removed.id, removed.image_path, removed.signature, ids)
         };
 
         let pinned_snapshot = {
-            let mut pinned_items = self.pinned_items.lock().unwrap();
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             pinned_items.retain(|id| id != &removed_id);
             pinned_items.clone()
         };
         {
-            let mut categories = self.categories.lock().unwrap();
+            let mut categories = lock_arc_mutex(&self.categories);
             categories.remove(&removed_id);
-            let mut image_tags = self.image_tags.lock().unwrap();
+            let mut image_tags = lock_arc_mutex(&self.image_tags);
             image_tags.remove(&removed_id);
-            let mut pending_images = self.pending_images.lock().unwrap();
+            let mut pending_images = lock_arc_mutex(&self.pending_images);
             pending_images.remove(&removed_id);
         }
 
         cleanup_image_blob_files_async(vec![removed_path.clone()]);
-        self.signature_index_dirty.store(true, Ordering::SeqCst);
         if let Err(e) = image_store::delete_item(&removed_id) {
             log::error!("删除图片项失败: {}", e);
         }
@@ -788,7 +954,7 @@ impl ImageClipboardManager {
         item_id: &str,
     ) -> Result<(String, String, String), String> {
         let index = {
-            let history = self.history.lock().unwrap();
+            let history = lock_arc_mutex(&self.history);
             history
                 .iter()
                 .position(|item| item.id == item_id)
@@ -798,16 +964,18 @@ impl ImageClipboardManager {
     }
 
     pub fn promote_to_top(&self, index: usize) -> Result<(), String> {
-        let mut history = self.history.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
+        let mut signature_index = lock_arc_mutex(&self.signature_index);
         if index >= history.len() {
             return Err("索引超出范围".to_string());
         }
         if index == 0 {
             return Ok(());
         }
+        let moved_signature = history[index].signature.clone();
         let moved = history.remove(index);
         history.insert(0, moved);
-        self.signature_index_dirty.store(true, Ordering::SeqCst);
+        signature_index_move_to_front(&mut signature_index, &moved_signature, index);
         let item_ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
         drop(history);
         if let Err(e) = image_store::sync_item_positions(&item_ids) {
@@ -818,7 +986,7 @@ impl ImageClipboardManager {
 
     pub fn promote_to_top_by_id(&self, item_id: &str) -> Result<(), String> {
         let index = {
-            let history = self.history.lock().unwrap();
+            let history = lock_arc_mutex(&self.history);
             history
                 .iter()
                 .position(|item| item.id == item_id)
@@ -828,7 +996,8 @@ impl ImageClipboardManager {
     }
 
     pub fn promote_to_top_in_memory_by_id(&self, item_id: &str) -> Result<(), String> {
-        let mut history = self.history.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
+        let mut signature_index = lock_arc_mutex(&self.signature_index);
         let index = history
             .iter()
             .position(|item| item.id == item_id)
@@ -836,18 +1005,19 @@ impl ImageClipboardManager {
         if index == 0 {
             return Ok(());
         }
+        let moved_signature = history[index].signature.clone();
         let moved = history.remove(index);
         history.insert(0, moved);
-        self.signature_index_dirty.store(true, Ordering::SeqCst);
+        signature_index_move_to_front(&mut signature_index, &moved_signature, index);
         Ok(())
     }
 
     pub fn set_pinned(&self, item_id: String, pinned: bool) -> Result<(), String> {
-        let mut history = self.history.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
         if !history.iter().any(|item| item.id == item_id) {
             return Err("目标图片不存在".to_string());
         }
-        let mut pinned_items = self.pinned_items.lock().unwrap();
+        let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         if pinned {
             if !pinned_items.iter().any(|id| id == &item_id) {
                 pinned_items.insert(0, item_id.clone());
@@ -859,16 +1029,44 @@ impl ImageClipboardManager {
         apply_pin_order(&mut history, &pinned_items);
         self.signature_index_dirty.store(true, Ordering::SeqCst);
         let item_ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
+        let pinned_snapshot = pinned_items.clone();
         drop(pinned_items);
         drop(history);
         if let Err(e) = image_store::sync_item_positions(&item_ids) {
             log::error!("同步图片位置失败: {}", e);
         }
-        let pinned_snapshot = {
-            let pinned_items = self.pinned_items.lock().unwrap();
-            pinned_items.clone()
-        };
         if let Err(e) = image_store::sync_pinned_order(&pinned_snapshot) {
+            log::error!("同步置顶列表失败: {}", e);
+        }
+        Ok(())
+    }
+
+    pub async fn set_pinned_async(&self, item_id: String, pinned: bool) -> Result<(), String> {
+        let (item_ids, pinned_snapshot) = {
+            let mut history = lock_arc_mutex(&self.history);
+            if !history.iter().any(|item| item.id == item_id) {
+                return Err("目标图片不存在".to_string());
+            }
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+            if pinned {
+                if !pinned_items.iter().any(|id| id == &item_id) {
+                    pinned_items.insert(0, item_id.clone());
+                }
+            } else {
+                pinned_items.retain(|id| id != &item_id);
+            }
+            normalize_pinned_items(&mut pinned_items, &history);
+            apply_pin_order(&mut history, &pinned_items);
+            self.signature_index_dirty.store(true, Ordering::SeqCst);
+            (
+                history.iter().map(|item| item.id.clone()).collect::<Vec<_>>(),
+                pinned_items.clone(),
+            )
+        };
+        if let Err(e) = image_store::sync_item_positions_async(&item_ids).await {
+            log::error!("同步图片位置失败: {}", e);
+        }
+        if let Err(e) = image_store::sync_pinned_order_async(&pinned_snapshot).await {
             log::error!("同步置顶列表失败: {}", e);
         }
         Ok(())
@@ -878,12 +1076,12 @@ impl ImageClipboardManager {
         let mut removed_paths: Vec<String> = Vec::new();
         let mut removed_ids: Vec<String> = Vec::new();
         let removed_count = {
-            let mut history = self.history.lock().unwrap();
-            let mut categories = self.categories.lock().unwrap();
-            let mut category_list = self.category_list.lock().unwrap();
-            let mut image_tags = self.image_tags.lock().unwrap();
-            let mut pinned_items = self.pinned_items.lock().unwrap();
-            let mut pending_images = self.pending_images.lock().unwrap();
+            let mut history = lock_arc_mutex(&self.history);
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
+            let mut image_tags = lock_arc_mutex(&self.image_tags);
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+            let mut pending_images = lock_arc_mutex(&self.pending_images);
             let before = history.len();
             match mode {
                 "all" => {
@@ -929,10 +1127,10 @@ impl ImageClipboardManager {
         cleanup_image_blob_files_async(removed_paths);
         self.signature_index_dirty.store(true, Ordering::SeqCst);
         let (items_snapshot, item_ids_snapshot, category_list_snapshot, tags_snapshot, pinned_snapshot) = {
-            let history = self.history.lock().unwrap();
-            let category_list = self.category_list.lock().unwrap();
-            let tags = self.image_tags.lock().unwrap();
-            let pinned = self.pinned_items.lock().unwrap();
+            let history = lock_arc_mutex(&self.history);
+            let category_list = lock_arc_mutex(&self.category_list);
+            let tags = lock_arc_mutex(&self.image_tags);
+            let pinned = lock_arc_mutex(&self.pinned_items);
             (
                 history.iter().map(compact_item_for_persist).collect::<Vec<_>>(),
                 history.iter().map(|item| item.id.clone()).collect::<Vec<_>>(),
@@ -974,19 +1172,120 @@ impl ImageClipboardManager {
         Ok(removed_count)
     }
 
+    pub async fn clear_history_by_mode_async(&self, mode: &str) -> Result<usize, String> {
+        let mut removed_paths: Vec<String> = Vec::new();
+        let mut removed_ids: Vec<String> = Vec::new();
+        let removed_count = {
+            let mut history = lock_arc_mutex(&self.history);
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
+            let mut image_tags = lock_arc_mutex(&self.image_tags);
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+            let mut pending_images = lock_arc_mutex(&self.pending_images);
+            let before = history.len();
+            match mode {
+                "all" => {
+                    removed_paths.extend(history.iter().map(|item| item.image_path.clone()));
+                    for item in history.iter() {
+                        pending_images.remove(&item.id);
+                        removed_ids.push(item.id.clone());
+                    }
+                    history.clear();
+                    categories.clear();
+                    category_list.clear();
+                    image_tags.clear();
+                    pinned_items.clear();
+                }
+                "untagged_or_unclassified" | "untagged_unclassified_unpinned" => {
+                    let tagged_ids: HashSet<String> = image_tags.keys().cloned().collect();
+                    let classified_ids: HashSet<String> = categories.keys().cloned().collect();
+                    let pinned_ids: HashSet<String> = pinned_items.iter().cloned().collect();
+                    let mut kept = Vec::with_capacity(history.len());
+                    for item in history.drain(..) {
+                        let is_tagged = tagged_ids.contains(&item.id);
+                        let is_classified = classified_ids.contains(&item.id);
+                        let is_pinned = pinned_ids.contains(&item.id);
+                        if is_tagged || is_classified || is_pinned {
+                            kept.push(item);
+                        } else {
+                            pending_images.remove(&item.id);
+                            removed_paths.push(item.image_path.clone());
+                            removed_ids.push(item.id.clone());
+                        }
+                    }
+                    *history = kept;
+                    let valid_ids: HashSet<String> = history.iter().map(|item| item.id.clone()).collect();
+                    categories.retain(|item_id, _| valid_ids.contains(item_id));
+                    image_tags.retain(|item_id, _| valid_ids.contains(item_id));
+                    normalize_pinned_items(&mut pinned_items, &history);
+                    apply_pin_order(&mut history, &pinned_items);
+                }
+                _ => return Err("不支持的清理模式".to_string()),
+            }
+            before.saturating_sub(history.len())
+        };
+        cleanup_image_blob_files_async(removed_paths);
+        self.signature_index_dirty.store(true, Ordering::SeqCst);
+        let (items_snapshot, item_ids_snapshot, category_list_snapshot, tags_snapshot, pinned_snapshot) = {
+            let history = lock_arc_mutex(&self.history);
+            let category_list = lock_arc_mutex(&self.category_list);
+            let tags = lock_arc_mutex(&self.image_tags);
+            let pinned = lock_arc_mutex(&self.pinned_items);
+            (
+                history.iter().map(compact_item_for_persist).collect::<Vec<_>>(),
+                history.iter().map(|item| item.id.clone()).collect::<Vec<_>>(),
+                category_list.clone(),
+                tags.clone(),
+                pinned.clone(),
+            )
+        };
+        for (position, item) in items_snapshot.iter().enumerate() {
+            if let Err(e) = image_store::upsert_item_async(item, position).await {
+                log::error!("同步图片项失败: {}", e);
+            }
+        }
+        for removed_id in removed_ids {
+            if let Err(e) = image_store::delete_item_async(&removed_id).await {
+                log::error!("删除图片项失败: {}", e);
+            }
+            if let Err(e) = image_store::delete_category_async(&removed_id).await {
+                log::error!("删除分类失败: {}", e);
+            }
+            if let Err(e) = image_store::delete_tags_for_item_async(&removed_id).await {
+                log::error!("删除标签失败: {}", e);
+            }
+        }
+        for (item_id, tags) in &tags_snapshot {
+            if let Err(e) = image_store::sync_tags_for_item_async(item_id, tags).await {
+                log::error!("同步标签失败: {}", e);
+            }
+        }
+        if let Err(e) = image_store::sync_pinned_order_async(&pinned_snapshot).await {
+            log::error!("同步置顶列表失败: {}", e);
+        }
+        if let Err(e) = image_store::sync_item_positions_async(&item_ids_snapshot).await {
+            log::error!("同步图片位置失败: {}", e);
+        }
+        if let Err(e) = image_store::sync_category_list_order_async(&category_list_snapshot).await {
+            log::error!("同步分类列表失败: {}", e);
+        }
+        Ok(removed_count)
+    }
+
     pub fn get_image_by_index(&self, index: usize) -> Result<Image<'static>, String> {
         let (bytes, width, height) = {
-            let mut history = self.history.lock().unwrap();
+            let mut history = lock_arc_mutex(&self.history);
             let item = history
                 .get_mut(index)
                 .ok_or_else(|| format!("索引 {} 超出范围", index))?;
             if item.rgba_bytes.is_empty() {
                 item.rgba_bytes = self.read_item_rgba(item)?;
             }
+            self.mark_image_accessed(&item.id);
             let bytes = item.rgba_bytes.clone();
             let width = item.width;
             let height = item.height;
-            enforce_full_res_cache_budget(&mut history);
+            self.enforce_full_res_cache_budget_lru(&mut history);
             (bytes, width, height)
         };
         Ok(Image::new_owned(bytes, width, height))
@@ -994,17 +1293,18 @@ impl ImageClipboardManager {
 
     pub fn get_image_by_index_for_fill(&self, index: usize) -> Result<Image<'static>, String> {
         let (bytes, width, height) = {
-            let mut history = self.history.lock().unwrap();
+            let mut history = lock_arc_mutex(&self.history);
             let item = history
                 .get_mut(index)
                 .ok_or_else(|| format!("索引 {} 超出范围", index))?;
             if item.rgba_bytes.is_empty() {
                 item.rgba_bytes = self.read_item_rgba(item)?;
             }
+            self.mark_image_accessed(&item.id);
             let bytes = item.rgba_bytes.clone();
             let width = item.width;
             let height = item.height;
-            enforce_full_res_cache_budget(&mut history);
+            self.enforce_full_res_cache_budget_lru(&mut history);
             (bytes, width, height)
         };
         Ok(Image::new_owned(bytes, width, height))
@@ -1012,7 +1312,7 @@ impl ImageClipboardManager {
 
     pub fn get_image_by_id_for_fill(&self, item_id: &str) -> Result<Image<'static>, String> {
         let index = {
-            let history = self.history.lock().unwrap();
+            let history = lock_arc_mutex(&self.history);
             history
                 .iter()
                 .position(|item| item.id == item_id)
@@ -1022,20 +1322,21 @@ impl ImageClipboardManager {
     }
 
     pub fn warmup_image_by_index(&self, index: usize) -> Result<(), String> {
-        let mut history = self.history.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
         let item = history
             .get_mut(index)
             .ok_or_else(|| format!("索引 {} 超出范围", index))?;
         if item.rgba_bytes.is_empty() {
             item.rgba_bytes = self.read_item_rgba(item)?;
         }
-        enforce_full_res_cache_budget(&mut history);
+        self.mark_image_accessed(&item.id);
+        self.enforce_full_res_cache_budget_lru(&mut history);
         Ok(())
     }
 
     pub fn warmup_image_by_id(&self, item_id: &str) -> Result<(), String> {
         let index = {
-            let history = self.history.lock().unwrap();
+            let history = lock_arc_mutex(&self.history);
             history
                 .iter()
                 .position(|item| item.id == item_id)
@@ -1045,17 +1346,17 @@ impl ImageClipboardManager {
     }
 
     pub fn get_preview_window_payload_by_index(&self, index: usize) -> Result<String, String> {
-        let mut history = self.history.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
         let item = history
             .get_mut(index)
             .ok_or_else(|| format!("索引 {} 超出范围", index))?;
         let payload = self.read_item_png_base64(item)?;
-        enforce_full_res_cache_budget(&mut history);
+        self.enforce_full_res_cache_budget_lru(&mut history);
         Ok(payload)
     }
 
     pub fn get_preview_image_path_by_index(&self, index: usize) -> Result<String, String> {
-        let history = self.history.lock().unwrap();
+        let history = lock_arc_mutex(&self.history);
         let item = history
             .get(index)
             .ok_or_else(|| format!("索引 {} 超出范围", index))?;
@@ -1063,7 +1364,7 @@ impl ImageClipboardManager {
     }
 
     pub fn get_preview_image_path_by_id(&self, item_id: &str) -> Result<String, String> {
-        let history = self.history.lock().unwrap();
+        let history = lock_arc_mutex(&self.history);
         let item = history
             .iter()
             .find(|item| item.id == item_id)
@@ -1072,7 +1373,7 @@ impl ImageClipboardManager {
     }
 
     pub fn get_preview_lowres_payload_by_index(&self, index: usize) -> Result<Option<String>, String> {
-        let history = self.history.lock().unwrap();
+        let history = lock_arc_mutex(&self.history);
         let item = history
             .get(index)
             .ok_or_else(|| format!("索引 {} 超出范围", index))?;
@@ -1188,9 +1489,9 @@ impl ImageClipboardManager {
 
     pub fn set_grouped_items_protected_from_limit(&mut self, enabled: bool) {
         self.grouped_items_protected_from_limit = enabled;
-        let mut history = self.history.lock().unwrap();
-        let mut categories = self.categories.lock().unwrap();
-        let mut pinned_items = self.pinned_items.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
+        let mut categories = lock_arc_mutex(&self.categories);
+        let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         let removed_paths = shrink_image_history_with_group_protection(
             &mut history,
             self.max_items,
@@ -1208,14 +1509,15 @@ impl ImageClipboardManager {
         );
         cleanup_image_blob_files_async(disk_removed_paths);
         self.prune_pending_images_by_history(&history);
+        self.prune_full_res_cache_access_by_history(&history);
         self.signature_index_dirty.store(true, Ordering::SeqCst);
     }
 
     pub fn set_disk_limit_mb(&mut self, image_disk_limit_mb: u64) {
         self.image_disk_limit_bytes = image_disk_limit_mb.saturating_mul(1024 * 1024);
-        let mut history = self.history.lock().unwrap();
-        let mut categories = self.categories.lock().unwrap();
-        let mut pinned_items = self.pinned_items.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
+        let mut categories = lock_arc_mutex(&self.categories);
+        let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         let disk_removed_paths = shrink_image_history_by_disk_limit(
             &mut history,
             &mut categories,
@@ -1224,6 +1526,7 @@ impl ImageClipboardManager {
         );
         cleanup_image_blob_files_async(disk_removed_paths);
         self.prune_pending_images_by_history(&history);
+        self.prune_full_res_cache_access_by_history(&history);
         self.signature_index_dirty.store(true, Ordering::SeqCst);
         let items_snapshot = history.iter().map(compact_item_for_persist).collect::<Vec<_>>();
         let item_ids_snapshot = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
@@ -1245,8 +1548,8 @@ impl ImageClipboardManager {
     }
 
     pub fn get_storage_metrics(&self) -> ImageStorageMetrics {
-        let history = self.history.lock().unwrap();
-        let pinned_items = self.pinned_items.lock().unwrap();
+        let history = lock_arc_mutex(&self.history);
+        let pinned_items = lock_arc_mutex(&self.pinned_items);
         let memory_bytes = history
             .iter()
             .fold(0u64, |acc, item| acc.saturating_add(item.rgba_bytes.len() as u64));
@@ -1267,7 +1570,7 @@ impl ImageClipboardManager {
         if let Ok(bytes) = read_image_blob(&item.image_path, item.width, item.height) {
             return Ok(bytes);
         }
-        let pending = self.pending_images.lock().unwrap();
+        let pending = lock_arc_mutex(&self.pending_images);
         if let Some(data) = pending.get(&item.id) {
             if data.width == item.width && data.height == item.height {
                 return Ok(data.rgba.as_ref().clone());
@@ -1280,7 +1583,7 @@ impl ImageClipboardManager {
         if let Ok(payload) = read_image_png_base64(&item.image_path) {
             return Ok(payload);
         }
-        let pending = self.pending_images.lock().unwrap();
+        let pending = lock_arc_mutex(&self.pending_images);
         if let Some(data) = pending.get(&item.id) {
             if data.width == item.width && data.height == item.height {
                 return rgba_to_png_base64(data.rgba.as_ref(), item.width, item.height);
@@ -1291,14 +1594,98 @@ impl ImageClipboardManager {
 
     fn prune_pending_images_by_history(&self, history: &[ImageHistoryItem]) {
         let valid_ids: HashSet<String> = history.iter().map(|item| item.id.clone()).collect();
-        let mut pending = self.pending_images.lock().unwrap();
+        let mut pending = lock_arc_mutex(&self.pending_images);
         pending.retain(|id, _| valid_ids.contains(id));
     }
 
+    fn mark_image_accessed(&self, item_id: &str) {
+        let mut lru = lock_arc_mutex(&self.full_res_lru);
+        lru.put(item_id.to_string(), ());
+    }
+
+    fn prune_full_res_cache_access_by_history(&self, history: &[ImageHistoryItem]) {
+        let valid_ids = history
+            .iter()
+            .filter(|item| !item.rgba_bytes.is_empty())
+            .map(|item| item.id.clone())
+            .collect::<HashSet<_>>();
+        let mut lru = lock_arc_mutex(&self.full_res_lru);
+        let mut kept = Vec::new();
+        while let Some((id, _)) = lru.pop_lru() {
+            if valid_ids.contains(&id) {
+                kept.push(id);
+            }
+        }
+        for id in kept {
+            lru.put(id, ());
+        }
+    }
+
+    fn enforce_full_res_cache_budget_lru(&self, history: &mut Vec<ImageHistoryItem>) {
+        let mut total = history
+            .iter()
+            .fold(0usize, |acc, item| acc.saturating_add(item.rgba_bytes.len()));
+        self.prune_full_res_cache_access_by_history(history);
+        if total <= IMAGE_FULL_RES_MEMORY_BUDGET_BYTES {
+            return;
+        }
+
+        let protected_count = IMAGE_FULL_RES_CACHE_KEEP_RECENT.min(history.len());
+        let protected_ids = history
+            .iter()
+            .take(protected_count)
+            .map(|item| item.id.clone())
+            .collect::<HashSet<_>>();
+        let index_by_id = history
+            .iter()
+            .enumerate()
+            .map(|(idx, item)| (item.id.clone(), idx))
+            .collect::<HashMap<_, _>>();
+        let mut lru = lock_arc_mutex(&self.full_res_lru);
+        let mut deferred_protected = Vec::new();
+
+        while total > IMAGE_FULL_RES_MEMORY_BUDGET_BYTES {
+            let Some((id, _)) = lru.pop_lru() else {
+                break;
+            };
+            if protected_ids.contains(&id) {
+                deferred_protected.push(id);
+                continue;
+            }
+            let Some(&idx) = index_by_id.get(&id) else {
+                continue;
+            };
+            let len = history[idx].rgba_bytes.len();
+            if len == 0 {
+                continue;
+            }
+            history[idx].rgba_bytes.clear();
+            total = total.saturating_sub(len);
+        }
+        for id in deferred_protected {
+            lru.put(id, ());
+        }
+
+        while total > IMAGE_FULL_RES_MEMORY_BUDGET_BYTES {
+            let Some((id, _)) = lru.pop_lru() else {
+                break;
+            };
+            let Some(&idx) = index_by_id.get(&id) else {
+                continue;
+            };
+            let len = history[idx].rgba_bytes.len();
+            if len == 0 {
+                continue;
+            }
+            history[idx].rgba_bytes.clear();
+            total = total.saturating_sub(len);
+        }
+    }
+
     fn compact_history_after_load(&self) {
-        let mut history = self.history.lock().unwrap();
-        let mut categories = self.categories.lock().unwrap();
-        let mut pinned_items = self.pinned_items.lock().unwrap();
+        let mut history = lock_arc_mutex(&self.history);
+        let mut categories = lock_arc_mutex(&self.categories);
+        let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         let removed_paths = shrink_image_history_with_group_protection(
             &mut history,
             self.max_items,
@@ -1311,10 +1698,11 @@ impl ImageClipboardManager {
             &mut pinned_items,
             self.image_disk_limit_bytes,
         );
-        enforce_full_res_cache_budget(&mut history);
+        self.enforce_full_res_cache_budget_lru(&mut history);
         cleanup_image_blob_files_async(removed_paths);
         cleanup_image_blob_files_async(disk_removed_paths);
         self.prune_pending_images_by_history(&history);
+        self.prune_full_res_cache_access_by_history(&history);
         self.signature_index_dirty.store(true, Ordering::SeqCst);
         let items_snapshot = history.iter().map(compact_item_for_persist).collect::<Vec<_>>();
         let item_ids_snapshot = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
@@ -1374,6 +1762,39 @@ fn build_signature_index(history: &[ImageHistoryItem]) -> HashMap<String, usize>
         .enumerate()
         .map(|(idx, item)| (item.signature.clone(), idx))
         .collect()
+}
+
+fn signature_index_move_to_front(
+    signature_index: &mut HashMap<String, usize>,
+    moved_signature: &str,
+    from_index: usize,
+) {
+    if from_index == 0 {
+        return;
+    }
+    for index in signature_index.values_mut() {
+        if *index < from_index {
+            *index += 1;
+        }
+    }
+    if let Some(existing) = signature_index.get_mut(moved_signature) {
+        *existing = 0;
+    } else {
+        signature_index.insert(moved_signature.to_string(), 0);
+    }
+}
+
+fn signature_index_remove(
+    signature_index: &mut HashMap<String, usize>,
+    removed_signature: &str,
+    removed_index: usize,
+) {
+    signature_index.remove(removed_signature);
+    for index in signature_index.values_mut() {
+        if *index > removed_index {
+            *index -= 1;
+        }
+    }
 }
 
 fn shrink_image_history_with_group_protection(
@@ -1501,7 +1922,7 @@ fn start_image_persist_worker(
             if let Err(e) = persist_result {
                 log::error!("异步落盘图片失败: {}", e);
             }
-            let mut pending = pending_images.lock().unwrap();
+            let mut pending = lock_arc_mutex(&pending_images);
             pending.remove(&task.item_id);
         }
     });
@@ -1579,11 +2000,35 @@ fn read_image_blob(path: &str, width: u32, height: u32) -> Result<Vec<u8>, Strin
 }
 
 fn read_image_png_base64(path: &str) -> Result<String, String> {
+    let stamp = read_file_change_stamp(path).unwrap_or(0);
+    if let Some((cached_stamp, cached_payload)) =
+        IMAGE_PNG_BASE64_CACHE.lock().get(path).cloned()
+    {
+        if cached_stamp == stamp {
+            return Ok(cached_payload);
+        }
+    }
     let bytes = std::fs::read(path).map_err(|e| format!("读取图片二进制失败: {}", e))?;
     if bytes.is_empty() {
         return Err("图片数据为空".to_string());
     }
-    Ok(BASE64_STANDARD.encode(&bytes))
+    let payload = BASE64_STANDARD.encode(&bytes);
+    IMAGE_PNG_BASE64_CACHE
+        .lock()
+        .put(path.to_string(), (stamp, payload.clone()));
+    Ok(payload)
+}
+
+fn read_file_change_stamp(path: &str) -> Option<u64> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let len = metadata.len();
+    let modified = metadata.modified().ok()?;
+    let modified_ms = modified
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    Some(len ^ modified_ms.rotate_left(13))
 }
 
 pub(crate) fn rgba_base64_to_png_base64(rgba_base64: &str, width: u32, height: u32) -> Result<String, String> {
@@ -1595,42 +2040,6 @@ pub(crate) fn rgba_base64_to_png_base64(rgba_base64: &str, width: u32, height: u
         return Err(format!("预览图像素长度异常: 期望 {} 实际 {}", expected, rgba.len()));
     }
     rgba_to_png_base64(&rgba, width, height)
-}
-
-fn enforce_full_res_cache_budget(history: &mut Vec<ImageHistoryItem>) {
-    let mut total = history
-        .iter()
-        .fold(0usize, |acc, item| acc.saturating_add(item.rgba_bytes.len()));
-    if total <= IMAGE_FULL_RES_MEMORY_BUDGET_BYTES {
-        return;
-    }
-
-    let keep_recent = IMAGE_FULL_RES_CACHE_KEEP_RECENT.min(history.len());
-    for idx in (keep_recent..history.len()).rev() {
-        if total <= IMAGE_FULL_RES_MEMORY_BUDGET_BYTES {
-            break;
-        }
-        let len = history[idx].rgba_bytes.len();
-        if len == 0 {
-            continue;
-        }
-        history[idx].rgba_bytes.clear();
-        total = total.saturating_sub(len);
-    }
-
-    if total > IMAGE_FULL_RES_MEMORY_BUDGET_BYTES {
-        for idx in (0..keep_recent).rev() {
-            if total <= IMAGE_FULL_RES_MEMORY_BUDGET_BYTES {
-                break;
-            }
-            let len = history[idx].rgba_bytes.len();
-            if len == 0 {
-                continue;
-            }
-            history[idx].rgba_bytes.clear();
-            total = total.saturating_sub(len);
-        }
-    }
 }
 
 fn cleanup_image_blob_files(paths: Vec<String>) {

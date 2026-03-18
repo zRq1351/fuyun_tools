@@ -891,14 +891,18 @@ const loadHistoryPage = async ({reset = false} = {}) => {
   isLoadingPage.value = true
   try {
     const offset = reset ? 0 : pageOffset.value
-    const data = await ImageClipboardService.getHistoryPage({
-      offset,
-      limit: pageSize.value,
-      category: categoryFilter.value === '全部' ? null : categoryFilter.value,
-      keyword: searchKeyword.value.trim() || null,
-      pinnedOnly: false,
-      sortOrder: sortOrder.value
-    })
+    const data = await withTimeout(
+        ImageClipboardService.getHistoryPage({
+          offset,
+          limit: pageSize.value,
+          category: categoryFilter.value === '全部' ? null : categoryFilter.value,
+          keyword: searchKeyword.value.trim() || null,
+          pinnedOnly: false,
+          sortOrder: sortOrder.value
+        }),
+        12000,
+        '加载图片历史超时'
+    )
     mergeImagePageIntoState(data, reset)
     if (selectedIndex.value < 0 || !history.value[selectedIndex.value]) {
       const firstLoaded = filteredHistory.value[0]
@@ -924,6 +928,14 @@ const syncHistory = async () => {
   loadMoreIntent.value = false
   await loadHistoryPage({reset: true})
 }
+
+const withTimeout = (promise, timeoutMs, message) =>
+    Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        window.setTimeout(() => reject(new Error(message)), timeoutMs)
+      })
+    ])
 
 const scheduleHistorySync = (delay = 80) => {
   if (historyUpdateTimer) return

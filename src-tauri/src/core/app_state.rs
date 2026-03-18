@@ -1,7 +1,8 @@
+use crate::sync::Mutex;
 use crate::utils::clipboard::ClipboardManager;
 use crate::utils::image_clipboard::{set_image_fill_verify_mode, ImageClipboardManager};
 use crate::utils::utils_helpers::{load_settings, AppSettingsData};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// 托盘菜单项
 #[derive(Clone)]

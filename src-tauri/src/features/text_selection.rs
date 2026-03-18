@@ -1,8 +1,9 @@
+use crate::sync::Mutex;
 use crate::ui::window_manager::ENIGO_INSTANCE;
 use crate::utils::clipboard::ClipboardManager;
 use enigo::{Enigo, Key, Keyboard, Settings};
 use log;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -20,6 +21,13 @@ use tauri::Manager;
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::GetClipboardSequenceNumber;
 
+fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    }
+}
+
 /// 获取选中的文本
 pub fn get_selected_text_with_app(
     app_handle: &AppHandle,
@@ -36,7 +44,7 @@ fn get_selected_text_windows(
     let state_manager = app_handle.state::<Arc<Mutex<SharedAppState>>>();
 
     {
-        let mut state = state_manager.lock().unwrap();
+        let mut state = lock_arc_mutex(state_manager.inner());
         if !state.settings.selection_enabled {
             return None;
         }
@@ -49,9 +57,20 @@ fn get_selected_text_windows(
     let sequence_before_copy = get_clipboard_sequence_number();
 
     // 3. 模拟 Ctrl+C
-    let mut enigo_guard = ENIGO_INSTANCE.lock().unwrap();
+    let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);
     if enigo_guard.is_none() {
-        *enigo_guard = Some(Enigo::new(&Settings::default()).expect("未能初始化enigo"));
+        match Enigo::new(&Settings::default()) {
+            Ok(enigo) => {
+                *enigo_guard = Some(enigo);
+            }
+            Err(e) => {
+                log::error!("未能初始化enigo: {}", e);
+                let mut state = lock_arc_mutex(state_manager.inner());
+                state.is_updating_clipboard = false;
+                state.is_processing_selection = false;
+                return None;
+            }
+        }
     }
 
     crate::features::mouse_listener::reset_ctrl_key_state();
@@ -83,7 +102,7 @@ fn get_selected_text_windows(
     }
 
     {
-        let mut state = state_manager.lock().unwrap();
+        let mut state = lock_arc_mutex(state_manager.inner());
         state.is_processing_selection = false;
     }
 
@@ -105,7 +124,7 @@ fn get_current_clipboard_content_with_manager(
     app_handle: &AppHandle,
 ) -> Option<String> {
     let content = {
-        let manager = clipboard_manager.lock().unwrap();
+        let manager = lock_arc_mutex(clipboard_manager);
         manager.get_content(app_handle)
     };
 
@@ -185,7 +204,7 @@ fn safe_restore_clipboard_content(
         if let Some(ref current) = current_content {
             if current == captured {
                 let result = {
-                    let manager = clipboard_manager.lock().unwrap();
+                    let manager = lock_arc_mutex(clipboard_manager);
                     manager.set_clipboard_content(app_handle, original_content)
                 };
 

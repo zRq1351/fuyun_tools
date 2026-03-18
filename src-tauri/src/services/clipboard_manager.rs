@@ -1,9 +1,17 @@
 use crate::core::app_state::AppState;
 use crate::services::clipboard_wakeup::{ClipboardWakeBackend, WakeSignal};
-use std::sync::{Arc, Mutex};
+use crate::sync::Mutex;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+
+fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
+    match state.lock() {
+        Ok(guard) => guard,
+        Err(e) => match e {},
+    }
+}
 
 /// 启动剪贴板监听器
 pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
@@ -18,12 +26,15 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
                 continue;
             }
 
-            let is_updating = {
-                let state_guard = state.lock().unwrap();
-                state_guard.is_updating_clipboard
-                    || state_guard.is_processing_selection
-                    || state_guard.is_visible
-                    || state_guard.is_image_visible
+            let (is_updating, manager_arc) = {
+                let state_guard = lock_state(&state);
+                (
+                    state_guard.is_updating_clipboard
+                        || state_guard.is_processing_selection
+                        || state_guard.is_visible
+                        || state_guard.is_image_visible,
+                    state_guard.clipboard_manager.clone(),
+                )
             };
 
             if is_updating {
@@ -31,8 +42,10 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
             }
 
             let current_content = {
-                let state_guard = state.lock().unwrap();
-                let manager = state_guard.clipboard_manager.lock().unwrap();
+                let manager = match manager_arc.lock() {
+                    Ok(guard) => guard,
+                    Err(e) => match e {},
+                };
                 manager.get_content(&app_handle)
             };
 
@@ -54,7 +67,7 @@ pub fn add_to_clipboard_history(app_handle: &AppHandle, content: String, state: 
     }
 
     let should_skip = {
-        let state_guard = state.lock().unwrap();
+        let state_guard = lock_state(&state);
         state_guard.is_processing_selection
     };
 
@@ -63,19 +76,24 @@ pub fn add_to_clipboard_history(app_handle: &AppHandle, content: String, state: 
         return;
     }
 
-    let manager_result = {
-        let state_guard = state.lock().unwrap();
+    let manager_arc = {
+        let state_guard = lock_state(&state);
         state_guard.clipboard_manager.clone()
     };
 
     {
-        let manager = manager_result.lock().unwrap();
+        let manager = match manager_arc.lock() {
+            Ok(guard) => guard,
+            Err(e) => match e {},
+        };
         manager.add_to_history(content);
     }
 
     let payload = {
-        let state_guard = state.lock().unwrap();
-        let manager = state_guard.clipboard_manager.lock().unwrap();
+        let manager = match manager_arc.lock() {
+            Ok(guard) => guard,
+            Err(e) => match e {},
+        };
         serde_json::json!({
             "history": manager.get_history(),
             "categories": manager.get_categories(),
