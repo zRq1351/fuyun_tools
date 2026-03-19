@@ -49,8 +49,6 @@ jobs:
           releaseName: 'Release ${{ github.ref_name }}'
           releaseBody: |
             ## 本次更新
-            - 优化剪贴板与图片剪贴板交互体验
-            - 修复已知问题并提升稳定性
-            - 改进 AI 相关功能与设置流程
+            - 移除原有的快捷键注销错误处理，避免因旧快捷键未注册成功而导致配置保存失败
           releaseDraft: false
           prerelease: false
