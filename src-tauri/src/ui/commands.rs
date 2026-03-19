@@ -4,6 +4,7 @@ use crate::core::error::{to_frontend_error_string, AppError, AppResult, ErrorCod
 use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
 use crate::services::image_clipboard_manager::emit_image_history_payload;
+use crate::sync::Mutex;
 use crate::ui::window_manager::{
     hide_clipboard_window, hide_image_clipboard_window, hide_image_preview_window, set_window_position,
     show_clipboard_window, show_image_clipboard_window, show_image_preview_loading_window,
@@ -14,7 +15,6 @@ use crate::utils::image_clipboard::{
     is_fast_fill_verify_mode_enabled, set_image_fill_verify_mode, ImageClipboardManager,
     ImageHistoryPageData, ImageHistoryPreviewItem,
 };
-use crate::sync::Mutex;
 use crate::utils::utils_helpers::{
     default_explanation_prompt_template, default_translation_prompt_template, get_dedup_scan_metrics,
     load_history_page_data_async, load_settings, save_settings, ClipboardHistoryPageData,
@@ -1573,9 +1573,10 @@ pub async fn save_app_settings(
             ));
         }
 
-        app.global_shortcut()
-            .unregister(settings.hot_key.as_str())
-            .map_err(|e| frontend_error(ErrorCode::SystemError, "保存配置失败", e.to_string()))?;
+        // 尝试注销旧快捷键，如果旧快捷键未注册成功则忽略错误
+        if let Err(e) = app.global_shortcut().unregister(settings.hot_key.as_str()) {
+            log::warn!("注销旧快捷键 '{}' 失败 (可能从未注册成功): {}", settings.hot_key, e);
+        }
         let app_clone = app.clone();
         let state_clone = state.inner().clone();
         app.global_shortcut()
@@ -1603,9 +1604,10 @@ pub async fn save_app_settings(
             ));
         }
 
-        app.global_shortcut()
-            .unregister(settings.image_hot_key.as_str())
-            .map_err(|e| frontend_error(ErrorCode::SystemError, "保存配置失败", e.to_string()))?;
+        // 尝试注销旧快捷键，如果旧快捷键未注册成功则忽略错误
+        if let Err(e) = app.global_shortcut().unregister(settings.image_hot_key.as_str()) {
+            log::warn!("注销旧图片快捷键 '{}' 失败 (可能从未注册成功): {}", settings.image_hot_key, e);
+        }
         let app_clone = app.clone();
         let state_clone = state.inner().clone();
         app.global_shortcut()
