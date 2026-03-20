@@ -98,12 +98,18 @@ Installation steps:
 
 ## 🚀 Quick Start
 
-1. Launch the app and find it in the system tray
-2. Use the default hotkey to open clipboard history
+1. **Launch App**: Run fuyun_tools; the icon appears in the system tray
+2. **Open Clipboard**: Use global hotkey to summon main window
     - Windows: `Ctrl+Shift+Z`
     - macOS: `Cmd+Shift+Z`
-3. Configure provider/model/API key in `Settings → AI Settings`
-4. On Windows, select text in any app and use the toolbar to translate or explain
+3. **Configure AI Service**: Go to 「Settings → AI Settings」
+    - Choose built-in provider (DeepSeek/Qwen/Mimo) or add custom OpenAI-compatible endpoint
+    - Enter API URL, model name, and key
+    - Click "Test Connection" to validate configuration
+4. **Try Text Selection**: Select text in any Windows application
+    - The 「Selection Toolbar」automatically pops up
+    - Click [Translate] or [Explain]
+    - View streaming results in the 「Result Window」with one-click write-back
 
 ---
 
@@ -111,40 +117,43 @@ Installation steps:
 
 ### Clipboard Window
 
-- `← / →`: move selection
-- `Enter`: fill selected item
-- `Esc`: hide window
-- Mouse wheel: scroll list
-- `T / E`: translate/explain the currently selected item
-- Supports expanding the language settings panel between the “Raise” handle and the search box
-- Supports auto-collapsing the language settings panel when clicking elsewhere in the window
+- **Navigation**: `← / →` to switch items, `Enter` to fill, `Esc` to close
+- **Scroll Control**: Use mouse wheel to navigate through history
+- **AI Actions**: Press `T` to translate or `E` to explain the selected item
+- **UI Interaction**: Drag the "Raise" handle to adjust window's vertical position
+- **Advanced Feature**: Click the blank area between the "Raise" handle and search box to expand/collapse the AI
+  language settings panel
 
 ### Image Clipboard Window
 
-- Click a card: select image
-- Double-click a card: fill image into the currently focused app
-- Top-right delete button: remove that image history item
-- Top-right fullscreen button: open image fullscreen preview
-- `← / →`: switch image; `Enter`: fill current image; `Esc`: close window
+- **Select Image**: Click a thumbnail card to select
+- **Quick Paste**: Double-click a card to paste directly at cursor position
+- **View Fullscreen**: Click the top-right "Fullscreen" button for high-resolution preview
+- **Manage History**: Click the top-right "Delete" icon to remove record
+- **Bulk Operations**: Use `← / →` to browse images, `Enter` to paste current item, `Esc` to close window
 
 ### Limit Strategy (Text + Image)
 
-- You can switch limit strategy in `Settings → Clipboard`
-- When `Limit Ungrouped Items Only` is enabled, grouped items are protected from auto-removal
-- When disabled, the history limit applies to all items
+- **Access Path**: Settings → Clipboard → Limit Strategy
+- **Smart Protection**: When "Limit Ungrouped Items Only" is enabled, all categorized/pinned items are protected from
+  capacity limits
+- **Full Cleanup**: When disabled, the history limit applies to all records (including important items)
 
 ### Selection Toolbar (Windows)
 
-- Appears automatically after text selection
-- Click translate/explain to view streaming results
-- Click outside to close
-- The result window supports one-click write-back to the currently focused app
+- **Trigger Condition**: Automatically appears upon completing text selection in any application
+- **Core Actions**: Provides three primary buttons: [Translate], [Explain], [Copy]
+- **Instant Feedback**: Clicking an action immediately displays streaming AI output in the "Result Window"
+- **UI Control**: Click outside the toolbar or press ESC to dismiss
 
 ### AI Configuration Tips
 
-- API endpoint must start with `http://` or `https://`
-- Model name must be available on your provider
-- Test connection before saving
+- **Secure Storage**: API keys are encrypted and stored in the system credential manager (keyring), never saved as plain
+  text
+- **Connection Validation**: Always click "Test Connection" to verify configuration validity before saving
+- **Custom Extension**: Supports adding any OpenAI-compatible interface, enabling flexible integration with private
+  model deployments
+- **Prompt Templates**: Modify translation/explanation system prompts in settings to achieve personalized output
 
 ---
 
