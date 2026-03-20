@@ -577,6 +577,19 @@ const getPreviewDataUrl = (item) => {
     return previewCache.get(item.id)
   }
   try {
+    // 优化：对于大图片，直接使用文件路径而不是 Base64
+    // 这样可以避免大量的 Base64 解码和编码操作
+    const isLargeImage = item.width > 1920 || item.height > 1080
+
+    if (isLargeImage) {
+      // 大图片：直接使用文件路径
+      const previewUrl = buildFileUrlFromPath(item.image_path)
+      previewCache.set(item.id, previewUrl)
+      enforcePreviewCacheSize()
+      return previewUrl
+    }
+
+    // 小图片：使用 Base64 预览
     const lowresBase64 = typeof item.preview_png_base64 === 'string' ? item.preview_png_base64.trim() : ''
     const rgbaBase64 = typeof item.preview_rgba_base64 === 'string' ? item.preview_rgba_base64.trim() : ''
     const previewUrl = lowresBase64
@@ -709,9 +722,57 @@ const promoteImageItem = async (itemId) => {
   try {
     const shouldPin = !isPinned(itemId)
     await ImageClipboardService.setItemPinned(itemId, shouldPin)
-    await syncHistory()
+
+    // 优化：只更新本地状态，不重新加载所有数据
+    if (shouldPin) {
+      // 置顶：将图片移到列表顶部
+      pinnedItems.value = [itemId, ...pinnedItems.value.filter(id => id !== itemId)]
+      promoteLocalItemToTop(itemId)
+    } else {
+      // 取消置顶：从置顶列表中移除，并将图片移到非置顶区域的开头
+      pinnedItems.value = pinnedItems.value.filter(id => id !== itemId)
+      demoteLocalItemFromTop(itemId)
+    }
+
+    // 触发置顶事件，通知其他窗口
+    const {emit} = await import('@tauri-apps/api/event')
+    await emit('image-item-pinned', {itemId, pinned: shouldPin})
+    
   } catch (error) {
     console.error('置顶图片失败:', error)
+    // 如果失败，回退到重新加载
+    await syncHistory()
+  }
+}
+
+// 取消置顶：将图片从顶部移动到非置顶区域的开头
+const demoteLocalItemFromTop = (itemId) => {
+  if (!itemId || !Array.isArray(history.value) || history.value.length < 2) return
+
+  const currentIndex = history.value.findIndex((item) => item?.id === itemId)
+  if (currentIndex < 0) return
+
+  const selectedId = history.value[selectedIndex.value]?.id
+  const [moved] = history.value.splice(currentIndex, 1)
+  if (!moved) return
+
+  // 找到第一个非置顶图片的位置
+  const pinnedSet = new Set(pinnedItems.value)
+  let insertIndex = history.value.findIndex((item) => !pinnedSet.has(item.id))
+
+  // 如果没有找到非置顶图片，插入到末尾
+  if (insertIndex < 0) {
+    insertIndex = history.value.length
+  }
+
+  history.value.splice(insertIndex, 0, moved)
+
+  // 更新选中索引
+  if (selectedId) {
+    const nextSelectedIndex = history.value.findIndex((item) => item?.id === selectedId)
+    selectedIndex.value = nextSelectedIndex >= 0 ? nextSelectedIndex : 0
+  } else {
+    selectedIndex.value = 0
   }
 }
 

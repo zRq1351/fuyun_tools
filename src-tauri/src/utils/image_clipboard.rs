@@ -705,8 +705,17 @@ impl ImageClipboardManager {
         // 阶段 2：计算签名
         let signature = compute_signature(&rgba, width, height);
         let id = generate_item_id(&signature);
-        let (preview_width, preview_height, preview_rgba_base64) =
-            build_preview_from_rgba(&rgba, width, height);
+
+        // 优化：大图片不生成 Base64，节省 CPU 和存储
+        let is_large_image = width > 1920 || height > 1080;
+        let (preview_width, preview_height, preview_rgba_base64) = if is_large_image {
+            // 大图片：不生成 Base64，只保留尺寸信息
+            (width, height, String::new())
+        } else {
+            // 小图片：生成 Base64 预览
+            build_preview_from_rgba(&rgba, width, height)
+        };
+        
         let blob_ext = source_blob.as_ref().map(|(_, ext)| ext.as_str()).unwrap_or(
             if BITMAP_STORAGE_USE_LOSSLESS_WEBP {
                 "webp"
@@ -1027,6 +1036,10 @@ impl ImageClipboardManager {
         if !history.iter().any(|item| item.id == item_id) {
             return Err("目标图片不存在".to_string());
         }
+
+        // 优化：记录旧位置，用于增量更新
+        let old_position = history.iter().position(|item| item.id == item_id);
+        
         let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         if pinned {
             if !pinned_items.iter().any(|id| id == &item_id) {
@@ -1038,13 +1051,30 @@ impl ImageClipboardManager {
         normalize_pinned_items(&mut pinned_items, &history);
         apply_pin_order(&mut history, &pinned_items);
         self.signature_index_dirty.store(true, Ordering::SeqCst);
-        let item_ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
+
+        // 优化：计算新位置
+        let new_position = history.iter().position(|item| item.id == item_id);
+        
         let pinned_snapshot = pinned_items.clone();
         drop(pinned_items);
         drop(history);
-        if let Err(e) = image_store::sync_item_positions(&item_ids) {
-            log::error!("同步图片位置失败: {}", e);
+
+        // 优化：使用增量更新而不是全量更新
+        if let (Some(old_pos), Some(new_pos)) = (old_position, new_position) {
+            if old_pos != new_pos {
+                if let Err(e) = image_store::sync_item_positions_incremental(&item_id, old_pos, new_pos) {
+                    log::error!("增量同步图片位置失败: {}", e);
+                    // 回退到全量同步
+                    let history = lock_arc_mutex(&self.history);
+                    let item_ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
+                    drop(history);
+                    if let Err(e) = image_store::sync_item_positions(&item_ids) {
+                        log::error!("全量同步图片位置失败: {}", e);
+                    }
+                }
+            }
         }
+        
         if let Err(e) = image_store::sync_pinned_order(&pinned_snapshot) {
             log::error!("同步置顶列表失败: {}", e);
         }
