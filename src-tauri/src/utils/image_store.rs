@@ -456,6 +456,8 @@ pub fn load_all_data() -> Result<ImageHistoryData, String> {
                 image_path,
                 rgba_bytes: Vec::new(),
                 signature: id,
+                lazy_load: true,
+                cached_signature: None,
             });
         }
 

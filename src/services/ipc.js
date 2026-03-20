@@ -37,6 +37,7 @@ export const IPC_COMMANDS = {
     IMPORT_IMAGE_FILES: 'import_image_files',
     SELECT_AND_FILL_IMAGE_BY_ID: 'select_and_fill_image_by_id',
     WARMUP_IMAGE_CLIPBOARD_ITEM_BY_ID: 'warmup_image_clipboard_item_by_id',
+    WARMUP_MULTIPLE_IMAGES: 'warmup_multiple_images',
     OPEN_IMAGE_PREVIEW_WINDOW_BY_ID: 'open_image_preview_window_by_id',
     CLOSE_IMAGE_PREVIEW_WINDOW: 'close_image_preview_window',
     COPY_TEXT: 'copy_text',
@@ -149,6 +150,8 @@ export const ImageClipboardService = {
         }),
     warmupItemById: (itemId) =>
         invoke(IPC_COMMANDS.WARMUP_IMAGE_CLIPBOARD_ITEM_BY_ID, {request: {itemId}}),
+    warmupMultipleItems: (itemIds) =>
+        invoke(IPC_COMMANDS.WARMUP_MULTIPLE_IMAGES, {itemIds}),
     openPreviewWindowById: (itemId) =>
         invoke(IPC_COMMANDS.OPEN_IMAGE_PREVIEW_WINDOW_BY_ID, {request: {itemId}}),
     closePreviewWindow: () => invoke(IPC_COMMANDS.CLOSE_IMAGE_PREVIEW_WINDOW),

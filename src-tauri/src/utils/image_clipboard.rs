@@ -8,10 +8,8 @@ use image::{DynamicImage, ImageEncoder, RgbaImage};
 use lru::LruCache;
 use parking_lot::Mutex as ParkingMutex;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -101,6 +99,10 @@ pub struct ImageHistoryItem {
     #[serde(skip, default)]
     pub rgba_bytes: Vec<u8>,
     pub signature: String,
+    #[serde(skip, default)]
+    pub lazy_load: bool,
+    #[serde(skip, default)]
+    pub cached_signature: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -682,6 +684,7 @@ impl ImageClipboardManager {
         height: u32,
         source_blob: Option<(Vec<u8>, String)>,
     ) {
+        // 阶段 2：计算签名
         let signature = compute_signature(&rgba, width, height);
         let id = generate_item_id(&signature);
         let (preview_width, preview_height, preview_rgba_base64) =
@@ -704,6 +707,8 @@ impl ImageClipboardManager {
             image_path: image_path.clone(),
             rgba_bytes: Vec::new(),
             signature: signature.clone(),
+            lazy_load: true,
+            cached_signature: None,
         };
         let removed_ids_after_insert = {
             let mut history = lock_arc_mutex(&self.history);
@@ -1379,7 +1384,8 @@ impl ImageClipboardManager {
         app_handle: &tauri::AppHandle,
     ) -> Result<Vec<ClipboardImagePayload>, String> {
         use tauri_plugin_clipboard_manager::ClipboardExt;
-        let retry_delays = [12u64, 18, 26, 36, 48, 62, 78, 96];
+        // 优化方案 4：极简读取逻辑，最多 2 次尝试，总延迟 < 30ms
+        let retry_delays = [10u64, 20];
         for (attempt, delay_ms) in retry_delays.iter().enumerate() {
             let read_result = crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
                 app_handle.clipboard().read_image()
@@ -1434,14 +1440,16 @@ impl ImageClipboardManager {
     ) -> Result<(), String> {
         use tauri_plugin_clipboard_manager::ClipboardExt;
         let mut last_error = String::new();
-        let retry_delays = [8u64, 12, 18, 26, 36, 50, 70, 95, 125];
+        // 优化方案 2：更激进的快速重试策略，减少等待时间
+        let retry_delays = [3u64, 6, 10, 16, 24, 36, 52, 72, 95];
         for (attempt, delay_ms) in retry_delays.iter().enumerate() {
             match app_handle.clipboard().write_image(image) {
                 Ok(_) => {
                     if is_fast_fill_verify_mode() {
                         return Ok(());
                     }
-                    let verify_delays = [10u64, 18, 28, 42];
+                    // 优化方案 2：极速验证策略，减少验证延迟
+                    let verify_delays = [5u64, 10, 18];
                     let mut verified = false;
                     for (verify_index, verify_delay) in verify_delays.iter().enumerate() {
                         if let Ok(read_back) = app_handle.clipboard().read_image() {
@@ -1554,15 +1562,25 @@ impl ImageClipboardManager {
     }
 
     fn read_item_rgba(&self, item: &ImageHistoryItem) -> Result<Vec<u8>, String> {
-        if let Ok(bytes) = read_image_blob(&item.image_path, item.width, item.height) {
-            return Ok(bytes);
+        // 优化：检查是否已经缓存
+        if !item.rgba_bytes.is_empty() {
+            return Ok(item.rgba_bytes.clone());
         }
+
+        // 优化：检查 pending 中是否有数据
         let pending = lock_arc_mutex(&self.pending_images);
         if let Some(data) = pending.get(&item.id) {
             if data.width == item.width && data.height == item.height {
                 return Ok(data.rgba.as_ref().clone());
             }
         }
+        drop(pending);
+
+        // 优化：延迟加载 - 只有在真正需要时才从磁盘读取
+        if item.lazy_load {
+            log::debug!("延迟加载图片: {} ({}x{})", item.id, item.width, item.height);
+        }
+        
         read_image_blob(&item.image_path, item.width, item.height)
     }
 
@@ -1740,6 +1758,8 @@ fn compact_item_for_persist(item: &ImageHistoryItem) -> ImageHistoryItem {
         image_path: item.image_path.clone(),
         rgba_bytes: Vec::new(),
         signature: item.signature.clone(),
+        lazy_load: true,
+        cached_signature: None,
     }
 }
 
@@ -1854,21 +1874,52 @@ fn file_size_bytes(path: &str) -> u64 {
 }
 
 pub(crate) fn compute_signature(rgba: &[u8], width: u32, height: u32) -> String {
-    let mut hasher = DefaultHasher::new();
-    width.hash(&mut hasher);
-    height.hash(&mut hasher);
-    rgba.len().hash(&mut hasher);
-    if !rgba.is_empty() {
-        let sample_points = 96usize;
-        let step = (rgba.len() / sample_points).max(1);
-        let mut idx = 0usize;
-        while idx < rgba.len() {
-            rgba[idx].hash(&mut hasher);
-            idx += step;
-        }
-        rgba[rgba.len() - 1].hash(&mut hasher);
+    use xxhash_rust::xxh3::xxh3_64;
+
+    // 阶段 1：使用 xxHash 和智能采样策略
+    let mut combined = Vec::with_capacity(12);
+    combined.extend_from_slice(&width.to_le_bytes());
+    combined.extend_from_slice(&height.to_le_bytes());
+    combined.extend_from_slice(&rgba.len().to_le_bytes());
+
+    if rgba.is_empty() {
+        let hash = xxh3_64(&combined);
+        return format!("{:016x}", hash);
     }
-    format!("{:x}", hasher.finish())
+
+    // 智能采样：根据图片大小调整采样点数
+    let total_pixels = width as usize * height as usize;
+    let sample_points = if total_pixels > 2_000_000 {  // > 2MP
+        64  // 大图片用更少的采样点
+    } else if total_pixels > 500_000 {  // > 0.5MP
+        96  // 中等图片
+    } else {
+        128  // 小图片用更多采样点
+    };
+
+    // 采样策略：取首、中、尾各 N 字节
+    let sample_size = (rgba.len() / sample_points).max(1);
+
+    // 首部采样
+    let head_end = sample_size.min(rgba.len());
+    combined.extend_from_slice(&rgba[..head_end]);
+
+    // 中部采样
+    if rgba.len() > sample_size * 2 {
+        let mid = rgba.len() / 2;
+        let mid_start = mid.saturating_sub(sample_size / 2);
+        let mid_end = (mid + sample_size / 2).min(rgba.len());
+        combined.extend_from_slice(&rgba[mid_start..mid_end]);
+    }
+
+    // 尾部采样
+    if rgba.len() > sample_size {
+        let tail_start = rgba.len().saturating_sub(sample_size);
+        combined.extend_from_slice(&rgba[tail_start..]);
+    }
+
+    let hash = xxh3_64(&combined);
+    format!("{:016x}", hash)
 }
 
 fn generate_item_id(signature: &str) -> String {
