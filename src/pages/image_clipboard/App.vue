@@ -388,6 +388,11 @@ const handleContentScroll = () => {
       })
     }
   })
+
+  // 优化方案 5：滚动时批量预热前方可见区域
+  const scrollLeft = contentRef.value?.scrollLeft || 0
+  const visibleStartIndex = Math.floor(scrollLeft / IMAGE_ITEM_UNIT)
+  warmupBatch(visibleStartIndex + 3, 6) // 预热前方第 3-8 个图片
 }
 
 const tryLoadMoreByScroll = async () => {
@@ -611,6 +616,33 @@ const warmupOne = (index) => {
       .finally(() => {
         warmingIndices.delete(index)
       })
+}
+
+// 优化方案 5：批量预热前方多个图片
+let warmupBatchTimer = null
+const warmupBatch = (startIndex, count = 6) => {
+  if (warmupBatchTimer) {
+    clearTimeout(warmupBatchTimer)
+  }
+  warmupBatchTimer = setTimeout(async () => {
+    const itemIds = []
+    for (let i = startIndex; i < Math.min(startIndex + count, history.value.length); i++) {
+      const itemId = history.value[i]?.id
+      if (itemId && !warmedIndices.has(i) && !warmingIndices.has(i)) {
+        itemIds.push(itemId)
+      }
+    }
+    if (itemIds.length > 0) {
+      try {
+        await ImageClipboardService.warmupMultipleItems(itemIds)
+        for (let i = startIndex; i < Math.min(startIndex + count, history.value.length); i++) {
+          warmedIndices.add(i)
+        }
+      } catch (error) {
+        console.error('批量预热失败:', error)
+      }
+    }
+  }, 100) // 100ms 防抖
 }
 
 const warmupAround = (index) => {
@@ -878,11 +910,17 @@ const mergeShowWindowPayload = (data) => {
   if (incoming.length > 0) {
     const existingById = new Map(history.value.filter(Boolean).map((item) => [item.id, item]))
     const incomingIds = new Set()
-    const keepCount = Math.max(1, Number(pageOffset.value) || Number(pageSize.value) || 10)
-    const front = incoming.map((item) => {
+
+    // 修复：使用更大的保留数量，确保所有图片都被保留
+    const keepCount = Math.max(100, Number(pageOffset.value) || 100, Number(pageSize.value) || 100, history.value.length + incoming.length)
+
+    // 修复：正确处理所有传入的图片，而不是只处理第一张
+    const front = []
+    for (const item of incoming) {
+      if (!item?.id) continue
       incomingIds.add(item.id)
       const existing = existingById.get(item.id) || {}
-      return {
+      front.push({
         ...existing,
         id: item.id,
         width: item.width ?? existing.width ?? 0,
@@ -892,9 +930,13 @@ const mergeShowWindowPayload = (data) => {
         preview_rgba_base64: item.preview_rgba_base64 ?? item.previewRgbaBase64 ?? existing.preview_rgba_base64 ?? '',
         preview_png_base64: item.preview_png_base64 ?? item.previewPngBase64 ?? existing.preview_png_base64 ?? '',
         image_path: item.image_path ?? item.imagePath ?? existing.image_path ?? ''
-      }
-    })
+      })
+    }
+
+    // 保留现有历史记录中不在传入数据中的项目
     const rest = history.value.filter((item) => item && !incomingIds.has(item.id))
+
+    // 合并并限制总数
     history.value = [...front, ...rest].slice(0, keepCount)
     const loadedCount = history.value.filter(Boolean).length
     totalCount.value = Math.max(totalCount.value || 0, loadedCount)
@@ -1065,7 +1107,8 @@ const syncHistory = async () => {
   await loadHistoryPage({reset: true})
 }
 
-const scheduleHistorySync = (delay = 80) => {
+// 优化方案 2：减少前端同步延迟，从 80ms 降至 40ms
+const scheduleHistorySync = (delay = 40) => {
   if (historyUpdateTimer) return
   historyUpdateTimer = window.setTimeout(async () => {
     historyUpdateTimer = null

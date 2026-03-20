@@ -13,6 +13,7 @@
         :key="entry.index"
         :class="{ selected: selectedIndex === entry.index }"
         class="clipboard-item"
+        v-memo="[entry.item, entry.index, selectedIndex, getItemCategory(entry.item), isPinned(entry.item), entry.snippet]"
         @click="handleClick(entry.index)"
         @dblclick="handleDoubleClick(entry.index)"
         @contextmenu.prevent="showContextMenu($event, entry.item, entry.index)"
@@ -407,6 +408,9 @@ defineExpose({
   color: white;
   transition: all 0.3s ease;
   box-sizing: border-box;
+  /* 优化：限制重排重绘范围 */
+  contain: layout style paint;
+  will-change: transform;
 }
 
 .clipboard-item:hover, .clipboard-item.selected {

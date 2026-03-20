@@ -307,22 +307,33 @@ async fn save_history_data_to_sqlite_async(data: &ClipboardHistoryData) -> Resul
         .await
         .map_err(|e| format!("创建历史数据库事务失败: {}", e))?;
 
-    sqlx::query("DELETE FROM history_items")
+    // 优化：使用临时表减少锁时间
+    sqlx::query("CREATE TEMP TABLE IF NOT EXISTS temp_history_items AS SELECT * FROM history_items WHERE 0")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("写入历史数据库失败: {}", e))?;
-    sqlx::query("DELETE FROM categories")
+        .map_err(|e| format!("创建临时表失败: {}", e))?;
+    sqlx::query("CREATE TEMP TABLE IF NOT EXISTS temp_categories AS SELECT * FROM categories WHERE 0")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("写入历史数据库失败: {}", e))?;
-    sqlx::query("DELETE FROM category_list")
+        .map_err(|e| format!("创建临时表失败: {}", e))?;
+    sqlx::query("CREATE TEMP TABLE IF NOT EXISTS temp_category_list AS SELECT * FROM category_list WHERE 0")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("写入历史数据库失败: {}", e))?;
-    sqlx::query("DELETE FROM pinned_items")
+        .map_err(|e| format!("创建临时表失败: {}", e))?;
+    sqlx::query("CREATE TEMP TABLE IF NOT EXISTS temp_pinned_items AS SELECT * FROM pinned_items WHERE 0")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+        .map_err(|e| format!("创建临时表失败: {}", e))?;
+
+    // 清空临时表
+    sqlx::query("DELETE FROM temp_history_items").execute(&mut *tx).await
+        .map_err(|e| format!("清空临时表失败: {}", e))?;
+    sqlx::query("DELETE FROM temp_categories").execute(&mut *tx).await
+        .map_err(|e| format!("清空临时表失败: {}", e))?;
+    sqlx::query("DELETE FROM temp_category_list").execute(&mut *tx).await
+        .map_err(|e| format!("清空临时表失败: {}", e))?;
+    sqlx::query("DELETE FROM temp_pinned_items").execute(&mut *tx).await
+        .map_err(|e| format!("清空临时表失败: {}", e))?;
 
     let fts_enabled = {
         let row = sqlx::query(
@@ -339,73 +350,119 @@ async fn save_history_data_to_sqlite_async(data: &ClipboardHistoryData) -> Resul
 
     let now_ms = now_unix_ms();
     let mut item_id_by_content = HashMap::<String, String>::new();
-    for (idx, content) in data.items.iter().enumerate() {
-        let item_id = stable_history_item_id(content);
-        item_id_by_content.insert(content.clone(), item_id.clone());
-        sqlx::query(
-            "
-            INSERT INTO history_items(position, content, item_id, content_hash, created_at, updated_at)
-            VALUES(?1, ?2, ?3, ?4, ?5, ?6)
-            ",
-        )
-            .bind(idx as i64)
-            .bind(content)
-            .bind(&item_id)
-            .bind(stable_history_content_hash(content))
-            .bind(now_ms)
-            .bind(now_ms)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("写入历史数据库失败: {}", e))?;
 
-        if fts_enabled {
-            let _ = sqlx::query(
-                "INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content) VALUES(?1, ?2, ?3)",
+    // 批量插入到临时表
+    const BATCH_SIZE: usize = 100;
+    for chunk_start in (0..data.items.len()).step_by(BATCH_SIZE) {
+        let chunk_end = (chunk_start + BATCH_SIZE).min(data.items.len());
+        let chunk = &data.items[chunk_start..chunk_end];
+
+        for (local_idx, content) in chunk.iter().enumerate() {
+            let idx = chunk_start + local_idx;
+            let item_id = stable_history_item_id(content);
+            item_id_by_content.insert(content.clone(), item_id.clone());
+
+            sqlx::query(
+                "
+                INSERT INTO temp_history_items(position, content, item_id, content_hash, created_at, updated_at)
+                VALUES(?1, ?2, ?3, ?4, ?5, ?6)
+                ",
             )
-                .bind(idx as i64 + 1)
-                .bind(&item_id)
+                .bind(idx as i64)
                 .bind(content)
+                .bind(&item_id)
+                .bind(stable_history_content_hash(content))
+                .bind(now_ms)
+                .bind(now_ms)
                 .execute(&mut *tx)
-                .await;
+                .await
+                .map_err(|e| format!("写入临时表失败: {}", e))?;
+
+            if fts_enabled {
+                let _ = sqlx::query(
+                    "INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content) VALUES(?1, ?2, ?3)",
+                )
+                    .bind(idx as i64 + 1)
+                    .bind(&item_id)
+                    .bind(content)
+                    .execute(&mut *tx)
+                    .await;
+            }
         }
     }
 
+    // 批量插入分类
     for (item, category) in &data.categories {
         let item_id = item_id_by_content
             .get(item)
             .cloned()
             .unwrap_or_else(|| stable_history_item_id(item));
-        sqlx::query("INSERT OR REPLACE INTO categories(item, category, item_id) VALUES(?1, ?2, ?3)")
+        sqlx::query("INSERT INTO temp_categories(item, category, item_id) VALUES(?1, ?2, ?3)")
             .bind(item)
             .bind(category)
             .bind(item_id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+            .map_err(|e| format!("写入临时表失败: {}", e))?;
     }
 
+    // 批量插入分类列表
     for (idx, category) in data.category_list.iter().enumerate() {
-        sqlx::query("INSERT INTO category_list(position, category) VALUES(?1, ?2)")
+        sqlx::query("INSERT INTO temp_category_list(position, category) VALUES(?1, ?2)")
             .bind(idx as i64)
             .bind(category)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+            .map_err(|e| format!("写入临时表失败: {}", e))?;
     }
 
+    // 批量插入置顶项
     for (idx, item) in data.pinned_items.iter().enumerate() {
         let item_id = item_id_by_content
             .get(item)
             .cloned()
             .unwrap_or_else(|| stable_history_item_id(item));
-        sqlx::query("INSERT INTO pinned_items(position, item, item_id) VALUES(?1, ?2, ?3)")
+        sqlx::query("INSERT INTO temp_pinned_items(position, item, item_id) VALUES(?1, ?2, ?3)")
             .bind(idx as i64)
             .bind(item)
             .bind(item_id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("写入历史数据库失败: {}", e))?;
+            .map_err(|e| format!("写入临时表失败: {}", e))?;
     }
+
+    // 原子替换：删除原表数据，从临时表插入
+    sqlx::query("DELETE FROM history_items").execute(&mut *tx).await
+        .map_err(|e| format!("删除原表数据失败: {}", e))?;
+    sqlx::query("DELETE FROM categories").execute(&mut *tx).await
+        .map_err(|e| format!("删除原表数据失败: {}", e))?;
+    sqlx::query("DELETE FROM category_list").execute(&mut *tx).await
+        .map_err(|e| format!("删除原表数据失败: {}", e))?;
+    sqlx::query("DELETE FROM pinned_items").execute(&mut *tx).await
+        .map_err(|e| format!("删除原表数据失败: {}", e))?;
+
+    sqlx::query("INSERT INTO history_items SELECT * FROM temp_history_items")
+        .execute(&mut *tx).await
+        .map_err(|e| format!("从临时表插入失败: {}", e))?;
+    sqlx::query("INSERT INTO categories SELECT * FROM temp_categories")
+        .execute(&mut *tx).await
+        .map_err(|e| format!("从临时表插入失败: {}", e))?;
+    sqlx::query("INSERT INTO category_list SELECT * FROM temp_category_list")
+        .execute(&mut *tx).await
+        .map_err(|e| format!("从临时表插入失败: {}", e))?;
+    sqlx::query("INSERT INTO pinned_items SELECT * FROM temp_pinned_items")
+        .execute(&mut *tx).await
+        .map_err(|e| format!("从临时表插入失败: {}", e))?;
+
+    // 清理临时表
+    sqlx::query("DROP TABLE IF EXISTS temp_history_items").execute(&mut *tx).await
+        .map_err(|e| format!("清理临时表失败: {}", e))?;
+    sqlx::query("DROP TABLE IF EXISTS temp_categories").execute(&mut *tx).await
+        .map_err(|e| format!("清理临时表失败: {}", e))?;
+    sqlx::query("DROP TABLE IF EXISTS temp_category_list").execute(&mut *tx).await
+        .map_err(|e| format!("清理临时表失败: {}", e))?;
+    sqlx::query("DROP TABLE IF EXISTS temp_pinned_items").execute(&mut *tx).await
+        .map_err(|e| format!("清理临时表失败: {}", e))?;
 
     tx.commit()
         .await

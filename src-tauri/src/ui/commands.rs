@@ -351,7 +351,8 @@ fn simulate_paste_with_retry(
                 return;
             }
             Err(first_error) => {
-                thread::sleep(Duration::from_millis(35));
+                // 优化方案 4：极速模式下快速重试，仅等待 15ms
+                thread::sleep(Duration::from_millis(15));
                 match crate::ui::window_manager::simulate_paste() {
                     Ok(_) => {
                         if let Some(op_id) = operation_id {
@@ -395,7 +396,8 @@ fn simulate_paste_with_retry(
             }
         }
     }
-    thread::sleep(Duration::from_millis(135));
+    // 优化方案 4：降低普通模式的延迟，从 135ms 降至 90ms
+    thread::sleep(Duration::from_millis(90));
     match crate::ui::window_manager::simulate_paste() {
         Ok(_) => {
             if let Some(op_id) = operation_id {
@@ -410,7 +412,8 @@ fn simulate_paste_with_retry(
             }
         }
         Err(first_error) => {
-            thread::sleep(Duration::from_millis(140));
+            // 优化方案 4：二次重试延迟从 140ms 降至 100ms
+            thread::sleep(Duration::from_millis(100));
             match crate::ui::window_manager::simulate_paste() {
                 Ok(_) => {
                     if let Some(op_id) = operation_id {
@@ -869,6 +872,29 @@ pub async fn warmup_image_clipboard_item_by_id(
     })
         .await
         .map_err(|e| frontend_error(ErrorCode::SystemError, "预热图片任务执行失败", e.to_string()))?
+}
+
+/// 优化方案 5：批量预热多个图片到内存缓存，用于滚动时提前加载
+#[tauri::command]
+pub async fn warmup_multiple_images(
+    item_ids: Vec<String>,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager_arc = get_image_clipboard_manager_arc(&state_arc);
+        let manager = lock_arc_mutex(&manager_arc);
+        for item_id in item_ids {
+            if let Some(index) = manager.get_history().iter().position(|item| item.id == item_id) {
+                if index < 6 {
+                    let _ = manager.warmup_image_by_id(&item_id);
+                }
+            }
+        }
+    })
+        .await
+        .map_err(|e| frontend_error(ErrorCode::SystemError, "批量预热图片任务执行失败", e.to_string()))?;
+    Ok(())
 }
 
 #[tauri::command]

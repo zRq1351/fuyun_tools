@@ -166,3 +166,131 @@ const {
   color: #909399;
 }
 </style>
+
+<style>
+/* 全局样式，用于更新内容中的Markdown元素 */
+.update-body-content {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.update-body-content h1,
+.update-body-content h2,
+.update-body-content h3,
+.update-body-content h4,
+.update-body-content h5,
+.update-body-content h6 {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.update-body-content h1 {
+  font-size: 18px;
+}
+
+.update-body-content h2 {
+  font-size: 16px;
+}
+
+.update-body-content h3 {
+  font-size: 15px;
+}
+
+.update-body-content p {
+  margin: 8px 0;
+  line-height: 1.6;
+}
+
+.update-body-content ul,
+.update-body-content ol {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.update-body-content li {
+  margin: 4px 0;
+  line-height: 1.6;
+}
+
+.update-body-content code {
+  background-color: #f5f7fa;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: Consolas, Monaco, 'Andale Mono', monospace;
+  font-size: 0.9em;
+  color: #476582;
+}
+
+.update-body-content pre {
+  background-color: #f5f7fa;
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.update-body-content pre code {
+  background-color: transparent;
+  padding: 0;
+  font-size: 0.85em;
+  color: #303133;
+}
+
+.update-body-content blockquote {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 4px solid #409eff;
+  background-color: #f5f7fa;
+  color: #606266;
+}
+
+.update-body-content a {
+  color: #409eff;
+  text-decoration: none;
+}
+
+.update-body-content a:hover {
+  text-decoration: underline;
+}
+
+.update-body-content img {
+  max-width: 100%;
+  height: auto;
+  margin: 8px 0;
+}
+
+.update-body-content table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  width: 100%;
+}
+
+.update-body-content th,
+.update-body-content td {
+  border: 1px solid #dcdfe6;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.update-body-content th {
+  background-color: #f5f7fa;
+  font-weight: 600;
+}
+
+.update-body-content hr {
+  margin: 16px 0;
+  border: 0;
+  border-top: 1px solid #dcdfe6;
+}
+
+/* 自定义消息框样式 */
+.update-message-box .el-message-box__content {
+  padding: 10px 20px;
+}
+
+.update-message-box .el-message-box__message {
+  margin: 0;
+}
+</style>
