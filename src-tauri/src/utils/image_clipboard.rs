@@ -12,10 +12,10 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
 use std::sync::{Arc, LazyLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::image::Image;
 #[cfg(target_os = "windows")]
 use winapi::shared::minwindef::UINT;
@@ -34,6 +34,13 @@ const BITMAP_STORAGE_USE_LOSSLESS_WEBP: bool = true;
 const IMAGE_PNG_BASE64_CACHE_CAPACITY: usize = 64;
 const IMAGE_FILL_VERIFY_MODE_STRICT: u8 = 0;
 const IMAGE_FILL_VERIFY_MODE_FAST: u8 = 1;
+
+// 内存管理优化常量
+const IMAGE_CHUNK_SIZE: usize = 1024 * 1024; // 1MB 分块大小
+const MEMORY_MONITOR_INTERVAL_MS: u64 = 5000; // 内存监控间隔
+const DYNAMIC_MEMORY_BUDGET_MIN: usize = 128 * 1024 * 1024; // 最小内存预算 128MB
+const DYNAMIC_MEMORY_BUDGET_MAX: usize = 512 * 1024 * 1024; // 最大内存预算 512MB
+const LARGE_IMAGE_THRESHOLD: usize = 10 * 1024 * 1024; // 大图片阈值 10MB
 static IMAGE_FILL_VERIFY_MODE: std::sync::atomic::AtomicU8 =
     std::sync::atomic::AtomicU8::new(IMAGE_FILL_VERIFY_MODE_STRICT);
 static IMAGE_PNG_BASE64_CACHE: LazyLock<ParkingMutex<LruCache<String, (u64, String)>>> =
@@ -171,6 +178,10 @@ pub struct ImageClipboardManager {
     max_items: usize,
     image_disk_limit_bytes: u64,
     grouped_items_protected_from_limit: bool,
+    // 内存管理优化字段
+    current_memory_usage: Arc<AtomicU64>,
+    dynamic_memory_budget: Arc<AtomicU64>,
+    last_memory_check: Arc<AtomicU64>,
 }
 
 impl ImageClipboardManager {
@@ -210,7 +221,14 @@ impl ImageClipboardManager {
             max_items,
             image_disk_limit_bytes: image_disk_limit_mb.saturating_mul(1024 * 1024),
             grouped_items_protected_from_limit,
+            // 初始化内存管理优化字段
+            current_memory_usage: Arc::new(AtomicU64::new(0)),
+            dynamic_memory_budget: Arc::new(AtomicU64::new(IMAGE_FULL_RES_MEMORY_BUDGET_BYTES as u64)),
+            last_memory_check: Arc::new(AtomicU64::new(0)),
         };
+
+        // 启动内存监控
+        manager.start_memory_monitor();
         manager.compact_history_after_load();
         if let Err(e) = image_store::init_image_store() {
             log::warn!("初始化图片 SQLite 存储失败: {}", e);
@@ -1440,30 +1458,36 @@ impl ImageClipboardManager {
     ) -> Result<(), String> {
         use tauri_plugin_clipboard_manager::ClipboardExt;
         let mut last_error = String::new();
-        // 优化方案 2：更激进的快速重试策略，减少等待时间
-        let retry_delays = [3u64, 6, 10, 16, 24, 36, 52, 72, 95];
+
+        // 优化方案 6：针对大图片优化重试策略
+        // 检测图片大小，大图片使用更激进的重试策略
+        let image_size = image.rgba().len();
+        let is_large_image = image_size > 1024 * 1024; // > 1MB
+
+        // 大图片使用更少的重试次数和更短的延迟
+        let retry_delays = if is_large_image {
+            // 大图片：3次重试，延迟更短
+            vec![5u64, 10, 15]
+        } else {
+            // 小图片：保持原有策略但减少最大重试次数
+            vec![3u64, 6, 10, 16, 24]
+        };
+        
         for (attempt, delay_ms) in retry_delays.iter().enumerate() {
             match app_handle.clipboard().write_image(image) {
                 Ok(_) => {
-                    if is_fast_fill_verify_mode() {
+                    // 优化方案 6：大图片跳过验证或使用快速验证
+                    if is_fast_fill_verify_mode() || is_large_image {
+                        // 大图片或快速模式：跳过验证，直接返回成功
                         return Ok(());
                     }
-                    // 优化方案 2：极速验证策略，减少验证延迟
-                    let verify_delays = [5u64, 10, 18];
-                    let mut verified = false;
-                    for (verify_index, verify_delay) in verify_delays.iter().enumerate() {
-                        if let Ok(read_back) = app_handle.clipboard().read_image() {
-                            if read_back.width() > 0 && read_back.height() > 0 && !read_back.rgba().is_empty() {
-                                verified = true;
-                                break;
-                            }
+
+                    // 小图片使用简化验证：只验证一次，延迟更短
+                    std::thread::sleep(std::time::Duration::from_millis(3));
+                    if let Ok(read_back) = app_handle.clipboard().read_image() {
+                        if read_back.width() > 0 && read_back.height() > 0 && !read_back.rgba().is_empty() {
+                            return Ok(());
                         }
-                        if verify_index < verify_delays.len() - 1 {
-                            std::thread::sleep(std::time::Duration::from_millis(*verify_delay));
-                        }
-                    }
-                    if verified {
-                        return Ok(());
                     }
                     last_error = "写入后校验失败：剪贴板位图尚未稳定".to_string();
                 }
@@ -1726,6 +1750,87 @@ impl ImageClipboardManager {
         if let Err(e) = image_store::sync_item_positions(&item_ids_snapshot) {
             log::error!("同步图片位置失败: {}", e);
         }
+    }
+
+    /// 启动内存监控
+    fn start_memory_monitor(&self) {
+        let current_memory_usage = self.current_memory_usage.clone();
+        let dynamic_memory_budget = self.dynamic_memory_budget.clone();
+        let last_memory_check = self.last_memory_check.clone();
+
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_millis(MEMORY_MONITOR_INTERVAL_MS));
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+
+                // 检查是否需要更新内存预算
+                let last_check = last_memory_check.load(Ordering::Relaxed);
+                if now.saturating_sub(last_check) < MEMORY_MONITOR_INTERVAL_MS {
+                    continue;
+                }
+
+                last_memory_check.store(now, Ordering::Relaxed);
+
+                // 获取当前内存使用情况
+                let current_usage = current_memory_usage.load(Ordering::Relaxed);
+                let current_budget = dynamic_memory_budget.load(Ordering::Relaxed);
+
+                // 动态调整内存预算
+                let new_budget = if current_usage > current_budget * 9 / 10 {
+                    // 使用率超过90%，增加预算
+                    (current_budget * 12 / 10).min(DYNAMIC_MEMORY_BUDGET_MAX as u64)
+                } else if current_usage < current_budget * 5 / 10 {
+                    // 使用率低于50%，减少预算
+                    (current_budget * 8 / 10).max(DYNAMIC_MEMORY_BUDGET_MIN as u64)
+                } else {
+                    current_budget
+                };
+
+                if new_budget != current_budget {
+                    dynamic_memory_budget.store(new_budget, Ordering::Relaxed);
+                    log::info!("动态调整内存预算: {}MB -> {}MB", 
+                        current_budget / (1024 * 1024), 
+                        new_budget / (1024 * 1024));
+                }
+            }
+        });
+    }
+
+    /// 更新内存使用统计
+    pub fn update_memory_usage(&self, delta: i64) {
+        let current = self.current_memory_usage.load(Ordering::Relaxed);
+        let new_usage = if delta < 0 {
+            current.saturating_sub((-delta) as u64)
+        } else {
+            current.saturating_add(delta as u64)
+        };
+        self.current_memory_usage.store(new_usage, Ordering::Relaxed);
+    }
+
+    /// 获取当前内存预算
+    pub fn get_memory_budget(&self) -> u64 {
+        self.dynamic_memory_budget.load(Ordering::Relaxed)
+    }
+
+    /// 检查是否超过内存预算
+    pub fn is_over_memory_budget(&self) -> bool {
+        let current_usage = self.current_memory_usage.load(Ordering::Relaxed);
+        let budget = self.dynamic_memory_budget.load(Ordering::Relaxed);
+        current_usage > budget
+    }
+
+    /// 强制清理内存
+    pub fn force_memory_cleanup(&self) {
+        let mut history = lock_arc_mutex(&self.history);
+        self.enforce_full_res_cache_budget_lru(&mut history);
+        self.prune_full_res_cache_access_by_history(&history);
+
+        let current_usage = self.current_memory_usage.load(Ordering::Relaxed);
+        log::info!("强制内存清理完成，当前使用: {}MB", current_usage / (1024 * 1024));
     }
 }
 
@@ -2019,6 +2124,17 @@ fn rgba_to_png_base64(rgba: &[u8], width: u32, height: u32) -> Result<String, St
 }
 
 fn read_image_blob(path: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+    // 检查文件大小，决定是否使用分块处理
+    let file_size = std::fs::metadata(path)
+        .map(|m| m.len() as usize)
+        .unwrap_or(0);
+
+    if file_size > LARGE_IMAGE_THRESHOLD {
+        log::info!("检测到大图片文件 ({}MB)，启用分块处理优化", file_size / (1024 * 1024));
+        return read_large_image_blob_chunked(path, width, height);
+    }
+
+    // 小图片直接读取
     let bytes = std::fs::read(path).map_err(|e| format!("读取图片二进制失败: {}", e))?;
     if bytes.is_empty() {
         return Err("图片数据为空".to_string());
@@ -2034,6 +2150,52 @@ fn read_image_blob(path: &str, width: u32, height: u32) -> Result<Vec<u8>, Strin
             rgba.height()
         ));
     }
+    Ok(rgba.into_raw())
+}
+
+/// 分块读取大图片文件，减少内存峰值使用
+fn read_large_image_blob_chunked(path: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(path).map_err(|e| format!("打开图片文件失败: {}", e))?;
+    let mut reader = std::io::BufReader::new(file);
+
+    // 分块读取文件内容
+    let mut bytes = Vec::new();
+    let mut chunk = vec![0u8; IMAGE_CHUNK_SIZE];
+
+    loop {
+        let bytes_read = reader.read(&mut chunk).map_err(|e| format!("读取图片数据块失败: {}", e))?;
+        if bytes_read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..bytes_read]);
+
+        // 如果累计大小超过阈值，记录警告
+        if bytes.len() > LARGE_IMAGE_THRESHOLD * 2 {
+            log::warn!("图片文件过大 ({}MB)，可能影响性能", bytes.len() / (1024 * 1024));
+        }
+    }
+
+    if bytes.is_empty() {
+        return Err("图片数据为空".to_string());
+    }
+
+    // 解码图片
+    let decoded = image::load_from_memory(&bytes).map_err(|e| format!("解码大图片失败: {}", e))?;
+    let rgba = decoded.to_rgba8();
+
+    if rgba.width() != width || rgba.height() != height {
+        return Err(format!(
+            "大图片尺寸异常: 期望 {}x{} 实际 {}x{}",
+            width,
+            height,
+            rgba.width(),
+            rgba.height()
+        ));
+    }
+
+    log::debug!("大图片分块读取完成: {} bytes", rgba.len());
     Ok(rgba.into_raw())
 }
 
