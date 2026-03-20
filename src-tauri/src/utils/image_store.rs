@@ -209,6 +209,59 @@ pub async fn sync_item_positions_async(item_ids: &[String]) -> Result<(), String
         .map_err(|e| format!("提交图片位置事务失败: {}", e))
 }
 
+/// 增量更新图片位置 - 只更新受影响的图片
+pub fn sync_item_positions_incremental(
+    item_id: &str,
+    old_position: usize,
+    new_position: usize,
+) -> Result<(), String> {
+    block_on_result(sync_item_positions_incremental_async(item_id, old_position, new_position))
+}
+
+/// 异步增量更新图片位置 - 只更新受影响的图片
+pub async fn sync_item_positions_incremental_async(
+    item_id: &str,
+    old_position: usize,
+    new_position: usize,
+) -> Result<(), String> {
+    let mut conn = open_image_store_async().await?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("创建增量更新事务失败: {}", e))?;
+
+    // 更新移动的图片位置
+    sqlx::query("UPDATE image_items SET position = ?1 WHERE item_id = ?2")
+        .bind(new_position as i64)
+        .bind(item_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("更新移动图片位置失败: {}", e))?;
+
+    // 更新其他受影响图片的位置
+    if old_position < new_position {
+        // 图片向后移动，前面的图片位置减1
+        sqlx::query("UPDATE image_items SET position = position - 1 WHERE position > ?1 AND position <= ?2")
+            .bind(old_position as i64)
+            .bind(new_position as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("更新受影响图片位置失败: {}", e))?;
+    } else if old_position > new_position {
+        // 图片向前移动，后面的图片位置加1
+        sqlx::query("UPDATE image_items SET position = position + 1 WHERE position >= ?1 AND position < ?2")
+            .bind(new_position as i64)
+            .bind(old_position as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("更新受影响图片位置失败: {}", e))?;
+    }
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交增量更新事务失败: {}", e))
+}
+
 pub fn upsert_category(item_id: &str, category: &str) -> Result<(), String> {
     block_on_result(upsert_category_async(item_id, category))
 }
