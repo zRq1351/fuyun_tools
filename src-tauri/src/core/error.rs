@@ -119,3 +119,25 @@ impl From<&str> for AppError {
         AppError::new(ErrorCode::SystemError, msg)
     }
 }
+
+// 实现从 std::io::Error 到 AppError 的转换
+impl From<std::io::Error> for AppError {
+    fn from(err: std::io::Error) -> Self {
+        AppError::new(ErrorCode::IoError, err.to_string())
+    }
+}
+
+// 实现从 sqlx::Error 到 AppError 的转换
+impl From<sqlx::Error> for AppError {
+    fn from(err: sqlx::Error) -> Self {
+        AppError::new(ErrorCode::SystemError, format!("数据库错误: {}", err))
+    }
+}
+
+// 实现从 serde_json::Error 到 AppError 的转换
+impl From<serde_json::Error> for AppError {
+    fn from(err: serde_json::Error) -> Self {
+        AppError::new(ErrorCode::SystemError, format!("JSON 解析错误: {}", err))
+    }
+}
+
