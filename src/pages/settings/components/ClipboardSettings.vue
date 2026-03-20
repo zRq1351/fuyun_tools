@@ -34,7 +34,7 @@
 
     <el-form-item label="打开剪切板窗口快捷键">
       <el-input
-          v-model="form.toggleShortcut"
+          :model-value="textDisplayValue"
           :class="{ recording: isTextRecording }"
           placeholder="例如: Ctrl+Shift+K"
           readonly
@@ -52,7 +52,7 @@
 
     <el-form-item label="打开图片剪切板窗口快捷键">
       <el-input
-          v-model="form.imageToggleShortcut"
+          :model-value="imageDisplayValue"
           :class="{ recording: isImageRecording }"
           placeholder="例如: Ctrl+Shift+X"
           readonly
@@ -132,10 +132,12 @@ const props = defineProps({
 
 const {
   isRecording: isTextRecording,
+  currentDisplayValue: textDisplayValue,
   toggleRecording: toggleTextRecording
 } = useShortcutRecorder(props.form, 'toggleShortcut')
 const {
   isRecording: isImageRecording,
+  currentDisplayValue: imageDisplayValue,
   toggleRecording: toggleImageRecording
 } = useShortcutRecorder(props.form, 'imageToggleShortcut')
 
