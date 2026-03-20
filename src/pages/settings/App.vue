@@ -96,6 +96,10 @@ const isInitializing = ref(true)
 const isAutoSaving = ref(false)
 const suppressNextAutoSave = ref(false)
 const autoSaveState = ref('idle')
+// 保存初始状态用于差异比较
+const initialFormState = ref(null)
+// 阻止初始化后的第一次 watch 触发
+const skipNextWatch = ref(false)
 
 const form = reactive({
   textMaxItems: 100,
@@ -135,16 +139,104 @@ const autoSaveText = computed(() => {
   return '已同步'
 })
 
+// 保存初始状态快照
+const saveInitialFormState = () => {
+  initialFormState.value = {
+    textMaxItems: form.textMaxItems,
+    imageMaxItems: form.imageMaxItems,
+    imageDiskLimitMb: form.imageDiskLimitMb,
+    groupedItemsProtectedFromLimit: form.groupedItemsProtectedFromLimit,
+    toggleShortcut: form.toggleShortcut,
+    imageToggleShortcut: form.imageToggleShortcut,
+    aiProvider: form.aiProvider,
+    apiUrl: form.apiUrl,
+    modelName: form.modelName,
+    apiKey: form.apiKey,
+    customProviderName: form.customProviderName,
+    selectionEnabled: form.selectionEnabled,
+    translationPromptTemplate: form.translationPromptTemplate,
+    explanationPromptTemplate: form.explanationPromptTemplate,
+    imageFillVerifyMode: form.imageFillVerifyMode
+  }
+}
+
+// 获取变化的字段
+const getChangedFields = () => {
+  if (!initialFormState.value) {
+    return null
+  }
+
+  const changedFields = {}
+  const initial = initialFormState.value
+
+  // 检查每个字段是否有变化
+  if (form.textMaxItems !== initial.textMaxItems) {
+    changedFields.textMaxItems = form.textMaxItems
+  }
+  if (form.imageMaxItems !== initial.imageMaxItems) {
+    changedFields.imageMaxItems = form.imageMaxItems
+  }
+  if (form.imageDiskLimitMb !== initial.imageDiskLimitMb) {
+    changedFields.imageDiskLimitMb = form.imageDiskLimitMb
+  }
+  if (form.groupedItemsProtectedFromLimit !== initial.groupedItemsProtectedFromLimit) {
+    changedFields.groupedItemsProtectedFromLimit = form.groupedItemsProtectedFromLimit
+  }
+  if (form.toggleShortcut !== initial.toggleShortcut) {
+    changedFields.hotKey = form.toggleShortcut
+  }
+  if (form.imageToggleShortcut !== initial.imageToggleShortcut) {
+    changedFields.imageHotKey = form.imageToggleShortcut
+  }
+
+  // 处理 AI 提供商
+  let selectedProvider = form.aiProvider
+  if (selectedProvider === 'custom') {
+    if (!form.customProviderName) {
+      return null
+    }
+    selectedProvider = form.customProviderName
+  }
+  if (selectedProvider !== initial.aiProvider && selectedProvider !== initial.customProviderName) {
+    changedFields.aiProvider = selectedProvider
+  }
+
+  if (form.apiUrl !== initial.apiUrl) {
+    changedFields.aiApiUrl = form.apiUrl
+  }
+  if (form.modelName !== initial.modelName) {
+    changedFields.aiModelName = form.modelName
+  }
+  if (form.apiKey !== initial.apiKey) {
+    changedFields.aiApiKey = form.apiKey
+  }
+  if (form.selectionEnabled !== initial.selectionEnabled) {
+    changedFields.selectionEnabled = form.selectionEnabled
+  }
+  if (form.translationPromptTemplate !== initial.translationPromptTemplate) {
+    changedFields.translationPromptTemplate = form.translationPromptTemplate
+  }
+  if (form.explanationPromptTemplate !== initial.explanationPromptTemplate) {
+    changedFields.explanationPromptTemplate = form.explanationPromptTemplate
+  }
+  if (form.imageFillVerifyMode !== initial.imageFillVerifyMode) {
+    changedFields.imageFillVerifyMode = form.imageFillVerifyMode
+  }
+
+  return Object.keys(changedFields).length > 0 ? changedFields : null
+}
+
 const persistSettings = async (silent = false) => {
   if (isInitializing.value || isAutoSaving.value) {
     return
   }
-  let selectedProvider = form.aiProvider
-  if (selectedProvider === 'custom') {
-    if (!form.customProviderName) {
-      return
-    }
-    selectedProvider = form.customProviderName
+
+  // 获取变化的字段
+  const changedFields = getChangedFields()
+
+  // 如果没有变化，不执行保存
+  if (!changedFields) {
+    return
   }
 
   try {
@@ -154,35 +246,34 @@ const persistSettings = async (silent = false) => {
       autoSaveStateResetTimer = null
     }
     autoSaveState.value = 'saving'
-    await AISettingsService.saveSettings({
-      textMaxItems: form.textMaxItems,
-      imageMaxItems: form.imageMaxItems,
-      imageDiskLimitMb: form.imageDiskLimitMb,
-      aiProvider: selectedProvider,
-      aiApiUrl: form.apiUrl,
-      aiModelName: form.modelName,
-      aiApiKey: form.apiKey,
-      hotKey: form.toggleShortcut,
-      imageHotKey: form.imageToggleShortcut,
-      selectionEnabled: form.selectionEnabled,
-      groupedItemsProtectedFromLimit: form.groupedItemsProtectedFromLimit,
-      translationPromptTemplate: form.translationPromptTemplate,
-      explanationPromptTemplate: form.explanationPromptTemplate,
-      imageFillVerifyMode: form.imageFillVerifyMode
-    })
 
-    if (form.aiProvider === 'custom' && form.customProviderName === selectedProvider) {
-      if (aiSettingsRef.value) {
-        suppressNextAutoSave.value = true
-        await aiSettingsRef.value.loadAiProviders()
+    // 只保存变化的字段
+    await AISettingsService.savePartialSettings(changedFields)
+
+    // 处理自定义提供商
+    if (changedFields.aiProvider) {
+      let selectedProvider = form.aiProvider
+      if (selectedProvider === 'custom') {
+        selectedProvider = form.customProviderName
       }
-      form.aiProvider = selectedProvider
+      if (form.aiProvider === 'custom' && form.customProviderName === selectedProvider) {
+        if (aiSettingsRef.value) {
+          suppressNextAutoSave.value = true
+          await aiSettingsRef.value.loadAiProviders()
+        }
+        form.aiProvider = selectedProvider
+      }
     }
+    
     shortcutConflictMessage.value = ''
     if (!silent) {
       ElMessage.success('已自动保存')
     }
     autoSaveState.value = 'saved'
+
+    // 保存成功后更新初始状态
+    saveInitialFormState()
+    
     autoSaveStateResetTimer = window.setTimeout(() => {
       if (autoSaveState.value === 'saved') {
         autoSaveState.value = 'idle'
@@ -276,12 +367,20 @@ onMounted(async () => {
     ElMessage.error(`加载设置失败: ${error}`)
     autoSaveState.value = 'error'
   } finally {
+    // 先保存初始状态，再设置 isInitializing 为 false
+    saveInitialFormState()
+    // 设置跳过下一次 watch 触发的标志
+    skipNextWatch.value = true
     isInitializing.value = false
   }
 })
 
 watch(form, () => {
   if (isInitializing.value) return
+  if (skipNextWatch.value) {
+    skipNextWatch.value = false
+    return
+  }
   if (suppressNextAutoSave.value) {
     suppressNextAutoSave.value = false
     return
