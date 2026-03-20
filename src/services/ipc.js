@@ -292,6 +292,14 @@ export const AISettingsService = {
         }),
 
     /**
+     * 部分保存应用设置（只保存变化的字段）
+     * @param {Object} changedFields - 变化的字段对象
+     * @returns {Promise<void>}
+     */
+    savePartialSettings: (changedFields) =>
+        invoke(IPC_COMMANDS.SAVE_APP_SETTINGS, changedFields),
+
+    /**
      * 测试 AI 连接
      * @param {Object} params
      * @param {string} params.aiApiUrl

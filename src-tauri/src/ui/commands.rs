@@ -1503,20 +1503,20 @@ pub async fn get_image_storage_metrics(
 
 #[tauri::command]
 pub async fn save_app_settings(
-    text_max_items: usize,
-    image_max_items: usize,
-    image_disk_limit_mb: u64,
-    ai_provider: String,
-    ai_api_url: String,
-    ai_model_name: String,
-    ai_api_key: String,
-    hot_key: String,
-    image_hot_key: String,
-    selection_enabled: bool,
-    grouped_items_protected_from_limit: bool,
-    translation_prompt_template: String,
-    explanation_prompt_template: String,
-    image_fill_verify_mode: String,
+    text_max_items: Option<usize>,
+    image_max_items: Option<usize>,
+    image_disk_limit_mb: Option<u64>,
+    ai_provider: Option<String>,
+    ai_api_url: Option<String>,
+    ai_model_name: Option<String>,
+    ai_api_key: Option<String>,
+    hot_key: Option<String>,
+    image_hot_key: Option<String>,
+    selection_enabled: Option<bool>,
+    grouped_items_protected_from_limit: Option<bool>,
+    translation_prompt_template: Option<String>,
+    explanation_prompt_template: Option<String>,
+    image_fill_verify_mode: Option<String>,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -1528,168 +1528,217 @@ pub async fn save_app_settings(
     };
 
     settings.version = version;
-    settings.max_items = text_max_items;
-    settings.text_max_items = text_max_items;
-    settings.image_max_items = image_max_items;
-    settings.image_disk_limit_mb = image_disk_limit_mb;
-    settings.selection_enabled = selection_enabled;
-    settings.grouped_items_protected_from_limit = grouped_items_protected_from_limit;
-    settings.translation_prompt_template = if translation_prompt_template.trim().is_empty() {
-        default_translation_prompt_template()
-    } else {
-        translation_prompt_template
-    };
-    settings.explanation_prompt_template = if explanation_prompt_template.trim().is_empty() {
-        default_explanation_prompt_template()
-    } else {
-        explanation_prompt_template
-    };
-    settings.image_fill_verify_mode = if image_fill_verify_mode == "fast" {
-        "fast".to_string()
-    } else {
-        "strict".to_string()
-    };
 
-    if hot_key.is_empty() {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "快捷键不能为空",
-            "hot_key is empty",
-        ));
+    // 部分更新：只更新传入的字段
+    if let Some(val) = text_max_items {
+        settings.max_items = val;
+        settings.text_max_items = val;
+    }
+    if let Some(val) = image_max_items {
+        settings.image_max_items = val;
+    }
+    if let Some(val) = image_disk_limit_mb {
+        settings.image_disk_limit_mb = val;
+    }
+    if let Some(val) = selection_enabled {
+        settings.selection_enabled = val;
+    }
+    if let Some(val) = grouped_items_protected_from_limit {
+        settings.grouped_items_protected_from_limit = val;
+    }
+    if let Some(val) = translation_prompt_template {
+        settings.translation_prompt_template = if val.trim().is_empty() {
+            default_translation_prompt_template()
+        } else {
+            val
+        };
+    }
+    if let Some(val) = explanation_prompt_template {
+        settings.explanation_prompt_template = if val.trim().is_empty() {
+            default_explanation_prompt_template()
+        } else {
+            val
+        };
+    }
+    if let Some(val) = image_fill_verify_mode {
+        settings.image_fill_verify_mode = if val == "fast" {
+            "fast".to_string()
+        } else {
+            "strict".to_string()
+        };
     }
 
-    if image_hot_key.is_empty() {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "图片窗口快捷键不能为空",
-            "image_hot_key is empty",
-        ));
-    }
-
-    if hot_key == image_hot_key {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "文字与图片窗口快捷键不能相同",
-            format!("hot_key={}, image_hot_key={}", hot_key, image_hot_key),
-        ));
-    }
-
-    if ai_provider.is_empty() {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "提供商名称不能为空",
-            "ai_provider is empty",
-        ));
-    }
-
-    if ai_api_key.trim().is_empty() {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "API密钥不能为空，请填写有效的API密钥",
-            "ai_api_key is empty",
-        ));
-    }
-
-    if hot_key != settings.hot_key {
-        if app.global_shortcut().is_registered(hot_key.as_str()) {
+    // 处理快捷键更新
+    if let Some(ref hot_key_val) = hot_key {
+        if hot_key_val.is_empty() {
             return Err(frontend_error(
                 ErrorCode::ValidationError,
-                format!("快捷键被占用：{}", hot_key),
-                "global shortcut already registered",
+                "快捷键不能为空",
+                "hot_key is empty",
             ));
         }
 
-        // 尝试注销旧快捷键，如果旧快捷键未注册成功则忽略错误
-        if let Err(e) = app.global_shortcut().unregister(settings.hot_key.as_str()) {
-            log::warn!("注销旧快捷键 '{}' 失败 (可能从未注册成功): {}", settings.hot_key, e);
-        }
-        let app_clone = app.clone();
-        let state_clone = state.inner().clone();
-        app.global_shortcut()
-            .on_shortcut(hot_key.as_str(), move |_app, _shortcut, event| {
-                if let ShortcutState::Pressed = event.state {
-                    let sg = lock_arc_mutex(&state_clone);
-                    if !sg.is_visible {
-                        let state_for_window = state_clone.clone();
-                        drop(sg);
-                        interrupt_text_fill_flow(&state_for_window);
-                        show_clipboard_window(app_clone.clone(), state_for_window);
-                        features::mouse_listener::reset_ctrl_key_state();
+        if hot_key_val != &settings.hot_key {
+            if app.global_shortcut().is_registered(hot_key_val.as_str()) {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    format!("快捷键被占用：{}", hot_key_val),
+                    "global shortcut already registered",
+                ));
+            }
+
+            // 尝试注销旧快捷键，如果旧快捷键未注册成功则忽略错误
+            if let Err(e) = app.global_shortcut().unregister(settings.hot_key.as_str()) {
+                log::warn!("注销旧快捷键 '{}' 失败 (可能从未注册成功): {}", settings.hot_key, e);
+            }
+            let app_clone = app.clone();
+            let state_clone = state.inner().clone();
+            let hot_key_clone = hot_key_val.clone();
+            app.global_shortcut()
+                .on_shortcut(hot_key_val.as_str(), move |_app, _shortcut, event| {
+                    if let ShortcutState::Pressed = event.state {
+                        let sg = lock_arc_mutex(&state_clone);
+                        if !sg.is_visible {
+                            let state_for_window = state_clone.clone();
+                            drop(sg);
+                            interrupt_text_fill_flow(&state_for_window);
+                            show_clipboard_window(app_clone.clone(), state_for_window);
+                            features::mouse_listener::reset_ctrl_key_state();
+                        }
                     }
-                }
-            })
-            .map_err(|e| frontend_error(ErrorCode::SystemError, "注册文字窗口快捷键失败", e.to_string()))?;
+                })
+                .map_err(|e| frontend_error(ErrorCode::SystemError, "注册文字窗口快捷键失败", e.to_string()))?;
+            settings.hot_key = hot_key_clone;
+        }
     }
 
-    if image_hot_key != settings.image_hot_key {
-        if app.global_shortcut().is_registered(image_hot_key.as_str()) {
+    // 处理图片快捷键更新
+    if let Some(ref image_hot_key_val) = image_hot_key {
+        if image_hot_key_val.is_empty() {
             return Err(frontend_error(
                 ErrorCode::ValidationError,
-                format!("图片窗口快捷键被占用：{}", image_hot_key),
-                "image global shortcut already registered",
+                "图片窗口快捷键不能为空",
+                "image_hot_key is empty",
             ));
         }
 
-        // 尝试注销旧快捷键，如果旧快捷键未注册成功则忽略错误
-        if let Err(e) = app.global_shortcut().unregister(settings.image_hot_key.as_str()) {
-            log::warn!("注销旧图片快捷键 '{}' 失败 (可能从未注册成功): {}", settings.image_hot_key, e);
-        }
-        let app_clone = app.clone();
-        let state_clone = state.inner().clone();
-        app.global_shortcut()
-            .on_shortcut(image_hot_key.as_str(), move |_app, _shortcut, event| {
-                if let ShortcutState::Pressed = event.state {
-                    let sg = lock_arc_mutex(&state_clone);
-                    if !sg.is_visible && !sg.is_image_visible {
-                        let state_for_window = state_clone.clone();
-                        drop(sg);
-                        interrupt_image_fill_flow(&state_for_window);
-                        show_image_clipboard_window(app_clone.clone(), state_for_window);
-                    }
+        if image_hot_key_val != &settings.image_hot_key {
+            // 检查是否与文字快捷键冲突
+            if let Some(ref hot_key_val) = hot_key {
+                if image_hot_key_val == hot_key_val {
+                    return Err(frontend_error(
+                        ErrorCode::ValidationError,
+                        "文字与图片窗口快捷键不能相同",
+                        format!("hot_key={}, image_hot_key={}", hot_key_val, image_hot_key_val),
+                    ));
                 }
-            })
-            .map_err(|e| frontend_error(ErrorCode::SystemError, "注册图片窗口快捷键失败", e.to_string()))?;
+            } else if image_hot_key_val == &settings.hot_key {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    "文字与图片窗口快捷键不能相同",
+                    format!("hot_key={}, image_hot_key={}", settings.hot_key, image_hot_key_val),
+                ));
+            }
+
+            if app.global_shortcut().is_registered(image_hot_key_val.as_str()) {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    format!("图片窗口快捷键被占用：{}", image_hot_key_val),
+                    "image global shortcut already registered",
+                ));
+            }
+
+            // 尝试注销旧快捷键，如果旧快捷键未注册成功则忽略错误
+            if let Err(e) = app.global_shortcut().unregister(settings.image_hot_key.as_str()) {
+                log::warn!("注销旧图片快捷键 '{}' 失败 (可能从未注册成功): {}", settings.image_hot_key, e);
+            }
+            let app_clone = app.clone();
+            let state_clone = state.inner().clone();
+            let image_hot_key_clone = image_hot_key_val.clone();
+            app.global_shortcut()
+                .on_shortcut(image_hot_key_val.as_str(), move |_app, _shortcut, event| {
+                    if let ShortcutState::Pressed = event.state {
+                        let sg = lock_arc_mutex(&state_clone);
+                        if !sg.is_visible && !sg.is_image_visible {
+                            let state_for_window = state_clone.clone();
+                            drop(sg);
+                            interrupt_image_fill_flow(&state_for_window);
+                            show_image_clipboard_window(app_clone.clone(), state_for_window);
+                        }
+                    }
+                })
+                .map_err(|e| frontend_error(ErrorCode::SystemError, "注册图片窗口快捷键失败", e.to_string()))?;
+            settings.image_hot_key = image_hot_key_clone;
+        }
     }
 
-    settings.hot_key = hot_key;
-    settings.image_hot_key = image_hot_key;
-    settings.ai_provider = ai_provider.clone();
+    // 处理 AI 提供商更新
+    if let Some(ref ai_provider_val) = ai_provider {
+        if ai_provider_val.is_empty() {
+            return Err(frontend_error(
+                ErrorCode::ValidationError,
+                "提供商名称不能为空",
+                "ai_provider is empty",
+            ));
+        }
+        settings.ai_provider = ai_provider_val.clone();
+
+        // 处理 API 配置
+        let mut need_update_config = false;
+        let config = settings
+            .provider_configs
+            .entry(ai_provider_val.clone())
+            .or_insert_with(|| {
+                need_update_config = true;
+                ProviderConfig::default()
+            });
+
+        if let Some(ref api_url) = ai_api_url {
+            config.api_url = api_url.clone();
+        }
+        if let Some(ref model_name) = ai_model_name {
+            config.model_name = model_name.clone();
+        }
+
+        // 处理 API 密钥
+        if let Some(ref api_key) = ai_api_key {
+            if api_key.trim().is_empty() {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    "API密钥不能为空，请填写有效的API密钥",
+                    "ai_api_key is empty",
+                ));
+            }
+
+            settings
+                .save_current_provider_config(api_key)
+                .map_err(|e| frontend_error(ErrorCode::ConfigError, "保存提供商配置失败", e))?;
+
+            match settings.get_provider_api_key(ai_provider_val) {
+                Ok(key) if key == *api_key => {
+                    log::info!("密钥保存验证通过");
+                },
+                Ok(_) => {
+                    log::warn!("密钥保存验证失败: 读取到的密钥与保存的不一致");
+                    return Err(frontend_error(
+                        ErrorCode::SystemError,
+                        "系统凭据管理器异常: 密钥保存验证失败，请重试",
+                        "saved key mismatch",
+                    ));
+                },
+                Err(e) => {
+                    log::error!("密钥保存验证错误: {}", e);
+                    return Err(frontend_error(
+                        ErrorCode::SystemError,
+                        "系统凭据管理器错误: 无法读取刚保存的密钥",
+                        e,
+                    ));
+                }
+            }
+        }
+    }
 
     settings.migrate_from_old();
-
-    let config = settings
-        .provider_configs
-        .entry(ai_provider.clone())
-        .or_insert_with(|| ProviderConfig::default());
-
-    config.api_url = ai_api_url;
-    config.model_name = ai_model_name;
-
-    settings
-        .save_current_provider_config(&ai_api_key)
-        .map_err(|e| frontend_error(ErrorCode::ConfigError, "保存提供商配置失败", e))?;
-
-    match settings.get_provider_api_key(&ai_provider) {
-        Ok(key) if key == ai_api_key => {
-            log::info!("密钥保存验证通过");
-        },
-        Ok(_) => {
-            log::warn!("密钥保存验证失败: 读取到的密钥与保存的不一致");
-            return Err(frontend_error(
-                ErrorCode::SystemError,
-                "系统凭据管理器异常: 密钥保存验证失败，请重试",
-                "saved key mismatch",
-            ));
-        },
-        Err(e) => {
-            log::error!("密钥保存验证错误: {}", e);
-            return Err(frontend_error(
-                ErrorCode::SystemError,
-                "系统凭据管理器错误: 无法读取刚保存的密钥",
-                e,
-            ));
-        }
-    }
 
     settings
         .validate()
@@ -1703,14 +1752,24 @@ pub async fn save_app_settings(
         let mut state_guard = lock_arc_mutex(state.inner());
         {
             let mut manager = lock_arc_mutex(&state_guard.clipboard_manager);
-            manager.set_max_items(text_max_items);
-            manager.set_grouped_items_protected_from_limit(grouped_items_protected_from_limit);
+            if let Some(val) = text_max_items {
+                manager.set_max_items(val);
+            }
+            if let Some(val) = grouped_items_protected_from_limit {
+                manager.set_grouped_items_protected_from_limit(val);
+            }
         }
         {
             let mut manager = lock_arc_mutex(&state_guard.image_clipboard_manager);
-            manager.set_max_items(image_max_items);
-            manager.set_disk_limit_mb(image_disk_limit_mb);
-            manager.set_grouped_items_protected_from_limit(grouped_items_protected_from_limit);
+            if let Some(val) = image_max_items {
+                manager.set_max_items(val);
+            }
+            if let Some(val) = image_disk_limit_mb {
+                manager.set_disk_limit_mb(val);
+            }
+            if let Some(val) = grouped_items_protected_from_limit {
+                manager.set_grouped_items_protected_from_limit(val);
+            }
         }
         state_guard.settings = settings.clone();
     }
@@ -1721,13 +1780,7 @@ pub async fn save_app_settings(
         selection_enabled,
     );
 
-    log::info!(
-        "设置保存成功: text_max_items={}, image_max_items={}, image_disk_limit_mb={}, provider={}",
-        text_max_items,
-        image_max_items,
-        image_disk_limit_mb,
-        ai_provider
-    );
+    log::info!("设置保存成功（部分更新）");
     Ok(())
 }
 
