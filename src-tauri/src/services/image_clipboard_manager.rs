@@ -4,7 +4,7 @@ use crate::sync::Mutex;
 use crate::utils::image_clipboard::ImageClipboardManager;
 use parking_lot::Mutex as ParkingMutex;
 use std::collections::VecDeque;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex};
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -21,6 +21,10 @@ struct PendingImageTask {
 /// 待处理图片队列
 static PENDING_IMAGE_QUEUE: LazyLock<ParkingMutex<VecDeque<PendingImageTask>>> =
     LazyLock::new(|| ParkingMutex::new(VecDeque::new()));
+
+/// 队列通知机制：用于在有新任务时唤醒处理线程
+static QUEUE_NOTIFY: LazyLock<Arc<(StdMutex<bool>, Condvar)>> =
+    LazyLock::new(|| Arc::new((StdMutex::new(false), Condvar::new())));
 
 /// 队列最大容量，防止内存溢出
 const MAX_QUEUE_SIZE: usize = 20;
@@ -107,6 +111,7 @@ fn update_recent_samples(width: u32, height: u32, rgba: &[u8]) {
 
 /// 处理队列中的待处理图片任务
 fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
+    log::info!("图片处理线程已启动，等待任务...");
     loop {
         let task = {
             let mut queue = PENDING_IMAGE_QUEUE.lock();
@@ -120,6 +125,8 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
                     log::trace!("队列中的图片与最近图片重复，跳过处理");
                     continue;
                 }
+
+                log::debug!("开始处理图片任务: {}x{}", task.width, task.height);
 
                 let manager_arc = {
                     let state_guard = lock_state(state);
@@ -145,14 +152,33 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
                 // 发送更新事件
                 emit_image_history_payload(app_handle, state.clone());
 
-                log::trace!("队列中的图片处理完成");
+                log::info!("图片处理完成");
             }
-            None => break, // 队列为空，退出循环
+            None => {
+                // 队列为空，等待通知而不是退出循环
+                log::trace!("队列为空，等待新任务通知...");
+                let (lock, cvar) = &**QUEUE_NOTIFY;
+                let mut notified = lock.lock().unwrap();
+                while !*notified {
+                    notified = cvar.wait(notified).unwrap();
+                }
+                *notified = false;
+                log::trace!("收到新任务通知，继续处理");
+                continue;
+            }
         }
     }
 }
 
 pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
+    // 启动独立的处理线程
+    let app_handle_clone = app_handle.clone();
+    let state_clone = state.clone();
+    thread::spawn(move || {
+        process_pending_queue(&app_handle_clone, &state_clone);
+    });
+
+    // 启动监听线程
     thread::spawn(move || {
         let mut wake_backend = ClipboardWakeBackend::new();
 
@@ -181,9 +207,13 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                     });
                     log::debug!("图片已加入待处理队列，当前队列长度: {}", queue.len());
                 }
-                // 入队后立即处理队列
-                drop(queue);  // 释放锁后再处理
-                process_pending_queue(&app_handle, &state);
+                drop(queue);  // 释放锁
+
+                // 通知处理线程有新任务
+                let (lock, cvar) = &**QUEUE_NOTIFY;
+                let mut notified = lock.lock().unwrap();
+                *notified = true;
+                cvar.notify_one();
             }
         }
     });
