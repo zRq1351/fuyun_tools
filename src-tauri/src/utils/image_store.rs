@@ -8,12 +8,11 @@ use std::env;
 use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use tokio::sync::OnceCell;
 
 /// 全局数据库连接池
-static DB_POOL: OnceCell<Arc<SqlitePool>> = OnceCell::const_new();
+static DB_POOL: OnceLock<Arc<SqlitePool>> = OnceLock::new();
 
 fn get_image_store_db_path() -> PathBuf {
     let mut db_path = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
@@ -60,9 +59,6 @@ async fn init_image_store_schema_async(conn: &mut SqliteConnection) -> Result<()
             item_id TEXT PRIMARY KEY,
             width INTEGER NOT NULL,
             height INTEGER NOT NULL,
-            preview_width INTEGER NOT NULL,
-            preview_height INTEGER NOT NULL,
-            preview_rgba_base64 TEXT NOT NULL,
             image_path TEXT NOT NULL
         )
         ",
@@ -196,15 +192,12 @@ pub async fn upsert_item_async(item: &ImageHistoryItem, position: usize) -> Resu
     sqlx::query(
         "
         INSERT INTO image_items (
-            position, item_id, width, height, preview_width, preview_height, preview_rgba_base64, image_path
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            position, item_id, width, height, image_path
+        ) VALUES (?1, ?2, ?3, ?4, ?5)
         ON CONFLICT(item_id) DO UPDATE SET
             position = excluded.position,
             width = excluded.width,
             height = excluded.height,
-            preview_width = excluded.preview_width,
-            preview_height = excluded.preview_height,
-            preview_rgba_base64 = excluded.preview_rgba_base64,
             image_path = excluded.image_path
         ",
     )
@@ -212,11 +205,8 @@ pub async fn upsert_item_async(item: &ImageHistoryItem, position: usize) -> Resu
         .bind(&item.id)
         .bind(item.width as i64)
         .bind(item.height as i64)
-        .bind(item.preview_width as i64)
-        .bind(item.preview_height as i64)
-        .bind(&item.preview_rgba_base64)
         .bind(&item.image_path)
-        .execute(&**pool)
+        .execute(pool.as_ref())
         .await
     .map_err(|e| format!("写入图片历史数据库失败: {}", e))?;
     Ok(())
@@ -530,9 +520,6 @@ pub fn load_all_data() -> Result<ImageHistoryData, String> {
               hi.item_id,
               hi.width,
               hi.height,
-              hi.preview_width,
-              hi.preview_height,
-              hi.preview_rgba_base64,
               hi.image_path
             FROM image_items hi
             ORDER BY hi.position ASC
@@ -546,20 +533,11 @@ pub fn load_all_data() -> Result<ImageHistoryData, String> {
             let id: String = row.try_get(0).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
             let width: i64 = row.try_get(1).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
             let height: i64 = row.try_get(2).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            let preview_width: i64 =
-                row.try_get(3).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            let preview_height: i64 =
-                row.try_get(4).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            let preview_rgba_base64: String =
-                row.try_get(5).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            let image_path: String = row.try_get(6).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+            let image_path: String = row.try_get(3).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
             items.push(ImageHistoryItem {
                 id: id.clone(),
                 width: width.max(0) as u32,
                 height: height.max(0) as u32,
-                preview_width: preview_width.max(0) as u32,
-                preview_height: preview_height.max(0) as u32,
-                preview_rgba_base64,
                 image_path,
                 rgba_bytes: Vec::new(),
                 signature: id,
@@ -666,9 +644,6 @@ pub async fn load_history_page_async(
           hi.item_id,
           hi.width,
           hi.height,
-          hi.preview_width,
-          hi.preview_height,
-          hi.preview_rgba_base64,
           hi.image_path,
           COALESCE(c.category, '未分类') AS category,
           CASE WHEN p.item_id IS NULL THEN 0 ELSE 1 END AS pinned
@@ -709,26 +684,20 @@ pub async fn load_history_page_async(
         .into_iter()
         .take(effective_limit)
         .map(|row| {
-            let preview_width = row.try_get::<i64, _>(4).unwrap_or(0).max(0) as u32;
-            let preview_height = row.try_get::<i64, _>(5).unwrap_or(0).max(0) as u32;
-            let preview_rgba_base64 = row.try_get::<String, _>(6).unwrap_or_default();
             let item_id = row.try_get::<String, _>(1).unwrap_or_default();
-            let image_path = row.try_get::<String, _>(7).unwrap_or_default();
+            let image_path = row.try_get::<String, _>(4).unwrap_or_default();
             ImageHistoryPageItem {
                 position: row.try_get::<i64, _>(0).unwrap_or(0).max(0) as usize,
                 id: item_id,
                 width: row.try_get::<i64, _>(2).unwrap_or(0).max(0) as u32,
                 height: row.try_get::<i64, _>(3).unwrap_or(0).max(0) as u32,
-                preview_width,
-                preview_height,
-                preview_rgba_base64,
                 preview_png_base64: String::new(),
                 image_path,
                 category: row
-                    .try_get::<String, _>(8)
+                    .try_get::<String, _>(5)
                     .unwrap_or_else(|_| "未分类".to_string()),
                 tags: Vec::new(),
-                pinned: row.try_get::<i64, _>(9).unwrap_or(0) == 1,
+                pinned: row.try_get::<i64, _>(6).unwrap_or(0) == 1,
             }
         })
         .collect::<Vec<_>>();
@@ -760,6 +729,33 @@ pub async fn load_history_page_async(
                 .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
             if let Some(index) = item_index.get(&item_id) {
                 items[*index].tags.push(tag);
+            }
+        }
+
+        // 加载异步预览数据
+        let async_previews_sql = format!(
+            "SELECT item_id, preview_width, preview_height, preview_base64 FROM image_async_previews WHERE item_id IN ({})",
+            placeholders
+        );
+        let mut async_query = sqlx::query(&async_previews_sql);
+        for item in &items {
+            async_query = async_query.bind(&item.id);
+        }
+        let async_preview_rows = async_query
+            .fetch_all(&mut conn)
+            .await
+            .map_err(|e| format!("读取异步预览数据失败: {}", e))?;
+
+        for row in async_preview_rows {
+            let item_id: String = row
+                .try_get(0)
+                .map_err(|e| format!("读取异步预览失败: {}", e))?;
+            let preview_base64: String = row
+                .try_get(3)
+                .map_err(|e| format!("读取异步预览失败: {}", e))?;
+            if let Some(index) = item_index.get(&item_id) {
+                // 将异步预览数据填充到 preview_png_base64 字段
+                items[*index].preview_png_base64 = preview_base64;
             }
         }
     }

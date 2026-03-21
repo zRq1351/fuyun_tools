@@ -17,6 +17,7 @@ use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::image::Image;
+use tauri::Emitter;
 #[cfg(target_os = "windows")]
 use winapi::shared::minwindef::UINT;
 #[cfg(target_os = "windows")]
@@ -30,7 +31,6 @@ const IMAGE_FULL_RES_CACHE_KEEP_RECENT: usize = 6;
 const IMAGE_FULL_RES_LRU_MAX_CAPACITY: usize = 4096;
 const IMAGE_PERSIST_QUEUE_SIZE: usize = 12;
 const IMAGE_PREVIEW_MAX_EDGE: u32 = 240;
-const BITMAP_STORAGE_USE_LOSSLESS_WEBP: bool = true;
 const IMAGE_PNG_BASE64_CACHE_CAPACITY: usize = 64;
 const IMAGE_FILL_VERIFY_MODE_STRICT: u8 = 0;
 const IMAGE_FILL_VERIFY_MODE_FAST: u8 = 1;
@@ -51,7 +51,7 @@ static IMAGE_PNG_BASE64_CACHE: LazyLock<ParkingMutex<LruCache<String, (u64, Stri
     });
 pub type ClipboardImagePayload = (Vec<u8>, u32, u32, Option<(Vec<u8>, String)>);
 
-fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
+fn lock_arc_mutex<T>(mutex: &'_ Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
     match mutex.lock() {
         Ok(guard) => guard,
         Err(e) => match e {},
@@ -104,7 +104,13 @@ struct PreviewGenerationTask {
 
 /// 异步预览生成器
 static PREVIEW_GENERATOR: LazyLock<Arc<Mutex<PreviewGenerator>>> =
-    LazyLock::new(|| Arc::new(Mutex::new(PreviewGenerator::new())));
+    LazyLock::new(|| Arc::new(Mutex::new(PreviewGenerator::new(None))));
+
+/// 带 AppHandle 的预览生成器初始化
+pub fn init_preview_generator_with_app_handle(app_handle: tauri::AppHandle) {
+    let mut generator = PREVIEW_GENERATOR.lock().unwrap();
+    *generator = PreviewGenerator::new(Some(app_handle));
+}
 
 struct PreviewGenerator {
     task_tx: SyncSender<PreviewGenerationTask>,
@@ -112,13 +118,14 @@ struct PreviewGenerator {
 }
 
 impl PreviewGenerator {
-    fn new() -> Self {
+    fn new(app_handle: Option<tauri::AppHandle>) -> Self {
         let (task_tx, task_rx) = sync_channel::<PreviewGenerationTask>(10);
         let preview_cache = Arc::new(Mutex::new(LruCache::new(
             NonZeroUsize::new(100).unwrap_or(NonZeroUsize::MIN),
         )));
 
         let cache_clone = preview_cache.clone();
+        let app_handle_clone = app_handle.clone();
         std::thread::spawn(move || {
             while let Ok(task) = task_rx.recv() {
                 let (preview_width, preview_height, preview_base64) =
@@ -137,6 +144,16 @@ impl PreviewGenerator {
                     &preview_base64,
                 ) {
                     log::error!("保存异步预览到数据库失败: {}", e);
+                }
+
+                // 发送预览就绪事件通知前端
+                if let Some(ref handle) = app_handle_clone {
+                    let preview_url = format!("data:image/png;base64,{}", preview_base64);
+                    let _ = handle.emit("preview-ready", serde_json::json!({
+                        "itemId": item_id,
+                        "previewUrl": preview_url
+                    }));
+                    log::debug!("已发送预览就绪事件: {}", item_id);
                 }
 
                 log::debug!("异步生成预览完成: {} ({}x{})", item_id, preview_width, preview_height);
@@ -188,12 +205,6 @@ pub struct ImageHistoryItem {
     pub id: String,
     pub width: u32,
     pub height: u32,
-    #[serde(default)]
-    pub preview_width: u32,
-    #[serde(default)]
-    pub preview_height: u32,
-    #[serde(default)]
-    pub preview_rgba_base64: String,
     pub image_path: String,
     #[serde(skip, default)]
     pub rgba_bytes: Vec<u8>,
@@ -209,9 +220,6 @@ pub struct ImageHistoryPreviewItem {
     pub id: String,
     pub width: u32,
     pub height: u32,
-    pub preview_width: u32,
-    pub preview_height: u32,
-    pub preview_rgba_base64: String,
     pub image_path: String,
 }
 
@@ -222,9 +230,6 @@ pub struct ImageHistoryPageItem {
     pub id: String,
     pub width: u32,
     pub height: u32,
-    pub preview_width: u32,
-    pub preview_height: u32,
-    pub preview_rgba_base64: String,
     pub preview_png_base64: String,
     pub image_path: String,
     pub category: String,
@@ -341,9 +346,6 @@ impl ImageClipboardManager {
                 id: item.id.clone(),
                 width: item.width,
                 height: item.height,
-                preview_width: item.preview_width,
-                preview_height: item.preview_height,
-                preview_rgba_base64: item.preview_rgba_base64.clone(),
                 image_path: item.image_path.clone(),
             })
             .collect::<Vec<_>>()
@@ -448,9 +450,6 @@ impl ImageClipboardManager {
                     id: item.id.clone(),
                     width: item.width,
                     height: item.height,
-                    preview_width: item.preview_width,
-                    preview_height: item.preview_height,
-                    preview_rgba_base64: item.preview_rgba_base64.clone(),
                     preview_png_base64: String::new(),
                     image_path: item.image_path.clone(),
                     category,
@@ -798,40 +797,27 @@ impl ImageClipboardManager {
         let signature = compute_signature(&rgba, width, height);
         let id = generate_item_id(&signature);
 
-        // 优化：大图片异步生成 Base64，不阻塞主线程
-        let is_large_image = width > 1920 || height > 1080;
-        let (preview_width, preview_height, preview_rgba_base64) = if is_large_image {
-            // 大图片：提交异步预览生成任务，立即返回空预览
-            let preview_task = PreviewGenerationTask {
-                item_id: id.clone(),
-                rgba: Arc::new(rgba.clone()),
-                width,
-                height,
-            };
-            let generator = PREVIEW_GENERATOR.lock().unwrap();
-            generator.submit_task(preview_task);
-            log::info!("已提交大图片异步预览生成任务: {} ({}x{})", id, width, height);
-            (width, height, String::new())
-        } else {
-            // 小图片：同步生成 Base64 预览
-            build_preview_from_rgba(&rgba, width, height)
+        // 优化：所有图片都使用异步生成预览，不阻塞主线程
+        let preview_task = PreviewGenerationTask {
+            item_id: id.clone(),
+            rgba: Arc::new(rgba.clone()),
+            width,
+            height,
         };
+        let generator = PREVIEW_GENERATOR.lock().unwrap();
+        generator.submit_task(preview_task);
+        log::debug!("已提交异步预览生成任务: {} ({}x{})", id, width, height);
+
+        // 立即返回，预览由异步任务生成
         
         let blob_ext = source_blob.as_ref().map(|(_, ext)| ext.as_str()).unwrap_or(
-            if BITMAP_STORAGE_USE_LOSSLESS_WEBP {
-                "webp"
-            } else {
-                "png"
-            },
+            "webp",
         );
         let image_path = image_blob_path(&id, blob_ext).to_string_lossy().to_string();
         let item = ImageHistoryItem {
             id: id.clone(),
             width,
             height,
-            preview_width,
-            preview_height,
-            preview_rgba_base64,
             image_path: image_path.clone(),
             rgba_bytes: Vec::new(),
             signature: signature.clone(),
@@ -921,7 +907,7 @@ impl ImageClipboardManager {
             );
         }
         let task = PersistTask {
-            item_id: id,
+            item_id: id.clone(),
             image_path,
             rgba: rgba_arc,
             width,
@@ -948,17 +934,23 @@ impl ImageClipboardManager {
             let history = lock_arc_mutex(&self.history);
             let pinned = lock_arc_mutex(&self.pinned_items);
             let item_ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
+            let items = history.iter().map(compact_item_for_persist).collect::<Vec<_>>();
+            log::info!("准备保存图片到数据库: item_id={}, 总数={}", id, items.len());
             (
-                history.iter().map(compact_item_for_persist).collect::<Vec<_>>(),
+                items,
                 item_ids,
                 pinned.clone(),
             )
         };
         for (position, item) in items_snapshot.iter().enumerate() {
+            log::debug!("保存图片项到数据库: position={}, item_id={}", position, item.id);
             if let Err(e) = image_store::upsert_item(item, position) {
                 log::error!("同步图片项失败: {}", e);
+            } else {
+                log::debug!("图片项保存成功: item_id={}", item.id);
             }
         }
+        log::info!("图片数据库保存完成: item_id={}", id);
         for removed_id in removed_ids_after_insert {
             if let Err(e) = image_store::delete_category(&removed_id) {
                 log::error!("删除分类失败: {}", e);
@@ -1513,39 +1505,9 @@ impl ImageClipboardManager {
         Ok(item.image_path.clone())
     }
 
-    pub fn get_preview_lowres_payload_by_index(&self, index: usize) -> Result<Option<String>, String> {
-        let history = lock_arc_mutex(&self.history);
-        let item = history
-            .get(index)
-            .ok_or_else(|| format!("索引 {} 超出范围", index))?;
-        if item.preview_rgba_base64.is_empty() || item.preview_width == 0 || item.preview_height == 0 {
-            return Ok(None);
-        }
-        rgba_base64_to_png_base64(
-            &item.preview_rgba_base64,
-            item.preview_width,
-            item.preview_height,
-        )
-        .map(Some)
-    }
-
-    /// 获取图片预览（优先使用已生成的，否则尝试从异步缓存获取）
+    /// 获取图片预览（从异步缓存获取）
     pub fn get_image_preview(&self, item_id: &str) -> Result<(u32, u32, String), String> {
-        let history = lock_arc_mutex(&self.history);
-        let item = history.iter().find(|i| i.id == item_id)
-            .ok_or_else(|| "目标图片不存在".to_string())?;
-
-        // 小图片：直接返回已生成的预览
-        if !item.preview_rgba_base64.is_empty() {
-            let png_base64 = rgba_base64_to_png_base64(
-                &item.preview_rgba_base64,
-                item.preview_width,
-                item.preview_height,
-            )?;
-            return Ok((item.preview_width, item.preview_height, png_base64));
-        }
-
-        // 大图片：尝试从异步缓存获取
+        // 尝试从异步缓存获取
         if let Some((width, height, base64)) = get_async_preview(item_id) {
             return Ok((width, height, base64));
         }
@@ -1556,16 +1518,7 @@ impl ImageClipboardManager {
 
     /// 检查图片预览是否已就绪
     pub fn is_image_preview_ready(&self, item_id: &str) -> bool {
-        let history = lock_arc_mutex(&self.history);
-        if let Some(item) = history.iter().find(|i| i.id == item_id) {
-            // 小图片：已有预览
-            if !item.preview_rgba_base64.is_empty() {
-                return true;
-            }
-            // 大图片：检查异步缓存
-            return is_preview_ready(item_id);
-        }
-        false
+        is_preview_ready(item_id)
     }
 
     pub fn read_clipboard_images_rgba(
@@ -1590,7 +1543,7 @@ impl ImageClipboardManager {
                 Err(_) => {}
             }
             if attempt < retry_delays.len() - 1 {
-                std::thread::sleep(std::time::Duration::from_millis(*delay_ms));
+                std::thread::sleep(Duration::from_millis(*delay_ms));
             }
         }
         if let Ok(text) = crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
@@ -1653,7 +1606,7 @@ impl ImageClipboardManager {
                     }
 
                     // 小图片使用简化验证：只验证一次，延迟更短
-                    std::thread::sleep(std::time::Duration::from_millis(3));
+                    std::thread::sleep(Duration::from_millis(3));
                     if let Ok(read_back) = app_handle.clipboard().read_image() {
                         if read_back.width() > 0 && read_back.height() > 0 && !read_back.rgba().is_empty() {
                             return Ok(());
@@ -1666,7 +1619,7 @@ impl ImageClipboardManager {
                 }
             }
             if attempt < retry_delays.len() - 1 {
-                std::thread::sleep(std::time::Duration::from_millis(*delay_ms));
+                std::thread::sleep(Duration::from_millis(*delay_ms));
             }
         }
         Err(format!("写入剪贴板图片失败: {}", last_error))
@@ -2027,9 +1980,6 @@ fn compact_item_for_persist(item: &ImageHistoryItem) -> ImageHistoryItem {
         id: item.id.clone(),
         width: item.width,
         height: item.height,
-        preview_width: item.preview_width,
-        preview_height: item.preview_height,
-        preview_rgba_base64: item.preview_rgba_base64.clone(),
         image_path: item.image_path.clone(),
         rgba_bytes: Vec::new(),
         signature: item.signature.clone(),
@@ -2401,17 +2351,6 @@ fn read_file_change_stamp(path: &str) -> Option<u64> {
     Some(len ^ modified_ms.rotate_left(13))
 }
 
-pub(crate) fn rgba_base64_to_png_base64(rgba_base64: &str, width: u32, height: u32) -> Result<String, String> {
-    let rgba = BASE64_STANDARD
-        .decode(rgba_base64)
-        .map_err(|e| format!("解析预览图数据失败: {}", e))?;
-    let expected = width as usize * height as usize * 4;
-    if rgba.len() != expected {
-        return Err(format!("预览图像素长度异常: 期望 {} 实际 {}", expected, rgba.len()));
-    }
-    rgba_to_png_base64(&rgba, width, height)
-}
-
 fn cleanup_image_blob_files(paths: Vec<String>) {
     for path in paths {
         if path.trim().is_empty() {
@@ -2619,7 +2558,7 @@ fn parse_data_url_image(text: &str) -> Option<(Vec<u8>, u32, u32, Option<(Vec<u8
         return None;
     };
     let source_ext = parse_image_ext_from_data_url_meta(meta).unwrap_or_else(|| "png".to_string());
-    let dyn_img = ::image::load_from_memory(&bytes).ok()?;
+    let dyn_img = image::load_from_memory(&bytes).ok()?;
     let rgba8 = dyn_img.to_rgba8();
     let (width, height) = rgba8.dimensions();
     if width == 0 || height == 0 {
@@ -2717,7 +2656,12 @@ fn build_preview_from_rgba(rgba: &[u8], width: u32, height: u32) -> (u32, u32, S
     if preview_width == 0 || preview_height == 0 {
         return (0, 0, String::new());
     }
-    let payload = BASE64_STANDARD.encode(preview.into_raw());
+    // 修复：将RGBA数据编码为PNG格式的Base64，而不是直接编码RGBA原始数据
+    let png_bytes = match rgba_to_png_bytes_for_storage(preview.as_raw(), preview_width, preview_height) {
+        Ok(bytes) => bytes,
+        Err(_) => return (0, 0, String::new()),
+    };
+    let payload = BASE64_STANDARD.encode(png_bytes);
     (preview_width, preview_height, payload)
 }
 
