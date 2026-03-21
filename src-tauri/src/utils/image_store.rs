@@ -1,7 +1,7 @@
 use crate::utils::image_clipboard::{
     ImageHistoryData, ImageHistoryItem, ImageHistoryPageData, ImageHistoryPageItem,
 };
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous, SqlitePool};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqliteSynchronous};
 use sqlx::{Connection, Row, SqliteConnection};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -192,7 +192,7 @@ pub fn upsert_item(item: &ImageHistoryItem, position: usize) -> Result<(), Strin
 }
 
 pub async fn upsert_item_async(item: &ImageHistoryItem, position: usize) -> Result<(), String> {
-    let mut conn = open_image_store_async().await?;
+    let pool = get_pool().await?;
     sqlx::query(
         "
         INSERT INTO image_items (
@@ -216,7 +216,7 @@ pub async fn upsert_item_async(item: &ImageHistoryItem, position: usize) -> Resu
         .bind(item.preview_height as i64)
         .bind(&item.preview_rgba_base64)
         .bind(&item.image_path)
-        .execute(&mut conn)
+        .execute(&**pool)
         .await
     .map_err(|e| format!("写入图片历史数据库失败: {}", e))?;
     Ok(())
