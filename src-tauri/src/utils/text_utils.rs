@@ -32,6 +32,9 @@ const FIND_BEST_CANDIDATE_BUDGET_MIN_MS: u64 = 12;
 const FIND_BEST_CANDIDATE_BUDGET_MAX_MS: u64 = 30;
 const CANDIDATE_LEN_RATIO_MIN: f64 = 0.22;
 const CANDIDATE_EDGE_MATCH_MIN: f64 = 0.06;
+// 优化：n-gram 相似度计算常量
+const NGRAM_SIZE: usize = 3;
+const NGRAM_SIMILARITY_THRESHOLD: f64 = 0.3;
 static FIND_BEST_CANDIDATE_DYNAMIC_BUDGET_MS: AtomicU64 =
     AtomicU64::new(FIND_BEST_CANDIDATE_BUDGET_MS);
 static DEDUP_SCAN_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -139,6 +142,58 @@ fn suffix_match_ratio(text1: &str, text2: &str, sample_len: usize) -> f64 {
     same as f64 / n as f64
 }
 
+/// 优化：计算 n-gram 相似度（比 LCS 更快）
+fn ngram_similarity(text1: &str, text2: &str, n: usize) -> f64 {
+    if text1.is_empty() && text2.is_empty() {
+        return 1.0;
+    }
+    if text1.is_empty() || text2.is_empty() {
+        return 0.0;
+    }
+
+    let chars1: Vec<char> = text1.chars().collect();
+    let chars2: Vec<char> = text2.chars().collect();
+
+    if chars1.len() < n || chars2.len() < n {
+        // 文本太短，使用简单的字符匹配
+        let min_len = chars1.len().min(chars2.len());
+        if min_len == 0 {
+            return 0.0;
+        }
+        let mut matches = 0;
+        for i in 0..min_len {
+            if chars1[i] == chars2[i] {
+                matches += 1;
+            }
+        }
+        return matches as f64 / min_len as f64;
+    }
+
+    // 构建 n-gram 集合
+    let mut ngrams1 = std::collections::HashSet::new();
+    let mut ngrams2 = std::collections::HashSet::new();
+
+    for i in 0..=chars1.len() - n {
+        let ngram: String = chars1[i..i + n].iter().collect();
+        ngrams1.insert(ngram);
+    }
+
+    for i in 0..=chars2.len() - n {
+        let ngram: String = chars2[i..i + n].iter().collect();
+        ngrams2.insert(ngram);
+    }
+
+    // 计算 Jaccard 相似度
+    let intersection = ngrams1.intersection(&ngrams2).count();
+    let union = ngrams1.union(&ngrams2).count();
+
+    if union == 0 {
+        0.0
+    } else {
+        intersection as f64 / union as f64
+    }
+}
+
 fn calculate_text_similarity_fast(text1: &str, text2: &str, len1: usize, len2: usize) -> f64 {
     if text1 == text2 {
         return 1.0;
@@ -204,6 +259,14 @@ fn candidate_prefilter(old_text: &str, new_text: &str) -> bool {
     if max_len > 0.0 && (min_len / max_len) < CANDIDATE_LEN_RATIO_MIN {
         return false;
     }
+
+    // 优化：使用 n-gram 相似度进行快速预筛选（比 LCS 快得多）
+    let ngram_sim = ngram_similarity(old_text, new_text, NGRAM_SIZE);
+    if ngram_sim >= NGRAM_SIMILARITY_THRESHOLD {
+        return true;
+    }
+
+    // 回退到原有的前缀/后缀匹配
     let head = prefix_match_ratio(old_text, new_text, 32);
     let tail = suffix_match_ratio(old_text, new_text, 32);
     head >= CANDIDATE_EDGE_MATCH_MIN || tail >= CANDIDATE_EDGE_MATCH_MIN

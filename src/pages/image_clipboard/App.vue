@@ -572,6 +572,52 @@ const rgbaBase64ToPngDataUrl = (rgbaBase64, width, height) => {
   return canvas.toDataURL('image/png')
 }
 
+// 异步预览相关的状态
+const asyncPreviewCache = new Map()
+const pendingPreviewIds = new Set()
+let previewPollInterval = null
+
+// 异步预览轮询
+const startPreviewPolling = () => {
+  if (previewPollInterval) return
+  previewPollInterval = setInterval(async () => {
+    if (pendingPreviewIds.size === 0) return
+
+    const idsToCheck = Array.from(pendingPreviewIds)
+    try {
+      const results = await ImageClipboardService.checkPreviewsReady(idsToCheck)
+
+      for (const [itemId, ready] of results) {
+        if (ready) {
+          pendingPreviewIds.delete(itemId)
+          // 获取预览数据
+          try {
+            const previewData = await ImageClipboardService.getImagePreviewById(itemId)
+            if (previewData) {
+              const [width, height, base64] = previewData
+              const previewUrl = `data:image/png;base64,${base64}`
+              asyncPreviewCache.set(itemId, previewUrl)
+              previewCache.set(itemId, previewUrl)
+              enforcePreviewCacheSize()
+            }
+          } catch (error) {
+            console.error('获取异步预览失败:', error)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('检查预览状态失败:', error)
+    }
+  }, 500) // 每500ms检查一次
+}
+
+const stopPreviewPolling = () => {
+  if (previewPollInterval) {
+    clearInterval(previewPollInterval)
+    previewPollInterval = null
+  }
+}
+
 const getPreviewDataUrl = (item) => {
   if (previewCache.has(item.id)) {
     return previewCache.get(item.id)
@@ -582,7 +628,21 @@ const getPreviewDataUrl = (item) => {
     const isLargeImage = item.width > 1920 || item.height > 1080
 
     if (isLargeImage) {
-      // 大图片：直接使用文件路径
+      // 大图片：检查是否有异步生成的预览
+      if (asyncPreviewCache.has(item.id)) {
+        const previewUrl = asyncPreviewCache.get(item.id)
+        previewCache.set(item.id, previewUrl)
+        enforcePreviewCacheSize()
+        return previewUrl
+      }
+
+      // 如果没有异步预览，添加到待检查列表
+      if (!pendingPreviewIds.has(item.id)) {
+        pendingPreviewIds.add(item.id)
+        startPreviewPolling()
+      }
+
+      // 暂时使用文件路径作为占位
       const previewUrl = buildFileUrlFromPath(item.image_path)
       previewCache.set(item.id, previewUrl)
       enforcePreviewCacheSize()
@@ -1281,12 +1341,15 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopContentDragging()
+  stopPreviewPolling() // 停止异步预览轮询
   if (contentMetricsRafId) {
     cancelAnimationFrame(contentMetricsRafId)
     contentMetricsRafId = 0
   }
   loadMorePending = false
   previewCache.clear()
+  asyncPreviewCache.clear() // 清理异步预览缓存
+  pendingPreviewIds.clear() // 清理待检查的预览ID
   if (filterDebounceTimer) {
     clearTimeout(filterDebounceTimer)
     filterDebounceTimer = null

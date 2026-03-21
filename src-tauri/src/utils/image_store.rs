@@ -1,14 +1,19 @@
 use crate::utils::image_clipboard::{
     ImageHistoryData, ImageHistoryItem, ImageHistoryPageData, ImageHistoryPageItem,
 };
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous, SqlitePool};
 use sqlx::{Connection, Row, SqliteConnection};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::OnceCell;
+
+/// 全局数据库连接池
+static DB_POOL: OnceCell<Arc<SqlitePool>> = OnceCell::const_new();
 
 fn get_image_store_db_path() -> PathBuf {
     let mut db_path = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
@@ -59,6 +64,19 @@ async fn init_image_store_schema_async(conn: &mut SqliteConnection) -> Result<()
             preview_height INTEGER NOT NULL,
             preview_rgba_base64 TEXT NOT NULL,
             image_path TEXT NOT NULL
+        )
+        ",
+    )
+        .await?;
+    exec(
+        conn,
+        "
+        CREATE TABLE IF NOT EXISTS image_async_previews (
+            item_id TEXT PRIMARY KEY,
+            preview_width INTEGER NOT NULL,
+            preview_height INTEGER NOT NULL,
+            preview_base64 TEXT NOT NULL,
+            created_at INTEGER NOT NULL
         )
         ",
     )
@@ -128,12 +146,44 @@ async fn init_image_store_schema_async(conn: &mut SqliteConnection) -> Result<()
     Ok(())
 }
 
+/// 获取或初始化数据库连接池
+async fn get_pool() -> Result<Arc<SqlitePool>, String> {
+    if let Some(pool) = DB_POOL.get() {
+        return Ok(pool.clone());
+    }
+    
+    let db_path = get_image_store_db_path();
+    if let Some(parent) = db_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建图片历史数据库目录失败: {}", e))?;
+    }
+    
+    let pool = SqlitePool::connect_with(
+        SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal)
+            .busy_timeout(Duration::from_millis(1200))
+    )
+    .await
+    .map_err(|e| format!("创建数据库连接池失败: {}", e))?;
+    
+    let pool_arc = Arc::new(pool);
+    
+    // 初始化表结构
+    let mut conn = pool_arc.acquire().await.map_err(|e| format!("获取连接失败: {}", e))?;
+    init_image_store_schema_async(&mut conn).await?;
+    
+    DB_POOL.set(pool_arc.clone()).map_err(|_| "连接池已初始化".to_string())?;
+    Ok(pool_arc)
+}
+
 fn block_on_result<T>(future: impl Future<Output=Result<T, String>>) -> Result<T, String> {
     tauri::async_runtime::block_on(future)
 }
 
 pub fn init_image_store() -> Result<(), String> {
-    let _ = block_on_result(open_image_store_async())?;
+    let _ = block_on_result(get_pool())?;
     Ok(())
 }
 
@@ -183,6 +233,10 @@ pub async fn delete_item_async(item_id: &str) -> Result<(), String> {
         .execute(&mut conn)
         .await
         .map_err(|e| format!("删除图片历史数据库条目失败: {}", e))?;
+    
+    // 同时删除异步预览
+    delete_async_preview_async(item_id).await?;
+    
     Ok(())
 }
 
@@ -741,4 +795,117 @@ pub fn has_any_data() -> Result<bool, String> {
             .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
         Ok(total > 0)
     })
+}
+
+/// 保存异步生成的预览到数据库
+pub fn save_async_preview(
+    item_id: &str,
+    preview_width: u32,
+    preview_height: u32,
+    preview_base64: &str,
+) -> Result<(), String> {
+    block_on_result(save_async_preview_async(item_id, preview_width, preview_height, preview_base64))
+}
+
+/// 异步保存预览到数据库
+pub async fn save_async_preview_async(
+    item_id: &str,
+    preview_width: u32,
+    preview_height: u32,
+    preview_base64: &str,
+) -> Result<(), String> {
+    let mut conn = open_image_store_async().await?;
+    let created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    
+    sqlx::query(
+        "
+        INSERT INTO image_async_previews (item_id, preview_width, preview_height, preview_base64, created_at)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        ON CONFLICT(item_id) DO UPDATE SET
+            preview_width = excluded.preview_width,
+            preview_height = excluded.preview_height,
+            preview_base64 = excluded.preview_base64,
+            created_at = excluded.created_at
+        ",
+    )
+        .bind(item_id)
+        .bind(preview_width as i64)
+        .bind(preview_height as i64)
+        .bind(preview_base64)
+        .bind(created_at)
+        .execute(&mut conn)
+        .await
+        .map_err(|e| format!("保存异步预览失败: {}", e))?;
+    Ok(())
+}
+
+/// 从数据库加载异步预览
+pub fn load_async_preview(item_id: &str) -> Result<Option<(u32, u32, String)>, String> {
+    block_on_result(load_async_preview_async(item_id))
+}
+
+/// 异步加载预览
+pub async fn load_async_preview_async(item_id: &str) -> Result<Option<(u32, u32, String)>, String> {
+    let mut conn = open_image_store_async().await?;
+    let row = sqlx::query(
+        "SELECT preview_width, preview_height, preview_base64 FROM image_async_previews WHERE item_id = ?1"
+    )
+        .bind(item_id)
+        .fetch_optional(&mut conn)
+        .await
+        .map_err(|e| format!("加载异步预览失败: {}", e))?;
+    
+    match row {
+        Some(row) => {
+            let preview_width: i64 = row.try_get(0).map_err(|e| format!("读取预览宽度失败: {}", e))?;
+            let preview_height: i64 = row.try_get(1).map_err(|e| format!("读取预览高度失败: {}", e))?;
+            let preview_base64: String = row.try_get(2).map_err(|e| format!("读取预览数据失败: {}", e))?;
+            Ok(Some((
+                preview_width.max(0) as u32,
+                preview_height.max(0) as u32,
+                preview_base64,
+            )))
+        }
+        None => Ok(None),
+    }
+}
+
+/// 删除图片时同时删除异步预览
+pub fn delete_async_preview(item_id: &str) -> Result<(), String> {
+    block_on_result(delete_async_preview_async(item_id))
+}
+
+/// 异步删除预览
+pub async fn delete_async_preview_async(item_id: &str) -> Result<(), String> {
+    let mut conn = open_image_store_async().await?;
+    sqlx::query("DELETE FROM image_async_previews WHERE item_id = ?1")
+        .bind(item_id)
+        .execute(&mut conn)
+        .await
+        .map_err(|e| format!("删除异步预览失败: {}", e))?;
+    Ok(())
+}
+
+/// 批量删除图片的异步预览
+pub fn delete_async_previews_bulk(item_ids: &[String]) -> Result<(), String> {
+    block_on_result(delete_async_previews_bulk_async(item_ids))
+}
+
+/// 异步批量删除预览
+pub async fn delete_async_previews_bulk_async(item_ids: &[String]) -> Result<(), String> {
+    if item_ids.is_empty() {
+        return Ok(());
+    }
+    let mut conn = open_image_store_async().await?;
+    let placeholders = vec!["?"; item_ids.len()].join(", ");
+    let sql = format!("DELETE FROM image_async_previews WHERE item_id IN ({})", placeholders);
+    let mut query = sqlx::query(&sql);
+    for item_id in item_ids {
+        query = query.bind(item_id);
+    }
+    query.execute(&mut conn).await.map_err(|e| format!("批量删除异步预览失败: {}", e))?;
+    Ok(())
 }

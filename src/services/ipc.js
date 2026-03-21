@@ -43,6 +43,10 @@ export const IPC_COMMANDS = {
     COPY_TEXT: 'copy_text',
     COPY_AND_PASTE_TEXT: 'copy_and_paste_text',
 
+    // 异步预览
+    GET_IMAGE_PREVIEW_BY_ID: 'get_image_preview_by_id',
+    CHECK_PREVIEWS_READY: 'check_previews_ready',
+
     // 分类管理
     SET_ITEM_CATEGORY: 'set_item_category',
     REMOVE_CATEGORY: 'remove_category',
@@ -85,6 +89,23 @@ export const ClipboardService = {
      * @returns {Promise<{history: string[], categories: Object, category_list: string[]}>}
      */
     getHistory: () => invoke(IPC_COMMANDS.GET_CLIPBOARD_HISTORY),
+
+    /**
+     * 批量获取剪贴板完整快照（优化 IPC 通信）
+     * 一次 IPC 调用获取所有需要的数据，减少通信开销
+     * @returns {Promise<{
+     *   textHistory: string[],
+     *   textCategories: Object,
+     *   textCategoryList: string[],
+     *   textPinnedItems: string[],
+     *   imageHistory: Array,
+     *   imageCategories: Object,
+     *   imageCategoryList: string[],
+     *   imageTags: Object,
+     *   imagePinnedItems: string[]
+     * }>}
+     */
+    getFullSnapshot: () => invoke('get_clipboard_full_snapshot'),
     getHistoryPage: ({
                          offset = 0,
                          limit = 50,
@@ -156,6 +177,12 @@ export const ImageClipboardService = {
         invoke(IPC_COMMANDS.OPEN_IMAGE_PREVIEW_WINDOW_BY_ID, {request: {itemId}}),
     closePreviewWindow: () => invoke(IPC_COMMANDS.CLOSE_IMAGE_PREVIEW_WINDOW),
     setItemTags: (itemId, tags) => invoke(IPC_COMMANDS.SET_IMAGE_ITEM_TAGS, {itemId, tags}),
+
+    // 异步预览相关方法
+    getImagePreviewById: (itemId) =>
+        invoke(IPC_COMMANDS.GET_IMAGE_PREVIEW_BY_ID, {itemId}),
+    checkPreviewsReady: (itemIds) =>
+        invoke(IPC_COMMANDS.CHECK_PREVIEWS_READY, {itemIds}),
 };
 
 /**
