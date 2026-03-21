@@ -27,7 +27,7 @@ impl Default for LogConfig {
 
         Self {
             level: if cfg!(debug_assertions) {
-                LevelFilter::Debug
+                LevelFilter::Info
             } else {
                 LevelFilter::Info
             },
