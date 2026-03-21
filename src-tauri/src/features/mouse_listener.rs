@@ -235,12 +235,12 @@ impl MouseListener {
                 EventType::KeyPress(key) => {
                     if key == Key::ControlLeft {
                         GLOBAL_STATE.ctrl_left_pressed.store(true, Ordering::SeqCst);
-                        log::info!("检测到左Ctrl键按下");
+                        log::debug!("检测到左Ctrl键按下");
                     } else if key == Key::ControlRight {
                         GLOBAL_STATE
                             .ctrl_right_pressed
                             .store(true, Ordering::SeqCst);
-                        log::info!("检测到右Ctrl键按下");
+                        log::debug!("检测到右Ctrl键按下");
                     }
                 }
                 EventType::KeyRelease(key) => {
@@ -248,12 +248,12 @@ impl MouseListener {
                         GLOBAL_STATE
                             .ctrl_left_pressed
                             .store(false, Ordering::SeqCst);
-                        log::info!("检测到左Ctrl键释放");
+                        log::debug!("检测到左Ctrl键释放");
                     } else if key == Key::ControlRight {
                         GLOBAL_STATE
                             .ctrl_right_pressed
                             .store(false, Ordering::SeqCst);
-                        log::info!("检测到右Ctrl键释放");
+                        log::debug!("检测到右Ctrl键释放");
                     }
                 }
                 EventType::ButtonPress(Button::Left) => {
@@ -269,7 +269,7 @@ impl MouseListener {
                         Some((last_x as i32, last_y as i32)),
                     );
 
-                    log::info!("检测到鼠标左键按下 at ({}, {})", last_x, last_y);
+                    log::debug!("检测到鼠标左键按下 at ({}, {})", last_x, last_y);
 
                     let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
                     *state_guard = MouseActionState::MouseDown(last_x, last_y, current_time);
@@ -282,7 +282,7 @@ impl MouseListener {
                         *pos_guard
                     };
 
-                    log::info!("检测到鼠标左键释放 at ({}, {})", last_x, last_y);
+                    log::debug!("检测到鼠标左键释放 at ({}, {})", last_x, last_y);
 
                     let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
                     let prev_state = std::mem::replace(&mut *state_guard, MouseActionState::Idle);
@@ -294,7 +294,7 @@ impl MouseListener {
                         let distance = calculate_distance(down_x, down_y, last_x, last_y);
                         let duration = up_time.duration_since(down_time);
 
-                        log::info!(
+                        log::debug!(
                             "鼠标移动距离: {:.2}px, 操作持续时间: {:?}ms",
                             distance,
                             duration.as_millis()
@@ -362,7 +362,7 @@ impl MouseListener {
                                 log::info!("当前在命令行/终端环境中，跳过划词检测");
                             }
                         } else {
-                            log::info!("不满足划词或双击条件，跳过");
+                            log::debug!("不满足划词或双击条件，跳过");
                         }
                     }
                 }
@@ -425,7 +425,7 @@ fn is_valid_drag_operation(distance: f64, duration: Duration) -> bool {
     let is_distance_valid = distance >= MIN_DRAG_DISTANCE;
     let is_duration_valid = duration.as_millis() <= MAX_OPERATION_TIME;
 
-    log::info!(
+    log::debug!(
         "拖拽验证 - 距离: {:.2}px (需要 >= {:.1}px), 时间: {:?} (需要 <= {}ms), 结果: {}",
         distance,
         MIN_DRAG_DISTANCE,

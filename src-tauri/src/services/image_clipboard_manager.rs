@@ -122,11 +122,11 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
             Some(task) => {
                 // 检查是否与最近图片重复
                 if is_duplicate_recent(task.width, task.height, &task.rgba) {
-                    log::trace!("队列中的图片与最近图片重复，跳过处理");
+                    log::info!("队列中的图片与最近图片重复，跳过处理");
                     continue;
                 }
 
-                log::debug!("开始处理图片任务: {}x{}", task.width, task.height);
+                log::info!("开始处理图片任务: {}x{}", task.width, task.height);
 
                 let manager_arc = {
                     let state_guard = lock_state(state);
@@ -156,14 +156,14 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
             }
             None => {
                 // 队列为空，等待通知而不是退出循环
-                log::trace!("队列为空，等待新任务通知...");
+                log::info!("队列为空，等待新任务通知...");
                 let (lock, cvar) = &**QUEUE_NOTIFY;
                 let mut notified = lock.lock().unwrap();
                 while !*notified {
                     notified = cvar.wait(notified).unwrap();
                 }
                 *notified = false;
-                log::trace!("收到新任务通知，继续处理");
+                log::info!("收到新任务通知，继续处理");
                 continue;
             }
         }
@@ -196,7 +196,7 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                 for (rgba, width, height, source_blob) in images {
                     // 检查队列容量
                     if queue.len() >= MAX_QUEUE_SIZE {
-                        log::warn!("待处理队列已满（{}），丢弃最早的图片", MAX_QUEUE_SIZE);
+                        log::info!("待处理队列已满（{}），丢弃最早的图片", MAX_QUEUE_SIZE);
                         queue.pop_front();
                     }
                     queue.push_back(PendingImageTask {
@@ -205,7 +205,7 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                         height,
                         source_blob,
                     });
-                    log::debug!("图片已加入待处理队列，当前队列长度: {}", queue.len());
+                    log::info!("图片已加入待处理队列，当前队列长度: {}", queue.len());
                 }
                 drop(queue);  // 释放锁
 
