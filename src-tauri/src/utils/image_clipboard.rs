@@ -75,12 +75,104 @@ pub fn is_fast_fill_verify_mode_enabled() -> bool {
     is_fast_fill_verify_mode()
 }
 
+/// 获取异步生成的预览（全局访问）
+pub fn get_async_preview(item_id: &str) -> Option<(u32, u32, String)> {
+    let generator = PREVIEW_GENERATOR.lock().unwrap();
+    generator.get_preview(item_id)
+}
+
+/// 检查预览是否已就绪（全局访问）
+pub fn is_preview_ready(item_id: &str) -> bool {
+    let generator = PREVIEW_GENERATOR.lock().unwrap();
+    generator.get_preview(item_id).is_some()
+}
+
 #[derive(Clone)]
 struct PendingImageData {
     rgba: Arc<Vec<u8>>,
     width: u32,
     height: u32,
 }
+
+/// 预览生成任务
+struct PreviewGenerationTask {
+    item_id: String,
+    rgba: Arc<Vec<u8>>,
+    width: u32,
+    height: u32,
+}
+
+/// 异步预览生成器
+static PREVIEW_GENERATOR: LazyLock<Arc<Mutex<PreviewGenerator>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(PreviewGenerator::new())));
+
+struct PreviewGenerator {
+    task_tx: SyncSender<PreviewGenerationTask>,
+    preview_cache: Arc<Mutex<LruCache<String, (u32, u32, String)>>>,
+}
+
+impl PreviewGenerator {
+    fn new() -> Self {
+        let (task_tx, task_rx) = sync_channel::<PreviewGenerationTask>(10);
+        let preview_cache = Arc::new(Mutex::new(LruCache::new(
+            NonZeroUsize::new(100).unwrap_or(NonZeroUsize::MIN),
+        )));
+
+        let cache_clone = preview_cache.clone();
+        std::thread::spawn(move || {
+            while let Ok(task) = task_rx.recv() {
+                let (preview_width, preview_height, preview_base64) =
+                    build_preview_from_rgba(&task.rgba, task.width, task.height);
+                let item_id = task.item_id.clone();
+
+                // 存储到内存缓存
+                let mut cache = cache_clone.lock().unwrap();
+                cache.put(item_id.clone(), (preview_width, preview_height, preview_base64.clone()));
+
+                // 持久化到数据库
+                if let Err(e) = image_store::save_async_preview(
+                    &item_id,
+                    preview_width,
+                    preview_height,
+                    &preview_base64,
+                ) {
+                    log::error!("保存异步预览到数据库失败: {}", e);
+                }
+
+                log::debug!("异步生成预览完成: {} ({}x{})", item_id, preview_width, preview_height);
+            }
+        });
+
+        Self {
+            task_tx,
+            preview_cache,
+        }
+    }
+
+    fn submit_task(&self, task: PreviewGenerationTask) {
+        if let Err(e) = self.task_tx.try_send(task) {
+            log::warn!("提交预览生成任务失败: {}", e);
+        }
+    }
+
+    /// 获取异步生成的预览（优先从内存缓存，其次从数据库）
+    pub fn get_preview(&self, item_id: &str) -> Option<(u32, u32, String)> {
+        // 先从内存缓存查找
+        if let Some(preview) = self.preview_cache.lock().unwrap().get(item_id) {
+            return Some(preview.clone());
+        }
+
+        // 从数据库加载
+        if let Ok(Some(preview)) = image_store::load_async_preview(item_id) {
+            // 加载到内存缓存
+            self.preview_cache.lock().unwrap().put(item_id.to_string(), preview.clone());
+            return Some(preview);
+        }
+
+        None
+    }
+}
+
 
 struct PersistTask {
     item_id: String,
@@ -706,13 +798,22 @@ impl ImageClipboardManager {
         let signature = compute_signature(&rgba, width, height);
         let id = generate_item_id(&signature);
 
-        // 优化：大图片不生成 Base64，节省 CPU 和存储
+        // 优化：大图片异步生成 Base64，不阻塞主线程
         let is_large_image = width > 1920 || height > 1080;
         let (preview_width, preview_height, preview_rgba_base64) = if is_large_image {
-            // 大图片：不生成 Base64，只保留尺寸信息
+            // 大图片：提交异步预览生成任务，立即返回空预览
+            let preview_task = PreviewGenerationTask {
+                item_id: id.clone(),
+                rgba: Arc::new(rgba.clone()),
+                width,
+                height,
+            };
+            let generator = PREVIEW_GENERATOR.lock().unwrap();
+            generator.submit_task(preview_task);
+            log::info!("已提交大图片异步预览生成任务: {} ({}x{})", id, width, height);
             (width, height, String::new())
         } else {
-            // 小图片：生成 Base64 预览
+            // 小图片：同步生成 Base64 预览
             build_preview_from_rgba(&rgba, width, height)
         };
         
@@ -1426,6 +1527,45 @@ impl ImageClipboardManager {
             item.preview_height,
         )
         .map(Some)
+    }
+
+    /// 获取图片预览（优先使用已生成的，否则尝试从异步缓存获取）
+    pub fn get_image_preview(&self, item_id: &str) -> Result<(u32, u32, String), String> {
+        let history = lock_arc_mutex(&self.history);
+        let item = history.iter().find(|i| i.id == item_id)
+            .ok_or_else(|| "目标图片不存在".to_string())?;
+
+        // 小图片：直接返回已生成的预览
+        if !item.preview_rgba_base64.is_empty() {
+            let png_base64 = rgba_base64_to_png_base64(
+                &item.preview_rgba_base64,
+                item.preview_width,
+                item.preview_height,
+            )?;
+            return Ok((item.preview_width, item.preview_height, png_base64));
+        }
+
+        // 大图片：尝试从异步缓存获取
+        if let Some((width, height, base64)) = get_async_preview(item_id) {
+            return Ok((width, height, base64));
+        }
+
+        // 预览还未生成，返回空
+        Err("预览正在生成中".to_string())
+    }
+
+    /// 检查图片预览是否已就绪
+    pub fn is_image_preview_ready(&self, item_id: &str) -> bool {
+        let history = lock_arc_mutex(&self.history);
+        if let Some(item) = history.iter().find(|i| i.id == item_id) {
+            // 小图片：已有预览
+            if !item.preview_rgba_base64.is_empty() {
+                return true;
+            }
+            // 大图片：检查异步缓存
+            return is_preview_ready(item_id);
+        }
+        false
     }
 
     pub fn read_clipboard_images_rgba(

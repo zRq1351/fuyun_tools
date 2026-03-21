@@ -1,5 +1,5 @@
 import {computed, ref} from 'vue'
-import {CategoryService, ClipboardService} from '../../../services/ipc'
+import {CategoryService, ClipboardService, ImageCategoryService, ImageClipboardService} from '../../../services/ipc'
 
 export function useClipboardHistory() {
     const history = ref([])
@@ -203,6 +203,44 @@ export function useClipboardHistory() {
         rebuildHistoryArray()
     }
 
+    /**
+     * 批量获取剪贴板完整快照（优化 IPC 通信）
+     * 一次 IPC 调用获取所有需要的数据，减少通信开销
+     */
+    const loadFullSnapshot = async () => {
+        try {
+            const snapshot = await ClipboardService.getFullSnapshot()
+
+            // 更新文本剪贴板数据
+            if (snapshot.textHistory) {
+                history.value = snapshot.textHistory
+                categoryMap.value = snapshot.textCategories || {}
+
+                // 初始化分页数据
+                const loadedCount = Math.min(snapshot.textHistory.length, pageSize.value)
+                const pinnedSet = new Set(Array.isArray(snapshot.textPinnedItems) ? snapshot.textPinnedItems : [])
+                pagedHistory.value = snapshot.textHistory.slice(0, loadedCount).map((content, position) => ({
+                    content,
+                    position,
+                    snippet: '',
+                    pinned: pinnedSet.has(content)
+                }))
+                totalCount.value = snapshot.textHistory.length
+                pageOffset.value = loadedCount
+                hasMore.value = loadedCount < snapshot.textHistory.length
+
+                if (selectedIndex.value < 0 || selectedIndex.value >= snapshot.textHistory.length) {
+                    selectedIndex.value = snapshot.textHistory.length > 0 ? 0 : -1
+                }
+            }
+
+            return snapshot
+        } catch (error) {
+            console.error('批量获取快照失败:', error)
+            throw error
+        }
+    }
+
     return {
         history,
         selectedIndex,
@@ -225,6 +263,7 @@ export function useClipboardHistory() {
         setSort,
         setPageSize,
         promoteLocalByContent,
-        applyPayloadSnapshot
+        applyPayloadSnapshot,
+        loadFullSnapshot
     }
 }

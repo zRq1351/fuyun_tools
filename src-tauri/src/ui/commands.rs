@@ -39,6 +39,21 @@ pub struct HistoryResponse {
     pinned_items: Vec<String>,
 }
 
+/// 批量获取剪贴板完整快照（优化 IPC 通信）
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardFullSnapshot {
+    pub text_history: Vec<String>,
+    pub text_categories: HashMap<String, String>,
+    pub text_category_list: Vec<String>,
+    pub text_pinned_items: Vec<String>,
+    pub image_history: Vec<ImageHistoryPreviewItem>,
+    pub image_categories: HashMap<String, String>,
+    pub image_category_list: Vec<String>,
+    pub image_tags: HashMap<String, Vec<String>>,
+    pub image_pinned_items: Vec<String>,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipboardHistoryPageRequest {
@@ -747,6 +762,44 @@ pub async fn get_clipboard_history(
         categories: manager.get_categories(),
         category_list: manager.get_category_list(),
         pinned_items: manager.get_pinned_items(),
+    })
+}
+
+/// 批量获取剪贴板完整快照（优化 IPC 通信）
+/// 一次 IPC 调用获取所有需要的数据，减少通信开销
+#[tauri::command]
+pub async fn get_clipboard_full_snapshot(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<ClipboardFullSnapshot, String> {
+    let state_guard = lock_arc_mutex(state.inner());
+
+    // 获取文本剪贴板数据
+    let text_manager = lock_arc_mutex(&state_guard.clipboard_manager);
+    let text_history = text_manager.get_history();
+    let text_categories = text_manager.get_categories();
+    let text_category_list = text_manager.get_category_list();
+    let text_pinned_items = text_manager.get_pinned_items();
+    drop(text_manager);
+
+    // 获取图片剪贴板数据
+    let image_manager = lock_arc_mutex(&state_guard.image_clipboard_manager);
+    let image_history = image_manager.get_history_preview();
+    let image_categories = image_manager.get_categories();
+    let image_category_list = image_manager.get_category_list();
+    let image_tags = image_manager.get_image_tags();
+    let image_pinned_items = image_manager.get_pinned_items();
+    drop(image_manager);
+
+    Ok(ClipboardFullSnapshot {
+        text_history,
+        text_categories,
+        text_category_list,
+        text_pinned_items,
+        image_history,
+        image_categories,
+        image_category_list,
+        image_tags,
+        image_pinned_items,
     })
 }
 
@@ -1933,4 +1986,38 @@ pub async fn get_all_configured_providers(
     }
 
     Ok(providers)
+}
+
+/// 获取图片预览（优先使用已生成的，否则尝试从异步缓存获取）
+#[tauri::command]
+pub async fn get_image_preview_by_id(
+    item_id: String,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<Option<(u32, u32, String)>, String> {
+    let manager_arc = get_image_clipboard_manager_arc(state.inner());
+    let manager = lock_arc_mutex(&manager_arc);
+
+    match manager.get_image_preview(&item_id) {
+        Ok((width, height, base64)) => Ok(Some((width, height, base64))),
+        Err(e) if e == "预览正在生成中" => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// 批量检查预览是否已就绪
+#[tauri::command]
+pub async fn check_previews_ready(
+    item_ids: Vec<String>,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<Vec<(String, bool)>, String> {
+    let manager_arc = get_image_clipboard_manager_arc(state.inner());
+    let manager = lock_arc_mutex(&manager_arc);
+
+    let mut results = Vec::new();
+    for item_id in item_ids {
+        let ready = manager.is_image_preview_ready(&item_id);
+        results.push((item_id, ready));
+    }
+
+    Ok(results)
 }
