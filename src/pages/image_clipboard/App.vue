@@ -573,11 +573,6 @@ const rgbaBase64ToPngDataUrl = (rgbaBase64, width, height) => {
   return canvas.toDataURL('image/png')
 }
 
-// 异步预览相关的状态
-const asyncPreviewCache = new Map()
-const pendingPreviewIds = new Set()
-let previewPollInterval = null
-
 // 缓存命中率统计
 const cacheStats = {
   hits: 0,
@@ -601,85 +596,34 @@ const cacheStats = {
   }
 }
 
-// 异步预览轮询
-const startPreviewPolling = () => {
-  if (previewPollInterval) return
-  previewPollInterval = setInterval(async () => {
-    if (pendingPreviewIds.size === 0) return
-
-    const idsToCheck = Array.from(pendingPreviewIds)
-    try {
-      const results = await ImageClipboardService.checkPreviewsReady(idsToCheck)
-
-      for (const [itemId, ready] of results) {
-        if (ready) {
-          pendingPreviewIds.delete(itemId)
-          // 获取预览数据
-          try {
-            const previewData = await ImageClipboardService.getImagePreviewById(itemId)
-            if (previewData) {
-              const [width, height, base64] = previewData
-              const previewUrl = `data:image/png;base64,${base64}`
-              asyncPreviewCache.set(itemId, previewUrl)
-              previewCache.set(itemId, previewUrl)
-              enforcePreviewCacheSize()
-            }
-          } catch (error) {
-            console.error('获取异步预览失败:', error)
-          }
-        }
-      }
-    } catch (error) {
-      console.error('检查预览状态失败:', error)
-    }
-  }, 500) // 每500ms检查一次
-}
-
-const stopPreviewPolling = () => {
-  if (previewPollInterval) {
-    clearInterval(previewPollInterval)
-    previewPollInterval = null
-  }
-}
+// 异步预览相关的状态
+const asyncPreviewCache = new Map()
+const pendingPreviewIds = new Set()
 
 const getPreviewDataUrl = (item) => {
   if (previewCache.has(item.id)) {
     return previewCache.get(item.id)
   }
   try {
-    // 优化：对于大图片，直接使用文件路径而不是 Base64
-    // 这样可以避免大量的 Base64 解码和编码操作
-    const isLargeImage = item.width > 1920 || item.height > 1080
-
-    if (isLargeImage) {
-      // 大图片：检查是否有异步生成的预览
-      if (asyncPreviewCache.has(item.id)) {
-        const previewUrl = asyncPreviewCache.get(item.id)
-        previewCache.set(item.id, previewUrl)
-        enforcePreviewCacheSize()
-        return previewUrl
-      }
-
-      // 如果没有异步预览，添加到待检查列表
-      if (!pendingPreviewIds.has(item.id)) {
-        pendingPreviewIds.add(item.id)
-        startPreviewPolling()
-      }
-
-      // 暂时使用文件路径作为占位
-      const previewUrl = buildFileUrlFromPath(item.image_path)
+    // 统一使用异步生成的预览（preview_png_base64）
+    const previewBase64 = typeof item.preview_png_base64 === 'string' ? item.preview_png_base64.trim() : ''
+    if (previewBase64) {
+      const previewUrl = `data:image/png;base64,${previewBase64}`
       previewCache.set(item.id, previewUrl)
       enforcePreviewCacheSize()
       return previewUrl
     }
 
-    // 小图片：使用 Base64 预览
-    const lowresBase64 = typeof item.preview_png_base64 === 'string' ? item.preview_png_base64.trim() : ''
-    const rgbaBase64 = typeof item.preview_rgba_base64 === 'string' ? item.preview_rgba_base64.trim() : ''
-    const previewUrl = lowresBase64
-        ? `data:image/png;base64,${lowresBase64}`
-        : rgbaBase64ToPngDataUrl(rgbaBase64, Number(item.preview_width) || 0, Number(item.preview_height) || 0)
-            || buildFileUrlFromPath(item.image_path)
+    // 检查是否有异步生成的预览（通过事件更新）
+    if (asyncPreviewCache.has(item.id)) {
+      const previewUrl = asyncPreviewCache.get(item.id)
+      previewCache.set(item.id, previewUrl)
+      enforcePreviewCacheSize()
+      return previewUrl
+    }
+
+    // 预览还未生成，使用文件路径作为占位
+    const previewUrl = buildFileUrlFromPath(item.image_path)
     previewCache.set(item.id, previewUrl)
     enforcePreviewCacheSize()
     return previewUrl
@@ -1070,9 +1014,6 @@ const mergeShowWindowPayload = (data) => {
         id: item.id,
         width: item.width ?? existing.width ?? 0,
         height: item.height ?? existing.height ?? 0,
-        preview_width: item.preview_width ?? item.previewWidth ?? existing.preview_width ?? 0,
-        preview_height: item.preview_height ?? item.previewHeight ?? existing.preview_height ?? 0,
-        preview_rgba_base64: item.preview_rgba_base64 ?? item.previewRgbaBase64 ?? existing.preview_rgba_base64 ?? '',
         preview_png_base64: item.preview_png_base64 ?? item.previewPngBase64 ?? existing.preview_png_base64 ?? '',
         image_path: item.image_path ?? item.imagePath ?? existing.image_path ?? ''
       })
@@ -1135,9 +1076,6 @@ const mergeImagePageIntoState = (data, reset = false) => {
       id: item.id,
       width: item.width,
       height: item.height,
-      preview_width: item.previewWidth,
-      preview_height: item.previewHeight,
-      preview_rgba_base64: item.previewRgbaBase64,
       preview_png_base64: item.previewPngBase64,
       image_path: item.imagePath
     }
@@ -1370,16 +1308,28 @@ onMounted(async () => {
       asyncPreviewCache.set(itemId, previewUrl)
       previewCache.set(itemId, previewUrl)
       enforcePreviewCacheSize()
+
+      // 关键修复：直接更新 history 数组中的项，触发 Vue 响应式更新
+      const itemIndex = history.value.findIndex(item => item?.id === itemId)
+      if (itemIndex >= 0) {
+        // 从 previewUrl 中提取 base64 部分
+        const base64 = previewUrl.replace('data:image/png;base64,', '')
+        // 使用展开运算符创建新对象，确保 Vue 检测到变化
+        history.value[itemIndex] = {
+          ...history.value[itemIndex],
+          preview_png_base64: base64
+        }
+      }
+      
       // 从待检查列表中移除
       pendingPreviewIds.delete(itemId)
-      console.log(`预览就绪事件: ${itemId}`)
+      console.log(`预览就绪事件已处理: ${itemId}`)
     }
   })
 })
 
 onBeforeUnmount(() => {
   stopContentDragging()
-  stopPreviewPolling() // 停止异步预览轮询
   if (contentMetricsRafId) {
     cancelAnimationFrame(contentMetricsRafId)
     contentMetricsRafId = 0

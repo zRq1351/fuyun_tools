@@ -127,6 +127,10 @@ pub fn run() {
 
             start_clipboard_listener(app_handle.clone(), state_arc.clone());
             start_image_clipboard_listener(app_handle.clone(), state_arc.clone());
+
+            // 初始化异步预览生成器，支持事件通知
+            crate::utils::image_clipboard::init_preview_generator_with_app_handle(app_handle.clone());
+            
             emit_image_history_payload(&app_handle, state_arc.clone());
 
             #[cfg(windows)]
@@ -149,6 +153,7 @@ pub fn run() {
             open_image_preview_window_by_id,
             close_image_preview_window,
             warmup_image_clipboard_item_by_id,
+            warmup_multiple_images,
             select_and_fill,
             select_and_fill_image_by_id,
             set_item_category,
@@ -183,6 +188,9 @@ pub fn run() {
             get_provider_config,
             remove_ai_provider,
             get_all_configured_providers,
+            get_image_preview_by_id,
+            check_previews_ready,
+            get_clipboard_full_snapshot,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());

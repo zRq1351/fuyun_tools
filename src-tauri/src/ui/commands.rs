@@ -2010,14 +2010,19 @@ pub async fn check_previews_ready(
     item_ids: Vec<String>,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<Vec<(String, bool)>, String> {
-    let manager_arc = get_image_clipboard_manager_arc(state.inner());
-    let manager = lock_arc_mutex(&manager_arc);
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager_arc = get_image_clipboard_manager_arc(&state_arc);
+        let manager = lock_arc_mutex(&manager_arc);
 
-    let mut results = Vec::new();
-    for item_id in item_ids {
-        let ready = manager.is_image_preview_ready(&item_id);
-        results.push((item_id, ready));
-    }
+        let mut results = Vec::new();
+        for item_id in item_ids {
+            let ready = manager.is_image_preview_ready(&item_id);
+            results.push((item_id, ready));
+        }
 
-    Ok(results)
+        Ok(results)
+    })
+        .await
+        .map_err(|e| frontend_error(ErrorCode::SystemError, "检查预览状态任务执行失败", e.to_string()))?
 }
