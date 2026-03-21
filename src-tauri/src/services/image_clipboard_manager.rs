@@ -3,11 +3,27 @@ use crate::services::clipboard_wakeup::{ClipboardWakeBackend, WakeSignal};
 use crate::sync::Mutex;
 use crate::utils::image_clipboard::ImageClipboardManager;
 use parking_lot::Mutex as ParkingMutex;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+
+/// 待处理图片任务
+#[derive(Clone)]
+struct PendingImageTask {
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+    source_blob: Option<(Vec<u8>, String)>,
+}
+
+/// 待处理图片队列
+static PENDING_IMAGE_QUEUE: LazyLock<ParkingMutex<VecDeque<PendingImageTask>>> =
+    LazyLock::new(|| ParkingMutex::new(VecDeque::new()));
+
+/// 队列最大容量，防止内存溢出
+const MAX_QUEUE_SIZE: usize = 20;
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
     match state.lock() {
@@ -35,33 +51,11 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
     let _ = app_handle.emit("image-history-payload-updated", payload);
 }
 
-// 防抖机制：200ms 内的相同图片不重复处理
-const DEBOUNCE_INTERVAL_MS: u64 = 200;
-static LAST_IMAGE_TIME: AtomicU64 = AtomicU64::new(0);
-static LAST_IMAGE_SIGNATURE: LazyLock<ParkingMutex<String>> = LazyLock::new(|| ParkingMutex::new(String::new()));
-
-static IMAGE_CLIPBOARD_PROCESSING: AtomicBool = AtomicBool::new(false);
 
 // 快速去重：存储最近图片的采样数据用于快速比较
 const SAMPLE_POINTS: usize = 10;
 static RECENT_IMAGE_SAMPLES: LazyLock<ParkingMutex<Vec<(u32, u32, [u8; SAMPLE_POINTS])>>> =
     LazyLock::new(|| ParkingMutex::new(Vec::new()));
-
-#[cfg(target_os = "windows")]
-fn read_clipboard_sequence_number() -> Option<u32> {
-    use winapi::um::winuser::GetClipboardSequenceNumber;
-    let seq = unsafe { GetClipboardSequenceNumber() };
-    if seq == 0 {
-        None
-    } else {
-        Some(seq)
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn read_clipboard_sequence_number() -> Option<u32> {
-    None
-}
 
 // 快速采样：从 RGBA 数据中提取 10 个采样点
 fn extract_sample_points(rgba: &[u8], width: u32, height: u32) -> [u8; SAMPLE_POINTS] {
@@ -111,30 +105,55 @@ fn update_recent_samples(width: u32, height: u32, rgba: &[u8]) {
     }
 }
 
-// 防抖检查：200ms 内的相同图片不重复处理
-fn should_process_with_debounce(signature: &str) -> bool {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+/// 处理队列中的待处理图片任务
+fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
+    loop {
+        let task = {
+            let mut queue = PENDING_IMAGE_QUEUE.lock();
+            queue.pop_front()
+        };
 
-    let last_time = LAST_IMAGE_TIME.load(Ordering::Relaxed);
-    let mut last_sig = LAST_IMAGE_SIGNATURE.lock();
+        match task {
+            Some(task) => {
+                // 检查是否与最近图片重复
+                if is_duplicate_recent(task.width, task.height, &task.rgba) {
+                    log::trace!("队列中的图片与最近图片重复，跳过处理");
+                    continue;
+                }
 
-    // 200ms 内的相同图片 → 跳过
-    if now.saturating_sub(last_time) < DEBOUNCE_INTERVAL_MS && last_sig.as_str() == signature {
-        return false;
+                let manager_arc = {
+                    let state_guard = lock_state(state);
+                    state_guard.image_clipboard_manager.clone()
+                };
+
+                let manager = match manager_arc.lock() {
+                    Ok(guard) => guard,
+                    Err(e) => match e {},
+                };
+
+                manager.add_rgba_image_with_source_blob(
+                    task.rgba.clone(),
+                    task.width,
+                    task.height,
+                    task.source_blob,
+                );
+                drop(manager);
+
+                // 更新采样缓存
+                update_recent_samples(task.width, task.height, &task.rgba);
+
+                // 发送更新事件
+                emit_image_history_payload(app_handle, state.clone());
+
+                log::trace!("队列中的图片处理完成");
+            }
+            None => break, // 队列为空，退出循环
+        }
     }
-
-    LAST_IMAGE_TIME.store(now, Ordering::Relaxed);
-    *last_sig = signature.to_string();
-    true
 }
 
 pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     thread::spawn(move || {
-        let mut last_error = String::new();
-        let mut last_clipboard_seq = read_clipboard_sequence_number();
         let mut wake_backend = ClipboardWakeBackend::new();
 
         loop {
@@ -144,99 +163,29 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                 continue;
             }
 
-            if IMAGE_CLIPBOARD_PROCESSING.swap(true, Ordering::SeqCst) {
-                continue;
-            }
-
-            let (should_skip, manager_arc) = {
-                let state_guard = lock_state(&state);
-                (
-                    state_guard.is_updating_clipboard
-                        || state_guard.is_processing_selection
-                        || state_guard.is_visible,
-                    state_guard.image_clipboard_manager.clone(),
-                )
-            };
-
-            if should_skip {
-                IMAGE_CLIPBOARD_PROCESSING.store(false, Ordering::SeqCst);
-                continue;
-            }
-
-            let current_clipboard_seq = read_clipboard_sequence_number();
-            if let (Some(current), Some(last)) = (current_clipboard_seq, last_clipboard_seq) {
-                if current == last {
-                    IMAGE_CLIPBOARD_PROCESSING.store(false, Ordering::SeqCst);
-                    continue;
-                }
-            }
-            let mut should_advance_clipboard_seq = false;
-
+            // 简化：所有图片都直接入队，由队列机制统一处理
             let image = ImageClipboardManager::read_clipboard_images_rgba(&app_handle);
             if let Ok(images) = image {
-                should_advance_clipboard_seq = true;
-                last_error.clear();
-                let signature = build_fast_signature(&images);
-
-                // 防抖检查：200ms 内的相同图片跳过
-                if !should_process_with_debounce(&signature) {
-                    IMAGE_CLIPBOARD_PROCESSING.store(false, Ordering::SeqCst);
-                    continue;
-                }
-
-                // 处理图片
-                let manager = match manager_arc.lock() {
-                    Ok(guard) => guard,
-                    Err(e) => match e {},
-                };
-
+                let mut queue = PENDING_IMAGE_QUEUE.lock();
                 for (rgba, width, height, source_blob) in images {
-                    // 快速去重：检查是否与最近图片重复
-                    if !is_duplicate_recent(width, height, &rgba) {
-                        manager.add_rgba_image_with_source_blob(rgba.clone(), width, height, source_blob);
-                        // 更新采样缓存
-                        update_recent_samples(width, height, &rgba);
+                    // 检查队列容量
+                    if queue.len() >= MAX_QUEUE_SIZE {
+                        log::warn!("待处理队列已满（{}），丢弃最早的图片", MAX_QUEUE_SIZE);
+                        queue.pop_front();
                     }
+                    queue.push_back(PendingImageTask {
+                        rgba,
+                        width,
+                        height,
+                        source_blob,
+                    });
+                    log::debug!("图片已加入待处理队列，当前队列长度: {}", queue.len());
                 }
-                drop(manager);
-
-                emit_image_history_payload(&app_handle, state.clone());
-            } else if let Err(e) = image {
-                if e != last_error {
-                    if e.contains("当前剪贴板不是位图格式") {
-                        log::trace!("图片剪贴板监听读取提示: {}", e);
-                        should_advance_clipboard_seq = true;
-                    } else {
-                        log::debug!("图片剪贴板监听读取失败: {}", e);
-                    }
-                    last_error = e;
-                }
+                // 入队后立即处理队列
+                drop(queue);  // 释放锁后再处理
+                process_pending_queue(&app_handle, &state);
             }
-
-            if should_advance_clipboard_seq && current_clipboard_seq.is_some() {
-                last_clipboard_seq = current_clipboard_seq;
-            }
-            IMAGE_CLIPBOARD_PROCESSING.store(false, Ordering::SeqCst);
         }
     });
 }
 
-fn build_fast_signature(images: &[crate::utils::image_clipboard::ClipboardImagePayload]) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    images.len().hash(&mut hasher);
-    for (rgba, width, height, _) in images {
-        width.hash(&mut hasher);
-        height.hash(&mut hasher);
-        rgba.len().hash(&mut hasher);
-        if !rgba.is_empty() {
-            // 优化：只采样 10 个点，而不是遍历整个数组
-            let step = (rgba.len() / SAMPLE_POINTS).max(1);
-            for i in 0..SAMPLE_POINTS {
-                let idx = (i * step).min(rgba.len() - 1);
-                rgba[idx].hash(&mut hasher);
-            }
-        }
-    }
-    format!("{:x}", hasher.finish())
-}
