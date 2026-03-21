@@ -192,6 +192,7 @@ const warmingIndices = new Set()
 let unlistenShowWindow = null
 let unlistenItemPromoted = null
 let unlistenHistoryPayloadUpdated = null
+let unlistenPreviewReady = null
 let isPointerDown = false
 let isContentDragging = false
 let pendingHistorySync = false
@@ -218,7 +219,7 @@ const IMAGE_ITEM_UNIT = IMAGE_ITEM_WIDTH + IMAGE_ITEM_GAP
 const IMAGE_TAIL_SPACER = 742
 const IMAGE_VIRTUAL_OVERSCAN = 4
 const IMAGE_PREVIEW_CACHE_MARGIN = 24
-const IMAGE_PREVIEW_CACHE_MAX_ITEMS = 260
+const IMAGE_PREVIEW_CACHE_MAX_ITEMS = 300
 
 const currentPageQuerySignature = () =>
     JSON.stringify({
@@ -576,6 +577,29 @@ const rgbaBase64ToPngDataUrl = (rgbaBase64, width, height) => {
 const asyncPreviewCache = new Map()
 const pendingPreviewIds = new Set()
 let previewPollInterval = null
+
+// 缓存命中率统计
+const cacheStats = {
+  hits: 0,
+  misses: 0,
+  get hitRate() {
+    const total = this.hits + this.misses
+    return total > 0 ? (this.hits / total * 100).toFixed(2) : 0
+  },
+  recordHit() {
+    this.hits++
+  },
+  recordMiss() {
+    this.misses++
+  },
+  reset() {
+    this.hits = 0
+    this.misses = 0
+  },
+  getReport() {
+    return `缓存命中率: ${this.hitRate}% (${this.hits}/${this.hits + this.misses})`
+  }
+}
 
 // 异步预览轮询
 const startPreviewPolling = () => {
@@ -1336,6 +1360,20 @@ onMounted(async () => {
   unlistenItemPromoted = await listen('image-item-promoted', (event) => {
     const itemId = event?.payload?.itemId
     promoteLocalItemToTop(itemId)
+  })
+
+  // 监听预览就绪事件
+  unlistenPreviewReady = await listen('preview-ready', (event) => {
+    const {itemId, previewUrl} = event.payload || {}
+    if (itemId && previewUrl) {
+      // 更新缓存
+      asyncPreviewCache.set(itemId, previewUrl)
+      previewCache.set(itemId, previewUrl)
+      enforcePreviewCacheSize()
+      // 从待检查列表中移除
+      pendingPreviewIds.delete(itemId)
+      console.log(`预览就绪事件: ${itemId}`)
+    }
   })
 })
 
