@@ -402,8 +402,7 @@ pub fn handle_selection_toolbar_autoclose(app_handle: &AppHandle, click_pos: Opt
 
 /// 模拟粘贴操作
 pub fn simulate_paste() -> Result<(), String> {
-    use crate::core::config::CTRL_KEY;
-    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+    use enigo::{Enigo, Settings};
     wait_for_foreground_ready_for_paste()?;
 
     {
@@ -413,24 +412,54 @@ pub fn simulate_paste() -> Result<(), String> {
         }
 
         if let Some(ref mut enigo) = *enigo_guard {
-            thread::sleep(Duration::from_millis(10));
-            enigo
-                .key(CTRL_KEY, Direction::Press)
-                .map_err(|e| format!("按下Ctrl失败: {}", e))?;
-            thread::sleep(Duration::from_millis(12));
-            enigo
-                .key(Key::Unicode('v'), Direction::Press)
-                .map_err(|e| format!("发送V键失败: {}", e))?;
-            thread::sleep(Duration::from_millis(12));
-            enigo
-                .key(Key::Unicode('v'), Direction::Release)
-                .map_err(|e| format!("释放V键失败: {}", e))?;
-            thread::sleep(Duration::from_millis(85));
-            enigo
-                .key(CTRL_KEY, Direction::Release)
-                .map_err(|e| format!("释放Ctrl失败: {}", e))?;
+            // 使用安全的粘贴执行函数
+            execute_ctrl_v_with_safety(enigo)?;
         }
     }
+    Ok(())
+}
+
+/// 执行 Ctrl+V 操作，确保 Ctrl 键总是被正确释放
+/// 使用 defer 模式，确保即使发生错误也能释放 Ctrl 键
+fn execute_ctrl_v_with_safety(enigo: &mut enigo::Enigo) -> Result<(), String> {
+    use crate::core::config::CTRL_KEY;
+    use enigo::{Direction, Key, Keyboard};
+
+    thread::sleep(Duration::from_millis(10));
+
+    // 按下 Ctrl 键
+    enigo
+        .key(CTRL_KEY, Direction::Press)
+        .map_err(|e| format!("按下 Ctrl 失败: {}", e))?;
+
+    // 定义释放函数，用于异常处理
+    fn release_ctrl(enigo: &mut enigo::Enigo) {
+        use crate::core::config::CTRL_KEY;
+        use enigo::{Direction, Keyboard};
+
+        if let Err(e) = enigo.key(CTRL_KEY, Direction::Release) {
+            log::error!("释放 Ctrl 键失败: {:?}", e);
+        } else {
+            log::debug!("Ctrl 键已释放");
+        }
+    }
+
+    // 按下 V 键（使用 Click，一次性按下释放，避免 V 键卡住）
+    thread::sleep(Duration::from_millis(12));
+    enigo
+        .key(Key::Unicode('v'), Direction::Click)
+        .map_err(|e| {
+            release_ctrl(enigo);
+            format!("发送 V 键失败: {}", e)
+        })?;
+
+    // 等待一段时间
+    thread::sleep(Duration::from_millis(85));
+
+    // 正常释放 Ctrl 键
+    release_ctrl(enigo);
+
+    log::info!("已发送 Ctrl+V 模拟按键");
     Ok(())
 }
 

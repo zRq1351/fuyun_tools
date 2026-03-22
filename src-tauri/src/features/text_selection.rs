@@ -8,6 +8,43 @@ use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
 
+/// 执行 Ctrl+C 操作，确保 Ctrl 键总是被正确释放
+/// 使用 defer 模式，确保即使发生错误也能释放 Ctrl 键
+fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
+    // 按下 Ctrl 键
+    match enigo.key(CTRL_KEY, enigo::Direction::Press) {
+        Ok(_) => {}
+        Err(e) => return Err(format!("按下 Ctrl 键失败: {:?}", e)),
+    }
+
+    // 定义释放函数，用于异常处理
+    fn release_ctrl(enigo: &mut Enigo) {
+        if let Err(e) = enigo.key(CTRL_KEY, enigo::Direction::Release) {
+            log::error!("释放 Ctrl 键失败: {:?}", e);
+        } else {
+            log::debug!("Ctrl 键已释放");
+        }
+    }
+
+    // 按下 C 键
+    match enigo.key(Key::Unicode('c'), enigo::Direction::Click) {
+        Ok(_) => {}
+        Err(e) => {
+            release_ctrl(enigo);
+            return Err(format!("按下 C 键失败: {:?}", e));
+        }
+    }
+
+    // 等待一小段时间
+    thread::sleep(Duration::from_millis(20));
+
+    // 正常释放 Ctrl 键
+    release_ctrl(enigo);
+
+    log::info!("已发送 Ctrl+C 模拟按键");
+    Ok(())
+}
+
 /// 划词捕获最大重试时长
 const CAPTURE_RETRY_MAX_DURATION: Duration = Duration::from_millis(600);
 /// 轮询间隔，使用序列号检测时可以更频繁
@@ -76,14 +113,11 @@ fn get_selected_text_windows(
     crate::features::mouse_listener::reset_ctrl_key_state();
 
     if let Some(ref mut enigo) = *enigo_guard {
-        let _ = enigo.key(CTRL_KEY, enigo::Direction::Press);
-        let _ = enigo.key(Key::Unicode('c'), enigo::Direction::Click);
-        // 减少按键保持时间，提高响应速度
-        thread::sleep(Duration::from_millis(20));
-        let _ = enigo.key(CTRL_KEY, enigo::Direction::Release);
+        // 使用 RAII 守卫确保 Ctrl 键总是被正确释放
+        if let Err(e) = execute_ctrl_c_with_safety(enigo) {
+            log::error!("执行 Ctrl+C 失败: {}", e);
+        }
     }
-
-    log::info!("已发送Ctrl+C模拟按键");
 
     thread::sleep(INITIAL_DELAY);
     crate::features::mouse_listener::reset_ctrl_key_state();
