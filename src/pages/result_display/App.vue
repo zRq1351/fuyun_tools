@@ -102,7 +102,7 @@
 </template>
 
 <script setup>
-import {computed, nextTick, onMounted, ref} from 'vue'
+import {computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue'
 import {marked} from 'marked'
 import {listen} from '@tauri-apps/api/event'
 import {DocumentCopy, Hide, Position, View} from '@element-plus/icons-vue'
@@ -123,6 +123,9 @@ const shouldAutoFollow = ref(true)
 const originalRef = ref(null)
 const isWaitingResult = ref(false)
 const loadingStartedAt = ref(0)
+let unlistenResultClean = null
+let unlistenResultUpdate = null
+let initDataHandler = null
 
 const escapeHtml = (value = '') =>
     value
@@ -198,7 +201,7 @@ const originalHtml = computed(() => renderMarkdownSafely(originalText.value))
 const resultHtml = computed(() => renderMarkdownSafely(resultText.value))
 
 onMounted(async () => {
-  const loadInitialData = () => {
+  initDataHandler = () => {
     const initialData = window.__INITIAL_DATA__
     if (initialData) {
       mode.value = initialData.type || 'translation'
@@ -220,11 +223,11 @@ onMounted(async () => {
     }
   }
 
-  loadInitialData()
-  window.addEventListener('init-data', loadInitialData)
+  initDataHandler()
+  window.addEventListener('init-data', initDataHandler)
 
   try {
-    await listen('result-clean', (event) => {
+    unlistenResultClean = await listen('result-clean', (event) => {
       const data = event.payload
       if (data && data.type && data.type !== mode.value) return
       resultText.value = ''
@@ -233,7 +236,7 @@ onMounted(async () => {
       loadingStartedAt.value = Date.now()
     })
 
-    await listen('result-update', (event) => {
+    unlistenResultUpdate = await listen('result-update', (event) => {
       const data = event.payload
       if (data && data.type && data.type !== mode.value) return
       if (data.content) {
@@ -253,6 +256,21 @@ onMounted(async () => {
     })
   } catch (error) {
     console.error('Failed to setup listeners:', error)
+  }
+})
+
+onBeforeUnmount(() => {
+  if (initDataHandler) {
+    window.removeEventListener('init-data', initDataHandler)
+    initDataHandler = null
+  }
+  if (unlistenResultClean) {
+    unlistenResultClean()
+    unlistenResultClean = null
+  }
+  if (unlistenResultUpdate) {
+    unlistenResultUpdate()
+    unlistenResultUpdate = null
   }
 })
 

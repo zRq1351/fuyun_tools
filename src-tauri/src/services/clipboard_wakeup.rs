@@ -48,10 +48,6 @@ impl ClipboardWakeBackend {
         }
     }
 
-    pub fn wait(&mut self, timeout: Duration) {
-        let _ = self.wait_with_signal(timeout);
-    }
-
     pub fn wait_with_signal(&mut self, timeout: Duration) -> WakeSignal {
         match &mut self.mode {
             #[cfg(target_os = "windows")]

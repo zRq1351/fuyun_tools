@@ -174,6 +174,7 @@ impl ClipboardManager {
 
     /// 添加新分类
     pub fn add_category(&self, category: String) -> Result<(), String> {
+        let history = lock_arc_mutex(&self.history).clone();
         let (categories_clone, category_list_clone) = {
             let categories = lock_arc_mutex(&self.categories);
             let mut category_list = lock_arc_mutex(&self.category_list);
@@ -189,8 +190,6 @@ impl ClipboardManager {
 
             (categories.clone(), category_list.clone())
         };
-
-        let history = lock_arc_mutex(&self.history).clone();
         let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
 
         self.enqueue_persist(ClipboardHistoryData {
@@ -216,6 +215,7 @@ impl ClipboardManager {
 
     /// 设置条目分类
     pub fn set_category(&self, item: String, category: String) -> Result<(), String> {
+        let history = lock_arc_mutex(&self.history).clone();
         let (categories_clone, category_list_clone) = {
             let mut categories = lock_arc_mutex(&self.categories);
             let mut category_list = lock_arc_mutex(&self.category_list);
@@ -232,8 +232,6 @@ impl ClipboardManager {
             }
             (categories.clone(), category_list.clone())
         };
-
-        let history = lock_arc_mutex(&self.history).clone();
         let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
 
         self.enqueue_persist(ClipboardHistoryData {
@@ -262,6 +260,7 @@ impl ClipboardManager {
 
     /// 移除分类
     pub fn remove_category(&self, category: String) -> Result<(), String> {
+        let history = lock_arc_mutex(&self.history).clone();
         let (categories_clone, category_list_clone) = {
             let mut categories = lock_arc_mutex(&self.categories);
             let mut category_list = lock_arc_mutex(&self.category_list);
@@ -270,8 +269,6 @@ impl ClipboardManager {
             categories.retain(|_, v| v != &category);
             (categories.clone(), category_list.clone())
         };
-
-        let history = lock_arc_mutex(&self.history).clone();
         let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
 
         self.enqueue_persist(ClipboardHistoryData {
