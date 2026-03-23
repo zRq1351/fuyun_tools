@@ -1292,7 +1292,8 @@ onMounted(async () => {
   })
   unlistenHistoryPayloadUpdated = await listen('image-history-payload-updated', (event) => {
     if (isAddingCategory.value) return
-    mergeShowWindowPayload(event.payload || {})
+    // 完全替换数据，确保删除操作能正确反映
+    applyPayload(event.payload || {})
   })
   unlistenItemPromoted = await listen('image-item-promoted', (event) => {
     const itemId = event?.payload?.itemId
