@@ -195,6 +195,10 @@ const isAiSettingsCollapsed = ref(true)
 const translationTargetLanguage = ref(localStorage.getItem('clipboard_ai_target_language') || '简体中文')
 const explanationTargetLanguage = ref(localStorage.getItem('clipboard_ai_explain_language') || '中文')
 const loadMoreIntent = ref(false)
+let unlistenShowWindow = null
+let unlistenHistoryPayloadUpdated = null
+let unlistenTextItemPromoted = null
+let windowBlurHandler = null
 
 const {
   history,
@@ -327,10 +331,10 @@ const toggleSortOrder = async () => {
 
 const init = async () => {
   try {
-    await listen('show-window', (event) => {
+    unlistenShowWindow = await listen('show-window', (event) => {
       void showWindow(event.payload)
     })
-    await listen('clipboard-history-payload-updated', (event) => {
+    unlistenHistoryPayloadUpdated = await listen('clipboard-history-payload-updated', (event) => {
       const payload = event.payload || {}
       applyPayloadSnapshot(payload)
       if (payload.categories) {
@@ -344,19 +348,20 @@ const init = async () => {
         categories.value = ['未分类', ...Array.from(new Set(list))]
       }
     })
-    await listen('text-item-promoted', (event) => {
+    unlistenTextItemPromoted = await listen('text-item-promoted', (event) => {
       const content = event?.payload?.content
       promoteLocalByContent(content)
     })
 
-    window.addEventListener('blur', async () => {
+    windowBlurHandler = async () => {
       try {
         await WindowService.blur()
         hideClipboardWindow()
       } catch (error) {
         console.error('调用 window_blur 失败:', error)
       }
-    })
+    }
+    window.addEventListener('blur', windowBlurHandler)
   } catch (error) {
     console.error('初始化失败:', error)
   }
@@ -668,6 +673,22 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (unlistenShowWindow) {
+    unlistenShowWindow()
+    unlistenShowWindow = null
+  }
+  if (unlistenHistoryPayloadUpdated) {
+    unlistenHistoryPayloadUpdated()
+    unlistenHistoryPayloadUpdated = null
+  }
+  if (unlistenTextItemPromoted) {
+    unlistenTextItemPromoted()
+    unlistenTextItemPromoted = null
+  }
+  if (windowBlurHandler) {
+    window.removeEventListener('blur', windowBlurHandler)
+    windowBlurHandler = null
+  }
   if (filterDebounceTimer) {
     clearTimeout(filterDebounceTimer)
     filterDebounceTimer = null

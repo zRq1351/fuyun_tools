@@ -598,7 +598,6 @@ const cacheStats = {
 
 // 异步预览相关的状态
 const asyncPreviewCache = new Map()
-const pendingPreviewIds = new Set()
 
 const getPreviewDataUrl = (item) => {
   if (previewCache.has(item.id)) {
@@ -1321,9 +1320,6 @@ onMounted(async () => {
         }
       }
       
-      // 从待检查列表中移除
-      pendingPreviewIds.delete(itemId)
-      console.log(`预览就绪事件已处理: ${itemId}`)
     }
   })
 })
@@ -1337,7 +1333,6 @@ onBeforeUnmount(() => {
   loadMorePending = false
   previewCache.clear()
   asyncPreviewCache.clear() // 清理异步预览缓存
-  pendingPreviewIds.clear() // 清理待检查的预览ID
   if (filterDebounceTimer) {
     clearTimeout(filterDebounceTimer)
     filterDebounceTimer = null
@@ -1361,6 +1356,10 @@ onBeforeUnmount(() => {
   if (unlistenItemPromoted) {
     unlistenItemPromoted()
     unlistenItemPromoted = null
+  }
+  if (unlistenPreviewReady) {
+    unlistenPreviewReady()
+    unlistenPreviewReady = null
   }
   window.removeEventListener('keydown', handleWindowKeydown)
   window.removeEventListener('keyup', handleWindowKeyup)

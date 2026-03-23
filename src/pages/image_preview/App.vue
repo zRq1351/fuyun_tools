@@ -36,8 +36,10 @@ const loadingStartedAt = ref(0)
 const activeRequestId = ref('')
 const MIN_LOADING_MS = 180
 let unlistenShowPreview = null
+let unlistenCloseRequested = null
 let closeTimer = null
 let revealTimer = null
+let keydownHandler = null
 
 const buildFileUrlFromPath = (imagePath) => {
   if (!imagePath) return ''
@@ -133,14 +135,15 @@ onMounted(async () => {
     playOpenAnimation()
   })
 
-  window.addEventListener('keydown', (event) => {
+  keydownHandler = (event) => {
     if (event.key === 'Escape') {
       event.preventDefault()
       requestClose()
     }
-  })
+  }
+  window.addEventListener('keydown', keydownHandler)
 
-  currentWindow.onCloseRequested(async (event) => {
+  unlistenCloseRequested = await currentWindow.onCloseRequested(async (event) => {
     if (animationState.value !== 'closing' && animationState.value !== 'closed') {
       event.preventDefault()
       requestClose()
@@ -152,6 +155,14 @@ onBeforeUnmount(() => {
   if (unlistenShowPreview) {
     unlistenShowPreview()
     unlistenShowPreview = null
+  }
+  if (unlistenCloseRequested) {
+    unlistenCloseRequested()
+    unlistenCloseRequested = null
+  }
+  if (keydownHandler) {
+    window.removeEventListener('keydown', keydownHandler)
+    keydownHandler = null
   }
   if (closeTimer) {
     window.clearTimeout(closeTimer)

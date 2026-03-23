@@ -2426,22 +2426,42 @@ fn load_image_history_data() -> Result<ImageHistoryData, String> {
         changed = true;
     }
     if changed {
+        let mut persist_errors = Vec::new();
         for (position, item) in data.items.iter().enumerate() {
-            let _ = image_store::upsert_item(item, position);
+            if let Err(e) = image_store::upsert_item(item, position) {
+                persist_errors.push(format!("upsert_item(item_id={}, position={}): {}", item.id, position, e));
+            }
         }
         for removed_id in removed_item_ids {
-            let _ = image_store::delete_item(&removed_id);
-            let _ = image_store::delete_category(&removed_id);
-            let _ = image_store::delete_tags_for_item(&removed_id);
+            if let Err(e) = image_store::delete_item(&removed_id) {
+                persist_errors.push(format!("delete_item(item_id={}): {}", removed_id, e));
+            }
+            if let Err(e) = image_store::delete_category(&removed_id) {
+                persist_errors.push(format!("delete_category(item_id={}): {}", removed_id, e));
+            }
+            if let Err(e) = image_store::delete_tags_for_item(&removed_id) {
+                persist_errors.push(format!("delete_tags_for_item(item_id={}): {}", removed_id, e));
+            }
         }
         for (item_id, category) in &data.categories {
-            let _ = image_store::upsert_category(item_id, category);
+            if let Err(e) = image_store::upsert_category(item_id, category) {
+                persist_errors.push(format!("upsert_category(item_id={}): {}", item_id, e));
+            }
         }
-        let _ = image_store::sync_category_list_order(&data.category_list);
+        if let Err(e) = image_store::sync_category_list_order(&data.category_list) {
+            persist_errors.push(format!("sync_category_list_order: {}", e));
+        }
         for (item_id, tags) in &data.image_tags {
-            let _ = image_store::sync_tags_for_item(item_id, tags);
+            if let Err(e) = image_store::sync_tags_for_item(item_id, tags) {
+                persist_errors.push(format!("sync_tags_for_item(item_id={}): {}", item_id, e));
+            }
         }
-        let _ = image_store::sync_pinned_order(&data.pinned_items);
+        if let Err(e) = image_store::sync_pinned_order(&data.pinned_items) {
+            persist_errors.push(format!("sync_pinned_order: {}", e));
+        }
+        if !persist_errors.is_empty() {
+            return Err(format!("修复图片历史数据后写库失败: {}", persist_errors.join(" | ")));
+        }
     }
     Ok(data)
 }

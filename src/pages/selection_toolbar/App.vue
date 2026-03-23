@@ -30,7 +30,7 @@
 </template>
 
 <script setup>
-import {onMounted, ref} from 'vue'
+import {onBeforeUnmount, onMounted, ref} from 'vue'
 import {ChatLineRound, Collection, DocumentCopy} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
 import {AIService, ClipboardService, WindowService} from '../../services/ipc'
@@ -38,16 +38,24 @@ import {handleAppError} from '../../utils/errorHandler'
 
 const selectedText = ref('')
 const actionLoading = ref(false)
+let unlistenSelectedText = null
 
 const getSafeSelectedText = () => selectedText.value.trim()
 
 onMounted(async () => {
   try {
-    await listen('selected-text', (event) => {
+    unlistenSelectedText = await listen('selected-text', (event) => {
       selectedText.value = typeof event.payload === 'string' ? event.payload : ''
     })
   } catch (error) {
     console.error('Listen error:', error)
+  }
+})
+
+onBeforeUnmount(() => {
+  if (unlistenSelectedText) {
+    unlistenSelectedText()
+    unlistenSelectedText = null
   }
 })
 
