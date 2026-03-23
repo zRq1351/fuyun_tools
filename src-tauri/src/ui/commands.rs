@@ -1092,16 +1092,22 @@ pub async fn clear_text_history(
 pub async fn clear_image_history(
     mode: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
+    app: AppHandle,
 ) -> Result<usize, String> {
     let manager_arc = get_image_clipboard_manager_arc(state.inner());
     let manager = {
         let guard = lock_arc_mutex(&manager_arc);
         guard.clone()
     };
-    manager
+    let removed = manager
         .clear_history_by_mode_async(mode.as_str())
         .await
-        .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "清理图片历史失败").with_details(e)))
+        .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "清理图片历史失败").with_details(e)))?;
+
+    // 通知图片窗口更新数据
+    emit_image_history_payload(&app, state.inner().clone());
+
+    Ok(removed)
 }
 
 #[tauri::command]
