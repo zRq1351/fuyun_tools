@@ -111,6 +111,13 @@ fn update_recent_samples(width: u32, height: u32, rgba: &[u8]) {
     }
 }
 
+/// 清理最近图片的采样缓存（在删除图片时调用）
+pub fn clear_recent_samples() {
+    let mut recent = RECENT_IMAGE_SAMPLES.lock();
+    recent.clear();
+    log::debug!("[缓存清理] 已清理最近图片采样缓存");
+}
+
 /// 处理队列中的待处理图片任务
 fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
     log::info!("[处理线程] 图片处理线程已启动，等待任务...");

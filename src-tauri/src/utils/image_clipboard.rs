@@ -1028,6 +1028,9 @@ impl ImageClipboardManager {
             (removed.id, removed.image_path, removed.signature, ids)
         };
 
+        // 清理最近图片的采样缓存，避免删除后再复制被误判为重复
+        crate::services::image_clipboard_manager::clear_recent_samples();
+
         let pinned_snapshot = {
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             pinned_items.retain(|id| id != &removed_id);
