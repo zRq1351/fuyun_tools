@@ -199,6 +199,9 @@ let unlistenShowWindow = null
 let unlistenHistoryPayloadUpdated = null
 let unlistenTextItemPromoted = null
 let windowBlurHandler = null
+let isPageReloading = false
+let beforeUnloadHandler = null
+let pageHideHandler = null
 
 const {
   history,
@@ -244,8 +247,8 @@ const {
   startWindowOffsetDrag
 } = useWindowOffset()
 
-const deleteItem = async (index) => {
-  await originalDeleteItem(index)
+const deleteItem = async (index, item) => {
+  await originalDeleteItem(index, item)
 }
 
 const isItemPinned = (item) => pinnedItems.value.includes(item)
@@ -329,6 +332,24 @@ const toggleSortOrder = async () => {
   persistSortState()
 }
 
+const syncWindowPayload = (payload = {}) => {
+  applyPayloadSnapshot(payload)
+  if (payload.categories) {
+    categoryMap.value = payload.categories
+  }
+  if (Array.isArray(payload.pinned_items)) {
+    pinnedItems.value = payload.pinned_items
+  }
+  if (Array.isArray(payload.category_list)) {
+    const list = payload.category_list.filter(c => c !== '未分类' && c !== '全部')
+    categories.value = ['未分类', ...Array.from(new Set(list))]
+  } else if (payload.categories) {
+    const extractedCategories = Object.values(payload.categories)
+    const uniqueList = Array.from(new Set(extractedCategories)).filter(c => c !== '未分类' && c !== '全部')
+    categories.value = ['未分类', ...uniqueList]
+  }
+}
+
 const init = async () => {
   try {
     unlistenShowWindow = await listen('show-window', (event) => {
@@ -336,17 +357,7 @@ const init = async () => {
     })
     unlistenHistoryPayloadUpdated = await listen('clipboard-history-payload-updated', (event) => {
       const payload = event.payload || {}
-      applyPayloadSnapshot(payload)
-      if (payload.categories) {
-        categoryMap.value = payload.categories
-      }
-      if (Array.isArray(payload.pinned_items)) {
-        pinnedItems.value = payload.pinned_items
-      }
-      if (Array.isArray(payload.category_list)) {
-        const list = payload.category_list.filter(c => c !== '未分类' && c !== '全部')
-        categories.value = ['未分类', ...Array.from(new Set(list))]
-      }
+      syncWindowPayload(payload)
     })
     unlistenTextItemPromoted = await listen('text-item-promoted', (event) => {
       const content = event?.payload?.content
@@ -354,6 +365,9 @@ const init = async () => {
     })
 
     windowBlurHandler = async () => {
+      if (isPageReloading) {
+        return
+      }
       try {
         await WindowService.blur()
         hideClipboardWindow()
@@ -362,6 +376,36 @@ const init = async () => {
       }
     }
     window.addEventListener('blur', windowBlurHandler)
+    beforeUnloadHandler = () => {
+      isPageReloading = true
+    }
+    pageHideHandler = () => {
+      isPageReloading = true
+    }
+    window.addEventListener('beforeunload', beforeUnloadHandler)
+    window.addEventListener('pagehide', pageHideHandler)
+
+    isVisible.value = true
+    let payload = null
+    try {
+      payload = await ClipboardService.getHistory()
+      syncWindowPayload(payload)
+    } catch (error) {
+      console.error('初始化拉取历史失败:', error)
+    }
+    await resetAndReloadHistory()
+    if (visibleHistory.value.length === 0) {
+      if (payload && Array.isArray(payload.history) && payload.history.length > 0) {
+        syncWindowPayload(payload)
+      } else {
+        try {
+          const fallbackPayload = await ClipboardService.getHistory()
+          syncWindowPayload(fallbackPayload)
+        } catch (error) {
+          console.error('刷新后兜底拉取历史失败:', error)
+        }
+      }
+    }
   } catch (error) {
     console.error('初始化失败:', error)
   }
@@ -371,21 +415,7 @@ const showWindow = async (data) => {
   if (typeof data.bottomOffset === 'number') {
     bottomOffset.value = clampBottomOffset(data.bottomOffset)
   }
-  if (data.categories) {
-    categoryMap.value = data.categories
-  }
-  if (Array.isArray(data.category_list)) {
-    const list = data.category_list.filter(c => c !== '未分类' && c !== '全部')
-    const uniqueList = Array.from(new Set(list))
-    categories.value = ['未分类', ...uniqueList]
-  } else {
-    if (data.categories) {
-      const extractedCategories = Object.values(data.categories)
-      const uniqueList = Array.from(new Set(extractedCategories)).filter(c => c !== '未分类' && c !== '全部')
-      categories.value = ['未分类', ...uniqueList]
-    }
-  }
-  pinnedItems.value = Array.isArray(data.pinned_items) ? data.pinned_items : []
+  syncWindowPayload(data)
 
   selectedIndex.value = data.selectedIndex !== undefined ? data.selectedIndex : 0
   isVisible.value = true
@@ -688,6 +718,14 @@ onBeforeUnmount(() => {
   if (windowBlurHandler) {
     window.removeEventListener('blur', windowBlurHandler)
     windowBlurHandler = null
+  }
+  if (beforeUnloadHandler) {
+    window.removeEventListener('beforeunload', beforeUnloadHandler)
+    beforeUnloadHandler = null
+  }
+  if (pageHideHandler) {
+    window.removeEventListener('pagehide', pageHideHandler)
+    pageHideHandler = null
   }
   if (filterDebounceTimer) {
     clearTimeout(filterDebounceTimer)

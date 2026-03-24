@@ -151,7 +151,7 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         SET item_id = (
             SELECT hi.item_id
             FROM history_items hi
-            WHERE hi.content = categories.item
+            WHERE hi.content = categories.content
             LIMIT 1
         )
         WHERE item_id IS NULL OR item_id = ''
@@ -167,7 +167,7 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         SET item_id = (
             SELECT hi.item_id
             FROM history_items hi
-            WHERE hi.content = pinned_items.item
+            WHERE hi.content = pinned_items.content
             LIMIT 1
         )
         WHERE item_id IS NULL OR item_id = ''

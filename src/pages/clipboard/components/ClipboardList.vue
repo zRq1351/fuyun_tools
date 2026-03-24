@@ -6,18 +6,16 @@
       @scroll="handleScroll"
       @wheel.prevent="handleWheel"
   >
-    <div v-if="leftSpacerWidth > 0" :style="{ minWidth: leftSpacerWidth + 'px', height: '1px' }"></div>
     <div
-        v-for="(entry) in virtualItems"
-        :id="'clipboard-item-' + entry.virtualIndex"
-        :key="entry.virtualIndex"
-        :class="{ selected: selectedIndex === entry.virtualIndex }"
+        v-for="(entry) in visibleHistory"
+        :id="'clipboard-item-' + entry.index"
+        :key="entry.index"
+        v-memo="[entry.item, entry.index, selectedIndex, getItemCategory(entry.item), isPinned(entry.item), entry.snippet]"
         class="clipboard-item"
-        :style="{ transform: `translateX(${entry.offset}px)` }"
-        v-memo="[entry.item, entry.virtualIndex, selectedIndex, getItemCategory(entry.item), isPinned(entry.item), entry.snippet]"
-        @click="handleClick(entry.virtualIndex)"
-        @dblclick="handleDoubleClick(entry.virtualIndex)"
-        @contextmenu.prevent="showContextMenu($event, entry.item, entry.virtualIndex)"
+        :class="{ selected: selectedIndex === entry.index }"
+        @click="handleClick(entry.index)"
+        @dblclick="handleDoubleClick(entry.index)"
+        @contextmenu.prevent="showContextMenu($event, entry.item, entry.index)"
     >
       <div v-if="isWebUrl(entry.item)" class="open-btn" @click.stop="openWebUrl(entry.item)">
         <el-icon>
@@ -25,17 +23,17 @@
         </el-icon>
       </div>
       <div :class="{ active: isPinned(entry.item) }" class="pin-btn"
-           @click.stop="promoteItem(entry.virtualIndex, entry.item)">
+           @click.stop="promoteItem(entry.index, entry.item)">
         <el-icon>
           <Pin/>
         </el-icon>
       </div>
-      <div class="delete-btn" @click.stop="deleteItem(entry.virtualIndex)">
+      <div class="delete-btn" @click.stop="deleteItem(entry.index, entry.item)">
         <el-icon>
           <Close/>
         </el-icon>
       </div>
-      <div class="index">{{ entry.virtualIndex + 1 }}</div>
+      <div class="index">{{ entry.index + 1 }}</div>
       <div class="category-wrap" @click.stop>
         <div class="category-chip">{{ getItemCategory(entry.item) }}</div>
       </div>
@@ -56,13 +54,12 @@
         <span>{{ isLoadingMore ? '加载中' : '加载更多' }}</span>
       </div>
     </div>
-    <div v-if="rightSpacerWidth > 0" :style="{ minWidth: rightSpacerWidth + 'px', height: '1px' }"></div>
     <div class="spacer"></div>
   </div>
 </template>
 
 <script setup>
-import {computed, onUnmounted, ref, watch} from 'vue'
+import {computed, onUnmounted, ref} from 'vue'
 import {Close, Link, Loading} from '@element-plus/icons-vue'
 import {Pin} from 'lucide-vue-next'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
@@ -128,8 +125,6 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent'])
 
 const contentRef = ref(null)
-const itemWidth = 258 // 卡片宽度 + 间距
-const bufferSize = 3 // 前后缓冲区
 let isDown = false
 let isDragging = false
 let startX = 0
@@ -137,15 +132,7 @@ let scrollLeftVal = 0
 let dragTargetScrollLeft = 0
 let dragScrollRafId = 0
 
-// 虚拟滚动相关
-const scrollPosition = ref(0)
-const containerWidth = ref(0)
-
 const handleScroll = () => {
-  if (contentRef.value) {
-    scrollPosition.value = contentRef.value.scrollLeft
-    containerWidth.value = contentRef.value.clientWidth
-  }
   emit('content-scroll')
 }
 
@@ -206,43 +193,8 @@ const stopDragging = () => {
   window.removeEventListener('dragend', handleGlobalDragEnd)
 }
 
-// 虚拟滚动：计算可见区域
-const visibleStartIndex = computed(() => {
-  return Math.max(0, Math.floor(scrollPosition.value / itemWidth) - bufferSize)
-})
-
-const visibleEndIndex = computed(() => {
-  const visibleCount = Math.ceil(containerWidth.value / itemWidth) + 2 * bufferSize
-  return Math.min(props.visibleHistory.length - 1, visibleStartIndex.value + visibleCount)
-})
-
-// 虚拟滚动：只渲染可见区域的项目
-const virtualItems = computed(() => {
-  if (props.visibleHistory.length === 0) return []
-
-  const start = visibleStartIndex.value
-  const end = visibleEndIndex.value
-
-  return props.visibleHistory.slice(start, end + 1).map((item, idx) => ({
-    ...item,
-    virtualIndex: start + idx,
-    offset: (start + idx) * itemWidth
-  }))
-})
-
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
-
-// 虚拟滚动：计算左右间距
-const leftSpacerWidth = computed(() => {
-  return visibleStartIndex.value * itemWidth
-})
-
-const rightSpacerWidth = computed(() => {
-  const totalWidth = props.visibleHistory.length * itemWidth
-  const renderedWidth = (visibleEndIndex.value - visibleStartIndex.value + 1) * itemWidth
-  return Math.max(0, totalWidth - renderedWidth - leftSpacerWidth.value)
-})
 
 onUnmounted(() => {
   stopDragging()
@@ -254,8 +206,6 @@ onUnmounted(() => {
 })
 
 const handleClick = (index) => {
-  // visibleIndex is not strictly needed for logic but was used for scrolling into view?
-  // passing -1 or null as visibleIndex if not needed by updateSelection
   props.updateSelection(index, false, contentRef.value, null)
 }
 
@@ -452,7 +402,6 @@ defineExpose({
   box-sizing: border-box;
   /* 优化：限制重排重绘范围 */
   contain: layout style paint;
-  will-change: transform;
 }
 
 .clipboard-item:hover, .clipboard-item.selected {

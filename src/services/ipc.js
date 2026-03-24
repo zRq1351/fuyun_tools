@@ -124,7 +124,7 @@ export const ClipboardService = {
      * @param {number} index
      * @returns {Promise<void>}
      */
-    removeItem: (index) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, {index}),
+    removeItem: (index, item = null) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, {index, item}),
     setItemPinned: (index, item, pinned) => invoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, {index, item, pinned}),
     promoteItem: (index) => invoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, {index}),
     clearHistory: (mode) => invoke(IPC_COMMANDS.CLEAR_TEXT_HISTORY, {mode}),

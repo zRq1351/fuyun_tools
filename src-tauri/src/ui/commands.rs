@@ -613,16 +613,30 @@ fn execute_select_and_fill_text(
 }
 
 fn execute_remove_clipboard_item(
-    index: usize,
+    index: Option<usize>,
+    item: Option<String>,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
 ) -> AppResult<()> {
-    log::info!("删除剪贴板项目，索引: {}", index);
+    log::info!("删除剪贴板项目，索引: {:?}, 内容存在: {}", index, item.is_some());
     let manager_arc = get_clipboard_manager_arc(&state);
     with_updating_clipboard(&state, || -> Result<(), String> {
+        let resolved_index = {
+            let manager = lock_arc_mutex(&manager_arc);
+            if let Some(content) = item.as_ref().filter(|v| !v.trim().is_empty()) {
+                manager
+                    .get_history()
+                    .iter()
+                    .position(|entry| entry == content)
+                    .or(index)
+                    .ok_or_else(|| "索引超出范围".to_string())?
+            } else {
+                index.ok_or_else(|| "索引超出范围".to_string())?
+            }
+        };
         let removed_item = {
             let manager = lock_arc_mutex(&manager_arc);
-            manager.remove_from_history(index)?
+            manager.remove_from_history(resolved_index)?
         };
         try_replace_text_clipboard_after_remove(&state, &app, &removed_item);
         Ok(())
@@ -1343,13 +1357,14 @@ pub async fn select_and_fill(
 
 #[tauri::command]
 pub async fn remove_clipboard_item(
-    index: usize,
+    index: Option<usize>,
+    item: Option<String>,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        execute_remove_clipboard_item(index, state_arc, app).map_err(to_frontend_error_string)
+        execute_remove_clipboard_item(index, item, state_arc, app).map_err(to_frontend_error_string)
     })
         .await
         .map_err(|e| frontend_error(ErrorCode::SystemError, "删除文本历史任务执行失败", e.to_string()))?
