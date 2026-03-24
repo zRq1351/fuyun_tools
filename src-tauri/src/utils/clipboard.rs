@@ -617,7 +617,24 @@ impl ClipboardManager {
     }
 
     pub async fn set_pinned_async(&self, item: String, pinned: bool) -> Result<(), String> {
-        // 使用增量操作设置置顶状态
+        {
+            let mut history = lock_arc_mutex(&self.history);
+            if !history.iter().any(|existing| existing == &item) {
+                return Err("目标条目不存在".to_string());
+            }
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+            if pinned {
+                if !pinned_items.iter().any(|p| p == &item) {
+                    pinned_items.insert(0, item.clone());
+                }
+            } else {
+                pinned_items.retain(|p| p != &item);
+            }
+            normalize_pinned_items(&mut pinned_items, &history);
+            apply_pin_order(&mut history, &pinned_items);
+            self.history_cache_dirty.store(true, Ordering::Relaxed);
+        }
+
         if pinned {
             crate::utils::database::pin_item(&item).await?;
         } else {
@@ -632,11 +649,9 @@ impl ClipboardManager {
         item: Option<String>,
         pinned: bool,
     ) -> Result<(), String> {
-        let resolved_item = if let Some(idx) = index {
-            self.get_history().get(idx).cloned()
-        } else {
-            item
-        }
+        let resolved_item = item
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| index.and_then(|idx| self.get_history().get(idx).cloned()))
             .ok_or_else(|| "索引超出范围".to_string())?;
         self.set_pinned_async(resolved_item, pinned).await
     }
