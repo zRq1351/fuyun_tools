@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous};
 use sqlx::{Connection, Row, SqliteConnection};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::future::Future;
@@ -311,6 +311,10 @@ fn resolve_history_sort(sort_by: Option<String>, sort_order: Option<String>) -> 
         .unwrap_or_else(|| "desc".to_string())
         .to_lowercase();
     match (by.as_str(), order.as_str()) {
+        ("pinnedfirst", "asc") | ("pinned_first", "asc") =>
+            "CASE WHEN p.content IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at DESC, hi.created_at ASC, hi.id ASC",
+        ("pinnedfirst", _) | ("pinned_first", _) =>
+            "CASE WHEN p.content IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at DESC, hi.created_at DESC, hi.id DESC",
         ("updatedat", "asc") | ("updated_at", "asc") => "hi.created_at ASC, hi.id ASC",
         ("updatedat", _) | ("updated_at", _) => "hi.created_at DESC, hi.id DESC",
         ("createdat", "asc") | ("created_at", "asc") => "hi.created_at ASC, hi.id ASC",
@@ -737,6 +741,100 @@ pub async fn clear_all_history() -> Result<(), String> {
         .execute(&mut *tx)
         .await
         .map_err(|e| format!("清空置顶项失败: {}", e))?;
+
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    Ok(())
+}
+
+pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Result<(), String> {
+    let mut conn = open_history_db_async().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+
+    sqlx::query("DELETE FROM categories")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("重建分类失败: {}", e))?;
+    sqlx::query("DELETE FROM category_list")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("重建分类列表失败: {}", e))?;
+    sqlx::query("DELETE FROM pinned_items")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("重建置顶项失败: {}", e))?;
+    sqlx::query("DELETE FROM history_items")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("重建历史记录失败: {}", e))?;
+    let _ = sqlx::query("DELETE FROM history_items_fts")
+        .execute(&mut *tx)
+        .await;
+
+    let now_ms = now_unix_ms();
+    for (idx, item) in data.items.iter().enumerate().rev() {
+        let ts = now_ms - (idx as i64);
+        let item_id = stable_history_item_id(item);
+        let content_hash = stable_history_content_hash(item);
+        sqlx::query(
+            "INSERT INTO history_items(content, item_id, content_hash, created_at, updated_at)
+             VALUES(?1, ?2, ?3, ?4, ?4)",
+        )
+            .bind(item)
+            .bind(&item_id)
+            .bind(&content_hash)
+            .bind(ts)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("写入历史记录失败: {}", e))?;
+    }
+
+    let history_set = data.items.iter().cloned().collect::<HashSet<_>>();
+    for (item, category) in &data.categories {
+        if !history_set.contains(item) {
+            continue;
+        }
+        let item_id = stable_history_item_id(item);
+        sqlx::query("INSERT INTO categories(content, category, item_id) VALUES(?1, ?2, ?3)")
+            .bind(item)
+            .bind(category)
+            .bind(&item_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("写入分类失败: {}", e))?;
+    }
+
+    for category in &data.category_list {
+        sqlx::query("INSERT INTO category_list(category) VALUES(?)")
+            .bind(category)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("写入分类列表失败: {}", e))?;
+    }
+
+    for (idx, item) in data.pinned_items.iter().enumerate() {
+        if !history_set.contains(item) {
+            continue;
+        }
+        let pinned_at = now_ms - (idx as i64);
+        let item_id = stable_history_item_id(item);
+        sqlx::query("INSERT INTO pinned_items(content, pinned_at, item_id) VALUES(?1, ?2, ?3)")
+            .bind(item)
+            .bind(pinned_at)
+            .bind(&item_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("写入置顶项失败: {}", e))?;
+    }
+
+    let _ = sqlx::query(
+        "
+        INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content)
+        SELECT id, COALESCE(item_id, ''), content
+        FROM history_items
+        ",
+    )
+        .execute(&mut *tx)
+        .await;
 
     tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
