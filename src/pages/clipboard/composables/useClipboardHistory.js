@@ -1,5 +1,5 @@
 import {computed, ref} from 'vue'
-import {CategoryService, ClipboardService, ImageCategoryService, ImageClipboardService} from '../../../services/ipc'
+import {CategoryService, ClipboardService} from '../../../services/ipc'
 
 export function useClipboardHistory() {
     const history = ref([])
@@ -46,16 +46,8 @@ export function useClipboardHistory() {
         history.value = nextHistory
     }
 
-    const mergePageItems = (items, reset) => {
-        if (reset) {
-            pagedHistory.value = items.slice()
-            return
-        }
-        const map = new Map(pagedHistory.value.map((entry) => [entry.position, entry]))
-        for (const item of items) {
-            map.set(item.position, item)
-        }
-        const merged = Array.from(map.values())
+    const sortPageItems = (entries) => {
+        const merged = entries.slice()
         const orderKey = 'pinnedFirst'
         merged.sort((a, b) => {
             if (orderKey === 'pinnedFirst') {
@@ -74,7 +66,20 @@ export function useClipboardHistory() {
             const diff = a.position - b.position
             return sortOrder.value === 'desc' ? -diff : diff
         })
-        pagedHistory.value = merged
+        return merged
+    }
+
+    const mergePageItems = (items, reset) => {
+        if (reset) {
+            pagedHistory.value = sortPageItems(items)
+            return
+        }
+        const map = new Map(pagedHistory.value.map((entry) => [entry.position, entry]))
+        for (const item of items) {
+            map.set(item.position, item)
+        }
+        const merged = Array.from(map.values())
+        pagedHistory.value = sortPageItems(merged)
     }
 
     const loadHistoryPage = async ({reset = false} = {}) => {

@@ -7,15 +7,15 @@
       @wheel.prevent="handleWheel"
   >
     <div
-        v-for="(entry) in visibleHistory"
-        :id="'clipboard-item-' + entry.index"
-        :key="entry.index"
-        v-memo="[entry.item, entry.index, selectedIndex, getItemCategory(entry.item), isPinned(entry.item), entry.snippet]"
+        v-for="(entry, index) in visibleHistory"
+        :id="'clipboard-item-' + index"
+        :key="index"
+        v-memo="[entry.item, index, selectedIndex, getItemCategory(entry.item), isPinned(entry.item), entry.snippet]"
         class="clipboard-item"
-        :class="{ selected: selectedIndex === entry.index }"
-        @click="handleClick(entry.index)"
-        @dblclick="handleDoubleClick(entry.index)"
-        @contextmenu.prevent="showContextMenu($event, entry.item, entry.index)"
+        :class="{ selected: selectedIndex === index }"
+        @click="handleClick(index)"
+        @dblclick="handleDoubleClick(index)"
+        @contextmenu.prevent="showContextMenu($event, entry.item, index)"
     >
       <div v-if="isWebUrl(entry.item)" class="open-btn" @click.stop="openWebUrl(entry.item)">
         <el-icon>
@@ -28,12 +28,12 @@
           <Pin/>
         </el-icon>
       </div>
-      <div class="delete-btn" @click.stop="deleteItem(entry.index, entry.item)">
+      <div class="delete-btn" @click.stop="deleteItem(index)">
         <el-icon>
           <Close/>
         </el-icon>
       </div>
-      <div class="index">{{ entry.index + 1 }}</div>
+      <div class="index">{{ index + 1 }}</div>
       <div class="category-wrap" @click.stop>
         <div class="category-chip">{{ getItemCategory(entry.item) }}</div>
       </div>
@@ -206,6 +206,8 @@ onUnmounted(() => {
 })
 
 const handleClick = (index) => {
+  // visibleIndex is not strictly needed for logic but was used for scrolling into view?
+  // passing -1 or null as visibleIndex if not needed by updateSelection
   props.updateSelection(index, false, contentRef.value, null)
 }
 
@@ -402,6 +404,7 @@ defineExpose({
   box-sizing: border-box;
   /* 优化：限制重排重绘范围 */
   contain: layout style paint;
+  will-change: transform;
 }
 
 .clipboard-item:hover, .clipboard-item.selected {

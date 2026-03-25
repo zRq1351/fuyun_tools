@@ -65,19 +65,35 @@ impl ClipboardManager {
         });
         let mut pinned_items = history_data.pinned_items.clone();
         normalize_pinned_items(&mut pinned_items, &history_data.items);
+        let initial_snapshot = ClipboardHistoryData {
+            items: history_data.items.clone(),
+            categories: history_data.categories.clone(),
+            category_list: history_data.category_list.clone(),
+            pinned_items: pinned_items.clone(),
+        };
         let history_fingerprints = build_history_fingerprints(&history_data.items);
         let (persist_tx, persist_rx) = mpsc::channel::<ClipboardHistoryData>();
-        // 使用增量操作，数据已实时保存，保留线程以兼容现有接口
         std::thread::spawn(move || {
-            loop {
-                match persist_rx.recv() {
-                    Ok(_) => {
-                        // 数据已通过增量操作实时保存，此处仅消费消息
-                    }
-                    Err(_) => break,
+            while let Ok(mut latest) = persist_rx.recv() {
+                while let Ok(next) = persist_rx.try_recv() {
+                    latest = next;
+                }
+                if let Err(e) = tauri::async_runtime::block_on(
+                    crate::utils::database::save_history_data_snapshot_async(&latest)
+                ) {
+                    log::error!("保存历史记录失败: {}", e);
                 }
             }
         });
+
+        if !initial_snapshot.items.is_empty()
+            || !initial_snapshot.categories.is_empty()
+            || !initial_snapshot.category_list.is_empty()
+            || !initial_snapshot.pinned_items.is_empty() {
+            if let Err(e) = persist_tx.send(initial_snapshot) {
+                log::error!("提交初始历史记录保存任务失败: {}", e);
+            }
+        }
 
         // 初始化布隆过滤器
         let mut bloom_filter = BloomFilter::with_rate(BLOOM_FILTER_ERROR_RATE, BLOOM_FILTER_CAPACITY);
@@ -174,7 +190,6 @@ impl ClipboardManager {
 
     /// 添加新分类
     pub fn add_category(&self, category: String) -> Result<(), String> {
-        let history = lock_arc_mutex(&self.history).clone();
         let (categories_clone, category_list_clone) = {
             let categories = lock_arc_mutex(&self.categories);
             let mut category_list = lock_arc_mutex(&self.category_list);
@@ -190,6 +205,8 @@ impl ClipboardManager {
 
             (categories.clone(), category_list.clone())
         };
+
+        let history = lock_arc_mutex(&self.history).clone();
         let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
 
         self.enqueue_persist(ClipboardHistoryData {
@@ -215,7 +232,6 @@ impl ClipboardManager {
 
     /// 设置条目分类
     pub fn set_category(&self, item: String, category: String) -> Result<(), String> {
-        let history = lock_arc_mutex(&self.history).clone();
         let (categories_clone, category_list_clone) = {
             let mut categories = lock_arc_mutex(&self.categories);
             let mut category_list = lock_arc_mutex(&self.category_list);
@@ -232,6 +248,8 @@ impl ClipboardManager {
             }
             (categories.clone(), category_list.clone())
         };
+
+        let history = lock_arc_mutex(&self.history).clone();
         let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
 
         self.enqueue_persist(ClipboardHistoryData {
@@ -260,7 +278,6 @@ impl ClipboardManager {
 
     /// 移除分类
     pub fn remove_category(&self, category: String) -> Result<(), String> {
-        let history = lock_arc_mutex(&self.history).clone();
         let (categories_clone, category_list_clone) = {
             let mut categories = lock_arc_mutex(&self.categories);
             let mut category_list = lock_arc_mutex(&self.category_list);
@@ -269,6 +286,8 @@ impl ClipboardManager {
             categories.retain(|_, v| v != &category);
             (categories.clone(), category_list.clone())
         };
+
+        let history = lock_arc_mutex(&self.history).clone();
         let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
 
         self.enqueue_persist(ClipboardHistoryData {
@@ -635,11 +654,29 @@ impl ClipboardManager {
             self.history_cache_dirty.store(true, Ordering::Relaxed);
         }
 
-        if pinned {
-            crate::utils::database::pin_item(&item).await?;
+        let db_result = if pinned {
+            crate::utils::database::pin_item(&item).await
         } else {
-            crate::utils::database::unpin_item(&item).await?;
+            crate::utils::database::unpin_item(&item).await
+        };
+
+        if db_result.is_err() {
+            let mut history = lock_arc_mutex(&self.history);
+            if history.iter().any(|existing| existing == &item) {
+                let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+                if pinned {
+                    pinned_items.retain(|p| p != &item);
+                } else if !pinned_items.iter().any(|p| p == &item) {
+                    pinned_items.insert(0, item.clone());
+                }
+                normalize_pinned_items(&mut pinned_items, &history);
+                apply_pin_order(&mut history, &pinned_items);
+                self.history_cache_dirty.store(true, Ordering::Relaxed);
+            }
         }
+
+        db_result?;
+
         Ok(())
     }
 
@@ -649,9 +686,7 @@ impl ClipboardManager {
         item: Option<String>,
         pinned: bool,
     ) -> Result<(), String> {
-        let resolved_item = item
-            .filter(|v| !v.trim().is_empty())
-            .or_else(|| index.and_then(|idx| self.get_history().get(idx).cloned()))
+        let resolved_item = item.or_else(|| index.and_then(|idx| self.get_history().get(idx).cloned()))
             .ok_or_else(|| "索引超出范围".to_string())?;
         self.set_pinned_async(resolved_item, pinned).await
     }
