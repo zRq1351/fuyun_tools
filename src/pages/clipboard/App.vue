@@ -251,12 +251,18 @@ const promoteItem = async (index, item) => {
     const shouldPin = !isItemPinned(item)
     await ClipboardService.setItemPinned(index, item, shouldPin)
     const payload = await ClipboardService.getHistory()
-    const nextIndex = payload.history.findIndex((text) => text === item)
-    await showWindow({
-      ...payload,
-      selectedIndex: nextIndex >= 0 ? nextIndex : 0,
-      bottomOffset: bottomOffset.value
-    })
+    applyPayloadSnapshot(payload)
+    if (payload.categories) {
+      categoryMap.value = payload.categories
+    }
+    if (Array.isArray(payload.pinned_items)) {
+      pinnedItems.value = payload.pinned_items
+    }
+    await resetAndReloadHistory()
+    const promoted = visibleHistory.value.find((entry) => entry.item === item)
+    if (promoted) {
+      selectedIndex.value = promoted.index
+    }
   } catch (error) {
     console.error('置顶失败:', error)
   }
@@ -385,9 +391,12 @@ const showWindow = async (data) => {
   selectedIndex.value = data.selectedIndex !== undefined ? data.selectedIndex : 0
   isVisible.value = true
   loadMoreIntent.value = false
-  if (history.value.length === 0) {
+  // 始终更新数据，确保置顶操作后数据能正确刷新
+  applyPayloadSnapshot(data)
+  const hasSnapshotHistory = Array.isArray(data.history) && data.history.length > 0
+  await resetAndReloadHistory()
+  if (visibleHistory.value.length === 0 && hasSnapshotHistory) {
     applyPayloadSnapshot(data)
-    await resetAndReloadHistory()
   }
 
   if (visibleHistory.value.length > 0) {

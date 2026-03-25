@@ -1,5 +1,5 @@
 import {computed, ref} from 'vue'
-import {CategoryService, ClipboardService, ImageCategoryService, ImageClipboardService} from '../../../services/ipc'
+import {CategoryService, ClipboardService} from '../../../services/ipc'
 
 export function useClipboardHistory() {
     const history = ref([])
@@ -46,16 +46,8 @@ export function useClipboardHistory() {
         history.value = nextHistory
     }
 
-    const mergePageItems = (items, reset) => {
-        if (reset) {
-            pagedHistory.value = items.slice()
-            return
-        }
-        const map = new Map(pagedHistory.value.map((entry) => [entry.position, entry]))
-        for (const item of items) {
-            map.set(item.position, item)
-        }
-        const merged = Array.from(map.values())
+    const sortPageItems = (entries) => {
+        const merged = entries.slice()
         const orderKey = 'pinnedFirst'
         merged.sort((a, b) => {
             if (orderKey === 'pinnedFirst') {
@@ -74,7 +66,20 @@ export function useClipboardHistory() {
             const diff = a.position - b.position
             return sortOrder.value === 'desc' ? -diff : diff
         })
-        pagedHistory.value = merged
+        return merged
+    }
+
+    const mergePageItems = (items, reset) => {
+        if (reset) {
+            pagedHistory.value = sortPageItems(items)
+            return
+        }
+        const map = new Map(pagedHistory.value.map((entry) => [entry.position, entry]))
+        for (const item of items) {
+            map.set(item.position, item)
+        }
+        const merged = Array.from(map.values())
+        pagedHistory.value = sortPageItems(merged)
     }
 
     const loadHistoryPage = async ({reset = false} = {}) => {
@@ -138,15 +143,9 @@ export function useClipboardHistory() {
         await resetAndReloadHistory()
     }
 
-    const deleteItem = async (index) => {
+    const deleteItem = async (index, item = '') => {
         try {
-            const removedItem = history.value[index]
-            history.value.splice(index, 1)
-            pagedHistory.value = pagedHistory.value.filter((entry) => entry.position !== index)
-            if (selectedIndex.value >= history.value.length) {
-                selectedIndex.value = Math.max(0, history.value.length - 1)
-            }
-
+            const removedItem = item || history.value[index]
             if (removedItem && categoryMap.value[removedItem]) {
                 delete categoryMap.value[removedItem]
                 try {
@@ -156,8 +155,21 @@ export function useClipboardHistory() {
                 }
             }
 
-            await ClipboardService.removeItem(index)
+            await ClipboardService.removeItem(index, removedItem || null)
+            let payload = null
+            try {
+                payload = await ClipboardService.getHistory()
+                applyPayloadSnapshot(payload)
+                if (payload?.categories) {
+                    categoryMap.value = payload.categories
+                }
+            } catch (error) {
+                console.error('删除后拉取历史失败:', error)
+            }
             await resetAndReloadHistory()
+            if (visibleHistory.value.length === 0 && payload && Array.isArray(payload.history) && payload.history.length > 0) {
+                applyPayloadSnapshot(payload)
+            }
         } catch (error) {
             console.error('删除失败:', error)
         }

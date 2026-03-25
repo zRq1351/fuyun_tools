@@ -65,19 +65,35 @@ impl ClipboardManager {
         });
         let mut pinned_items = history_data.pinned_items.clone();
         normalize_pinned_items(&mut pinned_items, &history_data.items);
+        let initial_snapshot = ClipboardHistoryData {
+            items: history_data.items.clone(),
+            categories: history_data.categories.clone(),
+            category_list: history_data.category_list.clone(),
+            pinned_items: pinned_items.clone(),
+        };
         let history_fingerprints = build_history_fingerprints(&history_data.items);
         let (persist_tx, persist_rx) = mpsc::channel::<ClipboardHistoryData>();
-        // 使用增量操作，数据已实时保存，保留线程以兼容现有接口
         std::thread::spawn(move || {
-            loop {
-                match persist_rx.recv() {
-                    Ok(_) => {
-                        // 数据已通过增量操作实时保存，此处仅消费消息
-                    }
-                    Err(_) => break,
+            while let Ok(mut latest) = persist_rx.recv() {
+                while let Ok(next) = persist_rx.try_recv() {
+                    latest = next;
+                }
+                if let Err(e) = tauri::async_runtime::block_on(
+                    crate::utils::database::save_history_data_snapshot_async(&latest)
+                ) {
+                    log::error!("保存历史记录失败: {}", e);
                 }
             }
         });
+
+        if !initial_snapshot.items.is_empty()
+            || !initial_snapshot.categories.is_empty()
+            || !initial_snapshot.category_list.is_empty()
+            || !initial_snapshot.pinned_items.is_empty() {
+            if let Err(e) = persist_tx.send(initial_snapshot) {
+                log::error!("提交初始历史记录保存任务失败: {}", e);
+            }
+        }
 
         // 初始化布隆过滤器
         let mut bloom_filter = BloomFilter::with_rate(BLOOM_FILTER_ERROR_RATE, BLOOM_FILTER_CAPACITY);
@@ -620,12 +636,47 @@ impl ClipboardManager {
     }
 
     pub async fn set_pinned_async(&self, item: String, pinned: bool) -> Result<(), String> {
-        // 使用增量操作设置置顶状态
-        if pinned {
-            crate::utils::database::pin_item(&item).await?;
-        } else {
-            crate::utils::database::unpin_item(&item).await?;
+        {
+            let mut history = lock_arc_mutex(&self.history);
+            if !history.iter().any(|existing| existing == &item) {
+                return Err("目标条目不存在".to_string());
+            }
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+            if pinned {
+                if !pinned_items.iter().any(|p| p == &item) {
+                    pinned_items.insert(0, item.clone());
+                }
+            } else {
+                pinned_items.retain(|p| p != &item);
+            }
+            normalize_pinned_items(&mut pinned_items, &history);
+            apply_pin_order(&mut history, &pinned_items);
+            self.history_cache_dirty.store(true, Ordering::Relaxed);
         }
+
+        let db_result = if pinned {
+            crate::utils::database::pin_item(&item).await
+        } else {
+            crate::utils::database::unpin_item(&item).await
+        };
+
+        if db_result.is_err() {
+            let mut history = lock_arc_mutex(&self.history);
+            if history.iter().any(|existing| existing == &item) {
+                let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+                if pinned {
+                    pinned_items.retain(|p| p != &item);
+                } else if !pinned_items.iter().any(|p| p == &item) {
+                    pinned_items.insert(0, item.clone());
+                }
+                normalize_pinned_items(&mut pinned_items, &history);
+                apply_pin_order(&mut history, &pinned_items);
+                self.history_cache_dirty.store(true, Ordering::Relaxed);
+            }
+        }
+
+        db_result?;
+
         Ok(())
     }
 
@@ -635,11 +686,7 @@ impl ClipboardManager {
         item: Option<String>,
         pinned: bool,
     ) -> Result<(), String> {
-        let resolved_item = if let Some(idx) = index {
-            self.get_history().get(idx).cloned()
-        } else {
-            item
-        }
+        let resolved_item = item.or_else(|| index.and_then(|idx| self.get_history().get(idx).cloned()))
             .ok_or_else(|| "索引超出范围".to_string())?;
         self.set_pinned_async(resolved_item, pinned).await
     }
