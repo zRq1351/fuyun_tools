@@ -339,13 +339,14 @@ export const AISettingsService = {
     /**
      * 测试 AI 连接
      * @param {Object} params
+     * @param {string} params.aiProvider
      * @param {string} params.aiApiUrl
      * @param {string} params.aiModelName
      * @param {string} params.aiApiKey
      * @returns {Promise<string>}
      */
-    testConnection: ({aiApiUrl, aiModelName, aiApiKey}) =>
-        invoke(IPC_COMMANDS.TEST_AI_CONNECTION, {aiApiUrl, aiModelName, aiApiKey}),
+    testConnection: ({aiProvider, aiApiUrl, aiModelName, aiApiKey}) =>
+        invoke(IPC_COMMANDS.TEST_AI_CONNECTION, {aiProvider, aiApiUrl, aiModelName, aiApiKey}),
 
     /**
      * 获取提供商配置
