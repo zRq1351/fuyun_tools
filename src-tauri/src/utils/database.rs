@@ -62,12 +62,6 @@ fn stable_history_item_id(content: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-fn stable_history_content_hash(content: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    content.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
-}
-
 fn db_options(db_path: &PathBuf) -> SqliteConnectOptions {
     SqliteConnectOptions::new()
         .filename(db_path)
@@ -97,7 +91,6 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             content TEXT NOT NULL,
             item_id TEXT,
-            content_hash TEXT,
             created_at INTEGER NOT NULL DEFAULT 0,
             updated_at INTEGER NOT NULL DEFAULT 0
         );
@@ -117,7 +110,6 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         );
         CREATE INDEX IF NOT EXISTS idx_history_items_created_at ON history_items(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_history_items_item_id ON history_items(item_id);
-        CREATE INDEX IF NOT EXISTS idx_history_items_content_hash ON history_items(content_hash);
         CREATE INDEX IF NOT EXISTS idx_categories_category ON categories(category);
         CREATE INDEX IF NOT EXISTS idx_categories_item_id ON categories(item_id);
         CREATE INDEX IF NOT EXISTS idx_pinned_items_pinned_at ON pinned_items(pinned_at DESC);
@@ -126,6 +118,13 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         .execute(&mut *conn)
         .await
         .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+
+    let _ = sqlx::query("DROP INDEX IF EXISTS idx_history_items_content_hash")
+        .execute(&mut *conn)
+        .await;
+    let _ = sqlx::query("ALTER TABLE history_items DROP COLUMN content_hash")
+        .execute(&mut *conn)
+        .await;
 
     sqlx::query(
         "UPDATE history_items
@@ -650,12 +649,11 @@ pub async fn insert_history_item(content: &str) -> Result<i64, String> {
     let item_id = stable_history_item_id(content);
 
     let id: i64 = sqlx::query_scalar(
-        "INSERT INTO history_items(content, item_id, content_hash, created_at, updated_at)
-         VALUES(?1, ?2, ?3, ?4, ?5) RETURNING id"
+        "INSERT INTO history_items(content, item_id, created_at, updated_at)
+         VALUES(?1, ?2, ?3, ?4) RETURNING id"
     )
         .bind(content)
         .bind(&item_id)
-        .bind(stable_history_content_hash(content))
         .bind(now_ms)
         .bind(now_ms)
         .fetch_one(&mut conn)
@@ -774,14 +772,12 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
     for (idx, item) in data.items.iter().enumerate().rev() {
         let ts = now_ms - (idx as i64);
         let item_id = stable_history_item_id(item);
-        let content_hash = stable_history_content_hash(item);
         sqlx::query(
-            "INSERT INTO history_items(content, item_id, content_hash, created_at, updated_at)
-             VALUES(?1, ?2, ?3, ?4, ?4)",
+            "INSERT INTO history_items(content, item_id, created_at, updated_at)
+             VALUES(?1, ?2, ?3, ?3)",
         )
             .bind(item)
             .bind(&item_id)
-            .bind(&content_hash)
             .bind(ts)
             .execute(&mut *tx)
             .await

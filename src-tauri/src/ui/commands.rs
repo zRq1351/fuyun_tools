@@ -91,6 +91,7 @@ pub async fn get_image_clipboard_history_page(
                 request.category,
                 request.keyword,
                 request.pinned_only,
+                request.sort_by,
                 request.sort_order,
             )
             .await,
@@ -846,6 +847,8 @@ pub struct ImageHistoryPageRequest {
     keyword: Option<String>,
     #[serde(default)]
     pinned_only: bool,
+    #[serde(default)]
+    sort_by: Option<String>,
     #[serde(default)]
     sort_order: Option<String>,
 }

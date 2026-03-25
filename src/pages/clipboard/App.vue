@@ -225,6 +225,8 @@ const {
   setSort,
   setPageSize,
   promoteLocalByContent,
+  setLocalPinnedByContent,
+  insertLocalIncomingContent,
   applyPayloadSnapshot
 } = useClipboardHistory()
 
@@ -254,23 +256,22 @@ const deleteItem = async (index, item) => {
 const isItemPinned = (item) => pinnedItems.value.includes(item)
 
 const promoteItem = async (index, item) => {
+  const shouldPin = !isItemPinned(item)
+  if (shouldPin) {
+    pinnedItems.value = [item, ...pinnedItems.value.filter((p) => p !== item)]
+  } else {
+    pinnedItems.value = pinnedItems.value.filter((p) => p !== item)
+  }
+  setLocalPinnedByContent(item, shouldPin)
   try {
-    const shouldPin = !isItemPinned(item)
     await ClipboardService.setItemPinned(index, item, shouldPin)
-    const payload = await ClipboardService.getHistory()
-    applyPayloadSnapshot(payload)
-    if (payload.categories) {
-      categoryMap.value = payload.categories
-    }
-    if (Array.isArray(payload.pinned_items)) {
-      pinnedItems.value = payload.pinned_items
-    }
-    await resetAndReloadHistory()
-    const promoted = visibleHistory.value.find((entry) => entry.item === item)
-    if (promoted) {
-      selectedIndex.value = promoted.index
-    }
   } catch (error) {
+    if (shouldPin) {
+      pinnedItems.value = pinnedItems.value.filter((p) => p !== item)
+    } else {
+      pinnedItems.value = [item, ...pinnedItems.value.filter((p) => p !== item)]
+    }
+    setLocalPinnedByContent(item, !shouldPin)
     console.error('置顶失败:', error)
   }
 }
@@ -307,7 +308,7 @@ const keywordHitCount = computed(() => {
       .filter(Boolean)
   if (tokens.length === 0) return 0
   return visibleHistory.value.filter((entry) => {
-    const text = `${entry.item || ''}\n${entry.snippet || ''}`.toLowerCase()
+    const text = `${entry.content || ''}\n${entry.snippet || ''}`.toLowerCase()
     return tokens.some((token) => text.includes(token))
   }).length
 })
@@ -339,7 +340,6 @@ const toggleSortOrder = async () => {
 }
 
 const syncWindowPayload = (payload = {}) => {
-  applyPayloadSnapshot(payload)
   if (payload.categories) {
     categoryMap.value = payload.categories
   }
@@ -354,6 +354,7 @@ const syncWindowPayload = (payload = {}) => {
     const uniqueList = Array.from(new Set(extractedCategories)).filter(c => c !== '未分类' && c !== '全部')
     categories.value = ['未分类', ...uniqueList]
   }
+  applyPayloadSnapshot(payload)
 }
 
 const init = async () => {
@@ -363,7 +364,27 @@ const init = async () => {
     })
     unlistenHistoryPayloadUpdated = await listen('clipboard-history-payload-updated', (event) => {
       const payload = event.payload || {}
-      syncWindowPayload(payload)
+      if (payload.categories) {
+        categoryMap.value = payload.categories
+      }
+      if (Array.isArray(payload.category_list)) {
+        const list = payload.category_list.filter(c => c !== '未分类' && c !== '全部')
+        categories.value = ['未分类', ...Array.from(new Set(list))]
+      }
+      const incomingHistory = Array.isArray(payload.history) ? payload.history : []
+      if (incomingHistory.length === 0) {
+        return
+      }
+      const incomingPinnedSet = new Set(Array.isArray(payload.pinned_items) ? payload.pinned_items : [])
+      const currentSet = new Set(history.value)
+      const addedContents = incomingHistory.filter((content) => !currentSet.has(content))
+      for (let i = addedContents.length - 1; i >= 0; i -= 1) {
+        const content = addedContents[i]
+        insertLocalIncomingContent(content, incomingPinnedSet.has(content))
+      }
+      if (Array.isArray(payload.pinned_items)) {
+        pinnedItems.value = payload.pinned_items
+      }
     })
     unlistenTextItemPromoted = await listen('text-item-promoted', (event) => {
       const content = event?.payload?.content
@@ -399,19 +420,6 @@ const init = async () => {
     } catch (error) {
       console.error('初始化拉取历史失败:', error)
     }
-    await resetAndReloadHistory()
-    if (visibleHistory.value.length === 0) {
-      if (payload && Array.isArray(payload.history) && payload.history.length > 0) {
-        syncWindowPayload(payload)
-      } else {
-        try {
-          const fallbackPayload = await ClipboardService.getHistory()
-          syncWindowPayload(fallbackPayload)
-        } catch (error) {
-          console.error('刷新后兜底拉取历史失败:', error)
-        }
-      }
-    }
   } catch (error) {
     console.error('初始化失败:', error)
   }
@@ -426,13 +434,6 @@ const showWindow = async (data) => {
   selectedIndex.value = data.selectedIndex !== undefined ? data.selectedIndex : 0
   isVisible.value = true
   loadMoreIntent.value = false
-  // 始终更新数据，确保置顶操作后数据能正确刷新
-  applyPayloadSnapshot(data)
-  const hasSnapshotHistory = Array.isArray(data.history) && data.history.length > 0
-  await resetAndReloadHistory()
-  if (visibleHistory.value.length === 0 && hasSnapshotHistory) {
-    applyPayloadSnapshot(data)
-  }
 
   if (visibleHistory.value.length > 0) {
     if (!visibleHistory.value.some((entry) => entry.index === selectedIndex.value)) {

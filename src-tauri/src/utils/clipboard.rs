@@ -224,7 +224,12 @@ impl ClipboardManager {
         if !normalized_category.is_empty()
             && normalized_category != "未分类"
             && normalized_category != "全部" {
-            // 使用增量操作添加分类
+            {
+                let mut category_list = lock_arc_mutex(&self.category_list);
+                if !category_list.contains(&normalized_category) {
+                    category_list.push(normalized_category.clone());
+                }
+            }
             crate::utils::database::add_category_to_list(&normalized_category).await?;
         }
         Ok(())
@@ -265,12 +270,21 @@ impl ClipboardManager {
     pub async fn set_category_async(&self, item: String, category: String) -> Result<(), String> {
         let normalized_category = category.trim().to_string();
         if normalized_category.is_empty() || normalized_category == "未分类" || normalized_category == "全部" {
-            // 使用增量操作删除分类
+            {
+                let mut categories = lock_arc_mutex(&self.categories);
+                categories.remove(&item);
+            }
             crate::utils::database::remove_item_category(&item).await?;
         } else {
-            // 使用增量操作设置分类
+            {
+                let mut categories = lock_arc_mutex(&self.categories);
+                let mut category_list = lock_arc_mutex(&self.category_list);
+                categories.insert(item.clone(), normalized_category.clone());
+                if !category_list.contains(&normalized_category) {
+                    category_list.push(normalized_category.clone());
+                }
+            }
             crate::utils::database::set_item_category(&item, &normalized_category).await?;
-            // 如果分类列表中不存在，添加到列表
             crate::utils::database::add_category_to_list(&normalized_category).await?;
         }
         Ok(())
@@ -301,7 +315,12 @@ impl ClipboardManager {
     }
 
     pub async fn remove_category_async(&self, category: String) -> Result<(), String> {
-        // 使用增量操作从分类列表中删除
+        {
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut category_list = lock_arc_mutex(&self.category_list);
+            category_list.retain(|c| c != &category);
+            categories.retain(|_, v| v != &category);
+        }
         crate::utils::database::remove_category_from_list(&category).await?;
         Ok(())
     }
@@ -568,15 +587,24 @@ impl ClipboardManager {
                 let item = history[0].clone();
                 return Ok(item);
             }
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+            normalize_pinned_items(&mut pinned_items, &history);
             let item = history.remove(index);
-            history.insert(0, item.clone());
+            if pinned_items.iter().any(|p| p == &item) {
+                pinned_items.retain(|p| p != &item);
+                pinned_items.insert(0, item.clone());
+                history.insert(0, item.clone());
+            } else {
+                let insert_pos = pinned_items.len().min(history.len());
+                history.insert(insert_pos, item.clone());
+            }
+            apply_pin_order(&mut history, &pinned_items);
             self.exact_index_cache.lock().clear();
             self.history_cache_dirty.store(true, Ordering::Relaxed);
 
             let categories = lock_arc_mutex(&self.categories).clone();
             let category_list = lock_arc_mutex(&self.category_list).clone();
-            let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
-            (item, categories, category_list, history.clone(), pinned_items)
+            (item, categories, category_list, history.clone(), pinned_items.clone())
         };
 
         self.enqueue_persist(ClipboardHistoryData {
@@ -598,8 +626,18 @@ impl ClipboardManager {
             if index == 0 {
                 return Ok(history[0].clone());
             }
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+            normalize_pinned_items(&mut pinned_items, &history);
             let item = history.remove(index);
-            history.insert(0, item.clone());
+            if pinned_items.iter().any(|p| p == &item) {
+                pinned_items.retain(|p| p != &item);
+                pinned_items.insert(0, item.clone());
+                history.insert(0, item.clone());
+            } else {
+                let insert_pos = pinned_items.len().min(history.len());
+                history.insert(insert_pos, item.clone());
+            }
+            apply_pin_order(&mut history, &pinned_items);
             self.exact_index_cache.lock().clear();
             self.history_cache_dirty.store(true, Ordering::Relaxed);
             item

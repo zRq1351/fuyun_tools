@@ -602,6 +602,7 @@ pub fn load_history_page(
     category: Option<String>,
     keyword: Option<String>,
     pinned_only: bool,
+    sort_by: Option<String>,
     sort_order: Option<String>,
 ) -> Result<ImageHistoryPageData, String> {
     block_on_result(load_history_page_async(
@@ -610,6 +611,7 @@ pub fn load_history_page(
         category,
         keyword,
         pinned_only,
+        sort_by,
         sort_order,
     ))
 }
@@ -620,6 +622,7 @@ pub async fn load_history_page_async(
     category: Option<String>,
     keyword: Option<String>,
     pinned_only: bool,
+    sort_by: Option<String>,
     sort_order: Option<String>,
 ) -> Result<ImageHistoryPageData, String> {
     let mut conn = open_image_store_async().await?;
@@ -633,6 +636,21 @@ pub async fn load_history_page_async(
     let order = match sort_order.as_deref() {
         Some("desc") | Some("DESC") => "DESC",
         _ => "ASC",
+    };
+    let pinned_first = sort_by
+        .as_deref()
+        .map(|v| matches!(v, "pinnedFirst" | "pinned_first" | "pinnedfirst"))
+        .unwrap_or(true);
+    let order_clause = if pinned_first {
+        format!(
+            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC,
+             CASE WHEN p.item_id IS NOT NULL THEN COALESCE(p.position, 2147483647) END ASC,
+             CASE WHEN p.item_id IS NULL THEN hi.position END {},
+             hi.item_id {}",
+            order, order
+        )
+    } else {
+        format!("hi.position {}, hi.item_id {}", order, order)
     };
     let keyword_like = keyword_filter.as_ref().map(|v| format!("%{}%", v));
     let effective_limit = limit.clamp(1, 200);
@@ -663,12 +681,10 @@ pub async fn load_history_page_async(
             )
           )
         ORDER BY
-          CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC,
-          CASE WHEN p.item_id IS NOT NULL THEN hi.position END ASC,
-          CASE WHEN p.item_id IS NULL THEN hi.position END {}
+          {}
         LIMIT ?4 OFFSET ?5
         ",
-        order
+        order_clause
     );
     let rows = sqlx::query(&query_sql)
         .bind(category_filter.as_deref())

@@ -10,34 +10,34 @@
         v-for="(entry, index) in visibleHistory"
         :id="'clipboard-item-' + index"
         :key="index"
-        v-memo="[entry.item, index, selectedIndex, getItemCategory(entry.item), isPinned(entry.item), entry.snippet]"
+        v-memo="[entry.content, index, selectedIndex, getItemCategory(entry.content), isPinned(entry.content), entry.snippet]"
         class="clipboard-item"
         :class="{ selected: selectedIndex === index }"
-        @click="handleClick(index)"
-        @dblclick="handleDoubleClick(index)"
-        @contextmenu.prevent="showContextMenu($event, entry.item, index)"
+        @click="handleClick(entry.index)"
+        @dblclick="handleDoubleClick(entry.index)"
+        @contextmenu.prevent="showContextMenu($event, entry.content, index)"
     >
-      <div v-if="isWebUrl(entry.item)" class="open-btn" @click.stop="openWebUrl(entry.item)">
+      <div v-if="isWebUrl(entry.content)" class="open-btn" @click.stop="openWebUrl(entry.content)">
         <el-icon>
           <Link/>
         </el-icon>
       </div>
-      <div :class="{ active: isPinned(entry.item) }" class="pin-btn"
-           @click.stop="promoteItem(entry.index, entry.item)">
+      <div :class="{ active: isPinned(entry.content) }" class="pin-btn"
+           @click.stop="promoteItem(entry.index, entry.content)">
         <el-icon>
           <Pin/>
         </el-icon>
       </div>
-      <div class="delete-btn" @click.stop="deleteItem(index)">
+      <div class="delete-btn" @click.stop="deleteItem(entry.index, entry.content)">
         <el-icon>
           <Close/>
         </el-icon>
       </div>
       <div class="index">{{ index + 1 }}</div>
       <div class="category-wrap" @click.stop>
-        <div class="category-chip">{{ getItemCategory(entry.item) }}</div>
+        <div class="category-chip">{{ getItemCategory(entry.content) }}</div>
       </div>
-      <div class="item-content">{{ entry.item }}</div>
+      <div class="item-content">{{ entry.content }}</div>
       <div v-if="entry.snippet" class="item-snippet">
         <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
           <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
@@ -205,14 +205,12 @@ onUnmounted(() => {
   window.removeEventListener('dragend', handleGlobalDragEnd)
 })
 
-const handleClick = (index) => {
-  // visibleIndex is not strictly needed for logic but was used for scrolling into view?
-  // passing -1 or null as visibleIndex if not needed by updateSelection
-  props.updateSelection(index, false, contentRef.value, null)
+const handleClick = (entryIndex) => {
+  props.updateSelection(entryIndex, false, contentRef.value, null)
 }
 
-const handleDoubleClick = (index) => {
-  props.selectAndFillDirect(index)
+const handleDoubleClick = (entryIndex) => {
+  props.selectAndFillDirect(entryIndex)
 }
 
 const isWebUrl = (value) => {
@@ -458,14 +456,23 @@ defineExpose({
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
-  display: flex;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.75);
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity 0.2s, border-color 0.2s, color 0.2s, background-color 0.2s;
   z-index: 12;
+  padding: 0;
+}
+
+.pin-btn:hover {
+  border-color: var(--el-color-primary, #409eff);
+  color: #fff;
+  background: var(--el-color-primary, #409eff);
 }
 
 .open-btn .el-icon {
