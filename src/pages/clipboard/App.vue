@@ -1024,6 +1024,26 @@ html, body {
   min-width: 120px;
   backdrop-filter: blur(10px);
   color: #e5e7eb;
+  max-height: min(60vh, 360px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+.context-menu::-webkit-scrollbar {
+  display: block !important;
+  width: 6px !important;
+  height: 6px !important;
+}
+
+.context-menu::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.context-menu::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .context-menu-header {
