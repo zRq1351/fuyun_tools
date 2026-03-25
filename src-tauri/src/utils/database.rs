@@ -395,14 +395,6 @@ fn block_on_result<T>(future: impl Future<Output=Result<T, String>>) -> Result<T
 }
 
 
-pub fn load_history() -> Result<Vec<String>, String> {
-    load_history_data().map(|data| data.items)
-}
-
-pub async fn load_history_async() -> Result<Vec<String>, String> {
-    load_history_data_async().await.map(|data| data.items)
-}
-
 pub fn load_history_data() -> Result<ClipboardHistoryData, String> {
     if let Some(sqlite_data) = block_on_result(load_history_data_from_sqlite_async())? {
         return Ok(sqlite_data);
@@ -416,27 +408,6 @@ pub async fn load_history_data_async() -> Result<ClipboardHistoryData, String> {
     }
     Ok(ClipboardHistoryData::default())
 }
-
-pub fn load_history_page_data(
-    offset: usize,
-    limit: usize,
-    category: Option<String>,
-    pinned_only: bool,
-    keyword: Option<String>,
-    sort_by: Option<String>,
-    sort_order: Option<String>,
-) -> Result<ClipboardHistoryPageData, String> {
-    block_on_result(load_history_page_data_async(
-        offset,
-        limit,
-        category,
-        pinned_only,
-        keyword,
-        sort_by,
-        sort_order,
-    ))
-}
-
 
 pub async fn load_history_page_data_async(
     offset: usize,
@@ -641,82 +612,6 @@ pub async fn load_history_page_data_async(
 }
 
 // ==================== 增量 CRUD 操作 ====================
-
-/// 新增单条历史记录（增量操作，无需全量重写）
-pub async fn insert_history_item(content: &str) -> Result<i64, String> {
-    let mut conn = open_history_db_async().await?;
-    let now_ms = now_unix_ms();
-    let item_id = stable_history_item_id(content);
-
-    let id: i64 = sqlx::query_scalar(
-        "INSERT INTO history_items(content, item_id, created_at, updated_at)
-         VALUES(?1, ?2, ?3, ?4) RETURNING id"
-    )
-        .bind(content)
-        .bind(&item_id)
-        .bind(now_ms)
-        .bind(now_ms)
-        .fetch_one(&mut conn)
-        .await
-        .map_err(|e| format!("插入历史记录失败: {}", e))?;
-
-    // 同步 FTS 索引
-    let _ = sqlx::query(
-        "INSERT INTO history_items_fts(rowid, item_id, content) VALUES(?1, ?2, ?3)"
-    )
-        .bind(id)
-        .bind(&item_id)
-        .bind(content)
-        .execute(&mut conn)
-        .await;
-
-    Ok(id)
-}
-
-/// 删除单条历史记录（增量操作）
-pub async fn delete_history_item_by_id(id: i64) -> Result<(), String> {
-    let mut conn = open_history_db_async().await?;
-
-    sqlx::query("DELETE FROM history_items WHERE id = ?")
-        .bind(id)
-        .execute(&mut conn)
-        .await
-        .map_err(|e| format!("删除历史记录失败: {}", e))?;
-
-    // 同步 FTS 索引
-    let _ = sqlx::query("DELETE FROM history_items_fts WHERE rowid = ?")
-        .bind(id)
-        .execute(&mut conn)
-        .await;
-
-    Ok(())
-}
-
-/// 批量删除历史记录（增量操作）
-pub async fn delete_history_items_by_ids(ids: &[i64]) -> Result<(), String> {
-    if ids.is_empty() {
-        return Ok(());
-    }
-
-    let mut conn = open_history_db_async().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
-
-    for &id in ids {
-        sqlx::query("DELETE FROM history_items WHERE id = ?")
-            .bind(id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("删除记录失败: {}", e))?;
-
-        let _ = sqlx::query("DELETE FROM history_items_fts WHERE rowid = ?")
-            .bind(id)
-            .execute(&mut *tx)
-            .await;
-    }
-
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
-    Ok(())
-}
 
 /// 清空所有历史记录
 pub async fn clear_all_history() -> Result<(), String> {

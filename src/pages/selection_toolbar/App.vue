@@ -41,6 +41,18 @@ const actionLoading = ref(false)
 let unlistenSelectedText = null
 
 const getSafeSelectedText = () => selectedText.value.trim()
+const runAction = async (executor, errorMessage) => {
+  const text = getSafeSelectedText()
+  if (!text || actionLoading.value) return
+  actionLoading.value = true
+  try {
+    await executor(text)
+  } catch (error) {
+    handleAppError(error, errorMessage)
+  } finally {
+    actionLoading.value = false
+  }
+}
 
 onMounted(async () => {
   try {
@@ -60,45 +72,24 @@ onBeforeUnmount(() => {
 })
 
 const handleTranslate = async () => {
-  const text = getSafeSelectedText()
-  if (!text || actionLoading.value) return
-  actionLoading.value = true
-  try {
+  await runAction(async (text) => {
     await WindowService.selectionToolbarBlur()
     await AIService.streamTranslate(text, '自动识别', '简体中文')
-  } catch (error) {
-    handleAppError(error, '翻译请求失败')
-  } finally {
-    actionLoading.value = false
-  }
+  }, '翻译请求失败')
 }
 
 const handleExplain = async () => {
-  const text = getSafeSelectedText()
-  if (!text || actionLoading.value) return
-  actionLoading.value = true
-  try {
+  await runAction(async (text) => {
     await WindowService.selectionToolbarBlur()
     await AIService.streamExplain(text, '中文')
-  } catch (error) {
-    handleAppError(error, '解释请求失败')
-  } finally {
-    actionLoading.value = false
-  }
+  }, '解释请求失败')
 }
 
 const handleCopy = async () => {
-  const text = getSafeSelectedText()
-  if (!text || actionLoading.value) return
-  actionLoading.value = true
-  try {
+  await runAction(async (text) => {
     await ClipboardService.copyText(text)
     await WindowService.selectionToolbarBlur()
-  } catch (error) {
-    handleAppError(error, '复制失败')
-  } finally {
-    actionLoading.value = false
-  }
+  }, '复制失败')
 }
 </script>
 

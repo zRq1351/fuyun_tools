@@ -1,5 +1,4 @@
 use log::LevelFilter;
-use std::time::Instant;
 use tauri_plugin_log::Target;
 #[cfg(debug_assertions)]
 use tauri_plugin_log::TargetKind;
@@ -60,28 +59,4 @@ pub fn build_logger() -> tauri_plugin_log::Builder {
     }
 
     builder
-}
-
-/// 性能埋点工具
-pub struct PerfTracer {
-    name: String,
-    start_time: Instant,
-}
-
-impl PerfTracer {
-    /// 开始追踪一个操作
-    pub fn start(name: impl Into<String>) -> Self {
-        let name = name.into();
-        log::debug!("[Perf Start] {}", name);
-        Self {
-            name,
-            start_time: Instant::now(),
-        }
-    }
-
-    /// 结束追踪并记录耗时
-    pub fn end(self) {
-        let duration = self.start_time.elapsed();
-        log::info!("[Perf End] {} - cost: {:?}", self.name, duration);
-    }
 }

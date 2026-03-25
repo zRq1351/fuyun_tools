@@ -415,10 +415,6 @@ body {
   color: #d8e2f7;
 }
 
-.flag-icon {
-  font-size: 20px;
-}
-
 .arrow {
   color: #9fb3d9;
 }

@@ -158,6 +158,8 @@ import {ElMessage, ElMessageBox} from 'element-plus'
 import {ImageCategoryService, ImageClipboardService, WindowService} from '../../services/ipc'
 import ClipboardToolbar from '../clipboard/components/ClipboardToolbar.vue'
 import {useWindowOffset} from '../clipboard/composables/useWindowOffset'
+import {useContextMenuState} from '../shared/useContextMenuState'
+import {runCategoryAssignment} from '../shared/categoryActions'
 
 const containerRef = ref(null)
 const contentRef = ref(null)
@@ -180,10 +182,14 @@ const isVisible = ref(false)
 const isAddingCategory = ref(false)
 const newCategoryName = ref('')
 const newCategoryInputRef = ref(null)
-const contextMenuVisible = ref(false)
-const contextMenuX = ref(0)
-const contextMenuY = ref(0)
-const contextMenuItemId = ref('')
+const {
+  contextMenuVisible,
+  contextMenuX,
+  contextMenuY,
+  contextMenuItem: contextMenuItemId,
+  openContextMenu,
+  closeContextMenu
+} = useContextMenuState('', {menuWidth: 160, maxHeightPx: 300, maxHeightRatio: 0.6})
 const dragItemId = ref('')
 const isFilling = ref(false)
 const categoryInputOpenedAt = ref(0)
@@ -827,31 +833,27 @@ const deleteItem = async (itemId, index) => {
   }
 }
 
-const showContextMenu = (event, itemId) => {
-  contextMenuVisible.value = true
-  contextMenuItemId.value = itemId
-  contextMenuX.value = event.clientX
-  contextMenuY.value = event.clientY
-}
+const showContextMenu = openContextMenu
 
-const closeContextMenu = () => {
-  contextMenuVisible.value = false
-  contextMenuItemId.value = ''
+const persistImageCategory = async (itemId, category, resetTagsWhenUnclassified = false) => {
+  await ImageCategoryService.setItemCategory(itemId, category)
+  if (resetTagsWhenUnclassified && category === '未分类') {
+    tagMap.value[itemId] = []
+    await ImageClipboardService.setItemTags(itemId, [])
+  }
 }
 
 const assignToCategory = async (category) => {
-  if (!contextMenuItemId.value) return
-  categoryMap.value[contextMenuItemId.value] = category
-  try {
-    await ImageCategoryService.setItemCategory(contextMenuItemId.value, category)
-    if (category === '未分类') {
-      tagMap.value[contextMenuItemId.value] = []
-      await ImageClipboardService.setItemTags(contextMenuItemId.value, [])
-    }
-  } catch (error) {
-    console.error('设置图片分类失败:', error)
-  }
-  closeContextMenu()
+  await runCategoryAssignment({
+    itemKey: contextMenuItemId.value,
+    category,
+    applyLocal: (itemId, nextCategory) => {
+      categoryMap.value[itemId] = nextCategory
+    },
+    persist: (itemId, nextCategory) => persistImageCategory(itemId, nextCategory, true),
+    onError: (error) => console.error('设置图片分类失败:', error),
+    onFinally: closeContextMenu
+  })
 }
 
 const editItemTags = async () => {
@@ -901,13 +903,15 @@ const handleDrop = async (event, category) => {
     target.classList.remove('drag-over')
   }
   const droppedItemId = dragItemId.value || event.dataTransfer?.getData('text/plain') || ''
-  if (!droppedItemId || category === '全部') return
-  categoryMap.value[droppedItemId] = category
-  try {
-    await ImageCategoryService.setItemCategory(droppedItemId, category)
-  } catch (error) {
-    console.error('拖拽设置图片分类失败:', error)
-  }
+  await runCategoryAssignment({
+    itemKey: droppedItemId,
+    category,
+    applyLocal: (itemId, nextCategory) => {
+      categoryMap.value[itemId] = nextCategory
+    },
+    persist: (itemId, nextCategory) => persistImageCategory(itemId, nextCategory),
+    onError: (error) => console.error('拖拽设置图片分类失败:', error)
+  })
 }
 
 const startCreateCategory = () => {
@@ -1395,27 +1399,8 @@ watch([searchKeyword, categoryFilter], () => {
 </script>
 
 <style>
-::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
-}
-
-html, body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  scrollbar-width: none;
-}
-
-#app {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-}
+@import "../shared/windowBase.css";
+@import "../shared/contextMenu.css";
 </style>
 
 <style scoped>
@@ -1762,71 +1747,6 @@ html, body {
   font-size: 12px;
   color: #dcdfe6;
   background: rgba(0, 0, 0, 0.45);
-}
-
-.context-menu {
-  position: fixed;
-  z-index: 2000;
-  background: rgba(30, 30, 35, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  padding: 4px 0;
-  min-width: 120px;
-  backdrop-filter: blur(10px);
-  color: #e5e7eb;
-  max-height: min(60vh, 360px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
-}
-
-.context-menu::-webkit-scrollbar {
-  display: block !important;
-  width: 6px !important;
-  height: 6px !important;
-}
-
-.context-menu::-webkit-scrollbar-thumb {
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.28);
-}
-
-.context-menu::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.context-menu-header {
-  padding: 4px 12px;
-  font-size: 12px;
-  color: #909399;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  margin-bottom: 4px;
-}
-
-.context-menu-item {
-  padding: 6px 12px;
-  font-size: 13px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  transition: background 0.2s;
-}
-
-.context-menu-item:hover {
-  background: var(--el-color-primary, #409eff);
-  color: #fff;
-}
-
-.context-menu-divider {
-  margin: 4px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.check-icon {
-  font-size: 12px;
 }
 
 .status-footer {
