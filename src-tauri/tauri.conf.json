@@ -92,7 +92,8 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "**"
+          "**/image_history_blobs/**",
+          "**\\image_history_blobs\\**"
         ]
       }
     },

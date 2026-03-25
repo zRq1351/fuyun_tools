@@ -1232,202 +1232,104 @@ impl ImageClipboardManager {
     }
 
     pub fn clear_history_by_mode(&self, mode: &str) -> Result<usize, String> {
-        let mut removed_paths: Vec<String> = Vec::new();
-        let mut removed_ids: Vec<String> = Vec::new();
-        let removed_count = {
-            let mut history = lock_arc_mutex(&self.history);
-            let mut categories = lock_arc_mutex(&self.categories);
-            let mut category_list = lock_arc_mutex(&self.category_list);
-            let mut image_tags = lock_arc_mutex(&self.image_tags);
-            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
-            let mut pending_images = lock_arc_mutex(&self.pending_images);
-            let before = history.len();
-            match mode {
-                "all" => {
-                    removed_paths.extend(history.iter().map(|item| item.image_path.clone()));
-                    for item in history.iter() {
-                        pending_images.remove(&item.id);
-                        removed_ids.push(item.id.clone());
-                    }
-                    history.clear();
-                    categories.clear();
-                    category_list.clear();
-                    image_tags.clear();
-                    pinned_items.clear();
-                }
-                "untagged_or_unclassified" | "untagged_unclassified_unpinned" => {
-                    let tagged_ids: HashSet<String> = image_tags.keys().cloned().collect();
-                    let classified_ids: HashSet<String> = categories.keys().cloned().collect();
-                    let pinned_ids: HashSet<String> = pinned_items.iter().cloned().collect();
-                    let mut kept = Vec::with_capacity(history.len());
-                    for item in history.drain(..) {
-                        let is_tagged = tagged_ids.contains(&item.id);
-                        let is_classified = classified_ids.contains(&item.id);
-                        let is_pinned = pinned_ids.contains(&item.id);
-                        if is_tagged || is_classified || is_pinned {
-                            kept.push(item);
-                        } else {
-                            pending_images.remove(&item.id);
-                            removed_paths.push(item.image_path.clone());
-                            removed_ids.push(item.id.clone());
-                        }
-                    }
-                    *history = kept;
-                    let valid_ids: HashSet<String> = history.iter().map(|item| item.id.clone()).collect();
-                    categories.retain(|item_id, _| valid_ids.contains(item_id));
-                    image_tags.retain(|item_id, _| valid_ids.contains(item_id));
-                    normalize_pinned_items(&mut pinned_items, &history);
-                    apply_pin_order(&mut history, &pinned_items);
-                }
-                _ => return Err("不支持的清理模式".to_string()),
-            }
-            before.saturating_sub(history.len())
-        };
-        cleanup_image_blob_files_async(removed_paths);
-        self.signature_index_dirty.store(true, Ordering::SeqCst);
-        let (items_snapshot, item_ids_snapshot, category_list_snapshot, tags_snapshot, pinned_snapshot) = {
-            let history = lock_arc_mutex(&self.history);
-            let category_list = lock_arc_mutex(&self.category_list);
-            let tags = lock_arc_mutex(&self.image_tags);
-            let pinned = lock_arc_mutex(&self.pinned_items);
-            (
-                history.iter().map(compact_item_for_persist).collect::<Vec<_>>(),
-                history.iter().map(|item| item.id.clone()).collect::<Vec<_>>(),
-                category_list.clone(),
-                tags.clone(),
-                pinned.clone(),
-            )
-        };
-        for (position, item) in items_snapshot.iter().enumerate() {
-            if let Err(e) = image_store::upsert_item(item, position) {
-                log::error!("同步图片项失败: {}", e);
-            }
-        }
-        for removed_id in removed_ids {
-            if let Err(e) = image_store::delete_item(&removed_id) {
-                log::error!("删除图片项失败: {}", e);
-            }
-            if let Err(e) = image_store::delete_category(&removed_id) {
-                log::error!("删除分类失败: {}", e);
-            }
-            if let Err(e) = image_store::delete_tags_for_item(&removed_id) {
-                log::error!("删除标签失败: {}", e);
-            }
-        }
-        for (item_id, tags) in &tags_snapshot {
-            if let Err(e) = image_store::sync_tags_for_item(item_id, tags) {
-                log::error!("同步标签失败: {}", e);
-            }
-        }
-        if let Err(e) = image_store::sync_pinned_order(&pinned_snapshot) {
-            log::error!("同步置顶列表失败: {}", e);
-        }
-        if let Err(e) = image_store::sync_item_positions(&item_ids_snapshot) {
-            log::error!("同步图片位置失败: {}", e);
-        }
-        if let Err(e) = image_store::sync_category_list_order(&category_list_snapshot) {
-            log::error!("同步分类列表失败: {}", e);
-        }
-        Ok(removed_count)
+        tauri::async_runtime::block_on(self.clear_history_by_mode_async(mode))
     }
 
     pub async fn clear_history_by_mode_async(&self, mode: &str) -> Result<usize, String> {
-        let mut removed_paths: Vec<String> = Vec::new();
-        let mut removed_ids: Vec<String> = Vec::new();
-        let removed_count = {
+        let (removed_paths, removed_ids, should_clear_all) = {
+            let history = lock_arc_mutex(&self.history);
+            let categories = lock_arc_mutex(&self.categories);
+            let image_tags = lock_arc_mutex(&self.image_tags);
+            let pinned_items = lock_arc_mutex(&self.pinned_items);
+
+            match mode {
+                "all" => {
+                    let paths = history.iter().map(|item| item.image_path.clone()).collect();
+                    let ids = history.iter().map(|item| item.id.clone()).collect();
+                    (paths, ids, true)
+                }
+                "untagged_or_unclassified" | "untagged_unclassified_unpinned" => {
+                    let tagged_ids: HashSet<String> = image_tags.keys().cloned().collect();
+                    let classified_ids: HashSet<String> = categories.keys().cloned().collect();
+                    let pinned_ids: HashSet<String> = pinned_items.iter().cloned().collect();
+                    
+                    let mut paths = Vec::new();
+                    let mut ids = Vec::new();
+                    
+                    for item in history.iter() {
+                        let is_tagged = tagged_ids.contains(&item.id);
+                        let is_classified = classified_ids.contains(&item.id);
+                        let is_pinned = pinned_ids.contains(&item.id);
+                        if !is_tagged && !is_classified && !is_pinned {
+                            paths.push(item.image_path.clone());
+                            ids.push(item.id.clone());
+                        }
+                    }
+                    (paths, ids, false)
+                }
+                _ => return Err("不支持的清理模式".to_string()),
+            }
+        };
+
+        let removed_count = removed_ids.len();
+        if removed_count == 0 {
+            return Ok(0);
+        }
+
+        // 释放锁后执行异步数据库操作
+        if should_clear_all {
+            image_store::clear_all_history_async().await?;
+        } else {
+            image_store::delete_items_bulk_async(&removed_ids).await?;
+        }
+        
+        // 只有数据库操作成功后，才更新内存和清理文件
+        cleanup_image_blob_files_async(removed_paths);
+        self.signature_index_dirty.store(true, Ordering::SeqCst);
+
+        let (item_ids_snapshot, category_list_snapshot) = {
             let mut history = lock_arc_mutex(&self.history);
             let mut categories = lock_arc_mutex(&self.categories);
             let mut category_list = lock_arc_mutex(&self.category_list);
             let mut image_tags = lock_arc_mutex(&self.image_tags);
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             let mut pending_images = lock_arc_mutex(&self.pending_images);
-            let before = history.len();
-            match mode {
-                "all" => {
-                    removed_paths.extend(history.iter().map(|item| item.image_path.clone()));
-                    for item in history.iter() {
-                        pending_images.remove(&item.id);
-                        removed_ids.push(item.id.clone());
-                    }
-                    history.clear();
-                    categories.clear();
-                    category_list.clear();
-                    image_tags.clear();
-                    pinned_items.clear();
+
+            if should_clear_all {
+                for id in &removed_ids {
+                    pending_images.remove(id);
                 }
-                "untagged_or_unclassified" | "untagged_unclassified_unpinned" => {
-                    let tagged_ids: HashSet<String> = image_tags.keys().cloned().collect();
-                    let classified_ids: HashSet<String> = categories.keys().cloned().collect();
-                    let pinned_ids: HashSet<String> = pinned_items.iter().cloned().collect();
-                    let mut kept = Vec::with_capacity(history.len());
-                    for item in history.drain(..) {
-                        let is_tagged = tagged_ids.contains(&item.id);
-                        let is_classified = classified_ids.contains(&item.id);
-                        let is_pinned = pinned_ids.contains(&item.id);
-                        if is_tagged || is_classified || is_pinned {
-                            kept.push(item);
-                        } else {
-                            pending_images.remove(&item.id);
-                            removed_paths.push(item.image_path.clone());
-                            removed_ids.push(item.id.clone());
-                        }
-                    }
-                    *history = kept;
-                    let valid_ids: HashSet<String> = history.iter().map(|item| item.id.clone()).collect();
-                    categories.retain(|item_id, _| valid_ids.contains(item_id));
-                    image_tags.retain(|item_id, _| valid_ids.contains(item_id));
-                    normalize_pinned_items(&mut pinned_items, &history);
-                    apply_pin_order(&mut history, &pinned_items);
+                history.clear();
+                categories.clear();
+                category_list.clear();
+                image_tags.clear();
+                pinned_items.clear();
+            } else {
+                for id in &removed_ids {
+                    pending_images.remove(id);
                 }
-                _ => return Err("不支持的清理模式".to_string()),
+                
+                let removed_set: HashSet<String> = removed_ids.into_iter().collect();
+                history.retain(|item| !removed_set.contains(&item.id));
+                categories.retain(|item_id, _| !removed_set.contains(item_id));
+                image_tags.retain(|item_id, _| !removed_set.contains(item_id));
+                normalize_pinned_items(&mut pinned_items, &history);
+                apply_pin_order(&mut history, &pinned_items);
             }
-            before.saturating_sub(history.len())
-        };
-        cleanup_image_blob_files_async(removed_paths);
-        self.signature_index_dirty.store(true, Ordering::SeqCst);
-        let (items_snapshot, item_ids_snapshot, category_list_snapshot, tags_snapshot, pinned_snapshot) = {
-            let history = lock_arc_mutex(&self.history);
-            let category_list = lock_arc_mutex(&self.category_list);
-            let tags = lock_arc_mutex(&self.image_tags);
-            let pinned = lock_arc_mutex(&self.pinned_items);
+            
             (
-                history.iter().map(compact_item_for_persist).collect::<Vec<_>>(),
                 history.iter().map(|item| item.id.clone()).collect::<Vec<_>>(),
                 category_list.clone(),
-                tags.clone(),
-                pinned.clone(),
             )
         };
-        for (position, item) in items_snapshot.iter().enumerate() {
-            if let Err(e) = image_store::upsert_item_async(item, position).await {
-                log::error!("同步图片项失败: {}", e);
-            }
-        }
-        for removed_id in removed_ids {
-            if let Err(e) = image_store::delete_item_async(&removed_id).await {
-                log::error!("删除图片项失败: {}", e);
-            }
-            if let Err(e) = image_store::delete_category_async(&removed_id).await {
-                log::error!("删除分类失败: {}", e);
-            }
-            if let Err(e) = image_store::delete_tags_for_item_async(&removed_id).await {
-                log::error!("删除标签失败: {}", e);
-            }
-        }
-        for (item_id, tags) in &tags_snapshot {
-            if let Err(e) = image_store::sync_tags_for_item_async(item_id, tags).await {
-                log::error!("同步标签失败: {}", e);
-            }
-        }
-        if let Err(e) = image_store::sync_pinned_order_async(&pinned_snapshot).await {
-            log::error!("同步置顶列表失败: {}", e);
-        }
+
         if let Err(e) = image_store::sync_item_positions_async(&item_ids_snapshot).await {
             log::error!("同步图片位置失败: {}", e);
         }
         if let Err(e) = image_store::sync_category_list_order_async(&category_list_snapshot).await {
             log::error!("同步分类列表失败: {}", e);
         }
+
         Ok(removed_count)
     }
 

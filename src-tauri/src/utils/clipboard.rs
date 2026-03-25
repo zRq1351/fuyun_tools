@@ -796,9 +796,7 @@ impl ClipboardManager {
         if should_clear_all {
             crate::utils::database::clear_all_history().await?;
         } else if !items_to_remove.is_empty() {
-            for item in &items_to_remove {
-                crate::utils::database::delete_history_item_by_content(item).await?;
-            }
+            crate::utils::database::delete_history_items_bulk(&items_to_remove).await?;
         }
 
         // 重新获取锁更新本地状态

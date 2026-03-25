@@ -230,6 +230,63 @@ pub async fn delete_item_async(item_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 批量删除图片及其相关数据（开启事务）
+pub async fn delete_items_bulk_async(item_ids: &[String]) -> Result<(), String> {
+    if item_ids.is_empty() {
+        return Ok(());
+    }
+    let mut conn = open_image_store_async().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("开启批量删除事务失败: {}", e))?;
+    
+    // 分批处理，防止 SQL 语句过长
+    for chunk in item_ids.chunks(100) {
+        let placeholders = vec!["?"; chunk.len()].join(", ");
+        
+        let sql_items = format!("DELETE FROM image_items WHERE item_id IN ({})", placeholders);
+        let mut q_items = sqlx::query(&sql_items);
+        
+        let sql_categories = format!("DELETE FROM image_categories WHERE item_id IN ({})", placeholders);
+        let mut q_categories = sqlx::query(&sql_categories);
+        
+        let sql_tags = format!("DELETE FROM image_tags WHERE item_id IN ({})", placeholders);
+        let mut q_tags = sqlx::query(&sql_tags);
+        
+        let sql_previews = format!("DELETE FROM image_async_previews WHERE item_id IN ({})", placeholders);
+        let mut q_previews = sqlx::query(&sql_previews);
+        
+        for id in chunk {
+            q_items = q_items.bind(id);
+            q_categories = q_categories.bind(id);
+            q_tags = q_tags.bind(id);
+            q_previews = q_previews.bind(id);
+        }
+        
+        q_items.execute(&mut *tx).await.map_err(|e| format!("批量删除图片项失败: {}", e))?;
+        q_categories.execute(&mut *tx).await.map_err(|e| format!("批量删除图片分类失败: {}", e))?;
+        q_tags.execute(&mut *tx).await.map_err(|e| format!("批量删除图片标签失败: {}", e))?;
+        q_previews.execute(&mut *tx).await.map_err(|e| format!("批量删除图片预览失败: {}", e))?;
+    }
+    
+    tx.commit().await.map_err(|e| format!("提交批量删除事务失败: {}", e))?;
+    Ok(())
+}
+
+/// 清空所有图片历史记录
+pub async fn clear_all_history_async() -> Result<(), String> {
+    let mut conn = open_image_store_async().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("创建清空图片历史事务失败: {}", e))?;
+
+    sqlx::query("DELETE FROM image_items").execute(&mut *tx).await.map_err(|e| format!("清空图片项失败: {}", e))?;
+    sqlx::query("DELETE FROM image_categories").execute(&mut *tx).await.map_err(|e| format!("清空图片分类失败: {}", e))?;
+    sqlx::query("DELETE FROM image_category_list").execute(&mut *tx).await.map_err(|e| format!("清空图片分类列表失败: {}", e))?;
+    sqlx::query("DELETE FROM image_tags").execute(&mut *tx).await.map_err(|e| format!("清空图片标签失败: {}", e))?;
+    sqlx::query("DELETE FROM image_pinned").execute(&mut *tx).await.map_err(|e| format!("清空图片置顶失败: {}", e))?;
+    sqlx::query("DELETE FROM image_async_previews").execute(&mut *tx).await.map_err(|e| format!("清空图片预览失败: {}", e))?;
+
+    tx.commit().await.map_err(|e| format!("提交清空图片历史事务失败: {}", e))?;
+    Ok(())
+}
+
 pub fn sync_item_positions(item_ids: &[String]) -> Result<(), String> {
     block_on_result(sync_item_positions_async(item_ids))
 }

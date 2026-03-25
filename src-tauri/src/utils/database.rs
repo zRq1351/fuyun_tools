@@ -95,24 +95,25 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
             updated_at INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS categories (
-            content TEXT PRIMARY KEY,
+            content TEXT,
             category TEXT NOT NULL,
-            item_id TEXT
+            item_id TEXT PRIMARY KEY
         );
         CREATE TABLE IF NOT EXISTS category_list (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             category TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS pinned_items (
-            content TEXT PRIMARY KEY,
+            content TEXT,
             pinned_at INTEGER NOT NULL DEFAULT 0,
-            item_id TEXT
+            item_id TEXT PRIMARY KEY
         );
         CREATE INDEX IF NOT EXISTS idx_history_items_created_at ON history_items(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_history_items_item_id ON history_items(item_id);
         CREATE INDEX IF NOT EXISTS idx_categories_category ON categories(category);
-        CREATE INDEX IF NOT EXISTS idx_categories_item_id ON categories(item_id);
+        CREATE INDEX IF NOT EXISTS idx_categories_content ON categories(content);
         CREATE INDEX IF NOT EXISTS idx_pinned_items_pinned_at ON pinned_items(pinned_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_pinned_items_content ON pinned_items(content);
         ",
     )
         .execute(&mut *conn)
@@ -175,6 +176,59 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         .execute(&mut *conn)
         .await
         .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+
+    // Migrate categories and pinned_items to use item_id as PRIMARY KEY
+    let categories_info: Vec<sqlx::sqlite::SqliteRow> = sqlx::query("PRAGMA table_info(categories)").fetch_all(&mut *conn).await.unwrap_or_default();
+    let mut item_id_is_pk_categories = false;
+    for r in categories_info {
+        let name: String = r.try_get("name").unwrap_or_default();
+        let pk: i32 = r.try_get("pk").unwrap_or(0);
+        if name == "item_id" && pk > 0 {
+            item_id_is_pk_categories = true;
+        }
+    }
+
+    if !item_id_is_pk_categories {
+        let _ = sqlx::query(
+            "
+            CREATE TABLE categories_new (
+                content TEXT,
+                category TEXT NOT NULL,
+                item_id TEXT PRIMARY KEY
+            );
+            INSERT OR IGNORE INTO categories_new(content, category, item_id)
+            SELECT content, category, item_id FROM categories WHERE item_id IS NOT NULL AND item_id != '';
+            DROP TABLE categories;
+            ALTER TABLE categories_new RENAME TO categories;
+            "
+        ).execute(&mut *conn).await;
+    }
+
+    let pinned_info: Vec<sqlx::sqlite::SqliteRow> = sqlx::query("PRAGMA table_info(pinned_items)").fetch_all(&mut *conn).await.unwrap_or_default();
+    let mut item_id_is_pk_pinned = false;
+    for r in pinned_info {
+        let name: String = r.try_get("name").unwrap_or_default();
+        let pk: i32 = r.try_get("pk").unwrap_or(0);
+        if name == "item_id" && pk > 0 {
+            item_id_is_pk_pinned = true;
+        }
+    }
+
+    if !item_id_is_pk_pinned {
+        let _ = sqlx::query(
+            "
+            CREATE TABLE pinned_items_new (
+                content TEXT,
+                pinned_at INTEGER NOT NULL DEFAULT 0,
+                item_id TEXT PRIMARY KEY
+            );
+            INSERT OR IGNORE INTO pinned_items_new(content, pinned_at, item_id)
+            SELECT content, pinned_at, item_id FROM pinned_items WHERE item_id IS NOT NULL AND item_id != '';
+            DROP TABLE pinned_items;
+            ALTER TABLE pinned_items_new RENAME TO pinned_items;
+            "
+        ).execute(&mut *conn).await;
+    }
 
     let _ = sqlx::query(
         "
@@ -739,7 +793,7 @@ pub async fn pin_item(content: &str) -> Result<(), String> {
 
     sqlx::query(
         "INSERT INTO pinned_items(content, pinned_at, item_id) VALUES(?1, ?2, ?3)
-         ON CONFLICT(content) DO UPDATE SET pinned_at = ?2"
+         ON CONFLICT(item_id) DO UPDATE SET pinned_at = ?2, content = ?1"
     )
         .bind(content)
         .bind(now_ms)
@@ -754,9 +808,10 @@ pub async fn pin_item(content: &str) -> Result<(), String> {
 /// 取消置顶（增量操作）
 pub async fn unpin_item(content: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
+    let item_id = stable_history_item_id(content);
 
-    sqlx::query("DELETE FROM pinned_items WHERE content = ?")
-        .bind(content)
+    sqlx::query("DELETE FROM pinned_items WHERE item_id = ?")
+        .bind(&item_id)
         .execute(&mut conn)
         .await
         .map_err(|e| format!("取消置顶失败: {}", e))?;
@@ -771,7 +826,7 @@ pub async fn set_item_category(content: &str, category: &str) -> Result<(), Stri
 
     sqlx::query(
         "INSERT INTO categories(content, category, item_id) VALUES(?1, ?2, ?3)
-         ON CONFLICT(content) DO UPDATE SET category = ?2"
+         ON CONFLICT(item_id) DO UPDATE SET category = ?2, content = ?1"
     )
         .bind(content)
         .bind(category)
@@ -786,9 +841,10 @@ pub async fn set_item_category(content: &str, category: &str) -> Result<(), Stri
 /// 删除记录分类（增量操作）
 pub async fn remove_item_category(content: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
+    let item_id = stable_history_item_id(content);
 
-    sqlx::query("DELETE FROM categories WHERE content = ?")
-        .bind(content)
+    sqlx::query("DELETE FROM categories WHERE item_id = ?")
+        .bind(&item_id)
         .execute(&mut conn)
         .await
         .map_err(|e| format!("删除分类失败: {}", e))?;
@@ -833,33 +889,102 @@ pub async fn remove_category_from_list(category: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 根据内容删除历史记录（增量操作）
+/// 根据内容批量删除历史记录（增量操作）
+pub async fn delete_history_items_bulk(contents: &[String]) -> Result<(), String> {
+    if contents.is_empty() {
+        return Ok(());
+    }
+    let mut conn = open_history_db_async().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
+
+    for chunk in contents.chunks(100) {
+        let placeholders = vec!["?"; chunk.len()].join(", ");
+        
+        // 查找所有 item_id
+        let sql_item_ids = format!("SELECT item_id FROM history_items WHERE content IN ({})", placeholders);
+        let mut q_item_ids = sqlx::query(&sql_item_ids);
+        for c in chunk {
+            q_item_ids = q_item_ids.bind(c);
+        }
+        let rows = q_item_ids.fetch_all(&mut *tx).await.map_err(|e| format!("查询历史记录失败: {}", e))?;
+        let item_ids: Vec<String> = rows.into_iter().filter_map(|r| r.try_get(0).ok()).collect();
+
+        // 删除主表记录
+        let sql_del_items = format!("DELETE FROM history_items WHERE content IN ({})", placeholders);
+        let mut q_del_items = sqlx::query(&sql_del_items);
+        for c in chunk {
+            q_del_items = q_del_items.bind(c);
+        }
+        q_del_items.execute(&mut *tx).await.map_err(|e| format!("删除历史记录失败: {}", e))?;
+
+        if !item_ids.is_empty() {
+            let id_placeholders = vec!["?"; item_ids.len()].join(", ");
+            
+            // 同步 FTS 索引
+            let sql_fts = format!("DELETE FROM history_items_fts WHERE item_id IN ({})", id_placeholders);
+            let mut q_fts = sqlx::query(&sql_fts);
+            
+            let sql_cat = format!("DELETE FROM categories WHERE item_id IN ({})", id_placeholders);
+            let mut q_cat = sqlx::query(&sql_cat);
+            
+            let sql_pin = format!("DELETE FROM pinned_items WHERE item_id IN ({})", id_placeholders);
+            let mut q_pin = sqlx::query(&sql_pin);
+            
+            for id in &item_ids {
+                q_fts = q_fts.bind(id);
+                q_cat = q_cat.bind(id);
+                q_pin = q_pin.bind(id);
+            }
+            
+            q_fts.execute(&mut *tx).await.unwrap_or_default();
+            q_cat.execute(&mut *tx).await.unwrap_or_default();
+            q_pin.execute(&mut *tx).await.unwrap_or_default();
+        }
+    }
+
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    Ok(())
+}
 pub async fn delete_history_item_by_content(content: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
 
-    // 获取 item_id 用于删除 FTS 索引
+    // 获取 item_id 用于删除 FTS 索引和关联表
     let item_id: Option<String> = sqlx::query_scalar(
         "SELECT item_id FROM history_items WHERE content = ?"
     )
         .bind(content)
-        .fetch_optional(&mut conn)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| format!("查询历史记录失败: {}", e))?;
 
-    // 删除记录
+    // 删除主表记录
     sqlx::query("DELETE FROM history_items WHERE content = ?")
         .bind(content)
-        .execute(&mut conn)
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("删除历史记录失败: {}", e))?;
 
-    // 同步 FTS 索引
     if let Some(id) = item_id {
+        // 同步 FTS 索引
         let _ = sqlx::query("DELETE FROM history_items_fts WHERE item_id = ?")
-            .bind(id)
-            .execute(&mut conn)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await;
+            
+        // 同步删除关联表记录
+        let _ = sqlx::query("DELETE FROM categories WHERE item_id = ?")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await;
+            
+        let _ = sqlx::query("DELETE FROM pinned_items WHERE item_id = ?")
+            .bind(&id)
+            .execute(&mut *tx)
             .await;
     }
+
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
 
     Ok(())
 }

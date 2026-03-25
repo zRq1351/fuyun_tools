@@ -1524,7 +1524,7 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
                     "model_name".to_string(),
                     serde_json::Value::String(decrypted_config.model_name.clone()),
                 );
-                config_map.insert("api_key".to_string(), serde_json::Value::String(api_key));
+                config_map.insert("api_key".to_string(), serde_json::Value::String(if api_key.is_empty() { "".to_string() } else { "********".to_string() }));
 
                 provider_configs_map.insert(
                     provider_key.clone(),
@@ -1787,29 +1787,31 @@ pub async fn save_app_settings(
                 ));
             }
 
-            settings
-                .save_current_provider_config(api_key)
-                .map_err(|e| frontend_error(ErrorCode::ConfigError, "保存提供商配置失败", e))?;
+            if api_key != "********" {
+                settings
+                    .save_current_provider_config(api_key)
+                    .map_err(|e| frontend_error(ErrorCode::ConfigError, "保存提供商配置失败", e))?;
 
-            match settings.get_provider_api_key(ai_provider_val) {
-                Ok(key) if key == *api_key => {
-                    log::info!("密钥保存验证通过");
-                },
-                Ok(_) => {
-                    log::warn!("密钥保存验证失败: 读取到的密钥与保存的不一致");
-                    return Err(frontend_error(
-                        ErrorCode::SystemError,
-                        "系统凭据管理器异常: 密钥保存验证失败，请重试",
-                        "saved key mismatch",
-                    ));
-                },
-                Err(e) => {
-                    log::error!("密钥保存验证错误: {}", e);
-                    return Err(frontend_error(
-                        ErrorCode::SystemError,
-                        "系统凭据管理器错误: 无法读取刚保存的密钥",
-                        e,
-                    ));
+                match settings.get_provider_api_key(ai_provider_val) {
+                    Ok(key) if key == *api_key => {
+                        log::info!("密钥保存验证通过");
+                    },
+                    Ok(_) => {
+                        log::warn!("密钥保存验证失败: 读取到的密钥与保存的不一致");
+                        return Err(frontend_error(
+                            ErrorCode::SystemError,
+                            "系统凭据管理器异常: 密钥保存验证失败，请重试",
+                            "saved key mismatch",
+                        ));
+                    },
+                    Err(e) => {
+                        log::error!("密钥保存验证错误: {}", e);
+                        return Err(frontend_error(
+                            ErrorCode::SystemError,
+                            "系统凭据管理器错误: 无法读取刚保存的密钥",
+                            e,
+                        ));
+                    }
                 }
             }
         }
@@ -1863,12 +1865,34 @@ pub async fn save_app_settings(
 
 #[tauri::command]
 pub async fn test_ai_connection(
+    ai_provider: Option<String>,
     ai_api_url: String,
     ai_model_name: String,
     ai_api_key: String,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<String, String> {
+    let mut real_api_key = ai_api_key;
+
+    // 如果前端传过来的是脱敏的密钥，则从状态中获取真实的密钥
+    if real_api_key == "********" {
+        let state_guard = lock_arc_mutex(state.inner());
+        let provider = ai_provider.unwrap_or_else(|| state_guard.settings.ai_provider.clone());
+        match state_guard.settings.get_provider_api_key(&provider) {
+            Ok(key) if !key.is_empty() => {
+                real_api_key = key;
+            }
+            _ => {
+                return Err(frontend_error(
+                    ErrorCode::ConfigError,
+                    "未能获取到真实的 API 密钥",
+                    "real api key not found",
+                ));
+            }
+        }
+    }
+
     let config = AIConfig {
-        api_key: ai_api_key,
+        api_key: real_api_key,
         base_url: ai_api_url,
         model: ai_model_name,
     };

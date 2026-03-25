@@ -106,7 +106,12 @@ export function useAIProvider(form) {
         }
         testingConnection.value = true
         try {
+            let provider = form.aiProvider
+            if (provider === 'custom') {
+                provider = form.customProviderName
+            }
             const result = await AISettingsService.testConnection({
+                aiProvider: provider,
                 aiApiUrl: form.apiUrl,
                 aiModelName: form.modelName,
                 aiApiKey: form.apiKey
