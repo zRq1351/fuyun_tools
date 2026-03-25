@@ -2,6 +2,8 @@ import {invoke} from '@tauri-apps/api/core';
 
 const buildSelectAndFillRequest = (index, opId) => ({index, opId});
 const buildSelectAndFillImageByIdRequest = (itemId, opId) => ({itemId, opId});
+const normalizeOptionalIndex = (index) =>
+    Number.isInteger(index) && index >= 0 ? index : null;
 const buildStreamTranslateRequest = (text, sourceLanguage, targetLanguage, opId, sceneHint) => ({
     text,
     sourceLanguage,
@@ -124,8 +126,15 @@ export const ClipboardService = {
      * @param {number} index
      * @returns {Promise<void>}
      */
-    removeItem: (index, item = null) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, {index, item}),
-    setItemPinned: (index, item, pinned) => invoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, {index, item, pinned}),
+    removeItem: (index, item = null) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, {
+        index: normalizeOptionalIndex(index),
+        item
+    }),
+    setItemPinned: (index, item, pinned) => invoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, {
+        index: normalizeOptionalIndex(index),
+        item,
+        pinned
+    }),
     promoteItem: (index) => invoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, {index}),
     clearHistory: (mode) => invoke(IPC_COMMANDS.CLEAR_TEXT_HISTORY, {mode}),
 
@@ -154,10 +163,11 @@ export const ImageClipboardService = {
                          category = null,
                          keyword = null,
                          pinnedOnly = false,
+                         sortBy = 'pinnedFirst',
                          sortOrder = null
                      } = {}) =>
         invoke(IPC_COMMANDS.GET_IMAGE_CLIPBOARD_HISTORY_PAGE, {
-            request: {offset, limit, category, keyword, pinnedOnly, sortOrder}
+            request: {offset, limit, category, keyword, pinnedOnly, sortBy, sortOrder}
         }),
     removeItemById: (itemId) => invoke(IPC_COMMANDS.REMOVE_IMAGE_CLIPBOARD_ITEM_BY_ID, {itemId}),
     promoteItemById: (itemId) =>

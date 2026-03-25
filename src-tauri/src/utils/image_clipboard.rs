@@ -358,6 +358,7 @@ impl ImageClipboardManager {
         category: Option<String>,
         keyword: Option<String>,
         pinned_only: bool,
+        sort_by: Option<String>,
         sort_order: Option<String>,
     ) -> ImageHistoryPageData {
         if let Ok(page) = image_store::load_history_page(
@@ -366,6 +367,7 @@ impl ImageClipboardManager {
             category.clone(),
             keyword.clone(),
             pinned_only,
+            sort_by.clone(),
             sort_order.clone(),
         ) {
             return page;
@@ -376,6 +378,7 @@ impl ImageClipboardManager {
             category,
             keyword,
             pinned_only,
+            sort_by,
             sort_order,
         )
     }
@@ -387,6 +390,7 @@ impl ImageClipboardManager {
         category: Option<String>,
         keyword: Option<String>,
         pinned_only: bool,
+        sort_by: Option<String>,
         sort_order: Option<String>,
     ) -> ImageHistoryPageData {
         if let Ok(page) = image_store::load_history_page_async(
@@ -395,6 +399,7 @@ impl ImageClipboardManager {
             category.clone(),
             keyword.clone(),
             pinned_only,
+            sort_by.clone(),
             sort_order.clone(),
         )
             .await
@@ -407,6 +412,7 @@ impl ImageClipboardManager {
             category,
             keyword,
             pinned_only,
+            sort_by,
             sort_order,
         )
     }
@@ -418,6 +424,7 @@ impl ImageClipboardManager {
         category: Option<String>,
         keyword: Option<String>,
         pinned_only: bool,
+        sort_by: Option<String>,
         sort_order: Option<String>,
     ) -> ImageHistoryPageData {
         let history = lock_arc_mutex(&self.history).clone();
@@ -433,7 +440,16 @@ impl ImageClipboardManager {
             .map(|v| v.trim().to_lowercase())
             .filter(|v| !v.is_empty());
         let pinned_set: HashSet<String> = pinned_items.iter().cloned().collect();
+        let pinned_rank = pinned_items
+            .iter()
+            .enumerate()
+            .map(|(idx, id)| (id.clone(), idx))
+            .collect::<HashMap<_, _>>();
         let unpinned_desc = matches!(sort_order.as_deref(), Some("desc") | Some("DESC"));
+        let pinned_first = sort_by
+            .as_deref()
+            .map(|v| matches!(v, "pinnedFirst" | "pinned_first" | "pinnedfirst"))
+            .unwrap_or(true);
 
         let mut rows: Vec<ImageHistoryPageItem> = history
             .iter()
@@ -481,17 +497,24 @@ impl ImageClipboardManager {
             .collect();
 
         rows.sort_by(|a, b| {
-            let pin_diff = (b.pinned as i32) - (a.pinned as i32);
-            if pin_diff != 0 {
-                return pin_diff.cmp(&0);
-            }
-            if a.pinned && b.pinned {
-                return a.position.cmp(&b.position);
+            if pinned_first {
+                let pin_diff = (b.pinned as i32) - (a.pinned as i32);
+                if pin_diff != 0 {
+                    return pin_diff.cmp(&0);
+                }
+                if a.pinned && b.pinned {
+                    let rank_a = pinned_rank.get(&a.id).copied().unwrap_or(usize::MAX);
+                    let rank_b = pinned_rank.get(&b.id).copied().unwrap_or(usize::MAX);
+                    if rank_a != rank_b {
+                        return rank_a.cmp(&rank_b);
+                    }
+                    return a.id.cmp(&b.id);
+                }
             }
             if unpinned_desc {
-                b.position.cmp(&a.position)
+                b.position.cmp(&a.position).then_with(|| b.id.cmp(&a.id))
             } else {
-                a.position.cmp(&b.position)
+                a.position.cmp(&b.position).then_with(|| a.id.cmp(&b.id))
             }
         });
 

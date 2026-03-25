@@ -174,6 +174,7 @@ const pageOffset = ref(0)
 const pageSize = ref(10)
 const hasMore = ref(false)
 const isLoadingPage = ref(false)
+const sortBy = ref('pinnedFirst')
 const sortOrder = ref('asc')
 const isVisible = ref(false)
 const isAddingCategory = ref(false)
@@ -226,6 +227,7 @@ const currentPageQuerySignature = () =>
       pageSize: pageSize.value,
       category: categoryFilter.value === '全部' ? null : categoryFilter.value,
       keyword: searchKeyword.value.trim() || null,
+      sortBy: sortBy.value,
       sortOrder: sortOrder.value
     })
 
@@ -257,6 +259,7 @@ const prefetchNextPage = async () => {
         category: categoryFilter.value === '全部' ? null : categoryFilter.value,
         keyword: searchKeyword.value.trim() || null,
         pinnedOnly: false,
+        sortBy: sortBy.value,
         sortOrder: sortOrder.value
       })
       if (requestSeq !== prefetchRequestSeq) return
@@ -1135,6 +1138,7 @@ const loadHistoryPage = async ({reset = false, force = false} = {}) => {
           category: categoryFilter.value === '全部' ? null : categoryFilter.value,
           keyword: searchKeyword.value.trim() || null,
           pinnedOnly: false,
+          sortBy: sortBy.value,
           sortOrder: sortOrder.value
         })
       }
