@@ -2,22 +2,6 @@
 
 use enigo::Key;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
-
-/// 剪贴板轮询间隔时间
-pub const CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(100);
-pub const CLIPBOARD_POLL_MIN_INTERVAL: Duration = Duration::from_millis(50);
-pub const CLIPBOARD_POLL_WARM_INTERVAL: Duration = Duration::from_millis(200);
-pub const CLIPBOARD_POLL_IDLE_INTERVAL: Duration = Duration::from_millis(1200);
-pub const CLIPBOARD_POLL_MAX_INTERVAL: Duration = Duration::from_millis(3000);
-pub const CLIPBOARD_POLL_REPORT_INTERVAL: Duration = Duration::from_secs(60);
-pub const DEFAULT_CLIPBOARD_POLL_MIN_INTERVAL_MS: u64 = 50;
-pub const DEFAULT_CLIPBOARD_POLL_WARM_INTERVAL_MS: u64 = 200;
-pub const DEFAULT_CLIPBOARD_POLL_IDLE_INTERVAL_MS: u64 = 1200;
-pub const DEFAULT_CLIPBOARD_POLL_MAX_INTERVAL_MS: u64 = 3000;
-pub const DEFAULT_CLIPBOARD_POLL_REPORT_INTERVAL_SECS: u64 = 60;
-pub const DEFAULT_CLIPBOARD_POLL_METRICS_ENABLED: bool = true;
-pub const DEFAULT_CLIPBOARD_POLL_METRICS_LOG_LEVEL: &str = "info";
 /// 剪贴板窗口与任务栏之间的额外安全边距（像素）
 pub const CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN: i32 = 8;
 /// 默认切换快捷键（根据操作系统自动适配）
@@ -31,12 +15,6 @@ pub const DEFAULT_IMAGE_TOGGLE_SHORTCUT: &str = if cfg!(target_os = "macos") {
 } else {
     "Ctrl+Shift+x"
 };
-/// 默认隐藏快捷键
-pub const DEFAULT_HIDE_SHORTCUT: &str = "Escape";
-
-/// 历史记录最大条数选项
-pub const MAX_ITEMS_OPTIONS: &[usize] = &[10, 20, 50, 100];
-
 /// Ctrl+C操作中的控制键（根据操作系统自动适配）
 pub const CTRL_KEY: Key = if cfg!(target_os = "macos") {
     Key::Meta

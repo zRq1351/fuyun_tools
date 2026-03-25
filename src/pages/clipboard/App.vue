@@ -79,7 +79,7 @@
         ref="clipboardListRef"
         class="history-list"
         :highlight-keyword="searchKeyword"
-        :delete-item="deleteItem"
+        :delete-item="originalDeleteItem"
         :get-item-category="getItemCategory"
         :handle-drag-end="handleDragEnd"
         :handle-drag-start="handleDragStart"
@@ -178,6 +178,8 @@ import ClipboardList from './components/ClipboardList.vue'
 import {useClipboardHistory} from './composables/useClipboardHistory'
 import {useCategoryManager} from './composables/useCategoryManager'
 import {useWindowOffset} from './composables/useWindowOffset'
+import {useContextMenuState} from '../shared/useContextMenuState'
+import {runCategoryAssignment} from '../shared/categoryActions'
 
 const containerRef = ref(null)
 const clipboardListRef = ref(null)
@@ -185,10 +187,14 @@ const isVisible = ref(false)
 const categories = ref(['未分类'])
 const pinnedItems = ref([])
 
-const contextMenuVisible = ref(false)
-const contextMenuX = ref(0)
-const contextMenuY = ref(0)
-const contextMenuItem = ref(null)
+const {
+  contextMenuVisible,
+  contextMenuX,
+  contextMenuY,
+  contextMenuItem,
+  openContextMenu,
+  closeContextMenu
+} = useContextMenuState(null, {menuWidth: 160, maxHeightPx: 300, maxHeightRatio: 0.6})
 const dragItem = ref(null)
 const aiActionLoading = ref(false)
 const isAiSettingsCollapsed = ref(true)
@@ -214,7 +220,6 @@ const {
   totalCount,
   hasMore,
   isLoadingPage,
-  sortBy,
   sortOrder,
   getItemCategory,
   updateSelection,
@@ -235,7 +240,6 @@ const {
   newCategoryName,
   newCategoryInputRef,
   setItemCategory,
-  removeItemCategory,
   removeCategory,
   canDeleteCategory,
   startCreateCategory,
@@ -248,10 +252,6 @@ const {
   clampBottomOffset,
   startWindowOffsetDrag
 } = useWindowOffset()
-
-const deleteItem = async (index, item) => {
-  await originalDeleteItem(index, item)
-}
 
 const isItemPinned = (item) => pinnedItems.value.includes(item)
 
@@ -457,32 +457,7 @@ const selectAndFillDirect = async (index) => {
   }
 }
 
-const showContextMenu = (event, item) => {
-  contextMenuVisible.value = true
-  contextMenuItem.value = item
-
-  const menuWidth = 160
-  const maxMenuHeight = Math.min(300, window.innerHeight * 0.6)
-
-  let x = event.clientX
-  let y = event.clientY
-
-  if (x + menuWidth > window.innerWidth) {
-    x -= menuWidth
-  }
-
-  if (y + maxMenuHeight > window.innerHeight) {
-    y -= maxMenuHeight
-  }
-
-  contextMenuX.value = x
-  contextMenuY.value = y
-}
-
-const closeContextMenu = () => {
-  contextMenuVisible.value = false
-  contextMenuItem.value = null
-}
+const showContextMenu = openContextMenu
 
 const closeFloatingPanels = () => {
   closeContextMenu()
@@ -501,11 +476,13 @@ const handleContainerMouseDown = (event) => {
   closeFloatingPanels()
 }
 
-const assignToCategory = (category) => {
-  if (contextMenuItem.value && category !== '全部') {
-    setItemCategory(contextMenuItem.value, category)
-  }
-  closeContextMenu()
+const assignToCategory = async (category) => {
+  await runCategoryAssignment({
+    itemKey: contextMenuItem.value,
+    category,
+    persist: (itemKey, nextCategory) => setItemCategory(itemKey, nextCategory),
+    onFinally: closeContextMenu
+  })
 }
 
 const handleDragStart = (event, item) => {
@@ -518,7 +495,7 @@ const handleDragEnd = () => {
   dragItem.value = null
 }
 
-const handleDrop = (event, category) => {
+const handleDrop = async (event, category) => {
   event.preventDefault()
 
   const target = event.currentTarget
@@ -526,9 +503,11 @@ const handleDrop = (event, category) => {
     target.classList.remove('drag-over')
   }
 
-  if (dragItem.value && category !== '全部') {
-    setItemCategory(dragItem.value, category)
-  }
+  await runCategoryAssignment({
+    itemKey: dragItem.value,
+    category,
+    persist: (itemKey, nextCategory) => setItemCategory(itemKey, nextCategory)
+  })
 }
 
 const buildOpId = () => Date.now() * 1000 + Math.floor(Math.random() * 1000)
@@ -706,7 +685,6 @@ watch([searchKeyword, categoryFilter], () => {
 onMounted(() => {
   const savedSortOrder = localStorage.getItem('clipboard_history_sort_order')
   const savedPageSize = localStorage.getItem('clipboard_history_page_size')
-  sortBy.value = 'pinnedFirst'
   sortOrder.value = savedSortOrder === 'desc' ? 'desc' : 'asc'
   pageSize.value = normalizePageSize(savedPageSize)
   init()
@@ -745,27 +723,8 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
-::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
-}
-
-html, body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  scrollbar-width: none;
-}
-
-#app {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-}
+@import "../shared/windowBase.css";
+@import "../shared/contextMenu.css";
 
 .clipboard-ai-select-popper {
   border: 1px solid rgba(255, 255, 255, 0.14) !important;
@@ -1013,74 +972,4 @@ html, body {
   font-size: 12px;
 }
 
-.context-menu {
-  position: fixed;
-  z-index: 2000;
-  background: rgba(30, 30, 35, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  padding: 4px 0;
-  min-width: 120px;
-  backdrop-filter: blur(10px);
-  color: #e5e7eb;
-  max-height: min(60vh, 360px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
-}
-
-.context-menu::-webkit-scrollbar {
-  display: block !important;
-  width: 6px !important;
-  height: 6px !important;
-}
-
-.context-menu::-webkit-scrollbar-thumb {
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.28);
-}
-
-.context-menu::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.context-menu-header {
-  padding: 4px 12px;
-  font-size: 12px;
-  color: #909399;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  margin-bottom: 4px;
-}
-
-.context-menu-item {
-  padding: 6px 12px;
-  font-size: 13px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  transition: background 0.2s;
-}
-
-.context-menu-item:hover {
-  background: var(--el-color-primary, #409eff);
-  color: #fff;
-}
-
-.context-menu-divider {
-  height: 1px;
-  margin: 4px 0;
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.shortcut-hint {
-  font-size: 11px;
-  opacity: 0.75;
-}
-
-.check-icon {
-  font-size: 12px;
-}
 </style>

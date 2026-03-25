@@ -1,6 +1,5 @@
 pub use crate::utils::database::{
-    get_history_db_path, load_history, load_history_async, load_history_data,
-    load_history_data_async, load_history_page_data, load_history_page_data_async,
+    get_history_db_path, load_history_data, load_history_data_async, load_history_page_data_async,
     ClipboardHistoryData, ClipboardHistoryPageData, ClipboardHistoryPageItem,
 };
 pub use crate::utils::settings_model::{
