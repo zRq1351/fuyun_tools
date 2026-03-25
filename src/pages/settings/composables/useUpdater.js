@@ -28,18 +28,17 @@ export function useUpdater(currentVersion) {
                 updateStatus.value = null
 
                 try {
-                    // 将Markdown内容转换为HTML
                     const bodyHtml = update.body ? marked(update.body) : '<p>暂无更新说明</p>'
-
-                    // 构建HTML格式的消息内容
                     const messageHtml = `
-                        <div style="text-align: left;">
-                            <h3 style="margin-top: 0; color: #303133;">发现新版本 ${update.version}</h3>
-                            <p style="margin: 16px 0 8px 0; color: #606266; font-weight: bold;">更新内容:</p>
-                            <div class="update-body-content" style="background: #f5f7fa; padding: 12px; border-radius: 4px; line-height: 1.6;">
+                        <div class="update-dialog">
+                            <div class="update-dialog__hero">
+                                <div class="update-dialog__tag">新版本可用</div>
+                                <h3 class="update-dialog__title">v${update.version}</h3>
+                            </div>
+                            <div class="update-body-content">
                                 ${bodyHtml}
                             </div>
-                            <p style="margin: 16px 0 0 0; color: #909399; font-size: 12px;">是否立即更新？</p>
+                            <p class="update-dialog__hint">是否立即更新？</p>
                         </div>
                     `
                     
@@ -49,7 +48,7 @@ export function useUpdater(currentVersion) {
                         {
                             confirmButtonText: '立即更新',
                             cancelButtonText: '稍后提醒',
-                            type: 'info',
+                            type: 'primary',
                             dangerouslyUseHTMLString: true,
                             customClass: 'update-message-box'
                         }
