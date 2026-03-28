@@ -53,6 +53,7 @@
           <AboutSettings
               :current-version="currentVersion"
               :image-toggle-shortcut="form.imageToggleShortcut"
+              :screenshot-toggle-shortcut="form.screenshotToggleShortcut"
               :toggle-shortcut="form.toggleShortcut"
           />
         </div>
@@ -108,6 +109,7 @@ const form = reactive({
   groupedItemsProtectedFromLimit: true,
   toggleShortcut: '',
   imageToggleShortcut: '',
+  screenshotToggleShortcut: '',
   aiProvider: '',
   apiUrl: '',
   modelName: '',
@@ -148,6 +150,7 @@ const saveInitialFormState = () => {
     groupedItemsProtectedFromLimit: form.groupedItemsProtectedFromLimit,
     toggleShortcut: form.toggleShortcut,
     imageToggleShortcut: form.imageToggleShortcut,
+    screenshotToggleShortcut: form.screenshotToggleShortcut,
     aiProvider: form.aiProvider,
     apiUrl: form.apiUrl,
     modelName: form.modelName,
@@ -187,6 +190,9 @@ const getChangedFields = () => {
   }
   if (form.imageToggleShortcut !== initial.imageToggleShortcut) {
     changedFields.imageHotKey = form.imageToggleShortcut
+  }
+  if (form.screenshotToggleShortcut !== initial.screenshotToggleShortcut) {
+    changedFields.screenshotHotKey = form.screenshotToggleShortcut
   }
 
   // 处理 AI 提供商
@@ -344,6 +350,7 @@ onMounted(async () => {
     currentVersion.value = settings.version || '0.3.1'
     form.toggleShortcut = settings.hot_key || ''
     form.imageToggleShortcut = settings.image_hot_key || ''
+    form.screenshotToggleShortcut = settings.screenshot_hot_key || ''
     form.selectionEnabled = settings.selection_enabled !== false
     form.groupedItemsProtectedFromLimit = settings.grouped_items_protected_from_limit !== false
     form.translationPromptTemplate = settings.translation_prompt_template || ''

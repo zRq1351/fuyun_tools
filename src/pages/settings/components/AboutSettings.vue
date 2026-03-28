@@ -84,6 +84,7 @@
       <li><strong>文字剪贴板</strong>：按 <code>{{ toggleShortcut || 'Ctrl+Shift+Z' }}</code> 打开文字历史窗口
       </li>
       <li><strong>图片剪贴板</strong>：按 <code>{{ imageToggleShortcut || 'Ctrl+Shift+X' }}</code> 打开图片历史窗口</li>
+      <li><strong>截图工具</strong>：按 <code>{{ screenshotToggleShortcut || 'Ctrl+Shift+A' }}</code> 打开截图窗口</li>
       <li><strong>图片回填</strong>：在图片窗口双击目标项，自动写入剪贴板并粘贴到当前焦点应用</li>
       <li><strong>划词功能</strong>：Windows 下选中文本后自动显示工具栏</li>
       <li><strong>上限策略</strong>：可在“设置 → 剪贴板”开启“仅限制未分组项”</li>
@@ -116,6 +117,10 @@ const props = defineProps({
     required: true
   },
   imageToggleShortcut: {
+    type: String,
+    required: true
+  },
+  screenshotToggleShortcut: {
     type: String,
     required: true
   }

@@ -1488,6 +1488,10 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         serde_json::Value::String(settings.image_hot_key.clone()),
     );
     result.insert(
+        "screenshot_hot_key".to_string(),
+        serde_json::Value::String(settings.screenshot_hot_key.clone()),
+    );
+    result.insert(
         "selection_enabled".to_string(),
         serde_json::Value::Bool(settings.selection_enabled),
     );
@@ -1590,6 +1594,7 @@ pub async fn save_app_settings(
     ai_api_key: Option<String>,
     hot_key: Option<String>,
     image_hot_key: Option<String>,
+    screenshot_hot_key: Option<String>,
     selection_enabled: Option<bool>,
     grouped_items_protected_from_limit: Option<bool>,
     translation_prompt_template: Option<String>,
@@ -1747,6 +1752,74 @@ pub async fn save_app_settings(
                 })
                 .map_err(|e| frontend_error(ErrorCode::SystemError, "注册图片窗口快捷键失败", e.to_string()))?;
             settings.image_hot_key = image_hot_key_clone;
+        }
+    }
+
+    if let Some(ref screenshot_hot_key_val) = screenshot_hot_key {
+        if screenshot_hot_key_val.is_empty() {
+            return Err(frontend_error(
+                ErrorCode::ValidationError,
+                "截图快捷键不能为空",
+                "screenshot_hot_key is empty",
+            ));
+        }
+
+        if screenshot_hot_key_val != &settings.screenshot_hot_key {
+            let effective_hot_key = hot_key.clone().unwrap_or_else(|| settings.hot_key.clone());
+            let effective_image_hot_key = image_hot_key
+                .clone()
+                .unwrap_or_else(|| settings.image_hot_key.clone());
+            if screenshot_hot_key_val == &effective_hot_key
+                || screenshot_hot_key_val == &effective_image_hot_key
+            {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    "截图快捷键不能与文字或图片窗口快捷键相同",
+                    format!(
+                        "hot_key={}, image_hot_key={}, screenshot_hot_key={}",
+                        effective_hot_key, effective_image_hot_key, screenshot_hot_key_val
+                    ),
+                ));
+            }
+
+            if app
+                .global_shortcut()
+                .is_registered(screenshot_hot_key_val.as_str())
+            {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    format!("截图快捷键被占用：{}", screenshot_hot_key_val),
+                    "screenshot global shortcut already registered",
+                ));
+            }
+
+            if let Err(e) = app
+                .global_shortcut()
+                .unregister(settings.screenshot_hot_key.as_str())
+            {
+                log::warn!(
+                    "注销旧截图快捷键 '{}' 失败 (可能从未注册成功): {}",
+                    settings.screenshot_hot_key,
+                    e
+                );
+            }
+            let app_clone = app.clone();
+            let screenshot_hot_key_clone = screenshot_hot_key_val.clone();
+            app.global_shortcut()
+                .on_shortcut(screenshot_hot_key_val.as_str(), move |_app, _shortcut, event| {
+                    if let ShortcutState::Pressed = event.state {
+                        let app_handle_inner = app_clone.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = open_screenshot_editor(app_handle_inner).await {
+                                log::error!("截图失败: {}", e);
+                            }
+                        });
+                    }
+                })
+                .map_err(|e| {
+                    frontend_error(ErrorCode::SystemError, "注册截图快捷键失败", e.to_string())
+                })?;
+            settings.screenshot_hot_key = screenshot_hot_key_clone;
         }
     }
 
@@ -2088,7 +2161,7 @@ pub async fn start_screenshot() -> Result<serde_json::Value, String> {
     log::info!("开始全屏截图");
 
     match capture::capture_full_screen() {
-        Ok((rgba, width, height)) => {
+        Ok((rgba, width, height, origin_x, origin_y)) => {
             let png_base64 = capture::rgba_to_base64_png(&rgba, width, height)
                 .map_err(|e| format!("转换PNG失败: {}", e))?;
 
@@ -2096,6 +2169,8 @@ pub async fn start_screenshot() -> Result<serde_json::Value, String> {
                 "success": true,
                 "width": width,
                 "height": height,
+                "origin_x": origin_x,
+                "origin_y": origin_y,
                 "png_base64": png_base64
             }))
         }
@@ -2349,7 +2424,7 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
 
     use crate::features::screenshot::capture;
     capture::set_screenshot_in_progress(true);
-    let (rgba, width, height) = match capture::capture_full_screen() {
+    let (rgba, width, height, origin_x, origin_y) = match capture::capture_full_screen() {
         Ok(data) => data,
         Err(e) => {
             capture::set_screenshot_in_progress(false);
@@ -2369,7 +2444,9 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
         let payload = serde_json::json!({
             "png_base64": png_base64,
             "width": width,
-            "height": height
+            "height": height,
+            "origin_x": origin_x,
+            "origin_y": origin_y
         });
         let script = format!(
             "window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {} }}));",
@@ -2384,6 +2461,7 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
             // 恢复窗口属性（防止之前关闭失败导致属性未重置）
             let _ = window.set_always_on_top(true);
             let _ = window.set_ignore_cursor_events(false);
+            let _ = window.set_fullscreen(true);
 
             let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
             let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: 0, y: 0 }));
@@ -2408,6 +2486,7 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
             .always_on_top(true)
             .skip_taskbar(true)
             .resizable(false)
+            .fullscreen(true)
             .build()
             .map_err(|e| {
                 capture::set_screenshot_in_progress(false);
@@ -2420,13 +2499,16 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(500));
 
+            let _ = window_clone.set_fullscreen(true);
             let _ = window_clone.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
             let _ = window_clone.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: 0, y: 0 }));
 
             let payload = serde_json::json!({
                 "png_base64": png_base64_clone,
                 "width": width,
-                "height": height
+                "height": height,
+                "origin_x": origin_x,
+                "origin_y": origin_y
             });
             let script = format!(
                 "window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {} }}));",

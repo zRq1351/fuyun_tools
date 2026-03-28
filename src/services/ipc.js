@@ -288,6 +288,7 @@ export const AISettingsService = {
      * @param {string} params.aiApiKey
      * @param {string} params.hotKey
      * @param {string} params.imageHotKey
+     * @param {string} params.screenshotHotKey
      * @param {boolean} params.selectionEnabled
      * @param {boolean} params.groupedItemsProtectedFromLimit
      * @param {string} params.translationPromptTemplate
@@ -305,6 +306,7 @@ export const AISettingsService = {
                        aiApiKey,
                        hotKey,
                        imageHotKey,
+                       screenshotHotKey,
                        selectionEnabled,
                        groupedItemsProtectedFromLimit,
                        translationPromptTemplate,
@@ -321,6 +323,7 @@ export const AISettingsService = {
             aiApiKey,
             hotKey,
             imageHotKey,
+            screenshotHotKey,
             selectionEnabled,
             groupedItemsProtectedFromLimit,
             translationPromptTemplate,

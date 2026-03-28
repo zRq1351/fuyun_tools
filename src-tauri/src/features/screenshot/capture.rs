@@ -108,8 +108,8 @@ fn capture_screen_region_internal(
 /// 捕获全屏截图
 ///
 /// # Returns
-/// * `Result<(Vec<u8>, u32, u32)>` - (RGBA像素数据, 宽度, 高度)
-pub fn capture_full_screen() -> Result<(Vec<u8>, u32, u32), String> {
+/// * `Result<(Vec<u8>, u32, u32, i32, i32)>` - (RGBA像素数据, 宽度, 高度, 屏幕原点X, 屏幕原点Y)
+pub fn capture_full_screen() -> Result<(Vec<u8>, u32, u32, i32, i32), String> {
     let screens = screenshots::Screen::all()
         .map_err(|e| format!("获取屏幕列表失败: {}", e))?;
 
@@ -125,10 +125,12 @@ pub fn capture_full_screen() -> Result<(Vec<u8>, u32, u32), String> {
     let width = image.width();
     let height = image.height();
     let rgba_data = image.to_vec();
+    let origin_x = screen.display_info.x;
+    let origin_y = screen.display_info.y;
 
-    log::info!("全屏截图成功: {}x{}", width, height);
+    log::info!("全屏截图成功: {}x{}, origin=({}, {})", width, height, origin_x, origin_y);
 
-    Ok((rgba_data, width, height))
+    Ok((rgba_data, width, height, origin_x, origin_y))
 }
 
 /// 获取屏幕尺寸

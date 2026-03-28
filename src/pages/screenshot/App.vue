@@ -17,7 +17,6 @@
       <!-- 智能窗口高亮 -->
       <div v-if="highlightedWindow && state === 'idle'" :style="windowHighlightStyle" class="window-highlight">
         <div class="window-border"></div>
-        <div class="window-label">{{ highlightedWindow.title }}</div>
       </div>
 
       <!-- 选区镂空及控制点 -->
@@ -204,6 +203,9 @@ const historyIndex = ref(-1)
 // 窗口探测
 const windows = ref([])
 const highlightedWindow = ref(null)
+const windowCoordScale = ref(1)
+const captureOriginX = ref(0)
+const captureOriginY = ref(0)
 
 // 物理像素比例
 const dpr = window.devicePixelRatio || 1
@@ -287,7 +289,6 @@ onMounted(() => {
   window.addEventListener('start-region-select', handleStartRegionSelect)
   document.addEventListener('keydown', handleKeyDown)
 
-  fetchWindows()
   requestScreenshot()
 })
 
@@ -300,9 +301,29 @@ onUnmounted(() => {
 async function fetchWindows() {
   try {
     const result = await invoke('get_window_list')
-    if (result.success) windows.value = result.windows
+    if (result.success) {
+      const list = result.windows || []
+      const maxWidth = list.reduce((max, item) => Math.max(max, Number(item?.width) || 0), 0)
+      windowCoordScale.value = maxWidth > window.innerWidth * 1.15 ? dpr : 1
+      windows.value = (result.windows || []).map(normalizeWindowRectToViewport)
+    }
   } catch (error) {
     console.error('获取窗口失败:', error)
+  }
+}
+
+function normalizeWindowRectToViewport(w) {
+  const scale = windowCoordScale.value || 1
+  const rawX = Number(w?.x) || 0
+  const rawY = Number(w?.y) || 0
+  const rawWidth = Number(w?.width) || 0
+  const rawHeight = Number(w?.height) || 0
+  return {
+    ...w,
+    x: (rawX - captureOriginX.value) / scale,
+    y: (rawY - captureOriginY.value) / scale,
+    width: rawWidth / scale,
+    height: rawHeight / scale
   }
 }
 
@@ -310,6 +331,9 @@ async function requestScreenshot() {
   try {
     const result = await invoke('start_screenshot')
     if (result.success && result.png_base64) {
+      captureOriginX.value = Number(result.origin_x) || 0
+      captureOriginY.value = Number(result.origin_y) || 0
+      await fetchWindows()
       loadImageFromBase64(result.png_base64)
     }
   } catch (error) {
@@ -319,6 +343,9 @@ async function requestScreenshot() {
 
 function handleScreenshotData(event) {
   if (event.detail && event.detail.png_base64) {
+    captureOriginX.value = Number(event.detail.origin_x) || 0
+    captureOriginY.value = Number(event.detail.origin_y) || 0
+    fetchWindows()
     loadImageFromBase64(event.detail.png_base64)
   }
 }
@@ -453,12 +480,25 @@ function onMouseUp(e) {
   if (state.value === 'selecting') {
     if (rect.width < 10 || rect.height < 10) {
       if (highlightedWindow.value) {
-        Object.assign(rect, highlightedWindow.value)
+        const w = highlightedWindow.value
+        const almostFullscreen =
+            w.width >= window.innerWidth - 16 &&
+            w.height >= window.innerHeight - 16
+        if (almostFullscreen) {
+          rect.x = 0
+          rect.y = 0
+          rect.width = window.innerWidth
+          rect.height = window.innerHeight
+        } else {
+          Object.assign(rect, highlightedWindow.value)
+        }
         state.value = 'selected'
       } else {
-        state.value = 'idle'
-        rect.width = 0
-        rect.height = 0
+        rect.x = 0
+        rect.y = 0
+        rect.width = window.innerWidth
+        rect.height = window.innerHeight
+        state.value = 'selected'
       }
     } else {
       state.value = 'selected'
@@ -496,8 +536,6 @@ function isInside(x, y, r) {
 
 function detectWindowAt(x, y) {
   for (const w of windows.value) {
-    // 忽略全屏或几乎全屏的无意义窗口
-    if (w.width >= window.innerWidth - 10 && w.height >= window.innerHeight - 10) continue;
     if (x >= w.x && x <= w.x + w.width && y >= w.y && y <= w.y + w.height) {
       return w
     }
