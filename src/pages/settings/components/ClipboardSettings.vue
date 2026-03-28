@@ -68,6 +68,24 @@
       <div class="form-hint">点击编辑按钮来自定义打开图片剪切板窗口的快捷键</div>
     </el-form-item>
 
+    <el-form-item label="打开截图窗口快捷键">
+      <el-input
+          :class="{ recording: isScreenshotRecording }"
+          :model-value="screenshotDisplayValue"
+          placeholder="例如: Ctrl+Shift+A"
+          readonly
+      >
+        <template #append>
+          <el-button :type="isScreenshotRecording ? 'danger' : 'primary'" @click="toggleScreenshotRecording">
+            <el-icon>
+              <component :is="isScreenshotRecording ? VideoPause : Edit"/>
+            </el-icon>
+          </el-button>
+        </template>
+      </el-input>
+      <div class="form-hint">点击编辑按钮来自定义打开截图窗口的快捷键</div>
+    </el-form-item>
+
     <el-divider>数据清理</el-divider>
 
     <el-form-item label="文字记录">
@@ -140,6 +158,11 @@ const {
   currentDisplayValue: imageDisplayValue,
   toggleRecording: toggleImageRecording
 } = useShortcutRecorder(props.form, 'imageToggleShortcut')
+const {
+  isRecording: isScreenshotRecording,
+  currentDisplayValue: screenshotDisplayValue,
+  toggleRecording: toggleScreenshotRecording
+} = useShortcutRecorder(props.form, 'screenshotToggleShortcut')
 
 const imageStorageMetrics = ref({})
 let metricsTimer = null
