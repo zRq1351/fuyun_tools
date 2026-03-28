@@ -1,6 +1,6 @@
 {
   "productName": "fuyun_tools",
-  "version": "0.3.4",
+  "version": "0.5.0",
   "identifier": "com.clipboard-manager.fuyun",
   "build": {
     "beforeDevCommand": "npm run dev",
