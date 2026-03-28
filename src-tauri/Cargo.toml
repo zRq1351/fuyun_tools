@@ -38,6 +38,9 @@ parking_lot = "0.12.5"
 bloom = "0.3.2"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 rayon = "1.8"
+anyhow = "1"
+screenshots = "0.8"
+xcap = "0.0.12"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.9", features = ["winuser", "winnt", "minwindef", "windef", "libloaderapi", "winbase", "processthreadsapi", "windowsx", "errhandlingapi", "handleapi", "heapapi", "memoryapi", "psapi", "synchapi", "sysinfoapi", "timezoneapi", "tlhelp32", "winioctl", "wingdi", "winerror", "winnls", "winreg", "winsvc", "setupapi", "ioapiset", "fileapi", "consoleapi", "namedpipeapi", "processenv", "stringapiset", "profileapi", "libloaderapi", "dwmapi", "shellapi"] }

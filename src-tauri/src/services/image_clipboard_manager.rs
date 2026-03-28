@@ -1,4 +1,5 @@
 use crate::core::app_state::AppState;
+use crate::features::screenshot::capture;
 use crate::services::clipboard_wakeup::{ClipboardWakeBackend, WakeSignal};
 use crate::sync::Mutex;
 use crate::utils::image_clipboard::ImageClipboardManager;
@@ -16,6 +17,7 @@ struct PendingImageTask {
     width: u32,
     height: u32,
     source_blob: Option<(Vec<u8>, String)>,
+    allow_when_screenshot: bool,
 }
 
 /// 待处理图片队列
@@ -133,6 +135,10 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
 
         match task {
             Some(task) => {
+                if capture::is_screenshot_in_progress() && !task.allow_when_screenshot {
+                    log::info!("[处理线程] 截图进行中，跳过图片任务: {}x{}", task.width, task.height);
+                    continue;
+                }
                 // 检查是否与最近图片重复
                 if is_duplicate_recent(task.width, task.height, &task.rgba) {
                     log::info!("[处理线程] 图片被跳过（重复）: {}x{}", task.width, task.height);
@@ -205,6 +211,15 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
             if !matches!(signal, WakeSignal::Event) {
                 continue;
             }
+            let screenshot_in_progress = capture::is_screenshot_in_progress();
+            let allow_when_screenshot = if screenshot_in_progress {
+                capture::take_allow_image_clipboard_once()
+            } else {
+                false
+            };
+            if screenshot_in_progress && !allow_when_screenshot {
+                continue;
+            }
 
             log::info!("[监听线程] 收到剪贴板变化事件");
 
@@ -225,6 +240,7 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                             width,
                             height,
                             source_blob,
+                            allow_when_screenshot,
                         });
                         log::info!("[监听线程] 图片入队: {}x{}, 当前队列长度: {}", width, height, queue.len());
                     }

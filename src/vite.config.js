@@ -13,6 +13,8 @@ export default defineConfig({
                 image_preview: resolve(__dirname, 'image_preview.html'),
                 selection_toolbar: resolve(__dirname, 'selection_toolbar.html'),
                 result_display: resolve(__dirname, 'result_display.html'),
+                screenshot: resolve(__dirname, 'screenshot.html'),
+                pinned_image: resolve(__dirname, 'pinned_image.html'),
             },
             output: {
                 manualChunks: {

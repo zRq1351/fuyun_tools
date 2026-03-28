@@ -1,5 +1,5 @@
 use crate::core::config::{
-    ProviderConfig, DEFAULT_IMAGE_TOGGLE_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT,
+    ProviderConfig, DEFAULT_IMAGE_TOGGLE_SHORTCUT, DEFAULT_SCREENSHOT_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT,
 };
 use crate::utils::system_utils::get_default_app_version;
 use keyring::Entry;
@@ -23,6 +23,8 @@ pub struct AppSettingsData {
     pub hot_key: String,
     #[serde(default = "default_image_hot_key")]
     pub image_hot_key: String,
+    #[serde(default = "default_screenshot_hot_key")]
+    pub screenshot_hot_key: String,
     #[serde(default)]
     pub ai_provider: String,
     #[serde(default)]
@@ -51,6 +53,7 @@ impl Default for AppSettingsData {
             image_disk_limit_mb: default_image_disk_limit_mb(),
             hot_key: DEFAULT_TOGGLE_SHORTCUT.to_string(),
             image_hot_key: default_image_hot_key(),
+            screenshot_hot_key: default_screenshot_hot_key(),
             ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
             selection_enabled: true,
@@ -81,6 +84,10 @@ fn default_image_disk_limit_mb() -> u64 {
 
 fn default_image_hot_key() -> String {
     DEFAULT_IMAGE_TOGGLE_SHORTCUT.to_string()
+}
+
+fn default_screenshot_hot_key() -> String {
+    DEFAULT_SCREENSHOT_SHORTCUT.to_string()
 }
 
 fn default_grouped_items_protected_from_limit() -> bool {
