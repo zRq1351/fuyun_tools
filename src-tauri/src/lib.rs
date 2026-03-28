@@ -75,6 +75,10 @@ pub fn run() {
                 let guard = lock_state(&state_arc);
                 guard.settings.image_hot_key.clone()
             };
+            let screenshot_hot_key = {
+                let guard = lock_state(&state_arc);
+                guard.settings.screenshot_hot_key.clone()
+            };
             let mut shortcut_conflicts: Vec<String> = Vec::new();
             if let Err(e) = app.global_shortcut()
                 .on_shortcut(hot_key.as_str(), move |_app, _shortcut, event| {
@@ -110,6 +114,23 @@ pub fn run() {
             {
                 log::warn!("图片窗口快捷键 '{}' 注册失败: {}", image_hot_key, e);
                 shortcut_conflicts.push(format!("图片窗口：{}", image_hot_key));
+            }
+
+            let app_handle_clone_screenshot = app_handle.clone();
+            if let Err(e) = app.global_shortcut()
+                .on_shortcut(screenshot_hot_key.as_str(), move |_app, _shortcut, event| {
+                    if let ShortcutState::Pressed = event.state {
+                        let app_handle_inner = app_handle_clone_screenshot.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = crate::ui::commands::open_screenshot_editor(app_handle_inner).await {
+                                log::error!("截图失败: {}", e);
+                            }
+                        });
+                    }
+                })
+            {
+                log::warn!("截图快捷键 '{}' 注册失败: {}", screenshot_hot_key, e);
+                shortcut_conflicts.push(format!("截图：{}", screenshot_hot_key));
             }
 
             if !shortcut_conflicts.is_empty() {
@@ -191,6 +212,19 @@ pub fn run() {
             get_image_preview_by_id,
             check_previews_ready,
             get_clipboard_full_snapshot,
+            // 截图相关命令
+            start_screenshot,
+            capture_region,
+            save_screenshot,
+            pin_screenshot_on_screen,
+            close_pinned_image_window,
+            get_pinned_image_window_position,
+            move_pinned_image_window,
+            get_screen_size,
+            set_screenshot_clipboard_link_once,
+            open_screenshot_editor,
+            get_window_list,
+            close_screenshot_window,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());

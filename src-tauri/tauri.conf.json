@@ -85,6 +85,22 @@
         "resizable": false,
         "maximizable": false,
         "minimizable": false
+      },
+      {
+        "label": "screenshot",
+        "title": "截图编辑",
+        "url": "screenshot.html",
+        "visible": false,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": true,
+        "center": false,
+        "resizable": true,
+        "maximizable": false,
+        "minimizable": false
       }
     ],
     "security": {

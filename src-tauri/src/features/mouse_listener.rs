@@ -1,3 +1,4 @@
+use crate::features::screenshot::capture;
 use crate::sync::Mutex;
 use log;
 use rdev::{listen, Button, EventType, Key};
@@ -144,6 +145,11 @@ impl MouseListener {
             }
 
             if GLOBAL_STATE.needs_detection.load(Ordering::SeqCst) {
+                if capture::is_screenshot_in_progress() {
+                    GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
+                    thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
                 GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
 
                 let (selection_enabled, should_skip_detection) = {
@@ -325,6 +331,9 @@ impl MouseListener {
 
                             if !is_foreground_window_console() {
                                 if !is_ctrl_effectively_pressed() {
+                                    if capture::is_screenshot_in_progress() {
+                                        return;
+                                    }
                                     let app_busy_or_visible = {
                                         let state_guard = lock_arc_mutex(&listener_state);
                                         state_guard.is_visible
