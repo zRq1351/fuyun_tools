@@ -112,7 +112,7 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
         };
         let tray_builder = TrayIconBuilder::with_id("main")
             .icon(icon)
-            .tooltip(&format!("fy_tools v{}", version))
+            .tooltip(format!("fy_tools v{}", version))
             .menu(&menu);
 
         tray_builder
@@ -122,14 +122,14 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
                     let event_id = event.id().as_ref();
                     match event_id {
                         "quit" => {
-                            handle_quit_event(&app);
+                            handle_quit_event(app);
                         }
                         "autostart" => {
-                            handle_autostart_event(&app, &state_for_events);
+                            handle_autostart_event(app, &state_for_events);
                         }
                         #[cfg(debug_assertions)]
                         "open_logs" => {
-                            if let Err(e) = open_log_directory(&app) {
+                            if let Err(e) = open_log_directory(app) {
                                 log::error!("打开日志目录失败: {}", e);
                             }
                         }
@@ -240,7 +240,7 @@ fn clear_log_files() -> Result<(), Box<dyn std::error::Error>> {
     for entry in std::fs::read_dir(&log_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "log") {
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "log") {
             std::fs::remove_file(&path)?;
             log::info!("删除日志文件: {:?}", path);
         }

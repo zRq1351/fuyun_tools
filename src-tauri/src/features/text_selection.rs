@@ -200,12 +200,10 @@ fn wait_for_clipboard_update(
                               attempts, start_time.elapsed());
                     return current_content;
                 }
-            } else {
-                if !current.is_empty() {
-                    log::info!("第{}次尝试成功捕获新内容，耗时: {:?}", 
-                              attempts, start_time.elapsed());
-                    return current_content;
-                }
+            } else if !current.is_empty() {
+                log::info!("第{}次尝试成功捕获新内容，耗时: {:?}", 
+                          attempts, start_time.elapsed());
+                return current_content;
             }
         }
     }

@@ -60,7 +60,8 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
 
 // 快速去重：存储最近图片的采样数据用于快速比较
 const SAMPLE_POINTS: usize = 10;
-static RECENT_IMAGE_SAMPLES: LazyLock<ParkingMutex<Vec<(u32, u32, [u8; SAMPLE_POINTS])>>> =
+type ImageSample = (u32, u32, [u8; SAMPLE_POINTS]);
+static RECENT_IMAGE_SAMPLES: LazyLock<ParkingMutex<Vec<ImageSample>>> =
     LazyLock::new(|| ParkingMutex::new(Vec::new()));
 
 // 快速采样：从 RGBA 数据中提取 10 个采样点
@@ -73,9 +74,9 @@ fn extract_sample_points(rgba: &[u8], width: u32, height: u32) -> [u8; SAMPLE_PO
     let total_bytes = rgba.len();
     let step = (total_bytes / SAMPLE_POINTS).max(1);
 
-    for i in 0..SAMPLE_POINTS {
+    for (i, item) in sample.iter_mut().enumerate().take(SAMPLE_POINTS) {
         let idx = (i * step).min(total_bytes - 1);
-        sample[i] = rgba[idx];
+        *item = rgba[idx];
     }
     sample
 }

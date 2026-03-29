@@ -202,10 +202,8 @@ impl AIClient {
                 Ok(response) => {
                     for choice in response.choices {
                         if let Some(content) = choice.delta.content {
-                            if !content.is_empty() {
-                                if !callback(content) {
-                                    return Ok(());
-                                }
+                            if !content.is_empty() && !callback(content) {
+                                return Ok(());
                             }
                         }
                         if let Some(finish_reason) = choice.finish_reason {

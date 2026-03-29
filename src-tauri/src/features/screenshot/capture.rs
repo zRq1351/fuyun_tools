@@ -9,6 +9,12 @@ pub fn is_screenshot_in_progress() -> bool {
     SCREENSHOT_IN_PROGRESS.load(Ordering::SeqCst)
 }
 
+pub fn try_begin_screenshot() -> bool {
+    SCREENSHOT_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
 /// 设置截图状态
 pub fn set_screenshot_in_progress(in_progress: bool) {
     SCREENSHOT_IN_PROGRESS.store(in_progress, Ordering::SeqCst);

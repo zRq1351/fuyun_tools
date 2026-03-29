@@ -84,19 +84,18 @@ pub async fn get_image_clipboard_history_page(
         let guard = lock_arc_mutex(&manager_arc);
         guard.clone()
     };
-    Ok(
-        manager
-            .get_history_preview_page_async(
-                request.offset,
-                request.limit,
-                request.category,
-                request.keyword,
-                request.pinned_only,
-                request.sort_by,
-                request.sort_order,
-            )
-            .await,
-    )
+
+    let page_request = crate::utils::image_clipboard::ImageHistoryPageRequest {
+        offset: request.offset,
+        limit: request.limit,
+        category: request.category,
+        keyword: request.keyword,
+        pinned_only: request.pinned_only,
+        sort_by: request.sort_by,
+        sort_order: request.sort_order,
+    };
+
+    Ok(manager.get_history_preview_page_async(page_request).await)
 }
 
 fn default_history_page_limit() -> usize {
@@ -2103,7 +2102,7 @@ pub async fn get_all_configured_providers(
 
     let mut providers: Vec<(String, String)> = Vec::new();
 
-    for (provider_key, _) in &settings.provider_configs {
+    for provider_key in settings.provider_configs.keys() {
         providers.push((provider_key.clone(), provider_key.clone()));
     }
 
@@ -2423,7 +2422,10 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
     log::info!("打开截图编辑窗口");
 
     use crate::features::screenshot::capture;
-    capture::set_screenshot_in_progress(true);
+    if !capture::try_begin_screenshot() {
+        log::info!("截图任务已在进行中，忽略重复触发");
+        return Ok(());
+    }
     let (rgba, width, height, origin_x, origin_y) = match capture::capture_full_screen() {
         Ok(data) => data,
         Err(e) => {
@@ -2438,9 +2440,7 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
             format!("转换PNG失败: {}", e)
         })?;
 
-    // 先发送截图数据，然后再显示窗口
     if let Some(window) = app.get_webview_window("screenshot") {
-        // 先发送数据
         let payload = serde_json::json!({
             "png_base64": png_base64,
             "width": width,
@@ -2452,28 +2452,19 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
             "window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {} }}));",
             payload
         );
-        let _ = window.eval(script);
+        let _ = window.eval(&script);
 
-        // 等待数据处理后再显示窗口
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(200));
-
-            // 恢复窗口属性（防止之前关闭失败导致属性未重置）
             let _ = window.set_always_on_top(true);
             let _ = window.set_ignore_cursor_events(false);
             let _ = window.set_fullscreen(true);
-
             let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
             let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: 0, y: 0 }));
             let _ = window.show();
             let _ = window.set_focus();
-
-            // 再发送开始区域选择事件
-            let script = "window.dispatchEvent(new CustomEvent('start-region-select'));";
-            let _ = window.eval(script);
+            let _ = window.eval("window.dispatchEvent(new CustomEvent('start-region-select'));");
         });
     } else {
-        // 创建新的全屏透明覆盖窗口
         let window = tauri::WebviewWindowBuilder::new(
             &app,
             "screenshot",
@@ -2493,15 +2484,14 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
                 format!("创建截图窗口失败: {}", e)
             })?;
 
-        // 窗口创建后发送数据并显示
         let window_clone = window.clone();
         let png_base64_clone = png_base64.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-
             let _ = window_clone.set_fullscreen(true);
             let _ = window_clone.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
             let _ = window_clone.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: 0, y: 0 }));
+            let _ = window_clone.show();
+            let _ = window_clone.set_focus();
 
             let payload = serde_json::json!({
                 "png_base64": png_base64_clone,
@@ -2514,16 +2504,21 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
                 "window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {} }}));",
                 payload
             );
-            let _ = window_clone.eval(script);
-
-            std::thread::sleep(std::time::Duration::from_millis(100));
-
-            let _ = window_clone.show();
-            let _ = window_clone.set_focus();
-
-            // 发送开始区域选择事件
-            let script = "window.dispatchEvent(new CustomEvent('start-region-select'));";
-            let _ = window_clone.eval(script);
+            for _ in 0..40 {
+                if window_clone.eval(&script).is_ok() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            for _ in 0..10 {
+                if window_clone
+                    .eval("window.dispatchEvent(new CustomEvent('start-region-select'));")
+                    .is_ok()
+                {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
         });
     }
 
