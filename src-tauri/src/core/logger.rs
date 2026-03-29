@@ -25,11 +25,7 @@ impl Default for LogConfig {
         let targets: Vec<Target> = Vec::new();
 
         Self {
-            level: if cfg!(debug_assertions) {
-                LevelFilter::Info
-            } else {
-                LevelFilter::Info
-            },
+            level: LevelFilter::Info,
             targets,
             max_file_size: 2 * 1024 * 1024, // 2MB
         }

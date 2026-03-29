@@ -55,9 +55,10 @@ impl SelectionRegion {
 }
 
 /// 截图模式
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum ScreenshotMode {
     /// 区域选择
+    #[default]
     Region,
     /// 全屏
     FullScreen,
@@ -65,12 +66,6 @@ pub enum ScreenshotMode {
     Window,
     /// 滚动截图
     Scroll,
-}
-
-impl Default for ScreenshotMode {
-    fn default() -> Self {
-        Self::Region
-    }
 }
 
 /// 截图配置

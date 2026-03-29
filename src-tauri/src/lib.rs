@@ -64,7 +64,7 @@ pub fn run() {
             }
 
             let app_handle = app.handle();
-            rebuild_tray_menu(&app_handle, state_arc.clone());
+            rebuild_tray_menu(app_handle, state_arc.clone());
             let state_clone = state_arc.clone();
             let app_handle_clone = app_handle.clone();
             let hot_key = {
@@ -151,8 +151,8 @@ pub fn run() {
 
             // 初始化异步预览生成器，支持事件通知
             crate::utils::image_clipboard::init_preview_generator_with_app_handle(app_handle.clone());
-            
-            emit_image_history_payload(&app_handle, state_arc.clone());
+
+            emit_image_history_payload(app_handle, state_arc.clone());
 
             #[cfg(windows)]
             start_text_selection_listener(app_handle.clone(), state_arc.clone());

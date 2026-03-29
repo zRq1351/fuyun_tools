@@ -247,6 +247,18 @@ pub struct ImageHistoryPageData {
     pub category_list: Vec<String>,
 }
 
+/// 图片历史页面请求参数
+#[derive(Clone, Debug)]
+pub struct ImageHistoryPageRequest {
+    pub offset: usize,
+    pub limit: usize,
+    pub category: Option<String>,
+    pub keyword: Option<String>,
+    pub pinned_only: bool,
+    pub sort_by: Option<String>,
+    pub sort_order: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ImageHistoryData {
     pub items: Vec<ImageHistoryItem>,
@@ -300,8 +312,7 @@ impl ImageClipboardManager {
         start_image_persist_worker(persist_rx, pending_images.clone());
         let full_res_lru_capacity = max_items
             .max(IMAGE_FULL_RES_CACHE_KEEP_RECENT)
-            .min(IMAGE_FULL_RES_LRU_MAX_CAPACITY)
-            .max(1);
+            .clamp(1, IMAGE_FULL_RES_LRU_MAX_CAPACITY);
         let manager = Self {
             history: Arc::new(Mutex::new(history_data.items)),
             signature_index: Arc::new(Mutex::new(signature_index)),
@@ -353,79 +364,45 @@ impl ImageClipboardManager {
 
     pub fn get_history_preview_page(
         &self,
-        offset: usize,
-        limit: usize,
-        category: Option<String>,
-        keyword: Option<String>,
-        pinned_only: bool,
-        sort_by: Option<String>,
-        sort_order: Option<String>,
+        request: ImageHistoryPageRequest,
     ) -> ImageHistoryPageData {
         if let Ok(page) = image_store::load_history_page(
-            offset,
-            limit,
-            category.clone(),
-            keyword.clone(),
-            pinned_only,
-            sort_by.clone(),
-            sort_order.clone(),
+            request.offset,
+            request.limit,
+            request.category.clone(),
+            request.keyword.clone(),
+            request.pinned_only,
+            request.sort_by.clone(),
+            request.sort_order.clone(),
         ) {
             return page;
         }
-        self.get_history_preview_page_fallback(
-            offset,
-            limit,
-            category,
-            keyword,
-            pinned_only,
-            sort_by,
-            sort_order,
-        )
+        self.get_history_preview_page_fallback(request)
     }
 
     pub async fn get_history_preview_page_async(
         &self,
-        offset: usize,
-        limit: usize,
-        category: Option<String>,
-        keyword: Option<String>,
-        pinned_only: bool,
-        sort_by: Option<String>,
-        sort_order: Option<String>,
+        request: ImageHistoryPageRequest,
     ) -> ImageHistoryPageData {
         if let Ok(page) = image_store::load_history_page_async(
-            offset,
-            limit,
-            category.clone(),
-            keyword.clone(),
-            pinned_only,
-            sort_by.clone(),
-            sort_order.clone(),
+            request.offset,
+            request.limit,
+            request.category.clone(),
+            request.keyword.clone(),
+            request.pinned_only,
+            request.sort_by.clone(),
+            request.sort_order.clone(),
         )
             .await
         {
             return page;
         }
-        self.get_history_preview_page_fallback(
-            offset,
-            limit,
-            category,
-            keyword,
-            pinned_only,
-            sort_by,
-            sort_order,
-        )
+        self.get_history_preview_page_fallback(request)
     }
 
     fn get_history_preview_page_fallback(
         &self,
-        offset: usize,
-        limit: usize,
-        category: Option<String>,
-        keyword: Option<String>,
-        pinned_only: bool,
-        sort_by: Option<String>,
-        sort_order: Option<String>,
+        request: ImageHistoryPageRequest,
     ) -> ImageHistoryPageData {
         let history = lock_arc_mutex(&self.history).clone();
         let categories = lock_arc_mutex(&self.categories).clone();
@@ -433,10 +410,10 @@ impl ImageClipboardManager {
         let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
         let category_list = lock_arc_mutex(&self.category_list).clone();
 
-        let category_filter = category
+        let category_filter = request.category
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty() && v != "全部");
-        let keyword_filter = keyword
+        let keyword_filter = request.keyword
             .map(|v| v.trim().to_lowercase())
             .filter(|v| !v.is_empty());
         let pinned_set: HashSet<String> = pinned_items.iter().cloned().collect();
@@ -445,8 +422,8 @@ impl ImageClipboardManager {
             .enumerate()
             .map(|(idx, id)| (id.clone(), idx))
             .collect::<HashMap<_, _>>();
-        let unpinned_desc = matches!(sort_order.as_deref(), Some("desc") | Some("DESC"));
-        let pinned_first = sort_by
+        let unpinned_desc = matches!(request.sort_order.as_deref(), Some("desc") | Some("DESC"));
+        let pinned_first = request.sort_by
             .as_deref()
             .map(|v| matches!(v, "pinnedFirst" | "pinned_first" | "pinnedfirst"))
             .unwrap_or(true);
@@ -474,7 +451,7 @@ impl ImageClipboardManager {
                 }
             })
             .filter(|entry| {
-                if pinned_only && !entry.pinned {
+                if request.pinned_only && !entry.pinned {
                     return false;
                 }
                 if let Some(filter) = category_filter.as_deref() {
@@ -519,16 +496,16 @@ impl ImageClipboardManager {
         });
 
         let total = rows.len();
-        let effective_limit = limit.clamp(1, 200);
+        let effective_limit = request.limit.clamp(1, 200);
         let items = rows
             .into_iter()
-            .skip(offset)
+            .skip(request.offset)
             .take(effective_limit)
             .collect::<Vec<_>>();
 
         ImageHistoryPageData {
             total,
-            offset,
+            offset: request.offset,
             limit: effective_limit,
             items,
             category_list,
@@ -1459,16 +1436,13 @@ impl ImageClipboardManager {
             let read_result = crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
                 app_handle.clipboard().read_image()
             });
-            match read_result {
-                Ok(image) => {
-                    let width = image.width();
-                    let height = image.height();
-                    let rgba = image.rgba().to_vec();
-                    if !rgba.is_empty() && width > 0 && height > 0 {
-                        return Ok(vec![(rgba, width, height, None)]);
-                    }
+            if let Ok(image) = read_result {
+                let width = image.width();
+                let height = image.height();
+                let rgba = image.rgba().to_vec();
+                if !rgba.is_empty() && width > 0 && height > 0 {
+                    return Ok(vec![(rgba, width, height, None)]);
                 }
-                Err(_) => {}
             }
             if attempt < retry_delays.len() - 1 {
                 std::thread::sleep(Duration::from_millis(*delay_ms));
@@ -2672,7 +2646,7 @@ fn file_uri_to_local_path(uri: &str) -> Option<String> {
                 rest = rest[1..].to_string();
             }
         }
-        return Some(rest.replace('/', "\\"));
+        Some(rest.replace('/', "\\"))
     }
     #[cfg(not(target_os = "windows"))]
     {

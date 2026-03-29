@@ -99,7 +99,7 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
         thread::spawn(move || {
             if let Some(window) = app_handle_clone.get_webview_window("image_clipboard") {
                 set_window_position(&window, bottom_offset);
-                if (!already_visible && window.show().is_ok()) || already_visible {
+                if already_visible || window.show().is_ok() {
                     if !already_visible {
                         let _ = window.set_focus();
                     }
@@ -391,10 +391,8 @@ pub fn handle_selection_toolbar_autoclose(app_handle: &AppHandle, click_pos: Opt
                         let _ = window.hide();
                     }
                 }
-            } else {
-                if let Ok(false) = window.is_focused() {
-                    let _ = window.hide();
-                }
+            } else if let Ok(false) = window.is_focused() {
+                let _ = window.hide();
             }
         }
     }

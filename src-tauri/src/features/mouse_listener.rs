@@ -138,52 +138,52 @@ impl MouseListener {
         let detection_thread_app_handle = app_handle.clone();
         let detection_state = state.clone();
 
-        thread::spawn(move || loop {
-            if !LISTENER_ENABLED.load(Ordering::SeqCst) {
-                thread::sleep(Duration::from_millis(200));
-                continue;
-            }
+        thread::spawn(move || {
+            loop {
+                if !LISTENER_ENABLED.load(Ordering::SeqCst) {
+                    thread::sleep(Duration::from_millis(200));
+                    continue;
+                }
 
-            if GLOBAL_STATE.needs_detection.load(Ordering::SeqCst) {
-                if capture::is_screenshot_in_progress() {
+                if GLOBAL_STATE.needs_detection.load(Ordering::SeqCst) {
+                    if capture::is_screenshot_in_progress() {
+                        GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
+                        thread::sleep(Duration::from_millis(50));
+                        continue;
+                    }
                     GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
-                    thread::sleep(Duration::from_millis(50));
-                    continue;
-                }
-                GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
 
-                let (selection_enabled, should_skip_detection) = {
-                    let state_guard = lock_arc_mutex(&detection_state);
-                    (
-                        state_guard.settings.selection_enabled,
-                        state_guard.is_visible
-                            || state_guard.is_image_visible
-                            || state_guard.is_processing_selection
-                            || state_guard.is_updating_clipboard,
-                    )
-                };
+                    let (selection_enabled, should_skip_detection) = {
+                        let state_guard = lock_arc_mutex(&detection_state);
+                        (
+                            state_guard.settings.selection_enabled,
+                            state_guard.is_visible
+                                || state_guard.is_image_visible
+                                || state_guard.is_processing_selection
+                                || state_guard.is_updating_clipboard,
+                        )
+                    };
 
-                if !selection_enabled {
-                    thread::sleep(Duration::from_millis(50));
-                    continue;
-                }
+                    if !selection_enabled {
+                        thread::sleep(Duration::from_millis(50));
+                        continue;
+                    }
 
-                if should_skip_detection {
-                    thread::sleep(Duration::from_millis(50));
-                    continue;
-                }
+                    if should_skip_detection {
+                        thread::sleep(Duration::from_millis(50));
+                        continue;
+                    }
 
-                let clipboard_manager = {
-                    let state_guard = lock_arc_mutex(&detection_state);
-                    state_guard.clipboard_manager.clone()
-                };
+                    let clipboard_manager = {
+                        let state_guard = lock_arc_mutex(&detection_state);
+                        state_guard.clipboard_manager.clone()
+                    };
 
-                if let Some(text) = perform_text_selection_detection(
-                    &detection_thread_app_handle,
-                    clipboard_manager,
-                ) {
-                    if !text.trim().is_empty() {
-                        if is_valid_selection(&text) {
+                    if let Some(text) = perform_text_selection_detection(
+                        &detection_thread_app_handle,
+                        clipboard_manager,
+                    ) {
+                        if !text.trim().is_empty() && is_valid_selection(&text) {
                             log::info!("检测到有效的选中文本: '{}'", text);
                             let app_handle_clone = detection_thread_app_handle.clone();
                             let text_clone = text.clone();
@@ -222,9 +222,9 @@ impl MouseListener {
                         }
                     }
                 }
-            }
 
-            thread::sleep(Duration::from_millis(50));
+                thread::sleep(Duration::from_millis(50));
+            }
         });
 
         let listener_state = state.clone();
@@ -347,7 +347,7 @@ impl MouseListener {
                                     }
 
                                     let last_processed = {
-                                        lock_arc_mutex(&GLOBAL_STATE.last_processed_time).clone()
+                                        *lock_arc_mutex(&GLOBAL_STATE.last_processed_time)
                                     };
 
                                     if up_time.duration_since(last_processed)

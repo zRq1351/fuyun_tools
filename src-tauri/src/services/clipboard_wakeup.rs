@@ -31,6 +31,12 @@ enum WakeMode {
     Fallback,
 }
 
+impl Default for ClipboardWakeBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClipboardWakeBackend {
     pub fn new() -> Self {
         #[cfg(target_os = "windows")]

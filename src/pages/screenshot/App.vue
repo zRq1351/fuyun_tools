@@ -206,6 +206,8 @@ const highlightedWindow = ref(null)
 const windowCoordScale = ref(1)
 const captureOriginX = ref(0)
 const captureOriginY = ref(0)
+const hasScreenshotPayload = ref(false)
+let screenshotFallbackTimer = null
 
 // 物理像素比例
 const dpr = window.devicePixelRatio || 1
@@ -288,15 +290,36 @@ onMounted(() => {
   window.addEventListener('screenshot-data', handleScreenshotData)
   window.addEventListener('start-region-select', handleStartRegionSelect)
   document.addEventListener('keydown', handleKeyDown)
-
-  requestScreenshot()
+  consumeBootPayload()
+  screenshotFallbackTimer = window.setTimeout(() => {
+    if (!hasScreenshotPayload.value) {
+      requestScreenshot()
+    }
+  }, 120)
 })
 
 onUnmounted(() => {
   window.removeEventListener('screenshot-data', handleScreenshotData)
   window.removeEventListener('start-region-select', handleStartRegionSelect)
   document.removeEventListener('keydown', handleKeyDown)
+  if (screenshotFallbackTimer) {
+    window.clearTimeout(screenshotFallbackTimer)
+    screenshotFallbackTimer = null
+  }
 })
+
+function consumeBootPayload() {
+  const boot = window.__SCREENSHOT_BOOT__
+  if (!boot) return
+  if (boot.pendingData && boot.pendingData.png_base64) {
+    handleScreenshotData({detail: boot.pendingData})
+    boot.pendingData = null
+  }
+  if (boot.pendingStart) {
+    handleStartRegionSelect()
+    boot.pendingStart = false
+  }
+}
 
 async function fetchWindows() {
   try {
@@ -343,6 +366,11 @@ async function requestScreenshot() {
 
 function handleScreenshotData(event) {
   if (event.detail && event.detail.png_base64) {
+    hasScreenshotPayload.value = true
+    if (screenshotFallbackTimer) {
+      window.clearTimeout(screenshotFallbackTimer)
+      screenshotFallbackTimer = null
+    }
     captureOriginX.value = Number(event.detail.origin_x) || 0
     captureOriginY.value = Number(event.detail.origin_y) || 0
     fetchWindows()
