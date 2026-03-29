@@ -1,9 +1,8 @@
 use crate::core::app_state::AppState;
-use crate::services::clipboard_wakeup::{ClipboardWakeBackend, WakeSignal};
+use crate::services::clipboard_wakeup::subscribe_clipboard_wake_events;
 use crate::sync::Mutex;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
@@ -17,13 +16,11 @@ fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a
 pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     thread::spawn(move || {
         let mut last_content = String::new();
-        let mut wake_backend = ClipboardWakeBackend::new();
+        let wake_rx = subscribe_clipboard_wake_events();
 
         loop {
-            let signal = wake_backend.wait_with_signal(Duration::from_secs(24 * 60 * 60));
-            #[cfg(target_os = "windows")]
-            if !matches!(signal, WakeSignal::Event) {
-                continue;
+            if wake_rx.recv().is_err() {
+                break;
             }
 
             let (is_updating, manager_arc) = {
