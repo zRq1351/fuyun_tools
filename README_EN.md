@@ -2,15 +2,17 @@
 
 [中文](README.md) | [English](README_EN.md)
 
-fuyun_tools is a desktop productivity tool running in the system tray, focused on two things:
+fuyun_tools is a desktop productivity tool running in the system tray, focused on three things:
 
 - Better clipboard history management
 - AI text selection translation/explanation on Windows
+- Fast screenshot capture and image OCR on Windows
 
 Core positioning:
 
 - One hotkey workflow to manage both text and image clipboard history
 - One selection workflow to translate, explain, and copy in-place
+- One screenshot + OCR workflow from capture to text extraction
 - One configurable strategy set to balance history limits and key item retention
 
 In addition, this project itself follows an AI full-process development workflow: AI deeply participates in requirement breakdown, solution design, coding implementation, and documentation maintenance.
