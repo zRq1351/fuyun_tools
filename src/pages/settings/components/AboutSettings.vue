@@ -27,8 +27,8 @@
       软件介绍
     </h3>
     <p class="intro-text">
-      fuyun_tools 是一款常驻系统托盘的效率工具，聚焦“文字剪贴板 + 图片剪贴板 + Windows 划词 AI”三条高频工作流，
-      目标是在不打断当前工作的前提下，完成快速回填、全屏预览、翻译解释和配置管理。
+      fuyun_tools 是一款常驻系统托盘的效率工具，聚焦“文字剪贴板 + 图片剪贴板 + Windows 划词 AI + Windows 截图与 OCR”
+      四条高频工作流，目标是在不打断当前工作的前提下，完成快速回填、大图预览、截图提取、翻译解释与配置管理。
     </p>
   </div>
 
@@ -50,7 +50,7 @@
         <el-icon>
           <Picture/>
         </el-icon>
-        <strong>图片剪贴板</strong> - 支持缩略图列表、双击回填、全屏预览与加载动画
+        <strong>图片剪贴板</strong> - 支持缩略图列表、双击回填与大图预览
       </li>
       <li>
         <el-icon>
@@ -63,6 +63,12 @@
           <Pointer/>
         </el-icon>
         <strong>划词助手</strong> - Windows 下选中文本后，直接翻译/解释/复制
+      </li>
+      <li>
+        <el-icon>
+          <Picture/>
+        </el-icon>
+        <strong>截图与 OCR</strong> - Windows 下支持快捷截图，并可在固定图片窗口进行 OCR 识别
       </li>
       <li>
         <el-icon>
@@ -84,7 +90,8 @@
       <li><strong>文字剪贴板</strong>：按 <code>{{ toggleShortcut || 'Ctrl+Shift+Z' }}</code> 打开文字历史窗口
       </li>
       <li><strong>图片剪贴板</strong>：按 <code>{{ imageToggleShortcut || 'Ctrl+Shift+X' }}</code> 打开图片历史窗口</li>
-      <li><strong>截图工具</strong>：按 <code>{{ screenshotToggleShortcut || 'Ctrl+Shift+A' }}</code> 打开截图窗口</li>
+      <li><strong>截图工具</strong>：按 <code>{{ screenshotToggleShortcut || 'Ctrl+Shift+S' }}</code> 打开截图窗口</li>
+      <li><strong>图片 OCR</strong>：在固定图片窗口右键，选择 OCR 识别并查看文本结果</li>
       <li><strong>图片回填</strong>：在图片窗口双击目标项，自动写入剪贴板并粘贴到当前焦点应用</li>
       <li><strong>划词功能</strong>：Windows 下选中文本后自动显示工具栏</li>
       <li><strong>上限策略</strong>：可在“设置 → 剪贴板”开启“仅限制未分组项”</li>
