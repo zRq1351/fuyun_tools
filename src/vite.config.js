@@ -15,6 +15,7 @@ export default defineConfig({
                 result_display: resolve(__dirname, 'result_display.html'),
                 screenshot: resolve(__dirname, 'screenshot.html'),
                 pinned_image: resolve(__dirname, 'pinned_image.html'),
+                ocr_text: resolve(__dirname, 'ocr_text.html'),
             },
             output: {
                 manualChunks: {

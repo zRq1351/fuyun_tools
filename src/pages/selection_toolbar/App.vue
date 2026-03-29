@@ -39,6 +39,7 @@ import {handleAppError} from '../../utils/errorHandler'
 const selectedText = ref('')
 const actionLoading = ref(false)
 let unlistenSelectedText = null
+let unlistenDomText = null
 
 const getSafeSelectedText = () => selectedText.value.trim()
 const runAction = async (executor, errorMessage) => {
@@ -56,6 +57,14 @@ const runAction = async (executor, errorMessage) => {
 
 onMounted(async () => {
   try {
+    if (window.__SELECTION_TOOLBAR_TEXT__) {
+      selectedText.value = String(window.__SELECTION_TOOLBAR_TEXT__)
+    }
+    const onDomText = (event) => {
+      selectedText.value = typeof event?.detail === 'string' ? event.detail : ''
+    }
+    window.addEventListener('selection-toolbar-text', onDomText)
+    unlistenDomText = () => window.removeEventListener('selection-toolbar-text', onDomText)
     unlistenSelectedText = await listen('selected-text', (event) => {
       selectedText.value = typeof event.payload === 'string' ? event.payload : ''
     })
@@ -68,6 +77,10 @@ onBeforeUnmount(() => {
   if (unlistenSelectedText) {
     unlistenSelectedText()
     unlistenSelectedText = null
+  }
+  if (unlistenDomText) {
+    unlistenDomText()
+    unlistenDomText = null
   }
 })
 
