@@ -167,7 +167,6 @@ async function runOcr(base64, width, height) {
       isRecognizing.value = false
     }
   }
-  return []
 }
 
 onMounted(() => {

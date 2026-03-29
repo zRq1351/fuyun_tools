@@ -37,10 +37,7 @@ const BLOOM_FILTER_CAPACITY: u32 = 10000;
 const BLOOM_FILTER_ERROR_RATE: f32 = 0.01; // 1% 误判率
 
 fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(e) => match e {},
-    }
+    mutex.lock().expect("infallible mutex lock failed")
 }
 
 fn stable_text_hash(text: &str) -> u64 {

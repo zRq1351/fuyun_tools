@@ -18,10 +18,7 @@ pub static ENIGO_INSTANCE: LazyLock<Arc<Mutex<Option<enigo::Enigo>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
 
 fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(e) => match e {},
-    }
+    mutex.lock().expect("infallible mutex lock failed")
 }
 
 /// 清理ENIGO实例资源

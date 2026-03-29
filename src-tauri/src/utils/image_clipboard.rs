@@ -52,10 +52,7 @@ static IMAGE_PNG_BASE64_CACHE: LazyLock<ParkingMutex<LruCache<String, (u64, Stri
 pub type ClipboardImagePayload = (Vec<u8>, u32, u32, Option<(Vec<u8>, String)>);
 
 fn lock_arc_mutex<T>(mutex: &'_ Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(e) => match e {},
-    }
+    mutex.lock().expect("infallible mutex lock failed")
 }
 
 pub fn set_image_fill_verify_mode(mode: &str) {

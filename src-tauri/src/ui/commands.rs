@@ -180,17 +180,11 @@ impl FillKind {
 }
 
 fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(e) => match e {},
-    }
+    mutex.lock().expect("infallible mutex lock failed")
 }
 
 fn lock_mutex<'a, T>(mutex: &'a Mutex<T>) -> crate::sync::MutexGuard<'a, T> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(e) => match e {},
-    }
+    mutex.lock().expect("infallible mutex lock failed")
 }
 
 fn begin_fill_sequence(state: &Arc<Mutex<SharedAppState>>, kind: FillKind) -> u64 {
