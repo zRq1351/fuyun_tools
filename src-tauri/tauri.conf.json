@@ -104,7 +104,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' tauri://ipc; img-src 'self' data: asset: http://asset.localhost https://asset.localhost; font-src 'self'; object-src 'none';",
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' tauri://ipc; img-src 'self' data: asset: http://asset.localhost https://asset.localhost; font-src 'self'; object-src 'none';",
       "assetProtocol": {
         "enable": true,
         "scope": [
