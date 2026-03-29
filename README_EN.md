@@ -33,8 +33,14 @@ In addition, this project itself follows an AI full-process development workflow
 - Automatically detects and stores images copied to the clipboard with thumbnail lists
 - Supports image search and category management for quick organization
 - Supports double-click image fill back to the currently focused document/app
-- Supports fullscreen preview with loading animation for large images
+- Supports large-image preview for detailed viewing
 - Image history and categories are persisted locally and available after restart
+
+### 🔎 Image OCR (Windows)
+
+- Pinned image window supports right-click OCR recognition
+- Recognition results are shown in a dedicated OCR text window for copy/reuse
+- OCR is currently available on Windows only
 
 ### 🔤 AI Text Selection Assistant (Windows)
 
@@ -45,7 +51,7 @@ In addition, this project itself follows an AI full-process development workflow
 
 ### 🤖 AI Service Configuration
 
-- Built-in DeepSeek / Qwen / Xiaomi Mimo providers
+- Built-in DeepSeek / Qwen (`qwen`) / Xiaomi Mimo (`xiaomimimo`) providers
 - Supports adding any OpenAI-compatible custom provider
 - Supports deleting custom providers directly in dropdown options
 - API keys are stored in the system credential manager (keyring)
@@ -53,7 +59,7 @@ In addition, this project itself follows an AI full-process development workflow
 ### ⚙️ System Integration
 
 - Runs in the system tray and supports auto-start
-- Global hotkey to open the clipboard window
+- Global hotkeys for text clipboard / image clipboard / screenshot
 - Light/Dark theme switching
 - Built-in app update support
 
@@ -70,10 +76,11 @@ In addition, this project itself follows an AI full-process development workflow
 | Feature              | Windows | Linux | macOS |
 |----------------------|---------|-------|-------|
 | Clipboard Management | ✅       | ✅     | ✅     |
+| Image OCR            | ✅       | ❌     | ❌     |
 | AI Text Selection    | ✅       | ❌     | ❌     |
 | Tray & Hotkeys       | ✅       | ✅     | ✅     |
 
-> Note: AI text selection is currently implemented only on Windows.
+> Note: AI text selection and image OCR are currently implemented only on Windows.
 
 ---
 
@@ -99,9 +106,10 @@ Installation steps:
 ## 🚀 Quick Start
 
 1. **Launch App**: Run fuyun_tools; the icon appears in the system tray
-2. **Open Clipboard**: Use global hotkey to summon main window
-    - Windows: `Ctrl+Shift+Z`
-    - macOS: `Cmd+Shift+Z`
+2. **Use Global Hotkeys**:
+    - Text clipboard: Windows `Ctrl+Shift+Z` / macOS `Cmd+Shift+Z`
+    - Image clipboard: Windows `Ctrl+Shift+X` / macOS `Cmd+Shift+X`
+    - Screenshot: Windows `Ctrl+Shift+S` / macOS `Cmd+Shift+S`
 3. **Configure AI Service**: Go to 「Settings → AI Settings」
     - Choose built-in provider (DeepSeek/Qwen/Mimo) or add custom OpenAI-compatible endpoint
     - Enter API URL, model name, and key
@@ -117,7 +125,7 @@ Installation steps:
 
 ### Clipboard Window
 
-- **Navigation**: `← / →` to switch items, `Enter` to fill, `Esc` to close
+- **Navigation**: `← / →` to switch items, `Enter` to fill
 - **Scroll Control**: Use mouse wheel to navigate through history
 - **AI Actions**: Press `T` to translate or `E` to explain the selected item
 - **UI Interaction**: Drag the "Raise" handle to adjust window's vertical position
@@ -128,9 +136,15 @@ Installation steps:
 
 - **Select Image**: Click a thumbnail card to select
 - **Quick Paste**: Double-click a card to paste directly at cursor position
-- **View Fullscreen**: Click the top-right "Fullscreen" button for high-resolution preview
+- **View Large Image**: Click the top-right "Fullscreen" button for large-image preview
 - **Manage History**: Click the top-right "Delete" icon to remove record
-- **Bulk Operations**: Use `← / →` to browse images, `Enter` to paste current item, `Esc` to close window
+- **Bulk Operations**: Use `← / →` to browse images, `Enter` to paste current item
+
+### Pinned Image OCR (Windows)
+
+- **How to Trigger**: Right-click in the pinned image window and choose OCR
+- **Result Output**: Recognition text opens in a dedicated OCR text window
+- **Platform Scope**: Currently supported on Windows only
 
 ### Limit Strategy (Text + Image)
 
