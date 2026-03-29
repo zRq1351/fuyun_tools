@@ -69,19 +69,19 @@
 
         <div class="divider"></div>
 
-        <button class="tool-btn" title="复制到剪贴板 (Ctrl+C)" @click="copyToClipboardLinked">
+        <button :disabled="!canExport" class="tool-btn" title="复制到剪贴板 (Ctrl+C)" @click="copyToClipboardLinked">
           <DocumentCopy class="tool-icon-wrap"/>
         </button>
-        <button class="tool-btn" title="保存文件 (Ctrl+S)" @click="saveAndClose">
+        <button :disabled="!canExport" class="tool-btn" title="保存文件 (Ctrl+S)" @click="saveAndClose">
           <Download class="tool-icon-wrap"/>
         </button>
-        <button class="tool-btn" title="固定到屏幕" @click="pinToScreenAndClose">
+        <button :disabled="!canExport" class="tool-btn" title="固定到屏幕" @click="pinToScreenAndClose">
           📌
         </button>
         <button class="tool-btn cancel" title="取消选区 (Esc)" @click="cancelSelection">
           <CloseBold class="tool-icon-wrap"/>
         </button>
-        <button class="tool-btn confirm" title="完成并复制" @click="completeAndCopyUnlinked">
+        <button :disabled="!canExport" class="tool-btn confirm" title="完成并复制" @click="completeAndCopyUnlinked">
           <Check class="tool-icon-wrap"/>
         </button>
       </div>
@@ -167,6 +167,7 @@ const screenshotSrc = ref('')
 const screenshotImg = ref(null)
 const canvas = ref(null)
 const isDrawing = ref(false)
+const isCaptureReady = ref(false)
 
 // 选区数据
 const rect = reactive({x: 0, y: 0, width: 0, height: 0})
@@ -208,6 +209,8 @@ const captureOriginX = ref(0)
 const captureOriginY = ref(0)
 const hasScreenshotPayload = ref(false)
 const screenshotSessionRequested = ref(false)
+const activeSessionId = ref(0)
+const payloadSessionId = ref(0)
 let screenshotFallbackTimer = null
 
 // 物理像素比例
@@ -227,6 +230,7 @@ const drawingTools = [
 ]
 
 const hasSelection = computed(() => rect.width > 0 && rect.height > 0)
+const canExport = computed(() => hasSelection.value)
 
 // 样式计算
 const cursorStyle = computed(() => {
@@ -307,16 +311,19 @@ onUnmounted(() => {
 function consumeBootPayload() {
   const boot = window.__SCREENSHOT_BOOT__
   if (!boot) return
-  if (boot.pendingStart) {
+  const bootStartSessionId = Number(boot.pendingStartSessionId) || 0
+  if (bootStartSessionId > 0) {
+    activeSessionId.value = bootStartSessionId
     screenshotSessionRequested.value = true
+    hasScreenshotPayload.value = payloadSessionId.value === bootStartSessionId
   }
   if (boot.pendingData && boot.pendingData.png_base64) {
     handleScreenshotData({detail: boot.pendingData})
     boot.pendingData = null
   }
-  if (boot.pendingStart) {
-    handleStartRegionSelect()
-    boot.pendingStart = false
+  if (bootStartSessionId > 0) {
+    handleStartRegionSelect({detail: {session_id: bootStartSessionId}})
+    boot.pendingStartSessionId = 0
   }
 }
 
@@ -365,6 +372,7 @@ async function requestScreenshot() {
   try {
     const result = await invoke('start_screenshot')
     if (result.success && result.png_base64) {
+      hasScreenshotPayload.value = true
       captureOriginX.value = Number(result.origin_x) || 0
       captureOriginY.value = Number(result.origin_y) || 0
       await fetchWindows()
@@ -377,6 +385,12 @@ async function requestScreenshot() {
 
 function handleScreenshotData(event) {
   if (event.detail && event.detail.png_base64) {
+    const sessionId = Number(event.detail.session_id) || 0
+    if (sessionId > 0) {
+      activeSessionId.value = sessionId
+      payloadSessionId.value = sessionId
+    }
+    isCaptureReady.value = false
     screenshotSessionRequested.value = true
     hasScreenshotPayload.value = true
     if (screenshotFallbackTimer) {
@@ -390,8 +404,15 @@ function handleScreenshotData(event) {
   }
 }
 
-function handleStartRegionSelect() {
-  screenshotSessionRequested.value = true
+function handleStartRegionSelect(event) {
+  const sessionId = Number(event?.detail?.session_id) || 0
+  if (sessionId > 0) {
+    activeSessionId.value = sessionId
+    screenshotSessionRequested.value = true
+    hasScreenshotPayload.value = payloadSessionId.value === sessionId
+  } else {
+    screenshotSessionRequested.value = true
+  }
   scheduleScreenshotFallback()
   state.value = 'idle'
   currentTool.value = 'select'
@@ -400,13 +421,18 @@ function handleStartRegionSelect() {
 }
 
 function loadImageFromBase64(base64Data) {
+  isCaptureReady.value = false
+  screenshotSrc.value = `data:image/png;base64,${base64Data}`
   const img = new Image()
   img.onload = () => {
     screenshotImg.value = img
-    screenshotSrc.value = `data:image/png;base64,${base64Data}`
     nextTick(() => {
       initCanvas()
+      isCaptureReady.value = Boolean(canvas.value && canvas.value.width > 0 && canvas.value.height > 0)
     })
+  }
+  img.onerror = () => {
+    isCaptureReady.value = false
   }
   img.src = `data:image/png;base64,${base64Data}`
 }
@@ -418,11 +444,35 @@ function initCanvas() {
   canvas.value.height = window.innerHeight * dpr
 
   const ctx = canvas.value.getContext('2d')
+  if (!ctx) return
   // 仅放大坐标系，物理像素保持不变
   ctx.scale(dpr, dpr)
 
   // 保存一张纯净版的快照用于重置
   saveToHistory()
+  isCaptureReady.value = true
+}
+
+async function ensureCaptureReady() {
+  if (isCaptureReady.value && screenshotImg.value && canvas.value && canvas.value.width > 0 && canvas.value.height > 0) {
+    return true
+  }
+  if (!screenshotImg.value && screenshotSrc.value) {
+    const img = new Image()
+    await new Promise((resolve, reject) => {
+      img.onload = resolve
+      img.onerror = reject
+      img.src = screenshotSrc.value
+    }).then(() => {
+      screenshotImg.value = img
+    }).catch(() => {
+    })
+  }
+  await nextTick()
+  if (screenshotImg.value && canvas.value) {
+    initCanvas()
+  }
+  return Boolean(screenshotImg.value && canvas.value && canvas.value.width > 0 && canvas.value.height > 0)
 }
 
 // 鼠标交互逻辑
@@ -1032,15 +1082,37 @@ function restoreFromHistory() {
 
 // 最终出图
 function getCroppedCanvas() {
-  const sourceX = Math.round(rect.x * dpr)
-  const sourceY = Math.round(rect.y * dpr)
-  const sourceWidth = Math.round(rect.width * dpr)
-  const sourceHeight = Math.round(rect.height * dpr)
+  if (!canvas.value || !screenshotImg.value) {
+    throw new Error('截图源未就绪')
+  }
+  const drawCanvasWidth = Number(canvas.value.width) || 0
+  const drawCanvasHeight = Number(canvas.value.height) || 0
+  if (drawCanvasWidth <= 0 || drawCanvasHeight <= 0) {
+    throw new Error('绘制画布尺寸无效')
+  }
+  const maxX = Math.max(0, drawCanvasWidth - 1)
+  const maxY = Math.max(0, drawCanvasHeight - 1)
+  const startX = Math.max(0, Math.min(maxX, Math.round(rect.x * dpr)))
+  const startY = Math.max(0, Math.min(maxY, Math.round(rect.y * dpr)))
+  const rawWidth = Math.max(1, Math.round(rect.width * dpr))
+  const rawHeight = Math.max(1, Math.round(rect.height * dpr))
+  const sourceWidth = Math.max(1, Math.min(rawWidth, drawCanvasWidth - startX))
+  const sourceHeight = Math.max(1, Math.min(rawHeight, drawCanvasHeight - startY))
+  const sourceX = Math.max(0, Math.min(startX, drawCanvasWidth - sourceWidth))
+  const sourceY = Math.max(0, Math.min(startY, drawCanvasHeight - sourceHeight))
+  if (sourceWidth <= 0 || sourceHeight <= 0) {
+    throw new Error(
+        `裁剪区域无效 rect=(${rect.x},${rect.y},${rect.width},${rect.height}) dpr=${dpr} canvas=${drawCanvasWidth}x${drawCanvasHeight}`
+    )
+  }
 
   const cropCanvas = document.createElement('canvas')
   cropCanvas.width = sourceWidth
   cropCanvas.height = sourceHeight
   const ctx = cropCanvas.getContext('2d')
+  if (!ctx) {
+    throw new Error('裁剪画布上下文创建失败')
+  }
 
   // 绘制底图
   ctx.drawImage(
@@ -1051,6 +1123,9 @@ function getCroppedCanvas() {
 
   // 绘制涂鸦层
   const drawCtx = canvas.value.getContext('2d')
+  if (!drawCtx) {
+    throw new Error('绘制画布上下文获取失败')
+  }
   const oldTransform = drawCtx.getTransform()
   drawCtx.resetTransform()
   const overlayData = drawCtx.getImageData(sourceX, sourceY, sourceWidth, sourceHeight)
@@ -1060,7 +1135,11 @@ function getCroppedCanvas() {
   const tempCanvas = document.createElement('canvas')
   tempCanvas.width = sourceWidth
   tempCanvas.height = sourceHeight
-  tempCanvas.getContext('2d').putImageData(overlayData, 0, 0)
+  const tempCtx = tempCanvas.getContext('2d')
+  if (!tempCtx) {
+    throw new Error('临时画布上下文创建失败')
+  }
+  tempCtx.putImageData(overlayData, 0, 0)
 
   ctx.drawImage(tempCanvas, 0, 0)
   drawTextItemsOnCroppedCanvas(ctx, sourceX, sourceY, sourceWidth, sourceHeight)
@@ -1113,6 +1192,10 @@ function drawTextItemToContext(ctx, item, x, y) {
 
 async function writeClipboardImage(linked, closeAfterCopy) {
   try {
+    if (!(await ensureCaptureReady())) {
+      alert('截图源尚未就绪，请稍后重试')
+      return
+    }
     await invoke('set_screenshot_clipboard_link_once', {linked})
     const cropCanvas = getCroppedCanvas()
     cropCanvas.toBlob(async (blob) => {
@@ -1137,10 +1220,14 @@ async function completeAndCopyUnlinked() {
 
 async function pinToScreenAndClose() {
   try {
+    if (!(await ensureCaptureReady())) {
+      alert('截图源尚未就绪，请稍后重试')
+      return
+    }
     const cropCanvas = getCroppedCanvas()
     const dataUrl = cropCanvas.toDataURL('image/png')
     const base64 = dataUrl.split(',')[1]
-    const result = await invoke('pin_screenshot_on_screen', {
+    const payload = {
       request: {
         pngBase64: base64,
         x: Math.round(rect.x),
@@ -1148,18 +1235,35 @@ async function pinToScreenAndClose() {
         width: Math.max(1, Math.round(rect.width)),
         height: Math.max(1, Math.round(rect.height))
       }
-    })
+    }
+    let result = null
+    try {
+      result = await invoke('pin_screenshot_on_screen', payload)
+    } catch (firstError) {
+      await new Promise(resolve => setTimeout(resolve, 80))
+      result = await invoke('pin_screenshot_on_screen', payload)
+      if (!result?.success) {
+        throw firstError
+      }
+    }
     if (result?.success) {
       close()
     }
   } catch (error) {
+    const reason = error?.message
+        || (typeof error === 'string' ? error : JSON.stringify(error))
+        || '未知错误'
     console.error('固定图片失败:', error)
-    alert('固定图片失败')
+    alert(`固定图片失败：${reason}`)
   }
 }
 
 async function saveAndClose() {
   try {
+    if (!(await ensureCaptureReady())) {
+      alert('截图源尚未就绪，请稍后重试')
+      return
+    }
     const cropCanvas = getCroppedCanvas()
     const dataUrl = cropCanvas.toDataURL('image/png')
     const base64 = dataUrl.split(',')[1]

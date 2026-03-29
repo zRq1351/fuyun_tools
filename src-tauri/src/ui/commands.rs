@@ -22,7 +22,7 @@ use crate::utils::utils_helpers::{
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::thread;
@@ -31,6 +31,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+static NEXT_SCREENSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(serde::Serialize)]
 pub struct HistoryResponse {
@@ -2439,6 +2441,7 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
             capture::set_screenshot_in_progress(false);
             format!("转换PNG失败: {}", e)
         })?;
+    let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
 
     if let Some(window) = app.get_webview_window("screenshot") {
         let payload = serde_json::json!({
@@ -2446,13 +2449,16 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
             "width": width,
             "height": height,
             "origin_x": origin_x,
-            "origin_y": origin_y
+            "origin_y": origin_y,
+            "session_id": session_id
         });
         let script = format!(
-            "window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {} }}));",
-            payload
+            "window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || {{ pendingData: null, pendingStartSessionId: 0 }};\
+window.__SCREENSHOT_BOOT__.pendingData = {payload};\
+window.__SCREENSHOT_BOOT__.pendingStartSessionId = {session_id};\
+window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {payload} }}));\
+window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ session_id: {session_id} }} }}));"
         );
-        let _ = window.eval(&script);
 
         std::thread::spawn(move || {
             let _ = window.set_always_on_top(true);
@@ -2462,7 +2468,12 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
             let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: 0, y: 0 }));
             let _ = window.show();
             let _ = window.set_focus();
-            let _ = window.eval("window.dispatchEvent(new CustomEvent('start-region-select'));");
+            for _ in 0..20 {
+                if window.eval(&script).is_ok() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
         });
     } else {
         let payload = serde_json::json!({
@@ -2470,13 +2481,14 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
             "width": width,
             "height": height,
             "origin_x": origin_x,
-            "origin_y": origin_y
+            "origin_y": origin_y,
+            "session_id": session_id
         });
         let boot_script = format!(
-            "window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || {{ pendingData: null, pendingStart: false }};\
+            "window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || {{ pendingData: null, pendingStartSessionId: 0 }};\
 window.__SCREENSHOT_BOOT__.pendingData = {};\
-window.__SCREENSHOT_BOOT__.pendingStart = true;",
-            payload
+window.__SCREENSHOT_BOOT__.pendingStartSessionId = {};",
+            payload, session_id
         );
         let window = tauri::WebviewWindowBuilder::new(
             &app,
