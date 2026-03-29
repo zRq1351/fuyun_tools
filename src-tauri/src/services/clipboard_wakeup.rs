@@ -18,6 +18,54 @@ pub struct ClipboardWakeBackend {
     mode: WakeMode,
 }
 
+struct WakeHub {
+    subscribers: std::sync::Mutex<Vec<mpsc::Sender<WakeSignal>>>,
+}
+
+impl WakeHub {
+    fn subscribe(&self) -> Receiver<WakeSignal> {
+        let (tx, rx) = mpsc::channel::<WakeSignal>();
+        if let Ok(mut guard) = self.subscribers.lock() {
+            guard.push(tx);
+        }
+        rx
+    }
+
+    fn broadcast_event(&self) {
+        if let Ok(mut guard) = self.subscribers.lock() {
+            guard.retain(|tx| tx.send(WakeSignal::Event).is_ok());
+        }
+    }
+}
+
+fn wake_hub() -> &'static WakeHub {
+    static HUB: std::sync::OnceLock<WakeHub> = std::sync::OnceLock::new();
+    HUB.get_or_init(|| WakeHub {
+        subscribers: std::sync::Mutex::new(Vec::new()),
+    })
+}
+
+fn ensure_wake_dispatcher_started() {
+    static STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    STARTED.get_or_init(|| {
+        thread::spawn(move || {
+            let mut wake_backend = ClipboardWakeBackend::new();
+            loop {
+                let signal = wake_backend.wait_with_signal(Duration::from_secs(24 * 60 * 60));
+                if !matches!(signal, WakeSignal::Event) {
+                    continue;
+                }
+                wake_hub().broadcast_event();
+            }
+        });
+    });
+}
+
+pub fn subscribe_clipboard_wake_events() -> Receiver<WakeSignal> {
+    ensure_wake_dispatcher_started();
+    wake_hub().subscribe()
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WakeSignal {
     Event,
