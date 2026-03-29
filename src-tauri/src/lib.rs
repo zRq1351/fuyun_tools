@@ -197,6 +197,8 @@ pub fn run() {
             window_blur,
             image_window_blur,
             selection_toolbar_blur,
+            show_selection_toolbar_with_text,
+            show_ocr_text_window,
             copy_text,
             copy_and_paste_text,
             get_ai_settings,
@@ -214,6 +216,7 @@ pub fn run() {
             get_clipboard_full_snapshot,
             // 截图相关命令
             start_screenshot,
+            recognize_image_ocr,
             capture_region,
             save_screenshot,
             pin_screenshot_on_screen,

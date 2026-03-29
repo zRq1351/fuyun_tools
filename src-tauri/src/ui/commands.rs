@@ -1445,6 +1445,136 @@ pub async fn selection_toolbar_blur(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub async fn show_selection_toolbar_with_text(
+    app: AppHandle,
+    text: String,
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        log::warn!("show_selection_toolbar_with_text 收到空文本，忽略");
+        return Ok(());
+    }
+    let content = trimmed.to_string();
+    log::info!(
+        "show_selection_toolbar_with_text: len={}, x={}, y={}",
+        content.chars().count(),
+        x,
+        y
+    );
+    if app.get_webview_window("selection_toolbar").is_none() {
+        let _ = tauri::WebviewWindowBuilder::new(
+            &app,
+            "selection_toolbar",
+            tauri::WebviewUrl::App("selection_toolbar.html".into()),
+        )
+            .title("fuyun_tools")
+            .visible(false)
+            .resizable(false)
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .build()
+            .map_err(|e| format!("创建划词工具栏窗口失败: {}", e))?;
+        log::info!("show_selection_toolbar_with_text: 已创建selection_toolbar窗口");
+    }
+    crate::ui::window_manager::show_selection_toolbar_force_impl(
+        app.clone(),
+        content.clone(),
+        Some((x, y)),
+    );
+    if let Some(toolbar_window) = app.get_webview_window("selection_toolbar") {
+        let payload = serde_json::to_string(&content).map_err(|e| format!("序列化文本失败: {}", e))?;
+        let script = format!(
+            "window.__SELECTION_TOOLBAR_TEXT__ = {payload}; window.dispatchEvent(new CustomEvent('selection-toolbar-text', {{ detail: {payload} }}));"
+        );
+        let _ = toolbar_window.eval(&script);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn show_ocr_text_window(
+    app: AppHandle,
+    source_label: String,
+    text: String,
+) -> Result<(), String> {
+    let content = text.trim().to_string();
+    if content.is_empty() {
+        return Ok(());
+    }
+
+    let source = app
+        .get_webview_window(&source_label)
+        .ok_or_else(|| "源窗口不存在".to_string())?;
+    let source_pos = source
+        .outer_position()
+        .map_err(|e| format!("获取源窗口位置失败: {}", e))?;
+    let source_size = source
+        .outer_size()
+        .map_err(|e| format!("获取源窗口尺寸失败: {}", e))?;
+    let monitor = source
+        .current_monitor()
+        .map_err(|e| format!("获取显示器信息失败: {}", e))?
+        .ok_or_else(|| "未找到显示器信息".to_string())?;
+
+    let result_label = format!("ocr_text_{}", source_label.replace('-', "_"));
+    let window = if let Some(existing) = app.get_webview_window(&result_label) {
+        existing
+    } else {
+        tauri::WebviewWindowBuilder::new(
+            &app,
+            result_label.clone(),
+            tauri::WebviewUrl::App("ocr_text.html".into()),
+        )
+            .title("OCR识别结果")
+            .visible(false)
+            .decorations(false)
+            .always_on_top(false)
+            .resizable(true)
+            .inner_size(560.0, 240.0)
+            .build()
+            .map_err(|e| format!("创建OCR结果窗口失败: {}", e))?
+    };
+
+    let monitor_pos = monitor.position();
+    let monitor_size = monitor.size();
+    let target_width = (source_size.width as i32).min(monitor_size.width as i32);
+    let target_height = 240i32;
+    let gap = 8i32;
+    let min_x = monitor_pos.x;
+    let min_y = monitor_pos.y;
+    let max_x = monitor_pos.x + monitor_size.width as i32 - target_width;
+    let max_y = monitor_pos.y + monitor_size.height as i32 - target_height;
+
+    let mut target_x = source_pos.x.clamp(min_x, max_x.max(min_x));
+    let below_y = source_pos.y + source_size.height as i32 + gap;
+    let above_y = source_pos.y - target_height - gap;
+    let target_y = if below_y <= max_y {
+        below_y
+    } else if above_y >= min_y {
+        above_y
+    } else {
+        below_y.clamp(min_y, max_y.max(min_y))
+    };
+    target_x = target_x.clamp(min_x, max_x.max(min_x));
+
+    let _ = window.set_size(tauri::PhysicalSize::new(target_width as u32, target_height as u32));
+    let _ = window.set_always_on_top(false);
+    let _ = window.set_position(tauri::PhysicalPosition::new(target_x, target_y));
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    let payload = serde_json::json!({"text": content});
+    let script = format!(
+        "window.__OCR_TEXT_PAYLOAD__ = {payload}; window.dispatchEvent(new CustomEvent('ocr-text-data', {{ detail: {payload} }}));"
+    );
+    let _ = window.eval(&script);
+    Ok(())
+}
 
 #[tauri::command]
 pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, String> {
@@ -2182,6 +2312,20 @@ pub async fn start_screenshot() -> Result<serde_json::Value, String> {
                 "error": e.to_string()
             }))
         }
+    }
+}
+
+#[tauri::command]
+pub async fn recognize_image_ocr(png_base64: String) -> Result<serde_json::Value, String> {
+    match crate::services::native_ocr::recognize_png_base64(&png_base64) {
+        Ok(result) => Ok(serde_json::json!({
+            "success": true,
+            "paragraphs": result.paragraphs
+        })),
+        Err(e) => Ok(serde_json::json!({
+            "success": false,
+            "error": e
+        })),
     }
 }
 

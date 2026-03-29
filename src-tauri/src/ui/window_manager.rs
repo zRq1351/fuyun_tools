@@ -304,27 +304,49 @@ fn get_taskbar_safe_offset() -> i32 {
 }
 
 /// 打开划词工具栏
-pub fn show_selection_toolbar_impl(
+fn show_selection_toolbar_internal(
     app_handle: AppHandle,
     selected_text: String,
     anchor_pos: Option<(i32, i32)>,
+    ignore_setting: bool,
 ) {
-    if let Some(state) = app_handle.try_state::<Arc<Mutex<AppState>>>() {
-        let state_guard = lock_arc_mutex(state.inner());
-        if !state_guard.settings.selection_enabled {
+    if !ignore_setting {
+        if let Some(state) = app_handle.try_state::<Arc<Mutex<AppState>>>() {
+            let state_guard = lock_arc_mutex(state.inner());
+            if !state_guard.settings.selection_enabled {
+                return;
+            }
+        } else {
             return;
         }
-    } else {
-        return;
     }
     if let Some(toolbar_window) = app_handle.get_webview_window("selection_toolbar") {
         set_toolbar_window(&toolbar_window, anchor_pos);
+        let _ = toolbar_window.set_always_on_top(false);
+        let _ = toolbar_window.set_always_on_top(true);
         if toolbar_window.show().is_ok() {
+            let _ = toolbar_window.set_focus();
             if let Err(e) = app_handle.emit("selected-text", selected_text) {
                 log::error!("未能发送选择文本到前端:{}", e);
             }
         }
     }
+}
+
+pub fn show_selection_toolbar_impl(
+    app_handle: AppHandle,
+    selected_text: String,
+    anchor_pos: Option<(i32, i32)>,
+) {
+    show_selection_toolbar_internal(app_handle, selected_text, anchor_pos, false);
+}
+
+pub fn show_selection_toolbar_force_impl(
+    app_handle: AppHandle,
+    selected_text: String,
+    anchor_pos: Option<(i32, i32)>,
+) {
+    show_selection_toolbar_internal(app_handle, selected_text, anchor_pos, true);
 }
 
 /// 设置工具栏窗口位置
@@ -336,7 +358,22 @@ fn set_toolbar_window(window: &tauri::WebviewWindow, anchor_pos: Option<(i32, i3
     if let Some((mx, my)) = anchor_pos {
         let mut x = mx - (toolbar_width as i32 / 2);
         let mut y = my + offset;
-        if let Ok(Some(monitor)) = window.current_monitor() {
+        let monitor_from_anchor = window
+            .available_monitors()
+            .ok()
+            .and_then(|monitors| {
+                monitors.into_iter().find(|monitor| {
+                    let pos = monitor.position();
+                    let size = monitor.size();
+                    let min_x = pos.x;
+                    let min_y = pos.y;
+                    let max_x = pos.x + size.width as i32;
+                    let max_y = pos.y + size.height as i32;
+                    mx >= min_x && mx <= max_x && my >= min_y && my <= max_y
+                })
+            })
+            .or_else(|| window.current_monitor().ok().flatten());
+        if let Some(monitor) = monitor_from_anchor {
             let monitor_pos = monitor.position();
             let monitor_size = monitor.size();
             let min_x = monitor_pos.x;

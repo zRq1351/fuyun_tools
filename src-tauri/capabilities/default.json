@@ -7,6 +7,7 @@
     "image_clipboard",
     "image_preview",
     "pinned_image_window",
+    "ocr_text_pinned_image_window",
     "screenshot",
     "selection_toolbar",
     "result_explanation",
