@@ -21,10 +21,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
-    match state.lock() {
-        Ok(guard) => guard,
-        Err(e) => match e {},
-    }
+    state.lock().expect("infallible mutex lock failed")
 }
 
 /// 启动划词选择监听器

@@ -53,10 +53,7 @@ static LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 static LISTENER_ENABLED: AtomicBool = AtomicBool::new(true);
 
 fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(e) => match e {},
-    }
+    mutex.lock().expect("infallible mutex lock failed")
 }
 
 /// 设置划词监听器启用状态

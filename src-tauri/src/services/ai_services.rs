@@ -11,10 +11,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 fn lock_state<'a>(state: &'a Arc<Mutex<SharedAppState>>) -> crate::sync::MutexGuard<'a, SharedAppState> {
-    match state.lock() {
-        Ok(guard) => guard,
-        Err(e) => match e {},
-    }
+    state.lock().expect("infallible mutex lock failed")
 }
 
 /// 验证AI提供商配置

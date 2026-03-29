@@ -7,9 +7,8 @@ fn clipboard_access_mutex() -> &'static Mutex<()> {
 }
 
 pub fn with_clipboard_access_lock<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = match clipboard_access_mutex().lock() {
-        Ok(guard) => guard,
-        Err(e) => match e {},
-    };
+    let _guard = clipboard_access_mutex()
+        .lock()
+        .expect("infallible mutex lock failed");
     f()
 }

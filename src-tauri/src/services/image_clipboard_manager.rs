@@ -31,10 +31,7 @@ static QUEUE_NOTIFY: LazyLock<Arc<(StdMutex<bool>, Condvar)>> =
 const MAX_QUEUE_SIZE: usize = 20;
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
-    match state.lock() {
-        Ok(guard) => guard,
-        Err(e) => match e {},
-    }
+    state.lock().expect("infallible mutex lock failed")
 }
 
 pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
@@ -42,10 +39,9 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
         let state_guard = lock_state(&state);
         state_guard.image_clipboard_manager.clone()
     };
-    let manager = match manager_arc.lock() {
-        Ok(guard) => guard,
-        Err(e) => match e {},
-    };
+    let manager = manager_arc
+        .lock()
+        .expect("infallible mutex lock failed");
     let payload = serde_json::json!({
         "history": manager.get_history_preview(),
         "categories": manager.get_categories(),

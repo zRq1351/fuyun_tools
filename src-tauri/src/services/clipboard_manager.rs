@@ -6,10 +6,7 @@ use std::thread;
 use tauri::{AppHandle, Emitter};
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
-    match state.lock() {
-        Ok(guard) => guard,
-        Err(e) => match e {},
-    }
+    state.lock().expect("infallible mutex lock failed")
 }
 
 /// 启动剪贴板监听器
@@ -39,10 +36,9 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
             }
 
             let current_content = {
-                let manager = match manager_arc.lock() {
-                    Ok(guard) => guard,
-                    Err(e) => match e {},
-                };
+                let manager = manager_arc
+                    .lock()
+                    .expect("infallible mutex lock failed");
                 manager.get_content(&app_handle)
             };
 
@@ -79,18 +75,16 @@ pub fn add_to_clipboard_history(app_handle: &AppHandle, content: String, state: 
     };
 
     {
-        let manager = match manager_arc.lock() {
-            Ok(guard) => guard,
-            Err(e) => match e {},
-        };
+        let manager = manager_arc
+            .lock()
+            .expect("infallible mutex lock failed");
         manager.add_to_history(content);
     }
 
     let payload = {
-        let manager = match manager_arc.lock() {
-            Ok(guard) => guard,
-            Err(e) => match e {},
-        };
+        let manager = manager_arc
+            .lock()
+            .expect("infallible mutex lock failed");
         serde_json::json!({
             "history": manager.get_history(),
             "categories": manager.get_categories(),
