@@ -2465,6 +2465,19 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
             let _ = window.eval("window.dispatchEvent(new CustomEvent('start-region-select'));");
         });
     } else {
+        let payload = serde_json::json!({
+            "png_base64": png_base64,
+            "width": width,
+            "height": height,
+            "origin_x": origin_x,
+            "origin_y": origin_y
+        });
+        let boot_script = format!(
+            "window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || {{ pendingData: null, pendingStart: false }};\
+window.__SCREENSHOT_BOOT__.pendingData = {};\
+window.__SCREENSHOT_BOOT__.pendingStart = true;",
+            payload
+        );
         let window = tauri::WebviewWindowBuilder::new(
             &app,
             "screenshot",
@@ -2477,49 +2490,21 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
             .always_on_top(true)
             .skip_taskbar(true)
             .resizable(false)
+            .inner_size(width as f64, height as f64)
+            .position(origin_x as f64, origin_y as f64)
             .fullscreen(true)
+            .on_page_load(move |window, _| {
+                let _ = window.eval(&boot_script);
+                let _ = window.show();
+                let _ = window.set_focus();
+            })
             .build()
             .map_err(|e| {
                 capture::set_screenshot_in_progress(false);
                 format!("创建截图窗口失败: {}", e)
             })?;
-
-        let window_clone = window.clone();
-        let png_base64_clone = png_base64.clone();
-        std::thread::spawn(move || {
-            let _ = window_clone.set_fullscreen(true);
-            let _ = window_clone.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
-            let _ = window_clone.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: 0, y: 0 }));
-            let _ = window_clone.show();
-            let _ = window_clone.set_focus();
-
-            let payload = serde_json::json!({
-                "png_base64": png_base64_clone,
-                "width": width,
-                "height": height,
-                "origin_x": origin_x,
-                "origin_y": origin_y
-            });
-            let script = format!(
-                "window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {} }}));",
-                payload
-            );
-            for _ in 0..40 {
-                if window_clone.eval(&script).is_ok() {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(25));
-            }
-            for _ in 0..10 {
-                if window_clone
-                    .eval("window.dispatchEvent(new CustomEvent('start-region-select'));")
-                    .is_ok()
-                {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(25));
-            }
-        });
+        let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: origin_x, y: origin_y }));
     }
 
     Ok(())

@@ -207,6 +207,7 @@ const windowCoordScale = ref(1)
 const captureOriginX = ref(0)
 const captureOriginY = ref(0)
 const hasScreenshotPayload = ref(false)
+const screenshotSessionRequested = ref(false)
 let screenshotFallbackTimer = null
 
 // 物理像素比例
@@ -291,11 +292,6 @@ onMounted(() => {
   window.addEventListener('start-region-select', handleStartRegionSelect)
   document.addEventListener('keydown', handleKeyDown)
   consumeBootPayload()
-  screenshotFallbackTimer = window.setTimeout(() => {
-    if (!hasScreenshotPayload.value) {
-      requestScreenshot()
-    }
-  }, 120)
 })
 
 onUnmounted(() => {
@@ -311,6 +307,9 @@ onUnmounted(() => {
 function consumeBootPayload() {
   const boot = window.__SCREENSHOT_BOOT__
   if (!boot) return
+  if (boot.pendingStart) {
+    screenshotSessionRequested.value = true
+  }
   if (boot.pendingData && boot.pendingData.png_base64) {
     handleScreenshotData({detail: boot.pendingData})
     boot.pendingData = null
@@ -319,6 +318,18 @@ function consumeBootPayload() {
     handleStartRegionSelect()
     boot.pendingStart = false
   }
+}
+
+function scheduleScreenshotFallback() {
+  if (!screenshotSessionRequested.value || hasScreenshotPayload.value) return
+  if (screenshotFallbackTimer) {
+    window.clearTimeout(screenshotFallbackTimer)
+  }
+  screenshotFallbackTimer = window.setTimeout(() => {
+    if (screenshotSessionRequested.value && !hasScreenshotPayload.value) {
+      requestScreenshot()
+    }
+  }, 120)
 }
 
 async function fetchWindows() {
@@ -366,6 +377,7 @@ async function requestScreenshot() {
 
 function handleScreenshotData(event) {
   if (event.detail && event.detail.png_base64) {
+    screenshotSessionRequested.value = true
     hasScreenshotPayload.value = true
     if (screenshotFallbackTimer) {
       window.clearTimeout(screenshotFallbackTimer)
@@ -379,6 +391,8 @@ function handleScreenshotData(event) {
 }
 
 function handleStartRegionSelect() {
+  screenshotSessionRequested.value = true
+  scheduleScreenshotFallback()
   state.value = 'idle'
   currentTool.value = 'select'
   rect.width = 0
