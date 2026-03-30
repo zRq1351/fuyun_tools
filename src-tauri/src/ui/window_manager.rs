@@ -322,7 +322,6 @@ fn show_selection_toolbar_internal(
         let _ = toolbar_window.set_always_on_top(false);
         let _ = toolbar_window.set_always_on_top(true);
         if toolbar_window.show().is_ok() {
-            let _ = toolbar_window.set_focus();
             if let Err(e) = app_handle.emit("selected-text", selected_text) {
                 log::error!("未能发送选择文本到前端:{}", e);
             }
