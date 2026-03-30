@@ -113,6 +113,9 @@ fn is_ctrl_effectively_pressed() -> bool {
 /// 重置Ctrl键状态
 pub fn reset_ctrl_key_state() {
     clear_ctrl_key_state_silent();
+    if let Err(e) = crate::ui::window_manager::force_release_ctrl_key() {
+        log::warn!("重置Ctrl状态时物理释放失败: {}", e);
+    }
     log::info!("已重置Ctrl键状态");
 }
 

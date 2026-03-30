@@ -194,6 +194,7 @@ const dragItemId = ref('')
 const isFilling = ref(false)
 const categoryInputOpenedAt = ref(0)
 const previewCache = new Map()
+const asyncPreviewCache = new Map()
 const warmedIndices = new Set()
 const warmingIndices = new Set()
 let unlistenShowWindow = null
@@ -227,6 +228,7 @@ const IMAGE_TAIL_SPACER = 742
 const IMAGE_VIRTUAL_OVERSCAN = 4
 const IMAGE_PREVIEW_CACHE_MARGIN = 24
 const IMAGE_PREVIEW_CACHE_MAX_ITEMS = 300
+const ASYNC_PREVIEW_CACHE_MAX_ITEMS = 180
 
 const currentPageQuerySignature = () =>
     JSON.stringify({
@@ -551,6 +553,14 @@ const enforcePreviewCacheSize = () => {
   }
 }
 
+const enforceAsyncPreviewCacheSize = () => {
+  while (asyncPreviewCache.size > ASYNC_PREVIEW_CACHE_MAX_ITEMS) {
+    const oldestKey = asyncPreviewCache.keys().next().value
+    if (!oldestKey) break
+    asyncPreviewCache.delete(oldestKey)
+  }
+}
+
 const prunePreviewCache = (keepIds) => {
   if (!Array.isArray(keepIds)) return
   const keepSet = new Set(keepIds)
@@ -560,6 +570,17 @@ const prunePreviewCache = (keepIds) => {
     }
   }
   enforcePreviewCacheSize()
+}
+
+const pruneAsyncPreviewCache = (keepIds) => {
+  if (!Array.isArray(keepIds)) return
+  const keepSet = new Set(keepIds)
+  for (const key of asyncPreviewCache.keys()) {
+    if (!keepSet.has(key)) {
+      asyncPreviewCache.delete(key)
+    }
+  }
+  enforceAsyncPreviewCacheSize()
 }
 
 const rgbaBase64ToPngDataUrl = (rgbaBase64, width, height) => {
@@ -605,9 +626,6 @@ const cacheStats = {
   }
 }
 
-// 异步预览相关的状态
-const asyncPreviewCache = new Map()
-
 const getPreviewDataUrl = (item) => {
   if (previewCache.has(item.id)) {
     return previewCache.get(item.id)
@@ -625,6 +643,9 @@ const getPreviewDataUrl = (item) => {
     // 检查是否有异步生成的预览（通过事件更新）
     if (asyncPreviewCache.has(item.id)) {
       const previewUrl = asyncPreviewCache.get(item.id)
+      asyncPreviewCache.delete(item.id)
+      asyncPreviewCache.set(item.id, previewUrl)
+      enforceAsyncPreviewCacheSize()
       previewCache.set(item.id, previewUrl)
       enforcePreviewCacheSize()
       return previewUrl
@@ -816,6 +837,7 @@ const deleteItem = async (itemId, index) => {
   try {
     if (itemId) {
       previewCache.delete(itemId)
+      asyncPreviewCache.delete(itemId)
       delete categoryMap.value[itemId]
       delete tagMap.value[itemId]
     }
@@ -1072,6 +1094,7 @@ const mergeImagePageIntoState = (data, reset = false) => {
     tagMap.value = {}
     pinnedItems.value = []
     previewCache.clear()
+    asyncPreviewCache.clear()
     warmedIndices.clear()
     warmingIndices.clear()
   }
@@ -1314,6 +1337,7 @@ onMounted(async () => {
     if (itemId && previewUrl) {
       // 更新缓存
       asyncPreviewCache.set(itemId, previewUrl)
+      enforceAsyncPreviewCacheSize()
       previewCache.set(itemId, previewUrl)
       enforcePreviewCacheSize()
 
@@ -1384,6 +1408,7 @@ watch(selectedIndex, (value) => {
 
 watch(previewCacheKeepIds, (ids) => {
   prunePreviewCache(ids)
+  pruneAsyncPreviewCache(ids)
 }, {immediate: true})
 
 let filterDebounceTimer = null

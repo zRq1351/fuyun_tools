@@ -72,6 +72,12 @@ const onImageLoaded = () => {
 }
 
 const closeWindowNow = async () => {
+  imageUrl.value = ''
+  isImageReady.value = false
+  activeRequestId.value = ''
+  await new Promise((resolve) => {
+    requestAnimationFrame(() => resolve())
+  })
   try {
     await ImageClipboardService.closePreviewWindow()
   } catch (error) {
