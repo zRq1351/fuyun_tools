@@ -1,134 +1,131 @@
 <template>
   <el-form :model="form" label-position="top">
-    <el-form-item label="文字历史记录上限">
-      <el-input-number v-model="form.textMaxItems" :max="1000" :min="1"/>
-      <div class="form-hint">设置文字剪贴板历史记录最大保存数量 (1-1000)</div>
-    </el-form-item>
+    <el-card class="setting-section-card compact-grid-card" shadow="never">
+      <template #header>
+        <div class="section-title">容量与写入策略</div>
+      </template>
+      <el-form-item label="文字历史记录上限">
+        <el-input-number v-model="form.textMaxItems" :max="1000" :min="1"/>
+        <div class="form-hint">设置文字剪贴板历史记录最大保存数量 (1-1000)</div>
+      </el-form-item>
 
-    <el-form-item label="图片历史记录上限">
-      <el-input-number v-model="form.imageMaxItems" :max="1000" :min="1"/>
-      <div class="form-hint">设置图片剪贴板历史记录最大保存数量 (1-1000)</div>
-    </el-form-item>
+      <el-form-item label="图片历史记录上限">
+        <el-input-number v-model="form.imageMaxItems" :max="1000" :min="1"/>
+        <div class="form-hint">设置图片剪贴板历史记录最大保存数量 (1-1000)</div>
+      </el-form-item>
 
-    <el-form-item label="图片历史磁盘上限（MB）">
-      <el-input-number v-model="form.imageDiskLimitMb" :max="102400" :min="100"/>
-      <div class="form-hint">超过上限后自动清理最旧未置顶图片，建议 2048MB</div>
-    </el-form-item>
+      <el-form-item label="图片历史磁盘上限（MB）">
+        <el-input-number v-model="form.imageDiskLimitMb" :max="102400" :min="100"/>
+        <div class="form-hint">超过上限后自动清理最旧未置顶图片，建议 2048MB</div>
+      </el-form-item>
 
-    <el-form-item label="图片回填模式">
-      <el-select v-model="form.imageFillVerifyMode" style="width: 220px">
-        <el-option label="严格模式（写后校验）" value="strict"/>
-        <el-option label="极速模式（完全不校验）" value="fast"/>
-      </el-select>
-      <div class="form-hint">极速模式写入系统剪贴板后立即粘贴，速度更快但成功率更依赖目标应用</div>
-    </el-form-item>
+      <el-form-item label="图片回填模式">
+        <el-select v-model="form.imageFillVerifyMode" style="width: 220px">
+          <el-option label="严格模式（写后校验）" value="strict"/>
+          <el-option label="极速模式（完全不校验）" value="fast"/>
+        </el-select>
+        <div class="form-hint">极速模式写入系统剪贴板后立即粘贴，速度更快但成功率更依赖目标应用</div>
+      </el-form-item>
 
-    <el-form-item label="上限策略">
-      <el-switch
-          v-model="form.groupedItemsProtectedFromLimit"
-          active-text="仅限制未分组项"
-          inactive-text="限制全部项"
-      />
-      <div class="form-hint">开启后，已分组的文字和图片不会因上限被自动删除</div>
-    </el-form-item>
+      <el-form-item label="上限策略">
+        <el-switch
+            v-model="form.groupedItemsProtectedFromLimit"
+            active-text="仅限制未分组项"
+            inactive-text="限制全部项"
+        />
+        <div class="form-hint">开启后，已分组的文字和图片不会因上限被自动删除</div>
+      </el-form-item>
+    </el-card>
 
-    <el-form-item label="打开剪切板窗口快捷键">
-      <el-input
-          :model-value="textDisplayValue"
-          :class="{ recording: isTextRecording }"
-          placeholder="例如: Ctrl+Shift+K"
-          readonly
-      >
-        <template #append>
-          <el-button :type="isTextRecording ? 'danger' : 'primary'" @click="toggleTextRecording">
-            <el-icon>
-              <component :is="isTextRecording ? VideoPause : Edit"/>
-            </el-icon>
-          </el-button>
-        </template>
-      </el-input>
-      <div class="form-hint">点击编辑按钮来自定义打开剪切板窗口的快捷键</div>
-    </el-form-item>
+    <el-card class="setting-section-card compact-grid-card" shadow="never">
+      <template #header>
+        <div class="section-title">快捷键</div>
+      </template>
+      <el-form-item label="打开剪切板窗口快捷键">
+        <el-input
+            :model-value="textDisplayValue"
+            :class="{ recording: isTextRecording }"
+            placeholder="例如: Ctrl+Shift+K"
+            readonly
+        >
+          <template #append>
+            <el-button :type="isTextRecording ? 'danger' : 'primary'" @click="toggleTextRecording">
+              <el-icon>
+                <component :is="isTextRecording ? VideoPause : Edit"/>
+              </el-icon>
+            </el-button>
+          </template>
+        </el-input>
+        <div class="form-hint">点击编辑按钮来自定义打开剪切板窗口的快捷键</div>
+      </el-form-item>
 
-    <el-form-item label="打开图片剪切板窗口快捷键">
-      <el-input
-          :model-value="imageDisplayValue"
-          :class="{ recording: isImageRecording }"
-          placeholder="例如: Ctrl+Shift+X"
-          readonly
-      >
-        <template #append>
-          <el-button :type="isImageRecording ? 'danger' : 'primary'" @click="toggleImageRecording">
-            <el-icon>
-              <component :is="isImageRecording ? VideoPause : Edit"/>
-            </el-icon>
-          </el-button>
-        </template>
-      </el-input>
-      <div class="form-hint">点击编辑按钮来自定义打开图片剪切板窗口的快捷键</div>
-    </el-form-item>
+      <el-form-item label="打开图片剪切板窗口快捷键">
+        <el-input
+            :model-value="imageDisplayValue"
+            :class="{ recording: isImageRecording }"
+            placeholder="例如: Ctrl+Shift+X"
+            readonly
+        >
+          <template #append>
+            <el-button :type="isImageRecording ? 'danger' : 'primary'" @click="toggleImageRecording">
+              <el-icon>
+                <component :is="isImageRecording ? VideoPause : Edit"/>
+              </el-icon>
+            </el-button>
+          </template>
+        </el-input>
+        <div class="form-hint">点击编辑按钮来自定义打开图片剪切板窗口的快捷键</div>
+      </el-form-item>
+    </el-card>
 
-    <el-form-item label="打开截图窗口快捷键">
-      <el-input
-          :class="{ recording: isScreenshotRecording }"
-          :model-value="screenshotDisplayValue"
-          placeholder="例如: Ctrl+Shift+A"
-          readonly
-      >
-        <template #append>
-          <el-button :type="isScreenshotRecording ? 'danger' : 'primary'" @click="toggleScreenshotRecording">
-            <el-icon>
-              <component :is="isScreenshotRecording ? VideoPause : Edit"/>
-            </el-icon>
-          </el-button>
-        </template>
-      </el-input>
-      <div class="form-hint">点击编辑按钮来自定义打开截图窗口的快捷键</div>
-    </el-form-item>
-
-    <el-divider>数据清理</el-divider>
-
-    <el-form-item label="文字记录">
-      <el-button type="warning" @click="clearTextHistory('unclassified_unpinned')">清除未分类未置顶</el-button>
-      <el-button type="danger" @click="clearTextHistory('all')">清除全部</el-button>
-    </el-form-item>
-    <el-form-item label="图片记录">
-      <el-button type="warning" @click="clearImageHistory('untagged_unclassified_unpinned')">清除未分类未置顶无标签
-      </el-button>
-      <el-button type="danger" @click="clearImageHistory('all')">清除全部</el-button>
-    </el-form-item>
-    <el-form-item label="导入图片">
-      <el-button :loading="importingImages" type="primary" @click="importImageFiles">导入图片</el-button>
-      <el-button :loading="importingImages" type="primary" @click="importImageFolders">导入文件夹</el-button>
-    </el-form-item>
-    <el-form-item v-if="importingImages || importTotal > 0">
-      <div class="metrics-card">
-        <div class="metrics-line">导入进度 {{ importProcessed }} / {{ importTotal }}</div>
-        <div class="metrics-line">成功 {{ importImported }}，失败 {{ importFailed }}</div>
-        <el-progress :percentage="importProgressPercent" :stroke-width="12" status="success"/>
-      </div>
-    </el-form-item>
-    <div class="form-hint">“清除全部”会删除对应类型的全部历史记录，请谨慎操作。</div>
-
-    <el-divider>图片存储占用</el-divider>
-
-    <el-form-item>
-      <el-button size="small" @click="refreshImageStorageMetrics">刷新占用</el-button>
-    </el-form-item>
-    <el-form-item>
-      <div class="metrics-card">
-        <div class="metrics-line">内存缓存 {{ formatBytes(imageStorageMetrics.memory_bytes) }} /
-          {{ formatBytes(imageStorageMetrics.memory_budget_bytes) }}
+    <el-card class="setting-section-card" shadow="never">
+      <template #header>
+        <div class="section-title">数据管理</div>
+      </template>
+      <el-form-item label="文字记录">
+        <el-button class="action-button" plain type="primary" @click="clearTextHistory('unclassified_unpinned')">清除未分类未置顶</el-button>
+        <el-button class="action-button" plain type="danger" @click="clearTextHistory('all')">清除全部</el-button>
+      </el-form-item>
+      <el-form-item label="图片记录">
+        <el-button class="action-button" plain type="primary" @click="clearImageHistory('untagged_unclassified_unpinned')">清除未分类未置顶无标签
+        </el-button>
+        <el-button class="action-button" plain type="danger" @click="clearImageHistory('all')">清除全部</el-button>
+      </el-form-item>
+      <el-form-item label="导入图片">
+        <el-button :loading="importingImages" class="action-button" type="primary" @click="importImageFiles">导入图片</el-button>
+        <el-button :loading="importingImages" class="action-button" plain type="primary" @click="importImageFolders">导入文件夹</el-button>
+      </el-form-item>
+      <el-form-item v-if="importingImages || importTotal > 0">
+        <div class="metrics-card">
+          <div class="metrics-line">导入进度 {{ importProcessed }} / {{ importTotal }}</div>
+          <div class="metrics-line">成功 {{ importImported }}，失败 {{ importFailed }}</div>
+          <el-progress :percentage="importProgressPercent" :stroke-width="12" status="success"/>
         </div>
-        <div class="metrics-line">磁盘占用 {{ formatBytes(imageStorageMetrics.disk_bytes) }} /
-          {{ formatBytes(imageStorageMetrics.disk_limit_bytes) }}
-        </div>
-        <div class="metrics-line">图片条目 {{ Number(imageStorageMetrics.item_count || 0) }}（置顶
-          {{ Number(imageStorageMetrics.pinned_count || 0) }}）
-        </div>
-      </div>
-    </el-form-item>
+      </el-form-item>
+      <div class="form-hint">“清除全部”会删除对应类型的全部历史记录，请谨慎操作。</div>
+    </el-card>
 
+    <el-card class="setting-section-card" shadow="never">
+      <template #header>
+        <div class="section-title">存储占用</div>
+      </template>
+      <el-form-item>
+        <el-button size="small" @click="refreshImageStorageMetrics">刷新占用</el-button>
+      </el-form-item>
+      <el-form-item>
+        <div class="metrics-card">
+          <div class="metrics-line">内存缓存 {{ formatBytes(imageStorageMetrics.memory_bytes) }} /
+            {{ formatBytes(imageStorageMetrics.memory_budget_bytes) }}
+          </div>
+          <div class="metrics-line">磁盘占用 {{ formatBytes(imageStorageMetrics.disk_bytes) }} /
+            {{ formatBytes(imageStorageMetrics.disk_limit_bytes) }}
+          </div>
+          <div class="metrics-line">图片条目 {{ Number(imageStorageMetrics.item_count || 0) }}（置顶
+            {{ Number(imageStorageMetrics.pinned_count || 0) }}）
+          </div>
+        </div>
+      </el-form-item>
+    </el-card>
   </el-form>
 </template>
 
@@ -158,11 +155,6 @@ const {
   currentDisplayValue: imageDisplayValue,
   toggleRecording: toggleImageRecording
 } = useShortcutRecorder(props.form, 'imageToggleShortcut')
-const {
-  isRecording: isScreenshotRecording,
-  currentDisplayValue: screenshotDisplayValue,
-  toggleRecording: toggleScreenshotRecording
-} = useShortcutRecorder(props.form, 'screenshotToggleShortcut')
 
 const imageStorageMetrics = ref({})
 let metricsTimer = null
@@ -325,6 +317,29 @@ onUnmounted(() => {
   margin-top: 4px;
 }
 
+.setting-section-card + .setting-section-card {
+  margin-top: 16px;
+}
+
+.compact-grid-card :deep(.el-card__body) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  column-gap: 16px;
+}
+
+.compact-grid-card :deep(.el-form-item) {
+  margin-bottom: 12px;
+}
+
+.action-button {
+  min-width: 120px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .recording :deep(.el-input__inner) {
   color: #f56c6c !important;
 }
@@ -351,5 +366,11 @@ onUnmounted(() => {
   margin-top: 8px;
   font-size: 16px;
   letter-spacing: 1px;
+}
+
+@media (max-width: 900px) {
+  .compact-grid-card :deep(.el-card__body) {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

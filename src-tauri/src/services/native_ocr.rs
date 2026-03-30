@@ -28,7 +28,7 @@ pub struct NativeOcrResult {
 }
 
 #[cfg(target_os = "windows")]
-pub fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, String> {
+pub async fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, String> {
     use base64::Engine;
     use image::imageops::FilterType;
     use image::{DynamicImage, ImageFormat};
@@ -64,7 +64,7 @@ pub fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, String>
         Ok(out)
     }
 
-    fn run_windows_ocr(
+    async fn run_windows_ocr(
         png_bytes: &[u8],
         language_tag: Option<&str>,
     ) -> Result<NativeOcrResult, String> {
@@ -78,12 +78,12 @@ pub fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, String>
         writer
             .StoreAsync()
             .map_err(|e| format!("OCR StoreAsync失败: {}", e))?
-            .get()
+            .await
             .map_err(|e| format!("OCR StoreAsync执行失败: {}", e))?;
         writer
             .FlushAsync()
             .map_err(|e| format!("OCR FlushAsync失败: {}", e))?
-            .get()
+            .await
             .map_err(|e| format!("OCR FlushAsync执行失败: {}", e))?;
         stream
             .Seek(0)
@@ -91,12 +91,12 @@ pub fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, String>
 
         let decoder = BitmapDecoder::CreateAsync(&stream)
             .map_err(|e| format!("OCR 创建BitmapDecoder失败: {}", e))?
-            .get()
+            .await
             .map_err(|e| format!("OCR BitmapDecoder执行失败: {}", e))?;
         let software_bitmap = decoder
             .GetSoftwareBitmapAsync()
             .map_err(|e| format!("OCR 获取SoftwareBitmap失败: {}", e))?
-            .get()
+            .await
             .map_err(|e| format!("OCR 获取SoftwareBitmap执行失败: {}", e))?;
 
         let engine = if let Some(tag) = language_tag {
@@ -113,7 +113,7 @@ pub fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, String>
         let ocr_result = engine
             .RecognizeAsync(&software_bitmap)
             .map_err(|e| format!("OCR 识别任务创建失败: {}", e))?
-            .get()
+            .await
             .map_err(|e| format!("OCR 识别执行失败: {}", e))?;
 
         let lines = ocr_result
@@ -218,7 +218,7 @@ pub fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, String>
     }
 
     for (bytes, lang) in attempts {
-        match run_windows_ocr(bytes, lang) {
+        match run_windows_ocr(bytes, lang).await {
             Ok(result) => {
                 let current_score = score(&result);
                 if current_score > best_score {
@@ -239,6 +239,6 @@ pub fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, String>
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn recognize_png_base64(_png_base64: &str) -> Result<NativeOcrResult, String> {
+pub async fn recognize_png_base64(_png_base64: &str) -> Result<NativeOcrResult, String> {
     Err("当前平台暂不支持本地原生OCR".to_string())
 }

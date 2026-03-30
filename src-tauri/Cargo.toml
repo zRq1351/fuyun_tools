@@ -27,24 +27,21 @@ serde_json = "1"
 log = "0.4.29"
 regex = "1.11.1"
 rdev = "0.5.3"
-async-openai = { version = "0.33.1", features = ["chat-completion"] }
+async-openai = { version = "0.34.0", features = ["chat-completion"] }
 futures-util = "0.3.31"
 base64 = "0.22.1"
 keyring = { version = "3.6.3", features = ["windows-native"] }
-image = { version = "0.25.5", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "sqlite"] }
 lru = "0.16.3"
 parking_lot = "0.12.5"
 bloom = "0.3.2"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
-rayon = "1.8"
-anyhow = "1"
-screenshots = "0.8"
-xcap = "0.0.12"
+screenshots = "0.8.10"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.9", features = ["winuser", "winnt", "minwindef", "windef", "libloaderapi", "winbase", "processthreadsapi", "windowsx", "errhandlingapi", "handleapi", "heapapi", "memoryapi", "psapi", "synchapi", "sysinfoapi", "timezoneapi", "tlhelp32", "winioctl", "wingdi", "winerror", "winnls", "winreg", "winsvc", "setupapi", "ioapiset", "fileapi", "consoleapi", "namedpipeapi", "processenv", "stringapiset", "profileapi", "libloaderapi", "dwmapi", "shellapi"] }
-windows = { version = "0.58.0", features = ["Foundation", "Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams"] }
+windows = { version = "0.62.2", features = ["Foundation", "Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 enigo = { version = "0.6.1", default-features = false }
