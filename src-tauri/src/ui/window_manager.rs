@@ -1,5 +1,5 @@
 use crate::core::app_state::AppState;
-use crate::core::config::CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN;
+use crate::core::config::{CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN, CTRL_KEY};
 use crate::sync::Mutex;
 use std::sync::{Arc, LazyLock};
 use std::thread;
@@ -26,6 +26,38 @@ pub fn cleanup_enigo_instance() {
     let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);
     *enigo_guard = None;
     log::info!("已清理ENIGO实例资源");
+}
+
+fn release_ctrl_key_once(enigo: &mut enigo::Enigo) -> Result<(), String> {
+    use enigo::{Direction, Keyboard};
+    enigo
+        .key(CTRL_KEY, Direction::Release)
+        .map_err(|e| format!("释放 Ctrl 键失败: {}", e))
+}
+
+pub fn force_release_ctrl_key() -> Result<(), String> {
+    use enigo::{Enigo, Settings};
+
+    let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);
+    if enigo_guard.is_none() {
+        *enigo_guard = Some(
+            Enigo::new(&Settings::default()).map_err(|e| format!("初始化输入器失败: {}", e))?,
+        );
+    }
+    let enigo = enigo_guard
+        .as_mut()
+        .ok_or_else(|| "输入器不可用".to_string())?;
+    let mut last_error = None;
+    for _ in 0..2 {
+        match release_ctrl_key_once(enigo) {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                last_error = Some(e);
+                thread::sleep(Duration::from_millis(8));
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| "释放 Ctrl 键失败".to_string()))
 }
 
 /// 显示剪贴板窗口
@@ -453,7 +485,6 @@ pub fn simulate_paste() -> Result<(), String> {
 /// 执行 Ctrl+V 操作，确保 Ctrl 键总是被正确释放
 /// 使用 defer 模式，确保即使发生错误也能释放 Ctrl 键
 fn execute_ctrl_v_with_safety(enigo: &mut enigo::Enigo) -> Result<(), String> {
-    use crate::core::config::CTRL_KEY;
     use enigo::{Direction, Key, Keyboard};
 
     thread::sleep(Duration::from_millis(10));
@@ -463,24 +494,12 @@ fn execute_ctrl_v_with_safety(enigo: &mut enigo::Enigo) -> Result<(), String> {
         .key(CTRL_KEY, Direction::Press)
         .map_err(|e| format!("按下 Ctrl 失败: {}", e))?;
 
-    // 定义释放函数，用于异常处理
-    fn release_ctrl(enigo: &mut enigo::Enigo) {
-        use crate::core::config::CTRL_KEY;
-        use enigo::{Direction, Keyboard};
-
-        if let Err(e) = enigo.key(CTRL_KEY, Direction::Release) {
-            log::error!("释放 Ctrl 键失败: {:?}", e);
-        } else {
-            log::debug!("Ctrl 键已释放");
-        }
-    }
-
     // 按下 V 键（使用 Click，一次性按下释放，避免 V 键卡住）
     thread::sleep(Duration::from_millis(12));
     enigo
         .key(Key::Unicode('v'), Direction::Click)
         .map_err(|e| {
-            release_ctrl(enigo);
+            let _ = release_ctrl_key_once(enigo);
             format!("发送 V 键失败: {}", e)
         })?;
 
@@ -488,7 +507,7 @@ fn execute_ctrl_v_with_safety(enigo: &mut enigo::Enigo) -> Result<(), String> {
     thread::sleep(Duration::from_millis(85));
 
     // 正常释放 Ctrl 键
-    release_ctrl(enigo);
+    release_ctrl_key_once(enigo)?;
 
     log::info!("已发送 Ctrl+V 模拟按键");
     Ok(())

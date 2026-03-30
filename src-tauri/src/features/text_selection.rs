@@ -18,19 +18,17 @@ fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
     }
 
     // 定义释放函数，用于异常处理
-    fn release_ctrl(enigo: &mut Enigo) {
-        if let Err(e) = enigo.key(CTRL_KEY, enigo::Direction::Release) {
-            log::error!("释放 Ctrl 键失败: {:?}", e);
-        } else {
-            log::debug!("Ctrl 键已释放");
-        }
+    fn release_ctrl(enigo: &mut Enigo) -> Result<(), String> {
+        enigo
+            .key(CTRL_KEY, enigo::Direction::Release)
+            .map_err(|e| format!("释放 Ctrl 键失败: {:?}", e))
     }
 
     // 按下 C 键
     match enigo.key(Key::Unicode('c'), enigo::Direction::Click) {
         Ok(_) => {}
         Err(e) => {
-            release_ctrl(enigo);
+            let _ = release_ctrl(enigo);
             return Err(format!("按下 C 键失败: {:?}", e));
         }
     }
@@ -39,7 +37,7 @@ fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
     thread::sleep(Duration::from_millis(20));
 
     // 正常释放 Ctrl 键
-    release_ctrl(enigo);
+    release_ctrl(enigo)?;
 
     log::info!("已发送 Ctrl+C 模拟按键");
     Ok(())
