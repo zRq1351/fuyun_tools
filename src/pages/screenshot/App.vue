@@ -294,6 +294,7 @@ const pickerStyle = computed(() => {
 onMounted(() => {
   window.addEventListener('screenshot-data', handleScreenshotData)
   window.addEventListener('start-region-select', handleStartRegionSelect)
+  window.addEventListener('screenshot-reset', handleScreenshotReset)
   document.addEventListener('keydown', handleKeyDown)
   consumeBootPayload()
 })
@@ -301,12 +302,30 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('screenshot-data', handleScreenshotData)
   window.removeEventListener('start-region-select', handleStartRegionSelect)
+  window.removeEventListener('screenshot-reset', handleScreenshotReset)
   document.removeEventListener('keydown', handleKeyDown)
   if (screenshotFallbackTimer) {
     window.clearTimeout(screenshotFallbackTimer)
     screenshotFallbackTimer = null
   }
 })
+
+function handleScreenshotReset() {
+  screenshotSrc.value = ''
+  screenshotImg.value = null
+  isCaptureReady.value = false
+  highlightedWindow.value = null
+  state.value = 'idle'
+  currentTool.value = 'select'
+  rect.x = 0
+  rect.y = 0
+  rect.width = 0
+  rect.height = 0
+  if (canvas.value) {
+    canvas.value.width = 0
+    canvas.value.height = 0
+  }
+}
 
 function consumeBootPayload() {
   const boot = window.__SCREENSHOT_BOOT__
@@ -457,6 +476,9 @@ async function ensureCaptureReady() {
   if (isCaptureReady.value && screenshotImg.value && canvas.value && canvas.value.width > 0 && canvas.value.height > 0) {
     return true
   }
+  if (!screenshotImg.value && !screenshotSrc.value) {
+    await requestScreenshot()
+  }
   if (!screenshotImg.value && screenshotSrc.value) {
     const img = new Image()
     await new Promise((resolve, reject) => {
@@ -472,7 +494,17 @@ async function ensureCaptureReady() {
   if (screenshotImg.value && canvas.value) {
     initCanvas()
   }
-  return Boolean(screenshotImg.value && canvas.value && canvas.value.width > 0 && canvas.value.height > 0)
+  if (isCaptureReady.value && screenshotImg.value && canvas.value && canvas.value.width > 0 && canvas.value.height > 0) {
+    return true
+  }
+  if (!screenshotImg.value || !canvas.value || canvas.value.width <= 0 || canvas.value.height <= 0) {
+    await requestScreenshot()
+    await nextTick()
+    if (screenshotImg.value && canvas.value) {
+      initCanvas()
+    }
+  }
+  return Boolean(isCaptureReady.value && screenshotImg.value && canvas.value && canvas.value.width > 0 && canvas.value.height > 0)
 }
 
 // 鼠标交互逻辑

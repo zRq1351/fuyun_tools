@@ -33,6 +33,17 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 static NEXT_SCREENSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_PINNED_IMAGE_WINDOW_ID: AtomicU64 = AtomicU64::new(1);
+static SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW: AtomicBool = AtomicBool::new(false);
+
+fn bind_screenshot_window_lifecycle(window: &tauri::WebviewWindow) {
+    window.on_window_event(move |event| match event {
+        tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+            crate::features::screenshot::capture::set_screenshot_in_progress(false);
+        }
+        _ => {}
+    });
+}
 
 #[derive(serde::Serialize)]
 pub struct HistoryResponse {
@@ -2436,29 +2447,28 @@ pub async fn pin_screenshot_on_screen(
     request: PinScreenshotRequest,
     app: AppHandle,
 ) -> Result<serde_json::Value, String> {
-    let label = "pinned_image_window".to_string();
+    let label = format!(
+        "pinned_image_{}",
+        NEXT_PINNED_IMAGE_WINDOW_ID.fetch_add(1, Ordering::Relaxed)
+    );
     let x = request.x.unwrap_or(100.0).max(0.0);
     let y = request.y.unwrap_or(100.0).max(0.0);
     let width = request.width.unwrap_or(360.0).max(1.0);
     let height = request.height.unwrap_or(240.0).max(1.0);
-    let window = if let Some(existing) = app.get_webview_window(&label) {
-        existing
-    } else {
-        tauri::WebviewWindowBuilder::new(
-            &app,
-            label.clone(),
-            tauri::WebviewUrl::App("pinned_image.html".into()),
-        )
-            .title("固定截图")
-            .visible(false)
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .resizable(true)
-            .build()
-            .map_err(|e| format!("创建固定图片窗口失败: {}", e))?
-    };
+    let window = tauri::WebviewWindowBuilder::new(
+        &app,
+        label.clone(),
+        tauri::WebviewUrl::App("pinned_image.html".into()),
+    )
+        .title("固定截图")
+        .visible(false)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(true)
+        .build()
+        .map_err(|e| format!("创建固定图片窗口失败: {}", e))?;
 
     let window_clone = window.clone();
     let payload = serde_json::json!({
@@ -2484,7 +2494,7 @@ pub async fn pin_screenshot_on_screen(
         }
     });
 
-    Ok(serde_json::json!({ "success": true }))
+    Ok(serde_json::json!({ "success": true, "label": label }))
 }
 
 #[tauri::command]
@@ -2582,6 +2592,12 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
     let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
 
     if let Some(window) = app.get_webview_window("screenshot") {
+        if SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            bind_screenshot_window_lifecycle(&window);
+        }
         let payload = serde_json::json!({
             "png_base64": png_base64,
             "width": width,
@@ -2604,13 +2620,20 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
             let _ = window.set_fullscreen(true);
             let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
             let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: 0, y: 0 }));
-            let _ = window.show();
-            let _ = window.set_focus();
+            let mut injected = false;
             for _ in 0..20 {
                 if window.eval(&script).is_ok() {
+                    injected = true;
                     break;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            if injected {
+                let _ = window.show();
+                let _ = window.set_focus();
+            } else {
+                let _ = window.hide();
+                crate::features::screenshot::capture::set_screenshot_in_progress(false);
             }
         });
     } else {
@@ -2653,6 +2676,7 @@ window.__SCREENSHOT_BOOT__.pendingStartSessionId = {};",
                 capture::set_screenshot_in_progress(false);
                 format!("创建截图窗口失败: {}", e)
             })?;
+        bind_screenshot_window_lifecycle(&window);
         let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
         let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: origin_x, y: origin_y }));
     }
@@ -2687,21 +2711,19 @@ pub async fn get_window_list() -> Result<serde_json::Value, String> {
 #[tauri::command]
 pub async fn close_screenshot_window(app: AppHandle) -> Result<(), String> {
     log::info!("关闭截图窗口");
-    crate::features::screenshot::capture::set_screenshot_in_progress(false);
-
     if let Some(window) = app.get_webview_window("screenshot") {
         // 解除置顶和鼠标拦截，防止在Windows上残留透明幽灵窗口导致桌面无法点击
         let _ = window.set_always_on_top(false);
         let _ = window.set_ignore_cursor_events(true);
-
-        // 短暂延迟后隐藏和关闭
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            let _ = window.hide();
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            let _ = window.close();
-        });
+        let _ = window.eval(
+            "window.dispatchEvent(new CustomEvent('screenshot-reset'));\
+window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || { pendingData: null, pendingStartSessionId: 0 };\
+window.__SCREENSHOT_BOOT__.pendingData = null;\
+window.__SCREENSHOT_BOOT__.pendingStartSessionId = 0;",
+        );
+        let _ = window.hide();
     }
+    crate::features::screenshot::capture::set_screenshot_in_progress(false);
 
     Ok(())
 }
