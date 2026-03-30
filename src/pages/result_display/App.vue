@@ -1,5 +1,26 @@
 <template>
-  <div class="container">
+  <div :class="['container', `theme-${themeMode}`]" @mousedown.left="handleContainerMouseDown">
+    <div class="window-titlebar">
+      <div class="window-title">{{ mode === 'translation' ? '翻译结果' : '解释结果' }}</div>
+      <div class="window-controls">
+        <button class="window-btn" @click.stop="minimizeWindow" @mousedown.stop>
+          <el-icon>
+            <Minus/>
+          </el-icon>
+        </button>
+        <button class="window-btn" @click.stop="toggleWindowMaximize" @mousedown.stop>
+          <el-icon>
+            <CopyDocument v-if="isWindowMaximized"/>
+            <FullScreen v-else/>
+          </el-icon>
+        </button>
+        <button class="window-btn window-btn-close" @click.stop="closeWindow" @mousedown.stop>
+          <el-icon>
+            <CloseBold/>
+          </el-icon>
+        </button>
+      </div>
+    </div>
     <div class="header">
       <div v-if="mode === 'explanation'" class="control-group">
         <span class="label">解释语言：</span>
@@ -105,7 +126,8 @@
 import {computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue'
 import {marked} from 'marked'
 import {listen} from '@tauri-apps/api/event'
-import {DocumentCopy, Hide, Position, View} from '@element-plus/icons-vue'
+import {getCurrentWindow} from '@tauri-apps/api/window'
+import {CloseBold, CopyDocument, DocumentCopy, FullScreen, Hide, Minus, Position, View} from '@element-plus/icons-vue'
 import {ElMessage} from 'element-plus'
 import {AIService, ClipboardService} from '../../services/ipc'
 import {handleAppError} from '../../utils/errorHandler'
@@ -114,6 +136,7 @@ const mode = ref('translation')
 const originalText = ref('')
 const resultText = ref('')
 const showOriginal = ref(false)
+const themeMode = ref('dark')
 
 const explanationLanguage = ref('中文')
 const targetLanguage = ref('简体中文')
@@ -123,9 +146,90 @@ const shouldAutoFollow = ref(true)
 const originalRef = ref(null)
 const isWaitingResult = ref(false)
 const loadingStartedAt = ref(0)
+const isWindowMaximized = ref(false)
 let unlistenResultClean = null
 let unlistenResultUpdate = null
 let initDataHandler = null
+let onStorageThemeChange = null
+let unlistenWindowResize = null
+const currentWindow = getCurrentWindow()
+
+const getCurrentTheme = () => {
+  const saved = localStorage.getItem('settings-theme')
+  if (saved === 'dark' || saved === 'light') {
+    return saved
+  }
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+const applyTheme = (value) => {
+  const next = value === 'light' ? 'light' : 'dark'
+  themeMode.value = next
+  document.documentElement.classList.toggle('theme-light', next === 'light')
+  document.documentElement.classList.toggle('theme-dark', next === 'dark')
+  document.body.classList.toggle('theme-light', next === 'light')
+  document.body.classList.toggle('theme-dark', next === 'dark')
+}
+
+const syncWindowMaximized = async () => {
+  try {
+    const [isMaximized, isFullscreen] = await Promise.all([
+      currentWindow.isMaximized(),
+      currentWindow.isFullscreen()
+    ])
+    isWindowMaximized.value = isMaximized || isFullscreen
+  } catch (_) {
+    isWindowMaximized.value = false
+  }
+}
+
+const startWindowDrag = async () => {
+  try {
+    await currentWindow.startDragging()
+  } catch (_) {
+  }
+}
+
+const handleContainerMouseDown = (event) => {
+  const rawTarget = event.target
+  const target = rawTarget instanceof Element
+      ? rawTarget
+      : (rawTarget instanceof Node ? rawTarget.parentElement : null)
+  if (!target) return
+  if (target.closest('.original-content') || target.closest('.result-content')) return
+  if (target.closest('button, input, textarea, select, option, a, [role="button"], [contenteditable="true"]')) return
+  if (target.closest('.el-select, .el-input, .el-textarea, .el-button, .icon-btn')) return
+  startWindowDrag()
+}
+
+const minimizeWindow = async () => {
+  try {
+    await currentWindow.minimize()
+  } catch (error) {
+    handleAppError(error, '最小化窗口失败')
+  }
+}
+
+const toggleWindowMaximize = async () => {
+  try {
+    const fullscreen = await currentWindow.isFullscreen()
+    if (fullscreen) {
+      await currentWindow.setFullscreen(false)
+    } else {
+      await currentWindow.setFullscreen(true)
+    }
+    isWindowMaximized.value = !fullscreen
+  } catch (error) {
+    handleAppError(error, '切换窗口放大状态失败')
+  }
+}
+
+const closeWindow = async () => {
+  try {
+    await currentWindow.close()
+  } catch (_) {
+  }
+}
 
 const escapeHtml = (value = '') =>
     value
@@ -201,6 +305,18 @@ const originalHtml = computed(() => renderMarkdownSafely(originalText.value))
 const resultHtml = computed(() => renderMarkdownSafely(resultText.value))
 
 onMounted(async () => {
+  applyTheme(getCurrentTheme())
+  onStorageThemeChange = (event) => {
+    if (!event || event.key === 'settings-theme') {
+      applyTheme(getCurrentTheme())
+    }
+  }
+  window.addEventListener('storage', onStorageThemeChange)
+  await syncWindowMaximized()
+  unlistenWindowResize = await currentWindow.onResized(async () => {
+    await syncWindowMaximized()
+  })
+
   initDataHandler = () => {
     const initialData = window.__INITIAL_DATA__
     if (initialData) {
@@ -260,6 +376,14 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (unlistenWindowResize) {
+    unlistenWindowResize()
+    unlistenWindowResize = null
+  }
+  if (onStorageThemeChange) {
+    window.removeEventListener('storage', onStorageThemeChange)
+    onStorageThemeChange = null
+  }
   if (initDataHandler) {
     window.removeEventListener('init-data', initDataHandler)
     initDataHandler = null
@@ -365,13 +489,18 @@ body {
 }
 
 body {
-  padding: 14px;
+  padding: 0;
   background: radial-gradient(120% 130% at 0% 0%, #20293a 0%, #161c28 46%, #111622 100%);
   color: #f2f6ff;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   overflow: hidden;
   height: 100vh;
   box-sizing: border-box;
+}
+
+body.theme-light {
+  background: radial-gradient(120% 130% at 0% 0%, #f2f6ff 0%, #eef3ff 46%, #e8eefb 100%);
+  color: #1f2a3d;
 }
 
 #app {
@@ -386,10 +515,185 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
-  gap: 12px;
+  gap: 10px;
   min-height: 0;
   border-radius: 12px;
-  padding: 2px;
+  padding: 14px;
+  box-sizing: border-box;
+}
+
+.window-titlebar {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 12px;
+  border-radius: 10px;
+  user-select: none;
+  background: linear-gradient(145deg, rgba(31, 39, 56, 0.9), rgba(23, 30, 45, 0.9));
+  border: 1px solid rgba(151, 174, 224, 0.18);
+}
+
+.window-title {
+  font-size: 13px;
+  color: #dbe7ff;
+  font-weight: 600;
+}
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.window-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: #c9d8f6;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.window-btn:hover {
+  color: #fff;
+  background: rgba(140, 168, 220, 0.2);
+}
+
+.window-btn-close:hover {
+  background: rgba(245, 108, 108, 0.9);
+  color: #fff;
+}
+
+.container.theme-light .header {
+  background: linear-gradient(145deg, rgba(251, 253, 255, 0.96), rgba(244, 248, 255, 0.95));
+  border: 1px solid rgba(154, 172, 206, 0.45);
+  box-shadow: 0 8px 22px rgba(120, 140, 180, 0.14);
+}
+
+.container.theme-light .window-titlebar {
+  background: linear-gradient(145deg, rgba(250, 253, 255, 0.96), rgba(242, 248, 255, 0.95));
+  border-color: rgba(154, 172, 206, 0.45);
+}
+
+.container.theme-light .window-title {
+  color: #2a4163;
+}
+
+.container.theme-light .window-btn {
+  color: #4c6084;
+}
+
+.container.theme-light .window-btn:hover {
+  background: rgba(122, 155, 220, 0.16);
+  color: #1d3158;
+}
+
+.container.theme-light .window-btn-close:hover {
+  background: rgba(245, 108, 108, 0.9);
+  color: #fff;
+}
+
+.container.theme-light .label {
+  color: #314464;
+}
+
+.container.theme-light .arrow {
+  color: #63789d;
+}
+
+.container.theme-light .auto-source-tag {
+  color: #325186;
+  background: rgba(64, 158, 255, 0.14);
+  border-color: rgba(64, 158, 255, 0.32);
+}
+
+.container.theme-light .right-controls {
+  border-left: 1px solid rgba(134, 156, 192, 0.35);
+}
+
+.container.theme-light .icon-btn {
+  color: #4c6084;
+}
+
+.container.theme-light .icon-btn:hover {
+  background: rgba(122, 155, 220, 0.16);
+  color: #1d3158;
+}
+
+.container.theme-light .writeback-btn:hover {
+  color: #2b8a3e;
+  background: rgba(103, 194, 58, 0.16);
+}
+
+.container.theme-light .content {
+  background: linear-gradient(150deg, rgba(249, 252, 255, 0.97), rgba(241, 247, 255, 0.96));
+  border: 1px solid rgba(162, 182, 218, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  color: #243957;
+}
+
+.container.theme-light .original-content {
+  background: linear-gradient(150deg, rgba(236, 249, 241, 0.95), rgba(226, 243, 233, 0.95));
+  border-left-color: #4cb77b;
+  color: #355746;
+}
+
+.container.theme-light .result-content {
+  border-left-color: #4d97ea;
+}
+
+.container.theme-light .loading-wrap {
+  color: #3d557d;
+  background: linear-gradient(160deg, rgba(240, 246, 255, 0.92), rgba(234, 241, 253, 0.86));
+}
+
+.container.theme-light .loading-dot {
+  background: #6599e8;
+}
+
+.container.theme-light .content::-webkit-scrollbar-track {
+  background: rgba(208, 220, 243, 0.72);
+}
+
+.container.theme-light .content::-webkit-scrollbar-thumb {
+  background: rgba(112, 141, 193, 0.52);
+}
+
+.container.theme-light .content::-webkit-scrollbar-thumb:hover {
+  background: rgba(97, 128, 183, 0.72);
+}
+
+.container.theme-light :deep(.content h1),
+.container.theme-light :deep(.content h2),
+.container.theme-light :deep(.content h3) {
+  color: #1f2f49;
+}
+
+.container.theme-light :deep(.content p) {
+  color: #2e4467;
+}
+
+.container.theme-light :deep(.content code) {
+  background-color: rgba(96, 127, 188, 0.16);
+}
+
+.container.theme-light :deep(.content pre) {
+  background-color: #f0f4fc;
+}
+
+.container.theme-light :deep(.content a) {
+  color: #2f73cf;
+}
+
+.container.theme-light :deep(.content blockquote) {
+  border-left-color: #8ea6d1;
+  color: #56709a;
 }
 
 .header {

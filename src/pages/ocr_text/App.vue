@@ -1,5 +1,5 @@
 <template>
-  <div class="ocr-text-root" @dblclick.left.stop.prevent="closeWindow">
+  <div :class="['ocr-text-root', `theme-${themeMode}`]" @dblclick.left.stop.prevent="closeWindow">
     <div class="drag-handle-wrap">
       <div class="drag-handle" @mousedown.left.stop.prevent="startDrag"></div>
     </div>
@@ -16,8 +16,27 @@ import {onMounted, onUnmounted, ref} from 'vue'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 
 const text = ref('')
+const themeMode = ref('dark')
 let onOcrTextData = null
+let onStorageThemeChange = null
 let lastDragStartAt = 0
+
+function getCurrentTheme() {
+  const saved = localStorage.getItem('settings-theme')
+  if (saved === 'dark' || saved === 'light') {
+    return saved
+  }
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function applyTheme(value) {
+  const next = value === 'light' ? 'light' : 'dark'
+  themeMode.value = next
+  document.documentElement.classList.toggle('theme-light', next === 'light')
+  document.documentElement.classList.toggle('theme-dark', next === 'dark')
+  document.body.classList.toggle('theme-light', next === 'light')
+  document.body.classList.toggle('theme-dark', next === 'dark')
+}
 
 function applyPayload(payload) {
   text.value = String(payload?.text || '').trim()
@@ -43,6 +62,14 @@ async function startDrag() {
 }
 
 onMounted(() => {
+  applyTheme(getCurrentTheme())
+  onStorageThemeChange = (event) => {
+    if (!event || event.key === 'settings-theme') {
+      applyTheme(getCurrentTheme())
+    }
+  }
+  window.addEventListener('storage', onStorageThemeChange)
+
   onOcrTextData = (event) => {
     applyPayload(event?.detail)
   }
@@ -53,6 +80,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (onStorageThemeChange) {
+    window.removeEventListener('storage', onStorageThemeChange)
+    onStorageThemeChange = null
+  }
   if (onOcrTextData) {
     window.removeEventListener('ocr-text-data', onOcrTextData)
     onOcrTextData = null
@@ -112,5 +143,18 @@ onUnmounted(() => {
   width: 0;
   height: 0;
   display: none;
+}
+
+.ocr-text-root.theme-light {
+  background: rgba(247, 251, 255, 0.98);
+  color: #294268;
+}
+
+.ocr-text-root.theme-light .drag-handle {
+  background: rgba(64, 99, 158, 0.3);
+}
+
+.ocr-text-root.theme-light .ocr-editor {
+  color: #2d466d;
 }
 </style>

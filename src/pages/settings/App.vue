@@ -2,26 +2,9 @@
   <el-config-provider :locale="zhCn">
     <div :class="{ dark: isDark }" class="settings-container">
       <div class="header">
-        <el-radio-group v-model="activeTab" size="large">
-          <el-radio-button label="clipboard">
-            <el-icon>
-              <DocumentCopy/>
-            </el-icon>
-            剪切板设置
-          </el-radio-button>
-          <el-radio-button label="ai">
-            <el-icon>
-              <Cpu/>
-            </el-icon>
-            AI设置
-          </el-radio-button>
-          <el-radio-button label="about">
-            <el-icon>
-              <InfoFilled/>
-            </el-icon>
-            关于
-          </el-radio-button>
-        </el-radio-group>
+        <div class="header-title">
+          <h1>设置中心</h1>
+        </div>
         <div class="header-actions">
           <span :class="['autosave-status', `autosave-${autoSaveState}`]">{{ autoSaveText }}</span>
           <el-button @click="toggleTheme">
@@ -33,29 +16,51 @@
         </div>
       </div>
 
-      <div class="content">
-        <el-alert
-            v-if="shortcutConflictMessage"
-            :closable="false"
-            :title="shortcutConflictMessage"
-            show-icon
-            type="error"
-        />
-        <div v-show="activeTab === 'clipboard'">
-          <ClipboardSettings :form="form"/>
-        </div>
-
-        <div v-show="activeTab === 'ai'">
-          <AISettings ref="aiSettingsRef" :form="form"/>
-        </div>
-
-        <div v-show="activeTab === 'about'">
-          <AboutSettings
-              :current-version="currentVersion"
-              :image-toggle-shortcut="form.imageToggleShortcut"
-              :screenshot-toggle-shortcut="form.screenshotToggleShortcut"
-              :toggle-shortcut="form.toggleShortcut"
+      <div class="settings-layout">
+        <aside class="settings-nav">
+          <button
+              v-for="section in sections"
+              :key="section.key"
+              :class="['section-nav-item', {active: activeTab === section.key}]"
+              @click="activeTab = section.key"
+          >
+            <el-icon>
+              <component :is="section.icon"/>
+            </el-icon>
+            <span>{{ section.label }}</span>
+          </button>
+        </aside>
+        <div class="content">
+          <el-alert
+              v-if="shortcutConflictMessage"
+              :closable="false"
+              :title="shortcutConflictMessage"
+              show-icon
+              type="error"
           />
+          <div class="content-header">
+            <h2>{{ currentSection.label }}</h2>
+            <p>{{ currentSection.description }}</p>
+          </div>
+          <div v-show="activeTab === 'clipboard'">
+            <ClipboardSettings :form="form"/>
+          </div>
+          <div v-show="activeTab === 'screenshot'">
+            <ScreenshotSettings :form="form"/>
+          </div>
+
+          <div v-show="activeTab === 'ai'">
+            <AISettings ref="aiSettingsRef" :form="form"/>
+          </div>
+
+          <div v-show="activeTab === 'about'">
+            <AboutSettings
+                :current-version="currentVersion"
+                :image-toggle-shortcut="form.imageToggleShortcut"
+                :screenshot-toggle-shortcut="form.screenshotToggleShortcut"
+                :toggle-shortcut="form.toggleShortcut"
+            />
+          </div>
         </div>
       </div>
 
@@ -77,11 +82,12 @@
 import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from 'vue'
 import {ElMessage} from 'element-plus'
 import zhCn from 'element-plus/dist/locale/zh-cn'
-import {Cpu, DocumentCopy, InfoFilled, Moon, Sunny} from '@element-plus/icons-vue'
+import {Camera, Cpu, DocumentCopy, InfoFilled, Moon, Sunny} from '@element-plus/icons-vue'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import {listen} from '@tauri-apps/api/event'
 import {AISettingsService} from '../../services/ipc'
 import ClipboardSettings from './components/ClipboardSettings.vue'
+import ScreenshotSettings from './components/ScreenshotSettings.vue'
 import AISettings from './components/AISettings.vue'
 import AboutSettings from './components/AboutSettings.vue'
 
@@ -101,6 +107,32 @@ const autoSaveState = ref('idle')
 const initialFormState = ref(null)
 // 阻止初始化后的第一次 watch 触发
 const skipNextWatch = ref(false)
+const sections = [
+  {
+    key: 'clipboard',
+    label: '剪贴板',
+    description: '管理历史记录、快捷键、导入与空间占用',
+    icon: DocumentCopy
+  },
+  {
+    key: 'screenshot',
+    label: '截图',
+    description: '管理截图功能相关的快捷键设置',
+    icon: Camera
+  },
+  {
+    key: 'ai',
+    label: 'AI',
+    description: '配置服务提供商、模型参数与提示词模板',
+    icon: Cpu
+  },
+  {
+    key: 'about',
+    label: '关于',
+    description: '查看版本信息与使用说明',
+    icon: InfoFilled
+  }
+]
 
 const form = reactive({
   textMaxItems: 100,
@@ -140,6 +172,8 @@ const autoSaveText = computed(() => {
   if (autoSaveState.value === 'error') return '自动保存失败'
   return '已同步'
 })
+
+const currentSection = computed(() => sections.find((section) => section.key === activeTab.value) || sections[0])
 
 // 保存初始状态快照
 const saveInitialFormState = () => {
@@ -433,18 +467,35 @@ body {
 
 .settings-container {
   padding: 20px;
-  max-width: 800px;
+  max-width: 980px;
   margin: 0 auto;
 }
 
 .header {
+  position: relative;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  min-height: 40px;
+  padding-right: 220px;
+}
+
+.header-title h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.header-title p {
+  margin: 6px 0 0;
+  color: #909399;
+  font-size: 13px;
 }
 
 .header-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -474,11 +525,66 @@ body {
   color: #f56c6c;
 }
 
+.settings-layout {
+  display: flex;
+  gap: 16px;
+}
+
+.settings-nav {
+  width: 180px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.section-nav-item {
+  width: 100%;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background: #fff;
+  color: #606266;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 14px;
+}
+
+.section-nav-item:hover {
+  border-color: var(--el-color-primary-light-5);
+  color: var(--el-color-primary);
+}
+
+.section-nav-item.active {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
 .content {
+  flex: 1;
   background: #fff;
   padding: 20px;
   border-radius: 8px;
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+}
+
+.content-header {
+  margin-bottom: 18px;
+}
+
+.content-header h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.content-header p {
+  margin: 6px 0 0;
+  color: #909399;
+  font-size: 13px;
 }
 
 .dark .content {
@@ -486,10 +592,31 @@ body {
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.3);
 }
 
+.dark .section-nav-item {
+  background: #1d1e1f;
+  border-color: #4c4d4f;
+  color: #cfd3dc;
+}
+
+.dark .section-nav-item.active {
+  border-color: var(--el-color-primary);
+  background: rgba(64, 158, 255, 0.15);
+}
+
 .footer-links {
   margin-top: 40px;
   text-align: center;
   color: #909399;
   font-size: 14px;
+}
+
+@media (max-width: 900px) {
+  .settings-nav {
+    width: 140px;
+  }
+
+  .section-nav-item {
+    padding: 8px 10px;
+  }
 }
 </style>

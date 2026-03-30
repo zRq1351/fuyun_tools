@@ -1,92 +1,102 @@
 <template>
   <el-form :model="form" label-position="top">
-    <el-form-item label="AI服务提供商">
-      <el-select v-model="form.aiProvider" class="provider-select" placeholder="请选择提供商"
-                 @change="handleProviderChange">
-        <el-option
-            v-for="provider in providers"
-            :key="provider.value"
-            :label="provider.label"
-            :value="provider.value"
-        >
-          <div class="provider-option-row">
-            <span class="provider-option-label">{{ provider.label }}</span>
-            <el-button
-                v-if="isRemovableProvider(provider.value)"
-                class="provider-option-delete"
-                link
-                type="danger"
-                @click.stop.prevent="removeProvider(provider.value)"
-            >
+    <el-card class="setting-section-card" shadow="never">
+      <template #header>
+        <div class="section-title">服务连接</div>
+      </template>
+      <el-form-item label="AI服务提供商">
+        <el-select v-model="form.aiProvider" class="provider-select" placeholder="请选择提供商"
+                   @change="handleProviderChange">
+          <el-option
+              v-for="provider in providers"
+              :key="provider.value"
+              :label="provider.label"
+              :value="provider.value"
+          >
+            <div class="provider-option-row">
+              <span class="provider-option-label">{{ provider.label }}</span>
+              <el-button
+                  v-if="isRemovableProvider(provider.value)"
+                  class="provider-option-delete"
+                  link
+                  type="danger"
+                  @click.stop.prevent="removeProvider(provider.value)"
+              >
+                <el-icon>
+                  <CloseBold/>
+                </el-icon>
+              </el-button>
+            </div>
+          </el-option>
+          <el-option label="自定义" value="custom"/>
+        </el-select>
+      </el-form-item>
+
+      <el-form-item v-if="form.aiProvider === 'custom'" label="自定义提供商名称">
+        <el-input v-model="form.customProviderName" placeholder="请输入自定义提供商名称，如：OpenAI"/>
+      </el-form-item>
+
+      <el-form-item label="AI服务地址">
+        <el-input v-model="form.apiUrl" placeholder="例如: https://api.openai.com/v1">
+          <template #append>
+            <el-button :loading="testingConnection" @click="testConnection">
               <el-icon>
-                <CloseBold/>
+                <Connection/>
               </el-icon>
             </el-button>
-          </div>
-        </el-option>
-        <el-option label="自定义" value="custom"/>
-      </el-select>
-    </el-form-item>
+          </template>
+        </el-input>
+      </el-form-item>
 
-    <el-form-item v-if="form.aiProvider === 'custom'" label="自定义提供商名称">
-      <el-input v-model="form.customProviderName" placeholder="请输入自定义提供商名称，如：OpenAI"/>
-    </el-form-item>
+      <el-form-item label="AI模型名称">
+        <el-input v-model="form.modelName" placeholder="例如: gpt-3.5-turbo"/>
+      </el-form-item>
 
-    <el-form-item label="AI服务地址">
-      <el-input v-model="form.apiUrl" placeholder="例如: https://api.openai.com/v1">
-        <template #append>
-          <el-button :loading="testingConnection" @click="testConnection">
-            <el-icon>
-              <Connection/>
-            </el-icon>
-          </el-button>
-        </template>
-      </el-input>
-    </el-form-item>
+      <el-form-item label="API密钥">
+        <el-input
+            v-model="form.apiKey"
+            placeholder="请输入您的API密钥"
+            show-password
+            type="password"
+        />
+      </el-form-item>
+    </el-card>
 
-    <el-form-item label="AI模型名称">
-      <el-input v-model="form.modelName" placeholder="例如: gpt-3.5-turbo"/>
-    </el-form-item>
+    <el-card class="setting-section-card" shadow="never">
+      <template #header>
+        <div class="section-title">划词能力</div>
+      </template>
+      <el-form-item label="划词功能">
+        <el-switch v-model="form.selectionEnabled" active-text="启用" inactive-text="关闭"/>
+        <div class="form-hint">关闭后不再触发划词工具栏与AI功能</div>
+      </el-form-item>
 
-    <el-form-item label="API密钥">
-      <el-input
-          v-model="form.apiKey"
-          placeholder="请输入您的API密钥"
-          show-password
-          type="password"
-      />
-    </el-form-item>
+      <el-form-item label="翻译提示词模板">
+        <el-input
+            v-model="form.translationPromptTemplate"
+            :rows="4"
+            placeholder="可使用变量：{text}、{source_language}、{target_language}"
+            type="textarea"
+        />
+        <div class="form-actions">
+          <el-button size="small" @click="resetTranslationPromptTemplate">默认</el-button>
+        </div>
+        <div class="form-hint">用于划词翻译，可通过变量控制提示词格式</div>
+      </el-form-item>
 
-    <el-form-item label="划词功能">
-      <el-switch v-model="form.selectionEnabled" active-text="启用" inactive-text="关闭"/>
-      <div class="form-hint">关闭后不再触发划词工具栏与AI功能</div>
-    </el-form-item>
-
-    <el-form-item label="翻译提示词模板">
-      <el-input
-          v-model="form.translationPromptTemplate"
-          :rows="4"
-          placeholder="可使用变量：{text}、{source_language}、{target_language}"
-          type="textarea"
-      />
-      <div class="form-actions">
-        <el-button size="small" @click="resetTranslationPromptTemplate">默认</el-button>
-      </div>
-      <div class="form-hint">用于划词翻译，可通过变量控制提示词格式</div>
-    </el-form-item>
-
-    <el-form-item label="解释提示词模板">
-      <el-input
-          v-model="form.explanationPromptTemplate"
-          :rows="4"
-          placeholder="可使用变量：{text}、{target_language}"
-          type="textarea"
-      />
-      <div class="form-actions">
-        <el-button size="small" @click="resetExplanationPromptTemplate">默认</el-button>
-      </div>
-      <div class="form-hint">用于划词解释，可通过变量控制输出风格</div>
-    </el-form-item>
+      <el-form-item label="解释提示词模板">
+        <el-input
+            v-model="form.explanationPromptTemplate"
+            :rows="4"
+            placeholder="可使用变量：{text}、{target_language}"
+            type="textarea"
+        />
+        <div class="form-actions">
+          <el-button size="small" @click="resetExplanationPromptTemplate">默认</el-button>
+        </div>
+        <div class="form-hint">用于划词解释，可通过变量控制输出风格</div>
+      </el-form-item>
+    </el-card>
   </el-form>
 </template>
 
@@ -139,6 +149,15 @@ const resetExplanationPromptTemplate = () => {
   font-size: 12px;
   color: #909399;
   margin-top: 4px;
+}
+
+.setting-section-card + .setting-section-card {
+  margin-top: 16px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .form-actions {

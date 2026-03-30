@@ -585,7 +585,7 @@ pub async fn show_result_window(
         .visible(false)
         .inner_size(560.0, 360.0)
         .resizable(true)
-        .decorations(true)
+        .decorations(false)
         .on_page_load(move |window, _| {
             let payload = serde_json::json!({
             "type": window_type.clone(),

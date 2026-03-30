@@ -1,0 +1,65 @@
+<template>
+  <el-form :model="form" label-position="top">
+    <el-card class="setting-section-card compact-card" shadow="never">
+      <template #header>
+        <div class="section-title">截图设置</div>
+      </template>
+      <el-form-item label="打开截图窗口快捷键">
+        <el-input
+            :class="{ recording: isScreenshotRecording }"
+            :model-value="screenshotDisplayValue"
+            placeholder="例如: Ctrl+Shift+A"
+            readonly
+        >
+          <template #append>
+            <el-button :type="isScreenshotRecording ? 'danger' : 'primary'" @click="toggleScreenshotRecording">
+              <el-icon>
+                <component :is="isScreenshotRecording ? VideoPause : Edit"/>
+              </el-icon>
+            </el-button>
+          </template>
+        </el-input>
+        <div class="form-hint">点击编辑按钮来自定义打开截图窗口的快捷键</div>
+      </el-form-item>
+    </el-card>
+  </el-form>
+</template>
+
+<script setup>
+import {Edit, VideoPause} from '@element-plus/icons-vue'
+import {useShortcutRecorder} from '../composables/useShortcutRecorder'
+
+const props = defineProps({
+  form: {
+    type: Object,
+    required: true
+  }
+})
+
+const {
+  isRecording: isScreenshotRecording,
+  currentDisplayValue: screenshotDisplayValue,
+  toggleRecording: toggleScreenshotRecording
+} = useShortcutRecorder(props.form, 'screenshotToggleShortcut')
+</script>
+
+<style scoped>
+.form-hint {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.compact-card :deep(.el-card__body) {
+  max-width: 560px;
+}
+
+.recording :deep(.el-input__inner) {
+  color: #f56c6c !important;
+}
+</style>

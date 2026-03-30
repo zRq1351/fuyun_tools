@@ -2311,7 +2311,7 @@ pub async fn start_screenshot() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 pub async fn recognize_image_ocr(png_base64: String) -> Result<serde_json::Value, String> {
-    match crate::services::native_ocr::recognize_png_base64(&png_base64) {
+    match crate::services::native_ocr::recognize_png_base64(&png_base64).await {
         Ok(result) => Ok(serde_json::json!({
             "success": true,
             "paragraphs": result.paragraphs
