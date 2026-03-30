@@ -65,6 +65,9 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
         }
 
         let title = String::from_utf16_lossy(&title_buf[..copied as usize]);
+        if title == "固定截图" || title == "截图选择" || title == "fuyun_tools" {
+            return 1;
+        }
 
         // 获取窗口位置
         let mut rect: RECT = std::mem::zeroed();
