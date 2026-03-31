@@ -472,6 +472,8 @@ pub async fn load_history_page_data_async(
     sort_by: Option<String>,
     sort_order: Option<String>,
 ) -> Result<ClipboardHistoryPageData, String> {
+    let clamp_i64_to_usize =
+        |value: i64| -> usize { usize::try_from(value.max(0)).unwrap_or(usize::MAX) };
     let db_path = get_history_db_path();
     if !db_path.exists() {
         return Ok(ClipboardHistoryPageData {
@@ -569,7 +571,7 @@ pub async fn load_history_page_data_async(
                     id = stable_history_item_id(&content);
                 }
                 ClipboardHistoryPageItem {
-                    position: row.try_get::<i64, _>(0).unwrap_or(0) as usize,
+                    position: clamp_i64_to_usize(row.try_get::<i64, _>(0).unwrap_or(0)),
                     id,
                     content,
                     category: row.try_get::<String, _>(3).unwrap_or_else(|_| "未分类".to_string()),
@@ -638,7 +640,7 @@ pub async fn load_history_page_data_async(
                     id = stable_history_item_id(&content);
                 }
                 ClipboardHistoryPageItem {
-                    position: row.try_get::<i64, _>(0).unwrap_or(0) as usize,
+                    position: clamp_i64_to_usize(row.try_get::<i64, _>(0).unwrap_or(0)),
                     id,
                     content,
                     category: row.try_get::<String, _>(3).unwrap_or_else(|_| "未分类".to_string()),
@@ -658,7 +660,7 @@ pub async fn load_history_page_data_async(
     }
 
     Ok(ClipboardHistoryPageData {
-        total: total as usize,
+        total: clamp_i64_to_usize(total),
         offset,
         limit: effective_limit,
         items,

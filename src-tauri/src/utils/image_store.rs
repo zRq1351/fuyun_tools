@@ -8,11 +8,45 @@ use std::env;
 use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use std::time::{Duration, Instant};
 
 /// 全局数据库连接池
 static DB_POOL: OnceLock<Arc<SqlitePool>> = OnceLock::new();
+static CATEGORY_LIST_CACHE: OnceLock<Arc<StdMutex<Option<(Instant, Vec<String>)>>>> = OnceLock::new();
+const CATEGORY_LIST_CACHE_TTL: Duration = Duration::from_secs(2);
+
+fn get_category_list_cache() -> &'static Arc<StdMutex<Option<(Instant, Vec<String>)>>> {
+    CATEGORY_LIST_CACHE.get_or_init(|| Arc::new(StdMutex::new(None)))
+}
+
+fn invalidate_category_list_cache() {
+    if let Ok(mut guard) = get_category_list_cache().lock() {
+        *guard = None;
+    }
+}
+
+async fn load_category_list_cached(conn: &mut SqliteConnection) -> Result<Vec<String>, String> {
+    if let Ok(guard) = get_category_list_cache().lock() {
+        if let Some((cached_at, categories)) = guard.as_ref() {
+            if cached_at.elapsed() < CATEGORY_LIST_CACHE_TTL {
+                return Ok(categories.clone());
+            }
+        }
+    }
+    let category_rows = sqlx::query("SELECT category FROM image_category_list ORDER BY position ASC")
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+    let category_list = category_rows
+        .into_iter()
+        .filter_map(|row| row.try_get::<String, _>(0).ok())
+        .collect::<Vec<_>>();
+    if let Ok(mut guard) = get_category_list_cache().lock() {
+        *guard = Some((Instant::now(), category_list.clone()));
+    }
+    Ok(category_list)
+}
 
 fn get_image_store_db_path() -> PathBuf {
     let mut db_path = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
@@ -284,6 +318,7 @@ pub async fn clear_all_history_async() -> Result<(), String> {
     sqlx::query("DELETE FROM image_async_previews").execute(&mut *tx).await.map_err(|e| format!("清空图片预览失败: {}", e))?;
 
     tx.commit().await.map_err(|e| format!("提交清空图片历史事务失败: {}", e))?;
+    invalidate_category_list_cache();
     Ok(())
 }
 
@@ -495,7 +530,9 @@ pub async fn sync_category_list_order_async(categories: &[String]) -> Result<(),
         }
         tx.commit()
             .await
-            .map_err(|e| format!("提交分类列表事务失败: {}", e))
+            .map_err(|e| format!("提交分类列表事务失败: {}", e))?;
+        invalidate_category_list_cache();
+        Ok(())
     }
 }
 
@@ -625,14 +662,7 @@ pub fn load_all_data() -> Result<ImageHistoryData, String> {
             image_tags.entry(item_id).or_default().push(tag);
         }
 
-        let category_rows = sqlx::query("SELECT category FROM image_category_list ORDER BY position ASC")
-            .fetch_all(&mut conn)
-            .await
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-        let category_list = category_rows
-            .into_iter()
-            .filter_map(|row| row.try_get::<String, _>(0).ok())
-            .collect::<Vec<_>>();
+        let category_list = load_category_list_cached(&mut conn).await?;
 
         let pinned_rows = sqlx::query("SELECT item_id FROM image_pinned ORDER BY position ASC")
             .fetch_all(&mut conn)
@@ -721,10 +751,24 @@ pub async fn load_history_page_async(
           hi.height,
           hi.image_path,
           COALESCE(c.category, '未分类') AS category,
-          CASE WHEN p.item_id IS NULL THEN 0 ELSE 1 END AS pinned
+          CASE WHEN p.item_id IS NULL THEN 0 ELSE 1 END AS pinned,
+          COALESCE(ap.preview_base64, '') AS preview_base64,
+          COALESCE(
+            (
+              SELECT GROUP_CONCAT(tag, '||')
+              FROM (
+                SELECT t.tag
+                FROM image_tags t
+                WHERE t.item_id = hi.item_id
+                ORDER BY t.position ASC
+              )
+            ),
+            ''
+          ) AS tags_joined
         FROM image_items hi
         LEFT JOIN image_categories c ON c.item_id = hi.item_id
         LEFT JOIN image_pinned p ON p.item_id = hi.item_id
+        LEFT JOIN image_async_previews ap ON ap.item_id = hi.item_id
         WHERE
           (?1 IS NULL OR COALESCE(c.category, '未分类') = ?1)
           AND (?2 = 0 OR p.item_id IS NOT NULL)
@@ -753,94 +797,37 @@ pub async fn load_history_page_async(
         .await
         .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
     let has_more = rows.len() > effective_limit;
-    let mut items = rows
+    let items = rows
         .into_iter()
         .take(effective_limit)
         .map(|row| {
             let item_id = row.try_get::<String, _>(1).unwrap_or_default();
             let image_path = row.try_get::<String, _>(4).unwrap_or_default();
+            let tags_joined = row.try_get::<String, _>(8).unwrap_or_default();
+            let tags = if tags_joined.is_empty() {
+                Vec::new()
+            } else {
+                tags_joined
+                    .split("||")
+                    .map(|tag| tag.to_string())
+                    .collect::<Vec<_>>()
+            };
             ImageHistoryPageItem {
                 position: row.try_get::<i64, _>(0).unwrap_or(0).max(0) as usize,
                 id: item_id,
                 width: row.try_get::<i64, _>(2).unwrap_or(0).max(0) as u32,
                 height: row.try_get::<i64, _>(3).unwrap_or(0).max(0) as u32,
-                preview_png_base64: String::new(),
+                preview_png_base64: row.try_get::<String, _>(7).unwrap_or_default(),
                 image_path,
                 category: row
                     .try_get::<String, _>(5)
                     .unwrap_or_else(|_| "未分类".to_string()),
-                tags: Vec::new(),
+                tags,
                 pinned: row.try_get::<i64, _>(6).unwrap_or(0) == 1,
             }
         })
         .collect::<Vec<_>>();
-
-    if !items.is_empty() {
-        let mut item_index = HashMap::<String, usize>::new();
-        for (idx, item) in items.iter().enumerate() {
-            item_index.insert(item.id.clone(), idx);
-        }
-        let placeholders = vec!["?"; items.len()].join(", ");
-        let tags_sql = format!(
-            "SELECT item_id, tag FROM image_tags WHERE item_id IN ({}) ORDER BY item_id, position ASC",
-            placeholders
-        );
-        let mut query = sqlx::query(&tags_sql);
-        for item in &items {
-            query = query.bind(&item.id);
-        }
-        let tag_rows = query
-            .fetch_all(&mut conn)
-            .await
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-        for row in tag_rows {
-            let item_id: String = row
-                .try_get(0)
-                .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            let tag: String = row
-                .try_get(1)
-                .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            if let Some(index) = item_index.get(&item_id) {
-                items[*index].tags.push(tag);
-            }
-        }
-
-        // 加载异步预览数据
-        let async_previews_sql = format!(
-            "SELECT item_id, preview_width, preview_height, preview_base64 FROM image_async_previews WHERE item_id IN ({})",
-            placeholders
-        );
-        let mut async_query = sqlx::query(&async_previews_sql);
-        for item in &items {
-            async_query = async_query.bind(&item.id);
-        }
-        let async_preview_rows = async_query
-            .fetch_all(&mut conn)
-            .await
-            .map_err(|e| format!("读取异步预览数据失败: {}", e))?;
-
-        for row in async_preview_rows {
-            let item_id: String = row
-                .try_get(0)
-                .map_err(|e| format!("读取异步预览失败: {}", e))?;
-            let preview_base64: String = row
-                .try_get(3)
-                .map_err(|e| format!("读取异步预览失败: {}", e))?;
-            if let Some(index) = item_index.get(&item_id) {
-                // 将异步预览数据填充到 preview_png_base64 字段
-                items[*index].preview_png_base64 = preview_base64;
-            }
-        }
-    }
-
-    let category_rows = sqlx::query("SELECT category FROM image_category_list ORDER BY position ASC")
-        .fetch_all(&mut conn)
-        .await
-        .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-    let category_list = category_rows
-        .into_iter()
-        .filter_map(|row| row.try_get::<String, _>(0).ok())
-        .collect::<Vec<_>>();
+    let category_list = load_category_list_cached(&mut conn).await?;
 
     Ok(ImageHistoryPageData {
         total: if has_more {

@@ -69,28 +69,28 @@ pub fn add_to_clipboard_history(app_handle: &AppHandle, content: String, state: 
         return;
     }
 
-    let manager_arc = {
+    let (manager_arc, should_emit) = {
         let state_guard = lock_state(&state);
-        state_guard.clipboard_manager.clone()
+        (state_guard.clipboard_manager.clone(), state_guard.is_visible)
     };
-
-    {
-        let manager = manager_arc
-            .lock()
-            .expect("infallible mutex lock failed");
-        manager.add_to_history(content);
-    }
 
     let payload = {
         let manager = manager_arc
             .lock()
             .expect("infallible mutex lock failed");
-        serde_json::json!({
-            "history": manager.get_history(),
-            "categories": manager.get_categories(),
-            "category_list": manager.get_category_list(),
-            "pinned_items": manager.get_pinned_items()
-        })
+        manager.add_to_history(content);
+        if !should_emit {
+            None
+        } else {
+            Some(serde_json::json!({
+                "history": manager.get_history(),
+                "categories": manager.get_categories(),
+                "category_list": manager.get_category_list(),
+                "pinned_items": manager.get_pinned_items()
+            }))
+        }
     };
-    let _ = app_handle.emit("clipboard-history-payload-updated", payload);
+    if let Some(payload) = payload {
+        let _ = app_handle.emit("clipboard-history-payload-updated", payload);
+    }
 }

@@ -200,6 +200,7 @@ const warmingIndices = new Set()
 let unlistenShowWindow = null
 let unlistenItemPromoted = null
 let unlistenHistoryPayloadUpdated = null
+let unlistenHistoryItemAdded = null
 let unlistenPreviewReady = null
 let isPointerDown = false
 let isContentDragging = false
@@ -455,6 +456,21 @@ const filteredHistory = computed(() => {
   return history.value
       .map((item, index) => ({item, index}))
       .filter((entry) => Boolean(entry.item))
+      .filter((entry) => {
+        const itemId = entry.item?.id
+        const itemCategory = getItemCategory(itemId)
+        if (categoryFilter.value !== '全部' && itemCategory !== categoryFilter.value) {
+          return false
+        }
+        const keyword = searchKeyword.value.trim().toLowerCase()
+        if (!keyword) {
+          return true
+        }
+        if (itemCategory.toLowerCase().includes(keyword)) {
+          return true
+        }
+        return getItemTags(itemId).some((tag) => String(tag).toLowerCase().includes(keyword))
+      })
 })
 
 const virtualRange = computed(() => {
@@ -558,6 +574,46 @@ const enforceAsyncPreviewCacheSize = () => {
     const oldestKey = asyncPreviewCache.keys().next().value
     if (!oldestKey) break
     asyncPreviewCache.delete(oldestKey)
+  }
+}
+
+const mergeIncrementalImageItem = (rawItem) => {
+  if (!rawItem?.id) return
+  const selectedId = history.value[selectedIndex.value]?.id
+  const existingIndex = history.value.findIndex((item) => item?.id === rawItem.id)
+  const existing = existingIndex >= 0 ? history.value[existingIndex] : null
+  if (existingIndex >= 0) {
+    history.value.splice(existingIndex, 1)
+  }
+  const normalized = {
+    id: rawItem.id,
+    width: rawItem.width ?? existing?.width ?? 0,
+    height: rawItem.height ?? existing?.height ?? 0,
+    preview_png_base64: rawItem.preview_png_base64 ?? rawItem.previewPngBase64 ?? existing?.preview_png_base64 ?? '',
+    image_path: rawItem.image_path ?? rawItem.imagePath ?? existing?.image_path ?? ''
+  }
+  const pinnedSet = new Set(pinnedItems.value)
+  const isPinnedItem = pinnedSet.has(normalized.id)
+  let insertIndex = 0
+  if (!isPinnedItem) {
+    insertIndex = history.value.findIndex((item) => item && !pinnedSet.has(item.id))
+    if (insertIndex < 0) {
+      insertIndex = history.value.length
+    }
+  }
+  history.value.splice(insertIndex, 0, normalized)
+  const keepCount = Math.max(100, Number(pageOffset.value) || 100, Number(pageSize.value) || 100, history.value.length)
+  if (history.value.length > keepCount) {
+    history.value = history.value.slice(0, keepCount)
+  }
+  const loadedCount = history.value.filter(Boolean).length
+  totalCount.value = Math.max(totalCount.value || 0, loadedCount)
+  pageOffset.value = Math.max(pageOffset.value || 0, loadedCount)
+  if (selectedId) {
+    const nextSelectedIndex = history.value.findIndex((item) => item?.id === selectedId)
+    selectedIndex.value = nextSelectedIndex >= 0 ? nextSelectedIndex : 0
+  } else if (selectedIndex.value < 0) {
+    selectedIndex.value = 0
   }
 }
 
@@ -1297,12 +1353,9 @@ onMounted(async () => {
   unlistenShowWindow = await listen('show-image-window', (event) => {
     const payload = event.payload || {}
     ensureInitialPageLoaded(true)
-    if (Array.isArray(payload.history) && payload.history.length > 0) {
-      if (history.value.length === 0) {
-        applyPayload(payload, {refocus: true})
-        return
-      }
-      mergeShowWindowPayload(payload)
+    if (Object.prototype.hasOwnProperty.call(payload, 'history') && Array.isArray(payload.history)) {
+      applyPayload(payload, {refocus: true})
+      return
     }
     if (typeof payload.bottomOffset === 'number') {
       bottomOffset.value = clampBottomOffset(payload.bottomOffset)
@@ -1323,8 +1376,11 @@ onMounted(async () => {
   })
   unlistenHistoryPayloadUpdated = await listen('image-history-payload-updated', (event) => {
     if (isAddingCategory.value) return
-    // 完全替换数据，确保删除操作能正确反映
     applyPayload(event.payload || {})
+  })
+  unlistenHistoryItemAdded = await listen('image-history-item-added', (event) => {
+    if (isAddingCategory.value) return
+    mergeIncrementalImageItem(event?.payload?.item)
   })
   unlistenItemPromoted = await listen('image-item-promoted', (event) => {
     const itemId = event?.payload?.itemId
@@ -1386,6 +1442,10 @@ onBeforeUnmount(() => {
     unlistenHistoryPayloadUpdated()
     unlistenHistoryPayloadUpdated = null
   }
+  if (unlistenHistoryItemAdded) {
+    unlistenHistoryItemAdded()
+    unlistenHistoryItemAdded = null
+  }
   if (unlistenItemPromoted) {
     unlistenItemPromoted()
     unlistenItemPromoted = null
@@ -1404,6 +1464,17 @@ onBeforeUnmount(() => {
 
 watch(selectedIndex, (value) => {
   warmupOne(value)
+})
+
+watch(filteredHistory, (list) => {
+  if (!Array.isArray(list) || list.length === 0) {
+    selectedIndex.value = -1
+    return
+  }
+  const exists = list.some((entry) => entry.index === selectedIndex.value)
+  if (!exists) {
+    selectedIndex.value = list[0].index
+  }
 })
 
 watch(previewCacheKeepIds, (ids) => {

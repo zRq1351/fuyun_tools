@@ -283,14 +283,17 @@ async fn execute_stream_request(
                 );
                 return false;
             }
-            let app_clone = app.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) =
-                    update_result_window(content_chunk, kind.kind_name().to_string(), app_clone).await
-                {
+            if let Some(window) = app.get_webview_window(kind.window_label()) {
+                let payload = serde_json::json!({
+                    "type": kind.kind_name(),
+                    "content": content_chunk
+                });
+                if let Err(e) = window.emit("result-update", payload) {
                     log::error!("更新{}结果窗口失败: {}", kind.display_name(), e);
                 }
-            });
+            } else {
+                log::error!("{}窗口不存在", kind.kind_name());
+            }
             true
         })
         .await;

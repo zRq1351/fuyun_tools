@@ -21,11 +21,25 @@ export function useClipboardHistory() {
     }
 
     const visibleHistory = computed(() => {
-        return pagedHistory.value.map((entry) => ({
-            content: entry.content,
-            index: entry.position,
-            snippet: entry.snippet || ''
-        }))
+        const keyword = searchKeyword.value.trim().toLowerCase()
+        return pagedHistory.value
+            .filter((entry) => {
+                const category = getItemCategory(entry.content)
+                if (categoryFilter.value !== '全部' && category !== categoryFilter.value) {
+                    return false
+                }
+                if (!keyword) {
+                    return true
+                }
+                const content = String(entry.content || '').toLowerCase()
+                const snippet = String(entry.snippet || '').toLowerCase()
+                return content.includes(keyword) || snippet.includes(keyword)
+            })
+            .map((entry) => ({
+                content: entry.content,
+                index: entry.position,
+                snippet: entry.snippet || ''
+            }))
     })
 
     const updateSelection = (index, shouldScroll = false, contentRef = null, visibleIndex = null) => {

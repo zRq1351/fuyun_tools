@@ -89,28 +89,27 @@ fn get_selected_text_windows(
     let sequence_before_copy = get_clipboard_sequence_number();
 
     // 3. 模拟 Ctrl+C
-    let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);
-    if enigo_guard.is_none() {
-        match Enigo::new(&Settings::default()) {
-            Ok(enigo) => {
-                *enigo_guard = Some(enigo);
-            }
-            Err(e) => {
-                log::error!("未能初始化enigo: {}", e);
-                let mut state = lock_arc_mutex(state_manager.inner());
-                state.is_updating_clipboard = false;
-                state.is_processing_selection = false;
-                return None;
+    crate::features::mouse_listener::reset_ctrl_key_state();
+    {
+        let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);
+        if enigo_guard.is_none() {
+            match Enigo::new(&Settings::default()) {
+                Ok(enigo) => {
+                    *enigo_guard = Some(enigo);
+                }
+                Err(e) => {
+                    log::error!("未能初始化enigo: {}", e);
+                    let mut state = lock_arc_mutex(state_manager.inner());
+                    state.is_updating_clipboard = false;
+                    state.is_processing_selection = false;
+                    return None;
+                }
             }
         }
-    }
-
-    crate::features::mouse_listener::reset_ctrl_key_state();
-
-    if let Some(ref mut enigo) = *enigo_guard {
-        // 使用 RAII 守卫确保 Ctrl 键总是被正确释放
-        if let Err(e) = execute_ctrl_c_with_safety(enigo) {
-            log::error!("执行 Ctrl+C 失败: {}", e);
+        if let Some(ref mut enigo) = *enigo_guard {
+            if let Err(e) = execute_ctrl_c_with_safety(enigo) {
+                log::error!("执行 Ctrl+C 失败: {}", e);
+            }
         }
     }
 
@@ -181,12 +180,18 @@ fn wait_for_clipboard_update(
     while start_time.elapsed() < CAPTURE_RETRY_MAX_DURATION {
         attempts += 1;
         thread::sleep(CAPTURE_RETRY_INTERVAL);
-
         let current_sequence = get_clipboard_sequence_number();
-        let current_content = get_current_clipboard_content_with_manager(clipboard_manager, app_handle);
         let sequence_changed = current_sequence != 0
             && sequence_before_copy != 0
             && current_sequence != sequence_before_copy;
+        let should_read_content = sequence_changed
+            || sequence_before_copy == 0
+            || attempts % 4 == 0;
+        if !should_read_content {
+            continue;
+        }
+        let current_content =
+            get_current_clipboard_content_with_manager(clipboard_manager, app_handle);
 
         if let Some(ref current) = current_content {
             if let Some(ref original) = original_content {

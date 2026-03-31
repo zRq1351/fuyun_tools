@@ -37,23 +37,28 @@ fn release_ctrl_key_once(enigo: &mut enigo::Enigo) -> Result<(), String> {
 
 pub fn force_release_ctrl_key() -> Result<(), String> {
     use enigo::{Enigo, Settings};
-
-    let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);
-    if enigo_guard.is_none() {
-        *enigo_guard = Some(
-            Enigo::new(&Settings::default()).map_err(|e| format!("初始化输入器失败: {}", e))?,
-        );
-    }
-    let enigo = enigo_guard
-        .as_mut()
-        .ok_or_else(|| "输入器不可用".to_string())?;
     let mut last_error = None;
-    for _ in 0..2 {
-        match release_ctrl_key_once(enigo) {
+    for attempt in 0..2 {
+        let release_result = {
+            let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);
+            if enigo_guard.is_none() {
+                *enigo_guard = Some(
+                    Enigo::new(&Settings::default())
+                        .map_err(|e| format!("初始化输入器失败: {}", e))?,
+                );
+            }
+            let enigo = enigo_guard
+                .as_mut()
+                .ok_or_else(|| "输入器不可用".to_string())?;
+            release_ctrl_key_once(enigo)
+        };
+        match release_result {
             Ok(_) => return Ok(()),
             Err(e) => {
                 last_error = Some(e);
-                thread::sleep(Duration::from_millis(8));
+                if attempt < 1 {
+                    thread::sleep(Duration::from_millis(8));
+                }
             }
         }
     }
@@ -112,19 +117,38 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
 }
 
 pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
-    let (already_visible, selected_index, bottom_offset) = {
+    let (already_visible, selected_index, bottom_offset, manager_arc, should_sync_history) = {
         let mut state_guard = lock_arc_mutex(&state);
         let already_visible = state_guard.is_image_visible;
         state_guard.is_image_visible = true;
+        let should_sync_history = !already_visible && state_guard.image_history_dirty;
+        if should_sync_history {
+            state_guard.image_history_dirty = false;
+        }
         (
             already_visible,
             state_guard.image_selected_index,
             state_guard.settings.clipboard_bottom_offset,
+            state_guard.image_clipboard_manager.clone(),
+            should_sync_history,
         )
+    };
+    let snapshot_payload = if should_sync_history {
+        let manager = lock_arc_mutex(&manager_arc);
+        Some(serde_json::json!({
+            "history": manager.get_history_preview(),
+            "categories": manager.get_categories(),
+            "category_list": manager.get_category_list(),
+            "image_tags": manager.get_image_tags(),
+            "pinned_items": manager.get_pinned_items()
+        }))
+    } else {
+        None
     };
 
     if let Some(_window) = app_handle.get_webview_window("image_clipboard") {
         let app_handle_clone = app_handle.clone();
+        let snapshot_payload_clone = snapshot_payload.clone();
         thread::spawn(move || {
             if let Some(window) = app_handle_clone.get_webview_window("image_clipboard") {
                 set_window_position(&window, bottom_offset);
@@ -132,10 +156,19 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
                     if !already_visible {
                         let _ = window.set_focus();
                     }
-                    let payload = serde_json::json!({
+                    let mut payload = serde_json::json!({
                         "bottomOffset": bottom_offset,
                         "selectedIndex": selected_index
                     });
+                    if let Some(snapshot) = snapshot_payload_clone {
+                        if let Some(payload_obj) = payload.as_object_mut() {
+                            if let Some(snapshot_obj) = snapshot.as_object() {
+                                for (key, value) in snapshot_obj {
+                                    payload_obj.insert(key.clone(), value.clone());
+                                }
+                            }
+                        }
+                    }
                     let _ = app_handle_clone.emit("show-image-window", payload);
                 }
             }
@@ -190,6 +223,8 @@ pub fn wait_for_window_hidden(
     timeout: Duration,
 ) -> Result<(), String> {
     let start = std::time::Instant::now();
+    let mut interval = Duration::from_millis(12);
+    let max_interval = Duration::from_millis(80);
     loop {
         if start.elapsed() > timeout {
             return Err(format!("等待窗口隐藏超时: {}", window_label));
@@ -201,7 +236,8 @@ pub fn wait_for_window_hidden(
         if !is_visible {
             return Ok(());
         }
-        thread::sleep(Duration::from_millis(20));
+        thread::sleep(interval);
+        interval = std::cmp::min(interval.saturating_mul(2), max_interval);
     }
 }
 

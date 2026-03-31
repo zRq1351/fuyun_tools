@@ -682,6 +682,17 @@ watch([searchKeyword, categoryFilter], () => {
   }, 160)
 })
 
+watch(visibleHistory, (list) => {
+  if (!Array.isArray(list) || list.length === 0) {
+    selectedIndex.value = -1
+    return
+  }
+  const exists = list.some((entry) => entry.index === selectedIndex.value)
+  if (!exists) {
+    selectedIndex.value = list[0].index
+  }
+})
+
 onMounted(() => {
   const savedSortOrder = localStorage.getItem('clipboard_history_sort_order')
   const savedPageSize = localStorage.getItem('clipboard_history_page_size')
