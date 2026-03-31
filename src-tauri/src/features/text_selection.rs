@@ -1,4 +1,5 @@
 use crate::sync::Mutex;
+use crate::services::clipboard_wakeup::subscribe_clipboard_wake_events;
 use crate::ui::window_manager::ENIGO_INSTANCE;
 use crate::utils::clipboard::ClipboardManager;
 use enigo::{Enigo, Key, Keyboard, Settings};
@@ -60,6 +61,29 @@ fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a
     mutex.lock().expect("infallible mutex lock failed")
 }
 
+struct SelectionProcessingGuard {
+    state: Arc<Mutex<SharedAppState>>,
+}
+
+impl SelectionProcessingGuard {
+    fn acquire(state: Arc<Mutex<SharedAppState>>) -> Option<Self> {
+        let mut guard = lock_arc_mutex(&state);
+        if !guard.settings.selection_enabled {
+            return None;
+        }
+        guard.is_processing_selection = true;
+        drop(guard);
+        Some(Self { state })
+    }
+}
+
+impl Drop for SelectionProcessingGuard {
+    fn drop(&mut self) {
+        let mut state = lock_arc_mutex(&self.state);
+        state.is_processing_selection = false;
+    }
+}
+
 /// 获取选中的文本
 pub fn get_selected_text_with_app(
     app_handle: &AppHandle,
@@ -74,14 +98,7 @@ fn get_selected_text_windows(
     clipboard_manager: Arc<Mutex<ClipboardManager>>,
 ) -> Option<String> {
     let state_manager = app_handle.state::<Arc<Mutex<SharedAppState>>>();
-
-    {
-        let mut state = lock_arc_mutex(state_manager.inner());
-        if !state.settings.selection_enabled {
-            return None;
-        }
-        state.is_processing_selection = true;
-    }
+    let _processing_guard = SelectionProcessingGuard::acquire(state_manager.inner().clone())?;
 
     // 1. 获取原始剪贴板内容（用于后续恢复）
     let original_content =
@@ -101,7 +118,6 @@ fn get_selected_text_windows(
                     log::error!("未能初始化enigo: {}", e);
                     let mut state = lock_arc_mutex(state_manager.inner());
                     state.is_updating_clipboard = false;
-                    state.is_processing_selection = false;
                     return None;
                 }
             }
@@ -127,11 +143,6 @@ fn get_selected_text_windows(
     // 5. 恢复原始剪贴板内容
     if let Some(ref original) = original_content {
         safe_restore_clipboard_content(&clipboard_manager, app_handle, original, &new_content);
-    }
-
-    {
-        let mut state = lock_arc_mutex(state_manager.inner());
-        state.is_processing_selection = false;
     }
 
     match &new_content {
@@ -174,12 +185,13 @@ fn wait_for_clipboard_update(
 ) -> Option<String> {
     let start_time = std::time::Instant::now();
     let mut attempts = 0;
+    let wake_rx = subscribe_clipboard_wake_events();
 
-    log::info!("使用内容轮询检测模式");
+    log::info!("使用事件优先+轮询兜底检测模式");
     
     while start_time.elapsed() < CAPTURE_RETRY_MAX_DURATION {
         attempts += 1;
-        thread::sleep(CAPTURE_RETRY_INTERVAL);
+        let _ = wake_rx.recv_timeout(CAPTURE_RETRY_INTERVAL);
         let current_sequence = get_clipboard_sequence_number();
         let sequence_changed = current_sequence != 0
             && sequence_before_copy != 0

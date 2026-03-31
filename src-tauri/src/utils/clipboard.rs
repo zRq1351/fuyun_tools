@@ -744,7 +744,8 @@ impl ClipboardManager {
                 let classified: HashSet<String> = categories.keys().cloned().collect();
                 let pinned: HashSet<String> = pinned_items.iter().cloned().collect();
                 history.retain(|item| classified.contains(item) || pinned.contains(item));
-                categories.retain(|item, _| history.contains(item));
+                let history_set: HashSet<String> = history.iter().cloned().collect();
+                categories.retain(|item, _| history_set.contains(item));
                 normalize_pinned_items(&mut pinned_items, &history);
                 apply_pin_order(&mut history, &pinned_items);
             }
@@ -812,7 +813,8 @@ impl ClipboardManager {
                 let classified: HashSet<String> = categories.keys().cloned().collect();
                 let pinned: HashSet<String> = pinned_items.iter().cloned().collect();
                 history.retain(|item| classified.contains(item) || pinned.contains(item));
-                categories.retain(|item, _| history.contains(item));
+                let history_set: HashSet<String> = history.iter().cloned().collect();
+                categories.retain(|item, _| history_set.contains(item));
                 normalize_pinned_items(&mut pinned_items, &history);
                 apply_pin_order(&mut history, &pinned_items);
             }

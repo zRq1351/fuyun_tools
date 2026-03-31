@@ -158,32 +158,43 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
                     state_guard.image_clipboard_manager.clone()
                 };
 
-                let manager = match manager_arc.lock() {
-                    Ok(guard) => guard,
-                    Err(e) => {
-                        log::error!("[处理线程] 获取 manager 锁失败: {:?}", e);
-                        continue;
-                    }
-                };
+                let source_blob = task.source_blob;
+                {
+                    let manager = match manager_arc.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            log::error!("[处理线程] 获取 manager 锁失败: {:?}", e);
+                            continue;
+                        }
+                    };
+                    manager.add_rgba_image_with_source_blob(
+                        task.rgba.clone(),
+                        task.width,
+                        task.height,
+                        source_blob,
+                    );
+                }
 
-                manager.add_rgba_image_with_source_blob(
-                    task.rgba.clone(),
-                    task.width,
-                    task.height,
-                    task.source_blob,
-                );
-                let history_preview = manager.get_history_preview();
-                let pinned_set = manager
-                    .get_pinned_items()
-                    .into_iter()
-                    .collect::<HashSet<_>>();
-                let delta_item = history_preview
-                    .iter()
-                    .find(|item| !pinned_set.contains(&item.id))
-                    .cloned()
-                    .or_else(|| history_preview.first().cloned());
+                let delta_item = {
+                    let manager = match manager_arc.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            log::error!("[处理线程] 二次获取 manager 锁失败: {:?}", e);
+                            continue;
+                        }
+                    };
+                    let history_preview = manager.get_history_preview();
+                    let pinned_set = manager
+                        .get_pinned_items()
+                        .into_iter()
+                        .collect::<HashSet<_>>();
+                    history_preview
+                        .iter()
+                        .find(|item| !pinned_set.contains(&item.id))
+                        .cloned()
+                        .or_else(|| history_preview.first().cloned())
+                };
                 log::info!("[处理线程] 图片处理成功: {}x{}", task.width, task.height);
-                drop(manager);
 
                 // 更新采样缓存
                 update_recent_samples(task.width, task.height, &task.rgba);
@@ -210,9 +221,21 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
                 // 队列为空，等待通知而不是退出循环
                 log::trace!("[处理线程] 队列为空，等待新任务通知...");
                 let (lock, cvar) = &**QUEUE_NOTIFY;
-                let mut notified = lock.lock().unwrap();
+                let mut notified = match lock.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => {
+                        log::error!("[处理线程] 通知锁已中毒，尝试恢复继续处理");
+                        poisoned.into_inner()
+                    }
+                };
                 while !*notified {
-                    notified = cvar.wait(notified).unwrap();
+                    notified = match cvar.wait(notified) {
+                        Ok(guard) => guard,
+                        Err(poisoned) => {
+                            log::error!("[处理线程] 通知条件变量等待异常（锁中毒），尝试恢复继续处理");
+                            poisoned.into_inner()
+                        }
+                    };
                 }
                 *notified = false;
                 log::trace!("[处理线程] 收到新任务通知，继续处理");
@@ -275,7 +298,13 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
 
                     // 通知处理线程有新任务
                     let (lock, cvar) = &**QUEUE_NOTIFY;
-                    let mut notified = lock.lock().unwrap();
+                    let mut notified = match lock.lock() {
+                        Ok(guard) => guard,
+                        Err(poisoned) => {
+                            log::error!("[监听线程] 通知锁已中毒，尝试恢复继续通知");
+                            poisoned.into_inner()
+                        }
+                    };
                     *notified = true;
                     cvar.notify_one();
                     log::info!("[监听线程] 已通知处理线程");

@@ -216,16 +216,16 @@ pub fn calculate_text_similarity(text1: &str, text2: &str) -> f64 {
     if text1.is_empty() || text2.is_empty() {
         return 0.0;
     }
-    let chars1: Vec<char> = text1.chars().collect();
-    let chars2: Vec<char> = text2.chars().collect();
-    let len1 = chars1.len();
-    let len2 = chars2.len();
+    let len1 = text1.chars().count();
+    let len2 = text2.chars().count();
     if len1 > LCS_MAX_CHARS_EACH
         || len2 > LCS_MAX_CHARS_EACH
         || len1.saturating_mul(len2) > LCS_MAX_PRODUCT
     {
         return calculate_text_similarity_fast(text1, text2, len1, len2);
     }
+    let chars1: Vec<char> = text1.chars().collect();
+    let chars2: Vec<char> = text2.chars().collect();
     let mut dp = vec![vec![0; len2 + 1]; len1 + 1];
     for i in 1..=len1 {
         for j in 1..=len2 {
@@ -249,15 +249,15 @@ fn candidate_prefilter(old_text: &str, new_text: &str) -> bool {
     if old_text.is_empty() || new_text.is_empty() {
         return true;
     }
-    if old_text.contains(new_text) || new_text.contains(old_text) {
-        return true;
-    }
     let len_old = old_text.chars().count();
     let len_new = new_text.chars().count();
     let min_len = len_old.min(len_new) as f64;
     let max_len = len_old.max(len_new) as f64;
     if max_len > 0.0 && (min_len / max_len) < CANDIDATE_LEN_RATIO_MIN {
         return false;
+    }
+    if old_text.contains(new_text) || new_text.contains(old_text) {
+        return true;
     }
 
     // 优化：使用 n-gram 相似度进行快速预筛选（比 LCS 快得多）
@@ -398,6 +398,18 @@ pub fn compare_versions(old_text: &str, new_text: &str, similarity_threshold: f6
     };
     if let Some(hit) = VERSION_COMPARE_CACHE.lock().get(&cache_key).cloned() {
         return hit;
+    }
+    if old_text == new_text {
+        let result = VersionComparison {
+            similarity_score: 1.0,
+            new_completeness: TextCompleteness::Complete,
+            should_replace: false,
+            reason: "版本相同，无需替换".to_string(),
+        };
+        VERSION_COMPARE_CACHE
+            .lock()
+            .put(cache_key, result.clone());
+        return result;
     }
     let similarity = calculate_text_similarity(old_text, new_text);
     let completeness = detect_text_completeness_with_similarity(new_text, old_text, similarity);

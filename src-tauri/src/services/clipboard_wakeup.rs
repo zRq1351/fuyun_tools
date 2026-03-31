@@ -32,9 +32,12 @@ impl WakeHub {
     }
 
     fn broadcast_event(&self) {
-        if let Ok(mut guard) = self.subscribers.lock() {
-            guard.retain(|tx| tx.send(WakeSignal::Event).is_ok());
-        }
+        let mut guard = if let Ok(guard) = self.subscribers.lock() {
+            guard
+        } else {
+            return;
+        };
+        guard.retain(|tx| tx.send(WakeSignal::Event).is_ok());
     }
 }
 
