@@ -4,7 +4,7 @@ use crate::services::clipboard_wakeup::subscribe_clipboard_wake_events;
 use crate::sync::Mutex;
 use crate::utils::image_clipboard::ImageClipboardManager;
 use parking_lot::Mutex as ParkingMutex;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex};
 use std::thread;
 use tauri::{AppHandle, Emitter};
@@ -35,10 +35,16 @@ fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a
 }
 
 pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
-    let manager_arc = {
-        let state_guard = lock_state(&state);
-        state_guard.image_clipboard_manager.clone()
+    let (manager_arc, should_emit) = {
+        let mut state_guard = lock_state(&state);
+        if !state_guard.is_image_visible {
+            state_guard.image_history_dirty = true;
+        }
+        (state_guard.image_clipboard_manager.clone(), state_guard.is_image_visible)
     };
+    if !should_emit {
+        return;
+    }
     let manager = manager_arc
         .lock()
         .expect("infallible mutex lock failed");
@@ -50,6 +56,10 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
         "pinned_items": manager.get_pinned_items()
     });
     let _ = app_handle.emit("image-history-payload-updated", payload);
+    {
+        let mut state_guard = lock_state(&state);
+        state_guard.image_history_dirty = false;
+    }
 }
 
 
@@ -162,14 +172,37 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
                     task.height,
                     task.source_blob,
                 );
+                let history_preview = manager.get_history_preview();
+                let pinned_set = manager
+                    .get_pinned_items()
+                    .into_iter()
+                    .collect::<HashSet<_>>();
+                let delta_item = history_preview
+                    .iter()
+                    .find(|item| !pinned_set.contains(&item.id))
+                    .cloned()
+                    .or_else(|| history_preview.first().cloned());
                 log::info!("[处理线程] 图片处理成功: {}x{}", task.width, task.height);
                 drop(manager);
 
                 // 更新采样缓存
                 update_recent_samples(task.width, task.height, &task.rgba);
 
-                // 发送更新事件
-                emit_image_history_payload(app_handle, state.clone());
+                let is_image_visible = {
+                    let state_guard = lock_state(state);
+                    state_guard.is_image_visible
+                };
+                if is_image_visible {
+                    if let Some(item) = delta_item {
+                        let payload = serde_json::json!({ "item": item });
+                        let _ = app_handle.emit("image-history-item-added", payload);
+                    } else {
+                        emit_image_history_payload(app_handle, state.clone());
+                    }
+                } else {
+                    let mut state_guard = lock_state(state);
+                    state_guard.image_history_dirty = true;
+                }
 
                 log::info!("[处理线程] 图片处理流程完成");
             }

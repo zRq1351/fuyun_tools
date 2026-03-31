@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::thread;
@@ -194,10 +195,6 @@ fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a
     mutex.lock().expect("infallible mutex lock failed")
 }
 
-fn lock_mutex<'a, T>(mutex: &'a Mutex<T>) -> crate::sync::MutexGuard<'a, T> {
-    mutex.lock().expect("infallible mutex lock failed")
-}
-
 fn begin_fill_sequence(state: &Arc<Mutex<SharedAppState>>, kind: FillKind) -> u64 {
     let mut state_guard = lock_arc_mutex(state);
     state_guard.is_updating_clipboard = true;
@@ -227,12 +224,7 @@ fn finish_fill_if_latest(state: &Arc<Mutex<SharedAppState>>, kind: FillKind, fil
     }
 }
 
-static IMAGE_PROMOTE_PENDING_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-static IMAGE_PROMOTE_WORKER_RUNNING: AtomicBool = AtomicBool::new(false);
-
-fn get_image_promote_pending_id_slot() -> &'static Mutex<Option<String>> {
-    IMAGE_PROMOTE_PENDING_ID.get_or_init(|| Mutex::new(None))
-}
+static IMAGE_PROMOTE_SENDER: OnceLock<Sender<String>> = OnceLock::new();
 
 pub fn interrupt_text_fill_flow(state: &Arc<Mutex<SharedAppState>>) {
     let mut state_guard = lock_arc_mutex(state);
@@ -246,58 +238,34 @@ pub fn interrupt_image_fill_flow(state: &Arc<Mutex<SharedAppState>>) {
     state_guard.image_fill_seq = state_guard.image_fill_seq.wrapping_add(1);
     state_guard.is_processing_selection = false;
     state_guard.is_updating_clipboard = false;
-    let slot = get_image_promote_pending_id_slot();
-    let mut guard = lock_mutex(slot);
-    *guard = None;
+}
+
+fn image_promote_worker(state: Arc<Mutex<SharedAppState>>, rx: Receiver<String>) {
+    while let Ok(mut item_id) = rx.recv() {
+        while let Ok(latest_item_id) = rx.try_recv() {
+            item_id = latest_item_id;
+        }
+        let manager_arc = {
+            let state_guard = lock_arc_mutex(&state);
+            state_guard.image_clipboard_manager.clone()
+        };
+        let manager = lock_arc_mutex(&manager_arc);
+        if let Err(e) = manager.promote_to_top_by_id(&item_id) {
+            log::warn!("极速模式异步置顶图片失败: {}", e);
+        }
+    }
 }
 
 fn schedule_image_promote_to_top(state: Arc<Mutex<SharedAppState>>, item_id: String) {
-    {
-        let slot = get_image_promote_pending_id_slot();
-        let mut guard = lock_mutex(slot);
-        *guard = Some(item_id);
-    }
-    if IMAGE_PROMOTE_WORKER_RUNNING
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return;
-    }
-    thread::spawn(move || {
-        loop {
-            thread::sleep(Duration::from_millis(120));
-            let next_item_id = {
-                let slot = get_image_promote_pending_id_slot();
-                let mut guard = lock_mutex(slot);
-                guard.take()
-            };
-            if let Some(item_id) = next_item_id {
-                let manager_arc = {
-                    let state_guard = lock_arc_mutex(&state);
-                    state_guard.image_clipboard_manager.clone()
-                };
-                let manager = lock_arc_mutex(&manager_arc);
-                if let Err(e) = manager.promote_to_top_by_id(&item_id) {
-                    log::warn!("极速模式异步置顶图片失败: {}", e);
-                }
-                continue;
-            }
-            IMAGE_PROMOTE_WORKER_RUNNING.store(false, Ordering::SeqCst);
-            let has_pending = {
-                let slot = get_image_promote_pending_id_slot();
-                let guard = lock_mutex(slot);
-                guard.is_some()
-            };
-            if has_pending
-                && IMAGE_PROMOTE_WORKER_RUNNING
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok()
-            {
-                continue;
-            }
-            break;
-        }
+    let sender = IMAGE_PROMOTE_SENDER.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<String>();
+        let state_for_worker = state.clone();
+        thread::spawn(move || image_promote_worker(state_for_worker, rx));
+        tx
     });
+    if let Err(e) = sender.send(item_id) {
+        log::warn!("提交极速模式异步置顶任务失败: {}", e);
+    }
 }
 
 fn wait_for_fill_window_hidden(app: &AppHandle, window_label: &str, label: &str, fast_path: bool) {
@@ -809,18 +777,22 @@ pub async fn get_clipboard_history(
 pub async fn get_clipboard_full_snapshot(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<ClipboardFullSnapshot, String> {
-    let state_guard = lock_arc_mutex(state.inner());
+    let (text_manager_arc, image_manager_arc) = {
+        let state_guard = lock_arc_mutex(state.inner());
+        (
+            state_guard.clipboard_manager.clone(),
+            state_guard.image_clipboard_manager.clone(),
+        )
+    };
 
-    // 获取文本剪贴板数据
-    let text_manager = lock_arc_mutex(&state_guard.clipboard_manager);
+    let text_manager = lock_arc_mutex(&text_manager_arc);
     let text_history = text_manager.get_history();
     let text_categories = text_manager.get_categories();
     let text_category_list = text_manager.get_category_list();
     let text_pinned_items = text_manager.get_pinned_items();
     drop(text_manager);
 
-    // 获取图片剪贴板数据
-    let image_manager = lock_arc_mutex(&state_guard.image_clipboard_manager);
+    let image_manager = lock_arc_mutex(&image_manager_arc);
     let image_history = image_manager.get_history_preview();
     let image_categories = image_manager.get_categories();
     let image_category_list = image_manager.get_category_list();
@@ -1814,18 +1786,7 @@ pub async fn save_app_settings(
         }
 
         if hot_key_val != &settings.hot_key {
-            if app.global_shortcut().is_registered(hot_key_val.as_str()) {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    format!("快捷键被占用：{}", hot_key_val),
-                    "global shortcut already registered",
-                ));
-            }
-
-            // 尝试注销旧快捷键，如果旧快捷键未注册成功则忽略错误
-            if let Err(e) = app.global_shortcut().unregister(settings.hot_key.as_str()) {
-                log::warn!("注销旧快捷键 '{}' 失败 (可能从未注册成功): {}", settings.hot_key, e);
-            }
+            let old_hot_key = settings.hot_key.clone();
             let app_clone = app.clone();
             let state_clone = state.inner().clone();
             let hot_key_clone = hot_key_val.clone();
@@ -1842,7 +1803,16 @@ pub async fn save_app_settings(
                         }
                     }
                 })
-                .map_err(|e| frontend_error(ErrorCode::SystemError, "注册文字窗口快捷键失败", e.to_string()))?;
+                .map_err(|e| {
+                    frontend_error(
+                        ErrorCode::ValidationError,
+                        format!("快捷键被占用或注册失败：{}", hot_key_val),
+                        e.to_string(),
+                    )
+                })?;
+            if let Err(e) = app.global_shortcut().unregister(old_hot_key.as_str()) {
+                log::warn!("注销旧快捷键 '{}' 失败 (可能从未注册成功): {}", old_hot_key, e);
+            }
             settings.hot_key = hot_key_clone;
         }
     }
@@ -1875,18 +1845,7 @@ pub async fn save_app_settings(
                 ));
             }
 
-            if app.global_shortcut().is_registered(image_hot_key_val.as_str()) {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    format!("图片窗口快捷键被占用：{}", image_hot_key_val),
-                    "image global shortcut already registered",
-                ));
-            }
-
-            // 尝试注销旧快捷键，如果旧快捷键未注册成功则忽略错误
-            if let Err(e) = app.global_shortcut().unregister(settings.image_hot_key.as_str()) {
-                log::warn!("注销旧图片快捷键 '{}' 失败 (可能从未注册成功): {}", settings.image_hot_key, e);
-            }
+            let old_image_hot_key = settings.image_hot_key.clone();
             let app_clone = app.clone();
             let state_clone = state.inner().clone();
             let image_hot_key_clone = image_hot_key_val.clone();
@@ -1902,7 +1861,20 @@ pub async fn save_app_settings(
                         }
                     }
                 })
-                .map_err(|e| frontend_error(ErrorCode::SystemError, "注册图片窗口快捷键失败", e.to_string()))?;
+                .map_err(|e| {
+                    frontend_error(
+                        ErrorCode::ValidationError,
+                        format!("图片窗口快捷键被占用或注册失败：{}", image_hot_key_val),
+                        e.to_string(),
+                    )
+                })?;
+            if let Err(e) = app.global_shortcut().unregister(old_image_hot_key.as_str()) {
+                log::warn!(
+                    "注销旧图片快捷键 '{}' 失败 (可能从未注册成功): {}",
+                    old_image_hot_key,
+                    e
+                );
+            }
             settings.image_hot_key = image_hot_key_clone;
         }
     }

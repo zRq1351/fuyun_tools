@@ -30,6 +30,7 @@ pub fn get_window_list() -> Result<Vec<WindowInfo>, String> {
 
 #[cfg(target_os = "windows")]
 fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
+    use std::ptr::NonNull;
     use winapi::um::winuser::{
         EnumWindows, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
         GetWindowTextW, IsWindowVisible, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
@@ -39,7 +40,10 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
     let mut windows = Vec::new();
 
     unsafe extern "system" fn enum_callback(hwnd: winapi::shared::windef::HWND, lparam: winapi::shared::minwindef::LPARAM) -> i32 {
-        let windows = &mut *(lparam as *mut Vec<WindowInfo>);
+        let Some(mut windows_ptr) = NonNull::new(lparam as *mut Vec<WindowInfo>) else {
+            return 0;
+        };
+        let windows = windows_ptr.as_mut();
 
         // 检查窗口是否可见
         if IsWindowVisible(hwnd) == 0 {
