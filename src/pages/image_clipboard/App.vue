@@ -1165,11 +1165,23 @@ const mergeShowWindowPayload = (data) => {
 const promoteLocalItemToTop = (itemId) => {
   if (!itemId || !Array.isArray(history.value) || history.value.length < 2) return
   const currentIndex = history.value.findIndex((item) => item?.id === itemId)
-  if (currentIndex <= 0) return
+  if (currentIndex < 0) return
   const selectedId = history.value[selectedIndex.value]?.id
   const [moved] = history.value.splice(currentIndex, 1)
   if (!moved) return
-  history.value.unshift(moved)
+  const pinnedSet = new Set(pinnedItems.value)
+  const isPinnedItem = pinnedSet.has(itemId)
+  let insertIndex = 0
+  if (!isPinnedItem) {
+    insertIndex = history.value.findIndex((item) => !pinnedSet.has(item?.id))
+    if (insertIndex < 0) {
+      insertIndex = history.value.length
+    }
+  }
+  if (insertIndex > history.value.length) {
+    insertIndex = history.value.length
+  }
+  history.value.splice(insertIndex, 0, moved)
   if (selectedId) {
     const nextSelectedIndex = history.value.findIndex((item) => item?.id === selectedId)
     selectedIndex.value = nextSelectedIndex >= 0 ? nextSelectedIndex : 0
