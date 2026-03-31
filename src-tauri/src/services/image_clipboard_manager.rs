@@ -261,6 +261,13 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
             if wake_rx.recv().is_err() {
                 break;
             }
+            let should_skip = {
+                let state_guard = lock_state(&state);
+                state_guard.is_updating_clipboard || state_guard.is_processing_selection
+            };
+            if should_skip {
+                continue;
+            }
             let screenshot_in_progress = capture::is_screenshot_in_progress();
             let allow_when_screenshot = if screenshot_in_progress {
                 capture::take_allow_image_clipboard_once()
