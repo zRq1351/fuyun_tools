@@ -106,7 +106,6 @@ fn get_selected_text_windows(
     let sequence_before_copy = get_clipboard_sequence_number();
 
     // 3. 模拟 Ctrl+C
-    crate::features::mouse_listener::reset_ctrl_key_state();
     {
         let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);
         if enigo_guard.is_none() {
@@ -125,12 +124,12 @@ fn get_selected_text_windows(
         if let Some(ref mut enigo) = *enigo_guard {
             if let Err(e) = execute_ctrl_c_with_safety(enigo) {
                 log::error!("执行 Ctrl+C 失败: {}", e);
+                crate::features::mouse_listener::reset_ctrl_key_state();
             }
         }
     }
 
     thread::sleep(INITIAL_DELAY);
-    crate::features::mouse_listener::reset_ctrl_key_state();
 
     // 4. 等待剪贴板更新并获取新内容
     let new_content = wait_for_clipboard_update(

@@ -152,7 +152,7 @@ export const ClipboardService = {
      * @returns {Promise<void>}
      */
     copyText: (text) => invoke(IPC_COMMANDS.COPY_TEXT, {text}),
-    copyAndPasteText: (text) => invoke(IPC_COMMANDS.COPY_AND_PASTE_TEXT, {text}),
+    copyAndPasteText: (text, requestId = null) => invoke(IPC_COMMANDS.COPY_AND_PASTE_TEXT, {text, requestId}),
 };
 
 export const ImageClipboardService = {

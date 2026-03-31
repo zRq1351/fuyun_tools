@@ -105,27 +105,6 @@
       <div class="form-hint">“清除全部”会删除对应类型的全部历史记录，请谨慎操作。</div>
     </el-card>
 
-    <el-card class="setting-section-card" shadow="never">
-      <template #header>
-        <div class="section-title">存储占用</div>
-      </template>
-      <el-form-item>
-        <el-button size="small" @click="refreshImageStorageMetrics">刷新占用</el-button>
-      </el-form-item>
-      <el-form-item>
-        <div class="metrics-card">
-          <div class="metrics-line">内存缓存 {{ formatBytes(imageStorageMetrics.memory_bytes) }} /
-            {{ formatBytes(imageStorageMetrics.memory_budget_bytes) }}
-          </div>
-          <div class="metrics-line">磁盘占用 {{ formatBytes(imageStorageMetrics.disk_bytes) }} /
-            {{ formatBytes(imageStorageMetrics.disk_limit_bytes) }}
-          </div>
-          <div class="metrics-line">图片条目 {{ Number(imageStorageMetrics.item_count || 0) }}（置顶
-            {{ Number(imageStorageMetrics.pinned_count || 0) }}）
-          </div>
-        </div>
-      </el-form-item>
-    </el-card>
   </el-form>
 </template>
 
@@ -136,7 +115,7 @@ import {Edit, VideoPause} from '@element-plus/icons-vue'
 import {open} from '@tauri-apps/plugin-dialog'
 import {listen} from '@tauri-apps/api/event'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
-import {AISettingsService, ClipboardService, ImageClipboardService} from '../../../services/ipc'
+import {ClipboardService, ImageClipboardService} from '../../../services/ipc'
 
 const props = defineProps({
   form: {
@@ -156,8 +135,6 @@ const {
   toggleRecording: toggleImageRecording
 } = useShortcutRecorder(props.form, 'imageToggleShortcut')
 
-const imageStorageMetrics = ref({})
-let metricsTimer = null
 let unlistenImportProgress = null
 const importingImages = ref(false)
 const importTotal = ref(0)
@@ -171,24 +148,6 @@ const importProgressPercent = computed(() => {
   const processed = Number(importProcessed.value || 0)
   return Math.min(100, Math.max(0, Math.round((processed / total) * 100)))
 })
-
-const refreshImageStorageMetrics = async () => {
-  const metrics = await AISettingsService.getImageStorageMetrics()
-  imageStorageMetrics.value = metrics || {}
-}
-
-const formatBytes = (bytes) => {
-  const val = Number(bytes || 0)
-  if (val <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let idx = 0
-  let current = val
-  while (current >= 1024 && idx < units.length - 1) {
-    current /= 1024
-    idx += 1
-  }
-  return `${current.toFixed(current >= 100 || idx === 0 ? 0 : 1)} ${units[idx]}`
-}
 
 const clearTextHistory = async (mode) => {
   try {
@@ -240,7 +199,6 @@ const runImageImport = async (paths) => {
   try {
     const imported = await ImageClipboardService.importImageFiles(paths)
     ElMessage.success(`已导入 ${imported} 张图片`)
-    await refreshImageStorageMetrics()
   } catch (error) {
     ElMessage.error(`导入失败: ${error}`)
   } finally {
@@ -291,18 +249,10 @@ onMounted(async () => {
       importingImages.value = false
     }
   })
-  await refreshImageStorageMetrics()
-  metricsTimer = setInterval(async () => {
-    await refreshImageStorageMetrics()
-  }, 10000)
 })
 
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
-  if (metricsTimer) {
-    clearInterval(metricsTimer)
-    metricsTimer = null
-  }
   if (unlistenImportProgress) {
     unlistenImportProgress()
     unlistenImportProgress = null
