@@ -147,6 +147,7 @@ const originalRef = ref(null)
 const isWaitingResult = ref(false)
 const loadingStartedAt = ref(0)
 const isWindowMaximized = ref(false)
+const isWriteBackInFlight = ref(false)
 let unlistenResultClean = null
 let unlistenResultUpdate = null
 let initDataHandler = null
@@ -447,12 +448,17 @@ const handleLanguageChange = async () => {
 }
 
 const handleWriteBack = async () => {
+  if (isWriteBackInFlight.value) return
   const text = resultText.value.trim()
   if (!text) return
+  const requestId = `wb-${Date.now()}-${text.length}`
+  isWriteBackInFlight.value = true
   try {
-    await ClipboardService.copyAndPasteText(text)
+    await ClipboardService.copyAndPasteText(text, requestId)
   } catch (error) {
     handleAppError(error, '回写失败')
+  } finally {
+    isWriteBackInFlight.value = false
   }
 }
 

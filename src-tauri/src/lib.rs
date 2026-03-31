@@ -199,7 +199,9 @@ pub fn run() {
             copy_text,
             copy_and_paste_text,
             get_ai_settings,
+            #[cfg(debug_assertions)]
             get_text_dedup_metrics,
+            #[cfg(debug_assertions)]
             get_image_storage_metrics,
             save_app_settings,
             test_ai_connection,

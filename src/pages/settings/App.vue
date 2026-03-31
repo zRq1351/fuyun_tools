@@ -53,6 +53,9 @@
             <AISettings ref="aiSettingsRef" :form="form"/>
           </div>
 
+          <div v-if="isDevMode" v-show="activeTab === 'developer'">
+            <DeveloperSettings/>
+          </div>
           <div v-show="activeTab === 'about'">
             <AboutSettings
                 :current-version="currentVersion"
@@ -82,7 +85,7 @@
 import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from 'vue'
 import {ElMessage} from 'element-plus'
 import zhCn from 'element-plus/dist/locale/zh-cn'
-import {Camera, Cpu, DocumentCopy, InfoFilled, Moon, Sunny} from '@element-plus/icons-vue'
+import {Camera, Cpu, DocumentCopy, InfoFilled, Moon, Setting, Sunny} from '@element-plus/icons-vue'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import {listen} from '@tauri-apps/api/event'
 import {AISettingsService} from '../../services/ipc'
@@ -90,6 +93,7 @@ import ClipboardSettings from './components/ClipboardSettings.vue'
 import ScreenshotSettings from './components/ScreenshotSettings.vue'
 import AISettings from './components/AISettings.vue'
 import AboutSettings from './components/AboutSettings.vue'
+import DeveloperSettings from '@dev/DeveloperSettings'
 
 const activeTab = ref('clipboard')
 const isDark = ref(false)
@@ -107,32 +111,45 @@ const autoSaveState = ref('idle')
 const initialFormState = ref(null)
 // 阻止初始化后的第一次 watch 触发
 const skipNextWatch = ref(false)
-const sections = [
-  {
-    key: 'clipboard',
-    label: '剪贴板',
-    description: '管理历史记录、快捷键、导入与空间占用',
-    icon: DocumentCopy
-  },
-  {
-    key: 'screenshot',
-    label: '截图',
-    description: '管理截图功能相关的快捷键设置',
-    icon: Camera
-  },
-  {
-    key: 'ai',
-    label: 'AI',
-    description: '配置服务提供商、模型参数与提示词模板',
-    icon: Cpu
-  },
-  {
+const isDevMode = __DEV_PANEL__
+
+const sections = computed(() => {
+  const baseSections = [
+    {
+      key: 'clipboard',
+      label: '剪贴板',
+      description: '管理历史记录、快捷键与导入',
+      icon: DocumentCopy
+    },
+    {
+      key: 'screenshot',
+      label: '截图',
+      description: '管理截图功能相关的快捷键设置',
+      icon: Camera
+    },
+    {
+      key: 'ai',
+      label: 'AI',
+      description: '配置服务提供商、模型参数与提示词模板',
+      icon: Cpu
+    }
+  ]
+  if (isDevMode) {
+    baseSections.push({
+      key: 'developer',
+      label: '开发者',
+      description: '开发调试信息与存储占用监控',
+      icon: Setting
+    })
+  }
+  baseSections.push({
     key: 'about',
     label: '关于',
     description: '查看版本信息与使用说明',
     icon: InfoFilled
-  }
-]
+  })
+  return baseSections
+})
 
 const form = reactive({
   textMaxItems: 100,
@@ -173,7 +190,7 @@ const autoSaveText = computed(() => {
   return '已同步'
 })
 
-const currentSection = computed(() => sections.find((section) => section.key === activeTab.value) || sections[0])
+const currentSection = computed(() => sections.value.find((section) => section.key === activeTab.value) || sections.value[0])
 
 // 保存初始状态快照
 const saveInitialFormState = () => {

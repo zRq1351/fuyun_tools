@@ -16,15 +16,18 @@ use crate::utils::image_clipboard::{
     ImageHistoryPageData, ImageHistoryPreviewItem,
 };
 use crate::utils::utils_helpers::{
-    default_explanation_prompt_template, default_translation_prompt_template, get_dedup_scan_metrics,
+    default_explanation_prompt_template, default_translation_prompt_template,
     load_history_page_data_async, load_settings, save_settings, ClipboardHistoryPageData,
 };
+#[cfg(debug_assertions)]
+use crate::utils::utils_helpers::get_dedup_scan_metrics;
 use std::collections::HashMap;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -36,6 +39,56 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 static NEXT_SCREENSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_PINNED_IMAGE_WINDOW_ID: AtomicU64 = AtomicU64::new(1);
 static SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW: AtomicBool = AtomicBool::new(false);
+static RECENT_COPY_PASTE: OnceLock<StdMutex<Option<RecentCopyPaste>>> = OnceLock::new();
+
+const COPY_PASTE_DEDUP_WINDOW_MS: u128 = 1200;
+
+struct RecentCopyPaste {
+    request_id: String,
+    text_hash: u64,
+    created_at_ms: u128,
+}
+
+fn calc_text_hash(text: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn now_unix_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+fn is_duplicate_copy_paste_request(text: &str, request_id: Option<&str>) -> bool {
+    let request_id_trimmed = request_id.unwrap_or("").trim();
+    let text_hash = calc_text_hash(text);
+    let now_ms = now_unix_ms();
+    let lock = RECENT_COPY_PASTE.get_or_init(|| StdMutex::new(None));
+    let mut guard = match lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::warn!("复制粘贴去重锁中毒，尝试恢复");
+            poisoned.into_inner()
+        }
+    };
+    if let Some(last) = guard.as_ref() {
+        let within_window = now_ms.saturating_sub(last.created_at_ms) <= COPY_PASTE_DEDUP_WINDOW_MS;
+        let same_request_id = !request_id_trimmed.is_empty() && request_id_trimmed == last.request_id;
+        let same_text_hash = last.text_hash == text_hash;
+        if within_window && (same_request_id || same_text_hash) {
+            return true;
+        }
+    }
+    *guard = Some(RecentCopyPaste {
+        request_id: request_id_trimmed.to_string(),
+        text_hash,
+        created_at_ms: now_ms,
+    });
+    false
+}
 
 fn bind_screenshot_window_lifecycle(window: &tauri::WebviewWindow) {
     window.on_window_event(move |event| match event {
@@ -328,6 +381,9 @@ fn simulate_paste_with_retry(
     started_at: std::time::Instant,
     fast_path: bool,
 ) {
+    let is_post_paste_ctrl_release_error = |err: &str| {
+        err.contains("释放 Ctrl")
+    };
     if fast_path {
         match crate::ui::window_manager::simulate_paste() {
             Ok(_) => {
@@ -344,6 +400,17 @@ fn simulate_paste_with_retry(
                 return;
             }
             Err(first_error) => {
+                if is_post_paste_ctrl_release_error(&first_error) {
+                    log::warn!(
+                        "{}回填检测到粘贴后Ctrl释放异常，跳过二次粘贴以避免重复输入: {}",
+                        label,
+                        first_error
+                    );
+                    if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
+                        log::warn!("{}回填粘贴后Ctrl异常兜底释放失败: {}", label, release_error);
+                    }
+                    return;
+                }
                 // 优化方案 4：极速模式下快速重试，仅等待 15ms
                 thread::sleep(Duration::from_millis(15));
                 if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
@@ -415,6 +482,17 @@ fn simulate_paste_with_retry(
             }
         }
         Err(first_error) => {
+            if is_post_paste_ctrl_release_error(&first_error) {
+                log::warn!(
+                    "{}回填检测到粘贴后Ctrl释放异常，跳过二次粘贴以避免重复输入: {}",
+                    label,
+                    first_error
+                );
+                if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
+                    log::warn!("{}回填粘贴后Ctrl异常兜底释放失败: {}", label, release_error);
+                }
+                return;
+            }
             // 优化方案 4：二次重试延迟从 140ms 降至 100ms
             thread::sleep(Duration::from_millis(100));
             if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
@@ -1673,15 +1751,9 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
     Ok(result)
 }
 
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn get_text_dedup_metrics() -> Result<serde_json::Value, String> {
-    if !cfg!(debug_assertions) {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "仅开发环境可用",
-            "debug_assertions is false",
-        ));
-    }
     serde_json::to_value(get_dedup_scan_metrics()).map_err(|e| {
         frontend_error(
             ErrorCode::SystemError,
@@ -1691,6 +1763,7 @@ pub async fn get_text_dedup_metrics() -> Result<serde_json::Value, String> {
     })
 }
 
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn get_image_storage_metrics(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
@@ -2141,7 +2214,15 @@ pub async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn copy_and_paste_text(text: String, app: AppHandle) -> Result<(), String> {
+pub async fn copy_and_paste_text(
+    text: String,
+    request_id: Option<String>,
+    app: AppHandle,
+) -> Result<(), String> {
+    if is_duplicate_copy_paste_request(&text, request_id.as_deref()) {
+        log::warn!("检测到短时重复回写请求，已跳过执行");
+        return Ok(());
+    }
     app.clipboard()
         .write_text(text)
         .map_err(|e| frontend_error(ErrorCode::ClipboardError, "复制文本失败", e.to_string()))?;

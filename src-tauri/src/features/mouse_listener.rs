@@ -589,9 +589,7 @@ fn get_selected_text(
     log::info!("开始获取选中文本（模拟复制）");
 
     use crate::features::text_selection::get_selected_text_with_app;
-    let result = get_selected_text_with_app(app_handle, clipboard_manager);
-    reset_ctrl_key_state();
-    result
+    get_selected_text_with_app(app_handle, clipboard_manager)
 }
 
 /// 验证选中文本是否有效
