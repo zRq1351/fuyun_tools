@@ -1107,6 +1107,15 @@ impl ImageClipboardManager {
         self.promote_to_top(index)
     }
 
+    pub fn sync_positions_to_store(&self) {
+        let history = lock_arc_mutex(&self.history);
+        let item_ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
+        drop(history);
+        if let Err(e) = image_store::sync_item_positions(&item_ids) {
+            log::error!("同步图片位置失败: {}", e);
+        }
+    }
+
     pub fn promote_to_top_in_memory_by_id(&self, item_id: &str) -> Result<(), String> {
         let mut history = lock_arc_mutex(&self.history);
         let mut signature_index = lock_arc_mutex(&self.signature_index);

@@ -405,6 +405,8 @@ fn image_promote_worker(state: Arc<Mutex<SharedAppState>>, rx: Receiver<String>)
         let manager = lock_arc_mutex(&manager_arc);
         if let Err(e) = manager.promote_to_top_by_id(&item_id) {
             log::warn!("极速模式异步置顶图片失败: {}", e);
+        } else {
+            manager.sync_positions_to_store();
         }
     }
 }

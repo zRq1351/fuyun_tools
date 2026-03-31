@@ -1164,19 +1164,19 @@ const mergeShowWindowPayload = (data) => {
 
 const promoteLocalItemToTop = (itemId) => {
   if (!itemId || !Array.isArray(history.value) || history.value.length < 2) return
+  const pinnedSet = new Set(pinnedItems.value)
+  if (pinnedSet.has(itemId)) {
+    return
+  }
   const currentIndex = history.value.findIndex((item) => item?.id === itemId)
   if (currentIndex < 0) return
   const selectedId = history.value[selectedIndex.value]?.id
   const [moved] = history.value.splice(currentIndex, 1)
   if (!moved) return
-  const pinnedSet = new Set(pinnedItems.value)
-  const isPinnedItem = pinnedSet.has(itemId)
   let insertIndex = 0
-  if (!isPinnedItem) {
-    insertIndex = history.value.findIndex((item) => !pinnedSet.has(item?.id))
-    if (insertIndex < 0) {
-      insertIndex = history.value.length
-    }
+  insertIndex = history.value.findIndex((item) => !pinnedSet.has(item?.id))
+  if (insertIndex < 0) {
+    insertIndex = history.value.length
   }
   if (insertIndex > history.value.length) {
     insertIndex = history.value.length
@@ -1192,6 +1192,7 @@ const promoteLocalItemToTop = (itemId) => {
 
 const mergeImagePageIntoState = (data, reset = false) => {
   const items = Array.isArray(data?.items) ? data.items : []
+  const baseOffset = Number.isFinite(data?.offset) ? Math.max(0, Number(data.offset)) : (reset ? 0 : pageOffset.value)
   if (reset) {
     clearPrefetchedPage()
     history.value = []
@@ -1203,9 +1204,10 @@ const mergeImagePageIntoState = (data, reset = false) => {
     warmedIndices.clear()
     warmingIndices.clear()
   }
-  for (const item of items) {
-    const position = Number(item.position)
-    if (!Number.isFinite(position) || position < 0) continue
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    if (!item) continue
+    const position = baseOffset + i
     history.value[position] = {
       id: item.id,
       width: item.width,
