@@ -74,12 +74,16 @@ export const IPC_COMMANDS = {
     GET_PROVIDER_CONFIG: 'get_provider_config',
     REMOVE_AI_PROVIDER: 'remove_ai_provider',
     GET_ALL_CONFIGURED_PROVIDERS: 'get_all_configured_providers',
-    GET_TEXT_DEDUP_METRICS: 'get_text_dedup_metrics',
-    GET_IMAGE_STORAGE_METRICS: 'get_image_storage_metrics',
 
     // AI 功能
     STREAM_TRANSLATE_TEXT: 'stream_translate_text',
     STREAM_EXPLAIN_TEXT: 'stream_explain_text',
+    ...(__DEV_PANEL__ ? {
+        GET_TEXT_DEDUP_METRICS: 'get_text_dedup_metrics',
+        GET_IMAGE_STORAGE_METRICS: 'get_image_storage_metrics',
+        GET_COPY_PASTE_DEDUP_DEBUG_STATE: 'get_copy_paste_dedup_debug_state',
+        SET_COPY_PASTE_DEDUP_DEBUG_CONFIG: 'set_copy_paste_dedup_debug_config',
+    } : {}),
 };
 
 /**
@@ -370,10 +374,16 @@ export const AISettingsService = {
      * @returns {Promise<Array<[string, string]>>}
      */
     getAllConfiguredProviders: () => invoke(IPC_COMMANDS.GET_ALL_CONFIGURED_PROVIDERS),
-    getTextDedupMetrics: () =>
-        invoke(IPC_COMMANDS.GET_TEXT_DEDUP_METRICS),
-    getImageStorageMetrics: () =>
-        invoke(IPC_COMMANDS.GET_IMAGE_STORAGE_METRICS),
+    ...(__DEV_PANEL__ ? {
+        getTextDedupMetrics: () =>
+            invoke(IPC_COMMANDS.GET_TEXT_DEDUP_METRICS),
+        getImageStorageMetrics: () =>
+            invoke(IPC_COMMANDS.GET_IMAGE_STORAGE_METRICS),
+        getCopyPasteDedupDebugState: () =>
+            invoke(IPC_COMMANDS.GET_COPY_PASTE_DEDUP_DEBUG_STATE),
+        setCopyPasteDedupDebugConfig: ({enabled, windowMs, logEnabled, resetMetrics}) =>
+            invoke(IPC_COMMANDS.SET_COPY_PASTE_DEDUP_DEBUG_CONFIG, {enabled, windowMs, logEnabled, resetMetrics}),
+    } : {}),
 };
 
 /**

@@ -203,6 +203,10 @@ pub fn run() {
             get_text_dedup_metrics,
             #[cfg(debug_assertions)]
             get_image_storage_metrics,
+            #[cfg(debug_assertions)]
+            get_copy_paste_dedup_debug_state,
+            #[cfg(debug_assertions)]
+            set_copy_paste_dedup_debug_config,
             save_app_settings,
             test_ai_connection,
             stream_translate_text,

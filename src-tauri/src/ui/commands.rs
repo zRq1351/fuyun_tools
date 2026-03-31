@@ -40,13 +40,27 @@ static NEXT_SCREENSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_PINNED_IMAGE_WINDOW_ID: AtomicU64 = AtomicU64::new(1);
 static SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW: AtomicBool = AtomicBool::new(false);
 static RECENT_COPY_PASTE: OnceLock<StdMutex<Option<RecentCopyPaste>>> = OnceLock::new();
-
-const COPY_PASTE_DEDUP_WINDOW_MS: u128 = 1200;
+static COPY_PASTE_DEDUP_ENABLED: AtomicBool = AtomicBool::new(true);
+static COPY_PASTE_DEDUP_WINDOW_MS: AtomicU64 = AtomicU64::new(1200);
+static COPY_PASTE_DEDUP_LOG_ENABLED: AtomicBool = AtomicBool::new(true);
+static COPY_PASTE_DEDUP_TOTAL_REQUESTS: AtomicU64 = AtomicU64::new(0);
+static COPY_PASTE_DEDUP_HIT_COUNT: AtomicU64 = AtomicU64::new(0);
+static COPY_PASTE_DEDUP_REQUEST_ID_HIT_COUNT: AtomicU64 = AtomicU64::new(0);
+static COPY_PASTE_DEDUP_TEXT_HASH_HIT_COUNT: AtomicU64 = AtomicU64::new(0);
+static COPY_PASTE_DEDUP_LOG_COUNT: AtomicU64 = AtomicU64::new(0);
+static COPY_PASTE_DEDUP_WINDOW_STATS: OnceLock<StdMutex<DedupWindowStats>> = OnceLock::new();
 
 struct RecentCopyPaste {
     request_id: String,
     text_hash: u64,
-    created_at_ms: u128,
+    created_at_ms: u64,
+}
+
+struct DedupWindowStats {
+    window_start_ms: u64,
+    requests: u64,
+    hits: u64,
+    last_hit_at_ms: u64,
 }
 
 fn calc_text_hash(text: &str) -> u64 {
@@ -55,17 +69,22 @@ fn calc_text_hash(text: &str) -> u64 {
     hasher.finish()
 }
 
-fn now_unix_ms() -> u128 {
+fn now_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
+        .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }
 
 fn is_duplicate_copy_paste_request(text: &str, request_id: Option<&str>) -> bool {
+    COPY_PASTE_DEDUP_TOTAL_REQUESTS.fetch_add(1, Ordering::Relaxed);
+    if !COPY_PASTE_DEDUP_ENABLED.load(Ordering::Relaxed) {
+        return false;
+    }
     let request_id_trimmed = request_id.unwrap_or("").trim();
     let text_hash = calc_text_hash(text);
     let now_ms = now_unix_ms();
+    let dedup_window_ms = COPY_PASTE_DEDUP_WINDOW_MS.load(Ordering::Relaxed);
     let lock = RECENT_COPY_PASTE.get_or_init(|| StdMutex::new(None));
     let mut guard = match lock.lock() {
         Ok(guard) => guard,
@@ -74,13 +93,46 @@ fn is_duplicate_copy_paste_request(text: &str, request_id: Option<&str>) -> bool
             poisoned.into_inner()
         }
     };
+    let mut is_hit = false;
     if let Some(last) = guard.as_ref() {
-        let within_window = now_ms.saturating_sub(last.created_at_ms) <= COPY_PASTE_DEDUP_WINDOW_MS;
+        let within_window = now_ms.saturating_sub(last.created_at_ms) <= dedup_window_ms;
         let same_request_id = !request_id_trimmed.is_empty() && request_id_trimmed == last.request_id;
         let same_text_hash = last.text_hash == text_hash;
         if within_window && (same_request_id || same_text_hash) {
-            return true;
+            COPY_PASTE_DEDUP_HIT_COUNT.fetch_add(1, Ordering::Relaxed);
+            if same_request_id {
+                COPY_PASTE_DEDUP_REQUEST_ID_HIT_COUNT.fetch_add(1, Ordering::Relaxed);
+            } else {
+                COPY_PASTE_DEDUP_TEXT_HASH_HIT_COUNT.fetch_add(1, Ordering::Relaxed);
+            }
+            is_hit = true;
         }
+    }
+    let stats_lock = COPY_PASTE_DEDUP_WINDOW_STATS.get_or_init(|| {
+        StdMutex::new(DedupWindowStats {
+            window_start_ms: now_ms,
+            requests: 0,
+            hits: 0,
+            last_hit_at_ms: 0,
+        })
+    });
+    let mut stats = match stats_lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::warn!("复制粘贴去重窗口统计锁中毒，尝试恢复");
+            poisoned.into_inner()
+        }
+    };
+    if now_ms.saturating_sub(stats.window_start_ms) > dedup_window_ms {
+        stats.window_start_ms = now_ms;
+        stats.requests = 0;
+        stats.hits = 0;
+    }
+    stats.requests = stats.requests.saturating_add(1);
+    if is_hit {
+        stats.hits = stats.hits.saturating_add(1);
+        stats.last_hit_at_ms = now_ms;
+        return true;
     }
     *guard = Some(RecentCopyPaste {
         request_id: request_id_trimmed.to_string(),
@@ -88,6 +140,54 @@ fn is_duplicate_copy_paste_request(text: &str, request_id: Option<&str>) -> bool
         created_at_ms: now_ms,
     });
     false
+}
+
+#[cfg(debug_assertions)]
+fn get_copy_paste_dedup_debug_state_value() -> serde_json::Value {
+    let now_ms = now_unix_ms();
+    let dedup_window_ms = COPY_PASTE_DEDUP_WINDOW_MS.load(Ordering::Relaxed);
+    let stats_lock = COPY_PASTE_DEDUP_WINDOW_STATS.get_or_init(|| {
+        StdMutex::new(DedupWindowStats {
+            window_start_ms: now_ms,
+            requests: 0,
+            hits: 0,
+            last_hit_at_ms: 0,
+        })
+    });
+    let stats = match stats_lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::warn!("复制粘贴去重窗口统计锁中毒，尝试恢复");
+            poisoned.into_inner()
+        }
+    };
+    let mut window_requests = stats.requests;
+    let mut window_hits = stats.hits;
+    if now_ms.saturating_sub(stats.window_start_ms) > dedup_window_ms {
+        window_requests = 0;
+        window_hits = 0;
+    }
+    let window_hit_rate = if window_requests == 0 {
+        0.0
+    } else {
+        (window_hits as f64 / window_requests as f64) * 100.0
+    };
+    serde_json::json!({
+        "enabled": COPY_PASTE_DEDUP_ENABLED.load(Ordering::Relaxed),
+        "window_ms": COPY_PASTE_DEDUP_WINDOW_MS.load(Ordering::Relaxed),
+        "log_enabled": COPY_PASTE_DEDUP_LOG_ENABLED.load(Ordering::Relaxed),
+        "metrics": {
+            "total_requests": COPY_PASTE_DEDUP_TOTAL_REQUESTS.load(Ordering::Relaxed),
+            "dedup_hits": COPY_PASTE_DEDUP_HIT_COUNT.load(Ordering::Relaxed),
+            "request_id_hits": COPY_PASTE_DEDUP_REQUEST_ID_HIT_COUNT.load(Ordering::Relaxed),
+            "text_hash_hits": COPY_PASTE_DEDUP_TEXT_HASH_HIT_COUNT.load(Ordering::Relaxed),
+            "log_count": COPY_PASTE_DEDUP_LOG_COUNT.load(Ordering::Relaxed),
+            "window_requests": window_requests,
+            "window_hits": window_hits,
+            "window_hit_rate_percent": window_hit_rate,
+            "last_hit_at_ms": stats.last_hit_at_ms,
+        }
+    })
 }
 
 fn bind_screenshot_window_lifecycle(window: &tauri::WebviewWindow) {
@@ -1782,6 +1882,65 @@ pub async fn get_image_storage_metrics(
     })
 }
 
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn get_copy_paste_dedup_debug_state() -> Result<serde_json::Value, String> {
+    Ok(get_copy_paste_dedup_debug_state_value())
+}
+
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn set_copy_paste_dedup_debug_config(
+    enabled: Option<bool>,
+    window_ms: Option<u64>,
+    log_enabled: Option<bool>,
+    reset_metrics: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    if let Some(enabled) = enabled {
+        COPY_PASTE_DEDUP_ENABLED.store(enabled, Ordering::Relaxed);
+    }
+    if let Some(window_ms) = window_ms {
+        let clamped = window_ms.clamp(50, 10_000);
+        COPY_PASTE_DEDUP_WINDOW_MS.store(clamped, Ordering::Relaxed);
+        if let Some(lock) = COPY_PASTE_DEDUP_WINDOW_STATS.get() {
+            let mut stats = match lock.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    log::warn!("复制粘贴去重窗口统计锁中毒，尝试恢复");
+                    poisoned.into_inner()
+                }
+            };
+            stats.window_start_ms = now_unix_ms();
+            stats.requests = 0;
+            stats.hits = 0;
+        }
+    }
+    if let Some(log_enabled) = log_enabled {
+        COPY_PASTE_DEDUP_LOG_ENABLED.store(log_enabled, Ordering::Relaxed);
+    }
+    if reset_metrics.unwrap_or(false) {
+        COPY_PASTE_DEDUP_TOTAL_REQUESTS.store(0, Ordering::Relaxed);
+        COPY_PASTE_DEDUP_HIT_COUNT.store(0, Ordering::Relaxed);
+        COPY_PASTE_DEDUP_REQUEST_ID_HIT_COUNT.store(0, Ordering::Relaxed);
+        COPY_PASTE_DEDUP_TEXT_HASH_HIT_COUNT.store(0, Ordering::Relaxed);
+        COPY_PASTE_DEDUP_LOG_COUNT.store(0, Ordering::Relaxed);
+        if let Some(lock) = COPY_PASTE_DEDUP_WINDOW_STATS.get() {
+            let mut stats = match lock.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    log::warn!("复制粘贴去重窗口统计锁中毒，尝试恢复");
+                    poisoned.into_inner()
+                }
+            };
+            stats.window_start_ms = now_unix_ms();
+            stats.requests = 0;
+            stats.hits = 0;
+            stats.last_hit_at_ms = 0;
+        }
+    }
+    Ok(get_copy_paste_dedup_debug_state_value())
+}
+
 #[tauri::command]
 pub async fn save_app_settings(
     text_max_items: Option<usize>,
@@ -2220,7 +2379,10 @@ pub async fn copy_and_paste_text(
     app: AppHandle,
 ) -> Result<(), String> {
     if is_duplicate_copy_paste_request(&text, request_id.as_deref()) {
-        log::warn!("检测到短时重复回写请求，已跳过执行");
+        if COPY_PASTE_DEDUP_LOG_ENABLED.load(Ordering::Relaxed) {
+            log::warn!("检测到短时重复回写请求，已跳过执行");
+            COPY_PASTE_DEDUP_LOG_COUNT.fetch_add(1, Ordering::Relaxed);
+        }
         return Ok(());
     }
     app.clipboard()
