@@ -47,11 +47,15 @@ pub fn capture_screen_region(
     width: u32,
     height: u32,
 ) -> Result<(Vec<u8>, u32, u32), String> {
-    set_screenshot_in_progress(true);
+    let owns_screenshot_state = SCREENSHOT_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok();
 
     let result = capture_screen_region_internal(x, y, width, height);
 
-    set_screenshot_in_progress(false);
+    if owns_screenshot_state {
+        set_screenshot_in_progress(false);
+    }
     result
 }
 

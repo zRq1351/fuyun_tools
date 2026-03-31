@@ -307,8 +307,8 @@ impl AIClient {
                 if !response.choices.is_empty() {
                     Ok(true)
                 } else {
-                    log::warn!("AI连接测试返回空选项，但网络连接正常");
-                    Ok(true)
+                    log::warn!("AI连接测试返回空选项");
+                    Ok(false)
                 }
             },
             Err(e) => {

@@ -500,34 +500,10 @@ pub async fn load_history_page_data_async(
     let order_clause = resolve_history_sort(sort_by, sort_order);
 
     let (total, mut items) = if fts_enabled {
-        let total_sql = "
-            SELECT COUNT(*)
-            FROM history_items hi
-            LEFT JOIN categories c ON (c.item_id = hi.item_id OR c.content = hi.content)
-            LEFT JOIN pinned_items p ON (p.item_id = hi.item_id OR p.content = hi.content)
-            WHERE
-              (?1 IS NULL OR (CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END) = ?1)
-              AND (?2 = 0 OR p.content IS NOT NULL)
-              AND (
-                ?3 IS NULL
-                OR EXISTS (
-                    SELECT 1 FROM history_items_fts
-                    WHERE history_items_fts.rowid = hi.id
-                      AND history_items_fts MATCH ?3
-                )
-              )
-            ";
-        let total = sqlx::query_scalar::<_, i64>(total_sql)
-            .bind(category_filter.as_deref())
-            .bind(pinned_flag)
-            .bind(fts_keyword.as_deref())
-            .fetch_one(&mut conn)
-            .await
-            .map_err(|e| format!("读取历史数据库失败: {}", e))?;
-
         let query_sql = format!(
             "
             SELECT
+              COUNT(*) OVER() AS total_count,
               hi.id,
               COALESCE(hi.item_id, ''),
               hi.content,
@@ -562,48 +538,35 @@ pub async fn load_history_page_data_async(
             .fetch_all(&mut conn)
             .await
             .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        let total = rows
+            .first()
+            .and_then(|row| row.try_get::<i64, _>(0).ok())
+            .unwrap_or(0);
         let items = rows
             .into_iter()
             .map(|row| {
-                let content: String = row.try_get(2).unwrap_or_default();
-                let mut id: String = row.try_get(1).unwrap_or_default();
+                let content: String = row.try_get(3).unwrap_or_default();
+                let mut id: String = row.try_get(2).unwrap_or_default();
                 if id.is_empty() {
                     id = stable_history_item_id(&content);
                 }
                 ClipboardHistoryPageItem {
-                    position: clamp_i64_to_usize(row.try_get::<i64, _>(0).unwrap_or(0)),
+                    position: clamp_i64_to_usize(row.try_get::<i64, _>(1).unwrap_or(0)),
                     id,
                     content,
-                    category: row.try_get::<String, _>(3).unwrap_or_else(|_| "未分类".to_string()),
-                    pinned: row.try_get::<i64, _>(4).unwrap_or(0) == 1,
-                    updated_at: row.try_get::<i64, _>(5).unwrap_or(0),
+                    category: row.try_get::<String, _>(4).unwrap_or_else(|_| "未分类".to_string()),
+                    pinned: row.try_get::<i64, _>(5).unwrap_or(0) == 1,
+                    updated_at: row.try_get::<i64, _>(6).unwrap_or(0),
                     snippet: None,
                 }
             })
             .collect::<Vec<_>>();
         (total, items)
     } else {
-        let total_sql = "
-            SELECT COUNT(*)
-            FROM history_items hi
-            LEFT JOIN categories c ON (c.item_id = hi.item_id OR c.content = hi.content)
-            LEFT JOIN pinned_items p ON (p.item_id = hi.item_id OR p.content = hi.content)
-            WHERE
-              (?1 IS NULL OR (CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END) = ?1)
-              AND (?2 = 0 OR p.content IS NOT NULL)
-              AND (?3 IS NULL OR hi.content LIKE '%' || ?3 || '%')
-            ";
-        let total = sqlx::query_scalar::<_, i64>(total_sql)
-            .bind(category_filter.as_deref())
-            .bind(pinned_flag)
-            .bind(keyword_filter.as_deref())
-            .fetch_one(&mut conn)
-            .await
-            .map_err(|e| format!("读取历史数据库失败: {}", e))?;
-
         let query_sql = format!(
             "
             SELECT
+              COUNT(*) OVER() AS total_count,
               hi.id,
               COALESCE(hi.item_id, ''),
               hi.content,
@@ -631,21 +594,25 @@ pub async fn load_history_page_data_async(
             .fetch_all(&mut conn)
             .await
             .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        let total = rows
+            .first()
+            .and_then(|row| row.try_get::<i64, _>(0).ok())
+            .unwrap_or(0);
         let items = rows
             .into_iter()
             .map(|row| {
-                let content: String = row.try_get(2).unwrap_or_default();
-                let mut id: String = row.try_get(1).unwrap_or_default();
+                let content: String = row.try_get(3).unwrap_or_default();
+                let mut id: String = row.try_get(2).unwrap_or_default();
                 if id.is_empty() {
                     id = stable_history_item_id(&content);
                 }
                 ClipboardHistoryPageItem {
-                    position: clamp_i64_to_usize(row.try_get::<i64, _>(0).unwrap_or(0)),
+                    position: clamp_i64_to_usize(row.try_get::<i64, _>(1).unwrap_or(0)),
                     id,
                     content,
-                    category: row.try_get::<String, _>(3).unwrap_or_else(|_| "未分类".to_string()),
-                    pinned: row.try_get::<i64, _>(4).unwrap_or(0) == 1,
-                    updated_at: row.try_get::<i64, _>(5).unwrap_or(0),
+                    category: row.try_get::<String, _>(4).unwrap_or_else(|_| "未分类".to_string()),
+                    pinned: row.try_get::<i64, _>(5).unwrap_or(0) == 1,
+                    updated_at: row.try_get::<i64, _>(6).unwrap_or(0),
                     snippet: None,
                 }
             })
@@ -938,9 +905,18 @@ pub async fn delete_history_items_bulk(contents: &[String]) -> Result<(), String
                 q_pin = q_pin.bind(id);
             }
             
-            q_fts.execute(&mut *tx).await.unwrap_or_default();
-            q_cat.execute(&mut *tx).await.unwrap_or_default();
-            q_pin.execute(&mut *tx).await.unwrap_or_default();
+            q_fts
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("删除 FTS 索引失败: {}", e))?;
+            q_cat
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("删除分类关联失败: {}", e))?;
+            q_pin
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("删除置顶关联失败: {}", e))?;
         }
     }
 
@@ -969,21 +945,24 @@ pub async fn delete_history_item_by_content(content: &str) -> Result<(), String>
 
     if let Some(id) = item_id {
         // 同步 FTS 索引
-        let _ = sqlx::query("DELETE FROM history_items_fts WHERE item_id = ?")
+        sqlx::query("DELETE FROM history_items_fts WHERE item_id = ?")
             .bind(&id)
             .execute(&mut *tx)
-            .await;
+            .await
+            .map_err(|e| format!("删除 FTS 索引失败: {}", e))?;
             
         // 同步删除关联表记录
-        let _ = sqlx::query("DELETE FROM categories WHERE item_id = ?")
+        sqlx::query("DELETE FROM categories WHERE item_id = ?")
             .bind(&id)
             .execute(&mut *tx)
-            .await;
+            .await
+            .map_err(|e| format!("删除分类关联失败: {}", e))?;
             
-        let _ = sqlx::query("DELETE FROM pinned_items WHERE item_id = ?")
+        sqlx::query("DELETE FROM pinned_items WHERE item_id = ?")
             .bind(&id)
             .execute(&mut *tx)
-            .await;
+            .await
+            .map_err(|e| format!("删除置顶关联失败: {}", e))?;
     }
 
     tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;

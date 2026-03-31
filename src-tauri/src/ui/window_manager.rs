@@ -1,7 +1,7 @@
 use crate::core::app_state::AppState;
 use crate::core::config::{CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN, CTRL_KEY};
 use crate::sync::Mutex;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex};
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -16,9 +16,24 @@ use winapi::um::winuser::{
 
 pub static ENIGO_INSTANCE: LazyLock<Arc<Mutex<Option<enigo::Enigo>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
+static WINDOW_VISIBILITY_NOTIFY: LazyLock<Arc<(StdMutex<u64>, Condvar)>> =
+    LazyLock::new(|| Arc::new((StdMutex::new(0), Condvar::new())));
 
 fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
     mutex.lock().expect("infallible mutex lock failed")
+}
+
+fn notify_window_visibility_changed() {
+    let (lock, cvar) = &**WINDOW_VISIBILITY_NOTIFY;
+    let mut seq = match lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::error!("窗口可见性通知锁中毒，尝试恢复");
+            poisoned.into_inner()
+        }
+    };
+    *seq = seq.wrapping_add(1);
+    cvar.notify_all();
 }
 
 /// 清理ENIGO实例资源
@@ -73,6 +88,7 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
             return;
         }
         state_guard.is_visible = true;
+        notify_window_visibility_changed();
         (
             state_guard.selected_index,
             state_guard.settings.clipboard_bottom_offset,
@@ -121,6 +137,7 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
         let mut state_guard = lock_arc_mutex(&state);
         let already_visible = state_guard.is_image_visible;
         state_guard.is_image_visible = true;
+        notify_window_visibility_changed();
         let should_sync_history = !already_visible && state_guard.image_history_dirty;
         if should_sync_history {
             state_guard.image_history_dirty = false;
@@ -195,6 +212,7 @@ pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
         state_guard.is_visible = false;
         state_guard.selected_index = 0;
     }
+    notify_window_visibility_changed();
 }
 
 pub fn hide_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
@@ -215,29 +233,69 @@ pub fn hide_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
         state_guard.is_image_visible = false;
         state_guard.image_selected_index = 0;
     }
+    notify_window_visibility_changed();
 }
 
 pub fn wait_for_window_hidden(
-    app_handle: &AppHandle,
+    _app_handle: &AppHandle,
+    state: &Arc<Mutex<AppState>>,
     window_label: &str,
     timeout: Duration,
 ) -> Result<(), String> {
+    let hidden = match window_label {
+        "clipboard" => {
+            let state_guard = lock_arc_mutex(state);
+            !state_guard.is_visible
+        }
+        "image_clipboard" => {
+            let state_guard = lock_arc_mutex(state);
+            !state_guard.is_image_visible
+        }
+        _ => true,
+    };
+    if hidden {
+        return Ok(());
+    }
     let start = std::time::Instant::now();
-    let mut interval = Duration::from_millis(12);
-    let max_interval = Duration::from_millis(80);
+    let (lock, cvar) = &**WINDOW_VISIBILITY_NOTIFY;
+    let mut seq = match lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::error!("等待窗口隐藏时通知锁中毒，尝试恢复");
+            poisoned.into_inner()
+        }
+    };
     loop {
-        if start.elapsed() > timeout {
+        let hidden = match window_label {
+            "clipboard" => {
+                let state_guard = lock_arc_mutex(state);
+                !state_guard.is_visible
+            }
+            "image_clipboard" => {
+                let state_guard = lock_arc_mutex(state);
+                !state_guard.is_image_visible
+            }
+            _ => true,
+        };
+        if hidden {
+            return Ok(());
+        }
+        let elapsed = start.elapsed();
+        if elapsed >= timeout {
             return Err(format!("等待窗口隐藏超时: {}", window_label));
         }
-        let Some(window) = app_handle.get_webview_window(window_label) else {
-            return Ok(());
-        };
-        let is_visible = window.is_visible().map_err(|e| e.to_string())?;
-        if !is_visible {
-            return Ok(());
+        let remain = timeout.saturating_sub(elapsed);
+        let wait_dur = std::cmp::min(remain, Duration::from_millis(80));
+        match cvar.wait_timeout(seq, wait_dur) {
+            Ok((next_seq, _)) => {
+                seq = next_seq;
+            }
+            Err(poisoned) => {
+                log::error!("等待窗口隐藏时条件变量异常（锁中毒），尝试恢复");
+                let (next_seq, _) = poisoned.into_inner();
+                seq = next_seq;
+            }
         }
-        thread::sleep(interval);
-        interval = std::cmp::min(interval.saturating_mul(2), max_interval);
     }
 }
 
@@ -552,6 +610,8 @@ fn execute_ctrl_v_with_safety(enigo: &mut enigo::Enigo) -> Result<(), String> {
 fn wait_for_foreground_ready_for_paste() -> Result<(), String> {
     let mut stable_not_fuyun_count = 0usize;
     let mut last_title = String::new();
+    let mut interval = Duration::from_millis(8);
+    let max_interval = Duration::from_millis(40);
     for _ in 0..24 {
         let (is_fuyun, title) = foreground_window_info();
         if !is_fuyun {
@@ -567,7 +627,8 @@ fn wait_for_foreground_ready_for_paste() -> Result<(), String> {
         } else {
             stable_not_fuyun_count = 0;
         }
-        thread::sleep(Duration::from_millis(20));
+        thread::sleep(interval);
+        interval = std::cmp::min(interval.saturating_mul(2), max_interval);
     }
     let (_, title) = foreground_window_info();
     Err(format!("前台窗口未就绪，当前窗口标题: {}", title))

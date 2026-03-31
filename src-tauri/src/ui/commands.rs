@@ -270,8 +270,10 @@ fn schedule_image_promote_to_top(state: Arc<Mutex<SharedAppState>>, item_id: Str
 
 fn wait_for_fill_window_hidden(app: &AppHandle, window_label: &str, label: &str, fast_path: bool) {
     let timeout_ms = if fast_path { 220 } else { 900 };
+    let state_arc = app.state::<Arc<Mutex<SharedAppState>>>().inner().clone();
     if let Err(e) = crate::ui::window_manager::wait_for_window_hidden(
         app,
+        &state_arc,
         window_label,
         Duration::from_millis(timeout_ms),
     ) {
@@ -2073,9 +2075,15 @@ pub async fn test_ai_connection(
 
     // 如果前端传过来的是脱敏的密钥，则从状态中获取真实的密钥
     if real_api_key == "********" {
-        let state_guard = lock_arc_mutex(state.inner());
-        let provider = ai_provider.unwrap_or_else(|| state_guard.settings.ai_provider.clone());
-        match state_guard.settings.get_provider_api_key(&provider) {
+        let (provider, settings_snapshot) = {
+            let state_guard = lock_arc_mutex(state.inner());
+            (
+                ai_provider.unwrap_or_else(|| state_guard.settings.ai_provider.clone()),
+                state_guard.settings.clone(),
+            )
+        };
+        let key = settings_snapshot.get_provider_api_key(&provider);
+        match key {
             Ok(key) if !key.is_empty() => {
                 real_api_key = key;
             }

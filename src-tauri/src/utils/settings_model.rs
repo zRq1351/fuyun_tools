@@ -261,10 +261,10 @@ impl AppSettingsData {
                             } else {
                                 log::info!("密钥迁移成功");
                                 migrated = true;
+                                config.encrypted_api_key.clear();
                             }
                         }
                     }
-                    config.encrypted_api_key.clear();
                 }
             }
         }

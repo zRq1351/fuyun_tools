@@ -3,7 +3,7 @@ use crate::sync::Mutex;
 use log;
 use rdev::{listen, Button, EventType, Key};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, Condvar, LazyLock};
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -33,6 +33,7 @@ struct GlobalState {
     detection_anchor_pos: Arc<Mutex<(i32, i32)>>,
     last_toolbar_emit: Arc<Mutex<Option<(String, (i32, i32), std::time::Instant)>>>,
     last_click: Arc<Mutex<Option<(u64, u64, std::time::Instant)>>>,
+    detection_notify: Arc<(std::sync::Mutex<bool>, Condvar)>,
 }
 
 static GLOBAL_STATE: LazyLock<GlobalState> = LazyLock::new(|| {
@@ -46,6 +47,7 @@ static GLOBAL_STATE: LazyLock<GlobalState> = LazyLock::new(|| {
         detection_anchor_pos: Arc::new(Mutex::new((0, 0))),
         last_toolbar_emit: Arc::new(Mutex::new(None)),
         last_click: Arc::new(Mutex::new(None)),
+        detection_notify: Arc::new((std::sync::Mutex::new(false), Condvar::new())),
     }
 });
 
@@ -54,6 +56,29 @@ static LISTENER_ENABLED: AtomicBool = AtomicBool::new(true);
 
 fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
     mutex.lock().expect("infallible mutex lock failed")
+}
+
+fn notify_detection_pending() {
+    let (lock, cvar) = &*GLOBAL_STATE.detection_notify;
+    if let Ok(mut pending) = lock.lock() {
+        *pending = true;
+        cvar.notify_one();
+    }
+}
+
+fn wait_detection_pending(timeout: Duration) {
+    let (lock, cvar) = &*GLOBAL_STATE.detection_notify;
+    if let Ok(mut pending) = lock.lock() {
+        if !*pending {
+            let wait_result = cvar.wait_timeout(pending, timeout);
+            if let Ok((guard, _)) = wait_result {
+                pending = guard;
+            } else {
+                return;
+            }
+        }
+        *pending = false;
+    }
 }
 
 /// 设置划词监听器启用状态
@@ -145,13 +170,15 @@ impl MouseListener {
                     continue;
                 }
 
-                if GLOBAL_STATE.needs_detection.load(Ordering::SeqCst) {
+                if !GLOBAL_STATE.needs_detection.swap(false, Ordering::SeqCst) {
+                    wait_detection_pending(Duration::from_millis(50));
+                    continue;
+                }
+
+                {
                     if capture::is_screenshot_in_progress() {
-                        GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
-                        thread::sleep(Duration::from_millis(50));
                         continue;
                     }
-                    GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
 
                     let (selection_enabled, should_skip_detection) = {
                         let state_guard = lock_arc_mutex(&detection_state);
@@ -165,12 +192,10 @@ impl MouseListener {
                     };
 
                     if !selection_enabled {
-                        thread::sleep(Duration::from_millis(50));
                         continue;
                     }
 
                     if should_skip_detection {
-                        thread::sleep(Duration::from_millis(50));
                         continue;
                     }
 
@@ -222,8 +247,6 @@ impl MouseListener {
                         }
                     }
                 }
-
-                thread::sleep(Duration::from_millis(50));
             }
         });
 
@@ -358,6 +381,7 @@ impl MouseListener {
                                             *pos_guard = (last_x as i32, last_y as i32);
                                         }
                                         GLOBAL_STATE.needs_detection.store(true, Ordering::SeqCst);
+                                        notify_detection_pending();
                                         log::info!("设置划词检测标志");
 
                                         *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) = up_time;

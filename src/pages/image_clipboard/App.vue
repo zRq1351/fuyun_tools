@@ -452,29 +452,48 @@ const getItemTags = (itemId) => {
 
 const isPinned = (itemId) => pinnedItems.value.includes(itemId)
 
-const filteredHistory = computed(() => {
-  return history.value
-      .map((item, index) => ({item, index}))
-      .filter((entry) => Boolean(entry.item))
-      .filter((entry) => {
-        const itemId = entry.item?.id
-        const itemCategory = getItemCategory(itemId)
-        if (categoryFilter.value !== '全部' && itemCategory !== categoryFilter.value) {
-          return false
+const filteredHistoryState = computed(() => {
+  const category = categoryFilter.value
+  const keyword = searchKeyword.value.trim().toLowerCase()
+  const out = []
+  let selectedDisplay = 1
+  for (let index = 0; index < history.value.length; index++) {
+    const item = history.value[index]
+    if (!item) continue
+    const itemId = item.id
+    const itemCategory = getItemCategory(itemId)
+    if (category !== '全部' && itemCategory !== category) {
+      continue
+    }
+    if (keyword) {
+      const categoryMatched = itemCategory.toLowerCase().includes(keyword)
+      if (!categoryMatched) {
+        const tags = getItemTags(itemId)
+        const tagMatched = tags.some((tag) => String(tag).toLowerCase().includes(keyword))
+        if (!tagMatched) {
+          continue
         }
-        const keyword = searchKeyword.value.trim().toLowerCase()
-        if (!keyword) {
-          return true
-        }
-        if (itemCategory.toLowerCase().includes(keyword)) {
-          return true
-        }
-        return getItemTags(itemId).some((tag) => String(tag).toLowerCase().includes(keyword))
-      })
+      }
+    }
+    out.push({item, index})
+  }
+  if (out.length > 0) {
+    const selectedPosition = out.findIndex((entry) => entry.index === selectedIndex.value)
+    if (selectedPosition >= 0) {
+      selectedDisplay = selectedPosition + 1
+    }
+  }
+  return {
+    entries: out,
+    total: out.length,
+    selectedDisplay
+  }
 })
 
+const filteredHistory = computed(() => filteredHistoryState.value.entries)
+
 const virtualRange = computed(() => {
-  const total = filteredHistory.value.length
+  const total = filteredHistoryState.value.total
   if (total === 0) {
     return {start: 0, end: 0}
   }
@@ -492,7 +511,7 @@ const renderedHistory = computed(() => {
 })
 
 const previewCacheKeepIds = computed(() => {
-  const total = filteredHistory.value.length
+  const total = filteredHistoryState.value.total
   if (total === 0) return []
   const start = Math.max(0, virtualRange.value.start - IMAGE_PREVIEW_CACHE_MARGIN)
   const end = Math.min(total, virtualRange.value.end + IMAGE_PREVIEW_CACHE_MARGIN)
@@ -510,30 +529,29 @@ const previewCacheKeepIds = computed(() => {
 const leadingSpacerWidth = computed(() => virtualRange.value.start * IMAGE_ITEM_UNIT)
 
 const trailingSpacerWidth = computed(() => {
-  const total = filteredHistory.value.length
+  const total = filteredHistoryState.value.total
   const trailing = Math.max(0, total - virtualRange.value.end) * IMAGE_ITEM_UNIT
   return trailing + IMAGE_TAIL_SPACER
 })
 
 const selectedStatusText = computed(() => {
-  const total = totalCount.value || filteredHistory.value.length
+  const total = totalCount.value || filteredHistoryState.value.total
   if (total === 0) return '当前无选中项'
-  const current = filteredHistory.value.findIndex((entry) => entry.index === selectedIndex.value)
-  const display = current >= 0 ? current + 1 : 1
+  const display = filteredHistoryState.value.selectedDisplay
   return `当前选中：第 ${display} / ${total} 条`
 })
 
 const loadStatusText = computed(() => {
   if (isLoadingPage.value) return '正在加载...'
-  if (hasMore.value) return `已加载 ${filteredHistory.value.length} / ${totalCount.value || filteredHistory.value.length}`
-  return `已全部加载 ${filteredHistory.value.length} 条`
+  if (hasMore.value) return `已加载 ${filteredHistoryState.value.total} / ${totalCount.value || filteredHistoryState.value.total}`
+  return `已全部加载 ${filteredHistoryState.value.total} 条`
 })
 
-const isLoadingMore = computed(() => isLoadingPage.value && filteredHistory.value.length > 0)
+const isLoadingMore = computed(() => isLoadingPage.value && filteredHistoryState.value.total > 0)
 
 const showTailLoadMoreHint = computed(() => {
-  if (!(hasMore.value || isLoadingMore.value) || filteredHistory.value.length === 0) return false
-  return virtualRange.value.end >= filteredHistory.value.length
+  if (!(hasMore.value || isLoadingMore.value) || filteredHistoryState.value.total === 0) return false
+  return virtualRange.value.end >= filteredHistoryState.value.total
 })
 
 const IMAGE_PAGE_SIZE_OPTIONS = [10, 30, 50]
@@ -580,10 +598,28 @@ const enforceAsyncPreviewCacheSize = () => {
 const mergeIncrementalImageItem = (rawItem) => {
   if (!rawItem?.id) return
   const selectedId = history.value[selectedIndex.value]?.id
-  const existingIndex = history.value.findIndex((item) => item?.id === rawItem.id)
+  const pinnedSet = new Set(pinnedItems.value)
+  let existingIndex = -1
+  let firstUnpinnedIndex = -1
+  for (let i = 0; i < history.value.length; i++) {
+    const item = history.value[i]
+    if (!item) continue
+    if (existingIndex < 0 && item.id === rawItem.id) {
+      existingIndex = i
+    }
+    if (firstUnpinnedIndex < 0 && !pinnedSet.has(item.id)) {
+      firstUnpinnedIndex = i
+    }
+    if (existingIndex >= 0 && firstUnpinnedIndex >= 0) {
+      break
+    }
+  }
   const existing = existingIndex >= 0 ? history.value[existingIndex] : null
   if (existingIndex >= 0) {
     history.value.splice(existingIndex, 1)
+    if (firstUnpinnedIndex > existingIndex) {
+      firstUnpinnedIndex -= 1
+    }
   }
   const normalized = {
     id: rawItem.id,
@@ -592,25 +628,26 @@ const mergeIncrementalImageItem = (rawItem) => {
     preview_png_base64: rawItem.preview_png_base64 ?? rawItem.previewPngBase64 ?? existing?.preview_png_base64 ?? '',
     image_path: rawItem.image_path ?? rawItem.imagePath ?? existing?.image_path ?? ''
   }
-  const pinnedSet = new Set(pinnedItems.value)
   const isPinnedItem = pinnedSet.has(normalized.id)
-  let insertIndex = 0
-  if (!isPinnedItem) {
-    insertIndex = history.value.findIndex((item) => item && !pinnedSet.has(item.id))
-    if (insertIndex < 0) {
-      insertIndex = history.value.length
-    }
-  }
+  const insertIndex = isPinnedItem ? 0 : (firstUnpinnedIndex >= 0 ? firstUnpinnedIndex : history.value.length)
   history.value.splice(insertIndex, 0, normalized)
   const keepCount = Math.max(100, Number(pageOffset.value) || 100, Number(pageSize.value) || 100, history.value.length)
   if (history.value.length > keepCount) {
     history.value = history.value.slice(0, keepCount)
   }
-  const loadedCount = history.value.filter(Boolean).length
+  let loadedCount = 0
+  let nextSelectedIndex = -1
+  for (let i = 0; i < history.value.length; i++) {
+    const item = history.value[i]
+    if (!item) continue
+    loadedCount += 1
+    if (selectedId && nextSelectedIndex < 0 && item.id === selectedId) {
+      nextSelectedIndex = i
+    }
+  }
   totalCount.value = Math.max(totalCount.value || 0, loadedCount)
   pageOffset.value = Math.max(pageOffset.value || 0, loadedCount)
   if (selectedId) {
-    const nextSelectedIndex = history.value.findIndex((item) => item?.id === selectedId)
     selectedIndex.value = nextSelectedIndex >= 0 ? nextSelectedIndex : 0
   } else if (selectedIndex.value < 0) {
     selectedIndex.value = 0
