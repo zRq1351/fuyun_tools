@@ -434,8 +434,6 @@ fn wait_for_fill_window_hidden(app: &AppHandle, window_label: &str, label: &str,
         Duration::from_millis(timeout_ms),
     ) {
         log::warn!("等待{}窗口隐藏失败: {}", label, e);
-    } else if !fast_path {
-        thread::sleep(Duration::from_millis(40));
     }
 }
 
@@ -484,93 +482,10 @@ fn simulate_paste_with_retry(
     started_at: std::time::Instant,
     fast_path: bool,
 ) {
-    let is_post_paste_ctrl_release_error = |err: &str| {
-        err.contains("释放 Ctrl")
-    };
-    if fast_path {
-        match crate::ui::window_manager::simulate_paste() {
-            Ok(_) => {
-                if let Some(op_id) = operation_id {
-                    log::info!(
-                        "{}回填完成: op_id={}, 耗时: {}ms",
-                        label,
-                        op_id,
-                        started_at.elapsed().as_millis()
-                    );
-                } else {
-                    log::info!("{}回填完成，耗时: {}ms", label, started_at.elapsed().as_millis());
-                }
-                return;
-            }
-            Err(first_error) => {
-                if is_post_paste_ctrl_release_error(&first_error) {
-                    log::warn!(
-                        "{}回填检测到粘贴后Ctrl释放异常，跳过二次粘贴以避免重复输入: {}",
-                        label,
-                        first_error
-                    );
-                    if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
-                        log::warn!("{}回填粘贴后Ctrl异常兜底释放失败: {}", label, release_error);
-                    }
-                    return;
-                }
-                // 优化方案 4：极速模式下快速重试，仅等待 15ms
-                thread::sleep(Duration::from_millis(15));
-                if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
-                    log::warn!("{}回填极速模式重试前释放Ctrl失败: {}", label, release_error);
-                }
-                match crate::ui::window_manager::simulate_paste() {
-                    Ok(_) => {
-                        if let Some(op_id) = operation_id {
-                            log::warn!(
-                                "{}回填极速模式首次粘贴失败，快速重试成功: op_id={}, {}，总耗时: {}ms",
-                                label,
-                                op_id,
-                                first_error,
-                                started_at.elapsed().as_millis()
-                            );
-                        } else {
-                            log::warn!(
-                                "{}回填极速模式首次粘贴失败，快速重试成功: {}，总耗时: {}ms",
-                                label,
-                                first_error,
-                                started_at.elapsed().as_millis()
-                            );
-                        }
-                        return;
-                    }
-                    Err(second_error) => {
-                        if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
-                            log::warn!(
-                                "{}回填极速模式最终兜底释放Ctrl失败: {}",
-                                label,
-                                release_error
-                            );
-                        }
-                        if let Some(op_id) = operation_id {
-                            log::error!(
-                                "{}回填极速模式粘贴失败: op_id={}, 首次错误: {}，二次错误: {}",
-                                label,
-                                op_id,
-                                first_error,
-                                second_error
-                            );
-                        } else {
-                            log::error!(
-                                "{}回填极速模式粘贴失败，首次错误: {}，二次错误: {}",
-                                label,
-                                first_error,
-                                second_error
-                            );
-                        }
-                        return;
-                    }
-                }
-            }
-        }
-    }
-    // 优化方案 4：降低普通模式的延迟，从 135ms 降至 90ms
-    thread::sleep(Duration::from_millis(90));
+    let is_post_paste_ctrl_release_error = |err: &str| err.contains("释放 Ctrl");
+    let mode_name = if fast_path { "极速模式" } else { "普通模式" };
+    let retry_delays: &[u64] = if fast_path { &[8, 16] } else { &[22, 40, 58] };
+
     match crate::ui::window_manager::simulate_paste() {
         Ok(_) => {
             if let Some(op_id) = operation_id {
@@ -596,51 +511,71 @@ fn simulate_paste_with_retry(
                 }
                 return;
             }
-            // 优化方案 4：二次重试延迟从 140ms 降至 100ms
-            thread::sleep(Duration::from_millis(100));
-            if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
-                log::warn!("{}回填重试前释放Ctrl失败: {}", label, release_error);
+            let mut final_error = first_error.clone();
+            for delay in retry_delays {
+                thread::sleep(Duration::from_millis(*delay));
+                if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
+                    log::warn!("{}回填{}重试前释放Ctrl失败: {}", label, mode_name, release_error);
+                }
+                match crate::ui::window_manager::simulate_paste() {
+                    Ok(_) => {
+                        if let Some(op_id) = operation_id {
+                            log::warn!(
+                                "{}回填{}首次粘贴失败，状态驱动重试成功: op_id={}, {}，总耗时: {}ms",
+                                label,
+                                mode_name,
+                                op_id,
+                                first_error,
+                                started_at.elapsed().as_millis()
+                            );
+                        } else {
+                            log::warn!(
+                                "{}回填{}首次粘贴失败，状态驱动重试成功: {}，总耗时: {}ms",
+                                label,
+                                mode_name,
+                                first_error,
+                                started_at.elapsed().as_millis()
+                            );
+                        }
+                        return;
+                    }
+                    Err(next_error) => {
+                        final_error = next_error;
+                        if is_post_paste_ctrl_release_error(&final_error) {
+                            log::warn!(
+                                "{}回填{}检测到粘贴后Ctrl释放异常，停止后续重试: {}",
+                                label,
+                                mode_name,
+                                final_error
+                            );
+                            if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
+                                log::warn!("{}回填粘贴后Ctrl异常兜底释放失败: {}", label, release_error);
+                            }
+                            return;
+                        }
+                    }
+                }
             }
-            match crate::ui::window_manager::simulate_paste() {
-                Ok(_) => {
-                    if let Some(op_id) = operation_id {
-                        log::warn!(
-                            "{}回填首次粘贴失败，二次重试成功: op_id={}, {}，总耗时: {}ms",
-                            label,
-                            op_id,
-                            first_error,
-                            started_at.elapsed().as_millis()
-                        );
-                    } else {
-                        log::warn!(
-                            "{}回填首次粘贴失败，二次重试成功: {}，总耗时: {}ms",
-                            label,
-                            first_error,
-                            started_at.elapsed().as_millis()
-                        );
-                    }
-                }
-                Err(second_error) => {
-                    if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
-                        log::warn!("{}回填最终兜底释放Ctrl失败: {}", label, release_error);
-                    }
-                    if let Some(op_id) = operation_id {
-                        log::error!(
-                            "{}回填粘贴失败: op_id={}, 首次错误: {}，二次错误: {}",
-                            label,
-                            op_id,
-                            first_error,
-                            second_error
-                        );
-                    } else {
-                        log::error!(
-                            "{}回填粘贴失败，首次错误: {}，二次错误: {}",
-                            label,
-                            first_error,
-                            second_error
-                        );
-                    }
-                }
+            if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
+                log::warn!("{}回填{}最终兜底释放Ctrl失败: {}", label, mode_name, release_error);
+            }
+            if let Some(op_id) = operation_id {
+                log::error!(
+                    "{}回填{}粘贴失败: op_id={}, 首次错误: {}，最终错误: {}",
+                    label,
+                    mode_name,
+                    op_id,
+                    first_error,
+                    final_error
+                );
+            } else {
+                log::error!(
+                    "{}回填{}粘贴失败，首次错误: {}，最终错误: {}",
+                    label,
+                    mode_name,
+                    first_error,
+                    final_error
+                );
             }
         }
     }
@@ -2400,8 +2335,50 @@ pub async fn copy_and_paste_text(
     }
 
     let paste_result = tauri::async_runtime::spawn_blocking(move || {
-        thread::sleep(Duration::from_millis(80));
-        crate::ui::window_manager::simulate_paste()
+        let started_at = std::time::Instant::now();
+        let is_post_paste_ctrl_release_error = |err: &str| err.contains("释放 Ctrl");
+        let retry_delays = [10_u64, 22_u64, 36_u64];
+        match crate::ui::window_manager::simulate_paste() {
+            Ok(_) => Ok(()),
+            Err(first_error) => {
+                if is_post_paste_ctrl_release_error(&first_error) {
+                    if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
+                        log::warn!("复制后自动粘贴检测到Ctrl释放异常时兜底释放失败: {}", release_error);
+                    }
+                    return Err(first_error);
+                }
+                let mut final_error = first_error.clone();
+                for delay in retry_delays {
+                    thread::sleep(Duration::from_millis(delay));
+                    if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
+                        log::warn!("复制后自动粘贴重试前释放Ctrl失败: {}", release_error);
+                    }
+                    match crate::ui::window_manager::simulate_paste() {
+                        Ok(_) => {
+                            log::warn!(
+                                "复制后自动粘贴首次失败后重试成功: 首次错误={}, 总耗时={}ms",
+                                first_error,
+                                started_at.elapsed().as_millis()
+                            );
+                            return Ok(());
+                        }
+                        Err(next_error) => {
+                            final_error = next_error;
+                            if is_post_paste_ctrl_release_error(&final_error) {
+                                if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
+                                    log::warn!("复制后自动粘贴检测到Ctrl释放异常时兜底释放失败: {}", release_error);
+                                }
+                                return Err(final_error);
+                            }
+                        }
+                    }
+                }
+                if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
+                    log::warn!("复制后自动粘贴最终兜底释放Ctrl失败: {}", release_error);
+                }
+                Err(format!("首次错误: {}，最终错误: {}", first_error, final_error))
+            }
+        }
     })
     .await
     .map_err(|e| frontend_error(ErrorCode::SystemError, "自动粘贴任务执行失败", e.to_string()))?;
