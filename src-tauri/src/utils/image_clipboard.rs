@@ -30,6 +30,8 @@ const IMAGE_FULL_RES_MEMORY_BUDGET_BYTES: usize = 256 * 1024 * 1024;
 const IMAGE_FULL_RES_CACHE_KEEP_RECENT: usize = 6;
 const IMAGE_FULL_RES_LRU_MAX_CAPACITY: usize = 4096;
 const IMAGE_PERSIST_QUEUE_SIZE: usize = 12;
+const IMAGE_PERSIST_SEND_TIMEOUT_MS: u64 = 45;
+const IMAGE_PERSIST_RETRY_INTERVAL_MS: u64 = 3;
 const IMAGE_PREVIEW_MAX_EDGE: u32 = 240;
 const IMAGE_PNG_BASE64_CACHE_CAPACITY: usize = 64;
 const IMAGE_FILL_VERIFY_MODE_STRICT: u8 = 0;
@@ -50,9 +52,69 @@ static IMAGE_PNG_BASE64_CACHE: LazyLock<ParkingMutex<LruCache<String, (u64, Stri
         ))
     });
 pub type ClipboardImagePayload = (Vec<u8>, u32, u32, Option<(Vec<u8>, String)>);
+static IMAGE_PERSIST_QUEUE_FULL_COUNT: AtomicU64 = AtomicU64::new(0);
+static IMAGE_PERSIST_QUEUE_TIMEOUT_DROP_COUNT: AtomicU64 = AtomicU64::new(0);
+static IMAGE_PERSIST_QUEUE_WAIT_MS_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 fn lock_arc_mutex<T>(mutex: &'_ Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
     mutex.lock().expect("infallible mutex lock failed")
+}
+
+fn push_persist_task_with_timeout(
+    persist_tx: &SyncSender<PersistTask>,
+    task: PersistTask,
+) -> Result<(), PersistTask> {
+    match persist_tx.try_send(task) {
+        Ok(_) => Ok(()),
+        Err(TrySendError::Disconnected(task)) => Err(task),
+        Err(TrySendError::Full(mut task)) => {
+            let full_count = IMAGE_PERSIST_QUEUE_FULL_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+            let started_at = std::time::Instant::now();
+            let timeout = Duration::from_millis(IMAGE_PERSIST_SEND_TIMEOUT_MS);
+            loop {
+                match persist_tx.try_send(task) {
+                    Ok(_) => {
+                        let waited = started_at.elapsed().as_millis() as u64;
+                        IMAGE_PERSIST_QUEUE_WAIT_MS_TOTAL.fetch_add(waited, Ordering::Relaxed);
+                        if full_count % 50 == 0 {
+                            let timeout_drop =
+                                IMAGE_PERSIST_QUEUE_TIMEOUT_DROP_COUNT.load(Ordering::Relaxed);
+                            let wait_total =
+                                IMAGE_PERSIST_QUEUE_WAIT_MS_TOTAL.load(Ordering::Relaxed);
+                            let avg_wait = if full_count > 0 {
+                                wait_total as f64 / full_count as f64
+                            } else {
+                                0.0
+                            };
+                            log::warn!(
+                                "图片持久化队列背压: full次数={}, 超时丢弃={}, 平均等待={:.1}ms",
+                                full_count,
+                                timeout_drop,
+                                avg_wait
+                            );
+                        }
+                        return Ok(());
+                    }
+                    Err(TrySendError::Disconnected(task_back)) => return Err(task_back),
+                    Err(TrySendError::Full(task_back)) => {
+                        task = task_back;
+                        if started_at.elapsed() >= timeout {
+                            IMAGE_PERSIST_QUEUE_TIMEOUT_DROP_COUNT
+                                .fetch_add(1, Ordering::Relaxed);
+                            IMAGE_PERSIST_QUEUE_WAIT_MS_TOTAL.fetch_add(
+                                started_at.elapsed().as_millis() as u64,
+                                Ordering::Relaxed,
+                            );
+                            return Err(task);
+                        }
+                        std::thread::sleep(Duration::from_millis(
+                            IMAGE_PERSIST_RETRY_INTERVAL_MS,
+                        ));
+                    }
+                }
+            }
+        }
+    }
 }
 
 pub fn set_image_fill_verify_mode(mode: &str) {
@@ -923,21 +985,10 @@ impl ImageClipboardManager {
             height,
             encoded_bytes: source_blob.map(|(bytes, _)| bytes),
         };
-        match self.persist_tx.try_send(task) {
-            Ok(_) => {}
-            Err(TrySendError::Full(task)) => {
-                if let Err(send_err) = self.persist_tx.send(task) {
-                    let failed_task = send_err.0;
-                    log::error!("图片持久化队列阻塞后发送失败: {}", failed_task.item_id);
-                    let mut pending = lock_arc_mutex(&self.pending_images);
-                    pending.remove(&failed_task.item_id);
-                }
-            }
-            Err(TrySendError::Disconnected(task)) => {
-                log::error!("图片持久化队列不可用: {}", task.item_id);
-                let mut pending = lock_arc_mutex(&self.pending_images);
-                pending.remove(&task.item_id);
-            }
+        if let Err(task_back) = push_persist_task_with_timeout(&self.persist_tx, task) {
+            log::error!("图片持久化队列发送失败或超时降级丢弃: {}", task_back.item_id);
+            let mut pending = lock_arc_mutex(&self.pending_images);
+            pending.remove(&task_back.item_id);
         }
         log::info!("准备增量保存图片到数据库: item_id={}, 总数={}", id, item_ids_snapshot.len());
         let new_position = item_ids_snapshot.iter().position(|item_id| item_id == &id);
@@ -1876,6 +1927,37 @@ pub struct ImageStorageMetrics {
     pub disk_limit_bytes: u64,
     pub item_count: u64,
     pub pinned_count: u64,
+}
+
+#[derive(Clone, Serialize)]
+pub struct ImagePersistQueueMetrics {
+    pub queue_size: u64,
+    pub send_timeout_ms: u64,
+    pub retry_interval_ms: u64,
+    pub full_count: u64,
+    pub timeout_drop_count: u64,
+    pub wait_ms_total: u64,
+    pub avg_wait_ms: f64,
+}
+
+pub fn get_image_persist_queue_metrics_snapshot() -> ImagePersistQueueMetrics {
+    let full_count = IMAGE_PERSIST_QUEUE_FULL_COUNT.load(Ordering::Relaxed);
+    let timeout_drop_count = IMAGE_PERSIST_QUEUE_TIMEOUT_DROP_COUNT.load(Ordering::Relaxed);
+    let wait_ms_total = IMAGE_PERSIST_QUEUE_WAIT_MS_TOTAL.load(Ordering::Relaxed);
+    let avg_wait_ms = if full_count > 0 {
+        wait_ms_total as f64 / full_count as f64
+    } else {
+        0.0
+    };
+    ImagePersistQueueMetrics {
+        queue_size: IMAGE_PERSIST_QUEUE_SIZE as u64,
+        send_timeout_ms: IMAGE_PERSIST_SEND_TIMEOUT_MS,
+        retry_interval_ms: IMAGE_PERSIST_RETRY_INTERVAL_MS,
+        full_count,
+        timeout_drop_count,
+        wait_ms_total,
+        avg_wait_ms,
+    }
 }
 
 impl Drop for ImageClipboardManager {

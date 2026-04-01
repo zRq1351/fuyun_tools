@@ -81,6 +81,7 @@ export const IPC_COMMANDS = {
     ...(__DEV_PANEL__ ? {
         GET_TEXT_DEDUP_METRICS: 'get_text_dedup_metrics',
         GET_IMAGE_STORAGE_METRICS: 'get_image_storage_metrics',
+        GET_IMAGE_PERSIST_QUEUE_METRICS: 'get_image_persist_queue_metrics',
         GET_COPY_PASTE_DEDUP_DEBUG_STATE: 'get_copy_paste_dedup_debug_state',
         SET_COPY_PASTE_DEDUP_DEBUG_CONFIG: 'set_copy_paste_dedup_debug_config',
     } : {}),
@@ -379,6 +380,8 @@ export const AISettingsService = {
             invoke(IPC_COMMANDS.GET_TEXT_DEDUP_METRICS),
         getImageStorageMetrics: () =>
             invoke(IPC_COMMANDS.GET_IMAGE_STORAGE_METRICS),
+        getImagePersistQueueMetrics: () =>
+            invoke(IPC_COMMANDS.GET_IMAGE_PERSIST_QUEUE_METRICS),
         getCopyPasteDedupDebugState: () =>
             invoke(IPC_COMMANDS.GET_COPY_PASTE_DEDUP_DEBUG_STATE),
         setCopyPasteDedupDebugConfig: ({enabled, windowMs, logEnabled, resetMetrics}) =>

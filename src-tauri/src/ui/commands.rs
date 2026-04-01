@@ -12,7 +12,7 @@ use crate::ui::window_manager::{
 };
 use crate::utils::clipboard::ClipboardManager;
 use crate::utils::image_clipboard::{
-    is_fast_fill_verify_mode_enabled, set_image_fill_verify_mode, ImageClipboardManager,
+    get_image_persist_queue_metrics_snapshot, is_fast_fill_verify_mode_enabled, set_image_fill_verify_mode, ImageClipboardManager,
     ImageHistoryPageData, ImageHistoryPreviewItem,
 };
 use crate::utils::utils_helpers::{
@@ -1824,6 +1824,17 @@ pub async fn get_image_storage_metrics(
 #[tauri::command]
 pub async fn get_copy_paste_dedup_debug_state() -> Result<serde_json::Value, String> {
     Ok(get_copy_paste_dedup_debug_state_value())
+}
+
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn get_image_persist_queue_metrics() -> Result<serde_json::Value, String> {
+    serde_json::to_value(get_image_persist_queue_metrics_snapshot()).map_err(|e| {
+        to_frontend_error_string(
+            AppError::new(ErrorCode::SystemError, "序列化图片持久化队列指标失败")
+                .with_details(e.to_string()),
+        )
+    })
 }
 
 #[cfg(debug_assertions)]

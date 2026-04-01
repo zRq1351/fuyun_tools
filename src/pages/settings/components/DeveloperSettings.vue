@@ -59,6 +59,25 @@
         </div>
       </el-form-item>
     </el-card>
+    <el-card class="setting-section-card" shadow="never">
+      <template #header>
+        <div class="section-title">图片持久化队列</div>
+      </template>
+      <el-form-item>
+        <el-button size="small" @click="refreshImagePersistQueueMetrics">刷新队列指标</el-button>
+      </el-form-item>
+      <el-form-item>
+        <div class="metrics-card">
+          <div class="metrics-line">队列容量 {{ Number(imagePersistQueueMetrics.queueSize || 0) }}</div>
+          <div class="metrics-line">发送超时 {{ Number(imagePersistQueueMetrics.sendTimeoutMs || 0) }}ms</div>
+          <div class="metrics-line">重试间隔 {{ Number(imagePersistQueueMetrics.retryIntervalMs || 0) }}ms</div>
+          <div class="metrics-line">满队次数 {{ Number(imagePersistQueueMetrics.fullCount || 0) }}</div>
+          <div class="metrics-line">超时丢弃 {{ Number(imagePersistQueueMetrics.timeoutDropCount || 0) }}</div>
+          <div class="metrics-line">累计等待 {{ Number(imagePersistQueueMetrics.waitMsTotal || 0) }}ms</div>
+          <div class="metrics-line">平均等待 {{ imagePersistQueueMetrics.avgWaitMs }}</div>
+        </div>
+      </el-form-item>
+    </el-card>
   </el-form>
 </template>
 
@@ -84,11 +103,33 @@ const dedupMetrics = ref({
   lastHitAt: '未命中',
   logCount: 0
 })
+const imagePersistQueueMetrics = ref({
+  queueSize: 0,
+  sendTimeoutMs: 0,
+  retryIntervalMs: 0,
+  fullCount: 0,
+  timeoutDropCount: 0,
+  waitMsTotal: 0,
+  avgWaitMs: '0.0ms'
+})
 let metricsTimer = null
 
 const refreshImageStorageMetrics = async () => {
   const metrics = await AISettingsService.getImageStorageMetrics()
   imageStorageMetrics.value = metrics || {}
+}
+
+const refreshImagePersistQueueMetrics = async () => {
+  const metrics = await AISettingsService.getImagePersistQueueMetrics()
+  imagePersistQueueMetrics.value = {
+    queueSize: Number(metrics?.queue_size || 0),
+    sendTimeoutMs: Number(metrics?.send_timeout_ms || 0),
+    retryIntervalMs: Number(metrics?.retry_interval_ms || 0),
+    fullCount: Number(metrics?.full_count || 0),
+    timeoutDropCount: Number(metrics?.timeout_drop_count || 0),
+    waitMsTotal: Number(metrics?.wait_ms_total || 0),
+    avgWaitMs: `${Number(metrics?.avg_wait_ms || 0).toFixed(1)}ms`
+  }
 }
 
 const applyDedupState = (state) => {
@@ -158,9 +199,11 @@ const formatBytes = (bytes) => {
 
 onMounted(async () => {
   await refreshImageStorageMetrics()
+  await refreshImagePersistQueueMetrics()
   await refreshDedupState()
   metricsTimer = setInterval(async () => {
     await refreshImageStorageMetrics()
+    await refreshImagePersistQueueMetrics()
     await refreshDedupState()
   }, 10000)
 })
