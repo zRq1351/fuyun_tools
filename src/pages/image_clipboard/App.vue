@@ -249,6 +249,183 @@ const IMAGE_VIRTUAL_OVERSCAN = 4
 const IMAGE_PREVIEW_CACHE_MARGIN = 24
 const IMAGE_PREVIEW_CACHE_MAX_ITEMS = 300
 const ASYNC_PREVIEW_CACHE_MAX_ITEMS = 180
+const filterDataRevision = ref(0)
+const filterEntriesCache = new Map()
+const keywordTagMatchCache = new Map()
+const keywordCategoryMatchCache = new Map()
+const tagSearchIndex = new Map()
+const itemTagSnapshot = new Map()
+const categorySearchIndex = new Map()
+const itemCategorySnapshot = new Map()
+
+const clearFilterCaches = () => {
+  filterEntriesCache.clear()
+  keywordTagMatchCache.clear()
+  keywordCategoryMatchCache.clear()
+}
+
+const bumpFilterDataRevision = () => {
+  filterDataRevision.value += 1
+  clearFilterCaches()
+}
+
+const normalizeTagList = (tags) =>
+    (Array.isArray(tags) ? tags : [])
+        .map((tag) => String(tag ?? '').trim())
+        .filter((tag) => tag.length > 0)
+
+const removeTagIndexForItem = (itemId) => {
+  const oldTags = itemTagSnapshot.get(itemId)
+  if (!oldTags || oldTags.length === 0) {
+    itemTagSnapshot.delete(itemId)
+    return
+  }
+  for (const tag of oldTags) {
+    const idSet = tagSearchIndex.get(tag)
+    if (!idSet) continue
+    idSet.delete(itemId)
+    if (idSet.size === 0) {
+      tagSearchIndex.delete(tag)
+    }
+  }
+  itemTagSnapshot.delete(itemId)
+}
+
+const applyTagIndexForItem = (itemId, tags) => {
+  removeTagIndexForItem(itemId)
+  const normalized = normalizeTagList(tags).map((tag) => tag.toLowerCase())
+  if (normalized.length === 0) {
+    return
+  }
+  itemTagSnapshot.set(itemId, normalized)
+  for (const tag of normalized) {
+    let idSet = tagSearchIndex.get(tag)
+    if (!idSet) {
+      idSet = new Set()
+      tagSearchIndex.set(tag, idSet)
+    }
+    idSet.add(itemId)
+  }
+}
+
+const setItemTagsLocal = (itemId, tags) => {
+  if (!itemId) return
+  const normalized = normalizeTagList(tags)
+  tagMap.value[itemId] = normalized
+  applyTagIndexForItem(itemId, normalized)
+  keywordTagMatchCache.clear()
+}
+
+const removeItemTagsLocal = (itemId) => {
+  if (!itemId) return
+  delete tagMap.value[itemId]
+  removeTagIndexForItem(itemId)
+  keywordTagMatchCache.clear()
+}
+
+const rebuildTagSearchIndex = () => {
+  tagSearchIndex.clear()
+  itemTagSnapshot.clear()
+  keywordTagMatchCache.clear()
+  const currentTagMap = tagMap.value || {}
+  for (const itemId of Object.keys(currentTagMap)) {
+    applyTagIndexForItem(itemId, currentTagMap[itemId])
+  }
+}
+
+const removeCategoryIndexForItem = (itemId) => {
+  const oldCategory = itemCategorySnapshot.get(itemId)
+  if (!oldCategory) {
+    itemCategorySnapshot.delete(itemId)
+    return
+  }
+  const idSet = categorySearchIndex.get(oldCategory)
+  if (idSet) {
+    idSet.delete(itemId)
+    if (idSet.size === 0) {
+      categorySearchIndex.delete(oldCategory)
+    }
+  }
+  itemCategorySnapshot.delete(itemId)
+}
+
+const applyCategoryIndexForItem = (itemId, category) => {
+  removeCategoryIndexForItem(itemId)
+  const normalized = String(category || '未分类')
+  itemCategorySnapshot.set(itemId, normalized)
+  let idSet = categorySearchIndex.get(normalized)
+  if (!idSet) {
+    idSet = new Set()
+    categorySearchIndex.set(normalized, idSet)
+  }
+  idSet.add(itemId)
+}
+
+const setItemCategoryLocal = (itemId, category) => {
+  if (!itemId) return
+  const normalized = String(category || '未分类')
+  categoryMap.value[itemId] = normalized
+  applyCategoryIndexForItem(itemId, normalized)
+  keywordCategoryMatchCache.clear()
+}
+
+const removeItemCategoryLocal = (itemId) => {
+  if (!itemId) return
+  delete categoryMap.value[itemId]
+  removeCategoryIndexForItem(itemId)
+  keywordCategoryMatchCache.clear()
+}
+
+const rebuildCategorySearchIndex = () => {
+  categorySearchIndex.clear()
+  itemCategorySnapshot.clear()
+  keywordCategoryMatchCache.clear()
+  const currentCategoryMap = categoryMap.value || {}
+  for (const itemId of Object.keys(currentCategoryMap)) {
+    applyCategoryIndexForItem(itemId, currentCategoryMap[itemId] || '未分类')
+  }
+}
+
+const rebuildFilterIndexes = () => {
+  rebuildTagSearchIndex()
+  rebuildCategorySearchIndex()
+}
+
+const getKeywordTagMatchedIds = (keyword) => {
+  if (!keyword) return null
+  const cacheKey = `${filterDataRevision.value}|${keyword}`
+  const cached = keywordTagMatchCache.get(cacheKey)
+  if (cached) {
+    return cached
+  }
+  const matchedIds = new Set()
+  for (const [tag, idSet] of tagSearchIndex.entries()) {
+    if (!tag.includes(keyword)) continue
+    for (const itemId of idSet) {
+      matchedIds.add(itemId)
+    }
+  }
+  keywordTagMatchCache.set(cacheKey, matchedIds)
+  return matchedIds
+}
+
+const getKeywordCategoryMatchedIds = (keyword) => {
+  if (!keyword) return null
+  const cacheKey = `${filterDataRevision.value}|${keyword}`
+  const cached = keywordCategoryMatchCache.get(cacheKey)
+  if (cached) {
+    return cached
+  }
+  const matchedIds = new Set()
+  for (const [category, idSet] of categorySearchIndex.entries()) {
+    if (!String(category).toLowerCase().includes(keyword)) continue
+    for (const itemId of idSet) {
+      matchedIds.add(itemId)
+    }
+  }
+  keywordCategoryMatchCache.set(cacheKey, matchedIds)
+  return matchedIds
+}
 
 const currentPageQuerySignature = () =>
     JSON.stringify({
@@ -472,39 +649,46 @@ const getItemTags = (itemId) => {
 const isPinned = (itemId) => pinnedItems.value.includes(itemId)
 
 const filteredHistoryState = computed(() => {
+  const revision = filterDataRevision.value
   const category = categoryFilter.value
   const keyword = searchKeyword.value.trim().toLowerCase()
-  const out = []
-  let selectedDisplay = 1
-  for (let index = 0; index < history.value.length; index++) {
-    const item = history.value[index]
-    if (!item) continue
-    const itemId = item.id
-    const itemCategory = getItemCategory(itemId)
-    if (category !== '全部' && itemCategory !== category) {
-      continue
-    }
-    if (keyword) {
-      const categoryMatched = itemCategory.toLowerCase().includes(keyword)
-      if (!categoryMatched) {
-        const tags = getItemTags(itemId)
-        const tagMatched = tags.some((tag) => String(tag).toLowerCase().includes(keyword))
-        if (!tagMatched) {
+  const cacheKey = `${revision}|${category}|${keyword}`
+  let cached = filterEntriesCache.get(cacheKey)
+  if (!cached) {
+    const out = []
+    const displayIndexMap = new Map()
+    const categoryFilteredIds = category === '全部' ? null : (categorySearchIndex.get(category) || new Set())
+    const tagMatchedIds = keyword ? getKeywordTagMatchedIds(keyword) : null
+    const categoryMatchedIds = keyword ? getKeywordCategoryMatchedIds(keyword) : null
+    for (let index = 0; index < history.value.length; index++) {
+      const item = history.value[index]
+      if (!item) continue
+      const itemId = item.id
+      if (categoryFilteredIds && !categoryFilteredIds.has(itemId)) {
+        continue
+      }
+      if (keyword) {
+        const categoryMatched = categoryMatchedIds && categoryMatchedIds.has(itemId)
+        const tagMatched = tagMatchedIds && tagMatchedIds.has(itemId)
+        if (!categoryMatched && !tagMatched) {
           continue
         }
       }
+      const nextDisplay = out.length + 1
+      out.push({item, index})
+      displayIndexMap.set(index, nextDisplay)
     }
-    out.push({item, index})
-  }
-  if (out.length > 0) {
-    const selectedPosition = out.findIndex((entry) => entry.index === selectedIndex.value)
-    if (selectedPosition >= 0) {
-      selectedDisplay = selectedPosition + 1
+    cached = {
+      entries: out,
+      total: out.length,
+      displayIndexMap
     }
+    filterEntriesCache.set(cacheKey, cached)
   }
+  const selectedDisplay = cached.displayIndexMap.get(selectedIndex.value) || 1
   return {
-    entries: out,
-    total: out.length,
+    entries: cached.entries,
+    total: cached.total,
     selectedDisplay
   }
 })
@@ -670,6 +854,10 @@ const mergeIncrementalImageItem = (rawItem) => {
     selectedIndex.value = nextSelectedIndex >= 0 ? nextSelectedIndex : 0
   } else if (selectedIndex.value < 0) {
     selectedIndex.value = 0
+  }
+  const wasHistoryMutated = existingIndex >= 0 || !!rawItem?.id
+  if (wasHistoryMutated) {
+    bumpFilterDataRevision()
   }
 }
 
@@ -943,6 +1131,7 @@ const demoteLocalItemFromTop = (itemId) => {
   } else {
     selectedIndex.value = 0
   }
+  bumpFilterDataRevision()
 }
 
 const deleteItem = async (itemId, index) => {
@@ -950,14 +1139,15 @@ const deleteItem = async (itemId, index) => {
     if (itemId) {
       previewCache.delete(itemId)
       asyncPreviewCache.delete(itemId)
-      delete categoryMap.value[itemId]
-      delete tagMap.value[itemId]
+      removeItemCategoryLocal(itemId)
+      removeItemTagsLocal(itemId)
     }
     if (Number.isInteger(index) && index >= 0 && index < history.value.length) {
       history.value.splice(index, 1)
       if (selectedIndex.value >= history.value.length) {
         selectedIndex.value = Math.max(0, history.value.length - 1)
       }
+      bumpFilterDataRevision()
     }
     if (!itemId) return
     await ImageClipboardService.removeItemById(itemId)
@@ -972,7 +1162,7 @@ const showContextMenu = openContextMenu
 const persistImageCategory = async (itemId, category, resetTagsWhenUnclassified = false) => {
   await ImageCategoryService.setItemCategory(itemId, category)
   if (resetTagsWhenUnclassified && category === '未分类') {
-    tagMap.value[itemId] = []
+    setItemTagsLocal(itemId, [])
     await ImageClipboardService.setItemTags(itemId, [])
   }
 }
@@ -982,7 +1172,8 @@ const assignToCategory = async (category) => {
     itemKey: contextMenuItemId.value,
     category,
     applyLocal: (itemId, nextCategory) => {
-      categoryMap.value[itemId] = nextCategory
+      setItemCategoryLocal(itemId, nextCategory)
+      bumpFilterDataRevision()
     },
     persist: (itemId, nextCategory) => persistImageCategory(itemId, nextCategory, true),
     onError: (error) => console.error('设置图片分类失败:', error),
@@ -1004,7 +1195,8 @@ const editItemTags = async () => {
         .split(/[,，]/)
         .map((item) => item.trim())
         .filter((item, idx, arr) => item && arr.indexOf(item) === idx)
-    tagMap.value[itemId] = tags
+    setItemTagsLocal(itemId, tags)
+    bumpFilterDataRevision()
     await ImageClipboardService.setItemTags(itemId, tags)
     closeContextMenu()
     ElMessage.success('标签已更新')
@@ -1041,7 +1233,8 @@ const handleDrop = async (event, category) => {
     itemKey: droppedItemId,
     category,
     applyLocal: (itemId, nextCategory) => {
-      categoryMap.value[itemId] = nextCategory
+      setItemCategoryLocal(itemId, nextCategory)
+      bumpFilterDataRevision()
     },
     persist: (itemId, nextCategory) => persistImageCategory(itemId, nextCategory),
     onError: (error) => console.error('拖拽设置图片分类失败:', error)
@@ -1083,10 +1276,11 @@ const removeCategory = async (category) => {
   categories.value = categories.value.filter((item) => item !== category)
   Object.keys(categoryMap.value).forEach((key) => {
     if (categoryMap.value[key] === category) {
-      delete categoryMap.value[key]
-      tagMap.value[key] = []
+      removeItemCategoryLocal(key)
+      setItemTagsLocal(key, [])
     }
   })
+  bumpFilterDataRevision()
   if (categoryFilter.value === category) {
     categoryFilter.value = '全部'
   }
@@ -1120,11 +1314,13 @@ const applyPayload = (data, options = {}) => {
       categories.value = ['未分类']
     }
   }
+  rebuildFilterIndexes()
   selectedIndex.value = typeof data.selectedIndex === 'number' ? data.selectedIndex : 0
   if (selectedIndex.value < 0 || selectedIndex.value >= history.value.length) {
     selectedIndex.value = history.value.length > 0 ? 0 : -1
   }
   warmupOne(selectedIndex.value)
+  bumpFilterDataRevision()
   isVisible.value = true
   if (refocus && !isAddingCategory.value) {
     nextTick(() => {
@@ -1179,6 +1375,8 @@ const mergeShowWindowPayload = (data) => {
       pinnedItems.value = data.pinned_items
     }
   }
+  rebuildFilterIndexes()
+  bumpFilterDataRevision()
 }
 
 const promoteLocalItemToTop = (itemId) => {
@@ -1204,6 +1402,7 @@ const promoteLocalItemToTop = (itemId) => {
   } else {
     selectedIndex.value = 0
   }
+  bumpFilterDataRevision()
 }
 
 const mergeImagePageIntoState = (data, reset = false) => {
@@ -1214,6 +1413,12 @@ const mergeImagePageIntoState = (data, reset = false) => {
     history.value = []
     categoryMap.value = {}
     tagMap.value = {}
+    tagSearchIndex.clear()
+    itemTagSnapshot.clear()
+    categorySearchIndex.clear()
+    itemCategorySnapshot.clear()
+    keywordTagMatchCache.clear()
+    keywordCategoryMatchCache.clear()
     pinnedItems.value = []
     previewCache.clear()
     asyncPreviewCache.clear()
@@ -1231,8 +1436,8 @@ const mergeImagePageIntoState = (data, reset = false) => {
       preview_png_base64: item.previewPngBase64,
       image_path: item.imagePath
     }
-    categoryMap.value[item.id] = item.category || '未分类'
-    tagMap.value[item.id] = Array.isArray(item.tags) ? item.tags : []
+    setItemCategoryLocal(item.id, item.category || '未分类')
+    setItemTagsLocal(item.id, item.tags)
   }
   const pinnedSet = new Set(pinnedItems.value)
   items.forEach((row) => {
@@ -1252,6 +1457,7 @@ const mergeImagePageIntoState = (data, reset = false) => {
     const list = data.categoryList.filter((c) => c !== '未分类' && c !== '全部')
     categories.value = ['未分类', ...Array.from(new Set(list))]
   }
+  bumpFilterDataRevision()
 }
 
 const mergeIncrementalPageIntoState = (data) => {
@@ -1266,6 +1472,7 @@ const mergeIncrementalPageIntoState = (data) => {
       pageOffset.value = history.value.filter(Boolean).length
       hasMore.value = pageOffset.value < totalCount.value
     }
+    bumpFilterDataRevision()
     return
   }
   const selectedId = history.value[selectedIndex.value]?.id
@@ -1284,8 +1491,12 @@ const mergeIncrementalPageIntoState = (data) => {
       preview_png_base64: row.previewPngBase64 ?? row.preview_png_base64 ?? existing.preview_png_base64 ?? '',
       image_path: row.imagePath ?? row.image_path ?? existing.image_path ?? ''
     })
-    categoryMap.value[row.id] = row.category || '未分类'
-    tagMap.value[row.id] = Array.isArray(row.tags) ? row.tags : (tagMap.value[row.id] || [])
+    setItemCategoryLocal(row.id, row.category || '未分类')
+    if (Array.isArray(row.tags)) {
+      setItemTagsLocal(row.id, row.tags)
+    } else if (!(row.id in tagMap.value)) {
+      setItemTagsLocal(row.id, [])
+    }
   }
   if (front.length === 0) return
   const rest = history.value.filter((item) => item && !incomingIds.has(item.id))
@@ -1319,6 +1530,7 @@ const mergeIncrementalPageIntoState = (data) => {
   } else if (selectedIndex.value < 0 && loadedCount > 0) {
     selectedIndex.value = 0
   }
+  bumpFilterDataRevision()
 }
 
 const loadHistoryPage = async ({reset = false, force = false} = {}) => {

@@ -204,6 +204,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             get_image_storage_metrics,
             #[cfg(debug_assertions)]
+            get_image_persist_queue_metrics,
+            #[cfg(debug_assertions)]
             get_copy_paste_dedup_debug_state,
             #[cfg(debug_assertions)]
             set_copy_paste_dedup_debug_config,
