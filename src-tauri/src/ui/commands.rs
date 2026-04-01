@@ -12,9 +12,11 @@ use crate::ui::window_manager::{
 };
 use crate::utils::clipboard::ClipboardManager;
 use crate::utils::image_clipboard::{
-    get_image_persist_queue_metrics_snapshot, is_fast_fill_verify_mode_enabled, set_image_fill_verify_mode, ImageClipboardManager,
+    is_fast_fill_verify_mode_enabled, set_image_fill_verify_mode, ImageClipboardManager,
     ImageHistoryPageData, ImageHistoryPreviewItem,
 };
+#[cfg(debug_assertions)]
+use crate::utils::image_clipboard::get_image_persist_queue_metrics_snapshot;
 use crate::utils::utils_helpers::{
     default_explanation_prompt_template, default_translation_prompt_template,
     load_history_page_data_async, load_settings, save_settings, ClipboardHistoryPageData,
@@ -86,13 +88,10 @@ fn is_duplicate_copy_paste_request(text: &str, request_id: Option<&str>) -> bool
     let now_ms = now_unix_ms();
     let dedup_window_ms = COPY_PASTE_DEDUP_WINDOW_MS.load(Ordering::Relaxed);
     let lock = RECENT_COPY_PASTE.get_or_init(|| StdMutex::new(None));
-    let mut guard = match lock.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            log::warn!("复制粘贴去重锁中毒，尝试恢复");
-            poisoned.into_inner()
-        }
-    };
+    let mut guard = lock.lock().unwrap_or_else(|poisoned| {
+        log::warn!("复制粘贴去重锁中毒，尝试恢复");
+        poisoned.into_inner()
+    });
     let mut is_hit = false;
     if let Some(last) = guard.as_ref() {
         let within_window = now_ms.saturating_sub(last.created_at_ms) <= dedup_window_ms;
@@ -116,13 +115,10 @@ fn is_duplicate_copy_paste_request(text: &str, request_id: Option<&str>) -> bool
             last_hit_at_ms: 0,
         })
     });
-    let mut stats = match stats_lock.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            log::warn!("复制粘贴去重窗口统计锁中毒，尝试恢复");
-            poisoned.into_inner()
-        }
-    };
+    let mut stats = stats_lock.lock().unwrap_or_else(|poisoned| {
+        log::warn!("复制粘贴去重窗口统计锁中毒，尝试恢复");
+        poisoned.into_inner()
+    });
     if now_ms.saturating_sub(stats.window_start_ms) > dedup_window_ms {
         stats.window_start_ms = now_ms;
         stats.requests = 0;
@@ -154,13 +150,10 @@ fn get_copy_paste_dedup_debug_state_value() -> serde_json::Value {
             last_hit_at_ms: 0,
         })
     });
-    let stats = match stats_lock.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            log::warn!("复制粘贴去重窗口统计锁中毒，尝试恢复");
-            poisoned.into_inner()
-        }
-    };
+    let stats = stats_lock.lock().unwrap_or_else(|poisoned| {
+        log::warn!("复制粘贴去重窗口统计锁中毒，尝试恢复");
+        poisoned.into_inner()
+    });
     let mut window_requests = stats.requests;
     let mut window_hits = stats.hits;
     if now_ms.saturating_sub(stats.window_start_ms) > dedup_window_ms {
@@ -193,7 +186,7 @@ fn get_copy_paste_dedup_debug_state_value() -> serde_json::Value {
 fn bind_screenshot_window_lifecycle(window: &tauri::WebviewWindow) {
     window.on_window_event(move |event| match event {
         tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
-            crate::features::screenshot::capture::set_screenshot_in_progress(false);
+            features::screenshot::capture::set_screenshot_in_progress(false);
         }
         _ => {}
     });
@@ -344,7 +337,7 @@ impl FillKind {
     }
 }
 
-fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
+fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
     mutex.lock().expect("infallible mutex lock failed")
 }
 
@@ -649,7 +642,7 @@ fn try_replace_image_clipboard_after_remove(
 ) {
     let manager_arc = get_image_clipboard_manager_arc(state);
     let should_replace_clipboard =
-        match crate::utils::image_clipboard::ImageClipboardManager::read_clipboard_images_rgba(app) {
+        match ImageClipboardManager::read_clipboard_images_rgba(app) {
             Ok(images) if !images.is_empty() => {
                 let (rgba, width, height, _) = &images[0];
                 crate::utils::image_clipboard::compute_signature(rgba, *width, *height)
@@ -668,7 +661,7 @@ fn try_replace_image_clipboard_after_remove(
     };
     if let Some(image) = next_image {
         if let Err(e) =
-            crate::utils::image_clipboard::ImageClipboardManager::write_clipboard_image(app, &image)
+            ImageClipboardManager::write_clipboard_image(app, &image)
         {
             log::warn!("删除图片后写入下一张到剪贴板失败: {}", e);
         }
@@ -856,7 +849,7 @@ fn execute_select_and_fill_image_by_id(
                     manager.get_image_by_index_for_fill(0)?
                 }
             };
-            crate::utils::image_clipboard::ImageClipboardManager::write_clipboard_image(
+            ImageClipboardManager::write_clipboard_image(
                 app_handle, &image,
             )?;
             let _ = app_handle.emit(
@@ -1852,13 +1845,10 @@ pub async fn set_copy_paste_dedup_debug_config(
         let clamped = window_ms.clamp(50, 10_000);
         COPY_PASTE_DEDUP_WINDOW_MS.store(clamped, Ordering::Relaxed);
         if let Some(lock) = COPY_PASTE_DEDUP_WINDOW_STATS.get() {
-            let mut stats = match lock.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => {
-                    log::warn!("复制粘贴去重窗口统计锁中毒，尝试恢复");
-                    poisoned.into_inner()
-                }
-            };
+            let mut stats = lock.lock().unwrap_or_else(|poisoned| {
+                log::warn!("复制粘贴去重窗口统计锁中毒，尝试恢复");
+                poisoned.into_inner()
+            });
             stats.window_start_ms = now_unix_ms();
             stats.requests = 0;
             stats.hits = 0;
@@ -1874,13 +1864,10 @@ pub async fn set_copy_paste_dedup_debug_config(
         COPY_PASTE_DEDUP_TEXT_HASH_HIT_COUNT.store(0, Ordering::Relaxed);
         COPY_PASTE_DEDUP_LOG_COUNT.store(0, Ordering::Relaxed);
         if let Some(lock) = COPY_PASTE_DEDUP_WINDOW_STATS.get() {
-            let mut stats = match lock.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => {
-                    log::warn!("复制粘贴去重窗口统计锁中毒，尝试恢复");
-                    poisoned.into_inner()
-                }
-            };
+            let mut stats = lock.lock().unwrap_or_else(|poisoned| {
+                log::warn!("复制粘贴去重窗口统计锁中毒，尝试恢复");
+                poisoned.into_inner()
+            });
             stats.window_start_ms = now_unix_ms();
             stats.requests = 0;
             stats.hits = 0;
@@ -2647,7 +2634,7 @@ pub async fn save_screenshot(
                 Some(file_path) => {
                     // 尝试将FilePath转换为PathBuf
                     if let Some(path_buf) = file_path.as_path() {
-                        match std::fs::write(path_buf, &png_data) {
+                        match fs::write(path_buf, &png_data) {
                             Ok(_) => {
                                 log::info!("截图已保存到: {}", path_buf.display());
                             }
@@ -2716,20 +2703,20 @@ pub async fn pin_screenshot_on_screen(
         "width": width,
         "height": height
     });
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(180));
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(180));
         let _ = window_clone.set_resizable(true);
         let _ = window_clone.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
         let _ = window_clone.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
         let _ = window_clone.show();
-        std::thread::sleep(std::time::Duration::from_millis(60));
+        thread::sleep(Duration::from_millis(60));
         for _ in 0..8 {
             let script = format!(
                 "window.__PINNED_IMAGE_PAYLOAD__ = {}; window.dispatchEvent(new CustomEvent('pinned-image-data', {{ detail: {} }}));",
                 payload, payload
             );
             let _ = window_clone.eval(script);
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            thread::sleep(Duration::from_millis(100));
         }
     });
 
@@ -2853,7 +2840,7 @@ window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {payload} }})
 window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ session_id: {session_id} }} }}));"
         );
 
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             let _ = window.set_always_on_top(true);
             let _ = window.set_ignore_cursor_events(false);
             let _ = window.set_fullscreen(true);
@@ -2868,14 +2855,14 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
                     injected = true;
                     break;
                 }
-                std::thread::sleep(std::time::Duration::from_millis(25));
+                thread::sleep(Duration::from_millis(25));
             }
             if injected {
                 let _ = window.show();
                 let _ = window.set_focus();
             } else {
                 let _ = window.hide();
-                crate::features::screenshot::capture::set_screenshot_in_progress(false);
+                capture::set_screenshot_in_progress(false);
             }
         });
     } else {
@@ -2965,7 +2952,7 @@ window.__SCREENSHOT_BOOT__.pendingStartSessionId = 0;",
         );
         let _ = window.hide();
     }
-    crate::features::screenshot::capture::set_screenshot_in_progress(false);
+    features::screenshot::capture::set_screenshot_in_progress(false);
 
     Ok(())
 }
