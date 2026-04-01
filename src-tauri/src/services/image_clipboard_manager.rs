@@ -5,8 +5,10 @@ use crate::sync::Mutex;
 use crate::utils::image_clipboard::ImageClipboardManager;
 use parking_lot::Mutex as ParkingMutex;
 use std::collections::{HashSet, VecDeque};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex};
 use std::thread;
+use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
 /// 待处理图片任务
@@ -17,6 +19,7 @@ struct PendingImageTask {
     height: u32,
     source_blob: Option<(Vec<u8>, String)>,
     allow_when_screenshot: bool,
+    enqueued_at: Instant,
 }
 
 /// 待处理图片队列
@@ -24,14 +27,81 @@ static PENDING_IMAGE_QUEUE: LazyLock<ParkingMutex<VecDeque<PendingImageTask>>> =
     LazyLock::new(|| ParkingMutex::new(VecDeque::new()));
 
 /// 队列通知机制：用于在有新任务时唤醒处理线程
-static QUEUE_NOTIFY: LazyLock<Arc<(StdMutex<bool>, Condvar)>> =
-    LazyLock::new(|| Arc::new((StdMutex::new(false), Condvar::new())));
+static QUEUE_NOTIFY: LazyLock<Arc<(StdMutex<u64>, Condvar)>> =
+    LazyLock::new(|| Arc::new((StdMutex::new(0), Condvar::new())));
 
 /// 队列最大容量，防止内存溢出
 const MAX_QUEUE_SIZE: usize = 20;
+const IMAGE_QUEUE_WORKER_COUNT: usize = 2;
+
+struct ImageQueueMetrics {
+    enqueued: AtomicU64,
+    dequeued: AtomicU64,
+    dropped_full: AtomicU64,
+    dropped_duplicate: AtomicU64,
+    dropped_screenshot: AtomicU64,
+    queue_wait_ms_total: AtomicU64,
+    queue_len_high_watermark: AtomicUsize,
+}
+
+static IMAGE_QUEUE_METRICS: LazyLock<ImageQueueMetrics> = LazyLock::new(|| ImageQueueMetrics {
+    enqueued: AtomicU64::new(0),
+    dequeued: AtomicU64::new(0),
+    dropped_full: AtomicU64::new(0),
+    dropped_duplicate: AtomicU64::new(0),
+    dropped_screenshot: AtomicU64::new(0),
+    queue_wait_ms_total: AtomicU64::new(0),
+    queue_len_high_watermark: AtomicUsize::new(0),
+});
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
     state.lock().expect("infallible mutex lock failed")
+}
+
+fn observe_queue_len(len: usize) {
+    let watermark = &IMAGE_QUEUE_METRICS.queue_len_high_watermark;
+    loop {
+        let current = watermark.load(Ordering::Relaxed);
+        if len <= current {
+            break;
+        }
+        if watermark
+            .compare_exchange(current, len, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+        {
+            break;
+        }
+    }
+}
+
+fn maybe_log_queue_metrics() {
+    let enqueued = IMAGE_QUEUE_METRICS.enqueued.load(Ordering::Relaxed);
+    if enqueued == 0 || enqueued % 40 != 0 {
+        return;
+    }
+    let dequeued = IMAGE_QUEUE_METRICS.dequeued.load(Ordering::Relaxed);
+    let dropped_full = IMAGE_QUEUE_METRICS.dropped_full.load(Ordering::Relaxed);
+    let dropped_duplicate = IMAGE_QUEUE_METRICS.dropped_duplicate.load(Ordering::Relaxed);
+    let dropped_screenshot = IMAGE_QUEUE_METRICS.dropped_screenshot.load(Ordering::Relaxed);
+    let wait_total = IMAGE_QUEUE_METRICS.queue_wait_ms_total.load(Ordering::Relaxed);
+    let avg_wait = if dequeued > 0 {
+        wait_total as f64 / dequeued as f64
+    } else {
+        0.0
+    };
+    let high_watermark = IMAGE_QUEUE_METRICS
+        .queue_len_high_watermark
+        .load(Ordering::Relaxed);
+    log::info!(
+        "[队列指标] 入队={}, 出队={}, 满队丢弃={}, 重复丢弃={}, 截图丢弃={}, 平均排队等待={:.1}ms, 队列高水位={}",
+        enqueued,
+        dequeued,
+        dropped_full,
+        dropped_duplicate,
+        dropped_screenshot,
+        avg_wait,
+        high_watermark
+    );
 }
 
 pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
@@ -45,9 +115,12 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
     if !should_emit {
         return;
     }
-    let manager = manager_arc
-        .lock()
-        .expect("infallible mutex lock failed");
+    let manager = {
+        let guard = manager_arc
+            .lock()
+            .expect("infallible mutex lock failed");
+        guard.clone()
+    };
     let payload = serde_json::json!({
         "history": manager.get_history_preview(),
         "categories": manager.get_categories(),
@@ -127,14 +200,26 @@ pub fn clear_recent_samples() {
 }
 
 /// 处理队列中的待处理图片任务
-fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
-    log::info!("[处理线程] 图片处理线程已启动，等待任务...");
+fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, worker_id: usize) {
+    log::info!("[处理线程-{}] 图片处理线程已启动，等待任务...", worker_id);
     loop {
         let task = {
             let mut queue = PENDING_IMAGE_QUEUE.lock();
             let task = queue.pop_front();
             if let Some(ref t) = task {
-                log::info!("[处理线程] 图片出队: {}x{}, 剩余队列长度: {}", t.width, t.height, queue.len());
+                let wait_ms = t.enqueued_at.elapsed().as_millis() as u64;
+                IMAGE_QUEUE_METRICS.dequeued.fetch_add(1, Ordering::Relaxed);
+                IMAGE_QUEUE_METRICS
+                    .queue_wait_ms_total
+                    .fetch_add(wait_ms, Ordering::Relaxed);
+                log::info!(
+                    "[处理线程-{}] 图片出队: {}x{}, 队列等待={}ms, 剩余队列长度: {}",
+                    worker_id,
+                    t.width,
+                    t.height,
+                    wait_ms,
+                    queue.len()
+                );
             }
             task
         };
@@ -142,16 +227,37 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
         match task {
             Some(task) => {
                 if capture::is_screenshot_in_progress() && !task.allow_when_screenshot {
-                    log::info!("[处理线程] 截图进行中，跳过图片任务: {}x{}", task.width, task.height);
+                    IMAGE_QUEUE_METRICS
+                        .dropped_screenshot
+                        .fetch_add(1, Ordering::Relaxed);
+                    log::info!(
+                        "[处理线程-{}] 截图进行中，跳过图片任务: {}x{}",
+                        worker_id,
+                        task.width,
+                        task.height
+                    );
                     continue;
                 }
                 // 检查是否与最近图片重复
                 if is_duplicate_recent(task.width, task.height, &task.rgba) {
-                    log::info!("[处理线程] 图片被跳过（重复）: {}x{}", task.width, task.height);
+                    IMAGE_QUEUE_METRICS
+                        .dropped_duplicate
+                        .fetch_add(1, Ordering::Relaxed);
+                    log::info!(
+                        "[处理线程-{}] 图片被跳过（重复）: {}x{}",
+                        worker_id,
+                        task.width,
+                        task.height
+                    );
                     continue;
                 }
 
-                log::info!("[处理线程] 开始处理图片任务: {}x{}", task.width, task.height);
+                log::info!(
+                    "[处理线程-{}] 开始处理图片任务: {}x{}",
+                    worker_id,
+                    task.width,
+                    task.height
+                );
 
                 let manager_arc = {
                     let state_guard = lock_state(state);
@@ -159,30 +265,21 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
                 };
 
                 let source_blob = task.source_blob;
-                {
+                let delta_item = {
                     let manager = match manager_arc.lock() {
                         Ok(guard) => guard,
                         Err(e) => {
-                            log::error!("[处理线程] 获取 manager 锁失败: {:?}", e);
+                            log::error!("[处理线程-{}] 获取 manager 锁失败: {:?}", worker_id, e);
                             continue;
                         }
                     };
+                    let manager = manager.clone();
                     manager.add_rgba_image_with_source_blob(
                         task.rgba.clone(),
                         task.width,
                         task.height,
                         source_blob,
                     );
-                }
-
-                let delta_item = {
-                    let manager = match manager_arc.lock() {
-                        Ok(guard) => guard,
-                        Err(e) => {
-                            log::error!("[处理线程] 二次获取 manager 锁失败: {:?}", e);
-                            continue;
-                        }
-                    };
                     let history_preview = manager.get_history_preview();
                     let pinned_set = manager
                         .get_pinned_items()
@@ -194,7 +291,12 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
                         .cloned()
                         .or_else(|| history_preview.first().cloned())
                 };
-                log::info!("[处理线程] 图片处理成功: {}x{}", task.width, task.height);
+                log::info!(
+                    "[处理线程-{}] 图片处理成功: {}x{}",
+                    worker_id,
+                    task.width,
+                    task.height
+                );
 
                 // 更新采样缓存
                 update_recent_samples(task.width, task.height, &task.rgba);
@@ -215,30 +317,34 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
                     state_guard.image_history_dirty = true;
                 }
 
-                log::info!("[处理线程] 图片处理流程完成");
+                log::info!("[处理线程-{}] 图片处理流程完成", worker_id);
+                maybe_log_queue_metrics();
             }
             None => {
                 // 队列为空，等待通知而不是退出循环
-                log::trace!("[处理线程] 队列为空，等待新任务通知...");
+                log::trace!("[处理线程-{}] 队列为空，等待新任务通知...", worker_id);
                 let (lock, cvar) = &**QUEUE_NOTIFY;
-                let mut notified = match lock.lock() {
+                let mut notify_seq = match lock.lock() {
                     Ok(guard) => guard,
                     Err(poisoned) => {
-                        log::error!("[处理线程] 通知锁已中毒，尝试恢复继续处理");
+                        log::error!("[处理线程-{}] 通知锁已中毒，尝试恢复继续处理", worker_id);
                         poisoned.into_inner()
                     }
                 };
-                while !*notified {
-                    notified = match cvar.wait(notified) {
+                let observed_seq = *notify_seq;
+                while *notify_seq == observed_seq {
+                    notify_seq = match cvar.wait(notify_seq) {
                         Ok(guard) => guard,
                         Err(poisoned) => {
-                            log::error!("[处理线程] 通知条件变量等待异常（锁中毒），尝试恢复继续处理");
+                            log::error!(
+                                "[处理线程-{}] 通知条件变量等待异常（锁中毒），尝试恢复继续处理",
+                                worker_id
+                            );
                             poisoned.into_inner()
                         }
                     };
                 }
-                *notified = false;
-                log::trace!("[处理线程] 收到新任务通知，继续处理");
+                log::trace!("[处理线程-{}] 收到新任务通知，继续处理", worker_id);
                 continue;
             }
         }
@@ -246,12 +352,13 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>) {
 }
 
 pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
-    // 启动独立的处理线程
-    let app_handle_clone = app_handle.clone();
-    let state_clone = state.clone();
-    thread::spawn(move || {
-        process_pending_queue(&app_handle_clone, &state_clone);
-    });
+    for worker_id in 0..IMAGE_QUEUE_WORKER_COUNT {
+        let app_handle_clone = app_handle.clone();
+        let state_clone = state.clone();
+        thread::spawn(move || {
+            process_pending_queue(&app_handle_clone, &state_clone, worker_id + 1);
+        });
+    }
 
     // 启动监听线程
     thread::spawn(move || {
@@ -291,6 +398,9 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                         if queue.len() >= MAX_QUEUE_SIZE {
                             log::warn!("[监听线程] 待处理队列已满（{}），丢弃最早的图片", MAX_QUEUE_SIZE);
                             queue.pop_front();
+                            IMAGE_QUEUE_METRICS
+                                .dropped_full
+                                .fetch_add(1, Ordering::Relaxed);
                         }
                         queue.push_back(PendingImageTask {
                             rgba,
@@ -298,7 +408,10 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                             height,
                             source_blob,
                             allow_when_screenshot,
+                            enqueued_at: Instant::now(),
                         });
+                        IMAGE_QUEUE_METRICS.enqueued.fetch_add(1, Ordering::Relaxed);
+                        observe_queue_len(queue.len());
                         log::info!("[监听线程] 图片入队: {}x{}, 当前队列长度: {}", width, height, queue.len());
                     }
                     drop(queue);  // 释放锁
@@ -312,9 +425,10 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                             poisoned.into_inner()
                         }
                     };
-                    *notified = true;
-                    cvar.notify_one();
+                    *notified = notified.wrapping_add(1);
+                    cvar.notify_all();
                     log::info!("[监听线程] 已通知处理线程");
+                    maybe_log_queue_metrics();
                 }
                 Err(e) => {
                     log::warn!("[监听线程] 读取剪贴板图片失败: {}", e);

@@ -151,7 +151,10 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
         )
     };
     let snapshot_payload = if should_sync_history {
-        let manager = lock_arc_mutex(&manager_arc);
+        let manager = {
+            let guard = lock_arc_mutex(&manager_arc);
+            guard.clone()
+        };
         Some(serde_json::json!({
             "history": manager.get_history_preview(),
             "categories": manager.get_categories(),
