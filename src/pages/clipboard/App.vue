@@ -136,7 +136,7 @@
 
     <div
         v-if="contextMenuVisible"
-        :style="{ top: contextMenuY + 'px', left: contextMenuX + 'px' }"
+        ref="contextMenuRef"
         class="context-menu"
         @click.stop
         @mousedown.stop
@@ -183,6 +183,7 @@ import {runCategoryAssignment} from '../shared/categoryActions'
 
 const containerRef = ref(null)
 const clipboardListRef = ref(null)
+const contextMenuRef = ref(null)
 const isVisible = ref(false)
 const categories = ref(['未分类'])
 const pinnedItems = ref([])
@@ -195,6 +196,13 @@ const {
   openContextMenu,
   closeContextMenu
 } = useContextMenuState(null, {menuWidth: 160, maxHeightPx: 300, maxHeightRatio: 0.6})
+
+const syncContextMenuPosition = () => {
+  const el = contextMenuRef.value
+  if (!el) return
+  el.style.top = `${contextMenuY.value}px`
+  el.style.left = `${contextMenuX.value}px`
+}
 const dragItem = ref(null)
 const aiActionLoading = ref(false)
 const isAiSettingsCollapsed = ref(true)
@@ -691,6 +699,12 @@ watch(visibleHistory, (list) => {
   if (!exists) {
     selectedIndex.value = list[0].index
   }
+})
+
+watch([contextMenuVisible, contextMenuX, contextMenuY], async ([visible]) => {
+  if (!visible) return
+  await nextTick()
+  syncContextMenuPosition()
 })
 
 onMounted(() => {

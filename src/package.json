@@ -5,10 +5,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "check:csp-style": "node ./scripts/check-csp-inline-style.mjs",
     "preview": "vite preview",
     "tauri": "cd .. && node src/node_modules/@tauri-apps/cli/tauri.js",
     "tauri:dev": "npm run tauri -- dev",
-    "tauri:build": "npm run tauri -- build"
+    "tauri:build": "npm run tauri -- build",
+    "tauri:dev:strict-csp": "npm run tauri -- dev -c src-tauri/tauri.strict-csp.conf.json",
+    "tauri:build:strict-csp": "npm run tauri -- build -c src-tauri/tauri.strict-csp.conf.json"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.0",

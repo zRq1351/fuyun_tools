@@ -51,8 +51,11 @@ fn validate_provider_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<()>
     }
     log::info!("提供商 {} 配置验证通过", settings.ai_provider);
 
-    if !provider_config.api_url.starts_with("http://") && !provider_config.api_url.starts_with("https://") {
-        return Err(AppError::new(ErrorCode::ConfigError, "API地址格式不正确，请确保以 http:// 或 https:// 开头"));
+    if !provider_config.api_url.starts_with("https://") {
+        return Err(AppError::new(
+            ErrorCode::ConfigError,
+            "API地址格式不正确，请确保以 https:// 开头",
+        ));
     }
 
     Ok(())

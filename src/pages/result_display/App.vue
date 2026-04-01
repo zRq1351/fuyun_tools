@@ -24,7 +24,7 @@
     <div class="header">
       <div v-if="mode === 'explanation'" class="control-group">
         <span class="label">解释语言：</span>
-        <el-select v-model="explanationLanguage" size="small" style="width: 100px" @change="handleLanguageChange">
+        <el-select v-model="explanationLanguage" class="lang-select" size="small" @change="handleLanguageChange">
           <el-option label="中文" value="中文"/>
           <el-option label="英文" value="英文"/>
           <el-option label="日文" value="日文"/>
@@ -36,7 +36,7 @@
         <span class="label">原文：</span>
         <span class="auto-source-tag">自动识别</span>
         <span class="arrow">→</span>
-        <el-select v-model="targetLanguage" size="small" style="width: 100px" @change="handleLanguageChange">
+        <el-select v-model="targetLanguage" class="lang-select" size="small" @change="handleLanguageChange">
           <el-option label="简体中文" value="简体中文"/>
           <el-option label="繁体中文" value="繁体中文"/>
           <el-option label="英语" value="英语"/>
@@ -657,6 +657,10 @@ body.theme-light {
 .container.theme-light .loading-wrap {
   color: #3d557d;
   background: linear-gradient(160deg, rgba(240, 246, 255, 0.92), rgba(234, 241, 253, 0.86));
+}
+
+.lang-select {
+  width: 100px;
 }
 
 .container.theme-light .loading-dot {

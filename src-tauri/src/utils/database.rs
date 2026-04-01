@@ -499,6 +499,10 @@ pub async fn load_history_page_data_async(
     let fts_enabled = history_fts_enabled_conn_async(&mut conn).await?;
     let order_clause = resolve_history_sort(sort_by, sort_order);
 
+    if !fts_enabled && keyword_filter.is_some() {
+        log::warn!("文本分页检索降级到 LIKE 回退（FTS 不可用）");
+    }
+
     let (total, mut items) = if fts_enabled {
         let query_sql = format!(
             "
@@ -508,14 +512,14 @@ pub async fn load_history_page_data_async(
               COALESCE(hi.item_id, ''),
               hi.content,
               CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END,
-              CASE WHEN p.content IS NULL THEN 0 ELSE 1 END,
+              CASE WHEN p.item_id IS NULL THEN 0 ELSE 1 END,
               COALESCE(hi.updated_at, 0)
             FROM history_items hi
-            LEFT JOIN categories c ON (c.item_id = hi.item_id OR c.content = hi.content)
-            LEFT JOIN pinned_items p ON (p.item_id = hi.item_id OR p.content = hi.content)
+            LEFT JOIN categories c ON c.item_id = hi.item_id
+            LEFT JOIN pinned_items p ON p.item_id = hi.item_id
             WHERE
               (?1 IS NULL OR (CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END) = ?1)
-              AND (?2 = 0 OR p.content IS NOT NULL)
+              AND (?2 = 0 OR p.item_id IS NOT NULL)
               AND (
                 ?3 IS NULL
                 OR EXISTS (
@@ -571,14 +575,14 @@ pub async fn load_history_page_data_async(
               COALESCE(hi.item_id, ''),
               hi.content,
               CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END,
-              CASE WHEN p.content IS NULL THEN 0 ELSE 1 END,
+              CASE WHEN p.item_id IS NULL THEN 0 ELSE 1 END,
               COALESCE(hi.updated_at, 0)
             FROM history_items hi
-            LEFT JOIN categories c ON (c.item_id = hi.item_id OR c.content = hi.content)
-            LEFT JOIN pinned_items p ON (p.item_id = hi.item_id OR p.content = hi.content)
+            LEFT JOIN categories c ON c.item_id = hi.item_id
+            LEFT JOIN pinned_items p ON p.item_id = hi.item_id
             WHERE
               (?1 IS NULL OR (CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END) = ?1)
-              AND (?2 = 0 OR p.content IS NOT NULL)
+              AND (?2 = 0 OR p.item_id IS NOT NULL)
               AND (?3 IS NULL OR hi.content LIKE '%' || ?3 || '%')
             ORDER BY {}
             LIMIT ?4 OFFSET ?5

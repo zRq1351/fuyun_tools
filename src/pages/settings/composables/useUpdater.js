@@ -1,14 +1,115 @@
-import {ref} from 'vue'
+import {h, ref} from 'vue'
 import {ElMessageBox} from 'element-plus'
 import {check} from '@tauri-apps/plugin-updater'
 import {relaunch} from '@tauri-apps/plugin-process'
 import {marked} from 'marked'
 
-// 配置marked选项
 marked.setOptions({
-    breaks: false, // 不将单个换行符转换为<br>
-    gfm: true, // 启用GitHub风格的Markdown
+    breaks: false,
+    gfm: true,
 })
+
+const safeText = (value) => (typeof value === 'string' ? value : '')
+
+const isSafeHref = (href) => typeof href === 'string' && /^(https?:\/\/|mailto:)/i.test(href)
+
+const renderInlineTokens = (tokens = []) => {
+    const nodes = []
+    for (const token of tokens) {
+        if (!token) continue
+        if (token.type === 'text') {
+            nodes.push(safeText(token.text))
+            continue
+        }
+        if (token.type === 'strong') {
+            nodes.push(h('strong', null, renderInlineTokens(token.tokens || [])))
+            continue
+        }
+        if (token.type === 'em') {
+            nodes.push(h('em', null, renderInlineTokens(token.tokens || [])))
+            continue
+        }
+        if (token.type === 'codespan') {
+            nodes.push(h('code', null, safeText(token.text)))
+            continue
+        }
+        if (token.type === 'br') {
+            nodes.push(h('br'))
+            continue
+        }
+        if (token.type === 'del') {
+            nodes.push(h('del', null, renderInlineTokens(token.tokens || [])))
+            continue
+        }
+        if (token.type === 'link') {
+            const href = isSafeHref(token.href) ? token.href : '#'
+            nodes.push(
+                h(
+                    'a',
+                    {href, target: '_blank', rel: 'noopener noreferrer'},
+                    renderInlineTokens(token.tokens || [{type: 'text', text: safeText(token.text)}])
+                )
+            )
+            continue
+        }
+        nodes.push(safeText(token.raw || token.text))
+    }
+    return nodes
+}
+
+const renderBlockToken = (token, index) => {
+    if (!token) return null
+    if (token.type === 'paragraph') {
+        return h('p', {key: `p-${index}`}, renderInlineTokens(token.tokens || []))
+    }
+    if (token.type === 'heading') {
+        const level = Math.min(6, Math.max(1, Number(token.depth) || 1))
+        return h(`h${level}`, {key: `h-${index}`}, renderInlineTokens(token.tokens || []))
+    }
+    if (token.type === 'list') {
+        const tag = token.ordered ? 'ol' : 'ul'
+        return h(
+            tag,
+            {key: `l-${index}`},
+            (token.items || []).map((item, itemIndex) =>
+                h('li', {key: `li-${index}-${itemIndex}`}, renderInlineTokens(item.tokens || []))
+            )
+        )
+    }
+    if (token.type === 'blockquote') {
+        return h(
+            'blockquote',
+            {key: `bq-${index}`},
+            (token.tokens || []).map((child, childIndex) => renderBlockToken(child, `${index}-${childIndex}`))
+        )
+    }
+    if (token.type === 'code') {
+        return h('pre', {key: `code-${index}`}, [h('code', null, safeText(token.text))])
+    }
+    if (token.type === 'hr') {
+        return h('hr', {key: `hr-${index}`})
+    }
+    if (token.type === 'space') {
+        return h('div', {key: `sp-${index}`})
+    }
+    return h('p', {key: `x-${index}`}, safeText(token.raw || token.text))
+}
+
+const buildUpdateMessageNode = (version, body) => {
+    const raw = safeText(body).trim()
+    const tokens = raw ? marked.lexer(raw) : [{type: 'paragraph', tokens: [{type: 'text', text: '暂无更新说明'}]}]
+    const renderedBlocks = tokens
+        .map((token, index) => renderBlockToken(token, index))
+        .filter(Boolean)
+    return h('div', {class: 'update-dialog'}, [
+        h('div', {class: 'update-dialog__hero'}, [
+            h('div', {class: 'update-dialog__tag'}, '新版本可用'),
+            h('h3', {class: 'update-dialog__title'}, `v${version}`)
+        ]),
+        h('div', {class: 'update-body-content'}, renderedBlocks),
+        h('p', {class: 'update-dialog__hint'}, '是否立即更新？')
+    ])
+}
 
 export function useUpdater(currentVersion) {
     const checkingUpdate = ref(false)
@@ -28,28 +129,15 @@ export function useUpdater(currentVersion) {
                 updateStatus.value = null
 
                 try {
-                    const bodyHtml = update.body ? marked(update.body) : '<p>暂无更新说明</p>'
-                    const messageHtml = `
-                        <div class="update-dialog">
-                            <div class="update-dialog__hero">
-                                <div class="update-dialog__tag">新版本可用</div>
-                                <h3 class="update-dialog__title">v${update.version}</h3>
-                            </div>
-                            <div class="update-body-content">
-                                ${bodyHtml}
-                            </div>
-                            <p class="update-dialog__hint">是否立即更新？</p>
-                        </div>
-                    `
-                    
+                    const messageNode = buildUpdateMessageNode(update.version, update.body)
+
                     await ElMessageBox.confirm(
-                        messageHtml,
+                        messageNode,
                         '发现更新',
                         {
                             confirmButtonText: '立即更新',
                             cancelButtonText: '稍后提醒',
                             type: 'primary',
-                            dangerouslyUseHTMLString: true,
                             customClass: 'update-message-box'
                         }
                     )

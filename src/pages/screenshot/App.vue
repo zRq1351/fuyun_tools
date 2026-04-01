@@ -1,6 +1,6 @@
 <template>
-  <div :style="{ cursor: cursorStyle }"
-       class="pixpin-editor"
+  <div
+      :class="['pixpin-editor', editorCursorClass]"
        @mousedown="onMouseDown"
        @mousemove="onMouseMove"
        @mouseup="onMouseUp"
@@ -15,14 +15,14 @@
     <!-- 遮罩与选区层 -->
     <div :class="{ 'pointer-none': state === 'drawing' }" class="mask-layer">
       <!-- 智能窗口高亮 -->
-      <div v-if="highlightedWindow && state === 'idle'" :style="windowHighlightStyle" class="window-highlight">
+      <div v-if="highlightedWindow && state === 'idle'" ref="windowHighlightRef" class="window-highlight">
         <div class="window-border"></div>
       </div>
 
       <!-- 选区镂空及控制点 -->
       <div v-if="hasSelection || state === 'selecting'"
+           ref="cutoutRef"
            :class="{ 'is-active': state === 'selected' }"
-           :style="cutoutStyle"
            class="cutout">
 
         <div :class="{ 'is-active': state !== 'drawing' }" class="cutout-border"></div>
@@ -47,7 +47,7 @@
 
     <!-- 浮动工具栏 -->
     <div v-if="hasSelection && (state === 'selected' || state === 'drawing')"
-         :style="toolbarStyle"
+         ref="floatingToolbarRef"
          class="floating-toolbar"
          @mousedown.stop>
 
@@ -110,7 +110,7 @@
     </div>
 
     <!-- 取色器放大镜 (暂留位) -->
-    <div v-if="currentTool === 'picker' && pickColor" :style="pickerStyle" class="color-picker-info">
+    <div v-if="currentTool === 'picker' && pickColor" ref="pickerInfoRef" class="color-picker-info">
       {{ pickColor }}
     </div>
 
@@ -118,7 +118,7 @@
         v-for="item in textItems"
         :key="item.id"
         :class="{ editing: editingTextId === item.id, selected: selectedTextId === item.id }"
-        :style="getTextItemStyle(item)"
+        :ref="(el) => setTextOverlayRef(el, item.id)"
         class="text-overlay-item"
         @mousedown.stop="selectTextItem(item.id)"
         @dblclick.stop="startEditTextItem(item)"
@@ -141,7 +141,7 @@
 </template>
 
 <script setup>
-import {computed, nextTick, onMounted, onUnmounted, reactive, ref} from 'vue'
+import {computed, nextTick, onMounted, onUnmounted, reactive, ref, watchPostEffect} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
 import {
   Aim,
@@ -166,6 +166,10 @@ const state = ref('idle') // idle, selecting, selected, moving, resizing, drawin
 const screenshotSrc = ref('')
 const screenshotImg = ref(null)
 const canvas = ref(null)
+const windowHighlightRef = ref(null)
+const cutoutRef = ref(null)
+const floatingToolbarRef = ref(null)
+const pickerInfoRef = ref(null)
 const isDrawing = ref(false)
 const isCaptureReady = ref(false)
 
@@ -187,6 +191,7 @@ let textItemIdSeed = 1
 const editingTextId = ref(null)
 const selectedTextId = ref(null)
 const editingElementRef = ref(null)
+const textOverlayRefMap = new Map()
 const editingBeforeText = ref('')
 const fontFamilies = ['Arial', 'Microsoft YaHei', 'PingFang SC', 'Consolas', 'Times New Roman']
 const textStyle = reactive({
@@ -233,7 +238,7 @@ const hasSelection = computed(() => rect.width > 0 && rect.height > 0)
 const canExport = computed(() => hasSelection.value)
 
 // 样式计算
-const cursorStyle = computed(() => {
+const editorCursorClass = computed(() => {
   if (state.value === 'idle' || state.value === 'selecting') return 'crosshair'
   if (currentTool.value !== 'select') return 'crosshair'
   return 'default'
@@ -287,6 +292,40 @@ const pickerStyle = computed(() => {
   return {
     left: `${drawStart.x + 15}px`,
     top: `${drawStart.y + 15}px`
+  }
+})
+
+function setTextOverlayRef(el, id) {
+  if (!id) return
+  if (el) {
+    textOverlayRefMap.set(id, el)
+  } else {
+    textOverlayRefMap.delete(id)
+  }
+}
+
+function applyStyleObject(el, styleObj) {
+  if (!el || !styleObj) return
+  Object.entries(styleObj).forEach(([key, value]) => {
+    el.style[key] = value
+  })
+}
+
+watchPostEffect(() => {
+  applyStyleObject(windowHighlightRef.value, windowHighlightStyle.value)
+  applyStyleObject(cutoutRef.value, cutoutStyle.value)
+  applyStyleObject(floatingToolbarRef.value, toolbarStyle.value)
+  applyStyleObject(pickerInfoRef.value, pickerStyle.value)
+  const validIds = new Set(textItems.value.map((item) => item.id))
+  for (const [id, el] of textOverlayRefMap.entries()) {
+    if (!validIds.has(id)) {
+      textOverlayRefMap.delete(id)
+      continue
+    }
+    const item = textItems.value.find((entry) => entry.id === id)
+    if (item) {
+      applyStyleObject(el, getTextItemStyle(item))
+    }
   }
 })
 
@@ -1351,13 +1390,31 @@ function handleKeyDown(event) {
 </script>
 
 <style scoped>
+:global(html),
+:global(body),
+:global(#app) {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 .pixpin-editor {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
   user-select: none;
   position: relative;
   background: transparent;
+}
+
+.pixpin-editor.cursor-crosshair {
+  cursor: crosshair;
+}
+
+.pixpin-editor.cursor-default {
+  cursor: default;
 }
 
 .bg-image {

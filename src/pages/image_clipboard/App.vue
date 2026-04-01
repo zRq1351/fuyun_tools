@@ -31,7 +31,7 @@
         @scroll="handleContentScroll"
         @wheel.prevent="handleContentWheel"
     >
-      <div :style="{ width: `${leadingSpacerWidth}px` }" class="virtual-spacer"></div>
+      <div ref="leadingSpacerRef" class="virtual-spacer"></div>
       <div
           v-for="entry in renderedHistory"
           :id="`image-item-${entry.index}`"
@@ -89,7 +89,7 @@
           <span>{{ isLoadingMore ? '加载中' : '加载更多' }}</span>
         </div>
       </div>
-      <div :style="{ width: `${trailingSpacerWidth}px` }" class="virtual-spacer"></div>
+      <div ref="trailingSpacerRef" class="virtual-spacer"></div>
     </div>
 
     <div class="status-footer" @click.stop @mousedown.stop>
@@ -123,7 +123,7 @@
 
     <div
         v-if="contextMenuVisible"
-        :style="{ top: contextMenuY + 'px', left: contextMenuX + 'px' }"
+        ref="contextMenuRef"
         class="context-menu"
         @click.stop
     >
@@ -163,6 +163,9 @@ import {runCategoryAssignment} from '../shared/categoryActions'
 
 const containerRef = ref(null)
 const contentRef = ref(null)
+const contextMenuRef = ref(null)
+const leadingSpacerRef = ref(null)
+const trailingSpacerRef = ref(null)
 const history = ref([])
 const categoryMap = ref({})
 const tagMap = ref({})
@@ -190,6 +193,22 @@ const {
   openContextMenu,
   closeContextMenu
 } = useContextMenuState('', {menuWidth: 160, maxHeightPx: 300, maxHeightRatio: 0.6})
+
+const syncContextMenuPosition = () => {
+  const el = contextMenuRef.value
+  if (!el) return
+  el.style.top = `${contextMenuY.value}px`
+  el.style.left = `${contextMenuX.value}px`
+}
+
+const syncVirtualSpacerWidths = () => {
+  if (leadingSpacerRef.value) {
+    leadingSpacerRef.value.style.width = `${leadingSpacerWidth.value}px`
+  }
+  if (trailingSpacerRef.value) {
+    trailingSpacerRef.value.style.width = `${trailingSpacerWidth.value}px`
+  }
+}
 const dragItemId = ref('')
 const isFilling = ref(false)
 const categoryInputOpenedAt = ref(0)
@@ -1165,9 +1184,6 @@ const mergeShowWindowPayload = (data) => {
 const promoteLocalItemToTop = (itemId) => {
   if (!itemId || !Array.isArray(history.value) || history.value.length < 2) return
   const pinnedSet = new Set(pinnedItems.value)
-  if (pinnedSet.has(itemId)) {
-    return
-  }
   const currentIndex = history.value.findIndex((item) => item?.id === itemId)
   if (currentIndex < 0) return
   const selectedId = history.value[selectedIndex.value]?.id
@@ -1235,6 +1251,73 @@ const mergeImagePageIntoState = (data, reset = false) => {
   if (Array.isArray(data?.categoryList)) {
     const list = data.categoryList.filter((c) => c !== '未分类' && c !== '全部')
     categories.value = ['未分类', ...Array.from(new Set(list))]
+  }
+}
+
+const mergeIncrementalPageIntoState = (data) => {
+  const items = Array.isArray(data?.items) ? data.items : []
+  if (items.length === 0) {
+    if (Number.isFinite(data?.total)) {
+      totalCount.value = data.total
+      const loadedCount = history.value.filter(Boolean).length
+      if (loadedCount > totalCount.value) {
+        history.value = history.value.slice(0, Math.max(0, totalCount.value))
+      }
+      pageOffset.value = history.value.filter(Boolean).length
+      hasMore.value = pageOffset.value < totalCount.value
+    }
+    return
+  }
+  const selectedId = history.value[selectedIndex.value]?.id
+  const incomingIds = new Set()
+  const existingById = new Map(history.value.filter(Boolean).map((item) => [item.id, item]))
+  const front = []
+  for (const row of items) {
+    if (!row?.id) continue
+    incomingIds.add(row.id)
+    const existing = existingById.get(row.id) || {}
+    front.push({
+      ...existing,
+      id: row.id,
+      width: row.width ?? existing.width ?? 0,
+      height: row.height ?? existing.height ?? 0,
+      preview_png_base64: row.previewPngBase64 ?? row.preview_png_base64 ?? existing.preview_png_base64 ?? '',
+      image_path: row.imagePath ?? row.image_path ?? existing.image_path ?? ''
+    })
+    categoryMap.value[row.id] = row.category || '未分类'
+    tagMap.value[row.id] = Array.isArray(row.tags) ? row.tags : (tagMap.value[row.id] || [])
+  }
+  if (front.length === 0) return
+  const rest = history.value.filter((item) => item && !incomingIds.has(item.id))
+  const loadedCountBefore = history.value.filter(Boolean).length
+  const keepCount = Math.max(loadedCountBefore, Number(pageSize.value) || 10, front.length)
+  const expectedTotal = Number.isFinite(data?.total) ? Math.max(0, Number(data.total)) : loadedCountBefore
+  const maxCount = expectedTotal > 0 ? Math.min(keepCount, expectedTotal) : keepCount
+  history.value = [...front, ...rest].slice(0, maxCount)
+
+  const pinnedSet = new Set(pinnedItems.value)
+  for (const row of items) {
+    if (!row?.id) continue
+    if (row.pinned) {
+      pinnedSet.add(row.id)
+    } else {
+      pinnedSet.delete(row.id)
+    }
+  }
+  pinnedItems.value = history.value
+      .filter(Boolean)
+      .map((item) => item.id)
+      .filter((id) => pinnedSet.has(id))
+
+  const loadedCount = history.value.filter(Boolean).length
+  totalCount.value = Number.isFinite(data?.total) ? data.total : Math.max(totalCount.value || 0, loadedCount)
+  pageOffset.value = loadedCount
+  hasMore.value = pageOffset.value < totalCount.value
+  if (selectedId) {
+    const nextSelectedIndex = history.value.findIndex((item) => item?.id === selectedId)
+    selectedIndex.value = nextSelectedIndex >= 0 ? nextSelectedIndex : 0
+  } else if (selectedIndex.value < 0 && loadedCount > 0) {
+    selectedIndex.value = 0
   }
 }
 
@@ -1327,8 +1410,22 @@ const syncHistory = async () => {
   await loadHistoryPage({reset: true})
 }
 
-// 优化方案 2：减少前端同步延迟，从 80ms 降至 40ms
-const scheduleHistorySync = (delay = 40) => {
+const syncHistoryIncremental = async () => {
+  const data = await ImageClipboardService.getHistoryPage({
+    offset: 0,
+    limit: Math.max(Number(pageSize.value) || 10, 30),
+    category: categoryFilter.value === '全部' ? null : categoryFilter.value,
+    keyword: searchKeyword.value.trim() || null,
+    pinnedOnly: false,
+    sortBy: sortBy.value,
+    sortOrder: sortOrder.value
+  })
+  mergeIncrementalPageIntoState(data)
+  await nextTick()
+  syncContentMetrics()
+}
+
+const scheduleHistorySync = (delay = 220) => {
   if (historyUpdateTimer) return
   historyUpdateTimer = window.setTimeout(async () => {
     historyUpdateTimer = null
@@ -1336,7 +1433,12 @@ const scheduleHistorySync = (delay = 40) => {
       pendingHistorySync = true
       return
     }
-    await syncHistory()
+    try {
+      await syncHistoryIncremental()
+    } catch (error) {
+      console.error('增量同步图片历史失败，回退全量同步:', error)
+      await syncHistory()
+    }
   }, delay)
 }
 
@@ -1531,6 +1633,17 @@ watch(filteredHistory, (list) => {
 watch(previewCacheKeepIds, (ids) => {
   prunePreviewCache(ids)
   pruneAsyncPreviewCache(ids)
+}, {immediate: true})
+
+watch([contextMenuVisible, contextMenuX, contextMenuY], async ([visible]) => {
+  if (!visible) return
+  await nextTick()
+  syncContextMenuPosition()
+})
+
+watch([leadingSpacerWidth, trailingSpacerWidth], async () => {
+  await nextTick()
+  syncVirtualSpacerWidths()
 }, {immediate: true})
 
 let filterDebounceTimer = null

@@ -63,6 +63,7 @@ fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a
 
 struct SelectionProcessingGuard {
     state: Arc<Mutex<SharedAppState>>,
+    epoch: u64,
 }
 
 impl SelectionProcessingGuard {
@@ -71,16 +72,23 @@ impl SelectionProcessingGuard {
         if !guard.settings.selection_enabled {
             return None;
         }
+        if guard.is_processing_selection {
+            return None;
+        }
+        guard.selection_guard_epoch = guard.selection_guard_epoch.wrapping_add(1);
+        let epoch = guard.selection_guard_epoch;
         guard.is_processing_selection = true;
         drop(guard);
-        Some(Self { state })
+        Some(Self { state, epoch })
     }
 }
 
 impl Drop for SelectionProcessingGuard {
     fn drop(&mut self) {
         let mut state = lock_arc_mutex(&self.state);
-        state.is_processing_selection = false;
+        if state.selection_guard_epoch == self.epoch {
+            state.is_processing_selection = false;
+        }
     }
 }
 
