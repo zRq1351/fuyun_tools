@@ -821,12 +821,9 @@ impl ImageClipboardManager {
             lazy_load: true,
             cached_signature: None,
         };
-        let removed_ids_after_insert = {
+        let (removed_ids_after_insert, new_item_compact, item_ids_snapshot, pinned_snapshot) = {
             let mut history = lock_arc_mutex(&self.history);
-            let mut categories = lock_arc_mutex(&self.categories);
-            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             let mut signature_index = lock_arc_mutex(&self.signature_index);
-            let before_ids = history.iter().map(|item| item.id.clone()).collect::<HashSet<_>>();
             if self.signature_index_dirty.load(Ordering::SeqCst) || signature_index.len() != history.len()
             {
                 *signature_index = build_signature_index(&history);
@@ -845,8 +842,6 @@ impl ImageClipboardManager {
                             existing_index,
                         );
                         drop(signature_index);
-                        drop(pinned_items);
-                        drop(categories);
                         drop(history);
                         if let Err(e) = image_store::sync_item_positions_incremental(
                             &moved_item_id,
@@ -860,20 +855,21 @@ impl ImageClipboardManager {
                         return;
                     }
                     drop(signature_index);
-                    drop(pinned_items);
-                    drop(categories);
                     drop(history);
                     return;
                 }
             }
+            drop(signature_index);
+            let mut categories = lock_arc_mutex(&self.categories);
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+            let before_ids = history.iter().map(|item| item.id.clone()).collect::<HashSet<_>>();
             history.insert(0, item);
-            let overflow_paths =
-                shrink_image_history_with_group_protection(
-                    &mut history,
-                    self.max_items,
-                    &mut categories,
-                    self.grouped_items_protected_from_limit,
-                );
+            let overflow_paths = shrink_image_history_with_group_protection(
+                &mut history,
+                self.max_items,
+                &mut categories,
+                self.grouped_items_protected_from_limit,
+            );
             cleanup_image_blob_files_async(overflow_paths);
             normalize_pinned_items(&mut pinned_items, &history);
             apply_pin_order(&mut history, &pinned_items);
@@ -884,16 +880,27 @@ impl ImageClipboardManager {
                 self.image_disk_limit_bytes,
             );
             cleanup_image_blob_files_async(disk_removed_paths);
+            let pinned_snapshot = pinned_items.clone();
+            drop(pinned_items);
+            drop(categories);
+            let mut signature_index = lock_arc_mutex(&self.signature_index);
             *signature_index = build_signature_index(&history);
             self.signature_index_dirty.store(false, Ordering::SeqCst);
+            drop(signature_index);
             self.enforce_full_res_cache_budget_lru(&mut history);
             self.prune_pending_images_by_history(&history);
             self.prune_full_res_cache_access_by_history(&history);
             let after_id_set = history.iter().map(|item| item.id.clone()).collect::<HashSet<_>>();
-            before_ids
+            let removed_ids = before_ids
                 .into_iter()
                 .filter(|id| !after_id_set.contains(id))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let new_item_compact = history
+                .iter()
+                .find(|it| it.id == id)
+                .map(compact_item_for_persist);
+            let item_ids_snapshot = history.iter().map(|it| it.id.clone()).collect::<Vec<_>>();
+            (removed_ids, new_item_compact, item_ids_snapshot, pinned_snapshot)
         };
 
         let rgba_arc = Arc::new(rgba);
@@ -932,20 +939,7 @@ impl ImageClipboardManager {
                 pending.remove(&task.item_id);
             }
         }
-        let new_item_compact = {
-            let history = lock_arc_mutex(&self.history);
-            history
-                .iter()
-                .find(|item| item.id == id)
-                .map(compact_item_for_persist)
-        };
-        let (item_ids_snapshot, pinned_snapshot) = {
-            let history = lock_arc_mutex(&self.history);
-            let pinned = lock_arc_mutex(&self.pinned_items);
-            let item_ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
-            log::info!("准备增量保存图片到数据库: item_id={}, 总数={}", id, item_ids.len());
-            (item_ids, pinned.clone())
-        };
+        log::info!("准备增量保存图片到数据库: item_id={}, 总数={}", id, item_ids_snapshot.len());
         let new_position = item_ids_snapshot.iter().position(|item_id| item_id == &id);
         if let (Some(item), Some(position)) = (new_item_compact.as_ref(), new_position) {
             if let Err(e) = image_store::upsert_item(item, position) {
