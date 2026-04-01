@@ -836,6 +836,7 @@ impl ImageClipboardManager {
                 if existing_index < history.len() {
                     if existing_index != 0 {
                         let moved_signature = history[existing_index].signature.clone();
+                        let moved_item_id = history[existing_index].id.clone();
                         let moved = history.remove(existing_index);
                         history.insert(0, moved);
                         signature_index_move_to_front(
@@ -843,21 +844,25 @@ impl ImageClipboardManager {
                             &moved_signature,
                             existing_index,
                         );
+                        drop(signature_index);
+                        drop(pinned_items);
+                        drop(categories);
+                        drop(history);
+                        if let Err(e) = image_store::sync_item_positions_incremental(
+                            &moved_item_id,
+                            existing_index,
+                            0,
+                        ) {
+                            log::error!("增量同步图片位置失败: {}", e);
+                        } else {
+                            log::info!("复用图片已增量移动到顶部: item_id={}", moved_item_id);
+                        }
+                        return;
                     }
-                    let items_for_store = history.iter().map(compact_item_for_persist).collect::<Vec<_>>();
-                    let item_ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
                     drop(signature_index);
                     drop(pinned_items);
                     drop(categories);
                     drop(history);
-                    for (position, item) in items_for_store.iter().enumerate() {
-                        if let Err(e) = image_store::upsert_item(item, position) {
-                            log::error!("同步图片项失败: {}", e);
-                        }
-                    }
-                    if let Err(e) = image_store::sync_item_positions(&item_ids) {
-                        log::error!("同步图片位置失败: {}", e);
-                    }
                     return;
                 }
             }
@@ -927,25 +932,29 @@ impl ImageClipboardManager {
                 pending.remove(&task.item_id);
             }
         }
-        let (items_snapshot, item_ids_snapshot, pinned_snapshot) = {
+        let new_item_compact = {
+            let history = lock_arc_mutex(&self.history);
+            history
+                .iter()
+                .find(|item| item.id == id)
+                .map(compact_item_for_persist)
+        };
+        let (item_ids_snapshot, pinned_snapshot) = {
             let history = lock_arc_mutex(&self.history);
             let pinned = lock_arc_mutex(&self.pinned_items);
             let item_ids = history.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
-            let items = history.iter().map(compact_item_for_persist).collect::<Vec<_>>();
-            log::info!("准备保存图片到数据库: item_id={}, 总数={}", id, items.len());
-            (
-                items,
-                item_ids,
-                pinned.clone(),
-            )
+            log::info!("准备增量保存图片到数据库: item_id={}, 总数={}", id, item_ids.len());
+            (item_ids, pinned.clone())
         };
-        for (position, item) in items_snapshot.iter().enumerate() {
-            log::debug!("保存图片项到数据库: position={}, item_id={}", position, item.id);
+        let new_position = item_ids_snapshot.iter().position(|item_id| item_id == &id);
+        if let (Some(item), Some(position)) = (new_item_compact.as_ref(), new_position) {
             if let Err(e) = image_store::upsert_item(item, position) {
-                log::error!("同步图片项失败: {}", e);
+                log::error!("增量写入新增图片项失败: {}", e);
             } else {
-                log::debug!("图片项保存成功: item_id={}", item.id);
+                log::debug!("新增图片项保存成功: item_id={}, position={}", id, position);
             }
+        } else {
+            log::warn!("未能定位新增图片项的持久化快照: item_id={}", id);
         }
         log::info!("图片数据库保存完成: item_id={}", id);
         for removed_id in removed_ids_after_insert {

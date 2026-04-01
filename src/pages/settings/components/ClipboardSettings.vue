@@ -20,7 +20,7 @@
       </el-form-item>
 
       <el-form-item label="图片回填模式">
-        <el-select v-model="form.imageFillVerifyMode" style="width: 220px">
+        <el-select v-model="form.imageFillVerifyMode" class="fill-mode-select">
           <el-option label="严格模式（写后校验）" value="strict"/>
           <el-option label="极速模式（完全不校验）" value="fast"/>
         </el-select>
@@ -304,6 +304,10 @@ onUnmounted(() => {
 .metrics-line {
   font-size: 12px;
   line-height: 20px;
+}
+
+.fill-mode-select {
+  width: 220px;
 }
 
 .metrics-meta {

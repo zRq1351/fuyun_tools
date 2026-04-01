@@ -352,6 +352,7 @@ fn begin_fill_sequence(state: &Arc<Mutex<SharedAppState>>, kind: FillKind) -> u6
     let mut state_guard = lock_arc_mutex(state);
     state_guard.is_updating_clipboard = true;
     state_guard.is_processing_selection = true;
+    state_guard.selection_guard_epoch = state_guard.selection_guard_epoch.wrapping_add(1);
     match kind {
         FillKind::Text => {
             state_guard.text_fill_seq = state_guard.text_fill_seq.wrapping_add(1);
@@ -2865,7 +2866,10 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
             let _ = window.set_ignore_cursor_events(false);
             let _ = window.set_fullscreen(true);
             let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
-            let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: 0, y: 0 }));
+            let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                x: origin_x,
+                y: origin_y,
+            }));
             let mut injected = false;
             for _ in 0..20 {
                 if window.eval(&script).is_ok() {

@@ -358,8 +358,8 @@ impl AppSettingsData {
 
         // 验证API URL格式（基本检查）
         for (provider_name, config) in &self.provider_configs {
-            if !config.api_url.is_empty() && !config.api_url.starts_with("http://") && !config.api_url.starts_with("https://") {
-                return Err(format!("提供商 {} 的API URL格式无效，必须以http://或https://开头", provider_name));
+            if !config.api_url.is_empty() && !config.api_url.starts_with("https://") {
+                return Err(format!("提供商 {} 的API URL格式无效，必须以https://开头", provider_name));
             }
         }
 
@@ -393,12 +393,19 @@ impl AppSettingsData {
                 if api_key.is_empty() {
                     return String::new();
                 }
-                let len = api_key.len();
+                let chars: Vec<char> = api_key.chars().collect();
+                let len = chars.len();
                 if len <= 16 {
                     return "*".repeat(len.min(30));
                 }
-                let prefix = &api_key[..8.min(len)];
-                let suffix = &api_key[len - 8.min(len - 8)..];
+                let prefix_len = 8.min(len);
+                let suffix_len = 8.min(len.saturating_sub(prefix_len));
+                let prefix: String = chars.iter().take(prefix_len).collect();
+                let suffix: String = chars
+                    .iter()
+                    .skip(len.saturating_sub(suffix_len))
+                    .take(suffix_len)
+                    .collect();
                 format!("{}{}{}", prefix, "*".repeat(30), suffix)
             }
             Err(_) => String::new(),

@@ -19,16 +19,19 @@ pub struct ClipboardWakeBackend {
 }
 
 struct WakeHub {
-    subscribers: std::sync::Mutex<Vec<mpsc::Sender<WakeSignal>>>,
+    subscribers: std::sync::Mutex<Vec<WakeSubscriber>>,
 }
 
 impl WakeHub {
-    fn subscribe(&self) -> Receiver<WakeSignal> {
+    fn subscribe(&self) -> ClipboardWakeSubscription {
         let (tx, rx) = mpsc::channel::<WakeSignal>();
+        let owner = std::sync::Arc::new(());
+        let owner_weak = std::sync::Arc::downgrade(&owner);
         if let Ok(mut guard) = self.subscribers.lock() {
-            guard.push(tx);
+            guard.retain(|entry| entry.owner.upgrade().is_some());
+            guard.push(WakeSubscriber { tx, owner: owner_weak });
         }
-        rx
+        ClipboardWakeSubscription { rx, owner }
     }
 
     fn broadcast_event(&self) {
@@ -37,7 +40,37 @@ impl WakeHub {
         } else {
             return;
         };
-        guard.retain(|tx| tx.send(WakeSignal::Event).is_ok());
+        guard.retain(|entry| {
+            if entry.owner.upgrade().is_none() {
+                return false;
+            }
+            entry.tx.send(WakeSignal::Event).is_ok()
+        });
+    }
+}
+
+struct WakeSubscriber {
+    tx: mpsc::Sender<WakeSignal>,
+    owner: std::sync::Weak<()>,
+}
+
+pub struct ClipboardWakeSubscription {
+    rx: Receiver<WakeSignal>,
+    owner: std::sync::Arc<()>,
+}
+
+impl ClipboardWakeSubscription {
+    pub fn recv(&self) -> Result<WakeSignal, mpsc::RecvError> {
+        let _ = &self.owner;
+        self.rx.recv()
+    }
+
+    pub fn recv_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<WakeSignal, mpsc::RecvTimeoutError> {
+        let _ = &self.owner;
+        self.rx.recv_timeout(timeout)
     }
 }
 
@@ -64,7 +97,7 @@ fn ensure_wake_dispatcher_started() {
     });
 }
 
-pub fn subscribe_clipboard_wake_events() -> Receiver<WakeSignal> {
+pub fn subscribe_clipboard_wake_events() -> ClipboardWakeSubscription {
     ensure_wake_dispatcher_started();
     wake_hub().subscribe()
 }

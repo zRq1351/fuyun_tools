@@ -66,7 +66,6 @@ fn capture_screen_region_internal(
     width: u32,
     height: u32,
 ) -> Result<(Vec<u8>, u32, u32), String> {
-    // 获取所有屏幕
     let screens = screenshots::Screen::all()
         .map_err(|e| format!("获取屏幕列表失败: {}", e))?;
 
@@ -74,29 +73,70 @@ fn capture_screen_region_internal(
         return Err("未检测到屏幕".to_string());
     }
 
-    // 默认使用主屏幕（第一个屏幕）
-    let screen = screens.first()
-        .ok_or_else(|| "无法获取主屏幕".to_string())?;
+    let req_left = i64::from(x);
+    let req_top = i64::from(y);
+    let req_right = req_left.saturating_add(i64::from(width));
+    let req_bottom = req_top.saturating_add(i64::from(height));
 
-    // 捕获整个屏幕
+    let mut best_screen_index: Option<usize> = None;
+    let mut best_overlap_area: i64 = -1;
+    let mut best_distance_sq: i128 = i128::MAX;
+    let center_x = req_left.saturating_add(i64::from(width / 2));
+    let center_y = req_top.saturating_add(i64::from(height / 2));
+
+    for (index, screen) in screens.iter().enumerate() {
+        let sx = i64::from(screen.display_info.x);
+        let sy = i64::from(screen.display_info.y);
+        let sw = i64::from(screen.display_info.width);
+        let sh = i64::from(screen.display_info.height);
+        let s_right = sx.saturating_add(sw);
+        let s_bottom = sy.saturating_add(sh);
+
+        let overlap_w = (req_right.min(s_right) - req_left.max(sx)).max(0);
+        let overlap_h = (req_bottom.min(s_bottom) - req_top.max(sy)).max(0);
+        let overlap_area = overlap_w.saturating_mul(overlap_h);
+
+        let clamped_x = center_x.clamp(sx, s_right.saturating_sub(1));
+        let clamped_y = center_y.clamp(sy, s_bottom.saturating_sub(1));
+        let dx = i128::from(center_x.saturating_sub(clamped_x));
+        let dy = i128::from(center_y.saturating_sub(clamped_y));
+        let distance_sq = dx.saturating_mul(dx).saturating_add(dy.saturating_mul(dy));
+
+        if overlap_area > best_overlap_area
+            || (overlap_area == best_overlap_area && distance_sq < best_distance_sq)
+        {
+            best_overlap_area = overlap_area;
+            best_distance_sq = distance_sq;
+            best_screen_index = Some(index);
+        }
+    }
+
+    let screen = screens
+        .get(best_screen_index.unwrap_or(0))
+        .ok_or_else(|| "无法获取目标屏幕".to_string())?;
+
     let image = screen.capture()
         .map_err(|e| format!("捕获屏幕失败: {}", e))?;
 
-    // 获取图片尺寸
     let img_width = image.width();
     let img_height = image.height();
+    let screen_x = i64::from(screen.display_info.x);
+    let screen_y = i64::from(screen.display_info.y);
 
-    // 边界检查和修正
-    let x = x.max(0) as u32;
-    let y = y.max(0) as u32;
-    let width = width.min(img_width.saturating_sub(x));
-    let height = height.min(img_height.saturating_sub(y));
+    let local_left = (req_left - screen_x).max(0);
+    let local_top = (req_top - screen_y).max(0);
+    let local_right = (req_right - screen_x).min(i64::from(img_width));
+    let local_bottom = (req_bottom - screen_y).min(i64::from(img_height));
+
+    let width = (local_right - local_left).max(0) as u32;
+    let height = (local_bottom - local_top).max(0) as u32;
+    let x = local_left as u32;
+    let y = local_top as u32;
 
     if width == 0 || height == 0 {
         return Err(format!("截图区域无效: {}x{}", width, height));
     }
 
-    // 裁剪到指定区域 - 手动裁剪避免版本冲突
     let mut rgba_data = Vec::with_capacity((width * height * 4) as usize);
     for row in y..(y + height) {
         let start = ((row * img_width + x) * 4) as usize;

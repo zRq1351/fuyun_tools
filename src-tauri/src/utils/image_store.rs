@@ -2,7 +2,7 @@ use crate::utils::image_clipboard::{
     ImageHistoryData, ImageHistoryItem, ImageHistoryPageData, ImageHistoryPageItem,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqliteSynchronous};
-use sqlx::{Connection, Row, SqliteConnection};
+use sqlx::{Row, SqliteConnection};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -62,18 +62,6 @@ fn image_store_options(db_path: &PathBuf) -> SqliteConnectOptions {
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(Duration::from_millis(1200))
-}
-
-async fn open_image_store_async() -> Result<SqliteConnection, String> {
-    let db_path = get_image_store_db_path();
-    if let Some(parent) = db_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建图片历史数据库目录失败: {}", e))?;
-    }
-    let mut conn = SqliteConnection::connect_with(&image_store_options(&db_path))
-        .await
-        .map_err(|e| format!("打开图片历史数据库失败: {}", e))?;
-    init_image_store_schema_async(&mut conn).await?;
-    Ok(conn)
 }
 
 async fn exec(conn: &mut SqliteConnection, sql: &str) -> Result<(), String> {
@@ -187,14 +175,7 @@ async fn get_pool() -> Result<Arc<SqlitePool>, String> {
         fs::create_dir_all(parent).map_err(|e| format!("创建图片历史数据库目录失败: {}", e))?;
     }
     
-    let pool = SqlitePool::connect_with(
-        SqliteConnectOptions::new()
-            .filename(&db_path)
-            .create_if_missing(true)
-            .journal_mode(SqliteJournalMode::Wal)
-            .synchronous(SqliteSynchronous::Normal)
-            .busy_timeout(Duration::from_millis(1200))
-    )
+    let pool = SqlitePool::connect_with(image_store_options(&db_path))
     .await
     .map_err(|e| format!("创建数据库连接池失败: {}", e))?;
     
@@ -251,10 +232,10 @@ pub fn delete_item(item_id: &str) -> Result<(), String> {
 }
 
 pub async fn delete_item_async(item_id: &str) -> Result<(), String> {
-    let mut conn = open_image_store_async().await?;
+    let pool = get_pool().await?;
     sqlx::query("DELETE FROM image_items WHERE item_id = ?1")
         .bind(item_id)
-        .execute(&mut conn)
+        .execute(pool.as_ref())
         .await
         .map_err(|e| format!("删除图片历史数据库条目失败: {}", e))?;
     
@@ -269,8 +250,8 @@ pub async fn delete_items_bulk_async(item_ids: &[String]) -> Result<(), String> 
     if item_ids.is_empty() {
         return Ok(());
     }
-    let mut conn = open_image_store_async().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("开启批量删除事务失败: {}", e))?;
+    let pool = get_pool().await?;
+    let mut tx = pool.begin().await.map_err(|e| format!("开启批量删除事务失败: {}", e))?;
     
     // 分批处理，防止 SQL 语句过长
     for chunk in item_ids.chunks(100) {
@@ -307,8 +288,8 @@ pub async fn delete_items_bulk_async(item_ids: &[String]) -> Result<(), String> 
 
 /// 清空所有图片历史记录
 pub async fn clear_all_history_async() -> Result<(), String> {
-    let mut conn = open_image_store_async().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("创建清空图片历史事务失败: {}", e))?;
+    let pool = get_pool().await?;
+    let mut tx = pool.begin().await.map_err(|e| format!("创建清空图片历史事务失败: {}", e))?;
 
     sqlx::query("DELETE FROM image_items").execute(&mut *tx).await.map_err(|e| format!("清空图片项失败: {}", e))?;
     sqlx::query("DELETE FROM image_categories").execute(&mut *tx).await.map_err(|e| format!("清空图片分类失败: {}", e))?;
@@ -327,8 +308,8 @@ pub fn sync_item_positions(item_ids: &[String]) -> Result<(), String> {
 }
 
 pub async fn sync_item_positions_async(item_ids: &[String]) -> Result<(), String> {
-    let mut conn = open_image_store_async().await?;
-    let mut tx = conn
+    let pool = get_pool().await?;
+    let mut tx = pool
         .begin()
         .await
         .map_err(|e| format!("创建图片位置事务失败: {}", e))?;
@@ -360,8 +341,8 @@ pub async fn sync_item_positions_incremental_async(
     old_position: usize,
     new_position: usize,
 ) -> Result<(), String> {
-    let mut conn = open_image_store_async().await?;
-    let mut tx = conn
+    let pool = get_pool().await?;
+    let mut tx = pool
         .begin()
         .await
         .map_err(|e| format!("创建增量更新事务失败: {}", e))?;
@@ -403,7 +384,7 @@ pub fn upsert_category(item_id: &str, category: &str) -> Result<(), String> {
 }
 
 pub async fn upsert_category_async(item_id: &str, category: &str) -> Result<(), String> {
-    let mut conn = open_image_store_async().await?;
+    let pool = get_pool().await?;
     sqlx::query(
         "
         INSERT INTO image_categories (item_id, category)
@@ -413,7 +394,7 @@ pub async fn upsert_category_async(item_id: &str, category: &str) -> Result<(), 
     )
         .bind(item_id)
         .bind(category)
-        .execute(&mut conn)
+        .execute(pool.as_ref())
         .await
     .map_err(|e| format!("写入图片分类数据库失败: {}", e))?;
     Ok(())
@@ -424,10 +405,10 @@ pub fn delete_category(item_id: &str) -> Result<(), String> {
 }
 
 pub async fn delete_category_async(item_id: &str) -> Result<(), String> {
-    let mut conn = open_image_store_async().await?;
+    let pool = get_pool().await?;
     sqlx::query("DELETE FROM image_categories WHERE item_id = ?1")
         .bind(item_id)
-        .execute(&mut conn)
+        .execute(pool.as_ref())
         .await
         .map_err(|e| format!("删除图片分类数据库失败: {}", e))?;
     Ok(())
@@ -438,8 +419,8 @@ pub fn sync_tags_for_item(item_id: &str, tags: &[String]) -> Result<(), String> 
 }
 
 pub async fn sync_tags_for_item_async(item_id: &str, tags: &[String]) -> Result<(), String> {
-    let mut conn = open_image_store_async().await?;
-    let mut tx = conn
+    let pool = get_pool().await?;
+    let mut tx = pool
         .begin()
         .await
         .map_err(|e| format!("创建图片标签事务失败: {}", e))?;
@@ -467,10 +448,10 @@ pub fn delete_tags_for_item(item_id: &str) -> Result<(), String> {
 }
 
 pub async fn delete_tags_for_item_async(item_id: &str) -> Result<(), String> {
-    let mut conn = open_image_store_async().await?;
+    let pool = get_pool().await?;
     sqlx::query("DELETE FROM image_tags WHERE item_id = ?1")
         .bind(item_id)
-        .execute(&mut conn)
+        .execute(pool.as_ref())
         .await
         .map_err(|e| format!("删除图片标签失败: {}", e))?;
     Ok(())
@@ -482,8 +463,8 @@ pub fn sync_category_list_order(categories: &[String]) -> Result<(), String> {
 
 pub async fn sync_category_list_order_async(categories: &[String]) -> Result<(), String> {
     {
-        let mut conn = open_image_store_async().await?;
-        let mut tx = conn
+        let pool = get_pool().await?;
+        let mut tx = pool
             .begin()
             .await
             .map_err(|e| format!("创建分类列表事务失败: {}", e))?;
@@ -542,8 +523,8 @@ pub fn sync_pinned_order(pinned_items: &[String]) -> Result<(), String> {
 
 pub async fn sync_pinned_order_async(pinned_items: &[String]) -> Result<(), String> {
     {
-        let mut conn = open_image_store_async().await?;
-        let mut tx = conn
+        let pool = get_pool().await?;
+        let mut tx = pool
             .begin()
             .await
             .map_err(|e| format!("创建置顶事务失败: {}", e))?;
@@ -596,10 +577,10 @@ pub fn delete_categories_by_category(category: &str) -> Result<(), String> {
 }
 
 pub async fn delete_categories_by_category_async(category: &str) -> Result<(), String> {
-    let mut conn = open_image_store_async().await?;
+    let pool = get_pool().await?;
     sqlx::query("DELETE FROM image_categories WHERE category = ?1")
         .bind(category)
-        .execute(&mut conn)
+        .execute(pool.as_ref())
         .await
         .map_err(|e| format!("按分类删除条目失败: {}", e))?;
     Ok(())
@@ -607,7 +588,8 @@ pub async fn delete_categories_by_category_async(category: &str) -> Result<(), S
 
 pub fn load_all_data() -> Result<ImageHistoryData, String> {
     block_on_result(async {
-        let mut conn = open_image_store_async().await?;
+        let pool = get_pool().await?;
+        let mut conn = pool.acquire().await.map_err(|e| format!("获取连接失败: {}", e))?;
         let item_rows = sqlx::query(
             "
             SELECT
@@ -619,7 +601,7 @@ pub fn load_all_data() -> Result<ImageHistoryData, String> {
             ORDER BY hi.position ASC
             ",
         )
-            .fetch_all(&mut conn)
+            .fetch_all(conn.as_mut())
             .await
         .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
         let mut items = Vec::new();
@@ -642,7 +624,7 @@ pub fn load_all_data() -> Result<ImageHistoryData, String> {
 
         let mut categories = HashMap::new();
         let category_rows = sqlx::query("SELECT item_id, category FROM image_categories")
-            .fetch_all(&mut conn)
+            .fetch_all(conn.as_mut())
             .await
             .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
         for row in category_rows {
@@ -653,7 +635,7 @@ pub fn load_all_data() -> Result<ImageHistoryData, String> {
 
         let mut image_tags: HashMap<String, Vec<String>> = HashMap::new();
         let tag_rows = sqlx::query("SELECT item_id, tag FROM image_tags ORDER BY item_id, position ASC")
-            .fetch_all(&mut conn)
+            .fetch_all(conn.as_mut())
             .await
             .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
         for row in tag_rows {
@@ -662,10 +644,10 @@ pub fn load_all_data() -> Result<ImageHistoryData, String> {
             image_tags.entry(item_id).or_default().push(tag);
         }
 
-        let category_list = load_category_list_cached(&mut conn).await?;
+        let category_list = load_category_list_cached(conn.as_mut()).await?;
 
         let pinned_rows = sqlx::query("SELECT item_id FROM image_pinned ORDER BY position ASC")
-            .fetch_all(&mut conn)
+            .fetch_all(conn.as_mut())
             .await
             .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
         let pinned_items = pinned_rows
@@ -712,7 +694,8 @@ pub async fn load_history_page_async(
     sort_by: Option<String>,
     sort_order: Option<String>,
 ) -> Result<ImageHistoryPageData, String> {
-    let mut conn = open_image_store_async().await?;
+    let pool = get_pool().await?;
+    let mut conn = pool.acquire().await.map_err(|e| format!("获取连接失败: {}", e))?;
     let category_filter = category
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty() && v != "全部");
@@ -793,7 +776,7 @@ pub async fn load_history_page_async(
         .bind(keyword_like.as_deref())
         .bind(fetch_limit as i64)
         .bind(offset as i64)
-        .fetch_all(&mut conn)
+        .fetch_all(conn.as_mut())
         .await
         .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
     let has_more = rows.len() > effective_limit;
@@ -827,7 +810,7 @@ pub async fn load_history_page_async(
             }
         })
         .collect::<Vec<_>>();
-    let category_list = load_category_list_cached(&mut conn).await?;
+    let category_list = load_category_list_cached(conn.as_mut()).await?;
 
     Ok(ImageHistoryPageData {
         total: if has_more {
@@ -844,9 +827,9 @@ pub async fn load_history_page_async(
 
 pub fn has_any_data() -> Result<bool, String> {
     block_on_result(async {
-        let mut conn = open_image_store_async().await?;
+        let pool = get_pool().await?;
         let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM image_items")
-            .fetch_one(&mut conn)
+            .fetch_one(pool.as_ref())
             .await
             .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
         Ok(total > 0)
@@ -870,7 +853,7 @@ pub async fn save_async_preview_async(
     preview_height: u32,
     preview_base64: &str,
 ) -> Result<(), String> {
-    let mut conn = open_image_store_async().await?;
+    let pool = get_pool().await?;
     let created_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -892,7 +875,7 @@ pub async fn save_async_preview_async(
         .bind(preview_height as i64)
         .bind(preview_base64)
         .bind(created_at)
-        .execute(&mut conn)
+        .execute(pool.as_ref())
         .await
         .map_err(|e| format!("保存异步预览失败: {}", e))?;
     Ok(())
@@ -905,12 +888,12 @@ pub fn load_async_preview(item_id: &str) -> Result<Option<(u32, u32, String)>, S
 
 /// 异步加载预览
 pub async fn load_async_preview_async(item_id: &str) -> Result<Option<(u32, u32, String)>, String> {
-    let mut conn = open_image_store_async().await?;
+    let pool = get_pool().await?;
     let row = sqlx::query(
         "SELECT preview_width, preview_height, preview_base64 FROM image_async_previews WHERE item_id = ?1"
     )
         .bind(item_id)
-        .fetch_optional(&mut conn)
+        .fetch_optional(pool.as_ref())
         .await
         .map_err(|e| format!("加载异步预览失败: {}", e))?;
     
@@ -936,10 +919,10 @@ pub fn delete_async_preview(item_id: &str) -> Result<(), String> {
 
 /// 异步删除预览
 pub async fn delete_async_preview_async(item_id: &str) -> Result<(), String> {
-    let mut conn = open_image_store_async().await?;
+    let pool = get_pool().await?;
     sqlx::query("DELETE FROM image_async_previews WHERE item_id = ?1")
         .bind(item_id)
-        .execute(&mut conn)
+        .execute(pool.as_ref())
         .await
         .map_err(|e| format!("删除异步预览失败: {}", e))?;
     Ok(())
@@ -955,13 +938,13 @@ pub async fn delete_async_previews_bulk_async(item_ids: &[String]) -> Result<(),
     if item_ids.is_empty() {
         return Ok(());
     }
-    let mut conn = open_image_store_async().await?;
+    let pool = get_pool().await?;
     let placeholders = vec!["?"; item_ids.len()].join(", ");
     let sql = format!("DELETE FROM image_async_previews WHERE item_id IN ({})", placeholders);
     let mut query = sqlx::query(&sql);
     for item_id in item_ids {
         query = query.bind(item_id);
     }
-    query.execute(&mut conn).await.map_err(|e| format!("批量删除异步预览失败: {}", e))?;
+    query.execute(pool.as_ref()).await.map_err(|e| format!("批量删除异步预览失败: {}", e))?;
     Ok(())
 }
