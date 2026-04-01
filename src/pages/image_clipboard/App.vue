@@ -1475,6 +1475,13 @@ const isInputLikeTarget = (target) => {
   return tagName === 'input' || tagName === 'textarea' || target?.isContentEditable
 }
 
+const shouldDeferHeavyPayloadApply = (data) => {
+  const historyList = Array.isArray(data?.history) ? data.history : null
+  if (!historyList) return false
+  const threshold = Math.max((Number(pageSize.value) || 10) * 6, 180)
+  return historyList.length > threshold
+}
+
 const handleWindowKeydown = (event) => {
   if (event.ctrlKey) {
     isCtrlKeyPressed.value = true
@@ -1506,6 +1513,17 @@ onMounted(async () => {
   unlistenShowWindow = await listen('show-image-window', (event) => {
     const payload = event.payload || {}
     ensureInitialPageLoaded(true)
+    if (shouldDeferHeavyPayloadApply(payload)) {
+      if (typeof payload.bottomOffset === 'number') {
+        bottomOffset.value = clampBottomOffset(payload.bottomOffset)
+      }
+      if (typeof payload.selectedIndex === 'number') {
+        selectedIndex.value = payload.selectedIndex
+      }
+      isVisible.value = true
+      scheduleHistorySync(0)
+      return
+    }
     if (Object.prototype.hasOwnProperty.call(payload, 'history') && Array.isArray(payload.history)) {
       applyPayload(payload, {refocus: true})
       return
@@ -1529,7 +1547,12 @@ onMounted(async () => {
   })
   unlistenHistoryPayloadUpdated = await listen('image-history-payload-updated', (event) => {
     if (isAddingCategory.value) return
-    applyPayload(event.payload || {})
+    const payload = event.payload || {}
+    if (shouldDeferHeavyPayloadApply(payload)) {
+      scheduleHistorySync(0)
+      return
+    }
+    applyPayload(payload)
   })
   unlistenHistoryItemAdded = await listen('image-history-item-added', (event) => {
     if (isAddingCategory.value) return
