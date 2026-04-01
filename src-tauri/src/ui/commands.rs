@@ -2197,30 +2197,34 @@ pub async fn save_app_settings(
     set_image_fill_verify_mode(&settings.image_fill_verify_mode);
 
     let selection_enabled = settings.selection_enabled;
-    {
+    let (clipboard_manager_arc, image_manager_arc) = {
         let mut state_guard = lock_arc_mutex(state.inner());
-        {
-            let mut manager = lock_arc_mutex(&state_guard.clipboard_manager);
-            if let Some(val) = text_max_items {
-                manager.set_max_items(val);
-            }
-            if let Some(val) = grouped_items_protected_from_limit {
-                manager.set_grouped_items_protected_from_limit(val);
-            }
-        }
-        {
-            let mut manager = lock_arc_mutex(&state_guard.image_clipboard_manager);
-            if let Some(val) = image_max_items {
-                manager.set_max_items(val);
-            }
-            if let Some(val) = image_disk_limit_mb {
-                manager.set_disk_limit_mb(val);
-            }
-            if let Some(val) = grouped_items_protected_from_limit {
-                manager.set_grouped_items_protected_from_limit(val);
-            }
-        }
         state_guard.settings = settings.clone();
+        (
+            state_guard.clipboard_manager.clone(),
+            state_guard.image_clipboard_manager.clone(),
+        )
+    };
+    {
+        let mut manager = lock_arc_mutex(&clipboard_manager_arc);
+        if let Some(val) = text_max_items {
+            manager.set_max_items(val);
+        }
+        if let Some(val) = grouped_items_protected_from_limit {
+            manager.set_grouped_items_protected_from_limit(val);
+        }
+    }
+    {
+        let mut manager = lock_arc_mutex(&image_manager_arc);
+        if let Some(val) = image_max_items {
+            manager.set_max_items(val);
+        }
+        if let Some(val) = image_disk_limit_mb {
+            manager.set_disk_limit_mb(val);
+        }
+        if let Some(val) = grouped_items_protected_from_limit {
+            manager.set_grouped_items_protected_from_limit(val);
+        }
     }
 
     features::mouse_listener::set_selection_listener_enabled(
