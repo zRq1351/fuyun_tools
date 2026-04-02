@@ -75,6 +75,18 @@ export const IPC_COMMANDS = {
     GET_PROVIDER_CONFIG: 'get_provider_config',
     REMOVE_AI_PROVIDER: 'remove_ai_provider',
     GET_ALL_CONFIGURED_PROVIDERS: 'get_all_configured_providers',
+    START_RECORDING: 'start_recording',
+    PAUSE_RECORDING: 'pause_recording',
+    RESUME_RECORDING: 'resume_recording',
+    STOP_RECORDING: 'stop_recording',
+    CANCEL_RECORDING: 'cancel_recording',
+    GET_RECORDING_STATE: 'get_recording_state',
+    LIST_RECORDING_AUDIO_DEVICES: 'list_recording_audio_devices',
+    LIST_RECORDING_SYSTEM_OUTPUT_DEVICES: 'list_recording_system_output_devices',
+    OPEN_RECORDING_FOLDER: 'open_recording_folder',
+    OPEN_RECORDING_WINDOW: 'open_recording_window',
+    RUN_RECORDING_REGRESSION: 'run_recording_regression',
+    RESIZE_RECORDING_TOOLBAR: 'resize_recording_toolbar',
 
     // AI 功能
     STREAM_TRANSLATE_TEXT: 'stream_translate_text',
@@ -265,6 +277,7 @@ export const WindowService = {
     blur: () => invoke(IPC_COMMANDS.WINDOW_BLUR),
     imageBlur: () => invoke(IPC_COMMANDS.IMAGE_WINDOW_BLUR),
     openSettingsWindow: (tab = 'ai', reason = '') => invoke(IPC_COMMANDS.OPEN_SETTINGS_WINDOW, {tab, reason}),
+    openRecordingWindow: () => invoke(IPC_COMMANDS.OPEN_RECORDING_WINDOW),
 
     /**
      * 选择工具栏失去焦点通知
@@ -426,4 +439,23 @@ export const AIService = {
         invoke(IPC_COMMANDS.STREAM_EXPLAIN_TEXT, {
             request: buildStreamExplainRequest(text, targetLanguage, opId, sceneHint)
         }),
+};
+
+export const RecordingService = {
+    start: (request = {}) => invoke(IPC_COMMANDS.START_RECORDING, {request}),
+    pause: () => invoke(IPC_COMMANDS.PAUSE_RECORDING),
+    resume: () => invoke(IPC_COMMANDS.RESUME_RECORDING),
+    stop: (sessionId = null) => invoke(IPC_COMMANDS.STOP_RECORDING, {request: {sessionId}}),
+    cancel: (sessionId = null) => invoke(IPC_COMMANDS.CANCEL_RECORDING, {request: {sessionId}}),
+    getState: () => invoke(IPC_COMMANDS.GET_RECORDING_STATE),
+    listAudioDevices: () => invoke(IPC_COMMANDS.LIST_RECORDING_AUDIO_DEVICES),
+    listSystemOutputs: () => invoke(IPC_COMMANDS.LIST_RECORDING_SYSTEM_OUTPUT_DEVICES),
+    openFolder: () => invoke(IPC_COMMANDS.OPEN_RECORDING_FOLDER),
+    runRegression: () => invoke(IPC_COMMANDS.RUN_RECORDING_REGRESSION),
+    resizeToolbar: (openSelect, openOverlay) => invoke(IPC_COMMANDS.RESIZE_RECORDING_TOOLBAR, {
+        request: {
+            openSelect,
+            openOverlay
+        }
+    }),
 };

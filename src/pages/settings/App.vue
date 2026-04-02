@@ -48,6 +48,9 @@
           <div v-show="activeTab === 'screenshot'">
             <ScreenshotSettings :form="form"/>
           </div>
+          <div v-show="activeTab === 'recording'">
+            <RecordingSettings :form="form"/>
+          </div>
 
           <div v-show="activeTab === 'selection'">
             <SelectionSettings :form="form"/>
@@ -89,12 +92,13 @@
 import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from 'vue'
 import {ElMessage} from 'element-plus'
 import zhCn from 'element-plus/dist/locale/zh-cn'
-import {Camera, Cpu, DocumentCopy, InfoFilled, Moon, Setting, Sunny} from '@element-plus/icons-vue'
+import {Camera, Cpu, DocumentCopy, InfoFilled, Moon, Setting, Sunny, VideoCamera} from '@element-plus/icons-vue'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import {listen} from '@tauri-apps/api/event'
 import {AISettingsService} from '../../services/ipc'
 import ClipboardSettings from './components/ClipboardSettings.vue'
 import ScreenshotSettings from './components/ScreenshotSettings.vue'
+import RecordingSettings from './components/RecordingSettings.vue'
 import SelectionSettings from './components/SelectionSettings.vue'
 import AISettings from './components/AISettings.vue'
 import AboutSettings from './components/AboutSettings.vue'
@@ -134,6 +138,12 @@ const sections = computed(() => {
       icon: Camera
     },
     {
+      key: 'recording',
+      label: '录屏',
+      description: '管理录屏录音参数与录制快捷键',
+      icon: VideoCamera
+    },
+    {
       key: 'selection',
       label: '划词',
       description: '管理划词开关与翻译解释提示词模板',
@@ -170,10 +180,23 @@ const form = reactive({
   textClipboardEnabled: true,
   imageClipboardEnabled: true,
   screenshotEnabled: true,
+  recordingEnabled: true,
   groupedItemsProtectedFromLimit: true,
   toggleShortcut: '',
   imageToggleShortcut: '',
   screenshotToggleShortcut: '',
+  recordingToggleShortcut: '',
+  recordingDefaultFps: 30,
+  recordingDefaultVideoBitrateKbps: 6000,
+  recordingDefaultAudioBitrateKbps: 160,
+  recordingCaptureCursor: true,
+  recordingCaptureSystemAudio: false,
+  recordingCaptureMicrophone: true,
+  recordingMicrophoneDeviceId: '',
+  recordingOutputDir: '',
+  recordingAutoOpenFolder: true,
+  recordingMaxDurationMinutes: 180,
+  recordingFileNameTemplate: '{timestamp}',
   aiProvider: '',
   apiUrl: '',
   modelName: '',
@@ -216,10 +239,23 @@ const saveInitialFormState = () => {
     textClipboardEnabled: form.textClipboardEnabled,
     imageClipboardEnabled: form.imageClipboardEnabled,
     screenshotEnabled: form.screenshotEnabled,
+    recordingEnabled: form.recordingEnabled,
     groupedItemsProtectedFromLimit: form.groupedItemsProtectedFromLimit,
     toggleShortcut: form.toggleShortcut,
     imageToggleShortcut: form.imageToggleShortcut,
     screenshotToggleShortcut: form.screenshotToggleShortcut,
+    recordingToggleShortcut: form.recordingToggleShortcut,
+    recordingDefaultFps: form.recordingDefaultFps,
+    recordingDefaultVideoBitrateKbps: form.recordingDefaultVideoBitrateKbps,
+    recordingDefaultAudioBitrateKbps: form.recordingDefaultAudioBitrateKbps,
+    recordingCaptureCursor: form.recordingCaptureCursor,
+    recordingCaptureSystemAudio: form.recordingCaptureSystemAudio,
+    recordingCaptureMicrophone: form.recordingCaptureMicrophone,
+    recordingMicrophoneDeviceId: form.recordingMicrophoneDeviceId,
+    recordingOutputDir: form.recordingOutputDir,
+    recordingAutoOpenFolder: form.recordingAutoOpenFolder,
+    recordingMaxDurationMinutes: form.recordingMaxDurationMinutes,
+    recordingFileNameTemplate: form.recordingFileNameTemplate,
     aiProvider: form.aiProvider,
     apiUrl: form.apiUrl,
     modelName: form.modelName,
@@ -260,6 +296,9 @@ const getChangedFields = () => {
   if (form.screenshotEnabled !== initial.screenshotEnabled) {
     changedFields.screenshotEnabled = form.screenshotEnabled
   }
+  if (form.recordingEnabled !== initial.recordingEnabled) {
+    changedFields.recordingEnabled = form.recordingEnabled
+  }
   if (form.groupedItemsProtectedFromLimit !== initial.groupedItemsProtectedFromLimit) {
     changedFields.groupedItemsProtectedFromLimit = form.groupedItemsProtectedFromLimit
   }
@@ -271,6 +310,42 @@ const getChangedFields = () => {
   }
   if (form.screenshotToggleShortcut !== initial.screenshotToggleShortcut) {
     changedFields.screenshotHotKey = form.screenshotToggleShortcut
+  }
+  if (form.recordingToggleShortcut !== initial.recordingToggleShortcut) {
+    changedFields.recordingHotKey = form.recordingToggleShortcut
+  }
+  if (form.recordingDefaultFps !== initial.recordingDefaultFps) {
+    changedFields.recordingDefaultFps = form.recordingDefaultFps
+  }
+  if (form.recordingDefaultVideoBitrateKbps !== initial.recordingDefaultVideoBitrateKbps) {
+    changedFields.recordingDefaultVideoBitrateKbps = form.recordingDefaultVideoBitrateKbps
+  }
+  if (form.recordingDefaultAudioBitrateKbps !== initial.recordingDefaultAudioBitrateKbps) {
+    changedFields.recordingDefaultAudioBitrateKbps = form.recordingDefaultAudioBitrateKbps
+  }
+  if (form.recordingCaptureCursor !== initial.recordingCaptureCursor) {
+    changedFields.recordingCaptureCursor = form.recordingCaptureCursor
+  }
+  if (form.recordingCaptureSystemAudio !== initial.recordingCaptureSystemAudio) {
+    changedFields.recordingCaptureSystemAudio = form.recordingCaptureSystemAudio
+  }
+  if (form.recordingCaptureMicrophone !== initial.recordingCaptureMicrophone) {
+    changedFields.recordingCaptureMicrophone = form.recordingCaptureMicrophone
+  }
+  if (form.recordingMicrophoneDeviceId !== initial.recordingMicrophoneDeviceId) {
+    changedFields.recordingMicrophoneDeviceId = form.recordingMicrophoneDeviceId
+  }
+  if (form.recordingOutputDir !== initial.recordingOutputDir) {
+    changedFields.recordingOutputDir = form.recordingOutputDir
+  }
+  if (form.recordingAutoOpenFolder !== initial.recordingAutoOpenFolder) {
+    changedFields.recordingAutoOpenFolder = form.recordingAutoOpenFolder
+  }
+  if (form.recordingMaxDurationMinutes !== initial.recordingMaxDurationMinutes) {
+    changedFields.recordingMaxDurationMinutes = form.recordingMaxDurationMinutes
+  }
+  if (form.recordingFileNameTemplate !== initial.recordingFileNameTemplate) {
+    changedFields.recordingFileNameTemplate = form.recordingFileNameTemplate
   }
 
   // 处理 AI 提供商
@@ -441,10 +516,23 @@ onMounted(async () => {
     form.textClipboardEnabled = settings.text_clipboard_enabled !== false
     form.imageClipboardEnabled = settings.image_clipboard_enabled !== false
     form.screenshotEnabled = settings.screenshot_enabled !== false
+    form.recordingEnabled = settings.recording_enabled !== false
     currentVersion.value = settings.version || '0.3.1'
     form.toggleShortcut = settings.hot_key || ''
     form.imageToggleShortcut = settings.image_hot_key || ''
     form.screenshotToggleShortcut = settings.screenshot_hot_key || ''
+    form.recordingToggleShortcut = settings.recording_hot_key || 'Alt+R'
+    form.recordingDefaultFps = Number(settings.recording_default_fps || 30)
+    form.recordingDefaultVideoBitrateKbps = Number(settings.recording_default_video_bitrate_kbps || 6000)
+    form.recordingDefaultAudioBitrateKbps = Number(settings.recording_default_audio_bitrate_kbps || 160)
+    form.recordingCaptureCursor = settings.recording_capture_cursor !== false
+    form.recordingCaptureSystemAudio = settings.recording_capture_system_audio === true
+    form.recordingCaptureMicrophone = settings.recording_capture_microphone !== false
+    form.recordingMicrophoneDeviceId = settings.recording_microphone_device_id || ''
+    form.recordingOutputDir = settings.recording_output_dir || ''
+    form.recordingAutoOpenFolder = settings.recording_auto_open_folder !== false
+    form.recordingMaxDurationMinutes = Number(settings.recording_max_duration_minutes || 180)
+    form.recordingFileNameTemplate = settings.recording_file_name_template || '{timestamp}'
     form.selectionEnabled = settings.selection_enabled !== false
     form.groupedItemsProtectedFromLimit = settings.grouped_items_protected_from_limit !== false
     form.translationPromptTemplate = settings.translation_prompt_template || ''

@@ -1,5 +1,6 @@
 use crate::core::config::{
-    ProviderConfig, DEFAULT_IMAGE_TOGGLE_SHORTCUT, DEFAULT_SCREENSHOT_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT,
+    ProviderConfig, DEFAULT_IMAGE_TOGGLE_SHORTCUT, DEFAULT_RECORDING_SHORTCUT, DEFAULT_SCREENSHOT_SHORTCUT,
+    DEFAULT_TOGGLE_SHORTCUT,
 };
 use crate::utils::system_utils::get_default_app_version;
 use keyring::Entry;
@@ -31,6 +32,32 @@ pub struct AppSettingsData {
     pub screenshot_hot_key: String,
     #[serde(default = "default_screenshot_enabled")]
     pub screenshot_enabled: bool,
+    #[serde(default = "default_recording_hot_key")]
+    pub recording_hot_key: String,
+    #[serde(default = "default_recording_enabled")]
+    pub recording_enabled: bool,
+    #[serde(default = "default_recording_default_fps")]
+    pub recording_default_fps: u32,
+    #[serde(default = "default_recording_default_video_bitrate_kbps")]
+    pub recording_default_video_bitrate_kbps: u32,
+    #[serde(default = "default_recording_default_audio_bitrate_kbps")]
+    pub recording_default_audio_bitrate_kbps: u32,
+    #[serde(default = "default_recording_capture_cursor")]
+    pub recording_capture_cursor: bool,
+    #[serde(default = "default_recording_capture_system_audio")]
+    pub recording_capture_system_audio: bool,
+    #[serde(default = "default_recording_capture_microphone")]
+    pub recording_capture_microphone: bool,
+    #[serde(default)]
+    pub recording_microphone_device_id: String,
+    #[serde(default = "default_recording_output_dir")]
+    pub recording_output_dir: String,
+    #[serde(default = "default_recording_auto_open_folder")]
+    pub recording_auto_open_folder: bool,
+    #[serde(default = "default_recording_max_duration_minutes")]
+    pub recording_max_duration_minutes: u32,
+    #[serde(default = "default_recording_file_name_template")]
+    pub recording_file_name_template: String,
     #[serde(default)]
     pub ai_provider: String,
     #[serde(default)]
@@ -63,6 +90,19 @@ impl Default for AppSettingsData {
             image_clipboard_enabled: default_image_clipboard_enabled(),
             screenshot_hot_key: default_screenshot_hot_key(),
             screenshot_enabled: default_screenshot_enabled(),
+            recording_hot_key: default_recording_hot_key(),
+            recording_enabled: default_recording_enabled(),
+            recording_default_fps: default_recording_default_fps(),
+            recording_default_video_bitrate_kbps: default_recording_default_video_bitrate_kbps(),
+            recording_default_audio_bitrate_kbps: default_recording_default_audio_bitrate_kbps(),
+            recording_capture_cursor: default_recording_capture_cursor(),
+            recording_capture_system_audio: default_recording_capture_system_audio(),
+            recording_capture_microphone: default_recording_capture_microphone(),
+            recording_microphone_device_id: String::new(),
+            recording_output_dir: default_recording_output_dir(),
+            recording_auto_open_folder: default_recording_auto_open_folder(),
+            recording_max_duration_minutes: default_recording_max_duration_minutes(),
+            recording_file_name_template: default_recording_file_name_template(),
             ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
             selection_enabled: true,
@@ -91,6 +131,10 @@ fn default_screenshot_enabled() -> bool {
     true
 }
 
+fn default_recording_enabled() -> bool {
+    true
+}
+
 fn default_text_max_items() -> usize {
     50
 }
@@ -109,6 +153,50 @@ fn default_image_hot_key() -> String {
 
 fn default_screenshot_hot_key() -> String {
     DEFAULT_SCREENSHOT_SHORTCUT.to_string()
+}
+
+fn default_recording_hot_key() -> String {
+    DEFAULT_RECORDING_SHORTCUT.to_string()
+}
+
+fn default_recording_default_fps() -> u32 {
+    30
+}
+
+fn default_recording_default_video_bitrate_kbps() -> u32 {
+    6000
+}
+
+fn default_recording_default_audio_bitrate_kbps() -> u32 {
+    160
+}
+
+fn default_recording_capture_cursor() -> bool {
+    true
+}
+
+fn default_recording_capture_system_audio() -> bool {
+    false
+}
+
+fn default_recording_capture_microphone() -> bool {
+    true
+}
+
+fn default_recording_output_dir() -> String {
+    String::new()
+}
+
+fn default_recording_auto_open_folder() -> bool {
+    true
+}
+
+fn default_recording_max_duration_minutes() -> u32 {
+    180
+}
+
+fn default_recording_file_name_template() -> String {
+    "{timestamp}".to_string()
 }
 
 fn default_grouped_items_protected_from_limit() -> bool {
@@ -376,6 +464,24 @@ impl AppSettingsData {
         if !self.screenshot_hot_key.is_empty() && !self.screenshot_hot_key.contains('+') {
             return Err("截图快捷键格式无效，必须包含修饰键（如Ctrl+Alt+A）".to_string());
         }
+        if !self.recording_hot_key.is_empty() && !self.recording_hot_key.contains('+') {
+            return Err("录屏快捷键格式无效，必须包含修饰键（如Ctrl+Alt+R）".to_string());
+        }
+        if self.recording_default_fps == 0 || self.recording_default_fps > 120 {
+            return Err("recording_default_fps必须在1-120之间".to_string());
+        }
+        if self.recording_default_video_bitrate_kbps < 500 || self.recording_default_video_bitrate_kbps > 50000 {
+            return Err("recording_default_video_bitrate_kbps必须在500-50000之间".to_string());
+        }
+        if self.recording_default_audio_bitrate_kbps < 32 || self.recording_default_audio_bitrate_kbps > 512 {
+            return Err("recording_default_audio_bitrate_kbps必须在32-512之间".to_string());
+        }
+        if self.recording_max_duration_minutes == 0 || self.recording_max_duration_minutes > 1440 {
+            return Err("recording_max_duration_minutes必须在1-1440之间".to_string());
+        }
+        if self.recording_file_name_template.trim().is_empty() {
+            return Err("recording_file_name_template不能为空".to_string());
+        }
 
         // 验证API URL格式（基本检查）
         for (provider_name, config) in &self.provider_configs {
@@ -528,6 +634,24 @@ impl AppSettingsData {
         }
         if !self.screenshot_enabled {
             log::info!("截图功能保持禁用");
+        }
+        if self.recording_hot_key.is_empty() {
+            self.recording_hot_key = default_recording_hot_key();
+        }
+        if self.recording_default_fps == 0 || self.recording_default_fps > 120 {
+            self.recording_default_fps = default_recording_default_fps();
+        }
+        if self.recording_default_video_bitrate_kbps < 500 || self.recording_default_video_bitrate_kbps > 50000 {
+            self.recording_default_video_bitrate_kbps = default_recording_default_video_bitrate_kbps();
+        }
+        if self.recording_default_audio_bitrate_kbps < 32 || self.recording_default_audio_bitrate_kbps > 512 {
+            self.recording_default_audio_bitrate_kbps = default_recording_default_audio_bitrate_kbps();
+        }
+        if self.recording_max_duration_minutes == 0 || self.recording_max_duration_minutes > 1440 {
+            self.recording_max_duration_minutes = default_recording_max_duration_minutes();
+        }
+        if self.recording_file_name_template.trim().is_empty() {
+            self.recording_file_name_template = default_recording_file_name_template();
         }
         if self.clipboard_bottom_offset < 0 || self.clipboard_bottom_offset > 400 {
             self.clipboard_bottom_offset = default_clipboard_bottom_offset();

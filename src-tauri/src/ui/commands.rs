@@ -8,6 +8,7 @@ use crate::services::image_clipboard_manager::{
     emit_image_history_payload, set_image_clipboard_listener_enabled,
 };
 use crate::sync::Mutex;
+use crate::ui::commands_recording::toggle_recording_from_shortcut;
 use crate::ui::tray_menu::open_settings;
 use crate::ui::window_manager::{
     hide_clipboard_window, hide_image_clipboard_window, hide_image_preview_window, set_window_position,
@@ -1657,6 +1658,26 @@ pub async fn open_settings_window(
     Ok(())
 }
 
+fn register_recording_shortcut(
+    app: &AppHandle,
+    state: Arc<Mutex<SharedAppState>>,
+    hot_key: &str,
+) -> Result<(), String> {
+    let app_clone = app.clone();
+    app.global_shortcut()
+        .on_shortcut(hot_key, move |_app, _shortcut, event| {
+            if let ShortcutState::Pressed = event.state {
+                let app_handle_inner = app_clone.clone();
+                let state_inner = state.clone();
+                tauri::async_runtime::spawn(async move {
+                    toggle_recording_from_shortcut(app_handle_inner, state_inner).await;
+                });
+            }
+        })
+        .map_err(|e| frontend_error(ErrorCode::SystemError, "注册录屏快捷键失败", e.to_string()))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn show_selection_toolbar_with_text(
     app: AppHandle,
@@ -1847,6 +1868,64 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         serde_json::Value::Bool(settings.screenshot_enabled),
     );
     result.insert(
+        "recording_hot_key".to_string(),
+        serde_json::Value::String(settings.recording_hot_key.clone()),
+    );
+    result.insert(
+        "recording_enabled".to_string(),
+        serde_json::Value::Bool(settings.recording_enabled),
+    );
+    result.insert(
+        "recording_default_fps".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(settings.recording_default_fps)),
+    );
+    result.insert(
+        "recording_default_video_bitrate_kbps".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(
+            settings.recording_default_video_bitrate_kbps,
+        )),
+    );
+    result.insert(
+        "recording_default_audio_bitrate_kbps".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(
+            settings.recording_default_audio_bitrate_kbps,
+        )),
+    );
+    result.insert(
+        "recording_capture_cursor".to_string(),
+        serde_json::Value::Bool(settings.recording_capture_cursor),
+    );
+    result.insert(
+        "recording_capture_system_audio".to_string(),
+        serde_json::Value::Bool(settings.recording_capture_system_audio),
+    );
+    result.insert(
+        "recording_capture_microphone".to_string(),
+        serde_json::Value::Bool(settings.recording_capture_microphone),
+    );
+    result.insert(
+        "recording_microphone_device_id".to_string(),
+        serde_json::Value::String(settings.recording_microphone_device_id.clone()),
+    );
+    result.insert(
+        "recording_output_dir".to_string(),
+        serde_json::Value::String(settings.recording_output_dir.clone()),
+    );
+    result.insert(
+        "recording_auto_open_folder".to_string(),
+        serde_json::Value::Bool(settings.recording_auto_open_folder),
+    );
+    result.insert(
+        "recording_max_duration_minutes".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(
+            settings.recording_max_duration_minutes,
+        )),
+    );
+    result.insert(
+        "recording_file_name_template".to_string(),
+        serde_json::Value::String(settings.recording_file_name_template.clone()),
+    );
+    result.insert(
         "selection_enabled".to_string(),
         serde_json::Value::Bool(settings.selection_enabled),
     );
@@ -2009,14 +2088,27 @@ pub async fn save_app_settings(
     hot_key: Option<String>,
     image_hot_key: Option<String>,
     screenshot_hot_key: Option<String>,
+    recording_hot_key: Option<String>,
     text_clipboard_enabled: Option<bool>,
     image_clipboard_enabled: Option<bool>,
     screenshot_enabled: Option<bool>,
+    recording_enabled: Option<bool>,
     selection_enabled: Option<bool>,
     grouped_items_protected_from_limit: Option<bool>,
     translation_prompt_template: Option<String>,
     explanation_prompt_template: Option<String>,
     image_fill_verify_mode: Option<String>,
+    recording_default_fps: Option<u32>,
+    recording_default_video_bitrate_kbps: Option<u32>,
+    recording_default_audio_bitrate_kbps: Option<u32>,
+    recording_capture_cursor: Option<bool>,
+    recording_capture_system_audio: Option<bool>,
+    recording_capture_microphone: Option<bool>,
+    recording_microphone_device_id: Option<String>,
+    recording_output_dir: Option<String>,
+    recording_auto_open_folder: Option<bool>,
+    recording_max_duration_minutes: Option<u32>,
+    recording_file_name_template: Option<String>,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -2049,6 +2141,9 @@ pub async fn save_app_settings(
     if let Some(val) = screenshot_enabled {
         settings.screenshot_enabled = val;
     }
+    if let Some(val) = recording_enabled {
+        settings.recording_enabled = val;
+    }
     if let Some(val) = selection_enabled {
         settings.selection_enabled = val;
     }
@@ -2074,6 +2169,43 @@ pub async fn save_app_settings(
             "fast".to_string()
         } else {
             "strict".to_string()
+        };
+    }
+    if let Some(val) = recording_default_fps {
+        settings.recording_default_fps = val.clamp(1, 120);
+    }
+    if let Some(val) = recording_default_video_bitrate_kbps {
+        settings.recording_default_video_bitrate_kbps = val.clamp(500, 50000);
+    }
+    if let Some(val) = recording_default_audio_bitrate_kbps {
+        settings.recording_default_audio_bitrate_kbps = val.clamp(32, 512);
+    }
+    if let Some(val) = recording_capture_cursor {
+        settings.recording_capture_cursor = val;
+    }
+    if let Some(val) = recording_capture_system_audio {
+        settings.recording_capture_system_audio = val;
+    }
+    if let Some(val) = recording_capture_microphone {
+        settings.recording_capture_microphone = val;
+    }
+    if let Some(val) = recording_microphone_device_id {
+        settings.recording_microphone_device_id = val.trim().to_string();
+    }
+    if let Some(val) = recording_output_dir {
+        settings.recording_output_dir = val.trim().to_string();
+    }
+    if let Some(val) = recording_auto_open_folder {
+        settings.recording_auto_open_folder = val;
+    }
+    if let Some(val) = recording_max_duration_minutes {
+        settings.recording_max_duration_minutes = val.clamp(1, 1440);
+    }
+    if let Some(val) = recording_file_name_template {
+        settings.recording_file_name_template = if val.trim().is_empty() {
+            "{timestamp}".to_string()
+        } else {
+            val
         };
     }
 
@@ -2197,6 +2329,67 @@ pub async fn save_app_settings(
         }
     }
 
+    if let Some(ref recording_hot_key_val) = recording_hot_key {
+        if recording_hot_key_val.is_empty() {
+            return Err(frontend_error(
+                ErrorCode::ValidationError,
+                "录屏快捷键不能为空",
+                "recording_hot_key is empty",
+            ));
+        }
+        if recording_hot_key_val != &settings.recording_hot_key {
+            let effective_hot_key = hot_key.clone().unwrap_or_else(|| settings.hot_key.clone());
+            let effective_image_hot_key = image_hot_key
+                .clone()
+                .unwrap_or_else(|| settings.image_hot_key.clone());
+            let effective_screenshot_hot_key = screenshot_hot_key
+                .clone()
+                .unwrap_or_else(|| settings.screenshot_hot_key.clone());
+            if recording_hot_key_val == &effective_hot_key
+                || recording_hot_key_val == &effective_image_hot_key
+                || recording_hot_key_val == &effective_screenshot_hot_key
+            {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    "录屏快捷键不能与文字、图片或截图快捷键相同",
+                    format!(
+                        "hot_key={}, image_hot_key={}, screenshot_hot_key={}, recording_hot_key={}",
+                        effective_hot_key,
+                        effective_image_hot_key,
+                        effective_screenshot_hot_key,
+                        recording_hot_key_val
+                    ),
+                ));
+            }
+
+            if app
+                .global_shortcut()
+                .is_registered(recording_hot_key_val.as_str())
+            {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    format!("录屏快捷键被占用：{}", recording_hot_key_val),
+                    "recording global shortcut already registered",
+                ));
+            }
+
+            if let Err(e) = app
+                .global_shortcut()
+                .unregister(settings.recording_hot_key.as_str())
+            {
+                log::warn!(
+                    "注销旧录屏快捷键 '{}' 失败 (可能从未注册成功): {}",
+                    settings.recording_hot_key,
+                    e
+                );
+            }
+            if settings.recording_enabled {
+                register_recording_shortcut(&app, state.inner().clone(), recording_hot_key_val.as_str())?;
+            }
+            settings.recording_hot_key = recording_hot_key_val.clone();
+        }
+    }
+
     if let Some(enabled) = text_clipboard_enabled {
         if enabled {
             if !app.global_shortcut().is_registered(settings.hot_key.as_str()) {
@@ -2236,6 +2429,22 @@ pub async fn save_app_settings(
             .unregister(settings.screenshot_hot_key.as_str())
         {
             log::warn!("注销截图快捷键 '{}' 失败: {}", settings.screenshot_hot_key, e);
+        }
+    }
+
+    if let Some(enabled) = recording_enabled {
+        if enabled {
+            if !app
+                .global_shortcut()
+                .is_registered(settings.recording_hot_key.as_str())
+            {
+                register_recording_shortcut(&app, state.inner().clone(), settings.recording_hot_key.as_str())?;
+            }
+        } else if let Err(e) = app
+            .global_shortcut()
+            .unregister(settings.recording_hot_key.as_str())
+        {
+            log::warn!("注销录屏快捷键 '{}' 失败: {}", settings.recording_hot_key, e);
         }
     }
 
@@ -2316,6 +2525,7 @@ pub async fn save_app_settings(
     let text_clipboard_feature_enabled = settings.text_clipboard_enabled;
     let image_clipboard_feature_enabled = settings.image_clipboard_enabled;
     let screenshot_feature_enabled = settings.screenshot_enabled;
+    let recording_feature_enabled = settings.recording_enabled;
     let (clipboard_manager_arc, image_manager_arc) = {
         let mut state_guard = lock_arc_mutex(state.inner());
         state_guard.settings = settings.clone();
@@ -2363,6 +2573,13 @@ pub async fn save_app_settings(
     );
     if !screenshot_feature_enabled {
         let _ = close_screenshot_window(app.clone()).await;
+    }
+    if !recording_feature_enabled {
+        let _ = crate::features::recording::recorder_service::cancel_recording(
+            &app,
+            state.inner().clone(),
+            crate::features::recording::types::SessionRequest { session_id: None },
+        );
     }
 
     log::info!("设置保存成功（部分更新）");

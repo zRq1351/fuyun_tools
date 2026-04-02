@@ -14,6 +14,12 @@ use crate::services::image_clipboard_manager::{
 };
 use crate::sync::Mutex;
 use crate::ui::commands::*;
+use crate::ui::commands_recording::{
+    cancel_recording, get_recording_state, list_recording_audio_devices, list_recording_system_output_devices,
+    open_recording_folder, open_recording_window, pause_recording, resize_recording_toolbar,
+    resume_recording, run_recording_regression, show_recording_toolbar, start_recording,
+    stop_recording, toggle_recording_from_shortcut,
+};
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{show_clipboard_window, show_image_clipboard_window};
 use std::sync::Arc;
@@ -76,6 +82,10 @@ pub fn run() {
                 let guard = lock_state(&state_arc);
                 guard.settings.screenshot_hot_key.clone()
             };
+            let recording_hot_key = {
+                let guard = lock_state(&state_arc);
+                guard.settings.recording_hot_key.clone()
+            };
             let text_clipboard_enabled = {
                 let guard = lock_state(&state_arc);
                 guard.settings.text_clipboard_enabled
@@ -87,6 +97,10 @@ pub fn run() {
             let screenshot_enabled = {
                 let guard = lock_state(&state_arc);
                 guard.settings.screenshot_enabled
+            };
+            let recording_enabled = {
+                let guard = lock_state(&state_arc);
+                guard.settings.recording_enabled
             };
             let mut shortcut_conflicts: Vec<String> = Vec::new();
             if text_clipboard_enabled {
@@ -156,6 +170,25 @@ pub fn run() {
                 {
                     log::warn!("截图快捷键 '{}' 注册失败: {}", screenshot_hot_key, e);
                     shortcut_conflicts.push(format!("截图：{}", screenshot_hot_key));
+                }
+            }
+
+            let app_handle_clone_recording = app_handle.clone();
+            let state_clone_recording = state_arc.clone();
+            if recording_enabled {
+                if let Err(e) = app.global_shortcut()
+                    .on_shortcut(recording_hot_key.as_str(), move |_app, _shortcut, event| {
+                        if let ShortcutState::Pressed = event.state {
+                            let app_handle_inner = app_handle_clone_recording.clone();
+                            let state_inner = state_clone_recording.clone();
+                            tauri::async_runtime::spawn(async move {
+                                toggle_recording_from_shortcut(app_handle_inner, state_inner).await;
+                            });
+                        }
+                    })
+                {
+                    log::warn!("录屏快捷键 '{}' 注册失败: {}", recording_hot_key, e);
+                    shortcut_conflicts.push(format!("录屏：{}", recording_hot_key));
                 }
             }
 
@@ -276,6 +309,19 @@ pub fn run() {
             open_screenshot_editor,
             get_window_list,
             close_screenshot_window,
+            start_recording,
+            pause_recording,
+            resume_recording,
+            stop_recording,
+            cancel_recording,
+            get_recording_state,
+            list_recording_audio_devices,
+            list_recording_system_output_devices,
+            open_recording_folder,
+            open_recording_window,
+            run_recording_regression,
+            show_recording_toolbar,
+            resize_recording_toolbar,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());

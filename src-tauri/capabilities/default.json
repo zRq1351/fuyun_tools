@@ -11,6 +11,8 @@
     "ocr_text_pinned_image_window",
     "ocr_text_pinned_image_*",
     "screenshot",
+    "recording",
+    "recording_toolbar",
     "selection_toolbar",
     "result_explanation",
     "result_translation",

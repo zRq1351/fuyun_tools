@@ -1,3 +1,4 @@
+use crate::features::recording::state::RecordingRuntime;
 use crate::sync::Mutex;
 use crate::utils::clipboard::ClipboardManager;
 use crate::utils::image_clipboard::{set_image_fill_verify_mode, ImageClipboardManager};
@@ -28,6 +29,7 @@ pub struct AppState {
     pub ai_request_seq: u64,
     pub active_translation_op_id: u64,
     pub active_explanation_op_id: u64,
+    pub recording_runtime: Arc<Mutex<RecordingRuntime>>,
     pub tray_menu_items: Option<TrayMenuItems>,
 }
 
@@ -51,6 +53,7 @@ impl Clone for AppState {
             ai_request_seq: self.ai_request_seq,
             active_translation_op_id: self.active_translation_op_id,
             active_explanation_op_id: self.active_explanation_op_id,
+            recording_runtime: self.recording_runtime.clone(),
             tray_menu_items: None,
         }
     }
@@ -86,6 +89,7 @@ impl Default for AppState {
             ai_request_seq: 0,
             active_translation_op_id: 0,
             active_explanation_op_id: 0,
+            recording_runtime: Arc::new(Mutex::new(RecordingRuntime::default())),
             tray_menu_items: None,
         }
     }

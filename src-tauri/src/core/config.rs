@@ -20,6 +20,11 @@ pub const DEFAULT_SCREENSHOT_SHORTCUT: &str = if cfg!(target_os = "macos") {
 } else {
     "Ctrl+Shift+s"
 };
+pub const DEFAULT_RECORDING_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "Alt+R"
+} else {
+    "Alt+R"
+};
 /// Ctrl+C操作中的控制键（根据操作系统自动适配）
 pub const CTRL_KEY: Key = if cfg!(target_os = "macos") {
     Key::Meta
