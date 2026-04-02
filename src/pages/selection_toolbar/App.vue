@@ -33,7 +33,7 @@
 import {onBeforeUnmount, onMounted, ref} from 'vue'
 import {ChatLineRound, Collection, DocumentCopy} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
-import {AIService, ClipboardService, WindowService} from '../../services/ipc'
+import {AIService, AISettingsService, ClipboardService, WindowService} from '../../services/ipc'
 import {handleAppError} from '../../utils/errorHandler'
 
 const selectedText = ref('')
@@ -42,6 +42,31 @@ let unlistenSelectedText = null
 let unlistenDomText = null
 
 const getSafeSelectedText = () => selectedText.value.trim()
+const hasSelectionAiConfig = (settings) => {
+  const provider = String(settings?.ai_provider || '').trim()
+  if (!provider) return false
+  const providerConfig = settings?.provider_configs?.[provider]
+  if (!providerConfig) return false
+  const apiUrl = String(providerConfig.api_url || '').trim()
+  const modelName = String(providerConfig.model_name || '').trim()
+  const apiKey = String(providerConfig.api_key || '').trim()
+  return apiUrl.length > 0 && modelName.length > 0 && apiKey.length > 0
+}
+const ensureSelectionAiConfigured = async () => {
+  try {
+    const settings = await AISettingsService.getSettings()
+    if (hasSelectionAiConfig(settings)) {
+      return true
+    }
+    await WindowService.selectionToolbarBlur()
+    await WindowService.openSettingsWindow('ai', 'selection_ai_not_configured')
+    return false
+  } catch (error) {
+    handleAppError(error, '读取AI设置失败')
+    return false
+  }
+}
+
 const runAction = async (executor, errorMessage) => {
   const text = getSafeSelectedText()
   if (!text || actionLoading.value) return
@@ -86,6 +111,8 @@ onBeforeUnmount(() => {
 
 const handleTranslate = async () => {
   await runAction(async (text) => {
+    const ready = await ensureSelectionAiConfigured()
+    if (!ready) return
     await WindowService.selectionToolbarBlur()
     await AIService.streamTranslate(text, '自动识别', '简体中文')
   }, '翻译请求失败')
@@ -93,6 +120,8 @@ const handleTranslate = async () => {
 
 const handleExplain = async () => {
   await runAction(async (text) => {
+    const ready = await ensureSelectionAiConfigured()
+    if (!ready) return
     await WindowService.selectionToolbarBlur()
     await AIService.streamExplain(text, '中文')
   }, '解释请求失败')

@@ -49,6 +49,10 @@
             <ScreenshotSettings :form="form"/>
           </div>
 
+          <div v-show="activeTab === 'selection'">
+            <SelectionSettings :form="form"/>
+          </div>
+
           <div v-show="activeTab === 'ai'">
             <AISettings ref="aiSettingsRef" :form="form"/>
           </div>
@@ -91,6 +95,7 @@ import {listen} from '@tauri-apps/api/event'
 import {AISettingsService} from '../../services/ipc'
 import ClipboardSettings from './components/ClipboardSettings.vue'
 import ScreenshotSettings from './components/ScreenshotSettings.vue'
+import SelectionSettings from './components/SelectionSettings.vue'
 import AISettings from './components/AISettings.vue'
 import AboutSettings from './components/AboutSettings.vue'
 import DeveloperSettings from '@dev/DeveloperSettings'
@@ -101,6 +106,7 @@ const currentVersion = ref('0.0.0')
 const aiSettingsRef = ref(null)
 const shortcutConflictMessage = ref('')
 let unlistenShortcutConflict = null
+let unlistenNavigateSettings = null
 let saveTimer = null
 let autoSaveStateResetTimer = null
 const isInitializing = ref(true)
@@ -126,6 +132,12 @@ const sections = computed(() => {
       label: '截图',
       description: '管理截图功能相关的快捷键设置',
       icon: Camera
+    },
+    {
+      key: 'selection',
+      label: '划词',
+      description: '管理划词开关与翻译解释提示词模板',
+      icon: Setting
     },
     {
       key: 'ai',
@@ -390,9 +402,22 @@ const showShortcutConflictWarning = (payload) => {
   shortcutConflictMessage.value = `快捷键被占用：${conflicts.join('；')}`
 }
 
+const handleNavigateSettings = (payload) => {
+  const tab = typeof payload?.tab === 'string' ? payload.tab : ''
+  if (tab && sections.value.some((section) => section.key === tab)) {
+    activeTab.value = tab
+  }
+  if (payload?.reason === 'selection_ai_not_configured') {
+    ElMessage.warning('划词翻译/解释需要先配置 AI。请先在当前页面完成提供商、地址、模型和 API 密钥配置。')
+  }
+}
+
 onMounted(async () => {
   unlistenShortcutConflict = await listen('shortcut-conflict-warning', (event) => {
     showShortcutConflictWarning(event.payload)
+  })
+  unlistenNavigateSettings = await listen('navigate-settings-tab', (event) => {
+    handleNavigateSettings(event.payload)
   })
 
   if (window.__SHORTCUT_CONFLICT__) {
@@ -490,6 +515,10 @@ onBeforeUnmount(() => {
   if (unlistenShortcutConflict) {
     unlistenShortcutConflict()
     unlistenShortcutConflict = null
+  }
+  if (unlistenNavigateSettings) {
+    unlistenNavigateSettings()
+    unlistenNavigateSettings = null
   }
 })
 </script>

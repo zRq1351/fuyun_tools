@@ -8,6 +8,7 @@ use crate::services::image_clipboard_manager::{
     emit_image_history_payload, set_image_clipboard_listener_enabled,
 };
 use crate::sync::Mutex;
+use crate::ui::tray_menu::open_settings;
 use crate::ui::window_manager::{
     hide_clipboard_window, hide_image_clipboard_window, hide_image_preview_window, set_window_position,
     show_clipboard_window, show_image_clipboard_window, show_image_preview_loading_window,
@@ -1640,6 +1641,23 @@ pub async fn selection_toolbar_blur(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn open_settings_window(
+    tab: Option<String>,
+    reason: Option<String>,
+    app: AppHandle,
+) -> Result<(), String> {
+    open_settings(&app);
+    if let Some(settings_window) = app.get_webview_window("settings") {
+        let payload = serde_json::json!({
+            "tab": tab.unwrap_or_else(|| "ai".to_string()),
+            "reason": reason.unwrap_or_default()
+        });
+        let _ = settings_window.emit("navigate-settings-tab", payload);
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn show_selection_toolbar_with_text(
     app: AppHandle,
     text: String,
@@ -2251,38 +2269,34 @@ pub async fn save_app_settings(
 
         // 处理 API 密钥
         if let Some(ref api_key) = ai_api_key {
-            if api_key.trim().is_empty() {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    "API密钥不能为空，请填写有效的API密钥",
-                    "ai_api_key is empty",
-                ));
-            }
-
             if api_key != "********" {
                 settings
                     .save_current_provider_config(api_key)
                     .map_err(|e| frontend_error(ErrorCode::ConfigError, "保存提供商配置失败", e))?;
 
-                match settings.get_provider_api_key(ai_provider_val) {
-                    Ok(key) if key == *api_key => {
-                        log::info!("密钥保存验证通过");
-                    },
-                    Ok(_) => {
-                        log::warn!("密钥保存验证失败: 读取到的密钥与保存的不一致");
-                        return Err(frontend_error(
-                            ErrorCode::SystemError,
-                            "系统凭据管理器异常: 密钥保存验证失败，请重试",
-                            "saved key mismatch",
-                        ));
-                    },
-                    Err(e) => {
-                        log::error!("密钥保存验证错误: {}", e);
-                        return Err(frontend_error(
-                            ErrorCode::SystemError,
-                            "系统凭据管理器错误: 无法读取刚保存的密钥",
-                            e,
-                        ));
+                if api_key.trim().is_empty() {
+                    log::info!("提供商 {} 的API密钥已清空", ai_provider_val);
+                } else {
+                    match settings.get_provider_api_key(ai_provider_val) {
+                        Ok(key) if key == *api_key => {
+                            log::info!("密钥保存验证通过");
+                        },
+                        Ok(_) => {
+                            log::warn!("密钥保存验证失败: 读取到的密钥与保存的不一致");
+                            return Err(frontend_error(
+                                ErrorCode::SystemError,
+                                "系统凭据管理器异常: 密钥保存验证失败，请重试",
+                                "saved key mismatch",
+                            ));
+                        },
+                        Err(e) => {
+                            log::error!("密钥保存验证错误: {}", e);
+                            return Err(frontend_error(
+                                ErrorCode::SystemError,
+                                "系统凭据管理器错误: 无法读取刚保存的密钥",
+                                e,
+                            ));
+                        }
                     }
                 }
             }

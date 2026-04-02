@@ -236,6 +236,7 @@ pub fn run() {
             window_blur,
             image_window_blur,
             selection_toolbar_blur,
+            open_settings_window,
             show_selection_toolbar_with_text,
             show_ocr_text_window,
             copy_text,

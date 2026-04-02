@@ -66,6 +66,7 @@ export const IPC_COMMANDS = {
     WINDOW_BLUR: 'window_blur',
     IMAGE_WINDOW_BLUR: 'image_window_blur',
     SELECTION_TOOLBAR_BLUR: 'selection_toolbar_blur',
+    OPEN_SETTINGS_WINDOW: 'open_settings_window',
 
     // AI 设置
     GET_AI_SETTINGS: 'get_ai_settings',
@@ -263,6 +264,7 @@ export const WindowService = {
      */
     blur: () => invoke(IPC_COMMANDS.WINDOW_BLUR),
     imageBlur: () => invoke(IPC_COMMANDS.IMAGE_WINDOW_BLUR),
+    openSettingsWindow: (tab = 'ai', reason = '') => invoke(IPC_COMMANDS.OPEN_SETTINGS_WINDOW, {tab, reason}),
 
     /**
      * 选择工具栏失去焦点通知
