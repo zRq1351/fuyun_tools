@@ -41,6 +41,16 @@
       <template #header>
         <div class="section-title">快捷键</div>
       </template>
+      <el-form-item label="文字剪切板功能">
+        <el-switch v-model="form.textClipboardEnabled" active-text="启用" inactive-text="停用"/>
+        <div class="form-hint">停用后后端不再启动文字剪贴板监听与快捷键</div>
+      </el-form-item>
+
+      <el-form-item label="图片剪切板功能">
+        <el-switch v-model="form.imageClipboardEnabled" active-text="启用" inactive-text="停用"/>
+        <div class="form-hint">停用后后端不再启动图片剪贴板监听与快捷键</div>
+      </el-form-item>
+
       <el-form-item label="打开剪切板窗口快捷键">
         <el-input
             :model-value="textDisplayValue"

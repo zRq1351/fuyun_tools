@@ -155,6 +155,9 @@ const form = reactive({
   textMaxItems: 100,
   imageMaxItems: 100,
   imageDiskLimitMb: 2048,
+  textClipboardEnabled: true,
+  imageClipboardEnabled: true,
+  screenshotEnabled: true,
   groupedItemsProtectedFromLimit: true,
   toggleShortcut: '',
   imageToggleShortcut: '',
@@ -198,6 +201,9 @@ const saveInitialFormState = () => {
     textMaxItems: form.textMaxItems,
     imageMaxItems: form.imageMaxItems,
     imageDiskLimitMb: form.imageDiskLimitMb,
+    textClipboardEnabled: form.textClipboardEnabled,
+    imageClipboardEnabled: form.imageClipboardEnabled,
+    screenshotEnabled: form.screenshotEnabled,
     groupedItemsProtectedFromLimit: form.groupedItemsProtectedFromLimit,
     toggleShortcut: form.toggleShortcut,
     imageToggleShortcut: form.imageToggleShortcut,
@@ -232,6 +238,15 @@ const getChangedFields = () => {
   }
   if (form.imageDiskLimitMb !== initial.imageDiskLimitMb) {
     changedFields.imageDiskLimitMb = form.imageDiskLimitMb
+  }
+  if (form.textClipboardEnabled !== initial.textClipboardEnabled) {
+    changedFields.textClipboardEnabled = form.textClipboardEnabled
+  }
+  if (form.imageClipboardEnabled !== initial.imageClipboardEnabled) {
+    changedFields.imageClipboardEnabled = form.imageClipboardEnabled
+  }
+  if (form.screenshotEnabled !== initial.screenshotEnabled) {
+    changedFields.screenshotEnabled = form.screenshotEnabled
   }
   if (form.groupedItemsProtectedFromLimit !== initial.groupedItemsProtectedFromLimit) {
     changedFields.groupedItemsProtectedFromLimit = form.groupedItemsProtectedFromLimit
@@ -398,6 +413,9 @@ onMounted(async () => {
     form.textMaxItems = settings.text_max_items || settings.max_items || 50
     form.imageMaxItems = settings.image_max_items || settings.max_items || 50
     form.imageDiskLimitMb = settings.image_disk_limit_mb || 2048
+    form.textClipboardEnabled = settings.text_clipboard_enabled !== false
+    form.imageClipboardEnabled = settings.image_clipboard_enabled !== false
+    form.screenshotEnabled = settings.screenshot_enabled !== false
     currentVersion.value = settings.version || '0.3.1'
     form.toggleShortcut = settings.hot_key || ''
     form.imageToggleShortcut = settings.image_hot_key || ''

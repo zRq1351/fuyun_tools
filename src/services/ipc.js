@@ -294,6 +294,9 @@ export const AISettingsService = {
      * @param {string} params.hotKey
      * @param {string} params.imageHotKey
      * @param {string} params.screenshotHotKey
+     * @param {boolean} params.textClipboardEnabled
+     * @param {boolean} params.imageClipboardEnabled
+     * @param {boolean} params.screenshotEnabled
      * @param {boolean} params.selectionEnabled
      * @param {boolean} params.groupedItemsProtectedFromLimit
      * @param {string} params.translationPromptTemplate
@@ -312,6 +315,9 @@ export const AISettingsService = {
                        hotKey,
                        imageHotKey,
                        screenshotHotKey,
+                       textClipboardEnabled,
+                       imageClipboardEnabled,
+                       screenshotEnabled,
                        selectionEnabled,
                        groupedItemsProtectedFromLimit,
                        translationPromptTemplate,
@@ -329,6 +335,9 @@ export const AISettingsService = {
             hotKey,
             imageHotKey,
             screenshotHotKey,
+            textClipboardEnabled,
+            imageClipboardEnabled,
+            screenshotEnabled,
             selectionEnabled,
             groupedItemsProtectedFromLimit,
             translationPromptTemplate,

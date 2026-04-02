@@ -5,10 +5,12 @@ use crate::sync::Mutex;
 use crate::utils::image_clipboard::ImageClipboardManager;
 use parking_lot::Mutex as ParkingMutex;
 use std::collections::{HashSet, VecDeque};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Sender};
+use std::sync::OnceLock;
 use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 /// 待处理图片任务
@@ -53,6 +55,14 @@ static IMAGE_QUEUE_METRICS: LazyLock<ImageQueueMetrics> = LazyLock::new(|| Image
     queue_wait_ms_total: AtomicU64::new(0),
     queue_len_high_watermark: AtomicUsize::new(0),
 });
+
+static IMAGE_WORKERS_STARTED: AtomicBool = AtomicBool::new(false);
+static IMAGE_LISTENER_RUNNING: AtomicBool = AtomicBool::new(false);
+
+fn image_listener_stop_tx() -> &'static StdMutex<Option<Sender<()>>> {
+    static STOP_TX: OnceLock<StdMutex<Option<Sender<()>>>> = OnceLock::new();
+    STOP_TX.get_or_init(|| StdMutex::new(None))
+}
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
     state.lock().expect("infallible mutex lock failed")
@@ -352,12 +362,28 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, w
 }
 
 pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
-    for worker_id in 0..IMAGE_QUEUE_WORKER_COUNT {
-        let app_handle_clone = app_handle.clone();
-        let state_clone = state.clone();
-        thread::spawn(move || {
-            process_pending_queue(&app_handle_clone, &state_clone, worker_id + 1);
-        });
+    if IMAGE_WORKERS_STARTED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        for worker_id in 0..IMAGE_QUEUE_WORKER_COUNT {
+            let app_handle_clone = app_handle.clone();
+            let state_clone = state.clone();
+            thread::spawn(move || {
+                process_pending_queue(&app_handle_clone, &state_clone, worker_id + 1);
+            });
+        }
+    }
+
+    if IMAGE_LISTENER_RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    let (stop_tx, stop_rx) = mpsc::channel::<()>();
+    if let Ok(mut guard) = image_listener_stop_tx().lock() {
+        *guard = Some(stop_tx);
     }
 
     // 启动监听线程
@@ -365,11 +391,19 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
         let wake_rx = subscribe_clipboard_wake_events();
 
         loop {
-            if wake_rx.recv().is_err() {
+            if stop_rx.try_recv().is_ok() {
                 break;
+            }
+            match wake_rx.recv_timeout(Duration::from_millis(250)) {
+                Ok(_) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
             let should_skip = {
                 let state_guard = lock_state(&state);
+                if !state_guard.settings.image_clipboard_enabled {
+                    continue;
+                }
                 state_guard.is_updating_clipboard || state_guard.is_processing_selection
             };
             if should_skip {
@@ -435,6 +469,30 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                 }
             }
         }
+        IMAGE_LISTENER_RUNNING.store(false, Ordering::SeqCst);
+        if let Ok(mut guard) = image_listener_stop_tx().lock() {
+            *guard = None;
+        }
     });
+}
+
+pub fn stop_image_clipboard_listener() {
+    if let Ok(mut guard) = image_listener_stop_tx().lock() {
+        if let Some(tx) = guard.take() {
+            let _ = tx.send(());
+        }
+    }
+}
+
+pub fn set_image_clipboard_listener_enabled(
+    app_handle: AppHandle,
+    state: Arc<Mutex<AppState>>,
+    enabled: bool,
+) {
+    if enabled {
+        start_image_clipboard_listener(app_handle, state);
+    } else {
+        stop_image_clipboard_listener();
+    }
 }
 

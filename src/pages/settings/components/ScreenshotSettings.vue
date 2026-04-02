@@ -4,6 +4,10 @@
       <template #header>
         <div class="section-title">截图设置</div>
       </template>
+      <el-form-item label="截图功能">
+        <el-switch v-model="form.screenshotEnabled" active-text="启用" inactive-text="停用"/>
+        <div class="form-hint">停用后后端不再注册截图快捷键，也不会执行截图命令</div>
+      </el-form-item>
       <el-form-item label="打开截图窗口快捷键">
         <el-input
             :class="{ recording: isScreenshotRecording }"

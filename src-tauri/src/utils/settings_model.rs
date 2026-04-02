@@ -21,10 +21,16 @@ pub struct AppSettingsData {
     #[serde(default = "default_image_disk_limit_mb")]
     pub image_disk_limit_mb: u64,
     pub hot_key: String,
+    #[serde(default = "default_text_clipboard_enabled")]
+    pub text_clipboard_enabled: bool,
     #[serde(default = "default_image_hot_key")]
     pub image_hot_key: String,
+    #[serde(default = "default_image_clipboard_enabled")]
+    pub image_clipboard_enabled: bool,
     #[serde(default = "default_screenshot_hot_key")]
     pub screenshot_hot_key: String,
+    #[serde(default = "default_screenshot_enabled")]
+    pub screenshot_enabled: bool,
     #[serde(default)]
     pub ai_provider: String,
     #[serde(default)]
@@ -52,8 +58,11 @@ impl Default for AppSettingsData {
             image_max_items: default_image_max_items(),
             image_disk_limit_mb: default_image_disk_limit_mb(),
             hot_key: DEFAULT_TOGGLE_SHORTCUT.to_string(),
+            text_clipboard_enabled: default_text_clipboard_enabled(),
             image_hot_key: default_image_hot_key(),
+            image_clipboard_enabled: default_image_clipboard_enabled(),
             screenshot_hot_key: default_screenshot_hot_key(),
+            screenshot_enabled: default_screenshot_enabled(),
             ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
             selection_enabled: true,
@@ -67,6 +76,18 @@ impl Default for AppSettingsData {
 }
 
 fn default_selection_enabled() -> bool {
+    true
+}
+
+fn default_text_clipboard_enabled() -> bool {
+    true
+}
+
+fn default_image_clipboard_enabled() -> bool {
+    true
+}
+
+fn default_screenshot_enabled() -> bool {
     true
 }
 
@@ -493,11 +514,20 @@ impl AppSettingsData {
             self.hot_key = DEFAULT_TOGGLE_SHORTCUT.to_string();
             log::info!("修复 hot_key 为默认值: {}", DEFAULT_TOGGLE_SHORTCUT);
         }
+        if !self.text_clipboard_enabled {
+            log::info!("文字剪贴板功能保持禁用");
+        }
         if self.image_hot_key.is_empty() {
             self.image_hot_key = default_image_hot_key();
         }
+        if !self.image_clipboard_enabled {
+            log::info!("图片剪贴板功能保持禁用");
+        }
         if self.screenshot_hot_key.is_empty() {
             self.screenshot_hot_key = default_screenshot_hot_key();
+        }
+        if !self.screenshot_enabled {
+            log::info!("截图功能保持禁用");
         }
         if self.clipboard_bottom_offset < 0 || self.clipboard_bottom_offset > 400 {
             self.clipboard_bottom_offset = default_clipboard_bottom_offset();
