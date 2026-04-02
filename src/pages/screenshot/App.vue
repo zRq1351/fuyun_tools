@@ -76,12 +76,12 @@
           <Download class="tool-icon-wrap"/>
         </button>
         <button :disabled="!canExport" class="tool-btn" title="固定到屏幕" @click="pinToScreenAndClose">
-          📌
+          <Pin class="tool-icon-wrap"/>
         </button>
-        <button class="tool-btn cancel" title="取消选区 (Esc)" @click="cancelSelection">
-          <CloseBold class="tool-icon-wrap"/>
+        <button class="tool-btn" title="取消选区 (Esc)" @click="cancelSelection">
+          <X class="tool-icon-wrap"/>
         </button>
-        <button :disabled="!canExport" class="tool-btn confirm" title="完成并复制" @click="completeAndCopyUnlinked">
+        <button :disabled="!canExport" class="tool-btn" title="完成并复制" @click="completeAndCopyUnlinked">
           <Check class="tool-icon-wrap"/>
         </button>
       </div>
@@ -120,12 +120,83 @@
     </div>
 
     <div
+        v-for="shape in shapeItems"
+        :key="`shape-${shape.id}`"
+        :class="{ selected: selectedShapeId === shape.id }"
+        :style="getShapeItemStyle(shape)"
+        class="shape-overlay-item"
+        @mousedown.stop="startDragShapeItem(shape.id, $event)"
+    >
+      <template v-if="shape.type === 'rect'">
+        <div :style="getShapeStrokeStyle(shape)" class="shape-rect"></div>
+      </template>
+      <template v-else-if="shape.type === 'circle'">
+        <div :style="getShapeStrokeStyle(shape)" class="shape-circle"></div>
+      </template>
+      <template v-else>
+        <svg :height="shape.height" :width="shape.width" class="shape-line-svg">
+          <line
+              :stroke="shape.color"
+              :stroke-width="shape.lineWidth"
+              :x1="shape.x1"
+              :x2="shape.x2"
+              :y1="shape.y1"
+              :y2="shape.y2"
+              stroke-linecap="round"
+          />
+          <template v-if="shape.type === 'arrow'">
+            <line
+                :stroke="shape.color"
+                :stroke-width="shape.lineWidth"
+                :x1="shape.x2"
+                :x2="shape.arrowLeft.x"
+                :y1="shape.y2"
+                :y2="shape.arrowLeft.y"
+                stroke-linecap="round"
+            />
+            <line
+                :stroke="shape.color"
+                :stroke-width="shape.lineWidth"
+                :x1="shape.x2"
+                :x2="shape.arrowRight.x"
+                :y1="shape.y2"
+                :y2="shape.arrowRight.y"
+                stroke-linecap="round"
+            />
+          </template>
+        </svg>
+      </template>
+      <template v-if="selectedShapeId === shape.id && (shape.type === 'rect' || shape.type === 'circle')">
+        <div class="shape-resize-handle tl" @mousedown.stop="startResizeShapeItem(shape.id, 'tl', $event)"></div>
+        <div class="shape-resize-handle tm" @mousedown.stop="startResizeShapeItem(shape.id, 'tm', $event)"></div>
+        <div class="shape-resize-handle tr" @mousedown.stop="startResizeShapeItem(shape.id, 'tr', $event)"></div>
+        <div class="shape-resize-handle ml" @mousedown.stop="startResizeShapeItem(shape.id, 'ml', $event)"></div>
+        <div class="shape-resize-handle mr" @mousedown.stop="startResizeShapeItem(shape.id, 'mr', $event)"></div>
+        <div class="shape-resize-handle bl" @mousedown.stop="startResizeShapeItem(shape.id, 'bl', $event)"></div>
+        <div class="shape-resize-handle bm" @mousedown.stop="startResizeShapeItem(shape.id, 'bm', $event)"></div>
+        <div class="shape-resize-handle br" @mousedown.stop="startResizeShapeItem(shape.id, 'br', $event)"></div>
+      </template>
+      <template v-if="selectedShapeId === shape.id && (shape.type === 'line' || shape.type === 'arrow')">
+        <div
+            :style="{ left: `${shape.x1}px`, top: `${shape.y1}px` }"
+            class="shape-point-handle"
+            @mousedown.stop="startAdjustLineEndpoint(shape.id, 'start', $event)"
+        ></div>
+        <div
+            :style="{ left: `${shape.x2}px`, top: `${shape.y2}px` }"
+            class="shape-point-handle"
+            @mousedown.stop="startAdjustLineEndpoint(shape.id, 'end', $event)"
+        ></div>
+      </template>
+    </div>
+
+    <div
         v-for="item in textItems"
         :key="item.id"
         :class="{ editing: editingTextId === item.id, selected: selectedTextId === item.id }"
         :ref="(el) => setTextOverlayRef(el, item.id)"
         class="text-overlay-item"
-        @mousedown.stop="selectTextItem(item.id)"
+        @mousedown.stop="startDragTextItem(item.id, $event)"
         @dblclick.stop="startEditTextItem(item)"
     >
       <div
@@ -148,12 +219,9 @@
 <script setup>
 import {computed, nextTick, onMounted, onUnmounted, reactive, ref, watchPostEffect} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
+import {Check, Circle, Pin, Square, X} from 'lucide-vue-next'
 import {
-  Aim,
   Brush,
-  Check,
-  CloseBold,
-  Crop,
   DocumentCopy,
   Download,
   Edit,
@@ -196,9 +264,12 @@ const pickColorRgb = ref('')
 const pickerDisplayMode = ref('hex')
 const pickerCopyHint = ref('Shift切换 RGB/# · Ctrl复制')
 const textItems = ref([])
+const shapeItems = ref([])
 let textItemIdSeed = 1
+let shapeItemIdSeed = 1
 const editingTextId = ref(null)
 const selectedTextId = ref(null)
+const selectedShapeId = ref(null)
 const editingElementRef = ref(null)
 const textOverlayRefMap = new Map()
 const editingBeforeText = ref('')
@@ -236,8 +307,8 @@ const drawingTools = [
   {id: 'pen', name: '画笔', icon: EditPen},
   {id: 'line', name: '直线', icon: Minus},
   {id: 'arrow', name: '箭头', icon: TopRight},
-  {id: 'rect', name: '矩形', icon: Crop},
-  {id: 'circle', name: '圆形', icon: Aim},
+  {id: 'rect', name: '矩形', icon: Square},
+  {id: 'circle', name: '圆形', icon: Circle},
   {id: 'text', name: '文字', icon: Edit},
   {id: 'mosaic', name: '马赛克', icon: Grid},
   {id: 'picker', name: '取色', icon: Brush}
@@ -251,6 +322,10 @@ const pickerDisplayValue = computed(() => {
 
 let screenshotPixelCanvas = null
 let screenshotPixelCtx = null
+const movingTextStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, id: 0})
+const movingShapeStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, id: 0})
+const resizingShapeStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, itemWidth: 0, itemHeight: 0, handle: '', id: 0})
+const adjustingLinePointStart = reactive({id: 0, point: 'start'})
 
 // 样式计算
 const editorCursorClass = computed(() => {
@@ -371,6 +446,11 @@ function handleScreenshotReset() {
   highlightedWindow.value = null
   state.value = 'idle'
   currentTool.value = 'select'
+  textItems.value = []
+  shapeItems.value = []
+  selectedTextId.value = null
+  selectedShapeId.value = null
+  editingTextId.value = null
   rect.x = 0
   rect.y = 0
   rect.width = 0
@@ -580,7 +660,12 @@ function onMouseDown(e) {
     return
   }
   if (e.button !== 0) return
-  selectedTextId.value = null
+  if (state.value !== 'text-moving') {
+    selectedTextId.value = null
+  }
+  if (state.value !== 'shape-moving') {
+    selectedShapeId.value = null
+  }
   if (state.value === 'idle') {
     state.value = 'selecting'
     startPoint.x = e.clientX
@@ -659,6 +744,24 @@ function onMouseMove(e) {
     rect.y = startRect.y + dy
   } else if (state.value === 'resizing') {
     handleResize(e)
+  } else if (state.value === 'text-moving') {
+    const item = textItems.value.find((entry) => entry.id === movingTextStart.id)
+    if (!item) return
+    const dx = e.clientX - movingTextStart.x
+    const dy = e.clientY - movingTextStart.y
+    item.x = movingTextStart.itemX + dx
+    item.y = movingTextStart.itemY + dy
+  } else if (state.value === 'shape-moving') {
+    const item = shapeItems.value.find((entry) => entry.id === movingShapeStart.id)
+    if (!item) return
+    const dx = e.clientX - movingShapeStart.x
+    const dy = e.clientY - movingShapeStart.y
+    item.x = movingShapeStart.itemX + dx
+    item.y = movingShapeStart.itemY + dy
+  } else if (state.value === 'shape-resizing') {
+    handleResizeShapeItem(e)
+  } else if (state.value === 'shape-point-moving') {
+    handleAdjustLineEndpoint(e)
   } else if (state.value === 'drawing') {
     handleCanvasMouseMove(e)
   }
@@ -695,6 +798,18 @@ function onMouseUp(e) {
     }
   } else if (state.value === 'moving' || state.value === 'resizing') {
     state.value = 'selected'
+  } else if (state.value === 'text-moving') {
+    state.value = 'selected'
+    saveToHistory()
+  } else if (state.value === 'shape-moving') {
+    state.value = 'selected'
+    saveToHistory()
+  } else if (state.value === 'shape-resizing') {
+    state.value = 'selected'
+    saveToHistory()
+  } else if (state.value === 'shape-point-moving') {
+    state.value = 'selected'
+    saveToHistory()
   } else if (state.value === 'drawing') {
     handleCanvasMouseUp(e)
     state.value = 'selected'
@@ -708,6 +823,7 @@ function onContextMenu(e) {
 function cancelSelection() {
   finishInlineEdit()
   selectedTextId.value = null
+  selectedShapeId.value = null
   state.value = 'idle'
   rect.width = 0
   rect.height = 0
@@ -787,6 +903,7 @@ function handleResize(e) {
 
 function setTool(toolId) {
   currentTool.value = toolId
+  selectedShapeId.value = null
   if (toolId !== 'picker') {
     pickerCopyHint.value = 'Shift切换 RGB/# · Ctrl复制'
   }
@@ -928,6 +1045,20 @@ function handleCanvasMouseUp(event) {
     return
   }
 
+  if (['line', 'arrow', 'rect', 'circle'].includes(currentTool.value)) {
+    if (currentDrawingSnapshot && ctx) {
+      const oldTransform = ctx.getTransform()
+      ctx.resetTransform()
+      ctx.putImageData(currentDrawingSnapshot, 0, 0)
+      ctx.setTransform(oldTransform)
+      currentDrawingSnapshot = null
+    }
+    createShapeItem(currentTool.value, drawStart.x, drawStart.y, x, y)
+    currentTool.value = 'select'
+    saveToHistory()
+    return
+  }
+
   saveToHistory()
 }
 
@@ -1045,8 +1176,233 @@ function cancelInlineEdit() {
   editingBeforeText.value = ''
 }
 
-function selectTextItem(id) {
+function startDragTextItem(id, event) {
+  if (editingTextId.value !== null) return
   selectedTextId.value = id
+  selectedShapeId.value = null
+  const item = textItems.value.find((entry) => entry.id === id)
+  if (!item) return
+  movingTextStart.x = event.clientX
+  movingTextStart.y = event.clientY
+  movingTextStart.itemX = item.x
+  movingTextStart.itemY = item.y
+  movingTextStart.id = id
+  state.value = 'text-moving'
+}
+
+function startDragShapeItem(id, event) {
+  if (editingTextId.value !== null) return
+  currentTool.value = 'select'
+  selectedShapeId.value = id
+  selectedTextId.value = null
+  const item = shapeItems.value.find((entry) => entry.id === id)
+  if (!item) return
+  movingShapeStart.x = event.clientX
+  movingShapeStart.y = event.clientY
+  movingShapeStart.itemX = item.x
+  movingShapeStart.itemY = item.y
+  movingShapeStart.id = id
+  state.value = 'shape-moving'
+}
+
+function startResizeShapeItem(id, handle, event) {
+  if (editingTextId.value !== null) return
+  const item = shapeItems.value.find((entry) => entry.id === id)
+  if (!item || (item.type !== 'rect' && item.type !== 'circle')) return
+  selectedShapeId.value = id
+  selectedTextId.value = null
+  resizingShapeStart.x = event.clientX
+  resizingShapeStart.y = event.clientY
+  resizingShapeStart.itemX = item.x
+  resizingShapeStart.itemY = item.y
+  resizingShapeStart.itemWidth = item.width
+  resizingShapeStart.itemHeight = item.height
+  resizingShapeStart.handle = handle
+  resizingShapeStart.id = id
+  state.value = 'shape-resizing'
+}
+
+function handleResizeShapeItem(event) {
+  const item = shapeItems.value.find((entry) => entry.id === resizingShapeStart.id)
+  if (!item) return
+  const dx = event.clientX - resizingShapeStart.x
+  const dy = event.clientY - resizingShapeStart.y
+  let x = resizingShapeStart.itemX
+  let y = resizingShapeStart.itemY
+  let width = resizingShapeStart.itemWidth
+  let height = resizingShapeStart.itemHeight
+  const handle = resizingShapeStart.handle
+  if (handle.includes('l')) {
+    x += dx
+    width -= dx
+  }
+  if (handle.includes('r')) {
+    width += dx
+  }
+  if (handle.includes('t')) {
+    y += dy
+    height -= dy
+  }
+  if (handle.includes('b')) {
+    height += dy
+  }
+  const minSize = 4
+  if (width < minSize) {
+    if (handle.includes('l')) {
+      x = resizingShapeStart.itemX + resizingShapeStart.itemWidth - minSize
+    }
+    width = minSize
+  }
+  if (height < minSize) {
+    if (handle.includes('t')) {
+      y = resizingShapeStart.itemY + resizingShapeStart.itemHeight - minSize
+    }
+    height = minSize
+  }
+  item.x = x
+  item.y = y
+  item.width = width
+  item.height = height
+}
+
+function startAdjustLineEndpoint(id, point, event) {
+  if (editingTextId.value !== null) return
+  const item = shapeItems.value.find((entry) => entry.id === id)
+  if (!item || (item.type !== 'line' && item.type !== 'arrow')) return
+  selectedShapeId.value = id
+  selectedTextId.value = null
+  adjustingLinePointStart.id = id
+  adjustingLinePointStart.point = point
+  state.value = 'shape-point-moving'
+}
+
+function handleAdjustLineEndpoint(event) {
+  const item = shapeItems.value.find((entry) => entry.id === adjustingLinePointStart.id)
+  if (!item || (item.type !== 'line' && item.type !== 'arrow')) return
+  const startAbs = {
+    x: item.x + item.x1,
+    y: item.y + item.y1
+  }
+  const endAbs = {
+    x: item.x + item.x2,
+    y: item.y + item.y2
+  }
+  if (adjustingLinePointStart.point === 'start') {
+    startAbs.x = event.clientX
+    startAbs.y = event.clientY
+  } else {
+    endAbs.x = event.clientX
+    endAbs.y = event.clientY
+  }
+  updateLineLikeShapeFromAbsolutePoints(item, startAbs, endAbs)
+}
+
+function updateLineLikeShapeFromAbsolutePoints(item, startAbs, endAbs) {
+  const minX = Math.min(startAbs.x, endAbs.x)
+  const minY = Math.min(startAbs.y, endAbs.y)
+  item.x = minX
+  item.y = minY
+  item.width = Math.max(1, Math.abs(endAbs.x - startAbs.x))
+  item.height = Math.max(1, Math.abs(endAbs.y - startAbs.y))
+  item.x1 = startAbs.x - minX
+  item.y1 = startAbs.y - minY
+  item.x2 = endAbs.x - minX
+  item.y2 = endAbs.y - minY
+  if (item.type === 'arrow') {
+    const arrowHead = getArrowHeadPoints(item.x1, item.y1, item.x2, item.y2)
+    item.arrowLeft = arrowHead.left
+    item.arrowRight = arrowHead.right
+  }
+}
+
+function createShapeItem(type, fromX, fromY, toX, toY) {
+  const dx = toX - fromX
+  const dy = toY - fromY
+  if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return
+  const stroke = Math.max(1, Number(lineWidth.value) || 1)
+  if (type === 'rect') {
+    shapeItems.value.push({
+      id: shapeItemIdSeed++,
+      type,
+      x: Math.min(fromX, toX),
+      y: Math.min(fromY, toY),
+      width: Math.max(2, Math.abs(dx)),
+      height: Math.max(2, Math.abs(dy)),
+      color: currentColor.value,
+      lineWidth: stroke
+    })
+    return
+  }
+  if (type === 'circle') {
+    const radius = Math.sqrt(dx * dx + dy * dy)
+    shapeItems.value.push({
+      id: shapeItemIdSeed++,
+      type,
+      x: fromX - radius,
+      y: fromY - radius,
+      width: Math.max(2, radius * 2),
+      height: Math.max(2, radius * 2),
+      color: currentColor.value,
+      lineWidth: stroke
+    })
+    return
+  }
+  const minX = Math.min(fromX, toX)
+  const minY = Math.min(fromY, toY)
+  const width = Math.max(2, Math.abs(dx))
+  const height = Math.max(2, Math.abs(dy))
+  const x1 = fromX - minX
+  const y1 = fromY - minY
+  const x2 = toX - minX
+  const y2 = toY - minY
+  const arrowHead = getArrowHeadPoints(x1, y1, x2, y2)
+  shapeItems.value.push({
+    id: shapeItemIdSeed++,
+    type,
+    x: minX,
+    y: minY,
+    width,
+    height,
+    x1,
+    y1,
+    x2,
+    y2,
+    color: currentColor.value,
+    lineWidth: stroke,
+    arrowLeft: arrowHead.left,
+    arrowRight: arrowHead.right
+  })
+}
+
+function getArrowHeadPoints(fromX, fromY, toX, toY) {
+  const angle = Math.atan2(toY - fromY, toX - fromX)
+  const headLength = 12
+  return {
+    left: {
+      x: toX - headLength * Math.cos(angle - Math.PI / 6),
+      y: toY - headLength * Math.sin(angle - Math.PI / 6)
+    },
+    right: {
+      x: toX - headLength * Math.cos(angle + Math.PI / 6),
+      y: toY - headLength * Math.sin(angle + Math.PI / 6)
+    }
+  }
+}
+
+function getShapeItemStyle(shape) {
+  return {
+    left: `${shape.x}px`,
+    top: `${shape.y}px`,
+    width: `${shape.width}px`,
+    height: `${shape.height}px`
+  }
+}
+
+function getShapeStrokeStyle(shape) {
+  return {
+    borderColor: shape.color,
+    borderWidth: `${shape.lineWidth}px`
+  }
 }
 
 function toggleTextBold() {
@@ -1198,11 +1554,13 @@ function saveToHistory() {
   const imageData = ctx.getImageData(0, 0, canvas.value.width, canvas.value.height)
   ctx.setTransform(oldTransform)
   const textSnapshot = textItems.value.map(item => ({...item}))
+  const shapeSnapshot = shapeItems.value.map(item => ({...item}))
 
   history.value = history.value.slice(0, historyIndex.value + 1)
   history.value.push({
     imageData,
-    textItems: textSnapshot
+    textItems: textSnapshot,
+    shapeItems: shapeSnapshot
   })
   historyIndex.value = history.value.length - 1
 
@@ -1235,6 +1593,7 @@ function restoreFromHistory() {
   ctx.putImageData(snapshot.imageData, 0, 0)
   ctx.setTransform(oldTransform)
   textItems.value = snapshot.textItems.map(item => ({...item}))
+  shapeItems.value = (snapshot.shapeItems || []).map(item => ({...item}))
 }
 
 // 最终出图
@@ -1299,6 +1658,7 @@ function getCroppedCanvas() {
   tempCtx.putImageData(overlayData, 0, 0)
 
   ctx.drawImage(tempCanvas, 0, 0)
+  drawShapeItemsOnCroppedCanvas(ctx, sourceX, sourceY, sourceWidth, sourceHeight)
   drawTextItemsOnCroppedCanvas(ctx, sourceX, sourceY, sourceWidth, sourceHeight)
 
   return cropCanvas
@@ -1320,6 +1680,7 @@ function drawTextItemToContext(ctx, item, x, y) {
   const lines = item.text.split('\n')
   const fontWeight = item.bold ? '700' : '400'
   ctx.save()
+  ctx.scale(dpr, dpr)
   ctx.fillStyle = item.color
   ctx.font = `${fontWeight} ${item.fontSize}px ${item.fontFamily || 'Arial'}`
   ctx.textBaseline = 'top'
@@ -1343,6 +1704,62 @@ function drawTextItemToContext(ctx, item, x, y) {
       ctx.strokeText(lines[i], x, lineY)
     }
     ctx.fillText(lines[i], x, lineY)
+  }
+  ctx.restore()
+}
+
+function drawShapeItemsOnCroppedCanvas(ctx, sourceX, sourceY, sourceWidth, sourceHeight) {
+  const cropLeft = sourceX / dpr
+  const cropTop = sourceY / dpr
+  const cropRight = cropLeft + sourceWidth / dpr
+  const cropBottom = cropTop + sourceHeight / dpr
+  for (const item of shapeItems.value) {
+    const itemRight = item.x + item.width
+    const itemBottom = item.y + item.height
+    if (itemRight < cropLeft || itemBottom < cropTop || item.x > cropRight || item.y > cropBottom) continue
+    drawShapeItemToContext(ctx, item, cropLeft, cropTop)
+  }
+}
+
+function drawShapeItemToContext(ctx, item, cropLeft, cropTop) {
+  const x = item.x - cropLeft
+  const y = item.y - cropTop
+  ctx.save()
+  ctx.scale(dpr, dpr)
+  ctx.strokeStyle = item.color
+  ctx.lineWidth = item.lineWidth
+  ctx.lineCap = 'round'
+  if (item.type === 'rect') {
+    ctx.strokeRect(x, y, item.width, item.height)
+    ctx.restore()
+    return
+  }
+  if (item.type === 'circle') {
+    ctx.beginPath()
+    ctx.ellipse(
+        x + item.width / 2,
+        y + item.height / 2,
+        item.width / 2,
+        item.height / 2,
+        0,
+        0,
+        Math.PI * 2
+    )
+    ctx.stroke()
+    ctx.restore()
+    return
+  }
+  ctx.beginPath()
+  ctx.moveTo(x + item.x1, y + item.y1)
+  ctx.lineTo(x + item.x2, y + item.y2)
+  ctx.stroke()
+  if (item.type === 'arrow') {
+    ctx.beginPath()
+    ctx.moveTo(x + item.x2, y + item.y2)
+    ctx.lineTo(x + item.arrowLeft.x, y + item.arrowLeft.y)
+    ctx.moveTo(x + item.x2, y + item.y2)
+    ctx.lineTo(x + item.arrowRight.x, y + item.arrowRight.y)
+    ctx.stroke()
   }
   ctx.restore()
 }
@@ -1729,19 +2146,6 @@ function handleKeyDown(event) {
   color: #00aaff;
 }
 
-.tool-btn.cancel {
-  color: #ff4444;
-}
-
-.tool-btn.confirm {
-  color: #00ff00;
-  background: #00550033;
-}
-
-.tool-btn.confirm:hover {
-  background: #00ff0066;
-}
-
 .tool-btn.mini {
   width: 26px;
   height: 26px;
@@ -1837,6 +2241,105 @@ function handleKeyDown(event) {
 .picker-hint {
   font-size: 11px;
   color: #9ca3af;
+}
+
+.shape-overlay-item {
+  position: absolute;
+  z-index: 1080;
+  cursor: move;
+  user-select: none;
+}
+
+.shape-overlay-item.selected {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.45);
+}
+
+.shape-rect,
+.shape-circle {
+  width: 100%;
+  height: 100%;
+  border-style: solid;
+  box-sizing: border-box;
+}
+
+.shape-circle {
+  border-radius: 50%;
+}
+
+.shape-line-svg {
+  display: block;
+  overflow: visible;
+}
+
+.shape-resize-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #00aaff;
+  border: 1px solid #ffffff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+}
+
+.shape-resize-handle.tl {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.shape-resize-handle.tm {
+  top: 0;
+  left: 50%;
+  cursor: ns-resize;
+}
+
+.shape-resize-handle.tr {
+  top: 0;
+  left: 100%;
+  cursor: nesw-resize;
+}
+
+.shape-resize-handle.ml {
+  top: 50%;
+  left: 0;
+  cursor: ew-resize;
+}
+
+.shape-resize-handle.mr {
+  top: 50%;
+  left: 100%;
+  cursor: ew-resize;
+}
+
+.shape-resize-handle.bl {
+  top: 100%;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.shape-resize-handle.bm {
+  top: 100%;
+  left: 50%;
+  cursor: ns-resize;
+}
+
+.shape-resize-handle.br {
+  top: 100%;
+  left: 100%;
+  cursor: nwse-resize;
+}
+
+.shape-point-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #00aaff;
+  border: 1px solid #ffffff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  cursor: move;
 }
 
 .text-overlay-item {
