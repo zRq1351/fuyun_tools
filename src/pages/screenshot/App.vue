@@ -109,9 +109,14 @@
       </div>
     </div>
 
-    <!-- 取色器放大镜 (暂留位) -->
+    <!-- 取色器放大镜 -->
     <div v-if="currentTool === 'picker' && pickColor" ref="pickerInfoRef" class="color-picker-info">
-      {{ pickColor }}
+      <canvas ref="pickerMagnifierCanvasRef" class="picker-magnifier"></canvas>
+      <div class="picker-meta">
+        <div :style="{ backgroundColor: pickColor }" class="picker-swatch"></div>
+        <div class="picker-value">{{ pickerDisplayValue }}</div>
+        <div class="picker-hint">{{ pickerCopyHint }}</div>
+      </div>
     </div>
 
     <div
@@ -170,6 +175,7 @@ const windowHighlightRef = ref(null)
 const cutoutRef = ref(null)
 const floatingToolbarRef = ref(null)
 const pickerInfoRef = ref(null)
+const pickerMagnifierCanvasRef = ref(null)
 const isDrawing = ref(false)
 const isCaptureReady = ref(false)
 
@@ -186,6 +192,9 @@ const currentTool = ref('select')
 const currentColor = ref('#ff0000')
 const lineWidth = ref(3)
 const pickColor = ref('')
+const pickColorRgb = ref('')
+const pickerDisplayMode = ref('hex')
+const pickerCopyHint = ref('Shift切换 RGB/# · Ctrl复制')
 const textItems = ref([])
 let textItemIdSeed = 1
 const editingTextId = ref(null)
@@ -236,6 +245,12 @@ const drawingTools = [
 
 const hasSelection = computed(() => rect.width > 0 && rect.height > 0)
 const canExport = computed(() => hasSelection.value)
+const pickerDisplayValue = computed(() => {
+  return pickerDisplayMode.value === 'rgb' ? pickColorRgb.value : pickColor.value
+})
+
+let screenshotPixelCanvas = null
+let screenshotPixelCtx = null
 
 // 样式计算
 const editorCursorClass = computed(() => {
@@ -364,6 +379,11 @@ function handleScreenshotReset() {
     canvas.value.width = 0
     canvas.value.height = 0
   }
+  pickColor.value = ''
+  pickColorRgb.value = ''
+  pickerCopyHint.value = 'Shift切换 RGB/# · Ctrl复制'
+  screenshotPixelCanvas = null
+  screenshotPixelCtx = null
 }
 
 function consumeBootPayload() {
@@ -484,6 +504,13 @@ function loadImageFromBase64(base64Data) {
   const img = new Image()
   img.onload = () => {
     screenshotImg.value = img
+    screenshotPixelCanvas = document.createElement('canvas')
+    screenshotPixelCanvas.width = img.width
+    screenshotPixelCanvas.height = img.height
+    screenshotPixelCtx = screenshotPixelCanvas.getContext('2d')
+    if (screenshotPixelCtx) {
+      screenshotPixelCtx.drawImage(img, 0, 0)
+    }
     nextTick(() => {
       initCanvas()
       isCaptureReady.value = Boolean(canvas.value && canvas.value.width > 0 && canvas.value.height > 0)
@@ -760,6 +787,9 @@ function handleResize(e) {
 
 function setTool(toolId) {
   currentTool.value = toolId
+  if (toolId !== 'picker') {
+    pickerCopyHint.value = 'Shift切换 RGB/# · Ctrl复制'
+  }
 }
 
 // 绘制相关
@@ -1074,33 +1104,89 @@ function drawArrowHead(ctx, fromX, fromY, toX, toY) {
 }
 
 function pickColorAt(event) {
-  const ctx = canvas.value.getContext('2d')
-  // 获取物理像素
   const px = Math.round(event.clientX * dpr)
   const py = Math.round(event.clientY * dpr)
-
-  // 如果没有绘图层数据，优先从原图取色
-  const tempCanvas = document.createElement('canvas')
-  tempCanvas.width = 1;
-  tempCanvas.height = 1;
-  const tempCtx = tempCanvas.getContext('2d')
-  tempCtx.drawImage(screenshotImg.value, px, py, 1, 1, 0, 0, 1, 1)
-
-  // 将涂鸦层叠加
-  const oldTransform = ctx.getTransform()
-  ctx.resetTransform()
-  const overlayData = ctx.getImageData(px, py, 1, 1)
-  ctx.setTransform(oldTransform)
-
-  // 简单合并 (若涂鸦层不透明则使用涂鸦层)
-  let pixel = tempCtx.getImageData(0, 0, 1, 1).data
-  if (overlayData.data[3] > 0) {
-    pixel = overlayData.data
-  }
-
-  const hex = '#' + [pixel[0], pixel[1], pixel[2]].map(v => v.toString(16).padStart(2, '0')).join('')
+  const color = getMergedPixelColorAt(px, py)
+  if (!color) return
+  const hex = '#' + [color.r, color.g, color.b].map(v => v.toString(16).padStart(2, '0')).join('')
   pickColor.value = hex.toUpperCase()
-  if (isDrawing.value) currentColor.value = hex
+  pickColorRgb.value = `RGB(${color.r}, ${color.g}, ${color.b})`
+  if (isDrawing.value) {
+    currentColor.value = pickColor.value
+  }
+  renderPickerMagnifier(px, py)
+}
+
+function getMergedPixelColorAt(px, py) {
+  const drawCanvas = canvas.value
+  if (!drawCanvas || !screenshotPixelCtx || !drawCanvas.width || !drawCanvas.height) return null
+  if (px < 0 || py < 0 || px >= drawCanvas.width || py >= drawCanvas.height) return null
+  const baseData = screenshotPixelCtx.getImageData(px, py, 1, 1).data
+  const drawCtx = drawCanvas.getContext('2d')
+  if (!drawCtx) return {r: baseData[0], g: baseData[1], b: baseData[2]}
+  const oldTransform = drawCtx.getTransform()
+  drawCtx.resetTransform()
+  const overlayData = drawCtx.getImageData(px, py, 1, 1).data
+  drawCtx.setTransform(oldTransform)
+  if (overlayData[3] > 0) {
+    return {r: overlayData[0], g: overlayData[1], b: overlayData[2]}
+  }
+  return {r: baseData[0], g: baseData[1], b: baseData[2]}
+}
+
+function renderPickerMagnifier(px, py) {
+  if (!pickerMagnifierCanvasRef.value || !canvas.value || !screenshotPixelCtx) return
+  const magnifierCanvas = pickerMagnifierCanvasRef.value
+  const magnifierCtx = magnifierCanvas.getContext('2d')
+  if (!magnifierCtx) return
+  const sampleSize = 11
+  const zoom = 12
+  const half = Math.floor(sampleSize / 2)
+  magnifierCanvas.width = sampleSize * zoom
+  magnifierCanvas.height = sampleSize * zoom
+  magnifierCtx.clearRect(0, 0, magnifierCanvas.width, magnifierCanvas.height)
+  for (let row = 0; row < sampleSize; row++) {
+    for (let col = 0; col < sampleSize; col++) {
+      const sx = px + col - half
+      const sy = py + row - half
+      const color = getMergedPixelColorAt(sx, sy)
+      const fill = color ? `rgb(${color.r}, ${color.g}, ${color.b})` : 'rgba(0,0,0,0.2)'
+      magnifierCtx.fillStyle = fill
+      magnifierCtx.fillRect(col * zoom, row * zoom, zoom, zoom)
+    }
+  }
+  magnifierCtx.strokeStyle = 'rgba(255,255,255,0.35)'
+  magnifierCtx.lineWidth = 1
+  for (let i = 0; i <= sampleSize; i++) {
+    const p = i * zoom
+    magnifierCtx.beginPath()
+    magnifierCtx.moveTo(p, 0)
+    magnifierCtx.lineTo(p, magnifierCanvas.height)
+    magnifierCtx.stroke()
+    magnifierCtx.beginPath()
+    magnifierCtx.moveTo(0, p)
+    magnifierCtx.lineTo(magnifierCanvas.width, p)
+    magnifierCtx.stroke()
+  }
+  magnifierCtx.strokeStyle = '#00aaff'
+  magnifierCtx.lineWidth = 2
+  magnifierCtx.strokeRect(half * zoom + 1, half * zoom + 1, zoom - 2, zoom - 2)
+}
+
+async function copyPickedColor() {
+  if (!pickColor.value) return
+  const value = pickerDisplayValue.value || pickColor.value
+  try {
+    await invoke('copy_text', {text: value})
+    pickerCopyHint.value = `已复制：${value}`
+    window.setTimeout(() => {
+      if (currentTool.value === 'picker') {
+        pickerCopyHint.value = 'Shift切换 RGB/# · Ctrl复制'
+      }
+    }, 1000)
+  } catch (error) {
+    pickerCopyHint.value = '复制失败，请重试'
+  }
 }
 
 // 历史记录
@@ -1372,6 +1458,12 @@ function handleKeyDown(event) {
     } else {
       close()
     }
+  } else if (currentTool.value === 'picker' && event.key === 'Shift' && !event.repeat) {
+    event.preventDefault()
+    pickerDisplayMode.value = pickerDisplayMode.value === 'hex' ? 'rgb' : 'hex'
+  } else if (currentTool.value === 'picker' && event.key === 'Control' && !event.repeat) {
+    event.preventDefault()
+    copyPickedColor()
   } else if (event.ctrlKey && event.key === 'z') {
     event.preventDefault()
     undo()
@@ -1701,13 +1793,50 @@ function handleKeyDown(event) {
 
 .color-picker-info {
   position: absolute;
-  background: rgba(0, 0, 0, 0.8);
-  color: white;
-  padding: 2px 6px;
-  border-radius: 4px;
+  background: rgba(17, 24, 39, 0.95);
+  color: #e5e7eb;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
   font-size: 12px;
   z-index: 1000;
   pointer-events: none;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.picker-magnifier {
+  width: 132px;
+  height: 132px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  image-rendering: pixelated;
+}
+
+.picker-meta {
+  min-width: 130px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.picker-swatch {
+  width: 100%;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.picker-value {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.picker-hint {
+  font-size: 11px;
+  color: #9ca3af;
 }
 
 .text-overlay-item {
