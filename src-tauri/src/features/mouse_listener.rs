@@ -1,9 +1,10 @@
 use crate::features::screenshot::capture;
 use crate::sync::Mutex;
 use log;
-use rdev::{listen, Button, EventType, Key};
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, LazyLock};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -14,13 +15,24 @@ use crate::ui::window_manager::{
 };
 use crate::utils::clipboard::ClipboardManager;
 #[cfg(target_os = "windows")]
+use winapi::shared::minwindef::{LPARAM, LRESULT, WPARAM};
+#[cfg(target_os = "windows")]
+use winapi::um::libloaderapi::GetModuleHandleW;
+#[cfg(target_os = "windows")]
+use winapi::um::winuser::{
+    CallNextHookEx, DispatchMessageW, PeekMessageW, PostThreadMessageW, SetWindowsHookExW,
+    TranslateMessage, UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, PM_REMOVE,
+    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+};
+#[cfg(target_os = "windows")]
 use winapi::um::winuser::{GetAsyncKeyState, VK_LCONTROL, VK_RCONTROL};
 
 #[derive(Debug, Clone, PartialEq)]
 enum MouseActionState {
     Idle,
-    MouseDown(u64, u64, std::time::Instant),
-    MouseUp(u64, u64, std::time::Instant),
+    MouseDown(i32, i32, std::time::Instant),
+    MouseUp(i32, i32, std::time::Instant),
 }
 
 struct GlobalState {
@@ -29,10 +41,10 @@ struct GlobalState {
     ctrl_right_pressed: AtomicBool,
     needs_detection: AtomicBool,
     last_processed_time: Arc<Mutex<std::time::Instant>>,
-    last_mouse_pos: Arc<Mutex<(u64, u64)>>,
+    last_mouse_pos: Arc<Mutex<(i32, i32)>>,
     detection_anchor_pos: Arc<Mutex<(i32, i32)>>,
     last_toolbar_emit: Arc<Mutex<Option<(String, (i32, i32), std::time::Instant)>>>,
-    last_click: Arc<Mutex<Option<(u64, u64, std::time::Instant)>>>,
+    last_click: Arc<Mutex<Option<(i32, i32, std::time::Instant)>>>,
     detection_notify: Arc<(std::sync::Mutex<bool>, Condvar)>,
 }
 
@@ -53,6 +65,26 @@ static GLOBAL_STATE: LazyLock<GlobalState> = LazyLock::new(|| {
 
 static LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 static LISTENER_ENABLED: AtomicBool = AtomicBool::new(true);
+static INPUT_SOURCE_RUNNING: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug, Clone, Copy)]
+enum HookEvent {
+    CtrlLeftPress,
+    CtrlRightPress,
+    CtrlLeftRelease,
+    CtrlRightRelease,
+    LeftButtonPress(i32, i32),
+    LeftButtonRelease(i32, i32),
+    MouseMove(i32, i32),
+}
+
+fn hook_event_sender() -> &'static StdMutex<Option<Sender<HookEvent>>> {
+    static HOOK_EVENT_SENDER: OnceLock<StdMutex<Option<Sender<HookEvent>>>> = OnceLock::new();
+    HOOK_EVENT_SENDER.get_or_init(|| StdMutex::new(None))
+}
+
+#[cfg(target_os = "windows")]
+static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
 fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
     mutex.lock().expect("infallible mutex lock failed")
@@ -63,6 +95,127 @@ fn notify_detection_pending() {
     if let Ok(mut pending) = lock.lock() {
         *pending = true;
         cvar.notify_one();
+    }
+}
+
+fn handle_hook_event(
+    event: HookEvent,
+    listener_state: &Arc<Mutex<SharedAppState>>,
+    listener_app_handle: &AppHandle,
+) {
+    if !LISTENER_ENABLED.load(Ordering::SeqCst) {
+        return;
+    }
+    match event {
+        HookEvent::CtrlLeftPress => {
+            GLOBAL_STATE.ctrl_left_pressed.store(true, Ordering::SeqCst);
+            log::debug!("检测到左Ctrl键按下");
+        }
+        HookEvent::CtrlRightPress => {
+            GLOBAL_STATE.ctrl_right_pressed.store(true, Ordering::SeqCst);
+            log::debug!("检测到右Ctrl键按下");
+        }
+        HookEvent::CtrlLeftRelease => {
+            GLOBAL_STATE.ctrl_left_pressed.store(false, Ordering::SeqCst);
+            log::debug!("检测到左Ctrl键释放");
+        }
+        HookEvent::CtrlRightRelease => {
+            GLOBAL_STATE.ctrl_right_pressed.store(false, Ordering::SeqCst);
+            log::debug!("检测到右Ctrl键释放");
+        }
+        HookEvent::LeftButtonPress(last_x, last_y) => {
+            let current_time = std::time::Instant::now();
+            if let Ok(mut pos_guard) = GLOBAL_STATE.last_mouse_pos.try_lock() {
+                *pos_guard = (last_x, last_y);
+            }
+            handle_selection_toolbar_autoclose(listener_app_handle, Some((last_x, last_y)));
+            log::debug!("检测到鼠标左键按下 at ({}, {})", last_x, last_y);
+            let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
+            *state_guard = MouseActionState::MouseDown(last_x, last_y, current_time);
+        }
+        HookEvent::LeftButtonRelease(last_x, last_y) => {
+            let current_time = std::time::Instant::now();
+            if let Ok(mut pos_guard) = GLOBAL_STATE.last_mouse_pos.try_lock() {
+                *pos_guard = (last_x, last_y);
+            }
+            log::debug!("检测到鼠标左键释放 at ({}, {})", last_x, last_y);
+            let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
+            let prev_state = std::mem::replace(&mut *state_guard, MouseActionState::Idle);
+            if let MouseActionState::MouseDown(down_x, down_y, down_time) = prev_state {
+                let up_time = current_time;
+                *state_guard = MouseActionState::MouseUp(last_x, last_y, up_time);
+                let distance = calculate_distance(down_x, down_y, last_x, last_y);
+                let duration = up_time.duration_since(down_time);
+                log::debug!(
+                    "鼠标移动距离: {:.2}px, 操作持续时间: {:?}ms",
+                    distance,
+                    duration.as_millis()
+                );
+                let is_drag = is_valid_drag_operation(distance, duration);
+                let is_double_click = if !is_drag {
+                    let mut last_click_guard = lock_arc_mutex(&GLOBAL_STATE.last_click);
+                    let result = if let Some((lx, ly, ltime)) = *last_click_guard {
+                        let click_dist = calculate_distance(lx, ly, last_x, last_y);
+                        let click_interval = up_time.duration_since(ltime);
+                        click_dist < 5.0 && click_interval.as_millis() < 500
+                    } else {
+                        false
+                    };
+                    *last_click_guard = Some((last_x, last_y, up_time));
+                    result
+                } else {
+                    *lock_arc_mutex(&GLOBAL_STATE.last_click) = None;
+                    false
+                };
+                if is_drag || is_double_click {
+                    if is_double_click {
+                        log::info!("检测到双击/三击操作");
+                    }
+                    if !is_foreground_window_console() {
+                        if !is_ctrl_effectively_pressed() {
+                            if capture::is_screenshot_in_progress() {
+                                return;
+                            }
+                            let app_busy_or_visible = {
+                                let state_guard = lock_arc_mutex(listener_state);
+                                state_guard.is_visible
+                                    || state_guard.is_image_visible
+                                    || state_guard.is_processing_selection
+                                    || state_guard.is_updating_clipboard
+                            };
+                            if app_busy_or_visible {
+                                log::info!("当前应用窗口可见或正在处理回填，跳过划词检测触发");
+                                return;
+                            }
+                            let last_processed = { *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) };
+                            if up_time.duration_since(last_processed) > Duration::from_millis(100) {
+                                {
+                                    let mut pos_guard = lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
+                                    *pos_guard = (last_x, last_y);
+                                }
+                                GLOBAL_STATE.needs_detection.store(true, Ordering::SeqCst);
+                                notify_detection_pending();
+                                log::info!("设置划词检测标志");
+                                *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) = up_time;
+                            } else {
+                                log::info!("操作过于频繁，跳过此次检测");
+                            }
+                        } else {
+                            log::info!("Ctrl键被按下，忽略此次点击");
+                        }
+                    } else {
+                        log::info!("当前在命令行/终端环境中，跳过划词检测");
+                    }
+                } else {
+                    log::debug!("不满足划词或双击条件，跳过");
+                }
+            }
+        }
+        HookEvent::MouseMove(mouse_x, mouse_y) => {
+            if let Ok(mut pos_guard) = GLOBAL_STATE.last_mouse_pos.try_lock() {
+                *pos_guard = (mouse_x, mouse_y);
+            }
+        }
     }
 }
 
@@ -81,6 +234,168 @@ fn wait_detection_pending(timeout: Duration) {
     }
 }
 
+fn start_input_listener_source(app_handle: AppHandle, state: Arc<Mutex<SharedAppState>>) {
+    #[cfg(target_os = "windows")]
+    {
+        start_windows_hook_listener(app_handle, state);
+        return;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = app_handle;
+        let _ = state;
+    }
+}
+
+fn stop_input_listener_source() {
+    #[cfg(target_os = "windows")]
+    {
+        stop_windows_hook_listener();
+    }
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn low_level_keyboard_proc(
+    code: i32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if code == HC_ACTION {
+        let keyboard = &*(lparam as *const KBDLLHOOKSTRUCT);
+        let event = match wparam as u32 {
+            WM_KEYDOWN | WM_SYSKEYDOWN => {
+                if keyboard.vkCode == VK_LCONTROL as u32 {
+                    Some(HookEvent::CtrlLeftPress)
+                } else if keyboard.vkCode == VK_RCONTROL as u32 {
+                    Some(HookEvent::CtrlRightPress)
+                } else {
+                    None
+                }
+            }
+            WM_KEYUP | WM_SYSKEYUP => {
+                if keyboard.vkCode == VK_LCONTROL as u32 {
+                    Some(HookEvent::CtrlLeftRelease)
+                } else if keyboard.vkCode == VK_RCONTROL as u32 {
+                    Some(HookEvent::CtrlRightRelease)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        if let Some(event) = event {
+            if let Ok(guard) = hook_event_sender().lock() {
+                if let Some(tx) = guard.as_ref() {
+                    let _ = tx.send(event);
+                }
+            }
+        }
+    }
+    CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn low_level_mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code == HC_ACTION {
+        let mouse = &*(lparam as *const MSLLHOOKSTRUCT);
+        let x = mouse.pt.x;
+        let y = mouse.pt.y;
+        let event = match wparam as u32 {
+            WM_LBUTTONDOWN => Some(HookEvent::LeftButtonPress(x, y)),
+            WM_LBUTTONUP => Some(HookEvent::LeftButtonRelease(x, y)),
+            WM_MOUSEMOVE => Some(HookEvent::MouseMove(x, y)),
+            _ => None,
+        };
+        if let Some(event) = event {
+            if let Ok(guard) = hook_event_sender().lock() {
+                if let Some(tx) = guard.as_ref() {
+                    let _ = tx.send(event);
+                }
+            }
+        }
+    }
+    CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+}
+
+#[cfg(target_os = "windows")]
+fn start_windows_hook_listener(app_handle: AppHandle, state: Arc<Mutex<SharedAppState>>) {
+    if INPUT_SOURCE_RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    thread::spawn(move || unsafe {
+        let thread_id = winapi::um::processthreadsapi::GetCurrentThreadId();
+        HOOK_THREAD_ID.store(thread_id, Ordering::SeqCst);
+        let (tx, rx): (Sender<HookEvent>, Receiver<HookEvent>) = mpsc::channel();
+        if let Ok(mut guard) = hook_event_sender().lock() {
+            *guard = Some(tx);
+        }
+
+        let module = GetModuleHandleW(std::ptr::null());
+        let keyboard_hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(low_level_keyboard_proc), module, 0);
+        let mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), module, 0);
+
+        if keyboard_hook.is_null() || mouse_hook.is_null() {
+            if !keyboard_hook.is_null() {
+                let _ = UnhookWindowsHookEx(keyboard_hook);
+            }
+            if !mouse_hook.is_null() {
+                let _ = UnhookWindowsHookEx(mouse_hook);
+            }
+            if let Ok(mut guard) = hook_event_sender().lock() {
+                *guard = None;
+            }
+            INPUT_SOURCE_RUNNING.store(false, Ordering::SeqCst);
+            HOOK_THREAD_ID.store(0, Ordering::SeqCst);
+            log::error!("安装划词低级键鼠 Hook 失败");
+            return;
+        }
+
+        log::info!("划词低级键鼠 Hook 已启动");
+        let mut msg: MSG = std::mem::zeroed();
+        let mut should_quit = false;
+        loop {
+            while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+                if msg.message == WM_QUIT {
+                    should_quit = true;
+                    break;
+                }
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            while let Ok(event) = rx.try_recv() {
+                handle_hook_event(event, &state, &app_handle);
+            }
+            if should_quit {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        let _ = UnhookWindowsHookEx(keyboard_hook);
+        let _ = UnhookWindowsHookEx(mouse_hook);
+        if let Ok(mut guard) = hook_event_sender().lock() {
+            *guard = None;
+        }
+        INPUT_SOURCE_RUNNING.store(false, Ordering::SeqCst);
+        HOOK_THREAD_ID.store(0, Ordering::SeqCst);
+        log::info!("划词低级键鼠 Hook 已停止");
+    });
+}
+
+#[cfg(target_os = "windows")]
+fn stop_windows_hook_listener() {
+    let thread_id = HOOK_THREAD_ID.load(Ordering::SeqCst);
+    if thread_id != 0 {
+        unsafe {
+            let _ = PostThreadMessageW(thread_id, WM_QUIT, 0, 0);
+        }
+    }
+}
+
 /// 设置划词监听器启用状态
 pub fn set_selection_listener_enabled(
     app_handle: AppHandle,
@@ -92,6 +407,7 @@ pub fn set_selection_listener_enabled(
         MouseListener::start_mouse_listener(app_handle, state);
     } else {
         GLOBAL_STATE.needs_detection.store(false, Ordering::SeqCst);
+        stop_input_listener_source();
         hide_selection_toolbar_impl(app_handle);
     }
 }
@@ -155,10 +471,11 @@ impl MouseListener {
             .is_err()
         {
             LISTENER_ENABLED.store(true, Ordering::SeqCst);
+            start_input_listener_source(app_handle, state);
             return;
         }
 
-        log::info!("启动跨平台鼠标监听器");
+        log::info!("启动划词监听主控线程");
 
         let detection_thread_app_handle = app_handle.clone();
         let detection_state = state.clone();
@@ -249,173 +566,9 @@ impl MouseListener {
                 }
             }
         });
+        start_input_listener_source(app_handle, state);
 
-        let listener_state = state.clone();
-        let listener_app_handle = app_handle.clone();
-
-        thread::spawn(move || {
-            log::info!("开始监听鼠标键盘事件");
-            if let Err(error) = listen(move |event| {
-                if !LISTENER_ENABLED.load(Ordering::SeqCst) {
-                    return;
-                }
-
-                match event.event_type {
-                EventType::KeyPress(key) => {
-                    if key == Key::ControlLeft {
-                        GLOBAL_STATE.ctrl_left_pressed.store(true, Ordering::SeqCst);
-                        log::debug!("检测到左Ctrl键按下");
-                    } else if key == Key::ControlRight {
-                        GLOBAL_STATE
-                            .ctrl_right_pressed
-                            .store(true, Ordering::SeqCst);
-                        log::debug!("检测到右Ctrl键按下");
-                    }
-                }
-                EventType::KeyRelease(key) => {
-                    if key == Key::ControlLeft {
-                        GLOBAL_STATE
-                            .ctrl_left_pressed
-                            .store(false, Ordering::SeqCst);
-                        log::debug!("检测到左Ctrl键释放");
-                    } else if key == Key::ControlRight {
-                        GLOBAL_STATE
-                            .ctrl_right_pressed
-                            .store(false, Ordering::SeqCst);
-                        log::debug!("检测到右Ctrl键释放");
-                    }
-                }
-                EventType::ButtonPress(Button::Left) => {
-                    let current_time = std::time::Instant::now();
-
-                    let (last_x, last_y) = {
-                        let pos_guard = lock_arc_mutex(&GLOBAL_STATE.last_mouse_pos);
-                        *pos_guard
-                    };
-
-                    handle_selection_toolbar_autoclose(
-                        &listener_app_handle,
-                        Some((last_x as i32, last_y as i32)),
-                    );
-
-                    log::debug!("检测到鼠标左键按下 at ({}, {})", last_x, last_y);
-
-                    let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
-                    *state_guard = MouseActionState::MouseDown(last_x, last_y, current_time);
-                }
-                EventType::ButtonRelease(Button::Left) => {
-                    let current_time = std::time::Instant::now();
-
-                    let (last_x, last_y) = {
-                        let pos_guard = lock_arc_mutex(&GLOBAL_STATE.last_mouse_pos);
-                        *pos_guard
-                    };
-
-                    log::debug!("检测到鼠标左键释放 at ({}, {})", last_x, last_y);
-
-                    let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
-                    let prev_state = std::mem::replace(&mut *state_guard, MouseActionState::Idle);
-
-                    if let MouseActionState::MouseDown(down_x, down_y, down_time) = prev_state {
-                        let up_time = current_time;
-                        *state_guard = MouseActionState::MouseUp(last_x, last_y, up_time);
-
-                        let distance = calculate_distance(down_x, down_y, last_x, last_y);
-                        let duration = up_time.duration_since(down_time);
-
-                        log::debug!(
-                            "鼠标移动距离: {:.2}px, 操作持续时间: {:?}ms",
-                            distance,
-                            duration.as_millis()
-                        );
-
-                        let is_drag = is_valid_drag_operation(distance, duration);
-
-                        let is_double_click = if !is_drag {
-                            let mut last_click_guard = lock_arc_mutex(&GLOBAL_STATE.last_click);
-                            let result = if let Some((lx, ly, ltime)) = *last_click_guard {
-                                let click_dist = calculate_distance(lx, ly, last_x, last_y);
-                                let click_interval = up_time.duration_since(ltime);
-                                click_dist < 5.0 && click_interval.as_millis() < 500
-                            } else {
-                                false
-                            };
-                            *last_click_guard = Some((last_x, last_y, up_time));
-                            result
-                        } else {
-                            *lock_arc_mutex(&GLOBAL_STATE.last_click) = None;
-                            false
-                        };
-
-                        if is_drag || is_double_click {
-                            if is_double_click {
-                                log::info!("检测到双击/三击操作");
-                            }
-
-                            if !is_foreground_window_console() {
-                                if !is_ctrl_effectively_pressed() {
-                                    if capture::is_screenshot_in_progress() {
-                                        return;
-                                    }
-                                    let app_busy_or_visible = {
-                                        let state_guard = lock_arc_mutex(&listener_state);
-                                        state_guard.is_visible
-                                            || state_guard.is_image_visible
-                                            || state_guard.is_processing_selection
-                                            || state_guard.is_updating_clipboard
-                                    };
-                                    if app_busy_or_visible {
-                                        log::info!("当前应用窗口可见或正在处理回填，跳过划词检测触发");
-                                        return;
-                                    }
-
-                                    let last_processed = {
-                                        *lock_arc_mutex(&GLOBAL_STATE.last_processed_time)
-                                    };
-
-                                    if up_time.duration_since(last_processed)
-                                        > Duration::from_millis(100)
-                                    {
-                                        {
-                                            let mut pos_guard = lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
-                                            *pos_guard = (last_x as i32, last_y as i32);
-                                        }
-                                        GLOBAL_STATE.needs_detection.store(true, Ordering::SeqCst);
-                                        notify_detection_pending();
-                                        log::info!("设置划词检测标志");
-
-                                        *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) = up_time;
-                                    } else {
-                                        log::info!("操作过于频繁，跳过此次检测");
-                                    }
-                                } else {
-                                    log::info!("Ctrl键被按下，忽略此次点击");
-                                }
-                            } else {
-                                log::info!("当前在命令行/终端环境中，跳过划词检测");
-                            }
-                        } else {
-                            log::debug!("不满足划词或双击条件，跳过");
-                        }
-                    }
-                }
-                EventType::MouseMove { x, y } => {
-                    let mouse_x = x as u64;
-                    let mouse_y = y as u64;
-
-                    if let Ok(mut pos_guard) = GLOBAL_STATE.last_mouse_pos.try_lock() {
-                        *pos_guard = (mouse_x, mouse_y);
-                    }
-                }
-                _ => {
-                }
-                }
-            }) {
-                log::error!("鼠标监听器启动失败: {:?}", error);
-            }
-        });
-
-        log::info!("跨平台鼠标监听器已启动");
+        log::info!("划词监听主控线程已启动");
     }
 }
 
@@ -444,7 +597,7 @@ fn perform_text_selection_detection(
 }
 
 /// 计算两点间距离
-fn calculate_distance(x1: u64, y1: u64, x2: u64, y2: u64) -> f64 {
+fn calculate_distance(x1: i32, y1: i32, x2: i32, y2: i32) -> f64 {
     let dx = x2 as f64 - x1 as f64;
     let dy = y2 as f64 - y1 as f64;
     (dx * dx + dy * dy).sqrt()

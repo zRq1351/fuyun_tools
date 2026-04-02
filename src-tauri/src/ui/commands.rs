@@ -3,7 +3,10 @@ use crate::core::config::{AIProvider, ProviderConfig};
 use crate::core::error::{to_frontend_error_string, AppError, AppResult, ErrorCode};
 use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
-use crate::services::image_clipboard_manager::emit_image_history_payload;
+use crate::services::clipboard_manager::set_clipboard_listener_enabled;
+use crate::services::image_clipboard_manager::{
+    emit_image_history_payload, set_image_clipboard_listener_enabled,
+};
 use crate::sync::Mutex;
 use crate::ui::window_manager::{
     hide_clipboard_window, hide_image_clipboard_window, hide_image_preview_window, set_window_position,
@@ -11,26 +14,26 @@ use crate::ui::window_manager::{
     show_image_preview_window,
 };
 use crate::utils::clipboard::ClipboardManager;
+#[cfg(debug_assertions)]
+use crate::utils::image_clipboard::get_image_persist_queue_metrics_snapshot;
 use crate::utils::image_clipboard::{
     is_fast_fill_verify_mode_enabled, set_image_fill_verify_mode, ImageClipboardManager,
     ImageHistoryPageData, ImageHistoryPreviewItem,
 };
 #[cfg(debug_assertions)]
-use crate::utils::image_clipboard::get_image_persist_queue_metrics_snapshot;
+use crate::utils::utils_helpers::get_dedup_scan_metrics;
 use crate::utils::utils_helpers::{
     default_explanation_prompt_template, default_translation_prompt_template,
     load_history_page_data_async, load_settings, save_settings, ClipboardHistoryPageData,
 };
-#[cfg(debug_assertions)]
-use crate::utils::utils_helpers::get_dedup_scan_metrics;
 use std::collections::HashMap;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex as StdMutex};
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -339,6 +342,93 @@ impl FillKind {
 
 fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
     mutex.lock().expect("infallible mutex lock failed")
+}
+
+fn is_screenshot_feature_enabled(state: &Arc<Mutex<SharedAppState>>) -> bool {
+    let guard = lock_arc_mutex(state);
+    guard.settings.screenshot_enabled
+}
+
+fn register_text_shortcut(
+    app: &AppHandle,
+    state: Arc<Mutex<SharedAppState>>,
+    hot_key: &str,
+) -> Result<(), String> {
+    let app_clone = app.clone();
+    let hot_key_string = hot_key.to_string();
+    app.global_shortcut()
+        .on_shortcut(hot_key, move |_app, _shortcut, event| {
+            if let ShortcutState::Pressed = event.state {
+                let sg = lock_arc_mutex(&state);
+                if !sg.settings.text_clipboard_enabled {
+                    return;
+                }
+                if !sg.is_visible && !sg.is_image_visible {
+                    let state_for_window = state.clone();
+                    drop(sg);
+                    interrupt_text_fill_flow(&state_for_window);
+                    show_clipboard_window(app_clone.clone(), state_for_window);
+                    features::mouse_listener::reset_ctrl_key_state();
+                }
+            }
+        })
+        .map_err(|e| {
+            frontend_error(
+                ErrorCode::ValidationError,
+                format!("快捷键被占用或注册失败：{}", hot_key_string),
+                e.to_string(),
+            )
+        })?;
+    Ok(())
+}
+
+fn register_image_shortcut(
+    app: &AppHandle,
+    state: Arc<Mutex<SharedAppState>>,
+    hot_key: &str,
+) -> Result<(), String> {
+    let app_clone = app.clone();
+    let hot_key_string = hot_key.to_string();
+    app.global_shortcut()
+        .on_shortcut(hot_key, move |_app, _shortcut, event| {
+            if let ShortcutState::Pressed = event.state {
+                let sg = lock_arc_mutex(&state);
+                if !sg.settings.image_clipboard_enabled {
+                    return;
+                }
+                if !sg.is_visible && !sg.is_image_visible {
+                    let state_for_window = state.clone();
+                    drop(sg);
+                    interrupt_image_fill_flow(&state_for_window);
+                    show_image_clipboard_window(app_clone.clone(), state_for_window);
+                }
+            }
+        })
+        .map_err(|e| {
+            frontend_error(
+                ErrorCode::ValidationError,
+                format!("图片窗口快捷键被占用或注册失败：{}", hot_key_string),
+                e.to_string(),
+            )
+        })?;
+    Ok(())
+}
+
+fn register_screenshot_shortcut(app: &AppHandle, hot_key: &str) -> Result<(), String> {
+    let app_clone = app.clone();
+    app.global_shortcut()
+        .on_shortcut(hot_key, move |_app, _shortcut, event| {
+            if let ShortcutState::Pressed = event.state {
+                let app_handle_inner = app_clone.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = open_screenshot_editor(app_handle_inner).await {
+                        log::error!("截图失败: {}", e);
+                    }
+                });
+            }
+        })
+        .map_err(|e| frontend_error(ErrorCode::SystemError, "注册截图快捷键失败", e.to_string()))?;
+    Ok(())
 }
 
 fn begin_fill_sequence(state: &Arc<Mutex<SharedAppState>>, kind: FillKind) -> u64 {
@@ -1719,12 +1809,24 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         serde_json::Value::String(settings.hot_key.clone()),
     );
     result.insert(
+        "text_clipboard_enabled".to_string(),
+        serde_json::Value::Bool(settings.text_clipboard_enabled),
+    );
+    result.insert(
         "image_hot_key".to_string(),
         serde_json::Value::String(settings.image_hot_key.clone()),
     );
     result.insert(
+        "image_clipboard_enabled".to_string(),
+        serde_json::Value::Bool(settings.image_clipboard_enabled),
+    );
+    result.insert(
         "screenshot_hot_key".to_string(),
         serde_json::Value::String(settings.screenshot_hot_key.clone()),
+    );
+    result.insert(
+        "screenshot_enabled".to_string(),
+        serde_json::Value::Bool(settings.screenshot_enabled),
     );
     result.insert(
         "selection_enabled".to_string(),
@@ -1889,6 +1991,9 @@ pub async fn save_app_settings(
     hot_key: Option<String>,
     image_hot_key: Option<String>,
     screenshot_hot_key: Option<String>,
+    text_clipboard_enabled: Option<bool>,
+    image_clipboard_enabled: Option<bool>,
+    screenshot_enabled: Option<bool>,
     selection_enabled: Option<bool>,
     grouped_items_protected_from_limit: Option<bool>,
     translation_prompt_template: Option<String>,
@@ -1916,6 +2021,15 @@ pub async fn save_app_settings(
     }
     if let Some(val) = image_disk_limit_mb {
         settings.image_disk_limit_mb = val;
+    }
+    if let Some(val) = text_clipboard_enabled {
+        settings.text_clipboard_enabled = val;
+    }
+    if let Some(val) = image_clipboard_enabled {
+        settings.image_clipboard_enabled = val;
+    }
+    if let Some(val) = screenshot_enabled {
+        settings.screenshot_enabled = val;
     }
     if let Some(val) = selection_enabled {
         settings.selection_enabled = val;
@@ -1957,33 +2071,13 @@ pub async fn save_app_settings(
 
         if hot_key_val != &settings.hot_key {
             let old_hot_key = settings.hot_key.clone();
-            let app_clone = app.clone();
-            let state_clone = state.inner().clone();
-            let hot_key_clone = hot_key_val.clone();
-            app.global_shortcut()
-                .on_shortcut(hot_key_val.as_str(), move |_app, _shortcut, event| {
-                    if let ShortcutState::Pressed = event.state {
-                        let sg = lock_arc_mutex(&state_clone);
-                        if !sg.is_visible {
-                            let state_for_window = state_clone.clone();
-                            drop(sg);
-                            interrupt_text_fill_flow(&state_for_window);
-                            show_clipboard_window(app_clone.clone(), state_for_window);
-                            features::mouse_listener::reset_ctrl_key_state();
-                        }
-                    }
-                })
-                .map_err(|e| {
-                    frontend_error(
-                        ErrorCode::ValidationError,
-                        format!("快捷键被占用或注册失败：{}", hot_key_val),
-                        e.to_string(),
-                    )
-                })?;
+            if settings.text_clipboard_enabled {
+                register_text_shortcut(&app, state.inner().clone(), hot_key_val.as_str())?;
+            }
             if let Err(e) = app.global_shortcut().unregister(old_hot_key.as_str()) {
                 log::warn!("注销旧快捷键 '{}' 失败 (可能从未注册成功): {}", old_hot_key, e);
             }
-            settings.hot_key = hot_key_clone;
+            settings.hot_key = hot_key_val.clone();
         }
     }
 
@@ -2016,28 +2110,9 @@ pub async fn save_app_settings(
             }
 
             let old_image_hot_key = settings.image_hot_key.clone();
-            let app_clone = app.clone();
-            let state_clone = state.inner().clone();
-            let image_hot_key_clone = image_hot_key_val.clone();
-            app.global_shortcut()
-                .on_shortcut(image_hot_key_val.as_str(), move |_app, _shortcut, event| {
-                    if let ShortcutState::Pressed = event.state {
-                        let sg = lock_arc_mutex(&state_clone);
-                        if !sg.is_visible && !sg.is_image_visible {
-                            let state_for_window = state_clone.clone();
-                            drop(sg);
-                            interrupt_image_fill_flow(&state_for_window);
-                            show_image_clipboard_window(app_clone.clone(), state_for_window);
-                        }
-                    }
-                })
-                .map_err(|e| {
-                    frontend_error(
-                        ErrorCode::ValidationError,
-                        format!("图片窗口快捷键被占用或注册失败：{}", image_hot_key_val),
-                        e.to_string(),
-                    )
-                })?;
+            if settings.image_clipboard_enabled {
+                register_image_shortcut(&app, state.inner().clone(), image_hot_key_val.as_str())?;
+            }
             if let Err(e) = app.global_shortcut().unregister(old_image_hot_key.as_str()) {
                 log::warn!(
                     "注销旧图片快捷键 '{}' 失败 (可能从未注册成功): {}",
@@ -2045,7 +2120,7 @@ pub async fn save_app_settings(
                     e
                 );
             }
-            settings.image_hot_key = image_hot_key_clone;
+            settings.image_hot_key = image_hot_key_val.clone();
         }
     }
 
@@ -2097,23 +2172,52 @@ pub async fn save_app_settings(
                     e
                 );
             }
-            let app_clone = app.clone();
-            let screenshot_hot_key_clone = screenshot_hot_key_val.clone();
-            app.global_shortcut()
-                .on_shortcut(screenshot_hot_key_val.as_str(), move |_app, _shortcut, event| {
-                    if let ShortcutState::Pressed = event.state {
-                        let app_handle_inner = app_clone.clone();
-                        tauri::async_runtime::spawn(async move {
-                            if let Err(e) = open_screenshot_editor(app_handle_inner).await {
-                                log::error!("截图失败: {}", e);
-                            }
-                        });
-                    }
-                })
-                .map_err(|e| {
-                    frontend_error(ErrorCode::SystemError, "注册截图快捷键失败", e.to_string())
-                })?;
-            settings.screenshot_hot_key = screenshot_hot_key_clone;
+            if settings.screenshot_enabled {
+                register_screenshot_shortcut(&app, screenshot_hot_key_val.as_str())?;
+            }
+            settings.screenshot_hot_key = screenshot_hot_key_val.clone();
+        }
+    }
+
+    if let Some(enabled) = text_clipboard_enabled {
+        if enabled {
+            if !app.global_shortcut().is_registered(settings.hot_key.as_str()) {
+                register_text_shortcut(&app, state.inner().clone(), settings.hot_key.as_str())?;
+            }
+        } else if let Err(e) = app.global_shortcut().unregister(settings.hot_key.as_str()) {
+            log::warn!("注销文字快捷键 '{}' 失败: {}", settings.hot_key, e);
+        }
+    }
+
+    if let Some(enabled) = image_clipboard_enabled {
+        if enabled {
+            if !app
+                .global_shortcut()
+                .is_registered(settings.image_hot_key.as_str())
+            {
+                register_image_shortcut(&app, state.inner().clone(), settings.image_hot_key.as_str())?;
+            }
+        } else if let Err(e) = app
+            .global_shortcut()
+            .unregister(settings.image_hot_key.as_str())
+        {
+            log::warn!("注销图片快捷键 '{}' 失败: {}", settings.image_hot_key, e);
+        }
+    }
+
+    if let Some(enabled) = screenshot_enabled {
+        if enabled {
+            if !app
+                .global_shortcut()
+                .is_registered(settings.screenshot_hot_key.as_str())
+            {
+                register_screenshot_shortcut(&app, settings.screenshot_hot_key.as_str())?;
+            }
+        } else if let Err(e) = app
+            .global_shortcut()
+            .unregister(settings.screenshot_hot_key.as_str())
+        {
+            log::warn!("注销截图快捷键 '{}' 失败: {}", settings.screenshot_hot_key, e);
         }
     }
 
@@ -2195,6 +2299,9 @@ pub async fn save_app_settings(
     set_image_fill_verify_mode(&settings.image_fill_verify_mode);
 
     let selection_enabled = settings.selection_enabled;
+    let text_clipboard_feature_enabled = settings.text_clipboard_enabled;
+    let image_clipboard_feature_enabled = settings.image_clipboard_enabled;
+    let screenshot_feature_enabled = settings.screenshot_enabled;
     let (clipboard_manager_arc, image_manager_arc) = {
         let mut state_guard = lock_arc_mutex(state.inner());
         state_guard.settings = settings.clone();
@@ -2230,6 +2337,19 @@ pub async fn save_app_settings(
         state.inner().clone(),
         selection_enabled,
     );
+    set_clipboard_listener_enabled(
+        app.clone(),
+        state.inner().clone(),
+        text_clipboard_feature_enabled,
+    );
+    set_image_clipboard_listener_enabled(
+        app.clone(),
+        state.inner().clone(),
+        image_clipboard_feature_enabled,
+    );
+    if !screenshot_feature_enabled {
+        let _ = close_screenshot_window(app.clone()).await;
+    }
 
     log::info!("设置保存成功（部分更新）");
     Ok(())
@@ -2517,8 +2637,17 @@ pub async fn check_previews_ready(
 
 /// 开始截图（全屏）
 #[tauri::command]
-pub async fn start_screenshot() -> Result<serde_json::Value, String> {
+pub async fn start_screenshot(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<serde_json::Value, String> {
     use crate::features::screenshot::capture;
+    if !is_screenshot_feature_enabled(state.inner()) {
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "截图功能已停用",
+            "screenshot feature disabled",
+        ));
+    }
 
     log::info!("开始全屏截图");
 
@@ -2567,8 +2696,16 @@ pub async fn capture_region(
     y: i32,
     width: u32,
     height: u32,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<serde_json::Value, String> {
     use crate::features::screenshot::capture;
+    if !is_screenshot_feature_enabled(state.inner()) {
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "截图功能已停用",
+            "screenshot feature disabled",
+        ));
+    }
 
     log::info!("捕获区域: ({}, {}) {}x{}", x, y, width, height);
 
@@ -2788,6 +2925,11 @@ pub async fn get_screen_size() -> Result<serde_json::Value, String> {
 #[tauri::command]
 pub async fn set_screenshot_clipboard_link_once(linked: bool) -> Result<(), String> {
     use crate::features::screenshot::capture;
+    if let Ok(settings) = load_settings() {
+        if !settings.screenshot_enabled {
+            return Ok(());
+        }
+    }
     capture::set_allow_image_clipboard_once(linked);
     Ok(())
 }
@@ -2795,6 +2937,15 @@ pub async fn set_screenshot_clipboard_link_once(linked: bool) -> Result<(), Stri
 /// 打开截图编辑窗口
 #[tauri::command]
 pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
+    if let Ok(settings) = load_settings() {
+        if !settings.screenshot_enabled {
+            return Err(frontend_error(
+                ErrorCode::ValidationError,
+                "截图功能已停用",
+                "screenshot feature disabled",
+            ));
+        }
+    }
     log::info!("打开截图编辑窗口");
 
     use crate::features::screenshot::capture;

@@ -8,9 +8,9 @@ pub mod sync;
 use crate::core::app_state::AppState;
 use crate::core::error::install_global_panic_hook;
 use crate::services::ai_services::{stream_explain_text, stream_translate_text};
-use crate::services::clipboard_manager::start_clipboard_listener;
+use crate::services::clipboard_manager::set_clipboard_listener_enabled;
 use crate::services::image_clipboard_manager::{
-    emit_image_history_payload, start_image_clipboard_listener,
+    emit_image_history_payload, set_image_clipboard_listener_enabled,
 };
 use crate::sync::Mutex;
 use crate::ui::commands::*;
@@ -76,58 +76,87 @@ pub fn run() {
                 let guard = lock_state(&state_arc);
                 guard.settings.screenshot_hot_key.clone()
             };
+            let text_clipboard_enabled = {
+                let guard = lock_state(&state_arc);
+                guard.settings.text_clipboard_enabled
+            };
+            let image_clipboard_enabled = {
+                let guard = lock_state(&state_arc);
+                guard.settings.image_clipboard_enabled
+            };
+            let screenshot_enabled = {
+                let guard = lock_state(&state_arc);
+                guard.settings.screenshot_enabled
+            };
             let mut shortcut_conflicts: Vec<String> = Vec::new();
-            if let Err(e) = app.global_shortcut()
-                .on_shortcut(hot_key.as_str(), move |_app, _shortcut, event| {
-                    if let ShortcutState::Pressed = event.state {
-                        let state_guard = lock_state(&state_clone);
-                        if !state_guard.is_visible && !state_guard.is_image_visible {
-                            drop(state_guard);
-                            crate::ui::commands::interrupt_text_fill_flow(&state_clone);
-                            show_clipboard_window(app_handle_clone.clone(), state_clone.clone());
-
-                            features::mouse_listener::reset_ctrl_key_state();
+            if text_clipboard_enabled {
+                if let Err(e) = app.global_shortcut()
+                    .on_shortcut(hot_key.as_str(), move |_app, _shortcut, event| {
+                        if let ShortcutState::Pressed = event.state {
+                            let state_guard = lock_state(&state_clone);
+                            if !state_guard.settings.text_clipboard_enabled {
+                                return;
+                            }
+                            if !state_guard.is_visible && !state_guard.is_image_visible {
+                                drop(state_guard);
+                                crate::ui::commands::interrupt_text_fill_flow(&state_clone);
+                                show_clipboard_window(app_handle_clone.clone(), state_clone.clone());
+                                features::mouse_listener::reset_ctrl_key_state();
+                            }
                         }
-                    }
-                })
-            {
-                log::warn!("文字窗口快捷键 '{}' 注册失败: {}", hot_key, e);
-                shortcut_conflicts.push(format!("文字窗口：{}", hot_key));
+                    })
+                {
+                    log::warn!("文字窗口快捷键 '{}' 注册失败: {}", hot_key, e);
+                    shortcut_conflicts.push(format!("文字窗口：{}", hot_key));
+                }
             }
 
             let state_clone_image = state_arc.clone();
             let app_handle_clone_image = app_handle.clone();
-            if let Err(e) = app.global_shortcut()
-                .on_shortcut(image_hot_key.as_str(), move |_app, _shortcut, event| {
-                    if let ShortcutState::Pressed = event.state {
-                        let state_guard = lock_state(&state_clone_image);
-                        if !state_guard.is_visible && !state_guard.is_image_visible {
-                            drop(state_guard);
-                            crate::ui::commands::interrupt_image_fill_flow(&state_clone_image);
-                            show_image_clipboard_window(app_handle_clone_image.clone(), state_clone_image.clone());
+            if image_clipboard_enabled {
+                if let Err(e) = app.global_shortcut()
+                    .on_shortcut(image_hot_key.as_str(), move |_app, _shortcut, event| {
+                        if let ShortcutState::Pressed = event.state {
+                            let state_guard = lock_state(&state_clone_image);
+                            if !state_guard.settings.image_clipboard_enabled {
+                                return;
+                            }
+                            if !state_guard.is_visible && !state_guard.is_image_visible {
+                                drop(state_guard);
+                                crate::ui::commands::interrupt_image_fill_flow(&state_clone_image);
+                                show_image_clipboard_window(app_handle_clone_image.clone(), state_clone_image.clone());
+                            }
                         }
-                    }
-                })
-            {
-                log::warn!("图片窗口快捷键 '{}' 注册失败: {}", image_hot_key, e);
-                shortcut_conflicts.push(format!("图片窗口：{}", image_hot_key));
+                    })
+                {
+                    log::warn!("图片窗口快捷键 '{}' 注册失败: {}", image_hot_key, e);
+                    shortcut_conflicts.push(format!("图片窗口：{}", image_hot_key));
+                }
             }
 
             let app_handle_clone_screenshot = app_handle.clone();
-            if let Err(e) = app.global_shortcut()
-                .on_shortcut(screenshot_hot_key.as_str(), move |_app, _shortcut, event| {
-                    if let ShortcutState::Pressed = event.state {
-                        let app_handle_inner = app_handle_clone_screenshot.clone();
-                        tauri::async_runtime::spawn(async move {
-                            if let Err(e) = crate::ui::commands::open_screenshot_editor(app_handle_inner).await {
-                                log::error!("截图失败: {}", e);
+            let state_clone_screenshot = state_arc.clone();
+            if screenshot_enabled {
+                if let Err(e) = app.global_shortcut()
+                    .on_shortcut(screenshot_hot_key.as_str(), move |_app, _shortcut, event| {
+                        if let ShortcutState::Pressed = event.state {
+                            let state_guard = lock_state(&state_clone_screenshot);
+                            if !state_guard.settings.screenshot_enabled {
+                                return;
                             }
-                        });
-                    }
-                })
-            {
-                log::warn!("截图快捷键 '{}' 注册失败: {}", screenshot_hot_key, e);
-                shortcut_conflicts.push(format!("截图：{}", screenshot_hot_key));
+                            drop(state_guard);
+                            let app_handle_inner = app_handle_clone_screenshot.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(e) = crate::ui::commands::open_screenshot_editor(app_handle_inner).await {
+                                    log::error!("截图失败: {}", e);
+                                }
+                            });
+                        }
+                    })
+                {
+                    log::warn!("截图快捷键 '{}' 注册失败: {}", screenshot_hot_key, e);
+                    shortcut_conflicts.push(format!("截图：{}", screenshot_hot_key));
+                }
             }
 
             if !shortcut_conflicts.is_empty() {
@@ -143,8 +172,16 @@ pub fn run() {
                 }
             }
 
-            start_clipboard_listener(app_handle.clone(), state_arc.clone());
-            start_image_clipboard_listener(app_handle.clone(), state_arc.clone());
+            set_clipboard_listener_enabled(
+                app_handle.clone(),
+                state_arc.clone(),
+                text_clipboard_enabled,
+            );
+            set_image_clipboard_listener_enabled(
+                app_handle.clone(),
+                state_arc.clone(),
+                image_clipboard_enabled,
+            );
 
             // 初始化异步预览生成器，支持事件通知
             crate::utils::image_clipboard::init_preview_generator_with_app_handle(app_handle.clone());
@@ -152,7 +189,12 @@ pub fn run() {
             emit_image_history_payload(app_handle, state_arc.clone());
 
             #[cfg(windows)]
-            start_text_selection_listener(app_handle.clone(), state_arc.clone());
+            if {
+                let guard = lock_state(&state_arc);
+                guard.settings.selection_enabled
+            } {
+                start_text_selection_listener(app_handle.clone(), state_arc.clone());
+            }
 
             #[cfg(desktop)]
             app_handle
