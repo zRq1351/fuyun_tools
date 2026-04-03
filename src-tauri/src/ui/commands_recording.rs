@@ -124,11 +124,11 @@ pub async fn show_recording_toolbar(app: AppHandle) -> Result<(), String> {
             .transparent(true)
             .always_on_top(true)
             .skip_taskbar(true)
-            .inner_size(630.0, 50.0)
+            .inner_size(630.0, 70.0)
             .build()
             .map_err(|e| format!("创建录制工具栏窗口失败: {}", e))?
     };
-    let _ = window.set_size(tauri::PhysicalSize::new(630, 50));
+    let _ = window.set_size(tauri::PhysicalSize::new(630, 70));
     move_window_top_center(&window);
     let content_protected = load_settings()
         .map(|settings| settings.recording_toolbar_content_protected)
@@ -160,7 +160,7 @@ pub async fn resize_recording_toolbar(
         } else if request.open_overlay {
             120
         } else {
-            50
+            70
         };
         (630, h)
     };
