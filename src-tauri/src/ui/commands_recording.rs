@@ -6,6 +6,7 @@ use crate::features::recording::types::{
     SessionRequest, StartRecordingRequest,
 };
 use crate::sync::Mutex;
+use crate::utils::utils_helpers::load_settings;
 use serde::Deserialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State, WebviewUrl};
@@ -16,6 +17,20 @@ use tauri_plugin_positioner::WindowExt;
 pub struct ResizeRecordingToolbarRequest {
     pub open_select: bool,
     pub open_overlay: bool,
+    #[serde(default)]
+    pub compact_mode: bool,
+}
+
+fn move_window_top_center(window: &tauri::WebviewWindow) {
+    if let (Ok(size), Ok(Some(monitor))) = (window.outer_size(), window.current_monitor()) {
+        let mon_pos = monitor.position();
+        let mon_size = monitor.size();
+        let x = mon_pos.x + (mon_size.width as i32 - size.width as i32) / 2;
+        let y = mon_pos.y;
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    } else {
+        let _ = window.move_window(tauri_plugin_positioner::Position::TopCenter);
+    }
 }
 
 #[tauri::command]
@@ -92,24 +107,6 @@ pub async fn open_recording_folder(
 }
 
 #[tauri::command]
-pub async fn open_recording_window(app: AppHandle) -> Result<(), String> {
-    let window = if let Some(existing) = app.get_webview_window("recording") {
-        existing
-    } else {
-        tauri::WebviewWindowBuilder::new(&app, "recording", WebviewUrl::App("recording.html".into()))
-            .title("录屏")
-            .visible(false)
-            .resizable(true)
-            .inner_size(840.0, 620.0)
-            .build()
-            .map_err(|e| format!("创建录屏控制台窗口失败: {}", e))?
-    };
-    let _ = window.show();
-    let _ = window.set_focus();
-    Ok(())
-}
-
-#[tauri::command]
 pub async fn show_recording_toolbar(app: AppHandle) -> Result<(), String> {
     let label = "recording_toolbar";
     let created;
@@ -127,23 +124,19 @@ pub async fn show_recording_toolbar(app: AppHandle) -> Result<(), String> {
             .transparent(true)
             .always_on_top(true)
             .skip_taskbar(true)
-            .inner_size(630.0, 70.0)
+            .inner_size(630.0, 50.0)
             .build()
             .map_err(|e| format!("创建录制工具栏窗口失败: {}", e))?
     };
-    let _ = window.set_size(tauri::PhysicalSize::new(630, 70));
+    let _ = window.set_size(tauri::PhysicalSize::new(630, 50));
+    move_window_top_center(&window);
+    let content_protected = load_settings()
+        .map(|settings| settings.recording_toolbar_content_protected)
+        .unwrap_or(false);
+    let _ = window.set_content_protected(content_protected);
     // 首次创建时，定位到当前屏幕上方居中
     if created {
-        if let (Ok(size), Ok(Some(monitor))) = (window.outer_size(), window.current_monitor()) {
-            let mon_pos = monitor.position();
-            let mon_size = monitor.size();
-            let x = mon_pos.x + (mon_size.width as i32 - size.width as i32) / 2;
-            let y = mon_pos.y + 16; // 距离屏幕顶端 16px
-            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
-        } else {
-            // 兜底：无法获取监视器信息时，使用插件器居中
-            let _ = window.move_window(tauri_plugin_positioner::Position::TopCenter);
-        }
+        move_window_top_center(&window);
     }
     let _ = window.show();
     let _ = window.set_focus();
@@ -158,17 +151,30 @@ pub async fn resize_recording_toolbar(
     let Some(window) = app.get_webview_window("recording_toolbar") else {
         return Ok(());
     };
-    let width = 630;
-    let height = if request.open_select {
-        340
-    } else if request.open_overlay {
-        120
+    let prev_size = window.outer_size().ok();
+    let (width, height) = if request.compact_mode {
+        (170, 26)
     } else {
-        70
+        let h = if request.open_select {
+            340
+        } else if request.open_overlay {
+            120
+        } else {
+            50
+        };
+        (630, h)
     };
     window
         .set_size(tauri::PhysicalSize::new(width, height))
         .map_err(|e| format!("调整录制工具栏窗口尺寸失败: {}", e))?;
+    if request.compact_mode {
+        move_window_top_center(&window);
+    } else if let Some(prev) = prev_size {
+        // 从胶囊(窄窗口)切回完整工具栏时，重新吸附到上方居中，避免视觉偏移
+        if prev.width <= 260 {
+            move_window_top_center(&window);
+        }
+    }
     Ok(())
 }
 #[tauri::command]

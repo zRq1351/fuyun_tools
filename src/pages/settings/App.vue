@@ -195,6 +195,7 @@ const form = reactive({
   recordingMicrophoneDeviceId: '',
   recordingOutputDir: '',
   recordingAutoOpenFolder: true,
+  recordingToolbarContentProtected: false,
   recordingMaxDurationMinutes: 180,
   recordingFileNameTemplate: '{timestamp}',
   aiProvider: '',
@@ -254,6 +255,7 @@ const saveInitialFormState = () => {
     recordingMicrophoneDeviceId: form.recordingMicrophoneDeviceId,
     recordingOutputDir: form.recordingOutputDir,
     recordingAutoOpenFolder: form.recordingAutoOpenFolder,
+    recordingToolbarContentProtected: form.recordingToolbarContentProtected,
     recordingMaxDurationMinutes: form.recordingMaxDurationMinutes,
     recordingFileNameTemplate: form.recordingFileNameTemplate,
     aiProvider: form.aiProvider,
@@ -340,6 +342,9 @@ const getChangedFields = () => {
   }
   if (form.recordingAutoOpenFolder !== initial.recordingAutoOpenFolder) {
     changedFields.recordingAutoOpenFolder = form.recordingAutoOpenFolder
+  }
+  if (form.recordingToolbarContentProtected !== initial.recordingToolbarContentProtected) {
+    changedFields.recordingToolbarContentProtected = form.recordingToolbarContentProtected
   }
   if (form.recordingMaxDurationMinutes !== initial.recordingMaxDurationMinutes) {
     changedFields.recordingMaxDurationMinutes = form.recordingMaxDurationMinutes
@@ -531,6 +536,7 @@ onMounted(async () => {
     form.recordingMicrophoneDeviceId = settings.recording_microphone_device_id || ''
     form.recordingOutputDir = settings.recording_output_dir || ''
     form.recordingAutoOpenFolder = settings.recording_auto_open_folder !== false
+    form.recordingToolbarContentProtected = settings.recording_toolbar_content_protected === true
     form.recordingMaxDurationMinutes = Number(settings.recording_max_duration_minutes || 180)
     form.recordingFileNameTemplate = settings.recording_file_name_template || '{timestamp}'
     form.selectionEnabled = settings.selection_enabled !== false

@@ -54,6 +54,8 @@ pub struct AppSettingsData {
     pub recording_output_dir: String,
     #[serde(default = "default_recording_auto_open_folder")]
     pub recording_auto_open_folder: bool,
+    #[serde(default = "default_recording_toolbar_content_protected")]
+    pub recording_toolbar_content_protected: bool,
     #[serde(default = "default_recording_max_duration_minutes")]
     pub recording_max_duration_minutes: u32,
     #[serde(default = "default_recording_file_name_template")]
@@ -101,6 +103,7 @@ impl Default for AppSettingsData {
             recording_microphone_device_id: String::new(),
             recording_output_dir: default_recording_output_dir(),
             recording_auto_open_folder: default_recording_auto_open_folder(),
+            recording_toolbar_content_protected: default_recording_toolbar_content_protected(),
             recording_max_duration_minutes: default_recording_max_duration_minutes(),
             recording_file_name_template: default_recording_file_name_template(),
             ai_provider: "deepseek".to_string(),
@@ -189,6 +192,10 @@ fn default_recording_output_dir() -> String {
 
 fn default_recording_auto_open_folder() -> bool {
     true
+}
+
+fn default_recording_toolbar_content_protected() -> bool {
+    false
 }
 
 fn default_recording_max_duration_minutes() -> u32 {

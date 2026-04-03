@@ -1,38 +1,24 @@
 <template>
   <el-config-provider :locale="zhCn">
-    <div class="bar" data-tauri-drag-region>
-      <div class="time">{{ elapsedText }}</div>
+    <div
+        :class="{'bar-collapsed': isToolbarCollapsed}"
+        :data-tauri-drag-region="isToolbarCollapsed ? null : ''"
+        class="bar"
+        @mouseenter="onBarMouseEnter"
+        @mouseleave="onBarMouseLeave"
+    >
+      <div
+          v-if="isToolbarCollapsed"
+          :data-state="rawRecordingState"
+          :title="collapsedPillText"
+          class="collapsed-pill"
+      ></div>
 
-      <span class="no-drag">
-        <el-popover
-            v-model:visible="fpsPopoverVisible"
-            placement="bottom-start"
-            popper-class="recording-toolbar-select-popper"
-            trigger="click"
-            @hide="onSelectVisibleChange(false)"
-            @show="onSelectVisibleChange(true)"
-        >
-          <div class="fps-list">
-            <div
-                v-for="v in fpsOptions"
-                :key="v"
-                :data-active="v === fps"
-                class="fps-item"
-                @click="selectFps(v)"
-            >
-              {{ v }}fps
-            </div>
-          </div>
-          <template #reference>
-            <el-button class="fps-btn" size="small" style="width: 90px">{{ fps }}fps</el-button>
-          </template>
-        </el-popover>
-      </span>
-
+      <div v-else class="expanded-content">
+        <div class="time">{{ elapsedText }}</div>
       <span class="no-drag" @mouseenter="onButtonHoverChange(true)" @mouseleave="onButtonHoverChange(false)">
         <el-popover
             v-model:visible="microphonePopoverVisible"
-            :width="microphoneListWidth"
             placement="bottom-start"
             popper-class="recording-toolbar-select-popper"
             trigger="manual"
@@ -171,6 +157,8 @@
         </el-tooltip>
       </span>
       <span class="no-drag" @mouseenter="onButtonHoverChange(true)" @mouseleave="onButtonHoverChange(false)">
+        <el-tooltip :content="closeTooltipText" effect="dark" placement="bottom"
+                    @visible-change="onTooltipVisibleChange">
           <el-button
               circle
               class="icon-btn"
@@ -179,13 +167,15 @@
           >
             <el-icon><Close/></el-icon>
           </el-button>
+        </el-tooltip>
       </span>
+      </div>
     </div>
   </el-config-provider>
 </template>
 
 <script setup>
-import {computed, onBeforeUnmount, onMounted, reactive, ref} from 'vue'
+import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from 'vue'
 import zhCn from 'element-plus/dist/locale/zh-cn'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWindow} from '@tauri-apps/api/window'
@@ -204,15 +194,16 @@ const systemOutputId = ref(null)
 const microphones = ref([])
 const microphoneDeviceId = ref(null)
 const fps = ref(30)
-const fpsPopoverVisible = ref(false)
-const fpsOptions = [15, 20, 24, 30, 45, 60]
 const state = reactive({state: 'idle', sessionId: null, elapsedMs: 0})
 let unlistenStateChanged = null
 let openSelectCount = 0
 let openTooltipCount = 0
 let openButtonHoverCount = 0
 let tooltipHideResizeTimer = null
+let toolbarCollapseTimer = null
 const TOOLTIP_HIDE_GRACE_MS = 450
+const TOOLBAR_COLLAPSE_GRACE_MS = 220
+const isToolbarCollapsed = ref(false)
 
 let _measureCanvas = null
 const ensureMeasureCtx = () => {
@@ -242,19 +233,63 @@ const microphoneListWidth = computed(() => computeListWidth(microphones.value, i
 const systemOutputListWidth = computed(() => computeListWidth(systemOutputs.value, it => it.name))
 
 const elapsedText = computed(() => `${Math.floor(state.elapsedMs / 1000)}s`)
+const rawRecordingState = computed(() => String(state.state || 'idle').toLowerCase())
 const currentRecordingState = computed(() => {
-  const normalized = String(state.state || '').toLowerCase()
-  if (normalized === 'idle' || normalized === 'recording' || normalized === 'paused') {
+  const normalized = rawRecordingState.value
+  if (
+      normalized === 'idle'
+      || normalized === 'recording'
+      || normalized === 'paused'
+      || normalized === 'starting'
+      || normalized === 'stopping'
+      || normalized === 'error'
+  ) {
     return normalized
   }
   return state.sessionId ? 'recording' : 'idle'
 })
-const canStart = computed(() => !loading.value && currentRecordingState.value === 'idle')
-const canPause = computed(() => !loading.value && currentRecordingState.value === 'recording')
-const canResume = computed(() => !loading.value && currentRecordingState.value === 'paused')
-const canStop = computed(() =>
-    !loading.value && (currentRecordingState.value === 'recording' || currentRecordingState.value === 'paused')
+const recordingHintText = computed(() => {
+  if (rawRecordingState.value === 'recording') return '正在录屏'
+  if (rawRecordingState.value === 'paused') return '录屏已暂停'
+  if (rawRecordingState.value === 'starting') return '录屏启动中'
+  if (rawRecordingState.value === 'stopping') return '录屏停止中'
+  if (rawRecordingState.value === 'error') return '录屏异常'
+  return '录屏处理中'
+})
+const collapsedPillText = computed(() => {
+  if (rawRecordingState.value === 'recording' || rawRecordingState.value === 'paused') {
+    return `${recordingHintText.value} · ${elapsedText.value}`
+  }
+  return recordingHintText.value
+})
+const phaseActionRules = computed(() => {
+  switch (currentRecordingState.value) {
+    case 'recording':
+      return {start: false, pause: true, resume: false, stop: true}
+    case 'paused':
+      return {start: false, pause: false, resume: true, stop: true}
+    case 'starting':
+    case 'stopping':
+      return {start: false, pause: false, resume: false, stop: false}
+    case 'error':
+      return {start: true, pause: false, resume: false, stop: false}
+    default:
+      return {start: true, pause: false, resume: false, stop: false}
+  }
+})
+const canStart = computed(() => !loading.value && phaseActionRules.value.start)
+const canPause = computed(() => !loading.value && phaseActionRules.value.pause)
+const canResume = computed(() => !loading.value && phaseActionRules.value.resume)
+const canStop = computed(() => !loading.value && phaseActionRules.value.stop)
+const isRecordingSessionActive = computed(() =>
+    ['starting', 'recording', 'paused', 'stopping'].includes(currentRecordingState.value)
 )
+const closeTooltipText = computed(() => {
+  if (currentRecordingState.value === 'recording' || currentRecordingState.value === 'paused') {
+    return '隐藏工具栏（录制继续）'
+  }
+  return '关闭工具栏'
+})
 
 const refresh = async () => {
   const data = await RecordingService.getState()
@@ -336,12 +371,47 @@ const closeBar = async () => {
 
 const applyToolbarWindowSize = async () => {
   try {
-    await RecordingService.resizeToolbar(openSelectCount > 0, openTooltipCount > 0 || openButtonHoverCount > 0)
+    await RecordingService.resizeToolbar(
+        openSelectCount > 0,
+        openTooltipCount > 0 || openButtonHoverCount > 0,
+        isToolbarCollapsed.value
+    )
   } catch (_e) {
   }
 }
 
 const hasExpandedOverlay = () => openSelectCount > 0 || openTooltipCount > 0 || openButtonHoverCount > 0
+
+const clearToolbarCollapseTimer = () => {
+  if (!toolbarCollapseTimer) return
+  clearTimeout(toolbarCollapseTimer)
+  toolbarCollapseTimer = null
+}
+
+const setToolbarCollapsed = async (collapsed) => {
+  const next = collapsed && isRecordingSessionActive.value
+  if (isToolbarCollapsed.value === next) return
+  isToolbarCollapsed.value = next
+  await applyToolbarWindowSize()
+}
+
+const scheduleToolbarCollapse = () => {
+  clearToolbarCollapseTimer()
+  if (!isRecordingSessionActive.value || hasExpandedOverlay()) return
+  toolbarCollapseTimer = setTimeout(() => {
+    toolbarCollapseTimer = null
+    setToolbarCollapsed(true)
+  }, TOOLBAR_COLLAPSE_GRACE_MS)
+}
+
+const onBarMouseEnter = async () => {
+  clearToolbarCollapseTimer()
+  await setToolbarCollapsed(false)
+}
+
+const onBarMouseLeave = () => {
+  scheduleToolbarCollapse()
+}
 
 const scheduleShrinkToolbarWindowSize = () => {
   if (tooltipHideResizeTimer) {
@@ -350,7 +420,11 @@ const scheduleShrinkToolbarWindowSize = () => {
   tooltipHideResizeTimer = setTimeout(() => {
     tooltipHideResizeTimer = null
     if (!hasExpandedOverlay()) {
-      applyToolbarWindowSize()
+      if (isRecordingSessionActive.value) {
+        scheduleToolbarCollapse()
+      } else {
+        setToolbarCollapsed(false)
+      }
     }
   }, TOOLTIP_HIDE_GRACE_MS)
 }
@@ -363,6 +437,7 @@ const onSelectVisibleChange = async (visible) => {
   openSelectCount += visible ? 1 : -1
   if (openSelectCount < 0) openSelectCount = 0
   if (hasExpandedOverlay()) {
+    await setToolbarCollapsed(false)
     await applyToolbarWindowSize()
   } else {
     scheduleShrinkToolbarWindowSize()
@@ -376,6 +451,7 @@ const onTooltipVisibleChange = async (visible) => {
       tooltipHideResizeTimer = null
     }
     openTooltipCount += 1
+    await setToolbarCollapsed(false)
     await applyToolbarWindowSize()
     return
   }
@@ -397,15 +473,11 @@ const onButtonHoverChange = async (visible) => {
   openButtonHoverCount += visible ? 1 : -1
   if (openButtonHoverCount < 0) openButtonHoverCount = 0
   if (hasExpandedOverlay()) {
+    await setToolbarCollapsed(false)
     await applyToolbarWindowSize()
   } else {
     scheduleShrinkToolbarWindowSize()
   }
-}
-
-const selectFps = async (v) => {
-  fps.value = v
-  fpsPopoverVisible.value = false
 }
 
 const toggleMicrophone = async () => {
@@ -481,6 +553,22 @@ onMounted(async () => {
     ElMessage.error(`加载麦克风设备失败: ${String(e)}`)
   }
   await refresh()
+  if (isRecordingSessionActive.value) {
+    scheduleToolbarCollapse()
+  } else {
+    await setToolbarCollapsed(false)
+  }
+})
+
+watch(currentRecordingState, async (next) => {
+  if (next === 'idle' || next === 'error') {
+    clearToolbarCollapseTimer()
+    await setToolbarCollapsed(false)
+    return
+  }
+  if (isRecordingSessionActive.value) {
+    scheduleToolbarCollapse()
+  }
 })
 
 onBeforeUnmount(() => {
@@ -488,6 +576,7 @@ onBeforeUnmount(() => {
     clearTimeout(tooltipHideResizeTimer)
     tooltipHideResizeTimer = null
   }
+  clearToolbarCollapseTimer()
   if (unlistenStateChanged) unlistenStateChanged()
 })
 </script>
@@ -522,27 +611,6 @@ html, body, #app {
 }
 
 .recording-toolbar-select-popper .el-select-dropdown__item.selected {
-  color: #7bb8ff;
-  font-weight: 600;
-}
-
-.recording-toolbar-select-popper .fps-list {
-  min-width: 96px;
-}
-
-.recording-toolbar-select-popper .fps-item {
-  line-height: 32px;
-  padding: 0 10px;
-  color: #e9eefc;
-  cursor: pointer;
-  border-radius: 6px;
-}
-
-.recording-toolbar-select-popper .fps-item:hover {
-  background: rgba(114, 183, 255, 0.18);
-}
-
-.recording-toolbar-select-popper .fps-item[data-active="true"] {
   color: #7bb8ff;
   font-weight: 600;
 }
@@ -592,6 +660,7 @@ html, body, #app {
 
 <style scoped>
 .bar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -606,6 +675,28 @@ html, body, #app {
   -webkit-app-region: drag;
 }
 
+.bar.bar-collapsed {
+  width: 100%;
+  height: 100%;
+  padding: 2px;
+  gap: 0;
+  justify-content: center;
+  align-items: center;
+  border-radius: 999px;
+  background: transparent;
+  border: none;
+  overflow: visible;
+  box-sizing: border-box;
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+.expanded-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .time {
   min-width: 54px;
   color: #fff;
@@ -613,6 +704,48 @@ html, body, #app {
   font-weight: 600;
   text-align: center;
   user-select: none;
+}
+
+.collapsed-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  height: calc(100% - 1px);
+  padding: 0;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2f9dfb 0%, #5fc0ff 100%);
+  border: 1px solid rgba(118, 196, 255, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(20, 62, 92, 0.22);
+  user-select: none;
+  pointer-events: none;
+}
+
+.bar:not(.bar-collapsed) .collapsed-pill {
+  flex: none;
+  width: 166px;
+  height: 22px;
+}
+
+.collapsed-pill[data-state="paused"] {
+  background: linear-gradient(90deg, #e4b22c 0%, #ffd96f 100%);
+  border-color: rgba(255, 219, 116, 0.95);
+  box-shadow: inset 0 0 0 1px rgba(107, 79, 16, 0.2);
+}
+
+.collapsed-pill[data-state="stopping"],
+.collapsed-pill[data-state="starting"] {
+  background: linear-gradient(90deg, #6ea7d3 0%, #8ac0ea 100%);
+  border-color: rgba(163, 208, 238, 0.9);
+}
+
+.collapsed-pill[data-state="error"] {
+  background: linear-gradient(90deg, #d55b5b 0%, #ef8b8b 100%);
+  border-color: rgba(244, 159, 159, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(116, 37, 37, 0.24);
 }
 
 .no-drag {

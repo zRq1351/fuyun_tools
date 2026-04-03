@@ -49,8 +49,9 @@
       <el-form-item label="录制完成自动打开目录">
         <el-switch v-model="form.recordingAutoOpenFolder" active-text="开启" inactive-text="关闭"/>
       </el-form-item>
-      <el-form-item label="录屏控制台">
-        <el-button type="primary" @click="openRecordingConsole">打开录屏控制台</el-button>
+      <el-form-item label="工具栏内容保护">
+        <el-switch v-model="form.recordingToolbarContentProtected" active-text="开启" inactive-text="关闭"/>
+        <div class="form-hint">开启后录屏工具栏窗口将尝试禁止被录制与截屏</div>
       </el-form-item>
     </el-card>
   </el-form>
@@ -58,8 +59,6 @@
 
 <script setup>
 import {Edit, VideoPause} from '@element-plus/icons-vue'
-import {ElMessage} from 'element-plus'
-import {WindowService} from '../../../services/ipc'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
 
 const props = defineProps({
@@ -74,14 +73,6 @@ const {
   currentDisplayValue: recordingDisplayValue,
   toggleRecording: toggleRecordingHotkey
 } = useShortcutRecorder(props.form, 'recordingToggleShortcut')
-
-const openRecordingConsole = async () => {
-  try {
-    await WindowService.openRecordingWindow()
-  } catch (error) {
-    ElMessage.error(String(error))
-  }
-}
 </script>
 
 <style scoped>

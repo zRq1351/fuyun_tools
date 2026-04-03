@@ -1916,6 +1916,10 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         serde_json::Value::Bool(settings.recording_auto_open_folder),
     );
     result.insert(
+        "recording_toolbar_content_protected".to_string(),
+        serde_json::Value::Bool(settings.recording_toolbar_content_protected),
+    );
+    result.insert(
         "recording_max_duration_minutes".to_string(),
         serde_json::Value::Number(serde_json::Number::from(
             settings.recording_max_duration_minutes,
@@ -2107,6 +2111,7 @@ pub async fn save_app_settings(
     recording_microphone_device_id: Option<String>,
     recording_output_dir: Option<String>,
     recording_auto_open_folder: Option<bool>,
+    recording_toolbar_content_protected: Option<bool>,
     recording_max_duration_minutes: Option<u32>,
     recording_file_name_template: Option<String>,
     app: AppHandle,
@@ -2197,6 +2202,9 @@ pub async fn save_app_settings(
     }
     if let Some(val) = recording_auto_open_folder {
         settings.recording_auto_open_folder = val;
+    }
+    if let Some(val) = recording_toolbar_content_protected {
+        settings.recording_toolbar_content_protected = val;
     }
     if let Some(val) = recording_max_duration_minutes {
         settings.recording_max_duration_minutes = val.clamp(1, 1440);
@@ -2580,6 +2588,11 @@ pub async fn save_app_settings(
             state.inner().clone(),
             crate::features::recording::types::SessionRequest { session_id: None },
         );
+    }
+    if let Some(content_protected) = recording_toolbar_content_protected {
+        if let Some(window) = app.get_webview_window("recording_toolbar") {
+            let _ = window.set_content_protected(content_protected);
+        }
     }
 
     log::info!("设置保存成功（部分更新）");

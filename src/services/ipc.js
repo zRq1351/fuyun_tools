@@ -84,7 +84,6 @@ export const IPC_COMMANDS = {
     LIST_RECORDING_AUDIO_DEVICES: 'list_recording_audio_devices',
     LIST_RECORDING_SYSTEM_OUTPUT_DEVICES: 'list_recording_system_output_devices',
     OPEN_RECORDING_FOLDER: 'open_recording_folder',
-    OPEN_RECORDING_WINDOW: 'open_recording_window',
     RUN_RECORDING_REGRESSION: 'run_recording_regression',
     RESIZE_RECORDING_TOOLBAR: 'resize_recording_toolbar',
 
@@ -277,7 +276,6 @@ export const WindowService = {
     blur: () => invoke(IPC_COMMANDS.WINDOW_BLUR),
     imageBlur: () => invoke(IPC_COMMANDS.IMAGE_WINDOW_BLUR),
     openSettingsWindow: (tab = 'ai', reason = '') => invoke(IPC_COMMANDS.OPEN_SETTINGS_WINDOW, {tab, reason}),
-    openRecordingWindow: () => invoke(IPC_COMMANDS.OPEN_RECORDING_WINDOW),
 
     /**
      * 选择工具栏失去焦点通知
@@ -452,10 +450,11 @@ export const RecordingService = {
     listSystemOutputs: () => invoke(IPC_COMMANDS.LIST_RECORDING_SYSTEM_OUTPUT_DEVICES),
     openFolder: () => invoke(IPC_COMMANDS.OPEN_RECORDING_FOLDER),
     runRegression: () => invoke(IPC_COMMANDS.RUN_RECORDING_REGRESSION),
-    resizeToolbar: (openSelect, openOverlay) => invoke(IPC_COMMANDS.RESIZE_RECORDING_TOOLBAR, {
+    resizeToolbar: (openSelect, openOverlay, compactMode = false) => invoke(IPC_COMMANDS.RESIZE_RECORDING_TOOLBAR, {
         request: {
             openSelect,
-            openOverlay
+            openOverlay,
+            compactMode
         }
     }),
 };
