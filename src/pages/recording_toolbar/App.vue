@@ -58,14 +58,8 @@
                 size="small"
                 @click="toggleMicrophone"
             >
-              <el-icon v-if="captureMicrophone"><Microphone/></el-icon>
-              <el-icon v-else>
-                <svg fill="none" viewBox="0 0 24 24">
-                  <path d="M4 9.5H8L13.2 5.5V18.5L8 14.5H4V9.5Z" stroke="currentColor" stroke-linejoin="round"
-                        stroke-width="1.8"/>
-                  <path d="M15.2 9.1L20.2 15.1" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/>
-                </svg>
-              </el-icon>
+              <el-icon v-if="captureMicrophone"><Mic :size="18" :stroke-width="2.2"/></el-icon>
+              <el-icon v-else><MicOff :size="18" :stroke-width="2.2"/></el-icon>
             </el-button>
           </template>
         </el-popover>
@@ -100,17 +94,8 @@
                 size="small"
                 @click="toggleSystemAudio"
             >
-              <el-icon v-if="captureSystemAudio">
-                <svg fill="none" viewBox="0 0 24 24">
-                  <path d="M4 9.5H8L13.2 5.5V18.5L8 14.5H4V9.5Z" stroke="currentColor" stroke-linejoin="round"
-                        stroke-width="1.8"/>
-                  <path d="M16 10.2C17.1 11.2 17.1 12.8 16 13.8" stroke="currentColor" stroke-linecap="round"
-                        stroke-width="1.8"/>
-                  <path d="M18.4 8.2C20.5 10.3 20.5 13.7 18.4 15.8" stroke="currentColor" stroke-linecap="round"
-                        stroke-width="1.8"/>
-                </svg>
-              </el-icon>
-              <el-icon v-else><Mute/></el-icon>
+              <el-icon v-if="captureSystemAudio"><Volume2 :size="18" :stroke-width="2.2"/></el-icon>
+              <el-icon v-else><VolumeOff :size="18" :stroke-width="2.2"/></el-icon>
             </el-button>
           </template>
         </el-popover>
@@ -120,6 +105,7 @@
         <el-tooltip content="开始录制" effect="dark" placement="bottom" @visible-change="onTooltipVisibleChange">
           <el-button
               :loading="loading"
+              :disabled="!canStart"
               circle
               class="icon-btn"
               size="small"
@@ -133,6 +119,7 @@
         <el-tooltip content="暂停录制" effect="dark" placement="bottom" @visible-change="onTooltipVisibleChange">
           <el-button
               :loading="loading"
+              :disabled="!canPause"
               circle
               class="icon-btn"
               size="small"
@@ -146,6 +133,7 @@
         <el-tooltip content="恢复录制" effect="dark" placement="bottom" @visible-change="onTooltipVisibleChange">
           <el-button
               :loading="loading"
+              :disabled="!canResume"
               circle
               class="icon-btn"
               size="small"
@@ -159,12 +147,26 @@
         <el-tooltip content="停止录制" effect="dark" placement="bottom" @visible-change="onTooltipVisibleChange">
           <el-button
               :loading="loading"
+              :disabled="!canStop"
               circle
               class="icon-btn"
               size="small"
               @click="stop"
           >
             <el-icon><SwitchButton/></el-icon>
+          </el-button>
+        </el-tooltip>
+      </span>
+      <span class="no-drag" @mouseenter="onButtonHoverChange(true)" @mouseleave="onButtonHoverChange(false)">
+        <el-tooltip content="打开视频目录" effect="dark" placement="bottom" @visible-change="onTooltipVisibleChange">
+          <el-button
+              :loading="loading"
+              circle
+              class="icon-btn"
+              size="small"
+              @click="openFolder"
+          >
+            <el-icon><FolderOpen :size="18" :stroke-width="2.2"/></el-icon>
           </el-button>
         </el-tooltip>
       </span>
@@ -190,6 +192,7 @@ import {getCurrentWindow} from '@tauri-apps/api/window'
 import {AISettingsService, RecordingService} from '@/services/ipc.js'
 import {ElMessage} from 'element-plus'
 import {Close} from "@element-plus/icons-vue";
+import {FolderOpen, Mic, MicOff, Volume2, VolumeOff} from 'lucide-vue-next'
 
 const loading = ref(false)
 const captureSystemAudio = ref(false)
@@ -203,7 +206,7 @@ const microphoneDeviceId = ref(null)
 const fps = ref(30)
 const fpsPopoverVisible = ref(false)
 const fpsOptions = [15, 20, 24, 30, 45, 60]
-const state = reactive({sessionId: null, elapsedMs: 0})
+const state = reactive({state: 'idle', sessionId: null, elapsedMs: 0})
 let unlistenStateChanged = null
 let openSelectCount = 0
 let openTooltipCount = 0
@@ -239,9 +242,23 @@ const microphoneListWidth = computed(() => computeListWidth(microphones.value, i
 const systemOutputListWidth = computed(() => computeListWidth(systemOutputs.value, it => it.name))
 
 const elapsedText = computed(() => `${Math.floor(state.elapsedMs / 1000)}s`)
+const currentRecordingState = computed(() => {
+  const normalized = String(state.state || '').toLowerCase()
+  if (normalized === 'idle' || normalized === 'recording' || normalized === 'paused') {
+    return normalized
+  }
+  return state.sessionId ? 'recording' : 'idle'
+})
+const canStart = computed(() => !loading.value && currentRecordingState.value === 'idle')
+const canPause = computed(() => !loading.value && currentRecordingState.value === 'recording')
+const canResume = computed(() => !loading.value && currentRecordingState.value === 'paused')
+const canStop = computed(() =>
+    !loading.value && (currentRecordingState.value === 'recording' || currentRecordingState.value === 'paused')
+)
 
 const refresh = async () => {
   const data = await RecordingService.getState()
+  state.state = data.state || state.state || 'idle'
   state.sessionId = data.sessionId || null
   state.elapsedMs = Number(data.elapsedMs || 0)
 }
@@ -292,6 +309,17 @@ const stop = async () => {
   try {
     await RecordingService.stop(state.sessionId);
     await refresh()
+  } catch (e) {
+    ElMessage.error(String(e))
+  } finally {
+    loading.value = false
+  }
+}
+
+const openFolder = async () => {
+  loading.value = true
+  try {
+    await RecordingService.openFolder()
   } catch (e) {
     ElMessage.error(String(e))
   } finally {
@@ -421,6 +449,7 @@ const selectSystemOutput = async (deviceId) => {
 onMounted(async () => {
   unlistenStateChanged = await listen('recording-state-changed', (event) => {
     const payload = event.payload || {}
+    state.state = payload.state || state.state
     state.sessionId = payload.sessionId ?? state.sessionId
     state.elapsedMs = Number(payload.elapsedMs || state.elapsedMs || 0)
   })
