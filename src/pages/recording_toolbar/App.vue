@@ -59,7 +59,13 @@
                 @click="toggleMicrophone"
             >
               <el-icon v-if="captureMicrophone"><Microphone/></el-icon>
-              <el-icon v-else><Mute/></el-icon>
+              <el-icon v-else>
+                <svg fill="none" viewBox="0 0 24 24">
+                  <path d="M4 9.5H8L13.2 5.5V18.5L8 14.5H4V9.5Z" stroke="currentColor" stroke-linejoin="round"
+                        stroke-width="1.8"/>
+                  <path d="M15.2 9.1L20.2 15.1" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/>
+                </svg>
+              </el-icon>
             </el-button>
           </template>
         </el-popover>
@@ -94,8 +100,17 @@
                 size="small"
                 @click="toggleSystemAudio"
             >
-              <el-icon v-if="captureSystemAudio"><Notification/></el-icon>
-              <el-icon v-else><MuteNotification/></el-icon>
+              <el-icon v-if="captureSystemAudio">
+                <svg fill="none" viewBox="0 0 24 24">
+                  <path d="M4 9.5H8L13.2 5.5V18.5L8 14.5H4V9.5Z" stroke="currentColor" stroke-linejoin="round"
+                        stroke-width="1.8"/>
+                  <path d="M16 10.2C17.1 11.2 17.1 12.8 16 13.8" stroke="currentColor" stroke-linecap="round"
+                        stroke-width="1.8"/>
+                  <path d="M18.4 8.2C20.5 10.3 20.5 13.7 18.4 15.8" stroke="currentColor" stroke-linecap="round"
+                        stroke-width="1.8"/>
+                </svg>
+              </el-icon>
+              <el-icon v-else><Mute/></el-icon>
             </el-button>
           </template>
         </el-popover>
@@ -193,6 +208,8 @@ let unlistenStateChanged = null
 let openSelectCount = 0
 let openTooltipCount = 0
 let openButtonHoverCount = 0
+let tooltipHideResizeTimer = null
+const TOOLTIP_HIDE_GRACE_MS = 450
 
 let _measureCanvas = null
 const ensureMeasureCtx = () => {
@@ -296,22 +313,66 @@ const applyToolbarWindowSize = async () => {
   }
 }
 
+const hasExpandedOverlay = () => openSelectCount > 0 || openTooltipCount > 0 || openButtonHoverCount > 0
+
+const scheduleShrinkToolbarWindowSize = () => {
+  if (tooltipHideResizeTimer) {
+    clearTimeout(tooltipHideResizeTimer)
+  }
+  tooltipHideResizeTimer = setTimeout(() => {
+    tooltipHideResizeTimer = null
+    if (!hasExpandedOverlay()) {
+      applyToolbarWindowSize()
+    }
+  }, TOOLTIP_HIDE_GRACE_MS)
+}
+
 const onSelectVisibleChange = async (visible) => {
+  if (visible && tooltipHideResizeTimer) {
+    clearTimeout(tooltipHideResizeTimer)
+    tooltipHideResizeTimer = null
+  }
   openSelectCount += visible ? 1 : -1
   if (openSelectCount < 0) openSelectCount = 0
-  await applyToolbarWindowSize()
+  if (hasExpandedOverlay()) {
+    await applyToolbarWindowSize()
+  } else {
+    scheduleShrinkToolbarWindowSize()
+  }
 }
 
 const onTooltipVisibleChange = async (visible) => {
-  openTooltipCount += visible ? 1 : -1
+  if (visible) {
+    if (tooltipHideResizeTimer) {
+      clearTimeout(tooltipHideResizeTimer)
+      tooltipHideResizeTimer = null
+    }
+    openTooltipCount += 1
+    await applyToolbarWindowSize()
+    return
+  }
+
+  openTooltipCount -= 1
   if (openTooltipCount < 0) openTooltipCount = 0
-  await applyToolbarWindowSize()
+  if (hasExpandedOverlay()) {
+    await applyToolbarWindowSize()
+    return
+  }
+  scheduleShrinkToolbarWindowSize()
 }
 
 const onButtonHoverChange = async (visible) => {
+  if (visible && tooltipHideResizeTimer) {
+    clearTimeout(tooltipHideResizeTimer)
+    tooltipHideResizeTimer = null
+  }
   openButtonHoverCount += visible ? 1 : -1
   if (openButtonHoverCount < 0) openButtonHoverCount = 0
-  await applyToolbarWindowSize()
+  if (hasExpandedOverlay()) {
+    await applyToolbarWindowSize()
+  } else {
+    scheduleShrinkToolbarWindowSize()
+  }
 }
 
 const selectFps = async (v) => {
@@ -394,6 +455,10 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (tooltipHideResizeTimer) {
+    clearTimeout(tooltipHideResizeTimer)
+    tooltipHideResizeTimer = null
+  }
   if (unlistenStateChanged) unlistenStateChanged()
 })
 </script>

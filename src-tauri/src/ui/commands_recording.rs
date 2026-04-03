@@ -164,7 +164,7 @@ pub async fn resize_recording_toolbar(
     } else if request.open_overlay {
         120
     } else {
-        60
+        70
     };
     window
         .set_size(tauri::PhysicalSize::new(width, height))
