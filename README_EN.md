@@ -2,7 +2,7 @@
 
 [中文](README.md) | [English](README_EN.md)
 
-fuyun_tools is a desktop productivity tool running in the system tray, focused on three things:
+fuyun_tools is a desktop productivity tool running in the system tray, focused on four things:
 
 - Better clipboard history management
 - AI text selection translation/explanation on Windows
@@ -14,6 +14,7 @@ Core positioning:
 - One hotkey workflow to manage both text and image clipboard history
 - One selection workflow to translate, explain, and copy in-place
 - One screenshot + OCR workflow from capture to text extraction
+- One recording workflow with capsule controls, audio capture, and recording parameter configuration
 - One configurable strategy set to balance history limits and key item retention
 
 In addition, this project itself follows an AI full-process development workflow: AI deeply participates in requirement breakdown, solution design, coding implementation, and documentation maintenance.
@@ -82,17 +83,7 @@ In addition, this project itself follows an AI full-process development workflow
 
 ---
 
-## 🌍 Platform Compatibility
-
-| Feature              | Windows | Linux | macOS |
-|----------------------|---------|-------|-------|
-| Clipboard Management | ✅       | ✅     | ✅     |
-| Image OCR            | ✅       | ❌     | ❌     |
-| AI Text Selection    | ✅       | ❌     | ❌     |
-| Screen Recording     | ✅       | ❌     | ❌     |
-| Tray & Hotkeys       | ✅       | ✅     | ✅     |
-
-> Note: AI text selection, image OCR, and screen recording are currently implemented only on Windows.
+> Current versions support Windows only; Linux/macOS are not yet supported and are under development.
 
 ---
 
@@ -108,10 +99,8 @@ In addition, this project itself follows an AI full-process development workflow
 Installation steps:
 
 1. Download the installer for your platform
-2. Windows: install `.exe`
-3. Linux: use `.AppImage` or `.deb`
-4. macOS: use `.dmg`
-5. Configuration files are created automatically on first launch
+2. On Windows, run and install the `.exe` package
+3. Configuration files are created automatically on first launch
 
 ---
 
@@ -119,9 +108,9 @@ Installation steps:
 
 1. **Launch App**: Run fuyun_tools; the icon appears in the system tray
 2. **Use Global Hotkeys**:
-    - Text clipboard: Windows `Ctrl+Shift+Z` / macOS `Cmd+Shift+Z`
-    - Image clipboard: Windows `Ctrl+Shift+X` / macOS `Cmd+Shift+X`
-    - Screenshot: Windows `Ctrl+Shift+S` / macOS `Cmd+Shift+S`
+    - Text clipboard: Windows `Ctrl+Shift+Z`
+    - Image clipboard: Windows `Ctrl+Shift+X`
+    - Screenshot: Windows `Ctrl+Shift+S`
 3. **Configure AI Service**: Go to 「Settings → AI Settings」
     - Choose built-in provider (DeepSeek/Qwen/Mimo) or add custom OpenAI-compatible endpoint
     - Enter API URL, model name, and key
@@ -174,6 +163,15 @@ Installation steps:
 - **Core Actions**: Provides three primary buttons: [Translate], [Explain], [Copy]
 - **Instant Feedback**: Clicking an action immediately displays streaming AI output in the "Result Window"
 - **UI Control**: Click outside the toolbar or press ESC to dismiss
+
+### Recording Capsule (Windows)
+
+- **Trigger**: Open via recording hotkey or from settings after enabling recording
+- **Core Controls**: Start, pause, resume, and stop recording directly from the capsule
+- **Audio Routing**: Select system output and microphone devices in capsule settings
+- **First-Run Dependency Check**: Automatically checks `ffmpeg.exe`; if missing, prompts download with real-time
+  progress
+- **Disabled State**: When recording is disabled, the capsule shows a disabled state and prevents accidental actions
 
 ### AI Configuration Tips
 
@@ -240,7 +238,8 @@ cargo check
 
 ### 1) Why is AI text selection unavailable on Linux/macOS?
 
-Current versions implement the text-selection pipeline only on Windows. Other platforms are planned.
+Current versions implement the text-selection pipeline only on Windows; Linux/macOS are not yet supported and are under
+development.
 
 ### 2) How do I delete a custom provider?
 
@@ -249,6 +248,11 @@ In AI provider dropdown options, click the `X` button on the right side of the c
 ### 3) Why does closing settings sometimes feel delayed after saving?
 
 The close flow has been optimized for responsiveness. Please update to the latest version.
+
+### 4) Why am I prompted to download ffmpeg when enabling recording?
+
+On first enable, the app checks whether `ffmpeg.exe` exists in the expected `bin` path. If missing, it guides an
+on-demand download.
 
 ---
 
