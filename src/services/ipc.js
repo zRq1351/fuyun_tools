@@ -86,6 +86,8 @@ export const IPC_COMMANDS = {
     OPEN_RECORDING_FOLDER: 'open_recording_folder',
     RUN_RECORDING_REGRESSION: 'run_recording_regression',
     RESIZE_RECORDING_TOOLBAR: 'resize_recording_toolbar',
+    CHECK_RECORDING_FFMPEG: 'check_recording_ffmpeg',
+    DOWNLOAD_RECORDING_FFMPEG: 'download_recording_ffmpeg',
 
     // AI 功能
     STREAM_TRANSLATE_TEXT: 'stream_translate_text',
@@ -450,6 +452,8 @@ export const RecordingService = {
     listSystemOutputs: () => invoke(IPC_COMMANDS.LIST_RECORDING_SYSTEM_OUTPUT_DEVICES),
     openFolder: () => invoke(IPC_COMMANDS.OPEN_RECORDING_FOLDER),
     runRegression: () => invoke(IPC_COMMANDS.RUN_RECORDING_REGRESSION),
+    checkFfmpeg: () => invoke(IPC_COMMANDS.CHECK_RECORDING_FFMPEG),
+    downloadFfmpeg: (downloadUrl = null) => invoke(IPC_COMMANDS.DOWNLOAD_RECORDING_FFMPEG, {downloadUrl}),
     resizeToolbar: (openSelect, openOverlay, compactMode = false) => invoke(IPC_COMMANDS.RESIZE_RECORDING_TOOLBAR, {
         request: {
             openSelect,

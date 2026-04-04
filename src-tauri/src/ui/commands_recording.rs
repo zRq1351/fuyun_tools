@@ -1,5 +1,6 @@
 use crate::core::app_state::SharedAppState;
 use crate::core::error::to_frontend_error_string;
+use crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path;
 use crate::features::recording::recorder_service;
 use crate::features::recording::types::{
     AudioInputDevice, RecordingRegressionReport, RecordingRuntimeState, RecordingSessionInfo, RecordingStopResult,
@@ -7,7 +8,13 @@ use crate::features::recording::types::{
 };
 use crate::sync::Mutex;
 use crate::utils::utils_helpers::load_settings;
+use futures_util::StreamExt;
 use serde::Deserialize;
+use serde::Serialize;
+use std::env;
+use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl};
 use tauri_plugin_positioner::WindowExt;
@@ -19,6 +26,174 @@ pub struct ResizeRecordingToolbarRequest {
     pub open_overlay: bool,
     #[serde(default)]
     pub compact_mode: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingFfmpegStatus {
+    pub exists: bool,
+    pub ffmpeg_path: String,
+    pub bin_dir: String,
+    pub download_url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecordingFfmpegDownloadProgress {
+    phase: String,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    progress_percent: Option<u8>,
+    message: String,
+}
+
+fn get_software_bin_dir() -> Result<PathBuf, String> {
+    let mut exe_dir = env::current_exe().map_err(|e| format!("获取程序路径失败: {}", e))?;
+    exe_dir.pop();
+    Ok(exe_dir.join("bin"))
+}
+
+fn get_recording_ffmpeg_path() -> Result<PathBuf, String> {
+    Ok(get_software_bin_dir()?.join("ffmpeg.exe"))
+}
+
+fn get_preferred_install_ffmpeg_path() -> Result<PathBuf, String> {
+    // Dev mode: prefer src-tauri/bin/ffmpeg.exe so both check/start/download use one location.
+    if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
+        let p = PathBuf::from(manifest_dir).join("bin").join("ffmpeg.exe");
+        return Ok(p);
+    }
+    // Production: install beside executable.
+    get_recording_ffmpeg_path()
+}
+
+fn get_default_ffmpeg_download_url() -> String {
+    load_settings()
+        .map(|settings| settings.recording_ffmpeg_download_url.trim().to_string())
+        .ok()
+        .filter(|url| !url.is_empty())
+        .unwrap_or_else(|| {
+            "https://gitee.com/zrq1351/fuyun_tools/releases/download/v0.5.6/ffmpeg.exe".to_string()
+        })
+}
+
+#[tauri::command]
+pub async fn check_recording_ffmpeg() -> Result<RecordingFfmpegStatus, String> {
+    let ffmpeg_path = resolve_ffmpeg_path().unwrap_or(get_preferred_install_ffmpeg_path()?);
+    let bin_dir = ffmpeg_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or(get_software_bin_dir()?);
+    Ok(RecordingFfmpegStatus {
+        exists: ffmpeg_path.exists() && ffmpeg_path.is_file(),
+        ffmpeg_path: ffmpeg_path.to_string_lossy().to_string(),
+        bin_dir: bin_dir.to_string_lossy().to_string(),
+        download_url: get_default_ffmpeg_download_url(),
+    })
+}
+
+#[tauri::command]
+pub async fn download_recording_ffmpeg(
+    download_url: Option<String>,
+    app: AppHandle,
+) -> Result<RecordingFfmpegStatus, String> {
+    let ffmpeg_path = get_preferred_install_ffmpeg_path()?;
+    let bin_dir = ffmpeg_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or(get_software_bin_dir()?);
+    let url = download_url
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .unwrap_or_else(get_default_ffmpeg_download_url);
+    fs::create_dir_all(&bin_dir).map_err(|e| format!("创建目录失败: {}", e))?;
+
+    let tmp_path = ffmpeg_path.with_extension("exe.tmp");
+    if tmp_path.exists() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+
+    let _ = app.emit(
+        "recording-ffmpeg-download-progress",
+        RecordingFfmpegDownloadProgress {
+            phase: "start".to_string(),
+            downloaded_bytes: 0,
+            total_bytes: None,
+            progress_percent: Some(0),
+            message: "开始下载 ffmpeg".to_string(),
+        },
+    );
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("下载请求失败: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!("下载 ffmpeg 失败，HTTP 状态: {}", response.status()));
+    }
+    let total_bytes = response.content_length();
+    let mut downloaded_bytes: u64 = 0;
+    let mut stream = response.bytes_stream();
+    let mut file = fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
+
+    while let Some(chunk_res) = stream.next().await {
+        let chunk = chunk_res.map_err(|e| format!("下载数据流失败: {}", e))?;
+        file.write_all(&chunk)
+            .map_err(|e| format!("写入临时文件失败: {}", e))?;
+        downloaded_bytes = downloaded_bytes.saturating_add(chunk.len() as u64);
+        let progress_percent = total_bytes.and_then(|total| {
+            if total == 0 {
+                None
+            } else {
+                Some(((downloaded_bytes.saturating_mul(100)) / total).min(100) as u8)
+            }
+        });
+        let _ = app.emit(
+            "recording-ffmpeg-download-progress",
+            RecordingFfmpegDownloadProgress {
+                phase: "downloading".to_string(),
+                downloaded_bytes,
+                total_bytes,
+                progress_percent,
+                message: "正在下载 ffmpeg".to_string(),
+            },
+        );
+    }
+    file.flush().map_err(|e| format!("刷新下载文件失败: {}", e))?;
+
+    let metadata = fs::metadata(&tmp_path).map_err(|e| format!("读取下载文件失败: {}", e))?;
+    if metadata.len() == 0 {
+        let _ = fs::remove_file(&tmp_path);
+        return Err("下载结果为空文件，请重试".to_string());
+    }
+    fs::rename(&tmp_path, &ffmpeg_path)
+        .or_else(|_| {
+            if ffmpeg_path.exists() {
+                let _ = fs::remove_file(&ffmpeg_path);
+            }
+            fs::rename(&tmp_path, &ffmpeg_path)
+        })
+        .map_err(|e| format!("写入 ffmpeg 文件失败: {}", e))?;
+
+    let _ = app.emit(
+        "recording-ffmpeg-download-progress",
+        RecordingFfmpegDownloadProgress {
+            phase: "completed".to_string(),
+            downloaded_bytes,
+            total_bytes,
+            progress_percent: Some(100),
+            message: "ffmpeg 下载完成".to_string(),
+        },
+    );
+
+    Ok(RecordingFfmpegStatus {
+        exists: true,
+        ffmpeg_path: ffmpeg_path.to_string_lossy().to_string(),
+        bin_dir: bin_dir.to_string_lossy().to_string(),
+        download_url: url,
+    })
 }
 
 fn move_window_top_center(window: &tauri::WebviewWindow) {
@@ -157,7 +332,11 @@ pub async fn resize_recording_toolbar(
         .map(|size| size.width <= 260)
         .unwrap_or(false);
     let (width, height) = if request.compact_mode {
-        (230, 40)
+        if request.open_overlay {
+            (430, 420)
+        } else {
+            (250, 40)
+        }
     } else {
         let h = if request.open_select {
             340

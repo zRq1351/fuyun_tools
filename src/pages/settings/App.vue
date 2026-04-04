@@ -90,12 +90,12 @@
 
 <script setup>
 import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from 'vue'
-import {ElMessage} from 'element-plus'
+import {ElLoading, ElMessage, ElMessageBox} from 'element-plus'
 import zhCn from 'element-plus/dist/locale/zh-cn'
 import {Camera, Cpu, DocumentCopy, InfoFilled, Moon, Setting, Sunny, VideoCamera} from '@element-plus/icons-vue'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import {listen} from '@tauri-apps/api/event'
-import {AISettingsService} from '../../services/ipc'
+import {AISettingsService, RecordingService} from '../../services/ipc'
 import ClipboardSettings from './components/ClipboardSettings.vue'
 import ScreenshotSettings from './components/ScreenshotSettings.vue'
 import RecordingSettings from './components/RecordingSettings.vue'
@@ -411,6 +411,65 @@ const persistSettings = async (silent = false) => {
     }
     autoSaveState.value = 'saving'
 
+    if (changedFields.recordingEnabled === true) {
+      const ffmpegStatus = await RecordingService.checkFfmpeg()
+      if (!ffmpegStatus?.exists) {
+        // 依赖缺失时先回退开关状态，避免出现“已启用但不可用”的中间态
+        suppressNextAutoSave.value = true
+        form.recordingEnabled = false
+        changedFields.recordingEnabled = false
+        try {
+          await ElMessageBox.confirm(
+              `检测到首次启用录屏，未找到 ffmpeg.exe。\n将下载到：${ffmpegStatus.ffmpegPath}`,
+              '需要下载 ffmpeg',
+              {
+                confirmButtonText: '确认下载',
+                cancelButtonText: '取消',
+                type: 'warning',
+                closeOnClickModal: false,
+                closeOnPressEscape: true
+              }
+          )
+        } catch {
+          autoSaveState.value = 'idle'
+          ElMessage.info('已取消启用录屏')
+          return
+        }
+        const downloading = ElLoading.service({
+          lock: true,
+          text: '正在下载 ffmpeg... 0%',
+          background: 'rgba(0, 0, 0, 0.35)'
+        })
+        let unlistenProgress = null
+        try {
+          unlistenProgress = await listen('recording-ffmpeg-download-progress', (event) => {
+            const payload = event?.payload || {}
+            const percent = typeof payload.progressPercent === 'number' ? payload.progressPercent : null
+            if (percent !== null) {
+              downloading.setText(`正在下载 ffmpeg... ${percent}%`)
+              return
+            }
+            const downloaded = Number(payload.downloadedBytes || 0)
+            const total = Number(payload.totalBytes || 0)
+            if (total > 0) {
+              const computed = Math.min(100, Math.floor(downloaded * 100 / total))
+              downloading.setText(`正在下载 ffmpeg... ${computed}%`)
+            }
+          })
+          await RecordingService.downloadFfmpeg(ffmpegStatus.downloadUrl || null)
+        } finally {
+          if (unlistenProgress) {
+            unlistenProgress()
+          }
+          downloading.close()
+        }
+        suppressNextAutoSave.value = true
+        form.recordingEnabled = true
+        changedFields.recordingEnabled = true
+        ElMessage.success('ffmpeg 下载完成，已启用录屏')
+      }
+    }
+
     // 只保存变化的字段
     await AISettingsService.savePartialSettings(changedFields)
 
@@ -518,10 +577,10 @@ onMounted(async () => {
     form.textMaxItems = settings.text_max_items || settings.max_items || 50
     form.imageMaxItems = settings.image_max_items || settings.max_items || 50
     form.imageDiskLimitMb = settings.image_disk_limit_mb || 2048
-    form.textClipboardEnabled = settings.text_clipboard_enabled !== false
-    form.imageClipboardEnabled = settings.image_clipboard_enabled !== false
-    form.screenshotEnabled = settings.screenshot_enabled !== false
-    form.recordingEnabled = settings.recording_enabled !== false
+    form.textClipboardEnabled = settings.text_clipboard_enabled === true
+    form.imageClipboardEnabled = settings.image_clipboard_enabled === true
+    form.screenshotEnabled = settings.screenshot_enabled === true
+    form.recordingEnabled = settings.recording_enabled === true
     currentVersion.value = settings.version || '0.3.1'
     form.toggleShortcut = settings.hot_key || ''
     form.imageToggleShortcut = settings.image_hot_key || ''
@@ -532,14 +591,14 @@ onMounted(async () => {
     form.recordingDefaultAudioBitrateKbps = Number(settings.recording_default_audio_bitrate_kbps || 160)
     form.recordingCaptureCursor = settings.recording_capture_cursor !== false
     form.recordingCaptureSystemAudio = settings.recording_capture_system_audio === true
-    form.recordingCaptureMicrophone = settings.recording_capture_microphone !== false
+    form.recordingCaptureMicrophone = settings.recording_capture_microphone === true
     form.recordingMicrophoneDeviceId = settings.recording_microphone_device_id || ''
     form.recordingOutputDir = settings.recording_output_dir || ''
     form.recordingAutoOpenFolder = settings.recording_auto_open_folder !== false
     form.recordingToolbarContentProtected = settings.recording_toolbar_content_protected === true
     form.recordingMaxDurationMinutes = Number(settings.recording_max_duration_minutes || 180)
     form.recordingFileNameTemplate = settings.recording_file_name_template || '{timestamp}'
-    form.selectionEnabled = settings.selection_enabled !== false
+    form.selectionEnabled = settings.selection_enabled === true
     form.groupedItemsProtectedFromLimit = settings.grouped_items_protected_from_limit !== false
     form.translationPromptTemplate = settings.translation_prompt_template || ''
     form.explanationPromptTemplate = settings.explanation_prompt_template || ''

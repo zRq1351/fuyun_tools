@@ -1930,6 +1930,10 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         serde_json::Value::String(settings.recording_file_name_template.clone()),
     );
     result.insert(
+        "recording_ffmpeg_download_url".to_string(),
+        serde_json::Value::String(settings.recording_ffmpeg_download_url.clone()),
+    );
+    result.insert(
         "selection_enabled".to_string(),
         serde_json::Value::Bool(settings.selection_enabled),
     );
@@ -2114,6 +2118,7 @@ pub async fn save_app_settings(
     recording_toolbar_content_protected: Option<bool>,
     recording_max_duration_minutes: Option<u32>,
     recording_file_name_template: Option<String>,
+    recording_ffmpeg_download_url: Option<String>,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -2214,6 +2219,13 @@ pub async fn save_app_settings(
             "{timestamp}".to_string()
         } else {
             val
+        };
+    }
+    if let Some(val) = recording_ffmpeg_download_url {
+        settings.recording_ffmpeg_download_url = if val.trim().is_empty() {
+            settings.recording_ffmpeg_download_url
+        } else {
+            val.trim().to_string()
         };
     }
 

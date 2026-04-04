@@ -60,6 +60,8 @@ pub struct AppSettingsData {
     pub recording_max_duration_minutes: u32,
     #[serde(default = "default_recording_file_name_template")]
     pub recording_file_name_template: String,
+    #[serde(default = "default_recording_ffmpeg_download_url")]
+    pub recording_ffmpeg_download_url: String,
     #[serde(default)]
     pub ai_provider: String,
     #[serde(default)]
@@ -106,6 +108,7 @@ impl Default for AppSettingsData {
             recording_toolbar_content_protected: default_recording_toolbar_content_protected(),
             recording_max_duration_minutes: default_recording_max_duration_minutes(),
             recording_file_name_template: default_recording_file_name_template(),
+            recording_ffmpeg_download_url: default_recording_ffmpeg_download_url(),
             ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
             selection_enabled: true,
@@ -119,23 +122,23 @@ impl Default for AppSettingsData {
 }
 
 fn default_selection_enabled() -> bool {
-    true
+    false
 }
 
 fn default_text_clipboard_enabled() -> bool {
-    true
+    false
 }
 
 fn default_image_clipboard_enabled() -> bool {
-    true
+    false
 }
 
 fn default_screenshot_enabled() -> bool {
-    true
+    false
 }
 
 fn default_recording_enabled() -> bool {
-    true
+    false
 }
 
 fn default_text_max_items() -> usize {
@@ -179,11 +182,11 @@ fn default_recording_capture_cursor() -> bool {
 }
 
 fn default_recording_capture_system_audio() -> bool {
-    false
+    true
 }
 
 fn default_recording_capture_microphone() -> bool {
-    true
+    false
 }
 
 fn default_recording_output_dir() -> String {
@@ -204,6 +207,10 @@ fn default_recording_max_duration_minutes() -> u32 {
 
 fn default_recording_file_name_template() -> String {
     "{timestamp}".to_string()
+}
+
+fn default_recording_ffmpeg_download_url() -> String {
+    "https://gitee.com/zrq1351/fuyun_tools/releases/download/v0.5.6/ffmpeg.exe".to_string()
 }
 
 fn default_grouped_items_protected_from_limit() -> bool {
@@ -489,6 +496,12 @@ impl AppSettingsData {
         if self.recording_file_name_template.trim().is_empty() {
             return Err("recording_file_name_template不能为空".to_string());
         }
+        if self.recording_ffmpeg_download_url.trim().is_empty() {
+            return Err("recording_ffmpeg_download_url不能为空".to_string());
+        }
+        if !self.recording_ffmpeg_download_url.starts_with("https://") {
+            return Err("recording_ffmpeg_download_url必须以https://开头".to_string());
+        }
 
         // 验证API URL格式（基本检查）
         for (provider_name, config) in &self.provider_configs {
@@ -659,6 +672,9 @@ impl AppSettingsData {
         }
         if self.recording_file_name_template.trim().is_empty() {
             self.recording_file_name_template = default_recording_file_name_template();
+        }
+        if self.recording_ffmpeg_download_url.trim().is_empty() {
+            self.recording_ffmpeg_download_url = default_recording_ffmpeg_download_url();
         }
         if self.clipboard_bottom_offset < 0 || self.clipboard_bottom_offset > 400 {
             self.clipboard_bottom_offset = default_clipboard_bottom_offset();

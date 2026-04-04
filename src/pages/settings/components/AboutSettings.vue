@@ -98,6 +98,36 @@
       <li><strong>系统托盘</strong>：右键托盘图标可进入设置、清理记录、检查更新和退出</li>
     </ol>
   </div>
+
+  <div class="about-section">
+    <h3>
+      <el-icon>
+        <Reading/>
+      </el-icon>
+      开源版权声明
+    </h3>
+    <ul class="feature-list">
+      <li>
+        <strong>FFmpeg</strong> - Copyright (c) FFmpeg developers。
+      </li>
+      <li>
+        <strong>上游构建来源</strong> - https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.0.1-essentials_build.7z
+      </li>
+      <li>
+        <strong>应用分发方式</strong> - 应用安装包不内置 ffmpeg.exe；用户首次启用录屏时按需下载到本地 bin 目录。
+      </li>
+      <li>
+        <strong>下载地址来源</strong> - 由运营方服务器提供，按 settings.json 中 recording_ffmpeg_download_url 配置下发。
+      </li>
+      <li>
+        <strong>授权说明</strong> - FFmpeg 主体遵循 LGPL v2.1+；当前使用构建启用 GPL 组件（含 libx264），分发时按 GPL
+        相关要求执行。
+      </li>
+      <li>
+        <strong>源码获取</strong> - https://git.ffmpeg.org/ffmpeg.git
+      </li>
+    </ul>
+  </div>
 </template>
 
 <script setup>

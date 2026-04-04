@@ -1,318 +1,225 @@
 <template>
   <el-config-provider :locale="zhCn">
     <div
-        ref="barRef"
-        :class="{ 'bar-collapsed': isToolbarCollapsed }"
+        :class="{
+        'bar-collapsed': isToolbarCollapsed,
+        'bar-collapsed-settings-open':
+          isToolbarCollapsed && capsuleSettingsVisible,
+      }"
         :data-tauri-drag-region="isToolbarCollapsed ? null : ''"
         class="bar"
-        @click="onBarClick"
-        @mouseenter="onBarMouseEnter"
-        @mouseleave="onBarMouseLeave"
     >
       <div
           v-if="isToolbarCollapsed"
           :data-state="rawRecordingState"
           class="collapsed-shell"
       >
-        <el-tooltip
-            :offset="10"
-            :show-after="300"
-            content="停止录制"
-            effect="dark"
-            placement="bottom"
-            popper-class="recording-toolbar-tooltip"
-        >
-          <button
-              :disabled="!canStop"
-              class="collapsed-stop-btn no-drag"
-              type="button"
-              @click.stop="stop"
-          >
-            <span class="collapsed-stop-icon"></span>
-          </button>
-        </el-tooltip>
-        <el-tooltip
-            :content="capsuleTooltipContent"
-            :offset="10"
-            :show-after="300"
-            effect="dark"
-            placement="bottom"
-            popper-class="recording-toolbar-tooltip"
-        >
-          <div
-              :data-state="rawRecordingState"
-              class="collapsed-pill"
-              @click.stop="toggleRecordingState"
-          >
-            <span class="collapsed-pill-content">
-              <span
-                  v-if="rawRecordingState === 'recording'"
-                  class="recording-dot"
-              ></span>
-              <span
-                  v-else-if="rawRecordingState === 'paused'"
-                  class="recording-pause-square"
-              ></span>
-              <span
-                  v-else-if="rawRecordingState === 'idle'"
-                  class="recording-ready-dot"
-              ></span>
-              <span class="collapsed-pill-text">{{ collapsedDisplayText }}</span>
-            </span>
-          </div>
-        </el-tooltip>
-        <el-tooltip
-            :offset="10"
-            :show-after="300"
-            content="设置"
-            effect="dark"
-            placement="bottom"
-            popper-class="recording-toolbar-tooltip"
-        >
-          <button
-              class="collapsed-expand-btn no-drag"
-              type="button"
-              @click.stop="expandFromCapsule"
-          >
-            <el-icon class="collapsed-expand-icon"
-            >
-              <Settings :size="13" :stroke-width="2.2"
-              />
-            </el-icon>
-          </button>
-        </el-tooltip>
-      </div>
-
-      <div v-else class="expanded-content">
-        <div class="time">{{ elapsedText }}</div>
-        <span
-            class="no-drag"
-            @mouseenter="onButtonHoverChange('microphone', true)"
-            @mouseleave="onButtonHoverChange('microphone', false)"
-        >
-          <el-popover
-            v-model:visible="microphonePopoverVisible"
-            placement="bottom-start"
-            popper-class="recording-toolbar-select-popper"
-            trigger="manual"
-            @hide="onSelectVisibleChange('microphone', false)"
-            @show="onSelectVisibleChange('microphone', true)"
-          >
-            <div class="device-list">
-              <div
-                v-for="item in microphones"
-                :key="item.id"
-                :data-active="item.id === microphoneDeviceId"
-                class="device-item"
-                @click="selectMicrophone(item.id)"
-              >
-                {{ item.name }}
-              </div>
-              <div v-if="microphones.length === 0" class="device-empty">
-                暂无麦克风设备
-              </div>
-            </div>
-            <template #reference>
-              <el-button
-                circle
-                class="icon-btn"
-                size="small"
-                @click="toggleMicrophone"
-              >
-                <el-icon v-if="captureMicrophone"
-                ><Mic :size="18" :stroke-width="2.2"
-                /></el-icon>
-                <el-icon v-else
-                ><MicOff :size="18" :stroke-width="2.2"
-                /></el-icon>
-              </el-button>
-            </template>
-          </el-popover>
-        </span>
-
-        <span
-            class="no-drag"
-            @mouseenter="onButtonHoverChange('systemAudio', true)"
-            @mouseleave="onButtonHoverChange('systemAudio', false)"
-        >
-          <el-popover
-            v-model:visible="systemAudioPopoverVisible"
-            :width="systemOutputListWidth"
-            placement="bottom-start"
-            popper-class="recording-toolbar-select-popper"
-            trigger="manual"
-            @hide="onSelectVisibleChange('systemAudio', false)"
-            @show="onSelectVisibleChange('systemAudio', true)"
-          >
-            <div class="device-list">
-              <div
-                v-for="item in systemOutputs"
-                :key="item.id"
-                :data-active="item.id === systemOutputId"
-                class="device-item"
-                @click="selectSystemOutput(item.id)"
-              >
-                {{ item.name }}
-              </div>
-              <div v-if="systemOutputs.length === 0" class="device-empty">
-                暂无系统音频设备
-              </div>
-            </div>
-            <template #reference>
-              <el-button
-                circle
-                class="icon-btn"
-                size="small"
-                @click="toggleSystemAudio"
-              >
-                <el-icon v-if="captureSystemAudio"
-                ><Volume2 :size="18" :stroke-width="2.2"
-                /></el-icon>
-                <el-icon v-else
-                ><VolumeOff :size="18" :stroke-width="2.2"
-                /></el-icon>
-              </el-button>
-            </template>
-          </el-popover>
-        </span>
-
-        <span
-            class="no-drag"
-            @mouseenter="onButtonHoverChange('openFolder', true)"
-            @mouseleave="onButtonHoverChange('openFolder', false)"
-        >
+        <div class="collapsed-shell-row">
           <el-tooltip
-              :offset="14"
-              content="打开视频目录"
+              :offset="10"
+              :show-after="300"
+              content="停止录制"
               effect="dark"
               placement="bottom"
               popper-class="recording-toolbar-tooltip"
-              @visible-change="
-              (visible) => onTooltipVisibleChange('openFolder', visible)
-            "
           >
-            <el-button
-              :loading="false"
-              circle
-              class="icon-btn"
-              size="small"
-              @click="openFolder"
+            <button
+                :disabled="!canStop"
+                class="collapsed-stop-btn no-drag"
+                type="button"
+                @click.stop="stop"
             >
-              <span class="action-icon-slot">
-                <el-icon
-                    :class="{
-                    'action-icon-hidden': loadingAction === 'openFolder',
-                  }"
-                    class="action-icon"
-                ><FolderOpen :size="18" :stroke-width="2.2"
-                /></el-icon>
-                <el-icon
-                    :class="{
-                    'action-icon-hidden': loadingAction !== 'openFolder',
-                  }"
-                    class="action-icon action-loading-icon"
-                ><Loading
-                /></el-icon>
+              <span class="collapsed-stop-icon"></span>
+            </button>
+          </el-tooltip>
+          <el-tooltip
+              :content="capsuleTooltipContent"
+              :offset="10"
+              :show-after="300"
+              effect="dark"
+              placement="bottom"
+              popper-class="recording-toolbar-tooltip"
+          >
+            <div
+                :data-state="currentRecordingState"
+                class="collapsed-pill"
+                @click.stop="toggleRecordingState"
+            >
+              <span class="collapsed-pill-content">
+                <span
+                    v-if="currentRecordingState === 'recording'"
+                    class="recording-dot"
+                ></span>
+                <span
+                    v-else-if="currentRecordingState === 'paused'"
+                    class="recording-pause-square"
+                ></span>
+                <span
+                    v-else-if="currentRecordingState === 'idle'"
+                    class="recording-ready-dot"
+                ></span>
+                <span class="collapsed-pill-text">{{ collapsedDisplayText }}</span>
               </span>
-            </el-button>
+            </div>
           </el-tooltip>
-        </span>
-        <span
-            class="no-drag"
-            @mouseenter="onButtonHoverChange('close', true)"
-            @mouseleave="onButtonHoverChange('close', false)"
-        >
           <el-tooltip
-              :content="closeTooltipText"
-              :offset="14"
+              :offset="10"
+              :show-after="300"
+              content="设置"
               effect="dark"
               placement="bottom"
               popper-class="recording-toolbar-tooltip"
-              @visible-change="
-              (visible) => onTooltipVisibleChange('close', visible)
-            "
           >
-            <el-button circle class="icon-btn" size="small" @click="closeBar">
-              <el-icon><Close/></el-icon>
-            </el-button>
+            <button
+                class="collapsed-expand-btn no-drag"
+                type="button"
+                @click.stop="toggleCapsuleSettings"
+            >
+              <el-icon class="collapsed-expand-icon">
+                <Settings :size="13" :stroke-width="2.2"/>
+              </el-icon>
+            </button>
           </el-tooltip>
-        </span>
+        </div>
+        <div v-if="capsuleSettingsVisible" class="capsule-settings-panel no-drag">
+          <div class="toolbar-settings-title">录制设置</div>
+          <div class="toolbar-settings-row">
+            <span class="toolbar-settings-label">系统音频</span>
+            <el-select
+                :model-value="captureSystemAudio ? systemOutputId : ''"
+                placeholder="选择系统音频设备"
+                popper-class="recording-toolbar-select-popper"
+                size="small"
+                @change="onSystemAudioDeviceChange"
+            >
+              <el-option label="不捕获系统音频" value=""/>
+              <el-option
+                  v-for="item in systemOutputs"
+                  :key="item.id"
+                  :label="item.name"
+                  :value="item.id"
+              />
+            </el-select>
+          </div>
+          <div class="toolbar-settings-row">
+            <span class="toolbar-settings-label">麦克风</span>
+            <el-select
+                :model-value="captureMicrophone ? microphoneDeviceId : ''"
+                placeholder="选择麦克风设备"
+                popper-class="recording-toolbar-select-popper"
+                size="small"
+                @change="onMicrophoneDeviceChange"
+            >
+              <el-option label="不捕获麦克风" value=""/>
+              <el-option
+                  v-for="item in microphones"
+                  :key="item.id"
+                  :label="item.name"
+                  :value="item.id"
+              />
+            </el-select>
+          </div>
+          <button
+              class="toolbar-folder-btn no-drag"
+              type="button"
+              @click="openRecordingFolder"
+          >
+            打开录制保存文件夹
+          </button>
+          <div class="toolbar-settings-switch-row">
+            <el-switch
+                v-model="captureCursor"
+                active-text="捕获鼠标"
+                @change="onToolbarSettingChange('recordingCaptureCursor', $event)"
+            />
+            <el-tooltip
+                content="开启后，录制画面会包含当前悬浮工具栏；关闭后，工具栏不会被录进去。"
+                effect="dark"
+                placement="top"
+                popper-class="recording-toolbar-tooltip"
+            >
+              <el-switch
+                  v-model="toolbarContentProtected"
+                  active-text="捕获工具栏"
+                  @change="onToolbarSettingChange('recordingToolbarContentProtected', $event)"
+              />
+            </el-tooltip>
+          </div>
+          <div class="toolbar-settings-row">
+            <span class="toolbar-settings-label">默认帧率</span>
+            <el-input-number
+                :controls="false"
+                :max="120"
+                :min="1"
+                :model-value="fps"
+                :step="1"
+                size="small"
+                @change="onToolbarSettingChange('recordingDefaultFps', $event)"
+            />
+          </div>
+          <div class="toolbar-settings-row">
+            <span class="toolbar-settings-label">视频码率 (kbps)</span>
+            <el-input-number
+                :controls="false"
+                :max="50000"
+                :min="500"
+                :model-value="videoBitrateKbps"
+                :step="500"
+                size="small"
+                @change="onToolbarSettingChange('recordingDefaultVideoBitrateKbps', $event)"
+            />
+          </div>
+          <div class="toolbar-settings-row">
+            <span class="toolbar-settings-label">音频码率 (kbps)</span>
+            <el-input-number
+                :controls="false"
+                :max="512"
+                :min="32"
+                :model-value="audioBitrateKbps"
+                :step="16"
+                size="small"
+                @change="onToolbarSettingChange('recordingDefaultAudioBitrateKbps', $event)"
+            />
+          </div>
+        </div>
       </div>
+
     </div>
   </el-config-provider>
 </template>
 
 <script setup>
-import {computed, onBeforeUnmount, onMounted, reactive, ref, watch,} from "vue";
+import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from "vue";
 import zhCn from "element-plus/dist/locale/zh-cn";
 import {listen} from "@tauri-apps/api/event";
-import {getCurrentWindow} from "@tauri-apps/api/window";
 import {AISettingsService, RecordingService} from "@/services/ipc.js";
 import {ElMessage} from "element-plus";
-import {Close, Loading} from "@element-plus/icons-vue";
-import {FolderOpen, Mic, MicOff, Settings, Volume2, VolumeOff,} from "lucide-vue-next";
+import {Settings} from "lucide-vue-next";
 
 const loadingAction = ref(null);
+const capsuleSettingsVisible = ref(false);
+const isToolbarCollapsed = ref(true);
+const recordingFeatureEnabled = ref(true);
+
 const captureSystemAudio = ref(false);
-const captureMicrophone = ref(true);
-const microphonePopoverVisible = ref(false);
-const systemAudioPopoverVisible = ref(false);
-const systemOutputs = ref([]);
+const captureMicrophone = ref(false);
 const systemOutputId = ref(null);
-const microphones = ref([]);
 const microphoneDeviceId = ref(null);
+const systemOutputs = ref([]);
+const microphones = ref([]);
+
 const fps = ref(30);
+const videoBitrateKbps = ref(6000);
+const audioBitrateKbps = ref(160);
+const captureCursor = ref(true);
+const toolbarContentProtected = ref(false);
+
 const state = reactive({state: "idle", sessionId: null, elapsedMs: 0});
 let unlistenStateChanged = null;
 let unlistenRecordingFinished = null;
 let unlistenRecordingError = null;
 let unlistenForceCompact = null;
 let lastElapsedUiSyncAt = 0;
-const barRef = ref(null);
-const openSelectIds = ref(new Set()); // 麦克风/系统音频下拉层
-const openTooltipIds = ref(new Set()); // tooltip 可见
-const hoveredControlIds = ref(new Set()); // 按钮 hover（用于预留 tooltip 空间）
-const isPointerOverBar = ref(false);
-const forceCompactMode = ref(false);
-let collapseTimer = null;
-const isToolbarCollapsed = ref(false);
-let pendingToolbarResizePayload = null;
-let lastAppliedToolbarResizePayload = null;
-let isApplyingToolbarResize = false;
-let suppressLayoutSync = false;
-const COLLAPSE_DELAY_MS = 0;
-
-let _measureCanvas = null;
-const ensureMeasureCtx = () => {
-  if (!_measureCanvas) {
-    _measureCanvas = document.createElement("canvas");
-  }
-  const ctx = _measureCanvas.getContext("2d");
-  ctx.font =
-      '14px -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, \"Microsoft Yahei\", sans-serif';
-  return ctx;
-};
-const computeListWidth = (items, labelSelector) => {
-  const names = Array.isArray(items) ? items.map(labelSelector) : [];
-  if (names.length === 0) return 220;
-  const ctx = ensureMeasureCtx();
-  let max = 0;
-  for (const s of names) {
-    max = Math.max(max, ctx.measureText(String(s || "")).width);
-  }
-  // 左右内边距与滚动条余量
-  const padding = 20 + 16;
-  const raw = Math.ceil(max + padding);
-  const minW = 220;
-  const maxW = 900;
-  return Math.max(minW, Math.min(maxW, raw));
-};
-const microphoneListWidth = computed(() =>
-    computeListWidth(microphones.value, (it) => it.name),
-);
-const systemOutputListWidth = computed(() =>
-    computeListWidth(systemOutputs.value, (it) => it.name),
-);
 
 const formatElapsedText = (ms) => {
   const totalSeconds = Math.floor(ms / 1000);
@@ -322,10 +229,9 @@ const formatElapsedText = (ms) => {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 };
 const elapsedText = computed(() => formatElapsedText(state.elapsedMs));
-const rawRecordingState = computed(() =>
-    String(state.state || "idle").toLowerCase(),
-);
+const rawRecordingState = computed(() => String(state.state || "idle").toLowerCase());
 const currentRecordingState = computed(() => {
+  if (!recordingFeatureEnabled.value) return "disabled";
   const normalized = rawRecordingState.value;
   if (
       normalized === "idle" ||
@@ -333,13 +239,15 @@ const currentRecordingState = computed(() => {
       normalized === "paused" ||
       normalized === "starting" ||
       normalized === "stopping" ||
-      normalized === "error"
+      normalized === "error" ||
+      normalized === "disabled"
   ) {
     return normalized;
   }
   return state.sessionId ? "recording" : "idle";
 });
 const recordingHintText = computed(() => {
+  if (!recordingFeatureEnabled.value) return "录屏已停用";
   if (rawRecordingState.value === "recording") return "正在录屏";
   if (rawRecordingState.value === "paused") return "录屏已暂停";
   if (rawRecordingState.value === "starting") return "录屏启动中";
@@ -348,16 +256,13 @@ const recordingHintText = computed(() => {
   return "开始录制";
 });
 const collapsedDisplayText = computed(() => {
-  // 只显示时间，去掉"已录制/已暂停"前缀
-  if (
-      rawRecordingState.value === "recording" ||
-      rawRecordingState.value === "paused"
-  ) {
+  if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
     return elapsedText.value;
   }
   return recordingHintText.value;
 });
 const capsuleTooltipContent = computed(() => {
+  if (!recordingFeatureEnabled.value) return "录屏功能已停用";
   if (rawRecordingState.value === "recording") return "正在录制，点击暂停";
   if (rawRecordingState.value === "paused") return "已暂停，点击恢复录制";
   if (rawRecordingState.value === "idle") return "开始录制，点击开始";
@@ -367,26 +272,34 @@ const isBusy = computed(() => loadingAction.value !== null);
 const canStop = computed(
     () =>
         !isBusy.value &&
-        (currentRecordingState.value === "recording" ||
-            currentRecordingState.value === "paused"),
+        (currentRecordingState.value === "recording" || currentRecordingState.value === "paused"),
 );
-const isRecordingSessionActive = computed(() =>
-    ["starting", "recording", "paused", "stopping"].includes(
-        currentRecordingState.value,
-    ),
-);
-const closeTooltipText = computed(() => {
-  if (
-      currentRecordingState.value === "recording" ||
-      currentRecordingState.value === "paused"
-  ) {
-    return "隐藏工具栏（录制继续）";
+
+const syncCapsuleLayout = async () => {
+  try {
+    isToolbarCollapsed.value = true;
+    await RecordingService.resizeToolbar(false, capsuleSettingsVisible.value, true);
+  } catch (_e) {
   }
-  return "关闭工具栏";
-});
+};
+
+const refresh = async () => {
+  const data = await RecordingService.getState();
+  state.state = data.state || state.state || "idle";
+  state.sessionId = data.sessionId || null;
+  state.elapsedMs = Number(data.elapsedMs || 0);
+};
 
 const toggleRecordingState = async () => {
   if (isBusy.value) return;
+  if (!recordingFeatureEnabled.value) {
+    try {
+      const settings = await AISettingsService.getSettings();
+      recordingFeatureEnabled.value = settings.recording_enabled === true;
+    } catch (_e) {
+    }
+    if (!recordingFeatureEnabled.value) return;
+  }
   try {
     if (rawRecordingState.value === "idle") {
       loadingAction.value = "start";
@@ -395,8 +308,10 @@ const toggleRecordingState = async () => {
         systemAudioDeviceId: systemOutputId.value,
         captureMicrophone: captureMicrophone.value,
         microphoneDeviceId: microphoneDeviceId.value,
-        captureCursor: true,
+        captureCursor: captureCursor.value,
         fps: fps.value,
+        videoBitrateKbps: videoBitrateKbps.value,
+        audioBitrateKbps: audioBitrateKbps.value,
       });
     } else if (rawRecordingState.value === "recording") {
       loadingAction.value = "pause";
@@ -407,17 +322,15 @@ const toggleRecordingState = async () => {
     }
     await refresh();
   } catch (e) {
-    ElMessage.error(String(e));
+    const msg = String(e || "");
+    if (msg.includes("录屏功能已停用")) {
+      recordingFeatureEnabled.value = false;
+      return;
+    }
+    ElMessage.error(msg);
   } finally {
     loadingAction.value = null;
   }
-};
-
-const refresh = async () => {
-  const data = await RecordingService.getState();
-  state.state = data.state || state.state || "idle";
-  state.sessionId = data.sessionId || null;
-  state.elapsedMs = Number(data.elapsedMs || 0);
 };
 
 const stop = async () => {
@@ -432,254 +345,80 @@ const stop = async () => {
   }
 };
 
-const openFolder = async () => {
-  loadingAction.value = "openFolder";
-  try {
-    await RecordingService.openFolder();
-  } catch (e) {
-    ElMessage.error(String(e));
-  } finally {
-    loadingAction.value = null;
-  }
-};
-
-const closeBar = async () => {
-  suppressLayoutSync = true;
-  clearCollapseTimer();
-  resetInteractionState();
-  try {
-    await getCurrentWindow().hide();
-  } catch (_e) {
-  } finally {
-    // 避免关闭瞬间触发的状态变更再次触发布局抖动
-    setTimeout(() => {
-      suppressLayoutSync = false;
-    }, 0);
-  }
-};
-
-const mutateIdSet = (setRef, id, visible) => {
-  const next = new Set(setRef.value);
-  if (visible) {
-    next.add(id);
-  } else {
-    next.delete(id);
-  }
-  setRef.value = next;
-};
-
-const clearTransientOverlayState = () => {
-  openTooltipIds.value = new Set();
-  hoveredControlIds.value = new Set();
-};
-
-const hasOpenSelectOverlay = () => openSelectIds.value.size > 0;
-const hasTransientOverlay = () =>
-    openTooltipIds.value.size > 0 || hoveredControlIds.value.size > 0;
-
-const reconcileSelectOverlayState = () => {
-  const next = new Set();
-  if (microphonePopoverVisible.value) next.add("microphone");
-  if (systemAudioPopoverVisible.value) next.add("systemAudio");
-  openSelectIds.value = next;
-};
-
-const buildToolbarSnapshot = () => ({
-  recordingActive: isRecordingSessionActive.value,
-  pointerOverBar: isPointerOverBar.value,
-  openSelect: hasOpenSelectOverlay(),
-  openOverlay: hasTransientOverlay(),
-  forceCompact: forceCompactMode.value,
-});
-
-const deriveCollapsedFromSnapshot = (snapshot) =>
-    snapshot.forceCompact ||
-    (snapshot.recordingActive && !snapshot.pointerOverBar && !snapshot.openSelect);
-
-const deriveResizePayloadFromSnapshot = (snapshot, compactMode) => ({
-  openSelect: snapshot.openSelect,
-  // 仅 tooltip 可见时增高窗口，不再由按钮 hover 触发
-  openOverlay: snapshot.openOverlay,
-  compactMode,
-});
-
-const isSameToolbarResizePayload = (a, b) => {
-  if (!a || !b) return false;
-  return (
-      a.openSelect === b.openSelect &&
-      a.openOverlay === b.openOverlay &&
-      a.compactMode === b.compactMode
-  );
-};
-
-const applyToolbarWindowSize = async (payload) => {
-  pendingToolbarResizePayload = payload;
-  if (isApplyingToolbarResize) return;
-
-  isApplyingToolbarResize = true;
-  try {
-    while (pendingToolbarResizePayload) {
-      const current = pendingToolbarResizePayload;
-      pendingToolbarResizePayload = null;
-      if (isSameToolbarResizePayload(current, lastAppliedToolbarResizePayload))
-        continue;
-      try {
-        await RecordingService.resizeToolbar(
-            current.openSelect,
-            current.openOverlay,
-            current.compactMode,
-        );
-        lastAppliedToolbarResizePayload = current;
-      } catch (_e) {
-      }
-    }
-  } finally {
-    isApplyingToolbarResize = false;
-  }
-};
-
-const clearCollapseTimer = () => {
-  if (!collapseTimer) return;
-  clearTimeout(collapseTimer);
-  collapseTimer = null;
-};
-
-const commitToolbarLayout = async (snapshot = null) => {
-  let currentSnapshot = snapshot || buildToolbarSnapshot();
-  const nextCollapsed = deriveCollapsedFromSnapshot(currentSnapshot);
-  if (isToolbarCollapsed.value !== nextCollapsed) {
-    isToolbarCollapsed.value = nextCollapsed;
-    if (nextCollapsed) {
-      clearTransientOverlayState();
-      currentSnapshot = buildToolbarSnapshot();
-    }
-  }
-  const payload = deriveResizePayloadFromSnapshot(
-      currentSnapshot,
-      isToolbarCollapsed.value,
-  );
-  await applyToolbarWindowSize(payload);
-};
-
-const scheduleToolbarTransition = (snapshot) => {
-  clearCollapseTimer();
-  if (!deriveCollapsedFromSnapshot(snapshot)) {
-    void commitToolbarLayout(snapshot);
-    return;
-  }
-  collapseTimer = setTimeout(() => {
-    collapseTimer = null;
-    reconcileSelectOverlayState();
-    void commitToolbarLayout(buildToolbarSnapshot());
-  }, COLLAPSE_DELAY_MS);
-};
-
-const requestToolbarLayoutSync = (immediate = false) => {
-  if (suppressLayoutSync) return;
-  reconcileSelectOverlayState();
-  const snapshot = buildToolbarSnapshot();
-  if (immediate) {
-    clearCollapseTimer();
-    void commitToolbarLayout(snapshot);
-    return;
-  }
-  scheduleToolbarTransition(snapshot);
-};
-
-const onBarMouseEnter = () => {
-  if (isToolbarCollapsed.value) return;
-  isPointerOverBar.value = true;
-  requestToolbarLayoutSync(true);
-};
-
-const onBarMouseLeave = () => {
-  isPointerOverBar.value = false;
-  clearTransientOverlayState();
-};
-
-const onBarClick = () => {
-  if (!isToolbarCollapsed.value) return;
-  expandFromCapsule();
-};
-
-const expandFromCapsule = () => {
-  if (!isToolbarCollapsed.value) return;
-  forceCompactMode.value = false;
-  isPointerOverBar.value = true;
-  requestToolbarLayoutSync(true);
+const toggleCapsuleSettings = () => {
+  capsuleSettingsVisible.value = !capsuleSettingsVisible.value;
 };
 
 const onWindowBlur = () => {
-  resetInteractionState();
-  requestToolbarLayoutSync(true);
+  if (!capsuleSettingsVisible.value) return;
+  capsuleSettingsVisible.value = false;
 };
 
-const onSelectVisibleChange = (id, visible) => {
-  mutateIdSet(openSelectIds, id, visible);
-  requestToolbarLayoutSync(true);
-};
-
-const onTooltipVisibleChange = (id, visible) => {
-  mutateIdSet(openTooltipIds, id, visible);
-  requestToolbarLayoutSync(true);
-};
-
-const onButtonHoverChange = (id, visible) => {
-  mutateIdSet(hoveredControlIds, id, visible);
-  requestToolbarLayoutSync(true);
-};
-
-const toggleMicrophone = async () => {
-  if (captureMicrophone.value) {
-    captureMicrophone.value = false;
-    microphonePopoverVisible.value = false;
-    return;
-  }
-  captureMicrophone.value = true;
-  if (!microphoneDeviceId.value && microphones.value.length > 0) {
-    const def = microphones.value.find((it) => it.isDefault);
-    microphoneDeviceId.value = def ? def.id : microphones.value[0].id;
-  }
-  microphonePopoverVisible.value = true;
-};
-
-const selectMicrophone = async (deviceId) => {
-  microphoneDeviceId.value = deviceId;
-  microphonePopoverVisible.value = false;
-};
-
-const toggleSystemAudio = async () => {
-  if (captureSystemAudio.value) {
-    captureSystemAudio.value = false;
-    systemAudioPopoverVisible.value = false;
-    return;
-  }
-  captureSystemAudio.value = true;
-  if (!systemOutputId.value && systemOutputs.value.length > 0) {
-    const def = systemOutputs.value.find((it) => it.isDefault);
-    systemOutputId.value = def ? def.id : systemOutputs.value[0].id;
-  }
-  systemAudioPopoverVisible.value = true;
-};
-
-const selectSystemOutput = async (deviceId) => {
-  systemOutputId.value = deviceId;
-  systemAudioPopoverVisible.value = false;
-};
-
-const resetInteractionState = () => {
-  isPointerOverBar.value = false;
-  clearTransientOverlayState();
-  openSelectIds.value = new Set();
-  microphonePopoverVisible.value = false;
-  systemAudioPopoverVisible.value = false;
-};
-
-const syncCompactModeFromWindowSize = async () => {
+const openRecordingFolder = async () => {
   try {
-    const size = await getCurrentWindow().outerSize();
-    forceCompactMode.value = Number(size?.width || 0) <= 260;
-  } catch (_e) {
+    await RecordingService.openFolder();
+  } catch (e) {
+    ElMessage.error(`打开录制保存文件夹失败: ${String(e)}`);
+  }
+};
+
+const onSystemAudioDeviceChange = async (deviceId) => {
+  const id = String(deviceId || "");
+  captureSystemAudio.value = id.length > 0;
+  systemOutputId.value = id.length > 0 ? id : null;
+  try {
+    await AISettingsService.savePartialSettings({
+      recordingCaptureSystemAudio: captureSystemAudio.value,
+    });
+  } catch (e) {
+    ElMessage.error(`保存系统音频设置失败: ${String(e)}`);
+  }
+};
+
+const onMicrophoneDeviceChange = async (deviceId) => {
+  const id = String(deviceId || "");
+  captureMicrophone.value = id.length > 0;
+  microphoneDeviceId.value = id.length > 0 ? id : null;
+  try {
+    await AISettingsService.savePartialSettings({
+      recordingCaptureMicrophone: captureMicrophone.value,
+      recordingMicrophoneDeviceId: microphoneDeviceId.value || "",
+    });
+  } catch (e) {
+    ElMessage.error(`保存麦克风设置失败: ${String(e)}`);
+  }
+};
+
+const onToolbarSettingChange = async (key, rawValue) => {
+  const n = Number(rawValue);
+  const patch = {};
+  if (key === "recordingDefaultFps") {
+    const v = Math.max(1, Math.min(120, Number.isFinite(n) ? n : fps.value));
+    fps.value = v;
+    patch.recordingDefaultFps = v;
+  } else if (key === "recordingDefaultVideoBitrateKbps") {
+    const v = Math.max(500, Math.min(50000, Number.isFinite(n) ? n : videoBitrateKbps.value));
+    videoBitrateKbps.value = v;
+    patch.recordingDefaultVideoBitrateKbps = v;
+  } else if (key === "recordingDefaultAudioBitrateKbps") {
+    const v = Math.max(32, Math.min(512, Number.isFinite(n) ? n : audioBitrateKbps.value));
+    audioBitrateKbps.value = v;
+    patch.recordingDefaultAudioBitrateKbps = v;
+  } else if (key === "recordingCaptureCursor") {
+    const v = rawValue === true;
+    captureCursor.value = v;
+    patch.recordingCaptureCursor = v;
+  } else if (key === "recordingToolbarContentProtected") {
+    const v = rawValue === true;
+    toolbarContentProtected.value = v;
+    patch.recordingToolbarContentProtected = v;
+  } else {
+    return;
+  }
+  try {
+    await AISettingsService.savePartialSettings(patch);
+  } catch (e) {
+    ElMessage.error(`保存录制设置失败: ${String(e)}`);
   }
 };
 
@@ -701,69 +440,75 @@ onMounted(async () => {
   unlistenRecordingFinished = await listen("recording-finished", () => {
     state.state = "idle";
     state.sessionId = null;
-    resetInteractionState();
-    requestToolbarLayoutSync(true);
+    capsuleSettingsVisible.value = false;
+    void syncCapsuleLayout();
   });
   unlistenRecordingError = await listen("recording-error", () => {
     state.state = "error";
-    resetInteractionState();
-    requestToolbarLayoutSync(true);
+    capsuleSettingsVisible.value = false;
+    void syncCapsuleLayout();
   });
   unlistenForceCompact = await listen("recording-toolbar-force-compact", () => {
-    forceCompactMode.value = true;
-    isPointerOverBar.value = false;
-    clearTransientOverlayState();
-    requestToolbarLayoutSync(true);
+    capsuleSettingsVisible.value = false;
+    void syncCapsuleLayout();
   });
   try {
     const settings = await AISettingsService.getSettings();
+    recordingFeatureEnabled.value = settings.recording_enabled === true;
     captureSystemAudio.value = settings.recording_capture_system_audio === true;
-    captureMicrophone.value = settings.recording_capture_microphone !== false;
+    captureMicrophone.value = settings.recording_capture_microphone === true;
     fps.value = Number(settings.recording_default_fps || 30);
+    videoBitrateKbps.value = Number(settings.recording_default_video_bitrate_kbps || 6000);
+    audioBitrateKbps.value = Number(settings.recording_default_audio_bitrate_kbps || 160);
+    captureCursor.value = settings.recording_capture_cursor !== false;
+    toolbarContentProtected.value = settings.recording_toolbar_content_protected === true;
+    microphoneDeviceId.value = settings.recording_microphone_device_id || null;
   } catch (_e) {
   }
   try {
     const outs = await RecordingService.listSystemOutputs();
     systemOutputs.value = Array.isArray(outs) ? outs : [];
     const def = systemOutputs.value.find((it) => it.isDefault);
-    systemOutputId.value = def ? def.id : (systemOutputs.value[0]?.id ?? null);
-  } catch (e) {
-    systemOutputs.value = [];
-    systemOutputId.value = null;
-    ElMessage.error(`加载系统音频设备失败: ${String(e)}`);
+    if (!systemOutputId.value) {
+      systemOutputId.value = def ? def.id : (systemOutputs.value[0]?.id ?? null);
+    }
+    if (captureSystemAudio.value && !systemOutputId.value && systemOutputs.value.length > 0) {
+      systemOutputId.value = def ? def.id : systemOutputs.value[0].id;
+    }
+    if (!captureSystemAudio.value) {
+      systemOutputId.value = null;
+    }
+  } catch (_e) {
   }
   try {
     const mics = await RecordingService.listAudioDevices();
     microphones.value = Array.isArray(mics) ? mics : [];
     const def = microphones.value.find((it) => it.isDefault);
-    microphoneDeviceId.value = def
-        ? def.id
-        : (microphones.value[0]?.id ?? null);
-  } catch (e) {
-    microphones.value = [];
-    microphoneDeviceId.value = null;
-    ElMessage.error(`加载麦克风设备失败: ${String(e)}`);
+    if (!microphoneDeviceId.value && captureMicrophone.value) {
+      microphoneDeviceId.value = def ? def.id : (microphones.value[0]?.id ?? null);
+    }
+    if (!captureMicrophone.value) {
+      microphoneDeviceId.value = null;
+    }
+  } catch (_e) {
   }
-  await syncCompactModeFromWindowSize();
   await refresh();
-  requestToolbarLayoutSync(true);
+  await syncCapsuleLayout();
+});
+
+watch(capsuleSettingsVisible, () => {
+  void syncCapsuleLayout();
 });
 
 watch(currentRecordingState, (next) => {
   if (next === "idle" || next === "error") {
-    resetInteractionState();
+    capsuleSettingsVisible.value = false;
   }
-  requestToolbarLayoutSync(true);
-});
-
-watch([microphonePopoverVisible, systemAudioPopoverVisible], () => {
-  reconcileSelectOverlayState();
-  requestToolbarLayoutSync(true);
+  void syncCapsuleLayout();
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("blur", onWindowBlur);
-  clearCollapseTimer();
   if (unlistenStateChanged) unlistenStateChanged();
   if (unlistenRecordingFinished) unlistenRecordingFinished();
   if (unlistenRecordingError) unlistenRecordingError();
@@ -791,6 +536,9 @@ body,
   --el-fill-color-light: #252b38;
   --el-border-color-light: rgba(255, 255, 255, 0.16);
   --el-text-color-primary: #e9eefc;
+  width: 220px !important;
+  max-width: 220px !important;
+  min-width: 220px !important;
 }
 
 .recording-toolbar-select-popper .el-select-dropdown__item {
@@ -808,45 +556,14 @@ body,
 }
 
 .recording-toolbar-select-popper.el-popper {
-  max-width: 940px;
+  max-width: 220px;
   overflow: hidden;
 }
 
-.recording-toolbar-select-popper .device-list {
-  width: auto;
-  max-width: 900px;
-  max-height: 260px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  box-sizing: border-box;
-}
-
-.recording-toolbar-select-popper .device-item {
-  display: block;
-  line-height: 32px;
-  padding: 0 10px;
-  color: #e9eefc;
-  cursor: pointer;
-  border-radius: 6px;
+.recording-toolbar-select-popper .el-select-dropdown__item {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
-}
-
-.recording-toolbar-select-popper .device-item:hover {
-  background: rgba(114, 183, 255, 0.18);
-}
-
-.recording-toolbar-select-popper .device-item[data-active="true"] {
-  color: #7bb8ff;
-  font-weight: 600;
-}
-
-.recording-toolbar-select-popper .device-empty {
-  line-height: 32px;
-  padding: 0 10px;
-  color: rgba(233, 238, 252, 0.72);
 }
 
 .recording-toolbar-tooltip.el-popper {
@@ -900,27 +617,31 @@ body,
   clip-path: inset(0 round 999px);
 }
 
+.bar.bar-collapsed.bar-collapsed-settings-open {
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(17, 22, 32, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  clip-path: none;
+}
+
 .collapsed-shell {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   width: 100%;
   height: 100%;
+  flex-direction: column;
+  justify-content: flex-start;
 }
 
-.expanded-content {
+.collapsed-shell-row {
+  width: 100%;
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.time {
-  min-width: 54px;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  text-align: center;
-  user-select: none;
+  gap: 6px;
 }
 
 .collapsed-pill {
@@ -931,11 +652,11 @@ body,
   width: auto;
   min-width: 0;
   height: calc(100% - 1px);
-  padding: 0;
+  padding: 0 8px;
   box-sizing: border-box;
   border-radius: 999px;
-  background: #4aa7f8;
-  border: 1px solid #66b5f7;
+  background: #202937;
+  border: 1px solid #344055;
   user-select: none;
   cursor: pointer;
   transition: none !important;
@@ -945,8 +666,20 @@ body,
 }
 
 .collapsed-pill:hover {
-  filter: none;
-  background: #5ab0fa;
+  background: #273345;
+}
+
+.collapsed-pill[data-state="disabled"] {
+  background: #d64242;
+  border-color: #f07979;
+}
+
+.collapsed-pill[data-state="disabled"]:hover {
+  background: #c73939;
+}
+
+.collapsed-pill[data-state="disabled"] .collapsed-pill-content {
+  color: #ffffff;
 }
 
 .recording-dot {
@@ -994,7 +727,7 @@ body,
   height: 10px;
   margin-right: 0;
   border-radius: 2px;
-  background: #ff4d4d;
+  background: #e8bf4f;
   box-shadow: none;
   flex-shrink: 0;
   vertical-align: middle;
@@ -1016,10 +749,27 @@ body,
   height: 22px;
 }
 
+.capsule-settings-panel {
+  width: 100%;
+  margin-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: calc(100% - 44px);
+  overflow-y: auto;
+  padding-right: 4px;
+  box-sizing: border-box;
+}
+
 .collapsed-stop-btn,
 .collapsed-expand-btn {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #344055;
+  background: #202937;
+  color: #dce7f8;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
@@ -1030,16 +780,16 @@ body,
 }
 
 .collapsed-stop-btn {
-  border: 1px solid #d85a5a;
-  background: #e46a6a;
+  border-color: #845364;
+  background: #2f2229;
 }
 
 .collapsed-stop-btn:hover:not(:disabled) {
-  background: #ec7878;
+  background: #3a2932;
 }
 
 .collapsed-stop-btn:active:not(:disabled) {
-  background: #cf5959;
+  background: #261b21;
 }
 
 .collapsed-stop-btn:disabled {
@@ -1051,80 +801,21 @@ body,
   width: 8px;
   height: 8px;
   border-radius: 2px;
-  background: #fff7f7;
+  background: #f08b8b;
 }
 
 .collapsed-expand-btn {
-  border: 1px solid rgba(98, 170, 255, 0.7);
-  background: #4f96f3;
-  color: #f4f8ff;
+  border-color: #3d4f6b;
+  background: #232f41;
+  color: #d3e4ff;
 }
 
 .collapsed-expand-btn:hover {
-  background: #63a5fb;
+  background: #2b3950;
 }
 
 .collapsed-expand-btn:active {
-  background: #3f88e6;
-}
-
-.collapsed-shell[data-state="paused"] .collapsed-expand-btn {
-  border-color: rgba(227, 172, 36, 0.78);
-  background: #edbe43;
-  color: #402800;
-}
-
-.collapsed-shell[data-state="paused"] .collapsed-expand-btn:hover {
-  background: #f3c95b;
-}
-
-.collapsed-shell[data-state="paused"] .collapsed-expand-btn:active {
-  background: #d9aa33;
-}
-
-.collapsed-shell[data-state="idle"] .collapsed-expand-btn {
-  border-color: rgba(83, 182, 123, 0.8);
-  background: #46bf77;
-  color: #f4fff8;
-}
-
-.collapsed-shell[data-state="idle"] .collapsed-expand-btn:hover {
-  background: #58ca86;
-}
-
-.collapsed-shell[data-state="idle"] .collapsed-expand-btn:active {
-  background: #38ad67;
-}
-
-.collapsed-shell[data-state="starting"] .collapsed-expand-btn,
-.collapsed-shell[data-state="stopping"] .collapsed-expand-btn {
-  border-color: rgba(143, 192, 229, 0.8);
-  background: #7eb5df;
-  color: #f4f8ff;
-}
-
-.collapsed-shell[data-state="starting"] .collapsed-expand-btn:hover,
-.collapsed-shell[data-state="stopping"] .collapsed-expand-btn:hover {
-  background: #93c2e6;
-}
-
-.collapsed-shell[data-state="starting"] .collapsed-expand-btn:active,
-.collapsed-shell[data-state="stopping"] .collapsed-expand-btn:active {
-  background: #6ba4d3;
-}
-
-.collapsed-shell[data-state="error"] .collapsed-expand-btn {
-  border-color: rgba(227, 118, 118, 0.78);
-  background: #df7171;
-  color: #fff4f4;
-}
-
-.collapsed-shell[data-state="error"] .collapsed-expand-btn:hover {
-  background: #e78383;
-}
-
-.collapsed-shell[data-state="error"] .collapsed-expand-btn:active {
-  background: #cb5f5f;
+  background: #1e2a3b;
 }
 
 .collapsed-expand-icon {
@@ -1141,17 +832,16 @@ body,
   justify-content: center;
   gap: 6px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 13px;
-  color: #f8fbff;
-  font-weight: 700;
-  letter-spacing: 0.2px;
+  overflow: visible;
+  font-size: 12.5px;
+  color: #dfebfc;
+  font-weight: 600;
+  letter-spacing: 0.1px;
   text-shadow: none;
   line-height: 1;
   width: 100%;
   height: 100%;
-  padding: 0 10px;
+  padding: 0;
   text-align: center;
   box-sizing: border-box;
   -webkit-font-smoothing: antialiased;
@@ -1160,36 +850,90 @@ body,
 .collapsed-pill-text {
   display: inline-block;
   vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
 }
 
 .bar:not(.bar-collapsed) .collapsed-pill {
   display: none;
 }
 
-.collapsed-pill[data-state="paused"] {
-  background: #f0c44c;
-  border-color: #f3d16f;
+.toolbar-settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 2px 0;
 }
 
-.collapsed-pill[data-state="idle"] {
-  background: #44c277;
-  border-color: #68d093;
+.toolbar-settings-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e9eefc;
+  margin-bottom: 2px;
 }
 
-.collapsed-pill[data-state="paused"] .collapsed-pill-content {
-  color: #3a2500;
-  text-shadow: none;
+.toolbar-folder-btn {
+  height: 30px;
+  border: 1px solid #3a4a63;
+  background: #233144;
+  color: #e6f0ff;
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 12px;
+  line-height: 30px;
+  text-align: center;
+  cursor: pointer;
 }
 
-.collapsed-pill[data-state="stopping"],
-.collapsed-pill[data-state="starting"] {
-  background: #7eb6de;
-  border-color: #9cc8e8;
+.toolbar-folder-btn:hover {
+  background: #2b3d54;
 }
 
-.collapsed-pill[data-state="error"] {
-  background: #de7373;
-  border-color: #e79a9a;
+.toolbar-folder-btn:active {
+  background: #1f2c3d;
+}
+
+.toolbar-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  min-height: 34px;
+}
+
+.toolbar-settings-label {
+  font-size: 13px;
+  color: #dce5f8;
+  white-space: nowrap;
+  width: 118px;
+  flex: 0 0 118px;
+}
+
+.toolbar-settings-switch-row {
+  display: flex;
+  justify-content: flex-start;
+  min-height: 34px;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: nowrap;
+}
+
+.toolbar-settings-switch-row > * {
+  flex-shrink: 0;
+}
+
+.toolbar-settings-row :deep(.el-input-number) {
+  width: 80px;
+  flex: 0 0 80px;
+}
+
+.toolbar-settings-row :deep(.el-select) {
+  width: 100px;
+  flex: 0 0 100px;
+}
+
+.toolbar-settings-panel :deep(.el-input-number .el-input__inner) {
+  text-align: left;
 }
 
 .no-drag {
@@ -1197,58 +941,7 @@ body,
 }
 
 .no-drag :deep(.el-select),
-.no-drag :deep(.el-button),
 .no-drag :deep(.el-switch) {
   cursor: default;
-}
-
-.icon-btn:deep(.el-button) {
-  background: transparent !important;
-  border-color: transparent !important;
-  color: #e9eefc !important;
-}
-
-.icon-btn:deep(.el-button:hover) {
-  background: rgba(255, 255, 255, 0.08) !important;
-  border-color: rgba(255, 255, 255, 0.12) !important;
-}
-
-.icon-btn:deep(.el-icon) {
-  font-size: 18px;
-}
-
-.action-loading-icon {
-  animation: pause-loading-spin 1s linear infinite;
-}
-
-.action-icon-slot {
-  width: 18px;
-  height: 18px;
-  position: relative;
-  display: inline-block;
-}
-
-.action-icon {
-  position: absolute;
-  inset: 0;
-  width: 18px;
-  height: 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: opacity 0.12s linear;
-}
-
-.action-icon-hidden {
-  opacity: 0;
-}
-
-@keyframes pause-loading-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>
