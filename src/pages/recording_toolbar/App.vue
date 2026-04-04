@@ -1,9 +1,11 @@
 <template>
   <el-config-provider :locale="zhCn">
     <div
+        ref="barRef"
         :class="{'bar-collapsed': isToolbarCollapsed}"
         :data-tauri-drag-region="isToolbarCollapsed ? null : ''"
         class="bar"
+        @click="onBarClick"
         @mouseenter="onBarMouseEnter"
         @mouseleave="onBarMouseLeave"
     >
@@ -12,18 +14,24 @@
           :data-state="rawRecordingState"
           :title="collapsedPillText"
           class="collapsed-pill"
-      ></div>
+      >
+        <span class="collapsed-pill-content">
+          <i v-if="rawRecordingState === 'recording'" class="recording-dot"></i>
+          <span class="collapsed-pill-text">{{ collapsedDisplayText }}</span>
+        </span>
+      </div>
 
       <div v-else class="expanded-content">
         <div class="time">{{ elapsedText }}</div>
-      <span class="no-drag" @mouseenter="onButtonHoverChange(true)" @mouseleave="onButtonHoverChange(false)">
+        <span class="no-drag" @mouseenter="onButtonHoverChange('microphone', true)"
+              @mouseleave="onButtonHoverChange('microphone', false)">
         <el-popover
             v-model:visible="microphonePopoverVisible"
             placement="bottom-start"
             popper-class="recording-toolbar-select-popper"
             trigger="manual"
-            @hide="onSelectVisibleChange(false)"
-            @show="onSelectVisibleChange(true)"
+            @hide="onSelectVisibleChange('microphone', false)"
+            @show="onSelectVisibleChange('microphone', true)"
         >
           <div class="device-list">
             <div
@@ -51,15 +59,16 @@
         </el-popover>
       </span>
 
-      <span class="no-drag" @mouseenter="onButtonHoverChange(true)" @mouseleave="onButtonHoverChange(false)">
+        <span class="no-drag" @mouseenter="onButtonHoverChange('systemAudio', true)"
+              @mouseleave="onButtonHoverChange('systemAudio', false)">
         <el-popover
             v-model:visible="systemAudioPopoverVisible"
             :width="systemOutputListWidth"
             placement="bottom-start"
             popper-class="recording-toolbar-select-popper"
             trigger="manual"
-            @hide="onSelectVisibleChange(false)"
-            @show="onSelectVisibleChange(true)"
+            @hide="onSelectVisibleChange('systemAudio', false)"
+            @show="onSelectVisibleChange('systemAudio', true)"
         >
           <div class="device-list">
             <div
@@ -87,78 +96,111 @@
         </el-popover>
       </span>
 
-      <span class="no-drag" @mouseenter="onButtonHoverChange(true)" @mouseleave="onButtonHoverChange(false)">
-        <el-tooltip content="开始录制" effect="dark" placement="bottom" @visible-change="onTooltipVisibleChange">
+        <span class="no-drag" @mouseenter="onButtonHoverChange('start', true)"
+              @mouseleave="onButtonHoverChange('start', false)">
+        <el-tooltip :offset="14" content="开始录制" effect="dark" placement="bottom"
+                    popper-class="recording-toolbar-tooltip" @visible-change="(visible) => onTooltipVisibleChange('start', visible)">
           <el-button
-              :loading="loading"
+              :loading="false"
               :disabled="!canStart"
               circle
               class="icon-btn"
               size="small"
               @click="start"
           >
-            <el-icon><VideoPlay/></el-icon>
+            <span class="action-icon-slot">
+              <el-icon :class="{'action-icon-hidden': loadingAction === 'start'}" class="action-icon"><VideoPlay/></el-icon>
+              <el-icon :class="{'action-icon-hidden': loadingAction !== 'start'}"
+                       class="action-icon action-loading-icon"><Loading/></el-icon>
+            </span>
           </el-button>
         </el-tooltip>
       </span>
-      <span class="no-drag" @mouseenter="onButtonHoverChange(true)" @mouseleave="onButtonHoverChange(false)">
-        <el-tooltip content="暂停录制" effect="dark" placement="bottom" @visible-change="onTooltipVisibleChange">
+        <span class="no-drag" @mouseenter="onButtonHoverChange('pause', true)"
+              @mouseleave="onButtonHoverChange('pause', false)">
+        <el-tooltip :offset="14" content="暂停录制" effect="dark" placement="bottom"
+                    popper-class="recording-toolbar-tooltip" @visible-change="(visible) => onTooltipVisibleChange('pause', visible)">
           <el-button
-              :loading="loading"
+              :loading="false"
               :disabled="!canPause"
               circle
               class="icon-btn"
               size="small"
               @click="pause"
           >
-            <el-icon><VideoPause/></el-icon>
+            <span class="action-icon-slot">
+              <el-icon :class="{'action-icon-hidden': loadingAction === 'pause'}" class="action-icon"><VideoPause/></el-icon>
+              <el-icon :class="{'action-icon-hidden': loadingAction !== 'pause'}"
+                       class="action-icon action-loading-icon"><Loading/></el-icon>
+            </span>
           </el-button>
         </el-tooltip>
       </span>
-      <span class="no-drag" @mouseenter="onButtonHoverChange(true)" @mouseleave="onButtonHoverChange(false)">
-        <el-tooltip content="恢复录制" effect="dark" placement="bottom" @visible-change="onTooltipVisibleChange">
+        <span class="no-drag" @mouseenter="onButtonHoverChange('resume', true)"
+              @mouseleave="onButtonHoverChange('resume', false)">
+        <el-tooltip :offset="14" content="恢复录制" effect="dark" placement="bottom"
+                    popper-class="recording-toolbar-tooltip" @visible-change="(visible) => onTooltipVisibleChange('resume', visible)">
           <el-button
-              :loading="loading"
+              :loading="false"
               :disabled="!canResume"
               circle
               class="icon-btn"
               size="small"
               @click="resume"
           >
-            <el-icon><RefreshRight/></el-icon>
+            <span class="action-icon-slot">
+              <el-icon :class="{'action-icon-hidden': loadingAction === 'resume'}" class="action-icon"><RefreshRight/></el-icon>
+              <el-icon :class="{'action-icon-hidden': loadingAction !== 'resume'}"
+                       class="action-icon action-loading-icon"><Loading/></el-icon>
+            </span>
           </el-button>
         </el-tooltip>
       </span>
-      <span class="no-drag" @mouseenter="onButtonHoverChange(true)" @mouseleave="onButtonHoverChange(false)">
-        <el-tooltip content="停止录制" effect="dark" placement="bottom" @visible-change="onTooltipVisibleChange">
+        <span class="no-drag" @mouseenter="onButtonHoverChange('stop', true)"
+              @mouseleave="onButtonHoverChange('stop', false)">
+        <el-tooltip :offset="14" content="停止录制" effect="dark" placement="bottom"
+                    popper-class="recording-toolbar-tooltip" @visible-change="(visible) => onTooltipVisibleChange('stop', visible)">
           <el-button
-              :loading="loading"
+              :loading="false"
               :disabled="!canStop"
               circle
               class="icon-btn"
               size="small"
               @click="stop"
           >
-            <el-icon><SwitchButton/></el-icon>
+            <span class="action-icon-slot">
+              <el-icon :class="{'action-icon-hidden': loadingAction === 'stop'}" class="action-icon"><SwitchButton/></el-icon>
+              <el-icon :class="{'action-icon-hidden': loadingAction !== 'stop'}"
+                       class="action-icon action-loading-icon"><Loading/></el-icon>
+            </span>
           </el-button>
         </el-tooltip>
       </span>
-      <span class="no-drag" @mouseenter="onButtonHoverChange(true)" @mouseleave="onButtonHoverChange(false)">
-        <el-tooltip content="打开视频目录" effect="dark" placement="bottom" @visible-change="onTooltipVisibleChange">
+        <span class="no-drag" @mouseenter="onButtonHoverChange('openFolder', true)"
+              @mouseleave="onButtonHoverChange('openFolder', false)">
+        <el-tooltip :offset="14" content="打开视频目录" effect="dark" placement="bottom"
+                    popper-class="recording-toolbar-tooltip" @visible-change="(visible) => onTooltipVisibleChange('openFolder', visible)">
           <el-button
-              :loading="loading"
+              :loading="false"
               circle
               class="icon-btn"
               size="small"
               @click="openFolder"
           >
-            <el-icon><FolderOpen :size="18" :stroke-width="2.2"/></el-icon>
+            <span class="action-icon-slot">
+              <el-icon :class="{'action-icon-hidden': loadingAction === 'openFolder'}" class="action-icon"><FolderOpen
+                  :size="18" :stroke-width="2.2"/></el-icon>
+              <el-icon :class="{'action-icon-hidden': loadingAction !== 'openFolder'}"
+                       class="action-icon action-loading-icon"><Loading/></el-icon>
+            </span>
           </el-button>
         </el-tooltip>
       </span>
-      <span class="no-drag" @mouseenter="onButtonHoverChange(true)" @mouseleave="onButtonHoverChange(false)">
-        <el-tooltip :content="closeTooltipText" effect="dark" placement="bottom"
-                    @visible-change="onTooltipVisibleChange">
+        <span class="no-drag" @mouseenter="onButtonHoverChange('close', true)"
+              @mouseleave="onButtonHoverChange('close', false)">
+        <el-tooltip :content="closeTooltipText" :offset="14" effect="dark" placement="bottom"
+                    popper-class="recording-toolbar-tooltip"
+                    @visible-change="(visible) => onTooltipVisibleChange('close', visible)">
           <el-button
               circle
               class="icon-btn"
@@ -181,10 +223,10 @@ import {listen} from '@tauri-apps/api/event'
 import {getCurrentWindow} from '@tauri-apps/api/window'
 import {AISettingsService, RecordingService} from '@/services/ipc.js'
 import {ElMessage} from 'element-plus'
-import {Close} from "@element-plus/icons-vue";
+import {Close, Loading} from "@element-plus/icons-vue";
 import {FolderOpen, Mic, MicOff, Volume2, VolumeOff} from 'lucide-vue-next'
 
-const loading = ref(false)
+const loadingAction = ref(null)
 const captureSystemAudio = ref(false)
 const captureMicrophone = ref(true)
 const microphonePopoverVisible = ref(false)
@@ -196,16 +238,22 @@ const microphoneDeviceId = ref(null)
 const fps = ref(30)
 const state = reactive({state: 'idle', sessionId: null, elapsedMs: 0})
 let unlistenStateChanged = null
-let openSelectCount = 0
-let openTooltipCount = 0
-let openButtonHoverCount = 0
-let tooltipHideResizeTimer = null
-let toolbarCollapseTimer = null
-const TOOLTIP_HIDE_GRACE_MS = 450
-const TOOLBAR_COLLAPSE_GRACE_MS = 220
+let unlistenRecordingFinished = null
+let unlistenRecordingError = null
+let unlistenForceExpand = null
+let lastElapsedUiSyncAt = 0
+const barRef = ref(null)
+const openSelectIds = ref(new Set()) // 麦克风/系统音频下拉层
+const openTooltipIds = ref(new Set()) // tooltip 可见
+const hoveredControlIds = ref(new Set()) // 按钮 hover（用于预留 tooltip 空间）
+const isPointerOverBar = ref(false)
+let collapseTimer = null
 const isToolbarCollapsed = ref(false)
-const isMouseOverBar = ref(false)
-let expandDebounceTimer = null
+let pendingToolbarResizePayload = null
+let lastAppliedToolbarResizePayload = null
+let isApplyingToolbarResize = false
+let suppressLayoutSync = false
+const COLLAPSE_DELAY_MS = 0
 
 let _measureCanvas = null
 const ensureMeasureCtx = () => {
@@ -264,6 +312,11 @@ const collapsedPillText = computed(() => {
   }
   return recordingHintText.value
 })
+const collapsedDisplayText = computed(() => {
+  if (rawRecordingState.value === 'recording') return `已录制 ${elapsedText.value}`
+  if (rawRecordingState.value === 'paused') return `已暂停 ${elapsedText.value}`
+  return recordingHintText.value
+})
 const phaseActionRules = computed(() => {
   switch (currentRecordingState.value) {
     case 'recording':
@@ -279,10 +332,11 @@ const phaseActionRules = computed(() => {
       return {start: true, pause: false, resume: false, stop: false}
   }
 })
-const canStart = computed(() => !loading.value && phaseActionRules.value.start)
-const canPause = computed(() => !loading.value && phaseActionRules.value.pause)
-const canResume = computed(() => !loading.value && phaseActionRules.value.resume)
-const canStop = computed(() => !loading.value && phaseActionRules.value.stop)
+const isBusy = computed(() => loadingAction.value !== null)
+const canStart = computed(() => !isBusy.value && phaseActionRules.value.start)
+const canPause = computed(() => !isBusy.value && phaseActionRules.value.pause)
+const canResume = computed(() => !isBusy.value && phaseActionRules.value.resume)
+const canStop = computed(() => !isBusy.value && phaseActionRules.value.stop)
 const isRecordingSessionActive = computed(() =>
     ['starting', 'recording', 'paused', 'stopping'].includes(currentRecordingState.value)
 )
@@ -301,7 +355,7 @@ const refresh = async () => {
 }
 
 const start = async () => {
-  loading.value = true
+  loadingAction.value = 'start'
   try {
     await RecordingService.start({
       captureSystemAudio: captureSystemAudio.value,
@@ -315,192 +369,228 @@ const start = async () => {
   } catch (e) {
     ElMessage.error(String(e))
   } finally {
-    loading.value = false
+    loadingAction.value = null
   }
 }
 
 const pause = async () => {
-  loading.value = true
+  loadingAction.value = 'pause'
   try {
     await RecordingService.pause();
     await refresh()
   } catch (e) {
     ElMessage.error(String(e))
   } finally {
-    loading.value = false
+    loadingAction.value = null
   }
 }
 const resume = async () => {
-  loading.value = true
+  loadingAction.value = 'resume'
   try {
     await RecordingService.resume();
     await refresh()
   } catch (e) {
     ElMessage.error(String(e))
   } finally {
-    loading.value = false
+    loadingAction.value = null
   }
 }
 const stop = async () => {
-  loading.value = true
+  loadingAction.value = 'stop'
   try {
     await RecordingService.stop(state.sessionId);
     await refresh()
   } catch (e) {
     ElMessage.error(String(e))
   } finally {
-    loading.value = false
+    loadingAction.value = null
   }
 }
 
 const openFolder = async () => {
-  loading.value = true
+  loadingAction.value = 'openFolder'
   try {
     await RecordingService.openFolder()
   } catch (e) {
     ElMessage.error(String(e))
   } finally {
-    loading.value = false
+    loadingAction.value = null
   }
 }
 
 const closeBar = async () => {
+  suppressLayoutSync = true
+  clearCollapseTimer()
+  resetInteractionState()
   try {
     await getCurrentWindow().hide()
   } catch (_e) {
+  } finally {
+    // 避免关闭瞬间触发的状态变更再次触发布局抖动
+    setTimeout(() => {
+      suppressLayoutSync = false
+    }, 0)
   }
 }
 
-const applyToolbarWindowSize = async () => {
+const mutateIdSet = (setRef, id, visible) => {
+  const next = new Set(setRef.value)
+  if (visible) {
+    next.add(id)
+  } else {
+    next.delete(id)
+  }
+  setRef.value = next
+}
+
+const clearTransientOverlayState = () => {
+  openTooltipIds.value = new Set()
+  hoveredControlIds.value = new Set()
+}
+
+const hasOpenSelectOverlay = () => openSelectIds.value.size > 0
+const hasTransientOverlay = () => openTooltipIds.value.size > 0 || hoveredControlIds.value.size > 0
+
+const reconcileSelectOverlayState = () => {
+  const next = new Set()
+  if (microphonePopoverVisible.value) next.add('microphone')
+  if (systemAudioPopoverVisible.value) next.add('systemAudio')
+  openSelectIds.value = next
+}
+
+const buildToolbarSnapshot = () => ({
+  recordingActive: isRecordingSessionActive.value,
+  pointerOverBar: isPointerOverBar.value,
+  openSelect: hasOpenSelectOverlay(),
+  openOverlay: hasTransientOverlay()
+})
+
+const deriveCollapsedFromSnapshot = (snapshot) => (
+    snapshot.recordingActive
+    && !snapshot.pointerOverBar
+    && !snapshot.openSelect
+)
+
+const deriveResizePayloadFromSnapshot = (snapshot, compactMode) => ({
+  openSelect: snapshot.openSelect,
+  // 仅 tooltip 可见时增高窗口，不再由按钮 hover 触发
+  openOverlay: snapshot.openOverlay,
+  compactMode
+})
+
+const isSameToolbarResizePayload = (a, b) => {
+  if (!a || !b) return false
+  return a.openSelect === b.openSelect
+      && a.openOverlay === b.openOverlay
+      && a.compactMode === b.compactMode
+}
+
+const applyToolbarWindowSize = async (payload) => {
+  pendingToolbarResizePayload = payload
+  if (isApplyingToolbarResize) return
+
+  isApplyingToolbarResize = true
   try {
-    await RecordingService.resizeToolbar(
-        openSelectCount > 0,
-        openTooltipCount > 0 || openButtonHoverCount > 0,
-        isToolbarCollapsed.value
-    )
-  } catch (_e) {
+    while (pendingToolbarResizePayload) {
+      const current = pendingToolbarResizePayload
+      pendingToolbarResizePayload = null
+      if (isSameToolbarResizePayload(current, lastAppliedToolbarResizePayload)) continue
+      try {
+        await RecordingService.resizeToolbar(current.openSelect, current.openOverlay, current.compactMode)
+        lastAppliedToolbarResizePayload = current
+      } catch (_e) {
+      }
+    }
+  } finally {
+    isApplyingToolbarResize = false
   }
 }
 
-const hasExpandedOverlay = () => openSelectCount > 0 || openTooltipCount > 0 || openButtonHoverCount > 0
-
-const clearToolbarCollapseTimer = () => {
-  if (!toolbarCollapseTimer) return
-  clearTimeout(toolbarCollapseTimer)
-  toolbarCollapseTimer = null
+const clearCollapseTimer = () => {
+  if (!collapseTimer) return
+  clearTimeout(collapseTimer)
+  collapseTimer = null
 }
 
-const setToolbarCollapsed = async (collapsed) => {
-  const next = collapsed && isRecordingSessionActive.value
-  if (isToolbarCollapsed.value === next) return
-  isToolbarCollapsed.value = next
-  await applyToolbarWindowSize()
-}
-
-const scheduleToolbarCollapse = () => {
-  clearToolbarCollapseTimer()
-  if (!isRecordingSessionActive.value || hasExpandedOverlay() || isMouseOverBar.value) return
-  toolbarCollapseTimer = setTimeout(() => {
-    toolbarCollapseTimer = null
-    if (!isMouseOverBar.value) {
-      setToolbarCollapsed(true)
+const commitToolbarLayout = async (snapshot = null) => {
+  let currentSnapshot = snapshot || buildToolbarSnapshot()
+  const nextCollapsed = deriveCollapsedFromSnapshot(currentSnapshot)
+  if (isToolbarCollapsed.value !== nextCollapsed) {
+    isToolbarCollapsed.value = nextCollapsed
+    if (nextCollapsed) {
+      clearTransientOverlayState()
+      currentSnapshot = buildToolbarSnapshot()
     }
-  }, TOOLBAR_COLLAPSE_GRACE_MS)
-}
-
-const onBarMouseEnter = async () => {
-  isMouseOverBar.value = true
-  clearToolbarCollapseTimer()
-  // 清除之前的展开防抖计时器
-  if (expandDebounceTimer) {
-    clearTimeout(expandDebounceTimer)
-    expandDebounceTimer = null
   }
-  // 使用防抖延迟展开，避免快速进出时频繁切换
-  expandDebounceTimer = setTimeout(async () => {
-    expandDebounceTimer = null
-    // 只有鼠标仍在工具栏上时才展开
-    if (isMouseOverBar.value) {
-      await setToolbarCollapsed(false)
-    }
-  }, 50)
+  const payload = deriveResizePayloadFromSnapshot(currentSnapshot, isToolbarCollapsed.value)
+  await applyToolbarWindowSize(payload)
+}
+
+const scheduleToolbarTransition = (snapshot) => {
+  clearCollapseTimer()
+  if (!deriveCollapsedFromSnapshot(snapshot)) {
+    void commitToolbarLayout(snapshot)
+    return
+  }
+  collapseTimer = setTimeout(() => {
+    collapseTimer = null
+    reconcileSelectOverlayState()
+    void commitToolbarLayout(buildToolbarSnapshot())
+  }, COLLAPSE_DELAY_MS)
+}
+
+const requestToolbarLayoutSync = (immediate = false) => {
+  if (suppressLayoutSync) return
+  reconcileSelectOverlayState()
+  const snapshot = buildToolbarSnapshot()
+  if (immediate) {
+    clearCollapseTimer()
+    void commitToolbarLayout(snapshot)
+    return
+  }
+  scheduleToolbarTransition(snapshot)
+}
+
+const onBarMouseEnter = () => {
+  if (isToolbarCollapsed.value) return
+  isPointerOverBar.value = true
+  requestToolbarLayoutSync(true)
 }
 
 const onBarMouseLeave = () => {
-  isMouseOverBar.value = false
-  // 清除展开防抖计时器
-  if (expandDebounceTimer) {
-    clearTimeout(expandDebounceTimer)
-    expandDebounceTimer = null
-  }
-  scheduleToolbarCollapse()
+  isPointerOverBar.value = false
+  clearTransientOverlayState()
 }
 
-const scheduleShrinkToolbarWindowSize = () => {
-  if (tooltipHideResizeTimer) {
-    clearTimeout(tooltipHideResizeTimer)
-  }
-  tooltipHideResizeTimer = setTimeout(() => {
-    tooltipHideResizeTimer = null
-    if (!hasExpandedOverlay()) {
-      if (isRecordingSessionActive.value) {
-        scheduleToolbarCollapse()
-      } else {
-        setToolbarCollapsed(false)
-      }
-    }
-  }, TOOLTIP_HIDE_GRACE_MS)
+const onBarClick = () => {
+  if (!isToolbarCollapsed.value) return
+  expandFromCapsule()
 }
 
-const onSelectVisibleChange = async (visible) => {
-  if (visible && tooltipHideResizeTimer) {
-    clearTimeout(tooltipHideResizeTimer)
-    tooltipHideResizeTimer = null
-  }
-  openSelectCount += visible ? 1 : -1
-  if (openSelectCount < 0) openSelectCount = 0
-  if (hasExpandedOverlay()) {
-    await setToolbarCollapsed(false)
-    await applyToolbarWindowSize()
-  } else {
-    scheduleShrinkToolbarWindowSize()
-  }
+const expandFromCapsule = () => {
+  if (!isToolbarCollapsed.value) return
+  isPointerOverBar.value = true
+  requestToolbarLayoutSync(true)
 }
 
-const onTooltipVisibleChange = async (visible) => {
-  if (visible) {
-    if (tooltipHideResizeTimer) {
-      clearTimeout(tooltipHideResizeTimer)
-      tooltipHideResizeTimer = null
-    }
-    openTooltipCount += 1
-    await setToolbarCollapsed(false)
-    await applyToolbarWindowSize()
-    return
-  }
-
-  openTooltipCount -= 1
-  if (openTooltipCount < 0) openTooltipCount = 0
-  if (hasExpandedOverlay()) {
-    await applyToolbarWindowSize()
-    return
-  }
-  scheduleShrinkToolbarWindowSize()
+const onWindowBlur = () => {
+  resetInteractionState()
+  requestToolbarLayoutSync(true)
 }
 
-const onButtonHoverChange = async (visible) => {
-  if (visible && tooltipHideResizeTimer) {
-    clearTimeout(tooltipHideResizeTimer)
-    tooltipHideResizeTimer = null
-  }
-  openButtonHoverCount += visible ? 1 : -1
-  if (openButtonHoverCount < 0) openButtonHoverCount = 0
-  if (hasExpandedOverlay()) {
-    await setToolbarCollapsed(false)
-    await applyToolbarWindowSize()
-  } else {
-    scheduleShrinkToolbarWindowSize()
-  }
+const onSelectVisibleChange = (id, visible) => {
+  mutateIdSet(openSelectIds, id, visible)
+  requestToolbarLayoutSync(true)
+}
+
+const onTooltipVisibleChange = (id, visible) => {
+  mutateIdSet(openTooltipIds, id, visible)
+  requestToolbarLayoutSync(true)
+}
+
+const onButtonHoverChange = (id, visible) => {
+  mutateIdSet(hoveredControlIds, id, visible)
+  requestToolbarLayoutSync(true)
 }
 
 const toggleMicrophone = async () => {
@@ -541,12 +631,43 @@ const selectSystemOutput = async (deviceId) => {
   systemAudioPopoverVisible.value = false
 }
 
+const resetInteractionState = () => {
+  isPointerOverBar.value = false
+  clearTransientOverlayState()
+  openSelectIds.value = new Set()
+  microphonePopoverVisible.value = false
+  systemAudioPopoverVisible.value = false
+}
+
 onMounted(async () => {
+  window.addEventListener('blur', onWindowBlur)
   unlistenStateChanged = await listen('recording-state-changed', (event) => {
     const payload = event.payload || {}
-    state.state = payload.state || state.state
+    const nextState = payload.state || state.state
+    const stateChanged = nextState !== state.state
+    state.state = nextState
     state.sessionId = payload.sessionId ?? state.sessionId
-    state.elapsedMs = Number(payload.elapsedMs || state.elapsedMs || 0)
+    const nextElapsedMs = Number(payload.elapsedMs || state.elapsedMs || 0)
+    const now = Date.now()
+    if (stateChanged || now - lastElapsedUiSyncAt >= 1000) {
+      state.elapsedMs = nextElapsedMs
+      lastElapsedUiSyncAt = now
+    }
+  })
+  unlistenRecordingFinished = await listen('recording-finished', () => {
+    state.state = 'idle'
+    state.sessionId = null
+    resetInteractionState()
+    requestToolbarLayoutSync(true)
+  })
+  unlistenRecordingError = await listen('recording-error', () => {
+    state.state = 'error'
+    resetInteractionState()
+    requestToolbarLayoutSync(true)
+  })
+  unlistenForceExpand = await listen('recording-toolbar-force-expand', () => {
+    isPointerOverBar.value = true
+    requestToolbarLayoutSync(true)
   })
   try {
     const settings = await AISettingsService.getSettings()
@@ -576,31 +697,28 @@ onMounted(async () => {
     ElMessage.error(`加载麦克风设备失败: ${String(e)}`)
   }
   await refresh()
-  if (isRecordingSessionActive.value) {
-    scheduleToolbarCollapse()
-  } else {
-    await setToolbarCollapsed(false)
-  }
+  requestToolbarLayoutSync(true)
 })
 
-watch(currentRecordingState, async (next) => {
+watch(currentRecordingState, (next) => {
   if (next === 'idle' || next === 'error') {
-    clearToolbarCollapseTimer()
-    await setToolbarCollapsed(false)
-    return
+    resetInteractionState()
   }
-  if (isRecordingSessionActive.value) {
-    scheduleToolbarCollapse()
-  }
+  requestToolbarLayoutSync(true)
+})
+
+watch([microphonePopoverVisible, systemAudioPopoverVisible], () => {
+  reconcileSelectOverlayState()
+  requestToolbarLayoutSync(true)
 })
 
 onBeforeUnmount(() => {
-  if (tooltipHideResizeTimer) {
-    clearTimeout(tooltipHideResizeTimer)
-    tooltipHideResizeTimer = null
-  }
-  clearToolbarCollapseTimer()
+  window.removeEventListener('blur', onWindowBlur)
+  clearCollapseTimer()
   if (unlistenStateChanged) unlistenStateChanged()
+  if (unlistenRecordingFinished) unlistenRecordingFinished()
+  if (unlistenRecordingError) unlistenRecordingError()
+  if (unlistenForceExpand) unlistenForceExpand()
 })
 </script>
 
@@ -679,6 +797,18 @@ html, body, #app {
   padding: 0 10px;
   color: rgba(233, 238, 252, 0.72);
 }
+
+.recording-toolbar-tooltip.el-popper {
+  background: rgba(17, 22, 32, 0.92) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #e9eefc !important;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.32);
+}
+
+.recording-toolbar-tooltip.el-popper .el-popper__arrow::before {
+  background: rgba(17, 22, 32, 0.92) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
 </style>
 
 <style scoped>
@@ -696,6 +826,8 @@ html, body, #app {
   overflow: hidden;
   cursor: move;
   -webkit-app-region: drag;
+  transition: none !important;
+  animation: none !important;
 }
 
 .bar.bar-collapsed {
@@ -708,10 +840,13 @@ html, body, #app {
   border-radius: 999px;
   background: transparent;
   border: none;
-  overflow: visible;
+  overflow: hidden;
   box-sizing: border-box;
   cursor: default;
   -webkit-app-region: no-drag;
+  transition: none !important;
+  animation: none !important;
+  clip-path: inset(0 round 999px);
 }
 
 .expanded-content {
@@ -745,12 +880,21 @@ html, body, #app {
   box-shadow: inset 0 0 0 1px rgba(20, 62, 92, 0.22);
   user-select: none;
   pointer-events: none;
+  transition: none !important;
+  animation: none !important;
+  background-clip: padding-box;
+  clip-path: inset(0 round 999px);
+}
+
+.bar.bar-collapsed .collapsed-pill {
+  flex: none;
+  width: 166px;
+  min-width: 166px;
+  height: 22px;
 }
 
 .bar:not(.bar-collapsed) .collapsed-pill {
-  flex: none;
-  width: 166px;
-  height: 22px;
+  display: none;
 }
 
 .collapsed-pill[data-state="paused"] {
@@ -794,5 +938,40 @@ html, body, #app {
 
 .icon-btn:deep(.el-icon) {
   font-size: 18px;
+}
+
+.action-loading-icon {
+  animation: pause-loading-spin 1s linear infinite;
+}
+
+.action-icon-slot {
+  width: 18px;
+  height: 18px;
+  position: relative;
+  display: inline-block;
+}
+
+.action-icon {
+  position: absolute;
+  inset: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity .12s linear;
+}
+
+.action-icon-hidden {
+  opacity: 0;
+}
+
+@keyframes pause-loading-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

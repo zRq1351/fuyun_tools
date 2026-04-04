@@ -9,7 +9,7 @@ use crate::sync::Mutex;
 use crate::utils::utils_helpers::load_settings;
 use serde::Deserialize;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State, WebviewUrl};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl};
 use tauri_plugin_positioner::WindowExt;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -124,11 +124,11 @@ pub async fn show_recording_toolbar(app: AppHandle) -> Result<(), String> {
             .transparent(true)
             .always_on_top(true)
             .skip_taskbar(true)
-            .inner_size(630.0, 70.0)
+            .inner_size(530.0, 64.0)
             .build()
             .map_err(|e| format!("创建录制工具栏窗口失败: {}", e))?
     };
-    let _ = window.set_size(tauri::PhysicalSize::new(630, 70));
+    let _ = window.set_size(tauri::PhysicalSize::new(530, 64));
     move_window_top_center(&window);
     let content_protected = load_settings()
         .map(|settings| settings.recording_toolbar_content_protected)
@@ -152,6 +152,10 @@ pub async fn resize_recording_toolbar(
         return Ok(());
     };
     let prev_size = window.outer_size().ok();
+    let was_compact = prev_size
+        .as_ref()
+        .map(|size| size.width <= 260)
+        .unwrap_or(false);
     let (width, height) = if request.compact_mode {
         (170, 26)
     } else {
@@ -160,20 +164,24 @@ pub async fn resize_recording_toolbar(
         } else if request.open_overlay {
             120
         } else {
-            70
+            64
         };
-        (630, h)
+        (530, h)
     };
-    window
-        .set_size(tauri::PhysicalSize::new(width, height))
-        .map_err(|e| format!("调整录制工具栏窗口尺寸失败: {}", e))?;
-    if request.compact_mode {
+    let target_size = tauri::PhysicalSize::new(width, height);
+    let need_resize = prev_size
+        .as_ref()
+        .map(|size| size.width != width as u32 || size.height != height as u32)
+        .unwrap_or(true);
+
+    if need_resize {
+        window
+            .set_size(target_size)
+            .map_err(|e| format!("调整录制工具栏窗口尺寸失败: {}", e))?;
+    }
+    // 胶囊/工具栏形态切换时重新居中，保证两种形态都居中显示
+    if was_compact != request.compact_mode {
         move_window_top_center(&window);
-    } else if let Some(prev) = prev_size {
-        // 从胶囊(窄窗口)切回完整工具栏时，重新吸附到上方居中，避免视觉偏移
-        if prev.width <= 260 {
-            move_window_top_center(&window);
-        }
     }
     Ok(())
 }
@@ -189,10 +197,9 @@ pub async fn toggle_recording_from_shortcut(
     app: AppHandle,
     state: Arc<Mutex<SharedAppState>>,
 ) {
-    let current = recorder_service::get_recording_state(state.clone());
+    let current = recorder_service::get_recording_state(state);
+    let _ = show_recording_toolbar(app.clone()).await;
     if current.state == "recording" || current.state == "paused" {
-        let _ = recorder_service::stop_recording(&app, state, SessionRequest { session_id: None });
-    } else {
-        let _ = show_recording_toolbar(app).await;
+        let _ = app.emit("recording-toolbar-force-expand", ());
     }
 }
