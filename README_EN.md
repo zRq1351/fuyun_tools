@@ -7,6 +7,7 @@ fuyun_tools is a desktop productivity tool running in the system tray, focused o
 - Better clipboard history management
 - AI text selection translation/explanation on Windows
 - Fast screenshot capture and image OCR on Windows
+- Screen recording with audio capture on Windows
 
 Core positioning:
 
@@ -44,6 +45,14 @@ In addition, this project itself follows an AI full-process development workflow
 - Recognition results are shown in a dedicated OCR text window for copy/reuse
 - OCR is currently available on Windows only
 
+### 🎥 Screen Recording (Windows)
+
+- Adds a recording capsule toolbar with hotkey trigger and one-click start/pause/resume/stop
+- Supports system output audio and microphone device selection (native WASAPI pipeline)
+- Supports FPS, video bitrate, audio bitrate, and cursor capture settings
+- On first enable, automatically checks `ffmpeg.exe`; if missing, downloads on demand with real-time progress
+- When recording is disabled, the capsule shows a direct disabled state to prevent accidental actions
+
 ### 🔤 AI Text Selection Assistant (Windows)
 
 - Supports drag, double-click, and triple-click selection scenarios
@@ -80,9 +89,10 @@ In addition, this project itself follows an AI full-process development workflow
 | Clipboard Management | ✅       | ✅     | ✅     |
 | Image OCR            | ✅       | ❌     | ❌     |
 | AI Text Selection    | ✅       | ❌     | ❌     |
+| Screen Recording     | ✅       | ❌     | ❌     |
 | Tray & Hotkeys       | ✅       | ✅     | ✅     |
 
-> Note: AI text selection and image OCR are currently implemented only on Windows.
+> Note: AI text selection, image OCR, and screen recording are currently implemented only on Windows.
 
 ---
 
@@ -120,6 +130,9 @@ Installation steps:
     - The 「Selection Toolbar」automatically pops up
     - Click [Translate] or [Explain]
     - View streaming results in the 「Result Window」with one-click write-back
+5. **Try Screen Recording**: Go to 「Settings → Recording」, enable recording, then use the recording capsule
+    - On first enable, ffmpeg is auto-checked and downloaded on demand if missing
+    - You can choose system/microphone audio devices and adjust recording parameters in capsule settings
 
 ---
 
