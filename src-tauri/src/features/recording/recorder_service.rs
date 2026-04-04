@@ -21,6 +21,8 @@ use crate::features::recording::types::{
 use crate::sync::Mutex;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{ChildStderr, Command, Stdio};
 use std::sync::Arc;
@@ -28,8 +30,19 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
     mutex.lock().expect("infallible mutex lock failed")
+}
+
+fn suppress_console_window(command: &mut Command) -> &mut Command {
+    #[cfg(target_os = "windows")]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
 }
 
 fn normalize_runtime_state(runtime: &mut crate::features::recording::state::RecordingRuntime) {
@@ -88,6 +101,7 @@ fn merge_system_audio_into_video(
     }
     let merged_path = video_path.with_extension("merged.tmp.mp4");
     let mut cmd = Command::new(ffmpeg_path);
+    suppress_console_window(&mut cmd);
     cmd.arg("-hide_banner")
         .arg("-loglevel")
         .arg("warning")
@@ -488,6 +502,7 @@ pub fn start_recording(
         args.push("-an".to_string());
         args.push(tmp_path.to_string_lossy().to_string());
         let mut command = Command::new(&ffmpeg_path);
+        suppress_console_window(&mut command);
         command
             .args(args)
             .stdin(Stdio::piped())

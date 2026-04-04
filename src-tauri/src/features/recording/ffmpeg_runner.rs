@@ -1,6 +1,19 @@
 use std::env;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn suppress_console_window(command: &mut Command) -> &mut Command {
+    #[cfg(target_os = "windows")]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
 
 fn candidate_paths() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
@@ -42,7 +55,9 @@ pub fn resolve_ffmpeg_path() -> Result<PathBuf, String> {
     for path in candidate_paths() {
         checked.push(path.to_string_lossy().to_string());
         if path == PathBuf::from("ffmpeg") || path == PathBuf::from("ffmpeg.exe") {
-            if Command::new(&path).arg("-version").output().is_ok() {
+            let mut probe = Command::new(&path);
+            suppress_console_window(&mut probe);
+            if probe.arg("-version").output().is_ok() {
                 return Ok(path);
             }
             continue;
