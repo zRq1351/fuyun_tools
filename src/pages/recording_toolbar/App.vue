@@ -80,6 +80,22 @@
               </el-icon>
             </button>
           </el-tooltip>
+          <el-tooltip
+              :offset="10"
+              :show-after="300"
+              content="关闭"
+              effect="dark"
+              placement="bottom"
+              popper-class="recording-toolbar-tooltip"
+          >
+            <button
+                class="collapsed-close-btn no-drag"
+                type="button"
+                @click.stop="closeCapsule"
+            >
+              ×
+            </button>
+          </el-tooltip>
         </div>
         <div v-if="capsuleSettingsVisible" class="capsule-settings-panel no-drag">
           <div class="toolbar-settings-title">录制设置</div>
@@ -192,6 +208,7 @@
 import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from "vue";
 import zhCn from "element-plus/dist/locale/zh-cn";
 import {listen} from "@tauri-apps/api/event";
+import {getCurrentWindow} from "@tauri-apps/api/window";
 import {AISettingsService, RecordingService} from "@/services/ipc.js";
 import {ElMessage} from "element-plus";
 import {Settings} from "lucide-vue-next";
@@ -347,6 +364,15 @@ const stop = async () => {
 
 const toggleCapsuleSettings = () => {
   capsuleSettingsVisible.value = !capsuleSettingsVisible.value;
+};
+
+const closeCapsule = async () => {
+  capsuleSettingsVisible.value = false;
+  await syncCapsuleLayout();
+  try {
+    await getCurrentWindow().hide();
+  } catch (_e) {
+  }
 };
 
 const onWindowBlur = () => {
@@ -764,7 +790,8 @@ body,
 }
 
 .collapsed-stop-btn,
-.collapsed-expand-btn {
+.collapsed-expand-btn,
+.collapsed-close-btn {
   width: 20px;
   height: 20px;
   border: 1px solid #344055;
@@ -823,6 +850,22 @@ body,
   align-items: center;
   justify-content: center;
   line-height: 1;
+}
+
+.collapsed-close-btn {
+  border-color: #475265;
+  background: #2a3445;
+  color: #e3e9f3;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.collapsed-close-btn:hover {
+  background: #333f53;
+}
+
+.collapsed-close-btn:active {
+  background: #232c3b;
 }
 
 .collapsed-pill-content {

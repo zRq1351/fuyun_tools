@@ -208,6 +208,26 @@ fn move_window_top_center(window: &tauri::WebviewWindow) {
     }
 }
 
+fn ensure_recording_toolbar_window(app: &AppHandle) -> Result<(tauri::WebviewWindow, bool), String> {
+    let label = "recording_toolbar";
+    if let Some(existing) = app.get_webview_window(label) {
+        return Ok((existing, false));
+    }
+    let window = tauri::WebviewWindowBuilder::new(app, label, WebviewUrl::App("recording_toolbar.html".into()))
+        .title("录制工具栏")
+        .visible(false)
+        .resizable(false)
+        .decorations(false)
+        .shadow(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .inner_size(530.0, 64.0)
+        .build()
+        .map_err(|e| format!("创建录制工具栏窗口失败: {}", e))?;
+    Ok((window, true))
+}
+
 #[tauri::command]
 pub async fn start_recording(
     request: StartRecordingRequest,
@@ -283,36 +303,13 @@ pub async fn open_recording_folder(
 
 #[tauri::command]
 pub async fn show_recording_toolbar(app: AppHandle) -> Result<(), String> {
-    let label = "recording_toolbar";
-    let created;
-    let window = if let Some(existing) = app.get_webview_window(label) {
-        created = false;
-        existing
-    } else {
-        created = true;
-        tauri::WebviewWindowBuilder::new(&app, label, WebviewUrl::App("recording_toolbar.html".into()))
-            .title("录制工具栏")
-            .visible(false)
-            .resizable(false)
-            .decorations(false)
-            .shadow(false)
-            .transparent(true)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .inner_size(530.0, 64.0)
-            .build()
-            .map_err(|e| format!("创建录制工具栏窗口失败: {}", e))?
-    };
+    let (window, _created) = ensure_recording_toolbar_window(&app)?;
     let _ = window.set_size(tauri::PhysicalSize::new(530, 64));
     move_window_top_center(&window);
     let content_protected = load_settings()
         .map(|settings| settings.recording_toolbar_content_protected)
         .unwrap_or(false);
     let _ = window.set_content_protected(content_protected);
-    // 首次创建时，定位到当前屏幕上方居中
-    if created {
-        move_window_top_center(&window);
-    }
     let _ = window.show();
     let _ = window.set_focus();
     Ok(())
@@ -376,10 +373,12 @@ pub async fn toggle_recording_from_shortcut(
     app: AppHandle,
     _state: Arc<Mutex<SharedAppState>>,
 ) {
-    let _ = show_recording_toolbar(app.clone()).await;
-    if let Some(window) = app.get_webview_window("recording_toolbar") {
-        let _ = window.set_size(tauri::PhysicalSize::new(230, 40));
+    if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
+        // Set compact size and position before showing to avoid opening flicker/jump.
+        let _ = window.set_size(tauri::PhysicalSize::new(250, 40));
         move_window_top_center(&window);
+        let _ = window.show();
+        let _ = window.set_focus();
     }
     let _ = app.emit("recording-toolbar-force-compact", ());
 }
