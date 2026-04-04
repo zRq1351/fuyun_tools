@@ -157,7 +157,7 @@ pub async fn resize_recording_toolbar(
         .map(|size| size.width <= 260)
         .unwrap_or(false);
     let (width, height) = if request.compact_mode {
-        (170, 26)
+        (230, 40)
     } else {
         let h = if request.open_select {
             340
@@ -195,11 +195,12 @@ pub async fn run_recording_regression(
 
 pub async fn toggle_recording_from_shortcut(
     app: AppHandle,
-    state: Arc<Mutex<SharedAppState>>,
+    _state: Arc<Mutex<SharedAppState>>,
 ) {
-    let current = recorder_service::get_recording_state(state);
     let _ = show_recording_toolbar(app.clone()).await;
-    if current.state == "recording" || current.state == "paused" {
-        let _ = app.emit("recording-toolbar-force-expand", ());
+    if let Some(window) = app.get_webview_window("recording_toolbar") {
+        let _ = window.set_size(tauri::PhysicalSize::new(230, 40));
+        move_window_top_center(&window);
     }
+    let _ = app.emit("recording-toolbar-force-compact", ());
 }
