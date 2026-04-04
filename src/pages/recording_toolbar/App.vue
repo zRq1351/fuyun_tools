@@ -204,6 +204,8 @@ let toolbarCollapseTimer = null
 const TOOLTIP_HIDE_GRACE_MS = 450
 const TOOLBAR_COLLAPSE_GRACE_MS = 220
 const isToolbarCollapsed = ref(false)
+const isMouseOverBar = ref(false)
+let expandDebounceTimer = null
 
 let _measureCanvas = null
 const ensureMeasureCtx = () => {
@@ -397,19 +399,40 @@ const setToolbarCollapsed = async (collapsed) => {
 
 const scheduleToolbarCollapse = () => {
   clearToolbarCollapseTimer()
-  if (!isRecordingSessionActive.value || hasExpandedOverlay()) return
+  if (!isRecordingSessionActive.value || hasExpandedOverlay() || isMouseOverBar.value) return
   toolbarCollapseTimer = setTimeout(() => {
     toolbarCollapseTimer = null
-    setToolbarCollapsed(true)
+    if (!isMouseOverBar.value) {
+      setToolbarCollapsed(true)
+    }
   }, TOOLBAR_COLLAPSE_GRACE_MS)
 }
 
 const onBarMouseEnter = async () => {
+  isMouseOverBar.value = true
   clearToolbarCollapseTimer()
-  await setToolbarCollapsed(false)
+  // 清除之前的展开防抖计时器
+  if (expandDebounceTimer) {
+    clearTimeout(expandDebounceTimer)
+    expandDebounceTimer = null
+  }
+  // 使用防抖延迟展开，避免快速进出时频繁切换
+  expandDebounceTimer = setTimeout(async () => {
+    expandDebounceTimer = null
+    // 只有鼠标仍在工具栏上时才展开
+    if (isMouseOverBar.value) {
+      await setToolbarCollapsed(false)
+    }
+  }, 50)
 }
 
 const onBarMouseLeave = () => {
+  isMouseOverBar.value = false
+  // 清除展开防抖计时器
+  if (expandDebounceTimer) {
+    clearTimeout(expandDebounceTimer)
+    expandDebounceTimer = null
+  }
   scheduleToolbarCollapse()
 }
 
