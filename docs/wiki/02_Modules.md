@@ -1,46 +1,69 @@
 # 02 - 主要模块职责
 
-## 1. 前端模块 (Frontend Modules)
-项目前端采用了多页应用架构（Multiple Page Application），通过 Vite (`vite.config.js`) 的 `rollupOptions.input` 划分了多个入口 HTML 文件：
+## 1. 前端模块（`src/pages`）
 
-- **`src/pages/settings`**: 应用设置界面，包括常规、AI 设置、剪贴板上限、截图、划词配置。
-- **`src/pages/clipboard`**: 文字剪贴板历史窗口，支持历史查询、搜索、分类、快捷回填（支持双击、方向键选择、回车）。
-- **`src/pages/image_clipboard`**: 图片剪贴板历史窗口，负责以缩略图形式展示图片并支持一键粘贴和分类。
-- **`src/pages/image_preview`**: 图片预览窗口，展示剪贴板内选中大图的详细视图。
-- **`src/pages/selection_toolbar`**: AI 划词工具栏，当用户在系统其他地方划词（选中文本）后自动弹出的小悬浮窗。
-- **`src/pages/result_display`**: 划词结果（如翻译、解释）流式输出展示窗口。
-- **`src/pages/screenshot`**: 截图窗口，提供屏幕快照编辑器。
-- **`src/pages/pinned_image`**: 置顶图片窗口。
-- **`src/pages/ocr_text`**: OCR 文本展示窗口，展示图片文字识别结果。
+项目采用 MPA，每个页面对应独立窗口与入口 HTML。
 
-## 2. 后端模块 (Backend Modules)
-后端的 Rust 代码按业务结构存放在 `src-tauri/src/` 目录下：
+- `settings`：设置中心，分为剪贴板、截图、录屏、划词、AI、关于（开发模式含开发者页）。
+- `clipboard`：文字历史窗口，支持分页、搜索、分类、置顶、快捷回填、AI 快捷动作。
+- `image_clipboard`：图片历史窗口，支持虚拟化渲染、分页预取、标签/分类、置顶、预览与回填。
+- `image_preview`：大图预览窗口。
+- `selection_toolbar`：划词后弹出的小工具栏。
+- `result_display`：翻译/解释结果窗口（按类型区分 `result_translation` / `result_explanation`）。
+- `screenshot`：全屏截图交互窗口。
+- `pinned_image`：固定截图窗口（可多实例）。
+- `ocr_text`：OCR 文本结果窗口。
+- `recording_toolbar`：录屏胶囊窗口（紧凑/展开尺寸）。
 
-### 2.1 `core` 模块
-- 包含应用运行生命周期的基础配置：
-  - **`app_state.rs`**: 定义并管理全局状态 (`AppState`)，包含当前是否在截屏、各个窗口的可见性等标志。
-  - **`config.rs`**: 加载和序列化用户配置文件，如热键配置、AI 提供商模型选择。
-  - **`error.rs`**: 定义统一的应用错误类型 `AppError` 及序列化为前端可见的字符串。
-  - **`logger.rs`**: 系统日志初始化与写入策略。
+## 2. 前端基础层
 
-### 2.2 `services` 模块
-- 封装系统级或后台常驻的服务与业务逻辑：
-  - **`clipboard_manager.rs` & `image_clipboard_manager.rs`**: 负责监听系统剪贴板（文字、图片）变化，并在变化时存入本地 SQLite 或内存 LRU Cache，并向前端派发 `emit` 事件。
-  - **`ai_client.rs` & `ai_services.rs`**: 对接各类大语言模型（兼容 OpenAI API），处理流式 (Streaming) 文本翻译与解释，通过 Tauri Emitter 推送至前端。
-  - **`native_ocr.rs`**: 调用系统底层（如 Windows.Media.Ocr）进行图片转文字。
+- `src/services/ipc.js`：统一封装 `invoke` 命令常量与服务方法。
+- `src/pages/shared/`：跨页面共享交互逻辑（右键菜单状态、分类动作、窗口样式）。
+- `src/utils/errorHandler.js`：前端错误统一处理入口。
 
-### 2.3 `features` 模块
-- 提供独立的高级功能模块：
-  - **`mouse_listener.rs` & `text_selection.rs`**: 监听鼠标双击、三击、拖拽选中，检测到选中事件后调用系统快捷键复制内容，并在光标处弹出划词工具栏。
-  - **`screenshot/`**: 包含屏幕捕捉、活动窗口识别等底层截屏 API。
+## 3. 后端模块（`src-tauri/src`）
 
-### 2.4 `ui` 模块
-- 负责 Tauri UI 与 IPC 指令绑定：
-  - **`commands.rs`**: 暴露所有给前端调用的 Tauri Commands，如 `get_clipboard_history`、`copy_and_paste_text`、`open_settings_window` 等。
-  - **`window_manager.rs`**: 负责所有 Tauri `WebviewWindow` 的创建、显示、隐藏、置顶及位置计算。
-  - **`tray_menu.rs`**: 管理系统托盘图标、菜单及其响应逻辑。
+### 3.1 `core`
 
-### 2.5 `utils` 模块
-- 通用工具类：
-  - **`database.rs`**: SQLite 连接池与建表逻辑、记录的增删改查。
-  - **`image_clipboard.rs` / `image_process.rs` / `image_store.rs`**: 处理图片缩放、存储到本地文件系统、计算特征 Hash、特征匹配去重等逻辑。
+- `app_state.rs`：全局状态定义与初始化。
+- `config.rs`：快捷键常量、AI provider 枚举、基础配置结构。
+- `error.rs`：统一错误码与前端错误序列化。
+- `logger.rs`：日志插件构建与策略。
+
+### 3.2 `services`
+
+- `clipboard_manager.rs`：文本剪贴板监听开关与历史推送。
+- `image_clipboard_manager.rs`：图片监听、入队、去重、异步处理与增量事件推送。
+- `ai_client.rs`：AI 客户端封装（OpenAI 兼容接口）。
+- `ai_services.rs`：翻译/解释流式任务编排与窗口更新。
+- `native_ocr.rs`：Windows OCR 调用。
+- `clipboard_wakeup.rs` / `adaptive_poll.rs`：剪贴板唤醒与轮询策略支撑。
+
+### 3.3 `features`
+
+- `mouse_listener.rs`：Windows 低级键鼠 Hook，驱动划词触发逻辑。
+- `text_selection.rs`：模拟 `Ctrl+C` 捕获选中文本并恢复原剪贴板。
+- `screenshot/`：全屏/区域截图、窗口探测、截图状态控制。
+- `recording/`：录屏运行时、音频设备、WASAPI 采集、ffmpeg 执行与回归自测。
+
+### 3.4 `ui`
+
+- `commands.rs`：主命令集合（剪贴板、分类、AI、截图、设置、窗口行为等）。
+- `commands_recording.rs`：录屏专属命令（状态、设备、胶囊、ffmpeg 检查/下载）。
+- `window_manager.rs`：窗口显示隐藏、定位、结果窗口布局、粘贴模拟输入。
+- `tray_menu.rs`：托盘菜单构建与菜单动作绑定。
+
+### 3.5 `utils`
+
+- `settings_model.rs`：设置模型、默认值、迁移与校验、密钥存取。
+- `database.rs`：SQLite 数据层。
+- `clipboard.rs` / `image_clipboard.rs`：文本与图片管理核心实现。
+- `image_process.rs` / `image_store.rs`：图片处理、存储、缓存与去重支撑。
+
+## 4. 启动入口与装配
+
+- `src-tauri/src/lib.rs` 是后端装配中心：
+  - 初始化 `AppState`。
+  - 注册全局快捷键与冲突提示事件。
+  - 注册 Tauri 插件与全部 `invoke` 命令。
+  - 启动文本/图片监听器、划词监听器和窗口初始化逻辑。

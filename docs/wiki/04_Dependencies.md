@@ -1,61 +1,92 @@
 # 04 - 依赖关系
 
-**fuyun_tools** 建立在诸多成熟的开源库之上。
+本文按“功能用途”说明当前主要依赖，版本以仓库 `package.json` 与 `Cargo.toml` 为准。
 
-## 1. 前端依赖 (`package.json`)
+## 1. 前端依赖（`src/package.json`）
 
-前端是一个标准的基于 Node.js 环境的 Vue 3 SPA/MPA 项目：
+### 1.1 核心框架
 
-### 核心框架
-- **`vue`** (`^3.4.0`): 构建界面的前端框架。
-- **`vite`** (`^5.0.0`): 极速前端构建工具。
+- `vue`：前端响应式框架。
+- `vite`：开发服务器与构建工具。
+- `@vitejs/plugin-vue`：Vite 的 Vue 编译支持。
 
-### UI 与样式
-- **`element-plus`** (`^2.5.0`): 基于 Vue 3 的组件库（提供输入框、按钮、下拉菜单、设置面板等）。
-- **`@element-plus/icons-vue`** (`^2.3.0`): Element Plus 官方图标库。
-- **`lucide-vue-next`** (`^0.577.0`): 现代化的图标库，为应用提供美观统一的 SVG 图标。
-- **`sass`** (`^1.70.0`): 样式预处理器，支持复杂的嵌套和变量。
+### 1.2 UI 与交互
 
-### Tauri 官方前端插件
-- **`@tauri-apps/api`** (`^2.10.1`): 核心 API，包含事件、窗口管理、文件系统等。
-- **`@tauri-apps/plugin-dialog`**: 原生对话框（打开/保存文件、提示框）。
-- **`@tauri-apps/plugin-opener`**: 默认浏览器或应用打开 URL。
-- **`@tauri-apps/plugin-process`**: 系统进程相关操作。
-- **`@tauri-apps/plugin-updater`**: 自动更新前端模块。
+- `element-plus`：设置页、列表、弹窗等基础组件。
+- `@element-plus/icons-vue`：Element Plus 图标组件。
+- `lucide-vue-next`：补充图标集（如置顶图标）。
+- `sass`：样式预处理支持。
 
-### 工具库
-- **`marked`** (`^17.0.1`): 极速的 Markdown 解析器，用于将 AI 返回的 Markdown 解释或翻译内容渲染为 HTML。
+### 1.3 Tauri 前端 SDK 与插件
 
-## 2. 后端依赖 (`Cargo.toml`)
+- `@tauri-apps/api`：窗口、事件、调用 `invoke` 等基础能力。
+- `@tauri-apps/plugin-dialog`：文件选择/保存等原生对话框能力。
+- `@tauri-apps/plugin-opener`：打开外部链接。
+- `@tauri-apps/plugin-process`：进程能力桥接。
+- `@tauri-apps/plugin-updater`：更新能力前端接入。
+- `@tauri-apps/cli`：Tauri 命令行工具（开发/构建脚本依赖）。
 
-后端是用 Rust 编写的 Tauri Core，涉及大量的系统级操作。
+### 1.4 业务工具库
 
-### 核心框架
-- **`tauri`** (`version = "2"`): 构建轻量级、跨平台桌面应用的框架。包含了 `protocol-asset`, `tray-icon` 等特性。
-- **`tauri-plugin-*`**: 一系列 Tauri 官方及社区插件，如 `global-shortcut` (全局快捷键)、`autostart` (开机自启)、`log` (日志)、`clipboard-manager` (剪贴板读写)、`updater` (自动更新) 等。
+- `marked`：AI 结果中的 Markdown 渲染。
 
-### 序列化与日志
-- **`serde`** / **`serde_json`**: 高性能数据序列化/反序列化库，用于配置解析及与前端 IPC 的 JSON 交互。
-- **`log`**: 标准日志门面。
+## 2. 后端依赖（`src-tauri/Cargo.toml`）
 
-### AI 与网络
-- **`async-openai`** (`0.34.0`): 异步的 OpenAI API 客户端，用于对接 DeepSeek、通义千问等兼容模型。
-- **`futures-util`**: 异步任务的扩展工具，常用于流式 (Streaming) 处理。
+### 2.1 Tauri 核心与插件
 
-### 安全与加密
-- **`keyring`** (`3.6.3`): 跨平台凭据存储，专门用于将 API Key 存入 Windows 凭据管理器，防止明文泄露。
+- `tauri`（启用 `protocol-asset`、`tray-icon`）。
+- 插件：
+  - `tauri-plugin-global-shortcut`
+  - `tauri-plugin-autostart`
+  - `tauri-plugin-log`
+  - `tauri-plugin-opener`
+  - `tauri-plugin-clipboard-manager`
+  - `tauri-plugin-notification`
+  - `tauri-plugin-dialog`
+  - `tauri-plugin-updater`
+  - `tauri-plugin-positioner`
 
-### 图像与多媒体
-- **`image`** (`0.25.10`): 处理剪贴板或截图获取到的图像数据（如缩放、格式转换 png/jpeg/webp）。
-- **`screenshots`** (`0.8.10`): 跨平台屏幕截图库，用于捕获显示器画面。
+### 2.2 AI 与网络
 
-### 数据库与缓存
-- **`sqlx`** (`0.8.6`): 纯异步、强类型的 SQL 框架，使用 `sqlite` 特性。
-- **`lru`**: 内存缓存淘汰算法，用于快速读取最近使用过的历史或图片。
-- **`bloom`**: 布隆过滤器，用于在大规模历史中快速判断重复（如判断刚复制的一段长文本是否已存在）。
-- **`xxhash-rust`**: 极速非加密哈希算法，用于生成文本或图片的特征哈希值以做去重。
+- `async-openai`：OpenAI 兼容接口客户端。
+- `futures-util`：流式异步处理辅助。
+- `reqwest`：ffmpeg 下载与 HTTP 请求。
 
-### 系统交互 (底层)
-- **`rdev`** (`0.5.3`): 全局鼠标/键盘钩子，监听 Windows 系统中用户的划词、点击等底层操作。
-- **`enigo`** (`0.6.1`): 跨平台的鼠标键盘模拟库，用于自动粘贴（模拟 `Ctrl+V`）。
-- **`winapi`** / **`windows`**: Windows 独有，包含 `winuser` (窗口管理)、`Media_Ocr` (调用 Windows 10/11 免费本地 OCR 引擎) 等大量底层 API。
+### 2.3 数据与序列化
+
+- `serde` / `serde_json`：配置与 IPC 序列化。
+- `sqlx`（`sqlite` + `runtime-tokio-rustls`）：本地数据库访问。
+
+### 2.4 图像、缓存与去重
+
+- `image`：图片解码与转换。
+- `screenshots`：屏幕捕获。
+- `lru`：缓存策略。
+- `bloom`：快速重复判断辅助。
+- `xxhash-rust`：高性能 hash。
+
+### 2.5 系统交互与安全
+
+- `enigo`：模拟键盘输入（回填/复制链路）。
+- `keyring`：系统凭据存储 API Key。
+- `regex`：文本匹配与过滤。
+- `parking_lot`：并发锁实现。
+
+### 2.6 平台相关依赖
+
+- Windows 专用：
+  - `winapi`
+  - `windows`
+  - `cpal`
+  - `hound`
+- 条件编译的 `enigo`：
+  - Windows/macOS 使用默认配置。
+  - Linux 使用 `x11rb` 特性。
+
+## 3. 依赖与功能映射
+
+- 剪贴板监听与回填：`tauri-plugin-clipboard-manager` + `enigo`。
+- 划词监听：Windows Hook（`winapi`）+ 文本过滤（`regex`）。
+- 截图/OCR：`screenshots` + `windows` OCR API。
+- 录屏：ffmpeg 进程编排 + `cpal`/`hound` WASAPI 音频链路 + `reqwest` 下载能力。
+- AI：`async-openai` 流式输出 + 前端 `marked` 渲染。

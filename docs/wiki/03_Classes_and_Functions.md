@@ -1,63 +1,99 @@
 # 03 - 关键类与函数说明
 
-本页面列出了项目中最为核心的几个类和函数，它们构成了整个系统的骨架。
+本页聚焦“高频改动/排障最常用”的结构体与函数入口，便于快速定位代码。
 
-## 1. 后端 (Rust) 关键类
+## 1. 核心结构体与状态
 
-### `AppState` (位于 `core/app_state.rs`)
-**功能**：管理全局应用程序状态，是 Tauri 后端中生命周期最长的对象。
-**属性**：
-- `settings`: 保存从配置文件加载的用户设置（如快捷键、是否启用剪贴板、AI提供商信息等）。
-- `is_visible` / `is_image_visible`: 标识主窗口或图片窗口当前是否在屏幕上可见。
-- `is_ocr_active`: 标识当前系统是否正在进行 OCR 任务。
+### `AppState`（`core/app_state.rs`）
 
-### `ClipboardManager` (位于 `utils/clipboard.rs` / `services/clipboard_manager.rs`)
-**功能**：全局单例，处理系统剪贴板文字的监听、记录和去重。
-**关键方法**：
-- `check_clipboard_and_store`: 轮询或监听系统剪贴板事件，比较新旧文本的 Hash，如果为新内容则保存至 SQLite 数据库并发出事件 `clipboard-update` 通知前端。
-- `remove_item` / `clear_history`: 清理过期或主动删除的剪贴板历史。
+- 全局共享状态根对象。
+- 关键字段：
+  - `settings`：运行期设置快照。
+  - `clipboard_manager` / `image_clipboard_manager`：文本与图片管理器。
+  - `is_visible` / `is_image_visible`：窗口可见状态。
+  - `text_fill_seq` / `image_fill_seq`：回填链路序列控制，防止过期请求生效。
+  - `recording_runtime`：录屏运行时状态。
 
-### `ImageClipboardManager` (位于 `services/image_clipboard_manager.rs`)
-**功能**：专门针对图片的剪贴板管理类。由于图片数据量大，它包含了一套缩略图生成、大图文件系统持久化与 LRU 缓存策略。
-**关键方法**：
-- `store_image`: 将新图片转换为缩略图（Base64 或文件路径）和大图，并生成特征 Hash 避免重复。
-- `emit_image_history_payload`: 批量读取图片数据推送到前端渲染列表。
+### `AppSettingsData`（`utils/settings_model.rs`）
 
-### `AIClient` (位于 `services/ai_client.rs`)
-**功能**：对 `async-openai` 的封装，处理所有发往大语言模型的请求。
-**关键方法**：
-- `stream_chat_completion`: 发送请求，建立流式连接，将 AI 吐出的 Token 通过 Tauri Window 的 `emit` 发送到前端（如 `result_display` 窗口）。
+- 设置数据模型，负责默认值、校验与迁移。
+- 覆盖功能开关、快捷键、AI provider 配置、录屏参数、提示词模板、ffmpeg 下载地址。
+- API Key 不明文落盘，使用 keyring 存储。
 
-## 2. 后端 (Rust) 关键函数
+### `RecordingRuntime` / `RecordingRuntimeState`（`features/recording/state.rs` / `types.rs`）
 
-### `commands::copy_and_paste_text(text: String, ...)` (位于 `ui/commands.rs`)
-**功能**：实现“快捷回填”功能。当前端点击某条历史记录时：
-1. 隐藏当前剪贴板窗口并将焦点交还给前一个应用程序。
-2. 将指定的 `text` 写入系统剪贴板。
-3. 使用 `enigo` 库模拟 `Ctrl+V` (Windows/Linux) 或 `Cmd+V` (macOS) 键盘事件，将内容粘贴到光标处。
+- 记录录屏阶段（idle/starting/recording/paused/stopping/error）。
+- 持有会话 ID、输出路径、码率/FPS、暂停累计时长、自动停止标记等。
 
-### `start_text_selection_listener` (位于 `lib.rs` / `features/mouse_listener.rs`)
-**功能**：Windows 独占功能。通过底层全局鼠标 Hook（`rdev` 库），监听用户的鼠标左键按下、拖拽与松开。
-1. 若判断为有效选词（如双击、三击或拖动一段距离），则触发系统复制动作（`Ctrl+C`）。
-2. 获取复制到的文本，如果有效，则在光标附近弹出 `selection_toolbar` 窗口供用户进行“翻译”或“解释”。
+## 2. 关键后端服务函数
 
-### `open_screenshot_editor` (位于 `features/screenshot/capture.rs`)
-**功能**：触发全屏截图并打开裁剪工具。
-1. 调用 `screenshots` 库捕获当前所有屏幕的图像。
-2. 创建或显示 `screenshot` 全屏无边框窗口。
-3. 将截图以 Base64 或本地文件形式传给前端，前端进行框选渲染。
+### 启动与命令装配
 
-## 3. 前端 (Vue 3) 关键组件
+- `run()`（`lib.rs`）：
+  - 初始化全局状态与窗口行为。
+  - 注册快捷键与冲突提示。
+  - 注册全部 Tauri `invoke` 命令与插件。
+  - 启动剪贴板与划词监听。
 
-### `ClipboardList.vue` (位于 `src/pages/clipboard/components/`)
-**功能**：文字剪贴板的展示列表。
-**特性**：
-- 使用了虚拟列表或分页加载以优化长历史记录的渲染。
-- 绑定了键盘事件监听（方向键移动高亮项，回车键触发回填）。
+### 剪贴板链路
 
-### `useClipboardHistory.js` (位于 `src/pages/clipboard/composables/`)
-**功能**：Vue 3 组合式 API (Composable)，封装了与后端的 IPC 通信逻辑。
-- 包含了 `fetchHistory`、`removeItem`、`pasteItem` 等方法，使 UI 组件与底层 Tauri Command 解耦。
+- `set_clipboard_listener_enabled()`（`services/clipboard_manager.rs`）：
+  - 控制文本监听线程启停。
+- `set_image_clipboard_listener_enabled()`（`services/image_clipboard_manager.rs`）：
+  - 控制图片监听线程启停与队列消费。
+- `emit_image_history_payload()`（`services/image_clipboard_manager.rs`）：
+  - 统一发送图片历史全量 payload。
+- `select_and_fill()` / `select_and_fill_image_by_id()`（`ui/commands.rs`）：
+  - 触发文本/图片回填主流程（隐藏窗口 -> 写剪贴板 -> 模拟粘贴）。
+- `copy_and_paste_text()`（`ui/commands.rs`）：
+  - 结果窗口一键回写，内置短时去重与粘贴重试。
 
-### `useAIProvider.js` (位于 `src/pages/settings/composables/`)
-**功能**：管理 AI 提供商配置的响应式逻辑，支持添加自定义提供商、测试连接（调用后端的 `get_ai_settings` 或发起测试请求）并将配置持久化保存。
+### 划词与 AI 链路
+
+- `set_selection_listener_enabled()`（`features/mouse_listener.rs`）：
+  - 划词监听总开关，控制 Hook 与工具栏显隐。
+- `get_selected_text_with_app()`（`features/text_selection.rs`）：
+  - `Ctrl+C` 捕获选区文本并恢复原剪贴板。
+- `stream_translate_text()` / `stream_explain_text()`（`services/ai_services.rs`）：
+  - 执行流式 AI 请求并实时推送结果窗口。
+
+### 截图链路
+
+- `open_screenshot_editor()`（`ui/commands.rs`）：
+  - 捕获全屏并初始化截图窗口启动数据。
+- `capture_region()` / `save_screenshot()` / `pin_screenshot_on_screen()`（`ui/commands.rs`）：
+  - 区域截取、保存、固定图片窗口操作。
+- `recognize_image_ocr()`（`ui/commands.rs`）：
+  - OCR 识别入口。
+
+### 录屏链路
+
+- `check_recording_ffmpeg()` / `download_recording_ffmpeg()`（`ui/commands_recording.rs`）：
+  - ffmpeg 检查与按需下载，带进度事件。
+- `start_recording()` / `pause_recording()` / `resume_recording()` / `stop_recording()`（`features/recording/recorder_service.rs`）：
+  - 录屏状态机主入口。
+- `toggle_recording_from_shortcut()`（`ui/commands_recording.rs`）：
+  - 快捷键唤起胶囊（紧凑模式）。
+
+## 3. 关键前端模块函数
+
+### `src/services/ipc.js`
+
+- 前后端命令协议单点定义。
+- `ClipboardService` / `ImageClipboardService` / `AISettingsService` / `RecordingService` 统一封装调用。
+
+### `useClipboardHistory()`（`pages/clipboard/composables/useClipboardHistory.js`）
+
+- 文本历史分页加载、筛选、排序、置顶和本地增量合并逻辑。
+- `applyPayloadSnapshot()` 支撑后端全量 payload 快速落地。
+
+### `image_clipboard/App.vue`
+
+- 图片历史虚拟化渲染、滚动预加载、预热与异步预览缓存。
+- 监听 `show-image-window`、`image-history-payload-updated`、`image-history-item-added` 等事件做增量刷新。
+
+### `settings/App.vue` + `useAIProvider.js`
+
+- 设置页面自动保存（差量字段上传）。
+- 录屏启用前自动触发 ffmpeg 检查/下载流程。
+- AI provider 切换、连接测试、自定义 provider 删除管理。
