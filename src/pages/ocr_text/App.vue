@@ -94,21 +94,21 @@ onUnmounted(() => {
 <style scoped>
 .ocr-text-root {
   box-sizing: border-box;
-  padding: 6px 6px 8px 6px;
   width: 100%;
   height: 100%;
+  overflow: hidden;
   background: rgba(13, 20, 30, 0.96);
   color: #dce8ff;
-  display: flex;
-  flex-direction: column;
+  position: relative;
 }
 
 .drag-handle-wrap {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 14px;
-  margin-bottom: 4px;
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  pointer-events: none;
 }
 
 .drag-handle {
@@ -117,17 +117,21 @@ onUnmounted(() => {
   border-radius: 999px;
   background: rgba(220, 232, 255, 0.35);
   cursor: move;
+  pointer-events: auto;
 }
 
 .ocr-editor {
+  box-sizing: border-box;
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: calc(100% - 18px);
+  height: 100%;
   border: none;
   outline: none;
   resize: none;
   background: transparent;
   color: #dce8ff;
-  padding: 12px;
+  padding: 20px 12px 12px;
   white-space: pre-wrap;
   word-break: break-word;
   font-size: 13px;

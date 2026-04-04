@@ -254,7 +254,8 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   display: block;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: left top;
   user-select: none;
   cursor: inherit;
 }
