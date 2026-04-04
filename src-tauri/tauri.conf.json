@@ -132,9 +132,9 @@
     "targets": "all",
     "resources": [
       "../LICENSE",
-      "../THIRD_PARTY_NOTICES.md",
-      "../GPLv2",
-      "../LGPLv2.1"
+      "../docs/THIRD_PARTY_NOTICES.md",
+      "../docs/GPLv2",
+      "../docs/LGPLv2.1"
     ],
     "icon": [
       "icons/32x32.png",
