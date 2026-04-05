@@ -6,7 +6,9 @@
     <textarea
         v-model="text"
         class="ocr-editor"
+        placeholder="暂无识别结果"
         spellcheck="false"
+        @dblclick.left.stop.prevent="closeWindow"
     />
   </div>
 </template>
@@ -17,15 +19,16 @@ import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 
 const text = ref('')
 const themeMode = ref('dark')
+
 let onOcrTextData = null
 let onStorageThemeChange = null
+let initialPayloadTimer = null
+let initialPayloadTryCount = 0
 let lastDragStartAt = 0
 
 function getCurrentTheme() {
   const saved = localStorage.getItem('settings-theme')
-  if (saved === 'dark' || saved === 'light') {
-    return saved
-  }
+  if (saved === 'dark' || saved === 'light') return saved
   return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
@@ -39,14 +42,44 @@ function applyTheme(value) {
 }
 
 function applyPayload(payload) {
-  text.value = String(payload?.text || '').trim()
+  const value = String(payload?.text || '').trim()
+  if (!value) return
+  text.value = value
+}
+
+function applyInitialPayload() {
+  if (window.__OCR_TEXT_PAYLOAD__) {
+    applyPayload(window.__OCR_TEXT_PAYLOAD__)
+  }
+}
+
+function stopInitialPayloadTimer() {
+  if (initialPayloadTimer) {
+    clearInterval(initialPayloadTimer)
+    initialPayloadTimer = null
+  }
+}
+
+function startInitialPayloadTimer() {
+  stopInitialPayloadTimer()
+  initialPayloadTryCount = 0
+  initialPayloadTimer = setInterval(() => {
+    initialPayloadTryCount += 1
+    applyInitialPayload()
+    if (text.value || initialPayloadTryCount >= 25) {
+      stopInitialPayloadTimer()
+    }
+  }, 80)
 }
 
 async function closeWindow() {
   try {
     await getCurrentWebviewWindow().close()
-  } catch (error) {
-    console.error('关闭OCR结果窗口失败:', error)
+  } catch (_) {
+    try {
+      window.close()
+    } catch (_) {
+    }
   }
 }
 
@@ -56,8 +89,7 @@ async function startDrag() {
   lastDragStartAt = now
   try {
     await getCurrentWebviewWindow().startDragging()
-  } catch (error) {
-    console.error('系统拖动OCR结果窗口失败:', error)
+  } catch (_) {
   }
 }
 
@@ -74,12 +106,13 @@ onMounted(() => {
     applyPayload(event?.detail)
   }
   window.addEventListener('ocr-text-data', onOcrTextData)
-  if (window.__OCR_TEXT_PAYLOAD__) {
-    applyPayload(window.__OCR_TEXT_PAYLOAD__)
-  }
+
+  applyInitialPayload()
+  startInitialPayloadTimer()
 })
 
 onUnmounted(() => {
+  stopInitialPayloadTimer()
   if (onStorageThemeChange) {
     window.removeEventListener('storage', onStorageThemeChange)
     onStorageThemeChange = null
@@ -94,21 +127,22 @@ onUnmounted(() => {
 <style scoped>
 .ocr-text-root {
   box-sizing: border-box;
-  width: 100%;
-  height: 100%;
+  position: fixed;
+  inset: 0;
   overflow: hidden;
   background: rgba(13, 20, 30, 0.96);
   color: #dce8ff;
-  position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 .drag-handle-wrap {
-  position: absolute;
-  top: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2;
-  pointer-events: none;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 6px;
+  flex: 0 0 auto;
 }
 
 .drag-handle {
@@ -117,21 +151,19 @@ onUnmounted(() => {
   border-radius: 999px;
   background: rgba(220, 232, 255, 0.35);
   cursor: move;
-  pointer-events: auto;
 }
 
 .ocr-editor {
   box-sizing: border-box;
-  position: absolute;
-  inset: 0;
   width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   border: none;
   outline: none;
   resize: none;
   background: transparent;
   color: #dce8ff;
-  padding: 20px 12px 12px;
+  padding: 8px 12px 12px;
   white-space: pre-wrap;
   word-break: break-word;
   font-size: 13px;
@@ -139,6 +171,8 @@ onUnmounted(() => {
   user-select: text;
   font-family: 'Consolas', 'Microsoft YaHei', sans-serif;
   overflow: auto;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }

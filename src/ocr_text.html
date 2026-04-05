@@ -16,6 +16,16 @@
             height: 100%;
             overflow: hidden;
             background: rgba(13, 20, 30, 0.96);
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar,
+        #app::-webkit-scrollbar {
+            width: 0;
+            height: 0;
+            display: none;
         }
 
         html.theme-light, body.theme-light, body.theme-light #app {

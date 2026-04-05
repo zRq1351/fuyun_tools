@@ -238,11 +238,37 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.pinned-image-root {
+:global(html),
+:global(body),
+:global(#app) {
+  margin: 0;
+  padding: 0;
   width: 100%;
   height: 100%;
-  overflow: hidden;
-  position: relative;
+  overflow: hidden !important;
+  overflow-x: hidden !important;
+  overflow-y: hidden !important;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+:global(*),
+:global(*::before),
+:global(*::after) {
+  scrollbar-width: none;
+}
+
+:global(*::-webkit-scrollbar) {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+.pinned-image-root {
+  box-sizing: border-box;
+  position: fixed;
+  inset: 0;
+  overflow: clip;
   cursor: move;
 }
 
@@ -254,7 +280,7 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   display: block;
-  object-fit: cover;
+  object-fit: fill;
   object-position: left top;
   user-select: none;
   cursor: inherit;
