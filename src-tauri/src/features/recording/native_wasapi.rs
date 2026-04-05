@@ -1,6 +1,8 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat as CpalSampleFormat, StreamConfig};
 use hound::{SampleFormat, WavWriter};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::{
@@ -8,11 +10,38 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::time::Duration;
+use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+use wasapi::{
+    get_default_device, initialize_mta, AudioClient, Direction, SampleType, SessionState, StreamMode, WaveFormat,
+};
+#[cfg(target_os = "windows")]
+use winapi::shared::minwindef::{BOOL, LPARAM};
+#[cfg(target_os = "windows")]
+use winapi::shared::windef::HWND;
+#[cfg(target_os = "windows")]
+use winapi::um::winuser::{
+    EnumWindows, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
+};
 
 pub struct WasapiCaptureHandle {
     pub stop_flag: Arc<AtomicBool>,
     pub join: Option<std::thread::JoinHandle<()>>,
     pub output_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct AudioProcessInfo {
+    pub pid: u32,
+    pub name: String,
+}
+
+static AUDIO_RECENT_ACTIVITY: std::sync::OnceLock<Mutex<HashMap<u32, u64>>> = std::sync::OnceLock::new();
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 impl WasapiCaptureHandle {
@@ -22,6 +51,241 @@ impl WasapiCaptureHandle {
             let _ = join.join();
         }
     }
+}
+
+fn capture_process_loopback_to_wav(
+    process_id: u32,
+    output_path: PathBuf,
+    stop_flag: Arc<AtomicBool>,
+    enabled_flag: Arc<AtomicBool>,
+) -> Result<(), String> {
+    let _ = initialize_mta();
+    let desired_format = WaveFormat::new(32, 32, &SampleType::Float, 48000, 2, None);
+    let mut audio_client = AudioClient::new_application_loopback_client(process_id, true)
+        .map_err(|e| format!("创建进程 loopback 客户端失败(pid={}): {}", process_id, e))?;
+    let mode = StreamMode::EventsShared {
+        autoconvert: true,
+        buffer_duration_hns: 0,
+    };
+    audio_client
+        .initialize_client(&desired_format, &Direction::Capture, &mode)
+        .map_err(|e| format!("初始化进程 loopback 失败(pid={}): {}", process_id, e))?;
+    let event = audio_client
+        .set_get_eventhandle()
+        .map_err(|e| format!("创建进程 loopback 事件失败(pid={}): {}", process_id, e))?;
+    let capture_client = audio_client
+        .get_audiocaptureclient()
+        .map_err(|e| format!("获取进程捕获客户端失败(pid={}): {}", process_id, e))?;
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 48_000,
+        bits_per_sample: 16,
+        sample_format: SampleFormat::Int,
+    };
+    let mut writer = WavWriter::create(&output_path, spec)
+        .map_err(|e| format!("创建进程音频文件失败(pid={}): {}", process_id, e))?;
+    let mut queue = std::collections::VecDeque::<u8>::new();
+    let blockalign = desired_format.get_blockalign() as usize;
+    audio_client
+        .start_stream()
+        .map_err(|e| format!("启动进程 loopback 失败(pid={}): {}", process_id, e))?;
+    while !stop_flag.load(Ordering::SeqCst) {
+        let new_frames = capture_client
+            .get_next_packet_size()
+            .map_err(|e| format!("读取进程音频包大小失败(pid={}): {}", process_id, e))?
+            .unwrap_or(0);
+        if new_frames > 0 {
+            capture_client
+                .read_from_device_to_deque(&mut queue)
+                .map_err(|e| format!("读取进程音频数据失败(pid={}): {}", process_id, e))?;
+        }
+        while queue.len() >= 4 {
+            let b0 = queue.pop_front().unwrap_or(0);
+            let b1 = queue.pop_front().unwrap_or(0);
+            let b2 = queue.pop_front().unwrap_or(0);
+            let b3 = queue.pop_front().unwrap_or(0);
+            let sample = f32::from_le_bytes([b0, b1, b2, b3]);
+            let out = if enabled_flag.load(Ordering::SeqCst) {
+                (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16
+            } else {
+                0
+            };
+            let _ = writer.write_sample(out);
+        }
+        if event.wait_for_event(50).is_err() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if blockalign == 0 {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    let _ = audio_client.stop_stream();
+    writer
+        .finalize()
+        .map_err(|e| format!("完成进程音频文件失败(pid={}): {}", process_id, e))?;
+    Ok(())
+}
+
+pub fn start_process_loopback_wavs(
+    process_ids: Vec<u32>,
+    output_paths: Vec<PathBuf>,
+    enabled_flag: Arc<AtomicBool>,
+) -> Result<WasapiCaptureHandle, String> {
+    if process_ids.is_empty() || process_ids.len() != output_paths.len() {
+        return Err("进程音频录制参数无效".to_string());
+    }
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let thread_stop = stop_flag.clone();
+    let thread_enabled = enabled_flag.clone();
+    let handle = std::thread::spawn(move || {
+        let mut workers = Vec::new();
+        for (pid, path) in process_ids.into_iter().zip(output_paths.into_iter()) {
+            let worker_stop = thread_stop.clone();
+            let worker_enabled = thread_enabled.clone();
+            workers.push(std::thread::spawn(move || {
+                let _ = capture_process_loopback_to_wav(pid, path, worker_stop, worker_enabled);
+            }));
+        }
+        while !thread_stop.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        for worker in workers {
+            let _ = worker.join();
+        }
+    });
+    Ok(WasapiCaptureHandle {
+        stop_flag,
+        join: Some(handle),
+        output_path: PathBuf::from(""),
+    })
+}
+
+pub fn list_audio_processes() -> Vec<AudioProcessInfo> {
+    let refresh = RefreshKind::nothing().with_processes(ProcessRefreshKind::everything());
+    let sys = System::new_with_specifics(refresh);
+    let window_titles = visible_window_process_titles();
+    let visible_pids = window_titles.keys().copied().collect::<HashSet<u32>>();
+    let active_now = active_audio_process_ids();
+    let now = now_ms();
+    let recent_map = AUDIO_RECENT_ACTIVITY.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(mut map) = recent_map.lock() {
+        for pid in &active_now {
+            map.insert(*pid, now);
+        }
+        map.retain(|_, ts| now.saturating_sub(*ts) <= 5 * 60 * 1000);
+    }
+    let mut list = sys
+        .processes()
+        .iter()
+        .map(|(pid, process)| AudioProcessInfo {
+            pid: pid.as_u32(),
+            name: {
+                let process_name = process.name().to_string_lossy().to_string();
+                let title = window_titles
+                    .get(&pid.as_u32())
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default();
+                if !title.is_empty() {
+                    format!("{} - {}", title, process_name)
+                } else {
+                    process_name
+                }
+            },
+        })
+        .filter(|p| {
+            p.pid > 0
+                && !p.name.trim().is_empty()
+                && (visible_pids.is_empty() || visible_pids.contains(&p.pid))
+        })
+        .collect::<Vec<_>>();
+    let activity_snapshot = AUDIO_RECENT_ACTIVITY
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()
+        .map(|m| m.clone())
+        .unwrap_or_default();
+    list.sort_by(|a, b| {
+        let a_active = active_now.contains(&a.pid);
+        let b_active = active_now.contains(&b.pid);
+        if a_active != b_active {
+            return b_active.cmp(&a_active);
+        }
+        let a_recent = activity_snapshot.get(&a.pid).copied().unwrap_or(0);
+        let b_recent = activity_snapshot.get(&b.pid).copied().unwrap_or(0);
+        if a_recent != b_recent {
+            return b_recent.cmp(&a_recent);
+        }
+        a.name.to_lowercase().cmp(&b.name.to_lowercase())
+    });
+    list.dedup_by(|a, b| a.pid == b.pid);
+    list
+}
+
+fn active_audio_process_ids() -> HashSet<u32> {
+    let mut set = HashSet::new();
+    let _ = initialize_mta();
+    let Ok(device) = get_default_device(&Direction::Render) else {
+        return set;
+    };
+    let Ok(manager) = device.get_iaudiosessionmanager() else {
+        return set;
+    };
+    let Ok(session_enum) = manager.get_audiosessionenumerator() else {
+        return set;
+    };
+    let Ok(count) = session_enum.get_count() else {
+        return set;
+    };
+    for i in 0..count {
+        let Ok(control) = session_enum.get_session(i) else { continue };
+        let Ok(state) = control.get_state() else { continue };
+        if state == SessionState::Active {
+            if let Ok(pid) = control.get_process_id() {
+                if pid > 0 {
+                    set.insert(pid);
+                }
+            }
+        }
+    }
+    set
+}
+
+#[cfg(target_os = "windows")]
+fn visible_window_process_titles() -> HashMap<u32, String> {
+    unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        if unsafe { IsWindowVisible(hwnd) } == 0 {
+            return 1;
+        }
+        let mut pid: u32 = 0;
+        unsafe {
+            GetWindowThreadProcessId(hwnd, &mut pid);
+        }
+        if pid > 0 {
+            let len = unsafe { GetWindowTextLengthW(hwnd) };
+            if len > 0 {
+                let mut buffer = vec![0u16; (len as usize) + 1];
+                let copied = unsafe { GetWindowTextW(hwnd, buffer.as_mut_ptr(), len + 1) };
+                if copied > 0 {
+                    let text = String::from_utf16_lossy(&buffer[..copied as usize]).trim().to_string();
+                    if !text.is_empty() {
+                        let map = unsafe { &mut *(lparam as *mut HashMap<u32, String>) };
+                        map.entry(pid).or_insert(text);
+                    }
+                }
+            }
+        }
+        1
+    }
+    let mut map: HashMap<u32, String> = HashMap::new();
+    unsafe {
+        EnumWindows(Some(enum_windows_proc), &mut map as *mut _ as LPARAM);
+    }
+    map
+}
+
+#[cfg(not(target_os = "windows"))]
+fn visible_window_process_titles() -> HashMap<u32, String> {
+    HashMap::new()
 }
 
 pub fn start_system_loopback_wav_with_device(

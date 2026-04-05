@@ -12,6 +12,7 @@ pub struct StartRecordingRequest {
     pub capture_cursor: Option<bool>,
     pub capture_system_audio: Option<bool>,
     pub system_audio_device_id: Option<String>,
+    pub system_audio_process_ids: Option<Vec<u32>>,
     pub capture_microphone: Option<bool>,
     pub microphone_device_id: Option<String>,
     pub fps: Option<u32>,
@@ -62,6 +63,13 @@ pub struct AudioInputDevice {
     pub id: String,
     pub name: String,
     pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioProcessItem {
+    pub pid: u32,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

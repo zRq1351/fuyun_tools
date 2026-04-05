@@ -170,6 +170,28 @@
               />
             </el-select>
           </div>
+          <div v-if="captureSystemAudio" class="toolbar-settings-row">
+            <span class="toolbar-settings-label">应用音频</span>
+            <el-select
+                v-model="systemAudioProcessIds"
+                :disabled="!canEditRecordingConfig"
+                collapse-tags
+                collapse-tags-tooltip
+                filterable
+                multiple
+                placeholder="可选：按应用录音（多选）"
+                popper-class="recording-toolbar-select-popper"
+                size="small"
+                @visible-change="onAudioProcessDropdownVisibleChange"
+            >
+              <el-option
+                  v-for="item in audioProcesses"
+                  :key="item.pid"
+                  :label="`${item.name} (PID ${item.pid})`"
+                  :value="item.pid"
+              />
+            </el-select>
+          </div>
           <div class="toolbar-settings-row">
             <span class="toolbar-settings-label">麦克风</span>
             <el-select
@@ -284,6 +306,8 @@ const systemOutputId = ref(null);
 const microphoneDeviceId = ref(null);
 const systemOutputs = ref([]);
 const microphones = ref([]);
+const audioProcesses = ref([]);
+const systemAudioProcessIds = ref([]);
 const recordTargetType = ref("screen");
 const recordTargetWindowId = ref("");
 const recordableWindows = ref([]);
@@ -493,6 +517,7 @@ const toggleRecordingState = async () => {
         targetHeight: selectedWindow ? Number(selectedWindow.height || 0) : null,
         captureSystemAudio: captureSystemAudio.value,
         systemAudioDeviceId: systemOutputId.value,
+        systemAudioProcessIds: captureSystemAudio.value ? systemAudioProcessIds.value : [],
         captureMicrophone: captureMicrophone.value,
         microphoneDeviceId: microphoneDeviceId.value,
         captureCursor: captureCursor.value,
@@ -676,6 +701,15 @@ const refreshMicrophoneDevices = async () => {
   }
 };
 
+const refreshAudioProcesses = async () => {
+  const procs = await RecordingService.listAudioProcesses();
+  audioProcesses.value = Array.isArray(procs) ? procs : [];
+  const pidSet = new Set(audioProcesses.value.map((p) => Number(p.pid || 0)));
+  systemAudioProcessIds.value = systemAudioProcessIds.value
+      .map((v) => Number(v))
+      .filter((v) => pidSet.has(v));
+};
+
 const onSystemAudioDropdownVisibleChange = async (visible) => {
   if (!visible) return;
   try {
@@ -688,6 +722,14 @@ const onMicrophoneDropdownVisibleChange = async (visible) => {
   if (!visible) return;
   try {
     await refreshMicrophoneDevices();
+  } catch (_e) {
+  }
+};
+
+const onAudioProcessDropdownVisibleChange = async (visible) => {
+  if (!visible) return;
+  try {
+    await refreshAudioProcesses();
   } catch (_e) {
   }
 };
@@ -815,6 +857,10 @@ onMounted(async () => {
   }
   try {
     await refreshMicrophoneDevices();
+  } catch (_e) {
+  }
+  try {
+    await refreshAudioProcesses();
   } catch (_e) {
   }
   await refresh();

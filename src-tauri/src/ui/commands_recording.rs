@@ -3,7 +3,7 @@ use crate::core::error::to_frontend_error_string;
 use crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path;
 use crate::features::recording::recorder_service;
 use crate::features::recording::types::{
-    AudioInputDevice, RecordingRegressionReport, RecordingRuntimeState, RecordingSessionInfo, RecordingStopResult,
+    AudioInputDevice, AudioProcessItem, RecordingRegressionReport, RecordingRuntimeState, RecordingSessionInfo, RecordingStopResult,
     SessionRequest, StartRecordingRequest,
 };
 use crate::sync::Mutex;
@@ -332,6 +332,11 @@ pub async fn list_recording_system_output_devices(
 ) -> Result<Vec<AudioInputDevice>, String> {
     // 复用 list_system_audio_sources（内部已切到 WASAPI 枚举）
     recorder_service::list_system_output_devices(&app).map_err(to_frontend_error_string)
+}
+
+#[tauri::command]
+pub async fn list_recording_audio_processes() -> Result<Vec<AudioProcessItem>, String> {
+    recorder_service::list_audio_process_items().map_err(to_frontend_error_string)
 }
 // input device listing & capability/installer commands removed in native WASAPI mode
 

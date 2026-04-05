@@ -11,11 +11,12 @@ use crate::features::recording::events::{
 };
 use crate::features::recording::ffmpeg_runner::{build_output_paths, resolve_ffmpeg_path};
 use crate::features::recording::native_wasapi::{
-    start_microphone_wav_with_device, start_system_loopback_wav_with_device,
+    list_audio_processes, start_microphone_wav_with_device, start_process_loopback_wavs,
+    start_system_loopback_wav_with_device,
 };
 use crate::features::recording::state::RecordingPhase;
 use crate::features::recording::types::{
-    AudioInputDevice, RecordingRegressionReport, RecordingRuntimeState, RecordingSessionInfo,
+    AudioInputDevice, AudioProcessItem, RecordingRegressionReport, RecordingRuntimeState, RecordingSessionInfo,
     RecordingStopResult, SessionRequest, StartRecordingRequest,
 };
 use crate::features::recording::wgc_capture::start_window_capture_to_mp4;
@@ -413,6 +414,40 @@ fn ensure_system_audio_capture_started(
         .map(|it| it.elapsed().as_millis() as u64)
         .unwrap_or(0);
     let seg_idx = runtime.system_audio_segments.len();
+    if !runtime.system_audio_process_ids.is_empty() {
+        let process_ids = runtime.system_audio_process_ids.clone();
+        let output_paths = process_ids
+            .iter()
+            .enumerate()
+            .map(|(idx, pid)| {
+                output_dir.join(format!(
+                    "{}.sys.proc{}.seg{}.wav",
+                    session_id, pid, seg_idx + idx
+                ))
+            })
+            .collect::<Vec<_>>();
+        let first_try = start_process_loopback_wavs(process_ids, output_paths.clone(), enabled_flag.clone());
+        return match first_try {
+            Ok(handle) => {
+                runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
+                runtime.system_audio_thread = handle.join;
+                runtime.system_audio_stream_start_ms = Some(start_ms);
+                for p in output_paths {
+                    runtime.system_audio_segments.push(crate::features::recording::state::AudioSegment {
+                        path: p,
+                        start_ms,
+                    });
+                }
+                Ok(())
+            }
+            Err(e) => {
+                if emit_error_on_fail {
+                    emit_recording_error(app, Some(session_id), AUDIO_DEVICE_NOT_FOUND, e.as_str());
+                }
+                Err(e)
+            }
+        };
+    }
     let sys_wav = if seg_idx == 0 {
         output_dir.join(format!("{}.sys.wav", session_id))
     } else {
@@ -526,6 +561,16 @@ pub fn list_system_output_devices(_app: &AppHandle) -> Result<Vec<AudioInputDevi
     Ok(outs)
 }
 // list_input_devices removed in native WASAPI mode
+
+pub fn list_audio_process_items() -> Result<Vec<AudioProcessItem>, AppError> {
+    Ok(list_audio_processes()
+        .into_iter()
+        .map(|p| AudioProcessItem {
+            pid: p.pid,
+            name: p.name,
+        })
+        .collect::<Vec<_>>())
+}
 
 fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
     if let Ok(entries) = fs::read_dir(output_dir) {
@@ -952,6 +997,13 @@ pub fn start_recording(
         runtime.output_path_tmp = Some(tmp_path.clone());
         runtime.output_path_final = Some(final_path.clone());
         runtime.system_audio_device_id = system_audio_device_id.clone();
+        runtime.system_audio_process_ids = request
+            .system_audio_process_ids
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|pid| *pid > 0)
+            .collect::<Vec<_>>();
         runtime.mic_audio_device_id = request.microphone_device_id.clone();
         runtime.system_audio_enabled_flag = Some(Arc::new(AtomicBool::new(capture_system_audio)));
         runtime.mic_audio_enabled_flag = Some(Arc::new(AtomicBool::new(capture_microphone)));
@@ -969,9 +1021,11 @@ pub fn start_recording(
         if capture_microphone {
             runtime.mic_audio_switch_points_ms.push(0);
         }
-        // 始终尝试启动音频采集线程，便于录制中实时开关；未开启时仅写入静音样本
+        // 系统音频允许静音常驻采集；麦克风未开启时不占用设备，避免系统显示“麦克风正在使用”
         let _ = ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, capture_system_audio);
-        let _ = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, capture_microphone);
+        if capture_microphone {
+            let _ = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true);
+        }
         runtime.process = child_opt;
         if let Some(handle) = window_wgc_handle {
             runtime.wgc_stop_flag = Some(handle.stop_flag);
@@ -1369,8 +1423,17 @@ pub fn update_audio_capture(
             AppError::new(ErrorCode::SystemError, format!("开启系统音频失败: {}", e)).with_details(e)
         })?;
     }
-    if runtime.mic_audio_thread.is_none() {
-        ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, should_enable_mic).map_err(|e| {
+    if !should_enable_mic && runtime.mic_audio_thread.is_some() {
+        if let Some(flag) = runtime.mic_audio_stop_flag.take() {
+            flag.store(true, Ordering::SeqCst);
+        }
+        if let Some(join) = runtime.mic_audio_thread.take() {
+            let _ = join.join();
+        }
+        runtime.mic_audio_stream_start_ms = None;
+    }
+    if should_enable_mic && runtime.mic_audio_thread.is_none() {
+        ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true).map_err(|e| {
             AppError::new(ErrorCode::SystemError, format!("开启麦克风失败: {}", e)).with_details(e)
         })?;
     }
@@ -1429,6 +1492,7 @@ pub fn run_recording_regression(
                 capture_cursor: Some(true),
                 capture_system_audio: Some(false),
                 system_audio_device_id: None,
+                system_audio_process_ids: None,
                 capture_microphone: Some(false),
                 microphone_device_id: None,
                 fps: Some(20),

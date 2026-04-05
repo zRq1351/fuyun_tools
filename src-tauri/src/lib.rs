@@ -16,8 +16,8 @@ use crate::sync::Mutex;
 use crate::ui::commands::*;
 use crate::ui::commands_recording::{
     cancel_recording, check_recording_ffmpeg, download_recording_ffmpeg, get_recording_output_dir, get_recording_state,
-    list_recording_audio_devices, list_recording_system_output_devices, open_recording_folder, pause_recording, resize_recording_toolbar,
-    resume_recording, run_recording_regression, show_recording_toolbar, start_recording,
+    list_recording_audio_devices, list_recording_audio_processes, list_recording_system_output_devices, open_recording_folder, pause_recording,
+    resize_recording_toolbar, resume_recording, run_recording_regression, show_recording_toolbar, start_recording,
     stop_recording, toggle_recording_from_shortcut, update_recording_audio_capture,
 };
 use crate::ui::tray_menu::rebuild_tray_menu;
@@ -321,6 +321,7 @@ pub fn run() {
             get_recording_output_dir,
             list_recording_audio_devices,
             list_recording_system_output_devices,
+            list_recording_audio_processes,
             open_recording_folder,
             run_recording_regression,
             show_recording_toolbar,

@@ -62,6 +62,7 @@ pub struct RecordingRuntime {
     pub system_audio_thread: Option<JoinHandle<()>>,
     pub system_audio_enabled_flag: Option<Arc<AtomicBool>>,
     pub system_audio_device_id: Option<String>,
+    pub system_audio_process_ids: Vec<u32>,
     pub system_audio_ever_enabled: bool,
     pub system_audio_stream_start_ms: Option<u64>,
     pub system_audio_switch_points_ms: Vec<u64>,
@@ -106,6 +107,7 @@ impl Default for RecordingRuntime {
             system_audio_thread: None,
             system_audio_enabled_flag: None,
             system_audio_device_id: None,
+            system_audio_process_ids: Vec::new(),
             system_audio_ever_enabled: false,
             system_audio_stream_start_ms: None,
             system_audio_switch_points_ms: Vec::new(),
@@ -173,6 +175,7 @@ impl RecordingRuntime {
         self.system_audio_thread = None;
         self.system_audio_enabled_flag = None;
         self.system_audio_device_id = None;
+        self.system_audio_process_ids.clear();
         self.system_audio_ever_enabled = false;
         self.system_audio_stream_start_ms = None;
         self.system_audio_switch_points_ms.clear();
