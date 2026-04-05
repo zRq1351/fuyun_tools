@@ -128,9 +128,8 @@ import {marked} from 'marked'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWindow} from '@tauri-apps/api/window'
 import {CloseBold, CopyDocument, DocumentCopy, FullScreen, Hide, Minus, Position, View} from '@element-plus/icons-vue'
-import {ElMessage} from 'element-plus'
-import {AIService, ClipboardService} from '../../services/ipc'
-import {handleAppError} from '../../utils/errorHandler'
+import {AIService, ClipboardService} from '@/services/ipc.js'
+import {handleAppError} from '@/utils/errorHandler.js'
 
 const mode = ref('translation')
 const originalText = ref('')

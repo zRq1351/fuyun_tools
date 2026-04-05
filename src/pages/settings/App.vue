@@ -90,7 +90,6 @@
 
 <script setup>
 import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from 'vue'
-import {ElLoading, ElMessage, ElMessageBox} from 'element-plus'
 import zhCn from 'element-plus/dist/locale/zh-cn'
 import {Camera, Cpu, DocumentCopy, InfoFilled, Moon, Setting, Sunny, VideoCamera} from '@element-plus/icons-vue'
 import {openUrl} from '@tauri-apps/plugin-opener'

@@ -1,5 +1,4 @@
 import {ref} from 'vue'
-import {ElMessage, ElMessageBox} from 'element-plus'
 import {AISettingsService} from '../../../services/ipc'
 import {handleAppError} from '../../../utils/errorHandler'
 

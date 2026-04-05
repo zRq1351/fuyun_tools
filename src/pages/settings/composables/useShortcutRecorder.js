@@ -1,5 +1,4 @@
 import {computed, ref} from 'vue'
-import {ElMessage} from 'element-plus'
 
 export function useShortcutRecorder(form, fieldKey = 'toggleShortcut') {
     const isRecording = ref(false)

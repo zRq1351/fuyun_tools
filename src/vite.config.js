@@ -1,11 +1,25 @@
 import {defineConfig} from 'vite'
 import vue from '@vitejs/plugin-vue'
+import AutoImport from 'unplugin-auto-import/vite'
+import Components from 'unplugin-vue-components/vite'
+import {ElementPlusResolver} from 'unplugin-vue-components/resolvers'
 import {resolve} from 'path'
 
 export default defineConfig(({mode}) => {
     const isDevMode = mode === 'development'
     return {
-        plugins: [vue()],
+        plugins: [
+            vue(),
+            AutoImport({
+                imports: ['vue'],
+                resolvers: [ElementPlusResolver({importStyle: 'css'})],
+                dts: false,
+            }),
+            Components({
+                resolvers: [ElementPlusResolver({importStyle: 'css'})],
+                dts: false,
+            }),
+        ],
         define: {
             __DEV_PANEL__: JSON.stringify(isDevMode),
         },
@@ -25,7 +39,6 @@ export default defineConfig(({mode}) => {
                 },
                 output: {
                     manualChunks: {
-                        'element-plus': ['element-plus'],
                         'vue': ['vue'],
                     }
                 }

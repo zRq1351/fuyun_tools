@@ -1,5 +1,3 @@
-import {ElMessage} from 'element-plus'
-
 /**
  * 错误代码常量，与 Rust 端保持一致
  */

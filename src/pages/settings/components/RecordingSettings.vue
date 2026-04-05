@@ -124,7 +124,6 @@ import {computed, onMounted, ref} from 'vue'
 import {Edit, FolderOpened, VideoPause} from '@element-plus/icons-vue'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
 import {RecordingService} from '../../../services/ipc'
-import {ElMessage} from 'element-plus'
 import {open} from '@tauri-apps/plugin-dialog'
 
 const props = defineProps({

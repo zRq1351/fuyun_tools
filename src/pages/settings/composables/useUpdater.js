@@ -1,5 +1,4 @@
 import {h, ref} from 'vue'
-import {ElMessageBox} from 'element-plus'
 import {check} from '@tauri-apps/plugin-updater'
 import {relaunch} from '@tauri-apps/plugin-process'
 import {marked} from 'marked'
