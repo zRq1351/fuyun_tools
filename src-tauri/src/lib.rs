@@ -332,7 +332,8 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());
 
-    // 使用统一的日志配置
+    // 仅调试模式启用日志插件；发布版不注册，避免任何日志落盘
+    #[cfg(debug_assertions)]
     let builder = builder.plugin(core::logger::build_logger().build());
 
     let app = builder
