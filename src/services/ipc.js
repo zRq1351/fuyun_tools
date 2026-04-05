@@ -454,11 +454,19 @@ export const RecordingService = {
     runRegression: () => invoke(IPC_COMMANDS.RUN_RECORDING_REGRESSION),
     checkFfmpeg: () => invoke(IPC_COMMANDS.CHECK_RECORDING_FFMPEG),
     downloadFfmpeg: (downloadUrl = null) => invoke(IPC_COMMANDS.DOWNLOAD_RECORDING_FFMPEG, {downloadUrl}),
-    resizeToolbar: (openSelect, openOverlay, compactMode = false) => invoke(IPC_COMMANDS.RESIZE_RECORDING_TOOLBAR, {
+    resizeToolbar: (
+        openSelect,
+        openOverlay,
+        compactMode = false,
+        layoutMode = 'capsule',
+        recenter = false
+    ) => invoke(IPC_COMMANDS.RESIZE_RECORDING_TOOLBAR, {
         request: {
             openSelect,
             openOverlay,
-            compactMode
+            compactMode,
+            layoutMode,
+            recenter
         }
     }),
 };

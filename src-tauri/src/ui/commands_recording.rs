@@ -26,6 +26,14 @@ pub struct ResizeRecordingToolbarRequest {
     pub open_overlay: bool,
     #[serde(default)]
     pub compact_mode: bool,
+    #[serde(default = "default_layout_mode")]
+    pub layout_mode: String,
+    #[serde(default)]
+    pub recenter: bool,
+}
+
+fn default_layout_mode() -> String {
+    "capsule".to_string()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -324,11 +332,14 @@ pub async fn resize_recording_toolbar(
         return Ok(());
     };
     let prev_size = window.outer_size().ok();
-    let was_compact = prev_size
-        .as_ref()
-        .map(|size| size.width <= 260)
-        .unwrap_or(false);
-    let (width, height) = if request.compact_mode {
+    let is_capsule_layout = request.layout_mode.eq_ignore_ascii_case("capsule");
+    let (width, height) = if is_capsule_layout {
+        if request.open_overlay {
+            (430, 420)
+        } else {
+            (250, 40)
+        }
+    } else if request.compact_mode {
         if request.open_overlay {
             (430, 420)
         } else {
@@ -355,8 +366,8 @@ pub async fn resize_recording_toolbar(
             .set_size(target_size)
             .map_err(|e| format!("调整录制工具栏窗口尺寸失败: {}", e))?;
     }
-    // 胶囊/工具栏形态切换时重新居中，保证两种形态都居中显示
-    if was_compact != request.compact_mode {
+    // Recenter only when caller explicitly asks for it.
+    if request.recenter {
         move_window_top_center(&window);
     }
     Ok(())

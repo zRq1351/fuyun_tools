@@ -295,7 +295,7 @@ const canStop = computed(
 const syncCapsuleLayout = async () => {
   try {
     isToolbarCollapsed.value = true;
-    await RecordingService.resizeToolbar(false, capsuleSettingsVisible.value, true);
+    await RecordingService.resizeToolbar(false, capsuleSettingsVisible.value, true, "capsule", false);
   } catch (_e) {
   }
 };

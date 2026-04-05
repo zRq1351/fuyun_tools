@@ -29,6 +29,14 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
+#[cfg(target_os = "windows")]
+use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
+#[cfg(target_os = "windows")]
+use winapi::um::processthreadsapi::{OpenThread, ResumeThread, SuspendThread};
+#[cfg(target_os = "windows")]
+use winapi::um::tlhelp32::{CreateToolhelp32Snapshot, Thread32First, Thread32Next, THREADENTRY32, TH32CS_SNAPTHREAD};
+#[cfg(target_os = "windows")]
+use winapi::um::winnt::THREAD_SUSPEND_RESUME;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -70,6 +78,50 @@ fn now_unix_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(target_os = "windows")]
+fn set_process_threads_suspended(process_id: u32, suspend: bool) -> Result<(), AppError> {
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(AppError::new(ErrorCode::SystemError, "获取线程快照失败"));
+        }
+        let mut entry: THREADENTRY32 = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+        let mut ok = Thread32First(snapshot, &mut entry) != 0;
+        let mut first_error: Option<String> = None;
+        while ok {
+            if entry.th32OwnerProcessID == process_id {
+                let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID);
+                if !thread.is_null() {
+                    let ret = if suspend {
+                        SuspendThread(thread)
+                    } else {
+                        ResumeThread(thread)
+                    };
+                    if ret == u32::MAX && first_error.is_none() {
+                        first_error = Some(format!(
+                            "{}线程失败，thread_id={}",
+                            if suspend { "暂停" } else { "恢复" },
+                            entry.th32ThreadID
+                        ));
+                    }
+                    let _ = CloseHandle(thread);
+                }
+            }
+            ok = Thread32Next(snapshot, &mut entry) != 0;
+        }
+        let _ = CloseHandle(snapshot);
+        if let Some(details) = first_error {
+            return Err(AppError::new(
+                ErrorCode::SystemError,
+                if suspend { "暂停录制失败" } else { "恢复录制失败" },
+            )
+            .with_details(details));
+        }
+        Ok(())
+    }
 }
 
 fn resolve_output_dir(state: &SharedAppState, request_output_dir: Option<String>) -> Result<PathBuf, AppError> {
@@ -599,6 +651,7 @@ pub fn stop_recording(
             return Err(AppError::new(ErrorCode::ValidationError, "录制会话已变化，请刷新状态后重试"));
         }
     }
+    let was_paused = runtime.phase == RecordingPhase::Paused;
     runtime.phase = RecordingPhase::Stopping;
     runtime.auto_stop_requested = false;
     let session_id = runtime.session_id.clone().unwrap_or_default();
@@ -613,6 +666,10 @@ pub fn stop_recording(
     );
 
     if let Some(process) = runtime.process.as_mut() {
+        #[cfg(target_os = "windows")]
+        if was_paused {
+            let _ = set_process_threads_suspended(process.id(), false);
+        }
         if let Some(stdin) = process.stdin.as_mut() {
             let _ = stdin.write_all(b"q\n");
         }
@@ -743,6 +800,11 @@ pub fn pause_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) -
         return Err(AppError::new(ErrorCode::ValidationError, "当前状态不允许暂停"));
     }
     if let Some(process) = runtime.process.as_mut() {
+        #[cfg(target_os = "windows")]
+        {
+            set_process_threads_suspended(process.id(), true)?;
+        }
+        #[cfg(not(target_os = "windows"))]
         if let Some(stdin) = process.stdin.as_mut() {
             stdin
                 .write_all(b"p\n")
@@ -766,6 +828,11 @@ pub fn resume_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) 
         return Err(AppError::new(ErrorCode::ValidationError, "当前状态不允许恢复"));
     }
     if let Some(process) = runtime.process.as_mut() {
+        #[cfg(target_os = "windows")]
+        {
+            set_process_threads_suspended(process.id(), false)?;
+        }
+        #[cfg(not(target_os = "windows"))]
         if let Some(stdin) = process.stdin.as_mut() {
             stdin
                 .write_all(b"p\n")
