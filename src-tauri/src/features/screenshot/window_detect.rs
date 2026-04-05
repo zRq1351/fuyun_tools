@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 /// 窗口信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowInfo {
+    pub hwnd: String,
     pub title: String,
     pub x: i32,
     pub y: i32,
@@ -88,6 +89,7 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
         }
 
         windows.push(WindowInfo {
+            hwnd: format!("0x{:X}", hwnd as usize),
             title,
             x: rect.left,
             y: rect.top,

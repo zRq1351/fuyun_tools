@@ -18,7 +18,7 @@ use crate::ui::commands_recording::{
     cancel_recording, check_recording_ffmpeg, download_recording_ffmpeg, get_recording_output_dir, get_recording_state,
     list_recording_audio_devices, list_recording_system_output_devices, open_recording_folder, pause_recording, resize_recording_toolbar,
     resume_recording, run_recording_regression, show_recording_toolbar, start_recording,
-    stop_recording, toggle_recording_from_shortcut,
+    stop_recording, toggle_recording_from_shortcut, update_recording_audio_capture,
 };
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{show_clipboard_window, show_image_clipboard_window};
@@ -161,7 +161,7 @@ pub fn run() {
                             drop(state_guard);
                             let app_handle_inner = app_handle_clone_screenshot.clone();
                             tauri::async_runtime::spawn(async move {
-                                if let Err(e) = crate::ui::commands::open_screenshot_editor(app_handle_inner).await {
+                                if let Err(e) = crate::ui::commands::open_screenshot_editor(app_handle_inner, None).await {
                                     log::error!("截图失败: {}", e);
                                 }
                             });
@@ -308,11 +308,13 @@ pub fn run() {
             get_screen_size,
             set_screenshot_clipboard_link_once,
             open_screenshot_editor,
+            notify_recording_region_selected,
             get_window_list,
             close_screenshot_window,
             start_recording,
             pause_recording,
             resume_recording,
+            update_recording_audio_capture,
             stop_recording,
             cancel_recording,
             get_recording_state,

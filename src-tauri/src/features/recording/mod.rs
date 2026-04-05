@@ -6,3 +6,4 @@ pub mod native_wasapi;
 pub mod recorder_service;
 pub mod state;
 pub mod types;
+pub mod wgc_capture;

@@ -27,6 +27,7 @@ impl WasapiCaptureHandle {
 pub fn start_system_loopback_wav_with_device(
     device_desc_key: Option<String>,
     output_path: PathBuf,
+    enabled_flag: Arc<AtomicBool>,
 ) -> Result<WasapiCaptureHandle, String> {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
@@ -99,6 +100,7 @@ pub fn start_system_loopback_wav_with_device(
                 .map_err(|e| format!("创建 wav 文件失败: {}", e))?;
             let writer = Arc::new(Mutex::new(Some(writer)));
             let writer_cb = writer.clone();
+            let enabled_cb = enabled_flag.clone();
             let err_fn = |err| eprintln!("WASAPI 捕获错误: {}", err);
             let stream = match sample_format {
                 CpalSampleFormat::F32 => device
@@ -107,8 +109,9 @@ pub fn start_system_loopback_wav_with_device(
                         move |data: &[f32], _| {
                             if let Ok(mut guard) = writer_cb.lock() {
                                 if let Some(writer) = guard.as_mut() {
+                                    let enabled = enabled_cb.load(Ordering::SeqCst);
                                     for &v in data {
-                                        let s = (v * i16::MAX as f32) as i16;
+                                        let s = if enabled { (v * i16::MAX as f32) as i16 } else { 0 };
                                         let _ = writer.write_sample(s);
                                     }
                                 }
@@ -120,14 +123,16 @@ pub fn start_system_loopback_wav_with_device(
                     .map_err(|e| format!("创建输入流失败: {}", e))?,
                 CpalSampleFormat::I16 => {
                     let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[i16], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let _ = writer.write_sample(v);
+                                            let _ = writer.write_sample(if enabled { v } else { 0 });
                                         }
                                     }
                                 }
@@ -139,14 +144,126 @@ pub fn start_system_loopback_wav_with_device(
                 }
                 CpalSampleFormat::U16 => {
                     let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[u16], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = v.to_sample::<i16>();
+                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let _ = writer.write_sample(s);
+                                        }
+                                    }
+                                }
+                            },
+                            err_fn,
+                            Some(Duration::from_millis(100)),
+                        )
+                        .map_err(|e| format!("创建输入流失败: {}", e))?
+                }
+                CpalSampleFormat::I8 => {
+                    let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
+                    device
+                        .build_input_stream(
+                            &config,
+                            move |data: &[i8], _| {
+                                if let Ok(mut guard) = writer_cb.lock() {
+                                    if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        for &v in data {
+                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let _ = writer.write_sample(s);
+                                        }
+                                    }
+                                }
+                            },
+                            err_fn,
+                            Some(Duration::from_millis(100)),
+                        )
+                        .map_err(|e| format!("创建输入流失败: {}", e))?
+                }
+                CpalSampleFormat::U8 => {
+                    let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
+                    device
+                        .build_input_stream(
+                            &config,
+                            move |data: &[u8], _| {
+                                if let Ok(mut guard) = writer_cb.lock() {
+                                    if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        for &v in data {
+                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let _ = writer.write_sample(s);
+                                        }
+                                    }
+                                }
+                            },
+                            err_fn,
+                            Some(Duration::from_millis(100)),
+                        )
+                        .map_err(|e| format!("创建输入流失败: {}", e))?
+                }
+                CpalSampleFormat::I32 => {
+                    let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
+                    device
+                        .build_input_stream(
+                            &config,
+                            move |data: &[i32], _| {
+                                if let Ok(mut guard) = writer_cb.lock() {
+                                    if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        for &v in data {
+                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let _ = writer.write_sample(s);
+                                        }
+                                    }
+                                }
+                            },
+                            err_fn,
+                            Some(Duration::from_millis(100)),
+                        )
+                        .map_err(|e| format!("创建输入流失败: {}", e))?
+                }
+                CpalSampleFormat::U32 => {
+                    let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
+                    device
+                        .build_input_stream(
+                            &config,
+                            move |data: &[u32], _| {
+                                if let Ok(mut guard) = writer_cb.lock() {
+                                    if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        for &v in data {
+                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let _ = writer.write_sample(s);
+                                        }
+                                    }
+                                }
+                            },
+                            err_fn,
+                            Some(Duration::from_millis(100)),
+                        )
+                        .map_err(|e| format!("创建输入流失败: {}", e))?
+                }
+                CpalSampleFormat::F64 => {
+                    let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
+                    device
+                        .build_input_stream(
+                            &config,
+                            move |data: &[f64], _| {
+                                if let Ok(mut guard) = writer_cb.lock() {
+                                    if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        for &v in data {
+                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }
@@ -191,12 +308,13 @@ pub fn start_system_loopback_wav_with_device(
 
 // 兼容旧签名
 pub fn start_system_loopback_wav(output_path: PathBuf) -> Result<WasapiCaptureHandle, String> {
-    start_system_loopback_wav_with_device(None, output_path)
+    start_system_loopback_wav_with_device(None, output_path, Arc::new(AtomicBool::new(true)))
 }
 
 pub fn start_microphone_wav_with_device(
     device_desc_key: Option<String>,
     output_path: PathBuf,
+    enabled_flag: Arc<AtomicBool>,
 ) -> Result<WasapiCaptureHandle, String> {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
@@ -269,6 +387,7 @@ pub fn start_microphone_wav_with_device(
                 .map_err(|e| format!("创建麦克风 wav 文件失败: {}", e))?;
             let writer = Arc::new(Mutex::new(Some(writer)));
             let writer_cb = writer.clone();
+            let enabled_cb = enabled_flag.clone();
             let err_fn = |err| eprintln!("WASAPI 麦克风捕获错误: {}", err);
             let stream = match sample_format {
                 CpalSampleFormat::F32 => device
@@ -277,8 +396,9 @@ pub fn start_microphone_wav_with_device(
                         move |data: &[f32], _| {
                             if let Ok(mut guard) = writer_cb.lock() {
                                 if let Some(writer) = guard.as_mut() {
+                                    let enabled = enabled_cb.load(Ordering::SeqCst);
                                     for &v in data {
-                                        let s = (v * i16::MAX as f32) as i16;
+                                        let s = if enabled { (v * i16::MAX as f32) as i16 } else { 0 };
                                         let _ = writer.write_sample(s);
                                     }
                                 }
@@ -290,14 +410,16 @@ pub fn start_microphone_wav_with_device(
                     .map_err(|e| format!("创建麦克风输入流失败: {}", e))?,
                 CpalSampleFormat::I16 => {
                     let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[i16], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let _ = writer.write_sample(v);
+                                            let _ = writer.write_sample(if enabled { v } else { 0 });
                                         }
                                     }
                                 }
@@ -309,14 +431,126 @@ pub fn start_microphone_wav_with_device(
                 }
                 CpalSampleFormat::U16 => {
                     let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[u16], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = v.to_sample::<i16>();
+                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let _ = writer.write_sample(s);
+                                        }
+                                    }
+                                }
+                            },
+                            err_fn,
+                            Some(Duration::from_millis(100)),
+                        )
+                        .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
+                }
+                CpalSampleFormat::I8 => {
+                    let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
+                    device
+                        .build_input_stream(
+                            &config,
+                            move |data: &[i8], _| {
+                                if let Ok(mut guard) = writer_cb.lock() {
+                                    if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        for &v in data {
+                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let _ = writer.write_sample(s);
+                                        }
+                                    }
+                                }
+                            },
+                            err_fn,
+                            Some(Duration::from_millis(100)),
+                        )
+                        .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
+                }
+                CpalSampleFormat::U8 => {
+                    let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
+                    device
+                        .build_input_stream(
+                            &config,
+                            move |data: &[u8], _| {
+                                if let Ok(mut guard) = writer_cb.lock() {
+                                    if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        for &v in data {
+                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let _ = writer.write_sample(s);
+                                        }
+                                    }
+                                }
+                            },
+                            err_fn,
+                            Some(Duration::from_millis(100)),
+                        )
+                        .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
+                }
+                CpalSampleFormat::I32 => {
+                    let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
+                    device
+                        .build_input_stream(
+                            &config,
+                            move |data: &[i32], _| {
+                                if let Ok(mut guard) = writer_cb.lock() {
+                                    if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        for &v in data {
+                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let _ = writer.write_sample(s);
+                                        }
+                                    }
+                                }
+                            },
+                            err_fn,
+                            Some(Duration::from_millis(100)),
+                        )
+                        .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
+                }
+                CpalSampleFormat::U32 => {
+                    let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
+                    device
+                        .build_input_stream(
+                            &config,
+                            move |data: &[u32], _| {
+                                if let Ok(mut guard) = writer_cb.lock() {
+                                    if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        for &v in data {
+                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let _ = writer.write_sample(s);
+                                        }
+                                    }
+                                }
+                            },
+                            err_fn,
+                            Some(Duration::from_millis(100)),
+                        )
+                        .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
+                }
+                CpalSampleFormat::F64 => {
+                    let writer_cb = writer.clone();
+                    let enabled_cb = enabled_flag.clone();
+                    device
+                        .build_input_stream(
+                            &config,
+                            move |data: &[f64], _| {
+                                if let Ok(mut guard) = writer_cb.lock() {
+                                    if let Some(writer) = guard.as_mut() {
+                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        for &v in data {
+                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }

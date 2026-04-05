@@ -18,6 +18,7 @@ use crate::features::recording::types::{
     AudioInputDevice, RecordingRegressionReport, RecordingRuntimeState, RecordingSessionInfo,
     RecordingStopResult, SessionRequest, StartRecordingRequest,
 };
+use crate::features::recording::wgc_capture::start_window_capture_to_mp4;
 use crate::sync::Mutex;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -25,6 +26,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{ChildStderr, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -34,9 +36,13 @@ use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
 #[cfg(target_os = "windows")]
 use winapi::um::processthreadsapi::{OpenThread, ResumeThread, SuspendThread};
 #[cfg(target_os = "windows")]
-use winapi::um::tlhelp32::{CreateToolhelp32Snapshot, Thread32First, Thread32Next, THREADENTRY32, TH32CS_SNAPTHREAD};
+use winapi::um::tlhelp32::{CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32};
 #[cfg(target_os = "windows")]
 use winapi::um::winnt::THREAD_SUSPEND_RESUME;
+#[cfg(target_os = "windows")]
+use winapi::um::winuser::{
+    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+};
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -59,7 +65,12 @@ fn normalize_runtime_state(runtime: &mut crate::features::recording::state::Reco
             runtime.process = None;
         }
     }
-    if runtime.process.is_none() {
+    let wgc_running = runtime
+        .wgc_thread
+        .as_ref()
+        .map(|t| !t.is_finished())
+        .unwrap_or(false);
+    if runtime.process.is_none() && !wgc_running {
         match runtime.phase {
             RecordingPhase::Idle => {}
             RecordingPhase::Starting
@@ -78,6 +89,81 @@ fn now_unix_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+fn parse_region_target(target_id: &str) -> Option<(i32, i32, u32, u32)> {
+    let parts: Vec<&str> = target_id.split(',').map(|s| s.trim()).collect();
+    if parts.len() != 4 {
+        return None;
+    }
+    let x = parts[0].parse::<i32>().ok()?;
+    let y = parts[1].parse::<i32>().ok()?;
+    let width = parts[2].parse::<u32>().ok()?;
+    let height = parts[3].parse::<u32>().ok()?;
+    if width == 0 || height == 0 {
+        return None;
+    }
+    Some((x, y, width, height))
+}
+
+#[cfg(target_os = "windows")]
+fn normalize_region_to_virtual_screen(x: i32, y: i32, width: u32, height: u32) -> Option<(i32, i32, u32, u32)> {
+    let vx = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+    let vy = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+    let vw = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+    let vh = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+    if vw <= 0 || vh <= 0 {
+        return None;
+    }
+    let min_x = vx as i64;
+    let min_y = vy as i64;
+    let max_x = min_x + vw as i64;
+    let max_y = min_y + vh as i64;
+    let raw_x = x as i64;
+    let raw_y = y as i64;
+    let raw_w = width as i64;
+    let raw_h = height as i64;
+    let clamped_x = raw_x.max(min_x).min(max_x - 1);
+    let clamped_y = raw_y.max(min_y).min(max_y - 1);
+    let available_w = (max_x - clamped_x).max(1);
+    let available_h = (max_y - clamped_y).max(1);
+    let clamped_w = raw_w.max(1).min(available_w);
+    let clamped_h = raw_h.max(1).min(available_h);
+    Some((clamped_x as i32, clamped_y as i32, clamped_w as u32, clamped_h as u32))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn normalize_region_to_virtual_screen(x: i32, y: i32, width: u32, height: u32) -> Option<(i32, i32, u32, u32)> {
+    Some((x, y, width.max(1), height.max(1)))
+}
+
+fn push_stderr_tail(runtime: &mut crate::features::recording::state::RecordingRuntime, line: &str) {
+    let text = line.trim();
+    if text.is_empty() {
+        return;
+    }
+    runtime.ffmpeg_stderr_tail.push_back(text.to_string());
+    while runtime.ffmpeg_stderr_tail.len() > 6 {
+        runtime.ffmpeg_stderr_tail.pop_front();
+    }
+}
+
+fn build_exit_error_with_stderr(status_text: String, runtime: &crate::features::recording::state::RecordingRuntime) -> String {
+    if runtime.ffmpeg_stderr_tail.is_empty() {
+        return format!("录制进程异常退出: {}", status_text);
+    }
+    let tail = runtime
+        .ffmpeg_stderr_tail
+        .iter()
+        .rev()
+        .take(3)
+        .cloned()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join(" | ");
+    format!("录制进程异常退出: {}；stderr: {}", status_text, tail)
 }
 
 #[cfg(target_os = "windows")]
@@ -207,6 +293,102 @@ fn merge_system_audio_into_video(
     Ok(())
 }
 
+fn ensure_system_audio_capture_started(
+    app: &AppHandle,
+    runtime: &mut crate::features::recording::state::RecordingRuntime,
+    output_dir: &PathBuf,
+    session_id: &str,
+    emit_error_on_fail: bool,
+) -> Result<(), String> {
+    if runtime.system_audio_thread.is_some() {
+        return Ok(());
+    }
+    let enabled_flag = runtime
+        .system_audio_enabled_flag
+        .clone()
+        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+    runtime.system_audio_enabled_flag = Some(enabled_flag.clone());
+    let sys_wav = runtime
+        .system_audio_wav_path
+        .clone()
+        .unwrap_or_else(|| output_dir.join(format!("{}.sys.wav", session_id)));
+    let first_try = start_system_loopback_wav_with_device(runtime.system_audio_device_id.clone(), sys_wav.clone(), enabled_flag.clone());
+    let start_result = match first_try {
+        Ok(h) => Ok(h),
+        Err(first_err) => {
+            if runtime.system_audio_device_id.is_some() {
+                runtime.system_audio_device_id = None;
+                start_system_loopback_wav_with_device(None, sys_wav.clone(), enabled_flag)
+                    .map_err(|second_err| format!("{}；回退默认设备失败: {}", first_err, second_err))
+            } else {
+                Err(first_err)
+            }
+        }
+    };
+    match start_result {
+        Ok(handle) => {
+            runtime.system_audio_wav_path = Some(sys_wav);
+            runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
+            runtime.system_audio_thread = handle.join;
+            Ok(())
+        }
+        Err(e) => {
+            if emit_error_on_fail {
+                emit_recording_error(app, Some(session_id), AUDIO_DEVICE_NOT_FOUND, e.as_str());
+            }
+            Err(e)
+        }
+    }
+}
+
+fn ensure_mic_capture_started(
+    app: &AppHandle,
+    runtime: &mut crate::features::recording::state::RecordingRuntime,
+    output_dir: &PathBuf,
+    session_id: &str,
+    emit_error_on_fail: bool,
+) -> Result<(), String> {
+    if runtime.mic_audio_thread.is_some() {
+        return Ok(());
+    }
+    let enabled_flag = runtime
+        .mic_audio_enabled_flag
+        .clone()
+        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+    runtime.mic_audio_enabled_flag = Some(enabled_flag.clone());
+    let mic_wav = runtime
+        .mic_audio_wav_path
+        .clone()
+        .unwrap_or_else(|| output_dir.join(format!("{}.mic.wav", session_id)));
+    let first_try = start_microphone_wav_with_device(runtime.mic_audio_device_id.clone(), mic_wav.clone(), enabled_flag.clone());
+    let start_result = match first_try {
+        Ok(h) => Ok(h),
+        Err(first_err) => {
+            if runtime.mic_audio_device_id.is_some() {
+                runtime.mic_audio_device_id = None;
+                start_microphone_wav_with_device(None, mic_wav.clone(), enabled_flag)
+                    .map_err(|second_err| format!("{}；回退默认设备失败: {}", first_err, second_err))
+            } else {
+                Err(first_err)
+            }
+        }
+    };
+    match start_result {
+        Ok(handle) => {
+            runtime.mic_audio_wav_path = Some(mic_wav);
+            runtime.mic_audio_stop_flag = Some(handle.stop_flag.clone());
+            runtime.mic_audio_thread = handle.join;
+            Ok(())
+        }
+        Err(e) => {
+            if emit_error_on_fail {
+                emit_recording_error(app, Some(session_id), AUDIO_DEVICE_NOT_FOUND, e.as_str());
+            }
+            Err(e)
+        }
+    }
+}
+
 pub fn list_audio_devices(app: &AppHandle) -> Result<Vec<AudioInputDevice>, AppError> {
     let dummy = std::path::Path::new("");
     let devices = list_microphones(dummy)
@@ -322,6 +504,7 @@ fn spawn_stderr_parser(
                 if runtime.session_id.as_deref() != Some(session_id.as_str()) {
                     break;
                 }
+                push_stderr_tail(&mut runtime, &line);
                 if let Some(drop) = parse_u64_after(&line, "drop=") {
                     runtime.dropped_video_frames = drop;
                 }
@@ -409,7 +592,7 @@ fn spawn_stats_loop(app: AppHandle, runtime_arc: Arc<Mutex<crate::features::reco
                             }
                         }
                     } else if phase != RecordingPhase::Idle && phase != RecordingPhase::Stopping {
-                        let err_msg = format!("录制进程异常退出: {}", status);
+                        let err_msg = build_exit_error_with_stderr(status.to_string(), &runtime);
                         runtime.last_error = Some(err_msg.clone());
                         runtime.phase = RecordingPhase::Error;
                         phase = RecordingPhase::Error;
@@ -523,50 +706,110 @@ pub fn start_recording(
         runtime.phase = RecordingPhase::Starting;
         runtime.last_error = None;
         emit_recording_state_changed(app, None, runtime.phase.as_str(), 0);
+        let mut rollback_starting = |public_message: &str, details: String| -> AppError {
+            runtime.reset_to_idle();
+            runtime.last_error = Some(details.clone());
+            emit_recording_state_changed(app, None, runtime.phase.as_str(), 0);
+            AppError::new(ErrorCode::ValidationError, public_message).with_details(details)
+        };
 
+        let target_type = request
+            .target_type
+            .clone()
+            .unwrap_or_else(|| "screen".to_string())
+            .to_lowercase();
+        let target_id = request.target_id.clone().unwrap_or_default();
+        let mut window_wgc_handle = None;
         let mut args: Vec<String> = vec![
             "-hide_banner".into(),
             "-loglevel".into(),
             "warning".into(),
             "-y".into(),
-            "-f".into(),
-            "gdigrab".into(),
-            "-framerate".into(),
-            format!("{}", fps),
-            "-draw_mouse".into(),
-            if capture_cursor { "1".into() } else { "0".into() },
-            "-i".into(),
-            "desktop".into(),
         ];
-        // 删除 ffmpeg 系统音频输入路径，改为 Rust 原生 WASAPI 录制（后处理合成）
-        args.push("-map".to_string());
-        args.push("0:v:0".to_string());
-        args.extend_from_slice(&[
-            "-c:v".to_string(),
-            "libx264".to_string(),
-            "-preset".to_string(),
-            "veryfast".to_string(),
-            "-pix_fmt".to_string(),
-            "yuv420p".to_string(),
-            "-b:v".to_string(),
-            format!("{}k", video_bitrate),
-        ]);
-        args.push("-an".to_string());
-        args.push(tmp_path.to_string_lossy().to_string());
-        let mut command = Command::new(&ffmpeg_path);
-        suppress_console_window(&mut command);
-        command
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped());
-        let mut child = command.spawn().map_err(|e| {
-            runtime.phase = RecordingPhase::Error;
-            runtime.last_error = Some(e.to_string());
-            emit_recording_error(app, None, RECORDING_START_FAILED, "录制进程启动失败");
-            AppError::new(ErrorCode::SystemError, "启动录制失败").with_details(e.to_string())
-        })?;
-        let stderr = child.stderr.take();
+        match target_type.as_str() {
+            "window" => {
+                if target_id.trim().is_empty() {
+                    return Err(rollback_starting("窗口录制目标不能为空", "target_id is empty".to_string()));
+                }
+                let handle = start_window_capture_to_mp4(
+                    target_id.trim(),
+                    tmp_path.clone(),
+                    fps,
+                    video_bitrate,
+                    capture_cursor,
+                )
+                    .map_err(|e| rollback_starting("启动窗口源录制失败", e))?;
+                window_wgc_handle = Some(handle);
+            }
+            "region" => {
+                let (x, y, width, height) = parse_region_target(&target_id).ok_or_else(|| {
+                    rollback_starting("区域录制参数无效", format!("target_id={}", target_id))
+                })?;
+                let (x, y, width, height) = normalize_region_to_virtual_screen(x, y, width, height)
+                    .ok_or_else(|| rollback_starting("区域录制参数无效", "virtual screen unavailable".to_string()))?;
+                args.push("-f".into());
+                args.push("gdigrab".into());
+                args.push("-framerate".into());
+                args.push(format!("{}", fps));
+                args.push("-draw_mouse".into());
+                args.push(if capture_cursor { "1".into() } else { "0".into() });
+                args.push("-offset_x".into());
+                args.push(x.to_string());
+                args.push("-offset_y".into());
+                args.push(y.to_string());
+                args.push("-video_size".into());
+                args.push(format!("{}x{}", width, height));
+                args.push("-i".into());
+                args.push("desktop".into());
+            }
+            _ => {
+                args.push("-f".into());
+                args.push("gdigrab".into());
+                args.push("-framerate".into());
+                args.push(format!("{}", fps));
+                args.push("-draw_mouse".into());
+                args.push(if capture_cursor { "1".into() } else { "0".into() });
+                args.push("-i".into());
+                args.push("desktop".into());
+            }
+        }
+        let (child_opt, stderr_opt) = if target_type != "window" {
+            // 删除 ffmpeg 系统音频输入路径，改为 Rust 原生 WASAPI 录制（后处理合成）
+            args.push("-map".to_string());
+            args.push("0:v:0".to_string());
+            // yuv420p + libx264 要求偶数宽高，区域框选常出现奇数尺寸，统一做偶数对齐避免 -22
+            args.push("-vf".to_string());
+            args.push("scale=trunc(iw/2)*2:trunc(ih/2)*2".to_string());
+            args.extend_from_slice(&[
+                "-c:v".to_string(),
+                "libx264".to_string(),
+                "-preset".to_string(),
+                "veryfast".to_string(),
+                "-pix_fmt".to_string(),
+                "yuv420p".to_string(),
+                "-b:v".to_string(),
+                format!("{}k", video_bitrate),
+            ]);
+            args.push("-an".to_string());
+            args.push(tmp_path.to_string_lossy().to_string());
+            let mut command = Command::new(&ffmpeg_path);
+            suppress_console_window(&mut command);
+            command
+                .args(args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped());
+            let mut child = command.spawn().map_err(|e| {
+                runtime.phase = RecordingPhase::Error;
+                runtime.last_error = Some(e.to_string());
+                emit_recording_error(app, None, RECORDING_START_FAILED, "录制进程启动失败");
+                AppError::new(ErrorCode::SystemError, "启动录制失败").with_details(e.to_string())
+            })?;
+            let stderr = child.stderr.take();
+            (Some(child), stderr)
+        } else {
+            (None, None)
+        };
         runtime.phase = RecordingPhase::Recording;
         runtime.session_id = Some(session_id.clone());
         runtime.started_at_ms = now_unix_ms();
@@ -586,39 +829,24 @@ pub fn start_recording(
         runtime.mic_enabled = capture_microphone;
         runtime.output_path_tmp = Some(tmp_path.clone());
         runtime.output_path_final = Some(final_path.clone());
-        // 如果需要系统音频，启动 WASAPI 录制到 wav
-        if capture_system_audio {
-            let sys_wav = output_dir.join(format!("{}.sys.wav", session_id));
-            match start_system_loopback_wav_with_device(system_audio_device_id, sys_wav.clone()) {
-                Ok(handle) => {
-                    runtime.system_audio_wav_path = Some(sys_wav);
-                    runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
-                    runtime.system_audio_thread = handle.join;
-                }
-                Err(e) => {
-                    emit_recording_error(app, Some(&session_id), AUDIO_DEVICE_NOT_FOUND, e.as_str());
-                }
-            }
+        runtime.system_audio_device_id = system_audio_device_id.clone();
+        runtime.mic_audio_device_id = request.microphone_device_id.clone();
+        runtime.system_audio_enabled_flag = Some(Arc::new(AtomicBool::new(capture_system_audio)));
+        runtime.mic_audio_enabled_flag = Some(Arc::new(AtomicBool::new(capture_microphone)));
+        runtime.system_audio_ever_enabled = capture_system_audio;
+        runtime.mic_audio_ever_enabled = capture_microphone;
+        // 始终尝试启动音频采集线程，便于录制中实时开关；未开启时仅写入静音样本
+        let _ = ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, capture_system_audio);
+        let _ = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, capture_microphone);
+        runtime.process = child_opt;
+        if let Some(handle) = window_wgc_handle {
+            runtime.wgc_stop_flag = Some(handle.stop_flag);
+            runtime.wgc_thread = Some(handle.join);
         }
-        // 如果需要麦克风，启动 WASAPI 录制到 wav
-        if capture_microphone {
-            let mic_wav = output_dir.join(format!("{}.mic.wav", session_id));
-            match start_microphone_wav_with_device(request.microphone_device_id.clone(), mic_wav.clone()) {
-                Ok(handle) => {
-                    runtime.mic_audio_wav_path = Some(mic_wav);
-                    runtime.mic_audio_stop_flag = Some(handle.stop_flag.clone());
-                    runtime.mic_audio_thread = handle.join;
-                }
-                Err(e) => {
-                    emit_recording_error(app, Some(&session_id), AUDIO_DEVICE_NOT_FOUND, e.as_str());
-                }
-            }
-        }
-        runtime.process = Some(child);
         let started_at_ms = runtime.started_at_ms;
         emit_recording_state_changed(app, Some(&session_id), runtime.phase.as_str(), 0);
         drop(runtime);
-        if let Some(stderr) = stderr {
+        if let Some(stderr) = stderr_opt {
             spawn_stderr_parser(app.clone(), runtime_arc.clone(), session_id.clone(), stderr);
         }
         spawn_stats_loop(app.clone(), runtime_arc.clone());
@@ -665,6 +893,9 @@ pub fn stop_recording(
             .unwrap_or(0),
     );
 
+    if let Some(flag) = runtime.wgc_stop_flag.as_ref() {
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
     if let Some(process) = runtime.process.as_mut() {
         #[cfg(target_os = "windows")]
         if was_paused {
@@ -688,6 +919,10 @@ pub fn stop_recording(
             let _ = process.wait();
         }
     }
+    if let Some(join) = runtime.wgc_thread.take() {
+        let _ = join.join();
+    }
+    runtime.wgc_stop_flag = None;
 
     let output_tmp = runtime
         .output_path_tmp
@@ -715,12 +950,32 @@ pub fn stop_recording(
     if let Some(join) = runtime.mic_audio_thread.take() {
         let _ = join.join();
     }
+    let sys_for_merge = if runtime.system_audio_ever_enabled {
+        runtime.system_audio_wav_path.as_ref()
+    } else {
+        None
+    };
+    let mic_for_merge = if runtime.mic_audio_ever_enabled {
+        runtime.mic_audio_wav_path.as_ref()
+    } else {
+        None
+    };
     let _ = merge_system_audio_into_video(
         &ffmpeg_path,
         &output_final,
-        runtime.system_audio_wav_path.as_ref(),
-        runtime.mic_audio_wav_path.as_ref(),
+        sys_for_merge,
+        mic_for_merge,
     );
+    if !runtime.system_audio_ever_enabled {
+        if let Some(p) = runtime.system_audio_wav_path.as_ref() {
+            let _ = fs::remove_file(p);
+        }
+    }
+    if !runtime.mic_audio_ever_enabled {
+        if let Some(p) = runtime.mic_audio_wav_path.as_ref() {
+            let _ = fs::remove_file(p);
+        }
+    }
 
     if let Some(paused_at) = runtime.paused_at_instant {
         runtime.paused_total_ms = runtime
@@ -764,6 +1019,12 @@ pub fn cancel_recording(
         let _ = process.kill();
         let _ = process.wait();
     }
+    if let Some(flag) = runtime.wgc_stop_flag.take() {
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    if let Some(join) = runtime.wgc_thread.take() {
+        let _ = join.join();
+    }
     if let Some(flag) = runtime.system_audio_stop_flag.take() {
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
@@ -799,6 +1060,12 @@ pub fn pause_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) -
     if runtime.phase != RecordingPhase::Recording {
         return Err(AppError::new(ErrorCode::ValidationError, "当前状态不允许暂停"));
     }
+    if runtime.process.is_none() && runtime.wgc_thread.is_some() {
+        return Err(AppError::new(
+            ErrorCode::ValidationError,
+            "窗口源录制暂不支持暂停，请直接停止录制",
+        ));
+    }
     if let Some(process) = runtime.process.as_mut() {
         #[cfg(target_os = "windows")]
         {
@@ -827,6 +1094,12 @@ pub fn resume_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) 
     if runtime.phase != RecordingPhase::Paused {
         return Err(AppError::new(ErrorCode::ValidationError, "当前状态不允许恢复"));
     }
+    if runtime.process.is_none() && runtime.wgc_thread.is_some() {
+        return Err(AppError::new(
+            ErrorCode::ValidationError,
+            "窗口源录制暂不支持暂停恢复，请继续录制或停止",
+        ));
+    }
     if let Some(process) = runtime.process.as_mut() {
         #[cfg(target_os = "windows")]
         {
@@ -848,6 +1121,70 @@ pub fn resume_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) 
     runtime.phase = RecordingPhase::Recording;
     let snapshot = runtime.snapshot();
     emit_recording_state_changed(app, runtime.session_id.as_deref(), runtime.phase.as_str(), snapshot.elapsed_ms);
+    Ok(())
+}
+
+pub fn update_audio_capture(
+    app: &AppHandle,
+    state_arc: Arc<Mutex<SharedAppState>>,
+    capture_system_audio: Option<bool>,
+    system_audio_device_id: Option<String>,
+    capture_microphone: Option<bool>,
+    microphone_device_id: Option<String>,
+) -> Result<(), AppError> {
+    let runtime_arc = {
+        let state_guard = lock_arc_mutex(&state_arc);
+        state_guard.recording_runtime.clone()
+    };
+    let mut runtime = lock_arc_mutex(&runtime_arc);
+    if runtime.phase != RecordingPhase::Recording && runtime.phase != RecordingPhase::Paused {
+        return Err(AppError::new(ErrorCode::ValidationError, "当前没有正在进行的录制任务"));
+    }
+    let session_id = runtime
+        .session_id
+        .clone()
+        .ok_or_else(|| AppError::new(ErrorCode::ValidationError, "录制会话不存在"))?;
+    let output_dir = runtime
+        .output_path_tmp
+        .as_ref()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .ok_or_else(|| AppError::new(ErrorCode::ValidationError, "录制输出目录不存在"))?;
+
+    if let Some(v) = capture_system_audio {
+        if let Some(flag) = runtime.system_audio_enabled_flag.as_ref() {
+            flag.store(v, Ordering::SeqCst);
+        }
+        if v {
+            runtime.system_audio_ever_enabled = true;
+        }
+    }
+    if let Some(v) = capture_microphone {
+        if let Some(flag) = runtime.mic_audio_enabled_flag.as_ref() {
+            flag.store(v, Ordering::SeqCst);
+        }
+        if v {
+            runtime.mic_audio_ever_enabled = true;
+        }
+    }
+    if let Some(id) = system_audio_device_id {
+        runtime.system_audio_device_id = if id.trim().is_empty() { None } else { Some(id) };
+    }
+    if let Some(id) = microphone_device_id {
+        runtime.mic_audio_device_id = if id.trim().is_empty() { None } else { Some(id) };
+    }
+
+    let should_enable_sys = capture_system_audio.unwrap_or(false);
+    let should_enable_mic = capture_microphone.unwrap_or(false);
+    if should_enable_sys && runtime.system_audio_thread.is_none() {
+        ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, true).map_err(|e| {
+            AppError::new(ErrorCode::SystemError, format!("开启系统音频失败: {}", e)).with_details(e)
+        })?;
+    }
+    if should_enable_mic && runtime.mic_audio_thread.is_none() {
+        ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true).map_err(|e| {
+            AppError::new(ErrorCode::SystemError, format!("开启麦克风失败: {}", e)).with_details(e)
+        })?;
+    }
     Ok(())
 }
 
@@ -896,6 +1233,10 @@ pub fn run_recording_regression(
             StartRecordingRequest {
                 target_type: Some("display".to_string()),
                 target_id: None,
+                target_x: None,
+                target_y: None,
+                target_width: None,
+                target_height: None,
                 capture_cursor: Some(true),
                 capture_system_audio: Some(false),
                 system_audio_device_id: None,

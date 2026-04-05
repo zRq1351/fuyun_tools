@@ -1,4 +1,5 @@
 use crate::features::recording::types::RecordingRuntimeState;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::process::Child;
 use std::sync::atomic::AtomicBool;
@@ -48,12 +49,21 @@ pub struct RecordingRuntime {
     pub output_path_tmp: Option<PathBuf>,
     pub output_path_final: Option<PathBuf>,
     pub process: Option<Child>,
+    pub wgc_stop_flag: Option<Arc<AtomicBool>>,
+    pub wgc_thread: Option<JoinHandle<Result<(), String>>>,
     pub system_audio_wav_path: Option<PathBuf>,
     pub system_audio_stop_flag: Option<Arc<AtomicBool>>,
     pub system_audio_thread: Option<JoinHandle<()>>,
+    pub system_audio_enabled_flag: Option<Arc<AtomicBool>>,
+    pub system_audio_device_id: Option<String>,
+    pub system_audio_ever_enabled: bool,
     pub mic_audio_wav_path: Option<PathBuf>,
     pub mic_audio_stop_flag: Option<Arc<AtomicBool>>,
     pub mic_audio_thread: Option<JoinHandle<()>>,
+    pub mic_audio_enabled_flag: Option<Arc<AtomicBool>>,
+    pub mic_audio_device_id: Option<String>,
+    pub mic_audio_ever_enabled: bool,
+    pub ffmpeg_stderr_tail: VecDeque<String>,
 }
 
 impl Default for RecordingRuntime {
@@ -77,12 +87,21 @@ impl Default for RecordingRuntime {
             output_path_tmp: None,
             output_path_final: None,
             process: None,
+            wgc_stop_flag: None,
+            wgc_thread: None,
             system_audio_wav_path: None,
             system_audio_stop_flag: None,
             system_audio_thread: None,
+            system_audio_enabled_flag: None,
+            system_audio_device_id: None,
+            system_audio_ever_enabled: false,
             mic_audio_wav_path: None,
             mic_audio_stop_flag: None,
             mic_audio_thread: None,
+            mic_audio_enabled_flag: None,
+            mic_audio_device_id: None,
+            mic_audio_ever_enabled: false,
+            ffmpeg_stderr_tail: VecDeque::new(),
         }
     }
 }
@@ -129,11 +148,20 @@ impl RecordingRuntime {
         self.output_path_tmp = None;
         self.output_path_final = None;
         self.process = None;
+        self.wgc_stop_flag = None;
+        self.wgc_thread = None;
         self.system_audio_wav_path = None;
         self.system_audio_stop_flag = None;
         self.system_audio_thread = None;
+        self.system_audio_enabled_flag = None;
+        self.system_audio_device_id = None;
+        self.system_audio_ever_enabled = false;
         self.mic_audio_wav_path = None;
         self.mic_audio_stop_flag = None;
         self.mic_audio_thread = None;
+        self.mic_audio_enabled_flag = None;
+        self.mic_audio_device_id = None;
+        self.mic_audio_ever_enabled = false;
+        self.ffmpeg_stderr_tail.clear();
     }
 }

@@ -45,8 +45,25 @@
       </div>
     </div>
 
+    <div
+        v-if="regionSelectMode === 'recording_region' && hasSelection && state === 'selected'"
+        :style="recordingConfirmStyle"
+        class="recording-region-confirm"
+        @mousedown.stop
+    >
+      <button class="region-icon-btn primary" title="确定区域 (Enter)" @click.stop="commitRecordingRegionSelection">
+        <Check class="tool-icon-wrap"/>
+      </button>
+      <button class="region-icon-btn" title="重选区域" @click.stop="cancelSelection">
+        <RefreshLeft class="tool-icon-wrap"/>
+      </button>
+      <button class="region-icon-btn danger" title="取消 (Esc)" @click.stop="close">
+        <X class="tool-icon-wrap"/>
+      </button>
+    </div>
+
     <!-- 浮动工具栏 -->
-    <div v-if="hasSelection && (state === 'selected' || state === 'drawing')"
+    <div v-if="regionSelectMode !== 'recording_region' && hasSelection && (state === 'selected' || state === 'drawing')"
          ref="floatingToolbarRef"
          class="floating-toolbar"
          @mousedown.stop>
@@ -219,6 +236,7 @@
 <script setup>
 import {computed, nextTick, onMounted, onUnmounted, reactive, ref, watchPostEffect} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
+import {emit} from '@tauri-apps/api/event'
 import {Check, Circle, Pin, Square, X} from 'lucide-vue-next'
 import {
   Brush,
@@ -285,6 +303,7 @@ const textStyle = reactive({
 // 历史记录
 const history = ref([])
 const historyIndex = ref(-1)
+const regionConfirmAnchor = reactive({x: 0, y: 0, ready: false})
 
 // 窗口探测
 const windows = ref([])
@@ -296,6 +315,7 @@ const hasScreenshotPayload = ref(false)
 const screenshotSessionRequested = ref(false)
 const activeSessionId = ref(0)
 const payloadSessionId = ref(0)
+const regionSelectMode = ref('screenshot')
 let screenshotFallbackTimer = null
 
 // 物理像素比例
@@ -316,6 +336,24 @@ const drawingTools = [
 
 const hasSelection = computed(() => rect.width > 0 && rect.height > 0)
 const canExport = computed(() => hasSelection.value)
+const recordingConfirmStyle = computed(() => {
+  const margin = 8
+  const panelWidth = 112
+  const panelHeight = 32
+  const defaultX = regionConfirmAnchor.ready
+      ? Math.round(regionConfirmAnchor.x)
+      : Math.round(rect.x + rect.width - panelWidth)
+  const defaultY = regionConfirmAnchor.ready
+      ? Math.round(regionConfirmAnchor.y)
+      : (rect.y > panelHeight + 12 ? Math.round(rect.y - panelHeight - margin) : Math.round(rect.y + rect.height + margin))
+  const x = Math.max(margin, Math.min(window.innerWidth - panelWidth - margin, defaultX))
+  const y = defaultY
+  const top = Math.max(margin, Math.min(window.innerHeight - panelHeight - margin, y))
+  return {
+    left: `${x}px`,
+    top: `${top}px`
+  }
+})
 const pickerDisplayValue = computed(() => {
   return pickerDisplayMode.value === 'rgb' ? pickColorRgb.value : pickColor.value
 })
@@ -480,8 +518,10 @@ function consumeBootPayload() {
     boot.pendingData = null
   }
   if (bootStartSessionId > 0) {
-    handleStartRegionSelect({detail: {session_id: bootStartSessionId}})
+    const bootMode = String(boot.pendingMode || 'screenshot')
+    handleStartRegionSelect({detail: {session_id: bootStartSessionId, mode: bootMode}})
     boot.pendingStartSessionId = 0
+    boot.pendingMode = null
   }
 }
 
@@ -564,6 +604,7 @@ function handleScreenshotData(event) {
 
 function handleStartRegionSelect(event) {
   const sessionId = Number(event?.detail?.session_id) || 0
+  regionSelectMode.value = String(event?.detail?.mode || 'screenshot')
   if (sessionId > 0) {
     activeSessionId.value = sessionId
     screenshotSessionRequested.value = true
@@ -576,6 +617,40 @@ function handleStartRegionSelect(event) {
   currentTool.value = 'select'
   rect.width = 0
   rect.height = 0
+  regionConfirmAnchor.ready = false
+}
+
+async function commitRecordingRegionSelection() {
+  const viewportW = Math.max(1, Number(window.innerWidth) || 1)
+  const viewportH = Math.max(1, Number(window.innerHeight) || 1)
+  const imageW = Math.max(1, Number(screenshotImg.value?.width) || viewportW)
+  const imageH = Math.max(1, Number(screenshotImg.value?.height) || viewportH)
+  const scaleX = imageW / viewportW
+  const scaleY = imageH / viewportH
+  const rawX = Math.round(captureOriginX.value + rect.x * scaleX)
+  const rawY = Math.round(captureOriginY.value + rect.y * scaleY)
+  const rawW = Math.max(1, Math.round(rect.width * scaleX))
+  const rawH = Math.max(1, Math.round(rect.height * scaleY))
+  const minX = Math.round(captureOriginX.value)
+  const minY = Math.round(captureOriginY.value)
+  const maxX = minX + imageW
+  const maxY = minY + imageH
+  const x = Math.max(minX, Math.min(maxX - 1, rawX))
+  const y = Math.max(minY, Math.min(maxY - 1, rawY))
+  const width = Math.max(1, Math.min(maxX - x, rawW))
+  const height = Math.max(1, Math.min(maxY - y, rawH))
+  const payload = {
+    x,
+    y,
+    width,
+    height,
+  }
+  try {
+    await invoke('notify_recording_region_selected', {payload})
+  } catch (_e) {
+    await emit('recording-region-selected', payload)
+  }
+  await close()
 }
 
 function loadImageFromBase64(base64Data) {
@@ -796,6 +871,11 @@ function onMouseUp(e) {
     } else {
       state.value = 'selected'
     }
+    if (regionSelectMode.value === 'recording_region' && state.value === 'selected' && rect.width > 0 && rect.height > 0) {
+      regionConfirmAnchor.x = e.clientX + 8
+      regionConfirmAnchor.y = e.clientY + 8
+      regionConfirmAnchor.ready = true
+    }
   } else if (state.value === 'moving' || state.value === 'resizing') {
     state.value = 'selected'
   } else if (state.value === 'text-moving') {
@@ -827,6 +907,7 @@ function cancelSelection() {
   state.value = 'idle'
   rect.width = 0
   rect.height = 0
+  regionConfirmAnchor.ready = false
   currentTool.value = 'select'
   // 重置画布到最初
   if (history.value.length > 0) {
@@ -1862,6 +1943,13 @@ async function close() {
 
 // 快捷键
 function handleKeyDown(event) {
+  if (regionSelectMode.value === 'recording_region' && event.key === 'Enter') {
+    event.preventDefault()
+    if (hasSelection.value && state.value === 'selected') {
+      commitRecordingRegionSelection()
+    }
+    return
+  }
   if (editingTextId.value !== null) {
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -1924,6 +2012,43 @@ function handleKeyDown(event) {
 
 .pixpin-editor.cursor-default {
   cursor: default;
+}
+
+.recording-region-confirm {
+  position: fixed;
+  display: flex;
+  gap: 6px;
+  z-index: 2100;
+}
+
+.region-icon-btn {
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(22, 26, 36, 0.76);
+  color: #edf2ff;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+}
+
+.region-icon-btn:hover {
+  background: rgba(46, 54, 72, 0.88);
+}
+
+.region-icon-btn.primary {
+  background: rgba(64, 158, 255, 0.22);
+  border-color: rgba(64, 158, 255, 0.72);
+  color: #fff;
+}
+
+.region-icon-btn.danger {
+  background: rgba(245, 108, 108, 0.15);
+  border-color: rgba(245, 108, 108, 0.52);
 }
 
 .bg-image {

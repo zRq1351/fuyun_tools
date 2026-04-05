@@ -38,6 +38,7 @@ bloom = "0.3.2"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 screenshots = "0.8.10"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+windows-capture = "2.0.0-alpha.7"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.9", features = ["winuser", "winnt", "minwindef", "windef", "libloaderapi", "winbase", "processthreadsapi", "windowsx", "errhandlingapi", "handleapi", "heapapi", "memoryapi", "psapi", "synchapi", "sysinfoapi", "timezoneapi", "tlhelp32", "winioctl", "wingdi", "winerror", "winnls", "winreg", "winsvc", "setupapi", "ioapiset", "fileapi", "consoleapi", "namedpipeapi", "processenv", "stringapiset", "profileapi", "libloaderapi", "dwmapi", "shellapi"] }

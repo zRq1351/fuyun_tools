@@ -279,6 +279,32 @@ pub async fn resume_recording(
     recorder_service::resume_recording(&app, state.inner().clone()).map_err(to_frontend_error_string)
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRecordingAudioCaptureRequest {
+    pub capture_system_audio: Option<bool>,
+    pub system_audio_device_id: Option<String>,
+    pub capture_microphone: Option<bool>,
+    pub microphone_device_id: Option<String>,
+}
+
+#[tauri::command]
+pub async fn update_recording_audio_capture(
+    request: UpdateRecordingAudioCaptureRequest,
+    app: AppHandle,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    recorder_service::update_audio_capture(
+        &app,
+        state.inner().clone(),
+        request.capture_system_audio,
+        request.system_audio_device_id,
+        request.capture_microphone,
+        request.microphone_device_id,
+    )
+        .map_err(to_frontend_error_string)
+}
+
 #[tauri::command]
 pub async fn get_recording_state(
     state: State<'_, Arc<Mutex<SharedAppState>>>,

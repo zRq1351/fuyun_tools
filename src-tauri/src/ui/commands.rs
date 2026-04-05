@@ -423,7 +423,7 @@ fn register_screenshot_shortcut(app: &AppHandle, hot_key: &str) -> Result<(), St
             if let ShortcutState::Pressed = event.state {
                 let app_handle_inner = app_clone.clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Err(e) = open_screenshot_editor(app_handle_inner).await {
+                    if let Err(e) = open_screenshot_editor(app_handle_inner, None).await {
                         log::error!("截图失败: {}", e);
                     }
                 });
@@ -1435,6 +1435,23 @@ pub async fn count_import_image_files(paths: Vec<String>) -> Result<usize, Strin
         frontend_error(ErrorCode::IoError, "统计可导入图片路径失败", e)
     })?;
     Ok(image_paths.len())
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone)]
+pub struct RecordingRegionSelectedPayload {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[tauri::command]
+pub async fn notify_recording_region_selected(
+    app: AppHandle,
+    payload: RecordingRegionSelectedPayload,
+) -> Result<(), String> {
+    app.emit("recording-region-selected", payload)
+        .map_err(|e| e.to_string())
 }
 
 fn collect_import_image_paths(entries: Vec<String>) -> Result<Vec<String>, String> {
@@ -3207,7 +3224,7 @@ pub async fn set_screenshot_clipboard_link_once(linked: bool) -> Result<(), Stri
 
 /// 打开截图编辑窗口
 #[tauri::command]
-pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
+pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Result<(), String> {
     if let Ok(settings) = load_settings() {
         if !settings.screenshot_enabled {
             return Err(frontend_error(
@@ -3239,6 +3256,7 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
         })?;
     let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
 
+    let selection_mode = mode.unwrap_or_else(|| "screenshot".to_string());
     if let Some(window) = app.get_webview_window("screenshot") {
         if SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -3258,8 +3276,9 @@ pub async fn open_screenshot_editor(app: AppHandle) -> Result<(), String> {
             "window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || {{ pendingData: null, pendingStartSessionId: 0 }};\
 window.__SCREENSHOT_BOOT__.pendingData = {payload};\
 window.__SCREENSHOT_BOOT__.pendingStartSessionId = {session_id};\
+window.__SCREENSHOT_BOOT__.pendingMode = '{selection_mode}';\
 window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {payload} }}));\
-window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ session_id: {session_id} }} }}));"
+window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ session_id: {session_id}, mode: '{selection_mode}' }} }}));"
         );
 
         thread::spawn(move || {

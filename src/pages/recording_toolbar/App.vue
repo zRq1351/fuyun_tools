@@ -98,7 +98,58 @@
           </el-tooltip>
         </div>
         <div v-if="capsuleSettingsVisible" class="capsule-settings-panel no-drag">
-          <div class="toolbar-settings-title">录制设置</div>
+          <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]">
+            {{ inlineNotice }}
+          </div>
+          <div class="toolbar-settings-title-row">
+            <div class="toolbar-settings-title">录制设置</div>
+            <span v-if="recordTargetType === 'region'" class="target-region-meta">
+              {{ regionCoordinateText }}
+            </span>
+          </div>
+          <div class="toolbar-settings-row">
+            <div class="target-mode-buttons">
+              <button
+                  :class="['target-mode-btn', { active: recordTargetType === 'screen' }]"
+                  :disabled="!canEditRecordingConfig"
+                  @click="onTargetModeClick('screen')"
+              >
+                全屏
+              </button>
+              <button
+                  :class="['target-mode-btn', { active: recordTargetType === 'window' }]"
+                  :disabled="!canEditRecordingConfig"
+                  @click="onTargetModeClick('window')"
+              >
+                窗口
+              </button>
+              <button
+                  :class="['target-mode-btn', { active: recordTargetType === 'region' }]"
+                  :disabled="!canEditRecordingConfig"
+                  @click="onTargetModeClick('region')"
+              >
+                区域
+              </button>
+            </div>
+          </div>
+          <div v-if="recordTargetType === 'window'" class="toolbar-settings-row">
+            <span class="toolbar-settings-label">目标窗口</span>
+            <el-select
+                v-model="recordTargetWindowId"
+                :disabled="!canEditRecordingConfig"
+                filterable
+                placeholder="选择窗口"
+                popper-class="recording-toolbar-select-popper"
+                size="small"
+            >
+              <el-option
+                  v-for="item in recordableWindows"
+                  :key="item.hwnd || item.title"
+                  :label="item.title"
+                  :value="item.hwnd || item.title"
+              />
+            </el-select>
+          </div>
           <div class="toolbar-settings-row">
             <span class="toolbar-settings-label">系统音频</span>
             <el-select
@@ -106,6 +157,7 @@
                 placeholder="选择系统音频设备"
                 popper-class="recording-toolbar-select-popper"
                 size="small"
+                :disabled="!canEditAudioConfig"
                 @change="onSystemAudioDeviceChange"
             >
               <el-option label="不捕获系统音频" value=""/>
@@ -124,6 +176,7 @@
                 placeholder="选择麦克风设备"
                 popper-class="recording-toolbar-select-popper"
                 size="small"
+                :disabled="!canEditAudioConfig"
                 @change="onMicrophoneDeviceChange"
             >
               <el-option label="不捕获麦克风" value=""/>
@@ -146,6 +199,7 @@
             <el-switch
                 v-model="captureCursor"
                 active-text="捕获鼠标"
+                :disabled="!canEditRecordingConfig"
                 @change="onToolbarSettingChange('recordingCaptureCursor', $event)"
             />
             <el-tooltip
@@ -157,6 +211,7 @@
               <el-switch
                   v-model="toolbarContentProtected"
                   active-text="捕获工具栏"
+                  :disabled="!canEditRecordingConfig"
                   @change="onToolbarSettingChange('recordingToolbarContentProtected', $event)"
               />
             </el-tooltip>
@@ -170,6 +225,7 @@
                 :model-value="fps"
                 :step="1"
                 size="small"
+                :disabled="!canEditRecordingConfig"
                 @change="onToolbarSettingChange('recordingDefaultFps', $event)"
             />
           </div>
@@ -182,6 +238,7 @@
                 :model-value="videoBitrateKbps"
                 :step="500"
                 size="small"
+                :disabled="!canEditRecordingConfig"
                 @change="onToolbarSettingChange('recordingDefaultVideoBitrateKbps', $event)"
             />
           </div>
@@ -194,6 +251,7 @@
                 :model-value="audioBitrateKbps"
                 :step="16"
                 size="small"
+                :disabled="!canEditRecordingConfig"
                 @change="onToolbarSettingChange('recordingDefaultAudioBitrateKbps', $event)"
             />
           </div>
@@ -208,9 +266,9 @@
 import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from "vue";
 import zhCn from "element-plus/dist/locale/zh-cn";
 import {listen} from "@tauri-apps/api/event";
+import {invoke} from "@tauri-apps/api/core";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import {AISettingsService, RecordingService} from "@/services/ipc.js";
-import {ElMessage} from "element-plus";
 import {Settings} from "lucide-vue-next";
 
 const loadingAction = ref(null);
@@ -224,6 +282,18 @@ const systemOutputId = ref(null);
 const microphoneDeviceId = ref(null);
 const systemOutputs = ref([]);
 const microphones = ref([]);
+const recordTargetType = ref("screen");
+const recordTargetWindowId = ref("");
+const recordableWindows = ref([]);
+const recordRegionX = ref(0);
+const recordRegionY = ref(0);
+const recordRegionWidth = ref(1280);
+const recordRegionHeight = ref(720);
+const regionSelectionReady = ref(false);
+let isPickingRegion = false;
+const inlineNotice = ref("");
+const inlineNoticeType = ref("error");
+let inlineNoticeTimer = null;
 
 const fps = ref(30);
 const videoBitrateKbps = ref(6000);
@@ -236,6 +306,9 @@ let unlistenStateChanged = null;
 let unlistenRecordingFinished = null;
 let unlistenRecordingError = null;
 let unlistenForceCompact = null;
+let unlistenRecordingRegionSelected = null;
+let keepSettingsOpenUntilTs = 0;
+let autoCollapseAfterStartPending = false;
 let lastElapsedUiSyncAt = 0;
 
 const formatElapsedText = (ms) => {
@@ -256,7 +329,6 @@ const currentRecordingState = computed(() => {
       normalized === "paused" ||
       normalized === "starting" ||
       normalized === "stopping" ||
-      normalized === "error" ||
       normalized === "disabled"
   ) {
     return normalized;
@@ -269,7 +341,6 @@ const recordingHintText = computed(() => {
   if (rawRecordingState.value === "paused") return "录屏已暂停";
   if (rawRecordingState.value === "starting") return "录屏启动中";
   if (rawRecordingState.value === "stopping") return "录屏停止中";
-  if (rawRecordingState.value === "error") return "录屏异常";
   return "开始录制";
 });
 const collapsedDisplayText = computed(() => {
@@ -286,6 +357,11 @@ const capsuleTooltipContent = computed(() => {
   return recordingHintText.value;
 });
 const isBusy = computed(() => loadingAction.value !== null);
+const canEditRecordingConfig = computed(() => rawRecordingState.value === "idle" || rawRecordingState.value === "error");
+const canEditAudioConfig = computed(() => {
+  const s = rawRecordingState.value;
+  return s === "idle" || s === "error" || s === "recording" || s === "paused";
+});
 const canStop = computed(
     () =>
         !isBusy.value &&
@@ -307,6 +383,73 @@ const refresh = async () => {
   state.elapsedMs = Number(data.elapsedMs || 0);
 };
 
+const showInlineNotice = (message, type = "error") => {
+  inlineNotice.value = String(message || "");
+  inlineNoticeType.value = type;
+  if (inlineNoticeTimer) {
+    clearTimeout(inlineNoticeTimer);
+    inlineNoticeTimer = null;
+  }
+  if (type === "error") {
+    return;
+  }
+  inlineNoticeTimer = window.setTimeout(() => {
+    inlineNotice.value = "";
+    inlineNoticeTimer = null;
+  }, 3600);
+};
+
+const clearInlineNotice = () => {
+  inlineNotice.value = "";
+  if (inlineNoticeTimer) {
+    clearTimeout(inlineNoticeTimer);
+    inlineNoticeTimer = null;
+  }
+};
+
+const showBackendErrorInSettings = (message) => {
+  const text = String(message || "录屏异常");
+  keepSettingsOpenUntilTs = Date.now() + 3000;
+  capsuleSettingsVisible.value = true;
+  showInlineNotice(text, "error");
+  void syncCapsuleLayout();
+};
+
+const pickRecordingRegion = async () => {
+  if (isPickingRegion) return;
+  isPickingRegion = true;
+  try {
+    await invoke("open_screenshot_editor", {mode: "recording_region"});
+  } catch (e) {
+    showInlineNotice(`打开区域框选失败: ${String(e)}`, "error");
+  } finally {
+    window.setTimeout(() => {
+      isPickingRegion = false;
+    }, 200);
+  }
+};
+
+const onTargetModeClick = (mode) => {
+  if (!canEditRecordingConfig.value) return;
+  const prevMode = recordTargetType.value;
+  recordTargetType.value = mode;
+  if (prevMode !== mode) {
+    clearInlineNotice();
+  }
+  if (mode === "region") {
+    void pickRecordingRegion();
+  }
+};
+
+const regionCoordinateText = computed(() => {
+  if (!regionSelectionReady.value) return "未选择";
+  const x1 = Math.round(recordRegionX.value);
+  const y1 = Math.round(recordRegionY.value);
+  const x2 = Math.round(recordRegionX.value + recordRegionWidth.value);
+  const y2 = Math.round(recordRegionY.value + recordRegionHeight.value);
+  return `左上(${x1}, ${y1}) 右下(${x2}, ${y2})`;
+});
+
 const toggleRecordingState = async () => {
   if (isBusy.value) return;
   if (!recordingFeatureEnabled.value) {
@@ -318,9 +461,34 @@ const toggleRecordingState = async () => {
     if (!recordingFeatureEnabled.value) return;
   }
   try {
-    if (rawRecordingState.value === "idle") {
+    const prevRawState = rawRecordingState.value;
+    if (rawRecordingState.value === "idle" || rawRecordingState.value === "error") {
       loadingAction.value = "start";
+      autoCollapseAfterStartPending = true;
+      if (recordTargetType.value === "window" && !recordTargetWindowId.value) {
+        showInlineNotice("请先选择录制窗口", "warning");
+        return;
+      }
+      if (recordTargetType.value === "region" && (recordRegionWidth.value <= 0 || recordRegionHeight.value <= 0)) {
+        showInlineNotice("录制区域宽高必须大于 0", "warning");
+        return;
+      }
+      const targetId = recordTargetType.value === "window"
+          ? recordTargetWindowId.value
+          : recordTargetType.value === "region"
+              ? `${Math.round(recordRegionX.value)},${Math.round(recordRegionY.value)},${Math.max(1, Math.round(recordRegionWidth.value))},${Math.max(1, Math.round(recordRegionHeight.value))}`
+              : "";
+      const selectedWindow =
+          recordTargetType.value === "window"
+              ? recordableWindows.value.find((w) => (w.hwnd || w.title) === recordTargetWindowId.value) || null
+              : null;
       await RecordingService.start({
+        targetType: recordTargetType.value,
+        targetId,
+        targetX: selectedWindow ? Number(selectedWindow.x || 0) : null,
+        targetY: selectedWindow ? Number(selectedWindow.y || 0) : null,
+        targetWidth: selectedWindow ? Number(selectedWindow.width || 0) : null,
+        targetHeight: selectedWindow ? Number(selectedWindow.height || 0) : null,
         captureSystemAudio: captureSystemAudio.value,
         systemAudioDeviceId: systemOutputId.value,
         captureMicrophone: captureMicrophone.value,
@@ -338,13 +506,15 @@ const toggleRecordingState = async () => {
       await RecordingService.resume();
     }
     await refresh();
-  } catch (e) {
-    const msg = String(e || "");
-    if (msg.includes("录屏功能已停用")) {
-      recordingFeatureEnabled.value = false;
-      return;
+    if ((prevRawState === "idle" || prevRawState === "error") && currentRecordingState.value === "recording") {
+      capsuleSettingsVisible.value = false;
+      void syncCapsuleLayout();
+      autoCollapseAfterStartPending = false;
     }
-    ElMessage.error(msg);
+  } catch (e) {
+    autoCollapseAfterStartPending = false;
+    const msg = String(e || "");
+    showBackendErrorInSettings(msg);
   } finally {
     loadingAction.value = null;
   }
@@ -356,7 +526,7 @@ const stop = async () => {
     await RecordingService.stop(state.sessionId);
     await refresh();
   } catch (e) {
-    ElMessage.error(String(e));
+    showBackendErrorInSettings(String(e));
   } finally {
     loadingAction.value = null;
   }
@@ -377,6 +547,7 @@ const closeCapsule = async () => {
 
 const onWindowBlur = () => {
   if (!capsuleSettingsVisible.value) return;
+  if (Date.now() < keepSettingsOpenUntilTs) return;
   capsuleSettingsVisible.value = false;
 };
 
@@ -384,34 +555,56 @@ const openRecordingFolder = async () => {
   try {
     await RecordingService.openFolder();
   } catch (e) {
-    ElMessage.error(`打开录制保存文件夹失败: ${String(e)}`);
+    showInlineNotice(`打开录制保存文件夹失败: ${String(e)}`, "error");
   }
 };
 
 const onSystemAudioDeviceChange = async (deviceId) => {
+  if (!canEditAudioConfig.value) return;
   const id = String(deviceId || "");
   captureSystemAudio.value = id.length > 0;
   systemOutputId.value = id.length > 0 ? id : null;
+  if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
+    try {
+      await RecordingService.updateAudioCapture({
+        captureSystemAudio: captureSystemAudio.value,
+        systemAudioDeviceId: systemOutputId.value || "",
+      });
+    } catch (e) {
+      showBackendErrorInSettings(String(e));
+    }
+  }
   try {
     await AISettingsService.savePartialSettings({
       recordingCaptureSystemAudio: captureSystemAudio.value,
     });
   } catch (e) {
-    ElMessage.error(`保存系统音频设置失败: ${String(e)}`);
+    showInlineNotice(`保存系统音频设置失败: ${String(e)}`, "error");
   }
 };
 
 const onMicrophoneDeviceChange = async (deviceId) => {
+  if (!canEditAudioConfig.value) return;
   const id = String(deviceId || "");
   captureMicrophone.value = id.length > 0;
   microphoneDeviceId.value = id.length > 0 ? id : null;
+  if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
+    try {
+      await RecordingService.updateAudioCapture({
+        captureMicrophone: captureMicrophone.value,
+        microphoneDeviceId: microphoneDeviceId.value || "",
+      });
+    } catch (e) {
+      showBackendErrorInSettings(String(e));
+    }
+  }
   try {
     await AISettingsService.savePartialSettings({
       recordingCaptureMicrophone: captureMicrophone.value,
       recordingMicrophoneDeviceId: microphoneDeviceId.value || "",
     });
   } catch (e) {
-    ElMessage.error(`保存麦克风设置失败: ${String(e)}`);
+    showInlineNotice(`保存麦克风设置失败: ${String(e)}`, "error");
   }
 };
 
@@ -444,7 +637,7 @@ const onToolbarSettingChange = async (key, rawValue) => {
   try {
     await AISettingsService.savePartialSettings(patch);
   } catch (e) {
-    ElMessage.error(`保存录制设置失败: ${String(e)}`);
+    showInlineNotice(`保存录制设置失败: ${String(e)}`, "error");
   }
 };
 
@@ -452,15 +645,24 @@ onMounted(async () => {
   window.addEventListener("blur", onWindowBlur);
   unlistenStateChanged = await listen("recording-state-changed", (event) => {
     const payload = event.payload || {};
-    const nextState = payload.state || state.state;
+    const incomingState = String(payload.state || state.state || "idle");
+    const nextState = incomingState === "error" ? "idle" : incomingState;
     const stateChanged = nextState !== state.state;
     state.state = nextState;
-    state.sessionId = payload.sessionId ?? state.sessionId;
+    state.sessionId = nextState === "idle" ? null : (payload.sessionId ?? state.sessionId);
     const nextElapsedMs = Number(payload.elapsedMs || state.elapsedMs || 0);
     const now = Date.now();
     if (stateChanged || now - lastElapsedUiSyncAt >= 1000) {
       state.elapsedMs = nextElapsedMs;
       lastElapsedUiSyncAt = now;
+    }
+    if (nextState === "recording" && capsuleSettingsVisible.value && autoCollapseAfterStartPending) {
+      capsuleSettingsVisible.value = false;
+      void syncCapsuleLayout();
+      autoCollapseAfterStartPending = false;
+    }
+    if (nextState !== "starting" && nextState !== "recording") {
+      autoCollapseAfterStartPending = false;
     }
   });
   unlistenRecordingFinished = await listen("recording-finished", () => {
@@ -469,15 +671,47 @@ onMounted(async () => {
     capsuleSettingsVisible.value = false;
     void syncCapsuleLayout();
   });
-  unlistenRecordingError = await listen("recording-error", () => {
-    state.state = "error";
-    capsuleSettingsVisible.value = false;
-    void syncCapsuleLayout();
+  unlistenRecordingError = await listen("recording-error", (event) => {
+    const payload = event.payload || {};
+    const message = String(payload.message || "录屏异常");
+    const code = String(payload.code || "");
+    state.state = "idle";
+    state.sessionId = null;
+    showBackendErrorInSettings(code ? `${code}: ${message}` : message);
   });
   unlistenForceCompact = await listen("recording-toolbar-force-compact", () => {
+    if (Date.now() < keepSettingsOpenUntilTs) {
+      return;
+    }
     capsuleSettingsVisible.value = false;
     void syncCapsuleLayout();
   });
+  unlistenRecordingRegionSelected = await listen("recording-region-selected", (event) => {
+    const payload = event.payload || {};
+    const x = Number(payload.x || 0);
+    const y = Number(payload.y || 0);
+    const width = Math.max(1, Number(payload.width || 1));
+    const height = Math.max(1, Number(payload.height || 1));
+    recordTargetType.value = "region";
+    recordRegionX.value = x;
+    recordRegionY.value = y;
+    recordRegionWidth.value = width;
+    recordRegionHeight.value = height;
+    regionSelectionReady.value = true;
+    keepSettingsOpenUntilTs = Date.now() + 1500;
+    capsuleSettingsVisible.value = true;
+    void syncCapsuleLayout();
+  });
+  try {
+    const windowRes = await RecordingService.listWindows();
+    if (windowRes?.success && Array.isArray(windowRes.windows)) {
+      recordableWindows.value = windowRes.windows.filter((w) => String(w?.title || "").trim().length > 0);
+      if (!recordTargetWindowId.value && recordableWindows.value.length > 0) {
+        recordTargetWindowId.value = recordableWindows.value[0].hwnd || recordableWindows.value[0].title;
+      }
+    }
+  } catch (_e) {
+  }
   try {
     const settings = await AISettingsService.getSettings();
     recordingFeatureEnabled.value = settings.recording_enabled === true;
@@ -527,18 +761,23 @@ watch(capsuleSettingsVisible, () => {
 });
 
 watch(currentRecordingState, (next) => {
-  if (next === "idle" || next === "error") {
+  if (next === "idle") {
     capsuleSettingsVisible.value = false;
   }
   void syncCapsuleLayout();
 });
 
 onBeforeUnmount(() => {
+  if (inlineNoticeTimer) {
+    clearTimeout(inlineNoticeTimer);
+    inlineNoticeTimer = null;
+  }
   window.removeEventListener("blur", onWindowBlur);
   if (unlistenStateChanged) unlistenStateChanged();
   if (unlistenRecordingFinished) unlistenRecordingFinished();
   if (unlistenRecordingError) unlistenRecordingError();
   if (unlistenForceCompact) unlistenForceCompact();
+  if (unlistenRecordingRegionSelected) unlistenRecordingRegionSelected();
 });
 </script>
 
@@ -590,6 +829,52 @@ body,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.target-mode-buttons {
+  display: inline-flex;
+  gap: 4px;
+  width: 100%;
+}
+
+.target-mode-btn {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(30, 35, 48, 0.72);
+  color: #d6ddec;
+  border-radius: 7px;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.target-mode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.target-mode-btn.active {
+  border-color: rgba(114, 183, 255, 0.82);
+  background: rgba(72, 157, 255, 0.24);
+  color: #ffffff;
+}
+
+.target-region-meta {
+  margin-left: 8px;
+  color: #c8d1e6;
+  font-size: 11px;
+  opacity: 0.86;
+  white-space: nowrap;
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toolbar-settings-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .recording-toolbar-tooltip.el-popper {
@@ -787,6 +1072,33 @@ body,
   overflow-y: auto;
   padding-right: 4px;
   box-sizing: border-box;
+}
+
+.toolbar-inline-notice {
+  margin-bottom: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  border: 1px solid transparent;
+  max-width: 100%;
+  overflow: visible;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}
+
+.toolbar-inline-notice.is-warning {
+  color: #c27803;
+  background: rgba(255, 182, 39, 0.14);
+  border-color: rgba(255, 182, 39, 0.36);
+}
+
+.toolbar-inline-notice.is-error {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.12);
+  border-color: rgba(255, 107, 107, 0.3);
 }
 
 .collapsed-stop-btn,

@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 pub struct StartRecordingRequest {
     pub target_type: Option<String>,
     pub target_id: Option<String>,
+    pub target_x: Option<i32>,
+    pub target_y: Option<i32>,
+    pub target_width: Option<u32>,
+    pub target_height: Option<u32>,
     pub capture_cursor: Option<bool>,
     pub capture_system_audio: Option<bool>,
     pub system_audio_device_id: Option<String>,
