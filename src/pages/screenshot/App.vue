@@ -27,8 +27,9 @@
 
         <div :class="{ 'is-active': state !== 'drawing' }" class="cutout-border"></div>
 
-        <div v-if="state === 'selecting' || state === 'resizing' || state === 'moving'" class="size-info">
-          {{ Math.round(rect.width) }} × {{ Math.round(rect.height) }}
+        <div v-if="state === 'selecting' || state === 'resizing' || state === 'moving' || state === 'selected'"
+             class="size-info">
+          {{ selectionInfoText }}
         </div>
 
         <!-- 8个调整控制点 -->
@@ -336,6 +337,14 @@ const drawingTools = [
 
 const hasSelection = computed(() => rect.width > 0 && rect.height > 0)
 const canExport = computed(() => hasSelection.value)
+const selectionInfoText = computed(() => {
+  const width = Math.max(0, Math.round(rect.width * dpr))
+  const height = Math.max(0, Math.round(rect.height * dpr))
+  if (width <= 0 || height <= 0) {
+    return `${width} × ${height} px`
+  }
+  return `${width} × ${height} px (${getAspectRatioText(width, height)})`
+})
 const recordingConfirmStyle = computed(() => {
   const margin = 8
   const panelWidth = 112
@@ -357,6 +366,24 @@ const recordingConfirmStyle = computed(() => {
 const pickerDisplayValue = computed(() => {
   return pickerDisplayMode.value === 'rgb' ? pickColorRgb.value : pickColor.value
 })
+
+function getAspectRatioText(width, height) {
+  const divisor = getGreatestCommonDivisor(width, height)
+  const ratioWidth = Math.round(width / divisor)
+  const ratioHeight = Math.round(height / divisor)
+  return `${ratioWidth}:${ratioHeight}`
+}
+
+function getGreatestCommonDivisor(a, b) {
+  let x = Math.abs(Math.trunc(a))
+  let y = Math.abs(Math.trunc(b))
+  while (y !== 0) {
+    const temp = y
+    y = x % y
+    x = temp
+  }
+  return x || 1
+}
 
 let screenshotPixelCanvas = null
 let screenshotPixelCtx = null
