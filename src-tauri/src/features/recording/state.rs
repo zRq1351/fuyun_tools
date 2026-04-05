@@ -7,6 +7,12 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
+#[derive(Debug, Clone)]
+pub struct AudioSegment {
+    pub path: PathBuf,
+    pub start_ms: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordingPhase {
     Idle,
@@ -57,12 +63,18 @@ pub struct RecordingRuntime {
     pub system_audio_enabled_flag: Option<Arc<AtomicBool>>,
     pub system_audio_device_id: Option<String>,
     pub system_audio_ever_enabled: bool,
+    pub system_audio_stream_start_ms: Option<u64>,
+    pub system_audio_switch_points_ms: Vec<u64>,
+    pub system_audio_segments: Vec<AudioSegment>,
     pub mic_audio_wav_path: Option<PathBuf>,
     pub mic_audio_stop_flag: Option<Arc<AtomicBool>>,
     pub mic_audio_thread: Option<JoinHandle<()>>,
     pub mic_audio_enabled_flag: Option<Arc<AtomicBool>>,
     pub mic_audio_device_id: Option<String>,
     pub mic_audio_ever_enabled: bool,
+    pub mic_audio_stream_start_ms: Option<u64>,
+    pub mic_audio_switch_points_ms: Vec<u64>,
+    pub mic_audio_segments: Vec<AudioSegment>,
     pub ffmpeg_stderr_tail: VecDeque<String>,
 }
 
@@ -95,12 +107,18 @@ impl Default for RecordingRuntime {
             system_audio_enabled_flag: None,
             system_audio_device_id: None,
             system_audio_ever_enabled: false,
+            system_audio_stream_start_ms: None,
+            system_audio_switch_points_ms: Vec::new(),
+            system_audio_segments: Vec::new(),
             mic_audio_wav_path: None,
             mic_audio_stop_flag: None,
             mic_audio_thread: None,
             mic_audio_enabled_flag: None,
             mic_audio_device_id: None,
             mic_audio_ever_enabled: false,
+            mic_audio_stream_start_ms: None,
+            mic_audio_switch_points_ms: Vec::new(),
+            mic_audio_segments: Vec::new(),
             ffmpeg_stderr_tail: VecDeque::new(),
         }
     }
@@ -156,12 +174,18 @@ impl RecordingRuntime {
         self.system_audio_enabled_flag = None;
         self.system_audio_device_id = None;
         self.system_audio_ever_enabled = false;
+        self.system_audio_stream_start_ms = None;
+        self.system_audio_switch_points_ms.clear();
+        self.system_audio_segments.clear();
         self.mic_audio_wav_path = None;
         self.mic_audio_stop_flag = None;
         self.mic_audio_thread = None;
         self.mic_audio_enabled_flag = None;
         self.mic_audio_device_id = None;
         self.mic_audio_ever_enabled = false;
+        self.mic_audio_stream_start_ms = None;
+        self.mic_audio_switch_points_ms.clear();
+        self.mic_audio_segments.clear();
         self.ffmpeg_stderr_tail.clear();
     }
 }

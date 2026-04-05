@@ -561,17 +561,36 @@ const openRecordingFolder = async () => {
 
 const onSystemAudioDeviceChange = async (deviceId) => {
   if (!canEditAudioConfig.value) return;
+  const prevCapture = captureSystemAudio.value;
+  const prevId = systemOutputId.value;
   const id = String(deviceId || "");
+  const nextCapture = id.length > 0;
+  const nextId = nextCapture ? id : null;
   captureSystemAudio.value = id.length > 0;
   systemOutputId.value = id.length > 0 ? id : null;
   if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
     try {
-      await RecordingService.updateAudioCapture({
-        captureSystemAudio: captureSystemAudio.value,
-        systemAudioDeviceId: systemOutputId.value || "",
-      });
+      if (prevCapture && nextCapture && prevId && nextId && prevId !== nextId) {
+        // 录制中切换设备：自动执行“先关后开”，避免用户手动两步操作
+        await RecordingService.updateAudioCapture({
+          captureSystemAudio: false,
+          systemAudioDeviceId: prevId || "",
+        });
+        await RecordingService.updateAudioCapture({
+          captureSystemAudio: true,
+          systemAudioDeviceId: nextId || "",
+        });
+      } else {
+        await RecordingService.updateAudioCapture({
+          captureSystemAudio: captureSystemAudio.value,
+          systemAudioDeviceId: systemOutputId.value || "",
+        });
+      }
     } catch (e) {
+      captureSystemAudio.value = prevCapture;
+      systemOutputId.value = prevId;
       showBackendErrorInSettings(String(e));
+      return;
     }
   }
   try {
@@ -585,17 +604,36 @@ const onSystemAudioDeviceChange = async (deviceId) => {
 
 const onMicrophoneDeviceChange = async (deviceId) => {
   if (!canEditAudioConfig.value) return;
+  const prevCapture = captureMicrophone.value;
+  const prevId = microphoneDeviceId.value;
   const id = String(deviceId || "");
+  const nextCapture = id.length > 0;
+  const nextId = nextCapture ? id : null;
   captureMicrophone.value = id.length > 0;
   microphoneDeviceId.value = id.length > 0 ? id : null;
   if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
     try {
-      await RecordingService.updateAudioCapture({
-        captureMicrophone: captureMicrophone.value,
-        microphoneDeviceId: microphoneDeviceId.value || "",
-      });
+      if (prevCapture && nextCapture && prevId && nextId && prevId !== nextId) {
+        // 录制中切换设备：自动执行“先关后开”，避免用户手动两步操作
+        await RecordingService.updateAudioCapture({
+          captureMicrophone: false,
+          microphoneDeviceId: prevId || "",
+        });
+        await RecordingService.updateAudioCapture({
+          captureMicrophone: true,
+          microphoneDeviceId: nextId || "",
+        });
+      } else {
+        await RecordingService.updateAudioCapture({
+          captureMicrophone: captureMicrophone.value,
+          microphoneDeviceId: microphoneDeviceId.value || "",
+        });
+      }
     } catch (e) {
+      captureMicrophone.value = prevCapture;
+      microphoneDeviceId.value = prevId;
       showBackendErrorInSettings(String(e));
+      return;
     }
   }
   try {
@@ -761,9 +799,6 @@ watch(capsuleSettingsVisible, () => {
 });
 
 watch(currentRecordingState, (next) => {
-  if (next === "idle") {
-    capsuleSettingsVisible.value = false;
-  }
   void syncCapsuleLayout();
 });
 
