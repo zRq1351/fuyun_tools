@@ -97,7 +97,12 @@
             </button>
           </el-tooltip>
         </div>
-        <div v-if="capsuleSettingsVisible" class="capsule-settings-panel no-drag">
+        <div
+            v-if="capsuleSettingsVisible"
+            ref="capsuleSettingsPanelRef"
+            class="capsule-settings-panel no-drag"
+            @wheel.prevent="onCapsulePanelWheel"
+        >
           <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]">
             {{ inlineNotice }}
           </div>
@@ -141,11 +146,12 @@
                 placeholder="选择窗口"
                 popper-class="recording-toolbar-select-popper"
                 size="small"
+                @visible-change="onTargetWindowDropdownVisibleChange"
             >
               <el-option
                   v-for="item in recordableWindows"
                   :key="item.hwnd || item.title"
-                  :label="item.title"
+                  :label="formatTargetWindowLabel(item)"
                   :value="item.hwnd || item.title"
               />
             </el-select>
@@ -180,7 +186,7 @@
                 filterable
                 multiple
                 placeholder="可选：按应用录音（多选）"
-                popper-class="recording-toolbar-select-popper"
+                popper-class="recording-toolbar-select-popper recording-toolbar-audio-process-popper"
                 size="small"
                 @visible-change="onAudioProcessDropdownVisibleChange"
             >
@@ -297,6 +303,7 @@ import {Settings} from "lucide-vue-next";
 
 const loadingAction = ref(null);
 const capsuleSettingsVisible = ref(false);
+const capsuleSettingsPanelRef = ref(null);
 const isToolbarCollapsed = ref(true);
 const recordingFeatureEnabled = ref(true);
 
@@ -402,11 +409,20 @@ const syncCapsuleLayout = async () => {
   }
 };
 
+
 const refresh = async () => {
   const data = await RecordingService.getState();
   state.state = data.state || state.state || "idle";
   state.sessionId = data.sessionId || null;
   state.elapsedMs = Number(data.elapsedMs || 0);
+};
+
+const onCapsulePanelWheel = (event) => {
+  const el = capsuleSettingsPanelRef.value;
+  if (!el) return;
+  const deltaY = Number(event.deltaY || 0);
+  if (!Number.isFinite(deltaY) || deltaY === 0) return;
+  el.scrollTop += deltaY;
 };
 
 const showInlineNotice = (message, type = "error") => {
@@ -464,6 +480,8 @@ const onTargetModeClick = (mode) => {
   }
   if (mode === "region") {
     void pickRecordingRegion();
+  } else if (mode === "window") {
+    void refreshRecordableWindows();
   }
 };
 
@@ -475,6 +493,15 @@ const regionCoordinateText = computed(() => {
   const y2 = Math.round(recordRegionY.value + recordRegionHeight.value);
   return `左上(${x1}, ${y1}) 右下(${x2}, ${y2})`;
 });
+
+const formatTargetWindowLabel = (item) => {
+  const title = String(item?.title || "").trim();
+  const processNameRaw = String(item?.processName || item?.process_name || "").trim();
+  const processName = processNameRaw.replace(/\.exe$/i, "");
+  if (!title) return processName || "未知窗口";
+  if (!processName) return title;
+  return `${processName} - ${title}`;
+};
 
 const toggleRecordingState = async () => {
   if (isBusy.value) return;
@@ -561,6 +588,9 @@ const stop = async () => {
 
 const toggleCapsuleSettings = () => {
   capsuleSettingsVisible.value = !capsuleSettingsVisible.value;
+  if (capsuleSettingsVisible.value) {
+    void refreshAllDropdownOptions();
+  }
 };
 
 const closeCapsule = async () => {
@@ -710,6 +740,34 @@ const refreshAudioProcesses = async () => {
       .filter((v) => pidSet.has(v));
 };
 
+const refreshRecordableWindows = async () => {
+  const windowRes = await RecordingService.listWindows();
+  if (!windowRes?.success || !Array.isArray(windowRes.windows)) {
+    return;
+  }
+  const nextWindows = windowRes.windows.filter((w) => String(w?.title || "").trim().length > 0);
+  recordableWindows.value = nextWindows;
+  if (nextWindows.length === 0) {
+    recordTargetWindowId.value = "";
+    return;
+  }
+  const exists = nextWindows.some(
+      (w) => (w.hwnd || w.title) === recordTargetWindowId.value,
+  );
+  if (!exists) {
+    recordTargetWindowId.value = nextWindows[0].hwnd || nextWindows[0].title;
+  }
+};
+
+const refreshAllDropdownOptions = async () => {
+  await Promise.allSettled([
+    refreshRecordableWindows(),
+    refreshSystemOutputDevices(),
+    refreshMicrophoneDevices(),
+    refreshAudioProcesses(),
+  ]);
+};
+
 const onSystemAudioDropdownVisibleChange = async (visible) => {
   if (!visible) return;
   try {
@@ -730,6 +788,14 @@ const onAudioProcessDropdownVisibleChange = async (visible) => {
   if (!visible) return;
   try {
     await refreshAudioProcesses();
+  } catch (_e) {
+  }
+};
+
+const onTargetWindowDropdownVisibleChange = async (visible) => {
+  if (!visible) return;
+  try {
+    await refreshRecordableWindows();
   } catch (_e) {
   }
 };
@@ -829,13 +895,7 @@ onMounted(async () => {
     void syncCapsuleLayout();
   });
   try {
-    const windowRes = await RecordingService.listWindows();
-    if (windowRes?.success && Array.isArray(windowRes.windows)) {
-      recordableWindows.value = windowRes.windows.filter((w) => String(w?.title || "").trim().length > 0);
-      if (!recordTargetWindowId.value && recordableWindows.value.length > 0) {
-        recordTargetWindowId.value = recordableWindows.value[0].hwnd || recordableWindows.value[0].title;
-      }
-    }
+    await refreshRecordableWindows();
   } catch (_e) {
   }
   try {
@@ -868,6 +928,9 @@ onMounted(async () => {
 });
 
 watch(capsuleSettingsVisible, () => {
+  if (capsuleSettingsVisible.value) {
+    void refreshAllDropdownOptions();
+  }
   void syncCapsuleLayout();
 });
 
@@ -937,6 +1000,10 @@ body,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.recording-toolbar-audio-process-popper .el-select-dropdown__wrap {
+  max-height: 168px !important;
 }
 
 .target-mode-buttons {
@@ -1052,6 +1119,7 @@ body,
   gap: 5px;
   width: 100%;
   height: 100%;
+  min-height: 0;
   flex-direction: column;
   justify-content: flex-start;
 }
@@ -1175,12 +1243,22 @@ body,
   padding-top: 12px;
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 10px;
-  max-height: calc(100% - 44px);
   overflow-y: auto;
+  overflow-x: hidden;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
   padding-right: 4px;
   box-sizing: border-box;
 }
+
+.capsule-settings-panel::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 
 .toolbar-inline-notice {
   margin-bottom: 4px;

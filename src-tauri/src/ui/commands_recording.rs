@@ -351,6 +351,9 @@ pub async fn open_recording_folder(
 pub async fn show_recording_toolbar(app: AppHandle) -> Result<(), String> {
     let (window, _created) = ensure_recording_toolbar_window(&app)?;
     let _ = window.set_size(tauri::PhysicalSize::new(530, 64));
+    let _ = window.set_min_size::<tauri::Size>(None);
+    let _ = window.set_max_size::<tauri::Size>(None);
+    let _ = window.set_resizable(false);
     move_window_top_center(&window);
     let content_protected = load_settings()
         .map(|settings| settings.recording_toolbar_content_protected)
@@ -373,13 +376,13 @@ pub async fn resize_recording_toolbar(
     let is_capsule_layout = request.layout_mode.eq_ignore_ascii_case("capsule");
     let (width, height) = if is_capsule_layout {
         if request.open_overlay {
-            (430, 420)
+            (430, 730)
         } else {
             (250, 40)
         }
     } else if request.compact_mode {
         if request.open_overlay {
-            (430, 420)
+            (430, 730)
         } else {
             (250, 40)
         }
@@ -404,6 +407,9 @@ pub async fn resize_recording_toolbar(
             .set_size(target_size)
             .map_err(|e| format!("调整录制工具栏窗口尺寸失败: {}", e))?;
     }
+    let _ = window.set_min_size::<tauri::Size>(None);
+    let _ = window.set_max_size::<tauri::Size>(None);
+    let _ = window.set_resizable(false);
     // Recenter only when caller explicitly asks for it.
     if request.recenter {
         move_window_top_center(&window);

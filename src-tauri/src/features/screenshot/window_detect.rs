@@ -2,9 +2,11 @@ use serde::{Deserialize, Serialize};
 
 /// 窗口信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WindowInfo {
     pub hwnd: String,
     pub title: String,
+    pub process_name: String,
     pub x: i32,
     pub y: i32,
     pub width: u32,
@@ -26,6 +28,55 @@ pub fn get_window_list() -> Result<Vec<WindowInfo>, String> {
     #[cfg(target_os = "linux")]
     {
         get_window_list_linux()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn get_window_process_name(hwnd: winapi::shared::windef::HWND) -> Option<String> {
+    use std::path::Path;
+    use winapi::shared::minwindef::DWORD;
+    use winapi::um::handleapi::CloseHandle;
+    use winapi::um::processthreadsapi::OpenProcess;
+    use winapi::um::winbase::QueryFullProcessImageNameW;
+    use winapi::um::winnt::PROCESS_QUERY_LIMITED_INFORMATION;
+    use winapi::um::winuser::GetWindowThreadProcessId;
+
+    let mut pid: DWORD = 0;
+    unsafe {
+        GetWindowThreadProcessId(hwnd, &mut pid);
+    }
+    if pid == 0 {
+        return None;
+    }
+
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return None;
+    }
+
+    let mut buffer = vec![0u16; 1024];
+    let mut size = buffer.len() as u32;
+    let ok = unsafe { QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size) };
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+    if ok == 0 || size == 0 {
+        return None;
+    }
+
+    let full_path = String::from_utf16_lossy(&buffer[..size as usize]);
+    let file_name = Path::new(&full_path)
+        .file_name()
+        .map(|x| x.to_string_lossy().to_string())?;
+    let app_name = Path::new(&file_name)
+        .file_stem()
+        .map(|x| x.to_string_lossy().to_string())
+        .unwrap_or(file_name);
+    let trimmed = app_name.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
     }
 }
 
@@ -73,6 +124,11 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
         if title == "固定截图" || title == "截图选择" || title == "fuyun_tools" {
             return 1;
         }
+        let process_name = get_window_process_name(hwnd).unwrap_or_default();
+        let process_name_lower = process_name.to_lowercase();
+        if process_name_lower == "textinputhost" || process_name_lower == "textinputhost.exe" {
+            return 1;
+        }
 
         // 获取窗口位置
         let mut rect: RECT = std::mem::zeroed();
@@ -91,6 +147,7 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
         windows.push(WindowInfo {
             hwnd: format!("0x{:X}", hwnd as usize),
             title,
+            process_name,
             x: rect.left,
             y: rect.top,
             width,
