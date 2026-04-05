@@ -158,6 +158,7 @@
                 popper-class="recording-toolbar-select-popper"
                 size="small"
                 :disabled="!canEditAudioConfig"
+                @visible-change="onSystemAudioDropdownVisibleChange"
                 @change="onSystemAudioDeviceChange"
             >
               <el-option label="不捕获系统音频" value=""/>
@@ -177,6 +178,7 @@
                 popper-class="recording-toolbar-select-popper"
                 size="small"
                 :disabled="!canEditAudioConfig"
+                @visible-change="onMicrophoneDropdownVisibleChange"
                 @change="onMicrophoneDeviceChange"
             >
               <el-option label="不捕获麦克风" value=""/>
@@ -646,6 +648,50 @@ const onMicrophoneDeviceChange = async (deviceId) => {
   }
 };
 
+const refreshSystemOutputDevices = async () => {
+  const outs = await RecordingService.listSystemOutputs();
+  systemOutputs.value = Array.isArray(outs) ? outs : [];
+  const def = systemOutputs.value.find((it) => it.isDefault);
+  if (captureSystemAudio.value) {
+    const exists = systemOutputs.value.some((it) => it.id === systemOutputId.value);
+    if (!exists) {
+      systemOutputId.value = def ? def.id : (systemOutputs.value[0]?.id ?? null);
+    }
+  } else {
+    systemOutputId.value = null;
+  }
+};
+
+const refreshMicrophoneDevices = async () => {
+  const mics = await RecordingService.listAudioDevices();
+  microphones.value = Array.isArray(mics) ? mics : [];
+  const def = microphones.value.find((it) => it.isDefault);
+  if (captureMicrophone.value) {
+    const exists = microphones.value.some((it) => it.id === microphoneDeviceId.value);
+    if (!exists) {
+      microphoneDeviceId.value = def ? def.id : (microphones.value[0]?.id ?? null);
+    }
+  } else {
+    microphoneDeviceId.value = null;
+  }
+};
+
+const onSystemAudioDropdownVisibleChange = async (visible) => {
+  if (!visible) return;
+  try {
+    await refreshSystemOutputDevices();
+  } catch (_e) {
+  }
+};
+
+const onMicrophoneDropdownVisibleChange = async (visible) => {
+  if (!visible) return;
+  try {
+    await refreshMicrophoneDevices();
+  } catch (_e) {
+  }
+};
+
 const onToolbarSettingChange = async (key, rawValue) => {
   const n = Number(rawValue);
   const patch = {};
@@ -764,30 +810,11 @@ onMounted(async () => {
   } catch (_e) {
   }
   try {
-    const outs = await RecordingService.listSystemOutputs();
-    systemOutputs.value = Array.isArray(outs) ? outs : [];
-    const def = systemOutputs.value.find((it) => it.isDefault);
-    if (!systemOutputId.value) {
-      systemOutputId.value = def ? def.id : (systemOutputs.value[0]?.id ?? null);
-    }
-    if (captureSystemAudio.value && !systemOutputId.value && systemOutputs.value.length > 0) {
-      systemOutputId.value = def ? def.id : systemOutputs.value[0].id;
-    }
-    if (!captureSystemAudio.value) {
-      systemOutputId.value = null;
-    }
+    await refreshSystemOutputDevices();
   } catch (_e) {
   }
   try {
-    const mics = await RecordingService.listAudioDevices();
-    microphones.value = Array.isArray(mics) ? mics : [];
-    const def = microphones.value.find((it) => it.isDefault);
-    if (!microphoneDeviceId.value && captureMicrophone.value) {
-      microphoneDeviceId.value = def ? def.id : (microphones.value[0]?.id ?? null);
-    }
-    if (!captureMicrophone.value) {
-      microphoneDeviceId.value = null;
-    }
+    await refreshMicrophoneDevices();
   } catch (_e) {
   }
   await refresh();
