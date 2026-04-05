@@ -1422,6 +1422,21 @@ pub async fn import_image_files(
     }
 }
 
+#[tauri::command]
+pub async fn count_import_image_files(paths: Vec<String>) -> Result<usize, String> {
+    if paths.is_empty() {
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "未选择任何文件或文件夹",
+            "paths is empty",
+        ));
+    }
+    let image_paths = collect_import_image_paths(paths).map_err(|e| {
+        frontend_error(ErrorCode::IoError, "统计可导入图片路径失败", e)
+    })?;
+    Ok(image_paths.len())
+}
+
 fn collect_import_image_paths(entries: Vec<String>) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     for raw in entries {

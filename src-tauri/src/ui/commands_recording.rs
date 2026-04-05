@@ -287,6 +287,13 @@ pub async fn get_recording_state(
 }
 
 #[tauri::command]
+pub async fn get_recording_output_dir(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<String, String> {
+    recorder_service::get_recording_output_dir(state.inner().clone()).map_err(to_frontend_error_string)
+}
+
+#[tauri::command]
 pub async fn list_recording_audio_devices(
     app: AppHandle,
 ) -> Result<Vec<AudioInputDevice>, String> {

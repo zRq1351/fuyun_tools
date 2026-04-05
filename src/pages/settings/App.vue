@@ -677,15 +677,27 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
+html,
+body,
+#app {
+  height: 100%;
+}
+
 body {
   margin: 0;
   font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
+  overflow: hidden;
 }
 
 .settings-container {
+  box-sizing: border-box;
+  height: 100vh;
   padding: 20px;
-  max-width: 980px;
+  max-width: 1080px;
   margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .header {
@@ -695,6 +707,7 @@ body {
   margin-bottom: 16px;
   min-height: 40px;
   padding-right: 220px;
+  flex-shrink: 0;
 }
 
 .header-title h1 {
@@ -745,6 +758,9 @@ body {
 .settings-layout {
   display: flex;
   gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .settings-nav {
@@ -753,6 +769,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow: hidden;
 }
 
 .section-nav-item {
@@ -783,10 +800,14 @@ body {
 
 .content {
   flex: 1;
-  background: #fff;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  min-height: 0;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  padding: 22px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .content-header {
@@ -805,8 +826,61 @@ body {
 }
 
 .dark .content {
-  background: #1d1e1f;
-  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.3);
+  background: linear-gradient(180deg, #1d1e1f 0%, #18191a 100%);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
+}
+
+.content :deep(.setting-section-card) {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.content :deep(.setting-section-card + .setting-section-card) {
+  margin-top: 16px;
+}
+
+.content :deep(.setting-section-card .el-card__header) {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.content :deep(.setting-section-card .el-card__body) {
+  padding: 14px 16px 12px;
+}
+
+.content :deep(.section-title) {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.content :deep(.el-form-item) {
+  margin-bottom: 14px;
+}
+
+.content :deep(.el-form-item__label) {
+  font-weight: 600;
+  padding-bottom: 6px;
+}
+
+.content :deep(.el-input),
+.content :deep(.el-select),
+.content :deep(.el-input-number) {
+  width: 100%;
+}
+
+.content :deep(.el-switch + .form-hint),
+.content :deep(.el-input + .form-hint),
+.content :deep(.el-select + .form-hint),
+.content :deep(.el-input-number + .form-hint) {
+  margin-top: 6px;
+}
+
+.dark .content :deep(.setting-section-card) {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .dark .section-nav-item {
@@ -821,19 +895,51 @@ body {
 }
 
 .footer-links {
-  margin-top: 40px;
+  margin-top: 14px;
   text-align: center;
   color: #909399;
   font-size: 14px;
+  flex-shrink: 0;
 }
 
 @media (max-width: 900px) {
+  body {
+    overflow: auto;
+  }
+
+  .settings-container {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .settings-layout {
+    flex-direction: column;
+    overflow: visible;
+  }
+
   .settings-nav {
-    width: 140px;
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 8px;
   }
 
   .section-nav-item {
     padding: 8px 10px;
+  }
+
+  .header {
+    padding-right: 0;
+  }
+
+  .header-actions {
+    position: static;
+    margin-left: auto;
+  }
+
+  .content {
+    overflow: visible;
   }
 }
 </style>

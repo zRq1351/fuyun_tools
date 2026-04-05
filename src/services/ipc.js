@@ -37,6 +37,7 @@ export const IPC_COMMANDS = {
     PROMOTE_IMAGE_CLIPBOARD_ITEM_BY_ID: 'promote_image_clipboard_item_by_id',
     CLEAR_IMAGE_HISTORY: 'clear_image_history',
     IMPORT_IMAGE_FILES: 'import_image_files',
+    COUNT_IMPORT_IMAGE_FILES: 'count_import_image_files',
     SELECT_AND_FILL_IMAGE_BY_ID: 'select_and_fill_image_by_id',
     WARMUP_IMAGE_CLIPBOARD_ITEM_BY_ID: 'warmup_image_clipboard_item_by_id',
     WARMUP_MULTIPLE_IMAGES: 'warmup_multiple_images',
@@ -81,6 +82,7 @@ export const IPC_COMMANDS = {
     STOP_RECORDING: 'stop_recording',
     CANCEL_RECORDING: 'cancel_recording',
     GET_RECORDING_STATE: 'get_recording_state',
+    GET_RECORDING_OUTPUT_DIR: 'get_recording_output_dir',
     LIST_RECORDING_AUDIO_DEVICES: 'list_recording_audio_devices',
     LIST_RECORDING_SYSTEM_OUTPUT_DEVICES: 'list_recording_system_output_devices',
     OPEN_RECORDING_FOLDER: 'open_recording_folder',
@@ -194,6 +196,7 @@ export const ImageClipboardService = {
     setItemPinned: (itemId, pinned) => invoke(IPC_COMMANDS.SET_IMAGE_ITEM_PINNED, {itemId, pinned}),
     clearHistory: (mode) => invoke(IPC_COMMANDS.CLEAR_IMAGE_HISTORY, {mode}),
     importImageFiles: (paths) => invoke(IPC_COMMANDS.IMPORT_IMAGE_FILES, {paths}),
+    countImportImageFiles: (paths) => invoke(IPC_COMMANDS.COUNT_IMPORT_IMAGE_FILES, {paths}),
     selectAndFillById: (itemId, opId) =>
         invoke(IPC_COMMANDS.SELECT_AND_FILL_IMAGE_BY_ID, {
             request: buildSelectAndFillImageByIdRequest(itemId, opId)
@@ -448,6 +451,7 @@ export const RecordingService = {
     stop: (sessionId = null) => invoke(IPC_COMMANDS.STOP_RECORDING, {request: {sessionId}}),
     cancel: (sessionId = null) => invoke(IPC_COMMANDS.CANCEL_RECORDING, {request: {sessionId}}),
     getState: () => invoke(IPC_COMMANDS.GET_RECORDING_STATE),
+    getOutputDir: () => invoke(IPC_COMMANDS.GET_RECORDING_OUTPUT_DIR),
     listAudioDevices: () => invoke(IPC_COMMANDS.LIST_RECORDING_AUDIO_DEVICES),
     listSystemOutputs: () => invoke(IPC_COMMANDS.LIST_RECORDING_SYSTEM_OUTPUT_DEVICES),
     openFolder: () => invoke(IPC_COMMANDS.OPEN_RECORDING_FOLDER),

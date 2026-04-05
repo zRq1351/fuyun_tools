@@ -860,6 +860,14 @@ pub fn get_recording_state(state_arc: Arc<Mutex<SharedAppState>>) -> RecordingRu
     runtime.snapshot()
 }
 
+pub fn get_recording_output_dir(state_arc: Arc<Mutex<SharedAppState>>) -> Result<String, AppError> {
+    let output_dir = {
+        let guard = lock_arc_mutex(&state_arc);
+        resolve_output_dir(&guard, None)?
+    };
+    Ok(output_dir.to_string_lossy().to_string())
+}
+
 pub fn run_recording_regression(
     app: &AppHandle,
     state_arc: Arc<Mutex<SharedAppState>>,

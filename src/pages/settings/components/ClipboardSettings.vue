@@ -1,117 +1,154 @@
 <template>
   <el-form :model="form" label-position="top">
-    <el-card class="setting-section-card compact-grid-card" shadow="never">
-      <template #header>
-        <div class="section-title">容量与写入策略</div>
-      </template>
-      <el-form-item label="文字历史记录上限">
-        <el-input-number v-model="form.textMaxItems" :max="1000" :min="1"/>
-        <div class="form-hint">设置文字剪贴板历史记录最大保存数量 (1-1000)</div>
-      </el-form-item>
-
-      <el-form-item label="图片历史记录上限">
-        <el-input-number v-model="form.imageMaxItems" :max="1000" :min="1"/>
-        <div class="form-hint">设置图片剪贴板历史记录最大保存数量 (1-1000)</div>
-      </el-form-item>
-
-      <el-form-item label="图片历史磁盘上限（MB）">
-        <el-input-number v-model="form.imageDiskLimitMb" :max="102400" :min="100"/>
-        <div class="form-hint">超过上限后自动清理最旧未置顶图片，建议 2048MB</div>
-      </el-form-item>
-
-      <el-form-item label="图片回填模式">
-        <el-select v-model="form.imageFillVerifyMode" class="fill-mode-select">
-          <el-option label="严格模式（写后校验）" value="strict"/>
-          <el-option label="极速模式（完全不校验）" value="fast"/>
-        </el-select>
-        <div class="form-hint">极速模式写入系统剪贴板后立即粘贴，速度更快但成功率更依赖目标应用</div>
-      </el-form-item>
-
-      <el-form-item label="上限策略">
-        <el-switch
-            v-model="form.groupedItemsProtectedFromLimit"
-            active-text="仅限制未分组项"
-            inactive-text="限制全部项"
-        />
-        <div class="form-hint">开启后，已分组的文字和图片不会因上限被自动删除</div>
-      </el-form-item>
-    </el-card>
-
-    <el-card class="setting-section-card compact-grid-card" shadow="never">
+    <el-card class="setting-section-card" shadow="never">
       <template #header>
         <div class="section-title">快捷键</div>
       </template>
-      <el-form-item label="文字剪切板功能">
-        <el-switch v-model="form.textClipboardEnabled" active-text="启用" inactive-text="停用"/>
-        <div class="form-hint">停用后后端不再启动文字剪贴板监听与快捷键</div>
-      </el-form-item>
+      <div class="setting-group">
+        <div class="group-grid cols-2">
+          <el-form-item label="文字剪贴板功能">
+            <el-switch v-model="form.textClipboardEnabled" active-text="启用" inactive-text="停用"/>
+            <div class="form-hint">停用后不再监听文字剪贴板与快捷键</div>
+          </el-form-item>
+          <el-form-item label="图片剪贴板功能">
+            <el-switch v-model="form.imageClipboardEnabled" active-text="启用" inactive-text="停用"/>
+            <div class="form-hint">停用后不再监听图片剪贴板与快捷键</div>
+          </el-form-item>
+        </div>
+        <div class="group-grid cols-2">
+          <el-form-item label="打开剪贴板窗口快捷键">
+            <el-input
+                :model-value="textDisplayValue"
+                :class="{ recording: isTextRecording }"
+                placeholder="例如: Ctrl+Shift+K"
+                readonly
+            >
+              <template #append>
+                <el-button :type="isTextRecording ? 'danger' : 'primary'" @click="toggleTextRecording">
+                  <el-icon>
+                    <component :is="isTextRecording ? VideoPause : Edit"/>
+                  </el-icon>
+                </el-button>
+              </template>
+            </el-input>
+          </el-form-item>
+          <el-form-item label="打开图片剪贴板窗口快捷键">
+            <el-input
+                :model-value="imageDisplayValue"
+                :class="{ recording: isImageRecording }"
+                placeholder="例如: Ctrl+Shift+X"
+                readonly
+            >
+              <template #append>
+                <el-button :type="isImageRecording ? 'danger' : 'primary'" @click="toggleImageRecording">
+                  <el-icon>
+                    <component :is="isImageRecording ? VideoPause : Edit"/>
+                  </el-icon>
+                </el-button>
+              </template>
+            </el-input>
+          </el-form-item>
+        </div>
+      </div>
+    </el-card>
 
-      <el-form-item label="图片剪切板功能">
-        <el-switch v-model="form.imageClipboardEnabled" active-text="启用" inactive-text="停用"/>
-        <div class="form-hint">停用后后端不再启动图片剪贴板监听与快捷键</div>
-      </el-form-item>
-
-      <el-form-item label="打开剪切板窗口快捷键">
-        <el-input
-            :model-value="textDisplayValue"
-            :class="{ recording: isTextRecording }"
-            placeholder="例如: Ctrl+Shift+K"
-            readonly
-        >
-          <template #append>
-            <el-button :type="isTextRecording ? 'danger' : 'primary'" @click="toggleTextRecording">
-              <el-icon>
-                <component :is="isTextRecording ? VideoPause : Edit"/>
-              </el-icon>
-            </el-button>
-          </template>
-        </el-input>
-        <div class="form-hint">点击编辑按钮来自定义打开剪切板窗口的快捷键</div>
-      </el-form-item>
-
-      <el-form-item label="打开图片剪切板窗口快捷键">
-        <el-input
-            :model-value="imageDisplayValue"
-            :class="{ recording: isImageRecording }"
-            placeholder="例如: Ctrl+Shift+X"
-            readonly
-        >
-          <template #append>
-            <el-button :type="isImageRecording ? 'danger' : 'primary'" @click="toggleImageRecording">
-              <el-icon>
-                <component :is="isImageRecording ? VideoPause : Edit"/>
-              </el-icon>
-            </el-button>
-          </template>
-        </el-input>
-        <div class="form-hint">点击编辑按钮来自定义打开图片剪切板窗口的快捷键</div>
-      </el-form-item>
+    <el-card class="setting-section-card" shadow="never">
+      <template #header>
+        <div class="section-title">容量与写入策略</div>
+      </template>
+      <div class="setting-group">
+        <div class="group-grid cols-3">
+          <el-form-item label="文字历史记录上限">
+            <el-input-number v-model="form.textMaxItems" :max="1000" :min="1"/>
+            <div class="form-hint">最大保存数量 1-1000</div>
+          </el-form-item>
+          <el-form-item label="图片历史记录上限">
+            <el-input-number v-model="form.imageMaxItems" :max="1000" :min="1"/>
+            <div class="form-hint">最大保存数量 1-1000</div>
+          </el-form-item>
+          <el-form-item label="图片历史磁盘上限（MB）">
+            <el-input-number v-model="form.imageDiskLimitMb" :max="102400" :min="100"/>
+            <div class="form-hint">建议 2048MB</div>
+          </el-form-item>
+        </div>
+        <div class="group-grid cols-2">
+          <el-form-item label="图片回填模式">
+            <el-select v-model="form.imageFillVerifyMode">
+              <el-option label="严格模式（写后校验）" value="strict"/>
+              <el-option label="极速模式（完全不校验）" value="fast"/>
+            </el-select>
+            <div class="form-hint">极速模式更快，但成功率更依赖目标应用</div>
+          </el-form-item>
+          <el-form-item label="上限策略">
+            <el-switch
+                v-model="form.groupedItemsProtectedFromLimit"
+                active-text="仅限制未分组项"
+                inactive-text="限制全部项"
+            />
+            <div class="form-hint">开启后，已分组内容不因上限被自动删除</div>
+          </el-form-item>
+        </div>
+      </div>
     </el-card>
 
     <el-card class="setting-section-card" shadow="never">
       <template #header>
         <div class="section-title">数据管理</div>
       </template>
-      <el-form-item label="文字记录">
-        <el-button class="action-button" plain type="primary" @click="clearTextHistory('unclassified_unpinned')">清除未分类未置顶</el-button>
-        <el-button class="action-button" plain type="danger" @click="clearTextHistory('all')">清除全部</el-button>
-      </el-form-item>
-      <el-form-item label="图片记录">
-        <el-button class="action-button" plain type="primary" @click="clearImageHistory('untagged_unclassified_unpinned')">清除未分类未置顶无标签
-        </el-button>
-        <el-button class="action-button" plain type="danger" @click="clearImageHistory('all')">清除全部</el-button>
-      </el-form-item>
-      <el-form-item label="导入图片">
-        <el-button :loading="importingImages" class="action-button" type="primary" @click="importImageFiles">导入图片</el-button>
-        <el-button :loading="importingImages" class="action-button" plain type="primary" @click="importImageFolders">导入文件夹</el-button>
-      </el-form-item>
-      <el-form-item v-if="importingImages || importTotal > 0">
-        <div class="metrics-card">
-          <div class="metrics-line">导入进度 {{ importProcessed }} / {{ importTotal }}</div>
-          <div class="metrics-line">成功 {{ importImported }}，失败 {{ importFailed }}</div>
-          <el-progress :percentage="importProgressPercent" :stroke-width="12" status="success"/>
+      <div class="management-list">
+        <div class="management-item">
+          <div class="management-meta">
+            <div class="management-title">文字记录</div>
+            <div class="form-hint">按条件清理仅影响未分类且未置顶项；“清除全部”为危险操作</div>
+          </div>
+          <div class="action-row">
+            <el-button class="action-button" plain type="primary" @click="clearTextHistory('unclassified_unpinned')">按条件清理</el-button>
+            <el-button class="action-button" plain type="danger" @click="clearTextHistory('all')">清除全部</el-button>
+          </div>
         </div>
-      </el-form-item>
+        <div class="management-item">
+          <div class="management-meta">
+            <div class="management-title">图片记录</div>
+            <div class="form-hint">按条件清理仅影响未分类、未置顶且无标签项；“清除全部”为危险操作</div>
+          </div>
+          <div class="action-row">
+            <el-button class="action-button" plain type="primary" @click="clearImageHistory('untagged_unclassified_unpinned')">按条件清理</el-button>
+            <el-button class="action-button" plain type="danger" @click="clearImageHistory('all')">清除全部</el-button>
+          </div>
+        </div>
+        <div class="management-item">
+          <div class="management-meta">
+            <div class="management-title">导入图片</div>
+            <div class="form-hint">支持导入图片文件或文件夹中的图片</div>
+          </div>
+          <el-input
+              :model-value="importSourceDisplay"
+              class="import-source-input"
+              placeholder="未选择导入来源"
+              readonly
+          >
+            <template #prepend>
+              <el-tooltip content="导入图片" placement="top">
+                <el-button :loading="importingImages" class="import-icon-btn" @click="importImageFiles">
+                  <el-icon><Picture/></el-icon>
+                </el-button>
+              </el-tooltip>
+            </template>
+            <template #append>
+              <el-tooltip content="导入目录" placement="top">
+                <el-button :loading="importingImages" class="import-icon-btn" @click="importImageFolders">
+                  <el-icon><FolderOpened/></el-icon>
+                </el-button>
+              </el-tooltip>
+            </template>
+          </el-input>
+          <div v-if="showImportProgressCard" class="metrics-card">
+            <div class="metrics-line">导入进度 {{ importProcessed }} / {{ importTotal }}</div>
+            <div class="metrics-line">成功 {{ importImported }}，失败 {{ importFailed }}</div>
+            <el-progress :percentage="importProgressPercent" :stroke-width="12" status="success"/>
+          </div>
+        </div>
+      </div>
       <div class="form-hint">“清除全部”会删除对应类型的全部历史记录，请谨慎操作。</div>
     </el-card>
 
@@ -121,7 +158,7 @@
 <script setup>
 import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
-import {Edit, VideoPause} from '@element-plus/icons-vue'
+import {Edit, FolderOpened, Picture, VideoPause} from '@element-plus/icons-vue'
 import {open} from '@tauri-apps/plugin-dialog'
 import {listen} from '@tauri-apps/api/event'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
@@ -151,6 +188,8 @@ const importTotal = ref(0)
 const importProcessed = ref(0)
 const importImported = ref(0)
 const importFailed = ref(0)
+let importProgressResetTimer = null
+const importSourceDisplay = ref('')
 
 const importProgressPercent = computed(() => {
   const total = Number(importTotal.value || 0)
@@ -158,6 +197,24 @@ const importProgressPercent = computed(() => {
   const processed = Number(importProcessed.value || 0)
   return Math.min(100, Math.max(0, Math.round((processed / total) * 100)))
 })
+
+const showImportProgressCard = computed(() => {
+  if (importingImages.value) return true
+  const total = Number(importTotal.value || 0)
+  const processed = Number(importProcessed.value || 0)
+  return total > 0 && processed < total
+})
+
+const scheduleResetImportProgress = () => {
+  if (importProgressResetTimer) {
+    clearTimeout(importProgressResetTimer)
+    importProgressResetTimer = null
+  }
+  importProgressResetTimer = window.setTimeout(() => {
+    resetImportProgress()
+    importProgressResetTimer = null
+  }, 800)
+}
 
 const clearTextHistory = async (mode) => {
   try {
@@ -203,16 +260,41 @@ const resetImportProgress = () => {
 }
 
 const runImageImport = async (paths) => {
-  if (!paths || !paths.length) return
+  if (!paths || !paths.length) return false
   importingImages.value = true
   resetImportProgress()
   try {
     const imported = await ImageClipboardService.importImageFiles(paths)
     ElMessage.success(`已导入 ${imported} 张图片`)
+    return true
   } catch (error) {
     ElMessage.error(`导入失败: ${error}`)
+    return false
   } finally {
     importingImages.value = false
+    scheduleResetImportProgress()
+  }
+}
+
+const confirmImport = async (kind, paths) => {
+  let total = 0
+  try {
+    total = Number(await ImageClipboardService.countImportImageFiles(paths)) || 0
+  } catch {
+    total = 0
+  }
+  const summary = kind === 'folder'
+      ? `已选择目录：\n${String(paths[0] || '')}\n\n预计导入 ${total} 张图片，确认开始导入吗？`
+      : `已选择 ${paths.length} 个文件，预计导入 ${total} 张图片，确认开始导入吗？`
+  try {
+    await ElMessageBox.confirm(summary, '确认导入', {
+      confirmButtonText: '确认导入',
+      cancelButtonText: '取消',
+      type: 'info'
+    })
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -225,7 +307,18 @@ const importImageFiles = async () => {
   })
   if (!selected) return
   const paths = Array.isArray(selected) ? selected : [selected]
-  await runImageImport(paths)
+  const names = paths.map((item) => {
+    const path = String(item || '')
+    const parts = path.split(/[\\/]/).filter(Boolean)
+    return parts[parts.length - 1] || path
+  })
+  importSourceDisplay.value = names.length > 1 ? `${names[0]} 等 ${names.length} 个文件` : (names[0] || '')
+  const confirmed = await confirmImport('file', paths)
+  if (!confirmed) return
+  const ok = await runImageImport(paths)
+  if (ok) {
+    importSourceDisplay.value = ''
+  }
 }
 
 const importImageFolders = async () => {
@@ -235,7 +328,13 @@ const importImageFolders = async () => {
   })
   if (!selected) return
   const paths = Array.isArray(selected) ? selected : [selected]
-  await runImageImport(paths)
+  importSourceDisplay.value = String(paths[0] || '')
+  const confirmed = await confirmImport('folder', paths)
+  if (!confirmed) return
+  const ok = await runImageImport(paths)
+  if (ok) {
+    importSourceDisplay.value = ''
+  }
 }
 
 const handleDocumentVisibilityChange = () => {
@@ -255,13 +354,22 @@ onMounted(async () => {
     importFailed.value = Number(payload.failed || 0)
     if (payload.status === 'start') {
       importingImages.value = true
+      if (importProgressResetTimer) {
+        clearTimeout(importProgressResetTimer)
+        importProgressResetTimer = null
+      }
     } else if (payload.status === 'finish') {
       importingImages.value = false
+      scheduleResetImportProgress()
     }
   })
 })
 
 onUnmounted(() => {
+  if (importProgressResetTimer) {
+    clearTimeout(importProgressResetTimer)
+    importProgressResetTimer = null
+  }
   document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
   if (unlistenImportProgress) {
     unlistenImportProgress()
@@ -281,23 +389,77 @@ onUnmounted(() => {
   margin-top: 16px;
 }
 
-.compact-grid-card :deep(.el-card__body) {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(260px, 1fr));
-  column-gap: 16px;
-}
-
-.compact-grid-card :deep(.el-form-item) {
-  margin-bottom: 12px;
-}
-
 .action-button {
   min-width: 120px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.import-source-input {
+  margin-bottom: 8px;
+}
+
+.import-icon-btn {
+  border: none;
+  padding: 0 10px;
+  min-width: auto;
+}
+
+.management-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.management-item {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.management-meta {
+  margin-bottom: 8px;
+}
+
+.management-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 2px;
 }
 
 .section-title {
   font-size: 15px;
   font-weight: 600;
+}
+
+.setting-group {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 12px 12px 6px;
+  background: var(--el-bg-color);
+}
+
+.group-grid {
+  display: grid;
+  column-gap: 14px;
+}
+
+.group-grid.cols-2 {
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+}
+
+.group-grid.cols-3 {
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.setting-group :deep(.el-form-item) {
+  margin-bottom: 12px;
 }
 
 .recording :deep(.el-input__inner) {
@@ -306,9 +468,11 @@ onUnmounted(() => {
 
 .metrics-card {
   width: 100%;
+  box-sizing: border-box;
   padding: 10px 12px;
   border: 1px solid var(--el-border-color-light);
   border-radius: 6px;
+  overflow: hidden;
 }
 
 .metrics-line {
@@ -316,8 +480,9 @@ onUnmounted(() => {
   line-height: 20px;
 }
 
-.fill-mode-select {
-  width: 220px;
+.metrics-card :deep(.el-progress) {
+  width: 100%;
+  max-width: 100%;
 }
 
 .metrics-meta {
@@ -333,7 +498,8 @@ onUnmounted(() => {
 }
 
 @media (max-width: 900px) {
-  .compact-grid-card :deep(.el-card__body) {
+  .group-grid.cols-2,
+  .group-grid.cols-3 {
     grid-template-columns: 1fr;
   }
 }

@@ -15,7 +15,7 @@ use crate::services::image_clipboard_manager::{
 use crate::sync::Mutex;
 use crate::ui::commands::*;
 use crate::ui::commands_recording::{
-    cancel_recording, check_recording_ffmpeg, download_recording_ffmpeg, get_recording_state,
+    cancel_recording, check_recording_ffmpeg, download_recording_ffmpeg, get_recording_output_dir, get_recording_state,
     list_recording_audio_devices, list_recording_system_output_devices, open_recording_folder, pause_recording, resize_recording_toolbar,
     resume_recording, run_recording_regression, show_recording_toolbar, start_recording,
     stop_recording, toggle_recording_from_shortcut,
@@ -262,6 +262,7 @@ pub fn run() {
             promote_image_clipboard_item_by_id,
             clear_text_history,
             clear_image_history,
+            count_import_image_files,
             import_image_files,
             get_clipboard_bottom_offset,
             preview_clipboard_bottom_offset,
@@ -315,6 +316,7 @@ pub fn run() {
             stop_recording,
             cancel_recording,
             get_recording_state,
+            get_recording_output_dir,
             list_recording_audio_devices,
             list_recording_system_output_devices,
             open_recording_folder,
