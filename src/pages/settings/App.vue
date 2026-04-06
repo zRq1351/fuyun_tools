@@ -193,10 +193,11 @@ const form = reactive({
   recordingCaptureMicrophone: true,
   recordingMicrophoneDeviceId: '',
   recordingOutputDir: '',
-  recordingAutoOpenFolder: true,
+  recordingAutoOpenFolder: false,
   recordingToolbarContentProtected: false,
   recordingMaxDurationMinutes: 180,
   recordingFileNameTemplate: '{timestamp}',
+  recordingWindowAudioSyncAdvanceMs: 80,
   aiProvider: '',
   apiUrl: '',
   modelName: '',
@@ -257,6 +258,7 @@ const saveInitialFormState = () => {
     recordingToolbarContentProtected: form.recordingToolbarContentProtected,
     recordingMaxDurationMinutes: form.recordingMaxDurationMinutes,
     recordingFileNameTemplate: form.recordingFileNameTemplate,
+    recordingWindowAudioSyncAdvanceMs: form.recordingWindowAudioSyncAdvanceMs,
     aiProvider: form.aiProvider,
     apiUrl: form.apiUrl,
     modelName: form.modelName,
@@ -350,6 +352,9 @@ const getChangedFields = () => {
   }
   if (form.recordingFileNameTemplate !== initial.recordingFileNameTemplate) {
     changedFields.recordingFileNameTemplate = form.recordingFileNameTemplate
+  }
+  if (form.recordingWindowAudioSyncAdvanceMs !== initial.recordingWindowAudioSyncAdvanceMs) {
+    changedFields.recordingWindowAudioSyncAdvanceMs = form.recordingWindowAudioSyncAdvanceMs
   }
 
   // 处理 AI 提供商
@@ -593,10 +598,11 @@ onMounted(async () => {
     form.recordingCaptureMicrophone = settings.recording_capture_microphone === true
     form.recordingMicrophoneDeviceId = settings.recording_microphone_device_id || ''
     form.recordingOutputDir = settings.recording_output_dir || ''
-    form.recordingAutoOpenFolder = settings.recording_auto_open_folder !== false
+    form.recordingAutoOpenFolder = settings.recording_auto_open_folder === true
     form.recordingToolbarContentProtected = settings.recording_toolbar_content_protected === true
     form.recordingMaxDurationMinutes = Number(settings.recording_max_duration_minutes || 180)
     form.recordingFileNameTemplate = settings.recording_file_name_template || '{timestamp}'
+    form.recordingWindowAudioSyncAdvanceMs = Number(settings.recording_window_audio_sync_advance_ms ?? 80)
     form.selectionEnabled = settings.selection_enabled === true
     form.groupedItemsProtectedFromLimit = settings.grouped_items_protected_from_limit !== false
     form.translationPromptTemplate = settings.translation_prompt_template || ''

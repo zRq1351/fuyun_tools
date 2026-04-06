@@ -1,4 +1,4 @@
-import {computed, ref} from 'vue'
+import {computed, onUnmounted, ref} from 'vue'
 
 export function useShortcutRecorder(form, fieldKey = 'toggleShortcut') {
     const isRecording = ref(false)
@@ -81,6 +81,10 @@ export function useShortcutRecorder(form, fieldKey = 'toggleShortcut') {
             startRecording()
         }
     }
+
+    onUnmounted(() => {
+        stopRecording()
+    })
 
     return {
         isRecording,

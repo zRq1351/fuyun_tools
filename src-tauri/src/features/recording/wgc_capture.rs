@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -16,12 +16,15 @@ use windows_capture::window::Window;
 
 pub struct WgcCaptureHandle {
     pub stop_flag: Arc<AtomicBool>,
+    pub first_frame_elapsed_ms: Arc<AtomicU64>,
     pub join: JoinHandle<Result<(), String>>,
 }
 
 #[derive(Clone)]
 struct WgcCaptureFlags {
     stop_flag: Arc<AtomicBool>,
+    capture_origin_instant: std::time::Instant,
+    first_frame_elapsed_ms: Arc<AtomicU64>,
     width: u32,
     height: u32,
     output_path: String,
@@ -56,6 +59,10 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
     }
 
     fn on_frame_arrived(&mut self, frame: &mut Frame, _capture_control: InternalCaptureControl) -> Result<(), Self::Error> {
+        if self.flags.first_frame_elapsed_ms.load(Ordering::Relaxed) == u64::MAX {
+            let elapsed_ms = self.flags.capture_origin_instant.elapsed().as_millis() as u64;
+            self.flags.first_frame_elapsed_ms.store(elapsed_ms, Ordering::Relaxed);
+        }
         if let Some(encoder) = self.encoder.as_mut() {
             encoder.send_frame(frame).map_err(|e| e.to_string())?;
         }
@@ -95,14 +102,18 @@ pub fn start_window_capture_to_mp4(
     fps: u32,
     video_bitrate_kbps: u32,
     capture_cursor: bool,
+    capture_origin_instant: std::time::Instant,
 ) -> Result<WgcCaptureHandle, String> {
     let window = parse_window_target(target_id)?;
     let rect = window.rect().map_err(|e| format!("读取窗口尺寸失败: {}", e))?;
     let width = (rect.right - rect.left).max(1) as u32;
     let height = (rect.bottom - rect.top).max(1) as u32;
     let stop_flag = Arc::new(AtomicBool::new(false));
+    let first_frame_elapsed_ms = Arc::new(AtomicU64::new(u64::MAX));
     let flags = WgcCaptureFlags {
         stop_flag: stop_flag.clone(),
+        capture_origin_instant,
+        first_frame_elapsed_ms: first_frame_elapsed_ms.clone(),
         width,
         height,
         output_path: output_path.to_string_lossy().to_string(),
@@ -150,5 +161,9 @@ pub fn start_window_capture_to_mp4(
             thread::sleep(Duration::from_millis(30));
         }
     });
-    Ok(WgcCaptureHandle { stop_flag, join })
+    Ok(WgcCaptureHandle {
+        stop_flag,
+        first_frame_elapsed_ms,
+        join,
+    })
 }

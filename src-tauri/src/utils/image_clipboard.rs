@@ -136,13 +136,17 @@ pub fn is_fast_fill_verify_mode_enabled() -> bool {
 
 /// 获取异步生成的预览（全局访问）
 pub fn get_async_preview(item_id: &str) -> Option<(u32, u32, String)> {
-    let generator = PREVIEW_GENERATOR.lock().unwrap();
+    let generator = PREVIEW_GENERATOR
+        .lock()
+        .expect("infallible mutex lock failed");
     generator.get_preview(item_id)
 }
 
 /// 检查预览是否已就绪（全局访问）
 pub fn is_preview_ready(item_id: &str) -> bool {
-    let generator = PREVIEW_GENERATOR.lock().unwrap();
+    let generator = PREVIEW_GENERATOR
+        .lock()
+        .expect("infallible mutex lock failed");
     generator.get_preview(item_id).is_some()
 }
 
@@ -167,7 +171,9 @@ static PREVIEW_GENERATOR: LazyLock<Arc<Mutex<PreviewGenerator>>> =
 
 /// 带 AppHandle 的预览生成器初始化
 pub fn init_preview_generator_with_app_handle(app_handle: tauri::AppHandle) {
-    let mut generator = PREVIEW_GENERATOR.lock().unwrap();
+    let mut generator = PREVIEW_GENERATOR
+        .lock()
+        .expect("infallible mutex lock failed");
     *generator = PreviewGenerator::new(Some(app_handle));
 }
 
@@ -192,7 +198,9 @@ impl PreviewGenerator {
                 let item_id = task.item_id.clone();
 
                 // 存储到内存缓存
-                let mut cache = cache_clone.lock().unwrap();
+                let mut cache = cache_clone
+                    .lock()
+                    .expect("infallible mutex lock failed");
                 cache.put(item_id.clone(), (preview_width, preview_height, preview_base64.clone()));
 
                 // 持久化到数据库
@@ -234,14 +242,22 @@ impl PreviewGenerator {
     /// 获取异步生成的预览（优先从内存缓存，其次从数据库）
     pub fn get_preview(&self, item_id: &str) -> Option<(u32, u32, String)> {
         // 先从内存缓存查找
-        if let Some(preview) = self.preview_cache.lock().unwrap().get(item_id) {
+        if let Some(preview) = self
+            .preview_cache
+            .lock()
+            .expect("infallible mutex lock failed")
+            .get(item_id)
+        {
             return Some(preview.clone());
         }
 
         // 从数据库加载
         if let Ok(Some(preview)) = image_store::load_async_preview(item_id) {
             // 加载到内存缓存
-            self.preview_cache.lock().unwrap().put(item_id.to_string(), preview.clone());
+            self.preview_cache
+                .lock()
+                .expect("infallible mutex lock failed")
+                .put(item_id.to_string(), preview.clone());
             return Some(preview);
         }
 
@@ -863,7 +879,9 @@ impl ImageClipboardManager {
             width,
             height,
         };
-        let generator = PREVIEW_GENERATOR.lock().unwrap();
+        let generator = PREVIEW_GENERATOR
+            .lock()
+            .expect("infallible mutex lock failed");
         generator.submit_task(preview_task);
         log::debug!("已提交异步预览生成任务: {} ({}x{})", id, width, height);
 

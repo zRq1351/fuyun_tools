@@ -62,6 +62,8 @@ pub struct AppSettingsData {
     pub recording_file_name_template: String,
     #[serde(default = "default_recording_ffmpeg_download_url")]
     pub recording_ffmpeg_download_url: String,
+    #[serde(default = "default_recording_window_audio_sync_advance_ms")]
+    pub recording_window_audio_sync_advance_ms: u32,
     #[serde(default)]
     pub ai_provider: String,
     #[serde(default)]
@@ -109,6 +111,7 @@ impl Default for AppSettingsData {
             recording_max_duration_minutes: default_recording_max_duration_minutes(),
             recording_file_name_template: default_recording_file_name_template(),
             recording_ffmpeg_download_url: default_recording_ffmpeg_download_url(),
+            recording_window_audio_sync_advance_ms: default_recording_window_audio_sync_advance_ms(),
             ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
             selection_enabled: true,
@@ -194,7 +197,7 @@ fn default_recording_output_dir() -> String {
 }
 
 fn default_recording_auto_open_folder() -> bool {
-    true
+    false
 }
 
 fn default_recording_toolbar_content_protected() -> bool {
@@ -211,6 +214,10 @@ fn default_recording_file_name_template() -> String {
 
 fn default_recording_ffmpeg_download_url() -> String {
     "https://gitee.com/zrq1351/fuyun_tools/releases/download/v0.5.6/ffmpeg.exe".to_string()
+}
+
+fn default_recording_window_audio_sync_advance_ms() -> u32 {
+    80
 }
 
 fn default_grouped_items_protected_from_limit() -> bool {
@@ -502,6 +509,9 @@ impl AppSettingsData {
         if !self.recording_ffmpeg_download_url.starts_with("https://") {
             return Err("recording_ffmpeg_download_url必须以https://开头".to_string());
         }
+        if self.recording_window_audio_sync_advance_ms > 500 {
+            return Err("recording_window_audio_sync_advance_ms必须在0-500之间".to_string());
+        }
 
         // 验证API URL格式（基本检查）
         for (provider_name, config) in &self.provider_configs {
@@ -675,6 +685,9 @@ impl AppSettingsData {
         }
         if self.recording_ffmpeg_download_url.trim().is_empty() {
             self.recording_ffmpeg_download_url = default_recording_ffmpeg_download_url();
+        }
+        if self.recording_window_audio_sync_advance_ms > 500 {
+            self.recording_window_audio_sync_advance_ms = default_recording_window_audio_sync_advance_ms();
         }
         if self.clipboard_bottom_offset < 0 || self.clipboard_bottom_offset > 400 {
             self.clipboard_bottom_offset = default_clipboard_bottom_offset();

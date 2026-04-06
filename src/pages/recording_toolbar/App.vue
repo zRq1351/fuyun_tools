@@ -237,13 +237,13 @@
                 @change="onToolbarSettingChange('recordingCaptureCursor', $event)"
             />
             <el-tooltip
-                content="开启后，录制画面会包含当前悬浮工具栏；关闭后，工具栏不会被录进去。"
+                content="开启后，录制画面会包含当前悬浮工具栏；关闭后，工具栏会尝试从录制画面中隐藏。"
                 effect="dark"
                 placement="top"
                 popper-class="recording-toolbar-tooltip"
             >
               <el-switch
-                  v-model="toolbarContentProtected"
+                  v-model="captureToolbar"
                   active-text="捕获工具栏"
                   :disabled="!canEditRecordingConfig"
                   @change="onToolbarSettingChange('recordingToolbarContentProtected', $event)"
@@ -336,7 +336,7 @@ const fps = ref(30);
 const videoBitrateKbps = ref(6000);
 const audioBitrateKbps = ref(160);
 const captureCursor = ref(true);
-const toolbarContentProtected = ref(false);
+const captureToolbar = ref(true);
 
 const state = reactive({state: "idle", sessionId: null, elapsedMs: 0});
 let unlistenStateChanged = null;
@@ -846,8 +846,9 @@ const onToolbarSettingChange = async (key, rawValue) => {
     patch.recordingCaptureCursor = v;
   } else if (key === "recordingToolbarContentProtected") {
     const v = rawValue === true;
-    toolbarContentProtected.value = v;
-    patch.recordingToolbarContentProtected = v;
+    captureToolbar.value = v;
+    // setting 字段是“内容保护”，与 UI 的“捕获工具栏”语义相反
+    patch.recordingToolbarContentProtected = !v;
   } else {
     return;
   }
@@ -933,7 +934,7 @@ onMounted(async () => {
     videoBitrateKbps.value = Number(settings.recording_default_video_bitrate_kbps || 6000);
     audioBitrateKbps.value = Number(settings.recording_default_audio_bitrate_kbps || 160);
     captureCursor.value = settings.recording_capture_cursor !== false;
-    toolbarContentProtected.value = settings.recording_toolbar_content_protected === true;
+    captureToolbar.value = settings.recording_toolbar_content_protected !== true;
     microphoneDeviceId.value = settings.recording_microphone_device_id || null;
   } catch (_e) {
   }

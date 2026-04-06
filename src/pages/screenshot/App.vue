@@ -317,6 +317,9 @@ const screenshotSessionRequested = ref(false)
 const activeSessionId = ref(0)
 const payloadSessionId = ref(0)
 const regionSelectMode = ref('screenshot')
+const screenshotRequestInFlight = ref(false)
+const fallbackRequestedSessionIds = new Set()
+let fallbackRequestedWithoutSession = false
 let screenshotFallbackTimer = null
 
 // 物理像素比例
@@ -529,6 +532,9 @@ function handleScreenshotReset() {
   pickerCopyHint.value = 'Shift切换 RGB/# · Ctrl复制'
   screenshotPixelCanvas = null
   screenshotPixelCtx = null
+  screenshotRequestInFlight.value = false
+  fallbackRequestedSessionIds.clear()
+  fallbackRequestedWithoutSession = false
 }
 
 function consumeBootPayload() {
@@ -557,9 +563,31 @@ function scheduleScreenshotFallback() {
   if (screenshotFallbackTimer) {
     window.clearTimeout(screenshotFallbackTimer)
   }
-  screenshotFallbackTimer = window.setTimeout(() => {
+  const scheduledSessionId = activeSessionId.value
+  screenshotFallbackTimer = window.setTimeout(async () => {
+    if (scheduledSessionId > 0 && activeSessionId.value !== scheduledSessionId) {
+      return
+    }
     if (screenshotSessionRequested.value && !hasScreenshotPayload.value) {
-      requestScreenshot()
+      if (scheduledSessionId > 0) {
+        if (fallbackRequestedSessionIds.has(scheduledSessionId)) {
+          return
+        }
+        fallbackRequestedSessionIds.add(scheduledSessionId)
+      } else {
+        if (fallbackRequestedWithoutSession) {
+          return
+        }
+        fallbackRequestedWithoutSession = true
+      }
+      const success = await requestScreenshot()
+      if (!success) {
+        if (scheduledSessionId > 0) {
+          fallbackRequestedSessionIds.delete(scheduledSessionId)
+        } else {
+          fallbackRequestedWithoutSession = false
+        }
+      }
     }
   }, 120)
 }
@@ -594,6 +622,10 @@ function normalizeWindowRectToViewport(w) {
 }
 
 async function requestScreenshot() {
+  if (screenshotRequestInFlight.value) {
+    return false
+  }
+  screenshotRequestInFlight.value = true
   try {
     const result = await invoke('start_screenshot')
     if (result.success && result.png_base64) {
@@ -602,9 +634,14 @@ async function requestScreenshot() {
       captureOriginY.value = Number(result.origin_y) || 0
       await fetchWindows()
       loadImageFromBase64(result.png_base64)
+      return true
     }
+    return false
   } catch (error) {
     console.error('请求截图失败:', error)
+    return false
+  } finally {
+    screenshotRequestInFlight.value = false
   }
 }
 
@@ -633,10 +670,12 @@ function handleStartRegionSelect(event) {
   const sessionId = Number(event?.detail?.session_id) || 0
   regionSelectMode.value = String(event?.detail?.mode || 'screenshot')
   if (sessionId > 0) {
+    fallbackRequestedSessionIds.delete(sessionId)
     activeSessionId.value = sessionId
     screenshotSessionRequested.value = true
     hasScreenshotPayload.value = payloadSessionId.value === sessionId
   } else {
+    fallbackRequestedWithoutSession = false
     screenshotSessionRequested.value = true
   }
   scheduleScreenshotFallback()

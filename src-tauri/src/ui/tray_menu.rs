@@ -46,6 +46,10 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
             Some(item) => item,
             None => return,
         };
+        let settings_item = match create_menu_item("settings", "设置") {
+            Some(item) => item,
+            None => return,
+        };
         #[cfg(debug_assertions)]
         let clear_logs_item = match create_menu_item("clear_logs", "清除日志") {
             Some(item) => item,
@@ -53,10 +57,6 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
         };
         #[cfg(debug_assertions)]
         let open_logs_item = match create_menu_item("open_logs", "打开日志目录") {
-            Some(item) => item,
-            None => return,
-        };
-        let settings_item = match create_menu_item("settings", "设置") {
             Some(item) => item,
             None => return,
         };
@@ -124,6 +124,9 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
                         "autostart" => {
                             handle_autostart_event(app, &state_for_events);
                         }
+                        "settings" => {
+                            open_settings(app);
+                        }
                         #[cfg(debug_assertions)]
                         "open_logs" => {
                             if let Err(e) = open_log_directory(app) {
@@ -135,9 +138,6 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
                             if let Err(e) = clear_log_files() {
                                 log::error!("清除日志文件失败: {}", e);
                             }
-                        }
-                        "settings" => {
-                            open_settings(app);
                         }
                         _ => {
                             log::info!("未知的菜单事件: {}", event_id);

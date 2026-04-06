@@ -323,6 +323,7 @@ export const AISettingsService = {
      * @param {string} params.translationPromptTemplate
      * @param {string} params.explanationPromptTemplate
      * @param {string} params.imageFillVerifyMode
+     * @param {number} params.recordingWindowAudioSyncAdvanceMs
      * @returns {Promise<void>}
      */
     saveSettings: ({
@@ -343,7 +344,8 @@ export const AISettingsService = {
                        groupedItemsProtectedFromLimit,
                        translationPromptTemplate,
                        explanationPromptTemplate,
-                       imageFillVerifyMode
+                       imageFillVerifyMode,
+                       recordingWindowAudioSyncAdvanceMs
                    }) =>
         invoke(IPC_COMMANDS.SAVE_APP_SETTINGS, {
             textMaxItems,
@@ -363,7 +365,8 @@ export const AISettingsService = {
             groupedItemsProtectedFromLimit,
             translationPromptTemplate,
             explanationPromptTemplate,
-            imageFillVerifyMode
+            imageFillVerifyMode,
+            recordingWindowAudioSyncAdvanceMs
         }),
 
     /**

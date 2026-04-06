@@ -29,52 +29,11 @@
       </div>
 
       <div class="setting-group">
-        <div class="group-title">音频来源</div>
-        <div class="group-grid">
-          <el-form-item label="系统音频">
-            <el-select
-                :model-value="systemAudioSelectValue"
-                placeholder="选择系统音频设备"
-                @change="onSystemAudioDeviceChange"
-            >
-              <el-option label="不捕获系统音频" value=""/>
-              <el-option
-                  v-for="item in systemOutputs"
-                  :key="item.id"
-                  :label="item.name"
-                  :value="item.id"
-              />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="麦克风">
-            <el-select
-                :model-value="microphoneSelectValue"
-                placeholder="选择麦克风设备"
-                @change="onMicrophoneDeviceChange"
-            >
-              <el-option label="不捕获麦克风" value=""/>
-              <el-option
-                  v-for="item in microphones"
-                  :key="item.id"
-                  :label="item.name"
-                  :value="item.id"
-              />
-            </el-select>
-          </el-form-item>
-        </div>
-      </div>
-
-      <div class="setting-group">
-        <div class="group-title">录制质量</div>
+        <div class="group-title">录制校准</div>
         <div class="group-grid quality-grid">
-          <el-form-item label="默认帧率">
-            <el-input-number v-model="form.recordingDefaultFps" :max="120" :min="1"/>
-          </el-form-item>
-          <el-form-item label="视频码率 (kbps)">
-            <el-input-number v-model="form.recordingDefaultVideoBitrateKbps" :max="50000" :min="500" :step="500"/>
-          </el-form-item>
-          <el-form-item label="音频码率 (kbps)">
-            <el-input-number v-model="form.recordingDefaultAudioBitrateKbps" :max="512" :min="32" :step="16"/>
+          <el-form-item label="窗口录制音频同步补偿 (ms)">
+            <el-input-number v-model="form.recordingWindowAudioSyncAdvanceMs" :max="500" :min="0" :step="5"/>
+            <div class="form-hint">仅窗口录制（WGC）生效；值越大表示音频越向前对齐。</div>
           </el-form-item>
           <el-form-item label="最长录制时长 (分钟)">
             <el-input-number v-model="form.recordingMaxDurationMinutes" :max="1440" :min="1"/>
@@ -105,14 +64,7 @@
           <el-form-item label="录制完成自动打开目录">
             <el-switch v-model="form.recordingAutoOpenFolder" active-text="开启" inactive-text="关闭"/>
           </el-form-item>
-          <el-form-item label="录制选项">
-            <el-switch v-model="form.recordingCaptureCursor" active-text="捕获鼠标"/>
-          </el-form-item>
         </div>
-        <el-form-item label="工具栏内容保护">
-          <el-switch v-model="form.recordingToolbarContentProtected" active-text="开启" inactive-text="关闭"/>
-          <div class="form-hint">开启后录屏工具栏窗口将尝试禁止被录制与截屏</div>
-        </el-form-item>
       </div>
     </el-card>
   </el-form>
@@ -139,18 +91,7 @@ const {
   toggleRecording: toggleRecordingHotkey
 } = useShortcutRecorder(props.form, 'recordingToggleShortcut')
 
-const systemOutputs = ref([])
-const microphones = ref([])
-const systemOutputId = ref('')
 const effectiveOutputDir = ref('')
-
-const systemAudioSelectValue = computed(() => {
-  return props.form.recordingCaptureSystemAudio ? (systemOutputId.value || '') : ''
-})
-
-const microphoneSelectValue = computed(() => {
-  return props.form.recordingCaptureMicrophone ? (props.form.recordingMicrophoneDeviceId || '') : ''
-})
 
 const effectiveOutputDirDisplay = computed(() => {
   if (props.form.recordingOutputDir && props.form.recordingOutputDir.trim().length > 0) {
@@ -158,18 +99,6 @@ const effectiveOutputDirDisplay = computed(() => {
   }
   return effectiveOutputDir.value
 })
-
-const onSystemAudioDeviceChange = (deviceId) => {
-  const id = String(deviceId || '')
-  systemOutputId.value = id
-  props.form.recordingCaptureSystemAudio = id.length > 0
-}
-
-const onMicrophoneDeviceChange = (deviceId) => {
-  const id = String(deviceId || '')
-  props.form.recordingCaptureMicrophone = id.length > 0
-  props.form.recordingMicrophoneDeviceId = id
-}
 
 const openOutputDir = async () => {
   try {
@@ -198,32 +127,6 @@ onMounted(async () => {
   } catch (e) {
     effectiveOutputDir.value = ''
     ElMessage.error(`加载输出目录失败: ${String(e)}`)
-  }
-
-  try {
-    const outputs = await RecordingService.listSystemOutputs()
-    systemOutputs.value = Array.isArray(outputs) ? outputs : []
-    if (props.form.recordingCaptureSystemAudio) {
-      const preferred = systemOutputs.value.find((item) => item.isDefault)?.id || systemOutputs.value[0]?.id || ''
-      systemOutputId.value = preferred
-      props.form.recordingCaptureSystemAudio = preferred.length > 0
-    } else {
-      systemOutputId.value = ''
-    }
-  } catch (e) {
-    ElMessage.error(`加载系统音频设备失败: ${String(e)}`)
-  }
-
-  try {
-    const mics = await RecordingService.listAudioDevices()
-    microphones.value = Array.isArray(mics) ? mics : []
-    if (props.form.recordingCaptureMicrophone && !props.form.recordingMicrophoneDeviceId) {
-      props.form.recordingMicrophoneDeviceId =
-          microphones.value.find((item) => item.isDefault)?.id || microphones.value[0]?.id || ''
-      props.form.recordingCaptureMicrophone = props.form.recordingMicrophoneDeviceId.length > 0
-    }
-  } catch (e) {
-    ElMessage.error(`加载麦克风设备失败: ${String(e)}`)
   }
 })
 </script>

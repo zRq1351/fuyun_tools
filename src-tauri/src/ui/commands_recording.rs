@@ -19,6 +19,16 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl};
 use tauri_plugin_positioner::WindowExt;
 
+async fn run_blocking_command<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|e| format!("录屏任务执行失败: {}", e))?
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResizeRecordingToolbarRequest {
@@ -246,7 +256,11 @@ pub async fn start_recording(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<RecordingSessionInfo, String> {
-    recorder_service::start_recording(&app, state.inner().clone(), request).map_err(to_frontend_error_string)
+    let state_arc = state.inner().clone();
+    run_blocking_command(move || {
+        recorder_service::start_recording(&app, state_arc, request).map_err(to_frontend_error_string)
+    })
+        .await
 }
 
 #[tauri::command]
@@ -255,13 +269,25 @@ pub async fn stop_recording(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<RecordingStopResult, String> {
-    match recorder_service::stop_recording(&app, state.inner().clone(), request.clone()) {
-        Ok(result) => Ok(result),
+    let state_arc = state.inner().clone();
+    run_blocking_command(move || match recorder_service::stop_recording(&app, state_arc.clone(), request.clone()) {
+        Ok(result) => {
+            let auto_open_folder = {
+                let guard = state_arc.lock().expect("infallible mutex lock failed");
+                guard.settings.recording_auto_open_folder
+            };
+            if auto_open_folder {
+                if let Err(e) = recorder_service::open_recording_folder(&app, state_arc.clone()) {
+                    log::warn!("录制完成自动打开目录失败: {}", e);
+                }
+            }
+            Ok(result)
+        }
         Err(stop_err) => {
             let fallback_req = SessionRequest {
                 session_id: request.session_id.clone(),
             };
-            match recorder_service::cancel_recording(&app, state.inner().clone(), fallback_req) {
+            match recorder_service::cancel_recording(&app, state_arc.clone(), fallback_req) {
                 Ok(()) => {
                     log::warn!("stop_recording 失败，已自动执行 cancel_recording 兜底清理");
                     Err(to_frontend_error_string(stop_err))
@@ -279,7 +305,8 @@ pub async fn stop_recording(
                 }
             }
         }
-    }
+    })
+        .await
 }
 
 #[tauri::command]
@@ -288,7 +315,11 @@ pub async fn cancel_recording(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    recorder_service::cancel_recording(&app, state.inner().clone(), request).map_err(to_frontend_error_string)
+    let state_arc = state.inner().clone();
+    run_blocking_command(move || {
+        recorder_service::cancel_recording(&app, state_arc, request).map_err(to_frontend_error_string)
+    })
+        .await
 }
 
 #[tauri::command]
@@ -296,7 +327,8 @@ pub async fn pause_recording(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    recorder_service::pause_recording(&app, state.inner().clone()).map_err(to_frontend_error_string)
+    let state_arc = state.inner().clone();
+    run_blocking_command(move || recorder_service::pause_recording(&app, state_arc).map_err(to_frontend_error_string)).await
 }
 
 #[tauri::command]
@@ -304,7 +336,9 @@ pub async fn resume_recording(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    recorder_service::resume_recording(&app, state.inner().clone()).map_err(to_frontend_error_string)
+    let state_arc = state.inner().clone();
+    run_blocking_command(move || recorder_service::resume_recording(&app, state_arc).map_err(to_frontend_error_string))
+        .await
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -322,15 +356,19 @@ pub async fn update_recording_audio_capture(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    recorder_service::update_audio_capture(
-        &app,
-        state.inner().clone(),
-        request.capture_system_audio,
-        request.system_audio_device_id,
-        request.capture_microphone,
-        request.microphone_device_id,
-    )
+    let state_arc = state.inner().clone();
+    run_blocking_command(move || {
+        recorder_service::update_audio_capture(
+            &app,
+            state_arc,
+            request.capture_system_audio,
+            request.system_audio_device_id,
+            request.capture_microphone,
+            request.microphone_device_id,
+        )
         .map_err(to_frontend_error_string)
+    })
+        .await
 }
 
 #[tauri::command]
@@ -478,7 +516,11 @@ pub async fn run_recording_regression(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<RecordingRegressionReport, String> {
-    recorder_service::run_recording_regression(&app, state.inner().clone()).map_err(to_frontend_error_string)
+    let state_arc = state.inner().clone();
+    run_blocking_command(move || {
+        recorder_service::run_recording_regression(&app, state_arc).map_err(to_frontend_error_string)
+    })
+        .await
 }
 
 pub async fn toggle_recording_from_shortcut(

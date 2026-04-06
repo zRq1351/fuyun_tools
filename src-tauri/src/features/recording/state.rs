@@ -2,7 +2,7 @@ use crate::features::recording::types::RecordingRuntimeState;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::process::Child;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Instant;
@@ -56,6 +56,8 @@ pub struct RecordingRuntime {
     pub output_path_final: Option<PathBuf>,
     pub process: Option<Child>,
     pub wgc_stop_flag: Option<Arc<AtomicBool>>,
+    pub wgc_first_frame_elapsed_ms: Option<Arc<AtomicU64>>,
+    pub wgc_audio_sync_advance_ms: u64,
     pub wgc_thread: Option<JoinHandle<Result<(), String>>>,
     pub system_audio_wav_path: Option<PathBuf>,
     pub system_audio_stop_flag: Option<Arc<AtomicBool>>,
@@ -101,6 +103,8 @@ impl Default for RecordingRuntime {
             output_path_final: None,
             process: None,
             wgc_stop_flag: None,
+            wgc_first_frame_elapsed_ms: None,
+            wgc_audio_sync_advance_ms: 80,
             wgc_thread: None,
             system_audio_wav_path: None,
             system_audio_stop_flag: None,
@@ -169,6 +173,8 @@ impl RecordingRuntime {
         self.output_path_final = None;
         self.process = None;
         self.wgc_stop_flag = None;
+        self.wgc_first_frame_elapsed_ms = None;
+        self.wgc_audio_sync_advance_ms = 80;
         self.wgc_thread = None;
         self.system_audio_wav_path = None;
         self.system_audio_stop_flag = None;

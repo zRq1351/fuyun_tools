@@ -23,11 +23,24 @@ use crate::ui::commands_recording::{
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{show_clipboard_window, show_image_clipboard_window};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+static RECORDING_SHORTCUT_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+static RECORDING_SHORTCUT_LAST_TRIGGER_MS: AtomicU64 = AtomicU64::new(0);
+const RECORDING_SHORTCUT_MIN_INTERVAL_MS: u64 = 300;
+
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
     state.lock().expect("infallible mutex lock failed")
+}
+
+fn now_unix_ms_u64() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// 启动划词选择监听器
@@ -179,10 +192,20 @@ pub fn run() {
                 if let Err(e) = app.global_shortcut()
                     .on_shortcut(recording_hot_key.as_str(), move |_app, _shortcut, event| {
                         if let ShortcutState::Pressed = event.state {
+                            let now_ms = now_unix_ms_u64();
+                            let last_ms = RECORDING_SHORTCUT_LAST_TRIGGER_MS.load(Ordering::Relaxed);
+                            if last_ms > 0 && now_ms.saturating_sub(last_ms) < RECORDING_SHORTCUT_MIN_INTERVAL_MS {
+                                return;
+                            }
+                            if RECORDING_SHORTCUT_IN_FLIGHT.swap(true, Ordering::AcqRel) {
+                                return;
+                            }
+                            RECORDING_SHORTCUT_LAST_TRIGGER_MS.store(now_ms, Ordering::Relaxed);
                             let app_handle_inner = app_handle_clone_recording.clone();
                             let state_inner = state_clone_recording.clone();
                             tauri::async_runtime::spawn(async move {
                                 toggle_recording_from_shortcut(app_handle_inner, state_inner).await;
+                                RECORDING_SHORTCUT_IN_FLIGHT.store(false, Ordering::Release);
                             });
                         }
                     })

@@ -1967,6 +1967,12 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
             serde_json::Value::String(settings.recording_ffmpeg_download_url.clone()),
         );
         result.insert(
+            "recording_window_audio_sync_advance_ms".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                settings.recording_window_audio_sync_advance_ms,
+            )),
+        );
+        result.insert(
             "selection_enabled".to_string(),
             serde_json::Value::Bool(settings.selection_enabled),
         );
@@ -2162,6 +2168,7 @@ pub async fn save_app_settings(
     recording_max_duration_minutes: Option<u32>,
     recording_file_name_template: Option<String>,
     recording_ffmpeg_download_url: Option<String>,
+    recording_window_audio_sync_advance_ms: Option<u32>,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -2270,6 +2277,9 @@ pub async fn save_app_settings(
         } else {
             val.trim().to_string()
         };
+    }
+    if let Some(val) = recording_window_audio_sync_advance_ms {
+        settings.recording_window_audio_sync_advance_ms = val.clamp(0, 500);
     }
 
     // 处理快捷键更新
