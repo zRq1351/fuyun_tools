@@ -18,6 +18,7 @@
           <el-tooltip
               :offset="10"
               :show-after="300"
+              :disabled="!capsuleSettingsVisible"
               content="停止录制"
               effect="dark"
               placement="bottom"
@@ -36,6 +37,7 @@
               :content="capsuleTooltipContent"
               :offset="10"
               :show-after="300"
+              :disabled="!capsuleSettingsVisible"
               effect="dark"
               placement="bottom"
               popper-class="recording-toolbar-tooltip"
@@ -65,6 +67,7 @@
           <el-tooltip
               :offset="10"
               :show-after="300"
+              :disabled="!capsuleSettingsVisible"
               content="设置"
               effect="dark"
               placement="bottom"
@@ -83,6 +86,7 @@
           <el-tooltip
               :offset="10"
               :show-after="300"
+              :disabled="!capsuleSettingsVisible"
               content="关闭"
               effect="dark"
               placement="bottom"
@@ -101,7 +105,6 @@
             v-if="capsuleSettingsVisible"
             ref="capsuleSettingsPanelRef"
             class="capsule-settings-panel no-drag"
-            @wheel.prevent="onCapsulePanelWheel"
         >
           <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]">
             {{ inlineNotice }}
@@ -221,6 +224,7 @@
           <button
               class="toolbar-folder-btn no-drag"
               type="button"
+              :disabled="isOpeningFolder"
               @click="openRecordingFolder"
           >
             打开录制保存文件夹
@@ -293,7 +297,7 @@
 </template>
 
 <script setup>
-import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from "vue";
+import {computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch} from "vue";
 import zhCn from "element-plus/dist/locale/zh-cn";
 import {listen} from "@tauri-apps/api/event";
 import {invoke} from "@tauri-apps/api/core";
@@ -343,6 +347,7 @@ let unlistenRecordingRegionSelected = null;
 let keepSettingsOpenUntilTs = 0;
 let autoCollapseAfterStartPending = false;
 let lastElapsedUiSyncAt = 0;
+const isOpeningFolder = ref(false);
 
 const formatElapsedText = (ms) => {
   const totalSeconds = Math.floor(ms / 1000);
@@ -401,10 +406,27 @@ const canStop = computed(
         (currentRecordingState.value === "recording" || currentRecordingState.value === "paused"),
 );
 
+const measureCapsuleContentHeight = () => {
+  const barEl = document.querySelector(".bar");
+  const naturalHeight = Number(barEl?.scrollHeight || 0);
+  if (!Number.isFinite(naturalHeight) || naturalHeight <= 0) {
+    return null;
+  }
+  return Math.max(320, Math.ceil(naturalHeight + 2));
+};
+
 const syncCapsuleLayout = async () => {
   try {
     isToolbarCollapsed.value = true;
-    await RecordingService.resizeToolbar(false, capsuleSettingsVisible.value, true, "capsule", false);
+    let capsuleContentHeight = null;
+    if (capsuleSettingsVisible.value) {
+      await nextTick();
+      await new Promise((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+      capsuleContentHeight = measureCapsuleContentHeight();
+    }
+    await RecordingService.resizeToolbar(false, capsuleSettingsVisible.value, true, "capsule", false, capsuleContentHeight, null);
   } catch (_e) {
   }
 };
@@ -415,14 +437,6 @@ const refresh = async () => {
   state.state = data.state || state.state || "idle";
   state.sessionId = data.sessionId || null;
   state.elapsedMs = Number(data.elapsedMs || 0);
-};
-
-const onCapsulePanelWheel = (event) => {
-  const el = capsuleSettingsPanelRef.value;
-  if (!el) return;
-  const deltaY = Number(event.deltaY || 0);
-  if (!Number.isFinite(deltaY) || deltaY === 0) return;
-  el.scrollTop += deltaY;
 };
 
 const showInlineNotice = (message, type = "error") => {
@@ -608,11 +622,22 @@ const onWindowBlur = () => {
   capsuleSettingsVisible.value = false;
 };
 
+const onWindowViewportChanged = () => {
+  if (!capsuleSettingsVisible.value) return;
+  void syncCapsuleLayout();
+};
+
 const openRecordingFolder = async () => {
+  if (isOpeningFolder.value) return;
+  isOpeningFolder.value = true;
   try {
     await RecordingService.openFolder();
   } catch (e) {
     showInlineNotice(`打开录制保存文件夹失败: ${String(e)}`, "error");
+  } finally {
+    window.setTimeout(() => {
+      isOpeningFolder.value = false;
+    }, 800);
   }
 };
 
@@ -835,6 +860,7 @@ const onToolbarSettingChange = async (key, rawValue) => {
 
 onMounted(async () => {
   window.addEventListener("blur", onWindowBlur);
+  window.addEventListener("resize", onWindowViewportChanged);
   unlistenStateChanged = await listen("recording-state-changed", (event) => {
     const payload = event.payload || {};
     const incomingState = String(payload.state || state.state || "idle");
@@ -934,6 +960,14 @@ watch(capsuleSettingsVisible, () => {
   void syncCapsuleLayout();
 });
 
+watch(
+    () => [recordTargetType.value, captureSystemAudio.value, inlineNotice.value],
+    () => {
+      if (!capsuleSettingsVisible.value) return;
+      void syncCapsuleLayout();
+    },
+);
+
 watch(currentRecordingState, (next) => {
   void syncCapsuleLayout();
 });
@@ -944,6 +978,7 @@ onBeforeUnmount(() => {
     inlineNoticeTimer = null;
   }
   window.removeEventListener("blur", onWindowBlur);
+  window.removeEventListener("resize", onWindowViewportChanged);
   if (unlistenStateChanged) unlistenStateChanged();
   if (unlistenRecordingFinished) unlistenRecordingFinished();
   if (unlistenRecordingError) unlistenRecordingError();
@@ -1021,6 +1056,8 @@ body,
   font-size: 12px;
   line-height: 1.2;
   cursor: pointer;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .target-mode-btn:disabled {
@@ -1107,10 +1144,15 @@ body,
   justify-content: flex-start;
   align-items: stretch;
   padding: 12px;
+  height: auto;
   border-radius: 12px;
   background: rgba(17, 22, 32, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.12);
   clip-path: none;
+}
+
+.bar.bar-collapsed.bar-collapsed-settings-open .collapsed-shell {
+  height: auto;
 }
 
 .collapsed-shell {
@@ -1243,10 +1285,10 @@ body,
   padding-top: 12px;
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 0;
   gap: 10px;
-  overflow-y: auto;
+  overflow-y: hidden;
   overflow-x: hidden;
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -1414,6 +1456,7 @@ body,
 }
 
 .toolbar-folder-btn {
+  width: 100%;
   height: 30px;
   border: 1px solid #3a4a63;
   background: #233144;
@@ -1440,6 +1483,13 @@ body,
   justify-content: flex-start;
   gap: 12px;
   min-height: 34px;
+  width: 100%;
+  min-width: 0;
+}
+
+.toolbar-settings-row > :not(.toolbar-settings-label) {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .toolbar-settings-label {
@@ -1464,13 +1514,15 @@ body,
 }
 
 .toolbar-settings-row :deep(.el-input-number) {
-  width: 80px;
-  flex: 0 0 80px;
+  width: 100% !important;
+  flex: 1 1 auto;
+  min-width: 112px;
 }
 
 .toolbar-settings-row :deep(.el-select) {
-  width: 100px;
-  flex: 0 0 100px;
+  width: 100% !important;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .toolbar-settings-panel :deep(.el-input-number .el-input__inner) {

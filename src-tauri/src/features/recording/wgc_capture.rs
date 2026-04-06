@@ -55,12 +55,9 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
         })
     }
 
-    fn on_frame_arrived(&mut self, frame: &mut Frame, capture_control: InternalCaptureControl) -> Result<(), Self::Error> {
+    fn on_frame_arrived(&mut self, frame: &mut Frame, _capture_control: InternalCaptureControl) -> Result<(), Self::Error> {
         if let Some(encoder) = self.encoder.as_mut() {
             encoder.send_frame(frame).map_err(|e| e.to_string())?;
-        }
-        if self.flags.stop_flag.load(Ordering::SeqCst) {
-            capture_control.stop();
         }
         Ok(())
     }

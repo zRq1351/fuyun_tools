@@ -1843,182 +1843,193 @@ pub async fn show_ocr_text_window(
 
 #[tauri::command]
 pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, String> {
-    let settings = load_settings().map_err(|e| {
-        frontend_error(ErrorCode::ConfigError, "读取AI设置失败", e)
-    })?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = load_settings().map_err(|e| {
+            frontend_error(ErrorCode::ConfigError, "读取AI设置失败", e)
+        })?;
 
-    // 转换为HashMap格式，便于前端处理
-    let mut result = HashMap::new();
+        // 转换为HashMap格式，便于前端处理
+        let mut result = HashMap::new();
 
-    // 添加基本设置
-    result.insert(
-        "version".to_string(),
-        serde_json::Value::String(settings.version.clone()),
-    );
-    result.insert(
-        "max_items".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(settings.max_items)),
-    );
-    result.insert(
-        "text_max_items".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(settings.text_max_items)),
-    );
-    result.insert(
-        "image_max_items".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(settings.image_max_items)),
-    );
-    result.insert(
-        "image_disk_limit_mb".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(settings.image_disk_limit_mb)),
-    );
-    result.insert(
-        "ai_provider".to_string(),
-        serde_json::Value::String(settings.ai_provider.clone()),
-    );
-    result.insert(
-        "hot_key".to_string(),
-        serde_json::Value::String(settings.hot_key.clone()),
-    );
-    result.insert(
-        "text_clipboard_enabled".to_string(),
-        serde_json::Value::Bool(settings.text_clipboard_enabled),
-    );
-    result.insert(
-        "image_hot_key".to_string(),
-        serde_json::Value::String(settings.image_hot_key.clone()),
-    );
-    result.insert(
-        "image_clipboard_enabled".to_string(),
-        serde_json::Value::Bool(settings.image_clipboard_enabled),
-    );
-    result.insert(
-        "screenshot_hot_key".to_string(),
-        serde_json::Value::String(settings.screenshot_hot_key.clone()),
-    );
-    result.insert(
-        "screenshot_enabled".to_string(),
-        serde_json::Value::Bool(settings.screenshot_enabled),
-    );
-    result.insert(
-        "recording_hot_key".to_string(),
-        serde_json::Value::String(settings.recording_hot_key.clone()),
-    );
-    result.insert(
-        "recording_enabled".to_string(),
-        serde_json::Value::Bool(settings.recording_enabled),
-    );
-    result.insert(
-        "recording_default_fps".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(settings.recording_default_fps)),
-    );
-    result.insert(
-        "recording_default_video_bitrate_kbps".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(
-            settings.recording_default_video_bitrate_kbps,
-        )),
-    );
-    result.insert(
-        "recording_default_audio_bitrate_kbps".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(
-            settings.recording_default_audio_bitrate_kbps,
-        )),
-    );
-    result.insert(
-        "recording_capture_cursor".to_string(),
-        serde_json::Value::Bool(settings.recording_capture_cursor),
-    );
-    result.insert(
-        "recording_capture_system_audio".to_string(),
-        serde_json::Value::Bool(settings.recording_capture_system_audio),
-    );
-    result.insert(
-        "recording_capture_microphone".to_string(),
-        serde_json::Value::Bool(settings.recording_capture_microphone),
-    );
-    result.insert(
-        "recording_microphone_device_id".to_string(),
-        serde_json::Value::String(settings.recording_microphone_device_id.clone()),
-    );
-    result.insert(
-        "recording_output_dir".to_string(),
-        serde_json::Value::String(settings.recording_output_dir.clone()),
-    );
-    result.insert(
-        "recording_auto_open_folder".to_string(),
-        serde_json::Value::Bool(settings.recording_auto_open_folder),
-    );
-    result.insert(
-        "recording_toolbar_content_protected".to_string(),
-        serde_json::Value::Bool(settings.recording_toolbar_content_protected),
-    );
-    result.insert(
-        "recording_max_duration_minutes".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(
-            settings.recording_max_duration_minutes,
-        )),
-    );
-    result.insert(
-        "recording_file_name_template".to_string(),
-        serde_json::Value::String(settings.recording_file_name_template.clone()),
-    );
-    result.insert(
-        "recording_ffmpeg_download_url".to_string(),
-        serde_json::Value::String(settings.recording_ffmpeg_download_url.clone()),
-    );
-    result.insert(
-        "selection_enabled".to_string(),
-        serde_json::Value::Bool(settings.selection_enabled),
-    );
-    result.insert(
-        "grouped_items_protected_from_limit".to_string(),
-        serde_json::Value::Bool(settings.grouped_items_protected_from_limit),
-    );
-    result.insert(
-        "translation_prompt_template".to_string(),
-        serde_json::Value::String(settings.translation_prompt_template.clone()),
-    );
-    result.insert(
-        "explanation_prompt_template".to_string(),
-        serde_json::Value::String(settings.explanation_prompt_template.clone()),
-    );
-    result.insert(
-        "image_fill_verify_mode".to_string(),
-        serde_json::Value::String(settings.image_fill_verify_mode.clone()),
-    );
+        // 添加基本设置
+        result.insert(
+            "version".to_string(),
+            serde_json::Value::String(settings.version.clone()),
+        );
+        result.insert(
+            "max_items".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(settings.max_items)),
+        );
+        result.insert(
+            "text_max_items".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(settings.text_max_items)),
+        );
+        result.insert(
+            "image_max_items".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(settings.image_max_items)),
+        );
+        result.insert(
+            "image_disk_limit_mb".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(settings.image_disk_limit_mb)),
+        );
+        result.insert(
+            "ai_provider".to_string(),
+            serde_json::Value::String(settings.ai_provider.clone()),
+        );
+        result.insert(
+            "hot_key".to_string(),
+            serde_json::Value::String(settings.hot_key.clone()),
+        );
+        result.insert(
+            "text_clipboard_enabled".to_string(),
+            serde_json::Value::Bool(settings.text_clipboard_enabled),
+        );
+        result.insert(
+            "image_hot_key".to_string(),
+            serde_json::Value::String(settings.image_hot_key.clone()),
+        );
+        result.insert(
+            "image_clipboard_enabled".to_string(),
+            serde_json::Value::Bool(settings.image_clipboard_enabled),
+        );
+        result.insert(
+            "screenshot_hot_key".to_string(),
+            serde_json::Value::String(settings.screenshot_hot_key.clone()),
+        );
+        result.insert(
+            "screenshot_enabled".to_string(),
+            serde_json::Value::Bool(settings.screenshot_enabled),
+        );
+        result.insert(
+            "recording_hot_key".to_string(),
+            serde_json::Value::String(settings.recording_hot_key.clone()),
+        );
+        result.insert(
+            "recording_enabled".to_string(),
+            serde_json::Value::Bool(settings.recording_enabled),
+        );
+        result.insert(
+            "recording_default_fps".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(settings.recording_default_fps)),
+        );
+        result.insert(
+            "recording_default_video_bitrate_kbps".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                settings.recording_default_video_bitrate_kbps,
+            )),
+        );
+        result.insert(
+            "recording_default_audio_bitrate_kbps".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                settings.recording_default_audio_bitrate_kbps,
+            )),
+        );
+        result.insert(
+            "recording_capture_cursor".to_string(),
+            serde_json::Value::Bool(settings.recording_capture_cursor),
+        );
+        result.insert(
+            "recording_capture_system_audio".to_string(),
+            serde_json::Value::Bool(settings.recording_capture_system_audio),
+        );
+        result.insert(
+            "recording_capture_microphone".to_string(),
+            serde_json::Value::Bool(settings.recording_capture_microphone),
+        );
+        result.insert(
+            "recording_microphone_device_id".to_string(),
+            serde_json::Value::String(settings.recording_microphone_device_id.clone()),
+        );
+        result.insert(
+            "recording_output_dir".to_string(),
+            serde_json::Value::String(settings.recording_output_dir.clone()),
+        );
+        result.insert(
+            "recording_auto_open_folder".to_string(),
+            serde_json::Value::Bool(settings.recording_auto_open_folder),
+        );
+        result.insert(
+            "recording_toolbar_content_protected".to_string(),
+            serde_json::Value::Bool(settings.recording_toolbar_content_protected),
+        );
+        result.insert(
+            "recording_max_duration_minutes".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                settings.recording_max_duration_minutes,
+            )),
+        );
+        result.insert(
+            "recording_file_name_template".to_string(),
+            serde_json::Value::String(settings.recording_file_name_template.clone()),
+        );
+        result.insert(
+            "recording_ffmpeg_download_url".to_string(),
+            serde_json::Value::String(settings.recording_ffmpeg_download_url.clone()),
+        );
+        result.insert(
+            "selection_enabled".to_string(),
+            serde_json::Value::Bool(settings.selection_enabled),
+        );
+        result.insert(
+            "grouped_items_protected_from_limit".to_string(),
+            serde_json::Value::Bool(settings.grouped_items_protected_from_limit),
+        );
+        result.insert(
+            "translation_prompt_template".to_string(),
+            serde_json::Value::String(settings.translation_prompt_template.clone()),
+        );
+        result.insert(
+            "explanation_prompt_template".to_string(),
+            serde_json::Value::String(settings.explanation_prompt_template.clone()),
+        );
+        result.insert(
+            "image_fill_verify_mode".to_string(),
+            serde_json::Value::String(settings.image_fill_verify_mode.clone()),
+        );
 
-    // 处理provider_configs，将encrypted_api_key替换为解密后的api_key
-    let mut provider_configs_map: HashMap<String, serde_json::Value> = HashMap::new();
+        // 处理provider_configs，将encrypted_api_key替换为解密后的api_key
+        let mut provider_configs_map: HashMap<String, serde_json::Value> = HashMap::new();
 
-    let provider_keys: Vec<String> = settings.provider_configs.keys().cloned().collect();
+        let provider_keys: Vec<String> = settings.provider_configs.keys().cloned().collect();
 
-    for provider_key in provider_keys.iter() {
-        if let Ok(api_key) = settings.get_provider_api_key(provider_key) {
-            if let Some(decrypted_config) = settings.provider_configs.get(provider_key) {
-                let mut config_map = HashMap::new();
-                config_map.insert(
-                    "api_url".to_string(),
-                    serde_json::Value::String(decrypted_config.api_url.clone()),
-                );
-                config_map.insert(
-                    "model_name".to_string(),
-                    serde_json::Value::String(decrypted_config.model_name.clone()),
-                );
-                config_map.insert("api_key".to_string(), serde_json::Value::String(if api_key.is_empty() { "".to_string() } else { "********".to_string() }));
+        for provider_key in provider_keys.iter() {
+            if let Ok(api_key) = settings.get_provider_api_key(provider_key) {
+                if let Some(decrypted_config) = settings.provider_configs.get(provider_key) {
+                    let mut config_map = HashMap::new();
+                    config_map.insert(
+                        "api_url".to_string(),
+                        serde_json::Value::String(decrypted_config.api_url.clone()),
+                    );
+                    config_map.insert(
+                        "model_name".to_string(),
+                        serde_json::Value::String(decrypted_config.model_name.clone()),
+                    );
+                    config_map.insert(
+                        "api_key".to_string(),
+                        serde_json::Value::String(if api_key.is_empty() {
+                            "".to_string()
+                        } else {
+                            "********".to_string()
+                        }),
+                    );
 
-                provider_configs_map.insert(
-                    provider_key.clone(),
-                    serde_json::Value::Object(config_map.into_iter().collect()),
-                );
+                    provider_configs_map.insert(
+                        provider_key.clone(),
+                        serde_json::Value::Object(config_map.into_iter().collect()),
+                    );
+                }
             }
         }
-    }
 
-    result.insert(
-        "provider_configs".to_string(),
-        serde_json::Value::Object(provider_configs_map.into_iter().collect()),
-    );
+        result.insert(
+            "provider_configs".to_string(),
+            serde_json::Value::Object(provider_configs_map.into_iter().collect()),
+        );
 
-    Ok(result)
+        Ok(result)
+    })
+    .await
+    .map_err(|e| frontend_error(ErrorCode::SystemError, "读取AI设置任务执行失败", e.to_string()))?
 }
 
 #[cfg(debug_assertions)]

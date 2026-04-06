@@ -469,14 +469,18 @@ export const RecordingService = {
         openOverlay,
         compactMode = false,
         layoutMode = 'capsule',
-        recenter = false
+        recenter = false,
+        capsuleContentHeight = null,
+        capsuleContentWidth = null
     ) => invoke(IPC_COMMANDS.RESIZE_RECORDING_TOOLBAR, {
         request: {
             openSelect,
             openOverlay,
             compactMode,
             layoutMode,
-            recenter
+            recenter,
+            capsuleContentHeight,
+            capsuleContentWidth
         }
     }),
 };

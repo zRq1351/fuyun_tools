@@ -73,8 +73,28 @@ impl std::error::Error for AppError {}
 /// 方便的 Result 类型别名
 pub type AppResult<T> = Result<T, AppError>;
 
+fn compact_error_details(raw: &str) -> String {
+    let merged = raw
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    if merged.chars().count() <= 500 {
+        return merged;
+    }
+    let mut shortened = merged.chars().take(500).collect::<String>();
+    shortened.push_str("...");
+    shortened
+}
+
 pub fn to_frontend_error_string(err: AppError) -> String {
-    format!("[{}] {}", err.code, err.message)
+    match err.details.as_deref() {
+        Some(details) if !details.trim().is_empty() => {
+            format!("[{}] {}；{}", err.code, err.message, compact_error_details(details))
+        }
+        _ => format!("[{}] {}", err.code, err.message),
+    }
 }
 
 static PANIC_HOOK_INSTALLED: OnceLock<()> = OnceLock::new();

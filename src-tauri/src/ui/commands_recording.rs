@@ -30,6 +30,10 @@ pub struct ResizeRecordingToolbarRequest {
     pub layout_mode: String,
     #[serde(default)]
     pub recenter: bool,
+    #[serde(default)]
+    pub capsule_content_height: Option<u32>,
+    #[serde(default)]
+    pub capsule_content_width: Option<u32>,
 }
 
 fn default_layout_mode() -> String {
@@ -251,7 +255,31 @@ pub async fn stop_recording(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<RecordingStopResult, String> {
-    recorder_service::stop_recording(&app, state.inner().clone(), request).map_err(to_frontend_error_string)
+    match recorder_service::stop_recording(&app, state.inner().clone(), request.clone()) {
+        Ok(result) => Ok(result),
+        Err(stop_err) => {
+            let fallback_req = SessionRequest {
+                session_id: request.session_id.clone(),
+            };
+            match recorder_service::cancel_recording(&app, state.inner().clone(), fallback_req) {
+                Ok(()) => {
+                    log::warn!("stop_recording 失败，已自动执行 cancel_recording 兜底清理");
+                    Err(to_frontend_error_string(stop_err))
+                }
+                Err(cancel_err) => {
+                    log::warn!(
+                        "stop_recording 失败，且 cancel_recording 兜底清理也失败: {}",
+                        cancel_err
+                    );
+                    let merged_err = stop_err.with_details(format!(
+                        "自动兜底清理失败: {}",
+                        cancel_err
+                    ));
+                    Err(to_frontend_error_string(merged_err))
+                }
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -342,9 +370,10 @@ pub async fn list_recording_audio_processes() -> Result<Vec<AudioProcessItem>, S
 
 #[tauri::command]
 pub async fn open_recording_folder(
+    app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    recorder_service::open_recording_folder(state.inner().clone()).map_err(to_frontend_error_string)
+    recorder_service::open_recording_folder(&app, state.inner().clone()).map_err(to_frontend_error_string)
 }
 
 #[tauri::command]
@@ -373,18 +402,42 @@ pub async fn resize_recording_toolbar(
         return Ok(());
     };
     let prev_size = window.outer_size().ok();
+    let scale_factor = window.scale_factor().unwrap_or(1.0);
+    let max_width_logical = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .map(|monitor| {
+            let logical_w = ((monitor.size().width as f64) / scale_factor).floor() as u32;
+            logical_w.saturating_sub(16)
+        })
+        .unwrap_or(1200);
+    let max_height_logical = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .map(|monitor| {
+            let logical_h = ((monitor.size().height as f64) / scale_factor).floor() as u32;
+            logical_h.saturating_sub(16)
+        })
+        .unwrap_or(900);
     let is_capsule_layout = request.layout_mode.eq_ignore_ascii_case("capsule");
-    let (width, height) = if is_capsule_layout {
+    let (width_logical, height_logical) = if is_capsule_layout {
         if request.open_overlay {
-            (430, 730)
+            let preferred_width = request.capsule_content_width.unwrap_or(400);
+            let preferred_height = request.capsule_content_height.unwrap_or(730);
+            (
+                preferred_width.clamp(360, max_width_logical.max(360)),
+                preferred_height.clamp(320, max_height_logical.max(320)),
+            )
         } else {
-            (250, 40)
+            (180, 40)
         }
     } else if request.compact_mode {
         if request.open_overlay {
-            (430, 730)
+            (400, 730)
         } else {
-            (250, 40)
+            (180, 40)
         }
     } else {
         let h = if request.open_select {
@@ -396,10 +449,14 @@ pub async fn resize_recording_toolbar(
         };
         (530, h)
     };
-    let target_size = tauri::PhysicalSize::new(width, height);
+    let target_size = tauri::LogicalSize::new(width_logical as f64, height_logical as f64);
     let need_resize = prev_size
         .as_ref()
-        .map(|size| size.width != width as u32 || size.height != height as u32)
+        .map(|size| {
+            let prev_w = ((size.width as f64) / scale_factor).round() as u32;
+            let prev_h = ((size.height as f64) / scale_factor).round() as u32;
+            prev_w != width_logical || prev_h != height_logical
+        })
         .unwrap_or(true);
 
     if need_resize {
@@ -430,7 +487,7 @@ pub async fn toggle_recording_from_shortcut(
 ) {
     if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
         // Set compact size and position before showing to avoid opening flicker/jump.
-        let _ = window.set_size(tauri::PhysicalSize::new(250, 40));
+        let _ = window.set_size(tauri::LogicalSize::new(180.0, 40.0));
         move_window_top_center(&window);
         let _ = window.show();
         let _ = window.set_focus();
