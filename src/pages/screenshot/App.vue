@@ -1128,6 +1128,7 @@ function loadImageFromBase64(base64Data) {
   screenshotSrc.value = `data:image/png;base64,${base64Data}`
   const img = new Image()
   img.onload = () => {
+    resetAnnotationStateForNewImage()
     screenshotImg.value = img
     screenshotPixelCanvas = document.createElement('canvas')
     screenshotPixelCanvas.width = img.width
@@ -1145,6 +1146,17 @@ function loadImageFromBase64(base64Data) {
     isCaptureReady.value = false
   }
   img.src = `data:image/png;base64,${base64Data}`
+}
+
+function resetAnnotationStateForNewImage() {
+  finishInlineEdit()
+  selectedTextId.value = null
+  selectedShapeId.value = null
+  textItems.value = []
+  shapeItems.value = []
+  history.value = []
+  historyIndex.value = -1
+  currentDrawingSnapshot = null
 }
 
 function initCanvas() {
