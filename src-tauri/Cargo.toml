@@ -39,6 +39,11 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 screenshots = "0.8.10"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 windows-capture = "2.0.0-alpha.7"
+opencv = { version = "0.98.2", optional = true, default-features = false, features = ["clang-runtime", "imgproc"] }
+
+[features]
+default = []
+longshot-opencv = ["dep:opencv"]
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.9", features = ["winuser", "winnt", "minwindef", "windef", "libloaderapi", "winbase", "processthreadsapi", "handleapi", "tlhelp32", "shellapi"] }

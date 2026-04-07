@@ -38,13 +38,36 @@ jobs:
       - name: 安装 Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: 安装 LLVM（提供 clang/libclang）
+        run: choco install llvm --no-progress -y
+
+      - name: 安装 vcpkg 并集成
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git "$env:RUNNER_TEMP\vcpkg"
+          & "$env:RUNNER_TEMP\vcpkg\bootstrap-vcpkg.bat"
+          & "$env:RUNNER_TEMP\vcpkg\vcpkg.exe" integrate install
+
+      - name: 安装 OpenCV（x64-windows）
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP\vcpkg\vcpkg.exe" install opencv4:x64-windows
+
       - name: 构建并发布 Tauri 应用
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VCPKG_ROOT: ${{ runner.temp }}\vcpkg
+          VCPKGRS_TRIPLET: x64-windows
+          VCPKGRS_DYNAMIC: "1"
+          OpenCV_DIR: ${{ runner.temp }}\vcpkg\installed\x64-windows\share\opencv4
+          OPENCV_DISABLE_PROBES: environment,cmake,vcpkg_cmake,pkg_config
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+          CLANG_PATH: C:\Program Files\LLVM\bin\clang.exe
         with:
+          args: --features longshot-opencv
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
           releaseBody: |

@@ -13,6 +13,8 @@
     "screenshot",
     "recording",
     "recording_toolbar",
+    "longshot_toolbar",
+    "longshot_border",
     "selection_toolbar",
     "result_explanation",
     "result_translation",

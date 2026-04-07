@@ -85,6 +85,12 @@ export const IPC_COMMANDS = {
     GET_RECORDING_STATE: 'get_recording_state',
     GET_RECORDING_OUTPUT_DIR: 'get_recording_output_dir',
     GET_WINDOW_LIST: 'get_window_list',
+    START_MANUAL_LONGSHOT: 'start_manual_longshot',
+    PAUSE_MANUAL_LONGSHOT: 'pause_manual_longshot',
+    RESUME_MANUAL_LONGSHOT: 'resume_manual_longshot',
+    CANCEL_MANUAL_LONGSHOT: 'cancel_manual_longshot',
+    FINISH_MANUAL_LONGSHOT: 'finish_manual_longshot',
+    GET_MANUAL_LONGSHOT_STATUS: 'get_manual_longshot_status',
     LIST_RECORDING_AUDIO_DEVICES: 'list_recording_audio_devices',
     LIST_RECORDING_SYSTEM_OUTPUT_DEVICES: 'list_recording_system_output_devices',
     LIST_RECORDING_AUDIO_PROCESSES: 'list_recording_audio_processes',
@@ -486,4 +492,13 @@ export const RecordingService = {
             capsuleContentWidth
         }
     }),
+};
+
+export const ScreenshotService = {
+    startManualLongshot: (request) => invoke(IPC_COMMANDS.START_MANUAL_LONGSHOT, {request}),
+    pauseManualLongshot: (sessionId) => invoke(IPC_COMMANDS.PAUSE_MANUAL_LONGSHOT, {request: {sessionId}}),
+    resumeManualLongshot: (sessionId) => invoke(IPC_COMMANDS.RESUME_MANUAL_LONGSHOT, {request: {sessionId}}),
+    cancelManualLongshot: (sessionId) => invoke(IPC_COMMANDS.CANCEL_MANUAL_LONGSHOT, {request: {sessionId}}),
+    finishManualLongshot: (sessionId) => invoke(IPC_COMMANDS.FINISH_MANUAL_LONGSHOT, {request: {sessionId}}),
+    getManualLongshotStatus: (sessionId) => invoke(IPC_COMMANDS.GET_MANUAL_LONGSHOT_STATUS, {request: {sessionId}}),
 };

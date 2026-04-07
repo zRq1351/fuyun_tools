@@ -7,13 +7,13 @@
        @contextmenu.prevent="onContextMenu">
 
     <!-- 底层截图 -->
-    <img v-if="screenshotSrc" :src="screenshotSrc" class="bg-image" draggable="false"/>
+    <img v-if="screenshotSrc && !longshotOverlayOnly" :src="screenshotSrc" class="bg-image" draggable="false"/>
 
     <!-- 绘制层 (全屏尺寸，缩放适配高DPI) -->
-    <canvas ref="canvas" class="draw-canvas"></canvas>
+    <canvas v-show="!longshotOverlayOnly" ref="canvas" class="draw-canvas"></canvas>
 
     <!-- 遮罩与选区层 -->
-    <div :class="{ 'pointer-none': state === 'drawing' }" class="mask-layer">
+    <div :class="{ 'pointer-none': state === 'drawing', 'longshot-overlay-only': longshotOverlayOnly }" class="mask-layer">
       <!-- 智能窗口高亮 -->
       <div v-if="highlightedWindow && state === 'idle'" ref="windowHighlightRef" class="window-highlight">
         <div class="window-border"></div>
@@ -22,18 +22,18 @@
       <!-- 选区镂空及控制点 -->
       <div v-if="hasSelection || state === 'selecting'"
            ref="cutoutRef"
-           :class="{ 'is-active': state === 'selected' }"
+           :class="{ 'is-active': state === 'selected', 'longshot-running': longshotOverlayOnly }"
            class="cutout">
 
         <div :class="{ 'is-active': state !== 'drawing' }" class="cutout-border"></div>
 
-        <div v-if="state === 'selecting' || state === 'resizing' || state === 'moving' || state === 'selected'"
+        <div v-if="(state === 'selecting' || state === 'resizing' || state === 'moving' || state === 'selected') && !longshotOverlayOnly"
              class="size-info">
           {{ selectionInfoText }}
         </div>
 
         <!-- 8个调整控制点 -->
-        <template v-if="hasSelection && state !== 'drawing' && currentTool === 'select'">
+        <template v-if="hasSelection && state !== 'drawing' && currentTool === 'select' && !longshotOverlayOnly">
           <div class="handle tl" @mousedown.stop="startResize('tl', $event)"></div>
           <div class="handle tm" @mousedown.stop="startResize('tm', $event)"></div>
           <div class="handle tr" @mousedown.stop="startResize('tr', $event)"></div>
@@ -63,8 +63,45 @@
       </button>
     </div>
 
+    <div
+        v-if="regionSelectMode === 'manual_longshot' && hasSelection && state === 'selected' && !manualLongshotRunning"
+        :style="recordingConfirmStyle"
+        class="recording-region-confirm"
+        @mousedown.stop
+    >
+      <button
+          class="region-icon-btn primary"
+          :title="manualLongshotRunning ? '暂停长截图' : '开始长截图'"
+          @click.stop="toggleManualLongshotRunning"
+      >
+        <span v-if="manualLongshotRunning" style="font-size: 12px;">||</span>
+        <span v-else style="font-size: 12px;">▶</span>
+      </button>
+      <button
+          class="region-icon-btn"
+          title="完成长截图"
+          :disabled="!manualLongshotSessionId"
+          @click.stop="finishManualLongshotCapture"
+      >
+        <Check class="tool-icon-wrap"/>
+      </button>
+      <button class="region-icon-btn" title="重选区域" @click.stop="cancelSelection">
+        <RefreshLeft class="tool-icon-wrap"/>
+      </button>
+      <button class="region-icon-btn danger" title="取消长截图" @click.stop="cancelManualLongshotCapture(true)">
+        <X class="tool-icon-wrap"/>
+      </button>
+    </div>
+
+    <div
+        v-if="regionSelectMode === 'manual_longshot' && hasSelection && state === 'selected' && manualLongshotHint"
+        class="manual-longshot-hint"
+    >
+      {{ manualLongshotHint }}
+    </div>
+
     <!-- 浮动工具栏 -->
-    <div v-if="regionSelectMode !== 'recording_region' && hasSelection && (state === 'selected' || state === 'drawing')"
+    <div v-if="regionSelectMode === 'screenshot' && hasSelection && (state === 'selected' || state === 'drawing')"
          ref="floatingToolbarRef"
          class="floating-toolbar"
          @mousedown.stop>
@@ -74,6 +111,11 @@
                 :class="{ active: currentTool === tool.id }" :title="tool.name"
                 class="tool-btn" @click="setTool(tool.id)">
           <component :is="tool.icon" class="tool-icon-wrap"/>
+        </button>
+
+        <div class="divider"></div>
+        <button class="tool-btn longshot-entry-btn" title="长截图" @click="enterManualLongshotMode">
+          长截
         </button>
 
         <div class="divider"></div>
@@ -238,6 +280,7 @@
 import {computed, nextTick, onMounted, onUnmounted, reactive, ref, watchPostEffect} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
 import {emit} from '@tauri-apps/api/event'
+import {listen} from '@tauri-apps/api/event'
 import {Check, Circle, Pin, Square, X} from 'lucide-vue-next'
 import {
   Brush,
@@ -252,6 +295,7 @@ import {
   RefreshRight,
   TopRight
 } from '@element-plus/icons-vue'
+import {ScreenshotService} from '@/services/ipc.js'
 
 // 核心状态
 const state = ref('idle') // idle, selecting, selected, moving, resizing, drawing
@@ -321,6 +365,19 @@ const screenshotRequestInFlight = ref(false)
 const fallbackRequestedSessionIds = new Set()
 let fallbackRequestedWithoutSession = false
 let screenshotFallbackTimer = null
+const manualLongshotSessionId = ref(0)
+const manualLongshotRunning = ref(false)
+const manualLongshotHint = ref('')
+const longshotOverlayOnly = ref(false)
+const pendingLongshotBorderAnchor = ref(null)
+const longshotBorderShown = ref(false)
+let unlistenManualLongshotProgress = null
+let unlistenManualLongshotLifecycle = null
+let unlistenManualLongshotFirstFrame = null
+let unlistenManualLongshotShortcutFinished = null
+let unlistenManualLongshotShortcutCanceled = null
+let unlistenManualLongshotShortcutPaused = null
+let unlistenManualLongshotShortcutResumed = null
 
 // 物理像素比例
 const dpr = window.devicePixelRatio || 1
@@ -488,19 +545,126 @@ watchPostEffect(() => {
 })
 
 // 初始化与通信
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('screenshot-data', handleScreenshotData)
   window.addEventListener('start-region-select', handleStartRegionSelect)
   window.addEventListener('screenshot-reset', handleScreenshotReset)
   document.addEventListener('keydown', handleKeyDown)
+  unlistenManualLongshotProgress = await listen('manual-longshot-progress', (event) => {
+    const payload = event.payload || {}
+    const sessionId = Number(payload.sessionId || 0)
+    if (manualLongshotSessionId.value > 0 && sessionId !== manualLongshotSessionId.value) return
+    const stitchedHeight = Number(payload.stitchedHeight || 0)
+    const frameCount = Number(payload.frameCount || 0)
+    const dropped = Number(payload.droppedFrames || 0)
+    const confidence = Number(payload.lastConfidence || 0)
+    manualLongshotHint.value = `长截图进行中：高度 ${stitchedHeight}px，帧 ${frameCount}，丢帧 ${dropped}，置信度 ${confidence.toFixed(2)}`
+    if (!longshotBorderShown.value && frameCount >= 1 && pendingLongshotBorderAnchor.value) {
+      invoke('show_longshot_border', {anchor: pendingLongshotBorderAnchor.value}).catch(() => {
+      })
+      longshotBorderShown.value = true
+    }
+  })
+  unlistenManualLongshotFirstFrame = await listen('manual-longshot-first-frame', (event) => {
+    const payload = event.payload || {}
+    const sessionId = Number(payload.sessionId || 0)
+    if (manualLongshotSessionId.value > 0 && sessionId !== manualLongshotSessionId.value) return
+    if (pendingLongshotBorderAnchor.value && !longshotBorderShown.value) {
+      invoke('show_longshot_border', {anchor: pendingLongshotBorderAnchor.value}).catch(() => {
+      })
+      longshotBorderShown.value = true
+    }
+  })
+  unlistenManualLongshotLifecycle = await listen('manual-longshot-lifecycle', (event) => {
+    const payload = event.payload || {}
+    const sessionId = Number(payload.sessionId || 0)
+    if (manualLongshotSessionId.value > 0 && sessionId !== manualLongshotSessionId.value) return
+    const stateName = String(payload.state || '')
+    if (stateName === 'started' || stateName === 'resumed') {
+      manualLongshotRunning.value = true
+      if (!manualLongshotHint.value) {
+        manualLongshotHint.value = '请在选区内手动滚动，完成后点击勾号'
+      }
+    } else if (stateName === 'paused') {
+      manualLongshotRunning.value = false
+      manualLongshotHint.value = '长截图已暂停，点击播放继续'
+    } else if (stateName === 'ended') {
+      manualLongshotRunning.value = false
+      manualLongshotHint.value = '长截图已完成'
+    } else if (stateName === 'canceled') {
+      manualLongshotRunning.value = false
+      manualLongshotSessionId.value = 0
+      manualLongshotHint.value = '长截图已取消'
+    } else if (stateName === 'error') {
+      manualLongshotRunning.value = false
+      manualLongshotHint.value = `长截图失败：${String(payload.message || '未知错误')}`
+    }
+  })
+  unlistenManualLongshotShortcutFinished = await listen('manual-longshot-shortcut-finished', (event) => {
+    const payload = event.payload || {}
+    try {
+      applyManualLongshotResult(payload)
+    } catch (error) {
+      manualLongshotHint.value = `完成长截图失败：${String(error)}`
+    }
+  })
+  unlistenManualLongshotShortcutCanceled = await listen('manual-longshot-shortcut-canceled', () => {
+    manualLongshotRunning.value = false
+    manualLongshotSessionId.value = 0
+    longshotOverlayOnly.value = false
+    pendingLongshotBorderAnchor.value = null
+    longshotBorderShown.value = false
+    manualLongshotHint.value = '长截图已取消'
+    regionSelectMode.value = 'screenshot'
+    invoke('set_screenshot_window_visible', {visible: true}).catch(() => {})
+    invoke('hide_longshot_border').catch(() => {})
+    invoke('hide_longshot_toolbar').catch(() => {})
+  })
+  unlistenManualLongshotShortcutPaused = await listen('manual-longshot-shortcut-paused', () => {
+    manualLongshotRunning.value = false
+    manualLongshotHint.value = '已暂停（可点击按钮操作）。继续: Ctrl+Alt+P，完成: Ctrl+Alt+Enter，取消: Ctrl+Alt+Backspace'
+  })
+  unlistenManualLongshotShortcutResumed = await listen('manual-longshot-shortcut-resumed', () => {
+    manualLongshotRunning.value = true
+    manualLongshotHint.value = '已恢复滚动采样。暂停/恢复: Ctrl+Alt+P，完成: Ctrl+Alt+Enter，取消: Ctrl+Alt+Backspace'
+  })
   consumeBootPayload()
 })
 
 onUnmounted(() => {
+  cancelManualLongshotCapture(false)
   window.removeEventListener('screenshot-data', handleScreenshotData)
   window.removeEventListener('start-region-select', handleStartRegionSelect)
   window.removeEventListener('screenshot-reset', handleScreenshotReset)
   document.removeEventListener('keydown', handleKeyDown)
+  if (typeof unlistenManualLongshotProgress === 'function') {
+    unlistenManualLongshotProgress()
+    unlistenManualLongshotProgress = null
+  }
+  if (typeof unlistenManualLongshotLifecycle === 'function') {
+    unlistenManualLongshotLifecycle()
+    unlistenManualLongshotLifecycle = null
+  }
+  if (typeof unlistenManualLongshotFirstFrame === 'function') {
+    unlistenManualLongshotFirstFrame()
+    unlistenManualLongshotFirstFrame = null
+  }
+  if (typeof unlistenManualLongshotShortcutFinished === 'function') {
+    unlistenManualLongshotShortcutFinished()
+    unlistenManualLongshotShortcutFinished = null
+  }
+  if (typeof unlistenManualLongshotShortcutCanceled === 'function') {
+    unlistenManualLongshotShortcutCanceled()
+    unlistenManualLongshotShortcutCanceled = null
+  }
+  if (typeof unlistenManualLongshotShortcutPaused === 'function') {
+    unlistenManualLongshotShortcutPaused()
+    unlistenManualLongshotShortcutPaused = null
+  }
+  if (typeof unlistenManualLongshotShortcutResumed === 'function') {
+    unlistenManualLongshotShortcutResumed()
+    unlistenManualLongshotShortcutResumed = null
+  }
   if (screenshotFallbackTimer) {
     window.clearTimeout(screenshotFallbackTimer)
     screenshotFallbackTimer = null
@@ -508,6 +672,7 @@ onUnmounted(() => {
 })
 
 function handleScreenshotReset() {
+  cancelManualLongshotCapture(false)
   screenshotSrc.value = ''
   screenshotImg.value = null
   isCaptureReady.value = false
@@ -535,6 +700,9 @@ function handleScreenshotReset() {
   screenshotRequestInFlight.value = false
   fallbackRequestedSessionIds.clear()
   fallbackRequestedWithoutSession = false
+  manualLongshotSessionId.value = 0
+  manualLongshotRunning.value = false
+  manualLongshotHint.value = ''
 }
 
 function consumeBootPayload() {
@@ -684,6 +852,119 @@ function handleStartRegionSelect(event) {
   rect.width = 0
   rect.height = 0
   regionConfirmAnchor.ready = false
+  manualLongshotSessionId.value = 0
+  manualLongshotRunning.value = false
+  manualLongshotHint.value = regionSelectMode.value === 'manual_longshot'
+      ? '先框选滚动区域，再点击播放开始采样'
+      : ''
+}
+
+async function toggleManualLongshotRunning() {
+  try {
+    if (manualLongshotSessionId.value <= 0) {
+      const region = getGlobalSelectionRect()
+      const result = await ScreenshotService.startManualLongshot({
+        region,
+        fps: 10,
+        minConfidence: 0.65,
+        maxDurationSec: 120,
+        previewIntervalMs: 300
+      })
+      const sid = Number(result?.sessionId || 0)
+      if (sid > 0) {
+        manualLongshotSessionId.value = sid
+        manualLongshotRunning.value = true
+        longshotOverlayOnly.value = false
+        pendingLongshotBorderAnchor.value = region
+        longshotBorderShown.value = false
+        await invoke('show_longshot_toolbar', {anchor: region})
+        await invoke('set_screenshot_window_visible', {visible: false})
+        manualLongshotHint.value = '长截图已开始，可直接看到目标窗口滚动'
+      }
+      return
+    }
+    if (manualLongshotRunning.value) {
+      await ScreenshotService.pauseManualLongshot(manualLongshotSessionId.value)
+      manualLongshotRunning.value = false
+      manualLongshotHint.value = '长截图已暂停，点击播放继续'
+    } else {
+      await ScreenshotService.resumeManualLongshot(manualLongshotSessionId.value)
+      manualLongshotRunning.value = true
+      manualLongshotHint.value = '继续滚动中，已切到悬浮预览窗'
+    }
+  } catch (error) {
+    await invoke('set_screenshot_window_visible', {visible: true}).catch(() => {})
+    await invoke('hide_longshot_border').catch(() => {})
+    await invoke('hide_longshot_toolbar').catch(() => {})
+    longshotOverlayOnly.value = false
+    pendingLongshotBorderAnchor.value = null
+    longshotBorderShown.value = false
+    manualLongshotRunning.value = false
+    manualLongshotHint.value = `长截图操作失败：${String(error)}`
+  }
+}
+
+async function finishManualLongshotCapture() {
+  if (manualLongshotSessionId.value <= 0) return
+  try {
+    await invoke('set_screenshot_window_visible', {visible: true})
+    await invoke('hide_longshot_border')
+    await invoke('hide_longshot_toolbar')
+    pendingLongshotBorderAnchor.value = null
+    longshotBorderShown.value = false
+    const result = await ScreenshotService.finishManualLongshot(manualLongshotSessionId.value)
+    applyManualLongshotResult(result || {})
+  } catch (error) {
+    await invoke('set_screenshot_window_visible', {visible: true}).catch(() => {})
+    await invoke('hide_longshot_border').catch(() => {})
+    await invoke('hide_longshot_toolbar').catch(() => {})
+    manualLongshotHint.value = `完成长截图失败：${String(error)}`
+  }
+}
+
+function cancelManualLongshotCapture(updateHint = true) {
+  const sid = manualLongshotSessionId.value
+  manualLongshotRunning.value = false
+  manualLongshotSessionId.value = 0
+  pendingLongshotBorderAnchor.value = null
+  longshotBorderShown.value = false
+  invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
+  })
+  invoke('hide_longshot_border').catch(() => {
+  })
+  invoke('hide_longshot_toolbar').catch(() => {
+  })
+  if (sid > 0) {
+    ScreenshotService.cancelManualLongshot(sid).catch(() => {
+    })
+  }
+  if (updateHint) {
+    manualLongshotHint.value = '长截图已取消'
+  }
+}
+
+function applyManualLongshotResult(result) {
+  const base64 = String(result?.pngBase64 || '')
+  if (!base64) {
+    throw new Error('未获取到长截图结果')
+  }
+  loadImageFromBase64(base64)
+  regionSelectMode.value = 'screenshot'
+  state.value = 'selected'
+  rect.x = 0
+  rect.y = 0
+  rect.width = window.innerWidth
+  rect.height = window.innerHeight
+  manualLongshotSessionId.value = 0
+  manualLongshotRunning.value = false
+  longshotOverlayOnly.value = false
+  manualLongshotHint.value = ''
+  invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
+  })
+  invoke('hide_longshot_border').catch(() => {
+  })
+  invoke('hide_longshot_toolbar').catch(() => {
+  })
 }
 
 async function commitRecordingRegionSelection() {
@@ -971,6 +1252,9 @@ function onContextMenu(e) {
 }
 
 function cancelSelection() {
+  if (manualLongshotSessionId.value > 0) {
+    cancelManualLongshotCapture(true)
+  }
   finishInlineEdit()
   selectedTextId.value = null
   selectedShapeId.value = null
@@ -1058,6 +1342,37 @@ function setTool(toolId) {
   if (toolId !== 'picker') {
     pickerCopyHint.value = 'Shift切换 RGB/# · Ctrl复制'
   }
+}
+
+function enterManualLongshotMode() {
+  cancelManualLongshotCapture(false)
+  finishInlineEdit()
+  regionSelectMode.value = 'manual_longshot'
+  manualLongshotRunning.value = false
+  manualLongshotSessionId.value = 0
+  currentTool.value = 'select'
+  selectedTextId.value = null
+  selectedShapeId.value = null
+  const keepCurrentSelection = hasSelection.value && state.value === 'selected'
+  if (keepCurrentSelection) {
+    // 复用当前选区，避免切换长截图后再次框选
+    manualLongshotHint.value = '已切换长截图，点击播放开始采样'
+    state.value = 'selected'
+    return
+  }
+  // 无有效选区时再进入重新框选流程
+  manualLongshotHint.value = '先框选滚动区域，再点击播放开始采样'
+  state.value = 'idle'
+  textItems.value = []
+  shapeItems.value = []
+  history.value = []
+  historyIndex.value = -1
+  rect.x = 0
+  rect.y = 0
+  rect.width = 0
+  rect.height = 0
+  regionConfirmAnchor.ready = false
+  initCanvas()
 }
 
 // 绘制相关
@@ -2005,6 +2320,7 @@ async function saveAndClose() {
 
 async function close() {
   try {
+    cancelManualLongshotCapture(false)
     await invoke('close_screenshot_window')
   } catch (error) {
     console.error('关闭窗口失败:', error)
@@ -2020,6 +2336,11 @@ function handleKeyDown(event) {
     }
     return
   }
+  if (regionSelectMode.value === 'manual_longshot' && event.key === 'Enter') {
+    event.preventDefault()
+    finishManualLongshotCapture()
+    return
+  }
   if (editingTextId.value !== null) {
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -2028,6 +2349,11 @@ function handleKeyDown(event) {
     return
   }
   if (event.key === 'Escape') {
+    if (regionSelectMode.value === 'manual_longshot' && manualLongshotSessionId.value > 0) {
+      event.preventDefault()
+      cancelManualLongshotCapture(true)
+      return
+    }
     if (state.value === 'selected' || state.value === 'selecting') {
       cancelSelection()
     } else {
@@ -2121,6 +2447,22 @@ function handleKeyDown(event) {
   border-color: rgba(245, 108, 108, 0.52);
 }
 
+.manual-longshot-hint {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 2101;
+  background: rgba(18, 24, 35, 0.86);
+  border: 1px solid rgba(100, 163, 255, 0.45);
+  color: #e5efff;
+  font-size: 12px;
+  line-height: 1.4;
+  border-radius: 8px;
+  padding: 8px 10px;
+  backdrop-filter: blur(3px);
+  max-width: min(620px, calc(100vw - 32px));
+}
+
 .bg-image {
   position: absolute;
   top: 0;
@@ -2154,10 +2496,18 @@ function handleKeyDown(event) {
   pointer-events: none; /* 绘制模式下，遮罩不阻挡鼠标事件 */
 }
 
+.mask-layer.longshot-overlay-only {
+  pointer-events: none;
+}
+
 .cutout {
   position: absolute;
   /* 使用巨大阴影实现外围遮罩效果 */
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
+}
+
+.cutout.longshot-running {
+  box-shadow: none;
 }
 
 .cutout.is-active {
@@ -2175,6 +2525,11 @@ function handleKeyDown(event) {
 
 .cutout-border.is-active {
   border: 2px solid #00aaff;
+}
+
+.cutout.longshot-running .cutout-border {
+  border: 2px solid #4cb7ff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 10px rgba(76, 183, 255, 0.5);
 }
 
 .size-info {
@@ -2345,6 +2700,12 @@ function handleKeyDown(event) {
   width: 26px;
   height: 26px;
   font-size: 12px;
+}
+
+.longshot-entry-btn {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
 }
 
 .divider {

@@ -42,6 +42,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_positioner::WindowExt;
 
 static NEXT_SCREENSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_PINNED_IMAGE_WINDOW_ID: AtomicU64 = AtomicU64::new(1);
@@ -2944,6 +2945,12 @@ pub async fn check_previews_ready(
 // 截图相关命令
 // ========================================
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManualLongshotSessionRequest {
+    session_id: u64,
+}
+
 /// 开始截图（全屏）
 #[tauri::command]
 pub async fn start_screenshot(
@@ -2982,6 +2989,69 @@ pub async fn start_screenshot(
             }))
         }
     }
+}
+
+#[tauri::command]
+pub async fn start_manual_longshot(
+    request: crate::features::screenshot::longshot::StartManualLongshotRequest,
+    app: AppHandle,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<serde_json::Value, String> {
+    if !is_screenshot_feature_enabled(state.inner()) {
+        return Err(frontend_error(
+            ErrorCode::ValidationError,
+            "截图功能已停用",
+            "screenshot feature disabled",
+        ));
+    }
+    // 在真正启动采样前先隐藏截图窗，避免首帧录入UI边框
+    if let Some(window) = app.get_webview_window("screenshot") {
+        let _ = window.hide();
+    }
+    if let Some(window) = app.get_webview_window("longshot_border") {
+        let _ = window.hide();
+    }
+    std::thread::sleep(std::time::Duration::from_millis(90));
+    crate::features::screenshot::longshot::start_manual_longshot(app, request)
+}
+
+#[tauri::command]
+pub async fn pause_manual_longshot(
+    request: ManualLongshotSessionRequest,
+    app: AppHandle,
+) -> Result<(), String> {
+    crate::features::screenshot::longshot::pause_manual_longshot(request.session_id, app)
+}
+
+#[tauri::command]
+pub async fn resume_manual_longshot(
+    request: ManualLongshotSessionRequest,
+    app: AppHandle,
+) -> Result<(), String> {
+    crate::features::screenshot::longshot::resume_manual_longshot(request.session_id, app)
+}
+
+#[tauri::command]
+pub async fn cancel_manual_longshot(
+    request: ManualLongshotSessionRequest,
+    app: AppHandle,
+) -> Result<(), String> {
+    crate::features::screenshot::longshot::cancel_manual_longshot(request.session_id, app)
+}
+
+#[tauri::command]
+pub async fn finish_manual_longshot(
+    request: ManualLongshotSessionRequest,
+    app: AppHandle,
+) -> Result<crate::features::screenshot::longshot::ManualLongshotFinishResult, String> {
+    crate::features::screenshot::longshot::finish_manual_longshot(request.session_id, app)
+}
+
+#[tauri::command]
+pub async fn get_manual_longshot_status(
+    request: ManualLongshotSessionRequest,
+) -> Result<crate::features::screenshot::longshot::ManualLongshotStatus, String> {
+    crate::features::screenshot::longshot::get_manual_longshot_status(request.session_id)
 }
 
 #[tauri::command]
@@ -3240,6 +3310,348 @@ pub async fn set_screenshot_clipboard_link_once(linked: bool) -> Result<(), Stri
         }
     }
     capture::set_allow_image_clipboard_once(linked);
+    Ok(())
+}
+
+fn set_screenshot_window_passthrough_internal(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("screenshot") else {
+        return Ok(());
+    };
+    window
+        .set_ignore_cursor_events(enabled)
+        .map_err(|e| format!("设置截图窗口输入穿透失败: {}", e))?;
+    if !enabled {
+        let _ = window.set_focus();
+    }
+    Ok(())
+}
+
+fn set_screenshot_window_visibility_internal(app: &AppHandle, visible: bool) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("screenshot") else {
+        return Ok(());
+    };
+    if visible {
+        let _ = window.show();
+        let _ = window.set_focus();
+    } else {
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
+fn ensure_longshot_toolbar_window(app: &AppHandle) -> Result<(tauri::WebviewWindow, bool), String> {
+    let label = "longshot_toolbar";
+    if let Some(existing) = app.get_webview_window(label) {
+        return Ok((existing, false));
+    }
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App("longshot_toolbar.html".into()),
+    )
+    .title("长截图工具栏")
+    .visible(false)
+    .resizable(false)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .inner_size(320.0, 180.0)
+    .build()
+    .map_err(|e| format!("创建长截图工具栏窗口失败: {}", e))?;
+    Ok((window, true))
+}
+
+fn ensure_longshot_border_window(app: &AppHandle) -> Result<(tauri::WebviewWindow, bool), String> {
+    let label = "longshot_border";
+    if let Some(existing) = app.get_webview_window(label) {
+        return Ok((existing, false));
+    }
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App("longshot_border.html".into()),
+    )
+    .title("长截图边框")
+    .visible(false)
+    .resizable(false)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .build()
+    .map_err(|e| format!("创建长截图边框窗口失败: {}", e))?;
+    let _ = window.set_ignore_cursor_events(true);
+    Ok((window, true))
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LongshotToolbarAnchor {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+fn place_longshot_toolbar_near_anchor(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+    anchor: Option<LongshotToolbarAnchor>,
+) {
+    let Some(anchor) = anchor else {
+        let _ = window.move_window(tauri_plugin_positioner::Position::TopRight);
+        return;
+    };
+    let (toolbar_w, toolbar_h) = (260i32, 430i32);
+    let default_x = anchor.x + anchor.width as i32 + 12;
+    let default_y = anchor.y + (anchor.height as i32 / 2) - (toolbar_h / 2);
+    let Some(screen_window) = app.get_webview_window("screenshot") else {
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
+            default_x, default_y,
+        )));
+        return;
+    };
+    let Ok(Some(monitor)) = screen_window.current_monitor() else {
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
+            default_x, default_y,
+        )));
+        return;
+    };
+    let mon_pos = monitor.position();
+    let mon_size = monitor.size();
+    let min_x = mon_pos.x + 8;
+    let max_x = mon_pos.x + mon_size.width as i32 - toolbar_w - 8;
+    let min_y = mon_pos.y + 8;
+    let max_y = mon_pos.y + mon_size.height as i32 - toolbar_h - 8;
+
+    let mut x = default_x;
+    if x > max_x {
+        x = anchor.x - toolbar_w - 12;
+    }
+    if x < min_x {
+        x = min_x;
+    }
+    let y = default_y.clamp(min_y, max_y);
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)));
+}
+
+#[tauri::command]
+pub async fn set_screenshot_input_passthrough(enabled: bool, app: AppHandle) -> Result<(), String> {
+    set_screenshot_window_passthrough_internal(&app, enabled)
+}
+
+#[tauri::command]
+pub async fn set_screenshot_window_visible(visible: bool, app: AppHandle) -> Result<(), String> {
+    set_screenshot_window_visibility_internal(&app, visible)
+}
+
+#[tauri::command]
+pub async fn show_longshot_toolbar(
+    app: AppHandle,
+    anchor: Option<LongshotToolbarAnchor>,
+) -> Result<(), String> {
+    let (window, _created) = ensure_longshot_toolbar_window(&app)?;
+    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+        width: 260.0,
+        height: 430.0,
+    }));
+    place_longshot_toolbar_near_anchor(&app, &window, anchor);
+    let _ = window.show();
+    let _ = window.set_focus();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn show_longshot_border(
+    app: AppHandle,
+    anchor: LongshotToolbarAnchor,
+) -> Result<(), String> {
+    let (window, _created) = ensure_longshot_border_window(&app)?;
+    // 边框窗外扩，确保边框不进入实际采集区域
+    const BORDER_OUTSET: i32 = 2;
+    let width = (anchor.width as i32 + BORDER_OUTSET * 2).max(2) as u32;
+    let height = (anchor.height as i32 + BORDER_OUTSET * 2).max(2) as u32;
+    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
+        anchor.x - BORDER_OUTSET,
+        anchor.y - BORDER_OUTSET,
+    )));
+    let _ = window.show();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn hide_longshot_border(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("longshot_border") {
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn snap_longshot_toolbar_window(app: AppHandle) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("longshot_toolbar") else {
+        return Ok(());
+    };
+    let Ok(pos) = window.outer_position() else {
+        return Ok(());
+    };
+    let Ok(size) = window.outer_size() else {
+        return Ok(());
+    };
+    let Ok(Some(monitor)) = window.current_monitor() else {
+        return Ok(());
+    };
+    let mon_pos = monitor.position();
+    let mon_size = monitor.size();
+    let left = mon_pos.x + 8;
+    let right = mon_pos.x + mon_size.width as i32 - size.width as i32 - 8;
+    let top = mon_pos.y + 8;
+    let threshold = 28;
+
+    let mut next_x = pos.x;
+    let mut next_y = pos.y;
+    if (pos.x - left).abs() <= threshold {
+        next_x = left;
+    } else if (pos.x - right).abs() <= threshold {
+        next_x = right;
+    }
+    if (pos.y - top).abs() <= threshold {
+        next_y = top;
+    }
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
+        next_x, next_y,
+    )));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn hide_longshot_toolbar(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("longshot_toolbar") {
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn longshot_toolbar_action(action: String, app: AppHandle) -> Result<(), String> {
+    let Some(session_id) = crate::features::screenshot::longshot::active_manual_longshot_session_id() else {
+        return Ok(());
+    };
+    match action.as_str() {
+        "pause" => {
+            crate::features::screenshot::longshot::pause_manual_longshot(session_id, app.clone())?;
+        }
+        "resume" => {
+            crate::features::screenshot::longshot::resume_manual_longshot(session_id, app.clone())?;
+        }
+        "finish" => {
+            let result =
+                crate::features::screenshot::longshot::finish_manual_longshot(session_id, app.clone())?;
+            let _ = app.emit(
+                "manual-longshot-shortcut-finished",
+                serde_json::json!({
+                    "sessionId": result.session_id,
+                    "pngBase64": result.png_base64,
+                    "width": result.width,
+                    "height": result.height,
+                    "frameCount": result.frame_count,
+                    "droppedFrames": result.dropped_frames,
+                }),
+            );
+            let _ = hide_longshot_border(app.clone()).await;
+            let _ = hide_longshot_toolbar(app.clone()).await;
+            let _ = set_screenshot_window_visibility_internal(&app, true);
+            return Ok(());
+        }
+        "cancel" => {
+            crate::features::screenshot::longshot::cancel_manual_longshot(session_id, app.clone())?;
+            let _ = app.emit(
+                "manual-longshot-shortcut-canceled",
+                serde_json::json!({
+                    "sessionId": session_id
+                }),
+            );
+            let _ = hide_longshot_border(app.clone()).await;
+            let _ = hide_longshot_toolbar(app.clone()).await;
+            let _ = set_screenshot_window_visibility_internal(&app, true);
+            return Ok(());
+        }
+        _ => return Err("不支持的长截图操作".to_string()),
+    }
+    Ok(())
+}
+
+pub async fn finish_manual_longshot_from_shortcut(app: AppHandle) -> Result<(), String> {
+    let Some(session_id) = crate::features::screenshot::longshot::active_manual_longshot_session_id() else {
+        return Ok(());
+    };
+    match crate::features::screenshot::longshot::finish_manual_longshot(session_id, app.clone()) {
+        Ok(result) => {
+            let _ = app.emit(
+                "manual-longshot-shortcut-finished",
+                serde_json::json!({
+                    "sessionId": result.session_id,
+                    "pngBase64": result.png_base64,
+                    "width": result.width,
+                    "height": result.height,
+                    "frameCount": result.frame_count,
+                    "droppedFrames": result.dropped_frames,
+                }),
+            );
+            let _ = hide_longshot_border(app.clone()).await;
+            let _ = hide_longshot_toolbar(app.clone()).await;
+            let _ = set_screenshot_window_visibility_internal(&app, true);
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+pub async fn cancel_manual_longshot_from_shortcut(app: AppHandle) -> Result<(), String> {
+    let Some(session_id) = crate::features::screenshot::longshot::active_manual_longshot_session_id() else {
+        return Ok(());
+    };
+    crate::features::screenshot::longshot::cancel_manual_longshot(session_id, app.clone())?;
+    let _ = app.emit(
+        "manual-longshot-shortcut-canceled",
+        serde_json::json!({
+            "sessionId": session_id
+        }),
+    );
+    let _ = hide_longshot_border(app.clone()).await;
+    let _ = hide_longshot_toolbar(app.clone()).await;
+    let _ = set_screenshot_window_visibility_internal(&app, true);
+    Ok(())
+}
+
+pub async fn toggle_manual_longshot_pause_from_shortcut(app: AppHandle) -> Result<(), String> {
+    let Some(session_id) = crate::features::screenshot::longshot::active_manual_longshot_session_id() else {
+        return Ok(());
+    };
+    let status = crate::features::screenshot::longshot::get_manual_longshot_status(session_id)?;
+    if status.state == "running" {
+        crate::features::screenshot::longshot::pause_manual_longshot(session_id, app.clone())?;
+        let _ = app.emit(
+            "manual-longshot-shortcut-paused",
+            serde_json::json!({
+                "sessionId": session_id
+            }),
+        );
+        return Ok(());
+    }
+    if status.state == "paused" {
+        crate::features::screenshot::longshot::resume_manual_longshot(session_id, app.clone())?;
+        let _ = app.emit(
+            "manual-longshot-shortcut-resumed",
+            serde_json::json!({
+                "sessionId": session_id
+            }),
+        );
+    }
     Ok(())
 }
 
