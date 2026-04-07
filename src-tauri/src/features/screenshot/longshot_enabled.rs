@@ -609,27 +609,30 @@ fn run_longshot_worker_inner(
     if ended_by_finishing {
         if let Ok(final_frame) = capture_single_gray_frame(request) {
             if let Some(prev) = anchor_frame.as_ref() {
-                if let Ok(estimate) = estimate_overlap(prev, &final_frame) {
-                    let tail_ok = estimate.unique_rows >= 2
-                        && estimate.phase_unique_rows >= 2
-                        && (estimate.phase_unique_rows - estimate.unique_rows).abs() <= 52
-                        && estimate.seam_cost <= 22.0
-                        && estimate.confidence >= 0.20;
-                    if tail_ok {
-                        if let Some(existing) = stitched.take() {
-                            let append = final_frame
-                                .row_range(
-                                    &core::Range::new(estimate.overlap_rows, final_frame.rows())
-                                        .map_err(to_cv_err)?,
-                                )
-                                .map_err(to_cv_err)?
-                                .try_clone()
-                                .map_err(to_cv_err)?;
+                let moved = frames_mean_absdiff(prev, &final_frame).map(|v| v > 1.2).unwrap_or(true);
+                if moved {
+                    // 根因级修复：finish 时不再依赖“门控是否放行”，而是确定性并入最终帧
+                    // 这样不会因尾段门控丢帧造成“最后一部分缺失”
+                    let force_estimate = estimate_overlap(prev, &final_frame).ok();
+                    let overlap_rows = force_estimate
+                        .as_ref()
+                        .map(|e| e.overlap_rows)
+                        .unwrap_or_else(|| (final_frame.rows() - 1).clamp(1, final_frame.rows() - 1));
+                    let confidence = force_estimate.as_ref().map(|e| e.confidence).unwrap_or(0.0);
+                    if let Some(existing) = stitched.take() {
+                        let append = final_frame
+                            .row_range(
+                                &core::Range::new(overlap_rows, final_frame.rows())
+                                    .map_err(to_cv_err)?,
+                            )
+                            .map_err(to_cv_err)?
+                            .try_clone()
+                            .map_err(to_cv_err)?;
+                        if append.rows() > 0 {
                             stitched = Some(vconcat_mats(&existing, &append)?);
-                            anchor_frame = Some(final_frame.try_clone().map_err(to_cv_err)?);
                             if let Ok(mut status) = control.status.lock() {
                                 status.frame_count = status.frame_count.saturating_add(1);
-                                status.last_confidence = estimate.confidence;
+                                status.last_confidence = confidence;
                                 if let Some(st) = stitched.as_ref() {
                                     status.stitched_height = st.rows().max(0) as u32;
                                     status.stitched_width = st.cols().max(0) as u32;
@@ -722,6 +725,13 @@ fn capture_single_gray_frame(request: &StartManualLongshotRequest) -> Result<Mat
     frame_from_gray_bytes(&frame_buf, request.region.height as i32)
 }
 
+fn frames_mean_absdiff(a: &Mat, b: &Mat) -> Result<f64, String> {
+    let mut diff = Mat::default();
+    core::absdiff(a, b, &mut diff).map_err(to_cv_err)?;
+    let avg = core::mean(&diff, &core::no_array()).map_err(to_cv_err)?;
+    Ok(avg[0])
+}
+
 fn frame_from_gray_bytes(bytes: &[u8], height: i32) -> Result<Mat, String> {
     let mat_1d = Mat::from_slice(bytes).map_err(to_cv_err)?;
     let reshaped = mat_1d.reshape(1, height).map_err(to_cv_err)?;
@@ -775,14 +785,23 @@ fn estimate_overlap(prev: &Mat, curr: &Mat) -> Result<AlignEstimate, String> {
     let phase_unique = phase_shift.y.abs().round() as i32;
     let phase_overlap = (rows - phase_unique).clamp(1, rows - 1);
 
-    // 先融合 template 与 phase 估计，再做一轮 seam 代价精修，降低重复段风险
-    let mut base_overlap = template_overlap;
+    // 根因修复：
+    // 过去这里偏向“更大 overlap”会在某些页面把内容裁掉过多，产生中段缺块。
+    // 改为候选 overlap 以 seam 代价选优，再进入精修，避免系统性过裁。
+    let mut candidates = vec![template_overlap];
     if response > 0.02 {
-        if (phase_overlap - template_overlap).abs() <= 48 {
-            // 在两个估计接近时偏向更大 overlap，避免拼接重复
-            base_overlap = template_overlap.max(phase_overlap);
-        } else if response > 0.12 {
-            base_overlap = phase_overlap;
+        candidates.push(phase_overlap);
+        candidates.push(((template_overlap + phase_overlap) / 2).clamp(1, rows - 1));
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+    let mut base_overlap = template_overlap;
+    let mut best_cost = f64::INFINITY;
+    for cand in candidates {
+        let cost = overlap_sad_cost(prev, curr, cand).unwrap_or(f64::INFINITY);
+        if cost < best_cost || ((cost - best_cost).abs() < 1e-6 && cand < base_overlap) {
+            best_cost = cost;
+            base_overlap = cand;
         }
     }
     let overlap_rows = refine_overlap_rows(prev, curr, base_overlap)?;

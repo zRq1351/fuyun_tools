@@ -369,6 +369,8 @@ const manualLongshotSessionId = ref(0)
 const manualLongshotRunning = ref(false)
 const manualLongshotHint = ref('')
 const longshotOverlayOnly = ref(false)
+const longshotResultActive = ref(false)
+const longshotRawPngBase64 = ref('')
 const pendingLongshotBorderAnchor = ref(null)
 const longshotBorderShown = ref(false)
 let unlistenManualLongshotProgress = null
@@ -703,6 +705,8 @@ function handleScreenshotReset() {
   manualLongshotSessionId.value = 0
   manualLongshotRunning.value = false
   manualLongshotHint.value = ''
+  longshotResultActive.value = false
+  longshotRawPngBase64.value = ''
 }
 
 function consumeBootPayload() {
@@ -797,6 +801,8 @@ async function requestScreenshot() {
   try {
     const result = await invoke('start_screenshot')
     if (result.success && result.png_base64) {
+      longshotResultActive.value = false
+      longshotRawPngBase64.value = ''
       hasScreenshotPayload.value = true
       captureOriginX.value = Number(result.origin_x) || 0
       captureOriginY.value = Number(result.origin_y) || 0
@@ -815,6 +821,8 @@ async function requestScreenshot() {
 
 function handleScreenshotData(event) {
   if (event.detail && event.detail.png_base64) {
+    longshotResultActive.value = false
+    longshotRawPngBase64.value = ''
     const sessionId = Number(event.detail.session_id) || 0
     if (sessionId > 0) {
       activeSessionId.value = sessionId
@@ -854,6 +862,8 @@ function handleStartRegionSelect(event) {
   regionConfirmAnchor.ready = false
   manualLongshotSessionId.value = 0
   manualLongshotRunning.value = false
+  longshotResultActive.value = false
+  longshotRawPngBase64.value = ''
   manualLongshotHint.value = regionSelectMode.value === 'manual_longshot'
       ? '先框选滚动区域，再点击播放开始采样'
       : ''
@@ -949,6 +959,8 @@ function applyManualLongshotResult(result) {
     throw new Error('未获取到长截图结果')
   }
   loadImageFromBase64(base64)
+  longshotResultActive.value = true
+  longshotRawPngBase64.value = base64
   regionSelectMode.value = 'screenshot'
   state.value = 'selected'
   rect.x = 0
@@ -965,6 +977,46 @@ function applyManualLongshotResult(result) {
   })
   invoke('hide_longshot_toolbar').catch(() => {
   })
+}
+
+function hasOverlayForLongshotExport() {
+  if (textItems.value.length > 0 || shapeItems.value.length > 0) {
+    return true
+  }
+  if (!canvas.value) return false
+  const ctx = canvas.value.getContext('2d')
+  if (!ctx) return false
+  const oldTransform = ctx.getTransform()
+  ctx.resetTransform()
+  const imageData = ctx.getImageData(0, 0, canvas.value.width, canvas.value.height)
+  ctx.setTransform(oldTransform)
+  const data = imageData.data
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] !== 0) {
+      return true
+    }
+  }
+  return false
+}
+
+function base64ToBlob(base64, mime = 'image/png') {
+  const binary = atob(base64)
+  const len = binary.length
+  const bytes = new Uint8Array(len)
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return new Blob([bytes], {type: mime})
+}
+
+function resolveExportBase64() {
+  if (longshotResultActive.value && longshotRawPngBase64.value && !hasOverlayForLongshotExport()) {
+    // 长截图优先走原始拼接结果，避免超长 canvas 导出被浏览器尺寸上限截断
+    return longshotRawPngBase64.value
+  }
+  const cropCanvas = getCroppedCanvas()
+  const dataUrl = cropCanvas.toDataURL('image/png')
+  return dataUrl.split(',')[1]
 }
 
 async function commitRecordingRegionSelection() {
@@ -2067,6 +2119,9 @@ function getCroppedCanvas() {
   if (!canvas.value || !screenshotImg.value) {
     throw new Error('截图源未就绪')
   }
+  if (longshotResultActive.value && screenshotPixelCanvas && screenshotImg.value) {
+    return getLongshotFullCanvas()
+  }
   const drawCanvasWidth = Number(canvas.value.width) || 0
   const drawCanvasHeight = Number(canvas.value.height) || 0
   if (drawCanvasWidth <= 0 || drawCanvasHeight <= 0) {
@@ -2128,6 +2183,111 @@ function getCroppedCanvas() {
   drawTextItemsOnCroppedCanvas(ctx, sourceX, sourceY, sourceWidth, sourceHeight)
 
   return cropCanvas
+}
+
+function getLongshotFullCanvas() {
+  const imageW = Math.max(1, Number(screenshotImg.value?.width) || 1)
+  const imageH = Math.max(1, Number(screenshotImg.value?.height) || 1)
+  const fullCanvas = document.createElement('canvas')
+  fullCanvas.width = imageW
+  fullCanvas.height = imageH
+  const ctx = fullCanvas.getContext('2d')
+  if (!ctx) {
+    throw new Error('长截图导出画布上下文创建失败')
+  }
+  ctx.drawImage(screenshotImg.value, 0, 0, imageW, imageH)
+
+  // 涂鸦层在视口坐标系下，导出时按比例映射到长图完整像素
+  if (canvas.value) {
+    ctx.drawImage(
+        canvas.value,
+        0,
+        0,
+        canvas.value.width,
+        canvas.value.height,
+        0,
+        0,
+        imageW,
+        imageH
+    )
+  }
+  const sx = imageW / Math.max(1, Number(window.innerWidth) || 1)
+  const sy = imageH / Math.max(1, Number(window.innerHeight) || 1)
+  drawShapeItemsOnLongshotCanvas(ctx, sx, sy)
+  drawTextItemsOnLongshotCanvas(ctx, sx, sy)
+  return fullCanvas
+}
+
+function drawShapeItemsOnLongshotCanvas(ctx, sx, sy) {
+  ctx.save()
+  ctx.lineCap = 'round'
+  for (const item of shapeItems.value) {
+    ctx.strokeStyle = item.color
+    ctx.lineWidth = Math.max(1, item.lineWidth * ((sx + sy) / 2))
+    const x = item.x * sx
+    const y = item.y * sy
+    const w = item.width * sx
+    const h = item.height * sy
+    if (item.type === 'rect') {
+      ctx.strokeRect(x, y, w, h)
+      continue
+    }
+    if (item.type === 'circle') {
+      ctx.beginPath()
+      ctx.ellipse(x + w / 2, y + h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2)
+      ctx.stroke()
+      continue
+    }
+    ctx.beginPath()
+    ctx.moveTo((item.x + item.x1) * sx, (item.y + item.y1) * sy)
+    ctx.lineTo((item.x + item.x2) * sx, (item.y + item.y2) * sy)
+    ctx.stroke()
+    if (item.type === 'arrow') {
+      ctx.beginPath()
+      ctx.moveTo((item.x + item.x2) * sx, (item.y + item.y2) * sy)
+      ctx.lineTo((item.x + item.arrowLeft.x) * sx, (item.y + item.arrowLeft.y) * sy)
+      ctx.moveTo((item.x + item.x2) * sx, (item.y + item.y2) * sy)
+      ctx.lineTo((item.x + item.arrowRight.x) * sx, (item.y + item.arrowRight.y) * sy)
+      ctx.stroke()
+    }
+  }
+  ctx.restore()
+}
+
+function drawTextItemsOnLongshotCanvas(ctx, sx, sy) {
+  for (const item of textItems.value) {
+    const lines = String(item.text || '').split('\n')
+    const x = item.x * sx
+    const y = item.y * sy
+    const fontSize = Math.max(8, item.fontSize * sy)
+    const lineHeight = Math.max(fontSize * 1.25, fontSize + 4)
+    const fontWeight = item.bold ? '700' : '400'
+    ctx.save()
+    ctx.fillStyle = item.color
+    ctx.font = `${fontWeight} ${fontSize}px ${item.fontFamily || 'Arial'}`
+    ctx.textBaseline = 'top'
+    if (item.shadow) {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.65)'
+      ctx.shadowBlur = Math.max(4, Math.round(fontSize * 0.35))
+      ctx.shadowOffsetX = 0
+      ctx.shadowOffsetY = Math.max(1, Math.round(fontSize * 0.1))
+    } else {
+      ctx.shadowColor = 'transparent'
+      ctx.shadowBlur = 0
+      ctx.shadowOffsetX = 0
+      ctx.shadowOffsetY = 0
+    }
+    for (let i = 0; i < lines.length; i++) {
+      const lineY = y + i * lineHeight
+      if (item.stroke) {
+        ctx.strokeStyle = item.strokeColor || '#000000'
+        ctx.lineWidth = Math.max(1, Math.round(fontSize / 14))
+        ctx.strokeText(lines[i], x, lineY)
+      }
+      ctx.fillText(lines[i], x, lineY)
+    }
+    ctx.restore()
+  }
 }
 
 function drawTextItemsOnCroppedCanvas(ctx, sourceX, sourceY, sourceWidth, sourceHeight) {
@@ -2237,13 +2397,12 @@ async function writeClipboardImage(linked, closeAfterCopy) {
       return
     }
     await invoke('set_screenshot_clipboard_link_once', {linked})
-    const cropCanvas = getCroppedCanvas()
-    cropCanvas.toBlob(async (blob) => {
-      await navigator.clipboard.write([new ClipboardItem({'image/png': blob})])
-      if (closeAfterCopy) {
-        close()
-      }
-    })
+    const pngBase64 = resolveExportBase64()
+    const blob = base64ToBlob(pngBase64, 'image/png')
+    await navigator.clipboard.write([new ClipboardItem({'image/png': blob})])
+    if (closeAfterCopy) {
+      close()
+    }
   } catch (error) {
     console.error('复制失败:', error)
     alert('复制失败')
@@ -2264,16 +2423,20 @@ async function pinToScreenAndClose() {
       alert('截图源尚未就绪，请稍后重试')
       return
     }
-    const cropCanvas = getCroppedCanvas()
-    const dataUrl = cropCanvas.toDataURL('image/png')
-    const base64 = dataUrl.split(',')[1]
+    const base64 = resolveExportBase64()
+    const pinWidth = longshotResultActive.value && longshotRawPngBase64.value && !hasOverlayForLongshotExport()
+        ? Math.max(1, Number(screenshotImg.value?.width) || Math.round(rect.width))
+        : Math.max(1, Math.round(rect.width))
+    const pinHeight = longshotResultActive.value && longshotRawPngBase64.value && !hasOverlayForLongshotExport()
+        ? Math.max(1, Number(screenshotImg.value?.height) || Math.round(rect.height))
+        : Math.max(1, Math.round(rect.height))
     const payload = {
       request: {
         pngBase64: base64,
         x: Math.round(rect.x),
         y: Math.round(rect.y),
-        width: Math.max(1, Math.round(rect.width)),
-        height: Math.max(1, Math.round(rect.height))
+        width: pinWidth,
+        height: pinHeight
       }
     }
     let result = null
@@ -2304,9 +2467,7 @@ async function saveAndClose() {
       alert('截图源尚未就绪，请稍后重试')
       return
     }
-    const cropCanvas = getCroppedCanvas()
-    const dataUrl = cropCanvas.toDataURL('image/png')
-    const base64 = dataUrl.split(',')[1]
+    const base64 = resolveExportBase64()
 
     const result = await invoke('save_screenshot', {pngBase64: base64})
     if (result.success) {
