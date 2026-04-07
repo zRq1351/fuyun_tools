@@ -4,16 +4,32 @@
        @mousedown="onMouseDown"
        @mousemove="onMouseMove"
        @mouseup="onMouseUp"
+       @wheel.prevent="onMouseWheel"
        @contextmenu.prevent="onContextMenu">
 
     <!-- 底层截图 -->
-    <img v-if="screenshotSrc && !longshotOverlayOnly" :src="screenshotSrc" class="bg-image" draggable="false"/>
+    <img
+        v-if="screenshotSrc && !longshotOverlayOnly"
+        :src="screenshotSrc"
+        :class="['bg-image', { 'longshot-view-bg': longshotResultActive }]"
+        :style="sceneLayerStyle"
+        draggable="false"
+    />
 
     <!-- 绘制层 (全屏尺寸，缩放适配高DPI) -->
-    <canvas v-show="!longshotOverlayOnly" ref="canvas" class="draw-canvas"></canvas>
+    <canvas
+        v-show="!longshotOverlayOnly"
+        ref="canvas"
+        :style="sceneLayerStyle"
+        class="draw-canvas"
+    ></canvas>
 
     <!-- 遮罩与选区层 -->
-    <div :class="{ 'pointer-none': state === 'drawing', 'longshot-overlay-only': longshotOverlayOnly }" class="mask-layer">
+    <div
+        :class="{ 'pointer-none': state === 'drawing', 'longshot-overlay-only': longshotOverlayOnly }"
+        :style="sceneLayerStyle"
+        class="mask-layer"
+    >
       <!-- 智能窗口高亮 -->
       <div v-if="highlightedWindow && state === 'idle'" ref="windowHighlightRef" class="window-highlight">
         <div class="window-border"></div>
@@ -371,6 +387,8 @@ const manualLongshotHint = ref('')
 const longshotOverlayOnly = ref(false)
 const longshotResultActive = ref(false)
 const longshotRawPngBase64 = ref('')
+const longshotViewScale = ref(1)
+const longshotViewOffset = reactive({x: 0, y: 0})
 const pendingLongshotBorderAnchor = ref(null)
 const longshotBorderShown = ref(false)
 let unlistenManualLongshotProgress = null
@@ -456,10 +474,47 @@ const adjustingLinePointStart = reactive({id: 0, point: 'start'})
 
 // 样式计算
 const editorCursorClass = computed(() => {
+  if (longshotResultActive.value && currentTool.value === 'select') return 'grab'
   if (state.value === 'idle' || state.value === 'selecting') return 'crosshair'
   if (currentTool.value !== 'select') return 'crosshair'
   return 'default'
 })
+
+const sceneLayerStyle = computed(() => {
+  if (!longshotResultActive.value) {
+    return {}
+  }
+  return {
+    transformOrigin: '0 0',
+    transform: `translate(${longshotViewOffset.x}px, ${longshotViewOffset.y}px) scale(${longshotViewScale.value})`
+  }
+})
+
+function toScenePoint(event) {
+  if (!longshotResultActive.value) {
+    return {x: event.clientX, y: event.clientY}
+  }
+  const scale = Math.max(0.1, longshotViewScale.value)
+  return {
+    x: (event.clientX - longshotViewOffset.x) / scale,
+    y: (event.clientY - longshotViewOffset.y) / scale
+  }
+}
+
+function onMouseWheel(event) {
+  if (!longshotResultActive.value) return
+  const delta = event.deltaY < 0 ? 1.12 : 0.89
+  const oldScale = longshotViewScale.value
+  const nextScale = Math.max(0.35, Math.min(4, oldScale * delta))
+  if (Math.abs(nextScale - oldScale) < 0.0001) return
+  const anchorX = event.clientX
+  const anchorY = event.clientY
+  const sceneX = (anchorX - longshotViewOffset.x) / oldScale
+  const sceneY = (anchorY - longshotViewOffset.y) / oldScale
+  longshotViewScale.value = nextScale
+  longshotViewOffset.x = anchorX - sceneX * nextScale
+  longshotViewOffset.y = anchorY - sceneY * nextScale
+}
 
 const cutoutStyle = computed(() => {
   return {
@@ -707,6 +762,9 @@ function handleScreenshotReset() {
   manualLongshotHint.value = ''
   longshotResultActive.value = false
   longshotRawPngBase64.value = ''
+  longshotViewScale.value = 1
+  longshotViewOffset.x = 0
+  longshotViewOffset.y = 0
 }
 
 function consumeBootPayload() {
@@ -803,6 +861,9 @@ async function requestScreenshot() {
     if (result.success && result.png_base64) {
       longshotResultActive.value = false
       longshotRawPngBase64.value = ''
+      longshotViewScale.value = 1
+      longshotViewOffset.x = 0
+      longshotViewOffset.y = 0
       hasScreenshotPayload.value = true
       captureOriginX.value = Number(result.origin_x) || 0
       captureOriginY.value = Number(result.origin_y) || 0
@@ -823,6 +884,9 @@ function handleScreenshotData(event) {
   if (event.detail && event.detail.png_base64) {
     longshotResultActive.value = false
     longshotRawPngBase64.value = ''
+    longshotViewScale.value = 1
+    longshotViewOffset.x = 0
+    longshotViewOffset.y = 0
     const sessionId = Number(event.detail.session_id) || 0
     if (sessionId > 0) {
       activeSessionId.value = sessionId
@@ -961,6 +1025,9 @@ function applyManualLongshotResult(result) {
   loadImageFromBase64(base64)
   longshotResultActive.value = true
   longshotRawPngBase64.value = base64
+  longshotViewScale.value = 1
+  longshotViewOffset.x = 0
+  longshotViewOffset.y = 0
   regionSelectMode.value = 'screenshot'
   state.value = 'selected'
   rect.x = 0
@@ -1144,28 +1211,35 @@ function onMouseDown(e) {
   if (state.value !== 'shape-moving') {
     selectedShapeId.value = null
   }
+  const p = toScenePoint(e)
   if (state.value === 'idle') {
     state.value = 'selecting'
-    startPoint.x = e.clientX
-    startPoint.y = e.clientY
-    rect.x = e.clientX
-    rect.y = e.clientY
+    startPoint.x = p.x
+    startPoint.y = p.y
+    rect.x = p.x
+    rect.y = p.y
     rect.width = 0
     rect.height = 0
   } else if (state.value === 'selected') {
     if (currentTool.value === 'select') {
-      if (isInside(e.clientX, e.clientY, rect)) {
+      if (longshotResultActive.value) {
         state.value = 'moving'
         startPoint.x = e.clientX
         startPoint.y = e.clientY
+        startRect.x = longshotViewOffset.x
+        startRect.y = longshotViewOffset.y
+      } else if (isInside(p.x, p.y, rect)) {
+        state.value = 'moving'
+        startPoint.x = p.x
+        startPoint.y = p.y
         Object.assign(startRect, rect)
       } else {
         // 点击外部重新选择
         state.value = 'selecting'
-        startPoint.x = e.clientX
-        startPoint.y = e.clientY
-        rect.x = e.clientX
-        rect.y = e.clientY
+        startPoint.x = p.x
+        startPoint.y = p.y
+        rect.x = p.x
+        rect.y = p.y
         rect.width = 0
         rect.height = 0
         // 重置画布
@@ -1176,13 +1250,13 @@ function onMouseDown(e) {
       }
     } else {
       // 绘制模式
-      if (!isInside(e.clientX, e.clientY, rect) && currentTool.value !== 'picker') {
+      if (!isInside(p.x, p.y, rect) && currentTool.value !== 'picker') {
         // 外部点击，取消选择并重新选择
         state.value = 'selecting'
-        startPoint.x = e.clientX
-        startPoint.y = e.clientY
-        rect.x = e.clientX
-        rect.y = e.clientY
+        startPoint.x = p.x
+        startPoint.y = p.y
+        rect.x = p.x
+        rect.y = p.y
         rect.width = 0
         rect.height = 0
         currentTool.value = 'select'
@@ -1203,37 +1277,43 @@ function onMouseDown(e) {
 
 function onMouseMove(e) {
   if (editingTextId.value !== null) return
+  const p = toScenePoint(e)
   if (state.value === 'idle') {
-    highlightedWindow.value = detectWindowAt(e.clientX, e.clientY)
+    highlightedWindow.value = detectWindowAt(p.x, p.y)
   } else if (state.value === 'selecting') {
     // 鼠标拖动框选区域
-    const x = Math.min(startPoint.x, e.clientX)
-    const y = Math.min(startPoint.y, e.clientY)
-    const width = Math.abs(e.clientX - startPoint.x)
-    const height = Math.abs(e.clientY - startPoint.y)
+    const x = Math.min(startPoint.x, p.x)
+    const y = Math.min(startPoint.y, p.y)
+    const width = Math.abs(p.x - startPoint.x)
+    const height = Math.abs(p.y - startPoint.y)
     rect.x = x
     rect.y = y
     rect.width = width
     rect.height = height
   } else if (state.value === 'moving') {
-    const dx = e.clientX - startPoint.x
-    const dy = e.clientY - startPoint.y
-    rect.x = startRect.x + dx
-    rect.y = startRect.y + dy
+    if (longshotResultActive.value && currentTool.value === 'select') {
+      longshotViewOffset.x = startRect.x + (e.clientX - startPoint.x)
+      longshotViewOffset.y = startRect.y + (e.clientY - startPoint.y)
+    } else {
+      const dx = p.x - startPoint.x
+      const dy = p.y - startPoint.y
+      rect.x = startRect.x + dx
+      rect.y = startRect.y + dy
+    }
   } else if (state.value === 'resizing') {
     handleResize(e)
   } else if (state.value === 'text-moving') {
     const item = textItems.value.find((entry) => entry.id === movingTextStart.id)
     if (!item) return
-    const dx = e.clientX - movingTextStart.x
-    const dy = e.clientY - movingTextStart.y
+    const dx = p.x - movingTextStart.x
+    const dy = p.y - movingTextStart.y
     item.x = movingTextStart.itemX + dx
     item.y = movingTextStart.itemY + dy
   } else if (state.value === 'shape-moving') {
     const item = shapeItems.value.find((entry) => entry.id === movingShapeStart.id)
     if (!item) return
-    const dx = e.clientX - movingShapeStart.x
-    const dy = e.clientY - movingShapeStart.y
+    const dx = p.x - movingShapeStart.x
+    const dy = p.y - movingShapeStart.y
     item.x = movingShapeStart.itemX + dx
     item.y = movingShapeStart.itemY + dy
   } else if (state.value === 'shape-resizing') {
@@ -1248,6 +1328,7 @@ function onMouseMove(e) {
 function onMouseUp(e) {
   if (editingTextId.value !== null) return
   if (e.button !== 0) return
+  const p = toScenePoint(e)
   if (state.value === 'selecting') {
     if (rect.width < 10 || rect.height < 10) {
       if (highlightedWindow.value) {
@@ -1275,8 +1356,8 @@ function onMouseUp(e) {
       state.value = 'selected'
     }
     if (regionSelectMode.value === 'recording_region' && state.value === 'selected' && rect.width > 0 && rect.height > 0) {
-      regionConfirmAnchor.x = e.clientX + 8
-      regionConfirmAnchor.y = e.clientY + 8
+      regionConfirmAnchor.x = p.x + 8
+      regionConfirmAnchor.y = p.y + 8
       regionConfirmAnchor.ready = true
     }
   } else if (state.value === 'moving' || state.value === 'resizing') {
@@ -1339,14 +1420,16 @@ function detectWindowAt(x, y) {
 function startResize(handle, event) {
   state.value = 'resizing'
   resizeHandleType = handle
-  startPoint.x = event.clientX
-  startPoint.y = event.clientY
+  const p = toScenePoint(event)
+  startPoint.x = p.x
+  startPoint.y = p.y
   Object.assign(startRect, rect)
 }
 
 function handleResize(e) {
-  const dx = e.clientX - startPoint.x
-  const dy = e.clientY - startPoint.y
+  const p = toScenePoint(e)
+  const dx = p.x - startPoint.x
+  const dy = p.y - startPoint.y
   let {x, y, width, height} = startRect
 
   if (resizeHandleType.includes('l')) {
@@ -1369,7 +1452,7 @@ function handleResize(e) {
     x += width;
     width = -width;
     resizeHandleType = resizeHandleType.replace('l', 'L').replace('r', 'l').replace('L', 'r');
-    startPoint.x = e.clientX;
+    startPoint.x = p.x;
     startRect.x = x;
     startRect.width = width;
   }
@@ -1377,7 +1460,7 @@ function handleResize(e) {
     y += height;
     height = -height;
     resizeHandleType = resizeHandleType.replace('t', 'T').replace('b', 't').replace('T', 'b');
-    startPoint.y = e.clientY;
+    startPoint.y = p.y;
     startRect.y = y;
     startRect.height = height;
   }
@@ -1429,16 +1512,17 @@ function enterManualLongshotMode() {
 
 // 绘制相关
 function handleCanvasMouseDown(event) {
+  const p = toScenePoint(event)
   if (currentTool.value === 'picker') {
-    pickColorAt(event)
-    drawStart.x = event.clientX
-    drawStart.y = event.clientY
+    pickColorAtScene(p.x, p.y)
+    drawStart.x = p.x
+    drawStart.y = p.y
     return
   }
 
   isDrawing.value = true
-  drawStart.x = event.clientX
-  drawStart.y = event.clientY
+  drawStart.x = p.x
+  drawStart.y = p.y
 
   const ctx = canvas.value.getContext('2d')
 
@@ -1452,17 +1536,18 @@ function handleCanvasMouseDown(event) {
 }
 
 function handleCanvasMouseMove(event) {
+  const p = toScenePoint(event)
   if (currentTool.value === 'picker' && !isDrawing.value) {
-    drawStart.x = event.clientX;
-    drawStart.y = event.clientY;
-    pickColorAt(event);
+    drawStart.x = p.x;
+    drawStart.y = p.y;
+    pickColorAtScene(p.x, p.y);
     return;
   }
 
   if (!isDrawing.value) return
 
-  const x = event.clientX
-  const y = event.clientY
+  const x = p.x
+  const y = p.y
   const ctx = canvas.value.getContext('2d')
 
   if (currentTool.value === 'pen') {
@@ -1553,8 +1638,9 @@ function handleCanvasMouseUp(event) {
   if (!isDrawing.value) return
   isDrawing.value = false
 
-  const x = event.clientX
-  const y = event.clientY
+  const p = toScenePoint(event)
+  const x = p.x
+  const y = p.y
   const ctx = canvas.value.getContext('2d')
 
   if (currentTool.value === 'text') {
@@ -1700,8 +1786,9 @@ function startDragTextItem(id, event) {
   selectedShapeId.value = null
   const item = textItems.value.find((entry) => entry.id === id)
   if (!item) return
-  movingTextStart.x = event.clientX
-  movingTextStart.y = event.clientY
+  const p = toScenePoint(event)
+  movingTextStart.x = p.x
+  movingTextStart.y = p.y
   movingTextStart.itemX = item.x
   movingTextStart.itemY = item.y
   movingTextStart.id = id
@@ -1715,8 +1802,9 @@ function startDragShapeItem(id, event) {
   selectedTextId.value = null
   const item = shapeItems.value.find((entry) => entry.id === id)
   if (!item) return
-  movingShapeStart.x = event.clientX
-  movingShapeStart.y = event.clientY
+  const p = toScenePoint(event)
+  movingShapeStart.x = p.x
+  movingShapeStart.y = p.y
   movingShapeStart.itemX = item.x
   movingShapeStart.itemY = item.y
   movingShapeStart.id = id
@@ -1729,8 +1817,9 @@ function startResizeShapeItem(id, handle, event) {
   if (!item || (item.type !== 'rect' && item.type !== 'circle')) return
   selectedShapeId.value = id
   selectedTextId.value = null
-  resizingShapeStart.x = event.clientX
-  resizingShapeStart.y = event.clientY
+  const p = toScenePoint(event)
+  resizingShapeStart.x = p.x
+  resizingShapeStart.y = p.y
   resizingShapeStart.itemX = item.x
   resizingShapeStart.itemY = item.y
   resizingShapeStart.itemWidth = item.width
@@ -1743,8 +1832,9 @@ function startResizeShapeItem(id, handle, event) {
 function handleResizeShapeItem(event) {
   const item = shapeItems.value.find((entry) => entry.id === resizingShapeStart.id)
   if (!item) return
-  const dx = event.clientX - resizingShapeStart.x
-  const dy = event.clientY - resizingShapeStart.y
+  const p = toScenePoint(event)
+  const dx = p.x - resizingShapeStart.x
+  const dy = p.y - resizingShapeStart.y
   let x = resizingShapeStart.itemX
   let y = resizingShapeStart.itemY
   let width = resizingShapeStart.itemWidth
@@ -1797,6 +1887,7 @@ function startAdjustLineEndpoint(id, point, event) {
 function handleAdjustLineEndpoint(event) {
   const item = shapeItems.value.find((entry) => entry.id === adjustingLinePointStart.id)
   if (!item || (item.type !== 'line' && item.type !== 'arrow')) return
+  const p = toScenePoint(event)
   const startAbs = {
     x: item.x + item.x1,
     y: item.y + item.y1
@@ -1806,11 +1897,11 @@ function handleAdjustLineEndpoint(event) {
     y: item.y + item.y2
   }
   if (adjustingLinePointStart.point === 'start') {
-    startAbs.x = event.clientX
-    startAbs.y = event.clientY
+    startAbs.x = p.x
+    startAbs.y = p.y
   } else {
-    endAbs.x = event.clientX
-    endAbs.y = event.clientY
+    endAbs.x = p.x
+    endAbs.y = p.y
   }
   updateLineLikeShapeFromAbsolutePoints(item, startAbs, endAbs)
 }
@@ -1908,18 +1999,22 @@ function getArrowHeadPoints(fromX, fromY, toX, toY) {
 }
 
 function getShapeItemStyle(shape) {
+  const scale = longshotResultActive.value ? longshotViewScale.value : 1
+  const ox = longshotResultActive.value ? longshotViewOffset.x : 0
+  const oy = longshotResultActive.value ? longshotViewOffset.y : 0
   return {
-    left: `${shape.x}px`,
-    top: `${shape.y}px`,
-    width: `${shape.width}px`,
-    height: `${shape.height}px`
+    left: `${shape.x * scale + ox}px`,
+    top: `${shape.y * scale + oy}px`,
+    width: `${shape.width * scale}px`,
+    height: `${shape.height * scale}px`
   }
 }
 
 function getShapeStrokeStyle(shape) {
+  const scale = longshotResultActive.value ? longshotViewScale.value : 1
   return {
     borderColor: shape.color,
-    borderWidth: `${shape.lineWidth}px`
+    borderWidth: `${Math.max(1, shape.lineWidth * scale)}px`
   }
 }
 
@@ -1954,15 +2049,18 @@ function syncEditingTextStyle() {
 function getTextItemStyle(item) {
   const fontWeight = item.bold ? '700' : '400'
   const textShadow = item.shadow ? '0 2px 8px rgba(0,0,0,0.6)' : 'none'
+  const scale = longshotResultActive.value ? longshotViewScale.value : 1
+  const ox = longshotResultActive.value ? longshotViewOffset.x : 0
+  const oy = longshotResultActive.value ? longshotViewOffset.y : 0
   return {
-    left: `${item.x}px`,
-    top: `${item.y}px`,
+    left: `${item.x * scale + ox}px`,
+    top: `${item.y * scale + oy}px`,
     color: item.color,
-    fontSize: `${item.fontSize}px`,
+    fontSize: `${Math.max(8, item.fontSize * scale)}px`,
     fontFamily: item.fontFamily || 'Arial',
     fontWeight,
     textShadow,
-    WebkitTextStroke: item.stroke ? `1px ${item.strokeColor || '#000000'}` : '0'
+    WebkitTextStroke: item.stroke ? `${Math.max(1, Math.round(scale))}px ${item.strokeColor || '#000000'}` : '0'
   }
 }
 
@@ -1978,8 +2076,13 @@ function drawArrowHead(ctx, fromX, fromY, toX, toY) {
 }
 
 function pickColorAt(event) {
-  const px = Math.round(event.clientX * dpr)
-  const py = Math.round(event.clientY * dpr)
+  const p = toScenePoint(event)
+  pickColorAtScene(p.x, p.y)
+}
+
+function pickColorAtScene(sceneX, sceneY) {
+  const px = Math.round(sceneX * dpr)
+  const py = Math.round(sceneY * dpr)
   const color = getMergedPixelColorAt(px, py)
   if (!color) return
   const hex = '#' + [color.r, color.g, color.b].map(v => v.toString(16).padStart(2, '0')).join('')
@@ -2197,37 +2300,55 @@ function getLongshotFullCanvas() {
   }
   ctx.drawImage(screenshotImg.value, 0, 0, imageW, imageH)
 
-  // 涂鸦层在视口坐标系下，导出时按比例映射到长图完整像素
+  // 长图在编辑页使用 contain 展示，导出时按 contain 视口做统一比例映射
+  const view = getLongshotImageViewportRect(imageW, imageH)
   if (canvas.value) {
     ctx.drawImage(
         canvas.value,
-        0,
-        0,
-        canvas.value.width,
-        canvas.value.height,
+        view.x,
+        view.y,
+        view.width,
+        view.height,
         0,
         0,
         imageW,
         imageH
     )
   }
-  const sx = imageW / Math.max(1, Number(window.innerWidth) || 1)
-  const sy = imageH / Math.max(1, Number(window.innerHeight) || 1)
-  drawShapeItemsOnLongshotCanvas(ctx, sx, sy)
-  drawTextItemsOnLongshotCanvas(ctx, sx, sy)
+  drawShapeItemsOnLongshotCanvas(ctx, view)
+  drawTextItemsOnLongshotCanvas(ctx, view)
   return fullCanvas
 }
 
-function drawShapeItemsOnLongshotCanvas(ctx, sx, sy) {
+function getLongshotImageViewportRect(imageW, imageH) {
+  const vw = Math.max(1, Number(window.innerWidth) || 1)
+  const vh = Math.max(1, Number(window.innerHeight) || 1)
+  const fit = Math.min(vw / imageW, vh / imageH)
+  const width = imageW * fit
+  const height = imageH * fit
+  const x = (vw - width) / 2
+  const y = (vh - height) / 2
+  return {x, y, width, height, fit}
+}
+
+function sceneToImagePoint(x, y, view) {
+  return {
+    x: (x - view.x) / view.fit,
+    y: (y - view.y) / view.fit
+  }
+}
+
+function drawShapeItemsOnLongshotCanvas(ctx, view) {
   ctx.save()
   ctx.lineCap = 'round'
   for (const item of shapeItems.value) {
     ctx.strokeStyle = item.color
-    ctx.lineWidth = Math.max(1, item.lineWidth * ((sx + sy) / 2))
-    const x = item.x * sx
-    const y = item.y * sy
-    const w = item.width * sx
-    const h = item.height * sy
+    ctx.lineWidth = Math.max(1, item.lineWidth / Math.max(0.0001, view.fit))
+    const p = sceneToImagePoint(item.x, item.y, view)
+    const x = p.x
+    const y = p.y
+    const w = item.width / view.fit
+    const h = item.height / view.fit
     if (item.type === 'rect') {
       ctx.strokeRect(x, y, w, h)
       continue
@@ -2239,27 +2360,33 @@ function drawShapeItemsOnLongshotCanvas(ctx, sx, sy) {
       continue
     }
     ctx.beginPath()
-    ctx.moveTo((item.x + item.x1) * sx, (item.y + item.y1) * sy)
-    ctx.lineTo((item.x + item.x2) * sx, (item.y + item.y2) * sy)
+    const s1 = sceneToImagePoint(item.x + item.x1, item.y + item.y1, view)
+    const s2 = sceneToImagePoint(item.x + item.x2, item.y + item.y2, view)
+    ctx.moveTo(s1.x, s1.y)
+    ctx.lineTo(s2.x, s2.y)
     ctx.stroke()
     if (item.type === 'arrow') {
       ctx.beginPath()
-      ctx.moveTo((item.x + item.x2) * sx, (item.y + item.y2) * sy)
-      ctx.lineTo((item.x + item.arrowLeft.x) * sx, (item.y + item.arrowLeft.y) * sy)
-      ctx.moveTo((item.x + item.x2) * sx, (item.y + item.y2) * sy)
-      ctx.lineTo((item.x + item.arrowRight.x) * sx, (item.y + item.arrowRight.y) * sy)
+      const head = sceneToImagePoint(item.x + item.x2, item.y + item.y2, view)
+      const left = sceneToImagePoint(item.x + item.arrowLeft.x, item.y + item.arrowLeft.y, view)
+      const right = sceneToImagePoint(item.x + item.arrowRight.x, item.y + item.arrowRight.y, view)
+      ctx.moveTo(head.x, head.y)
+      ctx.lineTo(left.x, left.y)
+      ctx.moveTo(head.x, head.y)
+      ctx.lineTo(right.x, right.y)
       ctx.stroke()
     }
   }
   ctx.restore()
 }
 
-function drawTextItemsOnLongshotCanvas(ctx, sx, sy) {
+function drawTextItemsOnLongshotCanvas(ctx, view) {
   for (const item of textItems.value) {
     const lines = String(item.text || '').split('\n')
-    const x = item.x * sx
-    const y = item.y * sy
-    const fontSize = Math.max(8, item.fontSize * sy)
+    const p = sceneToImagePoint(item.x, item.y, view)
+    const x = p.x
+    const y = p.y
+    const fontSize = Math.max(8, item.fontSize / Math.max(0.0001, view.fit))
     const lineHeight = Math.max(fontSize * 1.25, fontSize + 4)
     const fontWeight = item.bold ? '700' : '400'
     ctx.save()
@@ -2632,6 +2759,10 @@ function handleKeyDown(event) {
   height: 100vh;
   z-index: 1;
   object-fit: fill;
+}
+
+.bg-image.longshot-view-bg {
+  object-fit: contain;
 }
 
 .draw-canvas {
