@@ -45,8 +45,8 @@ winapi = { version = "0.3.9", features = ["winuser", "winnt", "minwindef", "wind
 windows = { version = "0.62.2", features = ["Foundation", "Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams"] }
 cpal = "0.17.3"
 hound = "3.5.1"
-wasapi = "0.21.0"
-sysinfo = { version = "0.37.2", default-features = false, features = ["system"] }
+wasapi = "0.23.0"
+sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 enigo = { version = "0.6.1", default-features = false }

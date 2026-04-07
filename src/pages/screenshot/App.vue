@@ -687,6 +687,16 @@ function handleStartRegionSelect(event) {
 }
 
 async function commitRecordingRegionSelection() {
+  const payload = getGlobalSelectionRect()
+  try {
+    await invoke('notify_recording_region_selected', {payload})
+  } catch (_e) {
+    await emit('recording-region-selected', payload)
+  }
+  await close()
+}
+
+function getGlobalSelectionRect() {
   const viewportW = Math.max(1, Number(window.innerWidth) || 1)
   const viewportH = Math.max(1, Number(window.innerHeight) || 1)
   const imageW = Math.max(1, Number(screenshotImg.value?.width) || viewportW)
@@ -705,18 +715,12 @@ async function commitRecordingRegionSelection() {
   const y = Math.max(minY, Math.min(maxY - 1, rawY))
   const width = Math.max(1, Math.min(maxX - x, rawW))
   const height = Math.max(1, Math.min(maxY - y, rawH))
-  const payload = {
+  return {
     x,
     y,
     width,
     height,
   }
-  try {
-    await invoke('notify_recording_region_selected', {payload})
-  } catch (_e) {
-    await emit('recording-region-selected', payload)
-  }
-  await close()
 }
 
 function loadImageFromBase64(base64Data) {

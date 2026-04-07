@@ -64,6 +64,8 @@ pub struct AppSettingsData {
     pub recording_ffmpeg_download_url: String,
     #[serde(default = "default_recording_window_audio_sync_advance_ms")]
     pub recording_window_audio_sync_advance_ms: u32,
+    #[serde(default = "default_recording_wgc_force_default_border")]
+    pub recording_wgc_force_default_border: bool,
     #[serde(default)]
     pub ai_provider: String,
     #[serde(default)]
@@ -112,6 +114,7 @@ impl Default for AppSettingsData {
             recording_file_name_template: default_recording_file_name_template(),
             recording_ffmpeg_download_url: default_recording_ffmpeg_download_url(),
             recording_window_audio_sync_advance_ms: default_recording_window_audio_sync_advance_ms(),
+            recording_wgc_force_default_border: default_recording_wgc_force_default_border(),
             ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
             selection_enabled: true,
@@ -218,6 +221,10 @@ fn default_recording_ffmpeg_download_url() -> String {
 
 fn default_recording_window_audio_sync_advance_ms() -> u32 {
     80
+}
+
+fn default_recording_wgc_force_default_border() -> bool {
+    false
 }
 
 fn default_grouped_items_protected_from_limit() -> bool {

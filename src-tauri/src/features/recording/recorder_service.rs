@@ -19,13 +19,17 @@ use crate::features::recording::types::{
     AudioInputDevice, AudioProcessItem, RecordingRegressionReport, RecordingRuntimeState, RecordingSessionInfo,
     RecordingStopResult, SessionRequest, StartRecordingRequest,
 };
-use crate::features::recording::wgc_capture::start_window_capture_to_mp4;
+use crate::features::recording::wgc_capture::{
+    bootstrap_force_default_border_from_settings, is_force_default_border_enabled,
+    start_window_capture_to_mp4,
+};
 use crate::sync::Mutex;
+use crate::utils::system_utils::save_settings;
+use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::{ChildStderr, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -84,6 +88,24 @@ fn normalize_runtime_state(runtime: &mut crate::features::recording::state::Reco
             | RecordingPhase::Stopping
             | RecordingPhase::Error => runtime.reset_to_idle(),
         }
+    }
+}
+
+fn persist_wgc_border_fallback_if_needed(state_arc: &Arc<Mutex<SharedAppState>>) {
+    if !is_force_default_border_enabled() {
+        return;
+    }
+    let mut guard = lock_arc_mutex(state_arc);
+    if guard.settings.recording_wgc_force_default_border {
+        return;
+    }
+    guard.settings.recording_wgc_force_default_border = true;
+    let snapshot = guard.settings.clone();
+    drop(guard);
+    if let Err(e) = save_settings(&snapshot) {
+        log::warn!("持久化 WGC Default border 回退策略失败: {}", e);
+    } else {
+        log::info!("已持久化 WGC Default border 回退策略");
     }
 }
 
@@ -521,6 +543,8 @@ fn is_benign_wgc_stop_error(details: &str) -> bool {
         || lower.contains("already stopped the capture")
         || lower.contains("capture has been closed")
         || lower.contains("operation is not valid in the current state")
+        || lower.contains("borderconfigunsupported")
+        || lower.contains("graphicscaptureapierror(borderconfigunsupported)")
 }
 
 fn ensure_system_audio_capture_started(
@@ -1019,6 +1043,7 @@ pub fn start_recording(
         let capture_origin_unix_ms = now_unix_ms();
         let capture_origin_instant = std::time::Instant::now();
         let mut window_wgc_handle = None;
+        bootstrap_force_default_border_from_settings(settings_snapshot.recording_wgc_force_default_border);
         let mut args: Vec<String> = vec![
             "-hide_banner".into(),
             "-loglevel".into(),
@@ -1037,6 +1062,7 @@ pub fn start_recording(
                     video_bitrate,
                     capture_cursor,
                     capture_origin_instant,
+                    settings_snapshot.recording_wgc_force_default_border,
                 )
                     .map_err(|e| rollback_starting("启动窗口源录制失败", e))?;
                 window_wgc_handle = Some(handle);
@@ -1336,6 +1362,7 @@ pub fn stop_recording(
             }
         }
     }
+    persist_wgc_border_fallback_if_needed(&state_arc);
     if let Some(anchor_holder) = wgc_first_frame_elapsed_ms.as_ref() {
         let anchor_ms = anchor_holder.load(Ordering::Relaxed);
         if anchor_ms != u64::MAX && anchor_ms > 0 {

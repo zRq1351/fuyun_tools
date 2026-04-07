@@ -14,6 +14,24 @@ use windows_capture::settings::{
 };
 use windows_capture::window::Window;
 
+static WGC_FORCE_DEFAULT_BORDER: AtomicBool = AtomicBool::new(false);
+
+fn is_border_config_unsupported(details: &str) -> bool {
+    let lower = details.to_lowercase();
+    lower.contains("borderconfigunsupported")
+        || lower.contains("graphicscaptureapierror(borderconfigunsupported)")
+}
+
+pub fn bootstrap_force_default_border_from_settings(force_default: bool) {
+    if force_default {
+        WGC_FORCE_DEFAULT_BORDER.store(true, Ordering::Relaxed);
+    }
+}
+
+pub fn is_force_default_border_enabled() -> bool {
+    WGC_FORCE_DEFAULT_BORDER.load(Ordering::Relaxed)
+}
+
 pub struct WgcCaptureHandle {
     pub stop_flag: Arc<AtomicBool>,
     pub first_frame_elapsed_ms: Arc<AtomicU64>,
@@ -103,6 +121,7 @@ pub fn start_window_capture_to_mp4(
     video_bitrate_kbps: u32,
     capture_cursor: bool,
     capture_origin_instant: std::time::Instant,
+    prefer_default_border: bool,
 ) -> Result<WgcCaptureHandle, String> {
     let window = parse_window_target(target_id)?;
     let rect = window.rect().map_err(|e| format!("读取窗口尺寸失败: {}", e))?;
@@ -127,10 +146,15 @@ pub fn start_window_capture_to_mp4(
     };
     let stop_flag_for_thread = stop_flag.clone();
     let join = thread::spawn(move || {
+        let draw_border_setting = if prefer_default_border || WGC_FORCE_DEFAULT_BORDER.load(Ordering::Relaxed) {
+            DrawBorderSettings::Default
+        } else {
+            DrawBorderSettings::WithoutBorder
+        };
         let settings = Settings::new(
             window,
             cursor_setting,
-            DrawBorderSettings::WithoutBorder,
+            draw_border_setting,
             SecondaryWindowSettings::Default,
             MinimumUpdateIntervalSettings::Default,
             DirtyRegionSettings::Default,
@@ -142,9 +166,22 @@ pub fn start_window_capture_to_mp4(
         loop {
             if stop_flag_for_thread.load(Ordering::SeqCst) {
                 if let Some(control) = control_opt.take() {
-                    return control
-                        .stop()
-                        .map_err(|e: CaptureControlError<String>| format!("{:?}", e));
+                    return match control.stop() {
+                        Ok(()) => Ok(()),
+                        Err(e) => {
+                            let details = format!("{:?}", e);
+                            if is_border_config_unsupported(&details) {
+                                // 当前环境不支持 border 配置：切到 Default 并吞掉本次 stop 错误。
+                                WGC_FORCE_DEFAULT_BORDER.store(true, Ordering::Relaxed);
+                                log::warn!(
+                                    "WGC stop 命中 BorderConfigUnsupported，后续会话回退 DrawBorderSettings::Default"
+                                );
+                                Ok(())
+                            } else {
+                                Err(details)
+                            }
+                        }
+                    };
                 }
                 return Ok(());
             }

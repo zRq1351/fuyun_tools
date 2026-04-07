@@ -12,7 +12,7 @@ use std::sync::{
 use std::time::Duration;
 use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 use wasapi::{
-    get_default_device, initialize_mta, AudioClient, Direction, SampleType, SessionState, StreamMode, WaveFormat,
+    initialize_mta, AudioClient, DeviceEnumerator, Direction, SampleType, SessionState, StreamMode, WaveFormat,
 };
 #[cfg(target_os = "windows")]
 use winapi::shared::minwindef::{BOOL, LPARAM};
@@ -224,7 +224,10 @@ pub fn list_audio_processes() -> Vec<AudioProcessInfo> {
 fn active_audio_process_ids() -> HashSet<u32> {
     let mut set = HashSet::new();
     let _ = initialize_mta();
-    let Ok(device) = get_default_device(&Direction::Render) else {
+    let Ok(enumerator) = DeviceEnumerator::new() else {
+        return set;
+    };
+    let Ok(device) = enumerator.get_default_device(&Direction::Render) else {
         return set;
     };
     let Ok(manager) = device.get_iaudiosessionmanager() else {
