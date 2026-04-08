@@ -59,6 +59,8 @@ static COPY_PASTE_DEDUP_REQUEST_ID_HIT_COUNT: AtomicU64 = AtomicU64::new(0);
 static COPY_PASTE_DEDUP_TEXT_HASH_HIT_COUNT: AtomicU64 = AtomicU64::new(0);
 static COPY_PASTE_DEDUP_LOG_COUNT: AtomicU64 = AtomicU64::new(0);
 static COPY_PASTE_DEDUP_WINDOW_STATS: OnceLock<StdMutex<DedupWindowStats>> = OnceLock::new();
+#[cfg(debug_assertions)]
+static VC_RUNTIME_FORCE_MISSING: AtomicBool = AtomicBool::new(false);
 
 struct RecentCopyPaste {
     request_id: String,
@@ -2984,10 +2986,20 @@ pub async fn check_vc_runtime_dependencies() -> Result<serde_json::Value, String
                 }
             })
             .collect();
+        #[cfg(debug_assertions)]
+        if VC_RUNTIME_FORCE_MISSING.load(Ordering::Relaxed) {
+            return Ok(serde_json::json!({
+                "ok": false,
+                "missing": required,
+                "installUrl": "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+                "forcedByDev": true
+            }));
+        }
         return Ok(serde_json::json!({
             "ok": missing.is_empty(),
             "missing": missing,
-            "installUrl": "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+            "installUrl": "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+            "forcedByDev": false
         }));
     }
     #[cfg(not(windows))]
@@ -3135,6 +3147,60 @@ pub async fn open_vc_runtime_installer(installer_path: String) -> Result<(), Str
     {
         Err("当前平台不支持该操作".to_string())
     }
+}
+
+#[tauri::command]
+pub async fn install_vc_runtime_and_wait(installer_path: String) -> Result<serde_json::Value, String> {
+    #[cfg(windows)]
+    {
+        let path = PathBuf::from(installer_path.trim());
+        if !path.exists() || !path.is_file() {
+            return Err("安装包文件不存在，请重新下载".to_string());
+        }
+        let status = tauri::async_runtime::spawn_blocking(move || {
+            std::process::Command::new(&path)
+                .arg("/install")
+                .arg("/passive")
+                .arg("/norestart")
+                .status()
+        })
+            .await
+            .map_err(|e| format!("启动安装程序失败: {}", e))?
+            .map_err(|e| format!("执行安装程序失败: {}", e))?;
+        let exit_code = status.code().unwrap_or(-1);
+        let success = matches!(exit_code, 0 | 1638 | 3010);
+        let cancelled = exit_code == 1602;
+        let reboot_required = exit_code == 3010;
+        return Ok(serde_json::json!({
+            "success": success,
+            "cancelled": cancelled,
+            "rebootRequired": reboot_required,
+            "exitCode": exit_code
+        }));
+    }
+    #[cfg(not(windows))]
+    {
+        Err("当前平台不支持该操作".to_string())
+    }
+}
+
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn get_vc_runtime_debug_state() -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "forceMissing": VC_RUNTIME_FORCE_MISSING.load(Ordering::Relaxed)
+    }))
+}
+
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn set_vc_runtime_debug_config(force_missing: Option<bool>) -> Result<serde_json::Value, String> {
+    if let Some(enabled) = force_missing {
+        VC_RUNTIME_FORCE_MISSING.store(enabled, Ordering::Relaxed);
+    }
+    Ok(serde_json::json!({
+        "forceMissing": VC_RUNTIME_FORCE_MISSING.load(Ordering::Relaxed)
+    }))
 }
 
 #[tauri::command]

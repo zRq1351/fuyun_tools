@@ -76,6 +76,7 @@ export const IPC_COMMANDS = {
     CHECK_VC_RUNTIME_DEPENDENCIES: 'check_vc_runtime_dependencies',
     DOWNLOAD_VC_RUNTIME_INSTALLER: 'download_vc_runtime_installer',
     OPEN_VC_RUNTIME_INSTALLER: 'open_vc_runtime_installer',
+    INSTALL_VC_RUNTIME_AND_WAIT: 'install_vc_runtime_and_wait',
     SAVE_APP_SETTINGS: 'save_app_settings',
     TEST_AI_CONNECTION: 'test_ai_connection',
     GET_PROVIDER_CONFIG: 'get_provider_config',
@@ -114,6 +115,8 @@ export const IPC_COMMANDS = {
         GET_IMAGE_PERSIST_QUEUE_METRICS: 'get_image_persist_queue_metrics',
         GET_COPY_PASTE_DEDUP_DEBUG_STATE: 'get_copy_paste_dedup_debug_state',
         SET_COPY_PASTE_DEDUP_DEBUG_CONFIG: 'set_copy_paste_dedup_debug_config',
+        GET_VC_RUNTIME_DEBUG_STATE: 'get_vc_runtime_debug_state',
+        SET_VC_RUNTIME_DEBUG_CONFIG: 'set_vc_runtime_debug_config',
     } : {}),
 };
 
@@ -320,6 +323,8 @@ export const AISettingsService = {
         invoke(IPC_COMMANDS.DOWNLOAD_VC_RUNTIME_INSTALLER, {downloadUrl}),
     openVcRuntimeInstaller: (installerPath) =>
         invoke(IPC_COMMANDS.OPEN_VC_RUNTIME_INSTALLER, {installerPath}),
+    installVcRuntimeAndWait: (installerPath) =>
+        invoke(IPC_COMMANDS.INSTALL_VC_RUNTIME_AND_WAIT, {installerPath}),
 
     /**
      * 保存应用设置
@@ -438,6 +443,10 @@ export const AISettingsService = {
             invoke(IPC_COMMANDS.GET_COPY_PASTE_DEDUP_DEBUG_STATE),
         setCopyPasteDedupDebugConfig: ({enabled, windowMs, logEnabled, resetMetrics}) =>
             invoke(IPC_COMMANDS.SET_COPY_PASTE_DEDUP_DEBUG_CONFIG, {enabled, windowMs, logEnabled, resetMetrics}),
+        getVcRuntimeDebugState: () =>
+            invoke(IPC_COMMANDS.GET_VC_RUNTIME_DEBUG_STATE),
+        setVcRuntimeDebugConfig: ({forceMissing}) =>
+            invoke(IPC_COMMANDS.SET_VC_RUNTIME_DEBUG_CONFIG, {forceMissing}),
     } : {}),
 };
 

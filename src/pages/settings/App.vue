@@ -570,7 +570,6 @@ const showShortcutConflictWarning = (payload) => {
 const showVcRuntimeMissingWarning = async (payload) => {
   const {missing, installUrl} = normalizeVcRuntimeMissing(payload)
   if (missing.length === 0) return
-  activeTab.value = 'about'
   const detail = missing.join('、')
   try {
     await ElMessageBox.confirm(
@@ -618,21 +617,34 @@ const showVcRuntimeMissingWarning = async (payload) => {
       ElMessage.error('VC Runtime 安装包下载成功，但未获取安装文件路径')
       return
     }
+    const installing = ElLoading.service({
+      lock: true,
+      text: '正在安装 VC Runtime，请按安装向导完成...',
+      background: 'rgba(0, 0, 0, 0.35)'
+    })
+    let installResult = null
     try {
-      await ElMessageBox.confirm(
-          'VC Runtime 安装包下载完成，是否现在启动安装程序？',
-          '下载完成',
-          {
-            confirmButtonText: '立即安装',
-            cancelButtonText: '稍后安装',
-            type: 'success'
-          }
-      )
-      await AISettingsService.openVcRuntimeInstaller(installerPath)
-      ElMessage.success('安装程序已启动，请完成安装后再开启截图功能')
-    } catch {
-      ElMessage.info(`已下载到：${installerPath}`)
+      installResult = await AISettingsService.installVcRuntimeAndWait(installerPath)
+    } finally {
+      installing.close()
     }
+    const cancelled = installResult?.cancelled === true
+    const success = installResult?.success === true
+    const rebootRequired = installResult?.rebootRequired === true
+    const exitCode = Number.isInteger(installResult?.exitCode) ? installResult.exitCode : null
+    if (cancelled) {
+      ElMessage.warning('已取消安装，请安装 VC Runtime 后重新启用截图功能')
+      return
+    }
+    if (!success) {
+      ElMessage.error(`VC Runtime 安装失败（exitCode=${exitCode ?? 'unknown'}），请手动安装后重新启用截图`)
+      return
+    }
+    if (rebootRequired) {
+      ElMessage.warning('VC Runtime 安装完成，系统提示需要重启。请重启后重新启用截图功能')
+      return
+    }
+    ElMessage.success('VC Runtime 安装完成，请重新启用截图功能')
   } catch {
     // 用户选择稍后处理
   }

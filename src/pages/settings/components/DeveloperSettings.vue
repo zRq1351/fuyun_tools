@@ -23,6 +23,23 @@
     </el-card>
     <el-card class="setting-section-card" shadow="never">
       <template #header>
+        <div class="section-title">VC Runtime 调试</div>
+      </template>
+      <el-form-item label="强制模拟缺失（仅开发模式）">
+        <el-switch v-model="vcRuntimeDebug.forceMissing"/>
+      </el-form-item>
+      <el-form-item>
+        <el-button size="small" type="primary" @click="saveVcRuntimeDebugConfig">保存配置</el-button>
+        <el-button size="small" @click="refreshVcRuntimeDebugState">刷新状态</el-button>
+      </el-form-item>
+      <el-form-item>
+        <div class="metrics-card">
+          <div class="metrics-line">当前状态：{{ vcRuntimeDebug.forceMissing ? '强制缺失' : '真实检测' }}</div>
+        </div>
+      </el-form-item>
+    </el-card>
+    <el-card class="setting-section-card" shadow="never">
+      <template #header>
         <div class="section-title">回写去重调优</div>
       </template>
       <el-form-item label="去重开关">
@@ -86,6 +103,9 @@ import {onMounted, onUnmounted, ref} from 'vue'
 import {AISettingsService} from '@/services/ipc.js'
 
 const imageStorageMetrics = ref({})
+const vcRuntimeDebug = ref({
+  forceMissing: false
+})
 const dedupConfig = ref({
   enabled: true,
   windowMs: 1200,
@@ -129,6 +149,23 @@ const refreshImagePersistQueueMetrics = async () => {
     waitMsTotal: Number(metrics?.wait_ms_total || 0),
     avgWaitMs: `${Number(metrics?.avg_wait_ms || 0).toFixed(1)}ms`
   }
+}
+
+const refreshVcRuntimeDebugState = async () => {
+  const state = await AISettingsService.getVcRuntimeDebugState()
+  vcRuntimeDebug.value = {
+    forceMissing: !!state?.forceMissing
+  }
+}
+
+const saveVcRuntimeDebugConfig = async () => {
+  const state = await AISettingsService.setVcRuntimeDebugConfig({
+    forceMissing: !!vcRuntimeDebug.value.forceMissing
+  })
+  vcRuntimeDebug.value = {
+    forceMissing: !!state?.forceMissing
+  }
+  ElMessage.success('VC Runtime 调试配置已保存')
 }
 
 const applyDedupState = (state) => {
@@ -198,10 +235,12 @@ const formatBytes = (bytes) => {
 
 onMounted(async () => {
   await refreshImageStorageMetrics()
+  await refreshVcRuntimeDebugState()
   await refreshImagePersistQueueMetrics()
   await refreshDedupState()
   metricsTimer = setInterval(async () => {
     await refreshImageStorageMetrics()
+    await refreshVcRuntimeDebugState()
     await refreshImagePersistQueueMetrics()
     await refreshDedupState()
   }, 10000)

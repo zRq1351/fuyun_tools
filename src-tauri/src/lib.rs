@@ -357,6 +357,11 @@ pub fn run() {
             check_vc_runtime_dependencies,
             download_vc_runtime_installer,
             open_vc_runtime_installer,
+            install_vc_runtime_and_wait,
+            #[cfg(debug_assertions)]
+            get_vc_runtime_debug_state,
+            #[cfg(debug_assertions)]
+            set_vc_runtime_debug_config,
             #[cfg(debug_assertions)]
             get_text_dedup_metrics,
             #[cfg(debug_assertions)]
