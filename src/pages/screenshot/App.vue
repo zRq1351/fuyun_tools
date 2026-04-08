@@ -295,8 +295,7 @@
 <script setup>
 import {computed, nextTick, onMounted, onUnmounted, reactive, ref, watchPostEffect} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
-import {emit} from '@tauri-apps/api/event'
-import {listen} from '@tauri-apps/api/event'
+import {emit, listen} from '@tauri-apps/api/event'
 import {Check, Circle, Pin, Square, X} from 'lucide-vue-next'
 import {
   Brush,
@@ -688,7 +687,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  cancelManualLongshotCapture(false)
+  cancelManualLongshotCapture(false, false)
   window.removeEventListener('screenshot-data', handleScreenshotData)
   window.removeEventListener('start-region-select', handleStartRegionSelect)
   window.removeEventListener('screenshot-reset', handleScreenshotReset)
@@ -996,14 +995,21 @@ async function finishManualLongshotCapture() {
   }
 }
 
-function cancelManualLongshotCapture(updateHint = true) {
+function cancelManualLongshotCapture(updateHint = true, restoreVisibility = true) {
   const sid = manualLongshotSessionId.value
+  const hadLongshotRuntime =
+      sid > 0 ||
+      longshotOverlayOnly.value ||
+      !!pendingLongshotBorderAnchor.value ||
+      longshotBorderShown.value
   manualLongshotRunning.value = false
   manualLongshotSessionId.value = 0
   pendingLongshotBorderAnchor.value = null
   longshotBorderShown.value = false
-  invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
-  })
+  if (restoreVisibility && hadLongshotRuntime) {
+    invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
+    })
+  }
   invoke('hide_longshot_border').catch(() => {
   })
   invoke('hide_longshot_toolbar').catch(() => {
@@ -2629,7 +2635,8 @@ async function saveAndClose() {
 
 async function close() {
   try {
-    cancelManualLongshotCapture(false)
+    // 普通截图关闭不应再触发“恢复截图窗口可见”，否则会与 close_screenshot_window 竞态。
+    cancelManualLongshotCapture(false, false)
     await invoke('close_screenshot_window')
   } catch (error) {
     console.error('关闭窗口失败:', error)
