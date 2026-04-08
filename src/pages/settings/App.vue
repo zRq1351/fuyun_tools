@@ -415,6 +415,18 @@ const persistSettings = async (silent = false) => {
     }
     autoSaveState.value = 'saving'
 
+    if (changedFields.screenshotEnabled === true) {
+      const runtimeStatus = await AISettingsService.checkVcRuntimeDependencies()
+      const missing = Array.isArray(runtimeStatus?.missing) ? runtimeStatus.missing : []
+      if (missing.length > 0) {
+        // 依赖缺失时先回退开关状态，避免出现“已启用但不可用”的中间态
+        suppressNextAutoSave.value = true
+        form.screenshotEnabled = false
+        changedFields.screenshotEnabled = false
+        await showVcRuntimeMissingWarning(runtimeStatus)
+      }
+    }
+
     if (changedFields.recordingEnabled === true) {
       const ffmpegStatus = await RecordingService.checkFfmpeg()
       if (!ffmpegStatus?.exists) {
@@ -538,11 +550,92 @@ const normalizeShortcutConflicts = (payload) => {
   return []
 }
 
+const normalizeVcRuntimeMissing = (payload) => {
+  const missing = payload && Array.isArray(payload.missing)
+      ? payload.missing.filter((item) => typeof item === 'string' && item.trim())
+      : []
+  const installUrl = typeof payload?.installUrl === 'string' && payload.installUrl.trim()
+      ? payload.installUrl.trim()
+      : 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
+  return {missing, installUrl}
+}
+
 const showShortcutConflictWarning = (payload) => {
   const conflicts = normalizeShortcutConflicts(payload)
   if (conflicts.length === 0) return
   activeTab.value = 'clipboard'
   shortcutConflictMessage.value = `快捷键被占用：${conflicts.join('；')}`
+}
+
+const showVcRuntimeMissingWarning = async (payload) => {
+  const {missing, installUrl} = normalizeVcRuntimeMissing(payload)
+  if (missing.length === 0) return
+  activeTab.value = 'about'
+  const detail = missing.join('、')
+  try {
+    await ElMessageBox.confirm(
+        `检测到系统缺少 VC 运行库组件：${detail}。\n安装后可避免录屏/长截图相关功能在部分机器上异常。\n是否现在下载安装 Microsoft VC++ Redistributable (x64)？`,
+        '检测到依赖缺失',
+        {
+          confirmButtonText: '下载安装',
+          cancelButtonText: '稍后处理',
+          type: 'warning',
+          closeOnClickModal: false,
+          closeOnPressEscape: true
+        }
+    )
+    const downloading = ElLoading.service({
+      lock: true,
+      text: '正在下载 VC Runtime... 0%',
+      background: 'rgba(0, 0, 0, 0.35)'
+    })
+    let unlistenProgress = null
+    let downloaded = null
+    try {
+      unlistenProgress = await listen('vc-runtime-download-progress', (event) => {
+        const progress = event?.payload || {}
+        const percent = typeof progress.progressPercent === 'number' ? progress.progressPercent : null
+        if (percent !== null) {
+          downloading.setText(`正在下载 VC Runtime... ${percent}%`)
+          return
+        }
+        const done = Number(progress.downloadedBytes || 0)
+        const total = Number(progress.totalBytes || 0)
+        if (total > 0) {
+          const computed = Math.min(100, Math.floor(done * 100 / total))
+          downloading.setText(`正在下载 VC Runtime... ${computed}%`)
+        }
+      })
+      downloaded = await AISettingsService.downloadVcRuntimeInstaller(installUrl)
+    } finally {
+      if (unlistenProgress) {
+        unlistenProgress()
+      }
+      downloading.close()
+    }
+    const installerPath = typeof downloaded?.installerPath === 'string' ? downloaded.installerPath : ''
+    if (!installerPath) {
+      ElMessage.error('VC Runtime 安装包下载成功，但未获取安装文件路径')
+      return
+    }
+    try {
+      await ElMessageBox.confirm(
+          'VC Runtime 安装包下载完成，是否现在启动安装程序？',
+          '下载完成',
+          {
+            confirmButtonText: '立即安装',
+            cancelButtonText: '稍后安装',
+            type: 'success'
+          }
+      )
+      await AISettingsService.openVcRuntimeInstaller(installerPath)
+      ElMessage.success('安装程序已启动，请完成安装后再开启截图功能')
+    } catch {
+      ElMessage.info(`已下载到：${installerPath}`)
+    }
+  } catch {
+    // 用户选择稍后处理
+  }
 }
 
 const handleNavigateSettings = (payload) => {

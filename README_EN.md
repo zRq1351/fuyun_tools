@@ -208,6 +208,19 @@ Extra entries in development builds:
 
 ---
 
+## 📄 Third-Party Licenses and Compliance
+
+- The recording pipeline invokes `ffmpeg.exe` as an external process.
+- The currently distributed FFmpeg build includes GPL components (for example, `libx264`), and that binary is
+  distributed under GPL/LGPL obligations.
+- The installer does not bundle `ffmpeg.exe` by default; it is downloaded on demand into local `bin` directory when
+  recording is enabled.
+- Corresponding source and license disclosure for FFmpeg are documented in `docs/THIRD_PARTY_NOTICES.md`.
+- License texts should be shipped with releases: `docs/GPLv2`, `docs/LGPLv2.1` (and `docs/OpenCV_LICENSE` when
+  OpenCV-related build is distributed).
+
+---
+
 ## Local Development
 
 ### Tech Stack

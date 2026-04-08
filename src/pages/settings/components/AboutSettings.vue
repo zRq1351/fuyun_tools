@@ -111,20 +111,26 @@
         <strong>FFmpeg</strong> - Copyright (c) FFmpeg developers。
       </li>
       <li>
-        <strong>上游构建来源</strong> - https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.0.1-essentials_build.7z
+        <strong>使用说明</strong> - 本软件通过外部进程调用 ffmpeg.exe，录屏功能启用时按需下载，不随安装包默认内置。
       </li>
       <li>
-        <strong>应用分发方式</strong> - 应用安装包不内置 ffmpeg.exe；用户首次启用录屏时按需下载到本地 bin 目录。
+        <strong>分发策略</strong> - ffmpeg.exe 下载到本地 bin 目录，下载地址可由 settings.json 中
+        recording_ffmpeg_download_url 配置。
       </li>
       <li>
-        <strong>下载地址来源</strong> - 由运营方服务器提供，按 settings.json 中 recording_ffmpeg_download_url 配置下发。
+        <strong>授权说明</strong> - 当前使用的 FFmpeg 构建包含 GPL 组件（如 libx264），对应 ffmpeg.exe 按 GPL/LGPL 要求分发。
       </li>
       <li>
-        <strong>授权说明</strong> - FFmpeg 主体遵循 LGPL v2.1+；当前使用构建启用 GPL 组件（含 libx264），分发时按 GPL
-        相关要求执行。
+        <strong>对应源码</strong> - FFmpeg 8.0.1 源码可从 https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz 获取。
       </li>
       <li>
-        <strong>源码获取</strong> - https://git.ffmpeg.org/ffmpeg.git
+        <strong>上游仓库</strong> - https://git.ffmpeg.org/ffmpeg.git
+      </li>
+      <li>
+        <strong>构建参考</strong> - https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.0.1-essentials_build.7z
+      </li>
+      <li>
+        <strong>完整声明</strong> - 详见 docs/THIRD_PARTY_NOTICES.md（含许可证文件与源码可获取信息）。
       </li>
     </ul>
   </div>

@@ -28,8 +28,10 @@ use crate::utils::utils_helpers::{
     default_explanation_prompt_template, default_translation_prompt_template,
     load_history_page_data_async, load_settings, save_settings, ClipboardHistoryPageData,
 };
+use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -37,12 +39,12 @@ use std::sync::OnceLock;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use xxhash_rust::xxh3::xxh3_64;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_positioner::WindowExt;
+use xxhash_rust::xxh3::xxh3_64;
 
 static NEXT_SCREENSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_PINNED_IMAGE_WINDOW_ID: AtomicU64 = AtomicU64::new(1);
@@ -2955,6 +2957,184 @@ pub async fn check_previews_ready(
 #[serde(rename_all = "camelCase")]
 pub struct ManualLongshotSessionRequest {
     session_id: u64,
+}
+
+#[tauri::command]
+pub async fn check_vc_runtime_dependencies() -> Result<serde_json::Value, String> {
+    #[cfg(windows)]
+    {
+        let win_dir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".to_string());
+        let system32 = PathBuf::from(win_dir).join("System32");
+        let app_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|x| x.to_path_buf()));
+        let required = ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"];
+        let missing: Vec<String> = required
+            .iter()
+            .filter_map(|name| {
+                let in_system32 = system32.join(name).exists();
+                let in_app_dir = app_dir
+                    .as_ref()
+                    .map(|dir| dir.join(name).exists())
+                    .unwrap_or(false);
+                if in_system32 || in_app_dir {
+                    None
+                } else {
+                    Some((*name).to_string())
+                }
+            })
+            .collect();
+        return Ok(serde_json::json!({
+            "ok": missing.is_empty(),
+            "missing": missing,
+            "installUrl": "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        }));
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(serde_json::json!({
+            "ok": true,
+            "missing": [],
+            "installUrl": ""
+        }))
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VcRuntimeDownloadProgress {
+    phase: String,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    progress_percent: Option<u8>,
+    message: String,
+}
+
+#[tauri::command]
+pub async fn download_vc_runtime_installer(
+    download_url: Option<String>,
+    app: AppHandle,
+) -> Result<serde_json::Value, String> {
+    #[cfg(windows)]
+    {
+        let default_url = "https://aka.ms/vs/17/release/vc_redist.x64.exe".to_string();
+        let url = download_url
+            .map(|x| x.trim().to_string())
+            .filter(|x| !x.is_empty())
+            .unwrap_or(default_url);
+        let target_dir = std::env::temp_dir().join("fuyun_tools");
+        fs::create_dir_all(&target_dir).map_err(|e| format!("创建目录失败: {}", e))?;
+        let installer_path = target_dir.join("vc_redist.x64.exe");
+        let tmp_path = target_dir.join("vc_redist.x64.exe.tmp");
+        if tmp_path.exists() {
+            let _ = fs::remove_file(&tmp_path);
+        }
+
+        let _ = app.emit(
+            "vc-runtime-download-progress",
+            VcRuntimeDownloadProgress {
+                phase: "start".to_string(),
+                downloaded_bytes: 0,
+                total_bytes: None,
+                progress_percent: Some(0),
+                message: "开始下载 VC Runtime 安装包".to_string(),
+            },
+        );
+
+        let client = reqwest::Client::new();
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("下载请求失败: {}", e))?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "下载 VC Runtime 失败，HTTP 状态: {}",
+                response.status()
+            ));
+        }
+        let total_bytes = response.content_length();
+        let mut downloaded_bytes: u64 = 0;
+        let mut stream = response.bytes_stream();
+        let mut file = fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
+
+        while let Some(chunk_res) = stream.next().await {
+            let chunk = chunk_res.map_err(|e| format!("下载数据流失败: {}", e))?;
+            file.write_all(&chunk)
+                .map_err(|e| format!("写入临时文件失败: {}", e))?;
+            downloaded_bytes = downloaded_bytes.saturating_add(chunk.len() as u64);
+            let progress_percent = total_bytes.and_then(|total| {
+                if total == 0 {
+                    None
+                } else {
+                    Some(((downloaded_bytes.saturating_mul(100)) / total).min(100) as u8)
+                }
+            });
+            let _ = app.emit(
+                "vc-runtime-download-progress",
+                VcRuntimeDownloadProgress {
+                    phase: "downloading".to_string(),
+                    downloaded_bytes,
+                    total_bytes,
+                    progress_percent,
+                    message: "正在下载 VC Runtime 安装包".to_string(),
+                },
+            );
+        }
+        file.flush().map_err(|e| format!("刷新下载文件失败: {}", e))?;
+        let metadata = fs::metadata(&tmp_path).map_err(|e| format!("读取下载文件失败: {}", e))?;
+        if metadata.len() == 0 {
+            let _ = fs::remove_file(&tmp_path);
+            return Err("下载结果为空文件，请重试".to_string());
+        }
+        fs::rename(&tmp_path, &installer_path)
+            .or_else(|_| {
+                if installer_path.exists() {
+                    let _ = fs::remove_file(&installer_path);
+                }
+                fs::rename(&tmp_path, &installer_path)
+            })
+            .map_err(|e| format!("写入安装包失败: {}", e))?;
+
+        let _ = app.emit(
+            "vc-runtime-download-progress",
+            VcRuntimeDownloadProgress {
+                phase: "completed".to_string(),
+                downloaded_bytes,
+                total_bytes,
+                progress_percent: Some(100),
+                message: "VC Runtime 安装包下载完成".to_string(),
+            },
+        );
+
+        return Ok(serde_json::json!({
+            "installerPath": installer_path.to_string_lossy().to_string(),
+            "downloadUrl": url
+        }));
+    }
+    #[cfg(not(windows))]
+    {
+        Err("当前平台不支持 VC Runtime 下载".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn open_vc_runtime_installer(installer_path: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let path = PathBuf::from(installer_path.trim());
+        if !path.exists() || !path.is_file() {
+            return Err("安装包文件不存在，请重新下载".to_string());
+        }
+        std::process::Command::new(&path)
+            .spawn()
+            .map_err(|e| format!("启动安装程序失败: {}", e))?;
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        Err("当前平台不支持该操作".to_string())
+    }
 }
 
 #[tauri::command]

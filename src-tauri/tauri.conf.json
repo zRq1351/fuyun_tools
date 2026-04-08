@@ -134,7 +134,8 @@
       "../LICENSE",
       "../docs/THIRD_PARTY_NOTICES.md",
       "../docs/GPLv2",
-      "../docs/LGPLv2.1"
+      "../docs/LGPLv2.1",
+      "../docs/OpenCV_LICENSE"
     ],
     "icon": [
       "icons/32x32.png",

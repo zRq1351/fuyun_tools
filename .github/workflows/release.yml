@@ -51,7 +51,7 @@ jobs:
       - name: 安装 OpenCV（x64-windows）
         shell: pwsh
         run: |
-          & "$env:RUNNER_TEMP\vcpkg\vcpkg.exe" install opencv4:x64-windows-static
+          & "$env:RUNNER_TEMP\vcpkg\vcpkg.exe" install opencv4:x64-windows-static-md
 
       - name: 构建并发布 Tauri 应用
         uses: tauri-apps/tauri-action@v0
@@ -60,9 +60,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           VCPKG_ROOT: ${{ runner.temp }}\vcpkg
-          VCPKGRS_TRIPLET: x64-windows-static
+          VCPKGRS_TRIPLET: x64-windows-static-md
           VCPKGRS_DYNAMIC: "0"
-          OpenCV_DIR: ${{ runner.temp }}\vcpkg\installed\x64-windows-static\share\opencv4
+          OpenCV_DIR: ${{ runner.temp }}\vcpkg\installed\x64-windows-static-md\share\opencv4
+          OPENCV_MSVC_CRT: dynamic
           OPENCV_DISABLE_PROBES: environment,cmake,vcpkg_cmake,pkg_config
           LIBCLANG_PATH: C:\Program Files\LLVM\bin
           CLANG_PATH: C:\Program Files\LLVM\bin\clang.exe

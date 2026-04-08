@@ -202,6 +202,16 @@ fuyun_tools 是一款常驻系统托盘的桌面效率工具，聚焦四件事�
 
 ---
 
+## 📄 第三方许可证与合规说明
+
+- 本项目录屏链路通过外部进程调用 `ffmpeg.exe`。
+- 当前默认分发的 FFmpeg 构建包含 GPL 组件（如 `libx264`），对应二进制按 GPL/LGPL 要求分发。
+- 安装包默认不内置 `ffmpeg.exe`，在用户启用录屏时按需下载到本地 `bin` 目录。
+- FFmpeg 对应源码与许可证信息已在仓库声明，详见 `docs/THIRD_PARTY_NOTICES.md`。
+- 随发布包应一并提供许可证文本：`docs/GPLv2`、`docs/LGPLv2.1`（以及 OpenCV 场景下的 `docs/OpenCV_LICENSE`）。
+
+---
+
 ## 🛠️ 本地开发
 
 ### 技术栈

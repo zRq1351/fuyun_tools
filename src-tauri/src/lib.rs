@@ -22,8 +22,8 @@ use crate::ui::commands_recording::{
 };
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{show_clipboard_window, show_image_clipboard_window};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -354,6 +354,9 @@ pub fn run() {
             copy_text,
             copy_and_paste_text,
             get_ai_settings,
+            check_vc_runtime_dependencies,
+            download_vc_runtime_installer,
+            open_vc_runtime_installer,
             #[cfg(debug_assertions)]
             get_text_dedup_metrics,
             #[cfg(debug_assertions)]

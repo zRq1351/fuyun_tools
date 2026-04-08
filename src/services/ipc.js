@@ -73,6 +73,9 @@ export const IPC_COMMANDS = {
 
     // AI 设置
     GET_AI_SETTINGS: 'get_ai_settings',
+    CHECK_VC_RUNTIME_DEPENDENCIES: 'check_vc_runtime_dependencies',
+    DOWNLOAD_VC_RUNTIME_INSTALLER: 'download_vc_runtime_installer',
+    OPEN_VC_RUNTIME_INSTALLER: 'open_vc_runtime_installer',
     SAVE_APP_SETTINGS: 'save_app_settings',
     TEST_AI_CONNECTION: 'test_ai_connection',
     GET_PROVIDER_CONFIG: 'get_provider_config',
@@ -312,6 +315,11 @@ export const AISettingsService = {
      * @returns {Promise<Object>}
      */
     getSettings: () => invoke(IPC_COMMANDS.GET_AI_SETTINGS),
+    checkVcRuntimeDependencies: () => invoke(IPC_COMMANDS.CHECK_VC_RUNTIME_DEPENDENCIES),
+    downloadVcRuntimeInstaller: (downloadUrl = null) =>
+        invoke(IPC_COMMANDS.DOWNLOAD_VC_RUNTIME_INSTALLER, {downloadUrl}),
+    openVcRuntimeInstaller: (installerPath) =>
+        invoke(IPC_COMMANDS.OPEN_VC_RUNTIME_INSTALLER, {installerPath}),
 
     /**
      * 保存应用设置
