@@ -30,14 +30,14 @@ use crate::utils::utils_helpers::{
 };
 use std::collections::HashMap;
 use std::fs;
-use std::hash::{Hash, Hasher};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use xxhash_rust::xxh3::xxh3_64;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
@@ -72,9 +72,7 @@ struct DedupWindowStats {
 }
 
 fn calc_text_hash(text: &str) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish()
+    xxh3_64(text.as_bytes())
 }
 
 fn now_unix_ms() -> u64 {
@@ -344,7 +342,7 @@ impl FillKind {
 }
 
 fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
-    mutex.lock().expect("infallible mutex lock failed")
+    mutex.lock().unwrap_or_else(|never| match never {})
 }
 
 fn is_screenshot_feature_enabled(state: &Arc<Mutex<SharedAppState>>) -> bool {
@@ -1127,6 +1125,14 @@ pub async fn get_image_clipboard_history(
 pub async fn close_image_preview_window(app: AppHandle) -> Result<(), String> {
     hide_image_preview_window(app);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn start_image_preview_window_drag(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("image_preview")
+        .ok_or_else(|| "图片预览窗口不存在".to_string())?;
+    window.start_dragging().map_err(|e| format!("拖动窗口失败: {}", e))
 }
 
 #[tauri::command]
@@ -2951,6 +2957,67 @@ pub struct ManualLongshotSessionRequest {
     session_id: u64,
 }
 
+#[tauri::command]
+pub async fn copy_image_clipboard_item_to_directory(
+    item_id: String,
+    target_directory: String,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<serde_json::Value, String> {
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager_arc = get_image_clipboard_manager_arc(&state_arc);
+        let manager = lock_arc_mutex(&manager_arc);
+        let source_path = manager.get_preview_image_path_by_id(&item_id)?;
+        drop(manager);
+
+        let source = PathBuf::from(&source_path);
+        if !source.exists() {
+            return Err("源图片文件不存在".to_string());
+        }
+        let file_name = source
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|n| !n.is_empty())
+            .ok_or_else(|| "无法解析源文件名".to_string())?
+            .to_string();
+
+        let target_dir = PathBuf::from(target_directory.trim());
+        if target_dir.as_os_str().is_empty() {
+            return Err("目标目录不能为空".to_string());
+        }
+        fs::create_dir_all(&target_dir).map_err(|e| format!("创建目标目录失败: {}", e))?;
+
+        let stem = Path::new(&file_name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("image");
+        let ext = Path::new(&file_name)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("png");
+
+        let mut target_path = target_dir.join(&file_name);
+        if target_path.exists() {
+            for idx in 1..10000u32 {
+                let candidate = target_dir.join(format!("{} ({idx}).{}", stem, ext));
+                if !candidate.exists() {
+                    target_path = candidate;
+                    break;
+                }
+            }
+        }
+
+        fs::copy(&source, &target_path).map_err(|e| format!("复制图片失败: {}", e))?;
+        Ok(serde_json::json!({
+            "success": true,
+            "sourcePath": source.to_string_lossy(),
+            "savedPath": target_path.to_string_lossy(),
+        }))
+    })
+        .await
+        .map_err(|e| frontend_error(ErrorCode::SystemError, "复制图片任务执行失败", e.to_string()))?
+}
+
 /// 开始截图（全屏）
 #[tauri::command]
 pub async fn start_screenshot(
@@ -3197,6 +3264,13 @@ pub async fn pin_screenshot_on_screen(
     let y = request.y.unwrap_or(100.0).max(0.0);
     let width = request.width.unwrap_or(360.0).max(1.0);
     let height = request.height.unwrap_or(240.0).max(1.0);
+    let payload = serde_json::json!({
+        "label": label,
+        "png_base64": request.png_base64,
+        "width": width,
+        "height": height
+    });
+    let payload_init_script = format!("window.__PINNED_IMAGE_PAYLOAD__ = {};", payload);
     let window = tauri::WebviewWindowBuilder::new(
         &app,
         label.clone(),
@@ -3209,32 +3283,20 @@ pub async fn pin_screenshot_on_screen(
         .always_on_top(true)
         .skip_taskbar(true)
         .resizable(true)
+        .initialization_script(&payload_init_script)
         .build()
         .map_err(|e| format!("创建固定图片窗口失败: {}", e))?;
 
     let window_clone = window.clone();
-    let payload = serde_json::json!({
-        "label": label,
-        "png_base64": request.png_base64,
-        "width": width,
-        "height": height
-    });
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(180));
-        let _ = window_clone.set_resizable(true);
-        let _ = window_clone.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
-        let _ = window_clone.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
-        let _ = window_clone.show();
-        thread::sleep(Duration::from_millis(60));
-        for _ in 0..8 {
-            let script = format!(
-                "window.__PINNED_IMAGE_PAYLOAD__ = {}; window.dispatchEvent(new CustomEvent('pinned-image-data', {{ detail: {} }}));",
-                payload, payload
-            );
-            let _ = window_clone.eval(script);
-            thread::sleep(Duration::from_millis(100));
-        }
-    });
+    let _ = window_clone.set_resizable(true);
+    let _ = window_clone.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
+    let _ = window_clone.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
+    let _ = window_clone.show();
+    let script = format!(
+        "window.__PINNED_IMAGE_PAYLOAD__ = {}; window.dispatchEvent(new CustomEvent('pinned-image-data', {{ detail: {} }}));",
+        payload, payload
+    );
+    let _ = window_clone.eval(script);
 
     Ok(serde_json::json!({ "success": true, "label": label }))
 }

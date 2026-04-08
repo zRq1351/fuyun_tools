@@ -185,8 +185,13 @@ async fn get_pool() -> Result<Arc<SqlitePool>, String> {
     let mut conn = pool_arc.acquire().await.map_err(|e| format!("获取连接失败: {}", e))?;
     init_image_store_schema_async(&mut conn).await?;
     
-    DB_POOL.set(pool_arc.clone()).map_err(|_| "连接池已初始化".to_string())?;
-    Ok(pool_arc)
+    match DB_POOL.set(pool_arc.clone()) {
+        Ok(()) => Ok(pool_arc),
+        Err(_) => DB_POOL
+            .get()
+            .cloned()
+            .ok_or_else(|| "连接池并发初始化后读取失败".to_string()),
+    }
 }
 
 fn block_on_result<T>(future: impl Future<Output=Result<T, String>>) -> Result<T, String> {

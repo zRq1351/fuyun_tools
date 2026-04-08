@@ -51,6 +51,11 @@
             <Close/>
           </el-icon>
         </div>
+        <button class="download-btn" title="下载到目录" @click.stop="downloadItem(entry.item.id)">
+          <el-icon>
+            <Download/>
+          </el-icon>
+        </button>
         <button class="fullscreen-btn" title="全屏预览" @click.stop="openFullscreen(entry.item.id)">
           <el-icon>
             <FullScreen/>
@@ -150,10 +155,11 @@
 
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
-import {ArrowLeftBold, ArrowRightBold, Check, Close, FullScreen, Loading} from '@element-plus/icons-vue'
+import {ArrowLeftBold, ArrowRightBold, Check, Close, Download, FullScreen, Loading} from '@element-plus/icons-vue'
 import {Pin} from 'lucide-vue-next'
 import {listen} from '@tauri-apps/api/event'
 import {convertFileSrc} from '@tauri-apps/api/core'
+import {open as openDialog} from '@tauri-apps/plugin-dialog'
 import {ImageCategoryService, ImageClipboardService, WindowService} from '../../services/ipc'
 import ClipboardToolbar from '../clipboard/components/ClipboardToolbar.vue'
 import {useWindowOffset} from '../clipboard/composables/useWindowOffset'
@@ -545,7 +551,7 @@ const handleGlobalMouseUp = () => {
 
 const handleContentMouseDown = (event) => {
   if (event.button !== 0) return
-  if (event.target.closest('.delete-btn') || event.target.closest('.fullscreen-btn') || event.target.closest('.pin-btn')) {
+  if (event.target.closest('.delete-btn') || event.target.closest('.download-btn') || event.target.closest('.fullscreen-btn') || event.target.closest('.pin-btn')) {
     return
   }
   if (!contentRef.value) return
@@ -585,6 +591,12 @@ const handleContentWheel = (event) => {
 }
 
 const handleContentScroll = () => {
+  if (contentRef.value) {
+    const remaining = contentRef.value.scrollWidth - contentRef.value.clientWidth - contentRef.value.scrollLeft
+    if (hasMore.value && remaining <= 160) {
+      loadMoreIntent.value = true
+    }
+  }
   if (contentMetricsRafId) return
   contentMetricsRafId = requestAnimationFrame(() => {
     contentMetricsRafId = 0
@@ -604,12 +616,16 @@ const handleContentScroll = () => {
 }
 
 const tryLoadMoreByScroll = async () => {
-  if (!hasMore.value || isLoadingPage.value || !contentRef.value) return
+  if (!hasMore.value || isLoadingPage.value || !contentRef.value) return false
   const remaining = contentRef.value.scrollWidth - contentRef.value.clientWidth - contentRef.value.scrollLeft
-  if (remaining <= 240 && loadMoreIntent.value) {
+  const hardReachedEnd = remaining <= 8
+  if (remaining <= 240 && (loadMoreIntent.value || hardReachedEnd)) {
     loadMoreIntent.value = false
+    const beforeOffset = pageOffset.value
     await loadHistoryPage({reset: false})
+    return pageOffset.value > beforeOffset
   }
+  return false
 }
 
 const ensureKeyboardSelectionVisible = async () => {
@@ -1037,11 +1053,16 @@ const scrollToStart = async () => {
 }
 
 const scrollToEnd = async () => {
-  if (contentRef.value) {
+  if (!contentRef.value) return
+  for (let i = 0; i < 20; i++) {
     contentRef.value.scrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+    loadMoreIntent.value = true
+    const loaded = await tryLoadMoreByScroll()
+    if (!hasMore.value || !loaded) {
+      break
+    }
+    await nextTick()
   }
-  loadMoreIntent.value = true
-  await tryLoadMoreByScroll()
   if (filteredHistory.value.length > 0) {
     const lastIndex = filteredHistory.value[filteredHistory.value.length - 1].index
     selectedIndex.value = lastIndex
@@ -1071,6 +1092,28 @@ const openFullscreen = async (itemId) => {
     await ImageClipboardService.openPreviewWindowById(itemId)
   } catch (error) {
     console.error('打开预览窗口失败:', error)
+  }
+}
+
+const downloadItem = async (itemId) => {
+  if (!itemId) return
+  try {
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: '选择图片下载目录'
+    })
+    const targetDirectory = Array.isArray(selected) ? selected[0] : selected
+    if (!targetDirectory) return
+    const result = await ImageClipboardService.copyItemToDirectory(itemId, targetDirectory)
+    const savedPath = String(result?.savedPath || '')
+    if (savedPath) {
+      ElMessage.success(`下载成功：${savedPath}`)
+    } else {
+      ElMessage.success('下载成功')
+    }
+  } catch (error) {
+    ElMessage.error(`下载失败: ${String(error)}`)
   }
 }
 
@@ -1821,6 +1864,10 @@ onBeforeUnmount(() => {
     clearTimeout(initialPageRetryTimer)
     initialPageRetryTimer = null
   }
+  if (warmupBatchTimer) {
+    clearTimeout(warmupBatchTimer)
+    warmupBatchTimer = null
+  }
   if (unlistenShowWindow) {
     unlistenShowWindow()
     unlistenShowWindow = null
@@ -1958,6 +2005,7 @@ watch([searchKeyword, categoryFilter], () => {
 }
 
 .content.is-dragging .delete-btn,
+.content.is-dragging .download-btn,
 .content.is-dragging .fullscreen-btn,
 .content.is-dragging .pin-btn {
   opacity: 0 !important;
@@ -2061,7 +2109,7 @@ watch([searchKeyword, categoryFilter], () => {
 .fullscreen-btn {
   position: absolute;
   top: 5px;
-  right: 29px;
+  right: 53px;
   width: 20px;
   height: 20px;
   border-radius: 50%;
@@ -2081,7 +2129,7 @@ watch([searchKeyword, categoryFilter], () => {
 .pin-btn {
   position: absolute;
   top: 5px;
-  right: 53px;
+  right: 77px;
   width: 20px;
   height: 20px;
   border-radius: 50%;
@@ -2123,6 +2171,36 @@ watch([searchKeyword, categoryFilter], () => {
   background: var(--el-color-primary, #409eff);
 }
 
+.download-btn {
+  position: absolute;
+  top: 5px;
+  right: 29px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.75);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s, border-color 0.2s, color 0.2s, background-color 0.2s;
+  z-index: 10;
+  padding: 0;
+}
+
+.download-btn:hover {
+  border-color: #67c23a;
+  color: #fff;
+  background: #67c23a;
+}
+
+.clipboard-item:hover .download-btn {
+  opacity: 1;
+}
+
 .clipboard-item:hover .fullscreen-btn {
   opacity: 1;
 }
@@ -2157,7 +2235,7 @@ watch([searchKeyword, categoryFilter], () => {
 .category-wrap {
   position: absolute;
   left: 36px;
-  right: 62px;
+  right: 86px;
   top: 5px;
   display: flex;
   justify-content: center;

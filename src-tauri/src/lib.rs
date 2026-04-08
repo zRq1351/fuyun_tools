@@ -33,7 +33,7 @@ static RECORDING_SHORTCUT_LAST_TRIGGER_MS: AtomicU64 = AtomicU64::new(0);
 const RECORDING_SHORTCUT_MIN_INTERVAL_MS: u64 = 300;
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
-    state.lock().expect("infallible mutex lock failed")
+    state.lock().unwrap_or_else(|never| match never {})
 }
 
 fn now_unix_ms_u64() -> u64 {
@@ -322,6 +322,7 @@ pub fn run() {
             get_image_clipboard_history_page,
             open_image_preview_window_by_id,
             close_image_preview_window,
+            start_image_preview_window_drag,
             warmup_image_clipboard_item_by_id,
             warmup_multiple_images,
             select_and_fill,
@@ -372,6 +373,7 @@ pub fn run() {
             get_all_configured_providers,
             get_image_preview_by_id,
             check_previews_ready,
+            copy_image_clipboard_item_to_directory,
             get_clipboard_full_snapshot,
             // 截图相关命令
             start_screenshot,

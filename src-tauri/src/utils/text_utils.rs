@@ -1,12 +1,11 @@
 use lru::LruCache;
 use parking_lot::Mutex;
 use serde::Serialize;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
+use xxhash_rust::xxh3::xxh3_64;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TextCompleteness {
@@ -383,9 +382,7 @@ fn is_subset_of(new_text: &str, old_text: &str) -> bool {
 }
 
 fn stable_text_hash(text: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish()
+    xxh3_64(text.as_bytes())
 }
 
 pub fn compare_versions(old_text: &str, new_text: &str, similarity_threshold: f64) -> VersionComparison {

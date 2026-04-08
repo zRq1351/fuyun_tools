@@ -43,6 +43,8 @@ export const IPC_COMMANDS = {
     WARMUP_MULTIPLE_IMAGES: 'warmup_multiple_images',
     OPEN_IMAGE_PREVIEW_WINDOW_BY_ID: 'open_image_preview_window_by_id',
     CLOSE_IMAGE_PREVIEW_WINDOW: 'close_image_preview_window',
+    START_IMAGE_PREVIEW_WINDOW_DRAG: 'start_image_preview_window_drag',
+    COPY_IMAGE_CLIPBOARD_ITEM_TO_DIRECTORY: 'copy_image_clipboard_item_to_directory',
     COPY_TEXT: 'copy_text',
     COPY_AND_PASTE_TEXT: 'copy_and_paste_text',
 
@@ -217,6 +219,9 @@ export const ImageClipboardService = {
     openPreviewWindowById: (itemId) =>
         invoke(IPC_COMMANDS.OPEN_IMAGE_PREVIEW_WINDOW_BY_ID, {request: {itemId}}),
     closePreviewWindow: () => invoke(IPC_COMMANDS.CLOSE_IMAGE_PREVIEW_WINDOW),
+    startPreviewWindowDrag: () => invoke(IPC_COMMANDS.START_IMAGE_PREVIEW_WINDOW_DRAG),
+    copyItemToDirectory: (itemId, targetDirectory) =>
+        invoke(IPC_COMMANDS.COPY_IMAGE_CLIPBOARD_ITEM_TO_DIRECTORY, {itemId, targetDirectory}),
     setItemTags: (itemId, tags) => invoke(IPC_COMMANDS.SET_IMAGE_ITEM_TAGS, {itemId, tags}),
 
     // 异步预览相关方法

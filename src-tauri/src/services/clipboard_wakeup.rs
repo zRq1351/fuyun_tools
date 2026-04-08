@@ -168,8 +168,16 @@ struct WindowsClipboardEventBackend {
 impl WindowsClipboardEventBackend {
     fn new() -> Option<Self> {
         use std::sync::mpsc::RecvTimeoutError;
+        use std::sync::{
+            atomic::{AtomicBool, AtomicIsize, Ordering},
+            Arc,
+        };
         let (event_tx, event_rx) = mpsc::channel::<()>();
         let (ready_tx, ready_rx) = mpsc::channel::<bool>();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let hwnd_holder = Arc::new(AtomicIsize::new(0));
+        let cancelled_for_thread = cancelled.clone();
+        let hwnd_holder_for_thread = hwnd_holder.clone();
         thread::spawn(move || {
             let run_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
                 use std::mem;
@@ -263,7 +271,13 @@ impl WindowsClipboardEventBackend {
                     let _ = ready_tx.send(false);
                     return;
                 }
+                hwnd_holder_for_thread.store(hwnd as isize, Ordering::Release);
                 log::info!("剪贴板消息窗口创建成功: hwnd={}", hwnd as isize);
+                if cancelled_for_thread.load(Ordering::Acquire) {
+                    let _ = ready_tx.send(false);
+                    DestroyWindow(hwnd);
+                    return;
+                }
 
                 {
                     if let Ok(mut guard) = wake_window_senders().lock() {
@@ -292,6 +306,9 @@ impl WindowsClipboardEventBackend {
 
                 let mut msg: MSG = mem::zeroed();
                 loop {
+                    if cancelled_for_thread.load(Ordering::Acquire) {
+                        break;
+                    }
                     let code = GetMessageW(&mut msg as *mut MSG, ptr::null_mut(), 0, 0);
                     if code > 0 {
                         TranslateMessage(&msg);
@@ -310,6 +327,7 @@ impl WindowsClipboardEventBackend {
                         guard.remove(&(hwnd as isize));
                     }
                 }
+                hwnd_holder_for_thread.store(0, Ordering::Release);
                 let _ = RemoveClipboardFormatListener(hwnd);
                 DestroyWindow(hwnd);
             }));
@@ -322,7 +340,17 @@ impl WindowsClipboardEventBackend {
         match ready_rx.recv_timeout(Duration::from_millis(600)) {
             Ok(true) => Some(Self { rx: event_rx }),
             Ok(false) => None,
-            Err(RecvTimeoutError::Timeout) => None,
+            Err(RecvTimeoutError::Timeout) => {
+                cancelled.store(true, Ordering::Release);
+                let hwnd = hwnd_holder.load(Ordering::Acquire);
+                if hwnd != 0 {
+                    unsafe {
+                        use winapi::um::winuser::{PostMessageW, WM_CLOSE};
+                        let _ = PostMessageW(hwnd as _, WM_CLOSE, 0, 0);
+                    }
+                }
+                None
+            }
             Err(RecvTimeoutError::Disconnected) => None,
         }
     }

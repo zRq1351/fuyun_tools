@@ -1,14 +1,17 @@
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous};
 use sqlx::{Connection, Row, SqliteConnection};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::future::Future;
-use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use xxhash_rust::xxh3::xxh3_64;
+
+static HISTORY_SCHEMA_READY: AtomicBool = AtomicBool::new(false);
+static HISTORY_SCHEMA_STATE: AtomicU8 = AtomicU8::new(0); // 0:未初始化 1:初始化中 2:已完成
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ClipboardHistoryData {
@@ -57,9 +60,7 @@ fn now_unix_ms() -> i64 {
 }
 
 fn stable_history_item_id(content: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    content.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+    format!("{:016x}", xxh3_64(content.as_bytes()))
 }
 
 fn db_options(db_path: &PathBuf) -> SqliteConnectOptions {
@@ -79,7 +80,23 @@ async fn open_history_db_async() -> Result<SqliteConnection, String> {
     let mut conn = SqliteConnection::connect_with(&db_options(&db_path))
         .await
         .map_err(|e| format!("打开历史数据库失败: {}", e))?;
-    ensure_history_db_schema_async(&mut conn).await?;
+    if !HISTORY_SCHEMA_READY.load(Ordering::Acquire) {
+        if HISTORY_SCHEMA_STATE
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            if let Err(e) = ensure_history_db_schema_async(&mut conn).await {
+                HISTORY_SCHEMA_STATE.store(0, Ordering::Release);
+                return Err(e);
+            }
+            HISTORY_SCHEMA_READY.store(true, Ordering::Release);
+            HISTORY_SCHEMA_STATE.store(2, Ordering::Release);
+        } else {
+            while HISTORY_SCHEMA_STATE.load(Ordering::Acquire) == 1 {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
     Ok(conn)
 }
 
@@ -1021,12 +1038,12 @@ pub async fn delete_history_item_by_content(content: &str) -> Result<(), String>
     let mut conn = open_history_db_async().await?;
     let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
 
-    // 获取 item_id 用于删除 FTS 索引和关联表
-    let item_id: Option<String> = sqlx::query_scalar(
+    // 获取全部 item_id，用于删除 FTS 索引和关联表（内容重复时必须全量清理）
+    let item_ids: Vec<String> = sqlx::query_scalar(
         "SELECT item_id FROM history_items WHERE content = ?"
     )
         .bind(content)
-        .fetch_optional(&mut *tx)
+        .fetch_all(&mut *tx)
         .await
         .map_err(|e| format!("查询历史记录失败: {}", e))?;
 
@@ -1037,23 +1054,30 @@ pub async fn delete_history_item_by_content(content: &str) -> Result<(), String>
         .await
         .map_err(|e| format!("删除历史记录失败: {}", e))?;
 
-    if let Some(id) = item_id {
-        // 同步 FTS 索引
-        sqlx::query("DELETE FROM history_items_fts WHERE item_id = ?")
-            .bind(&id)
+    if !item_ids.is_empty() {
+        let placeholders = vec!["?"; item_ids.len()].join(", ");
+        let sql_fts = format!("DELETE FROM history_items_fts WHERE item_id IN ({})", placeholders);
+        let sql_categories = format!("DELETE FROM categories WHERE item_id IN ({})", placeholders);
+        let sql_pinned = format!("DELETE FROM pinned_items WHERE item_id IN ({})", placeholders);
+
+        let mut q_fts = sqlx::query(&sql_fts);
+        let mut q_categories = sqlx::query(&sql_categories);
+        let mut q_pinned = sqlx::query(&sql_pinned);
+        for id in &item_ids {
+            q_fts = q_fts.bind(id);
+            q_categories = q_categories.bind(id);
+            q_pinned = q_pinned.bind(id);
+        }
+
+        q_fts
             .execute(&mut *tx)
             .await
             .map_err(|e| format!("删除 FTS 索引失败: {}", e))?;
-            
-        // 同步删除关联表记录
-        sqlx::query("DELETE FROM categories WHERE item_id = ?")
-            .bind(&id)
+        q_categories
             .execute(&mut *tx)
             .await
             .map_err(|e| format!("删除分类关联失败: {}", e))?;
-            
-        sqlx::query("DELETE FROM pinned_items WHERE item_id = ?")
-            .bind(&id)
+        q_pinned
             .execute(&mut *tx)
             .await
             .map_err(|e| format!("删除置顶关联失败: {}", e))?;

@@ -1,15 +1,38 @@
 <template>
-  <div class="viewer-root" @click="requestClose">
-    <div class="viewer-topbar">
-      <button class="viewer-close" @click.stop="requestClose(true)">关闭</button>
+  <div class="viewer-root" @click="requestClose" @contextmenu.prevent>
+    <div
+        class="viewer-drag-strip"
+        data-tauri-drag-region
+        @click.stop
+        @mousedown.left="startWindowDrag"
+    ></div>
+    <div class="viewer-topbar" @click.stop>
+      <div
+          class="viewer-drag-icon"
+          data-tauri-drag-region
+          title="拖动窗口"
+          @mousedown.left.stop.prevent="startWindowDrag"
+      >
+        <span></span><span></span><span></span>
+        <span></span><span></span><span></span>
+      </div>
+      <div class="viewer-zoom">{{ zoomPercent }}</div>
+      <button class="viewer-close" @mousedown.left.stop.prevent @click.stop="requestClose(true)">关闭</button>
     </div>
-    <div :class="['viewer-card', animationState]" @click.stop>
+    <div
+        :class="['viewer-card', animationState, {'is-dragging': isDragging}]"
+        @click.stop
+        @mousedown.left.stop.prevent="startDrag"
+        @wheel.prevent.stop="handleWheel"
+    >
       <img
           v-if="imageUrl"
           :class="{ 'viewer-image-hidden': !isImageReady }"
           :src="imageUrl"
           alt=""
           class="viewer-image"
+          :style="imageTransformStyle"
+          @dblclick.stop.prevent="resetViewTransform"
           @error="onImageLoaded"
           @load="onImageLoaded"
       />
@@ -22,24 +45,86 @@
 </template>
 
 <script setup>
-import {onBeforeUnmount, onMounted, ref} from 'vue'
+import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import {listen} from '@tauri-apps/api/event'
-import {getCurrentWindow} from '@tauri-apps/api/window'
+import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {convertFileSrc} from '@tauri-apps/api/core'
 import {ImageClipboardService} from '../../services/ipc'
 
-const currentWindow = getCurrentWindow()
+const currentWindow = getCurrentWebviewWindow()
 const imageUrl = ref('')
 const isImageReady = ref(false)
 const animationState = ref('closed')
 const loadingStartedAt = ref(0)
 const activeRequestId = ref('')
+const zoomScale = ref(1)
+const offsetX = ref(0)
+const offsetY = ref(0)
+const isDragging = ref(false)
 const MIN_LOADING_MS = 180
 let unlistenShowPreview = null
 let unlistenCloseRequested = null
 let closeTimer = null
 let revealTimer = null
 let keydownHandler = null
+let payloadWatchdogTimer = null
+let dragStartX = 0
+let dragStartY = 0
+let dragBaseOffsetX = 0
+let dragBaseOffsetY = 0
+let isMouseDown = false
+
+const imageTransformStyle = computed(() => ({
+  transform: `translate3d(${offsetX.value}px, ${offsetY.value}px, 0) scale(${zoomScale.value})`
+}))
+const zoomPercent = computed(() => `${Math.round(zoomScale.value * 100)}%`)
+
+const resetViewTransform = () => {
+  zoomScale.value = 1
+  offsetX.value = 0
+  offsetY.value = 0
+  isDragging.value = false
+  isMouseDown = false
+}
+
+const handleGlobalMouseMove = (event) => {
+  if (!isMouseDown || !isImageReady.value) return
+  isDragging.value = true
+  offsetX.value = dragBaseOffsetX + (event.clientX - dragStartX)
+  offsetY.value = dragBaseOffsetY + (event.clientY - dragStartY)
+}
+
+const stopDrag = () => {
+  isMouseDown = false
+  window.removeEventListener('mousemove', handleGlobalMouseMove)
+  window.removeEventListener('mouseup', stopDrag, true)
+}
+
+const startDrag = (event) => {
+  if (!isImageReady.value || !imageUrl.value) return
+  isMouseDown = true
+  dragStartX = event.clientX
+  dragStartY = event.clientY
+  dragBaseOffsetX = offsetX.value
+  dragBaseOffsetY = offsetY.value
+  window.addEventListener('mousemove', handleGlobalMouseMove)
+  window.addEventListener('mouseup', stopDrag, true)
+}
+
+const handleWheel = (event) => {
+  if (!isImageReady.value || !imageUrl.value) return
+  const factor = event.deltaY > 0 ? 0.92 : 1.08
+  const next = Math.min(6, Math.max(0.2, zoomScale.value * factor))
+  zoomScale.value = Number(next.toFixed(3))
+}
+
+const startWindowDrag = () => {
+  currentWindow.startDragging().catch((error) => {
+    ImageClipboardService.startPreviewWindowDrag().catch((fallbackError) => {
+      console.error('拖动预览窗口失败:', fallbackError || error)
+    })
+  })
+}
 
 const buildFileUrlFromPath = (imagePath) => {
   if (!imagePath) return ''
@@ -75,6 +160,7 @@ const closeWindowNow = async () => {
   imageUrl.value = ''
   isImageReady.value = false
   activeRequestId.value = ''
+  resetViewTransform()
   await new Promise((resolve) => {
     requestAnimationFrame(() => resolve())
   })
@@ -87,20 +173,32 @@ const closeWindowNow = async () => {
 }
 
 const requestClose = (immediate = false) => {
+  if (immediate) {
+    closeWindowNow()
+    return
+  }
   if (animationState.value === 'closing' || animationState.value === 'closed') return
   if (closeTimer) {
     window.clearTimeout(closeTimer)
     closeTimer = null
-  }
-  if (immediate) {
-    closeWindowNow()
-    return
   }
   animationState.value = 'closing'
   closeTimer = window.setTimeout(async () => {
     closeTimer = null
     await closeWindowNow()
   }, 220)
+}
+
+const schedulePayloadWatchdog = () => {
+  if (payloadWatchdogTimer) {
+    window.clearTimeout(payloadWatchdogTimer)
+  }
+  payloadWatchdogTimer = window.setTimeout(async () => {
+    payloadWatchdogTimer = null
+    if (!imageUrl.value && animationState.value === 'closed') {
+      await closeWindowNow()
+    }
+  }, 1200)
 }
 
 onMounted(async () => {
@@ -120,6 +218,7 @@ onMounted(async () => {
       loadingStartedAt.value = performance.now()
       isImageReady.value = false
       imageUrl.value = ''
+      resetViewTransform()
       playOpenAnimation()
       return
     }
@@ -129,6 +228,7 @@ onMounted(async () => {
       isImageReady.value = false
     }
     imageUrl.value = ''
+    resetViewTransform()
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const nextUrl = buildFileUrlFromPath(payload.image_path)
@@ -140,8 +240,13 @@ onMounted(async () => {
     })
     playOpenAnimation()
   })
+  schedulePayloadWatchdog()
 
   keydownHandler = (event) => {
+    if (event.key === 'F5' || ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === 'r')) {
+      event.preventDefault()
+      return
+    }
     if (event.key === 'Escape') {
       event.preventDefault()
       requestClose()
@@ -178,6 +283,11 @@ onBeforeUnmount(() => {
     window.clearTimeout(revealTimer)
     revealTimer = null
   }
+  if (payloadWatchdogTimer) {
+    window.clearTimeout(payloadWatchdogTimer)
+    payloadWatchdogTimer = null
+  }
+  stopDrag()
 })
 </script>
 
@@ -209,6 +319,57 @@ html, body, #app {
   right: 12px;
   z-index: 30;
   pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.viewer-drag-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  z-index: 25;
+  cursor: move;
+}
+
+.viewer-drag-icon {
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+  padding: 6px;
+  box-sizing: border-box;
+  cursor: move;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.viewer-drag-icon span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.86);
+  align-self: center;
+  justify-self: center;
+}
+
+.viewer-zoom {
+  min-width: 56px;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.6);
+  color: #e7f2ff;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  cursor: move;
 }
 
 .viewer-card {
@@ -243,10 +404,21 @@ html, body, #app {
   object-fit: contain;
   border-radius: 10px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  transform-origin: center center;
+  transition: transform 80ms linear;
+  user-select: none;
 }
 
 .viewer-image-hidden {
   opacity: 0;
+}
+
+.viewer-card {
+  cursor: grab;
+}
+
+.viewer-card.is-dragging {
+  cursor: grabbing;
 }
 
 .viewer-close {

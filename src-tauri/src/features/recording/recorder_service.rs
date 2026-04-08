@@ -625,10 +625,13 @@ fn ensure_system_audio_capture_started(
             runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
             runtime.system_audio_thread = handle.join;
             runtime.system_audio_stream_start_ms = Some(start_ms);
-            runtime.system_audio_segments.push(crate::features::recording::state::AudioSegment {
-                path: runtime.system_audio_wav_path.clone().expect("set"),
-                start_ms,
-            });
+            if let Some(path) = runtime.system_audio_wav_path.clone() {
+                runtime
+                    .system_audio_segments
+                    .push(crate::features::recording::state::AudioSegment { path, start_ms });
+            } else {
+                return Err("系统音频路径未设置".to_string());
+            }
             Ok(())
         }
         Err(e) => {
@@ -684,10 +687,13 @@ fn ensure_mic_capture_started(
             runtime.mic_audio_stop_flag = Some(handle.stop_flag.clone());
             runtime.mic_audio_thread = handle.join;
             runtime.mic_audio_stream_start_ms = Some(start_ms);
-            runtime.mic_audio_segments.push(crate::features::recording::state::AudioSegment {
-                path: runtime.mic_audio_wav_path.clone().expect("set"),
-                start_ms,
-            });
+            if let Some(path) = runtime.mic_audio_wav_path.clone() {
+                runtime
+                    .mic_audio_segments
+                    .push(crate::features::recording::state::AudioSegment { path, start_ms });
+            } else {
+                return Err("麦克风音频路径未设置".to_string());
+            }
             Ok(())
         }
         Err(e) => {

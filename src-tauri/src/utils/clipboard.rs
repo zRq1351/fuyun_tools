@@ -2,13 +2,12 @@ use crate::sync::Mutex;
 use bloom::{BloomFilter, ASMS};
 use lru::LruCache;
 use parking_lot::Mutex as ParkingMutex;
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
+use xxhash_rust::xxh3::xxh3_64;
 
 use crate::utils::utils_helpers::{
     find_best_replacement_candidate, load_history_data,
@@ -41,9 +40,7 @@ fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a
 }
 
 fn stable_text_hash(text: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish()
+    xxh3_64(text.as_bytes())
 }
 
 fn build_history_fingerprints(history: &[String]) -> Vec<(usize, u64)> {

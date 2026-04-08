@@ -588,16 +588,14 @@ watchPostEffect(() => {
   applyStyleObject(cutoutRef.value, cutoutStyle.value)
   applyStyleObject(floatingToolbarRef.value, toolbarStyle.value)
   applyStyleObject(pickerInfoRef.value, pickerStyle.value)
-  const validIds = new Set(textItems.value.map((item) => item.id))
+  const textItemById = new Map(textItems.value.map((item) => [item.id, item]))
   for (const [id, el] of textOverlayRefMap.entries()) {
-    if (!validIds.has(id)) {
+    const item = textItemById.get(id)
+    if (!item) {
       textOverlayRefMap.delete(id)
       continue
     }
-    const item = textItems.value.find((entry) => entry.id === id)
-    if (item) {
-      applyStyleObject(el, getTextItemStyle(item))
-    }
+    applyStyleObject(el, getTextItemStyle(item))
   }
 })
 
