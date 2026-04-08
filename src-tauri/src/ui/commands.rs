@@ -3078,7 +3078,9 @@ pub async fn start_manual_longshot(
     if let Some(window) = app.get_webview_window("longshot_border") {
         let _ = window.hide();
     }
-    std::thread::sleep(std::time::Duration::from_millis(90));
+    tauri::async_runtime::spawn_blocking(|| std::thread::sleep(std::time::Duration::from_millis(90)))
+        .await
+        .map_err(|e| format!("等待截图窗口隐藏失败: {}", e))?;
     crate::features::screenshot::longshot::start_manual_longshot(app, request)
 }
 
@@ -3103,7 +3105,12 @@ pub async fn cancel_manual_longshot(
     request: ManualLongshotSessionRequest,
     app: AppHandle,
 ) -> Result<(), String> {
-    crate::features::screenshot::longshot::cancel_manual_longshot(request.session_id, app)
+    let session_id = request.session_id;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::features::screenshot::longshot::cancel_manual_longshot(session_id, app)
+    })
+    .await
+    .map_err(|e| format!("取消长截图任务执行失败: {}", e))?
 }
 
 #[tauri::command]
@@ -3111,7 +3118,12 @@ pub async fn finish_manual_longshot(
     request: ManualLongshotSessionRequest,
     app: AppHandle,
 ) -> Result<crate::features::screenshot::longshot::ManualLongshotFinishResult, String> {
-    crate::features::screenshot::longshot::finish_manual_longshot(request.session_id, app)
+    let session_id = request.session_id;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::features::screenshot::longshot::finish_manual_longshot(session_id, app)
+    })
+    .await
+    .map_err(|e| format!("完成长截图任务执行失败: {}", e))?
 }
 
 #[tauri::command]
@@ -3611,8 +3623,12 @@ pub async fn longshot_toolbar_action(action: String, app: AppHandle) -> Result<(
             crate::features::screenshot::longshot::resume_manual_longshot(session_id, app.clone())?;
         }
         "finish" => {
-            let result =
-                crate::features::screenshot::longshot::finish_manual_longshot(session_id, app.clone())?;
+            let app_for_finish = app.clone();
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                crate::features::screenshot::longshot::finish_manual_longshot(session_id, app_for_finish)
+            })
+            .await
+            .map_err(|e| format!("完成长截图任务执行失败: {}", e))??;
             let _ = app.emit(
                 "manual-longshot-shortcut-finished",
                 serde_json::json!({
@@ -3630,7 +3646,12 @@ pub async fn longshot_toolbar_action(action: String, app: AppHandle) -> Result<(
             return Ok(());
         }
         "cancel" => {
-            crate::features::screenshot::longshot::cancel_manual_longshot(session_id, app.clone())?;
+            let app_for_cancel = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                crate::features::screenshot::longshot::cancel_manual_longshot(session_id, app_for_cancel)
+            })
+            .await
+            .map_err(|e| format!("取消长截图任务执行失败: {}", e))??;
             let _ = app.emit(
                 "manual-longshot-shortcut-canceled",
                 serde_json::json!({
@@ -3651,7 +3672,13 @@ pub async fn finish_manual_longshot_from_shortcut(app: AppHandle) -> Result<(), 
     let Some(session_id) = crate::features::screenshot::longshot::active_manual_longshot_session_id() else {
         return Ok(());
     };
-    match crate::features::screenshot::longshot::finish_manual_longshot(session_id, app.clone()) {
+    let app_for_finish = app.clone();
+    match tauri::async_runtime::spawn_blocking(move || {
+        crate::features::screenshot::longshot::finish_manual_longshot(session_id, app_for_finish)
+    })
+    .await
+    .map_err(|e| format!("完成长截图任务执行失败: {}", e))?
+    {
         Ok(result) => {
             let _ = app.emit(
                 "manual-longshot-shortcut-finished",
@@ -3677,7 +3704,12 @@ pub async fn cancel_manual_longshot_from_shortcut(app: AppHandle) -> Result<(), 
     let Some(session_id) = crate::features::screenshot::longshot::active_manual_longshot_session_id() else {
         return Ok(());
     };
-    crate::features::screenshot::longshot::cancel_manual_longshot(session_id, app.clone())?;
+    let app_for_cancel = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::features::screenshot::longshot::cancel_manual_longshot(session_id, app_for_cancel)
+    })
+    .await
+    .map_err(|e| format!("取消长截图任务执行失败: {}", e))??;
     let _ = app.emit(
         "manual-longshot-shortcut-canceled",
         serde_json::json!({

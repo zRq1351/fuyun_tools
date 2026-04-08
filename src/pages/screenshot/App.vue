@@ -387,6 +387,7 @@ const manualLongshotHint = ref('')
 const longshotOverlayOnly = ref(false)
 const longshotResultActive = ref(false)
 const longshotRawPngBase64 = ref('')
+const overlayDirty = ref(false)
 const longshotViewScale = ref(1)
 const longshotViewOffset = reactive({x: 0, y: 0})
 const pendingLongshotBorderAnchor = ref(null)
@@ -760,6 +761,7 @@ function handleScreenshotReset() {
   manualLongshotHint.value = ''
   longshotResultActive.value = false
   longshotRawPngBase64.value = ''
+  overlayDirty.value = false
   longshotViewScale.value = 1
   longshotViewOffset.x = 0
   longshotViewOffset.y = 0
@@ -1045,23 +1047,7 @@ function applyManualLongshotResult(result) {
 }
 
 function hasOverlayForLongshotExport() {
-  if (textItems.value.length > 0 || shapeItems.value.length > 0) {
-    return true
-  }
-  if (!canvas.value) return false
-  const ctx = canvas.value.getContext('2d')
-  if (!ctx) return false
-  const oldTransform = ctx.getTransform()
-  ctx.resetTransform()
-  const imageData = ctx.getImageData(0, 0, canvas.value.width, canvas.value.height)
-  ctx.setTransform(oldTransform)
-  const data = imageData.data
-  for (let i = 3; i < data.length; i += 4) {
-    if (data[i] !== 0) {
-      return true
-    }
-  }
-  return false
+  return overlayDirty.value
 }
 
 function base64ToBlob(base64, mime = 'image/png') {
@@ -1155,6 +1141,7 @@ function resetAnnotationStateForNewImage() {
   history.value = []
   historyIndex.value = -1
   currentDrawingSnapshot = null
+  overlayDirty.value = false
 }
 
 function initCanvas() {
@@ -2186,13 +2173,16 @@ function saveToHistory() {
   ctx.setTransform(oldTransform)
   const textSnapshot = textItems.value.map(item => ({...item}))
   const shapeSnapshot = shapeItems.value.map(item => ({...item}))
+  const snapshotOverlayDirty = detectOverlayDirty(imageData, textSnapshot, shapeSnapshot)
 
   history.value = history.value.slice(0, historyIndex.value + 1)
   history.value.push({
     imageData,
     textItems: textSnapshot,
-    shapeItems: shapeSnapshot
+    shapeItems: shapeSnapshot,
+    overlayDirty: snapshotOverlayDirty
   })
+  overlayDirty.value = snapshotOverlayDirty
   historyIndex.value = history.value.length - 1
 
   if (history.value.length > 50) {
@@ -2225,6 +2215,27 @@ function restoreFromHistory() {
   ctx.setTransform(oldTransform)
   textItems.value = snapshot.textItems.map(item => ({...item}))
   shapeItems.value = (snapshot.shapeItems || []).map(item => ({...item}))
+  if (typeof snapshot.overlayDirty === 'boolean') {
+    overlayDirty.value = snapshot.overlayDirty
+  } else {
+    overlayDirty.value = detectOverlayDirty(snapshot.imageData, textItems.value, shapeItems.value)
+  }
+}
+
+function detectOverlayDirty(imageData, textSnapshot, shapeSnapshot) {
+  if ((textSnapshot?.length || 0) > 0 || (shapeSnapshot?.length || 0) > 0) {
+    return true
+  }
+  const data = imageData?.data
+  if (!data || data.length === 0) {
+    return false
+  }
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] !== 0) {
+      return true
+    }
+  }
+  return false
 }
 
 // 最终出图

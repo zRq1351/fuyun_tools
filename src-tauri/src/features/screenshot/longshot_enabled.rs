@@ -17,6 +17,8 @@ use tauri::{AppHandle, Emitter};
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const MAX_STITCHED_HEIGHT: u32 = 20_000;
+const MAX_STITCHED_PIXELS: u64 = 120_000_000;
 static NEXT_LONGSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 static MANUAL_LONGSHOT_RUNTIME: OnceLock<StdMutex<Option<ManualLongshotRuntime>>> = OnceLock::new();
 
@@ -243,7 +245,10 @@ pub fn cancel_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
     let worker = runtime.worker.take();
     drop(slot);
     if let Some(handle) = worker {
-        let _ = handle.join();
+        // 两阶段收口：先快速返回，后台再等待采样线程完全退出，避免前台命令阻塞。
+        thread::spawn(move || {
+            let _ = handle.join();
+        });
     }
 
     let _ = app.emit(
@@ -390,6 +395,7 @@ fn run_longshot_worker_inner(
     let frame_height = request.region.height as usize;
     let frame_bytes = frame_width
         .checked_mul(frame_height)
+        .and_then(|v| v.checked_mul(3))
         .ok_or_else(|| "长截图区域尺寸过大".to_string())?;
 
     let mut command = Command::new(ffmpeg);
@@ -410,15 +416,13 @@ fn run_longshot_worker_inner(
         .arg(format!("{}x{}", request.region.width, request.region.height))
         .arg("-i")
         .arg("desktop")
-        .arg("-vf")
-        .arg("format=gray")
         .arg("-pix_fmt")
-        .arg("gray")
+        .arg("bgr24")
         .arg("-f")
         .arg("rawvideo")
         .arg("pipe:1")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::null());
 
     let mut child = command
         .spawn()
@@ -434,7 +438,10 @@ fn run_longshot_worker_inner(
     // 仅使用“已成功拼接到 stitched 的最后一帧”作为对齐基准，
     // 避免丢弃帧污染基准导致累计重叠/错位。
     let mut anchor_frame: Option<Mat> = None;
-    let mut stitched: Option<Mat> = None;
+    let mut stitched_segments: Vec<Mat> = Vec::new();
+    let mut stitched_width: u32 = 0;
+    let mut stitched_height: u32 = 0;
+    let mut last_preview_stitched_height: u32 = 0;
     let mut consecutive_drops: u32 = 0;
     let mut finishing_drain_left: Option<u32> = None;
     let mut ended_by_finishing = false;
@@ -469,17 +476,26 @@ fn run_longshot_worker_inner(
         if stdout.read_exact(&mut frame_buf).is_err() {
             break;
         }
-        let frame = frame_from_gray_bytes(&frame_buf, frame_height as i32)?;
+        let frame_color = frame_from_bgr_bytes(&frame_buf, frame_height as i32)?;
+        let frame_gray = to_gray_mat(&frame_color)?;
 
-        if stitched.is_none() {
-            stitched = Some(frame.try_clone().map_err(to_cv_err)?);
-            anchor_frame = Some(frame);
+        if stitched_segments.is_empty() {
+            stitched_segments.push(frame_color.try_clone().map_err(to_cv_err)?);
+            anchor_frame = Some(frame_gray);
+            stitched_width = request.region.width;
+            stitched_height = request.region.height;
+            if exceeds_stitched_limit(stitched_width, stitched_height) {
+                return Err(format!(
+                    "长截图超出安全上限（最大高度 {} px，最大像素 {}），请缩小区域或分段截取",
+                    MAX_STITCHED_HEIGHT, MAX_STITCHED_PIXELS
+                ));
+            }
             let mut first_frame_session_id = 0u64;
             if let Ok(mut status) = control.status.lock() {
                 first_frame_session_id = status.session_id;
                 status.frame_count = 1;
-                status.stitched_width = request.region.width;
-                status.stitched_height = request.region.height;
+                status.stitched_width = stitched_width;
+                status.stitched_height = stitched_height;
             }
             let _ = app.emit(
                 "manual-longshot-first-frame",
@@ -491,11 +507,11 @@ fn run_longshot_worker_inner(
         }
 
         let Some(prev) = anchor_frame.as_ref() else {
-            anchor_frame = Some(frame);
+            anchor_frame = Some(frame_gray);
             continue;
         };
 
-        let estimate = estimate_overlap(prev, &frame)?;
+        let estimate = estimate_overlap(prev, &frame_gray)?;
         let adaptive_min_conf = if consecutive_drops >= 10 {
             (request.min_confidence * 0.55).clamp(0.35, 0.95)
         } else if consecutive_drops >= 6 {
@@ -528,17 +544,23 @@ fn run_longshot_worker_inner(
             }
         }
         if !dropped {
-            if let Some(existing) = stitched.take() {
-            let append = frame
-                .row_range(&core::Range::new(estimate.overlap_rows, frame.rows()).map_err(to_cv_err)?)
+            let append = frame_color
+                .row_range(&core::Range::new(estimate.overlap_rows, frame_color.rows()).map_err(to_cv_err)?)
                 .map_err(to_cv_err)?
                 .try_clone()
                 .map_err(to_cv_err)?;
-            stitched = Some(vconcat_mats(&existing, &append)?);
-            // 只有真正拼接成功后，才更新基准帧
-            anchor_frame = Some(frame.try_clone().map_err(to_cv_err)?);
-            consecutive_drops = 0;
+            let append_rows = append.rows().max(0) as u32;
+            stitched_segments.push(append);
+            stitched_height = stitched_height.saturating_add(append_rows);
+            if exceeds_stitched_limit(stitched_width, stitched_height) {
+                return Err(format!(
+                    "长截图超出安全上限（最大高度 {} px，最大像素 {}），请缩小区域或分段截取",
+                    MAX_STITCHED_HEIGHT, MAX_STITCHED_PIXELS
+                ));
             }
+            // 只有真正拼接成功后，才更新基准帧
+            anchor_frame = Some(frame_gray);
+            consecutive_drops = 0;
         }
         if dropped {
             consecutive_drops = consecutive_drops.saturating_add(1);
@@ -549,10 +571,8 @@ fn run_longshot_worker_inner(
                 status.dropped_frames = status.dropped_frames.saturating_add(1);
             }
             status.last_confidence = estimate.confidence;
-            if let Some(st) = stitched.as_ref() {
-                status.stitched_height = st.rows().max(0) as u32;
-                status.stitched_width = st.cols().max(0) as u32;
-            }
+            status.stitched_height = stitched_height;
+            status.stitched_width = stitched_width;
             if status.state != "paused" {
                 status.state = "running".to_string();
             }
@@ -577,15 +597,21 @@ fn run_longshot_worker_inner(
                     }),
                 );
             }
-            if let Some(stitched_mat) = stitched.as_ref() {
-                if let Ok(preview_base64) = gray_mat_to_preview_base64(stitched_mat, 300, 110) {
-                    let _ = app.emit(
-                        "manual-longshot-preview-updated",
-                        serde_json::json!({
-                            "sessionId": current_session_id,
-                            "previewBase64": preview_base64,
-                        }),
-                    );
+            if !stitched_segments.is_empty() {
+                // 仅在拼接高度变化时生成预览，避免频繁重复编码。
+                if stitched_height > last_preview_stitched_height {
+                    if let Ok(stitched_mat) = concat_segments(&stitched_segments) {
+                        if let Ok(preview_base64) = mat_to_preview_base64(&stitched_mat, 300, 110) {
+                            let _ = app.emit(
+                                "manual-longshot-preview-updated",
+                                serde_json::json!({
+                                    "sessionId": current_session_id,
+                                    "previewBase64": preview_base64,
+                                }),
+                            );
+                            last_preview_stitched_height = stitched_height;
+                        }
+                    }
                 }
             }
             last_progress_emit = Instant::now();
@@ -607,37 +633,44 @@ fn run_longshot_worker_inner(
     // 根因级收尾：finish 触发后再抓取一帧“最终静态画面”参与拼接，
     // 避免最后一次滚动发生在流式采样间隙而被整体漏掉。
     if ended_by_finishing {
-        if let Ok(final_frame) = capture_single_gray_frame(request) {
+        if let Ok(final_frame_color) = capture_single_bgr_frame(request) {
+            let final_frame_gray = to_gray_mat(&final_frame_color)?;
             if let Some(prev) = anchor_frame.as_ref() {
-                let moved = frames_mean_absdiff(prev, &final_frame).map(|v| v > 1.2).unwrap_or(true);
+                let moved = frames_mean_absdiff(prev, &final_frame_gray).map(|v| v > 1.2).unwrap_or(true);
                 if moved {
                     // 根因级修复：finish 时不再依赖“门控是否放行”，而是确定性并入最终帧
                     // 这样不会因尾段门控丢帧造成“最后一部分缺失”
-                    let force_estimate = estimate_overlap(prev, &final_frame).ok();
+                    let force_estimate = estimate_overlap(prev, &final_frame_gray).ok();
                     let overlap_rows = force_estimate
                         .as_ref()
                         .map(|e| e.overlap_rows)
-                        .unwrap_or_else(|| (final_frame.rows() - 1).clamp(1, final_frame.rows() - 1));
+                        .unwrap_or_else(|| {
+                            (final_frame_color.rows() - 1).clamp(1, final_frame_color.rows() - 1)
+                        });
                     let confidence = force_estimate.as_ref().map(|e| e.confidence).unwrap_or(0.0);
-                    if let Some(existing) = stitched.take() {
-                        let append = final_frame
-                            .row_range(
-                                &core::Range::new(overlap_rows, final_frame.rows())
-                                    .map_err(to_cv_err)?,
-                            )
-                            .map_err(to_cv_err)?
-                            .try_clone()
-                            .map_err(to_cv_err)?;
-                        if append.rows() > 0 {
-                            stitched = Some(vconcat_mats(&existing, &append)?);
-                            if let Ok(mut status) = control.status.lock() {
-                                status.frame_count = status.frame_count.saturating_add(1);
-                                status.last_confidence = confidence;
-                                if let Some(st) = stitched.as_ref() {
-                                    status.stitched_height = st.rows().max(0) as u32;
-                                    status.stitched_width = st.cols().max(0) as u32;
-                                }
-                            }
+                    let append = final_frame_color
+                        .row_range(
+                            &core::Range::new(overlap_rows, final_frame_color.rows())
+                                .map_err(to_cv_err)?,
+                        )
+                        .map_err(to_cv_err)?
+                        .try_clone()
+                        .map_err(to_cv_err)?;
+                    if append.rows() > 0 {
+                        let append_rows = append.rows().max(0) as u32;
+                        stitched_segments.push(append);
+                        stitched_height = stitched_height.saturating_add(append_rows);
+                        if exceeds_stitched_limit(stitched_width, stitched_height) {
+                            return Err(format!(
+                                "长截图超出安全上限（最大高度 {} px，最大像素 {}），请缩小区域或分段截取",
+                                MAX_STITCHED_HEIGHT, MAX_STITCHED_PIXELS
+                            ));
+                        }
+                        if let Ok(mut status) = control.status.lock() {
+                            status.frame_count = status.frame_count.saturating_add(1);
+                            status.last_confidence = confidence;
+                            status.stitched_height = stitched_height;
+                            status.stitched_width = stitched_width;
                         }
                     }
                 }
@@ -645,10 +678,13 @@ fn run_longshot_worker_inner(
         }
     }
 
-    let final_mat = stitched.ok_or_else(|| "长截图没有采集到有效画面".to_string())?;
+    if stitched_segments.is_empty() {
+        return Err("长截图没有采集到有效画面".to_string());
+    }
+    let final_mat = concat_segments(&stitched_segments)?;
     let width = final_mat.cols().max(0) as u32;
     let height = final_mat.rows().max(0) as u32;
-    let png_base64 = gray_mat_to_png_base64(&final_mat)?;
+    let png_base64 = mat_to_png_base64(&final_mat)?;
     let status_snapshot = control
         .status
         .lock()
@@ -675,10 +711,11 @@ fn run_longshot_worker_inner(
     Ok(())
 }
 
-fn capture_single_gray_frame(request: &StartManualLongshotRequest) -> Result<Mat, String> {
+fn capture_single_bgr_frame(request: &StartManualLongshotRequest) -> Result<Mat, String> {
     let ffmpeg = resolve_ffmpeg_path()?;
     let frame_bytes = (request.region.width as usize)
         .checked_mul(request.region.height as usize)
+        .and_then(|v| v.checked_mul(3))
         .ok_or_else(|| "长截图区域尺寸过大".to_string())?;
     let mut command = Command::new(ffmpeg);
     suppress_console_window(&mut command);
@@ -700,15 +737,13 @@ fn capture_single_gray_frame(request: &StartManualLongshotRequest) -> Result<Mat
         .arg("desktop")
         .arg("-frames:v")
         .arg("1")
-        .arg("-vf")
-        .arg("format=gray")
         .arg("-pix_fmt")
-        .arg("gray")
+        .arg("bgr24")
         .arg("-f")
         .arg("rawvideo")
         .arg("pipe:1")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::null());
     let mut child = command
         .spawn()
         .map_err(|e| format!("收尾抓取最终帧失败: {}", e))?;
@@ -722,7 +757,7 @@ fn capture_single_gray_frame(request: &StartManualLongshotRequest) -> Result<Mat
         .map_err(|e| format!("收尾抓取读取最终帧失败: {}", e))?;
     let _ = child.kill();
     let _ = child.wait();
-    frame_from_gray_bytes(&frame_buf, request.region.height as i32)
+    frame_from_bgr_bytes(&frame_buf, request.region.height as i32)
 }
 
 fn frames_mean_absdiff(a: &Mat, b: &Mat) -> Result<f64, String> {
@@ -732,10 +767,23 @@ fn frames_mean_absdiff(a: &Mat, b: &Mat) -> Result<f64, String> {
     Ok(avg[0])
 }
 
-fn frame_from_gray_bytes(bytes: &[u8], height: i32) -> Result<Mat, String> {
+fn frame_from_bgr_bytes(bytes: &[u8], height: i32) -> Result<Mat, String> {
     let mat_1d = Mat::from_slice(bytes).map_err(to_cv_err)?;
-    let reshaped = mat_1d.reshape(1, height).map_err(to_cv_err)?;
+    let reshaped = mat_1d.reshape(3, height).map_err(to_cv_err)?;
     reshaped.try_clone().map_err(to_cv_err)
+}
+
+fn to_gray_mat(src_bgr: &Mat) -> Result<Mat, String> {
+    let mut gray = Mat::default();
+    imgproc::cvt_color(
+        src_bgr,
+        &mut gray,
+        imgproc::COLOR_BGR2GRAY,
+        0,
+        core::AlgorithmHint::ALGO_HINT_DEFAULT,
+    )
+    .map_err(to_cv_err)?;
+    Ok(gray)
 }
 
 fn estimate_overlap(prev: &Mat, curr: &Mat) -> Result<AlignEstimate, String> {
@@ -743,14 +791,23 @@ fn estimate_overlap(prev: &Mat, curr: &Mat) -> Result<AlignEstimate, String> {
     if rows <= 16 {
         return Err("长截图帧高度过小".to_string());
     }
-    let tpl_h = (rows / 4).clamp(64, 220);
-    let template = curr
+    let (prev_small, downsample_scale) = downsample_for_align(prev, 720)?;
+    let (curr_small, _) = downsample_for_align(curr, 720)?;
+    let small_rows = prev_small.rows();
+    let small_cols = prev_small.cols();
+    if small_rows <= 16 || small_cols <= 16 {
+        return Err("长截图帧尺寸过小".to_string());
+    }
+
+    // 先在降采样图上做粗估，显著降低模板匹配与相位相关成本。
+    let tpl_h = (small_rows / 4).clamp(32, 180).min(small_rows - 1);
+    let template = curr_small
         .row_range(&core::Range::new(0, tpl_h).map_err(to_cv_err)?)
         .map_err(to_cv_err)?;
 
     let mut result = Mat::default();
     imgproc::match_template(
-        prev,
+        &prev_small,
         &template,
         &mut result,
         imgproc::TM_CCOEFF_NORMED,
@@ -771,18 +828,24 @@ fn estimate_overlap(prev: &Mat, curr: &Mat) -> Result<AlignEstimate, String> {
     )
     .map_err(to_cv_err)?;
 
-    let template_overlap = (rows - max_loc.y).clamp(1, rows - 1);
+    let template_overlap_small = (small_rows - max_loc.y).clamp(1, small_rows - 1);
+    let template_overlap = ((template_overlap_small as f64) / downsample_scale)
+        .round() as i32;
+    let template_overlap = template_overlap.clamp(1, rows - 1);
 
     let mut prev32 = Mat::default();
     let mut curr32 = Mat::default();
-    prev.convert_to(&mut prev32, core::CV_32F, 1.0, 0.0)
+    prev_small
+        .convert_to(&mut prev32, core::CV_32F, 1.0, 0.0)
         .map_err(to_cv_err)?;
-    curr.convert_to(&mut curr32, core::CV_32F, 1.0, 0.0)
+    curr_small
+        .convert_to(&mut curr32, core::CV_32F, 1.0, 0.0)
         .map_err(to_cv_err)?;
     let mut response = 0.0f64;
     let phase_shift = imgproc::phase_correlate(&prev32, &curr32, &core::no_array(), &mut response)
         .map_err(to_cv_err)?;
-    let phase_unique = phase_shift.y.abs().round() as i32;
+    let phase_unique_small = phase_shift.y.abs().round() as i32;
+    let phase_unique = ((phase_unique_small as f64) / downsample_scale).round() as i32;
     let phase_overlap = (rows - phase_unique).clamp(1, rows - 1);
 
     // 根因修复：
@@ -804,7 +867,8 @@ fn estimate_overlap(prev: &Mat, curr: &Mat) -> Result<AlignEstimate, String> {
             base_overlap = cand;
         }
     }
-    let overlap_rows = refine_overlap_rows(prev, curr, base_overlap)?;
+    let refine_radius = dynamic_refine_radius(max_val as f32, response as f32);
+    let overlap_rows = refine_overlap_rows(prev, curr, base_overlap, refine_radius)?;
     let unique_rows = rows - overlap_rows;
     let diff = (phase_unique - unique_rows).abs();
     let phase_factor = if response > 0.02 && diff <= 48 { 1.0 } else { 0.85 };
@@ -830,11 +894,32 @@ fn estimate_overlap(prev: &Mat, curr: &Mat) -> Result<AlignEstimate, String> {
     })
 }
 
-fn refine_overlap_rows(prev: &Mat, curr: &Mat, seed_overlap: i32) -> Result<i32, String> {
+fn dynamic_refine_radius(template_conf: f32, phase_response: f32) -> i32 {
+    let mut radius = 16;
+    if phase_response < 0.02 {
+        radius += 24;
+    } else if phase_response < 0.04 {
+        radius += 14;
+    } else if phase_response < 0.08 {
+        radius += 8;
+    } else {
+        radius += 4;
+    }
+    if template_conf < 0.55 {
+        radius += 12;
+    } else if template_conf < 0.72 {
+        radius += 8;
+    } else if template_conf < 0.84 {
+        radius += 4;
+    }
+    radius.clamp(12, 56)
+}
+
+fn refine_overlap_rows(prev: &Mat, curr: &Mat, seed_overlap: i32, radius: i32) -> Result<i32, String> {
     let rows = prev.rows();
     let seed = seed_overlap.clamp(1, rows - 1);
-    let min_overlap = (seed - 40).max(8);
-    let max_overlap = (seed + 40).min(rows - 1);
+    let min_overlap = (seed - radius).max(8);
+    let max_overlap = (seed + radius).min(rows - 1);
     let mut best_overlap = seed;
     let mut best_cost = f64::INFINITY;
     for overlap in min_overlap..=max_overlap {
@@ -849,6 +934,7 @@ fn refine_overlap_rows(prev: &Mat, curr: &Mat, seed_overlap: i32) -> Result<i32,
 
 fn overlap_sad_cost(prev: &Mat, curr: &Mat, overlap_rows: i32) -> Result<f64, String> {
     let rows = prev.rows();
+    let cols = prev.cols();
     if overlap_rows <= 1 || overlap_rows >= rows {
         return Ok(f64::INFINITY);
     }
@@ -862,51 +948,126 @@ fn overlap_sad_cost(prev: &Mat, curr: &Mat, overlap_rows: i32) -> Result<f64, St
     let curr_tail = curr
         .row_range(&core::Range::new(overlap_rows - probe_h, overlap_rows).map_err(to_cv_err)?)
         .map_err(to_cv_err)?;
+
+    // 原图小窗精修：仅在中心列窗口内比较，减少每次精修的像素量。
+    let probe_w = cols.clamp(180, 720);
+    let x0 = ((cols - probe_w) / 2).max(0);
+    let x1 = (x0 + probe_w).min(cols);
+    let prev_roi = prev_tail
+        .col_range(&core::Range::new(x0, x1).map_err(to_cv_err)?)
+        .map_err(to_cv_err)?;
+    let curr_roi = curr_tail
+        .col_range(&core::Range::new(x0, x1).map_err(to_cv_err)?)
+        .map_err(to_cv_err)?;
+
     let mut diff = Mat::default();
-    core::absdiff(&prev_tail, &curr_tail, &mut diff).map_err(to_cv_err)?;
+    core::absdiff(&prev_roi, &curr_roi, &mut diff).map_err(to_cv_err)?;
     let avg = core::mean(&diff, &core::no_array()).map_err(to_cv_err)?;
     Ok(avg[0])
 }
 
-fn vconcat_mats(top: &Mat, bottom: &Mat) -> Result<Mat, String> {
+fn downsample_for_align(src: &Mat, max_side: i32) -> Result<(Mat, f64), String> {
+    let rows = src.rows();
+    let cols = src.cols();
+    let largest = rows.max(cols).max(1);
+    let scale = (max_side as f64 / largest as f64).clamp(0.2, 1.0);
+    if scale >= 0.999 {
+        return Ok((src.try_clone().map_err(to_cv_err)?, 1.0));
+    }
+    let dst_w = ((cols as f64) * scale).round().max(1.0) as i32;
+    let dst_h = ((rows as f64) * scale).round().max(1.0) as i32;
+    let mut out = Mat::default();
+    imgproc::resize(
+        src,
+        &mut out,
+        core::Size {
+            width: dst_w,
+            height: dst_h,
+        },
+        0.0,
+        0.0,
+        imgproc::INTER_AREA,
+    )
+    .map_err(to_cv_err)?;
+    Ok((out, scale))
+}
+
+fn concat_segments(segments: &[Mat]) -> Result<Mat, String> {
+    if segments.is_empty() {
+        return Err("长截图没有可拼接分段".to_string());
+    }
     let mut mats = core::Vector::<Mat>::new();
-    mats.push(top.try_clone().map_err(to_cv_err)?);
-    mats.push(bottom.try_clone().map_err(to_cv_err)?);
+    for segment in segments {
+        mats.push(segment.clone());
+    }
     let mut out = Mat::default();
     core::vconcat(&mats, &mut out).map_err(to_cv_err)?;
     Ok(out)
 }
 
-fn gray_mat_to_png_base64(gray: &Mat) -> Result<String, String> {
-    if gray.cols() <= 0 || gray.rows() <= 0 {
+fn mat_to_png_base64(image_mat: &Mat) -> Result<String, String> {
+    if image_mat.cols() <= 0 || image_mat.rows() <= 0 {
         return Err("长截图结果为空".to_string());
     }
-    let width = gray.cols() as u32;
-    let height = gray.rows() as u32;
+    let width = image_mat.cols() as u32;
+    let height = image_mat.rows() as u32;
+    let channels = image_mat.channels();
+
     let mut packed = Mat::default();
-    gray.copy_to(&mut packed).map_err(to_cv_err)?;
-    let bytes = packed.data_bytes().map_err(to_cv_err)?.to_vec();
-    let image = image::GrayImage::from_raw(width, height, bytes)
-        .ok_or_else(|| "长截图像素数据构建失败".to_string())?;
+    let (bytes, color_type) = match channels {
+        1 => {
+            image_mat.copy_to(&mut packed).map_err(to_cv_err)?;
+            (
+                packed.data_bytes().map_err(to_cv_err)?.to_vec(),
+                image::ExtendedColorType::L8,
+            )
+        }
+        3 => {
+            // OpenCV 常见彩色顺序为 BGR，编码前转为 RGB。
+            imgproc::cvt_color(
+                image_mat,
+                &mut packed,
+                imgproc::COLOR_BGR2RGB,
+                0,
+                core::AlgorithmHint::ALGO_HINT_DEFAULT,
+            )
+            .map_err(to_cv_err)?;
+            (
+                packed.data_bytes().map_err(to_cv_err)?.to_vec(),
+                image::ExtendedColorType::Rgb8,
+            )
+        }
+        4 => {
+            imgproc::cvt_color(
+                image_mat,
+                &mut packed,
+                imgproc::COLOR_BGRA2RGBA,
+                0,
+                core::AlgorithmHint::ALGO_HINT_DEFAULT,
+            )
+            .map_err(to_cv_err)?;
+            (
+                packed.data_bytes().map_err(to_cv_err)?.to_vec(),
+                image::ExtendedColorType::Rgba8,
+            )
+        }
+        _ => return Err(format!("不支持的图像通道数: {}", channels)),
+    };
+
     let mut png = Vec::<u8>::new();
     let encoder = image::codecs::png::PngEncoder::new(&mut png);
     encoder
-        .write_image(
-            image.as_raw(),
-            width,
-            height,
-            image::ExtendedColorType::L8,
-        )
+        .write_image(&bytes, width, height, color_type)
         .map_err(|e| format!("长截图 PNG 编码失败: {}", e))?;
     Ok(base64::engine::general_purpose::STANDARD.encode(png))
 }
 
-fn gray_mat_to_preview_base64(gray: &Mat, max_width: i32, max_height: i32) -> Result<String, String> {
-    if gray.cols() <= 0 || gray.rows() <= 0 {
+fn mat_to_preview_base64(image_mat: &Mat, max_width: i32, max_height: i32) -> Result<String, String> {
+    if image_mat.cols() <= 0 || image_mat.rows() <= 0 {
         return Err("预览图为空".to_string());
     }
-    let src_w = gray.cols();
-    let src_h = gray.rows();
+    let src_w = image_mat.cols();
+    let src_h = image_mat.rows();
     let scale_w = max_width as f64 / src_w as f64;
     let scale_h = max_height as f64 / src_h as f64;
     let scale = scale_w.min(scale_h).min(1.0).max(0.01);
@@ -915,7 +1076,7 @@ fn gray_mat_to_preview_base64(gray: &Mat, max_width: i32, max_height: i32) -> Re
 
     let mut resized = Mat::default();
     imgproc::resize(
-        gray,
+        image_mat,
         &mut resized,
         core::Size {
             width: dst_w,
@@ -926,9 +1087,19 @@ fn gray_mat_to_preview_base64(gray: &Mat, max_width: i32, max_height: i32) -> Re
         imgproc::INTER_AREA,
     )
     .map_err(to_cv_err)?;
-    gray_mat_to_png_base64(&resized)
+    mat_to_png_base64(&resized)
 }
 
 fn to_cv_err<E: std::fmt::Display>(e: E) -> String {
     format!("OpenCV 错误: {}", e)
+}
+
+fn exceeds_stitched_limit(width: u32, height: u32) -> bool {
+    if width == 0 || height == 0 {
+        return false;
+    }
+    if height > MAX_STITCHED_HEIGHT {
+        return true;
+    }
+    (width as u64).saturating_mul(height as u64) > MAX_STITCHED_PIXELS
 }
