@@ -112,6 +112,23 @@ const viewportStyle = computed(() => {
 </script>
 
 <style scoped>
+:global(html),
+:global(body),
+:global(#app) {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+:global(*),
+:global(*::before),
+:global(*::after) {
+  box-sizing: border-box;
+}
+
 .panel {
   width: 100%;
   height: 100%;
