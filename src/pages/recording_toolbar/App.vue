@@ -567,6 +567,10 @@ const toggleRecordingState = async () => {
         audioBitrateKbps: audioBitrateKbps.value,
       });
     } else if (rawRecordingState.value === "recording") {
+      if (recordTargetType.value === "window") {
+        showInlineNotice("窗口源录制暂不支持暂停，请点击停止按钮结束录制", "warning");
+        return;
+      }
       loadingAction.value = "pause";
       await RecordingService.pause();
     } else if (rawRecordingState.value === "paused") {
@@ -593,6 +597,7 @@ const stop = async () => {
   try {
     await RecordingService.stop(state.sessionId);
     await refresh();
+    clearInlineNotice();
   } catch (e) {
     showBackendErrorInSettings(String(e));
   } finally {
@@ -887,6 +892,7 @@ onMounted(async () => {
   unlistenRecordingFinished = await listen("recording-finished", () => {
     state.state = "idle";
     state.sessionId = null;
+    clearInlineNotice();
     capsuleSettingsVisible.value = false;
     void syncCapsuleLayout();
   });
