@@ -19,10 +19,7 @@ use crate::features::recording::types::{
     AudioInputDevice, AudioProcessItem, RecordingRegressionReport, RecordingRuntimeState, RecordingSessionInfo,
     RecordingStopResult, SessionRequest, StartRecordingRequest,
 };
-use crate::features::recording::wgc_capture::{
-    bootstrap_force_default_border_from_settings, is_force_default_border_enabled,
-    start_window_capture_to_mp4,
-};
+use crate::features::recording::wgc_capture::is_force_default_border_enabled;
 use crate::sync::Mutex;
 use crate::utils::system_utils::save_settings;
 use std::collections::HashSet;
@@ -116,6 +113,25 @@ fn now_unix_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+fn build_ffmpeg_window_input(target_id: &str) -> Result<String, String> {
+    let raw = target_id.trim();
+    if raw.is_empty() {
+        return Err("target_id is empty".to_string());
+    }
+    if raw.starts_with("title=") || raw.starts_with("hwnd=") {
+        return Ok(raw.to_string());
+    }
+    if let Some(hex) = raw.strip_prefix("0x") {
+        let _ = usize::from_str_radix(hex, 16).map_err(|e| format!("解析窗口句柄失败: {}", e))?;
+        return Ok(format!("hwnd=0x{}", hex));
+    }
+    if raw.chars().all(|c| c.is_ascii_hexdigit()) {
+        let _ = usize::from_str_radix(raw, 16).map_err(|e| format!("解析窗口句柄失败: {}", e))?;
+        return Ok(format!("hwnd=0x{}", raw));
+    }
+    Ok(format!("title={}", raw))
 }
 
 fn parse_region_target(target_id: &str) -> Option<(i32, i32, u32, u32)> {
@@ -1048,8 +1064,6 @@ pub fn start_recording(
         // 统一录制时钟起点：必须早于视频采集与音频采集启动，避免后续音频延迟估算偏小导致 A/V 不同步。
         let capture_origin_unix_ms = now_unix_ms();
         let capture_origin_instant = std::time::Instant::now();
-        let mut window_wgc_handle = None;
-        bootstrap_force_default_border_from_settings(settings_snapshot.recording_wgc_force_default_border);
         let mut args: Vec<String> = vec![
             "-hide_banner".into(),
             "-loglevel".into(),
@@ -1061,17 +1075,16 @@ pub fn start_recording(
                 if target_id.trim().is_empty() {
                     return Err(rollback_starting("窗口录制目标不能为空", "target_id is empty".to_string()));
                 }
-                let handle = start_window_capture_to_mp4(
-                    target_id.trim(),
-                    tmp_path.clone(),
-                    fps,
-                    video_bitrate,
-                    capture_cursor,
-                    capture_origin_instant,
-                    settings_snapshot.recording_wgc_force_default_border,
-                )
-                    .map_err(|e| rollback_starting("启动窗口源录制失败", e))?;
-                window_wgc_handle = Some(handle);
+                let input = build_ffmpeg_window_input(target_id.trim())
+                    .map_err(|e| rollback_starting("窗口录制目标无效", e))?;
+                args.push("-f".into());
+                args.push("gdigrab".into());
+                args.push("-framerate".into());
+                args.push(format!("{}", fps));
+                args.push("-draw_mouse".into());
+                args.push(if capture_cursor { "1".into() } else { "0".into() });
+                args.push("-i".into());
+                args.push(input);
             }
             "region" => {
                 let (x, y, width, height) = parse_region_target(&target_id).ok_or_else(|| {
@@ -1105,43 +1118,39 @@ pub fn start_recording(
                 args.push("desktop".into());
             }
         }
-        let (child_opt, stderr_opt) = if target_type != "window" {
-            // 删除 ffmpeg 系统音频输入路径，改为 Rust 原生 WASAPI 录制（后处理合成）
-            args.push("-map".to_string());
-            args.push("0:v:0".to_string());
-            // yuv420p + libx264 要求偶数宽高，区域框选常出现奇数尺寸，统一做偶数对齐避免 -22
-            args.push("-vf".to_string());
-            args.push("scale=trunc(iw/2)*2:trunc(ih/2)*2".to_string());
-            args.extend_from_slice(&[
-                "-c:v".to_string(),
-                "libx264".to_string(),
-                "-preset".to_string(),
-                "veryfast".to_string(),
-                "-pix_fmt".to_string(),
-                "yuv420p".to_string(),
-                "-b:v".to_string(),
-                format!("{}k", video_bitrate),
-            ]);
-            args.push("-an".to_string());
-            args.push(tmp_path.to_string_lossy().to_string());
-            let mut command = Command::new(&ffmpeg_path);
-            suppress_console_window(&mut command);
-            command
-                .args(args)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::piped());
-            let mut child = command.spawn().map_err(|e| {
-                runtime.phase = RecordingPhase::Error;
-                runtime.last_error = Some(e.to_string());
-                emit_recording_error(app, None, RECORDING_START_FAILED, "录制进程启动失败");
-                AppError::new(ErrorCode::SystemError, "启动录制失败").with_details(e.to_string())
-            })?;
-            let stderr = child.stderr.take();
-            (Some(child), stderr)
-        } else {
-            (None, None)
-        };
+        // 删除 ffmpeg 系统音频输入路径，改为 Rust 原生 WASAPI 录制（后处理合成）
+        args.push("-map".to_string());
+        args.push("0:v:0".to_string());
+        // yuv420p + libx264 要求偶数宽高，区域框选常出现奇数尺寸，统一做偶数对齐避免 -22
+        args.push("-vf".to_string());
+        args.push("scale=trunc(iw/2)*2:trunc(ih/2)*2".to_string());
+        args.extend_from_slice(&[
+            "-c:v".to_string(),
+            "libx264".to_string(),
+            "-preset".to_string(),
+            "veryfast".to_string(),
+            "-pix_fmt".to_string(),
+            "yuv420p".to_string(),
+            "-b:v".to_string(),
+            format!("{}k", video_bitrate),
+        ]);
+        args.push("-an".to_string());
+        args.push(tmp_path.to_string_lossy().to_string());
+        let mut command = Command::new(&ffmpeg_path);
+        suppress_console_window(&mut command);
+        command
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().map_err(|e| {
+            runtime.phase = RecordingPhase::Error;
+            runtime.last_error = Some(e.to_string());
+            emit_recording_error(app, None, RECORDING_START_FAILED, "录制进程启动失败");
+            AppError::new(ErrorCode::SystemError, "启动录制失败").with_details(e.to_string())
+        })?;
+        let stderr_opt = child.stderr.take();
+        let child_opt = Some(child);
         runtime.phase = RecordingPhase::Recording;
         runtime.session_id = Some(session_id.clone());
         runtime.started_at_ms = capture_origin_unix_ms;
@@ -1194,13 +1203,9 @@ pub fn start_recording(
             let _ = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true);
         }
         runtime.process = child_opt;
-        if let Some(handle) = window_wgc_handle {
-            runtime.wgc_stop_flag = Some(handle.stop_flag);
-            runtime.wgc_first_frame_elapsed_ms = Some(handle.first_frame_elapsed_ms);
-            runtime.wgc_thread = Some(handle.join);
-        } else {
-            runtime.wgc_first_frame_elapsed_ms = None;
-        }
+        runtime.wgc_stop_flag = None;
+        runtime.wgc_first_frame_elapsed_ms = None;
+        runtime.wgc_thread = None;
         let started_at_ms = runtime.started_at_ms;
         emit_recording_state_changed(app, Some(&session_id), runtime.phase.as_str(), 0);
         drop(runtime);
