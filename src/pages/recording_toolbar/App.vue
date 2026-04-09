@@ -2,15 +2,11 @@
   <el-config-provider :locale="zhCn">
     <div
         :class="{
-        'bar-collapsed': isToolbarCollapsed,
-        'bar-collapsed-settings-open':
-          isToolbarCollapsed && capsuleSettingsVisible,
+        'bar-collapsed-settings-open': capsuleSettingsVisible,
       }"
-        :data-tauri-drag-region="isToolbarCollapsed ? null : ''"
-        class="bar"
+        class="bar bar-collapsed"
     >
       <div
-          v-if="isToolbarCollapsed"
           :data-state="rawRecordingState"
           class="collapsed-shell"
       >
@@ -103,7 +99,6 @@
         </div>
         <div
             v-if="capsuleSettingsVisible"
-            ref="capsuleSettingsPanelRef"
             class="capsule-settings-panel no-drag"
         >
           <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]">
@@ -307,8 +302,6 @@ import {Settings} from "lucide-vue-next";
 
 const loadingAction = ref(null);
 const capsuleSettingsVisible = ref(false);
-const capsuleSettingsPanelRef = ref(null);
-const isToolbarCollapsed = ref(true);
 const recordingFeatureEnabled = ref(true);
 
 const captureSystemAudio = ref(false);
@@ -417,7 +410,6 @@ const measureCapsuleContentHeight = () => {
 
 const syncCapsuleLayout = async () => {
   try {
-    isToolbarCollapsed.value = true;
     let capsuleContentHeight = null;
     if (capsuleSettingsVisible.value) {
       await nextTick();
