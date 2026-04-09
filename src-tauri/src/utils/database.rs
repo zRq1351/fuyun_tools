@@ -93,7 +93,7 @@ async fn open_history_db_async() -> Result<SqliteConnection, String> {
             HISTORY_SCHEMA_STATE.store(2, Ordering::Release);
         } else {
             while HISTORY_SCHEMA_STATE.load(Ordering::Acquire) == 1 {
-                std::thread::sleep(Duration::from_millis(1));
+                sqlx::__rt::sleep(Duration::from_millis(1)).await;
             }
         }
     }

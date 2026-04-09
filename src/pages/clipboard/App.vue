@@ -211,6 +211,7 @@ const explanationTargetLanguage = ref(localStorage.getItem('clipboard_ai_explain
 const loadMoreIntent = ref(false)
 let unlistenShowWindow = null
 let unlistenHistoryPayloadUpdated = null
+let unlistenHistoryItemUpdated = null
 let unlistenTextItemPromoted = null
 let windowBlurHandler = null
 let isPageReloading = false
@@ -393,6 +394,14 @@ const init = async () => {
       if (Array.isArray(payload.pinned_items)) {
         pinnedItems.value = payload.pinned_items
       }
+    })
+    unlistenHistoryItemUpdated = await listen('clipboard-history-item-updated', (event) => {
+      const payload = event?.payload || {}
+      const latestItem = typeof payload.latest_item === 'string' ? payload.latest_item : ''
+      if (!latestItem) {
+        return
+      }
+      insertLocalIncomingContent(latestItem, Boolean(payload.is_pinned))
     })
     unlistenTextItemPromoted = await listen('text-item-promoted', (event) => {
       const content = event?.payload?.content
@@ -723,6 +732,10 @@ onBeforeUnmount(() => {
   if (unlistenHistoryPayloadUpdated) {
     unlistenHistoryPayloadUpdated()
     unlistenHistoryPayloadUpdated = null
+  }
+  if (unlistenHistoryItemUpdated) {
+    unlistenHistoryItemUpdated()
+    unlistenHistoryItemUpdated = null
   }
   if (unlistenTextItemPromoted) {
     unlistenTextItemPromoted()

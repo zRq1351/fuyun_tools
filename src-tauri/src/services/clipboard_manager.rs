@@ -131,15 +131,21 @@ pub fn add_to_clipboard_history(app_handle: &AppHandle, content: String, state: 
         if !should_emit {
             None
         } else {
+            let history = manager.get_history();
+            let latest_item = history.first().cloned().unwrap_or_default();
+            let is_pinned = if latest_item.is_empty() {
+                false
+            } else {
+                manager.get_pinned_items().iter().any(|v| v == &latest_item)
+            };
             Some(serde_json::json!({
-                "history": manager.get_history(),
-                "categories": manager.get_categories(),
-                "category_list": manager.get_category_list(),
-                "pinned_items": manager.get_pinned_items()
+                "latest_item": latest_item,
+                "history_len": history.len(),
+                "is_pinned": is_pinned
             }))
         }
     };
     if let Some(payload) = payload {
-        let _ = app_handle.emit("clipboard-history-payload-updated", payload);
+        let _ = app_handle.emit("clipboard-history-item-updated", payload);
     }
 }
