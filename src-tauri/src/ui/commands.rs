@@ -3998,8 +3998,12 @@ pub async fn toggle_manual_longshot_pause_from_shortcut(app: AppHandle) -> Resul
 /// 打开截图编辑窗口
 #[tauri::command]
 pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Result<(), String> {
+    let selection_mode = mode
+        .as_ref()
+        .map(|m| m.to_lowercase())
+        .unwrap_or_else(|| "screenshot".to_string());
     if let Ok(settings) = load_settings() {
-        if !settings.screenshot_enabled {
+        if !settings.screenshot_enabled && selection_mode != "recording_region" {
             return Err(frontend_error(
                 ErrorCode::ValidationError,
                 "截图功能已停用",
@@ -4029,7 +4033,7 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
         })?;
     let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
 
-    let selection_mode = mode.unwrap_or_else(|| "screenshot".to_string());
+    let selection_mode = selection_mode;
     if let Some(window) = app.get_webview_window("screenshot") {
         if SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
