@@ -157,7 +157,7 @@ pub fn start_window_capture_to_mp4(
             draw_border_setting,
             SecondaryWindowSettings::Default,
             MinimumUpdateIntervalSettings::Default,
-            DirtyRegionSettings::Default,
+            DirtyRegionSettings::ReportAndRender,
             ColorFormat::Bgra8,
             flags,
         );

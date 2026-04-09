@@ -1371,7 +1371,12 @@ pub fn stop_recording(
     persist_wgc_border_fallback_if_needed(&state_arc);
     if let Some(anchor_holder) = wgc_first_frame_elapsed_ms.as_ref() {
         let anchor_ms = anchor_holder.load(Ordering::Relaxed);
-        if anchor_ms != u64::MAX && anchor_ms > 0 {
+        if anchor_ms == u64::MAX && fatal_error.is_none() {
+            fatal_error = Some(
+                AppError::new(ErrorCode::ValidationError, "窗口录制未捕获到有效视频帧")
+                    .with_details("请确认目标窗口处于可见状态且有内容变化，避免最小化/被系统保护内容")
+            );
+        } else if anchor_ms > 0 {
             let calibrated_anchor_ms = anchor_ms.saturating_add(wgc_audio_sync_advance_ms);
             for seg in &mut sys_segments {
                 seg.start_ms = seg.start_ms.saturating_sub(calibrated_anchor_ms);
