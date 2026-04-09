@@ -567,10 +567,6 @@ const toggleRecordingState = async () => {
         audioBitrateKbps: audioBitrateKbps.value,
       });
     } else if (rawRecordingState.value === "recording") {
-      if (recordTargetType.value === "window") {
-        showInlineNotice("窗口源录制暂不支持暂停，请点击停止按钮结束录制", "warning");
-        return;
-      }
       loadingAction.value = "pause";
       await RecordingService.pause();
     } else if (rawRecordingState.value === "paused") {

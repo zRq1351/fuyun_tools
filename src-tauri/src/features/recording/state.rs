@@ -54,11 +54,18 @@ pub struct RecordingRuntime {
     pub last_error: Option<String>,
     pub output_path_tmp: Option<PathBuf>,
     pub output_path_final: Option<PathBuf>,
+    pub target_type: String,
+    pub target_id: String,
+    pub capture_cursor: bool,
     pub process: Option<Child>,
     pub wgc_stop_flag: Option<Arc<AtomicBool>>,
+    pub wgc_pause_flag: Option<Arc<AtomicBool>>,
     pub wgc_first_frame_elapsed_ms: Option<Arc<AtomicU64>>,
     pub wgc_audio_sync_advance_ms: u64,
     pub wgc_thread: Option<JoinHandle<Result<(), String>>>,
+    pub recording_pause_flag: Option<Arc<AtomicBool>>,
+    pub window_video_segments: Vec<PathBuf>,
+    pub window_segment_index: usize,
     pub system_audio_wav_path: Option<PathBuf>,
     pub system_audio_stop_flag: Option<Arc<AtomicBool>>,
     pub system_audio_thread: Option<JoinHandle<()>>,
@@ -101,11 +108,18 @@ impl Default for RecordingRuntime {
             last_error: None,
             output_path_tmp: None,
             output_path_final: None,
+            target_type: "screen".to_string(),
+            target_id: String::new(),
+            capture_cursor: true,
             process: None,
             wgc_stop_flag: None,
+            wgc_pause_flag: None,
             wgc_first_frame_elapsed_ms: None,
             wgc_audio_sync_advance_ms: 80,
             wgc_thread: None,
+            recording_pause_flag: None,
+            window_video_segments: Vec::new(),
+            window_segment_index: 0,
             system_audio_wav_path: None,
             system_audio_stop_flag: None,
             system_audio_thread: None,
@@ -171,11 +185,18 @@ impl RecordingRuntime {
         self.last_error = None;
         self.output_path_tmp = None;
         self.output_path_final = None;
+        self.target_type = "screen".to_string();
+        self.target_id.clear();
+        self.capture_cursor = true;
         self.process = None;
         self.wgc_stop_flag = None;
+        self.wgc_pause_flag = None;
         self.wgc_first_frame_elapsed_ms = None;
         self.wgc_audio_sync_advance_ms = 80;
         self.wgc_thread = None;
+        self.recording_pause_flag = None;
+        self.window_video_segments.clear();
+        self.window_segment_index = 0;
         self.system_audio_wav_path = None;
         self.system_audio_stop_flag = None;
         self.system_audio_thread = None;

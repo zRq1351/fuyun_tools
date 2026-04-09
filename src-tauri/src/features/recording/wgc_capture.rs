@@ -34,6 +34,7 @@ pub fn is_force_default_border_enabled() -> bool {
 
 pub struct WgcCaptureHandle {
     pub stop_flag: Arc<AtomicBool>,
+    pub pause_flag: Arc<AtomicBool>,
     pub first_frame_elapsed_ms: Arc<AtomicU64>,
     pub join: JoinHandle<Result<(), String>>,
 }
@@ -41,6 +42,7 @@ pub struct WgcCaptureHandle {
 #[derive(Clone)]
 struct WgcCaptureFlags {
     stop_flag: Arc<AtomicBool>,
+    pause_flag: Arc<AtomicBool>,
     capture_origin_instant: std::time::Instant,
     first_frame_elapsed_ms: Arc<AtomicU64>,
     width: u32,
@@ -77,6 +79,9 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
     }
 
     fn on_frame_arrived(&mut self, frame: &mut Frame, _capture_control: InternalCaptureControl) -> Result<(), Self::Error> {
+        if self.flags.pause_flag.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         if self.flags.first_frame_elapsed_ms.load(Ordering::Relaxed) == u64::MAX {
             let elapsed_ms = self.flags.capture_origin_instant.elapsed().as_millis() as u64;
             self.flags.first_frame_elapsed_ms.store(elapsed_ms, Ordering::Relaxed);
@@ -128,9 +133,11 @@ pub fn start_window_capture_to_mp4(
     let width = (rect.right - rect.left).max(1) as u32;
     let height = (rect.bottom - rect.top).max(1) as u32;
     let stop_flag = Arc::new(AtomicBool::new(false));
+    let pause_flag = Arc::new(AtomicBool::new(false));
     let first_frame_elapsed_ms = Arc::new(AtomicU64::new(u64::MAX));
     let flags = WgcCaptureFlags {
         stop_flag: stop_flag.clone(),
+        pause_flag: pause_flag.clone(),
         capture_origin_instant,
         first_frame_elapsed_ms: first_frame_elapsed_ms.clone(),
         width,
@@ -200,6 +207,7 @@ pub fn start_window_capture_to_mp4(
     });
     Ok(WgcCaptureHandle {
         stop_flag,
+        pause_flag,
         first_frame_elapsed_ms,
         join,
     })

@@ -58,6 +58,7 @@ fn capture_process_loopback_to_wav(
     output_path: PathBuf,
     stop_flag: Arc<AtomicBool>,
     enabled_flag: Arc<AtomicBool>,
+    recording_pause_flag: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let _ = initialize_mta();
     let desired_format = WaveFormat::new(32, 32, &SampleType::Float, 48000, 2, None);
@@ -105,7 +106,9 @@ fn capture_process_loopback_to_wav(
             let b2 = queue.pop_front().unwrap_or(0);
             let b3 = queue.pop_front().unwrap_or(0);
             let sample = f32::from_le_bytes([b0, b1, b2, b3]);
-            let out = if enabled_flag.load(Ordering::SeqCst) {
+            let out = if enabled_flag.load(Ordering::SeqCst)
+                && !recording_pause_flag.load(Ordering::SeqCst)
+            {
                 (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16
             } else {
                 0
@@ -130,6 +133,7 @@ pub fn start_process_loopback_wavs(
     process_ids: Vec<u32>,
     output_paths: Vec<PathBuf>,
     enabled_flag: Arc<AtomicBool>,
+    recording_pause_flag: Arc<AtomicBool>,
 ) -> Result<WasapiCaptureHandle, String> {
     if process_ids.is_empty() || process_ids.len() != output_paths.len() {
         return Err("进程音频录制参数无效".to_string());
@@ -137,13 +141,15 @@ pub fn start_process_loopback_wavs(
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop = stop_flag.clone();
     let thread_enabled = enabled_flag.clone();
+    let thread_pause = recording_pause_flag.clone();
     let handle = std::thread::spawn(move || {
         let mut workers = Vec::new();
         for (pid, path) in process_ids.into_iter().zip(output_paths.into_iter()) {
             let worker_stop = thread_stop.clone();
             let worker_enabled = thread_enabled.clone();
+            let worker_pause = thread_pause.clone();
             workers.push(std::thread::spawn(move || {
-                let _ = capture_process_loopback_to_wav(pid, path, worker_stop, worker_enabled);
+                let _ = capture_process_loopback_to_wav(pid, path, worker_stop, worker_enabled, worker_pause);
             }));
         }
         while !thread_stop.load(Ordering::SeqCst) {
@@ -295,6 +301,7 @@ pub fn start_system_loopback_wav_with_device(
     device_desc_key: Option<String>,
     output_path: PathBuf,
     enabled_flag: Arc<AtomicBool>,
+    recording_pause_flag: Arc<AtomicBool>,
 ) -> Result<WasapiCaptureHandle, String> {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
@@ -368,6 +375,7 @@ pub fn start_system_loopback_wav_with_device(
             let writer = Arc::new(Mutex::new(Some(writer)));
             let writer_cb = writer.clone();
             let enabled_cb = enabled_flag.clone();
+            let pause_cb = recording_pause_flag.clone();
             let err_fn = |err| eprintln!("WASAPI 捕获错误: {}", err);
             let stream = match sample_format {
                 CpalSampleFormat::F32 => device
@@ -376,7 +384,8 @@ pub fn start_system_loopback_wav_with_device(
                         move |data: &[f32], _| {
                             if let Ok(mut guard) = writer_cb.lock() {
                                 if let Some(writer) = guard.as_mut() {
-                                    let enabled = enabled_cb.load(Ordering::SeqCst);
+                                    let enabled = enabled_cb.load(Ordering::SeqCst)
+                                        && !pause_cb.load(Ordering::SeqCst);
                                     for &v in data {
                                         let s = if enabled { (v * i16::MAX as f32) as i16 } else { 0 };
                                         let _ = writer.write_sample(s);
@@ -391,13 +400,15 @@ pub fn start_system_loopback_wav_with_device(
                 CpalSampleFormat::I16 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[i16], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let _ = writer.write_sample(if enabled { v } else { 0 });
                                         }
@@ -412,13 +423,15 @@ pub fn start_system_loopback_wav_with_device(
                 CpalSampleFormat::U16 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[u16], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
@@ -434,13 +447,15 @@ pub fn start_system_loopback_wav_with_device(
                 CpalSampleFormat::I8 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[i8], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
@@ -456,13 +471,15 @@ pub fn start_system_loopback_wav_with_device(
                 CpalSampleFormat::U8 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[u8], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
@@ -478,13 +495,15 @@ pub fn start_system_loopback_wav_with_device(
                 CpalSampleFormat::I32 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[i32], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
@@ -500,13 +519,15 @@ pub fn start_system_loopback_wav_with_device(
                 CpalSampleFormat::U32 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[u32], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
@@ -522,13 +543,15 @@ pub fn start_system_loopback_wav_with_device(
                 CpalSampleFormat::F64 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[f64], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
@@ -575,13 +598,19 @@ pub fn start_system_loopback_wav_with_device(
 
 // 兼容旧签名
 pub fn start_system_loopback_wav(output_path: PathBuf) -> Result<WasapiCaptureHandle, String> {
-    start_system_loopback_wav_with_device(None, output_path, Arc::new(AtomicBool::new(true)))
+    start_system_loopback_wav_with_device(
+        None,
+        output_path,
+        Arc::new(AtomicBool::new(true)),
+        Arc::new(AtomicBool::new(false)),
+    )
 }
 
 pub fn start_microphone_wav_with_device(
     device_desc_key: Option<String>,
     output_path: PathBuf,
     enabled_flag: Arc<AtomicBool>,
+    recording_pause_flag: Arc<AtomicBool>,
 ) -> Result<WasapiCaptureHandle, String> {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
@@ -655,6 +684,7 @@ pub fn start_microphone_wav_with_device(
             let writer = Arc::new(Mutex::new(Some(writer)));
             let writer_cb = writer.clone();
             let enabled_cb = enabled_flag.clone();
+            let pause_cb = recording_pause_flag.clone();
             let err_fn = |err| eprintln!("WASAPI 麦克风捕获错误: {}", err);
             let stream = match sample_format {
                 CpalSampleFormat::F32 => device
@@ -663,7 +693,8 @@ pub fn start_microphone_wav_with_device(
                         move |data: &[f32], _| {
                             if let Ok(mut guard) = writer_cb.lock() {
                                 if let Some(writer) = guard.as_mut() {
-                                    let enabled = enabled_cb.load(Ordering::SeqCst);
+                                    let enabled = enabled_cb.load(Ordering::SeqCst)
+                                        && !pause_cb.load(Ordering::SeqCst);
                                     for &v in data {
                                         let s = if enabled { (v * i16::MAX as f32) as i16 } else { 0 };
                                         let _ = writer.write_sample(s);
@@ -678,13 +709,15 @@ pub fn start_microphone_wav_with_device(
                 CpalSampleFormat::I16 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[i16], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let _ = writer.write_sample(if enabled { v } else { 0 });
                                         }
@@ -699,13 +732,15 @@ pub fn start_microphone_wav_with_device(
                 CpalSampleFormat::U16 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[u16], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
@@ -721,13 +756,15 @@ pub fn start_microphone_wav_with_device(
                 CpalSampleFormat::I8 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[i8], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
@@ -743,13 +780,15 @@ pub fn start_microphone_wav_with_device(
                 CpalSampleFormat::U8 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[u8], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
@@ -765,13 +804,15 @@ pub fn start_microphone_wav_with_device(
                 CpalSampleFormat::I32 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[i32], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
@@ -787,13 +828,15 @@ pub fn start_microphone_wav_with_device(
                 CpalSampleFormat::U32 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[u32], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
@@ -809,13 +852,15 @@ pub fn start_microphone_wav_with_device(
                 CpalSampleFormat::F64 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
+                    let pause_cb = recording_pause_flag.clone();
                     device
                         .build_input_stream(
                             &config,
                             move |data: &[f64], _| {
                                 if let Ok(mut guard) = writer_cb.lock() {
                                     if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst);
+                                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                                            && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
                                             let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);

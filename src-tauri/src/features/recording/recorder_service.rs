@@ -19,7 +19,9 @@ use crate::features::recording::types::{
     AudioInputDevice, AudioProcessItem, RecordingRegressionReport, RecordingRuntimeState, RecordingSessionInfo,
     RecordingStopResult, SessionRequest, StartRecordingRequest,
 };
-use crate::features::recording::wgc_capture::is_force_default_border_enabled;
+use crate::features::recording::wgc_capture::{
+    bootstrap_force_default_border_from_settings, is_force_default_border_enabled, start_window_capture_to_mp4,
+};
 use crate::sync::Mutex;
 use crate::utils::system_utils::save_settings;
 use std::collections::HashSet;
@@ -113,25 +115,6 @@ fn now_unix_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
-}
-
-fn build_ffmpeg_window_input(target_id: &str) -> Result<String, String> {
-    let raw = target_id.trim();
-    if raw.is_empty() {
-        return Err("target_id is empty".to_string());
-    }
-    if raw.starts_with("title=") || raw.starts_with("hwnd=") {
-        return Ok(raw.to_string());
-    }
-    if let Some(hex) = raw.strip_prefix("0x") {
-        let _ = usize::from_str_radix(hex, 16).map_err(|e| format!("解析窗口句柄失败: {}", e))?;
-        return Ok(format!("hwnd=0x{}", hex));
-    }
-    if raw.chars().all(|c| c.is_ascii_hexdigit()) {
-        let _ = usize::from_str_radix(raw, 16).map_err(|e| format!("解析窗口句柄失败: {}", e))?;
-        return Ok(format!("hwnd=0x{}", raw));
-    }
-    Ok(format!("title={}", raw))
 }
 
 fn parse_region_target(target_id: &str) -> Option<(i32, i32, u32, u32)> {
@@ -267,6 +250,79 @@ fn resolve_output_dir(state: &SharedAppState, request_output_dir: Option<String>
         .map_err(|e| AppError::new(ErrorCode::IoError, format!("读取程序路径失败: {}", e)))?;
     let _ = base.pop();
     Ok(base.join("recordings"))
+}
+
+fn build_window_segment_path(output_dir: &PathBuf, session_id: &str, segment_index: usize) -> PathBuf {
+    output_dir.join(format!("{}.video.{}.tmp.mp4", session_id, segment_index))
+}
+
+fn stop_active_audio_capture(runtime: &mut crate::features::recording::state::RecordingRuntime) {
+    if let Some(flag) = runtime.system_audio_stop_flag.as_ref() {
+        flag.store(true, Ordering::SeqCst);
+    }
+    if let Some(join) = runtime.system_audio_thread.take() {
+        let _ = join.join();
+    }
+    runtime.system_audio_stop_flag = None;
+    runtime.system_audio_wav_path = None;
+    runtime.system_audio_stream_start_ms = None;
+
+    if let Some(flag) = runtime.mic_audio_stop_flag.as_ref() {
+        flag.store(true, Ordering::SeqCst);
+    }
+    if let Some(join) = runtime.mic_audio_thread.take() {
+        let _ = join.join();
+    }
+    runtime.mic_audio_stop_flag = None;
+    runtime.mic_audio_wav_path = None;
+    runtime.mic_audio_stream_start_ms = None;
+}
+
+fn concat_video_segments(
+    ffmpeg_path: &std::path::Path,
+    segments: &[PathBuf],
+    output_path: &PathBuf,
+) -> Result<(), AppError> {
+    if segments.is_empty() {
+        return Err(AppError::new(ErrorCode::ValidationError, "没有可拼接的视频分段"));
+    }
+    if segments.len() == 1 {
+        return rename_recording_output_with_retry(&segments[0], output_path);
+    }
+    let list_path = output_path.with_extension("concat.txt");
+    let mut list_file = fs::File::create(&list_path)
+        .map_err(|e| AppError::new(ErrorCode::IoError, "创建视频拼接列表失败").with_details(e.to_string()))?;
+    for seg in segments {
+        let seg_path = seg.to_string_lossy().replace('\'', "'\\''");
+        let line = format!("file '{}'\n", seg_path);
+        list_file
+            .write_all(line.as_bytes())
+            .map_err(|e| AppError::new(ErrorCode::IoError, "写入视频拼接列表失败").with_details(e.to_string()))?;
+    }
+    let mut cmd = Command::new(ffmpeg_path);
+    suppress_console_window(&mut cmd);
+    let output = cmd
+        .arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("warning")
+        .arg("-y")
+        .arg("-f")
+        .arg("concat")
+        .arg("-safe")
+        .arg("0")
+        .arg("-i")
+        .arg(&list_path)
+        .arg("-c")
+        .arg("copy")
+        .arg(output_path)
+        .output()
+        .map_err(|e| AppError::new(ErrorCode::SystemError, "执行视频拼接失败").with_details(e.to_string()))?;
+    let _ = fs::remove_file(&list_path);
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(AppError::new(ErrorCode::SystemError, "视频拼接失败").with_details(stderr));
+    }
+    Ok(())
 }
 
 fn merge_system_audio_into_video(
@@ -578,10 +634,12 @@ fn ensure_system_audio_capture_started(
         .clone()
         .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
     runtime.system_audio_enabled_flag = Some(enabled_flag.clone());
-    let start_ms = runtime
-        .started_instant
-        .map(|it| it.elapsed().as_millis() as u64)
-        .unwrap_or(0);
+    let pause_flag = runtime
+        .recording_pause_flag
+        .clone()
+        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+    runtime.recording_pause_flag = Some(pause_flag.clone());
+    let start_ms = runtime.snapshot().elapsed_ms;
     let seg_idx = runtime.system_audio_segments.len();
     if !runtime.system_audio_process_ids.is_empty() {
         let process_ids = runtime.system_audio_process_ids.clone();
@@ -595,7 +653,12 @@ fn ensure_system_audio_capture_started(
                 ))
             })
             .collect::<Vec<_>>();
-        let first_try = start_process_loopback_wavs(process_ids, output_paths.clone(), enabled_flag.clone());
+        let first_try = start_process_loopback_wavs(
+            process_ids,
+            output_paths.clone(),
+            enabled_flag.clone(),
+            pause_flag.clone(),
+        );
         return match first_try {
             Ok(handle) => {
                 runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
@@ -622,13 +685,18 @@ fn ensure_system_audio_capture_started(
     } else {
         output_dir.join(format!("{}.sys.{}.wav", session_id, seg_idx))
     };
-    let first_try = start_system_loopback_wav_with_device(runtime.system_audio_device_id.clone(), sys_wav.clone(), enabled_flag.clone());
+    let first_try = start_system_loopback_wav_with_device(
+        runtime.system_audio_device_id.clone(),
+        sys_wav.clone(),
+        enabled_flag.clone(),
+        pause_flag.clone(),
+    );
     let start_result = match first_try {
         Ok(h) => Ok(h),
         Err(first_err) => {
             if runtime.system_audio_device_id.is_some() {
                 runtime.system_audio_device_id = None;
-                start_system_loopback_wav_with_device(None, sys_wav.clone(), enabled_flag)
+                start_system_loopback_wav_with_device(None, sys_wav.clone(), enabled_flag, pause_flag)
                     .map_err(|second_err| format!("{}；回退默认设备失败: {}", first_err, second_err))
             } else {
                 Err(first_err)
@@ -674,23 +742,30 @@ fn ensure_mic_capture_started(
         .clone()
         .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
     runtime.mic_audio_enabled_flag = Some(enabled_flag.clone());
-    let start_ms = runtime
-        .started_instant
-        .map(|it| it.elapsed().as_millis() as u64)
-        .unwrap_or(0);
+    let pause_flag = runtime
+        .recording_pause_flag
+        .clone()
+        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+    runtime.recording_pause_flag = Some(pause_flag.clone());
+    let start_ms = runtime.snapshot().elapsed_ms;
     let seg_idx = runtime.mic_audio_segments.len();
     let mic_wav = if seg_idx == 0 {
         output_dir.join(format!("{}.mic.wav", session_id))
     } else {
         output_dir.join(format!("{}.mic.{}.wav", session_id, seg_idx))
     };
-    let first_try = start_microphone_wav_with_device(runtime.mic_audio_device_id.clone(), mic_wav.clone(), enabled_flag.clone());
+    let first_try = start_microphone_wav_with_device(
+        runtime.mic_audio_device_id.clone(),
+        mic_wav.clone(),
+        enabled_flag.clone(),
+        pause_flag.clone(),
+    );
     let start_result = match first_try {
         Ok(h) => Ok(h),
         Err(first_err) => {
             if runtime.mic_audio_device_id.is_some() {
                 runtime.mic_audio_device_id = None;
-                start_microphone_wav_with_device(None, mic_wav.clone(), enabled_flag)
+                start_microphone_wav_with_device(None, mic_wav.clone(), enabled_flag, pause_flag)
                     .map_err(|second_err| format!("{}；回退默认设备失败: {}", first_err, second_err))
             } else {
                 Err(first_err)
@@ -1064,6 +1139,9 @@ pub fn start_recording(
         // 统一录制时钟起点：必须早于视频采集与音频采集启动，避免后续音频延迟估算偏小导致 A/V 不同步。
         let capture_origin_unix_ms = now_unix_ms();
         let capture_origin_instant = std::time::Instant::now();
+        let mut window_wgc_handle = None;
+        let mut window_segment_path: Option<PathBuf> = None;
+        bootstrap_force_default_border_from_settings(settings_snapshot.recording_wgc_force_default_border);
         let mut args: Vec<String> = vec![
             "-hide_banner".into(),
             "-loglevel".into(),
@@ -1075,16 +1153,19 @@ pub fn start_recording(
                 if target_id.trim().is_empty() {
                     return Err(rollback_starting("窗口录制目标不能为空", "target_id is empty".to_string()));
                 }
-                let input = build_ffmpeg_window_input(target_id.trim())
-                    .map_err(|e| rollback_starting("窗口录制目标无效", e))?;
-                args.push("-f".into());
-                args.push("gdigrab".into());
-                args.push("-framerate".into());
-                args.push(format!("{}", fps));
-                args.push("-draw_mouse".into());
-                args.push(if capture_cursor { "1".into() } else { "0".into() });
-                args.push("-i".into());
-                args.push(input);
+                let first_segment_path = build_window_segment_path(&output_dir, &session_id, 0);
+                let handle = start_window_capture_to_mp4(
+                    target_id.trim(),
+                    first_segment_path.clone(),
+                    fps,
+                    video_bitrate,
+                    capture_cursor,
+                    capture_origin_instant,
+                    settings_snapshot.recording_wgc_force_default_border,
+                )
+                    .map_err(|e| rollback_starting("启动窗口源录制失败", e))?;
+                window_wgc_handle = Some(handle);
+                window_segment_path = Some(first_segment_path);
             }
             "region" => {
                 let (x, y, width, height) = parse_region_target(&target_id).ok_or_else(|| {
@@ -1118,39 +1199,43 @@ pub fn start_recording(
                 args.push("desktop".into());
             }
         }
-        // 删除 ffmpeg 系统音频输入路径，改为 Rust 原生 WASAPI 录制（后处理合成）
-        args.push("-map".to_string());
-        args.push("0:v:0".to_string());
-        // yuv420p + libx264 要求偶数宽高，区域框选常出现奇数尺寸，统一做偶数对齐避免 -22
-        args.push("-vf".to_string());
-        args.push("scale=trunc(iw/2)*2:trunc(ih/2)*2".to_string());
-        args.extend_from_slice(&[
-            "-c:v".to_string(),
-            "libx264".to_string(),
-            "-preset".to_string(),
-            "veryfast".to_string(),
-            "-pix_fmt".to_string(),
-            "yuv420p".to_string(),
-            "-b:v".to_string(),
-            format!("{}k", video_bitrate),
-        ]);
-        args.push("-an".to_string());
-        args.push(tmp_path.to_string_lossy().to_string());
-        let mut command = Command::new(&ffmpeg_path);
-        suppress_console_window(&mut command);
-        command
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped());
-        let mut child = command.spawn().map_err(|e| {
-            runtime.phase = RecordingPhase::Error;
-            runtime.last_error = Some(e.to_string());
-            emit_recording_error(app, None, RECORDING_START_FAILED, "录制进程启动失败");
-            AppError::new(ErrorCode::SystemError, "启动录制失败").with_details(e.to_string())
-        })?;
-        let stderr_opt = child.stderr.take();
-        let child_opt = Some(child);
+        let (child_opt, stderr_opt) = if target_type != "window" {
+            // 删除 ffmpeg 系统音频输入路径，改为 Rust 原生 WASAPI 录制（后处理合成）
+            args.push("-map".to_string());
+            args.push("0:v:0".to_string());
+            // yuv420p + libx264 要求偶数宽高，区域框选常出现奇数尺寸，统一做偶数对齐避免 -22
+            args.push("-vf".to_string());
+            args.push("scale=trunc(iw/2)*2:trunc(ih/2)*2".to_string());
+            args.extend_from_slice(&[
+                "-c:v".to_string(),
+                "libx264".to_string(),
+                "-preset".to_string(),
+                "veryfast".to_string(),
+                "-pix_fmt".to_string(),
+                "yuv420p".to_string(),
+                "-b:v".to_string(),
+                format!("{}k", video_bitrate),
+            ]);
+            args.push("-an".to_string());
+            args.push(tmp_path.to_string_lossy().to_string());
+            let mut command = Command::new(&ffmpeg_path);
+            suppress_console_window(&mut command);
+            command
+                .args(args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped());
+            let mut child = command.spawn().map_err(|e| {
+                runtime.phase = RecordingPhase::Error;
+                runtime.last_error = Some(e.to_string());
+                emit_recording_error(app, None, RECORDING_START_FAILED, "录制进程启动失败");
+                AppError::new(ErrorCode::SystemError, "启动录制失败").with_details(e.to_string())
+            })?;
+            let stderr = child.stderr.take();
+            (Some(child), stderr)
+        } else {
+            (None, None)
+        };
         runtime.phase = RecordingPhase::Recording;
         runtime.session_id = Some(session_id.clone());
         runtime.started_at_ms = capture_origin_unix_ms;
@@ -1172,6 +1257,9 @@ pub fn start_recording(
             (settings_snapshot.recording_window_audio_sync_advance_ms as u64).min(500);
         runtime.output_path_tmp = Some(tmp_path.clone());
         runtime.output_path_final = Some(final_path.clone());
+        runtime.target_type = target_type.clone();
+        runtime.target_id = target_id.clone();
+        runtime.capture_cursor = capture_cursor;
         runtime.system_audio_device_id = system_audio_device_id.clone();
         runtime.system_audio_process_ids = request
             .system_audio_process_ids
@@ -1183,6 +1271,7 @@ pub fn start_recording(
         runtime.mic_audio_device_id = request.microphone_device_id.clone();
         runtime.system_audio_enabled_flag = Some(Arc::new(AtomicBool::new(capture_system_audio)));
         runtime.mic_audio_enabled_flag = Some(Arc::new(AtomicBool::new(capture_microphone)));
+        runtime.recording_pause_flag = Some(Arc::new(AtomicBool::new(false)));
         runtime.system_audio_ever_enabled = capture_system_audio;
         runtime.mic_audio_ever_enabled = capture_microphone;
         runtime.system_audio_stream_start_ms = None;
@@ -1191,6 +1280,11 @@ pub fn start_recording(
         runtime.mic_audio_switch_points_ms.clear();
         runtime.system_audio_segments.clear();
         runtime.mic_audio_segments.clear();
+        runtime.window_video_segments.clear();
+        runtime.window_segment_index = 0;
+        if let Some(seg_path) = window_segment_path.as_ref() {
+            runtime.window_video_segments.push(seg_path.clone());
+        }
         if capture_system_audio {
             runtime.system_audio_switch_points_ms.push(0);
         }
@@ -1203,9 +1297,17 @@ pub fn start_recording(
             let _ = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true);
         }
         runtime.process = child_opt;
-        runtime.wgc_stop_flag = None;
-        runtime.wgc_first_frame_elapsed_ms = None;
-        runtime.wgc_thread = None;
+        if let Some(handle) = window_wgc_handle {
+            runtime.wgc_stop_flag = Some(handle.stop_flag);
+            runtime.wgc_pause_flag = Some(handle.pause_flag);
+            runtime.wgc_first_frame_elapsed_ms = Some(handle.first_frame_elapsed_ms);
+            runtime.wgc_thread = Some(handle.join);
+        } else {
+            runtime.wgc_stop_flag = None;
+            runtime.wgc_pause_flag = None;
+            runtime.wgc_first_frame_elapsed_ms = None;
+            runtime.wgc_thread = None;
+        }
         let started_at_ms = runtime.started_at_ms;
         emit_recording_state_changed(app, Some(&session_id), runtime.phase.as_str(), 0);
         drop(runtime);
@@ -1235,6 +1337,7 @@ pub fn stop_recording(
     };
     let (
         session_id,
+        target_type,
         was_paused,
         mut process,
         wgc_thread,
@@ -1250,6 +1353,7 @@ pub fn stop_recording(
         mut mic_segments,
         mut system_audio_switch_points_ms,
         mut mic_audio_switch_points_ms,
+        window_video_segments,
         audio_segment_paths,
     ) = {
         let mut runtime = lock_arc_mutex(&runtime_arc);
@@ -1266,6 +1370,7 @@ pub fn stop_recording(
         runtime.phase = RecordingPhase::Stopping;
         runtime.auto_stop_requested = false;
         let session_id = runtime.session_id.clone().unwrap_or_default();
+        let target_type = runtime.target_type.clone();
         emit_recording_state_changed(
             app,
             Some(session_id.as_str()),
@@ -1303,6 +1408,7 @@ pub fn stop_recording(
         };
         let system_audio_switch_points_ms = runtime.system_audio_switch_points_ms.clone();
         let mic_audio_switch_points_ms = runtime.mic_audio_switch_points_ms.clone();
+        let window_video_segments = runtime.window_video_segments.clone();
         let mut audio_segment_paths = HashSet::<PathBuf>::new();
         for seg in &runtime.system_audio_segments {
             audio_segment_paths.insert(seg.path.clone());
@@ -1312,6 +1418,7 @@ pub fn stop_recording(
         }
         (
             session_id,
+            target_type,
             was_paused,
             process,
             wgc_thread,
@@ -1327,6 +1434,7 @@ pub fn stop_recording(
             mic_segments,
             system_audio_switch_points_ms,
             mic_audio_switch_points_ms,
+            window_video_segments,
             audio_segment_paths,
         )
     };
@@ -1405,8 +1513,13 @@ pub fn stop_recording(
     }
 
     if let (Some(output_tmp), Some(output_final)) = (output_tmp.as_ref(), output_final.as_ref()) {
-        if let Err(e) = rename_recording_output_with_retry(output_tmp, output_final) {
-            if fatal_error.is_none() {
+        if target_type == "window" && fatal_error.is_none() {
+            if let Err(e) = concat_video_segments(&ffmpeg_path, &window_video_segments, output_tmp) {
+                fatal_error = Some(e);
+            }
+        }
+        if fatal_error.is_none() {
+            if let Err(e) = rename_recording_output_with_retry(output_tmp, output_final) {
                 fatal_error = Some(e);
             }
         }
@@ -1456,6 +1569,9 @@ pub fn stop_recording(
 
     // 统一清理录制过程产生的音频片段，避免 stop 后残留 *.sys.wav / *.mic.wav。
     for path in audio_segment_paths {
+        let _ = fs::remove_file(path);
+    }
+    for path in window_video_segments {
         let _ = fs::remove_file(path);
     }
 
@@ -1552,6 +1668,9 @@ pub fn cancel_recording(
         for seg in &runtime.mic_audio_segments {
             cleanup_paths.insert(seg.path.clone());
         }
+        for seg in &runtime.window_video_segments {
+            cleanup_paths.insert(seg.clone());
+        }
         (
             process,
             wgc_stop_flag,
@@ -1605,22 +1724,46 @@ pub fn pause_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) -
     if runtime.phase != RecordingPhase::Recording {
         return Err(AppError::new(ErrorCode::ValidationError, "当前状态不允许暂停"));
     }
-    if runtime.process.is_none() && runtime.wgc_thread.is_some() {
-        return Err(AppError::new(
-            ErrorCode::ValidationError,
-            "窗口源录制暂不支持暂停，请直接停止录制",
-        ));
-    }
-    if let Some(process) = runtime.process.as_mut() {
-        #[cfg(target_os = "windows")]
-        {
-            set_process_threads_suspended(process.id(), true)?;
+    if runtime.target_type == "window" {
+        if let Some(flag) = runtime.wgc_stop_flag.as_ref() {
+            flag.store(true, Ordering::SeqCst);
         }
-        #[cfg(not(target_os = "windows"))]
-        if let Some(stdin) = process.stdin.as_mut() {
-            stdin
-                .write_all(b"p\n")
-                .map_err(|e| AppError::new(ErrorCode::SystemError, "暂停录制失败").with_details(e.to_string()))?;
+        if let Some(join) = runtime.wgc_thread.take() {
+            match join.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    if !is_benign_wgc_stop_error(&e) {
+                        return Err(AppError::new(ErrorCode::SystemError, "暂停窗口录制失败").with_details(e));
+                    }
+                }
+                Err(_) => {
+                    return Err(AppError::new(ErrorCode::SystemError, "暂停窗口录制失败：线程异常退出"));
+                }
+            }
+        }
+        runtime.wgc_stop_flag = None;
+        runtime.wgc_pause_flag = None;
+        stop_active_audio_capture(&mut runtime);
+        if let Some(flag) = runtime.recording_pause_flag.as_ref() {
+            flag.store(true, Ordering::SeqCst);
+        }
+    } else {
+        if let Some(process) = runtime.process.as_mut() {
+            #[cfg(target_os = "windows")]
+            {
+                set_process_threads_suspended(process.id(), true)?;
+            }
+            #[cfg(not(target_os = "windows"))]
+            if let Some(stdin) = process.stdin.as_mut() {
+                stdin
+                    .write_all(b"p\n")
+                    .map_err(|e| AppError::new(ErrorCode::SystemError, "暂停录制失败").with_details(e.to_string()))?;
+            }
+        }
+        // 非窗口录制暂停时同步封口音频，避免“暂停后直接停止”出现尾部静止无声段。
+        stop_active_audio_capture(&mut runtime);
+        if let Some(flag) = runtime.recording_pause_flag.as_ref() {
+            flag.store(true, Ordering::SeqCst);
         }
     }
     runtime.phase = RecordingPhase::Paused;
@@ -1639,30 +1782,81 @@ pub fn resume_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) 
     if runtime.phase != RecordingPhase::Paused {
         return Err(AppError::new(ErrorCode::ValidationError, "当前状态不允许恢复"));
     }
-    if runtime.process.is_none() && runtime.wgc_thread.is_some() {
-        return Err(AppError::new(
-            ErrorCode::ValidationError,
-            "窗口源录制暂不支持暂停恢复，请继续录制或停止",
-        ));
-    }
-    if let Some(process) = runtime.process.as_mut() {
-        #[cfg(target_os = "windows")]
-        {
-            set_process_threads_suspended(process.id(), false)?;
-        }
-        #[cfg(not(target_os = "windows"))]
-        if let Some(stdin) = process.stdin.as_mut() {
-            stdin
-                .write_all(b"p\n")
-                .map_err(|e| AppError::new(ErrorCode::SystemError, "恢复录制失败").with_details(e.to_string()))?;
-        }
-    }
     if let Some(paused_at) = runtime.paused_at_instant {
         runtime.paused_total_ms = runtime
             .paused_total_ms
             .saturating_add(paused_at.elapsed().as_millis() as u64);
+        runtime.paused_at_instant = None;
     }
-    runtime.paused_at_instant = None;
+    let output_dir = runtime
+        .output_path_tmp
+        .as_ref()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .ok_or_else(|| AppError::new(ErrorCode::ValidationError, "录制输出目录不存在"))?;
+    let session_id_for_audio = runtime.session_id.clone().unwrap_or_default();
+    let should_restore_system_audio = runtime
+        .system_audio_enabled_flag
+        .as_ref()
+        .map(|f| f.load(Ordering::SeqCst))
+        .unwrap_or(false);
+    let should_restore_mic_audio = runtime
+        .mic_audio_enabled_flag
+        .as_ref()
+        .map(|f| f.load(Ordering::SeqCst))
+        .unwrap_or(false);
+    if runtime.target_type == "window" {
+        if let Some(flag) = runtime.recording_pause_flag.as_ref() {
+            flag.store(false, Ordering::SeqCst);
+        }
+        let next_segment_index = runtime.window_segment_index.saturating_add(1);
+        let next_segment_path = build_window_segment_path(&output_dir, &session_id_for_audio, next_segment_index);
+        let handle = start_window_capture_to_mp4(
+            runtime.target_id.as_str(),
+            next_segment_path.clone(),
+            runtime.fps,
+            runtime.video_bitrate_kbps,
+            runtime.capture_cursor,
+            std::time::Instant::now(),
+            is_force_default_border_enabled(),
+        )
+            .map_err(|e| AppError::new(ErrorCode::SystemError, "恢复窗口录制失败").with_details(e))?;
+        runtime.window_segment_index = next_segment_index;
+        runtime.window_video_segments.push(next_segment_path);
+        runtime.wgc_stop_flag = Some(handle.stop_flag);
+        runtime.wgc_pause_flag = Some(handle.pause_flag);
+        if runtime.wgc_first_frame_elapsed_ms.is_none() {
+            runtime.wgc_first_frame_elapsed_ms = Some(handle.first_frame_elapsed_ms.clone());
+        }
+        runtime.wgc_thread = Some(handle.join);
+        if should_restore_system_audio && runtime.system_audio_thread.is_none() {
+            let _ = ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id_for_audio, false);
+        }
+        if should_restore_mic_audio && runtime.mic_audio_thread.is_none() {
+            let _ = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id_for_audio, false);
+        }
+    } else {
+        if let Some(process) = runtime.process.as_mut() {
+            #[cfg(target_os = "windows")]
+            {
+                set_process_threads_suspended(process.id(), false)?;
+            }
+            #[cfg(not(target_os = "windows"))]
+            if let Some(stdin) = process.stdin.as_mut() {
+                stdin
+                    .write_all(b"p\n")
+                    .map_err(|e| AppError::new(ErrorCode::SystemError, "恢复录制失败").with_details(e.to_string()))?;
+            }
+        }
+        if let Some(flag) = runtime.recording_pause_flag.as_ref() {
+            flag.store(false, Ordering::SeqCst);
+        }
+        if should_restore_system_audio && runtime.system_audio_thread.is_none() {
+            let _ = ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id_for_audio, false);
+        }
+        if should_restore_mic_audio && runtime.mic_audio_thread.is_none() {
+            let _ = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id_for_audio, false);
+        }
+    }
     runtime.phase = RecordingPhase::Recording;
     let snapshot = runtime.snapshot();
     emit_recording_state_changed(app, runtime.session_id.as_deref(), runtime.phase.as_str(), snapshot.elapsed_ms);
