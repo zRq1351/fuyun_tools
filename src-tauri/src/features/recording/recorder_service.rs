@@ -256,28 +256,6 @@ fn build_window_segment_path(output_dir: &PathBuf, session_id: &str, segment_ind
     output_dir.join(format!("{}.video.{}.tmp.mp4", session_id, segment_index))
 }
 
-fn stop_active_audio_capture(runtime: &mut crate::features::recording::state::RecordingRuntime) {
-    if let Some(flag) = runtime.system_audio_stop_flag.as_ref() {
-        flag.store(true, Ordering::SeqCst);
-    }
-    if let Some(join) = runtime.system_audio_thread.take() {
-        let _ = join.join();
-    }
-    runtime.system_audio_stop_flag = None;
-    runtime.system_audio_wav_path = None;
-    runtime.system_audio_stream_start_ms = None;
-
-    if let Some(flag) = runtime.mic_audio_stop_flag.as_ref() {
-        flag.store(true, Ordering::SeqCst);
-    }
-    if let Some(join) = runtime.mic_audio_thread.take() {
-        let _ = join.join();
-    }
-    runtime.mic_audio_stop_flag = None;
-    runtime.mic_audio_wav_path = None;
-    runtime.mic_audio_stream_start_ms = None;
-}
-
 fn concat_video_segments(
     ffmpeg_path: &std::path::Path,
     segments: &[PathBuf],
@@ -1394,26 +1372,28 @@ pub fn stop_recording(
         let system_audio_thread = runtime.system_audio_thread.take();
         let mic_audio_stop_flag = runtime.mic_audio_stop_flag.take();
         let mic_audio_thread = runtime.mic_audio_thread.take();
-        let output_tmp = runtime.output_path_tmp.clone();
-        let output_final = runtime.output_path_final.clone();
+        let output_tmp = runtime.output_path_tmp.take();
+        let output_final = runtime.output_path_final.take();
+        let mut taken_sys_segments = std::mem::take(&mut runtime.system_audio_segments);
+        let mut taken_mic_segments = std::mem::take(&mut runtime.mic_audio_segments);
+        let system_audio_switch_points_ms = std::mem::take(&mut runtime.system_audio_switch_points_ms);
+        let mic_audio_switch_points_ms = std::mem::take(&mut runtime.mic_audio_switch_points_ms);
+        let window_video_segments = std::mem::take(&mut runtime.window_video_segments);
         let sys_segments = if runtime.system_audio_ever_enabled {
-            runtime.system_audio_segments.clone()
+            std::mem::take(&mut taken_sys_segments)
         } else {
             Vec::new()
         };
         let mic_segments = if runtime.mic_audio_ever_enabled {
-            runtime.mic_audio_segments.clone()
+            std::mem::take(&mut taken_mic_segments)
         } else {
             Vec::new()
         };
-        let system_audio_switch_points_ms = runtime.system_audio_switch_points_ms.clone();
-        let mic_audio_switch_points_ms = runtime.mic_audio_switch_points_ms.clone();
-        let window_video_segments = runtime.window_video_segments.clone();
         let mut audio_segment_paths = HashSet::<PathBuf>::new();
-        for seg in &runtime.system_audio_segments {
+        for seg in &sys_segments {
             audio_segment_paths.insert(seg.path.clone());
         }
-        for seg in &runtime.mic_audio_segments {
+        for seg in &mic_segments {
             audio_segment_paths.insert(seg.path.clone());
         }
         (
@@ -1653,23 +1633,23 @@ pub fn cancel_recording(
         let mic_audio_stop_flag = runtime.mic_audio_stop_flag.take();
         let mic_audio_thread = runtime.mic_audio_thread.take();
         let mut cleanup_paths = HashSet::<PathBuf>::new();
-        if let Some(wav) = runtime.system_audio_wav_path.clone() {
+        if let Some(wav) = runtime.system_audio_wav_path.take() {
             cleanup_paths.insert(wav);
         }
-        if let Some(wav) = runtime.mic_audio_wav_path.clone() {
+        if let Some(wav) = runtime.mic_audio_wav_path.take() {
             cleanup_paths.insert(wav);
         }
-        if let Some(path) = runtime.output_path_tmp.clone() {
+        if let Some(path) = runtime.output_path_tmp.take() {
             cleanup_paths.insert(path);
         }
-        for seg in &runtime.system_audio_segments {
-            cleanup_paths.insert(seg.path.clone());
+        for seg in std::mem::take(&mut runtime.system_audio_segments) {
+            cleanup_paths.insert(seg.path);
         }
-        for seg in &runtime.mic_audio_segments {
-            cleanup_paths.insert(seg.path.clone());
+        for seg in std::mem::take(&mut runtime.mic_audio_segments) {
+            cleanup_paths.insert(seg.path);
         }
-        for seg in &runtime.window_video_segments {
-            cleanup_paths.insert(seg.clone());
+        for seg in std::mem::take(&mut runtime.window_video_segments) {
+            cleanup_paths.insert(seg);
         }
         (
             process,
@@ -1720,35 +1700,25 @@ pub fn pause_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) -
         let state_guard = lock_arc_mutex(&state_arc);
         state_guard.recording_runtime.clone()
     };
-    let mut runtime = lock_arc_mutex(&runtime_arc);
-    if runtime.phase != RecordingPhase::Recording {
-        return Err(AppError::new(ErrorCode::ValidationError, "当前状态不允许暂停"));
-    }
-    if runtime.target_type == "window" {
-        if let Some(flag) = runtime.wgc_stop_flag.as_ref() {
-            flag.store(true, Ordering::SeqCst);
+    let (
+        session_id,
+        target_type,
+        wgc_thread,
+        system_audio_stop_flag,
+        system_audio_thread,
+        mic_audio_stop_flag,
+        mic_audio_thread,
+    ) = {
+        let mut runtime = lock_arc_mutex(&runtime_arc);
+        if runtime.phase != RecordingPhase::Recording {
+            return Err(AppError::new(ErrorCode::ValidationError, "当前状态不允许暂停"));
         }
-        if let Some(join) = runtime.wgc_thread.take() {
-            match join.join() {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => {
-                    if !is_benign_wgc_stop_error(&e) {
-                        return Err(AppError::new(ErrorCode::SystemError, "暂停窗口录制失败").with_details(e));
-                    }
-                }
-                Err(_) => {
-                    return Err(AppError::new(ErrorCode::SystemError, "暂停窗口录制失败：线程异常退出"));
-                }
+        runtime.phase = RecordingPhase::Stopping;
+        if runtime.target_type == "window" {
+            if let Some(flag) = runtime.wgc_stop_flag.as_ref() {
+                flag.store(true, Ordering::SeqCst);
             }
-        }
-        runtime.wgc_stop_flag = None;
-        runtime.wgc_pause_flag = None;
-        stop_active_audio_capture(&mut runtime);
-        if let Some(flag) = runtime.recording_pause_flag.as_ref() {
-            flag.store(true, Ordering::SeqCst);
-        }
-    } else {
-        if let Some(process) = runtime.process.as_mut() {
+        } else if let Some(process) = runtime.process.as_mut() {
             #[cfg(target_os = "windows")]
             {
                 set_process_threads_suspended(process.id(), true)?;
@@ -1760,16 +1730,72 @@ pub fn pause_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) -
                     .map_err(|e| AppError::new(ErrorCode::SystemError, "暂停录制失败").with_details(e.to_string()))?;
             }
         }
-        // 非窗口录制暂停时同步封口音频，避免“暂停后直接停止”出现尾部静止无声段。
-        stop_active_audio_capture(&mut runtime);
         if let Some(flag) = runtime.recording_pause_flag.as_ref() {
             flag.store(true, Ordering::SeqCst);
         }
+        (
+            runtime.session_id.clone(),
+            runtime.target_type.clone(),
+            runtime.wgc_thread.take(),
+            runtime.system_audio_stop_flag.take(),
+            runtime.system_audio_thread.take(),
+            runtime.mic_audio_stop_flag.take(),
+            runtime.mic_audio_thread.take(),
+        )
+    };
+
+    if let Some(flag) = system_audio_stop_flag.as_ref() {
+        flag.store(true, Ordering::SeqCst);
     }
-    runtime.phase = RecordingPhase::Paused;
-    runtime.paused_at_instant = Some(std::time::Instant::now());
-    let snapshot = runtime.snapshot();
-    emit_recording_state_changed(app, runtime.session_id.as_deref(), runtime.phase.as_str(), snapshot.elapsed_ms);
+    if let Some(join) = system_audio_thread {
+        let _ = join.join();
+    }
+    if let Some(flag) = mic_audio_stop_flag.as_ref() {
+        flag.store(true, Ordering::SeqCst);
+    }
+    if let Some(join) = mic_audio_thread {
+        let _ = join.join();
+    }
+
+    if target_type == "window" {
+        if let Some(join) = wgc_thread {
+            match join.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    if !is_benign_wgc_stop_error(&e) {
+                        let mut runtime = lock_arc_mutex(&runtime_arc);
+                        runtime.phase = RecordingPhase::Recording;
+                        if let Some(flag) = runtime.recording_pause_flag.as_ref() {
+                            flag.store(false, Ordering::SeqCst);
+                        }
+                        return Err(AppError::new(ErrorCode::SystemError, "暂停窗口录制失败").with_details(e));
+                    }
+                }
+                Err(_) => {
+                    let mut runtime = lock_arc_mutex(&runtime_arc);
+                    runtime.phase = RecordingPhase::Recording;
+                    if let Some(flag) = runtime.recording_pause_flag.as_ref() {
+                        flag.store(false, Ordering::SeqCst);
+                    }
+                    return Err(AppError::new(ErrorCode::SystemError, "暂停窗口录制失败：线程异常退出"));
+                }
+            }
+        }
+    }
+
+    let elapsed_ms = {
+        let mut runtime = lock_arc_mutex(&runtime_arc);
+        runtime.wgc_stop_flag = None;
+        runtime.wgc_pause_flag = None;
+        runtime.system_audio_wav_path = None;
+        runtime.system_audio_stream_start_ms = None;
+        runtime.mic_audio_wav_path = None;
+        runtime.mic_audio_stream_start_ms = None;
+        runtime.phase = RecordingPhase::Paused;
+        runtime.paused_at_instant = Some(std::time::Instant::now());
+        runtime.snapshot().elapsed_ms
+    };
+    emit_recording_state_changed(app, session_id.as_deref(), RecordingPhase::Paused.as_str(), elapsed_ms);
     Ok(())
 }
 
@@ -1778,48 +1804,110 @@ pub fn resume_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) 
         let state_guard = lock_arc_mutex(&state_arc);
         state_guard.recording_runtime.clone()
     };
-    let mut runtime = lock_arc_mutex(&runtime_arc);
-    if runtime.phase != RecordingPhase::Paused {
-        return Err(AppError::new(ErrorCode::ValidationError, "当前状态不允许恢复"));
-    }
-    if let Some(paused_at) = runtime.paused_at_instant {
-        runtime.paused_total_ms = runtime
-            .paused_total_ms
-            .saturating_add(paused_at.elapsed().as_millis() as u64);
-        runtime.paused_at_instant = None;
-    }
-    let output_dir = runtime
-        .output_path_tmp
-        .as_ref()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .ok_or_else(|| AppError::new(ErrorCode::ValidationError, "录制输出目录不存在"))?;
-    let session_id_for_audio = runtime.session_id.clone().unwrap_or_default();
-    let should_restore_system_audio = runtime
-        .system_audio_enabled_flag
-        .as_ref()
-        .map(|f| f.load(Ordering::SeqCst))
-        .unwrap_or(false);
-    let should_restore_mic_audio = runtime
-        .mic_audio_enabled_flag
-        .as_ref()
-        .map(|f| f.load(Ordering::SeqCst))
-        .unwrap_or(false);
-    if runtime.target_type == "window" {
+    let (
+        is_window_target,
+        target_id,
+        output_dir,
+        session_id_for_audio,
+        should_restore_system_audio,
+        should_restore_mic_audio,
+        next_segment_index,
+        next_segment_path,
+        fps,
+        video_bitrate_kbps,
+        capture_cursor,
+    ) = {
+        let mut runtime = lock_arc_mutex(&runtime_arc);
+        if runtime.phase != RecordingPhase::Paused {
+            return Err(AppError::new(ErrorCode::ValidationError, "当前状态不允许恢复"));
+        }
+        if let Some(paused_at) = runtime.paused_at_instant {
+            runtime.paused_total_ms = runtime
+                .paused_total_ms
+                .saturating_add(paused_at.elapsed().as_millis() as u64);
+            runtime.paused_at_instant = None;
+        }
+        let output_dir = runtime
+            .output_path_tmp
+            .as_ref()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .ok_or_else(|| AppError::new(ErrorCode::ValidationError, "录制输出目录不存在"))?;
+        let session_id_for_audio = runtime.session_id.clone().unwrap_or_default();
+        let should_restore_system_audio = runtime
+            .system_audio_enabled_flag
+            .as_ref()
+            .map(|f| f.load(Ordering::SeqCst))
+            .unwrap_or(false);
+        let should_restore_mic_audio = runtime
+            .mic_audio_enabled_flag
+            .as_ref()
+            .map(|f| f.load(Ordering::SeqCst))
+            .unwrap_or(false);
         if let Some(flag) = runtime.recording_pause_flag.as_ref() {
             flag.store(false, Ordering::SeqCst);
         }
+        let is_window_target = runtime.target_type == "window";
+        let target_id = runtime.target_id.clone();
         let next_segment_index = runtime.window_segment_index.saturating_add(1);
-        let next_segment_path = build_window_segment_path(&output_dir, &session_id_for_audio, next_segment_index);
-        let handle = start_window_capture_to_mp4(
-            runtime.target_id.as_str(),
-            next_segment_path.clone(),
-            runtime.fps,
-            runtime.video_bitrate_kbps,
-            runtime.capture_cursor,
-            std::time::Instant::now(),
-            is_force_default_border_enabled(),
+        let next_segment_path =
+            build_window_segment_path(&output_dir, &session_id_for_audio, next_segment_index);
+        let fps = runtime.fps;
+        let video_bitrate_kbps = runtime.video_bitrate_kbps;
+        let capture_cursor = runtime.capture_cursor;
+        if !is_window_target {
+            if let Some(process) = runtime.process.as_mut() {
+                #[cfg(target_os = "windows")]
+                {
+                    set_process_threads_suspended(process.id(), false)?;
+                }
+                #[cfg(not(target_os = "windows"))]
+                if let Some(stdin) = process.stdin.as_mut() {
+                    stdin
+                        .write_all(b"p\n")
+                        .map_err(|e| AppError::new(ErrorCode::SystemError, "恢复录制失败").with_details(e.to_string()))?;
+                }
+            }
+        }
+        (
+            is_window_target,
+            target_id,
+            output_dir,
+            session_id_for_audio,
+            should_restore_system_audio,
+            should_restore_mic_audio,
+            next_segment_index,
+            next_segment_path,
+            fps,
+            video_bitrate_kbps,
+            capture_cursor,
         )
-            .map_err(|e| AppError::new(ErrorCode::SystemError, "恢复窗口录制失败").with_details(e))?;
+    };
+
+    let window_handle = if is_window_target {
+        Some(
+            start_window_capture_to_mp4(
+                target_id.as_str(),
+                next_segment_path.clone(),
+                fps,
+                video_bitrate_kbps,
+                capture_cursor,
+                std::time::Instant::now(),
+                is_force_default_border_enabled(),
+            )
+                .map_err(|e| AppError::new(ErrorCode::SystemError, "恢复窗口录制失败").with_details(e))?,
+        )
+    } else {
+        None
+    };
+
+    let mut runtime = lock_arc_mutex(&runtime_arc);
+    if runtime.phase != RecordingPhase::Paused {
+        return Err(AppError::new(
+            ErrorCode::ValidationError,
+            "录制状态已变化，请刷新状态后重试",
+        ));
+    }
+    if let Some(handle) = window_handle {
         runtime.window_segment_index = next_segment_index;
         runtime.window_video_segments.push(next_segment_path);
         runtime.wgc_stop_flag = Some(handle.stop_flag);
@@ -1828,34 +1916,12 @@ pub fn resume_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) 
             runtime.wgc_first_frame_elapsed_ms = Some(handle.first_frame_elapsed_ms.clone());
         }
         runtime.wgc_thread = Some(handle.join);
-        if should_restore_system_audio && runtime.system_audio_thread.is_none() {
-            let _ = ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id_for_audio, false);
-        }
-        if should_restore_mic_audio && runtime.mic_audio_thread.is_none() {
-            let _ = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id_for_audio, false);
-        }
-    } else {
-        if let Some(process) = runtime.process.as_mut() {
-            #[cfg(target_os = "windows")]
-            {
-                set_process_threads_suspended(process.id(), false)?;
-            }
-            #[cfg(not(target_os = "windows"))]
-            if let Some(stdin) = process.stdin.as_mut() {
-                stdin
-                    .write_all(b"p\n")
-                    .map_err(|e| AppError::new(ErrorCode::SystemError, "恢复录制失败").with_details(e.to_string()))?;
-            }
-        }
-        if let Some(flag) = runtime.recording_pause_flag.as_ref() {
-            flag.store(false, Ordering::SeqCst);
-        }
-        if should_restore_system_audio && runtime.system_audio_thread.is_none() {
-            let _ = ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id_for_audio, false);
-        }
-        if should_restore_mic_audio && runtime.mic_audio_thread.is_none() {
-            let _ = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id_for_audio, false);
-        }
+    }
+    if should_restore_system_audio && runtime.system_audio_thread.is_none() {
+        let _ = ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id_for_audio, false);
+    }
+    if should_restore_mic_audio && runtime.mic_audio_thread.is_none() {
+        let _ = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id_for_audio, false);
     }
     runtime.phase = RecordingPhase::Recording;
     let snapshot = runtime.snapshot();
@@ -1875,107 +1941,144 @@ pub fn update_audio_capture(
         let state_guard = lock_arc_mutex(&state_arc);
         state_guard.recording_runtime.clone()
     };
+    let (
+        session_id,
+        output_dir,
+        should_enable_sys,
+        should_enable_mic,
+        elapsed_now_ms,
+        system_audio_stop_flag,
+        system_audio_thread,
+        mic_audio_stop_flag,
+        mic_audio_thread,
+        sys_device_changed,
+        mic_device_changed,
+    ) = {
+        let mut runtime = lock_arc_mutex(&runtime_arc);
+        if runtime.phase != RecordingPhase::Recording && runtime.phase != RecordingPhase::Paused {
+            return Err(AppError::new(ErrorCode::ValidationError, "当前没有正在进行的录制任务"));
+        }
+        let session_id = runtime
+            .session_id
+            .clone()
+            .ok_or_else(|| AppError::new(ErrorCode::ValidationError, "录制会话不存在"))?;
+        let output_dir = runtime
+            .output_path_tmp
+            .as_ref()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .ok_or_else(|| AppError::new(ErrorCode::ValidationError, "录制输出目录不存在"))?;
+
+        let current_sys_enabled = runtime
+            .system_audio_enabled_flag
+            .as_ref()
+            .map(|f| f.load(Ordering::SeqCst))
+            .unwrap_or(false);
+        let current_mic_enabled = runtime
+            .mic_audio_enabled_flag
+            .as_ref()
+            .map(|f| f.load(Ordering::SeqCst))
+            .unwrap_or(false);
+        let requested_sys_device = system_audio_device_id
+            .as_ref()
+            .map(|id| id.trim().to_string())
+            .map(|id| if id.is_empty() { None } else { Some(id) })
+            .unwrap_or_else(|| runtime.system_audio_device_id.clone());
+        let requested_mic_device = microphone_device_id
+            .as_ref()
+            .map(|id| id.trim().to_string())
+            .map(|id| if id.is_empty() { None } else { Some(id) })
+            .unwrap_or_else(|| runtime.mic_audio_device_id.clone());
+        let should_enable_sys = capture_system_audio.unwrap_or(current_sys_enabled);
+        let should_enable_mic = capture_microphone.unwrap_or(current_mic_enabled);
+        let elapsed_now_ms = runtime.snapshot().elapsed_ms;
+        let sys_device_changed = requested_sys_device != runtime.system_audio_device_id;
+        let mic_device_changed = requested_mic_device != runtime.mic_audio_device_id;
+
+        if let Some(v) = capture_system_audio {
+            if v != current_sys_enabled {
+                runtime.system_audio_switch_points_ms.push(elapsed_now_ms);
+                if runtime.system_audio_switch_points_ms.len() > 64 {
+                    let _ = runtime.system_audio_switch_points_ms.remove(0);
+                }
+            }
+            if let Some(flag) = runtime.system_audio_enabled_flag.as_ref() {
+                flag.store(v, Ordering::SeqCst);
+            }
+            if v {
+                runtime.system_audio_ever_enabled = true;
+            }
+        }
+        if let Some(v) = capture_microphone {
+            if v != current_mic_enabled {
+                runtime.mic_audio_switch_points_ms.push(elapsed_now_ms);
+                if runtime.mic_audio_switch_points_ms.len() > 64 {
+                    let _ = runtime.mic_audio_switch_points_ms.remove(0);
+                }
+            }
+            if let Some(flag) = runtime.mic_audio_enabled_flag.as_ref() {
+                flag.store(v, Ordering::SeqCst);
+            }
+            if v {
+                runtime.mic_audio_ever_enabled = true;
+            }
+        }
+        runtime.system_audio_device_id = requested_sys_device;
+        runtime.mic_audio_device_id = requested_mic_device;
+
+        let mut system_audio_stop_flag = None;
+        let mut system_audio_thread = None;
+        if sys_device_changed && runtime.system_audio_thread.is_some() {
+            system_audio_stop_flag = runtime.system_audio_stop_flag.take();
+            system_audio_thread = runtime.system_audio_thread.take();
+        }
+        let mut mic_audio_stop_flag = None;
+        let mut mic_audio_thread = None;
+        if (mic_device_changed || !should_enable_mic) && runtime.mic_audio_thread.is_some() {
+            mic_audio_stop_flag = runtime.mic_audio_stop_flag.take();
+            mic_audio_thread = runtime.mic_audio_thread.take();
+        }
+
+        (
+            session_id,
+            output_dir,
+            should_enable_sys,
+            should_enable_mic,
+            elapsed_now_ms,
+            system_audio_stop_flag,
+            system_audio_thread,
+            mic_audio_stop_flag,
+            mic_audio_thread,
+            sys_device_changed,
+            mic_device_changed,
+        )
+    };
+
+    if let Some(flag) = system_audio_stop_flag.as_ref() {
+        flag.store(true, Ordering::SeqCst);
+    }
+    if let Some(join) = system_audio_thread {
+        let _ = join.join();
+    }
+    if let Some(flag) = mic_audio_stop_flag.as_ref() {
+        flag.store(true, Ordering::SeqCst);
+    }
+    if let Some(join) = mic_audio_thread {
+        let _ = join.join();
+    }
     let mut runtime = lock_arc_mutex(&runtime_arc);
-    if runtime.phase != RecordingPhase::Recording && runtime.phase != RecordingPhase::Paused {
-        return Err(AppError::new(ErrorCode::ValidationError, "当前没有正在进行的录制任务"));
-    }
-    let session_id = runtime
-        .session_id
-        .clone()
-        .ok_or_else(|| AppError::new(ErrorCode::ValidationError, "录制会话不存在"))?;
-    let output_dir = runtime
-        .output_path_tmp
-        .as_ref()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .ok_or_else(|| AppError::new(ErrorCode::ValidationError, "录制输出目录不存在"))?;
-
-    let current_sys_enabled = runtime
-        .system_audio_enabled_flag
-        .as_ref()
-        .map(|f| f.load(Ordering::SeqCst))
-        .unwrap_or(false);
-    let current_mic_enabled = runtime
-        .mic_audio_enabled_flag
-        .as_ref()
-        .map(|f| f.load(Ordering::SeqCst))
-        .unwrap_or(false);
-    let requested_sys_device = system_audio_device_id
-        .as_ref()
-        .map(|id| id.trim().to_string())
-        .map(|id| if id.is_empty() { None } else { Some(id) })
-        .unwrap_or_else(|| runtime.system_audio_device_id.clone());
-    let requested_mic_device = microphone_device_id
-        .as_ref()
-        .map(|id| id.trim().to_string())
-        .map(|id| if id.is_empty() { None } else { Some(id) })
-        .unwrap_or_else(|| runtime.mic_audio_device_id.clone());
-    let should_enable_sys = capture_system_audio.unwrap_or(current_sys_enabled);
-    let should_enable_mic = capture_microphone.unwrap_or(current_mic_enabled);
-    let elapsed_now_ms = runtime.snapshot().elapsed_ms;
-    let sys_device_changed = requested_sys_device != runtime.system_audio_device_id;
-    let mic_device_changed = requested_mic_device != runtime.mic_audio_device_id;
-
-    if let Some(v) = capture_system_audio {
-        if v != current_sys_enabled {
-            runtime.system_audio_switch_points_ms.push(elapsed_now_ms);
-            if runtime.system_audio_switch_points_ms.len() > 64 {
-                let _ = runtime.system_audio_switch_points_ms.remove(0);
-            }
-        }
-        if let Some(flag) = runtime.system_audio_enabled_flag.as_ref() {
-            flag.store(v, Ordering::SeqCst);
-        }
-        if v {
-            runtime.system_audio_ever_enabled = true;
-        }
-    }
-    if let Some(v) = capture_microphone {
-        if v != current_mic_enabled {
-            runtime.mic_audio_switch_points_ms.push(elapsed_now_ms);
-            if runtime.mic_audio_switch_points_ms.len() > 64 {
-                let _ = runtime.mic_audio_switch_points_ms.remove(0);
-            }
-        }
-        if let Some(flag) = runtime.mic_audio_enabled_flag.as_ref() {
-            flag.store(v, Ordering::SeqCst);
-        }
-        if v {
-            runtime.mic_audio_ever_enabled = true;
-        }
-    }
-    runtime.system_audio_device_id = requested_sys_device;
-    runtime.mic_audio_device_id = requested_mic_device;
-    if sys_device_changed && runtime.system_audio_thread.is_some() {
-        if let Some(flag) = runtime.system_audio_stop_flag.take() {
-            flag.store(true, Ordering::SeqCst);
-        }
-        if let Some(join) = runtime.system_audio_thread.take() {
-            let _ = join.join();
-        }
+    if sys_device_changed {
         runtime.system_audio_stream_start_ms = Some(elapsed_now_ms);
     }
-    if mic_device_changed && runtime.mic_audio_thread.is_some() {
-        if let Some(flag) = runtime.mic_audio_stop_flag.take() {
-            flag.store(true, Ordering::SeqCst);
-        }
-        if let Some(join) = runtime.mic_audio_thread.take() {
-            let _ = join.join();
-        }
+    if mic_device_changed {
         runtime.mic_audio_stream_start_ms = Some(elapsed_now_ms);
+    }
+    if !should_enable_mic {
+        runtime.mic_audio_stream_start_ms = None;
     }
     if runtime.system_audio_thread.is_none() {
         ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, should_enable_sys).map_err(|e| {
             AppError::new(ErrorCode::SystemError, format!("开启系统音频失败: {}", e)).with_details(e)
         })?;
-    }
-    if !should_enable_mic && runtime.mic_audio_thread.is_some() {
-        if let Some(flag) = runtime.mic_audio_stop_flag.take() {
-            flag.store(true, Ordering::SeqCst);
-        }
-        if let Some(join) = runtime.mic_audio_thread.take() {
-            let _ = join.join();
-        }
-        runtime.mic_audio_stream_start_ms = None;
     }
     if should_enable_mic && runtime.mic_audio_thread.is_none() {
         ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true).map_err(|e| {

@@ -11,10 +11,11 @@ use crate::utils::utils_helpers::load_settings;
 use futures_util::StreamExt;
 use serde::Deserialize;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
-use std::io::Write;
-use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl};
 use tauri_plugin_positioner::WindowExt;
@@ -99,6 +100,92 @@ fn get_default_ffmpeg_download_url() -> String {
         })
 }
 
+fn normalize_sha256_hex(raw: &str) -> Option<String> {
+    let value = raw.trim().to_ascii_lowercase();
+    if value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+fn split_download_url_and_sha256(raw: &str) -> Result<(String, Option<String>), String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("下载地址不能为空".to_string());
+    }
+    if let Some((url, fragment)) = trimmed.split_once("#sha256=") {
+        let expected = normalize_sha256_hex(fragment)
+            .ok_or_else(|| "下载地址中的 sha256 参数格式无效（应为64位十六进制）".to_string())?;
+        return Ok((url.trim().to_string(), Some(expected)));
+    }
+    Ok((trimmed.to_string(), None))
+}
+
+fn is_trusted_download_host(host: &str) -> bool {
+    matches!(
+        host,
+        "gitee.com" | "github.com" | "objects.githubusercontent.com" | "aka.ms"
+    )
+}
+
+fn validate_download_url_policy(url: &str, expected_sha256: Option<&str>) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| format!("下载地址无效: {}", e))?;
+    if parsed.scheme() != "https" {
+        return Err("下载地址必须使用 HTTPS".to_string());
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "下载地址缺少主机名".to_string())?
+        .to_ascii_lowercase();
+    if expected_sha256.is_none() && !is_trusted_download_host(&host) {
+        return Err(format!(
+            "未提供 sha256 时，仅允许可信下载域名；当前域名不受信任: {}",
+            host
+        ));
+    }
+    Ok(())
+}
+
+fn compute_file_sha256(path: &Path) -> Result<String, String> {
+    let mut file = fs::File::open(path).map_err(|e| format!("读取下载文件失败: {}", e))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| format!("读取下载文件失败: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(64);
+    for b in digest {
+        hex.push_str(format!("{:02x}", b).as_str());
+    }
+    Ok(hex)
+}
+
+fn verify_downloaded_exe_integrity(path: &Path, expected_sha256: Option<&str>) -> Result<(), String> {
+    let mut header = [0u8; 2];
+    let mut file = fs::File::open(path).map_err(|e| format!("读取下载文件失败: {}", e))?;
+    file.read_exact(&mut header)
+        .map_err(|e| format!("读取下载文件头失败: {}", e))?;
+    if header != [b'M', b'Z'] {
+        return Err("下载文件不是有效的 Windows 可执行文件".to_string());
+    }
+    if let Some(expected) = expected_sha256 {
+        let actual = compute_file_sha256(path)?;
+        if actual != expected {
+            return Err(format!(
+                "下载文件 SHA-256 校验失败，expected={}, actual={}",
+                expected, actual
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn check_recording_ffmpeg() -> Result<RecordingFfmpegStatus, String> {
     let ffmpeg_path = resolve_ffmpeg_path().unwrap_or(get_preferred_install_ffmpeg_path()?);
@@ -124,10 +211,12 @@ pub async fn download_recording_ffmpeg(
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or(get_software_bin_dir()?);
-    let url = download_url
+    let raw_url = download_url
         .map(|x| x.trim().to_string())
         .filter(|x| !x.is_empty())
         .unwrap_or_else(get_default_ffmpeg_download_url);
+    let (url, expected_sha256) = split_download_url_and_sha256(&raw_url)?;
+    validate_download_url_policy(&url, expected_sha256.as_deref())?;
     fs::create_dir_all(&bin_dir).map_err(|e| format!("创建目录失败: {}", e))?;
 
     let tmp_path = ffmpeg_path.with_extension("exe.tmp");
@@ -190,6 +279,9 @@ pub async fn download_recording_ffmpeg(
         let _ = fs::remove_file(&tmp_path);
         return Err("下载结果为空文件，请重试".to_string());
     }
+    verify_downloaded_exe_integrity(&tmp_path, expected_sha256.as_deref()).inspect_err(|_| {
+        let _ = fs::remove_file(&tmp_path);
+    })?;
     fs::rename(&tmp_path, &ffmpeg_path)
         .or_else(|_| {
             if ffmpeg_path.exists() {

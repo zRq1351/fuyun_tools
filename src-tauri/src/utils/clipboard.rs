@@ -13,6 +13,10 @@ use crate::utils::utils_helpers::{
     find_best_replacement_candidate, load_history_data,
     ClipboardHistoryData,
 };
+enum PersistTask {
+    Snapshot(ClipboardHistoryData),
+    HistoryOnly(Vec<String>),
+}
 
 #[derive(Clone)]
 pub struct ClipboardManager {
@@ -20,7 +24,7 @@ pub struct ClipboardManager {
     history_fingerprints: Arc<Mutex<Vec<(usize, u64)>>>,
     exact_index_cache: Arc<ParkingMutex<LruCache<u64, usize>>>,
     history_cache_dirty: Arc<AtomicBool>,
-    persist_tx: Sender<ClipboardHistoryData>,
+    persist_tx: Sender<PersistTask>,
     categories: Arc<Mutex<HashMap<String, String>>>,
     category_list: Arc<Mutex<Vec<String>>>,
     pinned_items: Arc<Mutex<Vec<String>>>,
@@ -66,15 +70,27 @@ impl ClipboardManager {
             pinned_items: pinned_items.clone(),
         };
         let history_fingerprints = build_history_fingerprints(&history_data.items);
-        let (persist_tx, persist_rx) = mpsc::channel::<ClipboardHistoryData>();
+        let (persist_tx, persist_rx) = mpsc::channel::<PersistTask>();
         std::thread::spawn(move || {
             while let Ok(mut latest) = persist_rx.recv() {
                 while let Ok(next) = persist_rx.try_recv() {
-                    latest = next;
+                    latest = match (latest, next) {
+                        (_, PersistTask::Snapshot(s)) => PersistTask::Snapshot(s),
+                        (PersistTask::Snapshot(s), PersistTask::HistoryOnly(_)) => PersistTask::Snapshot(s),
+                        (PersistTask::HistoryOnly(_), PersistTask::HistoryOnly(items)) => {
+                            PersistTask::HistoryOnly(items)
+                        }
+                    };
                 }
-                if let Err(e) = tauri::async_runtime::block_on(
-                    crate::utils::database::save_history_data_snapshot_async(&latest)
-                ) {
+                let result = match latest {
+                    PersistTask::Snapshot(snapshot) => tauri::async_runtime::block_on(
+                        crate::utils::database::save_history_data_snapshot_async(&snapshot),
+                    ),
+                    PersistTask::HistoryOnly(items) => tauri::async_runtime::block_on(
+                        crate::utils::database::save_history_items_only_async(&items),
+                    ),
+                };
+                if let Err(e) = result {
                     log::error!("保存历史记录失败: {}", e);
                 }
             }
@@ -84,7 +100,7 @@ impl ClipboardManager {
             || !initial_snapshot.categories.is_empty()
             || !initial_snapshot.category_list.is_empty()
             || !initial_snapshot.pinned_items.is_empty() {
-            if let Err(e) = persist_tx.send(initial_snapshot) {
+            if let Err(e) = persist_tx.send(PersistTask::Snapshot(initial_snapshot)) {
                 log::error!("提交初始历史记录保存任务失败: {}", e);
             }
         }
@@ -115,8 +131,14 @@ impl ClipboardManager {
     }
 
     fn enqueue_persist(&self, data: ClipboardHistoryData) {
-        if let Err(e) = self.persist_tx.send(data) {
+        if let Err(e) = self.persist_tx.send(PersistTask::Snapshot(data)) {
             log::error!("提交历史记录保存任务失败: {}", e);
+        }
+    }
+
+    fn enqueue_history_only_persist(&self, history: Vec<String>) {
+        if let Err(e) = self.persist_tx.send(PersistTask::HistoryOnly(history)) {
+            log::error!("提交历史记录增量保存任务失败: {}", e);
         }
     }
 
@@ -354,14 +376,7 @@ impl ClipboardManager {
                     );
                     normalize_pinned_items(&mut pinned_items, &history);
                     apply_pin_order(&mut history, &pinned_items);
-                    let category_list = lock_arc_mutex(&self.category_list);
-                    let data = ClipboardHistoryData {
-                        items: history.clone(),
-                        categories: categories.clone(),
-                        category_list: category_list.clone(),
-                        pinned_items: pinned_items.clone(),
-                    };
-                    self.enqueue_persist(data);
+                    self.enqueue_history_only_persist(history.clone());
                     *fingerprints = build_history_fingerprints(&history);
                     self.history_cache_dirty.store(false, Ordering::Relaxed);
                     return;
@@ -400,14 +415,7 @@ impl ClipboardManager {
                 );
                 normalize_pinned_items(&mut pinned_items, &history);
                 apply_pin_order(&mut history, &pinned_items);
-                let category_list = lock_arc_mutex(&self.category_list);
-                let data = ClipboardHistoryData {
-                    items: history.clone(),
-                    categories: categories.clone(),
-                    category_list: category_list.clone(),
-                    pinned_items: pinned_items.clone(),
-                };
-                self.enqueue_persist(data);
+                self.enqueue_history_only_persist(history.clone());
                 *fingerprints = build_history_fingerprints(&history);
                 self.history_cache_dirty.store(false, Ordering::Relaxed);
                 return;
@@ -466,15 +474,7 @@ impl ClipboardManager {
         );
         normalize_pinned_items(&mut pinned_items, &history);
         apply_pin_order(&mut history, &pinned_items);
-        let category_list = lock_arc_mutex(&self.category_list);
-        let data = ClipboardHistoryData {
-            items: history.clone(),
-            categories: categories.clone(),
-            category_list: category_list.clone(),
-            pinned_items: pinned_items.clone(),
-        };
-
-        self.enqueue_persist(data);
+        self.enqueue_history_only_persist(history.clone());
         let mut exact_index_cache = self.exact_index_cache.lock();
         exact_index_cache.clear();
         if let Some(first) = history.first() {
@@ -528,16 +528,7 @@ impl ClipboardManager {
             );
             normalize_pinned_items(&mut pinned_items, &history);
             apply_pin_order(&mut history, &pinned_items);
-            let category_list = lock_arc_mutex(&self.category_list);
-
-            let data = ClipboardHistoryData {
-                items: history.clone(),
-                categories: categories.clone(),
-                category_list: category_list.clone(),
-                pinned_items: pinned_items.clone(),
-            };
-
-            self.enqueue_persist(data);
+            self.enqueue_history_only_persist(history.clone());
             self.exact_index_cache.lock().clear();
             self.history_cache_dirty.store(true, Ordering::Relaxed);
         }
@@ -556,15 +547,7 @@ impl ClipboardManager {
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             normalize_pinned_items(&mut pinned_items, &history);
 
-            let category_list = lock_arc_mutex(&self.category_list);
-            let data = ClipboardHistoryData {
-                items: history.clone(),
-                categories: categories.clone(),
-                category_list: category_list.clone(),
-                pinned_items: pinned_items.clone(),
-            };
-
-            self.enqueue_persist(data);
+            self.enqueue_history_only_persist(history.clone());
             Ok(item)
         } else {
             Err("索引超出范围".to_string())
@@ -750,12 +733,16 @@ impl ClipboardManager {
         }
 
         self.history_cache_dirty.store(true, Ordering::Relaxed);
-        self.enqueue_persist(ClipboardHistoryData {
-            items: history.clone(),
-            categories: categories.clone(),
-            category_list: category_list.clone(),
-            pinned_items: pinned_items.clone(),
-        });
+        if mode == "all" {
+            self.enqueue_persist(ClipboardHistoryData {
+                items: history.clone(),
+                categories: categories.clone(),
+                category_list: category_list.clone(),
+                pinned_items: pinned_items.clone(),
+            });
+        } else {
+            self.enqueue_history_only_persist(history.clone());
+        }
         Ok(before.saturating_sub(history.len()))
     }
 

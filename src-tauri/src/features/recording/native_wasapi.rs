@@ -59,74 +59,87 @@ fn capture_process_loopback_to_wav(
     stop_flag: Arc<AtomicBool>,
     enabled_flag: Arc<AtomicBool>,
     recording_pause_flag: Arc<AtomicBool>,
+    startup_tx: Option<mpsc::Sender<(u32, Result<(), String>)>>,
 ) -> Result<(), String> {
-    let _ = initialize_mta();
-    let desired_format = WaveFormat::new(32, 32, &SampleType::Float, 48000, 2, None);
-    let mut audio_client = AudioClient::new_application_loopback_client(process_id, true)
-        .map_err(|e| format!("创建进程 loopback 客户端失败(pid={}): {}", process_id, e))?;
-    let mode = StreamMode::EventsShared {
-        autoconvert: true,
-        buffer_duration_hns: 0,
+    let run = || -> Result<(), String> {
+        let _ = initialize_mta();
+        let desired_format = WaveFormat::new(32, 32, &SampleType::Float, 48000, 2, None);
+        let mut audio_client = AudioClient::new_application_loopback_client(process_id, true)
+            .map_err(|e| format!("创建进程 loopback 客户端失败(pid={}): {}", process_id, e))?;
+        let mode = StreamMode::EventsShared {
+            autoconvert: true,
+            buffer_duration_hns: 0,
+        };
+        audio_client
+            .initialize_client(&desired_format, &Direction::Capture, &mode)
+            .map_err(|e| format!("初始化进程 loopback 失败(pid={}): {}", process_id, e))?;
+        let event = audio_client
+            .set_get_eventhandle()
+            .map_err(|e| format!("创建进程 loopback 事件失败(pid={}): {}", process_id, e))?;
+        let capture_client = audio_client
+            .get_audiocaptureclient()
+            .map_err(|e| format!("获取进程捕获客户端失败(pid={}): {}", process_id, e))?;
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
+        };
+        let mut writer = WavWriter::create(&output_path, spec)
+            .map_err(|e| format!("创建进程音频文件失败(pid={}): {}", process_id, e))?;
+        let mut queue = std::collections::VecDeque::<u8>::new();
+        let blockalign = desired_format.get_blockalign() as usize;
+        audio_client
+            .start_stream()
+            .map_err(|e| format!("启动进程 loopback 失败(pid={}): {}", process_id, e))?;
+        if let Some(tx) = startup_tx.as_ref() {
+            let _ = tx.send((process_id, Ok(())));
+        }
+        while !stop_flag.load(Ordering::SeqCst) {
+            let new_frames = capture_client
+                .get_next_packet_size()
+                .map_err(|e| format!("读取进程音频包大小失败(pid={}): {}", process_id, e))?
+                .unwrap_or(0);
+            if new_frames > 0 {
+                capture_client
+                    .read_from_device_to_deque(&mut queue)
+                    .map_err(|e| format!("读取进程音频数据失败(pid={}): {}", process_id, e))?;
+            }
+            while queue.len() >= 4 {
+                let b0 = queue.pop_front().unwrap_or(0);
+                let b1 = queue.pop_front().unwrap_or(0);
+                let b2 = queue.pop_front().unwrap_or(0);
+                let b3 = queue.pop_front().unwrap_or(0);
+                let sample = f32::from_le_bytes([b0, b1, b2, b3]);
+                let out = if enabled_flag.load(Ordering::SeqCst)
+                    && !recording_pause_flag.load(Ordering::SeqCst)
+                {
+                    (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16
+                } else {
+                    0
+                };
+                let _ = writer.write_sample(out);
+            }
+            if event.wait_for_event(50).is_err() {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if blockalign == 0 {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        let _ = audio_client.stop_stream();
+        writer
+            .finalize()
+            .map_err(|e| format!("完成进程音频文件失败(pid={}): {}", process_id, e))?;
+        Ok(())
     };
-    audio_client
-        .initialize_client(&desired_format, &Direction::Capture, &mode)
-        .map_err(|e| format!("初始化进程 loopback 失败(pid={}): {}", process_id, e))?;
-    let event = audio_client
-        .set_get_eventhandle()
-        .map_err(|e| format!("创建进程 loopback 事件失败(pid={}): {}", process_id, e))?;
-    let capture_client = audio_client
-        .get_audiocaptureclient()
-        .map_err(|e| format!("获取进程捕获客户端失败(pid={}): {}", process_id, e))?;
-    let spec = hound::WavSpec {
-        channels: 2,
-        sample_rate: 48_000,
-        bits_per_sample: 16,
-        sample_format: SampleFormat::Int,
-    };
-    let mut writer = WavWriter::create(&output_path, spec)
-        .map_err(|e| format!("创建进程音频文件失败(pid={}): {}", process_id, e))?;
-    let mut queue = std::collections::VecDeque::<u8>::new();
-    let blockalign = desired_format.get_blockalign() as usize;
-    audio_client
-        .start_stream()
-        .map_err(|e| format!("启动进程 loopback 失败(pid={}): {}", process_id, e))?;
-    while !stop_flag.load(Ordering::SeqCst) {
-        let new_frames = capture_client
-            .get_next_packet_size()
-            .map_err(|e| format!("读取进程音频包大小失败(pid={}): {}", process_id, e))?
-            .unwrap_or(0);
-        if new_frames > 0 {
-            capture_client
-                .read_from_device_to_deque(&mut queue)
-                .map_err(|e| format!("读取进程音频数据失败(pid={}): {}", process_id, e))?;
-        }
-        while queue.len() >= 4 {
-            let b0 = queue.pop_front().unwrap_or(0);
-            let b1 = queue.pop_front().unwrap_or(0);
-            let b2 = queue.pop_front().unwrap_or(0);
-            let b3 = queue.pop_front().unwrap_or(0);
-            let sample = f32::from_le_bytes([b0, b1, b2, b3]);
-            let out = if enabled_flag.load(Ordering::SeqCst)
-                && !recording_pause_flag.load(Ordering::SeqCst)
-            {
-                (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16
-            } else {
-                0
-            };
-            let _ = writer.write_sample(out);
-        }
-        if event.wait_for_event(50).is_err() {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        if blockalign == 0 {
-            std::thread::sleep(Duration::from_millis(10));
+    let result = run();
+    if let Err(err) = &result {
+        if let Some(tx) = startup_tx {
+            let _ = tx.send((process_id, Err(err.clone())));
         }
     }
-    let _ = audio_client.stop_stream();
-    writer
-        .finalize()
-        .map_err(|e| format!("完成进程音频文件失败(pid={}): {}", process_id, e))?;
-    Ok(())
+    result
 }
 
 pub fn start_process_loopback_wavs(
@@ -142,16 +155,58 @@ pub fn start_process_loopback_wavs(
     let thread_stop = stop_flag.clone();
     let thread_enabled = enabled_flag.clone();
     let thread_pause = recording_pause_flag.clone();
-    let handle = std::thread::spawn(move || {
-        let mut workers = Vec::new();
-        for (pid, path) in process_ids.into_iter().zip(output_paths.into_iter()) {
-            let worker_stop = thread_stop.clone();
-            let worker_enabled = thread_enabled.clone();
-            let worker_pause = thread_pause.clone();
-            workers.push(std::thread::spawn(move || {
-                let _ = capture_process_loopback_to_wav(pid, path, worker_stop, worker_enabled, worker_pause);
-            }));
+    let process_count = process_ids.len();
+    let (startup_tx, startup_rx) = mpsc::channel::<(u32, Result<(), String>)>();
+    let mut workers = Vec::new();
+    for (pid, path) in process_ids.into_iter().zip(output_paths.into_iter()) {
+        let worker_stop = thread_stop.clone();
+        let worker_enabled = thread_enabled.clone();
+        let worker_pause = thread_pause.clone();
+        let worker_startup_tx = startup_tx.clone();
+        workers.push(std::thread::spawn(move || {
+            if let Err(e) = capture_process_loopback_to_wav(
+                pid,
+                path,
+                worker_stop,
+                worker_enabled,
+                worker_pause,
+                Some(worker_startup_tx),
+            ) {
+                log::error!("进程音频采集线程异常退出(pid={}): {}", pid, e);
+            }
+        }));
+    }
+    drop(startup_tx);
+    let mut startup_errors = Vec::new();
+    for _ in 0..process_count {
+        match startup_rx.recv_timeout(Duration::from_secs(3)) {
+            Ok((pid, Ok(()))) => {
+                log::info!("进程音频采集启动成功(pid={})", pid);
+            }
+            Ok((pid, Err(e))) => {
+                startup_errors.push(format!("pid={}: {}", pid, e));
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                startup_errors.push("进程音频采集启动超时".to_string());
+                break;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                startup_errors.push("进程音频采集启动通道断开".to_string());
+                break;
+            }
         }
+    }
+    if !startup_errors.is_empty() {
+        stop_flag.store(true, Ordering::SeqCst);
+        for worker in workers {
+            let _ = worker.join();
+        }
+        return Err(format!(
+            "进程音频采集启动失败: {}",
+            startup_errors.join(" | ")
+        ));
+    }
+    let handle = std::thread::spawn(move || {
         while !thread_stop.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(100));
         }

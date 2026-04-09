@@ -206,7 +206,7 @@ impl WindowsClipboardEventBackend {
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                             + 1;
 
-                        log::info!("剪贴板消息监听事件计数: {}", count);
+                        log::debug!("剪贴板消息监听事件计数: {}", count);
 
                         let key = hwnd as isize;
                         let sender = {

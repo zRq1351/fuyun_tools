@@ -29,9 +29,10 @@ use crate::utils::utils_helpers::{
     load_history_page_data_async, load_settings, save_settings, ClipboardHistoryPageData,
 };
 use futures_util::StreamExt;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -3022,6 +3023,93 @@ struct VcRuntimeDownloadProgress {
     message: String,
 }
 
+fn normalize_sha256_hex(raw: &str) -> Option<String> {
+    let value = raw.trim().to_ascii_lowercase();
+    if value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+fn split_download_url_and_sha256(raw: &str) -> Result<(String, Option<String>), String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("下载地址不能为空".to_string());
+    }
+    if let Some((url, fragment)) = trimmed.split_once("#sha256=") {
+        let expected = normalize_sha256_hex(fragment)
+            .ok_or_else(|| "下载地址中的 sha256 参数格式无效（应为64位十六进制）".to_string())?;
+        return Ok((url.trim().to_string(), Some(expected)));
+    }
+    Ok((trimmed.to_string(), None))
+}
+
+fn compute_file_sha256(path: &Path) -> Result<String, String> {
+    let mut file = fs::File::open(path).map_err(|e| format!("读取下载文件失败: {}", e))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| format!("读取下载文件失败: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(64);
+    for b in digest {
+        hex.push_str(format!("{:02x}", b).as_str());
+    }
+    Ok(hex)
+}
+
+fn verify_downloaded_exe_integrity(path: &Path, expected_sha256: Option<&str>) -> Result<(), String> {
+    let mut header = [0u8; 2];
+    let mut file = fs::File::open(path).map_err(|e| format!("读取下载文件失败: {}", e))?;
+    file.read_exact(&mut header)
+        .map_err(|e| format!("读取下载文件头失败: {}", e))?;
+    if header != [b'M', b'Z'] {
+        return Err("下载文件不是有效的 Windows 可执行文件".to_string());
+    }
+    if let Some(expected) = expected_sha256 {
+        let actual = compute_file_sha256(path)?;
+        if actual != expected {
+            return Err(format!(
+                "下载文件 SHA-256 校验失败，expected={}, actual={}",
+                expected, actual
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_vc_runtime_installer_path(installer_path: &str) -> Result<PathBuf, String> {
+    let raw = installer_path.trim();
+    if raw.is_empty() {
+        return Err("安装包路径不能为空".to_string());
+    }
+    let path = PathBuf::from(raw);
+    if !path.exists() || !path.is_file() {
+        return Err("安装包文件不存在，请重新下载".to_string());
+    }
+    let canonical = fs::canonicalize(&path).map_err(|e| format!("解析安装包路径失败: {}", e))?;
+    let file_name = canonical
+        .file_name()
+        .and_then(|v| v.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if file_name != "vc_redist.x64.exe" {
+        return Err("安装包文件名不合法，拒绝执行".to_string());
+    }
+    let allowed_root = fs::canonicalize(std::env::temp_dir().join("fuyun_tools"))
+        .map_err(|e| format!("解析安装目录失败: {}", e))?;
+    if !canonical.starts_with(&allowed_root) {
+        return Err("安装包路径不在受信任目录，拒绝执行".to_string());
+    }
+    Ok(canonical)
+}
+
 #[tauri::command]
 pub async fn download_vc_runtime_installer(
     download_url: Option<String>,
@@ -3030,10 +3118,19 @@ pub async fn download_vc_runtime_installer(
     #[cfg(windows)]
     {
         let default_url = "https://aka.ms/vs/17/release/vc_redist.x64.exe".to_string();
-        let url = download_url
+        let raw_url = download_url
             .map(|x| x.trim().to_string())
             .filter(|x| !x.is_empty())
             .unwrap_or(default_url);
+        let (url, expected_sha256) = split_download_url_and_sha256(&raw_url)?;
+        let parsed = reqwest::Url::parse(&url).map_err(|e| format!("下载地址无效: {}", e))?;
+        if parsed.scheme() != "https" {
+            return Err("下载地址必须使用 HTTPS".to_string());
+        }
+        let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+        if expected_sha256.is_none() && host != "aka.ms" {
+            return Err("未提供 sha256 时，仅允许从 aka.ms 下载 VC Runtime".to_string());
+        }
         let target_dir = std::env::temp_dir().join("fuyun_tools");
         fs::create_dir_all(&target_dir).map_err(|e| format!("创建目录失败: {}", e))?;
         let installer_path = target_dir.join("vc_redist.x64.exe");
@@ -3099,6 +3196,9 @@ pub async fn download_vc_runtime_installer(
             let _ = fs::remove_file(&tmp_path);
             return Err("下载结果为空文件，请重试".to_string());
         }
+        verify_downloaded_exe_integrity(&tmp_path, expected_sha256.as_deref()).inspect_err(|_| {
+            let _ = fs::remove_file(&tmp_path);
+        })?;
         fs::rename(&tmp_path, &installer_path)
             .or_else(|_| {
                 if installer_path.exists() {
@@ -3134,10 +3234,7 @@ pub async fn download_vc_runtime_installer(
 pub async fn open_vc_runtime_installer(installer_path: String) -> Result<(), String> {
     #[cfg(windows)]
     {
-        let path = PathBuf::from(installer_path.trim());
-        if !path.exists() || !path.is_file() {
-            return Err("安装包文件不存在，请重新下载".to_string());
-        }
+        let path = validate_vc_runtime_installer_path(&installer_path)?;
         std::process::Command::new(&path)
             .spawn()
             .map_err(|e| format!("启动安装程序失败: {}", e))?;
@@ -3153,10 +3250,7 @@ pub async fn open_vc_runtime_installer(installer_path: String) -> Result<(), Str
 pub async fn install_vc_runtime_and_wait(installer_path: String) -> Result<serde_json::Value, String> {
     #[cfg(windows)]
     {
-        let path = PathBuf::from(installer_path.trim());
-        if !path.exists() || !path.is_file() {
-            return Err("安装包文件不存在，请重新下载".to_string());
-        }
+        let path = validate_vc_runtime_installer_path(&installer_path)?;
         let status = tauri::async_runtime::spawn_blocking(move || {
             std::process::Command::new(&path)
                 .arg("/install")

@@ -38,6 +38,7 @@ bloom = "0.3.2"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 screenshots = "0.8.10"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+sha2 = "0.10.9"
 windows-capture = "2.0.0-alpha.7"
 opencv = { version = "0.98.2", optional = true, default-features = false, features = ["clang-runtime", "imgproc"] }
 

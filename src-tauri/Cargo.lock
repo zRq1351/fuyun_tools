@@ -1836,6 +1836,7 @@ dependencies = [
  "screenshots",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "sysinfo",
  "tauri",
