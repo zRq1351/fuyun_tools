@@ -14,8 +14,13 @@ use crate::utils::utils_helpers::{
     ClipboardHistoryData,
 };
 enum PersistTask {
-    Snapshot(ClipboardHistoryData),
     HistoryOnly(Vec<String>),
+    CategoriesOnly {
+        categories: HashMap<String, String>,
+        category_list: Vec<String>,
+    },
+    PinnedOnly(Vec<String>),
+    ClearAll,
 }
 
 #[derive(Clone)]
@@ -72,36 +77,79 @@ impl ClipboardManager {
         let history_fingerprints = build_history_fingerprints(&history_data.items);
         let (persist_tx, persist_rx) = mpsc::channel::<PersistTask>();
         std::thread::spawn(move || {
-            while let Ok(mut latest) = persist_rx.recv() {
-                while let Ok(next) = persist_rx.try_recv() {
-                    latest = match (latest, next) {
-                        (_, PersistTask::Snapshot(s)) => PersistTask::Snapshot(s),
-                        (PersistTask::Snapshot(s), PersistTask::HistoryOnly(_)) => PersistTask::Snapshot(s),
-                        (PersistTask::HistoryOnly(_), PersistTask::HistoryOnly(items)) => {
-                            PersistTask::HistoryOnly(items)
+            while let Ok(first) = persist_rx.recv() {
+                let mut latest_history: Option<Vec<String>> = None;
+                let mut latest_categories: Option<(HashMap<String, String>, Vec<String>)> = None;
+                let mut latest_pinned: Option<Vec<String>> = None;
+                let mut clear_all = false;
+                let mut absorb = |task: PersistTask| {
+                    match task {
+                        PersistTask::HistoryOnly(items) => latest_history = Some(items),
+                        PersistTask::CategoriesOnly {
+                            categories,
+                            category_list,
+                        } => latest_categories = Some((categories, category_list)),
+                        PersistTask::PinnedOnly(items) => latest_pinned = Some(items),
+                        PersistTask::ClearAll => {
+                            clear_all = true;
+                            latest_history = None;
+                            latest_categories = None;
+                            latest_pinned = None;
                         }
-                    };
-                }
-                let result = match latest {
-                    PersistTask::Snapshot(snapshot) => tauri::async_runtime::block_on(
-                        crate::utils::database::save_history_data_snapshot_async(&snapshot),
-                    ),
-                    PersistTask::HistoryOnly(items) => tauri::async_runtime::block_on(
-                        crate::utils::database::save_history_items_only_async(&items),
-                    ),
+                    }
                 };
-                if let Err(e) = result {
-                    log::error!("保存历史记录失败: {}", e);
+                absorb(first);
+                while let Ok(next) = persist_rx.try_recv() {
+                    absorb(next);
+                }
+                if clear_all {
+                    if let Err(e) = tauri::async_runtime::block_on(crate::utils::database::clear_all_history()) {
+                        log::error!("清理历史记录失败: {}", e);
+                    }
+                }
+                if let Some(items) = latest_history {
+                    if let Err(e) = tauri::async_runtime::block_on(
+                        crate::utils::database::save_history_items_only_async(&items),
+                    ) {
+                        log::error!("保存历史记录失败: {}", e);
+                    }
+                }
+                if let Some((categories, category_list)) = latest_categories {
+                    if let Err(e) = tauri::async_runtime::block_on(
+                        crate::utils::database::save_categories_state_async(
+                            &categories,
+                            &category_list,
+                        ),
+                    ) {
+                        log::error!("保存分类状态失败: {}", e);
+                    }
+                }
+                if let Some(pinned_items) = latest_pinned {
+                    if let Err(e) = tauri::async_runtime::block_on(
+                        crate::utils::database::save_pinned_items_order_async(&pinned_items),
+                    ) {
+                        log::error!("保存置顶状态失败: {}", e);
+                    }
                 }
             }
         });
 
-        if !initial_snapshot.items.is_empty()
-            || !initial_snapshot.categories.is_empty()
-            || !initial_snapshot.category_list.is_empty()
-            || !initial_snapshot.pinned_items.is_empty() {
-            if let Err(e) = persist_tx.send(PersistTask::Snapshot(initial_snapshot)) {
+        if !initial_snapshot.items.is_empty() {
+            if let Err(e) = persist_tx.send(PersistTask::HistoryOnly(initial_snapshot.items.clone())) {
                 log::error!("提交初始历史记录保存任务失败: {}", e);
+            }
+        }
+        if !initial_snapshot.categories.is_empty() || !initial_snapshot.category_list.is_empty() {
+            if let Err(e) = persist_tx.send(PersistTask::CategoriesOnly {
+                categories: initial_snapshot.categories.clone(),
+                category_list: initial_snapshot.category_list.clone(),
+            }) {
+                log::error!("提交初始分类保存任务失败: {}", e);
+            }
+        }
+        if !initial_snapshot.pinned_items.is_empty() {
+            if let Err(e) = persist_tx.send(PersistTask::PinnedOnly(initial_snapshot.pinned_items.clone())) {
+                log::error!("提交初始置顶保存任务失败: {}", e);
             }
         }
 
@@ -130,15 +178,34 @@ impl ClipboardManager {
         }
     }
 
-    fn enqueue_persist(&self, data: ClipboardHistoryData) {
-        if let Err(e) = self.persist_tx.send(PersistTask::Snapshot(data)) {
-            log::error!("提交历史记录保存任务失败: {}", e);
-        }
-    }
-
     fn enqueue_history_only_persist(&self, history: Vec<String>) {
         if let Err(e) = self.persist_tx.send(PersistTask::HistoryOnly(history)) {
             log::error!("提交历史记录增量保存任务失败: {}", e);
+        }
+    }
+
+    fn enqueue_categories_only_persist(
+        &self,
+        categories: HashMap<String, String>,
+        category_list: Vec<String>,
+    ) {
+        if let Err(e) = self.persist_tx.send(PersistTask::CategoriesOnly {
+            categories,
+            category_list,
+        }) {
+            log::error!("提交分类增量保存任务失败: {}", e);
+        }
+    }
+
+    fn enqueue_pinned_only_persist(&self, pinned_items: Vec<String>) {
+        if let Err(e) = self.persist_tx.send(PersistTask::PinnedOnly(pinned_items)) {
+            log::error!("提交置顶增量保存任务失败: {}", e);
+        }
+    }
+
+    fn enqueue_clear_all_persist(&self) {
+        if let Err(e) = self.persist_tx.send(PersistTask::ClearAll) {
+            log::error!("提交全量清理任务失败: {}", e);
         }
     }
 
@@ -222,15 +289,7 @@ impl ClipboardManager {
             (categories.clone(), category_list.clone())
         };
 
-        let history = lock_arc_mutex(&self.history).clone();
-        let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
-
-        self.enqueue_persist(ClipboardHistoryData {
-            items: history,
-            categories: categories_clone,
-            category_list: category_list_clone,
-            pinned_items,
-        });
+        self.enqueue_categories_only_persist(categories_clone, category_list_clone);
 
         Ok(())
     }
@@ -270,15 +329,7 @@ impl ClipboardManager {
             (categories.clone(), category_list.clone())
         };
 
-        let history = lock_arc_mutex(&self.history).clone();
-        let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
-
-        self.enqueue_persist(ClipboardHistoryData {
-            items: history,
-            categories: categories_clone,
-            category_list: category_list_clone,
-            pinned_items,
-        });
+        self.enqueue_categories_only_persist(categories_clone, category_list_clone);
 
         Ok(())
     }
@@ -317,15 +368,7 @@ impl ClipboardManager {
             (categories.clone(), category_list.clone())
         };
 
-        let history = lock_arc_mutex(&self.history).clone();
-        let pinned_items = lock_arc_mutex(&self.pinned_items).clone();
-
-        self.enqueue_persist(ClipboardHistoryData {
-            items: history,
-            categories: categories_clone,
-            category_list: category_list_clone,
-            pinned_items,
-        });
+        self.enqueue_categories_only_persist(categories_clone, category_list_clone);
 
         Ok(())
     }
@@ -500,12 +543,7 @@ impl ClipboardManager {
         let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         pinned_items.clear();
 
-        self.enqueue_persist(ClipboardHistoryData {
-            items: Vec::new(),
-            categories: HashMap::new(),
-            category_list: Vec::new(),
-            pinned_items: Vec::new(),
-        });
+        self.enqueue_clear_all_persist();
         
         log::info!("历史记录已清空");
         Ok(())
@@ -555,7 +593,7 @@ impl ClipboardManager {
     }
 
     pub fn promote_to_top(&self, index: usize) -> Result<String, String> {
-        let (item, categories_clone, category_list_clone, history_clone, pinned_items) = {
+        let (item, history_clone, pinned_items) = {
             let mut history = lock_arc_mutex(&self.history);
             if index >= history.len() {
                 return Err("索引超出范围".to_string());
@@ -579,17 +617,11 @@ impl ClipboardManager {
             self.exact_index_cache.lock().clear();
             self.history_cache_dirty.store(true, Ordering::Relaxed);
 
-            let categories = lock_arc_mutex(&self.categories).clone();
-            let category_list = lock_arc_mutex(&self.category_list).clone();
-            (item, categories, category_list, history.clone(), pinned_items.clone())
+            (item, history.clone(), pinned_items.clone())
         };
 
-        self.enqueue_persist(ClipboardHistoryData {
-            items: history_clone,
-            categories: categories_clone,
-            category_list: category_list_clone,
-            pinned_items,
-        });
+        self.enqueue_history_only_persist(history_clone);
+        self.enqueue_pinned_only_persist(pinned_items);
 
         Ok(item)
     }
@@ -639,14 +671,8 @@ impl ClipboardManager {
         apply_pin_order(&mut history, &pinned_items);
         self.history_cache_dirty.store(true, Ordering::Relaxed);
 
-        let categories = lock_arc_mutex(&self.categories).clone();
-        let category_list = lock_arc_mutex(&self.category_list).clone();
-        self.enqueue_persist(ClipboardHistoryData {
-            items: history.clone(),
-            categories,
-            category_list,
-            pinned_items: pinned_items.clone(),
-        });
+        self.enqueue_history_only_persist(history.clone());
+        self.enqueue_pinned_only_persist(pinned_items.clone());
         Ok(())
     }
 
@@ -734,12 +760,7 @@ impl ClipboardManager {
 
         self.history_cache_dirty.store(true, Ordering::Relaxed);
         if mode == "all" {
-            self.enqueue_persist(ClipboardHistoryData {
-                items: history.clone(),
-                categories: categories.clone(),
-                category_list: category_list.clone(),
-                pinned_items: pinned_items.clone(),
-            });
+            self.enqueue_clear_all_persist();
         } else {
             self.enqueue_history_only_persist(history.clone());
         }

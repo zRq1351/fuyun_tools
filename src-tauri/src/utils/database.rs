@@ -999,6 +999,80 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
     Ok(())
 }
 
+/// 仅同步分类映射与分类列表。
+pub async fn save_categories_state_async(
+    categories: &HashMap<String, String>,
+    category_list: &[String],
+) -> Result<(), String> {
+    let mut conn = open_history_db_async().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+
+    sqlx::query("DELETE FROM categories")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("清理分类失败: {}", e))?;
+    sqlx::query("DELETE FROM category_list")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("清理分类列表失败: {}", e))?;
+
+    for (content, category) in categories {
+        let item_id = stable_history_item_id(content);
+        sqlx::query(
+            "INSERT INTO categories(content, category, item_id)
+             VALUES(?1, ?2, ?3)",
+        )
+            .bind(content)
+            .bind(category)
+            .bind(item_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("写入分类失败: {}", e))?;
+    }
+
+    for category in category_list {
+        sqlx::query("INSERT INTO category_list(category) VALUES(?)")
+            .bind(category)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("写入分类列表失败: {}", e))?;
+    }
+
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    Ok(())
+}
+
+/// 仅同步置顶顺序（按 pinned_items 向量顺序重建 pinned_at）。
+pub async fn save_pinned_items_order_async(pinned_items: &[String]) -> Result<(), String> {
+    let mut conn = open_history_db_async().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+
+    sqlx::query("DELETE FROM pinned_items")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("清理置顶项失败: {}", e))?;
+
+    let base_ts = now_unix_ms();
+    for (idx, content) in pinned_items.iter().enumerate() {
+        let item_id = stable_history_item_id(content);
+        // 较新的 pinned_at 表示更靠前的置顶项。
+        let pinned_at = base_ts + (pinned_items.len().saturating_sub(idx) as i64);
+        sqlx::query(
+            "INSERT INTO pinned_items(content, pinned_at, item_id)
+             VALUES(?1, ?2, ?3)",
+        )
+            .bind(content)
+            .bind(pinned_at)
+            .bind(item_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("写入置顶项失败: {}", e))?;
+    }
+
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    Ok(())
+}
+
 /// 置顶记录（增量操作）
 pub async fn pin_item(content: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
