@@ -169,15 +169,7 @@ let unlistenItemPromoted = null
 let unlistenHistoryPayloadUpdated = null
 let unlistenHistoryItemAdded = null
 let unlistenPreviewReady = null
-let isPointerDown = false
-let isContentDragging = false
 let pendingHistorySync = false
-let dragStartX = 0
-let dragStartScrollLeft = 0
-let dragTargetScrollLeft = 0
-let dragScrollRafId = 0
-let contentMetricsRafId = 0
-let loadMorePending = false
 let historyUpdateTimer = null
 let initialPageRetryTimer = null
 const isCtrlKeyPressed = ref(false)
@@ -187,9 +179,7 @@ const isPrefetchingPage = ref(false)
 let prefetchRequestSeq = 0
 let prefetchPromise = null
 
-const IMAGE_ITEM_WIDTH = 250
-const IMAGE_ITEM_GAP = 8
-const IMAGE_ITEM_UNIT = IMAGE_ITEM_WIDTH + IMAGE_ITEM_GAP
+const IMAGE_ITEM_UNIT = 258
 const IMAGE_PREVIEW_CACHE_MARGIN = 24
 const IMAGE_PREVIEW_CACHE_MAX_ITEMS = 300
 const ASYNC_PREVIEW_CACHE_MAX_ITEMS = 180
@@ -430,15 +420,7 @@ const prefetchNextPage = async () => {
   await prefetchPromise
 }
 
-const stopContentDragging = () => {
-  isPointerDown = false
-  isContentDragging = false
-  if (contentMetricsRafId) {
-    cancelAnimationFrame(contentMetricsRafId)
-    contentMetricsRafId = 0
-  }
-  loadMorePending = false
-  document.body.style.removeProperty('user-select')
+const flushPendingHistorySync = () => {
   if (pendingHistorySync) {
     pendingHistorySync = false
     scheduleHistorySync(0)
@@ -451,10 +433,6 @@ const handleContainerMouseDown = (event) => {
   if (isAddingCategory.value && target instanceof Element && !target.closest('.category-input')) {
     cancelCreateCategory()
   }
-}
-
-const syncContentMetrics = () => {
-  if (!contentRef.value) return
 }
 
 const handleLoadMoreIntent = () => {
@@ -582,13 +560,6 @@ const loadStatusText = computed(() => {
   if (isLoadingPage.value) return '正在加载...'
   if (hasMore.value) return `已加载 ${filteredHistoryState.value.total} / ${totalCount.value || filteredHistoryState.value.total}`
   return `已全部加载 ${filteredHistoryState.value.total} 条`
-})
-
-const isLoadingMore = computed(() => isLoadingPage.value && filteredHistoryState.value.total > 0)
-
-const showTailLoadMoreHint = computed(() => {
-  if (!(hasMore.value || isLoadingMore.value) || filteredHistoryState.value.total === 0) return false
-  return true
 })
 
 const IMAGE_PAGE_SIZE_OPTIONS = [10, 30, 50]
@@ -856,7 +827,6 @@ const warmupAround = (index) => {
 }
 
 const handleItemHover = (index) => {
-  if (isPointerDown || isContentDragging) return
   warmupAround(index)
 }
 
@@ -1069,11 +1039,11 @@ const editItemTags = async () => {
 }
 
 const handleDragStart = (event, itemId) => {
-  if (!isCtrlKeyPressed.value || isContentDragging) {
+  if (!isCtrlKeyPressed.value) {
     event.preventDefault()
     return
   }
-  stopContentDragging()
+  flushPendingHistorySync()
   dragItemId.value = itemId
   event.dataTransfer.effectAllowed = 'copy'
   event.dataTransfer.setData('text/plain', itemId)
@@ -1466,7 +1436,6 @@ const loadHistoryPage = async ({reset = false, force = false} = {}) => {
       selectedIndex.value = firstLoaded ? firstLoaded.index : -1
     }
     await nextTick()
-    syncContentMetrics()
     if (hasMore.value) {
       void prefetchNextPage()
     }
@@ -1481,10 +1450,7 @@ const loadHistoryPage = async ({reset = false, force = false} = {}) => {
     }
   } finally {
     isLoadingPage.value = false
-    if (pendingHistorySync && !isPointerDown && !isContentDragging) {
-      pendingHistorySync = false
-      scheduleHistorySync(0)
-    }
+    flushPendingHistorySync()
   }
 }
 
@@ -1522,14 +1488,13 @@ const syncHistoryIncremental = async () => {
   })
   mergeIncrementalPageIntoState(data)
   await nextTick()
-  syncContentMetrics()
 }
 
 const scheduleHistorySync = (delay = 220) => {
   if (historyUpdateTimer) return
   historyUpdateTimer = window.setTimeout(async () => {
     historyUpdateTimer = null
-    if (isPointerDown || isContentDragging || isLoadingPage.value) {
+    if (isLoadingPage.value) {
       pendingHistorySync = true
       return
     }
@@ -1635,7 +1600,6 @@ onMounted(async () => {
   window.addEventListener('keydown', handleWindowKeydown)
   window.addEventListener('keyup', handleWindowKeyup)
   window.addEventListener('blur', handleWindowBlur)
-  window.addEventListener('resize', syncContentMetrics)
   pageSize.value = normalizeImagePageSize(localStorage.getItem('image_history_page_size'))
   await nextTick()
   await waitForFirstPaint()
@@ -1732,12 +1696,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  stopContentDragging()
-  if (contentMetricsRafId) {
-    cancelAnimationFrame(contentMetricsRafId)
-    contentMetricsRafId = 0
-  }
-  loadMorePending = false
+  flushPendingHistorySync()
   previewCache.clear()
   asyncPreviewCache.clear() // 清理异步预览缓存
   if (filterDebounceTimer) {
@@ -1779,7 +1738,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleWindowKeydown)
   window.removeEventListener('keyup', handleWindowKeyup)
   window.removeEventListener('blur', handleWindowBlur)
-  window.removeEventListener('resize', syncContentMetrics)
 })
 
 watch(selectedIndex, (value) => {
@@ -1850,356 +1808,6 @@ watch([searchKeyword, categoryFilter], () => {
   align-items: center;
   height: 100%;
   color: #fff;
-}
-
-.content {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  gap: 8px;
-  padding: 8px;
-  flex-direction: row;
-  overflow-x: auto;
-  overflow-y: hidden;
-  margin-top: 10px;
-  scrollbar-width: none;
-}
-
-.content::-webkit-scrollbar {
-  display: none;
-}
-
-.content.is-dragging .clipboard-item {
-  transition: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-
-.content.is-dragging .clipboard-item:hover,
-.content.is-dragging .clipboard-item.selected {
-  box-shadow: none !important;
-}
-
-.content.is-dragging .clipboard-item.selected {
-  transform: none !important;
-}
-
-.content.is-dragging .delete-btn,
-.content.is-dragging .download-btn,
-.content.is-dragging .fullscreen-btn,
-.content.is-dragging .pin-btn {
-  opacity: 0 !important;
-}
-
-.content.is-dragging .clipboard-item {
-  pointer-events: none;
-}
-
-.load-more-tail-indicator {
-  width: 56px;
-  flex: 0 0 56px;
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: rgba(166, 213, 255, 0.9);
-  user-select: none;
-  pointer-events: none;
-}
-
-.tail-spacer {
-  height: 1px;
-  pointer-events: none;
-}
-
-.load-more-tail-text {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  letter-spacing: 0.5px;
-  line-height: 1;
-}
-
-.load-more-tail-spinner {
-  font-size: 16px;
-  color: rgba(220, 240, 255, 0.95);
-}
-
-.clipboard-item {
-  background: rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 12px;
-  cursor: pointer;
-  position: relative;
-  user-select: none;
-  width: 250px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  backdrop-filter: blur(10px);
-  color: white;
-  transition: all 0.3s ease;
-  box-sizing: border-box;
-}
-
-.clipboard-item:hover, .clipboard-item.selected {
-  background: rgba(0, 0, 0, 0.8);
-  border-color: var(--el-color-primary, #409eff);
-  box-shadow: 0 0 15px rgba(64, 158, 255, 0.5);
-}
-
-.clipboard-item.selected {
-  transform: scale(1.02);
-}
-
-.delete-btn {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s;
-  z-index: 10;
-}
-
-.delete-btn .el-icon {
-  font-size: 12px;
-}
-
-.clipboard-item:hover .delete-btn {
-  opacity: 1;
-}
-
-.delete-btn:hover {
-  background: #f56c6c;
-}
-
-.fullscreen-btn {
-  position: absolute;
-  top: 5px;
-  right: 53px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.75);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s, border-color 0.2s, color 0.2s, background-color 0.2s;
-  z-index: 10;
-  padding: 0;
-}
-
-.pin-btn {
-  position: absolute;
-  top: 5px;
-  right: 77px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.75);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s, border-color 0.2s, color 0.2s, background-color 0.2s;
-  z-index: 10;
-  padding: 0;
-}
-
-.pin-lucide {
-  width: 12px;
-  height: 12px;
-  stroke-width: 2;
-}
-
-.pin-btn:hover {
-  border-color: var(--el-color-primary, #409eff);
-  color: #fff;
-  background: var(--el-color-primary, #409eff);
-}
-
-.pin-btn.active {
-  opacity: 1;
-  border-color: #f7b955;
-  color: #fff;
-  background: rgba(247, 185, 85, 0.75);
-}
-
-.fullscreen-btn:hover {
-  border-color: var(--el-color-primary, #409eff);
-  color: #fff;
-  background: var(--el-color-primary, #409eff);
-}
-
-.download-btn {
-  position: absolute;
-  top: 5px;
-  right: 29px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.75);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s, border-color 0.2s, color 0.2s, background-color 0.2s;
-  z-index: 10;
-  padding: 0;
-}
-
-.download-btn:hover {
-  border-color: #67c23a;
-  color: #fff;
-  background: #67c23a;
-}
-
-.clipboard-item:hover .download-btn {
-  opacity: 1;
-}
-
-.clipboard-item:hover .fullscreen-btn {
-  opacity: 1;
-}
-
-.clipboard-item:hover .pin-btn {
-  opacity: 1;
-}
-
-.index-tools {
-  position: absolute;
-  top: 5px;
-  left: 5px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  z-index: 10;
-}
-
-.index {
-  background: rgba(255, 255, 255, 0.1);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
-  color: #909399;
-}
-
-.clipboard-item:hover .index, .clipboard-item.selected .index {
-  background: var(--el-color-primary, #409eff);
-  color: #fff;
-}
-
-.category-wrap {
-  position: absolute;
-  left: 36px;
-  right: 86px;
-  top: 5px;
-  display: flex;
-  justify-content: center;
-  z-index: 10;
-  pointer-events: none;
-}
-
-.category-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  max-width: 100%;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.85);
-  font-size: 12px;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tag-wrap {
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  top: 32px;
-  min-height: 20px;
-  display: flex;
-  align-items: center;
-  z-index: 8;
-}
-
-.tag-chip-list {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.tag-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 6px;
-  border-radius: 999px;
-  font-size: 11px;
-  color: #d9ecff;
-  background: rgba(64, 158, 255, 0.2);
-  border: 1px solid rgba(64, 158, 255, 0.45);
-}
-
-.tag-chip-empty {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
-}
-
-.item-content {
-  margin-top: 56px;
-  flex: 1;
-  min-height: 0;
-  position: relative;
-  z-index: 1;
-}
-
-.image-preview {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.45);
-}
-
-.image-meta {
-  position: absolute;
-  right: 8px;
-  bottom: 6px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
-  color: #dcdfe6;
-  background: rgba(0, 0, 0, 0.45);
 }
 
 .status-footer {
