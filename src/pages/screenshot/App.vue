@@ -351,6 +351,7 @@ const selectedShapeId = ref(null)
 const editingElementRef = ref(null)
 const textOverlayRefMap = new Map()
 const editingBeforeText = ref('')
+const editingBeforeItem = ref(null)
 const fontFamilies = ['Arial', 'Microsoft YaHei', 'PingFang SC', 'Consolas', 'Times New Roman']
 const textStyle = reactive({
   fontFamily: 'Arial',
@@ -363,8 +364,9 @@ const textStyle = reactive({
 // 历史记录
 const history = ref([])
 const historyIndex = ref(-1)
-const emptyOverlaySnapshotCache = new Map()
-let historyRestoreVersion = 0
+let overlayCommandLog = []
+let vectorCommandLog = []
+let activeRasterCommand = null
 const regionConfirmAnchor = reactive({x: 0, y: 0, ready: false})
 
 // 窗口探测
@@ -473,6 +475,10 @@ const movingTextStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, id: 0})
 const movingShapeStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, id: 0})
 const resizingShapeStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, itemWidth: 0, itemHeight: 0, handle: '', id: 0})
 const adjustingLinePointStart = reactive({id: 0, point: 'start'})
+let movingTextBeforeItem = null
+let movingShapeBeforeItem = null
+let resizingShapeBeforeItem = null
+let adjustingLineBeforeItem = null
 
 // 样式计算
 const editorCursorClass = computed(() => {
@@ -763,6 +769,14 @@ function handleScreenshotReset() {
   longshotResultActive.value = false
   longshotRawPngBase64.value = ''
   overlayDirty.value = false
+  overlayCommandLog = []
+  vectorCommandLog = []
+  activeRasterCommand = null
+  editingBeforeItem.value = null
+  movingTextBeforeItem = null
+  movingShapeBeforeItem = null
+  resizingShapeBeforeItem = null
+  adjustingLineBeforeItem = null
   longshotViewScale.value = 1
   longshotViewOffset.x = 0
   longshotViewOffset.y = 0
@@ -1148,6 +1162,14 @@ function resetAnnotationStateForNewImage() {
   shapeItems.value = []
   history.value = []
   historyIndex.value = -1
+  overlayCommandLog = []
+  vectorCommandLog = []
+  activeRasterCommand = null
+  editingBeforeItem.value = null
+  movingTextBeforeItem = null
+  movingShapeBeforeItem = null
+  resizingShapeBeforeItem = null
+  adjustingLineBeforeItem = null
   currentDrawingSnapshot = null
   overlayDirty.value = false
 }
@@ -1369,16 +1391,36 @@ function onMouseUp(e) {
     state.value = 'selected'
   } else if (state.value === 'text-moving') {
     state.value = 'selected'
-    saveToHistory()
+    const item = textItems.value.find((entry) => entry.id === movingTextStart.id)
+    if (item && !areFlatItemsEqual(movingTextBeforeItem, item)) {
+      appendVectorUpsertCommand('text', item)
+      saveToHistory()
+    }
+    movingTextBeforeItem = null
   } else if (state.value === 'shape-moving') {
     state.value = 'selected'
-    saveToHistory()
+    const item = shapeItems.value.find((entry) => entry.id === movingShapeStart.id)
+    if (item && !areFlatItemsEqual(movingShapeBeforeItem, item)) {
+      appendVectorUpsertCommand('shape', item)
+      saveToHistory()
+    }
+    movingShapeBeforeItem = null
   } else if (state.value === 'shape-resizing') {
     state.value = 'selected'
-    saveToHistory()
+    const item = shapeItems.value.find((entry) => entry.id === resizingShapeStart.id)
+    if (item && !areFlatItemsEqual(resizingShapeBeforeItem, item)) {
+      appendVectorUpsertCommand('shape', item)
+      saveToHistory()
+    }
+    resizingShapeBeforeItem = null
   } else if (state.value === 'shape-point-moving') {
     state.value = 'selected'
-    saveToHistory()
+    const item = shapeItems.value.find((entry) => entry.id === adjustingLinePointStart.id)
+    if (item && !areFlatItemsEqual(adjustingLineBeforeItem, item)) {
+      appendVectorUpsertCommand('shape', item)
+      saveToHistory()
+    }
+    adjustingLineBeforeItem = null
   } else if (state.value === 'drawing') {
     handleCanvasMouseUp(e)
     state.value = 'selected'
@@ -1507,6 +1549,14 @@ function enterManualLongshotMode() {
   shapeItems.value = []
   history.value = []
   historyIndex.value = -1
+  overlayCommandLog = []
+  vectorCommandLog = []
+  activeRasterCommand = null
+  editingBeforeItem.value = null
+  movingTextBeforeItem = null
+  movingShapeBeforeItem = null
+  resizingShapeBeforeItem = null
+  adjustingLineBeforeItem = null
   rect.x = 0
   rect.y = 0
   rect.width = 0
@@ -1534,6 +1584,12 @@ function handleCanvasMouseDown(event) {
   if (currentTool.value === 'pen' || currentTool.value === 'mosaic') {
     ctx.beginPath()
     ctx.moveTo(drawStart.x, drawStart.y)
+    activeRasterCommand = {
+      type: currentTool.value,
+      color: currentColor.value,
+      lineWidth: Number(lineWidth.value) || 1,
+      points: [{x: drawStart.x, y: drawStart.y}]
+    }
   } else if (['line', 'arrow', 'rect', 'circle'].includes(currentTool.value)) {
     // 拖拽形状时需要保留之前的快照，以防留痕
     currentDrawingSnapshot = ctx.getImageData(0, 0, canvas.value.width, canvas.value.height)
@@ -1561,56 +1617,10 @@ function handleCanvasMouseMove(event) {
     ctx.lineCap = 'round'
     ctx.lineTo(x, y)
     ctx.stroke()
+    activeRasterCommand?.points?.push({x, y})
   } else if (currentTool.value === 'mosaic') {
-    // 马赛克处理：直接获取物理像素并打码
-    const size = lineWidth.value * 3
-    const physSize = Math.round(size * dpr)
-    const px = Math.round(x * dpr)
-    const py = Math.round(y * dpr)
-
-    // 如果没有背景底图则不处理
-    if (!screenshotImg.value) return
-
-    // 直接从原图获取颜色数据
-    const tempCanvas = document.createElement('canvas')
-    tempCanvas.width = physSize
-    tempCanvas.height = physSize
-    const tempCtx = tempCanvas.getContext('2d')
-    tempCtx.drawImage(
-        screenshotImg.value,
-        px - physSize / 2, py - physSize / 2, physSize, physSize,
-        0, 0, physSize, physSize
-    )
-
-    const imageData = tempCtx.getImageData(0, 0, physSize, physSize)
-    const data = imageData.data
-    const blockSize = Math.round(6 * dpr)
-
-    for (let i = 0; i < physSize; i += blockSize) {
-      for (let j = 0; j < physSize; j += blockSize) {
-        const pIdx = (j * physSize + i) * 4
-        if (pIdx >= data.length) continue
-        const r = data[pIdx], g = data[pIdx + 1], b = data[pIdx + 2]
-
-        for (let bi = 0; bi < blockSize && i + bi < physSize; bi++) {
-          for (let bj = 0; bj < blockSize && j + bj < physSize; bj++) {
-            const idx = ((j + bj) * physSize + (i + bi)) * 4
-            if (idx < data.length) {
-              data[idx] = r;
-              data[idx + 1] = g;
-              data[idx + 2] = b
-            }
-          }
-        }
-      }
-    }
-
-    // 将打码后的像素放回主画布 (注意需要重置scale才能使用putImageData精确对齐)
-    const oldTransform = ctx.getTransform()
-    ctx.resetTransform()
-    ctx.putImageData(imageData, px - physSize / 2, py - physSize / 2)
-    ctx.setTransform(oldTransform)
-
+    applyMosaicAtScenePoint(ctx, x, y, Number(lineWidth.value) || 1)
+    activeRasterCommand?.points?.push({x, y})
   } else if (['line', 'arrow', 'rect', 'circle'].includes(currentTool.value)) {
     // 恢复快照
     const oldTransform = ctx.getTransform()
@@ -1651,6 +1661,7 @@ function handleCanvasMouseUp(event) {
   if (currentTool.value === 'text') {
     startCreateTextItem(x, y)
     state.value = 'selected'
+    activeRasterCommand = null
     return
   }
 
@@ -1662,12 +1673,17 @@ function handleCanvasMouseUp(event) {
       ctx.setTransform(oldTransform)
       currentDrawingSnapshot = null
     }
-    createShapeItem(currentTool.value, drawStart.x, drawStart.y, x, y)
+    const createdShape = createShapeItem(currentTool.value, drawStart.x, drawStart.y, x, y)
     currentTool.value = 'select'
-    saveToHistory()
+    if (createdShape) {
+      appendVectorUpsertCommand('shape', createdShape)
+      saveToHistory()
+    }
+    activeRasterCommand = null
     return
   }
 
+  commitActiveRasterCommand()
   saveToHistory()
 }
 
@@ -1696,6 +1712,7 @@ function startEditTextItem(item) {
   editingTextId.value = item.id
   selectedTextId.value = item.id
   editingBeforeText.value = item.text
+  editingBeforeItem.value = {...item}
   currentColor.value = item.color
   lineWidth.value = Math.max(1, Math.round(item.fontSize / 8))
   textStyle.fontFamily = item.fontFamily || 'Arial'
@@ -1743,25 +1760,37 @@ function finishInlineEdit() {
   if (editingTextId.value === null) return
   const id = editingTextId.value
   const index = textItems.value.findIndex(item => item.id === id)
-  const before = editingBeforeText.value
+  const before = editingBeforeItem.value ? {...editingBeforeItem.value} : null
   if (index === -1) {
     editingTextId.value = null
     editingElementRef.value = null
     editingBeforeText.value = ''
+    editingBeforeItem.value = null
     return
   }
   const text = textItems.value[index].text.trim()
+  let shouldSave = false
   if (!text) {
     textItems.value.splice(index, 1)
     selectedTextId.value = null
+    if (before && String(before.text || '').trim()) {
+      appendVectorDeleteCommand('text', id)
+      shouldSave = true
+    }
   } else {
     textItems.value[index].text = text
     selectedTextId.value = id
+    const after = {...textItems.value[index]}
+    if (!areFlatItemsEqual(before, after)) {
+      appendVectorUpsertCommand('text', after)
+      shouldSave = true
+    }
   }
   editingTextId.value = null
   editingElementRef.value = null
   editingBeforeText.value = ''
-  if (text !== before) {
+  editingBeforeItem.value = null
+  if (shouldSave) {
     saveToHistory()
   }
 }
@@ -1770,19 +1799,20 @@ function cancelInlineEdit() {
   if (editingTextId.value === null) return
   const id = editingTextId.value
   const index = textItems.value.findIndex(item => item.id === id)
-  const before = editingBeforeText.value
+  const before = editingBeforeItem.value ? {...editingBeforeItem.value} : null
   if (index !== -1) {
-    if (!before.trim()) {
+    if (!String(before?.text || '').trim()) {
       textItems.value.splice(index, 1)
       selectedTextId.value = null
     } else {
-      textItems.value[index].text = before
+      textItems.value[index] = {...before}
       selectedTextId.value = id
     }
   }
   editingTextId.value = null
   editingElementRef.value = null
   editingBeforeText.value = ''
+  editingBeforeItem.value = null
 }
 
 function startDragTextItem(id, event) {
@@ -1797,6 +1827,7 @@ function startDragTextItem(id, event) {
   movingTextStart.itemX = item.x
   movingTextStart.itemY = item.y
   movingTextStart.id = id
+  movingTextBeforeItem = {...item}
   state.value = 'text-moving'
 }
 
@@ -1813,6 +1844,7 @@ function startDragShapeItem(id, event) {
   movingShapeStart.itemX = item.x
   movingShapeStart.itemY = item.y
   movingShapeStart.id = id
+  movingShapeBeforeItem = {...item}
   state.value = 'shape-moving'
 }
 
@@ -1831,6 +1863,7 @@ function startResizeShapeItem(id, handle, event) {
   resizingShapeStart.itemHeight = item.height
   resizingShapeStart.handle = handle
   resizingShapeStart.id = id
+  resizingShapeBeforeItem = {...item}
   state.value = 'shape-resizing'
 }
 
@@ -1886,6 +1919,7 @@ function startAdjustLineEndpoint(id, point, event) {
   selectedTextId.value = null
   adjustingLinePointStart.id = id
   adjustingLinePointStart.point = point
+  adjustingLineBeforeItem = {...item}
   state.value = 'shape-point-moving'
 }
 
@@ -1935,7 +1969,7 @@ function createShapeItem(type, fromX, fromY, toX, toY) {
   if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return
   const stroke = Math.max(1, Number(lineWidth.value) || 1)
   if (type === 'rect') {
-    shapeItems.value.push({
+    const item = {
       id: shapeItemIdSeed++,
       type,
       x: Math.min(fromX, toX),
@@ -1944,12 +1978,13 @@ function createShapeItem(type, fromX, fromY, toX, toY) {
       height: Math.max(2, Math.abs(dy)),
       color: currentColor.value,
       lineWidth: stroke
-    })
-    return
+    }
+    shapeItems.value.push(item)
+    return item
   }
   if (type === 'circle') {
     const radius = Math.sqrt(dx * dx + dy * dy)
-    shapeItems.value.push({
+    const item = {
       id: shapeItemIdSeed++,
       type,
       x: fromX - radius,
@@ -1958,8 +1993,9 @@ function createShapeItem(type, fromX, fromY, toX, toY) {
       height: Math.max(2, radius * 2),
       color: currentColor.value,
       lineWidth: stroke
-    })
-    return
+    }
+    shapeItems.value.push(item)
+    return item
   }
   const minX = Math.min(fromX, toX)
   const minY = Math.min(fromY, toY)
@@ -1970,7 +2006,7 @@ function createShapeItem(type, fromX, fromY, toX, toY) {
   const x2 = toX - minX
   const y2 = toY - minY
   const arrowHead = getArrowHeadPoints(x1, y1, x2, y2)
-  shapeItems.value.push({
+  const item = {
     id: shapeItemIdSeed++,
     type,
     x: minX,
@@ -1985,7 +2021,9 @@ function createShapeItem(type, fromX, fromY, toX, toY) {
     lineWidth: stroke,
     arrowLeft: arrowHead.left,
     arrowRight: arrowHead.right
-  })
+  }
+  shapeItems.value.push(item)
+  return item
 }
 
 function getArrowHeadPoints(fromX, fromY, toX, toY) {
@@ -2171,110 +2209,252 @@ async function copyPickedColor() {
   }
 }
 
-// 历史记录
+function cloneTextItem(item) {
+  return item ? {...item} : null
+}
+
+function cloneShapeItem(item) {
+  return item ? {...item} : null
+}
+
+function areFlatItemsEqual(a, b) {
+  if (a === b) return true
+  if (!a || !b) return false
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  for (const key of keys) {
+    if (a[key] !== b[key]) {
+      return false
+    }
+  }
+  return true
+}
+
+function appendVectorUpsertCommand(target, item) {
+  if (!item) return
+  truncateFutureHistoryForMutation()
+  vectorCommandLog.push({
+    target,
+    op: 'upsert',
+    item: target === 'text' ? cloneTextItem(item) : cloneShapeItem(item)
+  })
+}
+
+function appendVectorDeleteCommand(target, itemId) {
+  if (!itemId) return
+  truncateFutureHistoryForMutation()
+  vectorCommandLog.push({
+    target,
+    op: 'delete',
+    itemId
+  })
+}
+
+function clearOverlayCanvas(ctx) {
+  const oldTransform = ctx.getTransform()
+  ctx.resetTransform()
+  ctx.clearRect(0, 0, canvas.value.width, canvas.value.height)
+  ctx.setTransform(oldTransform)
+}
+
+function applyMosaicAtScenePoint(ctx, x, y, strokeWidth) {
+  if (!screenshotImg.value) return
+  const size = strokeWidth * 3
+  const physSize = Math.max(1, Math.round(size * dpr))
+  const px = Math.round(x * dpr)
+  const py = Math.round(y * dpr)
+  const tempCanvas = document.createElement('canvas')
+  tempCanvas.width = physSize
+  tempCanvas.height = physSize
+  const tempCtx = tempCanvas.getContext('2d')
+  if (!tempCtx) return
+  tempCtx.drawImage(
+      screenshotImg.value,
+      px - physSize / 2, py - physSize / 2, physSize, physSize,
+      0, 0, physSize, physSize
+  )
+  const imageData = tempCtx.getImageData(0, 0, physSize, physSize)
+  const data = imageData.data
+  const blockSize = Math.max(1, Math.round(6 * dpr))
+  for (let i = 0; i < physSize; i += blockSize) {
+    for (let j = 0; j < physSize; j += blockSize) {
+      const pIdx = (j * physSize + i) * 4
+      if (pIdx >= data.length) continue
+      const r = data[pIdx]
+      const g = data[pIdx + 1]
+      const b = data[pIdx + 2]
+      for (let bi = 0; bi < blockSize && i + bi < physSize; bi++) {
+        for (let bj = 0; bj < blockSize && j + bj < physSize; bj++) {
+          const idx = ((j + bj) * physSize + (i + bi)) * 4
+          if (idx < data.length) {
+            data[idx] = r
+            data[idx + 1] = g
+            data[idx + 2] = b
+          }
+        }
+      }
+    }
+  }
+  const oldTransform = ctx.getTransform()
+  ctx.resetTransform()
+  ctx.putImageData(imageData, px - physSize / 2, py - physSize / 2)
+  ctx.setTransform(oldTransform)
+}
+
+function applyRasterCommand(ctx, command) {
+  if (!command) return
+  if (command.type === 'pen') {
+    if (!Array.isArray(command.points) || command.points.length < 2) return
+    ctx.strokeStyle = command.color
+    ctx.lineWidth = command.lineWidth
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    ctx.moveTo(command.points[0].x, command.points[0].y)
+    for (let i = 1; i < command.points.length; i++) {
+      const point = command.points[i]
+      ctx.lineTo(point.x, point.y)
+    }
+    ctx.stroke()
+    return
+  }
+  if (command.type === 'mosaic') {
+    if (!Array.isArray(command.points) || command.points.length < 2) return
+    for (const point of command.points) {
+      applyMosaicAtScenePoint(ctx, point.x, point.y, command.lineWidth)
+    }
+  }
+}
+
+function replayOverlayCommands(commandCount) {
+  if (!canvas.value) return
+  const ctx = canvas.value.getContext('2d')
+  if (!ctx) return
+  clearOverlayCanvas(ctx)
+  const limit = Math.max(0, Math.min(commandCount, overlayCommandLog.length))
+  for (let i = 0; i < limit; i++) {
+    applyRasterCommand(ctx, overlayCommandLog[i])
+  }
+}
+
+function replayVectorCommands(commandCount) {
+  const textMap = new Map()
+  const shapeMap = new Map()
+  const limit = Math.max(0, Math.min(commandCount, vectorCommandLog.length))
+  for (let i = 0; i < limit; i++) {
+    const command = vectorCommandLog[i]
+    if (!command) continue
+    if (command.target === 'text') {
+      if (command.op === 'upsert' && command.item) {
+        textMap.set(command.item.id, cloneTextItem(command.item))
+      } else if (command.op === 'delete') {
+        textMap.delete(command.itemId)
+      }
+      continue
+    }
+    if (command.target === 'shape') {
+      if (command.op === 'upsert' && command.item) {
+        shapeMap.set(command.item.id, cloneShapeItem(command.item))
+      } else if (command.op === 'delete') {
+        shapeMap.delete(command.itemId)
+      }
+    }
+  }
+  textItems.value = Array.from(textMap.values())
+  shapeItems.value = Array.from(shapeMap.values())
+}
+
+function truncateFutureHistoryForMutation() {
+  if (historyIndex.value < history.value.length - 1) {
+    const currentSnapshot = history.value[historyIndex.value]
+    const keepOverlayCommandCount = currentSnapshot?.overlayCommandCount ?? 0
+    const keepVectorCommandCount = currentSnapshot?.vectorCommandCount ?? 0
+    overlayCommandLog = overlayCommandLog.slice(0, keepOverlayCommandCount)
+    vectorCommandLog = vectorCommandLog.slice(0, keepVectorCommandCount)
+    history.value = history.value.slice(0, historyIndex.value + 1)
+  }
+}
+
+function pruneHistoryWindowIfNeeded() {
+  if (history.value.length <= 50) return
+  history.value.shift()
+  historyIndex.value--
+  const keepOverlayFrom = history.value[0]?.overlayCommandCount ?? 0
+  const keepVectorFrom = history.value[0]?.vectorCommandCount ?? 0
+  if (keepOverlayFrom > 0) {
+    overlayCommandLog = overlayCommandLog.slice(keepOverlayFrom)
+  }
+  if (keepVectorFrom > 0) {
+    vectorCommandLog = vectorCommandLog.slice(keepVectorFrom)
+  }
+  if (keepOverlayFrom > 0 || keepVectorFrom > 0) {
+    history.value = history.value.map((entry) => ({
+      ...entry,
+      overlayCommandCount: Math.max(0, entry.overlayCommandCount - keepOverlayFrom),
+      vectorCommandCount: Math.max(0, (entry.vectorCommandCount || 0) - keepVectorFrom)
+    }))
+  }
+}
+
+function commitActiveRasterCommand() {
+  if (!activeRasterCommand) return false
+  const pointCount = activeRasterCommand.points?.length || 0
+  const shouldCommit = pointCount >= 2
+  if (!shouldCommit) {
+    activeRasterCommand = null
+    return false
+  }
+  truncateFutureHistoryForMutation()
+  overlayCommandLog.push({
+    type: activeRasterCommand.type,
+    color: activeRasterCommand.color,
+    lineWidth: activeRasterCommand.lineWidth,
+    points: activeRasterCommand.points.map((point) => ({x: point.x, y: point.y}))
+  })
+  activeRasterCommand = null
+  return true
+}
+
 function saveToHistory() {
   if (!canvas.value) return
-  const overlaySnapshotUrl = canvas.value.toDataURL('image/png')
-  const textSnapshot = textItems.value.map(item => ({...item}))
-  const shapeSnapshot = shapeItems.value.map(item => ({...item}))
+  truncateFutureHistoryForMutation()
   const snapshotOverlayDirty = detectOverlayDirty(
-      overlaySnapshotUrl,
-      canvas.value.width,
-      canvas.value.height,
-      textSnapshot,
-      shapeSnapshot
+      overlayCommandLog.length,
+      vectorCommandLog.length
   )
-
-  history.value = history.value.slice(0, historyIndex.value + 1)
   history.value.push({
-    overlaySnapshotUrl,
-    textItems: textSnapshot,
-    shapeItems: shapeSnapshot,
+    overlayCommandCount: overlayCommandLog.length,
+    vectorCommandCount: vectorCommandLog.length,
     overlayDirty: snapshotOverlayDirty
   })
   overlayDirty.value = snapshotOverlayDirty
   historyIndex.value = history.value.length - 1
-
-  if (history.value.length > 50) {
-    history.value.shift()
-    historyIndex.value--
-  }
+  pruneHistoryWindowIfNeeded()
 }
 
-async function undo() {
+function undo() {
   if (historyIndex.value > 0) {
     historyIndex.value--
-    await restoreFromHistory()
+    restoreFromHistory()
   }
 }
 
-async function redo() {
+function redo() {
   if (historyIndex.value < history.value.length - 1) {
     historyIndex.value++
-    await restoreFromHistory()
+    restoreFromHistory()
   }
 }
 
-function loadSnapshotImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.onload = () => resolve(img)
-    img.onerror = () => reject(new Error('历史快照加载失败'))
-    img.src = src
-  })
-}
-
-function getEmptyOverlaySnapshotUrl(width, height) {
-  const cacheKey = `${width}x${height}`
-  const cached = emptyOverlaySnapshotCache.get(cacheKey)
-  if (cached) {
-    return cached
-  }
-  const emptyCanvas = document.createElement('canvas')
-  emptyCanvas.width = width
-  emptyCanvas.height = height
-  const emptyUrl = emptyCanvas.toDataURL('image/png')
-  emptyOverlaySnapshotCache.set(cacheKey, emptyUrl)
-  return emptyUrl
-}
-
-async function restoreFromHistory() {
+function restoreFromHistory() {
   if (historyIndex.value < 0 || !history.value[historyIndex.value]) return
   const snapshot = history.value[historyIndex.value]
-  if (!canvas.value) return
-  const ctx = canvas.value.getContext('2d')
-  if (!ctx) return
-  const restoreVersion = ++historyRestoreVersion
-  const oldTransform = ctx.getTransform()
-  ctx.resetTransform()
-  ctx.clearRect(0, 0, canvas.value.width, canvas.value.height)
-  if (
-      snapshot.overlaySnapshotUrl
-      && snapshot.overlaySnapshotUrl !== getEmptyOverlaySnapshotUrl(canvas.value.width, canvas.value.height)
-  ) {
-    try {
-      const img = await loadSnapshotImage(snapshot.overlaySnapshotUrl)
-      if (restoreVersion === historyRestoreVersion) {
-        ctx.drawImage(img, 0, 0)
-      }
-    } catch (error) {
-      console.error('恢复历史快照失败:', error)
-    }
-  }
-  ctx.setTransform(oldTransform)
-  textItems.value = snapshot.textItems.map(item => ({...item}))
-  shapeItems.value = (snapshot.shapeItems || []).map(item => ({...item}))
+  replayOverlayCommands(snapshot.overlayCommandCount || 0)
+  replayVectorCommands(snapshot.vectorCommandCount || 0)
   overlayDirty.value = snapshot.overlayDirty !== false
 }
 
-function detectOverlayDirty(overlaySnapshotUrl, width, height, textSnapshot, shapeSnapshot) {
-  if ((textSnapshot?.length || 0) > 0 || (shapeSnapshot?.length || 0) > 0) {
-    return true
-  }
-  if (!overlaySnapshotUrl || width <= 0 || height <= 0) {
-    return false
-  }
-  return overlaySnapshotUrl !== getEmptyOverlaySnapshotUrl(width, height)
+function detectOverlayDirty(overlayCommandCount, vectorCommandCount) {
+  return Number(overlayCommandCount) > 0 || Number(vectorCommandCount) > 0
 }
 
 // 最终出图
