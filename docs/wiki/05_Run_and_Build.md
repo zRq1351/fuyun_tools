@@ -38,11 +38,6 @@ npm run tauri:dev
 
 - 启动完整桌面应用开发模式（前端 HMR + Rust 后端）。
 
-```bash
-npm run tauri:dev:strict-csp
-```
-
-- 使用严格 CSP 配置启动开发模式。
 
 ## 4. 构建命令
 
@@ -60,11 +55,6 @@ npm run tauri:build
 
 - 构建 Tauri 发布包（包含前端构建 + Rust release 编译 + 打包）。
 
-```bash
-npm run tauri:build:strict-csp
-```
-
-- 使用严格 CSP 配置构建发布包。
 
 产物目录（Windows）通常位于：
 
