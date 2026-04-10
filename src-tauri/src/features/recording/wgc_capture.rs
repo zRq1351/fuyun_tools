@@ -15,11 +15,18 @@ use windows_capture::settings::{
 use windows_capture::window::Window;
 
 static WGC_FORCE_DEFAULT_BORDER: AtomicBool = AtomicBool::new(false);
+static WGC_FORCE_DEFAULT_DIRTY_REGION: AtomicBool = AtomicBool::new(false);
 
 fn is_border_config_unsupported(details: &str) -> bool {
     let lower = details.to_lowercase();
     lower.contains("borderconfigunsupported")
         || lower.contains("graphicscaptureapierror(borderconfigunsupported)")
+}
+
+fn is_dirty_region_unsupported(details: &str) -> bool {
+    let lower = details.to_lowercase();
+    lower.contains("dirtyregionunsupported")
+        || lower.contains("graphicscaptureapierror(dirtyregionunsupported)")
 }
 
 pub fn bootstrap_force_default_border_from_settings(force_default: bool) {
@@ -28,8 +35,18 @@ pub fn bootstrap_force_default_border_from_settings(force_default: bool) {
     }
 }
 
+pub fn bootstrap_force_default_dirty_region_from_settings(force_default: bool) {
+    if force_default {
+        WGC_FORCE_DEFAULT_DIRTY_REGION.store(true, Ordering::Relaxed);
+    }
+}
+
 pub fn is_force_default_border_enabled() -> bool {
     WGC_FORCE_DEFAULT_BORDER.load(Ordering::Relaxed)
+}
+
+pub fn is_force_default_dirty_region_enabled() -> bool {
+    WGC_FORCE_DEFAULT_DIRTY_REGION.load(Ordering::Relaxed)
 }
 
 pub struct WgcCaptureHandle {
@@ -132,6 +149,7 @@ pub fn start_window_capture_to_mp4(
     let rect = window.rect().map_err(|e| format!("读取窗口尺寸失败: {}", e))?;
     let width = (rect.right - rect.left).max(1) as u32;
     let height = (rect.bottom - rect.top).max(1) as u32;
+    let target_id = target_id.trim().to_string();
     let stop_flag = Arc::new(AtomicBool::new(false));
     let pause_flag = Arc::new(AtomicBool::new(false));
     let first_frame_elapsed_ms = Arc::new(AtomicU64::new(u64::MAX));
@@ -158,17 +176,42 @@ pub fn start_window_capture_to_mp4(
         } else {
             DrawBorderSettings::WithoutBorder
         };
-        let settings = Settings::new(
-            window,
-            cursor_setting,
-            draw_border_setting,
-            SecondaryWindowSettings::Default,
-            MinimumUpdateIntervalSettings::Default,
-            DirtyRegionSettings::ReportAndRender,
-            ColorFormat::Bgra8,
-            flags,
-        );
-        let control = WgcCaptureHandler::start_free_threaded(settings).map_err(|e| format!("{:?}", e))?;
+        let mut dirty_region_setting = if WGC_FORCE_DEFAULT_DIRTY_REGION.load(Ordering::Relaxed) {
+            DirtyRegionSettings::Default
+        } else {
+            DirtyRegionSettings::ReportAndRender
+        };
+        let start_capture = |dirty_region_setting: DirtyRegionSettings| -> Result<_, String> {
+            let window = parse_window_target(&target_id)?;
+            let settings = Settings::new(
+                window,
+                cursor_setting,
+                draw_border_setting,
+                SecondaryWindowSettings::Default,
+                MinimumUpdateIntervalSettings::Default,
+                dirty_region_setting,
+                ColorFormat::Bgra8,
+                flags.clone(),
+            );
+            WgcCaptureHandler::start_free_threaded(settings).map_err(|e| format!("{:?}", e))
+        };
+        let control = match start_capture(dirty_region_setting) {
+            Ok(control) => control,
+            Err(details) => {
+                if dirty_region_setting != DirtyRegionSettings::Default
+                    && is_dirty_region_unsupported(&details)
+                {
+                    WGC_FORCE_DEFAULT_DIRTY_REGION.store(true, Ordering::Relaxed);
+                    log::warn!(
+                        "WGC start 命中 DirtyRegionUnsupported，当前会话与后续会话回退 DirtyRegionSettings::Default"
+                    );
+                    dirty_region_setting = DirtyRegionSettings::Default;
+                    start_capture(dirty_region_setting)?
+                } else {
+                    return Err(details);
+                }
+            }
+        };
         let mut control_opt = Some(control);
         loop {
             if stop_flag_for_thread.load(Ordering::SeqCst) {

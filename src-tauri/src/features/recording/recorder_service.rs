@@ -20,7 +20,8 @@ use crate::features::recording::types::{
     RecordingStopResult, SessionRequest, StartRecordingRequest,
 };
 use crate::features::recording::wgc_capture::{
-    bootstrap_force_default_border_from_settings, is_force_default_border_enabled, start_window_capture_to_mp4,
+    bootstrap_force_default_border_from_settings, bootstrap_force_default_dirty_region_from_settings,
+    is_force_default_border_enabled, is_force_default_dirty_region_enabled, start_window_capture_to_mp4,
 };
 use crate::sync::Mutex;
 use crate::utils::system_utils::save_settings;
@@ -90,21 +91,31 @@ fn normalize_runtime_state(runtime: &mut crate::features::recording::state::Reco
     }
 }
 
-fn persist_wgc_border_fallback_if_needed(state_arc: &Arc<Mutex<SharedAppState>>) {
-    if !is_force_default_border_enabled() {
+fn persist_wgc_capture_fallback_if_needed(state_arc: &Arc<Mutex<SharedAppState>>) {
+    let force_default_border = is_force_default_border_enabled();
+    let force_default_dirty_region = is_force_default_dirty_region_enabled();
+    if !force_default_border && !force_default_dirty_region {
         return;
     }
     let mut guard = lock_arc_mutex(state_arc);
-    if guard.settings.recording_wgc_force_default_border {
+    let mut changed = Vec::new();
+    if force_default_border && !guard.settings.recording_wgc_force_default_border {
+        guard.settings.recording_wgc_force_default_border = true;
+        changed.push("DrawBorderSettings::Default");
+    }
+    if force_default_dirty_region && !guard.settings.recording_wgc_force_default_dirty_region {
+        guard.settings.recording_wgc_force_default_dirty_region = true;
+        changed.push("DirtyRegionSettings::Default");
+    }
+    if changed.is_empty() {
         return;
     }
-    guard.settings.recording_wgc_force_default_border = true;
     let snapshot = guard.settings.clone();
     drop(guard);
     if let Err(e) = save_settings(&snapshot) {
-        log::warn!("持久化 WGC Default border 回退策略失败: {}", e);
+        log::warn!("持久化 WGC 捕获回退策略失败: {}", e);
     } else {
-        log::info!("已持久化 WGC Default border 回退策略");
+        log::info!("已持久化 WGC 捕获回退策略: {}", changed.join(", "));
     }
 }
 
@@ -1120,6 +1131,7 @@ pub fn start_recording(
         let mut window_wgc_handle = None;
         let mut window_segment_path: Option<PathBuf> = None;
         bootstrap_force_default_border_from_settings(settings_snapshot.recording_wgc_force_default_border);
+        bootstrap_force_default_dirty_region_from_settings(settings_snapshot.recording_wgc_force_default_dirty_region);
         let mut args: Vec<String> = vec![
             "-hide_banner".into(),
             "-loglevel".into(),
@@ -1289,6 +1301,7 @@ pub fn start_recording(
         let started_at_ms = runtime.started_at_ms;
         emit_recording_state_changed(app, Some(&session_id), runtime.phase.as_str(), 0);
         drop(runtime);
+        persist_wgc_capture_fallback_if_needed(&state_arc);
         if let Some(stderr) = stderr_opt {
             spawn_stderr_parser(app.clone(), runtime_arc.clone(), session_id.clone(), stderr);
         }
@@ -1461,7 +1474,7 @@ pub fn stop_recording(
             }
         }
     }
-    persist_wgc_border_fallback_if_needed(&state_arc);
+    persist_wgc_capture_fallback_if_needed(&state_arc);
     if let Some(anchor_holder) = wgc_first_frame_elapsed_ms.as_ref() {
         let anchor_ms = anchor_holder.load(Ordering::Relaxed);
         if anchor_ms == u64::MAX && fatal_error.is_none() {
@@ -1926,6 +1939,8 @@ pub fn resume_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) 
     runtime.phase = RecordingPhase::Recording;
     let snapshot = runtime.snapshot();
     emit_recording_state_changed(app, runtime.session_id.as_deref(), runtime.phase.as_str(), snapshot.elapsed_ms);
+    drop(runtime);
+    persist_wgc_capture_fallback_if_needed(&state_arc);
     Ok(())
 }
 
