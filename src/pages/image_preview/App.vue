@@ -1,5 +1,5 @@
 <template>
-  <div class="viewer-root" @click="requestClose" @contextmenu.prevent>
+  <div class="viewer-root" @click="requestClose">
     <div
         class="viewer-drag-strip"
         data-tauri-drag-region
@@ -33,13 +33,16 @@
           class="viewer-image"
           :style="imageTransformStyle"
           @dblclick.stop.prevent="resetViewTransform"
-          @error="onImageLoaded"
+          @error="onImageError"
           @load="onImageLoaded"
       />
     </div>
-    <div v-if="!isImageReady" class="viewer-loading viewer-loading-overlay">
+    <div v-if="!isImageReady && !loadErrorMessage" class="viewer-loading viewer-loading-overlay">
       <div class="viewer-loading-spinner"></div>
       <div class="viewer-loading-text">正在加载图片...</div>
+    </div>
+    <div v-if="isImageReady && loadErrorMessage" class="viewer-loading viewer-loading-overlay viewer-error">
+      <div class="viewer-loading-text">{{ loadErrorMessage }}</div>
     </div>
   </div>
 </template>
@@ -54,6 +57,7 @@ import {ImageClipboardService} from '../../services/ipc'
 const currentWindow = getCurrentWebviewWindow()
 const imageUrl = ref('')
 const isImageReady = ref(false)
+const loadErrorMessage = ref('')
 const animationState = ref('closed')
 const loadingStartedAt = ref(0)
 const activeRequestId = ref('')
@@ -145,6 +149,22 @@ const playOpenAnimation = () => {
 }
 
 const onImageLoaded = () => {
+  loadErrorMessage.value = ''
+  const elapsed = performance.now() - loadingStartedAt.value
+  const remain = Math.max(0, MIN_LOADING_MS - elapsed)
+  if (revealTimer) {
+    window.clearTimeout(revealTimer)
+  }
+  revealTimer = window.setTimeout(() => {
+    isImageReady.value = true
+    revealTimer = null
+  }, remain)
+}
+
+const onImageError = () => {
+  if (!loadErrorMessage.value) {
+    loadErrorMessage.value = '图片加载失败，路径不可访问或文件已失效'
+  }
   const elapsed = performance.now() - loadingStartedAt.value
   const remain = Math.max(0, MIN_LOADING_MS - elapsed)
   if (revealTimer) {
@@ -159,6 +179,7 @@ const onImageLoaded = () => {
 const closeWindowNow = async () => {
   imageUrl.value = ''
   isImageReady.value = false
+  loadErrorMessage.value = ''
   activeRequestId.value = ''
   resetViewTransform()
   await new Promise((resolve) => {
@@ -217,6 +238,7 @@ onMounted(async () => {
     if (payload.loading) {
       loadingStartedAt.value = performance.now()
       isImageReady.value = false
+      loadErrorMessage.value = ''
       imageUrl.value = ''
       resetViewTransform()
       playOpenAnimation()
@@ -226,6 +248,18 @@ onMounted(async () => {
     if (!keepVisible) {
       loadingStartedAt.value = performance.now()
       isImageReady.value = false
+      loadErrorMessage.value = ''
+    }
+    const payloadError = typeof payload.error_message === 'string'
+        ? payload.error_message.trim()
+        : ''
+    if (payloadError) {
+      imageUrl.value = ''
+      resetViewTransform()
+      loadErrorMessage.value = payloadError
+      onImageError()
+      playOpenAnimation()
+      return
     }
     imageUrl.value = ''
     resetViewTransform()
@@ -234,7 +268,8 @@ onMounted(async () => {
         const nextUrl = buildFileUrlFromPath(payload.image_path)
         imageUrl.value = nextUrl
         if (!nextUrl) {
-          onImageLoaded()
+          loadErrorMessage.value = '图片路径无效或不在允许目录内'
+          onImageError()
         }
       })
     })
@@ -462,6 +497,16 @@ html, body, #app {
 .viewer-loading-text {
   font-size: 13px;
   letter-spacing: 0.2px;
+}
+
+.viewer-error .viewer-loading-text {
+  max-width: min(720px, 78vw);
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 120, 120, 0.5);
+  background: rgba(60, 10, 10, 0.65);
+  color: rgba(255, 230, 230, 0.96);
+  text-align: center;
 }
 
 @keyframes viewer-spin {

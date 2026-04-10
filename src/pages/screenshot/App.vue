@@ -4,8 +4,8 @@
        @mousedown="onMouseDown"
        @mousemove="onMouseMove"
        @mouseup="onMouseUp"
-       @wheel.prevent="onMouseWheel"
-       @contextmenu.prevent="onContextMenu">
+      @wheel.prevent="onMouseWheel"
+      @contextmenu.prevent="onContextMenu">
 
     <!-- 底层截图 -->
     <img

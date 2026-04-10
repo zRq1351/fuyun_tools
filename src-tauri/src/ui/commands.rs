@@ -865,13 +865,89 @@ fn execute_open_image_preview_window_by_id(
                 let manager = lock_arc_mutex(&manager_arc);
                 manager.get_preview_image_path_by_id(&item_id)?
             };
-            show_image_preview_window(app_clone, request_id_clone, image_path)
+            let preview_path = ensure_preview_image_path_for_asset(&item_id, &image_path)?;
+            show_image_preview_window(app_clone.clone(), request_id_clone.clone(), preview_path)
         })();
         if let Err(e) = result {
             log::error!("加载预览图片失败: {}", e);
+            let _ = app_clone.emit(
+                "show-image-preview",
+                serde_json::json!({
+                    "request_id": request_id_clone,
+                    "error_message": e,
+                    "is_final": true
+                }),
+            );
         }
     });
     Ok(())
+}
+
+fn ensure_preview_image_path_for_asset(item_id: &str, image_path: &str) -> Result<String, String> {
+    let trimmed = image_path.trim();
+    if trimmed.is_empty() {
+        return Err("图片路径为空".to_string());
+    }
+    let source_path = PathBuf::from(trimmed);
+    if !source_path.exists() {
+        return Err(format!("图片文件不存在: {}", trimmed));
+    }
+    if !source_path.is_file() {
+        return Err(format!("图片路径不是文件: {}", trimmed));
+    }
+    let canonical_source = source_path
+        .canonicalize()
+        .map_err(|e| format!("规范化图片路径失败: {}", e))?;
+    let ext = canonical_source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let allowed_ext = ["png", "jpg", "jpeg", "webp", "bmp", "gif"];
+    if !allowed_ext.contains(&ext.as_str()) {
+        return Err(format!("不支持的图片格式: {}", ext));
+    }
+
+    let mut blobs_dir = std::env::current_exe()
+        .map_err(|e| format!("获取程序目录失败: {}", e))?;
+    blobs_dir.pop();
+    blobs_dir.push("image_history_blobs");
+    fs::create_dir_all(&blobs_dir).map_err(|e| format!("创建图片目录失败: {}", e))?;
+    let canonical_blobs = blobs_dir
+        .canonicalize()
+        .unwrap_or_else(|_| blobs_dir.clone());
+    if canonical_source.starts_with(&canonical_blobs) {
+        return Ok(canonical_source.to_string_lossy().to_string());
+    }
+
+    let normalized_item_id = sanitize_image_item_id(item_id);
+    let target_name = if ext.is_empty() {
+        format!("preview_external_{}.png", normalized_item_id)
+    } else {
+        format!("preview_external_{}.{}", normalized_item_id, ext)
+    };
+    let target_path = canonical_blobs.join(target_name);
+    fs::copy(&canonical_source, &target_path)
+        .map_err(|e| format!("复制预览图片到受控目录失败: {}", e))?;
+    Ok(target_path.to_string_lossy().to_string())
+}
+
+fn sanitize_image_item_id(raw: &str) -> String {
+    let sanitized: String = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "unknown".to_string()
+    } else {
+        sanitized
+    }
 }
 
 fn execute_warmup_image_clipboard_item_by_id(

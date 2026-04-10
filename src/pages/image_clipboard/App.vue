@@ -23,79 +23,31 @@
       <el-empty :image-size="100" description="暂无图片剪切板记录"/>
     </div>
 
-    <div
+    <ImageClipboardList
         v-else
-        ref="contentRef"
-        class="content"
-        @mousedown="handleContentMouseDown"
-        @scroll="handleContentScroll"
-        @wheel.prevent="handleContentWheel"
-    >
-      <div ref="leadingSpacerRef" class="virtual-spacer"></div>
-      <div
-          v-for="entry in renderedHistory"
-          :id="`image-item-${entry.index}`"
-          :key="entry.item.id"
-          :class="{ selected: selectedIndex === entry.index }"
-          class="clipboard-item"
-          :draggable="isCtrlKeyPressed"
-          @click="selectByIndex(entry.index)"
-          @dblclick="fillById(entry.item.id)"
-          @dragend="handleDragEnd"
-          @dragstart="handleDragStart($event, entry.item.id)"
-          @mouseenter="handleItemHover(entry.index)"
-          @contextmenu.prevent="showContextMenu($event, entry.item.id)"
-      >
-        <div class="delete-btn" @click.stop="deleteItem(entry.item.id, entry.index)">
-          <el-icon>
-            <Close/>
-          </el-icon>
-        </div>
-        <button class="download-btn" title="下载到目录" @click.stop="downloadItem(entry.item.id)">
-          <el-icon>
-            <Download/>
-          </el-icon>
-        </button>
-        <button class="fullscreen-btn" title="全屏预览" @click.stop="openFullscreen(entry.item.id)">
-          <el-icon>
-            <FullScreen/>
-          </el-icon>
-        </button>
-        <button :class="{ active: isPinned(entry.item.id) }" class="pin-btn" title="置顶"
-                @click.stop="promoteImageItem(entry.item.id)">
-          <Pin class="pin-lucide"/>
-        </button>
-        <div class="index-tools">
-          <div class="index">{{ entry.index + 1 }}</div>
-        </div>
-        <div class="category-wrap">
-          <div class="category-chip">{{ getItemCategory(entry.item.id) }}</div>
-        </div>
-        <div class="tag-wrap">
-          <div v-if="getItemTags(entry.item.id).length" class="tag-chip-list">
-            <span v-for="tag in getItemTags(entry.item.id)" :key="`${entry.item.id}-${tag}`" class="tag-chip">#{{
-                tag
-              }}</span>
-          </div>
-          <div v-else class="tag-chip-empty">无标签</div>
-        </div>
-        <div class="item-content">
-          <img :src="getPreviewDataUrl(entry.item)" alt="" class="image-preview" decoding="async" draggable="false"
-               loading="lazy" @dragstart.prevent/>
-          <div class="image-meta">{{ entry.item.width }} × {{ entry.item.height }}</div>
-        </div>
-      </div>
-      <div v-if="showTailLoadMoreHint" class="load-more-tail-indicator">
-        <el-icon v-if="isLoadingMore" class="load-more-tail-spinner is-loading">
-          <Loading/>
-        </el-icon>
-        <div class="load-more-tail-text">
-          <span>左滑</span>
-          <span>{{ isLoadingMore ? '加载中' : '加载更多' }}</span>
-        </div>
-      </div>
-      <div ref="trailingSpacerRef" class="virtual-spacer"></div>
-    </div>
+        ref="imageListRef"
+        :delete-item="deleteItem"
+        :download-item="downloadItem"
+        :fill-by-id="fillById"
+        :get-item-category="getItemCategory"
+        :get-item-tags="getItemTags"
+        :get-preview-data-url="getPreviewDataUrl"
+        :handle-drag-end="handleDragEnd"
+        :handle-drag-start="handleDragStart"
+        :handle-item-hover="handleItemHover"
+        :has-more="hasMore"
+        :is-ctrl-key-pressed="isCtrlKeyPressed"
+        :is-loading-page="isLoadingPage"
+        :is-pinned="isPinned"
+        :open-fullscreen="openFullscreen"
+        :promote-item="promoteImageItem"
+        :select-by-index="selectByIndex"
+        :selected-index="selectedIndex"
+        :show-context-menu="showContextMenu"
+        :visible-history="filteredHistory"
+        @content-scroll="tryLoadMoreByScroll"
+        @load-more-intent="handleLoadMoreIntent"
+    />
 
     <div class="status-footer" @click.stop @mousedown.stop>
       <div class="status-text">
@@ -155,22 +107,21 @@
 
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
-import {ArrowLeftBold, ArrowRightBold, Check, Close, Download, FullScreen, Loading} from '@element-plus/icons-vue'
-import {Pin} from 'lucide-vue-next'
+import {ArrowLeftBold, ArrowRightBold, Check} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
 import {convertFileSrc} from '@tauri-apps/api/core'
 import {open as openDialog} from '@tauri-apps/plugin-dialog'
 import {ImageCategoryService, ImageClipboardService, WindowService} from '../../services/ipc'
 import ClipboardToolbar from '../clipboard/components/ClipboardToolbar.vue'
+import ImageClipboardList from './components/ImageClipboardList.vue'
 import {useWindowOffset} from '../clipboard/composables/useWindowOffset'
 import {useContextMenuState} from '../shared/useContextMenuState'
 import {runCategoryAssignment} from '../shared/categoryActions'
 
 const containerRef = ref(null)
-const contentRef = ref(null)
+const imageListRef = ref(null)
+const contentRef = computed(() => imageListRef.value?.contentRef?.value || imageListRef.value?.contentRef || null)
 const contextMenuRef = ref(null)
-const leadingSpacerRef = ref(null)
-const trailingSpacerRef = ref(null)
 const history = ref([])
 const categoryMap = ref({})
 const tagMap = ref({})
@@ -206,14 +157,6 @@ const syncContextMenuPosition = () => {
   el.style.left = `${contextMenuX.value}px`
 }
 
-const syncVirtualSpacerWidths = () => {
-  if (leadingSpacerRef.value) {
-    leadingSpacerRef.value.style.width = `${leadingSpacerWidth.value}px`
-  }
-  if (trailingSpacerRef.value) {
-    trailingSpacerRef.value.style.width = `${trailingSpacerWidth.value}px`
-  }
-}
 const dragItemId = ref('')
 const isFilling = ref(false)
 const categoryInputOpenedAt = ref(0)
@@ -238,8 +181,6 @@ let loadMorePending = false
 let historyUpdateTimer = null
 let initialPageRetryTimer = null
 const isCtrlKeyPressed = ref(false)
-const contentScrollLeft = ref(0)
-const contentViewportWidth = ref(0)
 const loadMoreIntent = ref(false)
 const prefetchedPage = ref(null)
 const isPrefetchingPage = ref(false)
@@ -249,8 +190,6 @@ let prefetchPromise = null
 const IMAGE_ITEM_WIDTH = 250
 const IMAGE_ITEM_GAP = 8
 const IMAGE_ITEM_UNIT = IMAGE_ITEM_WIDTH + IMAGE_ITEM_GAP
-const IMAGE_TAIL_SPACER = 742
-const IMAGE_VIRTUAL_OVERSCAN = 4
 const IMAGE_PREVIEW_CACHE_MARGIN = 24
 const IMAGE_PREVIEW_CACHE_MAX_ITEMS = 300
 const ASYNC_PREVIEW_CACHE_MAX_ITEMS = 180
@@ -262,7 +201,6 @@ const tagSearchIndex = new Map()
 const itemTagSnapshot = new Map()
 const categorySearchIndex = new Map()
 const itemCategorySnapshot = new Map()
-
 const clearFilterCaches = () => {
   filterEntriesCache.clear()
   keywordTagMatchCache.clear()
@@ -495,73 +433,16 @@ const prefetchNextPage = async () => {
 const stopContentDragging = () => {
   isPointerDown = false
   isContentDragging = false
-  if (dragScrollRafId) {
-    cancelAnimationFrame(dragScrollRafId)
-    dragScrollRafId = 0
-  }
   if (contentMetricsRafId) {
     cancelAnimationFrame(contentMetricsRafId)
     contentMetricsRafId = 0
   }
   loadMorePending = false
-  if (contentRef.value) {
-    contentRef.value.classList.remove('is-dragging')
-  }
-  if (contentRef.value) {
-    contentRef.value.style.cursor = 'default'
-  }
   document.body.style.removeProperty('user-select')
-  window.removeEventListener('mousemove', handleGlobalMouseMove)
-  window.removeEventListener('mouseup', handleGlobalMouseUp, true)
   if (pendingHistorySync) {
     pendingHistorySync = false
     scheduleHistorySync(0)
   }
-}
-
-const handleGlobalMouseMove = (event) => {
-  if (!isPointerDown || !contentRef.value) return
-  const delta = event.pageX - dragStartX
-  if (!isContentDragging && Math.abs(delta) > 4) {
-    isContentDragging = true
-    contentRef.value.style.cursor = 'grabbing'
-    contentRef.value.classList.add('is-dragging')
-    document.body.style.userSelect = 'none'
-  }
-  if (isContentDragging) {
-    dragTargetScrollLeft = dragStartScrollLeft - delta
-    const maxScrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
-    if (dragTargetScrollLeft > maxScrollLeft + 36 && hasMore.value && !isLoadingPage.value) {
-      loadMoreIntent.value = true
-    }
-    if (!dragScrollRafId) {
-      dragScrollRafId = requestAnimationFrame(() => {
-        dragScrollRafId = 0
-        if (contentRef.value) {
-          contentRef.value.scrollLeft = dragTargetScrollLeft
-        }
-      })
-    }
-  }
-}
-
-const handleGlobalMouseUp = () => {
-  stopContentDragging()
-}
-
-const handleContentMouseDown = (event) => {
-  if (event.button !== 0) return
-  if (event.target.closest('.delete-btn') || event.target.closest('.download-btn') || event.target.closest('.fullscreen-btn') || event.target.closest('.pin-btn')) {
-    return
-  }
-  if (!contentRef.value) return
-  isPointerDown = true
-  isContentDragging = false
-  dragStartX = event.pageX
-  dragStartScrollLeft = contentRef.value.scrollLeft
-  dragTargetScrollLeft = dragStartScrollLeft
-  window.addEventListener('mousemove', handleGlobalMouseMove)
-  window.addEventListener('mouseup', handleGlobalMouseUp, true)
 }
 
 const handleContainerMouseDown = (event) => {
@@ -574,56 +455,24 @@ const handleContainerMouseDown = (event) => {
 
 const syncContentMetrics = () => {
   if (!contentRef.value) return
-  contentScrollLeft.value = contentRef.value.scrollLeft
-  contentViewportWidth.value = contentRef.value.clientWidth
 }
 
-const handleContentWheel = (event) => {
-  if (!contentRef.value) return
-  const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
-  const maxScrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
-  const nearEnd = contentRef.value.scrollLeft >= maxScrollLeft - 8
-  if (delta > 0 && nearEnd && hasMore.value && !isLoadingPage.value) {
-    loadMoreIntent.value = true
-  }
-  contentRef.value.scrollLeft += delta
+const handleLoadMoreIntent = () => {
+  if (!hasMore.value || isLoadingPage.value) return
+  loadMoreIntent.value = true
   void tryLoadMoreByScroll()
 }
 
-const handleContentScroll = () => {
-  if (contentRef.value) {
-    const remaining = contentRef.value.scrollWidth - contentRef.value.clientWidth - contentRef.value.scrollLeft
-    if (hasMore.value && remaining <= 160) {
-      loadMoreIntent.value = true
-    }
-  }
-  if (contentMetricsRafId) return
-  contentMetricsRafId = requestAnimationFrame(() => {
-    contentMetricsRafId = 0
-    syncContentMetrics()
-    if (!loadMorePending) {
-      loadMorePending = true
-      Promise.resolve(tryLoadMoreByScroll()).finally(() => {
-        loadMorePending = false
-      })
-    }
-  })
-
-  // 优化方案 5：滚动时批量预热前方可见区域
-  const scrollLeft = contentRef.value?.scrollLeft || 0
-  const visibleStartIndex = Math.floor(scrollLeft / IMAGE_ITEM_UNIT)
-  warmupBatch(visibleStartIndex + 3, 6) // 预热前方第 3-8 个图片
-}
-
 const tryLoadMoreByScroll = async () => {
-  if (!hasMore.value || isLoadingPage.value || !contentRef.value) return false
-  const remaining = contentRef.value.scrollWidth - contentRef.value.clientWidth - contentRef.value.scrollLeft
-  const hardReachedEnd = remaining <= 8
-  if (remaining <= 240 && (loadMoreIntent.value || hardReachedEnd)) {
+  if (!hasMore.value || isLoadingPage.value) return false
+  const container = contentRef.value
+  if (!container) return false
+  const remaining = container.scrollWidth - container.clientWidth - container.scrollLeft
+  if (remaining <= 240 && loadMoreIntent.value) {
     loadMoreIntent.value = false
-    const beforeOffset = pageOffset.value
+    const beforeLoaded = history.value.filter(Boolean).length
     await loadHistoryPage({reset: false})
-    return pageOffset.value > beforeOffset
+    return history.value.filter(Boolean).length > beforeLoaded
   }
   return false
 }
@@ -710,31 +559,9 @@ const filteredHistoryState = computed(() => {
 
 const filteredHistory = computed(() => filteredHistoryState.value.entries)
 
-const virtualRange = computed(() => {
-  const total = filteredHistoryState.value.total
-  if (total === 0) {
-    return {start: 0, end: 0}
-  }
-  const viewport = Math.max(contentViewportWidth.value, IMAGE_ITEM_UNIT)
-  const scroll = Math.max(0, contentScrollLeft.value)
-  const start = Math.max(0, Math.floor(scroll / IMAGE_ITEM_UNIT) - IMAGE_VIRTUAL_OVERSCAN)
-  const visibleCount = Math.ceil(viewport / IMAGE_ITEM_UNIT) + IMAGE_VIRTUAL_OVERSCAN * 2
-  const end = Math.min(total, start + visibleCount)
-  return {start, end}
-})
-
-const renderedHistory = computed(() => {
-  const {start, end} = virtualRange.value
-  return filteredHistory.value.slice(start, end)
-})
-
 const previewCacheKeepIds = computed(() => {
-  const total = filteredHistoryState.value.total
-  if (total === 0) return []
-  const start = Math.max(0, virtualRange.value.start - IMAGE_PREVIEW_CACHE_MARGIN)
-  const end = Math.min(total, virtualRange.value.end + IMAGE_PREVIEW_CACHE_MARGIN)
+  if (filteredHistoryState.value.total === 0) return []
   const ids = filteredHistory.value
-      .slice(start, end)
       .map((entry) => entry.item?.id)
       .filter(Boolean)
   const selectedId = history.value[selectedIndex.value]?.id
@@ -742,14 +569,6 @@ const previewCacheKeepIds = computed(() => {
     ids.push(selectedId)
   }
   return Array.from(new Set(ids))
-})
-
-const leadingSpacerWidth = computed(() => virtualRange.value.start * IMAGE_ITEM_UNIT)
-
-const trailingSpacerWidth = computed(() => {
-  const total = filteredHistoryState.value.total
-  const trailing = Math.max(0, total - virtualRange.value.end) * IMAGE_ITEM_UNIT
-  return trailing + IMAGE_TAIL_SPACER
 })
 
 const selectedStatusText = computed(() => {
@@ -769,7 +588,7 @@ const isLoadingMore = computed(() => isLoadingPage.value && filteredHistoryState
 
 const showTailLoadMoreHint = computed(() => {
   if (!(hasMore.value || isLoadingMore.value) || filteredHistoryState.value.total === 0) return false
-  return virtualRange.value.end >= filteredHistoryState.value.total
+  return true
 })
 
 const IMAGE_PAGE_SIZE_OPTIONS = [10, 30, 50]
@@ -1056,7 +875,7 @@ const scrollToEnd = async () => {
   if (!contentRef.value) return
   for (let i = 0; i < 20; i++) {
     contentRef.value.scrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
-    loadMoreIntent.value = true
+    handleLoadMoreIntent()
     const loaded = await tryLoadMoreByScroll()
     if (!hasMore.value || !loaded) {
       break
@@ -1136,7 +955,7 @@ const promoteImageItem = async (itemId) => {
     // 触发置顶事件，通知其他窗口
     const {emit} = await import('@tauri-apps/api/event')
     await emit('image-item-pinned', {itemId, pinned: shouldPin})
-    
+
   } catch (error) {
     console.error('置顶图片失败:', error)
     // 如果失败，回退到重新加载
@@ -1339,7 +1158,8 @@ const applyPayload = (data, options = {}) => {
   history.value = Array.isArray(data.history) ? data.history : []
   totalCount.value = history.value.filter(Boolean).length
   pageOffset.value = totalCount.value
-  hasMore.value = false
+  // 快照仅用于首屏快速展示，不依赖 pageSize 推断 hasMore，后续由分页接口校正。
+  hasMore.value = totalCount.value > 0
   warmedIndices.clear()
   warmingIndices.clear()
   if (typeof data.bottomOffset === 'number') {
@@ -1452,16 +1272,20 @@ const mergeImagePageIntoState = (data, reset = false) => {
   const baseOffset = Number.isFinite(data?.offset) ? Math.max(0, Number(data.offset)) : (reset ? 0 : pageOffset.value)
   if (reset) {
     clearPrefetchedPage()
-    history.value = []
-    categoryMap.value = {}
-    tagMap.value = {}
-    tagSearchIndex.clear()
-    itemTagSnapshot.clear()
-    categorySearchIndex.clear()
-    itemCategorySnapshot.clear()
-    keywordTagMatchCache.clear()
-    keywordCategoryMatchCache.clear()
-    pinnedItems.value = []
+    // reset 时保留已接收的窗口快照数据，避免“16条快照被分页首包覆盖成14条”。
+    // 仅在确实没有任何历史时才执行清空初始化。
+    if (history.value.filter(Boolean).length === 0) {
+      history.value = []
+      categoryMap.value = {}
+      tagMap.value = {}
+      tagSearchIndex.clear()
+      itemTagSnapshot.clear()
+      categorySearchIndex.clear()
+      itemCategorySnapshot.clear()
+      keywordTagMatchCache.clear()
+      keywordCategoryMatchCache.clear()
+      pinnedItems.value = []
+    }
     previewCache.clear()
     asyncPreviewCache.clear()
     warmedIndices.clear()
@@ -1481,20 +1305,44 @@ const mergeImagePageIntoState = (data, reset = false) => {
     setItemCategoryLocal(item.id, item.category || '未分类')
     setItemTagsLocal(item.id, item.tags)
   }
+
+  // 去重：将重复 ID 设为 undefined 后，重新压缩数组，去除空洞
+  const seenIds = new Set()
+  const compactedHistory = []
+  for (let i = 0; i < history.value.length; i++) {
+    const item = history.value[i]
+    if (!item) continue
+    if (!seenIds.has(item.id)) {
+      seenIds.add(item.id)
+      compactedHistory.push(item)
+    }
+  }
+  history.value = compactedHistory
+
   const pinnedSet = new Set(pinnedItems.value)
   items.forEach((row) => {
     if (row?.pinned && row.id) {
       pinnedSet.add(row.id)
     }
   })
-  const loadedItems = history.value.filter(Boolean)
+  const loadedItems = history.value // 此时已经没有空洞了
   pinnedItems.value = loadedItems
       .filter((item) => pinnedSet.has(item.id))
       .map((item) => item.id)
-  totalCount.value = Number.isFinite(data?.total) ? data.total : loadedItems.length
-  const nextOffset = (reset ? 0 : pageOffset.value) + items.length
-  pageOffset.value = nextOffset
-  hasMore.value = nextOffset < totalCount.value
+
+  const incomingTotal = Number.isFinite(data?.total) ? Number(data.total) : loadedItems.length
+  totalCount.value = Math.max(Number(totalCount.value) || 0, incomingTotal, loadedItems.length)
+
+  const nextOffset = baseOffset + items.length
+  pageOffset.value = loadedItems.length // 使用真实的 DOM 节点数量作为偏移量
+
+  // 使用后端准确的 total 边界判断，结合真实节点数量
+  if (Number.isFinite(data?.total)) {
+    hasMore.value = data.total > loadedItems.length
+  } else {
+    hasMore.value = loadedItems.length < totalCount.value
+  }
+
   if (Array.isArray(data?.categoryList)) {
     const list = data.categoryList.filter((c) => c !== '未分类' && c !== '全部')
     categories.value = ['未分类', ...Array.from(new Set(list))]
@@ -1506,12 +1354,10 @@ const mergeIncrementalPageIntoState = (data) => {
   const items = Array.isArray(data?.items) ? data.items : []
   if (items.length === 0) {
     if (Number.isFinite(data?.total)) {
-      totalCount.value = data.total
       const loadedCount = history.value.filter(Boolean).length
-      if (loadedCount > totalCount.value) {
-        history.value = history.value.slice(0, Math.max(0, totalCount.value))
-      }
-      pageOffset.value = history.value.filter(Boolean).length
+      // 增量同步阶段禁止回退到更小 total，避免短暂时序差异导致已渲染列表被截断。
+      totalCount.value = Math.max(Number(data.total), loadedCount, Number(totalCount.value) || 0)
+      pageOffset.value = loadedCount
       hasMore.value = pageOffset.value < totalCount.value
     }
     bumpFilterDataRevision()
@@ -1543,10 +1389,8 @@ const mergeIncrementalPageIntoState = (data) => {
   if (front.length === 0) return
   const rest = history.value.filter((item) => item && !incomingIds.has(item.id))
   const loadedCountBefore = history.value.filter(Boolean).length
-  const keepCount = Math.max(loadedCountBefore, Number(pageSize.value) || 10, front.length)
-  const expectedTotal = Number.isFinite(data?.total) ? Math.max(0, Number(data.total)) : loadedCountBefore
-  const maxCount = expectedTotal > 0 ? Math.min(keepCount, expectedTotal) : keepCount
-  history.value = [...front, ...rest].slice(0, maxCount)
+  // 增量同步只做“前部更新 + 其余保留”，不按 total 截断，避免出现 9 条被裁成 6 条。
+  history.value = [...front, ...rest]
 
   const pinnedSet = new Set(pinnedItems.value)
   for (const row of items) {
@@ -1563,7 +1407,9 @@ const mergeIncrementalPageIntoState = (data) => {
       .filter((id) => pinnedSet.has(id))
 
   const loadedCount = history.value.filter(Boolean).length
-  totalCount.value = Number.isFinite(data?.total) ? data.total : Math.max(totalCount.value || 0, loadedCount)
+  totalCount.value = Number.isFinite(data?.total)
+      ? Math.max(Number(data.total), loadedCount, Number(totalCount.value) || 0)
+      : Math.max(totalCount.value || 0, loadedCount)
   pageOffset.value = loadedCount
   hasMore.value = pageOffset.value < totalCount.value
   if (selectedId) {
@@ -1644,7 +1490,7 @@ const loadHistoryPage = async ({reset = false, force = false} = {}) => {
 
 const ensureInitialPageLoaded = (force = false) => {
   if (isLoadingPage.value && !force) return
-  if (history.value.filter(Boolean).length > 0) return
+  if (!force && history.value.filter(Boolean).length > 0) return
   loadHistoryPage({reset: true, force}).catch((error) => {
     console.error('初始化图片历史失败:', error)
   })
@@ -1713,7 +1559,7 @@ const handleKeydown = async (event) => {
     event.preventDefault()
     currentVisibleIndex = Math.min(visible.length - 1, currentVisibleIndex + 1)
     selectedIndex.value = visible[currentVisibleIndex].index
-    loadMoreIntent.value = true
+    handleLoadMoreIntent()
     await tryLoadMoreByScroll()
     await ensureKeyboardSelectionVisible()
   } else if (event.key === 'Enter') {
@@ -1755,6 +1601,36 @@ const handleWindowBlur = () => {
   })
 }
 
+const applyImagePayloadMeta = (payload) => {
+  if (!payload || typeof payload !== 'object') return
+  const snapshotCount = Array.isArray(payload.history)
+      ? payload.history.filter((item) => item && item.id).length
+      : 0
+  if (snapshotCount > 0) {
+    totalCount.value = Math.max(Number(totalCount.value) || 0, snapshotCount)
+    const loadedCount = history.value.filter(Boolean).length
+    pageOffset.value = Math.max(Number(pageOffset.value) || 0, loadedCount)
+    hasMore.value = pageOffset.value < totalCount.value
+  }
+  if (!isAddingCategory.value) {
+    if (payload.categories) {
+      categoryMap.value = payload.categories
+    }
+    if (payload.image_tags) {
+      tagMap.value = payload.image_tags
+    }
+    if (Array.isArray(payload.pinned_items)) {
+      pinnedItems.value = payload.pinned_items
+    }
+    if (Array.isArray(payload.category_list)) {
+      const list = payload.category_list.filter((c) => c !== '未分类' && c !== '全部')
+      categories.value = ['未分类', ...Array.from(new Set(list))]
+    }
+  }
+  rebuildFilterIndexes()
+  bumpFilterDataRevision()
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', handleWindowKeydown)
   window.addEventListener('keyup', handleWindowKeyup)
@@ -1779,7 +1655,16 @@ onMounted(async () => {
       return
     }
     if (Object.prototype.hasOwnProperty.call(payload, 'history') && Array.isArray(payload.history)) {
-      applyPayload(payload, {refocus: true})
+      // 快照先并入列表，保证首屏与当前内存态一致，再由分页接口校正。
+      mergeShowWindowPayload(payload)
+      loadMoreIntent.value = false
+      ensureInitialPageLoaded(true)
+      isVisible.value = true
+      if (!isAddingCategory.value) {
+        nextTick(() => {
+          containerRef.value?.focus()
+        })
+      }
       return
     }
     if (typeof payload.bottomOffset === 'number') {
@@ -1806,7 +1691,10 @@ onMounted(async () => {
       scheduleHistorySync(0)
       return
     }
-    applyPayload(payload)
+    applyImagePayloadMeta(payload)
+    if (Array.isArray(payload.history)) {
+      scheduleHistorySync(0)
+    }
   })
   unlistenHistoryItemAdded = await listen('image-history-item-added', (event) => {
     if (isAddingCategory.value) return
@@ -1838,7 +1726,7 @@ onMounted(async () => {
           preview_png_base64: base64
         }
       }
-      
+
     }
   })
 })
@@ -1892,8 +1780,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('keyup', handleWindowKeyup)
   window.removeEventListener('blur', handleWindowBlur)
   window.removeEventListener('resize', syncContentMetrics)
-  window.removeEventListener('mousemove', handleGlobalMouseMove)
-  window.removeEventListener('mouseup', handleGlobalMouseUp, true)
 })
 
 watch(selectedIndex, (value) => {
@@ -1921,11 +1807,6 @@ watch([contextMenuVisible, contextMenuX, contextMenuY], async ([visible]) => {
   await nextTick()
   syncContextMenuPosition()
 })
-
-watch([leadingSpacerWidth, trailingSpacerWidth], async () => {
-  await nextTick()
-  syncVirtualSpacerWidths()
-}, {immediate: true})
 
 let filterDebounceTimer = null
 watch([searchKeyword, categoryFilter], () => {
@@ -2015,11 +1896,6 @@ watch([searchKeyword, categoryFilter], () => {
   pointer-events: none;
 }
 
-.virtual-spacer {
-  flex: 0 0 auto;
-  height: 1px;
-}
-
 .load-more-tail-indicator {
   width: 56px;
   flex: 0 0 56px;
@@ -2031,6 +1907,11 @@ watch([searchKeyword, categoryFilter], () => {
   gap: 10px;
   color: rgba(166, 213, 255, 0.9);
   user-select: none;
+  pointer-events: none;
+}
+
+.tail-spacer {
+  height: 1px;
   pointer-events: none;
 }
 

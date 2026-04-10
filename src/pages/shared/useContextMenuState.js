@@ -8,6 +8,9 @@ export const useContextMenuState = (initialItem = null, positionOptions = {}) =>
     const contextMenuItem = ref(initialItem)
 
     const openContextMenu = (event, item) => {
+        if (event?.preventDefault) {
+            event.preventDefault()
+        }
         contextMenuVisible.value = true
         contextMenuItem.value = item
         const {x, y} = resolveContextMenuPosition(event, positionOptions)

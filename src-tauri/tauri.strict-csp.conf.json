@@ -1,7 +1,0 @@
-{
-  "app": {
-    "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self'; style-src-elem 'self'; style-src-attr 'none'; connect-src 'self' tauri://ipc; img-src 'self' data: asset: https://asset.localhost; font-src 'self'; object-src 'none';"
-    }
-  }
-}
