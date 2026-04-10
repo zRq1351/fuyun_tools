@@ -42,28 +42,28 @@
             <h2>{{ currentSection.label }}</h2>
             <p>{{ currentSection.description }}</p>
           </div>
-          <div v-show="activeTab === 'clipboard'">
+          <div v-if="activeTab === 'clipboard'">
             <ClipboardSettings :form="form"/>
           </div>
-          <div v-show="activeTab === 'screenshot'">
+          <div v-else-if="activeTab === 'screenshot'">
             <ScreenshotSettings :form="form"/>
           </div>
-          <div v-show="activeTab === 'recording'">
+          <div v-else-if="activeTab === 'recording'">
             <RecordingSettings :form="form"/>
           </div>
 
-          <div v-show="activeTab === 'selection'">
+          <div v-else-if="activeTab === 'selection'">
             <SelectionSettings :form="form"/>
           </div>
 
-          <div v-show="activeTab === 'ai'">
+          <div v-else-if="activeTab === 'ai'">
             <AISettings ref="aiSettingsRef" :form="form"/>
           </div>
 
-          <div v-if="isDevMode" v-show="activeTab === 'developer'">
+          <div v-else-if="isDevMode && activeTab === 'developer'">
             <DeveloperSettings/>
           </div>
-          <div v-show="activeTab === 'about'">
+          <div v-else-if="activeTab === 'about'">
             <AboutSettings
                 :current-version="currentVersion"
                 :image-toggle-shortcut="form.imageToggleShortcut"
@@ -112,6 +112,9 @@ let unlistenShortcutConflict = null
 let unlistenNavigateSettings = null
 let saveTimer = null
 let autoSaveStateResetTimer = null
+let pendingPersistSnapshot = null
+let pendingPersistVersion = 0
+let formMutationVersion = 0
 const isInitializing = ref(true)
 const isAutoSaving = ref(false)
 const suppressNextAutoSave = ref(false)
@@ -231,9 +234,7 @@ const autoSaveText = computed(() => {
 
 const currentSection = computed(() => sections.value.find((section) => section.key === activeTab.value) || sections.value[0])
 
-// 保存初始状态快照
-const saveInitialFormState = () => {
-  initialFormState.value = {
+const buildFormSnapshot = () => ({
     textMaxItems: form.textMaxItems,
     imageMaxItems: form.imageMaxItems,
     imageDiskLimitMb: form.imageDiskLimitMb,
@@ -268,142 +269,177 @@ const saveInitialFormState = () => {
     translationPromptTemplate: form.translationPromptTemplate,
     explanationPromptTemplate: form.explanationPromptTemplate,
     imageFillVerifyMode: form.imageFillVerifyMode
+})
+
+// 保存初始状态快照
+const saveInitialFormState = (snapshot = buildFormSnapshot()) => {
+  initialFormState.value = {
+    ...snapshot
   }
 }
 
 // 获取变化的字段
-const getChangedFields = () => {
+const getChangedFields = (snapshot = buildFormSnapshot()) => {
   if (!initialFormState.value) {
     return null
   }
 
   const changedFields = {}
   const initial = initialFormState.value
+  const source = snapshot
 
   // 检查每个字段是否有变化
-  if (form.textMaxItems !== initial.textMaxItems) {
-    changedFields.textMaxItems = form.textMaxItems
+  if (source.textMaxItems !== initial.textMaxItems) {
+    changedFields.textMaxItems = source.textMaxItems
   }
-  if (form.imageMaxItems !== initial.imageMaxItems) {
-    changedFields.imageMaxItems = form.imageMaxItems
+  if (source.imageMaxItems !== initial.imageMaxItems) {
+    changedFields.imageMaxItems = source.imageMaxItems
   }
-  if (form.imageDiskLimitMb !== initial.imageDiskLimitMb) {
-    changedFields.imageDiskLimitMb = form.imageDiskLimitMb
+  if (source.imageDiskLimitMb !== initial.imageDiskLimitMb) {
+    changedFields.imageDiskLimitMb = source.imageDiskLimitMb
   }
-  if (form.textClipboardEnabled !== initial.textClipboardEnabled) {
-    changedFields.textClipboardEnabled = form.textClipboardEnabled
+  if (source.textClipboardEnabled !== initial.textClipboardEnabled) {
+    changedFields.textClipboardEnabled = source.textClipboardEnabled
   }
-  if (form.imageClipboardEnabled !== initial.imageClipboardEnabled) {
-    changedFields.imageClipboardEnabled = form.imageClipboardEnabled
+  if (source.imageClipboardEnabled !== initial.imageClipboardEnabled) {
+    changedFields.imageClipboardEnabled = source.imageClipboardEnabled
   }
-  if (form.screenshotEnabled !== initial.screenshotEnabled) {
-    changedFields.screenshotEnabled = form.screenshotEnabled
+  if (source.screenshotEnabled !== initial.screenshotEnabled) {
+    changedFields.screenshotEnabled = source.screenshotEnabled
   }
-  if (form.recordingEnabled !== initial.recordingEnabled) {
-    changedFields.recordingEnabled = form.recordingEnabled
+  if (source.recordingEnabled !== initial.recordingEnabled) {
+    changedFields.recordingEnabled = source.recordingEnabled
   }
-  if (form.groupedItemsProtectedFromLimit !== initial.groupedItemsProtectedFromLimit) {
-    changedFields.groupedItemsProtectedFromLimit = form.groupedItemsProtectedFromLimit
+  if (source.groupedItemsProtectedFromLimit !== initial.groupedItemsProtectedFromLimit) {
+    changedFields.groupedItemsProtectedFromLimit = source.groupedItemsProtectedFromLimit
   }
-  if (form.toggleShortcut !== initial.toggleShortcut) {
-    changedFields.hotKey = form.toggleShortcut
+  if (source.toggleShortcut !== initial.toggleShortcut) {
+    changedFields.hotKey = source.toggleShortcut
   }
-  if (form.imageToggleShortcut !== initial.imageToggleShortcut) {
-    changedFields.imageHotKey = form.imageToggleShortcut
+  if (source.imageToggleShortcut !== initial.imageToggleShortcut) {
+    changedFields.imageHotKey = source.imageToggleShortcut
   }
-  if (form.screenshotToggleShortcut !== initial.screenshotToggleShortcut) {
-    changedFields.screenshotHotKey = form.screenshotToggleShortcut
+  if (source.screenshotToggleShortcut !== initial.screenshotToggleShortcut) {
+    changedFields.screenshotHotKey = source.screenshotToggleShortcut
   }
-  if (form.recordingToggleShortcut !== initial.recordingToggleShortcut) {
-    changedFields.recordingHotKey = form.recordingToggleShortcut
+  if (source.recordingToggleShortcut !== initial.recordingToggleShortcut) {
+    changedFields.recordingHotKey = source.recordingToggleShortcut
   }
-  if (form.recordingDefaultFps !== initial.recordingDefaultFps) {
-    changedFields.recordingDefaultFps = form.recordingDefaultFps
+  if (source.recordingDefaultFps !== initial.recordingDefaultFps) {
+    changedFields.recordingDefaultFps = source.recordingDefaultFps
   }
-  if (form.recordingDefaultVideoBitrateKbps !== initial.recordingDefaultVideoBitrateKbps) {
-    changedFields.recordingDefaultVideoBitrateKbps = form.recordingDefaultVideoBitrateKbps
+  if (source.recordingDefaultVideoBitrateKbps !== initial.recordingDefaultVideoBitrateKbps) {
+    changedFields.recordingDefaultVideoBitrateKbps = source.recordingDefaultVideoBitrateKbps
   }
-  if (form.recordingDefaultAudioBitrateKbps !== initial.recordingDefaultAudioBitrateKbps) {
-    changedFields.recordingDefaultAudioBitrateKbps = form.recordingDefaultAudioBitrateKbps
+  if (source.recordingDefaultAudioBitrateKbps !== initial.recordingDefaultAudioBitrateKbps) {
+    changedFields.recordingDefaultAudioBitrateKbps = source.recordingDefaultAudioBitrateKbps
   }
-  if (form.recordingCaptureCursor !== initial.recordingCaptureCursor) {
-    changedFields.recordingCaptureCursor = form.recordingCaptureCursor
+  if (source.recordingCaptureCursor !== initial.recordingCaptureCursor) {
+    changedFields.recordingCaptureCursor = source.recordingCaptureCursor
   }
-  if (form.recordingCaptureSystemAudio !== initial.recordingCaptureSystemAudio) {
-    changedFields.recordingCaptureSystemAudio = form.recordingCaptureSystemAudio
+  if (source.recordingCaptureSystemAudio !== initial.recordingCaptureSystemAudio) {
+    changedFields.recordingCaptureSystemAudio = source.recordingCaptureSystemAudio
   }
-  if (form.recordingCaptureMicrophone !== initial.recordingCaptureMicrophone) {
-    changedFields.recordingCaptureMicrophone = form.recordingCaptureMicrophone
+  if (source.recordingCaptureMicrophone !== initial.recordingCaptureMicrophone) {
+    changedFields.recordingCaptureMicrophone = source.recordingCaptureMicrophone
   }
-  if (form.recordingMicrophoneDeviceId !== initial.recordingMicrophoneDeviceId) {
-    changedFields.recordingMicrophoneDeviceId = form.recordingMicrophoneDeviceId
+  if (source.recordingMicrophoneDeviceId !== initial.recordingMicrophoneDeviceId) {
+    changedFields.recordingMicrophoneDeviceId = source.recordingMicrophoneDeviceId
   }
-  if (form.recordingOutputDir !== initial.recordingOutputDir) {
-    changedFields.recordingOutputDir = form.recordingOutputDir
+  if (source.recordingOutputDir !== initial.recordingOutputDir) {
+    changedFields.recordingOutputDir = source.recordingOutputDir
   }
-  if (form.recordingAutoOpenFolder !== initial.recordingAutoOpenFolder) {
-    changedFields.recordingAutoOpenFolder = form.recordingAutoOpenFolder
+  if (source.recordingAutoOpenFolder !== initial.recordingAutoOpenFolder) {
+    changedFields.recordingAutoOpenFolder = source.recordingAutoOpenFolder
   }
-  if (form.recordingToolbarContentProtected !== initial.recordingToolbarContentProtected) {
-    changedFields.recordingToolbarContentProtected = form.recordingToolbarContentProtected
+  if (source.recordingToolbarContentProtected !== initial.recordingToolbarContentProtected) {
+    changedFields.recordingToolbarContentProtected = source.recordingToolbarContentProtected
   }
-  if (form.recordingMaxDurationMinutes !== initial.recordingMaxDurationMinutes) {
-    changedFields.recordingMaxDurationMinutes = form.recordingMaxDurationMinutes
+  if (source.recordingMaxDurationMinutes !== initial.recordingMaxDurationMinutes) {
+    changedFields.recordingMaxDurationMinutes = source.recordingMaxDurationMinutes
   }
-  if (form.recordingFileNameTemplate !== initial.recordingFileNameTemplate) {
-    changedFields.recordingFileNameTemplate = form.recordingFileNameTemplate
+  if (source.recordingFileNameTemplate !== initial.recordingFileNameTemplate) {
+    changedFields.recordingFileNameTemplate = source.recordingFileNameTemplate
   }
-  if (form.recordingWindowAudioSyncAdvanceMs !== initial.recordingWindowAudioSyncAdvanceMs) {
-    changedFields.recordingWindowAudioSyncAdvanceMs = form.recordingWindowAudioSyncAdvanceMs
+  if (source.recordingWindowAudioSyncAdvanceMs !== initial.recordingWindowAudioSyncAdvanceMs) {
+    changedFields.recordingWindowAudioSyncAdvanceMs = source.recordingWindowAudioSyncAdvanceMs
   }
 
   // 处理 AI 提供商
-  let selectedProvider = form.aiProvider
+  let selectedProvider = source.aiProvider
   if (selectedProvider === 'custom') {
-    if (!form.customProviderName) {
+    if (!source.customProviderName) {
       return null
     }
-    selectedProvider = form.customProviderName
+    selectedProvider = source.customProviderName
   }
   if (selectedProvider !== initial.aiProvider && selectedProvider !== initial.customProviderName) {
     changedFields.aiProvider = selectedProvider
   }
 
-  if (form.apiUrl !== initial.apiUrl) {
-    changedFields.aiApiUrl = form.apiUrl
+  if (source.apiUrl !== initial.apiUrl) {
+    changedFields.aiApiUrl = source.apiUrl
   }
-  if (form.modelName !== initial.modelName) {
-    changedFields.aiModelName = form.modelName
+  if (source.modelName !== initial.modelName) {
+    changedFields.aiModelName = source.modelName
   }
-  if (form.apiKey !== initial.apiKey) {
-    changedFields.aiApiKey = form.apiKey
+  if (source.apiKey !== initial.apiKey) {
+    changedFields.aiApiKey = source.apiKey
   }
-  if (form.selectionEnabled !== initial.selectionEnabled) {
-    changedFields.selectionEnabled = form.selectionEnabled
+  if (source.selectionEnabled !== initial.selectionEnabled) {
+    changedFields.selectionEnabled = source.selectionEnabled
   }
-  if (form.translationPromptTemplate !== initial.translationPromptTemplate) {
-    changedFields.translationPromptTemplate = form.translationPromptTemplate
+  if (source.translationPromptTemplate !== initial.translationPromptTemplate) {
+    changedFields.translationPromptTemplate = source.translationPromptTemplate
   }
-  if (form.explanationPromptTemplate !== initial.explanationPromptTemplate) {
-    changedFields.explanationPromptTemplate = form.explanationPromptTemplate
+  if (source.explanationPromptTemplate !== initial.explanationPromptTemplate) {
+    changedFields.explanationPromptTemplate = source.explanationPromptTemplate
   }
-  if (form.imageFillVerifyMode !== initial.imageFillVerifyMode) {
-    changedFields.imageFillVerifyMode = form.imageFillVerifyMode
+  if (source.imageFillVerifyMode !== initial.imageFillVerifyMode) {
+    changedFields.imageFillVerifyMode = source.imageFillVerifyMode
   }
 
   return Object.keys(changedFields).length > 0 ? changedFields : null
 }
 
-const persistSettings = async (silent = false) => {
-  if (isInitializing.value || isAutoSaving.value) {
+const queuePersistSettings = (silent = true, delay = 450) => {
+  pendingPersistSnapshot = buildFormSnapshot()
+  pendingPersistVersion = ++formMutationVersion
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+  }
+  saveTimer = window.setTimeout(() => {
+    const snapshot = pendingPersistSnapshot
+    const version = pendingPersistVersion
+    pendingPersistSnapshot = null
+    pendingPersistVersion = 0
+    saveTimer = null
+    void persistSettings(silent, snapshot, version)
+  }, delay)
+}
+
+const persistSettings = async (
+    silent = false,
+    snapshot = buildFormSnapshot(),
+    persistVersion = ++formMutationVersion
+) => {
+  if (isInitializing.value) {
+    return
+  }
+  if (isAutoSaving.value) {
+    pendingPersistSnapshot = snapshot
+    pendingPersistVersion = Math.max(pendingPersistVersion, persistVersion)
     return
   }
 
   // 获取变化的字段
-  const changedFields = getChangedFields()
+  const changedFields = getChangedFields(snapshot)
 
   // 如果没有变化，不执行保存
   if (!changedFields) {
+    if (!pendingPersistSnapshot && getChangedFields() === null) {
+      autoSaveState.value = 'idle'
+    }
     return
   }
 
@@ -422,6 +458,7 @@ const persistSettings = async (silent = false) => {
         // 依赖缺失时先回退开关状态，避免出现“已启用但不可用”的中间态
         suppressNextAutoSave.value = true
         form.screenshotEnabled = false
+        snapshot.screenshotEnabled = false
         changedFields.screenshotEnabled = false
         await showVcRuntimeMissingWarning(runtimeStatus)
       }
@@ -433,6 +470,7 @@ const persistSettings = async (silent = false) => {
         // 依赖缺失时先回退开关状态，避免出现“已启用但不可用”的中间态
         suppressNextAutoSave.value = true
         form.recordingEnabled = false
+        snapshot.recordingEnabled = false
         changedFields.recordingEnabled = false
         try {
           await ElMessageBox.confirm(
@@ -481,6 +519,7 @@ const persistSettings = async (silent = false) => {
         }
         suppressNextAutoSave.value = true
         form.recordingEnabled = true
+        snapshot.recordingEnabled = true
         changedFields.recordingEnabled = true
         ElMessage.success('ffmpeg 下载完成，已启用录屏')
       }
@@ -491,16 +530,17 @@ const persistSettings = async (silent = false) => {
 
     // 处理自定义提供商
     if (changedFields.aiProvider) {
-      let selectedProvider = form.aiProvider
+      let selectedProvider = snapshot.aiProvider
       if (selectedProvider === 'custom') {
-        selectedProvider = form.customProviderName
+        selectedProvider = snapshot.customProviderName
       }
-      if (form.aiProvider === 'custom' && form.customProviderName === selectedProvider) {
+      if (snapshot.aiProvider === 'custom' && snapshot.customProviderName === selectedProvider) {
         if (aiSettingsRef.value) {
           suppressNextAutoSave.value = true
           await aiSettingsRef.value.loadAiProviders()
         }
         form.aiProvider = selectedProvider
+        snapshot.aiProvider = selectedProvider
       }
     }
     
@@ -510,8 +550,8 @@ const persistSettings = async (silent = false) => {
     }
     autoSaveState.value = 'saved'
 
-    // 保存成功后更新初始状态
-    saveInitialFormState()
+    // 仅使用当前成功保存的快照更新基线，避免旧请求覆盖新输入
+    saveInitialFormState(snapshot)
     
     autoSaveStateResetTimer = window.setTimeout(() => {
       if (autoSaveState.value === 'saved') {
@@ -529,6 +569,15 @@ const persistSettings = async (silent = false) => {
     autoSaveState.value = 'error'
   } finally {
     isAutoSaving.value = false
+    if (pendingPersistSnapshot && pendingPersistVersion > persistVersion) {
+      const retrySnapshot = pendingPersistSnapshot
+      const retryVersion = pendingPersistVersion
+      pendingPersistSnapshot = null
+      pendingPersistVersion = 0
+      window.setTimeout(() => {
+        void persistSettings(true, retrySnapshot, retryVersion)
+      }, 0)
+    }
   }
 }
 
@@ -758,12 +807,8 @@ watch(form, () => {
   }
   if (saveTimer) {
     clearTimeout(saveTimer)
-    saveTimer = null
   }
-  saveTimer = window.setTimeout(() => {
-    persistSettings(true)
-    saveTimer = null
-  }, 450)
+  queuePersistSettings(true, 450)
 }, {deep: true})
 
 onBeforeUnmount(() => {

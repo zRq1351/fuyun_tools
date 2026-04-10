@@ -31,6 +31,31 @@ pub fn take_allow_image_clipboard_once() -> bool {
     SCREENSHOT_ALLOW_IMAGE_CLIPBOARD_ONCE.swap(false, Ordering::SeqCst)
 }
 
+fn resolve_virtual_screen_bounds(
+    screens: &[screenshots::Screen],
+) -> Result<(i32, i32, u32, u32), String> {
+    if screens.is_empty() {
+        return Err("未检测到屏幕".to_string());
+    }
+    let mut min_x = i32::MAX;
+    let mut min_y = i32::MAX;
+    let mut max_right = i32::MIN;
+    let mut max_bottom = i32::MIN;
+    for screen in screens {
+        let info = &screen.display_info;
+        min_x = min_x.min(info.x);
+        min_y = min_y.min(info.y);
+        max_right = max_right.max(info.x.saturating_add(info.width as i32));
+        max_bottom = max_bottom.max(info.y.saturating_add(info.height as i32));
+    }
+    let width = max_right.saturating_sub(min_x).max(0) as u32;
+    let height = max_bottom.saturating_sub(min_y).max(0) as u32;
+    if width == 0 || height == 0 {
+        return Err("虚拟桌面尺寸无效".to_string());
+    }
+    Ok((min_x, min_y, width, height))
+}
+
 /// 捕获指定区域的屏幕截图
 ///
 /// # Arguments
@@ -167,18 +192,37 @@ pub fn capture_full_screen() -> Result<(Vec<u8>, u32, u32, i32, i32), String> {
         return Err("未检测到屏幕".to_string());
     }
 
-    let screen = screens.first()
-        .ok_or_else(|| "无法获取主屏幕".to_string())?;
-    let image = screen.capture()
-        .map_err(|e| format!("捕获全屏失败: {}", e))?;
+    let (origin_x, origin_y, width, height) = resolve_virtual_screen_bounds(&screens)?;
+    let mut rgba_data = vec![0_u8; (width as usize) * (height as usize) * 4];
 
-    let width = image.width();
-    let height = image.height();
-    let rgba_data = image.to_vec();
-    let origin_x = screen.display_info.x;
-    let origin_y = screen.display_info.y;
+    for screen in &screens {
+        let image = screen
+            .capture()
+            .map_err(|e| format!("捕获全屏失败: {}", e))?;
+        let screen_width = image.width() as usize;
+        let screen_height = image.height() as usize;
+        let offset_x = (screen.display_info.x - origin_x).max(0) as usize;
+        let offset_y = (screen.display_info.y - origin_y).max(0) as usize;
+        let src = image.as_raw();
+        for row in 0..screen_height {
+            let src_start = row * screen_width * 4;
+            let src_end = src_start + screen_width * 4;
+            let dest_row = offset_y + row;
+            let dest_start = (dest_row * width as usize + offset_x) * 4;
+            let dest_end = dest_start + screen_width * 4;
+            if src_end <= src.len() && dest_end <= rgba_data.len() {
+                rgba_data[dest_start..dest_end].copy_from_slice(&src[src_start..src_end]);
+            }
+        }
+    }
 
-    log::info!("全屏截图成功: {}x{}, origin=({}, {})", width, height, origin_x, origin_y);
+    log::info!(
+        "全屏截图成功(虚拟桌面): {}x{}, origin=({}, {})",
+        width,
+        height,
+        origin_x,
+        origin_y
+    );
 
     Ok((rgba_data, width, height, origin_x, origin_y))
 }
@@ -191,15 +235,8 @@ pub fn get_screen_size() -> Result<(u32, u32), String> {
     let screens = screenshots::Screen::all()
         .map_err(|e| format!("获取屏幕列表失败: {}", e))?;
 
-    if screens.is_empty() {
-        return Err("未检测到屏幕".to_string());
-    }
-
-    let screen = screens.first()
-        .ok_or_else(|| "无法获取主屏幕".to_string())?;
-    let display_info = &screen.display_info;
-
-    Ok((display_info.width, display_info.height))
+    let (_, _, width, height) = resolve_virtual_screen_bounds(&screens)?;
+    Ok((width, height))
 }
 
 /// 将RGBA数据转换为PNG Base64字符串

@@ -169,8 +169,8 @@ fn extract_sample_points(rgba: &[u8], width: u32, height: u32) -> [u8; SAMPLE_PO
     sample
 }
 
-// 快速去重检查：检查是否与最近的图片重复
-fn is_duplicate_recent(width: u32, height: u32, rgba: &[u8]) -> bool {
+// 快速去重检查：仅作为粗筛提示，真正是否重复仍以后续完整签名判断为准。
+fn matches_recent_sample(width: u32, height: u32, rgba: &[u8]) -> bool {
     let sample = extract_sample_points(rgba, width, height);
     let recent = RECENT_IMAGE_SAMPLES.lock();
 
@@ -179,8 +179,8 @@ fn is_duplicate_recent(width: u32, height: u32, rgba: &[u8]) -> bool {
         if *recent_width == width && *recent_height == height {
             // 比较采样点
             if recent_sample == &sample {
-                log::info!("[重复检查] 图片 {}x{} 与最近第 {} 张图片重复", width, height, idx + 1);
-                return true; // 重复
+                log::info!("[重复检查] 图片 {}x{} 与最近第 {} 张图片采样命中，继续执行强签名校验", width, height, idx + 1);
+                return true;
             }
         }
     }
@@ -248,18 +248,14 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, w
                     );
                     continue;
                 }
-                // 检查是否与最近图片重复
-                if is_duplicate_recent(task.width, task.height, &task.rgba) {
-                    IMAGE_QUEUE_METRICS
-                        .dropped_duplicate
-                        .fetch_add(1, Ordering::Relaxed);
-                    log::info!(
-                        "[处理线程-{}] 图片被跳过（重复）: {}x{}",
+                // 快速采样仅作粗筛，不能直接丢图；真正去重交给后续完整签名。
+                if matches_recent_sample(task.width, task.height, &task.rgba) {
+                    log::debug!(
+                        "[处理线程-{}] 图片采样命中，进入强签名去重: {}x{}",
                         worker_id,
                         task.width,
                         task.height
                     );
-                    continue;
                 }
 
                 log::info!(
@@ -495,4 +491,3 @@ pub fn set_image_clipboard_listener_enabled(
         stop_image_clipboard_listener();
     }
 }
-

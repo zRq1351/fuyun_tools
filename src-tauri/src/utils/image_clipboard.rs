@@ -871,22 +871,6 @@ impl ImageClipboardManager {
         // 阶段 2：计算签名
         let signature = compute_signature(&rgba, width, height);
         let id = generate_item_id(&signature);
-
-        // 优化：所有图片都使用异步生成预览，不阻塞主线程
-        let preview_task = PreviewGenerationTask {
-            item_id: id.clone(),
-            rgba: Arc::new(rgba.clone()),
-            width,
-            height,
-        };
-        let generator = PREVIEW_GENERATOR
-            .lock()
-            .expect("infallible mutex lock failed");
-        generator.submit_task(preview_task);
-        log::debug!("已提交异步预览生成任务: {} ({}x{})", id, width, height);
-
-        // 立即返回，预览由异步任务生成
-        
         let blob_ext = source_blob.as_ref().map(|(_, ext)| ext.as_str()).unwrap_or(
             "webp",
         );
@@ -984,6 +968,20 @@ impl ImageClipboardManager {
         };
 
         let rgba_arc = Arc::new(rgba);
+        if new_item_compact.is_some() {
+            // 仅当强签名确认插入为新图片后，才异步生成预览，避免重复图白白占用编码/I/O 队列。
+            let preview_task = PreviewGenerationTask {
+                item_id: id.clone(),
+                rgba: rgba_arc.clone(),
+                width,
+                height,
+            };
+            let generator = PREVIEW_GENERATOR
+                .lock()
+                .expect("infallible mutex lock failed");
+            generator.submit_task(preview_task);
+            log::debug!("已提交异步预览生成任务: {} ({}x{})", id, width, height);
+        }
         {
             let mut pending = lock_arc_mutex(&self.pending_images);
             pending.insert(

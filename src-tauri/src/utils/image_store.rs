@@ -730,6 +730,32 @@ pub async fn load_history_page_async(
     let keyword_like = keyword_filter.as_ref().map(|v| format!("%{}%", v));
     let effective_limit = limit.clamp(1, 200);
     let fetch_limit = effective_limit.saturating_add(1);
+    let total: i64 = sqlx::query_scalar(
+        "
+        SELECT COUNT(*)
+        FROM image_items hi
+        LEFT JOIN image_categories c ON c.item_id = hi.item_id
+        LEFT JOIN image_pinned p ON p.item_id = hi.item_id
+        WHERE
+          (?1 IS NULL OR COALESCE(c.category, '未分类') = ?1)
+          AND (?2 = 0 OR p.item_id IS NOT NULL)
+          AND (
+            ?3 IS NULL
+            OR LOWER(COALESCE(c.category, '未分类')) LIKE ?3
+            OR EXISTS (
+                SELECT 1 FROM image_tags t
+                WHERE t.item_id = hi.item_id
+                  AND LOWER(t.tag) LIKE ?3
+            )
+          )
+        ",
+    )
+        .bind(category_filter.as_deref())
+        .bind(pinned_flag)
+        .bind(keyword_like.as_deref())
+        .fetch_one(conn.as_mut())
+        .await
+        .map_err(|e| format!("读取图片历史总数失败: {}", e))?;
     let query_sql = format!(
         "
         SELECT
@@ -784,7 +810,6 @@ pub async fn load_history_page_async(
         .fetch_all(conn.as_mut())
         .await
         .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-    let has_more = rows.len() > effective_limit;
     let items = rows
         .into_iter()
         .take(effective_limit)
@@ -818,11 +843,7 @@ pub async fn load_history_page_async(
     let category_list = load_category_list_cached(conn.as_mut()).await?;
 
     Ok(ImageHistoryPageData {
-        total: if has_more {
-            offset.saturating_add(effective_limit).saturating_add(1)
-        } else {
-            offset.saturating_add(items.len())
-        },
+        total: total.max(0) as usize,
         offset,
         limit: effective_limit,
         items,

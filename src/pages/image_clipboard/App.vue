@@ -164,6 +164,7 @@ const previewCache = new Map()
 const asyncPreviewCache = new Map()
 const warmedIndices = new Set()
 const warmingIndices = new Set()
+const pendingWarmupItemIds = new Set()
 let unlistenShowWindow = null
 let unlistenItemPromoted = null
 let unlistenHistoryPayloadUpdated = null
@@ -172,6 +173,8 @@ let unlistenPreviewReady = null
 let pendingHistorySync = false
 let historyUpdateTimer = null
 let initialPageRetryTimer = null
+let warmupBatchTimer = null
+let warmupBatchInFlight = null
 const isCtrlKeyPressed = ref(false)
 const loadMoreIntent = ref(false)
 const prefetchedPage = ref(null)
@@ -453,6 +456,27 @@ const tryLoadMoreByScroll = async () => {
     return history.value.filter(Boolean).length > beforeLoaded
   }
   return false
+}
+
+const loadTailPage = async () => {
+  if (!hasMore.value || isLoadingPage.value) return false
+  const exactTotal = Math.max(Number(totalCount.value) || 0, history.value.filter(Boolean).length)
+  const targetOffset = Math.max(0, exactTotal - (Number(pageSize.value) || 10))
+  if (targetOffset <= 0 && history.value.filter(Boolean).length >= exactTotal) {
+    return false
+  }
+  clearPrefetchedPage()
+  const data = await ImageClipboardService.getHistoryPage({
+    offset: targetOffset,
+    limit: pageSize.value,
+    category: categoryFilter.value === '全部' ? null : categoryFilter.value,
+    keyword: searchKeyword.value.trim() || null,
+    pinnedOnly: false,
+    sortBy: sortBy.value,
+    sortOrder: sortOrder.value
+  })
+  mergeImagePageIntoState(data, false)
+  return true
 }
 
 const ensureKeyboardSelectionVisible = async () => {
@@ -772,58 +796,62 @@ const selectByIndex = (index) => {
   warmupAround(index)
 }
 
-const warmupOne = (index) => {
+const enqueueWarmupByIndex = (index) => {
   if (index < 0 || index >= history.value.length) return
-  if (warmedIndices.has(index) || warmingIndices.has(index)) return
-  warmingIndices.add(index)
   const itemId = history.value[index]?.id
-  if (!itemId) {
-    warmingIndices.delete(index)
-    return
-  }
-  const warmupTask = ImageClipboardService.warmupItemById(itemId)
-  warmupTask
-      .then(() => {
-        warmedIndices.add(index)
-      })
-      .catch(() => {
-      })
-      .finally(() => {
-        warmingIndices.delete(index)
-      })
+  if (!itemId || warmedIndices.has(itemId) || warmingIndices.has(itemId)) return
+  pendingWarmupItemIds.add(itemId)
 }
 
-// 优化方案 5：批量预热前方多个图片
-let warmupBatchTimer = null
-const warmupBatch = (startIndex, count = 6) => {
+const flushWarmupBatch = async () => {
+  if (warmupBatchInFlight) return warmupBatchInFlight
+  const itemIds = Array.from(pendingWarmupItemIds).filter(
+      (itemId) => itemId && !warmedIndices.has(itemId) && !warmingIndices.has(itemId)
+  )
+  pendingWarmupItemIds.clear()
+  if (itemIds.length === 0) return null
+  itemIds.forEach((itemId) => warmingIndices.add(itemId))
+  warmupBatchInFlight = ImageClipboardService.warmupMultipleItems(itemIds)
+      .then(() => {
+        itemIds.forEach((itemId) => warmedIndices.add(itemId))
+      })
+      .catch((error) => {
+        console.error('批量预热失败:', error)
+      })
+      .finally(() => {
+        itemIds.forEach((itemId) => warmingIndices.delete(itemId))
+        warmupBatchInFlight = null
+        if (pendingWarmupItemIds.size > 0) {
+          void flushWarmupBatch()
+        }
+      })
+  return warmupBatchInFlight
+}
+
+const scheduleWarmupBatch = (delay = 80) => {
   if (warmupBatchTimer) {
     clearTimeout(warmupBatchTimer)
   }
-  warmupBatchTimer = setTimeout(async () => {
-    const itemIds = []
-    for (let i = startIndex; i < Math.min(startIndex + count, history.value.length); i++) {
-      const itemId = history.value[i]?.id
-      if (itemId && !warmedIndices.has(i) && !warmingIndices.has(i)) {
-        itemIds.push(itemId)
-      }
-    }
-    if (itemIds.length > 0) {
-      try {
-        await ImageClipboardService.warmupMultipleItems(itemIds)
-        for (let i = startIndex; i < Math.min(startIndex + count, history.value.length); i++) {
-          warmedIndices.add(i)
-        }
-      } catch (error) {
-        console.error('批量预热失败:', error)
-      }
-    }
-  }, 100) // 100ms 防抖
+  warmupBatchTimer = setTimeout(() => {
+    warmupBatchTimer = null
+    void flushWarmupBatch()
+  }, delay)
+}
+
+const warmupOne = (index) => {
+  enqueueWarmupByIndex(index)
+  scheduleWarmupBatch(60)
+}
+
+const warmupBatch = (startIndex, count = 6) => {
+  for (let i = startIndex; i < Math.min(startIndex + count, history.value.length); i++) {
+    enqueueWarmupByIndex(i)
+  }
+  scheduleWarmupBatch(80)
 }
 
 const warmupAround = (index) => {
-  warmupOne(index - 1)
-  warmupOne(index)
-  warmupOne(index + 1)
+  warmupBatch(Math.max(0, index - 1), 3)
 }
 
 const handleItemHover = (index) => {
@@ -843,14 +871,16 @@ const scrollToStart = async () => {
 
 const scrollToEnd = async () => {
   if (!contentRef.value) return
-  for (let i = 0; i < 20; i++) {
-    contentRef.value.scrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
-    handleLoadMoreIntent()
-    const loaded = await tryLoadMoreByScroll()
-    if (!hasMore.value || !loaded) {
-      break
+  contentRef.value.scrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+  if (hasMore.value) {
+    try {
+      await loadTailPage()
+      await nextTick()
+    } catch (error) {
+      console.error('加载图片尾页失败:', error)
+      await syncHistory()
+      await nextTick()
     }
-    await nextTick()
   }
   if (filteredHistory.value.length > 0) {
     const lastIndex = filteredHistory.value[filteredHistory.value.length - 1].index
