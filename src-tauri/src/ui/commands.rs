@@ -1025,9 +1025,10 @@ fn execute_select_and_fill_image_by_id(
                 app_handle, &image,
             )?;
             let _ = app_handle.emit(
-                "image-item-promoted",
+                "image-item-pinned",
                 serde_json::json!({
                     "itemId": item_id,
+                    "pinned": true,
                 }),
             );
             if fast_mode {

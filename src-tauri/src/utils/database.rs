@@ -674,6 +674,10 @@ pub async fn clear_all_history() -> Result<(), String> {
         .execute(&mut *tx)
         .await
         .map_err(|e| format!("清空分类失败: {}", e))?;
+    sqlx::query("DELETE FROM category_list")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("清空分类列表失败: {}", e))?;
     sqlx::query("DELETE FROM pinned_items")
         .execute(&mut *tx)
         .await
@@ -1174,6 +1178,27 @@ pub async fn remove_category_from_list(category: &str) -> Result<(), String> {
         .await
         .map_err(|e| format!("删除分类失败: {}", e))?;
 
+    Ok(())
+}
+
+/// 从映射表与分类列表同时删除指定分类（增量操作）
+pub async fn remove_category_everywhere(category: &str) -> Result<(), String> {
+    let mut conn = open_history_db_async().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
+
+    sqlx::query("DELETE FROM categories WHERE category = ?")
+        .bind(category)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("删除分类映射失败: {}", e))?;
+
+    sqlx::query("DELETE FROM category_list WHERE category = ?")
+        .bind(category)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("删除分类失败: {}", e))?;
+
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 

@@ -8,11 +8,11 @@
   >
     <div
         v-for="(entry, index) in visibleHistory"
-        :id="'clipboard-item-' + index"
-        :key="index"
-        v-memo="[entry.content, index, selectedIndex, getItemCategory(entry.content), isPinned(entry.content), entry.snippet]"
+        :id="'clipboard-item-' + entry.index"
+        :key="entry.index"
+        v-memo="[entry.content, entry.index, selectedIndex, getItemCategory(entry.content), isPinned(entry.content), entry.snippet]"
         class="clipboard-item"
-        :class="{ selected: selectedIndex === index }"
+        :class="{ selected: selectedIndex === entry.index }"
         @click="handleClick(entry.index)"
         @dblclick="handleDoubleClick(entry.index)"
         @contextmenu.prevent="showContextMenu($event, entry.content, index)"

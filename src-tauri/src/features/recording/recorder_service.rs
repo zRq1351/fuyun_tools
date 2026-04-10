@@ -119,6 +119,39 @@ fn persist_wgc_capture_fallback_if_needed(state_arc: &Arc<Mutex<SharedAppState>>
     }
 }
 
+fn finalize_auto_stop_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>, session_id: String) {
+    let request = SessionRequest {
+        session_id: Some(session_id.clone()),
+    };
+    match stop_recording(app, state_arc.clone(), request.clone()) {
+        Ok(_) => {
+            let auto_open_folder = {
+                let guard = lock_arc_mutex(&state_arc);
+                guard.settings.recording_auto_open_folder
+            };
+            if auto_open_folder {
+                if let Err(e) = open_recording_folder(app, state_arc.clone()) {
+                    log::warn!("自动停止后打开录制目录失败: {}", e);
+                }
+            }
+        }
+        Err(stop_err) => {
+            let stop_msg = stop_err.to_string();
+            match cancel_recording(app, state_arc, request) {
+                Ok(()) => {
+                    log::warn!("自动停止收尾失败，已执行 cancel_recording 兜底清理: {}", stop_msg);
+                    emit_recording_error(app, Some(session_id.as_str()), RECORDING_PROCESS_EXITED, &stop_msg);
+                }
+                Err(cancel_err) => {
+                    let merged = format!("{}；自动兜底清理失败: {}", stop_msg, cancel_err);
+                    log::warn!("自动停止收尾与兜底清理均失败: {}", merged);
+                    emit_recording_error(app, Some(session_id.as_str()), RECORDING_PROCESS_EXITED, &merged);
+                }
+            }
+        }
+    }
+}
+
 // check_system_audio_capability removed in native WASAPI mode
 
 fn now_unix_ms() -> i64 {
@@ -937,10 +970,14 @@ fn spawn_stderr_parser(
     });
 }
 
-fn spawn_stats_loop(app: AppHandle, runtime_arc: Arc<Mutex<crate::features::recording::state::RecordingRuntime>>) {
+fn spawn_stats_loop(
+    app: AppHandle,
+    state_arc: Arc<Mutex<SharedAppState>>,
+    runtime_arc: Arc<Mutex<crate::features::recording::state::RecordingRuntime>>,
+) {
     thread::spawn(move || loop {
         let mut emit_error: Option<(&'static str, String, Option<String>)> = None;
-        let mut emit_finished: Option<RecordingStopResult> = None;
+        let mut auto_stop_session_id: Option<String> = None;
         let (
             phase,
             session_id,
@@ -963,11 +1000,7 @@ fn spawn_stats_loop(app: AppHandle, runtime_arc: Arc<Mutex<crate::features::reco
                 runtime.auto_stop_requested = true;
                 runtime.phase = RecordingPhase::Stopping;
                 phase = RecordingPhase::Stopping;
-                if let Some(process) = runtime.process.as_mut() {
-                    if let Some(stdin) = process.stdin.as_mut() {
-                        let _ = stdin.write_all(b"q\n");
-                    }
-                }
+                auto_stop_session_id = session_id.clone();
                 emit_error = Some((
                     MAX_DURATION_REACHED,
                     "已达到最大录制时长，自动停止录制".to_string(),
@@ -978,26 +1011,10 @@ fn spawn_stats_loop(app: AppHandle, runtime_arc: Arc<Mutex<crate::features::reco
             if let Some(process) = runtime.process.as_mut() {
                 if let Ok(Some(status)) = process.try_wait() {
                     runtime.process = None;
-                    if runtime.auto_stop_requested {
-                        if let (Some(tmp), Some(final_path)) =
-                            (runtime.output_path_tmp.clone(), runtime.output_path_final.clone())
-                        {
-                            if final_path.exists() {
-                                let _ = fs::remove_file(&final_path);
-                            }
-                            if fs::rename(&tmp, &final_path).is_ok() {
-                                let finished = RecordingStopResult {
-                                    session_id: session_id.clone().unwrap_or_default(),
-                                    output_path: final_path.to_string_lossy().to_string(),
-                                    duration_ms: runtime.snapshot().elapsed_ms,
-                                    file_size_bytes: fs::metadata(&final_path).map(|m| m.len()).unwrap_or(0),
-                                };
-                                emit_finished = Some(finished);
-                                runtime.reset_to_idle();
-                                phase = RecordingPhase::Idle;
-                            }
-                        }
-                    } else if phase != RecordingPhase::Idle && phase != RecordingPhase::Stopping {
+                    if !runtime.auto_stop_requested
+                        && phase != RecordingPhase::Idle
+                        && phase != RecordingPhase::Stopping
+                    {
                         let err_msg = build_exit_error_with_stderr(status.to_string(), &runtime);
                         runtime.last_error = Some(err_msg.clone());
                         runtime.phase = RecordingPhase::Error;
@@ -1024,8 +1041,12 @@ fn spawn_stats_loop(app: AppHandle, runtime_arc: Arc<Mutex<crate::features::reco
         if let Some((code, message, sid)) = emit_error {
             emit_recording_error(&app, sid.as_deref(), code, message.as_str());
         }
-        if let Some(result) = emit_finished {
-            emit_recording_finished(&app, &result);
+        if let Some(session_id) = auto_stop_session_id.clone() {
+            let app_clone = app.clone();
+            let state_clone = state_arc.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                finalize_auto_stop_recording(&app_clone, state_clone, session_id);
+            });
         }
         if phase == RecordingPhase::Idle || phase == RecordingPhase::Error {
             break;
@@ -1305,7 +1326,7 @@ pub fn start_recording(
         if let Some(stderr) = stderr_opt {
             spawn_stderr_parser(app.clone(), runtime_arc.clone(), session_id.clone(), stderr);
         }
-        spawn_stats_loop(app.clone(), runtime_arc.clone());
+        spawn_stats_loop(app.clone(), state_arc.clone(), runtime_arc.clone());
 
         Ok(RecordingSessionInfo {
             session_id,
@@ -1348,7 +1369,11 @@ pub fn stop_recording(
         audio_segment_paths,
     ) = {
         let mut runtime = lock_arc_mutex(&runtime_arc);
-        if runtime.phase != RecordingPhase::Recording && runtime.phase != RecordingPhase::Paused {
+        let allow_auto_stop_finalize = runtime.phase == RecordingPhase::Stopping && runtime.auto_stop_requested;
+        if runtime.phase != RecordingPhase::Recording
+            && runtime.phase != RecordingPhase::Paused
+            && !allow_auto_stop_finalize
+        {
             return Err(AppError::new(ErrorCode::ValidationError, "当前没有正在进行的录制任务"));
         }
         if let Some(ref expected) = request.session_id {

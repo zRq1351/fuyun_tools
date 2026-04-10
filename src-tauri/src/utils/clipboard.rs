@@ -380,7 +380,7 @@ impl ClipboardManager {
             category_list.retain(|c| c != &category);
             categories.retain(|_, v| v != &category);
         }
-        crate::utils::database::remove_category_from_list(&category).await?;
+        crate::utils::database::remove_category_everywhere(&category).await?;
         Ok(())
     }
 

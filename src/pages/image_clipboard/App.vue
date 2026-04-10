@@ -1664,9 +1664,14 @@ onMounted(async () => {
     if (isAddingCategory.value) return
     mergeIncrementalImageItem(event?.payload?.item)
   })
-  unlistenItemPromoted = await listen('image-item-promoted', (event) => {
+  unlistenItemPromoted = await listen('image-item-pinned', (event) => {
     const itemId = event?.payload?.itemId
-    promoteLocalItemToTop(itemId)
+    const pinned = event?.payload?.pinned !== false
+    if (pinned) {
+      promoteLocalItemToTop(itemId)
+    } else {
+      demoteLocalItemFromTop(itemId)
+    }
   })
 
   // 监听预览就绪事件
