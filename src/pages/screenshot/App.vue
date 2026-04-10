@@ -363,6 +363,8 @@ const textStyle = reactive({
 // 历史记录
 const history = ref([])
 const historyIndex = ref(-1)
+const emptyOverlaySnapshotCache = new Map()
+let historyRestoreVersion = 0
 const regionConfirmAnchor = reactive({x: 0, y: 0, ready: false})
 
 // 窗口探测
@@ -2172,18 +2174,20 @@ async function copyPickedColor() {
 // 历史记录
 function saveToHistory() {
   if (!canvas.value) return
-  const ctx = canvas.value.getContext('2d')
-  const oldTransform = ctx.getTransform()
-  ctx.resetTransform()
-  const imageData = ctx.getImageData(0, 0, canvas.value.width, canvas.value.height)
-  ctx.setTransform(oldTransform)
+  const overlaySnapshotUrl = canvas.value.toDataURL('image/png')
   const textSnapshot = textItems.value.map(item => ({...item}))
   const shapeSnapshot = shapeItems.value.map(item => ({...item}))
-  const snapshotOverlayDirty = detectOverlayDirty(imageData, textSnapshot, shapeSnapshot)
+  const snapshotOverlayDirty = detectOverlayDirty(
+      overlaySnapshotUrl,
+      canvas.value.width,
+      canvas.value.height,
+      textSnapshot,
+      shapeSnapshot
+  )
 
   history.value = history.value.slice(0, historyIndex.value + 1)
   history.value.push({
-    imageData,
+    overlaySnapshotUrl,
     textItems: textSnapshot,
     shapeItems: shapeSnapshot,
     overlayDirty: snapshotOverlayDirty
@@ -2197,51 +2201,80 @@ function saveToHistory() {
   }
 }
 
-function undo() {
+async function undo() {
   if (historyIndex.value > 0) {
     historyIndex.value--
-    restoreFromHistory()
+    await restoreFromHistory()
   }
 }
 
-function redo() {
+async function redo() {
   if (historyIndex.value < history.value.length - 1) {
     historyIndex.value++
-    restoreFromHistory()
+    await restoreFromHistory()
   }
 }
 
-function restoreFromHistory() {
+function loadSnapshotImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('历史快照加载失败'))
+    img.src = src
+  })
+}
+
+function getEmptyOverlaySnapshotUrl(width, height) {
+  const cacheKey = `${width}x${height}`
+  const cached = emptyOverlaySnapshotCache.get(cacheKey)
+  if (cached) {
+    return cached
+  }
+  const emptyCanvas = document.createElement('canvas')
+  emptyCanvas.width = width
+  emptyCanvas.height = height
+  const emptyUrl = emptyCanvas.toDataURL('image/png')
+  emptyOverlaySnapshotCache.set(cacheKey, emptyUrl)
+  return emptyUrl
+}
+
+async function restoreFromHistory() {
   if (historyIndex.value < 0 || !history.value[historyIndex.value]) return
   const snapshot = history.value[historyIndex.value]
+  if (!canvas.value) return
   const ctx = canvas.value.getContext('2d')
+  if (!ctx) return
+  const restoreVersion = ++historyRestoreVersion
   const oldTransform = ctx.getTransform()
   ctx.resetTransform()
-  ctx.putImageData(snapshot.imageData, 0, 0)
+  ctx.clearRect(0, 0, canvas.value.width, canvas.value.height)
+  if (
+      snapshot.overlaySnapshotUrl
+      && snapshot.overlaySnapshotUrl !== getEmptyOverlaySnapshotUrl(canvas.value.width, canvas.value.height)
+  ) {
+    try {
+      const img = await loadSnapshotImage(snapshot.overlaySnapshotUrl)
+      if (restoreVersion === historyRestoreVersion) {
+        ctx.drawImage(img, 0, 0)
+      }
+    } catch (error) {
+      console.error('恢复历史快照失败:', error)
+    }
+  }
   ctx.setTransform(oldTransform)
   textItems.value = snapshot.textItems.map(item => ({...item}))
   shapeItems.value = (snapshot.shapeItems || []).map(item => ({...item}))
-  if (typeof snapshot.overlayDirty === 'boolean') {
-    overlayDirty.value = snapshot.overlayDirty
-  } else {
-    overlayDirty.value = detectOverlayDirty(snapshot.imageData, textItems.value, shapeItems.value)
-  }
+  overlayDirty.value = snapshot.overlayDirty !== false
 }
 
-function detectOverlayDirty(imageData, textSnapshot, shapeSnapshot) {
+function detectOverlayDirty(overlaySnapshotUrl, width, height, textSnapshot, shapeSnapshot) {
   if ((textSnapshot?.length || 0) > 0 || (shapeSnapshot?.length || 0) > 0) {
     return true
   }
-  const data = imageData?.data
-  if (!data || data.length === 0) {
+  if (!overlaySnapshotUrl || width <= 0 || height <= 0) {
     return false
   }
-  for (let i = 3; i < data.length; i += 4) {
-    if (data[i] !== 0) {
-      return true
-    }
-  }
-  return false
+  return overlaySnapshotUrl !== getEmptyOverlaySnapshotUrl(width, height)
 }
 
 // 最终出图
