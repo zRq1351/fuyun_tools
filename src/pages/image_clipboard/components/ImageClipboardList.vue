@@ -10,6 +10,15 @@
         v-for="entry in visibleHistory"
         :id="`image-item-${entry.index}`"
         :key="entry.item.id"
+        v-memo="[
+          entry.item.id,
+          selectedIndex === entry.index,
+          entry.pinned,
+          entry.category,
+          entry.tags.join('|'),
+          entry.item.preview_png_base64,
+          entry.item.image_path
+        ]"
         :class="{ selected: selectedIndex === entry.index }"
         :draggable="isCtrlKeyPressed"
         class="clipboard-item"
@@ -35,7 +44,7 @@
           <FullScreen/>
         </el-icon>
       </button>
-      <button :class="{ active: isPinned(entry.item.id) }" class="pin-btn" title="置顶"
+      <button :class="{ active: entry.pinned }" class="pin-btn" title="置顶"
               @click.stop="promoteItem(entry.item.id)">
         <Pin class="pin-lucide"/>
       </button>
@@ -43,11 +52,11 @@
         <div class="index">{{ entry.index + 1 }}</div>
       </div>
       <div class="category-wrap">
-        <div class="category-chip">{{ getItemCategory(entry.item.id) }}</div>
+        <div class="category-chip">{{ entry.category }}</div>
       </div>
       <div class="tag-wrap">
-        <div v-if="getItemTags(entry.item.id).length" class="tag-chip-list">
-          <span v-for="tag in getItemTags(entry.item.id)" :key="`${entry.item.id}-${tag}`" class="tag-chip">#{{
+        <div v-if="entry.tags.length" class="tag-chip-list">
+          <span v-for="tag in entry.tags" :key="`${entry.item.id}-${tag}`" class="tag-chip">#{{
               tag
             }}</span>
         </div>
@@ -118,10 +127,6 @@ const props = defineProps({
     type: Function,
     required: true
   },
-  isPinned: {
-    type: Function,
-    required: true
-  },
   promoteItem: {
     type: Function,
     required: true
@@ -131,14 +136,6 @@ const props = defineProps({
     required: true
   },
   openFullscreen: {
-    type: Function,
-    required: true
-  },
-  getItemCategory: {
-    type: Function,
-    required: true
-  },
-  getItemTags: {
     type: Function,
     required: true
   },

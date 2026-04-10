@@ -7,11 +7,15 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_positioner::{Position, WindowExt};
 #[cfg(target_os = "windows")]
+use winapi::shared::minwindef::DWORD;
+#[cfg(target_os = "windows")]
 use winapi::shared::windef::RECT;
 #[cfg(target_os = "windows")]
+use winapi::um::processthreadsapi::GetCurrentProcessId;
+#[cfg(target_os = "windows")]
 use winapi::um::winuser::{
-    GetForegroundWindow, GetSystemMetrics, GetWindowTextW, SystemParametersInfoW, SM_CYSCREEN,
-    SPI_GETWORKAREA,
+    GetForegroundWindow, GetSystemMetrics, GetWindowTextW, GetWindowThreadProcessId,
+    SystemParametersInfoW, SM_CYSCREEN, SPI_GETWORKAREA,
 };
 
 pub static ENIGO_INSTANCE: LazyLock<Arc<Mutex<Option<enigo::Enigo>>>> =
@@ -644,13 +648,16 @@ fn foreground_window_info() -> (bool, String) {
         if hwnd.is_null() {
             return (false, "unknown".to_string());
         }
+        let mut pid: DWORD = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
         let mut title_buffer = [0u16; 512];
         let title_len = GetWindowTextW(hwnd, title_buffer.as_mut_ptr(), title_buffer.len() as i32);
-        if title_len <= 0 {
-            return (false, "untitled".to_string());
-        }
-        let title = String::from_utf16_lossy(&title_buffer[..title_len as usize]).to_lowercase();
-        (title.contains("fuyun") || title.contains("clipboard"), title)
+        let title = if title_len > 0 {
+            String::from_utf16_lossy(&title_buffer[..title_len as usize])
+        } else {
+            "untitled".to_string()
+        };
+        (pid != 0 && pid == GetCurrentProcessId(), title)
     }
 }
 

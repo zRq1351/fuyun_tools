@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous};
-use sqlx::{Connection, Row, SqliteConnection};
+use sqlx::{Connection, Row, Sqlite, SqliteConnection, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -61,6 +61,49 @@ fn now_unix_ms() -> i64 {
 
 fn stable_history_item_id(content: &str) -> String {
     format!("{:016x}", xxh3_64(content.as_bytes()))
+}
+
+async fn reset_temp_text_table(
+    tx: &mut Transaction<'_, Sqlite>,
+    table_name: &str,
+    column_name: &str,
+) -> Result<(), String> {
+    let create_sql = format!(
+        "CREATE TEMP TABLE IF NOT EXISTS {} ({} TEXT PRIMARY KEY)",
+        table_name, column_name
+    );
+    sqlx::query(&create_sql)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| format!("创建临时表失败: {}", e))?;
+
+    let clear_sql = format!("DELETE FROM {}", table_name);
+    sqlx::query(&clear_sql)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| format!("清空临时表失败: {}", e))?;
+
+    Ok(())
+}
+
+async fn fill_temp_text_table(
+    tx: &mut Transaction<'_, Sqlite>,
+    table_name: &str,
+    column_name: &str,
+    values: &[String],
+) -> Result<(), String> {
+    let insert_sql = format!(
+        "INSERT OR IGNORE INTO {} ({}) VALUES (?1)",
+        table_name, column_name
+    );
+    for value in values {
+        sqlx::query(&insert_sql)
+            .bind(value)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| format!("写入临时表失败: {}", e))?;
+    }
+    Ok(())
 }
 
 fn db_options(db_path: &PathBuf) -> SqliteConnectOptions {
@@ -521,10 +564,34 @@ pub async fn load_history_page_data_async(
     }
 
     let (total, mut items) = if fts_enabled {
-        let query_sql = format!(
+        let count_query_sql = "
+            SELECT COUNT(*)
+            FROM history_items hi
+            LEFT JOIN categories c ON c.item_id = hi.item_id
+            LEFT JOIN pinned_items p ON p.item_id = hi.item_id
+            WHERE
+              (?1 IS NULL OR (CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END) = ?1)
+              AND (?2 = 0 OR p.item_id IS NOT NULL)
+              AND (
+                ?3 IS NULL
+                OR EXISTS (
+                    SELECT 1 FROM history_items_fts
+                    WHERE history_items_fts.rowid = hi.id
+                      AND history_items_fts MATCH ?3
+                )
+              )
+        ";
+        let total = sqlx::query_scalar::<_, i64>(count_query_sql)
+            .bind(category_filter.as_deref())
+            .bind(pinned_flag)
+            .bind(fts_keyword.as_deref())
+            .fetch_one(&mut conn)
+            .await
+            .map_err(|e| format!("读取历史总数失败: {}", e))?;
+
+        let data_query_sql = format!(
             "
             SELECT
-              COUNT(*) OVER() AS total_count,
               hi.id,
               COALESCE(hi.item_id, ''),
               hi.content,
@@ -550,7 +617,7 @@ pub async fn load_history_page_data_async(
             ",
             order_clause
         );
-        let rows = sqlx::query(&query_sql)
+        let rows = sqlx::query(&data_query_sql)
             .bind(category_filter.as_deref())
             .bind(pinned_flag)
             .bind(fts_keyword.as_deref())
@@ -559,35 +626,48 @@ pub async fn load_history_page_data_async(
             .fetch_all(&mut conn)
             .await
             .map_err(|e| format!("读取历史数据库失败: {}", e))?;
-        let total = rows
-            .first()
-            .and_then(|row| row.try_get::<i64, _>(0).ok())
-            .unwrap_or(0);
         let items = rows
             .into_iter()
             .map(|row| {
-                let content: String = row.try_get(3).unwrap_or_default();
-                let mut id: String = row.try_get(2).unwrap_or_default();
+                let content: String = row.try_get(2).unwrap_or_default();
+                let mut id: String = row.try_get(1).unwrap_or_default();
                 if id.is_empty() {
                     id = stable_history_item_id(&content);
                 }
                 ClipboardHistoryPageItem {
-                    position: clamp_i64_to_usize(row.try_get::<i64, _>(1).unwrap_or(0)),
+                    position: clamp_i64_to_usize(row.try_get::<i64, _>(0).unwrap_or(0)),
                     id,
                     content,
-                    category: row.try_get::<String, _>(4).unwrap_or_else(|_| "未分类".to_string()),
-                    pinned: row.try_get::<i64, _>(5).unwrap_or(0) == 1,
-                    updated_at: row.try_get::<i64, _>(6).unwrap_or(0),
+                    category: row.try_get::<String, _>(3).unwrap_or_else(|_| "未分类".to_string()),
+                    pinned: row.try_get::<i64, _>(4).unwrap_or(0) == 1,
+                    updated_at: row.try_get::<i64, _>(5).unwrap_or(0),
                     snippet: None,
                 }
             })
             .collect::<Vec<_>>();
         (total, items)
     } else {
-        let query_sql = format!(
+        let count_query_sql = "
+            SELECT COUNT(*)
+            FROM history_items hi
+            LEFT JOIN categories c ON c.item_id = hi.item_id
+            LEFT JOIN pinned_items p ON p.item_id = hi.item_id
+            WHERE
+              (?1 IS NULL OR (CASE WHEN c.category IS NULL OR c.category = '' THEN '未分类' ELSE c.category END) = ?1)
+              AND (?2 = 0 OR p.item_id IS NOT NULL)
+              AND (?3 IS NULL OR hi.content LIKE '%' || ?3 || '%')
+        ";
+        let total = sqlx::query_scalar::<_, i64>(count_query_sql)
+            .bind(category_filter.as_deref())
+            .bind(pinned_flag)
+            .bind(keyword_filter.as_deref())
+            .fetch_one(&mut conn)
+            .await
+            .map_err(|e| format!("读取历史总数失败: {}", e))?;
+
+        let data_query_sql = format!(
             "
             SELECT
-              COUNT(*) OVER() AS total_count,
               hi.id,
               COALESCE(hi.item_id, ''),
               hi.content,
@@ -606,7 +686,7 @@ pub async fn load_history_page_data_async(
             ",
             order_clause
         );
-        let rows = sqlx::query(&query_sql)
+        let rows = sqlx::query(&data_query_sql)
             .bind(category_filter.as_deref())
             .bind(pinned_flag)
             .bind(keyword_filter.as_deref())
@@ -615,25 +695,21 @@ pub async fn load_history_page_data_async(
             .fetch_all(&mut conn)
             .await
             .map_err(|e| format!("读取历史数据库失败: {}", e))?;
-        let total = rows
-            .first()
-            .and_then(|row| row.try_get::<i64, _>(0).ok())
-            .unwrap_or(0);
         let items = rows
             .into_iter()
             .map(|row| {
-                let content: String = row.try_get(3).unwrap_or_default();
-                let mut id: String = row.try_get(2).unwrap_or_default();
+                let content: String = row.try_get(2).unwrap_or_default();
+                let mut id: String = row.try_get(1).unwrap_or_default();
                 if id.is_empty() {
                     id = stable_history_item_id(&content);
                 }
                 ClipboardHistoryPageItem {
-                    position: clamp_i64_to_usize(row.try_get::<i64, _>(1).unwrap_or(0)),
+                    position: clamp_i64_to_usize(row.try_get::<i64, _>(0).unwrap_or(0)),
                     id,
                     content,
-                    category: row.try_get::<String, _>(4).unwrap_or_else(|_| "未分类".to_string()),
-                    pinned: row.try_get::<i64, _>(5).unwrap_or(0) == 1,
-                    updated_at: row.try_get::<i64, _>(6).unwrap_or(0),
+                    category: row.try_get::<String, _>(3).unwrap_or_else(|_| "未分类".to_string()),
+                    pinned: row.try_get::<i64, _>(4).unwrap_or(0) == 1,
+                    updated_at: row.try_get::<i64, _>(5).unwrap_or(0),
                     snippet: None,
                 }
             })
@@ -751,50 +827,74 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
             .await
             .map_err(|e| format!("清理置顶项失败: {}", e))?;
     } else {
-        let existing_item_ids = sqlx::query("SELECT item_id FROM history_items WHERE item_id IS NOT NULL AND item_id != ''")
-            .fetch_all(&mut *tx)
+        reset_temp_text_table(&mut tx, "temp_desired_history_item_ids", "item_id").await?;
+        fill_temp_text_table(
+            &mut tx,
+            "temp_desired_history_item_ids",
+            "item_id",
+            &desired_item_ids,
+        )
+            .await?;
+
+        sqlx::query(
+            "
+            DELETE FROM history_items
+            WHERE item_id IS NOT NULL
+              AND item_id != ''
+              AND NOT EXISTS (
+                SELECT 1
+                FROM temp_desired_history_item_ids desired
+                WHERE desired.item_id = history_items.item_id
+              )
+            ",
+        )
+            .execute(&mut *tx)
             .await
-            .map_err(|e| format!("读取历史记录失败: {}", e))?
-            .into_iter()
-            .filter_map(|row| row.try_get::<String, _>(0).ok())
-            .collect::<HashSet<_>>();
-        let stale_ids = existing_item_ids
-            .into_iter()
-            .filter(|item_id| !desired_item_id_set.contains(item_id))
-            .collect::<Vec<_>>();
-        for chunk in stale_ids.chunks(200) {
-            if chunk.is_empty() {
-                continue;
-            }
-            let placeholders = vec!["?"; chunk.len()].join(", ");
-            let sql_history = format!("DELETE FROM history_items WHERE item_id IN ({})", placeholders);
-            let sql_categories = format!("DELETE FROM categories WHERE item_id IN ({})", placeholders);
-            let sql_pinned = format!("DELETE FROM pinned_items WHERE item_id IN ({})", placeholders);
-            let sql_fts = format!("DELETE FROM history_items_fts WHERE item_id IN ({})", placeholders);
-            let mut q_history = sqlx::query(&sql_history);
-            let mut q_categories = sqlx::query(&sql_categories);
-            let mut q_pinned = sqlx::query(&sql_pinned);
-            let mut q_fts = sqlx::query(&sql_fts);
-            for item_id in chunk {
-                q_history = q_history.bind(item_id);
-                q_categories = q_categories.bind(item_id);
-                q_pinned = q_pinned.bind(item_id);
-                q_fts = q_fts.bind(item_id);
-            }
-            q_history
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("清理历史记录失败: {}", e))?;
-            q_categories
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("清理分类失败: {}", e))?;
-            q_pinned
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("清理置顶项失败: {}", e))?;
-            let _ = q_fts.execute(&mut *tx).await;
-        }
+            .map_err(|e| format!("清理历史记录失败: {}", e))?;
+        sqlx::query(
+            "
+            DELETE FROM categories
+            WHERE item_id IS NOT NULL
+              AND item_id != ''
+              AND NOT EXISTS (
+                SELECT 1
+                FROM temp_desired_history_item_ids desired
+                WHERE desired.item_id = categories.item_id
+              )
+            ",
+        )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("清理分类失败: {}", e))?;
+        sqlx::query(
+            "
+            DELETE FROM pinned_items
+            WHERE item_id IS NOT NULL
+              AND item_id != ''
+              AND NOT EXISTS (
+                SELECT 1
+                FROM temp_desired_history_item_ids desired
+                WHERE desired.item_id = pinned_items.item_id
+              )
+            ",
+        )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("清理置顶项失败: {}", e))?;
+        let _ = sqlx::query(
+            "
+            DELETE FROM history_items_fts
+            WHERE item_id IS NOT NULL
+              AND item_id != ''
+              AND NOT EXISTS (
+                SELECT 1
+                FROM temp_desired_history_item_ids desired
+                WHERE desired.item_id = history_items_fts.item_id
+              )
+            ",
+        )
+            .execute(&mut *tx)
+            .await;
     }
 
     for (item, category) in &data.categories {
@@ -888,7 +988,6 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
         .iter()
         .map(|(item_id, _, _)| item_id.clone())
         .collect::<Vec<_>>();
-    let desired_item_id_set = desired_item_ids.iter().cloned().collect::<HashSet<_>>();
 
     for (item_id, content, ts) in &history_entries {
         let updated = sqlx::query(
@@ -932,50 +1031,74 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
             .await
             .map_err(|e| format!("清理置顶项失败: {}", e))?;
     } else {
-        let existing_item_ids = sqlx::query("SELECT item_id FROM history_items WHERE item_id IS NOT NULL AND item_id != ''")
-            .fetch_all(&mut *tx)
+        reset_temp_text_table(&mut tx, "temp_desired_history_item_ids", "item_id").await?;
+        fill_temp_text_table(
+            &mut tx,
+            "temp_desired_history_item_ids",
+            "item_id",
+            &desired_item_ids,
+        )
+            .await?;
+
+        sqlx::query(
+            "
+            DELETE FROM history_items
+            WHERE item_id IS NOT NULL
+              AND item_id != ''
+              AND NOT EXISTS (
+                SELECT 1
+                FROM temp_desired_history_item_ids desired
+                WHERE desired.item_id = history_items.item_id
+              )
+            ",
+        )
+            .execute(&mut *tx)
             .await
-            .map_err(|e| format!("读取历史记录失败: {}", e))?
-            .into_iter()
-            .filter_map(|row| row.try_get::<String, _>(0).ok())
-            .collect::<HashSet<_>>();
-        let stale_ids = existing_item_ids
-            .into_iter()
-            .filter(|item_id| !desired_item_id_set.contains(item_id))
-            .collect::<Vec<_>>();
-        for chunk in stale_ids.chunks(200) {
-            if chunk.is_empty() {
-                continue;
-            }
-            let placeholders = vec!["?"; chunk.len()].join(", ");
-            let sql_history = format!("DELETE FROM history_items WHERE item_id IN ({})", placeholders);
-            let sql_categories = format!("DELETE FROM categories WHERE item_id IN ({})", placeholders);
-            let sql_pinned = format!("DELETE FROM pinned_items WHERE item_id IN ({})", placeholders);
-            let sql_fts = format!("DELETE FROM history_items_fts WHERE item_id IN ({})", placeholders);
-            let mut q_history = sqlx::query(&sql_history);
-            let mut q_categories = sqlx::query(&sql_categories);
-            let mut q_pinned = sqlx::query(&sql_pinned);
-            let mut q_fts = sqlx::query(&sql_fts);
-            for item_id in chunk {
-                q_history = q_history.bind(item_id);
-                q_categories = q_categories.bind(item_id);
-                q_pinned = q_pinned.bind(item_id);
-                q_fts = q_fts.bind(item_id);
-            }
-            q_history
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("清理历史记录失败: {}", e))?;
-            q_categories
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("清理分类失败: {}", e))?;
-            q_pinned
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("清理置顶项失败: {}", e))?;
-            let _ = q_fts.execute(&mut *tx).await;
-        }
+            .map_err(|e| format!("清理历史记录失败: {}", e))?;
+        sqlx::query(
+            "
+            DELETE FROM categories
+            WHERE item_id IS NOT NULL
+              AND item_id != ''
+              AND NOT EXISTS (
+                SELECT 1
+                FROM temp_desired_history_item_ids desired
+                WHERE desired.item_id = categories.item_id
+              )
+            ",
+        )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("清理分类失败: {}", e))?;
+        sqlx::query(
+            "
+            DELETE FROM pinned_items
+            WHERE item_id IS NOT NULL
+              AND item_id != ''
+              AND NOT EXISTS (
+                SELECT 1
+                FROM temp_desired_history_item_ids desired
+                WHERE desired.item_id = pinned_items.item_id
+              )
+            ",
+        )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("清理置顶项失败: {}", e))?;
+        let _ = sqlx::query(
+            "
+            DELETE FROM history_items_fts
+            WHERE item_id IS NOT NULL
+              AND item_id != ''
+              AND NOT EXISTS (
+                SELECT 1
+                FROM temp_desired_history_item_ids desired
+                WHERE desired.item_id = history_items_fts.item_id
+              )
+            ",
+        )
+            .execute(&mut *tx)
+            .await;
     }
 
     for item_id in &desired_item_ids {
@@ -1210,59 +1333,72 @@ pub async fn delete_history_items_bulk(contents: &[String]) -> Result<(), String
     let mut conn = open_history_db_async().await?;
     let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
 
-    for chunk in contents.chunks(100) {
-        let placeholders = vec!["?"; chunk.len()].join(", ");
-        
-        // 查找所有 item_id
-        let sql_item_ids = format!("SELECT item_id FROM history_items WHERE content IN ({})", placeholders);
-        let mut q_item_ids = sqlx::query(&sql_item_ids);
-        for c in chunk {
-            q_item_ids = q_item_ids.bind(c);
-        }
-        let rows = q_item_ids.fetch_all(&mut *tx).await.map_err(|e| format!("查询历史记录失败: {}", e))?;
-        let item_ids: Vec<String> = rows.into_iter().filter_map(|r| r.try_get(0).ok()).collect();
+    reset_temp_text_table(&mut tx, "temp_delete_history_contents", "content").await?;
+    fill_temp_text_table(
+        &mut tx,
+        "temp_delete_history_contents",
+        "content",
+        contents,
+    )
+        .await?;
 
-        // 删除主表记录
-        let sql_del_items = format!("DELETE FROM history_items WHERE content IN ({})", placeholders);
-        let mut q_del_items = sqlx::query(&sql_del_items);
-        for c in chunk {
-            q_del_items = q_del_items.bind(c);
-        }
-        q_del_items.execute(&mut *tx).await.map_err(|e| format!("删除历史记录失败: {}", e))?;
-
-        if !item_ids.is_empty() {
-            let id_placeholders = vec!["?"; item_ids.len()].join(", ");
-            
-            // 同步 FTS 索引
-            let sql_fts = format!("DELETE FROM history_items_fts WHERE item_id IN ({})", id_placeholders);
-            let mut q_fts = sqlx::query(&sql_fts);
-            
-            let sql_cat = format!("DELETE FROM categories WHERE item_id IN ({})", id_placeholders);
-            let mut q_cat = sqlx::query(&sql_cat);
-            
-            let sql_pin = format!("DELETE FROM pinned_items WHERE item_id IN ({})", id_placeholders);
-            let mut q_pin = sqlx::query(&sql_pin);
-            
-            for id in &item_ids {
-                q_fts = q_fts.bind(id);
-                q_cat = q_cat.bind(id);
-                q_pin = q_pin.bind(id);
-            }
-            
-            q_fts
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("删除 FTS 索引失败: {}", e))?;
-            q_cat
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("删除分类关联失败: {}", e))?;
-            q_pin
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("删除置顶关联失败: {}", e))?;
-        }
-    }
+    let _ = sqlx::query(
+        "
+        DELETE FROM history_items_fts
+        WHERE EXISTS (
+            SELECT 1
+            FROM history_items hi
+            JOIN temp_delete_history_contents target
+              ON target.content = hi.content
+            WHERE hi.item_id = history_items_fts.item_id
+        )
+        ",
+    )
+        .execute(&mut *tx)
+        .await;
+    sqlx::query(
+        "
+        DELETE FROM categories
+        WHERE EXISTS (
+            SELECT 1
+            FROM history_items hi
+            JOIN temp_delete_history_contents target
+              ON target.content = hi.content
+            WHERE hi.item_id = categories.item_id
+        )
+        ",
+    )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("删除分类关联失败: {}", e))?;
+    sqlx::query(
+        "
+        DELETE FROM pinned_items
+        WHERE EXISTS (
+            SELECT 1
+            FROM history_items hi
+            JOIN temp_delete_history_contents target
+              ON target.content = hi.content
+            WHERE hi.item_id = pinned_items.item_id
+        )
+        ",
+    )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("删除置顶关联失败: {}", e))?;
+    sqlx::query(
+        "
+        DELETE FROM history_items
+        WHERE EXISTS (
+            SELECT 1
+            FROM temp_delete_history_contents target
+            WHERE target.content = history_items.content
+        )
+        ",
+    )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("删除历史记录失败: {}", e))?;
 
     tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
@@ -1271,50 +1407,72 @@ pub async fn delete_history_item_by_content(content: &str) -> Result<(), String>
     let mut conn = open_history_db_async().await?;
     let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
 
-    // 获取全部 item_id，用于删除 FTS 索引和关联表（内容重复时必须全量清理）
-    let item_ids: Vec<String> = sqlx::query_scalar(
-        "SELECT item_id FROM history_items WHERE content = ?"
+    reset_temp_text_table(&mut tx, "temp_delete_history_contents", "content").await?;
+    fill_temp_text_table(
+        &mut tx,
+        "temp_delete_history_contents",
+        "content",
+        &[content.to_string()],
     )
-        .bind(content)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(|e| format!("查询历史记录失败: {}", e))?;
+        .await?;
 
-    // 删除主表记录
-    sqlx::query("DELETE FROM history_items WHERE content = ?")
-        .bind(content)
+    let _ = sqlx::query(
+        "
+        DELETE FROM history_items_fts
+        WHERE EXISTS (
+            SELECT 1
+            FROM history_items hi
+            JOIN temp_delete_history_contents target
+              ON target.content = hi.content
+            WHERE hi.item_id = history_items_fts.item_id
+        )
+        ",
+    )
+        .execute(&mut *tx)
+        .await;
+    sqlx::query(
+        "
+        DELETE FROM categories
+        WHERE EXISTS (
+            SELECT 1
+            FROM history_items hi
+            JOIN temp_delete_history_contents target
+              ON target.content = hi.content
+            WHERE hi.item_id = categories.item_id
+        )
+        ",
+    )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("删除分类关联失败: {}", e))?;
+    sqlx::query(
+        "
+        DELETE FROM pinned_items
+        WHERE EXISTS (
+            SELECT 1
+            FROM history_items hi
+            JOIN temp_delete_history_contents target
+              ON target.content = hi.content
+            WHERE hi.item_id = pinned_items.item_id
+        )
+        ",
+    )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("删除置顶关联失败: {}", e))?;
+    sqlx::query(
+        "
+        DELETE FROM history_items
+        WHERE EXISTS (
+            SELECT 1
+            FROM temp_delete_history_contents target
+            WHERE target.content = history_items.content
+        )
+        ",
+    )
         .execute(&mut *tx)
         .await
         .map_err(|e| format!("删除历史记录失败: {}", e))?;
-
-    if !item_ids.is_empty() {
-        let placeholders = vec!["?"; item_ids.len()].join(", ");
-        let sql_fts = format!("DELETE FROM history_items_fts WHERE item_id IN ({})", placeholders);
-        let sql_categories = format!("DELETE FROM categories WHERE item_id IN ({})", placeholders);
-        let sql_pinned = format!("DELETE FROM pinned_items WHERE item_id IN ({})", placeholders);
-
-        let mut q_fts = sqlx::query(&sql_fts);
-        let mut q_categories = sqlx::query(&sql_categories);
-        let mut q_pinned = sqlx::query(&sql_pinned);
-        for id in &item_ids {
-            q_fts = q_fts.bind(id);
-            q_categories = q_categories.bind(id);
-            q_pinned = q_pinned.bind(id);
-        }
-
-        q_fts
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("删除 FTS 索引失败: {}", e))?;
-        q_categories
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("删除分类关联失败: {}", e))?;
-        q_pinned
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("删除置顶关联失败: {}", e))?;
-    }
 
     tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
 

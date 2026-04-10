@@ -189,8 +189,7 @@ fn matches_recent_sample(width: u32, height: u32, rgba: &[u8]) -> bool {
 }
 
 // 更新最近图片的采样缓存
-fn update_recent_samples(width: u32, height: u32, rgba: &[u8]) {
-    let sample = extract_sample_points(rgba, width, height);
+fn update_recent_samples_with_sample(width: u32, height: u32, sample: [u8; SAMPLE_POINTS]) {
     let mut recent = RECENT_IMAGE_SAMPLES.lock();
 
     // 添加新的采样
@@ -270,7 +269,14 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, w
                     state_guard.image_clipboard_manager.clone()
                 };
 
-                let source_blob = task.source_blob;
+                let sample = extract_sample_points(&task.rgba, task.width, task.height);
+                let PendingImageTask {
+                    rgba,
+                    width,
+                    height,
+                    source_blob,
+                    ..
+                } = task;
                 let delta_item = {
                     let manager = match manager_arc.lock() {
                         Ok(guard) => guard,
@@ -281,9 +287,9 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, w
                     };
                     let manager = manager.clone();
                     manager.add_rgba_image_with_source_blob(
-                        task.rgba.clone(),
-                        task.width,
-                        task.height,
+                        rgba,
+                        width,
+                        height,
                         source_blob,
                     );
                     let history_preview = manager.get_history_preview();
@@ -300,12 +306,12 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, w
                 log::info!(
                     "[处理线程-{}] 图片处理成功: {}x{}",
                     worker_id,
-                    task.width,
-                    task.height
+                    width,
+                    height
                 );
 
                 // 更新采样缓存
-                update_recent_samples(task.width, task.height, &task.rgba);
+                update_recent_samples_with_sample(width, height, sample);
 
                 let is_image_visible = {
                     let state_guard = lock_state(state);

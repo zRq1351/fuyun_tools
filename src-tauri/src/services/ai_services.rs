@@ -14,74 +14,98 @@ fn lock_state<'a>(state: &'a Arc<Mutex<SharedAppState>>) -> crate::sync::MutexGu
     state.lock().expect("infallible mutex lock failed")
 }
 
-/// 验证AI提供商配置
-fn validate_provider_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<()> {
-    let state_guard = lock_state(state);
-    let settings = &state_guard.settings;
+fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
+    let (settings_snapshot, provider_key, api_url, model_name) = {
+        let state_guard = lock_state(state);
+        let settings_snapshot = state_guard.settings.clone();
 
-    if settings.ai_provider.is_empty() {
-        return Err(AppError::new(ErrorCode::ConfigError, "未配置AI提供商，请在设置中选择提供商"));
-    }
+        if settings_snapshot.ai_provider.is_empty() {
+            return Err(AppError::new(ErrorCode::ConfigError, "未配置AI提供商，请在设置中选择提供商"));
+        }
 
-    if !settings.provider_configs.contains_key(&settings.ai_provider) {
-        return Err(AppError::new(ErrorCode::ConfigError, format!("未找到提供商 '{}' 的配置，请在设置中配置API信息", settings.ai_provider)));
-    }
+        if !settings_snapshot
+            .provider_configs
+            .contains_key(&settings_snapshot.ai_provider)
+        {
+            return Err(AppError::new(
+                ErrorCode::ConfigError,
+                format!(
+                    "未找到提供商 '{}' 的配置，请在设置中配置API信息",
+                    settings_snapshot.ai_provider
+                ),
+            ));
+        }
 
-    let provider_config = settings.get_current_provider_config()
-        .ok_or_else(|| AppError::new(ErrorCode::ConfigError, format!("未找到提供商 '{}' 的配置，请在设置中配置API信息", settings.ai_provider)))?;
+        let provider_key = settings_snapshot.ai_provider.clone();
+        let provider_config = settings_snapshot
+            .get_current_provider_config()
+            .ok_or_else(|| {
+                AppError::new(
+                    ErrorCode::ConfigError,
+                    format!(
+                        "未找到提供商 '{}' 的配置，请在设置中配置API信息",
+                        provider_key
+                    ),
+                )
+            })?;
 
-    if provider_config.api_url.is_empty() {
-        return Err(AppError::new(ErrorCode::ConfigError, "API地址不能为空，请在设置中填写正确的API地址"));
-    }
+        if provider_config.api_url.is_empty() {
+            return Err(AppError::new(
+                ErrorCode::ConfigError,
+                "API地址不能为空，请在设置中填写正确的API地址",
+            ));
+        }
 
-    if provider_config.model_name.is_empty() {
-        return Err(AppError::new(ErrorCode::ConfigError, "模型名称不能为空，请在设置中填写正确的模型名称"));
-    }
+        if provider_config.model_name.is_empty() {
+            return Err(AppError::new(
+                ErrorCode::ConfigError,
+                "模型名称不能为空，请在设置中填写正确的模型名称",
+            ));
+        }
 
-    log::info!("正在验证提供商 {} 的配置", settings.ai_provider);
-    let api_key = settings.get_provider_api_key(&settings.ai_provider)
-        .map_err(|e| {
-            log::error!("读取密钥库失败: {}", e);
-            AppError::new(ErrorCode::SystemError, format!("读取密钥库失败: {}", e))
-        })?;
+        let api_url = provider_config.api_url.clone();
+        let model_name = provider_config.model_name.clone();
 
-    if api_key.is_empty() {
-        log::warn!("提供商 {} 的API密钥为空", settings.ai_provider);
-        return Err(AppError::new(ErrorCode::ConfigError, "API密钥未配置或无效，请在设置中填写正确的API密钥"));
-    }
-    log::info!("提供商 {} 配置验证通过", settings.ai_provider);
+        (
+            settings_snapshot,
+            provider_key,
+            api_url,
+            model_name,
+        )
+    };
 
-    if !provider_config.api_url.starts_with("https://") {
+    if !api_url.starts_with("https://") {
         return Err(AppError::new(
             ErrorCode::ConfigError,
             "API地址格式不正确，请确保以 https:// 开头",
         ));
     }
 
-    Ok(())
+    log::info!("正在验证提供商 {} 的配置", provider_key);
+    let api_key = settings_snapshot.get_provider_api_key(&provider_key).map_err(|e| {
+        log::error!("读取密钥库失败: {}", e);
+        AppError::new(ErrorCode::SystemError, format!("读取密钥库失败: {}", e))
+    })?;
+
+    if api_key.is_empty() {
+        log::warn!("提供商 {} 的API密钥为空", provider_key);
+        return Err(AppError::new(
+            ErrorCode::ConfigError,
+            "API密钥未配置或无效，请在设置中填写正确的API密钥",
+        ));
+    }
+    log::info!("提供商 {} 配置验证通过", provider_key);
+
+    Ok(AIConfig {
+        api_key,
+        base_url: api_url,
+        model: model_name,
+    })
 }
 
 /// 获取或创建AI客户端
 pub async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> AppResult<AIClient> {
-    validate_provider_config(&state)?;
-    
-    let current_config = {
-        let state_guard = lock_state(&state);
-        let api_key = state_guard
-            .settings
-            .get_provider_api_key(&state_guard.settings.ai_provider)
-            .map_err(|e| AppError::new(ErrorCode::SystemError, format!("获取API密钥失败: {}", e)))?;
-        if api_key.is_empty() {
-            return Err(AppError::new(ErrorCode::ConfigError, "API密钥为空，无法创建客户端"));
-        }
-        let provider_config = state_guard.settings.get_current_provider_config()
-            .ok_or(AppError::new(ErrorCode::ConfigError, "获取当前提供商配置失败"))?;
-        AIConfig {
-            api_key,
-            base_url: provider_config.api_url.clone(),
-            model: provider_config.model_name.clone(),
-        }
-    };
+    let current_config = build_ai_config(&state)?;
     let client = AIClient::new(current_config).map_err(|e| {
         AppError::new(ErrorCode::SystemError, "客户端初始化失败").with_details(e.to_string())
     })?;

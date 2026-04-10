@@ -2,8 +2,8 @@ use crate::utils::image_clipboard::{
     ImageHistoryData, ImageHistoryItem, ImageHistoryPageData, ImageHistoryPageItem,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqliteSynchronous};
-use sqlx::{Row, SqliteConnection};
-use std::collections::{HashMap, HashSet};
+use sqlx::{Row, Sqlite, SqliteConnection, Transaction};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::future::Future;
@@ -69,6 +69,93 @@ async fn exec(conn: &mut SqliteConnection, sql: &str) -> Result<(), String> {
         .execute(conn)
         .await
         .map_err(|e| format!("初始化图片历史数据库失败: {}", e))?;
+    Ok(())
+}
+
+async fn reset_temp_text_table(
+    tx: &mut Transaction<'_, Sqlite>,
+    table_name: &str,
+    column_name: &str,
+) -> Result<(), String> {
+    let create_sql = format!(
+        "CREATE TEMP TABLE IF NOT EXISTS {} ({} TEXT PRIMARY KEY)",
+        table_name, column_name
+    );
+    sqlx::query(&create_sql)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| format!("创建图片临时表失败: {}", e))?;
+
+    let clear_sql = format!("DELETE FROM {}", table_name);
+    sqlx::query(&clear_sql)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| format!("清空图片临时表失败: {}", e))?;
+
+    Ok(())
+}
+
+async fn fill_temp_text_table(
+    tx: &mut Transaction<'_, Sqlite>,
+    table_name: &str,
+    column_name: &str,
+    values: &[String],
+) -> Result<(), String> {
+    let insert_sql = format!(
+        "INSERT OR IGNORE INTO {} ({}) VALUES (?1)",
+        table_name, column_name
+    );
+    for value in values {
+        sqlx::query(&insert_sql)
+            .bind(value)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| format!("写入图片临时表失败: {}", e))?;
+    }
+    Ok(())
+}
+
+async fn reset_temp_position_table(
+    tx: &mut Transaction<'_, Sqlite>,
+    table_name: &str,
+    key_column: &str,
+) -> Result<(), String> {
+    let create_sql = format!(
+        "CREATE TEMP TABLE IF NOT EXISTS {} ({} TEXT PRIMARY KEY, position INTEGER NOT NULL)",
+        table_name, key_column
+    );
+    sqlx::query(&create_sql)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| format!("创建图片顺序临时表失败: {}", e))?;
+
+    let clear_sql = format!("DELETE FROM {}", table_name);
+    sqlx::query(&clear_sql)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| format!("清空图片顺序临时表失败: {}", e))?;
+
+    Ok(())
+}
+
+async fn fill_temp_position_table(
+    tx: &mut Transaction<'_, Sqlite>,
+    table_name: &str,
+    key_column: &str,
+    values: &[String],
+) -> Result<(), String> {
+    let insert_sql = format!(
+        "INSERT OR REPLACE INTO {} ({}, position) VALUES (?1, ?2)",
+        table_name, key_column
+    );
+    for (position, value) in values.iter().enumerate() {
+        sqlx::query(&insert_sql)
+            .bind(value)
+            .bind(position as i64)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| format!("写入图片顺序临时表失败: {}", e))?;
+    }
     Ok(())
 }
 
@@ -257,35 +344,75 @@ pub async fn delete_items_bulk_async(item_ids: &[String]) -> Result<(), String> 
     }
     let pool = get_pool().await?;
     let mut tx = pool.begin().await.map_err(|e| format!("开启批量删除事务失败: {}", e))?;
-    
-    // 分批处理，防止 SQL 语句过长
-    for chunk in item_ids.chunks(100) {
-        let placeholders = vec!["?"; chunk.len()].join(", ");
-        
-        let sql_items = format!("DELETE FROM image_items WHERE item_id IN ({})", placeholders);
-        let mut q_items = sqlx::query(&sql_items);
-        
-        let sql_categories = format!("DELETE FROM image_categories WHERE item_id IN ({})", placeholders);
-        let mut q_categories = sqlx::query(&sql_categories);
-        
-        let sql_tags = format!("DELETE FROM image_tags WHERE item_id IN ({})", placeholders);
-        let mut q_tags = sqlx::query(&sql_tags);
-        
-        let sql_previews = format!("DELETE FROM image_async_previews WHERE item_id IN ({})", placeholders);
-        let mut q_previews = sqlx::query(&sql_previews);
-        
-        for id in chunk {
-            q_items = q_items.bind(id);
-            q_categories = q_categories.bind(id);
-            q_tags = q_tags.bind(id);
-            q_previews = q_previews.bind(id);
-        }
-        
-        q_items.execute(&mut *tx).await.map_err(|e| format!("批量删除图片项失败: {}", e))?;
-        q_categories.execute(&mut *tx).await.map_err(|e| format!("批量删除图片分类失败: {}", e))?;
-        q_tags.execute(&mut *tx).await.map_err(|e| format!("批量删除图片标签失败: {}", e))?;
-        q_previews.execute(&mut *tx).await.map_err(|e| format!("批量删除图片预览失败: {}", e))?;
-    }
+
+    reset_temp_text_table(&mut tx, "temp_delete_image_item_ids", "item_id").await?;
+    fill_temp_text_table(&mut tx, "temp_delete_image_item_ids", "item_id", item_ids).await?;
+
+    sqlx::query(
+        "
+        DELETE FROM image_items
+        WHERE EXISTS (
+            SELECT 1
+            FROM temp_delete_image_item_ids target
+            WHERE target.item_id = image_items.item_id
+        )
+        ",
+    )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("批量删除图片项失败: {}", e))?;
+    sqlx::query(
+        "
+        DELETE FROM image_categories
+        WHERE EXISTS (
+            SELECT 1
+            FROM temp_delete_image_item_ids target
+            WHERE target.item_id = image_categories.item_id
+        )
+        ",
+    )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("批量删除图片分类失败: {}", e))?;
+    sqlx::query(
+        "
+        DELETE FROM image_tags
+        WHERE EXISTS (
+            SELECT 1
+            FROM temp_delete_image_item_ids target
+            WHERE target.item_id = image_tags.item_id
+        )
+        ",
+    )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("批量删除图片标签失败: {}", e))?;
+    sqlx::query(
+        "
+        DELETE FROM image_pinned
+        WHERE EXISTS (
+            SELECT 1
+            FROM temp_delete_image_item_ids target
+            WHERE target.item_id = image_pinned.item_id
+        )
+        ",
+    )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("批量删除图片置顶失败: {}", e))?;
+    sqlx::query(
+        "
+        DELETE FROM image_async_previews
+        WHERE EXISTS (
+            SELECT 1
+            FROM temp_delete_image_item_ids target
+            WHERE target.item_id = image_async_previews.item_id
+        )
+        ",
+    )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("批量删除图片预览失败: {}", e))?;
     
     tx.commit().await.map_err(|e| format!("提交批量删除事务失败: {}", e))?;
     Ok(())
@@ -473,47 +600,64 @@ pub async fn sync_category_list_order_async(categories: &[String]) -> Result<(),
             .begin()
             .await
             .map_err(|e| format!("创建分类列表事务失败: {}", e))?;
-        let rows = sqlx::query("SELECT category, position FROM image_category_list")
-            .fetch_all(&mut *tx)
+        reset_temp_position_table(&mut tx, "temp_target_image_category_list", "category").await?;
+        fill_temp_position_table(
+            &mut tx,
+            "temp_target_image_category_list",
+            "category",
+            categories,
+        )
+            .await?;
+
+        sqlx::query(
+            "
+            DELETE FROM image_category_list
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM temp_target_image_category_list target
+                WHERE target.category = image_category_list.category
+            )
+            ",
+        )
+            .execute(&mut *tx)
             .await
-            .map_err(|e| format!("读取分类列表失败: {}", e))?;
-        let mut existing = HashMap::<String, i64>::new();
-        for row in rows {
-            let category: String = row.try_get(0).map_err(|e| format!("读取分类列表失败: {}", e))?;
-            let position: i64 = row.try_get(1).map_err(|e| format!("读取分类列表失败: {}", e))?;
-            existing.insert(category, position);
-        }
-        for (position, category) in categories.iter().enumerate() {
-            if existing.get(category) == Some(&(position as i64)) {
-                continue;
-            }
-            let affected = sqlx::query("UPDATE image_category_list SET position = ?1 WHERE category = ?2")
-                .bind(position as i64)
-                .bind(category)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("更新分类列表失败: {}", e))?
-                .rows_affected();
-            if affected == 0 {
-                sqlx::query("INSERT INTO image_category_list (position, category) VALUES (?1, ?2)")
-                    .bind(position as i64)
-                    .bind(category)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| format!("写入分类列表失败: {}", e))?;
-            }
-        }
-        let desired = categories.iter().cloned().collect::<HashSet<_>>();
-        for existing_category in existing.keys() {
-            if desired.contains(existing_category) {
-                continue;
-            }
-            sqlx::query("DELETE FROM image_category_list WHERE category = ?1")
-                .bind(existing_category)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("清理分类列表失败: {}", e))?;
-        }
+            .map_err(|e| format!("清理分类列表失败: {}", e))?;
+
+        sqlx::query(
+            "
+            UPDATE image_category_list
+            SET position = (
+                SELECT target.position
+                FROM temp_target_image_category_list target
+                WHERE target.category = image_category_list.category
+            )
+            WHERE EXISTS (
+                SELECT 1
+                FROM temp_target_image_category_list target
+                WHERE target.category = image_category_list.category
+                  AND target.position != image_category_list.position
+            )
+            ",
+        )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("更新分类列表失败: {}", e))?;
+
+        sqlx::query(
+            "
+            INSERT INTO image_category_list (position, category)
+            SELECT target.position, target.category
+            FROM temp_target_image_category_list target
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM image_category_list existing
+                WHERE existing.category = target.category
+            )
+            ",
+        )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("写入分类列表失败: {}", e))?;
         tx.commit()
             .await
             .map_err(|e| format!("提交分类列表事务失败: {}", e))?;
@@ -533,44 +677,64 @@ pub async fn sync_pinned_order_async(pinned_items: &[String]) -> Result<(), Stri
             .begin()
             .await
             .map_err(|e| format!("创建置顶事务失败: {}", e))?;
-        let rows = sqlx::query("SELECT item_id, position FROM image_pinned")
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(|e| format!("读取置顶失败: {}", e))?;
-        let mut existing = HashMap::<String, i64>::new();
-        for row in rows {
-            let item_id: String = row.try_get(0).map_err(|e| format!("读取置顶失败: {}", e))?;
-            let position: i64 = row.try_get(1).map_err(|e| format!("读取置顶失败: {}", e))?;
-            existing.insert(item_id, position);
-        }
-        for (position, item_id) in pinned_items.iter().enumerate() {
-            if existing.get(item_id) == Some(&(position as i64)) {
-                continue;
-            }
-            sqlx::query(
-                "
-                INSERT INTO image_pinned (item_id, position)
-                VALUES (?1, ?2)
-                ON CONFLICT(item_id) DO UPDATE SET position = excluded.position
-                ",
+        reset_temp_position_table(&mut tx, "temp_target_image_pinned", "item_id").await?;
+        fill_temp_position_table(
+            &mut tx,
+            "temp_target_image_pinned",
+            "item_id",
+            pinned_items,
+        )
+            .await?;
+
+        sqlx::query(
+            "
+            DELETE FROM image_pinned
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM temp_target_image_pinned target
+                WHERE target.item_id = image_pinned.item_id
             )
-                .bind(item_id)
-                .bind(position as i64)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("写入置顶失败: {}", e))?;
-        }
-        let desired = pinned_items.iter().cloned().collect::<HashSet<_>>();
-        for existing_item in existing.keys() {
-            if desired.contains(existing_item) {
-                continue;
-            }
-            sqlx::query("DELETE FROM image_pinned WHERE item_id = ?1")
-                .bind(existing_item)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("清理置顶失败: {}", e))?;
-        }
+            ",
+        )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("清理置顶失败: {}", e))?;
+
+        sqlx::query(
+            "
+            UPDATE image_pinned
+            SET position = (
+                SELECT target.position
+                FROM temp_target_image_pinned target
+                WHERE target.item_id = image_pinned.item_id
+            )
+            WHERE EXISTS (
+                SELECT 1
+                FROM temp_target_image_pinned target
+                WHERE target.item_id = image_pinned.item_id
+                  AND target.position != image_pinned.position
+            )
+            ",
+        )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("更新置顶失败: {}", e))?;
+
+        sqlx::query(
+            "
+            INSERT INTO image_pinned (item_id, position)
+            SELECT target.item_id, target.position
+            FROM temp_target_image_pinned target
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM image_pinned existing
+                WHERE existing.item_id = target.item_id
+            )
+            ",
+        )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("写入置顶失败: {}", e))?;
         tx.commit()
             .await
             .map_err(|e| format!("提交置顶事务失败: {}", e))
@@ -965,12 +1129,24 @@ pub async fn delete_async_previews_bulk_async(item_ids: &[String]) -> Result<(),
         return Ok(());
     }
     let pool = get_pool().await?;
-    let placeholders = vec!["?"; item_ids.len()].join(", ");
-    let sql = format!("DELETE FROM image_async_previews WHERE item_id IN ({})", placeholders);
-    let mut query = sqlx::query(&sql);
-    for item_id in item_ids {
-        query = query.bind(item_id);
-    }
-    query.execute(pool.as_ref()).await.map_err(|e| format!("批量删除异步预览失败: {}", e))?;
+    let mut tx = pool.begin().await.map_err(|e| format!("开启批量删除预览事务失败: {}", e))?;
+    reset_temp_text_table(&mut tx, "temp_delete_image_item_ids", "item_id").await?;
+    fill_temp_text_table(&mut tx, "temp_delete_image_item_ids", "item_id", item_ids).await?;
+    sqlx::query(
+        "
+        DELETE FROM image_async_previews
+        WHERE EXISTS (
+            SELECT 1
+            FROM temp_delete_image_item_ids target
+            WHERE target.item_id = image_async_previews.item_id
+        )
+        ",
+    )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("批量删除异步预览失败: {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交批量删除预览事务失败: {}", e))?;
     Ok(())
 }

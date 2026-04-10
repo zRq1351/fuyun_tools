@@ -29,8 +29,6 @@
         :delete-item="deleteItem"
         :download-item="downloadItem"
         :fill-by-id="fillById"
-        :get-item-category="getItemCategory"
-        :get-item-tags="getItemTags"
         :get-preview-data-url="getPreviewDataUrl"
         :handle-drag-end="handleDragEnd"
         :handle-drag-start="handleDragStart"
@@ -38,7 +36,6 @@
         :has-more="hasMore"
         :is-ctrl-key-pressed="isCtrlKeyPressed"
         :is-loading-page="isLoadingPage"
-        :is-pinned="isPinned"
         :open-fullscreen="openFullscreen"
         :promote-item="promoteImageItem"
         :select-by-index="selectByIndex"
@@ -379,6 +376,16 @@ const clearPrefetchedPage = () => {
   prefetchPromise = null
 }
 
+const getHistoryRetentionLimit = (...candidateCounts) => {
+  const normalizedPageSize = normalizeImagePageSize(pageSize.value)
+  const loadedCount = Math.max(0, Number(pageOffset.value) || 0)
+  const normalizedCandidates = candidateCounts
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value))
+      .map((value) => Math.max(0, value))
+  return Math.max(100, normalizedPageSize * 4, loadedCount, ...normalizedCandidates)
+}
+
 const prefetchNextPage = async () => {
   if (isLoadingPage.value || isPrefetchingPage.value || !hasMore.value) return
   const offset = pageOffset.value
@@ -512,7 +519,8 @@ const getItemTags = (itemId) => {
   return Array.isArray(tags) ? tags : []
 }
 
-const isPinned = (itemId) => pinnedItems.value.includes(itemId)
+const pinnedItemSet = computed(() => new Set(pinnedItems.value))
+const isPinned = (itemId) => pinnedItemSet.value.has(itemId)
 
 const filteredHistoryState = computed(() => {
   const revision = filterDataRevision.value
@@ -526,6 +534,7 @@ const filteredHistoryState = computed(() => {
     const categoryFilteredIds = category === '全部' ? null : (categorySearchIndex.get(category) || new Set())
     const tagMatchedIds = keyword ? getKeywordTagMatchedIds(keyword) : null
     const categoryMatchedIds = keyword ? getKeywordCategoryMatchedIds(keyword) : null
+    const currentPinnedSet = pinnedItemSet.value
     for (let index = 0; index < history.value.length; index++) {
       const item = history.value[index]
       if (!item) continue
@@ -541,7 +550,13 @@ const filteredHistoryState = computed(() => {
         }
       }
       const nextDisplay = out.length + 1
-      out.push({item, index})
+      out.push({
+        item,
+        index,
+        pinned: currentPinnedSet.has(itemId),
+        category: getItemCategory(itemId),
+        tags: getItemTags(itemId)
+      })
       displayIndexMap.set(index, nextDisplay)
     }
     cached = {
@@ -663,7 +678,9 @@ const mergeIncrementalImageItem = (rawItem) => {
   const isPinnedItem = pinnedSet.has(normalized.id)
   const insertIndex = isPinnedItem ? 0 : (firstUnpinnedIndex >= 0 ? firstUnpinnedIndex : history.value.length)
   history.value.splice(insertIndex, 0, normalized)
-  const keepCount = Math.max(100, Number(pageOffset.value) || 100, Number(pageSize.value) || 100, history.value.length)
+  const keepCount = getHistoryRetentionLimit(
+      (Number(pageOffset.value) || 0) + (existingIndex >= 0 ? 0 : 1)
+  )
   if (history.value.length > keepCount) {
     history.value = history.value.slice(0, keepCount)
   }
@@ -996,13 +1013,25 @@ const demoteLocalItemFromTop = (itemId) => {
 }
 
 const deleteItem = async (itemId, index) => {
+  if (!itemId) return
+  const snapshot = {
+    history: history.value.slice(),
+    categoryMap: {...categoryMap.value},
+    tagMap: Object.fromEntries(
+        Object.entries(tagMap.value || {}).map(([key, value]) => [key, Array.isArray(value) ? [...value] : []])
+    ),
+    pinnedItems: pinnedItems.value.slice(),
+    selectedIndex: selectedIndex.value,
+    totalCount: totalCount.value,
+    pageOffset: pageOffset.value,
+    hasMore: hasMore.value
+  }
   try {
-    if (itemId) {
-      previewCache.delete(itemId)
-      asyncPreviewCache.delete(itemId)
-      removeItemCategoryLocal(itemId)
-      removeItemTagsLocal(itemId)
-    }
+    previewCache.delete(itemId)
+    asyncPreviewCache.delete(itemId)
+    removeItemCategoryLocal(itemId)
+    removeItemTagsLocal(itemId)
+    pinnedItems.value = pinnedItems.value.filter((id) => id !== itemId)
     if (Number.isInteger(index) && index >= 0 && index < history.value.length) {
       history.value.splice(index, 1)
       if (selectedIndex.value >= history.value.length) {
@@ -1010,11 +1039,25 @@ const deleteItem = async (itemId, index) => {
       }
       bumpFilterDataRevision()
     }
-    if (!itemId) return
     await ImageClipboardService.removeItemById(itemId)
     await syncHistory()
   } catch (error) {
     console.error('删除图片记录失败:', error)
+    history.value = snapshot.history
+    categoryMap.value = snapshot.categoryMap
+    tagMap.value = snapshot.tagMap
+    pinnedItems.value = snapshot.pinnedItems
+    selectedIndex.value = snapshot.selectedIndex
+    totalCount.value = snapshot.totalCount
+    pageOffset.value = snapshot.pageOffset
+    hasMore.value = snapshot.hasMore
+    rebuildFilterIndexes()
+    bumpFilterDataRevision()
+    try {
+      await syncHistory()
+    } catch (syncError) {
+      console.error('删除失败后重同步图片历史失败:', syncError)
+    }
   }
 }
 
@@ -1198,8 +1241,7 @@ const mergeShowWindowPayload = (data) => {
     const existingById = new Map(history.value.filter(Boolean).map((item) => [item.id, item]))
     const incomingIds = new Set()
 
-    // 修复：使用更大的保留数量，确保所有图片都被保留
-    const keepCount = Math.max(100, Number(pageOffset.value) || 100, Number(pageSize.value) || 100, history.value.length + incoming.length)
+    const keepCount = getHistoryRetentionLimit(incoming.length)
 
     // 修复：正确处理所有传入的图片，而不是只处理第一张
     const front = []

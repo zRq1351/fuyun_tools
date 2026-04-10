@@ -1,5 +1,5 @@
-use crate::sync::Mutex;
 use crate::services::clipboard_wakeup::subscribe_clipboard_wake_events;
+use crate::sync::Mutex;
 use crate::ui::window_manager::ENIGO_INSTANCE;
 use crate::utils::clipboard::ClipboardManager;
 use enigo::{Enigo, Key, Keyboard, Settings};
@@ -53,7 +53,9 @@ const INITIAL_DELAY: Duration = Duration::from_millis(10);
 
 use crate::core::app_state::AppState as SharedAppState;
 use crate::core::config::CTRL_KEY;
+use tauri::image::Image;
 use tauri::Manager;
+use tauri_plugin_clipboard_manager::ClipboardExt;
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::GetClipboardSequenceNumber;
 
@@ -92,6 +94,12 @@ impl Drop for SelectionProcessingGuard {
     }
 }
 
+enum ClipboardSnapshot {
+    Text(String),
+    Image { rgba: Vec<u8>, width: u32, height: u32 },
+    Empty,
+}
+
 /// 获取选中的文本
 pub fn get_selected_text_with_app(
     app_handle: &AppHandle,
@@ -109,8 +117,12 @@ fn get_selected_text_windows(
     let _processing_guard = SelectionProcessingGuard::acquire(state_manager.inner().clone())?;
 
     // 1. 获取原始剪贴板内容（用于后续恢复）
-    let original_content =
-        get_current_clipboard_content_with_manager(&clipboard_manager, app_handle);
+    let original_snapshot =
+        capture_clipboard_snapshot(&clipboard_manager, app_handle);
+    let original_text = match &original_snapshot {
+        ClipboardSnapshot::Text(text) => Some(text.clone()),
+        _ => None,
+    };
     let sequence_before_copy = get_clipboard_sequence_number();
 
     // 3. 模拟 Ctrl+C
@@ -143,14 +155,12 @@ fn get_selected_text_windows(
     let new_content = wait_for_clipboard_update(
         &clipboard_manager,
         app_handle,
-        &original_content,
+        &original_text,
         sequence_before_copy,
     );
 
     // 5. 恢复原始剪贴板内容
-    if let Some(ref original) = original_content {
-        safe_restore_clipboard_content(&clipboard_manager, app_handle, original, &new_content);
-    }
+    restore_clipboard_snapshot(&clipboard_manager, app_handle, &original_snapshot, &new_content);
 
     match &new_content {
         Some(content) => {
@@ -160,6 +170,35 @@ fn get_selected_text_windows(
         None => {
             log::warn!("未能捕获选中文本");
             None
+        }
+    }
+}
+
+fn capture_clipboard_snapshot(
+    clipboard_manager: &Arc<Mutex<ClipboardManager>>,
+    app_handle: &AppHandle,
+) -> ClipboardSnapshot {
+    if let Some(text) = get_current_clipboard_content_with_manager(clipboard_manager, app_handle) {
+        return ClipboardSnapshot::Text(text);
+    }
+
+    match crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
+        app_handle.clipboard().read_image()
+    }) {
+        Ok(image) => {
+            let width = image.width();
+            let height = image.height();
+            let rgba = image.rgba().to_vec();
+            if width > 0 && height > 0 && !rgba.is_empty() {
+                log::debug!("捕获到原始图片剪贴板: {}x{}", width, height);
+                ClipboardSnapshot::Image { rgba, width, height }
+            } else {
+                ClipboardSnapshot::Empty
+            }
+        }
+        Err(_) => {
+            log::debug!("未捕获到原始文本/图片剪贴板内容，按空态处理");
+            ClipboardSnapshot::Empty
         }
     }
 }
@@ -242,34 +281,59 @@ fn get_clipboard_sequence_number() -> u32 {
     0
 }
 
-/// 安全地恢复原始剪贴板内容
-fn safe_restore_clipboard_content(
+fn restore_clipboard_snapshot(
     clipboard_manager: &Arc<Mutex<ClipboardManager>>,
     app_handle: &AppHandle,
-    original_content: &str,
+    snapshot: &ClipboardSnapshot,
     captured_content: &Option<String>,
 ) {
     let current_content = get_current_clipboard_content_with_manager(clipboard_manager, app_handle);
 
-    if let Some(ref captured) = captured_content {
-        if let Some(ref current) = current_content {
-            if current == captured {
-                let result = {
-                    let manager = lock_arc_mutex(clipboard_manager);
-                    manager.set_clipboard_content(app_handle, original_content)
-                };
+    let still_holds_captured_text = captured_content
+        .as_ref()
+        .zip(current_content.as_ref())
+        .is_some_and(|(captured, current)| current == captured);
 
-                match result {
-                    Ok(()) => log::debug!("已安全恢复原始剪贴板内容"),
-                    Err(e) => log::error!("恢复剪贴板内容失败: {}", e),
-                }
-            } else {
-                log::info!("检测到剪贴板在捕获后被用户更改，已放弃恢复原始内容以避免覆盖用户操作");
-            }
-        } else {
-            log::info!("当前剪贴板为空，已放弃恢复原始内容");
-        }
-    } else {
+    if captured_content.is_none() {
         log::debug!("未捕获到内容，无需恢复");
+        return;
+    }
+
+    if !still_holds_captured_text {
+        log::info!("检测到剪贴板在捕获后被用户更改，已放弃恢复原始内容以避免覆盖用户操作");
+        return;
+    }
+
+    match snapshot {
+        ClipboardSnapshot::Text(original_content) => {
+            let result = {
+                let manager = lock_arc_mutex(clipboard_manager);
+                manager.set_clipboard_content(app_handle, original_content)
+            };
+            match result {
+                Ok(()) => log::debug!("已恢复原始文本剪贴板内容"),
+                Err(e) => log::error!("恢复文本剪贴板内容失败: {}", e),
+            }
+        }
+        ClipboardSnapshot::Image { rgba, width, height } => {
+            let image = Image::new_owned(rgba.clone(), *width, *height);
+            let result = crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
+                app_handle.clipboard().write_image(&image)
+            });
+            match result {
+                Ok(()) => log::debug!("已恢复原始图片剪贴板内容"),
+                Err(e) => log::error!("恢复图片剪贴板内容失败: {}", e),
+            }
+        }
+        ClipboardSnapshot::Empty => {
+            let result = {
+                let manager = lock_arc_mutex(clipboard_manager);
+                manager.set_clipboard_content(app_handle, "")
+            };
+            match result {
+                Ok(()) => log::debug!("已按空态恢复剪贴板内容"),
+                Err(e) => log::error!("恢复空态剪贴板内容失败: {}", e),
+            }
+        }
     }
 }
