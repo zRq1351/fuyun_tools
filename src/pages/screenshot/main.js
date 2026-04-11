@@ -14,6 +14,7 @@ if (typeof screenshotBoot.pendingMode !== 'string') {
     screenshotBoot.pendingMode = null
 }
 window.__SCREENSHOT_BOOT__ = screenshotBoot
+window.__SCREENSHOT_BOOT_READY__ = true
 
 window.addEventListener('screenshot-data', (event) => {
     screenshotBoot.pendingData = event.detail || null

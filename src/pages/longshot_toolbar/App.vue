@@ -38,6 +38,7 @@ const lastConfidence = ref(0)
 let unlistenProgress = null
 let unlistenPreview = null
 let unlistenLifecycle = null
+let unlistenReset = null
 let snapTimer = null
 
 const togglePause = async () => {
@@ -74,6 +75,15 @@ onMounted(async () => {
     if (state === 'paused') paused.value = true
     if (state === 'resumed' || state === 'started' || state === 'running') paused.value = false
   })
+  unlistenReset = await listen('manual-longshot-toolbar-reset', () => {
+    previewSrc.value = ''
+    stitchedHeight.value = 0
+    captureHeight.value = 0
+    frameCount.value = 0
+    droppedFrames.value = 0
+    lastConfidence.value = 0
+    paused.value = false
+  })
   window.addEventListener('mouseup', scheduleSnap)
 })
 
@@ -81,6 +91,7 @@ onUnmounted(() => {
   if (typeof unlistenProgress === 'function') unlistenProgress()
   if (typeof unlistenPreview === 'function') unlistenPreview()
   if (typeof unlistenLifecycle === 'function') unlistenLifecycle()
+  if (typeof unlistenReset === 'function') unlistenReset()
   window.removeEventListener('mouseup', scheduleSnap)
   if (snapTimer) {
     clearTimeout(snapTimer)

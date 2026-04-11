@@ -116,6 +116,17 @@
       {{ manualLongshotHint }}
     </div>
 
+    <div
+        v-if="showExportRouteIndicator"
+        :class="['export-route-indicator', exportRouteIndicator.kind]"
+        @mousedown.stop
+    >
+      <div class="export-route-title">当前链路状态</div>
+      <div v-for="item in exportRouteIndicator.items" :key="item.key" class="export-route-detail">
+        {{ item.label }}：{{ item.value }}
+      </div>
+    </div>
+
     <!-- 浮动工具栏 -->
     <div v-if="regionSelectMode === 'screenshot' && hasSelection && (state === 'selected' || state === 'drawing')"
          ref="floatingToolbarRef"
@@ -130,8 +141,14 @@
         </button>
 
         <div class="divider"></div>
-        <button class="tool-btn longshot-entry-btn" title="长截图" @click="enterManualLongshotMode">
-          长截
+        <button class="tool-btn" title="长截图" @click="enterManualLongshotMode">
+          <svg aria-hidden="true" class="tool-icon-wrap" fill="none" viewBox="0 0 16 16">
+            <path d="M8 1.5 L6.2 3.3 M8 1.5 L9.8 3.3 M8 1.5 V5" stroke="currentColor" stroke-linecap="round"
+                  stroke-linejoin="round" stroke-width="1.4"/>
+            <rect height="7" rx="1.6" stroke="currentColor" stroke-width="1.4" width="8" x="4" y="4.5"/>
+            <path d="M8 14.5 L6.2 12.7 M8 14.5 L9.8 12.7 M8 11 V14.5" stroke="currentColor" stroke-linecap="round"
+                  stroke-linejoin="round" stroke-width="1.4"/>
+          </svg>
         </button>
 
         <div class="divider"></div>
@@ -210,7 +227,11 @@
         <div :style="getShapeStrokeStyle(shape)" class="shape-circle"></div>
       </template>
       <template v-else>
-        <svg :height="shape.height" :width="shape.width" class="shape-line-svg">
+        <svg
+            :viewBox="getShapeLineViewBox(shape)"
+            class="shape-line-svg"
+            preserveAspectRatio="none"
+        >
           <line
               :stroke="shape.color"
               :stroke-width="shape.lineWidth"
@@ -254,12 +275,12 @@
       </template>
       <template v-if="selectedShapeId === shape.id && (shape.type === 'line' || shape.type === 'arrow')">
         <div
-            :style="{ left: `${shape.x1}px`, top: `${shape.y1}px` }"
+            :style="getShapePointHandleStyle(shape.x1, shape.y1)"
             class="shape-point-handle"
             @mousedown.stop="startAdjustLineEndpoint(shape.id, 'start', $event)"
         ></div>
         <div
-            :style="{ left: `${shape.x2}px`, top: `${shape.y2}px` }"
+            :style="getShapePointHandleStyle(shape.x2, shape.y2)"
             class="shape-point-handle"
             @mousedown.stop="startAdjustLineEndpoint(shape.id, 'end', $event)"
         ></div>
@@ -390,6 +411,7 @@ const manualLongshotHint = ref('')
 const longshotOverlayOnly = ref(false)
 const longshotResultActive = ref(false)
 const longshotRawPngBase64 = ref('')
+const sourceImagePath = ref('')
 const overlayDirty = ref(false)
 const longshotViewScale = ref(1)
 const longshotViewOffset = reactive({x: 0, y: 0})
@@ -421,6 +443,47 @@ const drawingTools = [
 
 const hasSelection = computed(() => rect.width > 0 && rect.height > 0)
 const canExport = computed(() => hasSelection.value)
+const showExportRouteIndicator = computed(() =>
+    regionSelectMode.value === 'screenshot' &&
+    hasSelection.value &&
+    (state.value === 'selected' || state.value === 'drawing')
+)
+const exportRouteIndicator = computed(() => {
+  const sourcePath = String(sourceImagePath.value || '').trim()
+  const hasBackendPath = !!sourcePath
+  const displaySource = hasBackendPath
+      ? `imagePath -> objectURL 显示 (${getPathBasename(sourcePath)})`
+      : (screenshotSrc.value?.startsWith('data:image/')
+          ? 'fallback -> data:image/base64 显示'
+          : (screenshotSrc.value ? 'fallback -> 内存 URL 显示' : '未就绪'))
+  const rawLongshotAvailable = longshotResultActive.value && !!longshotRawPngBase64.value && !hasOverlayForLongshotExport()
+  const fallbackExport = rawLongshotAvailable ? 'fallback -> 原始长图 base64' : 'fallback -> canvas/base64'
+  const saveRoute = hasBackendPath ? 'imagePath -> 后端导出' : fallbackExport
+  const copyRoute = hasBackendPath ? 'imagePath -> 后端剪贴板' : 'fallback -> 浏览器剪贴板'
+  const pinRoute = hasBackendPath ? 'imagePath -> 后端渲染 PNG' : fallbackExport
+  if (sourcePath) {
+    return {
+      kind: 'backend',
+      items: [
+        {key: 'display', label: '截图源', value: displaySource},
+        {key: 'save', label: '保存', value: saveRoute},
+        {key: 'copy', label: '复制', value: copyRoute},
+        {key: 'pin', label: '固定', value: pinRoute},
+        {key: 'path', label: '当前路径', value: sourcePath}
+      ]
+    }
+  }
+  return {
+    kind: 'fallback',
+    items: [
+      {key: 'display', label: '截图源', value: displaySource},
+      {key: 'save', label: '保存', value: saveRoute},
+      {key: 'copy', label: '复制', value: copyRoute},
+      {key: 'pin', label: '固定', value: pinRoute},
+      {key: 'path', label: '当前路径', value: '前端内存链路（无 imagePath）'}
+    ]
+  }
+})
 const selectionInfoText = computed(() => {
   const width = Math.max(0, Math.round(rect.width * dpr))
   const height = Math.max(0, Math.round(rect.height * dpr))
@@ -469,8 +532,15 @@ function getGreatestCommonDivisor(a, b) {
   return x || 1
 }
 
+function getPathBasename(filePath) {
+  const normalized = String(filePath || '').replace(/\\/g, '/')
+  const parts = normalized.split('/')
+  return parts[parts.length - 1] || normalized
+}
+
 let screenshotPixelCanvas = null
 let screenshotPixelCtx = null
+let screenshotObjectUrl = ''
 const movingTextStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, id: 0})
 const movingShapeStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, id: 0})
 const resizingShapeStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, itemWidth: 0, itemHeight: 0, handle: '', id: 0})
@@ -506,6 +576,17 @@ function toScenePoint(event) {
   return {
     x: (event.clientX - longshotViewOffset.x) / scale,
     y: (event.clientY - longshotViewOffset.y) / scale
+  }
+}
+
+function sceneToDisplayPoint(x, y) {
+  if (!longshotResultActive.value) {
+    return {x, y}
+  }
+  const scale = Math.max(0.1, longshotViewScale.value)
+  return {
+    x: x * scale + longshotViewOffset.x,
+    y: y * scale + longshotViewOffset.y
   }
 }
 
@@ -695,6 +776,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  revokeScreenshotObjectUrl()
   cancelManualLongshotCapture(false, false)
   window.removeEventListener('screenshot-data', handleScreenshotData)
   window.removeEventListener('start-region-select', handleStartRegionSelect)
@@ -873,17 +955,22 @@ async function requestScreenshot() {
   screenshotRequestInFlight.value = true
   try {
     const result = await invoke('start_screenshot')
-    if (result.success && result.png_base64) {
+    if (result.success && (result.image_path || result.png_base64)) {
       longshotResultActive.value = false
       longshotRawPngBase64.value = ''
       longshotViewScale.value = 1
       longshotViewOffset.x = 0
       longshotViewOffset.y = 0
+      sourceImagePath.value = String(result.image_path || '')
       hasScreenshotPayload.value = true
       captureOriginX.value = Number(result.origin_x) || 0
       captureOriginY.value = Number(result.origin_y) || 0
       await fetchWindows()
-      loadImageFromBase64(result.png_base64)
+      if (result.image_path) {
+        loadImageFromPath(result.image_path)
+      } else {
+        loadImageFromBase64(result.png_base64)
+      }
       return true
     }
     return false
@@ -899,6 +986,7 @@ function handleScreenshotData(event) {
   if (event.detail && (event.detail.png_base64 || event.detail.image_path)) {
     longshotResultActive.value = false
     longshotRawPngBase64.value = ''
+    sourceImagePath.value = String(event.detail.image_path || '')
     longshotViewScale.value = 1
     longshotViewOffset.x = 0
     longshotViewOffset.y = 0
@@ -956,6 +1044,12 @@ async function toggleManualLongshotRunning() {
   try {
     if (manualLongshotSessionId.value <= 0) {
       const region = getGlobalSelectionRect()
+      longshotOverlayOnly.value = false
+      pendingLongshotBorderAnchor.value = region
+      longshotBorderShown.value = false
+      await invoke('set_screenshot_window_visible', {visible: false})
+      // 等待截图窗真正退出桌面合成，再启动长截图采样，避免首帧混入鼠标/覆盖层。
+      await new Promise(resolve => setTimeout(resolve, 80))
       const result = await ScreenshotService.startManualLongshot({
         region,
         fps: 10,
@@ -967,12 +1061,13 @@ async function toggleManualLongshotRunning() {
       if (sid > 0) {
         manualLongshotSessionId.value = sid
         manualLongshotRunning.value = true
-        longshotOverlayOnly.value = false
-        pendingLongshotBorderAnchor.value = region
-        longshotBorderShown.value = false
         await invoke('show_longshot_toolbar', {anchor: region})
-        await invoke('set_screenshot_window_visible', {visible: false})
         manualLongshotHint.value = '长截图已开始，可直接看到目标窗口滚动'
+      } else {
+        await invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
+        })
+        pendingLongshotBorderAnchor.value = null
+        longshotBorderShown.value = false
       }
       return
     }
@@ -1044,13 +1139,19 @@ function cancelManualLongshotCapture(updateHint = true, restoreVisibility = true
 }
 
 function applyManualLongshotResult(result) {
-  const base64 = String(result?.pngBase64 || '')
-  if (!base64) {
+  const base64 = String(result?.pngBase64 || result?.png_base64 || '')
+  const imagePath = String(result?.imagePath || result?.image_path || '')
+  if (!base64 && !imagePath) {
     throw new Error('未获取到长截图结果')
   }
-  loadImageFromBase64(base64)
+  if (imagePath) {
+    loadImageFromPath(imagePath)
+  } else {
+    loadImageFromBase64(base64)
+  }
   longshotResultActive.value = true
   longshotRawPngBase64.value = base64
+  sourceImagePath.value = imagePath
   longshotViewScale.value = 1
   longshotViewOffset.x = 0
   longshotViewOffset.y = 0
@@ -1094,6 +1195,56 @@ function resolveExportBase64() {
   const cropCanvas = getCroppedCanvas()
   const dataUrl = cropCanvas.toDataURL('image/png')
   return dataUrl.split(',')[1]
+}
+
+function buildBackendExportRequest(outputPath) {
+  return {
+    sourceImagePath: sourceImagePath.value,
+    outputPath,
+    isLongshot: longshotResultActive.value,
+    devicePixelRatio: dpr,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    selection: longshotResultActive.value ? null : {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height
+    },
+    textItems: textItems.value.map((item) => ({
+      x: item.x,
+      y: item.y,
+      text: item.text,
+      color: item.color,
+      fontSize: item.fontSize,
+      fontFamily: item.fontFamily,
+      bold: !!item.bold,
+      stroke: !!item.stroke,
+      strokeColor: item.strokeColor,
+      shadow: !!item.shadow
+    })),
+    shapeItems: shapeItems.value.map((item) => ({
+      type: item.type,
+      x: item.x,
+      y: item.y,
+      width: item.width,
+      height: item.height,
+      x1: item.x1,
+      y1: item.y1,
+      x2: item.x2,
+      y2: item.y2,
+      color: item.color,
+      lineWidth: item.lineWidth
+    })),
+    overlayCommands: overlayCommandLog.map((command) => ({
+      type: command.type,
+      color: command.color,
+      lineWidth: command.lineWidth,
+      points: Array.isArray(command.points)
+          ? command.points.map((point) => ({x: point.x, y: point.y}))
+          : []
+    }))
+  }
 }
 
 async function commitRecordingRegionSelection() {
@@ -1142,6 +1293,13 @@ function buildFileUrlFromPath(imagePath) {
   }
 }
 
+function revokeScreenshotObjectUrl() {
+  if (screenshotObjectUrl) {
+    URL.revokeObjectURL(screenshotObjectUrl)
+    screenshotObjectUrl = ''
+  }
+}
+
 function loadImageFromSrc(src) {
   isCaptureReady.value = false
   screenshotSrc.value = src
@@ -1177,10 +1335,26 @@ function loadImageFromPath(imagePath) {
     isCaptureReady.value = false
     return
   }
-  loadImageFromSrc(fileUrl)
+  revokeScreenshotObjectUrl()
+  fetch(fileUrl)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+        return response.blob()
+      })
+      .then((blob) => {
+        screenshotObjectUrl = URL.createObjectURL(blob)
+        loadImageFromSrc(screenshotObjectUrl)
+      })
+      .catch((error) => {
+        console.error('加载截图文件失败:', error)
+        isCaptureReady.value = false
+      })
 }
 
 function resetAnnotationStateForNewImage() {
+  revokeScreenshotObjectUrl()
   finishInlineEdit()
   selectedTextId.value = null
   selectedShapeId.value = null
@@ -1714,8 +1888,9 @@ function handleCanvasMouseUp(event) {
 }
 
 function startCreateTextItem(x, y) {
-  const safeX = Math.max(10, Math.min(x, window.innerWidth - 240))
-  const safeY = Math.max(10, Math.min(y, window.innerHeight - 120))
+  const bounds = getTextCreationBounds()
+  const safeX = Math.max(bounds.minX, Math.min(x, bounds.maxX))
+  const safeY = Math.max(bounds.minY, Math.min(y, bounds.maxY))
   const item = {
     id: textItemIdSeed++,
     x: safeX,
@@ -2087,6 +2262,20 @@ function getShapeStrokeStyle(shape) {
   }
 }
 
+function getShapeLineViewBox(shape) {
+  const width = Math.max(1, Number(shape?.width) || 1)
+  const height = Math.max(1, Number(shape?.height) || 1)
+  return `0 0 ${width} ${height}`
+}
+
+function getShapePointHandleStyle(x, y) {
+  const scale = longshotResultActive.value ? longshotViewScale.value : 1
+  return {
+    left: `${x * scale}px`,
+    top: `${y * scale}px`
+  }
+}
+
 function toggleTextBold() {
   textStyle.bold = !textStyle.bold
   syncEditingTextStyle()
@@ -2121,16 +2310,53 @@ function getTextItemStyle(item) {
   const scale = longshotResultActive.value ? longshotViewScale.value : 1
   const ox = longshotResultActive.value ? longshotViewOffset.x : 0
   const oy = longshotResultActive.value ? longshotViewOffset.y : 0
+  const displayFontSize = Math.max(8, item.fontSize * scale)
+  const strokeWidth = Math.max(1, Math.round(displayFontSize / 14))
   return {
     left: `${item.x * scale + ox}px`,
     top: `${item.y * scale + oy}px`,
     color: item.color,
-    fontSize: `${Math.max(8, item.fontSize * scale)}px`,
+    fontSize: `${displayFontSize}px`,
     fontFamily: item.fontFamily || 'Arial',
     fontWeight,
     textShadow,
-    WebkitTextStroke: item.stroke ? `${Math.max(1, Math.round(scale))}px ${item.strokeColor || '#000000'}` : '0'
+    WebkitTextStroke: item.stroke ? `${strokeWidth}px ${item.strokeColor || '#000000'}` : '0'
   }
+}
+
+function getTextCreationBounds() {
+  const displayMargin = 10
+  const estimatedDisplayWidth = 240
+  const estimatedDisplayHeight = 120
+  if (longshotResultActive.value && screenshotImg.value) {
+    const scale = Math.max(0.1, longshotViewScale.value || 1)
+    const ox = longshotViewOffset.x || 0
+    const oy = longshotViewOffset.y || 0
+    const view = getLongshotImageViewportRect(
+        Math.max(1, Number(screenshotImg.value.width) || 1),
+        Math.max(1, Number(screenshotImg.value.height) || 1)
+    )
+
+    const estimatedWidth = estimatedDisplayWidth / scale
+    const estimatedHeight = estimatedDisplayHeight / scale
+    const margin = displayMargin / scale
+
+    const visibleMinX = (displayMargin - ox) / scale
+    const visibleMinY = (displayMargin - oy) / scale
+    const visibleMaxX = (window.innerWidth - estimatedDisplayWidth - displayMargin - ox) / scale
+    const visibleMaxY = (window.innerHeight - estimatedDisplayHeight - displayMargin - oy) / scale
+
+    const minX = Math.round(Math.max(view.x + margin, visibleMinX))
+    const minY = Math.round(Math.max(view.y + margin, visibleMinY))
+    const maxX = Math.round(Math.max(minX, Math.min(view.x + view.width - estimatedWidth - margin, visibleMaxX)))
+    const maxY = Math.round(Math.max(minY, Math.min(view.y + view.height - estimatedHeight - margin, visibleMaxY)))
+    return {minX, minY, maxX, maxY}
+  }
+  const minX = displayMargin
+  const minY = displayMargin
+  const maxX = Math.max(minX, window.innerWidth - estimatedDisplayWidth - displayMargin)
+  const maxY = Math.max(minY, window.innerHeight - estimatedDisplayHeight - displayMargin)
+  return {minX, minY, maxX, maxY}
 }
 
 function drawArrowHead(ctx, fromX, fromY, toX, toY) {
@@ -2285,32 +2511,50 @@ function clearOverlayCanvas(ctx) {
 function applyMosaicAtScenePoint(ctx, x, y, strokeWidth) {
   if (!screenshotImg.value) return
   const size = strokeWidth * 3
-  const physSize = Math.max(1, Math.round(size * dpr))
-  const px = Math.round(x * dpr)
-  const py = Math.round(y * dpr)
+  let sampleSize = Math.max(1, Math.round(size * dpr))
+  let sampleX = x * dpr
+  let sampleY = y * dpr
+  let drawX = x
+  let drawY = y
+  let drawSize = size
+  let blockSize = Math.max(1, Math.round(6 * dpr))
+
+  if (longshotResultActive.value) {
+    const view = getLongshotImageViewportRect(
+        Math.max(1, Number(screenshotImg.value.width) || 1),
+        Math.max(1, Number(screenshotImg.value.height) || 1)
+    )
+    const imagePoint = sceneToImagePoint(x, y, view)
+    sampleSize = Math.max(1, Math.round(size / Math.max(0.0001, view.fit)))
+    blockSize = Math.max(1, Math.round(6 / Math.max(0.0001, view.fit)))
+    sampleX = imagePoint.x
+    sampleY = imagePoint.y
+  }
+
+  const px = Math.round(sampleX)
+  const py = Math.round(sampleY)
   const tempCanvas = document.createElement('canvas')
-  tempCanvas.width = physSize
-  tempCanvas.height = physSize
+  tempCanvas.width = sampleSize
+  tempCanvas.height = sampleSize
   const tempCtx = tempCanvas.getContext('2d')
   if (!tempCtx) return
   tempCtx.drawImage(
       screenshotImg.value,
-      px - physSize / 2, py - physSize / 2, physSize, physSize,
-      0, 0, physSize, physSize
+      px - sampleSize / 2, py - sampleSize / 2, sampleSize, sampleSize,
+      0, 0, sampleSize, sampleSize
   )
-  const imageData = tempCtx.getImageData(0, 0, physSize, physSize)
+  const imageData = tempCtx.getImageData(0, 0, sampleSize, sampleSize)
   const data = imageData.data
-  const blockSize = Math.max(1, Math.round(6 * dpr))
-  for (let i = 0; i < physSize; i += blockSize) {
-    for (let j = 0; j < physSize; j += blockSize) {
-      const pIdx = (j * physSize + i) * 4
+  for (let i = 0; i < sampleSize; i += blockSize) {
+    for (let j = 0; j < sampleSize; j += blockSize) {
+      const pIdx = (j * sampleSize + i) * 4
       if (pIdx >= data.length) continue
       const r = data[pIdx]
       const g = data[pIdx + 1]
       const b = data[pIdx + 2]
-      for (let bi = 0; bi < blockSize && i + bi < physSize; bi++) {
-        for (let bj = 0; bj < blockSize && j + bj < physSize; bj++) {
-          const idx = ((j + bj) * physSize + (i + bi)) * 4
+      for (let bi = 0; bi < blockSize && i + bi < sampleSize; bi++) {
+        for (let bj = 0; bj < blockSize && j + bj < sampleSize; bj++) {
+          const idx = ((j + bj) * sampleSize + (i + bi)) * 4
           if (idx < data.length) {
             data[idx] = r
             data[idx + 1] = g
@@ -2320,10 +2564,17 @@ function applyMosaicAtScenePoint(ctx, x, y, strokeWidth) {
       }
     }
   }
-  const oldTransform = ctx.getTransform()
-  ctx.resetTransform()
-  ctx.putImageData(imageData, px - physSize / 2, py - physSize / 2)
-  ctx.setTransform(oldTransform)
+  tempCtx.putImageData(imageData, 0, 0)
+  const oldSmoothing = ctx.imageSmoothingEnabled
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(
+      tempCanvas,
+      drawX - drawSize / 2,
+      drawY - drawSize / 2,
+      drawSize,
+      drawSize
+  )
+  ctx.imageSmoothingEnabled = oldSmoothing
 }
 
 function applyRasterCommand(ctx, command) {
@@ -2790,9 +3041,18 @@ async function writeClipboardImage(linked, closeAfterCopy) {
       return
     }
     await invoke('set_screenshot_clipboard_link_once', {linked})
-    const pngBase64 = resolveExportBase64()
-    const blob = base64ToBlob(pngBase64, 'image/png')
-    await navigator.clipboard.write([new ClipboardItem({'image/png': blob})])
+    if (sourceImagePath.value) {
+      const result = await invoke('copy_screenshot_to_clipboard', {
+        request: buildBackendExportRequest('')
+      })
+      if (!result?.success) {
+        throw new Error(result?.error || result?.message || '复制失败')
+      }
+    } else {
+      const pngBase64 = resolveExportBase64()
+      const blob = base64ToBlob(pngBase64, 'image/png')
+      await navigator.clipboard.write([new ClipboardItem({'image/png': blob})])
+    }
     if (closeAfterCopy) {
       close()
     }
@@ -2816,13 +3076,28 @@ async function pinToScreenAndClose() {
       alert('截图源尚未就绪，请稍后重试')
       return
     }
-    const base64 = resolveExportBase64()
-    const pinWidth = longshotResultActive.value && longshotRawPngBase64.value && !hasOverlayForLongshotExport()
-        ? Math.max(1, Number(screenshotImg.value?.width) || Math.round(rect.width))
-        : Math.max(1, Math.round(rect.width))
-    const pinHeight = longshotResultActive.value && longshotRawPngBase64.value && !hasOverlayForLongshotExport()
-        ? Math.max(1, Number(screenshotImg.value?.height) || Math.round(rect.height))
-        : Math.max(1, Math.round(rect.height))
+    let base64 = ''
+    let pinWidth = 0
+    let pinHeight = 0
+    if (sourceImagePath.value) {
+      const renderResult = await invoke('render_screenshot_to_png_data', {
+        request: buildBackendExportRequest('')
+      })
+      if (!renderResult?.success) {
+        throw new Error(renderResult?.error || renderResult?.message || '生成固定图片失败')
+      }
+      base64 = String(renderResult?.pngBase64 || '')
+      pinWidth = Math.max(1, Number(renderResult?.width) || 1)
+      pinHeight = Math.max(1, Number(renderResult?.height) || 1)
+    } else {
+      base64 = resolveExportBase64()
+      pinWidth = longshotResultActive.value && longshotRawPngBase64.value && !hasOverlayForLongshotExport()
+          ? Math.max(1, Number(screenshotImg.value?.width) || Math.round(rect.width))
+          : Math.max(1, Math.round(rect.width))
+      pinHeight = longshotResultActive.value && longshotRawPngBase64.value && !hasOverlayForLongshotExport()
+          ? Math.max(1, Number(screenshotImg.value?.height) || Math.round(rect.height))
+          : Math.max(1, Math.round(rect.height))
+    }
     const payload = {
       request: {
         pngBase64: base64,
@@ -2860,17 +3135,46 @@ async function saveAndClose() {
       alert('截图源尚未就绪，请稍后重试')
       return
     }
-    const base64 = resolveExportBase64()
 
-    const result = await invoke('save_screenshot', {pngBase64: base64})
-    if (result.success) {
-      close()
+    const pathResult = await invoke('choose_screenshot_save_path')
+    if (!pathResult?.success) {
+      if (pathResult?.cancelled) {
+        return
+      }
+      alert(pathResult?.error || pathResult?.message || '选择保存路径失败')
       return
     }
-    if (result?.cancelled) {
+
+    // 只要后端持有源图，就统一走后端导出。
+    // 长截图带马赛克/画笔时如果走前端 canvas 直存，容易与长图视口映射产生偏差；
+    // 后端已经具备完整的长截图栅格/矢量导出能力，这里统一收口到同一条保存链路。
+    const shouldSaveRenderedImageDirectly = !sourceImagePath.value
+
+    if (shouldSaveRenderedImageDirectly) {
+      const base64 = resolveExportBase64()
+      const result = await invoke('save_screenshot_to_path', {
+        pngBase64: base64,
+        outputPath: pathResult.path
+      })
+      if (result?.success) {
+        close()
+        return
+      }
+      alert(result?.error || result?.message || '保存失败')
       return
     }
-    alert(result?.error || result?.message || '保存失败')
+
+    if (sourceImagePath.value) {
+      const exportResult = await invoke('export_screenshot_to_path', {
+        request: buildBackendExportRequest(pathResult.path)
+      })
+      if (exportResult?.success) {
+        close()
+        return
+      }
+      alert(exportResult?.error || exportResult?.message || '保存失败')
+      return
+    }
   } catch (error) {
     const reason = error?.message
         || (typeof error === 'string' ? error : JSON.stringify(error))
@@ -3024,6 +3328,45 @@ function handleKeyDown(event) {
   padding: 8px 10px;
   backdrop-filter: blur(3px);
   max-width: min(620px, calc(100vw - 32px));
+}
+
+.export-route-indicator {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  min-width: 168px;
+  max-width: 320px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #fff;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
+  z-index: 2101;
+  user-select: text;
+}
+
+.export-route-indicator.backend {
+  background: rgba(32, 92, 58, 0.82);
+  border: 1px solid rgba(86, 196, 127, 0.68);
+}
+
+.export-route-indicator.fallback {
+  background: rgba(122, 77, 21, 0.84);
+  border: 1px solid rgba(255, 189, 89, 0.72);
+}
+
+.export-route-title {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.export-route-detail {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.92;
+  word-break: break-all;
 }
 
 .bg-image {
@@ -3269,12 +3612,6 @@ function handleKeyDown(event) {
   font-size: 12px;
 }
 
-.longshot-entry-btn {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-}
-
 .divider {
   width: 1px;
   height: 20px;
@@ -3391,6 +3728,8 @@ function handleKeyDown(event) {
 
 .shape-line-svg {
   display: block;
+  width: 100%;
+  height: 100%;
   overflow: visible;
 }
 
@@ -3494,5 +3833,10 @@ function handleKeyDown(event) {
   white-space: pre-wrap;
   caret-color: #ffffff;
   user-select: text;
+  padding: 2px 4px;
+  border: 1px solid rgba(0, 0, 0, 0.88);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.18);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.92), 0 2px 8px rgba(0, 0, 0, 0.28);
 }
 </style>

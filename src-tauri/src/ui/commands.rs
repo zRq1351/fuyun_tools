@@ -29,8 +29,12 @@ use crate::utils::utils_helpers::{
     load_history_page_data_async, load_settings, save_settings, ClipboardHistoryPageData,
 };
 use futures_util::StreamExt;
+use image::{imageops, Rgba, RgbaImage};
+use imageproc::drawing::{draw_filled_circle_mut, draw_hollow_ellipse_mut, draw_hollow_rect_mut, draw_text_mut};
+use imageproc::rect::Rect;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -51,6 +55,7 @@ static NEXT_SCREENSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_PINNED_IMAGE_WINDOW_ID: AtomicU64 = AtomicU64::new(1);
 static SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW: AtomicBool = AtomicBool::new(false);
 static SCREENSHOT_BOOT_IMAGE_PATH: OnceLock<StdMutex<Option<PathBuf>>> = OnceLock::new();
+static SCREENSHOT_BOOT_IMAGE_PATHS: OnceLock<StdMutex<HashSet<PathBuf>>> = OnceLock::new();
 static RECENT_COPY_PASTE: OnceLock<StdMutex<Option<RecentCopyPaste>>> = OnceLock::new();
 static COPY_PASTE_DEDUP_ENABLED: AtomicBool = AtomicBool::new(true);
 static COPY_PASTE_DEDUP_WINDOW_MS: AtomicU64 = AtomicU64::new(1200);
@@ -63,6 +68,7 @@ static COPY_PASTE_DEDUP_LOG_COUNT: AtomicU64 = AtomicU64::new(0);
 static COPY_PASTE_DEDUP_WINDOW_STATS: OnceLock<StdMutex<DedupWindowStats>> = OnceLock::new();
 #[cfg(debug_assertions)]
 static VC_RUNTIME_FORCE_MISSING: AtomicBool = AtomicBool::new(false);
+static SCREENSHOT_EXPORT_FONT_BYTES: OnceLock<StdMutex<HashMap<String, Arc<Vec<u8>>>>> = OnceLock::new();
 
 struct RecentCopyPaste {
     request_id: String,
@@ -75,6 +81,79 @@ struct DedupWindowStats {
     requests: u64,
     hits: u64,
     last_hit_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScreenshotExportSelection {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenshotExportTextItem {
+    x: f32,
+    y: f32,
+    text: String,
+    color: String,
+    font_size: f32,
+    font_family: Option<String>,
+    bold: Option<bool>,
+    stroke: Option<bool>,
+    stroke_color: Option<String>,
+    shadow: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenshotExportShapeItem {
+    #[serde(rename = "type")]
+    shape_type: String,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    x1: Option<f32>,
+    y1: Option<f32>,
+    x2: Option<f32>,
+    y2: Option<f32>,
+    color: String,
+    line_width: f32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenshotExportRasterPoint {
+    x: f32,
+    y: f32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenshotExportRasterCommand {
+    #[serde(rename = "type")]
+    raster_type: String,
+    color: String,
+    line_width: f32,
+    points: Vec<ScreenshotExportRasterPoint>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenshotExportRequest {
+    source_image_path: String,
+    output_path: String,
+    is_longshot: bool,
+    device_pixel_ratio: Option<f32>,
+    viewport_width: Option<f32>,
+    viewport_height: Option<f32>,
+    selection: Option<ScreenshotExportSelection>,
+    text_items: Vec<ScreenshotExportTextItem>,
+    shape_items: Vec<ScreenshotExportShapeItem>,
+    overlay_commands: Vec<ScreenshotExportRasterCommand>,
 }
 
 fn calc_text_hash(text: &str) -> u64 {
@@ -92,23 +171,41 @@ fn screenshot_boot_image_slot() -> &'static StdMutex<Option<PathBuf>> {
     SCREENSHOT_BOOT_IMAGE_PATH.get_or_init(|| StdMutex::new(None))
 }
 
+fn screenshot_boot_image_paths() -> &'static StdMutex<HashSet<PathBuf>> {
+    SCREENSHOT_BOOT_IMAGE_PATHS.get_or_init(|| StdMutex::new(HashSet::new()))
+}
+
 fn replace_screenshot_boot_image_path(next_path: Option<PathBuf>) {
     let mut slot = match screenshot_boot_image_slot().lock() {
         Ok(guard) => guard,
         Err(_) => return,
     };
-    let previous = slot.take();
     *slot = next_path.clone();
-    if let Some(previous_path) = previous {
-        if next_path.as_ref() != Some(&previous_path) {
-            let _ = fs::remove_file(previous_path);
+    if let Some(path) = next_path {
+        if let Ok(mut paths) = screenshot_boot_image_paths().lock() {
+            paths.insert(path);
         }
     }
 }
 
+fn cleanup_all_screenshot_boot_images() {
+    if let Ok(mut slot) = screenshot_boot_image_slot().lock() {
+        *slot = None;
+    }
+    let paths = match screenshot_boot_image_paths().lock() {
+        Ok(mut guard) => std::mem::take(&mut *guard),
+        Err(_) => return,
+    };
+    for path in paths {
+        let _ = fs::remove_file(path);
+    }
+}
+
 fn build_screenshot_boot_image_path(session_id: u64) -> Result<PathBuf, String> {
-    let dir = std::env::temp_dir().join("fuyun_tools").join("screenshot_boot");
-    fs::create_dir_all(&dir).map_err(|e| format!("创建截图临时目录失败: {}", e))?;
+    let mut dir = std::env::current_exe().map_err(|e| format!("获取程序目录失败: {}", e))?;
+    dir.pop();
+    dir.push("screenshot_boot");
+    fs::create_dir_all(&dir).map_err(|e| format!("创建截图启动目录失败: {}", e))?;
     Ok(dir.join(format!("screenshot_boot_{}.png", session_id)))
 }
 
@@ -123,6 +220,481 @@ fn write_screenshot_boot_image(
     fs::write(&path, png_data).map_err(|e| format!("写入截图临时文件失败: {}", e))?;
     replace_screenshot_boot_image_path(Some(path.clone()));
     Ok(path)
+}
+
+fn screenshot_export_font_cache() -> &'static StdMutex<HashMap<String, Arc<Vec<u8>>>> {
+    SCREENSHOT_EXPORT_FONT_BYTES.get_or_init(|| StdMutex::new(HashMap::new()))
+}
+
+fn parse_hex_color(value: &str) -> Rgba<u8> {
+    let hex = value.trim().trim_start_matches('#');
+    match hex.len() {
+        6 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(255);
+            let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(255);
+            let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(255);
+            Rgba([r, g, b, 255])
+        }
+        8 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(255);
+            let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(255);
+            let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(255);
+            let a = u8::from_str_radix(&hex[6..8], 16).unwrap_or(255);
+            Rgba([r, g, b, a])
+        }
+        _ => Rgba([255, 255, 255, 255]),
+    }
+}
+
+fn pick_font_candidates(font_family: Option<&str>) -> Vec<&'static str> {
+    let family = font_family.unwrap_or("Arial").to_ascii_lowercase();
+    if family.contains("yahei") {
+        vec!["msyh.ttc", "msyh.ttf", "msyhbd.ttc", "arial.ttf", "segoeui.ttf"]
+    } else if family.contains("hei") {
+        vec!["simhei.ttf", "msyh.ttc", "arial.ttf"]
+    } else if family.contains("song") {
+        vec!["simsun.ttc", "arial.ttf"]
+    } else if family.contains("consolas") {
+        vec!["consola.ttf", "consolab.ttf", "arial.ttf"]
+    } else if family.contains("times") {
+        vec!["times.ttf", "timesbd.ttf", "arial.ttf"]
+    } else {
+        vec!["arial.ttf", "segoeui.ttf", "msyh.ttc", "simhei.ttf"]
+    }
+}
+
+fn load_font_arc(font_family: Option<&str>) -> Result<ab_glyph::FontArc, String> {
+    let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".to_string());
+    let fonts_dir = Path::new(&windir).join("Fonts");
+    let cache_key = font_family.unwrap_or("Arial").to_string();
+    if let Ok(cache) = screenshot_export_font_cache().lock() {
+        if let Some(bytes) = cache.get(&cache_key) {
+            return ab_glyph::FontArc::try_from_vec((**bytes).clone())
+                .map_err(|_| format!("加载字体失败: {}", cache_key));
+        }
+    }
+    for file_name in pick_font_candidates(font_family) {
+        let path = fonts_dir.join(file_name);
+        if let Ok(bytes) = fs::read(&path) {
+            if let Ok(font) = ab_glyph::FontArc::try_from_vec(bytes.clone()) {
+                if let Ok(mut cache) = screenshot_export_font_cache().lock() {
+                    cache.insert(cache_key.clone(), Arc::new(bytes));
+                }
+                return Ok(font);
+            }
+        }
+    }
+    Err(format!("未找到可用字体: {}", cache_key))
+}
+
+fn clamp_crop_rect(
+    source: &RgbaImage,
+    selection: &ScreenshotExportSelection,
+    dpr: f32,
+) -> (u32, u32, u32, u32) {
+    let max_w = source.width().max(1);
+    let max_h = source.height().max(1);
+    let x = (selection.x.max(0.0) * dpr).round().max(0.0) as u32;
+    let y = (selection.y.max(0.0) * dpr).round().max(0.0) as u32;
+    let w = (selection.width.max(1.0) * dpr).round().max(1.0) as u32;
+    let h = (selection.height.max(1.0) * dpr).round().max(1.0) as u32;
+    let crop_x = x.min(max_w.saturating_sub(1));
+    let crop_y = y.min(max_h.saturating_sub(1));
+    let crop_w = w.min(max_w.saturating_sub(crop_x)).max(1);
+    let crop_h = h.min(max_h.saturating_sub(crop_y)).max(1);
+    (crop_x, crop_y, crop_w, crop_h)
+}
+
+fn longshot_viewport_fit(
+    image_w: u32,
+    image_h: u32,
+    viewport_w: f32,
+    viewport_h: f32,
+) -> (f32, f32, f32) {
+    let iw = image_w.max(1) as f32;
+    let ih = image_h.max(1) as f32;
+    let vw = viewport_w.max(1.0);
+    let vh = viewport_h.max(1.0);
+    let fit = (vw / iw).min(vh / ih).max(0.0001);
+    let view_x = (vw - iw * fit) * 0.5;
+    let view_y = (vh - ih * fit) * 0.5;
+    (fit, view_x, view_y)
+}
+
+fn longshot_scene_to_image(x: f32, y: f32, fit: f32, view_x: f32, view_y: f32) -> (f32, f32) {
+    ((x - view_x) / fit, (y - view_y) / fit)
+}
+
+fn draw_thick_line(canvas: &mut RgbaImage, from: (f32, f32), to: (f32, f32), color: Rgba<u8>, width: f32) {
+    let radius = (width.max(1.0) * 0.5).ceil() as i32;
+    let dx = to.0 - from.0;
+    let dy = to.1 - from.1;
+    let distance = dx.abs().max(dy.abs()).max(1.0);
+    let steps = distance.ceil() as i32;
+    for index in 0..=steps {
+        let t = index as f32 / steps as f32;
+        let x = from.0 + dx * t;
+        let y = from.1 + dy * t;
+        draw_filled_circle_mut(canvas, (x.round() as i32, y.round() as i32), radius, color);
+    }
+}
+
+fn clamp_i32(value: i32, min_value: i32, max_value: i32) -> i32 {
+    value.max(min_value).min(max_value)
+}
+
+fn apply_mosaic_at_image_point(
+    target: &mut RgbaImage,
+    source: &RgbaImage,
+    image_x: f32,
+    image_y: f32,
+    stroke_width: f32,
+    scale_factor: f32,
+    target_offset_x: i32,
+    target_offset_y: i32,
+) {
+    let size = (stroke_width.max(1.0) * 3.0 * scale_factor.max(0.0001)).round().max(1.0) as i32;
+    let block_size = (6.0 * scale_factor.max(0.0001)).round().max(1.0) as i32;
+    let half = size / 2;
+    let center_x = image_x.round() as i32;
+    let center_y = image_y.round() as i32;
+    let src_w = source.width() as i32;
+    let src_h = source.height() as i32;
+    let dst_w = target.width() as i32;
+    let dst_h = target.height() as i32;
+    for local_y in 0..size {
+        for local_x in 0..size {
+            let _ = (local_x, local_y);
+        }
+    }
+    for block_y in (0..size).step_by(block_size as usize) {
+        for block_x in (0..size).step_by(block_size as usize) {
+            let src_x = clamp_i32(center_x - half + block_x, 0, src_w.saturating_sub(1));
+            let src_y = clamp_i32(center_y - half + block_y, 0, src_h.saturating_sub(1));
+            let sample = *source.get_pixel(src_x as u32, src_y as u32);
+            for by in 0..block_size {
+                for bx in 0..block_size {
+                    let px = center_x - half + block_x + bx;
+                    let py = center_y - half + block_y + by;
+                    if px < 0 || py < 0 || px >= src_w || py >= src_h {
+                        continue;
+                    }
+                    let dx = px - target_offset_x;
+                    let dy = py - target_offset_y;
+                    if dx < 0 || dy < 0 || dx >= dst_w || dy >= dst_h {
+                        continue;
+                    }
+                    target.put_pixel(dx as u32, dy as u32, sample);
+                }
+            }
+        }
+    }
+}
+
+fn render_normal_raster_commands(
+    canvas: &mut RgbaImage,
+    source: &RgbaImage,
+    request: &ScreenshotExportRequest,
+    selection: &ScreenshotExportSelection,
+    dpr: f32,
+) {
+    let crop_x = (selection.x * dpr).round() as i32;
+    let crop_y = (selection.y * dpr).round() as i32;
+    for command in &request.overlay_commands {
+        if command.points.len() < 2 {
+            continue;
+        }
+        match command.raster_type.as_str() {
+            "pen" => {
+                let color = parse_hex_color(&command.color);
+                let width = (command.line_width * dpr).max(1.0);
+                for segment in command.points.windows(2) {
+                    let from = ((segment[0].x - selection.x) * dpr, (segment[0].y - selection.y) * dpr);
+                    let to = ((segment[1].x - selection.x) * dpr, (segment[1].y - selection.y) * dpr);
+                    draw_thick_line(canvas, from, to, color, width);
+                }
+            }
+            "mosaic" => {
+                for point in &command.points {
+                    apply_mosaic_at_image_point(
+                        canvas,
+                        source,
+                        point.x * dpr,
+                        point.y * dpr,
+                        command.line_width,
+                        dpr,
+                        crop_x,
+                        crop_y,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn render_longshot_raster_commands(
+    canvas: &mut RgbaImage,
+    source: &RgbaImage,
+    request: &ScreenshotExportRequest,
+    fit: f32,
+    view_x: f32,
+    view_y: f32,
+) {
+    for command in &request.overlay_commands {
+        if command.points.len() < 2 {
+            continue;
+        }
+        match command.raster_type.as_str() {
+            "pen" => {
+                let color = parse_hex_color(&command.color);
+                let width = (command.line_width / fit).max(1.0);
+                for segment in command.points.windows(2) {
+                    let from = longshot_scene_to_image(segment[0].x, segment[0].y, fit, view_x, view_y);
+                    let to = longshot_scene_to_image(segment[1].x, segment[1].y, fit, view_x, view_y);
+                    draw_thick_line(canvas, from, to, color, width);
+                }
+            }
+            "mosaic" => {
+                let scale_factor = 1.0 / fit.max(0.0001);
+                for point in &command.points {
+                    let (x, y) = longshot_scene_to_image(point.x, point.y, fit, view_x, view_y);
+                    apply_mosaic_at_image_point(
+                        canvas,
+                        source,
+                        x,
+                        y,
+                        command.line_width,
+                        scale_factor,
+                        0,
+                        0,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn draw_rect_shape(canvas: &mut RgbaImage, x: f32, y: f32, width: f32, height: f32, color: Rgba<u8>, line_width: f32) {
+    let left = x.round() as i32;
+    let top = y.round() as i32;
+    let rect_w = width.max(1.0).round() as u32;
+    let rect_h = height.max(1.0).round() as u32;
+    for offset in 0..line_width.max(1.0).round() as i32 {
+        let inset = offset / 2;
+        let w = rect_w.saturating_sub((offset as u32).min(rect_w.saturating_sub(1)));
+        let h = rect_h.saturating_sub((offset as u32).min(rect_h.saturating_sub(1)));
+        draw_hollow_rect_mut(canvas, Rect::at(left + inset, top + inset).of_size(w.max(1), h.max(1)), color);
+    }
+}
+
+fn draw_circle_shape(canvas: &mut RgbaImage, x: f32, y: f32, width: f32, height: f32, color: Rgba<u8>, line_width: f32) {
+    let cx = (x + width * 0.5).round() as i32;
+    let cy = (y + height * 0.5).round() as i32;
+    let rx = (width * 0.5).round().max(1.0) as i32;
+    let ry = (height * 0.5).round().max(1.0) as i32;
+    let stroke = line_width.max(1.0).round() as i32;
+    for offset in 0..stroke {
+        let inner_rx = (rx - offset).max(1);
+        let inner_ry = (ry - offset).max(1);
+        draw_hollow_ellipse_mut(canvas, (cx, cy), inner_rx, inner_ry, color);
+    }
+}
+
+fn draw_text_item(
+    canvas: &mut RgbaImage,
+    item: &ScreenshotExportTextItem,
+    x: f32,
+    y: f32,
+    font_size: f32,
+) -> Result<(), String> {
+    let font = load_font_arc(item.font_family.as_deref())?;
+    let scale = ab_glyph::PxScale::from(font_size.max(8.0));
+    let color = parse_hex_color(&item.color);
+    let shadow = item.shadow.unwrap_or(false);
+    let stroke = item.stroke.unwrap_or(false);
+    let stroke_color = parse_hex_color(item.stroke_color.as_deref().unwrap_or("#000000"));
+    let line_height = (font_size.max(8.0) * 1.25).max(font_size + 4.0);
+    for (line_index, line) in item.text.replace("\r", "").split('\n').enumerate() {
+        let draw_x = x.round() as i32;
+        let draw_y = (y + line_index as f32 * line_height).round() as i32;
+        if shadow {
+            draw_text_mut(
+                canvas,
+                Rgba([0, 0, 0, 96]),
+                draw_x,
+                draw_y + (font_size * 0.1).round() as i32,
+                scale,
+                &font,
+                line,
+            );
+        }
+        if stroke {
+            let outline = (font_size / 14.0).round().max(1.0) as i32;
+            for ox in -outline..=outline {
+                for oy in -outline..=outline {
+                    if ox == 0 && oy == 0 {
+                        continue;
+                    }
+                    draw_text_mut(canvas, stroke_color, draw_x + ox, draw_y + oy, scale, &font, line);
+                }
+            }
+        }
+        draw_text_mut(canvas, color, draw_x, draw_y, scale, &font, line);
+        if item.bold.unwrap_or(false) {
+            draw_text_mut(canvas, color, draw_x + 1, draw_y, scale, &font, line);
+        }
+    }
+    Ok(())
+}
+
+fn render_normal_shapes(
+    canvas: &mut RgbaImage,
+    request: &ScreenshotExportRequest,
+    selection: &ScreenshotExportSelection,
+    dpr: f32,
+) {
+    for item in &request.shape_items {
+        let color = parse_hex_color(&item.color);
+        let x = (item.x - selection.x) * dpr;
+        let y = (item.y - selection.y) * dpr;
+        let width = item.width.max(1.0) * dpr;
+        let height = item.height.max(1.0) * dpr;
+        let line_width = item.line_width.max(1.0) * dpr;
+        match item.shape_type.as_str() {
+            "rect" => draw_rect_shape(canvas, x, y, width, height, color, line_width),
+            "circle" => draw_circle_shape(canvas, x, y, width, height, color, line_width),
+            "line" | "arrow" => {
+                let from = (
+                    x + item.x1.unwrap_or(0.0) * dpr,
+                    y + item.y1.unwrap_or(0.0) * dpr,
+                );
+                let to = (
+                    x + item.x2.unwrap_or(item.width.max(1.0)) * dpr,
+                    y + item.y2.unwrap_or(item.height.max(1.0)) * dpr,
+                );
+                draw_thick_line(canvas, from, to, color, line_width);
+                if item.shape_type == "arrow" {
+                    let angle = (to.1 - from.1).atan2(to.0 - from.0);
+                    let head = 12.0 * dpr;
+                    let left = (
+                        to.0 - head * (angle - std::f32::consts::PI / 6.0).cos(),
+                        to.1 - head * (angle - std::f32::consts::PI / 6.0).sin(),
+                    );
+                    let right = (
+                        to.0 - head * (angle + std::f32::consts::PI / 6.0).cos(),
+                        to.1 - head * (angle + std::f32::consts::PI / 6.0).sin(),
+                    );
+                    draw_thick_line(canvas, to, left, color, line_width);
+                    draw_thick_line(canvas, to, right, color, line_width);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn render_shape_item_for_longshot(canvas: &mut RgbaImage, item: &ScreenshotExportShapeItem, fit: f32, view_x: f32, view_y: f32) {
+    let color = parse_hex_color(&item.color);
+    let line_width = (item.line_width / fit).max(1.0);
+    match item.shape_type.as_str() {
+        "rect" => {
+            let (x1, y1) = longshot_scene_to_image(item.x, item.y, fit, view_x, view_y);
+            let (x2, y2) = longshot_scene_to_image(item.x + item.width, item.y + item.height, fit, view_x, view_y);
+            draw_rect_shape(canvas, x1, y1, x2 - x1, y2 - y1, color, line_width);
+        }
+        "circle" => {
+            let (x1, y1) = longshot_scene_to_image(item.x, item.y, fit, view_x, view_y);
+            let (x2, y2) = longshot_scene_to_image(item.x + item.width, item.y + item.height, fit, view_x, view_y);
+            draw_circle_shape(canvas, x1, y1, x2 - x1, y2 - y1, color, line_width);
+        }
+        "line" | "arrow" => {
+            let (from_x, from_y) = longshot_scene_to_image(
+                item.x + item.x1.unwrap_or(0.0),
+                item.y + item.y1.unwrap_or(0.0),
+                fit,
+                view_x,
+                view_y,
+            );
+            let (to_x, to_y) = longshot_scene_to_image(
+                item.x + item.x2.unwrap_or(item.width),
+                item.y + item.y2.unwrap_or(item.height),
+                fit,
+                view_x,
+                view_y,
+            );
+            draw_thick_line(canvas, (from_x, from_y), (to_x, to_y), color, line_width);
+            if item.shape_type == "arrow" {
+                let angle = (to_y - from_y).atan2(to_x - from_x);
+                let head = 12.0 / fit.max(0.0001);
+                let left = (to_x - head * (angle - std::f32::consts::PI / 6.0).cos(), to_y - head * (angle - std::f32::consts::PI / 6.0).sin());
+                let right = (to_x - head * (angle + std::f32::consts::PI / 6.0).cos(), to_y - head * (angle + std::f32::consts::PI / 6.0).sin());
+                draw_thick_line(canvas, (to_x, to_y), left, color, line_width);
+                draw_thick_line(canvas, (to_x, to_y), right, color, line_width);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn render_screenshot_image(request: &ScreenshotExportRequest) -> Result<RgbaImage, String> {
+    if request.source_image_path.trim().is_empty() {
+        return Err("缺少源图路径".to_string());
+    }
+    let source = image::open(&request.source_image_path)
+        .map_err(|e| format!("读取源图失败: {}", e))?
+        .to_rgba8();
+    let mut canvas = if request.is_longshot {
+        source.clone()
+    } else {
+        let selection = request.selection.as_ref().ok_or_else(|| "缺少裁剪区域".to_string())?;
+        let dpr = request.device_pixel_ratio.unwrap_or(1.0).max(0.1);
+        let (crop_x, crop_y, crop_w, crop_h) = clamp_crop_rect(&source, selection, dpr);
+        imageops::crop_imm(&source, crop_x, crop_y, crop_w, crop_h).to_image()
+    };
+
+    if request.is_longshot {
+        let viewport_w = request.viewport_width.unwrap_or(source.width() as f32);
+        let viewport_h = request.viewport_height.unwrap_or(source.height() as f32);
+        let (fit, view_x, view_y) = longshot_viewport_fit(source.width(), source.height(), viewport_w, viewport_h);
+        render_longshot_raster_commands(&mut canvas, &source, request, fit, view_x, view_y);
+        for item in &request.shape_items {
+            render_shape_item_for_longshot(&mut canvas, item, fit, view_x, view_y);
+        }
+        for item in &request.text_items {
+            let (x, y) = longshot_scene_to_image(item.x, item.y, fit, view_x, view_y);
+            let font_size = (item.font_size / fit).max(8.0);
+            draw_text_item(&mut canvas, item, x, y, font_size)?;
+        }
+    } else {
+        let selection = request.selection.as_ref().ok_or_else(|| "缺少裁剪区域".to_string())?;
+        let dpr = request.device_pixel_ratio.unwrap_or(1.0).max(0.1);
+        render_normal_raster_commands(&mut canvas, &source, request, selection, dpr);
+        render_normal_shapes(&mut canvas, request, selection, dpr);
+        for item in &request.text_items {
+            draw_text_item(
+                &mut canvas,
+                item,
+                (item.x - selection.x) * dpr,
+                (item.y - selection.y) * dpr,
+                item.font_size * dpr,
+            )?;
+        }
+    }
+
+    Ok(canvas)
+}
+
+fn export_screenshot_image(request: &ScreenshotExportRequest) -> Result<(), String> {
+    if request.output_path.trim().is_empty() {
+        return Err("缺少导出目标路径".to_string());
+    }
+    let canvas = render_screenshot_image(request)?;
+    canvas
+        .save(&request.output_path)
+        .map_err(|e| format!("写入导出图片失败: {}", e))?;
+    Ok(())
 }
 
 fn is_duplicate_copy_paste_request(text: &str, request_id: Option<&str>) -> bool {
@@ -3492,6 +4064,9 @@ pub async fn start_screenshot(
 
     match capture::capture_full_screen() {
         Ok((rgba, width, height, origin_x, origin_y)) => {
+            let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
+            let image_path = write_screenshot_boot_image(&rgba, width, height, session_id)
+                .map_err(|e| format!("写入截图源图失败: {}", e))?;
             let png_base64 = capture::rgba_to_base64_png(&rgba, width, height)
                 .map_err(|e| format!("转换PNG失败: {}", e))?;
 
@@ -3501,7 +4076,8 @@ pub async fn start_screenshot(
                 "height": height,
                 "origin_x": origin_x,
                 "origin_y": origin_y,
-                "png_base64": png_base64
+                "png_base64": png_base64,
+                "image_path": image_path
             }))
         }
         Err(e) => {
@@ -3575,11 +4151,15 @@ pub async fn finish_manual_longshot(
     app: AppHandle,
 ) -> Result<crate::features::screenshot::longshot::ManualLongshotFinishResult, String> {
     let session_id = request.session_id;
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         crate::features::screenshot::longshot::finish_manual_longshot(session_id, app)
     })
     .await
-    .map_err(|e| format!("完成长截图任务执行失败: {}", e))?
+    .map_err(|e| format!("完成长截图任务执行失败: {}", e))??;
+    if !result.image_path.is_empty() {
+        replace_screenshot_boot_image_path(Some(PathBuf::from(&result.image_path)));
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -3653,6 +4233,147 @@ pub async fn capture_region(
 }
 
 /// 保存截图到文件
+#[tauri::command]
+pub async fn choose_screenshot_save_path(app: AppHandle) -> Result<serde_json::Value, String> {
+    let filename = format!("screenshot_{}.png", now_unix_ms());
+    let (tx, rx) = mpsc::channel::<Result<Option<PathBuf>, String>>();
+    let screenshot_window = app.get_webview_window("screenshot");
+
+    if let Some(window) = screenshot_window.as_ref() {
+        let _ = window.set_always_on_top(false);
+        let _ = window.set_ignore_cursor_events(true);
+    }
+
+    app.dialog()
+        .file()
+        .add_filter("PNG图片", &["png"])
+        .set_file_name(&filename)
+        .save_file(move |path| {
+            let result = match path {
+                Some(file_path) => file_path
+                    .as_path()
+                    .map(|p| Some(p.to_path_buf()))
+                    .ok_or_else(|| "无法获取保存路径".to_string()),
+                None => Ok(None),
+            };
+            let _ = tx.send(result);
+        });
+
+    let selected_path_result = tauri::async_runtime::spawn_blocking(move || rx.recv()).await;
+
+    if let Some(window) = screenshot_window.as_ref() {
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_ignore_cursor_events(false);
+        let _ = window.set_focus();
+    }
+
+    let selected_path = selected_path_result
+        .map_err(|e| format!("等待保存对话框结果失败: {}", e))?
+        .map_err(|e| format!("接收保存对话框结果失败: {}", e))??;
+
+    let Some(path_buf) = selected_path else {
+        return Ok(serde_json::json!({
+            "success": false,
+            "cancelled": true,
+            "message": "用户取消保存"
+        }));
+    };
+
+    Ok(serde_json::json!({
+        "success": true,
+        "cancelled": false,
+        "path": path_buf.to_string_lossy().to_string()
+    }))
+}
+
+#[tauri::command]
+pub async fn save_screenshot_to_path(
+    png_base64: String,
+    output_path: String,
+) -> Result<serde_json::Value, String> {
+    use base64::Engine;
+
+    if output_path.trim().is_empty() {
+        return Err("保存路径为空".to_string());
+    }
+
+    let png_data = base64::engine::general_purpose::STANDARD
+        .decode(&png_base64)
+        .map_err(|e| format!("Base64解码失败: {}", e))?;
+
+    let target_path = PathBuf::from(&output_path);
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建保存目录失败: {}", e))?;
+    }
+
+    fs::write(&target_path, &png_data).map_err(|e| format!("写入文件失败: {}", e))?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "path": target_path.to_string_lossy().to_string()
+    }))
+}
+
+#[tauri::command]
+pub async fn export_screenshot_to_path(
+    request: ScreenshotExportRequest,
+) -> Result<serde_json::Value, String> {
+    let output_path = request.output_path.clone();
+    tauri::async_runtime::spawn_blocking(move || export_screenshot_image(&request))
+        .await
+        .map_err(|e| format!("执行截图导出任务失败: {}", e))?
+        .map(|_| {
+            serde_json::json!({
+                "success": true,
+                "path": output_path
+            })
+        })
+}
+
+#[tauri::command]
+pub async fn render_screenshot_to_png_data(
+    request: ScreenshotExportRequest,
+) -> Result<serde_json::Value, String> {
+    let (rgba, width, height) = tauri::async_runtime::spawn_blocking(move || {
+        let canvas = render_screenshot_image(&request)?;
+        let width = canvas.width();
+        let height = canvas.height();
+        Ok::<(Vec<u8>, u32, u32), String>((canvas.into_raw(), width, height))
+    })
+    .await
+    .map_err(|e| format!("执行截图渲染任务失败: {}", e))??;
+    let png_base64 = crate::features::screenshot::capture::rgba_to_base64_png(&rgba, width, height)
+        .map_err(|e| format!("转换PNG失败: {}", e))?;
+    Ok(serde_json::json!({
+        "success": true,
+        "pngBase64": png_base64,
+        "width": width,
+        "height": height
+    }))
+}
+
+#[tauri::command]
+pub async fn copy_screenshot_to_clipboard(
+    request: ScreenshotExportRequest,
+    app: AppHandle,
+) -> Result<serde_json::Value, String> {
+    let (rgba, width, height) = tauri::async_runtime::spawn_blocking(move || {
+        let canvas = render_screenshot_image(&request)?;
+        let width = canvas.width();
+        let height = canvas.height();
+        Ok::<(Vec<u8>, u32, u32), String>((canvas.into_raw(), width, height))
+    })
+    .await
+    .map_err(|e| format!("执行截图渲染任务失败: {}", e))??;
+    let image = tauri::image::Image::new_owned(rgba, width, height);
+    ImageClipboardManager::write_clipboard_image(&app, &image)?;
+    Ok(serde_json::json!({
+        "success": true,
+        "width": width,
+        "height": height
+    }))
+}
+
 #[tauri::command]
 pub async fn save_screenshot(
     png_base64: String,
@@ -3993,6 +4714,12 @@ pub async fn show_longshot_toolbar(
     anchor: Option<LongshotToolbarAnchor>,
 ) -> Result<(), String> {
     let (window, _created) = ensure_longshot_toolbar_window(&app)?;
+    let _ = window.emit(
+        "manual-longshot-toolbar-reset",
+        serde_json::json!({
+            "ts": now_unix_ms()
+        }),
+    );
     let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
         width: 260.0,
         height: 430.0,
@@ -4094,11 +4821,15 @@ pub async fn longshot_toolbar_action(action: String, app: AppHandle) -> Result<(
             })
             .await
             .map_err(|e| format!("完成长截图任务执行失败: {}", e))??;
+            if !result.image_path.is_empty() {
+                replace_screenshot_boot_image_path(Some(PathBuf::from(&result.image_path)));
+            }
             let _ = app.emit(
                 "manual-longshot-shortcut-finished",
                 serde_json::json!({
                     "sessionId": result.session_id,
                     "pngBase64": result.png_base64,
+                    "imagePath": result.image_path,
                     "width": result.width,
                     "height": result.height,
                     "frameCount": result.frame_count,
@@ -4145,11 +4876,15 @@ pub async fn finish_manual_longshot_from_shortcut(app: AppHandle) -> Result<(), 
     .map_err(|e| format!("完成长截图任务执行失败: {}", e))?
     {
         Ok(result) => {
+            if !result.image_path.is_empty() {
+                replace_screenshot_boot_image_path(Some(PathBuf::from(&result.image_path)));
+            }
             let _ = app.emit(
                 "manual-longshot-shortcut-finished",
                 serde_json::json!({
                     "sessionId": result.session_id,
                     "pngBase64": result.png_base64,
+                    "imagePath": result.image_path,
                     "width": result.width,
                     "height": result.height,
                     "frameCount": result.frame_count,
@@ -4268,7 +5003,8 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
             "session_id": session_id
         });
         let script = format!(
-            "window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || {{ pendingData: null, pendingStartSessionId: 0 }};\
+            "if (!window.__SCREENSHOT_BOOT_READY__) {{ throw new Error('screenshot boot not ready'); }}\
+window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || {{ pendingData: null, pendingStartSessionId: 0 }};\
 window.__SCREENSHOT_BOOT__.pendingData = {payload};\
 window.__SCREENSHOT_BOOT__.pendingStartSessionId = {session_id};\
 window.__SCREENSHOT_BOOT__.pendingMode = '{selection_mode}';\
@@ -4286,7 +5022,7 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
                 y: origin_y,
             }));
             let mut injected = false;
-            for _ in 0..20 {
+            for _attempt in 0..20 {
                 if window.eval(&script).is_ok() {
                     injected = true;
                     break;
@@ -4298,7 +5034,7 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
                 let _ = window.set_focus();
             } else {
                 let _ = window.hide();
-                replace_screenshot_boot_image_path(None);
+                cleanup_all_screenshot_boot_images();
                 capture::set_screenshot_in_progress(false);
             }
         });
@@ -4340,7 +5076,7 @@ window.__SCREENSHOT_BOOT__.pendingMode = '{}';",
             })
             .build()
             .map_err(|e| {
-                replace_screenshot_boot_image_path(None);
+                cleanup_all_screenshot_boot_images();
                 capture::set_screenshot_in_progress(false);
                 format!("创建截图窗口失败: {}", e)
             })?;
@@ -4392,7 +5128,7 @@ window.__SCREENSHOT_BOOT__.pendingMode = null;",
         );
         let _ = window.hide();
     }
-    replace_screenshot_boot_image_path(None);
+    cleanup_all_screenshot_boot_images();
     features::screenshot::capture::set_screenshot_in_progress(false);
 
     Ok(())

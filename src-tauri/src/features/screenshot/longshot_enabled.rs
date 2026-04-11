@@ -5,6 +5,7 @@ use opencv::core::{self, Mat, MatTraitConst, Point};
 use opencv::imgproc;
 use opencv::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::io::Read;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -82,6 +83,7 @@ pub struct ManualLongshotFinishResult {
     pub width: u32,
     pub height: u32,
     pub png_base64: String,
+    pub image_path: String,
     pub frame_count: u64,
     pub dropped_frames: u64,
 }
@@ -428,6 +430,8 @@ fn run_longshot_worker_inner(
         .arg("error")
         .arg("-f")
         .arg("gdigrab")
+        .arg("-draw_mouse")
+        .arg("0")
         .arg("-framerate")
         .arg(request.fps.to_string())
         .arg("-offset_x")
@@ -712,12 +716,16 @@ fn run_longshot_worker_inner(
         .lock()
         .map_err(|_| "长截图状态锁不可用".to_string())?
         .clone();
+    let image_path = write_longshot_result_image(&final_mat, status_snapshot.session_id)?
+        .to_string_lossy()
+        .to_string();
 
     let finish = ManualLongshotFinishResult {
         session_id: status_snapshot.session_id,
         width,
         height,
         png_base64,
+        image_path,
         frame_count: status_snapshot.frame_count,
         dropped_frames: status_snapshot.dropped_frames,
     };
@@ -747,6 +755,8 @@ fn capture_single_bgr_frame(request: &StartManualLongshotRequest) -> Result<Mat,
         .arg("error")
         .arg("-f")
         .arg("gdigrab")
+        .arg("-draw_mouse")
+        .arg("0")
         .arg("-framerate")
         .arg("30")
         .arg("-offset_x")
@@ -1084,6 +1094,50 @@ fn mat_to_png_base64(image_mat: &Mat) -> Result<String, String> {
     Ok(base64::engine::general_purpose::STANDARD.encode(png))
 }
 
+fn mat_to_bgra_bytes(image_mat: &Mat) -> Result<Vec<u8>, String> {
+    if image_mat.cols() <= 0 || image_mat.rows() <= 0 {
+        return Err("长截图结果为空".to_string());
+    }
+    let channels = image_mat.channels();
+    let mut packed = Mat::default();
+    match channels {
+        4 => {
+            imgproc::cvt_color(
+                image_mat,
+                &mut packed,
+                imgproc::COLOR_BGRA2RGBA,
+                0,
+                core::AlgorithmHint::ALGO_HINT_DEFAULT,
+            )
+            .map_err(to_cv_err)?;
+            Ok(packed.data_bytes().map_err(to_cv_err)?.to_vec())
+        }
+        3 => {
+            imgproc::cvt_color(
+                image_mat,
+                &mut packed,
+                imgproc::COLOR_BGR2RGBA,
+                0,
+                core::AlgorithmHint::ALGO_HINT_DEFAULT,
+            )
+            .map_err(to_cv_err)?;
+            Ok(packed.data_bytes().map_err(to_cv_err)?.to_vec())
+        }
+        1 => {
+            imgproc::cvt_color(
+                image_mat,
+                &mut packed,
+                imgproc::COLOR_GRAY2RGBA,
+                0,
+                core::AlgorithmHint::ALGO_HINT_DEFAULT,
+            )
+            .map_err(to_cv_err)?;
+            Ok(packed.data_bytes().map_err(to_cv_err)?.to_vec())
+        }
+        _ => Err(format!("不支持的图像通道数: {}", channels)),
+    }
+}
+
 fn mat_to_preview_base64(image_mat: &Mat, max_width: i32, max_height: i32) -> Result<String, String> {
     if image_mat.cols() <= 0 || image_mat.rows() <= 0 {
         return Err("预览图为空".to_string());
@@ -1110,6 +1164,31 @@ fn mat_to_preview_base64(image_mat: &Mat, max_width: i32, max_height: i32) -> Re
     )
     .map_err(to_cv_err)?;
     mat_to_png_base64(&resized)
+}
+
+fn build_longshot_result_image_path(session_id: u64) -> Result<std::path::PathBuf, String> {
+    let mut dir = std::env::current_exe().map_err(|e| format!("获取程序目录失败: {}", e))?;
+    dir.pop();
+    dir.push("screenshot_boot");
+    fs::create_dir_all(&dir).map_err(|e| format!("创建长截图结果目录失败: {}", e))?;
+    Ok(dir.join(format!("longshot_result_{}.png", session_id)))
+}
+
+fn write_longshot_result_image(image_mat: &Mat, session_id: u64) -> Result<std::path::PathBuf, String> {
+    let width = image_mat.cols().max(0) as u32;
+    let height = image_mat.rows().max(0) as u32;
+    if width == 0 || height == 0 {
+        return Err("长截图结果为空".to_string());
+    }
+    let bgra = mat_to_bgra_bytes(image_mat)?;
+    let path = build_longshot_result_image_path(session_id)?;
+    let file = fs::File::create(&path).map_err(|e| format!("创建长截图结果文件失败: {}", e))?;
+    let mut writer = std::io::BufWriter::new(file);
+    let encoder = image::codecs::png::PngEncoder::new(&mut writer);
+    encoder
+        .write_image(&bgra, width, height, image::ColorType::Rgba8.into())
+        .map_err(|e| format!("写入长截图结果 PNG 失败: {}", e))?;
+    Ok(path)
 }
 
 fn to_cv_err<E: std::fmt::Display>(e: E) -> String {

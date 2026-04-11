@@ -70,6 +70,7 @@ mod fallback {
         pub width: u32,
         pub height: u32,
         pub png_base64: String,
+    pub image_path: String,
         pub frame_count: u64,
         pub dropped_frames: u64,
     }

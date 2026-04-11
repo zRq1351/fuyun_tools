@@ -40,8 +40,10 @@ export default defineConfig(({mode}) => {
                     ocr_text: resolve(__dirname, 'ocr_text.html'),
                 },
                 output: {
-                    manualChunks: {
-                        'vue': ['vue'],
+                    manualChunks(id) {
+                        if (id.includes('/node_modules/vue/')) {
+                            return 'vue'
+                        }
                     }
                 }
             },
