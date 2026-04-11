@@ -1828,6 +1828,7 @@ pub async fn show_selection_toolbar_with_text(
             .visible(false)
             .resizable(false)
             .decorations(false)
+            .shadow(false)
             .transparent(true)
             .always_on_top(true)
             .skip_taskbar(true)
