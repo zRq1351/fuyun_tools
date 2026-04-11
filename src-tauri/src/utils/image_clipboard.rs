@@ -165,6 +165,13 @@ struct PreviewGenerationTask {
     height: u32,
 }
 
+struct PreviewPersistTask {
+    item_id: String,
+    preview_width: u32,
+    preview_height: u32,
+    preview_base64: String,
+}
+
 /// 异步预览生成器
 static PREVIEW_GENERATOR: LazyLock<Arc<Mutex<PreviewGenerator>>> =
     LazyLock::new(|| Arc::new(Mutex::new(PreviewGenerator::new(None))));
@@ -179,18 +186,21 @@ pub fn init_preview_generator_with_app_handle(app_handle: tauri::AppHandle) {
 
 struct PreviewGenerator {
     task_tx: SyncSender<PreviewGenerationTask>,
+    _persist_tx: SyncSender<PreviewPersistTask>,
     preview_cache: Arc<Mutex<LruCache<String, (u32, u32, String)>>>,
 }
 
 impl PreviewGenerator {
     fn new(app_handle: Option<tauri::AppHandle>) -> Self {
         let (task_tx, task_rx) = sync_channel::<PreviewGenerationTask>(10);
+        let (persist_tx, persist_rx) = sync_channel::<PreviewPersistTask>(32);
         let preview_cache = Arc::new(Mutex::new(LruCache::new(
             NonZeroUsize::new(100).unwrap_or(NonZeroUsize::MIN),
         )));
 
         let cache_clone = preview_cache.clone();
         let app_handle_clone = app_handle.clone();
+        let persist_tx_clone = persist_tx.clone();
         std::thread::spawn(move || {
             while let Ok(task) = task_rx.recv() {
                 let (preview_width, preview_height, preview_base64) =
@@ -202,16 +212,7 @@ impl PreviewGenerator {
                     .lock()
                     .expect("infallible mutex lock failed");
                 cache.put(item_id.clone(), (preview_width, preview_height, preview_base64.clone()));
-
-                // 持久化到数据库
-                if let Err(e) = image_store::save_async_preview(
-                    &item_id,
-                    preview_width,
-                    preview_height,
-                    &preview_base64,
-                ) {
-                    log::error!("保存异步预览到数据库失败: {}", e);
-                }
+                drop(cache);
 
                 // 发送预览就绪事件通知前端
                 if let Some(ref handle) = app_handle_clone {
@@ -223,12 +224,53 @@ impl PreviewGenerator {
                     log::debug!("已发送预览就绪事件: {}", item_id);
                 }
 
+                let persist_task = PreviewPersistTask {
+                    item_id: item_id.clone(),
+                    preview_width,
+                    preview_height,
+                    preview_base64,
+                };
+                if let Err(e) = persist_tx_clone.try_send(persist_task) {
+                    match e {
+                        TrySendError::Full(task) => {
+                            log::warn!("预览落库队列已满，改为后台线程直接落库: {}", task.item_id);
+                            std::thread::spawn(move || {
+                                if let Err(err) = image_store::save_async_preview(
+                                    &task.item_id,
+                                    task.preview_width,
+                                    task.preview_height,
+                                    &task.preview_base64,
+                                ) {
+                                    log::error!("保存异步预览到数据库失败: {}", err);
+                                }
+                            });
+                        }
+                        TrySendError::Disconnected(task) => {
+                            log::error!("预览落库队列已断开: {}", task.item_id);
+                        }
+                    }
+                }
+
                 log::debug!("异步生成预览完成: {} ({}x{})", item_id, preview_width, preview_height);
+            }
+        });
+
+        std::thread::spawn(move || {
+            while let Ok(task) = persist_rx.recv() {
+                if let Err(e) = image_store::save_async_preview(
+                    &task.item_id,
+                    task.preview_width,
+                    task.preview_height,
+                    &task.preview_base64,
+                ) {
+                    log::error!("保存异步预览到数据库失败: {}", e);
+                }
             }
         });
 
         Self {
             task_tx,
+            _persist_tx: persist_tx,
             preview_cache,
         }
     }

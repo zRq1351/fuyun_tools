@@ -202,6 +202,25 @@ const bumpFilterDataRevision = () => {
   clearFilterCaches()
 }
 
+const getLoadedHistoryCount = () => {
+  let count = 0
+  for (const item of history.value) {
+    if (item) count += 1
+  }
+  return count
+}
+
+const getLoadedHistorySnapshot = () => {
+  const loadedItems = []
+  const existingById = new Map()
+  for (const item of history.value) {
+    if (!item?.id) continue
+    loadedItems.push(item)
+    existingById.set(item.id, item)
+  }
+  return {loadedItems, existingById}
+}
+
 const normalizeTagList = (tags) =>
     (Array.isArray(tags) ? tags : [])
         .map((tag) => String(tag ?? '').trim())
@@ -458,18 +477,19 @@ const tryLoadMoreByScroll = async () => {
   const remaining = container.scrollWidth - container.clientWidth - container.scrollLeft
   if (remaining <= 240 && loadMoreIntent.value) {
     loadMoreIntent.value = false
-    const beforeLoaded = history.value.filter(Boolean).length
+    const beforeLoaded = getLoadedHistoryCount()
     await loadHistoryPage({reset: false})
-    return history.value.filter(Boolean).length > beforeLoaded
+    return getLoadedHistoryCount() > beforeLoaded
   }
   return false
 }
 
 const loadTailPage = async () => {
   if (!hasMore.value || isLoadingPage.value) return false
-  const exactTotal = Math.max(Number(totalCount.value) || 0, history.value.filter(Boolean).length)
+  const loadedCount = getLoadedHistoryCount()
+  const exactTotal = Math.max(Number(totalCount.value) || 0, loadedCount)
   const targetOffset = Math.max(0, exactTotal - (Number(pageSize.value) || 10))
-  if (targetOffset <= 0 && history.value.filter(Boolean).length >= exactTotal) {
+  if (targetOffset <= 0 && loadedCount >= exactTotal) {
     return false
   }
   clearPrefetchedPage()
@@ -1199,7 +1219,7 @@ const applyPayload = (data, options = {}) => {
   const {refocus = false} = options
   clearPrefetchedPage()
   history.value = Array.isArray(data.history) ? data.history : []
-  totalCount.value = history.value.filter(Boolean).length
+  totalCount.value = getLoadedHistoryCount()
   pageOffset.value = totalCount.value
   // 快照仅用于首屏快速展示，不依赖 pageSize 推断 hasMore，后续由分页接口校正。
   hasMore.value = totalCount.value > 0
@@ -1238,7 +1258,7 @@ const mergeShowWindowPayload = (data) => {
   clearPrefetchedPage()
   const incoming = Array.isArray(data?.history) ? data.history.filter((item) => item?.id) : []
   if (incoming.length > 0) {
-    const existingById = new Map(history.value.filter(Boolean).map((item) => [item.id, item]))
+    const {loadedItems, existingById} = getLoadedHistorySnapshot()
     const incomingIds = new Set()
 
     const keepCount = getHistoryRetentionLimit(incoming.length)
@@ -1260,11 +1280,17 @@ const mergeShowWindowPayload = (data) => {
     }
 
     // 保留现有历史记录中不在传入数据中的项目
-    const rest = history.value.filter((item) => item && !incomingIds.has(item.id))
+    const rest = []
+    for (const item of loadedItems) {
+      if (!incomingIds.has(item.id)) {
+        rest.push(item)
+      }
+    }
 
     // 合并并限制总数
-    history.value = [...front, ...rest].slice(0, keepCount)
-    const loadedCount = history.value.filter(Boolean).length
+    const nextHistory = [...front, ...rest].slice(0, keepCount)
+    history.value = nextHistory
+    const loadedCount = nextHistory.length
     totalCount.value = Math.max(totalCount.value || 0, loadedCount)
     pageOffset.value = Math.max(pageOffset.value || 0, loadedCount)
   }
@@ -1316,7 +1342,7 @@ const mergeImagePageIntoState = (data, reset = false) => {
     clearPrefetchedPage()
     // reset 时保留已接收的窗口快照数据，避免“16条快照被分页首包覆盖成14条”。
     // 仅在确实没有任何历史时才执行清空初始化。
-    if (history.value.filter(Boolean).length === 0) {
+    if (getLoadedHistoryCount() === 0) {
       history.value = []
       categoryMap.value = {}
       tagMap.value = {}
@@ -1396,7 +1422,7 @@ const mergeIncrementalPageIntoState = (data) => {
   const items = Array.isArray(data?.items) ? data.items : []
   if (items.length === 0) {
     if (Number.isFinite(data?.total)) {
-      const loadedCount = history.value.filter(Boolean).length
+      const loadedCount = getLoadedHistoryCount()
       // 增量同步阶段禁止回退到更小 total，避免短暂时序差异导致已渲染列表被截断。
       totalCount.value = Math.max(Number(data.total), loadedCount, Number(totalCount.value) || 0)
       pageOffset.value = loadedCount
@@ -1406,8 +1432,8 @@ const mergeIncrementalPageIntoState = (data) => {
     return
   }
   const selectedId = history.value[selectedIndex.value]?.id
+  const {loadedItems, existingById} = getLoadedHistorySnapshot()
   const incomingIds = new Set()
-  const existingById = new Map(history.value.filter(Boolean).map((item) => [item.id, item]))
   const front = []
   for (const row of items) {
     if (!row?.id) continue
@@ -1429,10 +1455,15 @@ const mergeIncrementalPageIntoState = (data) => {
     }
   }
   if (front.length === 0) return
-  const rest = history.value.filter((item) => item && !incomingIds.has(item.id))
-  const loadedCountBefore = history.value.filter(Boolean).length
+  const rest = []
+  for (const item of loadedItems) {
+    if (!incomingIds.has(item.id)) {
+      rest.push(item)
+    }
+  }
   // 增量同步只做“前部更新 + 其余保留”，不按 total 截断，避免出现 9 条被裁成 6 条。
-  history.value = [...front, ...rest]
+  const nextHistory = [...front, ...rest]
+  history.value = nextHistory
 
   const pinnedSet = new Set(pinnedItems.value)
   for (const row of items) {
@@ -1443,12 +1474,11 @@ const mergeIncrementalPageIntoState = (data) => {
       pinnedSet.delete(row.id)
     }
   }
-  pinnedItems.value = history.value
-      .filter(Boolean)
+  pinnedItems.value = nextHistory
       .map((item) => item.id)
       .filter((id) => pinnedSet.has(id))
 
-  const loadedCount = history.value.filter(Boolean).length
+  const loadedCount = nextHistory.length
   totalCount.value = Number.isFinite(data?.total)
       ? Math.max(Number(data.total), loadedCount, Number(totalCount.value) || 0)
       : Math.max(totalCount.value || 0, loadedCount)
@@ -1513,7 +1543,7 @@ const loadHistoryPage = async ({reset = false, force = false} = {}) => {
     }
   } catch (error) {
     console.error('同步图片历史失败:', error)
-    if (reset && history.value.filter(Boolean).length === 0 && !initialPageRetryTimer) {
+    if (reset && getLoadedHistoryCount() === 0 && !initialPageRetryTimer) {
       initialPageRetryTimer = setTimeout(() => {
         initialPageRetryTimer = null
         loadHistoryPage({reset: true}).catch(() => {
@@ -1528,7 +1558,7 @@ const loadHistoryPage = async ({reset = false, force = false} = {}) => {
 
 const ensureInitialPageLoaded = (force = false) => {
   if (isLoadingPage.value && !force) return
-  if (!force && history.value.filter(Boolean).length > 0) return
+  if (!force && getLoadedHistoryCount() > 0) return
   loadHistoryPage({reset: true, force}).catch((error) => {
     console.error('初始化图片历史失败:', error)
   })
@@ -1645,7 +1675,7 @@ const applyImagePayloadMeta = (payload) => {
       : 0
   if (snapshotCount > 0) {
     totalCount.value = Math.max(Number(totalCount.value) || 0, snapshotCount)
-    const loadedCount = history.value.filter(Boolean).length
+    const loadedCount = getLoadedHistoryCount()
     pageOffset.value = Math.max(Number(pageOffset.value) || 0, loadedCount)
     hasMore.value = pageOffset.value < totalCount.value
   }

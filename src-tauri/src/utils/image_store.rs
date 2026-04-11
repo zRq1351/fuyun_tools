@@ -445,14 +445,36 @@ pub async fn sync_item_positions_async(item_ids: &[String]) -> Result<(), String
         .begin()
         .await
         .map_err(|e| format!("创建图片位置事务失败: {}", e))?;
-    for (position, item_id) in item_ids.iter().enumerate() {
-        sqlx::query("UPDATE image_items SET position = ?1 WHERE item_id = ?2")
-            .bind(position as i64)
-            .bind(item_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("更新图片位置失败: {}", e))?;
-    }
+
+    reset_temp_position_table(&mut tx, "temp_target_image_items_position", "item_id").await?;
+    fill_temp_position_table(
+        &mut tx,
+        "temp_target_image_items_position",
+        "item_id",
+        item_ids,
+    )
+    .await?;
+
+    sqlx::query(
+        "
+        UPDATE image_items
+        SET position = (
+            SELECT target.position
+            FROM temp_target_image_items_position target
+            WHERE target.item_id = image_items.item_id
+        )
+        WHERE EXISTS (
+            SELECT 1
+            FROM temp_target_image_items_position target
+            WHERE target.item_id = image_items.item_id
+              AND target.position != image_items.position
+        )
+        ",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("批量更新图片位置失败: {}", e))?;
+
     tx.commit()
         .await
         .map_err(|e| format!("提交图片位置事务失败: {}", e))
@@ -473,19 +495,22 @@ pub async fn sync_item_positions_incremental_async(
     old_position: usize,
     new_position: usize,
 ) -> Result<(), String> {
+    if old_position == new_position {
+        return Ok(());
+    }
+
     let pool = get_pool().await?;
     let mut tx = pool
         .begin()
         .await
         .map_err(|e| format!("创建增量更新事务失败: {}", e))?;
 
-    // 更新移动的图片位置
-    sqlx::query("UPDATE image_items SET position = ?1 WHERE item_id = ?2")
-        .bind(new_position as i64)
+    // 先把移动项挪到事务内哨兵位置，避免后续区间更新再次命中自身。
+    sqlx::query("UPDATE image_items SET position = -1 WHERE item_id = ?1")
         .bind(item_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("更新移动图片位置失败: {}", e))?;
+        .map_err(|e| format!("暂存移动图片位置失败: {}", e))?;
 
     // 更新其他受影响图片的位置
     if old_position < new_position {
@@ -505,6 +530,14 @@ pub async fn sync_item_positions_incremental_async(
             .await
             .map_err(|e| format!("更新受影响图片位置失败: {}", e))?;
     }
+
+    // 最后把目标项写回最终位置。
+    sqlx::query("UPDATE image_items SET position = ?1 WHERE item_id = ?2")
+        .bind(new_position as i64)
+        .bind(item_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("写回移动图片位置失败: {}", e))?;
 
     tx.commit()
         .await

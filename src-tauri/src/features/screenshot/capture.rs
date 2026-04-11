@@ -240,8 +240,7 @@ pub fn get_screen_size() -> Result<(u32, u32), String> {
 }
 
 /// 将RGBA数据转换为PNG Base64字符串
-pub fn rgba_to_base64_png(rgba: &[u8], width: u32, height: u32) -> Result<String, String> {
-    use base64::Engine;
+pub fn rgba_to_png_bytes(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
     use image::{ImageBuffer, ImageEncoder, Rgba};
 
     let _img_buffer = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, rgba.to_vec())
@@ -249,8 +248,17 @@ pub fn rgba_to_base64_png(rgba: &[u8], width: u32, height: u32) -> Result<String
 
     let mut png_data = Vec::new();
     let encoder = image::codecs::png::PngEncoder::new(&mut png_data);
-    encoder.write_image(rgba, width, height, image::ColorType::Rgba8.into())
+    encoder
+        .write_image(rgba, width, height, image::ColorType::Rgba8.into())
         .map_err(|e| format!("编码PNG失败: {}", e))?;
+
+    Ok(png_data)
+}
+
+/// 将RGBA数据转换为PNG Base64字符串
+pub fn rgba_to_base64_png(rgba: &[u8], width: u32, height: u32) -> Result<String, String> {
+    use base64::Engine;
+    let png_data = rgba_to_png_bytes(rgba, width, height)?;
 
     let base64_str = base64::engine::general_purpose::STANDARD.encode(&png_data);
 

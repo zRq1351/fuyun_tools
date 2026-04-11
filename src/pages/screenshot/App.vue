@@ -294,7 +294,7 @@
 
 <script setup>
 import {computed, nextTick, onMounted, onUnmounted, reactive, ref, watchPostEffect} from 'vue'
-import {invoke} from '@tauri-apps/api/core'
+import {convertFileSrc, invoke} from '@tauri-apps/api/core'
 import {emit, listen} from '@tauri-apps/api/event'
 import {Check, Circle, Pin, Square, X} from 'lucide-vue-next'
 import {
@@ -791,7 +791,7 @@ function consumeBootPayload() {
     screenshotSessionRequested.value = true
     hasScreenshotPayload.value = payloadSessionId.value === bootStartSessionId
   }
-  if (boot.pendingData && boot.pendingData.png_base64) {
+  if (boot.pendingData && (boot.pendingData.png_base64 || boot.pendingData.image_path)) {
     handleScreenshotData({detail: boot.pendingData})
     boot.pendingData = null
   }
@@ -896,7 +896,7 @@ async function requestScreenshot() {
 }
 
 function handleScreenshotData(event) {
-  if (event.detail && event.detail.png_base64) {
+  if (event.detail && (event.detail.png_base64 || event.detail.image_path)) {
     longshotResultActive.value = false
     longshotRawPngBase64.value = ''
     longshotViewScale.value = 1
@@ -917,7 +917,11 @@ function handleScreenshotData(event) {
     captureOriginX.value = Number(event.detail.origin_x) || 0
     captureOriginY.value = Number(event.detail.origin_y) || 0
     fetchWindows()
-    loadImageFromBase64(event.detail.png_base64)
+    if (event.detail.image_path) {
+      loadImageFromPath(event.detail.image_path)
+    } else {
+      loadImageFromBase64(event.detail.png_base64)
+    }
   }
 }
 
@@ -1129,9 +1133,18 @@ function getGlobalSelectionRect() {
   }
 }
 
-function loadImageFromBase64(base64Data) {
+function buildFileUrlFromPath(imagePath) {
+  if (!imagePath) return ''
+  try {
+    return convertFileSrc(imagePath)
+  } catch (_) {
+    return ''
+  }
+}
+
+function loadImageFromSrc(src) {
   isCaptureReady.value = false
-  screenshotSrc.value = `data:image/png;base64,${base64Data}`
+  screenshotSrc.value = src
   const img = new Image()
   img.onload = () => {
     resetAnnotationStateForNewImage()
@@ -1151,7 +1164,20 @@ function loadImageFromBase64(base64Data) {
   img.onerror = () => {
     isCaptureReady.value = false
   }
-  img.src = `data:image/png;base64,${base64Data}`
+  img.src = src
+}
+
+function loadImageFromBase64(base64Data) {
+  loadImageFromSrc(`data:image/png;base64,${base64Data}`)
+}
+
+function loadImageFromPath(imagePath) {
+  const fileUrl = buildFileUrlFromPath(imagePath)
+  if (!fileUrl) {
+    isCaptureReady.value = false
+    return
+  }
+  loadImageFromSrc(fileUrl)
 }
 
 function resetAnnotationStateForNewImage() {
@@ -2839,10 +2865,18 @@ async function saveAndClose() {
     const result = await invoke('save_screenshot', {pngBase64: base64})
     if (result.success) {
       close()
+      return
     }
+    if (result?.cancelled) {
+      return
+    }
+    alert(result?.error || result?.message || '保存失败')
   } catch (error) {
+    const reason = error?.message
+        || (typeof error === 'string' ? error : JSON.stringify(error))
+        || '未知错误'
     console.error('保存失败:', error)
-    alert('保存失败')
+    alert(`保存失败：${reason}`)
   }
 }
 

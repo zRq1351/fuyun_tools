@@ -353,8 +353,6 @@ fn merge_system_audio_into_video(
     video_path: &PathBuf,
     system_segments: &[crate::features::recording::state::AudioSegment],
     mic_segments: &[crate::features::recording::state::AudioSegment],
-    system_switch_points_ms: &[u64],
-    mic_switch_points_ms: &[u64],
 ) -> Result<(), AppError> {
     let expected_system_count = system_segments.len();
     let expected_mic_count = mic_segments.len();
@@ -415,21 +413,10 @@ fn merge_system_audio_into_video(
     }
     let sys_delay = sys_inputs.first().map(|(_, d)| *d).unwrap_or(0);
     let mic_delay = mic_inputs.first().map(|(_, d)| *d).unwrap_or(0);
-    let switch_meta = |points: &[u64]| {
-        if points.is_empty() {
-            "none".to_string()
-        } else {
-            points.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
-        }
-    };
     cmd.arg("-metadata")
         .arg(format!("fy_sys_delay_ms={}", sys_delay))
         .arg("-metadata")
-        .arg(format!("fy_mic_delay_ms={}", mic_delay))
-        .arg("-metadata")
-        .arg(format!("fy_sys_switch_points_ms={}", switch_meta(system_switch_points_ms)))
-        .arg("-metadata")
-        .arg(format!("fy_mic_switch_points_ms={}", switch_meta(mic_switch_points_ms)));
+        .arg(format!("fy_mic_delay_ms={}", mic_delay));
     let mut filter_parts: Vec<String> = Vec::new();
     let mut sys_labels: Vec<String> = Vec::new();
     for (idx, (input, delay)) in sys_inputs.iter().enumerate() {
@@ -1389,8 +1376,6 @@ pub fn start_recording(
         runtime.mic_audio_ever_enabled = capture_microphone;
         runtime.system_audio_stream_start_ms = None;
         runtime.mic_audio_stream_start_ms = None;
-        runtime.system_audio_switch_points_ms.clear();
-        runtime.mic_audio_switch_points_ms.clear();
         runtime.system_audio_segments.clear();
         runtime.mic_audio_segments.clear();
         runtime.window_video_segments.clear();
@@ -1398,14 +1383,10 @@ pub fn start_recording(
         if let Some(seg_path) = window_segment_path.as_ref() {
             runtime.window_video_segments.push(seg_path.clone());
         }
+        // 系统音频关闭时不占用 loopback 设备；重新开启时再创建新音频分段并在合成阶段按 start_ms 对齐。
         if capture_system_audio {
-            runtime.system_audio_switch_points_ms.push(0);
+            let _ = ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, true);
         }
-        if capture_microphone {
-            runtime.mic_audio_switch_points_ms.push(0);
-        }
-        // 系统音频允许静音常驻采集；麦克风未开启时不占用设备，避免系统显示“麦克风正在使用”
-        let _ = ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, capture_system_audio);
         if capture_microphone {
             let _ = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true);
         }
@@ -1465,8 +1446,6 @@ pub fn stop_recording(
         output_final,
         mut sys_segments,
         mut mic_segments,
-        mut system_audio_switch_points_ms,
-        mut mic_audio_switch_points_ms,
         window_video_segments,
         audio_segment_paths,
     ) = {
@@ -1516,8 +1495,6 @@ pub fn stop_recording(
         let output_final = runtime.output_path_final.take();
         let mut taken_sys_segments = std::mem::take(&mut runtime.system_audio_segments);
         let mut taken_mic_segments = std::mem::take(&mut runtime.mic_audio_segments);
-        let system_audio_switch_points_ms = std::mem::take(&mut runtime.system_audio_switch_points_ms);
-        let mic_audio_switch_points_ms = std::mem::take(&mut runtime.mic_audio_switch_points_ms);
         let window_video_segments = std::mem::take(&mut runtime.window_video_segments);
         let sys_segments = if runtime.system_audio_ever_enabled {
             std::mem::take(&mut taken_sys_segments)
@@ -1552,8 +1529,6 @@ pub fn stop_recording(
             output_final,
             sys_segments,
             mic_segments,
-            system_audio_switch_points_ms,
-            mic_audio_switch_points_ms,
             window_video_segments,
             audio_segment_paths,
         )
@@ -1626,12 +1601,6 @@ pub fn stop_recording(
             for seg in &mut mic_segments {
                 seg.start_ms = seg.start_ms.saturating_sub(calibrated_anchor_ms);
             }
-            for point in &mut system_audio_switch_points_ms {
-                *point = point.saturating_sub(calibrated_anchor_ms);
-            }
-            for point in &mut mic_audio_switch_points_ms {
-                *point = point.saturating_sub(calibrated_anchor_ms);
-            }
             log::info!(
                 "应用 WGC 首帧锚点校正: anchor_ms={}, advance_ms={}, calibrated_anchor_ms={}",
                 anchor_ms,
@@ -1684,8 +1653,6 @@ pub fn stop_recording(
                 output_final,
                 &sys_segments,
                 &mic_segments,
-                &system_audio_switch_points_ms,
-                &mic_audio_switch_points_ms,
             ) {
                 let detail = e.details.clone().unwrap_or_default();
                 let msg = if detail.is_empty() {
@@ -2150,12 +2117,6 @@ pub fn update_audio_capture(
         let mic_device_changed = requested_mic_device != runtime.mic_audio_device_id;
 
         if let Some(v) = capture_system_audio {
-            if v != current_sys_enabled {
-                runtime.system_audio_switch_points_ms.push(elapsed_now_ms);
-                if runtime.system_audio_switch_points_ms.len() > 64 {
-                    let _ = runtime.system_audio_switch_points_ms.remove(0);
-                }
-            }
             if let Some(flag) = runtime.system_audio_enabled_flag.as_ref() {
                 flag.store(v, Ordering::SeqCst);
             }
@@ -2164,12 +2125,6 @@ pub fn update_audio_capture(
             }
         }
         if let Some(v) = capture_microphone {
-            if v != current_mic_enabled {
-                runtime.mic_audio_switch_points_ms.push(elapsed_now_ms);
-                if runtime.mic_audio_switch_points_ms.len() > 64 {
-                    let _ = runtime.mic_audio_switch_points_ms.remove(0);
-                }
-            }
             if let Some(flag) = runtime.mic_audio_enabled_flag.as_ref() {
                 flag.store(v, Ordering::SeqCst);
             }
@@ -2182,15 +2137,17 @@ pub fn update_audio_capture(
 
         let mut system_audio_stop_flag = None;
         let mut system_audio_thread = None;
-        if sys_device_changed && runtime.system_audio_thread.is_some() {
+        if (sys_device_changed || !should_enable_sys) && runtime.system_audio_thread.is_some() {
             system_audio_stop_flag = runtime.system_audio_stop_flag.take();
             system_audio_thread = runtime.system_audio_thread.take();
+            runtime.system_audio_wav_path = None;
         }
         let mut mic_audio_stop_flag = None;
         let mut mic_audio_thread = None;
         if (mic_device_changed || !should_enable_mic) && runtime.mic_audio_thread.is_some() {
             mic_audio_stop_flag = runtime.mic_audio_stop_flag.take();
             mic_audio_thread = runtime.mic_audio_thread.take();
+            runtime.mic_audio_wav_path = None;
         }
 
         (
@@ -2224,14 +2181,17 @@ pub fn update_audio_capture(
     if sys_device_changed {
         runtime.system_audio_stream_start_ms = Some(elapsed_now_ms);
     }
+    if !should_enable_sys {
+        runtime.system_audio_stream_start_ms = None;
+    }
     if mic_device_changed {
         runtime.mic_audio_stream_start_ms = Some(elapsed_now_ms);
     }
     if !should_enable_mic {
         runtime.mic_audio_stream_start_ms = None;
     }
-    if runtime.system_audio_thread.is_none() {
-        ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, should_enable_sys).map_err(|e| {
+    if should_enable_sys && runtime.system_audio_thread.is_none() {
+        ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, true).map_err(|e| {
             AppError::new(ErrorCode::SystemError, format!("开启系统音频失败: {}", e)).with_details(e)
         })?;
     }

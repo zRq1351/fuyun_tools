@@ -113,6 +113,18 @@ fn runtime_slot() -> &'static StdMutex<Option<ManualLongshotRuntime>> {
     MANUAL_LONGSHOT_RUNTIME.get_or_init(|| StdMutex::new(None))
 }
 
+fn clear_runtime_if_finished(session_id: u64) {
+    if let Ok(mut slot) = runtime_slot().lock() {
+        let should_clear = slot
+            .as_ref()
+            .map(|runtime| runtime.session_id == session_id && runtime.worker.is_none())
+            .unwrap_or(false);
+        if should_clear {
+            *slot = None;
+        }
+    }
+}
+
 fn suppress_console_window(command: &mut Command) {
     #[cfg(target_os = "windows")]
     {
@@ -141,7 +153,11 @@ pub fn start_manual_longshot(
             .status
             .lock()
             .map_err(|_| "长截图状态锁不可用".to_string())?;
-        if status.state == "running" || status.state == "paused" {
+        if status.state == "running"
+            || status.state == "paused"
+            || status.state == "finishing"
+            || status.state == "canceling"
+        {
             return Err("已有长截图会话进行中，请先完成或取消".to_string());
         }
     }
@@ -229,26 +245,28 @@ pub fn cancel_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
     let mut slot = runtime_slot()
         .lock()
         .map_err(|_| "长截图会话锁不可用".to_string())?;
-    let Some(mut runtime) = slot.take() else {
+    let Some(runtime) = slot.as_mut() else {
         return Err("未找到进行中的长截图会话".to_string());
     };
     if runtime.session_id != session_id {
-        *slot = Some(runtime);
         return Err("长截图会话 ID 不匹配".to_string());
     }
 
     runtime.control.stop.store(true, Ordering::Release);
     runtime.control.paused.store(false, Ordering::Release);
     if let Ok(mut status) = runtime.control.status.lock() {
-        status.state = "canceled".to_string();
+        status.state = "canceling".to_string();
     }
     let worker = runtime.worker.take();
     drop(slot);
     if let Some(handle) = worker {
-        // 两阶段收口：先快速返回，后台再等待采样线程完全退出，避免前台命令阻塞。
+        // 两阶段收口：先返回给前端，再在后台等待采样线程退出，最后清空会话槽。
         thread::spawn(move || {
             let _ = handle.join();
+            clear_runtime_if_finished(session_id);
         });
+    } else {
+        clear_runtime_if_finished(session_id);
     }
 
     let _ = app.emit(
@@ -333,7 +351,11 @@ pub fn active_manual_longshot_session_id() -> Option<u64> {
     let slot = runtime_slot().lock().ok()?;
     let runtime = slot.as_ref()?;
     let status = runtime.control.status.lock().ok()?;
-    if status.state == "running" || status.state == "paused" || status.state == "finishing" {
+    if status.state == "running"
+        || status.state == "paused"
+        || status.state == "finishing"
+        || status.state == "canceling"
+    {
         Some(runtime.session_id)
     } else {
         None

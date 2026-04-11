@@ -50,6 +50,7 @@ use xxhash_rust::xxh3::xxh3_64;
 static NEXT_SCREENSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_PINNED_IMAGE_WINDOW_ID: AtomicU64 = AtomicU64::new(1);
 static SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW: AtomicBool = AtomicBool::new(false);
+static SCREENSHOT_BOOT_IMAGE_PATH: OnceLock<StdMutex<Option<PathBuf>>> = OnceLock::new();
 static RECENT_COPY_PASTE: OnceLock<StdMutex<Option<RecentCopyPaste>>> = OnceLock::new();
 static COPY_PASTE_DEDUP_ENABLED: AtomicBool = AtomicBool::new(true);
 static COPY_PASTE_DEDUP_WINDOW_MS: AtomicU64 = AtomicU64::new(1200);
@@ -85,6 +86,43 @@ fn now_unix_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn screenshot_boot_image_slot() -> &'static StdMutex<Option<PathBuf>> {
+    SCREENSHOT_BOOT_IMAGE_PATH.get_or_init(|| StdMutex::new(None))
+}
+
+fn replace_screenshot_boot_image_path(next_path: Option<PathBuf>) {
+    let mut slot = match screenshot_boot_image_slot().lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+    let previous = slot.take();
+    *slot = next_path.clone();
+    if let Some(previous_path) = previous {
+        if next_path.as_ref() != Some(&previous_path) {
+            let _ = fs::remove_file(previous_path);
+        }
+    }
+}
+
+fn build_screenshot_boot_image_path(session_id: u64) -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("fuyun_tools").join("screenshot_boot");
+    fs::create_dir_all(&dir).map_err(|e| format!("创建截图临时目录失败: {}", e))?;
+    Ok(dir.join(format!("screenshot_boot_{}.png", session_id)))
+}
+
+fn write_screenshot_boot_image(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    session_id: u64,
+) -> Result<PathBuf, String> {
+    let png_data = crate::features::screenshot::capture::rgba_to_png_bytes(rgba, width, height)?;
+    let path = build_screenshot_boot_image_path(session_id)?;
+    fs::write(&path, png_data).map_err(|e| format!("写入截图临时文件失败: {}", e))?;
+    replace_screenshot_boot_image_path(Some(path.clone()));
+    Ok(path)
 }
 
 fn is_duplicate_copy_paste_request(text: &str, request_id: Option<&str>) -> bool {
@@ -3637,37 +3675,46 @@ pub async fn save_screenshot(
         .as_millis();
     let filename = format!("screenshot_{}.png", timestamp);
 
+    let (tx, rx) = mpsc::channel::<Result<Option<PathBuf>, String>>();
+
     // 获取保存路径（用户选择）
     app.dialog()
         .file()
         .add_filter("PNG图片", &["png"])
         .set_file_name(&filename)
         .save_file(move |path| {
-            match path {
-                Some(file_path) => {
-                    // 尝试将FilePath转换为PathBuf
-                    if let Some(path_buf) = file_path.as_path() {
-                        match fs::write(path_buf, &png_data) {
-                            Ok(_) => {
-                                log::info!("截图已保存到: {}", path_buf.display());
-                            }
-                            Err(e) => {
-                                log::error!("写入文件失败: {}", e);
-                            }
-                        }
-                    } else {
-                        log::error!("无法获取保存路径");
-                    }
-                }
-                None => {
-                    log::info!("用户取消保存");
-                }
-            }
+            let result = match path {
+                Some(file_path) => file_path
+                    .as_path()
+                    .map(|p| Some(p.to_path_buf()))
+                    .ok_or_else(|| "无法获取保存路径".to_string()),
+                None => Ok(None),
+            };
+            let _ = tx.send(result);
         });
+
+    let selected_path = tauri::async_runtime::spawn_blocking(move || rx.recv())
+        .await
+        .map_err(|e| format!("等待保存对话框结果失败: {}", e))?
+        .map_err(|e| format!("接收保存对话框结果失败: {}", e))??;
+
+    let Some(path_buf) = selected_path else {
+        log::info!("用户取消保存");
+        return Ok(serde_json::json!({
+            "success": false,
+            "cancelled": true,
+            "message": "用户取消保存"
+        }));
+    };
+
+    fs::write(&path_buf, &png_data)
+        .map_err(|e| format!("写入文件失败: {}", e))?;
+    log::info!("截图已保存到: {}", path_buf.display());
 
     Ok(serde_json::json!({
         "success": true,
-        "message": "保存对话框已打开"
+        "cancelled": false,
+        "path": path_buf.to_string_lossy().to_string()
     }))
 }
 
@@ -4198,12 +4245,11 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
         }
     };
 
-    let png_base64 = capture::rgba_to_base64_png(&rgba, width, height)
-        .map_err(|e| {
-            capture::set_screenshot_in_progress(false);
-            format!("转换PNG失败: {}", e)
-        })?;
     let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
+    let image_path = write_screenshot_boot_image(&rgba, width, height, session_id).map_err(|e| {
+        capture::set_screenshot_in_progress(false);
+        e
+    })?;
 
     let selection_mode = selection_mode;
     if let Some(window) = app.get_webview_window("screenshot") {
@@ -4214,7 +4260,7 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
             bind_screenshot_window_lifecycle(&window);
         }
         let payload = serde_json::json!({
-            "png_base64": png_base64,
+            "image_path": image_path,
             "width": width,
             "height": height,
             "origin_x": origin_x,
@@ -4252,12 +4298,13 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
                 let _ = window.set_focus();
             } else {
                 let _ = window.hide();
+                replace_screenshot_boot_image_path(None);
                 capture::set_screenshot_in_progress(false);
             }
         });
     } else {
         let payload = serde_json::json!({
-            "png_base64": png_base64,
+            "image_path": image_path,
             "width": width,
             "height": height,
             "origin_x": origin_x,
@@ -4267,8 +4314,9 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
         let boot_script = format!(
             "window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || {{ pendingData: null, pendingStartSessionId: 0 }};\
 window.__SCREENSHOT_BOOT__.pendingData = {};\
-window.__SCREENSHOT_BOOT__.pendingStartSessionId = {};",
-            payload, session_id
+window.__SCREENSHOT_BOOT__.pendingStartSessionId = {};\
+window.__SCREENSHOT_BOOT__.pendingMode = '{}';",
+            payload, session_id, selection_mode
         );
         let window = tauri::WebviewWindowBuilder::new(
             &app,
@@ -4292,6 +4340,7 @@ window.__SCREENSHOT_BOOT__.pendingStartSessionId = {};",
             })
             .build()
             .map_err(|e| {
+                replace_screenshot_boot_image_path(None);
                 capture::set_screenshot_in_progress(false);
                 format!("创建截图窗口失败: {}", e)
             })?;
@@ -4338,10 +4387,12 @@ pub async fn close_screenshot_window(app: AppHandle) -> Result<(), String> {
             "window.dispatchEvent(new CustomEvent('screenshot-reset'));\
 window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || { pendingData: null, pendingStartSessionId: 0 };\
 window.__SCREENSHOT_BOOT__.pendingData = null;\
-window.__SCREENSHOT_BOOT__.pendingStartSessionId = 0;",
+window.__SCREENSHOT_BOOT__.pendingStartSessionId = 0;\
+window.__SCREENSHOT_BOOT__.pendingMode = null;",
         );
         let _ = window.hide();
     }
+    replace_screenshot_boot_image_path(None);
     features::screenshot::capture::set_screenshot_in_progress(false);
 
     Ok(())
