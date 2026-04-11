@@ -101,8 +101,10 @@
             v-if="capsuleSettingsVisible"
             class="capsule-settings-panel no-drag"
         >
-          <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]">
+          <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
+               title="点击关闭提示" @click="clearInlineNotice">
             {{ inlineNotice }}
+            <span class="inline-notice-close">×</span>
           </div>
           <div class="toolbar-settings-title-row">
             <div class="toolbar-settings-title">录制设置</div>
@@ -438,13 +440,7 @@ const showInlineNotice = (message, type = "error") => {
     clearTimeout(inlineNoticeTimer);
     inlineNoticeTimer = null;
   }
-  if (type === "error") {
-    return;
-  }
-  inlineNoticeTimer = window.setTimeout(() => {
-    inlineNotice.value = "";
-    inlineNoticeTimer = null;
-  }, 3600);
+  // 移除自动清除定时器，让提示常驻，直到被主动清理或用户操作
 };
 
 const clearInlineNotice = () => {
@@ -459,7 +455,14 @@ const showBackendErrorInSettings = async (message) => {
   const text = String(message || "录屏异常");
   keepSettingsOpenUntilTs = Date.now() + 3000;
   capsuleSettingsVisible.value = true;
-  showInlineNotice(text, "error");
+  // 如果当前已经有横幅且是 error，将新的错误追加到后面，而不是直接覆盖，保留原始根因
+  if (inlineNotice.value && inlineNoticeType.value === "error" && inlineNotice.value !== text) {
+    if (!inlineNotice.value.includes(text)) {
+      showInlineNotice(`${inlineNotice.value} | 连锁异常: ${text}`, "error");
+    }
+  } else {
+    showInlineNotice(text, "error");
+  }
   void syncCapsuleLayout();
   try {
     const win = getCurrentWindow();
@@ -621,6 +624,8 @@ const closeCapsule = async () => {
 const onWindowBlur = () => {
   if (!capsuleSettingsVisible.value) return;
   if (Date.now() < keepSettingsOpenUntilTs) return;
+  // 如果当前正在展示任何内联通知（如报错、警告或时长到达提示），禁止自动折叠
+  if (inlineNotice.value) return;
   capsuleSettingsVisible.value = false;
 };
 
@@ -889,9 +894,14 @@ onMounted(async () => {
   unlistenRecordingFinished = await listen("recording-finished", async () => {
     state.state = "idle";
     state.sessionId = null;
-    clearInlineNotice();
-    capsuleSettingsVisible.value = false;
-    void syncCapsuleLayout();
+
+    // 如果是因为错误/超长导致自动结束，此时横幅上已经有提示，不要清空并折叠，而是保留提示让用户看见
+    if (!inlineNotice.value) {
+      clearInlineNotice();
+      capsuleSettingsVisible.value = false;
+      void syncCapsuleLayout();
+    }
+
     try {
       const win = getCurrentWindow();
       if (await win.isVisible() === false) {
@@ -914,6 +924,8 @@ onMounted(async () => {
     if (Date.now() < keepSettingsOpenUntilTs) {
       return;
     }
+    // 如果有未被确认的横幅提示，拒绝强制折叠
+    if (inlineNotice.value) return;
     capsuleSettingsVisible.value = false;
     void syncCapsuleLayout();
   });
@@ -1317,7 +1329,7 @@ body,
 
 .toolbar-inline-notice {
   margin-bottom: 4px;
-  padding: 6px 8px;
+  padding: 6px 24px 6px 8px;
   border-radius: 8px;
   font-size: 12px;
   line-height: 1.35;
@@ -1328,6 +1340,23 @@ body,
   word-break: break-word;
   overflow-wrap: anywhere;
   box-sizing: border-box;
+  position: relative;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.toolbar-inline-notice:hover {
+  opacity: 0.8;
+}
+
+.inline-notice-close {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  font-weight: bold;
+  opacity: 0.6;
 }
 
 .toolbar-inline-notice.is-warning {
