@@ -603,7 +603,7 @@ fn validate_video_input_for_merge_with_retry(
                 last_err = Some(AppError::new(
                     ErrorCode::ValidationError,
                     "录制视频文件为空，未捕获到有效视频帧",
-                ).with_details("请确认目标窗口未最小化、处于可见状态且存在内容变化；若录制包含受保护内容或硬件加速，请尝试关闭加速或改用全屏录制"));
+                ).with_details("请确认目标窗口未最小化；若录制包含受保护内容或硬件加速，请尝试关闭加速或改用全屏录制"));
                 if idx + 1 < VIDEO_IO_RETRY_DELAYS_MS.len() {
                     thread::sleep(Duration::from_millis(*delay_ms));
                 }
@@ -645,10 +645,10 @@ fn is_benign_wgc_stop_error(details: &str) -> bool {
 fn build_window_capture_unavailable_details(details: &str) -> String {
     let trimmed = details.trim();
     if trimmed.is_empty() {
-        "请确认目标窗口未最小化、处于可见状态且存在内容变化；若窗口包含受保护视频、硬件加速覆盖层或系统限制内容，请改用区域录制或全屏录制".to_string()
+        "请确认目标窗口未最小化；若窗口包含受保护视频、硬件加速覆盖层或系统限制内容，请改用区域录制或全屏录制".to_string()
     } else {
         format!(
-            "{}；请确认目标窗口未最小化、处于可见状态且存在内容变化；若窗口包含受保护视频、硬件加速覆盖层或系统限制内容，请改用区域录制或全屏录制",
+            "{}；请确认目标窗口未最小化；若窗口包含受保护视频、硬件加速覆盖层或系统限制内容，请改用区域录制或全屏录制",
             trimmed
         )
     }
@@ -1060,14 +1060,14 @@ fn spawn_stats_loop(
                         no_video_frames = true;
                     }
                 }
-                
+
                 if no_video_frames {
                     runtime.auto_stop_requested = true;
                     runtime.phase = RecordingPhase::Stopping;
                     phase = RecordingPhase::Stopping;
                     auto_stop_session_id = session_id.clone();
-                    
-                    let details = "请确认目标窗口未最小化、处于可见状态且存在内容变化；若录制包含受保护内容或硬件加速，请尝试关闭加速或改用全屏录制";
+
+                    let details = "请确认目标窗口未最小化；若录制包含受保护内容或硬件加速，请尝试关闭加速或改用全屏录制";
                     let err_msg = format!("未捕获到有效视频帧；{}", details);
                     runtime.last_error = Some(err_msg.clone());
                     emit_error = Some((
@@ -1210,7 +1210,7 @@ pub fn start_recording(
             "warning".into(),
             "-y".into(),
         ];
-        
+
         // 第一次尝试处理 window，如果命中 WGC 不支持的内容，降级到 gdigrab 的窗口模式
         if target_type == "window" {
             if target_id.trim().is_empty() {
@@ -1219,7 +1219,7 @@ pub fn start_recording(
             if let Err(e) = validate_window_capture_target(target_id.trim()) {
                 return Err(rollback_starting("当前窗口不可录制", e));
             }
-            
+
             #[cfg(debug_assertions)]
             let force_ffmpeg_fallback = settings_snapshot.dev_force_ffmpeg_window_capture;
             #[cfg(not(debug_assertions))]
@@ -1265,7 +1265,7 @@ pub fn start_recording(
                 }
             }
         }
-        
+
         match target_type.as_str() {
             "window" => {
                 // 已在上方通过 WGC 启动，此处留空
