@@ -1,6 +1,6 @@
 use crate::services::clipboard_wakeup::subscribe_clipboard_wake_events;
 use crate::sync::Mutex;
-use crate::ui::window_manager::ENIGO_INSTANCE;
+use crate::ui::window_manager::{release_ctrl_key_with_fallback, ENIGO_INSTANCE};
 use crate::utils::clipboard::ClipboardManager;
 use enigo::{Enigo, Key, Keyboard, Settings};
 use log;
@@ -20,9 +20,7 @@ fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
 
     // 定义释放函数，用于异常处理
     fn release_ctrl(enigo: &mut Enigo) -> Result<(), String> {
-        enigo
-            .key(CTRL_KEY, enigo::Direction::Release)
-            .map_err(|e| format!("释放 Ctrl 键失败: {:?}", e))
+        release_ctrl_key_with_fallback(enigo).map_err(|e| format!("释放 Ctrl 键失败: {}", e))
     }
 
     // 按下 C 键

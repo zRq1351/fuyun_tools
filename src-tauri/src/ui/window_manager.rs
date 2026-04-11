@@ -14,8 +14,9 @@ use winapi::shared::windef::RECT;
 use winapi::um::processthreadsapi::GetCurrentProcessId;
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::{
-    GetForegroundWindow, GetSystemMetrics, GetWindowTextW, GetWindowThreadProcessId,
-    SystemParametersInfoW, SM_CYSCREEN, SPI_GETWORKAREA,
+    keybd_event, GetForegroundWindow, GetSystemMetrics, GetWindowTextW, GetWindowThreadProcessId,
+    SystemParametersInfoW, KEYEVENTF_KEYUP, SM_CYSCREEN, SPI_GETWORKAREA, VK_CONTROL, VK_LCONTROL,
+    VK_RCONTROL,
 };
 
 pub static ENIGO_INSTANCE: LazyLock<Arc<Mutex<Option<enigo::Enigo>>>> =
@@ -47,11 +48,30 @@ pub fn cleanup_enigo_instance() {
     log::info!("已清理ENIGO实例资源");
 }
 
-fn release_ctrl_key_once(enigo: &mut enigo::Enigo) -> Result<(), String> {
+#[cfg(target_os = "windows")]
+fn release_ctrl_key_winapi() {
+    unsafe {
+        keybd_event(VK_CONTROL as u8, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_LCONTROL as u8, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_RCONTROL as u8, 0, KEYEVENTF_KEYUP, 0);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn release_ctrl_key_winapi() {}
+
+pub fn release_ctrl_key_with_fallback(enigo: &mut enigo::Enigo) -> Result<(), String> {
     use enigo::{Direction, Keyboard};
-    enigo
+    let enigo_result = enigo
         .key(CTRL_KEY, Direction::Release)
-        .map_err(|e| format!("释放 Ctrl 键失败: {}", e))
+        .map_err(|e| format!("释放 Ctrl 键失败: {}", e));
+    // Windows 下额外补发通用/左右 Ctrl 的 keyup，尽量消除偶发“Ctrl 卡住”。
+    release_ctrl_key_winapi();
+    enigo_result
+}
+
+fn release_ctrl_key_once(enigo: &mut enigo::Enigo) -> Result<(), String> {
+    release_ctrl_key_with_fallback(enigo)
 }
 
 pub fn force_release_ctrl_key() -> Result<(), String> {
