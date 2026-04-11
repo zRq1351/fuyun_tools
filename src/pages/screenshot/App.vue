@@ -440,10 +440,12 @@ const drawingTools = [
   {id: 'mosaic', name: '马赛克', icon: Grid},
   {id: 'picker', name: '取色', icon: Brush}
 ]
+const isDevMode = import.meta.env.DEV
 
 const hasSelection = computed(() => rect.width > 0 && rect.height > 0)
 const canExport = computed(() => hasSelection.value)
 const showExportRouteIndicator = computed(() =>
+    isDevMode &&
     regionSelectMode.value === 'screenshot' &&
     hasSelection.value &&
     (state.value === 'selected' || state.value === 'drawing')
