@@ -13,6 +13,10 @@ use windows_capture::settings::{
     SecondaryWindowSettings, Settings,
 };
 use windows_capture::window::Window;
+#[cfg(target_os = "windows")]
+use winapi::shared::windef::RECT;
+#[cfg(target_os = "windows")]
+use winapi::um::winuser::{GetWindowRect, IsIconic, IsWindow, IsWindowVisible};
 
 static WGC_FORCE_DEFAULT_BORDER: AtomicBool = AtomicBool::new(false);
 static WGC_FORCE_DEFAULT_DIRTY_REGION: AtomicBool = AtomicBool::new(false);
@@ -27,6 +31,73 @@ fn is_dirty_region_unsupported(details: &str) -> bool {
     let lower = details.to_lowercase();
     lower.contains("dirtyregionunsupported")
         || lower.contains("graphicscaptureapierror(dirtyregionunsupported)")
+}
+
+pub fn is_item_convert_failed(details: &str) -> bool {
+    let lower = details.to_lowercase();
+    lower.contains("itemconvertfailed")
+        || lower.contains("graphicscaptureapierror(itemconvertfailed)")
+}
+
+fn parse_hwnd_value(raw: &str) -> Option<usize> {
+    if let Some(hex) = raw.strip_prefix("0x") {
+        return usize::from_str_radix(hex, 16).ok();
+    }
+    if !raw.is_empty() && raw.chars().all(|c| c.is_ascii_hexdigit()) {
+        return usize::from_str_radix(raw, 16).ok();
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn validate_hwnd_target(hwnd: usize) -> Result<(), String> {
+    let hwnd = hwnd as winapi::shared::windef::HWND;
+    unsafe {
+        if IsWindow(hwnd) == 0 {
+            return Err("目标窗口句柄已失效或窗口已关闭".to_string());
+        }
+        if IsWindowVisible(hwnd) == 0 {
+            return Err("目标窗口当前不可见，请将窗口切回前台后重试".to_string());
+        }
+        if IsIconic(hwnd) != 0 {
+            return Err("目标窗口已最小化，请恢复窗口后再开始录制".to_string());
+        }
+        let mut rect: RECT = std::mem::zeroed();
+        if GetWindowRect(hwnd, &mut rect) == 0 {
+            return Err("读取目标窗口尺寸失败，请重新选择窗口后重试".to_string());
+        }
+        let width = (rect.right - rect.left).max(0);
+        let height = (rect.bottom - rect.top).max(0);
+        if width < 2 || height < 2 {
+            return Err("目标窗口尺寸异常，当前无法进行窗口录制".to_string());
+        }
+    }
+    Ok(())
+}
+
+pub fn get_window_rect_from_target(target_id: &str) -> Result<(i32, i32, u32, u32), String> {
+    let window = parse_window_target(target_id)?;
+    let rect = window.rect().map_err(|e| format!("读取窗口尺寸失败: {}", e))?;
+    let width = (rect.right - rect.left).max(1) as u32;
+    let height = (rect.bottom - rect.top).max(1) as u32;
+    Ok((rect.left, rect.top, width, height))
+}
+
+pub fn get_window_title_from_target(target_id: &str) -> Result<String, String> {
+    let window = parse_window_target(target_id)?;
+    window.title().map_err(|e| format!("读取窗口标题失败: {}", e))
+}
+
+pub fn validate_window_capture_target(target_id: &str) -> Result<(), String> {
+    let mut raw = target_id.trim().to_string();
+    if raw.starts_with("hwnd=") {
+        raw = raw.trim_start_matches("hwnd=").to_string();
+    }
+    #[cfg(target_os = "windows")]
+    if let Some(hwnd) = parse_hwnd_value(&raw) {
+        validate_hwnd_target(hwnd)?;
+    }
+    Ok(())
 }
 
 pub fn bootstrap_force_default_border_from_settings(force_default: bool) {
@@ -123,12 +194,7 @@ fn parse_window_target(target_id: &str) -> Result<Window, String> {
     if raw.starts_with("hwnd=") {
         raw = raw.trim_start_matches("hwnd=").to_string();
     }
-    if let Some(hex) = raw.strip_prefix("0x") {
-        let hwnd = usize::from_str_radix(hex, 16).map_err(|e| format!("解析窗口句柄失败: {}", e))?;
-        return Ok(Window::from_raw_hwnd(hwnd as *mut std::ffi::c_void));
-    }
-    if !raw.is_empty() && raw.chars().all(|c| c.is_ascii_hexdigit()) {
-        let hwnd = usize::from_str_radix(&raw, 16).map_err(|e| format!("解析窗口句柄失败: {}", e))?;
+    if let Some(hwnd) = parse_hwnd_value(&raw) {
         return Ok(Window::from_raw_hwnd(hwnd as *mut std::ffi::c_void));
     }
     Window::from_name(&raw)

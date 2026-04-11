@@ -455,12 +455,21 @@ const clearInlineNotice = () => {
   }
 };
 
-const showBackendErrorInSettings = (message) => {
+const showBackendErrorInSettings = async (message) => {
   const text = String(message || "录屏异常");
   keepSettingsOpenUntilTs = Date.now() + 3000;
   capsuleSettingsVisible.value = true;
   showInlineNotice(text, "error");
   void syncCapsuleLayout();
+  try {
+    const win = getCurrentWindow();
+    if (await win.isVisible() === false) {
+      await win.show();
+      await win.setFocus();
+    }
+  } catch (e) {
+    console.error("唤醒控制台窗口失败:", e);
+  }
 };
 
 const pickRecordingRegion = async () => {
@@ -877,12 +886,21 @@ onMounted(async () => {
       autoCollapseAfterStartPending = false;
     }
   });
-  unlistenRecordingFinished = await listen("recording-finished", () => {
+  unlistenRecordingFinished = await listen("recording-finished", async () => {
     state.state = "idle";
     state.sessionId = null;
     clearInlineNotice();
     capsuleSettingsVisible.value = false;
     void syncCapsuleLayout();
+    try {
+      const win = getCurrentWindow();
+      if (await win.isVisible() === false) {
+        await win.show();
+        await win.setFocus();
+      }
+    } catch (e) {
+      console.error("唤醒控制台窗口失败:", e);
+    }
   });
   unlistenRecordingError = await listen("recording-error", (event) => {
     const payload = event.payload || {};

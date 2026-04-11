@@ -339,6 +339,15 @@ fn ensure_recording_toolbar_window(app: &AppHandle) -> Result<(tauri::WebviewWin
         .inner_size(530.0, 64.0)
         .build()
         .map_err(|e| format!("创建录制工具栏窗口失败: {}", e))?;
+
+    let window_clone = window.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = window_clone.hide();
+        }
+    });
+
     Ok((window, true))
 }
 

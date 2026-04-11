@@ -201,6 +201,7 @@ const form = reactive({
   recordingMaxDurationMinutes: 180,
   recordingFileNameTemplate: '{timestamp}',
   recordingWindowAudioSyncAdvanceMs: 80,
+  devForceFfmpegWindowCapture: false,
   aiProvider: '',
   apiUrl: '',
   modelName: '',
@@ -260,6 +261,7 @@ const buildFormSnapshot = () => ({
     recordingMaxDurationMinutes: form.recordingMaxDurationMinutes,
     recordingFileNameTemplate: form.recordingFileNameTemplate,
     recordingWindowAudioSyncAdvanceMs: form.recordingWindowAudioSyncAdvanceMs,
+  devForceFfmpegWindowCapture: form.devForceFfmpegWindowCapture,
     aiProvider: form.aiProvider,
     apiUrl: form.apiUrl,
     modelName: form.modelName,
@@ -363,6 +365,9 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
   }
   if (source.recordingWindowAudioSyncAdvanceMs !== initial.recordingWindowAudioSyncAdvanceMs) {
     changedFields.recordingWindowAudioSyncAdvanceMs = source.recordingWindowAudioSyncAdvanceMs
+  }
+  if (source.devForceFfmpegWindowCapture !== initial.devForceFfmpegWindowCapture) {
+    changedFields.devForceFfmpegWindowCapture = source.devForceFfmpegWindowCapture
   }
 
   // 处理 AI 提供商
@@ -543,7 +548,7 @@ const persistSettings = async (
         snapshot.aiProvider = selectedProvider
       }
     }
-    
+
     shortcutConflictMessage.value = ''
     if (!silent) {
       ElMessage.success('已自动保存')
@@ -552,7 +557,7 @@ const persistSettings = async (
 
     // 仅使用当前成功保存的快照更新基线，避免旧请求覆盖新输入
     saveInitialFormState(snapshot)
-    
+
     autoSaveStateResetTimer = window.setTimeout(() => {
       if (autoSaveState.value === 'saved') {
         autoSaveState.value = 'idle'
@@ -757,6 +762,7 @@ onMounted(async () => {
     form.recordingMaxDurationMinutes = Number(settings.recording_max_duration_minutes || 180)
     form.recordingFileNameTemplate = settings.recording_file_name_template || '{timestamp}'
     form.recordingWindowAudioSyncAdvanceMs = Number(settings.recording_window_audio_sync_advance_ms ?? 80)
+    form.devForceFfmpegWindowCapture = settings.dev_force_ffmpeg_window_capture === true
     form.selectionEnabled = settings.selection_enabled === true
     form.groupedItemsProtectedFromLimit = settings.grouped_items_protected_from_limit !== false
     form.translationPromptTemplate = settings.translation_prompt_template || ''

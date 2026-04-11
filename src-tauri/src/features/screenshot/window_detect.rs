@@ -32,6 +32,48 @@ pub fn get_window_list() -> Result<Vec<WindowInfo>, String> {
 }
 
 #[cfg(target_os = "windows")]
+fn is_cloaked(hwnd: winapi::shared::windef::HWND) -> bool {
+    use winapi::shared::minwindef::DWORD;
+    use winapi::um::dwmapi::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+    let mut cloaked: DWORD = 0;
+    let res = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAKED,
+            &mut cloaked as *mut _ as _,
+            std::mem::size_of::<DWORD>() as u32,
+        )
+    };
+    if res == winapi::shared::winerror::S_OK {
+        cloaked != 0
+    } else {
+        false
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn is_system_or_invalid_process(process_name: &str) -> bool {
+    let lower = process_name.to_lowercase();
+    matches!(
+        lower.as_str(),
+        "textinputhost.exe" | "textinputhost" |
+        "applicationframehost.exe" | "applicationframehost" |
+        "runtimebroker.exe" | "runtimebroker" |
+        "svchost.exe" | "svchost" |
+        "shellhost.exe" | "shellhost" |
+        "searchhost.exe" | "searchhost" |
+        "taskhostw.exe" | "taskhostw" |
+        "dwm.exe" | "dwm" |
+        "systemsettings.exe" | "systemsettings" |
+        "widgetboard.exe" | "widgetboard" |
+        "widgetservice.exe" | "widgetservice" |
+        "startmenuexperiencehost.exe" | "startmenuexperiencehost" |
+        "phoneexperiencehost.exe" | "phoneexperiencehost" |
+        "crossdeviceresume.exe" | "crossdeviceresume"
+    )
+}
+
+#[cfg(target_os = "windows")]
 fn get_window_process_name(hwnd: winapi::shared::windef::HWND) -> Option<String> {
     use std::path::Path;
     use winapi::shared::minwindef::DWORD;
@@ -125,8 +167,12 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
             return 1;
         }
         let process_name = get_window_process_name(hwnd).unwrap_or_default();
-        let process_name_lower = process_name.to_lowercase();
-        if process_name_lower == "textinputhost" || process_name_lower == "textinputhost.exe" {
+        if is_system_or_invalid_process(&process_name) {
+            return 1;
+        }
+
+        // 判断是否被 DWM 隐藏 (Cloaked)
+        if is_cloaked(hwnd) {
             return 1;
         }
 

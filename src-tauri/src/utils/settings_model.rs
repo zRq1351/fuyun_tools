@@ -68,6 +68,8 @@ pub struct AppSettingsData {
     pub recording_wgc_force_default_border: bool,
     #[serde(default = "default_recording_wgc_force_default_dirty_region")]
     pub recording_wgc_force_default_dirty_region: bool,
+    #[serde(default = "default_dev_force_ffmpeg_window_capture")]
+    pub dev_force_ffmpeg_window_capture: bool,
     #[serde(default)]
     pub ai_provider: String,
     #[serde(default)]
@@ -118,6 +120,7 @@ impl Default for AppSettingsData {
             recording_window_audio_sync_advance_ms: default_recording_window_audio_sync_advance_ms(),
             recording_wgc_force_default_border: default_recording_wgc_force_default_border(),
             recording_wgc_force_default_dirty_region: default_recording_wgc_force_default_dirty_region(),
+            dev_force_ffmpeg_window_capture: default_dev_force_ffmpeg_window_capture(),
             ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
             selection_enabled: true,
@@ -231,6 +234,10 @@ fn default_recording_wgc_force_default_border() -> bool {
 }
 
 fn default_recording_wgc_force_default_dirty_region() -> bool {
+    false
+}
+
+fn default_dev_force_ffmpeg_window_capture() -> bool {
     false
 }
 

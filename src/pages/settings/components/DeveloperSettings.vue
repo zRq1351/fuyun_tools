@@ -95,6 +95,15 @@
         </div>
       </el-form-item>
     </el-card>
+    <el-card class="setting-section-card" shadow="never">
+      <template #header>
+        <div class="section-title">录制调试</div>
+      </template>
+      <el-form-item label="强制模拟 WGC 失败（一键降级为 FFmpeg 窗口模式）">
+        <el-switch v-model="recordingDebug.forceFfmpegFallback" @change="saveRecordingDebugConfig"/>
+        <div class="form-hint">开启后，窗口录制将直接使用 FFmpeg gdigrab 模式，跳过原生 WGC 捕获。</div>
+      </el-form-item>
+    </el-card>
   </el-form>
 </template>
 
@@ -105,6 +114,9 @@ import {AISettingsService} from '@/services/ipc.js'
 const imageStorageMetrics = ref({})
 const vcRuntimeDebug = ref({
   forceMissing: false
+})
+const recordingDebug = ref({
+  forceFfmpegFallback: false
 })
 const dedupConfig = ref({
   enabled: true,
@@ -166,6 +178,17 @@ const saveVcRuntimeDebugConfig = async () => {
     forceMissing: !!state?.forceMissing
   }
   ElMessage.success('VC Runtime 调试配置已保存')
+}
+
+const refreshRecordingDebugState = async () => {
+  const settings = await AISettingsService.getSettings()
+  recordingDebug.value.forceFfmpegFallback = settings.dev_force_ffmpeg_window_capture === true
+}
+
+const saveRecordingDebugConfig = async (val) => {
+  await AISettingsService.savePartialSettings({
+    devForceFfmpegWindowCapture: val
+  })
 }
 
 const applyDedupState = (state) => {
@@ -237,11 +260,13 @@ onMounted(async () => {
   await refreshImageStorageMetrics()
   await refreshVcRuntimeDebugState()
   await refreshImagePersistQueueMetrics()
+  await refreshRecordingDebugState()
   await refreshDedupState()
   metricsTimer = setInterval(async () => {
     await refreshImageStorageMetrics()
     await refreshVcRuntimeDebugState()
     await refreshImagePersistQueueMetrics()
+    await refreshRecordingDebugState()
     await refreshDedupState()
   }, 10000)
 })

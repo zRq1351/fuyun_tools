@@ -47,7 +47,7 @@ default = []
 longshot-opencv = ["dep:opencv"]
 
 [target.'cfg(target_os = "windows")'.dependencies]
-winapi = { version = "0.3.9", features = ["winuser", "winnt", "minwindef", "windef", "libloaderapi", "winbase", "processthreadsapi", "handleapi", "tlhelp32", "shellapi"] }
+winapi = { version = "0.3.9", features = ["winuser", "winnt", "minwindef", "windef", "libloaderapi", "winbase", "processthreadsapi", "handleapi", "tlhelp32", "shellapi", "dwmapi"] }
 windows = { version = "0.62.2", features = ["Foundation", "Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams"] }
 cpal = "0.17.3"
 hound = "3.5.1"

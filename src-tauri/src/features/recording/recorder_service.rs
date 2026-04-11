@@ -21,7 +21,8 @@ use crate::features::recording::types::{
 };
 use crate::features::recording::wgc_capture::{
     bootstrap_force_default_border_from_settings, bootstrap_force_default_dirty_region_from_settings,
-    is_force_default_border_enabled, is_force_default_dirty_region_enabled, start_window_capture_to_mp4,
+    is_force_default_border_enabled, is_force_default_dirty_region_enabled, is_item_convert_failed,
+    start_window_capture_to_mp4, validate_window_capture_target,
 };
 use crate::sync::Mutex;
 use crate::utils::system_utils::save_settings;
@@ -601,8 +602,8 @@ fn validate_video_input_for_merge_with_retry(
             Ok(_) => {
                 last_err = Some(AppError::new(
                     ErrorCode::ValidationError,
-                    "录制视频文件为空，无法合成音频",
-                ));
+                    "录制视频文件为空，未捕获到有效视频帧",
+                ).with_details("请确认目标窗口未最小化、处于可见状态且存在内容变化；若录制包含受保护内容或硬件加速，请尝试关闭加速或改用全屏录制"));
                 if idx + 1 < VIDEO_IO_RETRY_DELAYS_MS.len() {
                     thread::sleep(Duration::from_millis(*delay_ms));
                 }
@@ -639,6 +640,23 @@ fn is_benign_wgc_stop_error(details: &str) -> bool {
         || lower.contains("operation is not valid in the current state")
         || lower.contains("borderconfigunsupported")
         || lower.contains("graphicscaptureapierror(borderconfigunsupported)")
+}
+
+fn build_window_capture_unavailable_details(details: &str) -> String {
+    let trimmed = details.trim();
+    if trimmed.is_empty() {
+        "请确认目标窗口未最小化、处于可见状态且存在内容变化；若窗口包含受保护视频、硬件加速覆盖层或系统限制内容，请改用区域录制或全屏录制".to_string()
+    } else {
+        format!(
+            "{}；请确认目标窗口未最小化、处于可见状态且存在内容变化；若窗口包含受保护视频、硬件加速覆盖层或系统限制内容，请改用区域录制或全屏录制",
+            trimmed
+        )
+    }
+}
+
+fn build_window_capture_unavailable_error(details: &str) -> AppError {
+    AppError::new(ErrorCode::ValidationError, "当前窗口不可录制")
+        .with_details(build_window_capture_unavailable_details(details))
 }
 
 fn ensure_system_audio_capture_started(
@@ -1027,6 +1045,39 @@ fn spawn_stats_loop(
                 }
             }
 
+            // 无画面看门狗：提前拦截“死黑屏/没内容”的假录制状态
+            if phase == RecordingPhase::Recording && snapshot.elapsed_ms > 4000 && emit_error.is_none() {
+                let mut no_video_frames = false;
+                if runtime.target_type == "window" {
+                    if let Some(first_frame) = runtime.wgc_first_frame_elapsed_ms.as_ref() {
+                        if first_frame.load(Ordering::Relaxed) == u64::MAX {
+                            no_video_frames = true;
+                        }
+                    }
+                } else if let Some(tmp_path) = runtime.output_path_tmp.as_ref() {
+                    // FFmpeg 模式下，如果超过 4 秒文件依然是 0 字节，说明没录进任何有效视频帧
+                    if fs::metadata(tmp_path).map(|m| m.len()).unwrap_or(0) == 0 {
+                        no_video_frames = true;
+                    }
+                }
+                
+                if no_video_frames {
+                    runtime.auto_stop_requested = true;
+                    runtime.phase = RecordingPhase::Stopping;
+                    phase = RecordingPhase::Stopping;
+                    auto_stop_session_id = session_id.clone();
+                    
+                    let details = "请确认目标窗口未最小化、处于可见状态且存在内容变化；若录制包含受保护内容或硬件加速，请尝试关闭加速或改用全屏录制";
+                    let err_msg = format!("未捕获到有效视频帧；{}", details);
+                    runtime.last_error = Some(err_msg.clone());
+                    emit_error = Some((
+                        "VALIDATION_ERROR",
+                        err_msg,
+                        session_id.clone(),
+                    ));
+                }
+            }
+
             (
                 phase,
                 session_id,
@@ -1140,12 +1191,12 @@ pub fn start_recording(
             AppError::new(ErrorCode::ValidationError, public_message).with_details(details)
         };
 
-        let target_type = request
+        let mut target_type = request
             .target_type
             .clone()
             .unwrap_or_else(|| "screen".to_string())
             .to_lowercase();
-        let target_id = request.target_id.clone().unwrap_or_default();
+        let mut target_id = request.target_id.clone().unwrap_or_default();
         // 统一录制时钟起点：必须早于视频采集与音频采集启动，避免后续音频延迟估算偏小导致 A/V 不同步。
         let capture_origin_unix_ms = now_unix_ms();
         let capture_origin_instant = std::time::Instant::now();
@@ -1159,13 +1210,32 @@ pub fn start_recording(
             "warning".into(),
             "-y".into(),
         ];
-        match target_type.as_str() {
-            "window" => {
-                if target_id.trim().is_empty() {
-                    return Err(rollback_starting("窗口录制目标不能为空", "target_id is empty".to_string()));
+        
+        // 第一次尝试处理 window，如果命中 WGC 不支持的内容，降级到 gdigrab 的窗口模式
+        if target_type == "window" {
+            if target_id.trim().is_empty() {
+                return Err(rollback_starting("窗口录制目标不能为空", "target_id is empty".to_string()));
+            }
+            if let Err(e) = validate_window_capture_target(target_id.trim()) {
+                return Err(rollback_starting("当前窗口不可录制", e));
+            }
+            
+            #[cfg(debug_assertions)]
+            let force_ffmpeg_fallback = settings_snapshot.dev_force_ffmpeg_window_capture;
+            #[cfg(not(debug_assertions))]
+            let force_ffmpeg_fallback = false;
+
+            if force_ffmpeg_fallback {
+                log::warn!("开发模式：强制将 WGC 窗口录制降级为 GDI/FFmpeg 窗口录制");
+                if let Ok(title) = crate::features::recording::wgc_capture::get_window_title_from_target(target_id.trim()) {
+                    target_type = "gdigrab_window".to_string();
+                    target_id = title;
+                } else {
+                    return Err(rollback_starting("开发模式强制降级失败：无法获取目标窗口标题", "".to_string()));
                 }
+            } else {
                 let first_segment_path = build_window_segment_path(&output_dir, &session_id, 0);
-                let handle = start_window_capture_to_mp4(
+                match start_window_capture_to_mp4(
                     target_id.trim(),
                     first_segment_path.clone(),
                     fps,
@@ -1173,10 +1243,42 @@ pub fn start_recording(
                     capture_cursor,
                     capture_origin_instant,
                     settings_snapshot.recording_wgc_force_default_border,
-                )
-                    .map_err(|e| rollback_starting("启动窗口源录制失败", e))?;
-                window_wgc_handle = Some(handle);
-                window_segment_path = Some(first_segment_path);
+                ) {
+                    Ok(handle) => {
+                        window_wgc_handle = Some(handle);
+                        window_segment_path = Some(first_segment_path);
+                    }
+                    Err(e) => {
+                        if is_item_convert_failed(&e) {
+                            log::warn!("WGC 窗口录制被系统拒绝 ({})，自动降级为 GDI/FFmpeg 窗口录制", e);
+                            if let Ok(title) = crate::features::recording::wgc_capture::get_window_title_from_target(target_id.trim()) {
+                                target_type = "gdigrab_window".to_string();
+                                target_id = title;
+                                // 降级成功，交给下面的 ffmpeg 分支处理
+                            } else {
+                                return Err(rollback_starting("当前窗口不可录制且降级失败", build_window_capture_unavailable_details(&e)));
+                            }
+                        } else {
+                            return Err(rollback_starting("启动窗口源录制失败", e));
+                        }
+                    }
+                }
+            }
+        }
+        
+        match target_type.as_str() {
+            "window" => {
+                // 已在上方通过 WGC 启动，此处留空
+            }
+            "gdigrab_window" => {
+                args.push("-f".into());
+                args.push("gdigrab".into());
+                args.push("-framerate".into());
+                args.push(format!("{}", fps));
+                args.push("-draw_mouse".into());
+                args.push(if capture_cursor { "1".into() } else { "0".into() });
+                args.push("-i".into());
+                args.push(format!("title={}", target_id));
             }
             "region" => {
                 let (x, y, width, height) = parse_region_target(&target_id).ok_or_else(|| {
@@ -1458,6 +1560,7 @@ pub fn stop_recording(
     };
 
     let mut fatal_error: Option<AppError> = None;
+    let mut pending_window_capture_unavailable_details: Option<String> = None;
 
     if let Some(process) = process.as_mut() {
         #[cfg(target_os = "windows")]
@@ -1488,6 +1591,8 @@ pub fn stop_recording(
             Ok(Err(e)) => {
                 if is_benign_wgc_stop_error(&e) {
                     log::warn!("窗口录制停止返回可忽略状态: {}", e);
+                } else if is_item_convert_failed(&e) {
+                    pending_window_capture_unavailable_details = Some(e);
                 } else if fatal_error.is_none() {
                     fatal_error = Some(AppError::new(ErrorCode::SystemError, "窗口录制停止失败").with_details(e));
                 }
@@ -1503,10 +1608,16 @@ pub fn stop_recording(
     if let Some(anchor_holder) = wgc_first_frame_elapsed_ms.as_ref() {
         let anchor_ms = anchor_holder.load(Ordering::Relaxed);
         if anchor_ms == u64::MAX && fatal_error.is_none() {
-            fatal_error = Some(
-                AppError::new(ErrorCode::ValidationError, "窗口录制未捕获到有效视频帧")
-                    .with_details("请确认目标窗口处于可见状态且有内容变化，避免最小化/被系统保护内容")
-            );
+            if let Some(details) = pending_window_capture_unavailable_details.take() {
+                fatal_error = Some(build_window_capture_unavailable_error(&details));
+            } else {
+                fatal_error = Some(
+                    AppError::new(ErrorCode::ValidationError, "窗口录制未捕获到有效视频帧")
+                        .with_details(
+                            "请确认目标窗口处于可见状态且有内容变化，避免最小化/被系统保护内容；若为视频类窗口，可尝试关闭硬件加速或改用区域录制/全屏录制",
+                        ),
+                );
+            }
         } else if anchor_ms > 0 {
             let calibrated_anchor_ms = anchor_ms.saturating_add(wgc_audio_sync_advance_ms);
             for seg in &mut sys_segments {
@@ -1527,7 +1638,11 @@ pub fn stop_recording(
                 wgc_audio_sync_advance_ms,
                 calibrated_anchor_ms
             );
+        } else if let Some(details) = pending_window_capture_unavailable_details.take() {
+            fatal_error = Some(build_window_capture_unavailable_error(&details));
         }
+    } else if let Some(details) = pending_window_capture_unavailable_details.take() {
+        fatal_error = Some(build_window_capture_unavailable_error(&details));
     }
 
     if let (Some(output_tmp), Some(output_final)) = (output_tmp.as_ref(), output_final.as_ref()) {
@@ -1892,7 +2007,7 @@ pub fn resume_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) 
         let fps = runtime.fps;
         let video_bitrate_kbps = runtime.video_bitrate_kbps;
         let capture_cursor = runtime.capture_cursor;
-        if !is_window_target {
+        if runtime.target_type != "window" {
             if let Some(process) = runtime.process.as_mut() {
                 #[cfg(target_os = "windows")]
                 {

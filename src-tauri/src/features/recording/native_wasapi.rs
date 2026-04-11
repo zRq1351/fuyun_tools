@@ -15,13 +15,7 @@ use wasapi::{
     initialize_mta, AudioClient, DeviceEnumerator, Direction, SampleType, SessionState, StreamMode, WaveFormat,
 };
 #[cfg(target_os = "windows")]
-use winapi::shared::minwindef::{BOOL, LPARAM};
-#[cfg(target_os = "windows")]
-use winapi::shared::windef::HWND;
-#[cfg(target_os = "windows")]
-use winapi::um::winuser::{
-    EnumWindows, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
-};
+use winapi::um::winuser::GetWindowThreadProcessId;
 
 pub struct WasapiCaptureHandle {
     pub stop_flag: Arc<AtomicBool>,
@@ -224,8 +218,10 @@ pub fn start_process_loopback_wavs(
 pub fn list_audio_processes() -> Vec<AudioProcessInfo> {
     let refresh = RefreshKind::nothing().with_processes(ProcessRefreshKind::everything());
     let sys = System::new_with_specifics(refresh);
+    
     let window_titles = visible_window_process_titles();
     let visible_pids = window_titles.keys().copied().collect::<HashSet<u32>>();
+    
     let active_now = active_audio_process_ids();
     let now = now_ms();
     let recent_map = AUDIO_RECENT_ACTIVITY.get_or_init(|| Mutex::new(HashMap::new()));
@@ -316,33 +312,22 @@ fn active_audio_process_ids() -> HashSet<u32> {
 
 #[cfg(target_os = "windows")]
 fn visible_window_process_titles() -> HashMap<u32, String> {
-    unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        if unsafe { IsWindowVisible(hwnd) } == 0 {
-            return 1;
-        }
-        let mut pid: u32 = 0;
-        unsafe {
-            GetWindowThreadProcessId(hwnd, &mut pid);
-        }
-        if pid > 0 {
-            let len = unsafe { GetWindowTextLengthW(hwnd) };
-            if len > 0 {
-                let mut buffer = vec![0u16; (len as usize) + 1];
-                let copied = unsafe { GetWindowTextW(hwnd, buffer.as_mut_ptr(), len + 1) };
-                if copied > 0 {
-                    let text = String::from_utf16_lossy(&buffer[..copied as usize]).trim().to_string();
-                    if !text.is_empty() {
-                        let map = unsafe { &mut *(lparam as *mut HashMap<u32, String>) };
-                        map.entry(pid).or_insert(text);
-                    }
+    let mut map = HashMap::new();
+    if let Ok(windows) = crate::features::screenshot::window_detect::get_window_list() {
+        for w in windows {
+            // 解析 hwnd
+            let hwnd_str = w.hwnd.trim_start_matches("0x");
+            if let Ok(hwnd_val) = usize::from_str_radix(hwnd_str, 16) {
+                let hwnd = hwnd_val as winapi::shared::windef::HWND;
+                let mut pid: u32 = 0;
+                unsafe {
+                    GetWindowThreadProcessId(hwnd, &mut pid);
+                }
+                if pid > 0 && !w.title.is_empty() {
+                    map.entry(pid).or_insert(w.title);
                 }
             }
         }
-        1
-    }
-    let mut map: HashMap<u32, String> = HashMap::new();
-    unsafe {
-        EnumWindows(Some(enum_windows_proc), &mut map as *mut _ as LPARAM);
     }
     map
 }
