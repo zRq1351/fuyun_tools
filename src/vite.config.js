@@ -7,6 +7,7 @@ import {resolve} from 'path'
 
 export default defineConfig(({mode}) => {
     const isDevMode = mode === 'development'
+    const vueRuntimePath = resolve(__dirname, 'node_modules/vue/dist/vue.runtime.esm-bundler.js')
     return {
         plugins: [
             vue(),
@@ -22,6 +23,39 @@ export default defineConfig(({mode}) => {
         ],
         define: {
             __DEV_PANEL__: JSON.stringify(isDevMode),
+        },
+        optimizeDeps: {
+            include: [
+                'vue',
+                'element-plus',
+                'element-plus/es',
+                'element-plus/dist/locale/zh-cn',
+                '@element-plus/icons-vue',
+                'element-plus/es/components/alert/style/css',
+                'element-plus/es/components/base/style/css',
+                'element-plus/es/components/button/style/css',
+                'element-plus/es/components/card/style/css',
+                'element-plus/es/components/checkbox/style/css',
+                'element-plus/es/components/config-provider/style/css',
+                'element-plus/es/components/empty/style/css',
+                'element-plus/es/components/form-item/style/css',
+                'element-plus/es/components/form/style/css',
+                'element-plus/es/components/icon/style/css',
+                'element-plus/es/components/input-number/style/css',
+                'element-plus/es/components/input/style/css',
+                'element-plus/es/components/link/style/css',
+                'element-plus/es/components/loading/style/css',
+                'element-plus/es/components/message-box/style/css',
+                'element-plus/es/components/message/style/css',
+                'element-plus/es/components/option/style/css',
+                'element-plus/es/components/progress/style/css',
+                'element-plus/es/components/radio-button/style/css',
+                'element-plus/es/components/radio-group/style/css',
+                'element-plus/es/components/select/style/css',
+                'element-plus/es/components/switch/style/css',
+                'element-plus/es/components/tag/style/css',
+                'element-plus/es/components/tooltip/style/css',
+            ],
         },
         build: {
             rollupOptions: {
@@ -52,8 +86,10 @@ export default defineConfig(({mode}) => {
             chunkSizeWarningLimit: 2000,
         },
         resolve: {
+            dedupe: ['vue'],
             alias: {
                 '@': resolve(__dirname, '.'),
+                vue: vueRuntimePath,
                 '@dev/DeveloperSettings': isDevMode
                     ? resolve(__dirname, 'pages/settings/components/DeveloperSettings.vue')
                     : resolve(__dirname, 'pages/settings/components/DeveloperSettings.stub.vue'),

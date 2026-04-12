@@ -97,6 +97,19 @@ export const IPC_COMMANDS = {
     CANCEL_MANUAL_LONGSHOT: 'cancel_manual_longshot',
     FINISH_MANUAL_LONGSHOT: 'finish_manual_longshot',
     GET_MANUAL_LONGSHOT_STATUS: 'get_manual_longshot_status',
+    GET_MANUAL_LONGSHOT_AVAILABILITY: 'get_manual_longshot_availability',
+    PREVIEW_BACKUP_EXPORT: 'preview_backup_export',
+    EXPORT_BACKUP_TO_PATH: 'export_backup_to_path',
+    PREVIEW_BACKUP_PACKAGE: 'preview_backup_package',
+    RESTORE_BACKUP_PACKAGE: 'restore_backup_package',
+    LIST_BACKUP_HISTORY: 'list_backup_history',
+    DELETE_BACKUP_HISTORY_ITEM: 'delete_backup_history_item',
+    RUN_MANUAL_BACKUP: 'run_manual_backup',
+    GET_BACKUP_SETTINGS: 'get_backup_settings',
+    SAVE_BACKUP_SETTINGS: 'save_backup_settings',
+    GET_DIAGNOSTIC_OVERVIEW: 'get_diagnostic_overview',
+    GET_DIAGNOSTIC_ITEMS: 'get_diagnostic_items',
+    RUN_DIAGNOSTIC_ACTION: 'run_diagnostic_action',
     LIST_RECORDING_AUDIO_DEVICES: 'list_recording_audio_devices',
     LIST_RECORDING_SYSTEM_OUTPUT_DEVICES: 'list_recording_system_output_devices',
     LIST_RECORDING_AUDIO_PROCESSES: 'list_recording_audio_processes',
@@ -523,4 +536,23 @@ export const ScreenshotService = {
     cancelManualLongshot: (sessionId) => invoke(IPC_COMMANDS.CANCEL_MANUAL_LONGSHOT, {request: {sessionId}}),
     finishManualLongshot: (sessionId) => invoke(IPC_COMMANDS.FINISH_MANUAL_LONGSHOT, {request: {sessionId}}),
     getManualLongshotStatus: (sessionId) => invoke(IPC_COMMANDS.GET_MANUAL_LONGSHOT_STATUS, {request: {sessionId}}),
+    getManualLongshotAvailability: () => invoke(IPC_COMMANDS.GET_MANUAL_LONGSHOT_AVAILABILITY),
+};
+
+export const BackupService = {
+    previewExport: () => invoke(IPC_COMMANDS.PREVIEW_BACKUP_EXPORT),
+    exportToPath: (targetPath) => invoke(IPC_COMMANDS.EXPORT_BACKUP_TO_PATH, {request: {targetPath}}),
+    previewPackage: (packagePath) => invoke(IPC_COMMANDS.PREVIEW_BACKUP_PACKAGE, {request: {packagePath}}),
+    restorePackage: (payload) => invoke(IPC_COMMANDS.RESTORE_BACKUP_PACKAGE, {request: payload}),
+    listHistory: () => invoke(IPC_COMMANDS.LIST_BACKUP_HISTORY),
+    deleteHistoryItem: (filePath) => invoke(IPC_COMMANDS.DELETE_BACKUP_HISTORY_ITEM, {request: {filePath}}),
+    runManualBackup: () => invoke(IPC_COMMANDS.RUN_MANUAL_BACKUP),
+    getSettings: () => invoke(IPC_COMMANDS.GET_BACKUP_SETTINGS),
+    saveSettings: (payload) => invoke(IPC_COMMANDS.SAVE_BACKUP_SETTINGS, {request: payload}),
+};
+
+export const DiagnosticService = {
+    getOverview: () => invoke(IPC_COMMANDS.GET_DIAGNOSTIC_OVERVIEW),
+    getItems: () => invoke(IPC_COMMANDS.GET_DIAGNOSTIC_ITEMS),
+    runAction: (actionKey) => invoke(IPC_COMMANDS.RUN_DIAGNOSTIC_ACTION, {request: {actionKey}}),
 };

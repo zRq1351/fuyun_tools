@@ -1,5 +1,6 @@
 use crate::core::app_state::SharedAppState;
 use crate::core::error::{AppError, ErrorCode};
+use crate::core::perf_metrics::record_perf_metric;
 use crate::features::recording::audio_device::list_microphones;
 use crate::features::recording::error_codes::{
     AUDIO_DEVICE_LOST, AUDIO_DEVICE_NOT_FOUND, MAX_DURATION_REACHED, RECORDING_PROCESS_EXITED,
@@ -36,7 +37,7 @@ use std::process::{ChildStderr, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 #[cfg(target_os = "windows")]
@@ -354,6 +355,7 @@ fn merge_system_audio_into_video(
     system_segments: &[crate::features::recording::state::AudioSegment],
     mic_segments: &[crate::features::recording::state::AudioSegment],
 ) -> Result<(), AppError> {
+    let started_at = Instant::now();
     let expected_system_count = system_segments.len();
     let expected_mic_count = mic_segments.len();
     let is_valid_audio_segment = |seg: &crate::features::recording::state::AudioSegment| {
@@ -512,13 +514,35 @@ fn merge_system_audio_into_video(
         } else {
             format!("ffmpeg exit status: {}；stderr: {}", output.status, stderr)
         };
+        record_perf_metric(
+            "recording.audio_merge",
+            "录屏音频合成耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(details.clone()),
+        );
         return Err(AppError::new(ErrorCode::SystemError, "系统音频合成失败").with_details(details));
     }
     if video_path.exists() {
         let _ = fs::remove_file(video_path);
     }
-    fs::rename(&merged_path, video_path)
-        .map_err(|e| AppError::new(ErrorCode::IoError, "写入合成文件失败").with_details(e.to_string()))?;
+    fs::rename(&merged_path, video_path).map_err(|e| {
+        record_perf_metric(
+            "recording.audio_merge",
+            "录屏音频合成耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(e.to_string()),
+        );
+        AppError::new(ErrorCode::IoError, "写入合成文件失败").with_details(e.to_string())
+    })?;
+    record_perf_metric(
+        "recording.audio_merge",
+        "录屏音频合成耗时",
+        started_at.elapsed().as_millis() as u64,
+        true,
+        None,
+    );
     for seg in &valid_system {
         let _ = fs::remove_file(&seg.path);
     }

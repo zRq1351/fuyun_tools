@@ -1,7 +1,7 @@
 <template>
-  <div class="toolbar">
+  <div class="toolbar" data-tauri-drag-region>
     <el-tooltip :show-after="500" content="翻译" placement="top">
-      <div :class="{ disabled: actionLoading }" class="toolbar-button translate-btn" @click="handleTranslate">
+      <div :class="{ disabled: actionLoading }" class="toolbar-button translate-btn no-drag" @click="handleTranslate">
         <el-icon class="btn-icon">
           <collection/>
         </el-icon>
@@ -10,7 +10,7 @@
     </el-tooltip>
 
     <el-tooltip :show-after="500" content="解释" placement="top">
-      <div :class="{ disabled: actionLoading }" class="toolbar-button explain-btn" @click="handleExplain">
+      <div :class="{ disabled: actionLoading }" class="toolbar-button explain-btn no-drag" @click="handleExplain">
         <el-icon class="btn-icon">
           <chat-line-round/>
         </el-icon>
@@ -19,7 +19,7 @@
     </el-tooltip>
 
     <el-tooltip :show-after="500" content="复制" placement="top">
-      <div :class="{ disabled: actionLoading }" class="toolbar-button copy-btn" @click="handleCopy">
+      <div :class="{ disabled: actionLoading }" class="toolbar-button copy-btn no-drag" @click="handleCopy">
         <el-icon class="btn-icon">
           <document-copy/>
         </el-icon>
@@ -147,6 +147,7 @@ body {
 
 <style scoped>
 .toolbar {
+  -webkit-app-region: drag;
   background: linear-gradient(145deg, rgba(22, 28, 38, 0.95), rgba(14, 18, 26, 0.95));
   border-radius: 10px;
   padding: 5px;
@@ -158,6 +159,10 @@ body {
   gap: 5px;
   width: auto;
   box-sizing: border-box;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
 }
 
 .toolbar-button {

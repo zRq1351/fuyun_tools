@@ -1,6 +1,5 @@
 <template>
-  <el-config-provider :locale="zhCn">
-    <div
+  <div
         :class="{
         'bar-collapsed-settings-open': capsuleSettingsVisible,
       }"
@@ -288,19 +287,20 @@
           </div>
         </div>
       </div>
-
-    </div>
-  </el-config-provider>
+  </div>
 </template>
 
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch} from "vue";
+import {provideGlobalConfig} from "element-plus";
 import zhCn from "element-plus/dist/locale/zh-cn";
 import {listen} from "@tauri-apps/api/event";
 import {invoke} from "@tauri-apps/api/core";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import {AISettingsService, RecordingService} from "@/services/ipc.js";
 import {Settings} from "lucide-vue-next";
+
+provideGlobalConfig({locale: zhCn});
 
 const loadingAction = ref(null);
 const capsuleSettingsVisible = ref(false);

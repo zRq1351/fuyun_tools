@@ -1,5 +1,6 @@
 use crate::core::app_state::SharedAppState;
 use crate::core::error::to_frontend_error_string;
+use crate::core::perf_metrics::record_perf_metric;
 use crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path;
 use crate::features::recording::recorder_service;
 use crate::features::recording::types::{
@@ -7,6 +8,7 @@ use crate::features::recording::types::{
     SessionRequest, StartRecordingRequest,
 };
 use crate::sync::Mutex;
+use crate::ui::window_manager::{bind_overlay_window_events, show_overlay_window_by_label};
 use crate::utils::utils_helpers::load_settings;
 use futures_util::StreamExt;
 use serde::Deserialize;
@@ -17,6 +19,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl};
 use tauri_plugin_positioner::WindowExt;
 
@@ -340,13 +343,7 @@ fn ensure_recording_toolbar_window(app: &AppHandle) -> Result<(tauri::WebviewWin
         .build()
         .map_err(|e| format!("创建录制工具栏窗口失败: {}", e))?;
 
-    let window_clone = window.clone();
-    window.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            api.prevent_close();
-            let _ = window_clone.hide();
-        }
-    });
+    bind_overlay_window_events(&window, app.clone(), label);
 
     Ok((window, true))
 }
@@ -357,11 +354,29 @@ pub async fn start_recording(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<RecordingSessionInfo, String> {
+    let started_at = Instant::now();
     let state_arc = state.inner().clone();
-    run_blocking_command(move || {
+    let result = run_blocking_command(move || {
         recorder_service::start_recording(&app, state_arc, request).map_err(to_frontend_error_string)
     })
-        .await
+    .await;
+    match &result {
+        Ok(_) => record_perf_metric(
+            "recording.start",
+            "录屏开始耗时",
+            started_at.elapsed().as_millis() as u64,
+            true,
+            None,
+        ),
+        Err(error) => record_perf_metric(
+            "recording.start",
+            "录屏开始耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(error.clone()),
+        ),
+    }
+    result
 }
 
 #[tauri::command]
@@ -370,8 +385,9 @@ pub async fn stop_recording(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<RecordingStopResult, String> {
+    let started_at = Instant::now();
     let state_arc = state.inner().clone();
-    run_blocking_command(move || match recorder_service::stop_recording(&app, state_arc.clone(), request.clone()) {
+    let result = run_blocking_command(move || match recorder_service::stop_recording(&app, state_arc.clone(), request.clone()) {
         Ok(result) => {
             let auto_open_folder = {
                 let guard = state_arc.lock().expect("infallible mutex lock failed");
@@ -407,7 +423,24 @@ pub async fn stop_recording(
             }
         }
     })
-        .await
+    .await;
+    match &result {
+        Ok(_) => record_perf_metric(
+            "recording.stop",
+            "录屏停止耗时",
+            started_at.elapsed().as_millis() as u64,
+            true,
+            None,
+        ),
+        Err(error) => record_perf_metric(
+            "recording.stop",
+            "录屏停止耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(error.clone()),
+        ),
+    }
+    result
 }
 
 #[tauri::command]
@@ -527,8 +560,7 @@ pub async fn show_recording_toolbar(app: AppHandle) -> Result<(), String> {
         .map(|settings| settings.recording_toolbar_content_protected)
         .unwrap_or(false);
     let _ = window.set_content_protected(content_protected);
-    let _ = window.show();
-    let _ = window.set_focus();
+    show_overlay_window_by_label(&app, "recording_toolbar", true)?;
     Ok(())
 }
 
@@ -632,8 +664,7 @@ pub async fn toggle_recording_from_shortcut(
         // Set compact size and position before showing to avoid opening flicker/jump.
         let _ = window.set_size(tauri::LogicalSize::new(180.0, 40.0));
         move_window_top_center(&window);
-        let _ = window.show();
-        let _ = window.set_focus();
+        let _ = show_overlay_window_by_label(&app, "recording_toolbar", true);
     }
     let _ = app.emit("recording-toolbar-force-compact", ());
 }

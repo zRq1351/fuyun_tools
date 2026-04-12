@@ -1,6 +1,7 @@
 use crate::core::app_state::AppState as SharedAppState;
 use crate::core::config::{AIProvider, ProviderConfig};
 use crate::core::error::{to_frontend_error_string, AppError, AppResult, ErrorCode};
+use crate::core::perf_metrics::{get_perf_metrics_snapshot, record_perf_metric, reset_perf_metrics, timed_sync};
 use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
 use crate::services::clipboard_manager::set_clipboard_listener_enabled;
@@ -11,12 +12,25 @@ use crate::sync::Mutex;
 use crate::ui::commands_recording::toggle_recording_from_shortcut;
 use crate::ui::tray_menu::open_settings;
 use crate::ui::window_manager::{
-    hide_clipboard_window, hide_image_clipboard_window, hide_image_preview_window, set_window_position,
+    bind_overlay_window_events, focus_overlay_window_by_label, hide_clipboard_window, hide_image_clipboard_window,
+    hide_image_preview_window, hide_overlay_window_by_label, set_window_position,
+    show_overlay_window_by_label,
     show_clipboard_window, show_image_clipboard_window, show_image_preview_loading_window,
     show_image_preview_window,
 };
+use crate::utils::backup_archive::{
+    cleanup_dir, create_backup_temp_dir, read_manifest_from_package, write_backup_payload, zip_backup_dir,
+};
+use crate::utils::backup_model::{
+    BackupBlobFile, BackupExportPreviewData, BackupExportPreviewResponse, BackupExportRequest,
+    BackupExportResultData, BackupExportResultResponse, BackupHistoryItem, BackupImageHistoryFile,
+    BackupImageHistoryItem, BackupPackagePreviewData, BackupPackagePreviewRequest,
+    BackupPackagePreviewResponse, BackupRestoreOptions, BackupRestoreRequest,
+    BackupRestoreResultResponse, BackupSettingsData, DeleteBackupHistoryItemRequest,
+    PreparedBackupData, SaveBackupSettingsRequest,
+};
+use crate::utils::backup_restore::restore_backup_package as execute_restore_backup_package;
 use crate::utils::clipboard::ClipboardManager;
-#[cfg(debug_assertions)]
 use crate::utils::image_clipboard::get_image_persist_queue_metrics_snapshot;
 use crate::utils::image_clipboard::{
     is_fast_fill_verify_mode_enabled, set_image_fill_verify_mode, ImageClipboardManager,
@@ -32,9 +46,9 @@ use futures_util::StreamExt;
 use image::{imageops, Rgba, RgbaImage};
 use imageproc::drawing::{draw_filled_circle_mut, draw_hollow_ellipse_mut, draw_hollow_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -69,6 +83,8 @@ static COPY_PASTE_DEDUP_WINDOW_STATS: OnceLock<StdMutex<DedupWindowStats>> = Onc
 #[cfg(debug_assertions)]
 static VC_RUNTIME_FORCE_MISSING: AtomicBool = AtomicBool::new(false);
 static SCREENSHOT_EXPORT_FONT_BYTES: OnceLock<StdMutex<HashMap<String, Arc<Vec<u8>>>>> = OnceLock::new();
+static AUTO_BACKUP_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+static LAST_WRITEBACK_RESULT: OnceLock<StdMutex<Option<WriteBackExecutionResult>>> = OnceLock::new();
 
 struct RecentCopyPaste {
     request_id: String,
@@ -81,6 +97,67 @@ struct DedupWindowStats {
     requests: u64,
     hits: u64,
     last_hit_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManualLongshotAvailability {
+    pub status: String,
+    pub phase: String,
+    pub summary: String,
+    pub details: Vec<String>,
+    pub session_id: Option<u64>,
+    pub recent_failure_kind: Option<String>,
+    pub recent_failure_message: Option<String>,
+    pub recent_failure_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticAction {
+    pub key: String,
+    pub label: String,
+    pub action_type: String,
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticItem {
+    pub key: String,
+    pub title: String,
+    pub status: String,
+    pub summary: String,
+    pub details: Vec<String>,
+    pub actions: Vec<DiagnosticAction>,
+    pub last_checked_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticOverview {
+    pub overall_status: String,
+    pub error_count: usize,
+    pub warning_count: usize,
+    pub checked_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticActionResult {
+    pub success: bool,
+    pub action_key: String,
+    pub message: String,
+    pub needs_refresh: bool,
+    pub should_restart: bool,
+    pub navigate_to: Option<String>,
+    pub external_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticActionRequest {
+    pub action_key: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -802,7 +879,8 @@ fn get_copy_paste_dedup_debug_state_value() -> serde_json::Value {
     })
 }
 
-fn bind_screenshot_window_lifecycle(window: &tauri::WebviewWindow) {
+fn bind_screenshot_window_lifecycle(window: &tauri::WebviewWindow, app: &AppHandle) {
+    bind_overlay_window_events(window, app.clone(), "screenshot");
     window.on_window_event(move |event| match event {
         tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
             features::screenshot::capture::set_screenshot_in_progress(false);
@@ -858,6 +936,7 @@ pub async fn get_image_clipboard_history_page(
     request: ImageHistoryPageRequest,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<ImageHistoryPageData, String> {
+    let started_at = std::time::Instant::now();
     let manager_arc = get_image_clipboard_manager_arc(state.inner());
     let manager = {
         let guard = lock_arc_mutex(&manager_arc);
@@ -874,7 +953,15 @@ pub async fn get_image_clipboard_history_page(
         sort_order: request.sort_order,
     };
 
-    Ok(manager.get_history_preview_page_async(page_request).await)
+    let result = manager.get_history_preview_page_async(page_request).await;
+    record_perf_metric(
+        "image.history_page",
+        "图片历史分页加载耗时",
+        started_at.elapsed().as_millis() as u64,
+        true,
+        None,
+    );
+    Ok(result)
 }
 
 fn default_history_page_limit() -> usize {
@@ -965,6 +1052,101 @@ fn is_screenshot_feature_enabled(state: &Arc<Mutex<SharedAppState>>) -> bool {
     guard.settings.screenshot_enabled
 }
 
+fn recompute_selection_related_flags(state: &mut SharedAppState) {
+    state.is_processing_selection =
+        state.is_selection_capture_active || state.is_text_writeback_active || state.is_image_writeback_active;
+    state.is_updating_clipboard = state.is_text_writeback_active || state.is_image_writeback_active;
+}
+
+fn emit_writeback_phase(
+    app: &AppHandle,
+    source: &str,
+    stage: &str,
+    operation_id: Option<u64>,
+    detail: Option<String>,
+) {
+    let _ = app.emit(
+        "writeback-phase",
+        serde_json::json!({
+            "source": source,
+            "stage": stage,
+            "operationId": operation_id,
+            "detail": detail,
+        }),
+    );
+}
+
+fn writeback_metric_source_key(source: &str) -> &'static str {
+    match source {
+        "文本" => "text",
+        "图片" => "image",
+        "结果窗" => "result_window",
+        _ => "unknown",
+    }
+}
+
+fn record_writeback_stage_metric(
+    source: &str,
+    stage: &str,
+    label: &str,
+    duration_ms: u64,
+    success: bool,
+    error: Option<String>,
+) {
+    let key = format!("writeback.{}.{}", writeback_metric_source_key(source), stage);
+    record_perf_metric(&key, label, duration_ms, success, error);
+}
+
+fn perf_metric_group_label(key: &str) -> &'static str {
+    if key.starts_with("ocr.") || key.starts_with("ai.") {
+        "交互"
+    } else if key.starts_with("backup.") {
+        "备份"
+    } else if key.starts_with("recording.") {
+        "录屏"
+    } else if key.starts_with("screenshot.") {
+        "截图"
+    } else if key.starts_with("writeback.") {
+        "回写"
+    } else if key.starts_with("image.") {
+        "图片"
+    } else if key.starts_with("text.") {
+        "文本历史"
+    } else {
+        "其他"
+    }
+}
+
+fn perf_metric_group_rank(group: &str) -> usize {
+    match group {
+        "交互" => 0,
+        "回写" => 1,
+        "图片" => 2,
+        "截图" => 3,
+        "录屏" => 4,
+        "备份" => 5,
+        "文本历史" => 6,
+        _ => 9,
+    }
+}
+
+fn perf_metric_is_slow(item: &crate::core::perf_metrics::PerfMetricSnapshot) -> bool {
+    let (avg_threshold, max_threshold) = if item.key.contains("first_chunk") {
+        (1200.0, 2500)
+    } else if item.key.contains("history_page") || item.key.contains("wait_hidden") {
+        (900.0, 2000)
+    } else {
+        (1500.0, 3000)
+    };
+    item.avg_duration_ms >= avg_threshold || item.max_duration_ms >= max_threshold
+}
+
+fn last_writeback_result() -> Option<WriteBackExecutionResult> {
+    LAST_WRITEBACK_RESULT
+        .get()
+        .and_then(|slot| slot.lock().ok().and_then(|guard| guard.clone()))
+}
+
 fn register_text_shortcut(
     app: &AppHandle,
     state: Arc<Mutex<SharedAppState>>,
@@ -1049,9 +1231,12 @@ fn register_screenshot_shortcut(app: &AppHandle, hot_key: &str) -> Result<(), St
 
 fn begin_fill_sequence(state: &Arc<Mutex<SharedAppState>>, kind: FillKind) -> u64 {
     let mut state_guard = lock_arc_mutex(state);
-    state_guard.is_updating_clipboard = true;
-    state_guard.is_processing_selection = true;
     state_guard.selection_guard_epoch = state_guard.selection_guard_epoch.wrapping_add(1);
+    match kind {
+        FillKind::Text => state_guard.is_text_writeback_active = true,
+        FillKind::Image => state_guard.is_image_writeback_active = true,
+    }
+    recompute_selection_related_flags(&mut state_guard);
     match kind {
         FillKind::Text => {
             state_guard.text_fill_seq = state_guard.text_fill_seq.wrapping_add(1);
@@ -1072,8 +1257,11 @@ fn is_fill_latest(state: &Arc<Mutex<SharedAppState>>, kind: FillKind, fill_seq: 
 fn finish_fill_if_latest(state: &Arc<Mutex<SharedAppState>>, kind: FillKind, fill_seq: u64) {
     let mut guard = lock_arc_mutex(state);
     if kind.current_seq(&guard) == fill_seq {
-        guard.is_processing_selection = false;
-        guard.is_updating_clipboard = false;
+        match kind {
+            FillKind::Text => guard.is_text_writeback_active = false,
+            FillKind::Image => guard.is_image_writeback_active = false,
+        }
+        recompute_selection_related_flags(&mut guard);
     }
 }
 
@@ -1082,15 +1270,15 @@ static IMAGE_PROMOTE_SENDER: OnceLock<Sender<String>> = OnceLock::new();
 pub fn interrupt_text_fill_flow(state: &Arc<Mutex<SharedAppState>>) {
     let mut state_guard = lock_arc_mutex(state);
     state_guard.text_fill_seq = state_guard.text_fill_seq.wrapping_add(1);
-    state_guard.is_processing_selection = false;
-    state_guard.is_updating_clipboard = false;
+    state_guard.is_text_writeback_active = false;
+    recompute_selection_related_flags(&mut state_guard);
 }
 
 pub fn interrupt_image_fill_flow(state: &Arc<Mutex<SharedAppState>>) {
     let mut state_guard = lock_arc_mutex(state);
     state_guard.image_fill_seq = state_guard.image_fill_seq.wrapping_add(1);
-    state_guard.is_processing_selection = false;
-    state_guard.is_updating_clipboard = false;
+    state_guard.is_image_writeback_active = false;
+    recompute_selection_related_flags(&mut state_guard);
 }
 
 fn image_promote_worker(state: Arc<Mutex<SharedAppState>>, rx: Receiver<String>) {
@@ -1123,17 +1311,20 @@ fn schedule_image_promote_to_top(state: Arc<Mutex<SharedAppState>>, item_id: Str
     }
 }
 
-fn wait_for_fill_window_hidden(app: &AppHandle, window_label: &str, label: &str, fast_path: bool) {
+fn wait_for_fill_window_hidden(app: &AppHandle, window_label: &str, label: &str, fast_path: bool) -> Result<(), String> {
     let timeout_ms = if fast_path { 220 } else { 900 };
     let state_arc = app.state::<Arc<Mutex<SharedAppState>>>().inner().clone();
-    if let Err(e) = crate::ui::window_manager::wait_for_window_hidden(
+    crate::ui::window_manager::wait_for_window_hidden(
         app,
         &state_arc,
         window_label,
         Duration::from_millis(timeout_ms),
-    ) {
-        log::warn!("等待{}窗口隐藏失败: {}", label, e);
-    }
+    )
+    .map_err(|e| {
+        let message = e.to_string();
+        log::warn!("等待{}窗口隐藏失败: {}", label, message);
+        message
+    })
 }
 
 fn spawn_fill_task<F>(
@@ -1149,26 +1340,144 @@ fn spawn_fill_task<F>(
     thread::spawn(move || {
         let started_at = std::time::Instant::now();
         let fast_path = kind == FillKind::Image && is_fast_fill_verify_mode_enabled();
-        wait_for_fill_window_hidden(&app_handle, kind.window_label(), kind.label(), fast_path);
+        emit_writeback_phase(&app_handle, kind.label(), "waiting_window_hidden", Some(operation_id), None);
+        let wait_started_at = std::time::Instant::now();
+        let wait_result = wait_for_fill_window_hidden(&app_handle, kind.window_label(), kind.label(), fast_path);
+        match &wait_result {
+            Ok(_) => record_writeback_stage_metric(
+                kind.label(),
+                "wait_hidden",
+                &format!("{}回写等待窗口隐藏耗时", kind.label()),
+                wait_started_at.elapsed().as_millis() as u64,
+                true,
+                None,
+            ),
+            Err(error) => record_writeback_stage_metric(
+                kind.label(),
+                "wait_hidden",
+                &format!("{}回写等待窗口隐藏耗时", kind.label()),
+                wait_started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            ),
+        }
 
         if !is_fill_latest(&state, kind, fill_seq) {
             log::info!("{}回填请求过期，跳过执行: op_id={}", kind.label(), operation_id);
+            emit_writeback_phase(
+                &app_handle,
+                kind.label(),
+                "cancelled_stale",
+                Some(operation_id),
+                Some("回填请求已被更新请求替代".to_string()),
+            );
             return;
         }
 
+        let clipboard_started_at = std::time::Instant::now();
         let fill_result = write_stage(&app_handle, &state);
         if fill_result.is_ok() {
+            record_writeback_stage_metric(
+                kind.label(),
+                "write_clipboard",
+                &format!("{}回写写入剪贴板耗时", kind.label()),
+                clipboard_started_at.elapsed().as_millis() as u64,
+                true,
+                None,
+            );
+            emit_writeback_phase(&app_handle, kind.label(), "clipboard_written", Some(operation_id), None);
             if !is_fill_latest(&state, kind, fill_seq) {
                 log::info!(
                     "{}回填请求被新请求替代: op_id={}",
                     kind.label(),
                     operation_id
                 );
+                emit_writeback_phase(
+                    &app_handle,
+                    kind.label(),
+                    "cancelled_stale",
+                    Some(operation_id),
+                    Some("回填请求已被更新请求替代".to_string()),
+                );
                 return;
             }
-            simulate_paste_with_retry(kind.label(), Some(operation_id), started_at, fast_path);
+            emit_writeback_phase(&app_handle, kind.label(), "pasting", Some(operation_id), None);
+            let paste_started_at = std::time::Instant::now();
+            let paste_result =
+                simulate_paste_with_retry(&app_handle, kind.label(), Some(operation_id), started_at, fast_path);
+            match paste_result {
+                Ok(result) => {
+                    record_writeback_stage_metric(
+                        kind.label(),
+                        "paste",
+                        &format!("{}回写粘贴耗时", kind.label()),
+                        paste_started_at.elapsed().as_millis() as u64,
+                        true,
+                        None,
+                    );
+                    record_writeback_stage_metric(
+                        kind.label(),
+                        "total",
+                        &format!("{}回写总耗时", kind.label()),
+                        started_at.elapsed().as_millis() as u64,
+                        true,
+                        None,
+                    );
+                    emit_writeback_phase(&app_handle, kind.label(), "completed", Some(operation_id), Some(result.detail.clone()));
+                    emit_writeback_result(&app_handle, &result)
+                }
+                Err(result) => {
+                    record_writeback_stage_metric(
+                        kind.label(),
+                        "paste",
+                        &format!("{}回写粘贴耗时", kind.label()),
+                        paste_started_at.elapsed().as_millis() as u64,
+                        false,
+                        Some(result.detail.clone()),
+                    );
+                    record_writeback_stage_metric(
+                        kind.label(),
+                        "total",
+                        &format!("{}回写总耗时", kind.label()),
+                        started_at.elapsed().as_millis() as u64,
+                        false,
+                        Some(result.detail.clone()),
+                    );
+                    emit_writeback_phase(&app_handle, kind.label(), "failed", Some(operation_id), Some(result.detail.clone()));
+                    emit_writeback_result(&app_handle, &result)
+                }
+            }
         } else if let Err(e) = fill_result {
             log::error!("{}回填失败（写入阶段）: op_id={}, {}", kind.label(), operation_id, e);
+            record_writeback_stage_metric(
+                kind.label(),
+                "write_clipboard",
+                &format!("{}回写写入剪贴板耗时", kind.label()),
+                clipboard_started_at.elapsed().as_millis() as u64,
+                false,
+                Some(e.clone()),
+            );
+            record_writeback_stage_metric(
+                kind.label(),
+                "total",
+                &format!("{}回写总耗时", kind.label()),
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some(e.clone()),
+            );
+            emit_writeback_phase(&app_handle, kind.label(), "failed", Some(operation_id), Some(e.clone()));
+            emit_writeback_result(
+                &app_handle,
+                &WriteBackExecutionResult {
+                    source: kind.label().to_string(),
+                    success: false,
+                    stage: "write_clipboard_failed".to_string(),
+                    target_window_title: String::new(),
+                    target_window_pid: 0,
+                    detail: e,
+                    operation_id: Some(operation_id),
+                },
+            );
         }
 
         finish_fill_if_latest(&state, kind, fill_seq);
@@ -1176,17 +1485,18 @@ fn spawn_fill_task<F>(
 }
 
 fn simulate_paste_with_retry(
+    app_handle: &AppHandle,
     label: &str,
     operation_id: Option<u64>,
     started_at: std::time::Instant,
     fast_path: bool,
-) {
+) -> Result<WriteBackExecutionResult, WriteBackExecutionResult> {
     let is_post_paste_ctrl_release_error = |err: &str| err.contains("释放 Ctrl");
     let mode_name = if fast_path { "极速模式" } else { "普通模式" };
     let retry_delays: &[u64] = if fast_path { &[8, 16] } else { &[22, 40, 58] };
 
-    match crate::ui::window_manager::simulate_paste() {
-        Ok(_) => {
+    match crate::ui::window_manager::simulate_paste(app_handle) {
+        Ok(target) => {
             if let Some(op_id) = operation_id {
                 log::info!(
                     "{}回填完成: op_id={}, 耗时: {}ms",
@@ -1197,6 +1507,15 @@ fn simulate_paste_with_retry(
             } else {
                 log::info!("{}回填完成，耗时: {}ms", label, started_at.elapsed().as_millis());
             }
+            Ok(WriteBackExecutionResult {
+                source: label.to_string(),
+                success: true,
+                stage: "pasted".to_string(),
+                target_window_title: target.title,
+                target_window_pid: target.pid,
+                detail: format!("{}回填成功，耗时 {}ms", label, started_at.elapsed().as_millis()),
+                operation_id,
+            })
         }
         Err(first_error) => {
             if is_post_paste_ctrl_release_error(&first_error) {
@@ -1208,7 +1527,15 @@ fn simulate_paste_with_retry(
                 if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
                     log::warn!("{}回填粘贴后Ctrl异常兜底释放失败: {}", label, release_error);
                 }
-                return;
+                return Err(WriteBackExecutionResult {
+                    source: label.to_string(),
+                    success: false,
+                    stage: "paste_ctrl_release_failed".to_string(),
+                    target_window_title: String::new(),
+                    target_window_pid: 0,
+                    detail: first_error,
+                    operation_id,
+                });
             }
             let mut final_error = first_error.clone();
             for delay in retry_delays {
@@ -1216,8 +1543,8 @@ fn simulate_paste_with_retry(
                 if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
                     log::warn!("{}回填{}重试前释放Ctrl失败: {}", label, mode_name, release_error);
                 }
-                match crate::ui::window_manager::simulate_paste() {
-                    Ok(_) => {
+                match crate::ui::window_manager::simulate_paste(app_handle) {
+                    Ok(target) => {
                         if let Some(op_id) = operation_id {
                             log::warn!(
                                 "{}回填{}首次粘贴失败，状态驱动重试成功: op_id={}, {}，总耗时: {}ms",
@@ -1236,7 +1563,15 @@ fn simulate_paste_with_retry(
                                 started_at.elapsed().as_millis()
                             );
                         }
-                        return;
+                        return Ok(WriteBackExecutionResult {
+                            source: label.to_string(),
+                            success: true,
+                            stage: "pasted_after_retry".to_string(),
+                            target_window_title: target.title,
+                            target_window_pid: target.pid,
+                            detail: format!("首次失败后重试成功: {}", first_error),
+                            operation_id,
+                        });
                     }
                     Err(next_error) => {
                         final_error = next_error;
@@ -1250,7 +1585,15 @@ fn simulate_paste_with_retry(
                             if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
                                 log::warn!("{}回填粘贴后Ctrl异常兜底释放失败: {}", label, release_error);
                             }
-                            return;
+                            return Err(WriteBackExecutionResult {
+                                source: label.to_string(),
+                                success: false,
+                                stage: "paste_ctrl_release_failed".to_string(),
+                                target_window_title: String::new(),
+                                target_window_pid: 0,
+                                detail: final_error,
+                                operation_id,
+                            });
                         }
                     }
                 }
@@ -1276,13 +1619,26 @@ fn simulate_paste_with_retry(
                     final_error
                 );
             }
+            Err(WriteBackExecutionResult {
+                source: label.to_string(),
+                success: false,
+                stage: "paste_failed".to_string(),
+                target_window_title: String::new(),
+                target_window_pid: 0,
+                detail: format!("首次错误: {}，最终错误: {}", first_error, final_error),
+                operation_id,
+            })
         }
     }
 }
 
 fn set_updating_clipboard(state: &Arc<Mutex<SharedAppState>>, updating: bool) {
     let mut state_guard = lock_arc_mutex(state);
-    state_guard.is_updating_clipboard = updating;
+    if !updating {
+        state_guard.is_text_writeback_active = false;
+        state_guard.is_image_writeback_active = false;
+    }
+    recompute_selection_related_flags(&mut state_guard);
 }
 
 fn get_clipboard_manager_arc(state: &Arc<Mutex<SharedAppState>>) -> Arc<Mutex<ClipboardManager>> {
@@ -1458,6 +1814,7 @@ fn execute_open_image_preview_window_by_id(
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
 ) -> AppResult<()> {
+    let started_at = std::time::Instant::now();
     let request_id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
@@ -1470,44 +1827,105 @@ fn execute_open_image_preview_window_by_id(
     let request_id_clone = request_id;
     thread::spawn(move || {
         let result: Result<(), String> = (|| {
+            let prepare_started_at = std::time::Instant::now();
             let manager_arc = get_image_clipboard_manager_arc(&state_clone);
             let image_path = {
                 let manager = lock_arc_mutex(&manager_arc);
                 manager.get_preview_image_path_by_id(&item_id)?
             };
             let preview_path = ensure_preview_image_path_for_asset(&item_id, &image_path)?;
+            record_perf_metric(
+                "image.preview_prepare",
+                "图片预览资源准备耗时",
+                prepare_started_at.elapsed().as_millis() as u64,
+                true,
+                None,
+            );
             show_image_preview_window(app_clone.clone(), request_id_clone.clone(), preview_path)
         })();
-        if let Err(e) = result {
-            log::error!("加载预览图片失败: {}", e);
-            let _ = app_clone.emit(
-                "show-image-preview",
-                serde_json::json!({
-                    "request_id": request_id_clone,
-                    "error_message": e,
-                    "is_final": true
-                }),
-            );
+        match result {
+            Ok(()) => {
+                record_perf_metric(
+                    "image.preview_open",
+                    "图片预览打开耗时",
+                    started_at.elapsed().as_millis() as u64,
+                    true,
+                    None,
+                );
+            }
+            Err(e) => {
+                record_perf_metric(
+                    "image.preview_open",
+                    "图片预览打开耗时",
+                    started_at.elapsed().as_millis() as u64,
+                    false,
+                    Some(e.clone()),
+                );
+                log::error!("加载预览图片失败: {}", e);
+                let _ = app_clone.emit(
+                    "show-image-preview",
+                    serde_json::json!({
+                        "request_id": request_id_clone,
+                        "error_message": e,
+                        "is_final": true
+                    }),
+                );
+            }
         }
     });
     Ok(())
 }
 
 fn ensure_preview_image_path_for_asset(item_id: &str, image_path: &str) -> Result<String, String> {
+    let started_at = std::time::Instant::now();
     let trimmed = image_path.trim();
     if trimmed.is_empty() {
-        return Err("图片路径为空".to_string());
+        let error = "图片路径为空".to_string();
+        record_perf_metric(
+            "image.preview_asset_path",
+            "图片预览路径准备耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(error.clone()),
+        );
+        return Err(error);
     }
     let source_path = PathBuf::from(trimmed);
     if !source_path.exists() {
-        return Err(format!("图片文件不存在: {}", trimmed));
+        let error = format!("图片文件不存在: {}", trimmed);
+        record_perf_metric(
+            "image.preview_asset_path",
+            "图片预览路径准备耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(error.clone()),
+        );
+        return Err(error);
     }
     if !source_path.is_file() {
-        return Err(format!("图片路径不是文件: {}", trimmed));
+        let error = format!("图片路径不是文件: {}", trimmed);
+        record_perf_metric(
+            "image.preview_asset_path",
+            "图片预览路径准备耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(error.clone()),
+        );
+        return Err(error);
     }
     let canonical_source = source_path
         .canonicalize()
-        .map_err(|e| format!("规范化图片路径失败: {}", e))?;
+        .map_err(|e| {
+            let error = format!("规范化图片路径失败: {}", e);
+            record_perf_metric(
+                "image.preview_asset_path",
+                "图片预览路径准备耗时",
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            );
+            error
+        })?;
     let ext = canonical_source
         .extension()
         .and_then(|value| value.to_str())
@@ -1515,18 +1933,53 @@ fn ensure_preview_image_path_for_asset(item_id: &str, image_path: &str) -> Resul
         .unwrap_or_default();
     let allowed_ext = ["png", "jpg", "jpeg", "webp", "bmp", "gif"];
     if !allowed_ext.contains(&ext.as_str()) {
-        return Err(format!("不支持的图片格式: {}", ext));
+        let error = format!("不支持的图片格式: {}", ext);
+        record_perf_metric(
+            "image.preview_asset_path",
+            "图片预览路径准备耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(error.clone()),
+        );
+        return Err(error);
     }
 
     let mut blobs_dir = std::env::current_exe()
-        .map_err(|e| format!("获取程序目录失败: {}", e))?;
+        .map_err(|e| {
+            let error = format!("获取程序目录失败: {}", e);
+            record_perf_metric(
+                "image.preview_asset_path",
+                "图片预览路径准备耗时",
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            );
+            error
+        })?;
     blobs_dir.pop();
     blobs_dir.push("image_history_blobs");
-    fs::create_dir_all(&blobs_dir).map_err(|e| format!("创建图片目录失败: {}", e))?;
+    fs::create_dir_all(&blobs_dir).map_err(|e| {
+        let error = format!("创建图片目录失败: {}", e);
+        record_perf_metric(
+            "image.preview_asset_path",
+            "图片预览路径准备耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(error.clone()),
+        );
+        error
+    })?;
     let canonical_blobs = blobs_dir
         .canonicalize()
         .unwrap_or_else(|_| blobs_dir.clone());
     if canonical_source.starts_with(&canonical_blobs) {
+        record_perf_metric(
+            "image.preview_asset_path",
+            "图片预览路径准备耗时",
+            started_at.elapsed().as_millis() as u64,
+            true,
+            None,
+        );
         return Ok(canonical_source.to_string_lossy().to_string());
     }
 
@@ -1537,8 +1990,24 @@ fn ensure_preview_image_path_for_asset(item_id: &str, image_path: &str) -> Resul
         format!("preview_external_{}.{}", normalized_item_id, ext)
     };
     let target_path = canonical_blobs.join(target_name);
-    fs::copy(&canonical_source, &target_path)
-        .map_err(|e| format!("复制预览图片到受控目录失败: {}", e))?;
+    fs::copy(&canonical_source, &target_path).map_err(|e| {
+        let error = format!("复制预览图片到受控目录失败: {}", e);
+        record_perf_metric(
+            "image.preview_asset_path",
+            "图片预览路径准备耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(error.clone()),
+        );
+        error
+    })?;
+    record_perf_metric(
+        "image.preview_asset_path",
+        "图片预览路径准备耗时",
+        started_at.elapsed().as_millis() as u64,
+        true,
+        None,
+    );
     Ok(target_path.to_string_lossy().to_string())
 }
 
@@ -1564,11 +2033,27 @@ fn execute_warmup_image_clipboard_item_by_id(
     item_id: String,
     state: Arc<Mutex<SharedAppState>>,
 ) -> AppResult<()> {
+    let started_at = std::time::Instant::now();
     let manager_arc = get_image_clipboard_manager_arc(&state);
     let manager = lock_arc_mutex(&manager_arc);
-    manager
-        .warmup_image_by_id(&item_id)
-        .map_err(|e| AppError::new(ErrorCode::ClipboardError, "预热图片失败").with_details(e))
+    manager.warmup_image_by_id(&item_id).map_err(|e| {
+        record_perf_metric(
+            "image.warmup",
+            "图片预热耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(e.clone()),
+        );
+        AppError::new(ErrorCode::ClipboardError, "预热图片失败").with_details(e)
+    })?;
+    record_perf_metric(
+        "image.warmup",
+        "图片预热耗时",
+        started_at.elapsed().as_millis() as u64,
+        true,
+        None,
+    );
+    Ok(())
 }
 
 fn execute_promote_image_clipboard_item_by_id(
@@ -1619,6 +2104,7 @@ fn execute_select_and_fill_image_by_id(
         fill_seq,
         operation_id,
         move |app_handle, state_ref| {
+            let prepare_started_at = std::time::Instant::now();
             let fast_mode = is_fast_fill_verify_mode_enabled();
             let image = {
                 let _ = state_ref;
@@ -1631,6 +2117,13 @@ fn execute_select_and_fill_image_by_id(
                     manager.get_image_by_index_for_fill(0)?
                 }
             };
+            record_perf_metric(
+                "image.fill_prepare",
+                "图片回填准备耗时",
+                prepare_started_at.elapsed().as_millis() as u64,
+                true,
+                None,
+            );
             ImageClipboardManager::write_clipboard_image(
                 app_handle, &image,
             )?;
@@ -1711,7 +2204,8 @@ pub async fn get_clipboard_full_snapshot(
 pub async fn get_clipboard_history_page(
     request: ClipboardHistoryPageRequest,
 ) -> Result<ClipboardHistoryPageData, String> {
-    load_history_page_data_async(
+    let started_at = std::time::Instant::now();
+    let result = load_history_page_data_async(
         request.offset,
         request.limit,
         request.category,
@@ -1720,7 +2214,24 @@ pub async fn get_clipboard_history_page(
         request.sort_by,
         request.sort_order,
     )
-        .await
+    .await;
+    match &result {
+        Ok(_) => record_perf_metric(
+            "text.history_page",
+            "文本历史分页加载耗时",
+            started_at.elapsed().as_millis() as u64,
+            true,
+            None,
+        ),
+        Err(error) => record_perf_metric(
+            "text.history_page",
+            "文本历史分页加载耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(error.clone()),
+        ),
+    }
+    result
 }
 
 #[derive(serde::Deserialize)]
@@ -2366,9 +2877,7 @@ pub async fn image_window_blur(
 
 #[tauri::command]
 pub async fn selection_toolbar_blur(app: AppHandle) -> Result<(), String> {
-    if let Some(toolbar_window) = app.get_webview_window("selection_toolbar") {
-        let _ = toolbar_window.hide();
-    }
+    let _ = hide_overlay_window_by_label(&app, "selection_toolbar");
     Ok(())
 }
 
@@ -2429,7 +2938,7 @@ pub async fn show_selection_toolbar_with_text(
         y
     );
     if app.get_webview_window("selection_toolbar").is_none() {
-        let _ = tauri::WebviewWindowBuilder::new(
+        let toolbar_window = tauri::WebviewWindowBuilder::new(
             &app,
             "selection_toolbar",
             tauri::WebviewUrl::App("selection_toolbar.html".into()),
@@ -2444,6 +2953,7 @@ pub async fn show_selection_toolbar_with_text(
             .skip_taskbar(true)
             .build()
             .map_err(|e| format!("创建划词工具栏窗口失败: {}", e))?;
+        bind_overlay_window_events(&toolbar_window, app.clone(), "selection_toolbar");
         log::info!("show_selection_toolbar_with_text: 已创建selection_toolbar窗口");
     }
     crate::ui::window_manager::show_selection_toolbar_force_impl(
@@ -2490,7 +3000,7 @@ pub async fn show_ocr_text_window(
     let window = if let Some(existing) = app.get_webview_window(&result_label) {
         existing
     } else {
-        tauri::WebviewWindowBuilder::new(
+        let window = tauri::WebviewWindowBuilder::new(
             &app,
             result_label.clone(),
             tauri::WebviewUrl::App("ocr_text.html".into()),
@@ -2502,7 +3012,9 @@ pub async fn show_ocr_text_window(
             .resizable(true)
             .inner_size(560.0, 240.0)
             .build()
-            .map_err(|e| format!("创建OCR结果窗口失败: {}", e))?
+            .map_err(|e| format!("创建OCR结果窗口失败: {}", e))?;
+        bind_overlay_window_events(&window, app.clone(), result_label.clone());
+        window
     };
 
     let monitor_pos = monitor.position();
@@ -2530,8 +3042,7 @@ pub async fn show_ocr_text_window(
     let _ = window.set_size(tauri::PhysicalSize::new(target_width as u32, target_height as u32));
     let _ = window.set_always_on_top(false);
     let _ = window.set_position(tauri::PhysicalPosition::new(target_x, target_y));
-    let _ = window.show();
-    let _ = window.set_focus();
+    let _ = show_overlay_window_by_label(&app, &result_label, true);
 
     let payload = serde_json::json!({"text": content});
     let script = format!(
@@ -3446,80 +3957,112 @@ pub async fn copy_and_paste_text(
     text: String,
     request_id: Option<String>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> Result<WriteBackExecutionResult, String> {
+    let started_at = std::time::Instant::now();
     if is_duplicate_copy_paste_request(&text, request_id.as_deref()) {
         if COPY_PASTE_DEDUP_LOG_ENABLED.load(Ordering::Relaxed) {
             log::warn!("检测到短时重复回写请求，已跳过执行");
             COPY_PASTE_DEDUP_LOG_COUNT.fetch_add(1, Ordering::Relaxed);
         }
-        return Ok(());
+        return Ok(WriteBackExecutionResult {
+            source: "结果窗".to_string(),
+            success: true,
+            stage: "deduplicated".to_string(),
+            target_window_title: String::new(),
+            target_window_pid: 0,
+            detail: "检测到重复回写请求，已跳过".to_string(),
+            operation_id: None,
+        });
     }
-    app.clipboard()
-        .write_text(text)
-        .map_err(|e| frontend_error(ErrorCode::ClipboardError, "复制文本失败", e.to_string()))?;
+    let clipboard_started_at = std::time::Instant::now();
+    app.clipboard().write_text(text).map_err(|e| {
+        let error = frontend_error(ErrorCode::ClipboardError, "复制文本失败", e.to_string());
+        record_writeback_stage_metric(
+            "结果窗",
+            "write_clipboard",
+            "结果窗回写写入剪贴板耗时",
+            clipboard_started_at.elapsed().as_millis() as u64,
+            false,
+            Some(error.clone()),
+        );
+        record_writeback_stage_metric(
+            "结果窗",
+            "total",
+            "结果窗回写总耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(error.clone()),
+        );
+        error
+    })?;
+    record_writeback_stage_metric(
+        "结果窗",
+        "write_clipboard",
+        "结果窗回写写入剪贴板耗时",
+        clipboard_started_at.elapsed().as_millis() as u64,
+        true,
+        None,
+    );
 
-    if let Some(window) = app.get_webview_window("result_translation") {
-        let _ = window.hide();
-    }
-    if let Some(window) = app.get_webview_window("result_explanation") {
-        let _ = window.hide();
-    }
+    let _ = hide_overlay_window_by_label(&app, "result_translation");
+    let _ = hide_overlay_window_by_label(&app, "result_explanation");
 
+    emit_writeback_phase(&app, "结果窗", "clipboard_written", None, None);
+    emit_writeback_phase(&app, "结果窗", "pasting", None, None);
+    let paste_started_at = std::time::Instant::now();
+    let app_for_paste = app.clone();
     let paste_result = tauri::async_runtime::spawn_blocking(move || {
-        let started_at = std::time::Instant::now();
-        let is_post_paste_ctrl_release_error = |err: &str| err.contains("释放 Ctrl");
-        let retry_delays = [10_u64, 22_u64, 36_u64];
-        match crate::ui::window_manager::simulate_paste() {
-            Ok(_) => Ok(()),
-            Err(first_error) => {
-                if is_post_paste_ctrl_release_error(&first_error) {
-                    if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
-                        log::warn!("复制后自动粘贴检测到Ctrl释放异常时兜底释放失败: {}", release_error);
-                    }
-                    return Err(first_error);
-                }
-                let mut final_error = first_error.clone();
-                for delay in retry_delays {
-                    thread::sleep(Duration::from_millis(delay));
-                    if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
-                        log::warn!("复制后自动粘贴重试前释放Ctrl失败: {}", release_error);
-                    }
-                    match crate::ui::window_manager::simulate_paste() {
-                        Ok(_) => {
-                            log::warn!(
-                                "复制后自动粘贴首次失败后重试成功: 首次错误={}, 总耗时={}ms",
-                                first_error,
-                                started_at.elapsed().as_millis()
-                            );
-                            return Ok(());
-                        }
-                        Err(next_error) => {
-                            final_error = next_error;
-                            if is_post_paste_ctrl_release_error(&final_error) {
-                                if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
-                                    log::warn!("复制后自动粘贴检测到Ctrl释放异常时兜底释放失败: {}", release_error);
-                                }
-                                return Err(final_error);
-                            }
-                        }
-                    }
-                }
-                if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
-                    log::warn!("复制后自动粘贴最终兜底释放Ctrl失败: {}", release_error);
-                }
-                Err(format!("首次错误: {}，最终错误: {}", first_error, final_error))
-            }
-        }
+        simulate_paste_with_retry(&app_for_paste, "结果窗", None, started_at, false)
     })
     .await
     .map_err(|e| frontend_error(ErrorCode::SystemError, "自动粘贴任务执行失败", e.to_string()))?;
-    if let Err(e) = paste_result {
-        if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
-            log::warn!("复制后自动粘贴失败时兜底释放Ctrl失败: {}", release_error);
+    match paste_result {
+        Ok(result) => {
+            record_writeback_stage_metric(
+                "结果窗",
+                "paste",
+                "结果窗回写粘贴耗时",
+                paste_started_at.elapsed().as_millis() as u64,
+                true,
+                None,
+            );
+            record_writeback_stage_metric(
+                "结果窗",
+                "total",
+                "结果窗回写总耗时",
+                started_at.elapsed().as_millis() as u64,
+                true,
+                None,
+            );
+            emit_writeback_phase(&app, "结果窗", "completed", result.operation_id, Some(result.detail.clone()));
+            emit_writeback_result(&app, &result);
+            Ok(result)
         }
-        return Err(frontend_error(ErrorCode::ClipboardError, "自动粘贴失败", e));
+        Err(result) => {
+            record_writeback_stage_metric(
+                "结果窗",
+                "paste",
+                "结果窗回写粘贴耗时",
+                paste_started_at.elapsed().as_millis() as u64,
+                false,
+                Some(result.detail.clone()),
+            );
+            record_writeback_stage_metric(
+                "结果窗",
+                "total",
+                "结果窗回写总耗时",
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some(result.detail.clone()),
+            );
+            if let Err(release_error) = crate::ui::window_manager::force_release_ctrl_key() {
+                log::warn!("复制后自动粘贴失败时兜底释放Ctrl失败: {}", release_error);
+            }
+            emit_writeback_phase(&app, "结果窗", "failed", result.operation_id, Some(result.detail.clone()));
+            emit_writeback_result(&app, &result);
+            Err(frontend_error(ErrorCode::ClipboardError, "自动粘贴失败", result.detail))
+        }
     }
-    Ok(())
 }
 
 #[tauri::command]
@@ -3698,6 +4241,1409 @@ pub async fn check_vc_runtime_dependencies() -> Result<serde_json::Value, String
             "missing": [],
             "installUrl": ""
         }))
+    }
+}
+
+fn sanitize_settings_for_backup(settings: &crate::utils::settings_model::AppSettingsData) -> crate::utils::settings_model::AppSettingsData {
+    let mut sanitized = settings.clone();
+    for config in sanitized.provider_configs.values_mut() {
+        config.encrypted_api_key.clear();
+    }
+    sanitized
+}
+
+async fn build_prepared_backup_data(
+    state: &Arc<Mutex<SharedAppState>>,
+) -> Result<PreparedBackupData, String> {
+    let (settings, clipboard_manager_arc, image_manager_arc) = {
+        let guard = state.lock().unwrap_or_else(|never| match never {});
+        (
+            sanitize_settings_for_backup(&guard.settings),
+            guard.clipboard_manager.clone(),
+            guard.image_clipboard_manager.clone(),
+        )
+    };
+
+    let text_history = {
+        let clipboard = lock_arc_mutex(&clipboard_manager_arc);
+        crate::utils::database::ClipboardHistoryData {
+            items: clipboard.get_history(),
+            categories: clipboard.get_categories(),
+            category_list: clipboard.get_category_list(),
+            pinned_items: clipboard.get_pinned_items(),
+        }
+    };
+
+    let (image_items, image_categories, image_category_list, image_tags, pinned_items) = {
+        let manager = lock_arc_mutex(&image_manager_arc);
+        (
+            manager.get_history(),
+            manager.get_categories(),
+            manager.get_category_list(),
+            manager.get_image_tags(),
+            manager.get_pinned_items(),
+        )
+    };
+
+    let mut warnings = vec!["API Key 不会被导出，恢复后需要重新填写".to_string()];
+    let mut blobs = Vec::new();
+    let mut backup_items = Vec::new();
+
+    for item in image_items {
+        if item.image_path.trim().is_empty() {
+            warnings.push(format!("图片 {} 缺少实体文件路径，已跳过", item.id));
+            continue;
+        }
+        let source = PathBuf::from(&item.image_path);
+        if !source.exists() {
+            warnings.push(format!("图片 {} 的实体文件不存在，已跳过", item.id));
+            continue;
+        }
+        let metadata = fs::metadata(&source).map_err(|e| format!("读取图片文件失败 {}: {}", source.display(), e))?;
+        let extension = source.extension().and_then(|ext| ext.to_str()).unwrap_or("png");
+        let package_path = format!("image_history/blobs/{}.{}", item.id, extension);
+        backup_items.push(BackupImageHistoryItem {
+            id: item.id.clone(),
+            width: item.width,
+            height: item.height,
+            blob_path: format!("blobs/{}.{}", item.id, extension),
+        });
+        blobs.push(BackupBlobFile {
+            item_id: item.id,
+            source_path: source.to_string_lossy().to_string(),
+            package_path,
+            file_size: metadata.len(),
+        });
+    }
+
+    let image_history = BackupImageHistoryFile {
+        items: backup_items,
+        categories: image_categories,
+        category_list: image_category_list,
+        image_tags,
+        pinned_items,
+    };
+
+    let settings_bytes = serde_json::to_vec(&crate::utils::backup_model::BackupSettingsFile {
+        settings: settings.clone(),
+    })
+    .map_err(|e| format!("序列化设置失败: {}", e))?;
+    let text_bytes = serde_json::to_vec(&crate::utils::backup_model::BackupTextHistoryFile {
+        snapshot: text_history.clone(),
+    })
+    .map_err(|e| format!("序列化文字历史失败: {}", e))?;
+    let image_bytes = serde_json::to_vec(&image_history).map_err(|e| format!("序列化图片历史失败: {}", e))?;
+    let blob_bytes = blobs.iter().map(|blob| blob.file_size).sum::<u64>();
+
+    Ok(PreparedBackupData {
+        settings,
+        text_history: text_history.clone(),
+        image_history: image_history.clone(),
+        blobs,
+        includes: crate::utils::backup_model::BackupIncludes {
+            settings: true,
+            text_history: true,
+            image_history: true,
+            image_blobs: true,
+            api_keys: false,
+            recordings: false,
+        },
+        stats: crate::utils::backup_model::BackupStats {
+            text_item_count: text_history.items.len(),
+            image_item_count: image_history.items.len(),
+            image_blob_count: image_history.items.len(),
+        },
+        estimated_bytes: settings_bytes.len() as u64 + text_bytes.len() as u64 + image_bytes.len() as u64 + blob_bytes,
+        warnings,
+    })
+}
+
+fn backup_preview_warnings_from_manifest(
+    manifest: &crate::utils::backup_model::BackupManifest,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if !manifest.includes.api_keys {
+        warnings.push("恢复后不会自动恢复 API Key".to_string());
+    }
+    if manifest.includes.image_history {
+        warnings.push("图片预览缓存会在恢复后重新生成".to_string());
+    }
+    warnings
+}
+
+fn default_backup_file_name() -> String {
+    format!("fuyun_tools_{}.fytbk.zip", now_unix_ms())
+}
+
+fn backup_frequency_interval_ms(frequency: &str) -> Option<i64> {
+    match frequency {
+        "daily" => Some(24 * 60 * 60 * 1000),
+        "weekly" => Some(7 * 24 * 60 * 60 * 1000),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteBackExecutionResult {
+    pub source: String,
+    pub success: bool,
+    pub stage: String,
+    pub target_window_title: String,
+    pub target_window_pid: u32,
+    pub detail: String,
+    pub operation_id: Option<u64>,
+}
+
+fn emit_writeback_result(app: &AppHandle, result: &WriteBackExecutionResult) {
+    let slot = LAST_WRITEBACK_RESULT.get_or_init(|| StdMutex::new(None));
+    if let Ok(mut guard) = slot.lock() {
+        *guard = Some(result.clone());
+    }
+    let _ = app.emit("writeback-result", result);
+}
+
+fn list_backup_history_items(target_dir: &Path) -> Result<Vec<BackupHistoryItem>, String> {
+    if !target_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut items = Vec::new();
+    for entry in fs::read_dir(target_dir).map_err(|e| format!("读取备份目录失败: {}", e))? {
+        let entry = entry.map_err(|e| format!("读取备份目录项失败: {}", e))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !file_name.ends_with(".fytbk.zip") {
+            continue;
+        }
+        let metadata = entry.metadata().map_err(|e| format!("读取备份文件信息失败: {}", e))?;
+        let created_at = metadata
+            .modified()
+            .unwrap_or_else(|_| SystemTime::now())
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        items.push(BackupHistoryItem {
+            file_name: file_name.to_string(),
+            file_path: path.to_string_lossy().to_string(),
+            file_size_bytes: metadata.len(),
+            created_at,
+        });
+    }
+    items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(items)
+}
+
+fn current_backup_settings() -> Result<BackupSettingsData, String> {
+    let settings = load_settings()?;
+    Ok(BackupSettingsData {
+        enabled: settings.backup_enabled,
+        frequency: settings.backup_frequency,
+        target_dir: settings.backup_target_dir,
+        max_backup_count: settings.backup_max_count,
+        last_run_at: settings.backup_last_run_at,
+        last_run_status: settings.backup_last_run_status,
+    })
+}
+
+fn update_backup_run_state(target_path: &str, status: &str) -> Result<(), String> {
+    let mut settings = load_settings()?;
+    if let Some(parent) = Path::new(target_path).parent() {
+        settings.backup_target_dir = parent.to_string_lossy().to_string();
+    }
+    settings.backup_last_run_at = now_unix_ms() as i64;
+    settings.backup_last_run_status = status.to_string();
+    save_settings(&settings)
+}
+
+async fn export_backup_internal(
+    target_path: &Path,
+    state: &Arc<Mutex<SharedAppState>>,
+) -> Result<BackupExportResultData, String> {
+    let prepare_started_at = std::time::Instant::now();
+    let prepared = build_prepared_backup_data(state).await.map_err(|error| {
+        record_perf_metric(
+            "backup.export_stage.prepare_data",
+            "备份导出准备数据耗时",
+            prepare_started_at.elapsed().as_millis() as u64,
+            false,
+            Some(error.clone()),
+        );
+        error
+    })?;
+    record_perf_metric(
+        "backup.export_stage.prepare_data",
+        "备份导出准备数据耗时",
+        prepare_started_at.elapsed().as_millis() as u64,
+        true,
+        None,
+    );
+    let temp_dir = create_backup_temp_dir()?;
+    let app_version = {
+        let guard = state.lock().unwrap_or_else(|never| match never {});
+        guard.settings.version.clone()
+    };
+    let payload_started_at = std::time::Instant::now();
+    let manifest_result = write_backup_payload(&temp_dir, &prepared, &app_version);
+    if let Err(err) = manifest_result {
+        record_perf_metric(
+            "backup.export_stage.write_payload",
+            "备份导出写入载荷耗时",
+            payload_started_at.elapsed().as_millis() as u64,
+            false,
+            Some(err.clone()),
+        );
+        cleanup_dir(&temp_dir);
+        return Err(err);
+    }
+    let manifest = manifest_result?;
+    record_perf_metric(
+        "backup.export_stage.write_payload",
+        "备份导出写入载荷耗时",
+        payload_started_at.elapsed().as_millis() as u64,
+        true,
+        None,
+    );
+    let zip_started_at = std::time::Instant::now();
+    let zip_result = zip_backup_dir(&temp_dir, target_path);
+    cleanup_dir(&temp_dir);
+    let file_size_bytes = match zip_result {
+        Ok(value) => {
+            record_perf_metric(
+                "backup.export_stage.zip_package",
+                "备份导出打包压缩耗时",
+                zip_started_at.elapsed().as_millis() as u64,
+                true,
+                None,
+            );
+            value
+        }
+        Err(error) => {
+            record_perf_metric(
+                "backup.export_stage.zip_package",
+                "备份导出打包压缩耗时",
+                zip_started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            );
+            return Err(error);
+        }
+    };
+    update_backup_run_state(&target_path.to_string_lossy(), "success")?;
+    Ok(BackupExportResultData {
+        file_path: target_path.to_string_lossy().to_string(),
+        file_size_bytes,
+        created_at: manifest.created_at,
+        stats: manifest.stats,
+    })
+}
+
+pub async fn run_auto_backup_tick(
+    state: Arc<Mutex<SharedAppState>>,
+) -> Result<bool, String> {
+    let settings = current_backup_settings()?;
+    if !settings.enabled {
+        return Ok(false);
+    }
+    let Some(interval_ms) = backup_frequency_interval_ms(&settings.frequency) else {
+        return Ok(false);
+    };
+    if settings.target_dir.trim().is_empty() {
+        let mut raw_settings = load_settings()?;
+        raw_settings.backup_last_run_at = now_unix_ms() as i64;
+        raw_settings.backup_last_run_status = "misconfigured".to_string();
+        save_settings(&raw_settings)?;
+        return Err("自动备份目录未配置".to_string());
+    }
+
+    let now_ms = now_unix_ms() as i64;
+    let due = settings.last_run_at <= 0 || now_ms.saturating_sub(settings.last_run_at) >= interval_ms;
+    if !due {
+        return Ok(false);
+    }
+    if AUTO_BACKUP_IN_FLIGHT.swap(true, Ordering::AcqRel) {
+        return Ok(false);
+    }
+    let mut raw_settings = load_settings()?;
+    raw_settings.backup_last_run_at = now_unix_ms() as i64;
+    raw_settings.backup_last_run_status = "running".to_string();
+    save_settings(&raw_settings)?;
+
+    let run_result = async {
+        let target_path = Path::new(&settings.target_dir).join(default_backup_file_name());
+        let response = export_backup_internal(&target_path, &state).await?;
+        let history_items = list_backup_history_items(Path::new(&settings.target_dir))?;
+        if history_items.len() > settings.max_backup_count {
+            for item in history_items.iter().skip(settings.max_backup_count) {
+                let _ = fs::remove_file(&item.file_path);
+            }
+        }
+        Ok::<BackupExportResultData, String>(response)
+    }
+    .await;
+
+    AUTO_BACKUP_IN_FLIGHT.store(false, Ordering::Release);
+
+    match run_result {
+        Ok(_) => Ok(true),
+        Err(err) => {
+            let mut raw_settings = load_settings()?;
+            raw_settings.backup_last_run_at = now_unix_ms() as i64;
+            raw_settings.backup_last_run_status = "failed".to_string();
+            save_settings(&raw_settings)?;
+            Err(err)
+        }
+    }
+}
+
+async fn build_diagnostic_items_inner(
+    state: &Arc<Mutex<SharedAppState>>,
+) -> Result<Vec<DiagnosticItem>, String> {
+    let checked_at = now_unix_ms() as i64;
+    let (settings, image_manager_arc, active_overlay_window, last_overlay_lifecycle, overlay_lifecycle_history) = {
+        let guard = state.lock().unwrap_or_else(|never| match never {});
+        (
+            guard.settings.clone(),
+            guard.image_clipboard_manager.clone(),
+            guard.active_overlay_window.clone(),
+            guard.last_overlay_lifecycle.clone(),
+            guard.overlay_lifecycle_history.clone(),
+        )
+    };
+    let storage_metrics = {
+        let manager = lock_arc_mutex(&image_manager_arc);
+        manager.get_storage_metrics()
+    };
+    let queue_metrics = get_image_persist_queue_metrics_snapshot();
+    let mut perf_metrics = get_perf_metrics_snapshot();
+    let dedup_state = get_copy_paste_dedup_debug_state_value();
+    let vc_runtime = check_vc_runtime_dependencies().await?;
+    let longshot = get_manual_longshot_availability().await?;
+
+    let memory_ratio = if storage_metrics.memory_budget_bytes == 0 {
+        0.0
+    } else {
+        storage_metrics.memory_bytes as f64 / storage_metrics.memory_budget_bytes as f64
+    };
+    let disk_ratio = if storage_metrics.disk_limit_bytes == 0 {
+        0.0
+    } else {
+        storage_metrics.disk_bytes as f64 / storage_metrics.disk_limit_bytes as f64
+    };
+    let image_storage_status = if memory_ratio >= 1.0 || disk_ratio >= 1.0 {
+        "error"
+    } else if memory_ratio >= 0.8 || disk_ratio >= 0.8 {
+        "warning"
+    } else {
+        "healthy"
+    };
+
+    let persist_status = if queue_metrics.timeout_drop_count > 0 || queue_metrics.full_count > 20 {
+        "error"
+    } else if queue_metrics.full_count > 0 {
+        "warning"
+    } else {
+        "healthy"
+    };
+
+    let vc_ok = vc_runtime
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+    let vc_missing = vc_runtime
+        .get("missing")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let dependency_status = if vc_ok { "healthy" } else { "error" };
+    let dependency_summary = if vc_ok {
+        "运行依赖检查正常".to_string()
+    } else {
+        format!("VC Runtime 缺失 {} 项依赖", vc_missing.len())
+    };
+
+    let recording_status = if settings.dev_force_ffmpeg_window_capture {
+        "warning"
+    } else {
+        "healthy"
+    };
+    let recording_summary = if settings.dev_force_ffmpeg_window_capture {
+        "当前录屏处于强制 FFmpeg 降级模式".to_string()
+    } else {
+        "当前录屏主链路未强制降级".to_string()
+    };
+    perf_metrics.sort_by(|a, b| {
+        b.avg_duration_ms
+            .partial_cmp(&a.avg_duration_ms)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.key.cmp(&b.key))
+    });
+    let perf_error_items = perf_metrics
+        .iter()
+        .filter(|item| item.last_status == "error")
+        .collect::<Vec<_>>();
+    let perf_slow_items = perf_metrics
+        .iter()
+        .filter(|item| perf_metric_is_slow(item))
+        .collect::<Vec<_>>();
+    let perf_status = if perf_metrics.is_empty() {
+        "unknown"
+    } else if !perf_error_items.is_empty() {
+        "warning"
+    } else if !perf_slow_items.is_empty() {
+        "warning"
+    } else {
+        "healthy"
+    };
+    let perf_summary = if let Some(item) = perf_metrics.first() {
+        format!(
+            "已采样 {} 条链路，慢项 {} 条，异常 {} 条，当前平均最慢项 {} {:.0} ms",
+            perf_metrics.len(),
+            perf_slow_items.len(),
+            perf_error_items.len(),
+            item.label,
+            item.avg_duration_ms
+        )
+    } else {
+        "尚无性能采样记录，触发 OCR、AI 或截图保存后会出现数据".to_string()
+    };
+    let mut perf_grouped: BTreeMap<String, Vec<&crate::core::perf_metrics::PerfMetricSnapshot>> = BTreeMap::new();
+    for item in &perf_metrics {
+        perf_grouped
+            .entry(perf_metric_group_label(&item.key).to_string())
+            .or_default()
+            .push(item);
+    }
+    let mut perf_group_summaries = perf_grouped
+        .into_iter()
+        .collect::<Vec<_>>();
+    perf_group_summaries.sort_by(|(left, _), (right, _)| {
+        perf_metric_group_rank(left)
+            .cmp(&perf_metric_group_rank(right))
+            .then_with(|| left.cmp(right))
+    });
+    let mut perf_details = Vec::new();
+    if !perf_error_items.is_empty() {
+        perf_details.extend(perf_error_items.iter().take(3).map(|item| {
+            format!(
+                "[最近异常] {}: last {} ms / error {}",
+                item.label,
+                item.last_duration_ms,
+                item.last_error.clone().unwrap_or_else(|| "未知错误".to_string())
+            )
+        }));
+    } else {
+        perf_details.push("最近异常: 无".to_string());
+    }
+    if !perf_slow_items.is_empty() {
+        perf_details.extend(perf_slow_items.iter().take(4).map(|item| {
+            format!(
+                "[慢项] {}: avg {:.0} ms / max {} ms / samples {}",
+                item.label,
+                item.avg_duration_ms,
+                item.max_duration_ms,
+                item.sample_count
+            )
+        }));
+    } else if !perf_metrics.is_empty() {
+        perf_details.push("慢项提示: 当前没有超阈值链路".to_string());
+    }
+    perf_details.extend(perf_group_summaries.into_iter().map(|(group, items)| {
+        let slow_count = items.iter().filter(|item| perf_metric_is_slow(item)).count();
+        let error_count = items.iter().filter(|item| item.last_status == "error").count();
+        let slowest = items
+            .iter()
+            .max_by(|left, right| {
+                left.avg_duration_ms
+                    .partial_cmp(&right.avg_duration_ms)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .copied();
+        match slowest {
+            Some(item) => format!(
+                "[分组] {}: {} 条 / 慢项 {} / 异常 {} / 最慢 {} {:.0} ms",
+                group,
+                items.len(),
+                slow_count,
+                error_count,
+                item.label,
+                item.avg_duration_ms
+            ),
+            None => format!("[分组] {}: 0 条", group),
+        }
+    }));
+
+    let window_hit_rate = dedup_state
+        .get("metrics")
+        .and_then(|value| value.get("windowHitRate"))
+        .and_then(|value| value.as_f64())
+        .unwrap_or(0.0);
+    let dedup_enabled = dedup_state.get("enabled").and_then(|value| value.as_bool()).unwrap_or(true);
+    let dedup_status = if !dedup_enabled {
+        "warning"
+    } else if window_hit_rate > 0.8 {
+        "warning"
+    } else {
+        "healthy"
+    };
+    let dedup_summary = if !dedup_enabled {
+        "回写去重已关闭".to_string()
+    } else {
+        format!("当前命中率 {:.1}%", window_hit_rate * 100.0)
+    };
+    let last_writeback = last_writeback_result();
+    let writeback_status = match last_writeback.as_ref() {
+        Some(item) if item.success => "healthy",
+        Some(_) => "warning",
+        None => "unknown",
+    };
+    let writeback_summary = match last_writeback.as_ref() {
+        Some(item) if item.success => format!(
+            "{} 最近一次回写成功{}",
+            item.source,
+            if item.target_window_title.is_empty() {
+                String::new()
+            } else {
+                format!("，目标窗口 {}", item.target_window_title)
+            }
+        ),
+        Some(item) => format!("{} 最近一次回写失败：{}", item.source, item.detail),
+        None => "最近还没有回写执行记录".to_string(),
+    };
+
+    let longshot_status = match longshot.status.as_str() {
+        "available" => "healthy",
+        "busy" => "warning",
+        "unavailable_missing_dependency" | "unavailable_runtime_error" => "error",
+        _ => "unknown",
+    };
+
+    let mut longshot_details = longshot.details.clone();
+    longshot_details.push(format!("当前阶段: {}", longshot.phase));
+    if let Some(kind) = longshot.recent_failure_kind.as_ref() {
+        longshot_details.push(format!("最近失败类型: {}", kind));
+    }
+    if let Some(message) = longshot.recent_failure_message.as_ref() {
+        longshot_details.push(format!("最近失败原因: {}", message));
+    }
+    if let Some(at) = longshot.recent_failure_at {
+        longshot_details.push(format!("最近失败时间: {}", at));
+    }
+    if longshot.status == "unavailable_missing_dependency" {
+        longshot_details.push("修复建议: 先确认 FFmpeg 可执行文件可用，再检查 longshot-opencv 构建能力".to_string());
+    } else if longshot.status == "busy" {
+        longshot_details.push("修复建议: 完成或取消当前长截图会话后再重试".to_string());
+    } else if longshot.recent_failure_kind.as_deref() == Some("runtime_error") {
+        longshot_details.push("修复建议: 重新开始一次长截图，若仍失败请打开诊断并检查最近失败原因".to_string());
+    }
+
+    let mut longshot_actions = vec![
+        DiagnosticAction {
+            key: "diagnostic.refresh".to_string(),
+            label: "重新检查".to_string(),
+            action_type: "refresh".to_string(),
+            target: None,
+        },
+        DiagnosticAction {
+            key: "longshot.open-settings".to_string(),
+            label: "查看截图设置".to_string(),
+            action_type: "open_settings".to_string(),
+            target: Some("screenshot".to_string()),
+        },
+    ];
+    if longshot.status == "unavailable_missing_dependency" {
+        longshot_actions.push(DiagnosticAction {
+            key: "longshot.show-help".to_string(),
+            label: "查看修复说明".to_string(),
+            action_type: "show_help".to_string(),
+            target: None,
+        });
+        longshot_actions.push(DiagnosticAction {
+            key: "longshot.download-ffmpeg".to_string(),
+            label: "下载 FFmpeg".to_string(),
+            action_type: "open_external".to_string(),
+            target: None,
+        });
+        longshot_actions.push(DiagnosticAction {
+            key: "longshot.show-build-help".to_string(),
+            label: "查看构建要求".to_string(),
+            action_type: "show_help".to_string(),
+            target: None,
+        });
+    } else if longshot.recent_failure_kind.as_deref() == Some("runtime_error") {
+        longshot_actions.push(DiagnosticAction {
+            key: "longshot.show-runtime-help".to_string(),
+            label: "查看失败说明".to_string(),
+            action_type: "show_help".to_string(),
+            target: None,
+        });
+    }
+
+    Ok(vec![
+        DiagnosticItem {
+            key: "image-storage".to_string(),
+            title: "图片存储占用".to_string(),
+            status: image_storage_status.to_string(),
+            summary: format!(
+                "当前 {} 张图片，磁盘 {:.0}% / 内存 {:.0}%",
+                storage_metrics.item_count,
+                disk_ratio * 100.0,
+                memory_ratio * 100.0
+            ),
+            details: vec![
+                format!("磁盘占用 {} / {} 字节", storage_metrics.disk_bytes, storage_metrics.disk_limit_bytes),
+                format!("内存占用 {} / {} 字节", storage_metrics.memory_bytes, storage_metrics.memory_budget_bytes),
+                format!("置顶图片 {} 张", storage_metrics.pinned_count),
+            ],
+            actions: vec![
+                DiagnosticAction {
+                    key: "diagnostic.refresh".to_string(),
+                    label: "刷新".to_string(),
+                    action_type: "refresh".to_string(),
+                    target: None,
+                },
+                DiagnosticAction {
+                    key: "image-storage.open-settings".to_string(),
+                    label: "打开设置".to_string(),
+                    action_type: "open_settings".to_string(),
+                    target: Some("clipboard".to_string()),
+                },
+            ],
+            last_checked_at: checked_at,
+        },
+        DiagnosticItem {
+            key: "image-persist-queue".to_string(),
+            title: "图片持久化队列".to_string(),
+            status: persist_status.to_string(),
+            summary: format!(
+                "队列容量 {}，满队 {} 次，超时丢弃 {} 次",
+                queue_metrics.queue_size, queue_metrics.full_count, queue_metrics.timeout_drop_count
+            ),
+            details: vec![
+                format!("发送超时 {} ms", queue_metrics.send_timeout_ms),
+                format!("重试间隔 {} ms", queue_metrics.retry_interval_ms),
+                format!("平均等待 {:.1} ms", queue_metrics.avg_wait_ms),
+            ],
+            actions: vec![DiagnosticAction {
+                key: "diagnostic.refresh".to_string(),
+                label: "刷新".to_string(),
+                action_type: "refresh".to_string(),
+                target: None,
+            }],
+            last_checked_at: checked_at,
+        },
+        DiagnosticItem {
+            key: "dependencies".to_string(),
+            title: "依赖检查状态".to_string(),
+            status: dependency_status.to_string(),
+            summary: dependency_summary,
+            details: vec![
+                format!(
+                    "VC Runtime: {}",
+                    if vc_ok { "已就绪" } else { "缺失" }
+                ),
+                format!(
+                    "FFmpeg: {}",
+                    if crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path().is_ok() {
+                        "已就绪"
+                    } else {
+                        "未检测到"
+                    }
+                ),
+                if vc_missing.is_empty() {
+                    "无缺失的 VC Runtime 组件".to_string()
+                } else {
+                    format!(
+                        "缺失组件: {}",
+                        vc_missing
+                            .into_iter()
+                            .filter_map(|value| value.as_str().map(|s| s.to_string()))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                },
+            ],
+            actions: vec![
+                DiagnosticAction {
+                    key: "diagnostic.refresh".to_string(),
+                    label: "重新检查".to_string(),
+                    action_type: "refresh".to_string(),
+                    target: None,
+                },
+                DiagnosticAction {
+                    key: "dependencies.download-vc-runtime".to_string(),
+                    label: "下载依赖".to_string(),
+                    action_type: "download_dependency".to_string(),
+                    target: vc_runtime
+                        .get("installUrl")
+                        .and_then(|value| value.as_str())
+                        .map(|value| value.to_string()),
+                },
+            ],
+            last_checked_at: checked_at,
+        },
+        DiagnosticItem {
+            key: "recording-degrade".to_string(),
+            title: "录屏降级状态".to_string(),
+            status: recording_status.to_string(),
+            summary: recording_summary,
+            details: vec![
+                format!(
+                    "强制 FFmpeg 降级: {}",
+                    if settings.dev_force_ffmpeg_window_capture { "已开启" } else { "未开启" }
+                ),
+                format!("录屏开关: {}", if settings.recording_enabled { "已启用" } else { "未启用" }),
+            ],
+            actions: vec![
+                DiagnosticAction {
+                    key: "diagnostic.refresh".to_string(),
+                    label: "刷新".to_string(),
+                    action_type: "refresh".to_string(),
+                    target: None,
+                },
+                DiagnosticAction {
+                    key: "recording-degrade.open-settings".to_string(),
+                    label: "打开录屏设置".to_string(),
+                    action_type: "open_settings".to_string(),
+                    target: Some("recording".to_string()),
+                },
+            ],
+            last_checked_at: checked_at,
+        },
+        DiagnosticItem {
+            key: "performance-metrics".to_string(),
+            title: "关键链路性能观测".to_string(),
+            status: perf_status.to_string(),
+            summary: perf_summary,
+            details: if perf_metrics.is_empty() {
+                vec![
+                    "当前还没有运行时性能采样".to_string(),
+                    "可先触发 OCR、AI 翻译/解释、截图保存等链路".to_string(),
+                ]
+            } else {
+                perf_details
+            },
+            actions: vec![
+                DiagnosticAction {
+                    key: "diagnostic.refresh".to_string(),
+                    label: "刷新".to_string(),
+                    action_type: "refresh".to_string(),
+                    target: None,
+                },
+                DiagnosticAction {
+                    key: "perf-metrics.reset".to_string(),
+                    label: "清零采样".to_string(),
+                    action_type: "reset_metrics".to_string(),
+                    target: None,
+                },
+            ],
+            last_checked_at: checked_at,
+        },
+        DiagnosticItem {
+            key: "overlay-window".to_string(),
+            title: "覆盖层窗口状态".to_string(),
+            status: if active_overlay_window.is_some() { "warning" } else { "healthy" }.to_string(),
+            summary: match active_overlay_window.as_deref() {
+                Some(label) => format!("当前活动覆盖层窗口: {}", label),
+                None => "当前没有活动覆盖层窗口".to_string(),
+            },
+            details: vec![
+                "用于观察工具栏、剪贴板窗、结果窗、预览窗的生命周期一致性".to_string(),
+                match active_overlay_window.as_deref() {
+                    Some(label) => format!("活动窗口标签: {}", label),
+                    None => "活动窗口标签: 无".to_string(),
+                },
+                match last_overlay_lifecycle.as_ref() {
+                    Some(item) => format!(
+                        "最近动作: {} -> {} (focused={}, at={})",
+                        item.label, item.action, item.focused, item.occurred_at
+                    ),
+                    None => "最近动作: 无".to_string(),
+                },
+            ]
+            .into_iter()
+            .chain(
+                overlay_lifecycle_history
+                    .iter()
+                    .rev()
+                    .take(5)
+                    .map(|item| {
+                        format!(
+                            "历史: {} -> {} (focused={}, at={})",
+                            item.label, item.action, item.focused, item.occurred_at
+                        )
+                    }),
+            )
+            .collect(),
+            actions: vec![DiagnosticAction {
+                key: "diagnostic.refresh".to_string(),
+                label: "刷新".to_string(),
+                action_type: "refresh".to_string(),
+                target: None,
+            }],
+            last_checked_at: checked_at,
+        },
+        DiagnosticItem {
+            key: "copy-paste-dedup".to_string(),
+            title: "回写去重状态".to_string(),
+            status: dedup_status.to_string(),
+            summary: dedup_summary,
+            details: vec![
+                format!("总请求数 {}", dedup_state["metrics"]["totalRequests"].as_u64().unwrap_or(0)),
+                format!("命中总数 {}", dedup_state["metrics"]["hitCount"].as_u64().unwrap_or(0)),
+                format!("时间窗口 {} ms", dedup_state["windowMs"].as_u64().unwrap_or(0)),
+            ],
+            actions: vec![
+                DiagnosticAction {
+                    key: "diagnostic.refresh".to_string(),
+                    label: "刷新".to_string(),
+                    action_type: "refresh".to_string(),
+                    target: None,
+                },
+                DiagnosticAction {
+                    key: "copy-paste-dedup.reset-metrics".to_string(),
+                    label: "清零计数".to_string(),
+                    action_type: "reset_metrics".to_string(),
+                    target: None,
+                },
+                DiagnosticAction {
+                    key: "copy-paste-dedup.open-settings".to_string(),
+                    label: "调整设置".to_string(),
+                    action_type: "open_settings".to_string(),
+                    target: Some("selection".to_string()),
+                },
+            ],
+            last_checked_at: checked_at,
+        },
+        DiagnosticItem {
+            key: "writeback-flow".to_string(),
+            title: "回写链路状态".to_string(),
+            status: writeback_status.to_string(),
+            summary: writeback_summary,
+            details: match last_writeback.as_ref() {
+                Some(item) => vec![
+                    format!("来源 {}", item.source),
+                    format!("阶段 {}", item.stage),
+                    format!(
+                        "目标窗口 {}",
+                        if item.target_window_title.is_empty() {
+                            "未知".to_string()
+                        } else {
+                            item.target_window_title.clone()
+                        }
+                    ),
+                    format!("目标进程 PID {}", item.target_window_pid),
+                ],
+                None => vec![
+                    "尚无最近回写结果".to_string(),
+                    "可通过文字历史、图片历史或结果窗触发一次回写".to_string(),
+                ],
+            },
+            actions: vec![
+                DiagnosticAction {
+                    key: "diagnostic.refresh".to_string(),
+                    label: "刷新".to_string(),
+                    action_type: "refresh".to_string(),
+                    target: None,
+                },
+                DiagnosticAction {
+                    key: "writeback-flow.open-settings".to_string(),
+                    label: "查看划词设置".to_string(),
+                    action_type: "open_settings".to_string(),
+                    target: Some("selection".to_string()),
+                },
+            ],
+            last_checked_at: checked_at,
+        },
+        DiagnosticItem {
+            key: "longshot".to_string(),
+            title: "长截图可用性状态".to_string(),
+            status: longshot_status.to_string(),
+            summary: longshot.summary,
+            details: longshot_details,
+            actions: longshot_actions,
+            last_checked_at: checked_at,
+        },
+    ])
+}
+
+#[tauri::command]
+pub async fn preview_backup_export(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<BackupExportPreviewResponse, String> {
+    let started_at = std::time::Instant::now();
+    let prepared = match build_prepared_backup_data(state.inner()).await {
+        Ok(value) => {
+            record_perf_metric(
+                "backup.preview_export",
+                "备份导出预览耗时",
+                started_at.elapsed().as_millis() as u64,
+                true,
+                None,
+            );
+            value
+        }
+        Err(error) => {
+            record_perf_metric(
+                "backup.preview_export",
+                "备份导出预览耗时",
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            );
+            return Err(error);
+        }
+    };
+    Ok(BackupExportPreviewResponse {
+        success: true,
+        message: "已生成导出预览".to_string(),
+        data: BackupExportPreviewData {
+            includes: prepared.includes,
+            stats: prepared.stats,
+            estimated_bytes: prepared.estimated_bytes,
+            warnings: prepared.warnings,
+        },
+    })
+}
+
+#[tauri::command]
+pub async fn export_backup_to_path(
+    request: BackupExportRequest,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<BackupExportResultResponse, String> {
+    let started_at = std::time::Instant::now();
+    let target = PathBuf::from(request.target_path);
+    let result = export_backup_internal(&target, state.inner()).await;
+    if let Err(err) = &result {
+        let _ = update_backup_run_state(&target.to_string_lossy(), "failed");
+        record_perf_metric(
+            "backup.export",
+            "备份导出耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(err.clone()),
+        );
+        return Err(err.clone());
+    }
+    record_perf_metric(
+        "backup.export",
+        "备份导出耗时",
+        started_at.elapsed().as_millis() as u64,
+        true,
+        None,
+    );
+    Ok(BackupExportResultResponse {
+        success: true,
+        message: "备份导出成功".to_string(),
+        data: result?,
+    })
+}
+
+#[tauri::command]
+pub async fn preview_backup_package(
+    request: BackupPackagePreviewRequest,
+) -> Result<BackupPackagePreviewResponse, String> {
+    let started_at = std::time::Instant::now();
+    let manifest = match read_manifest_from_package(Path::new(&request.package_path)) {
+        Ok(value) => {
+            record_perf_metric(
+                "backup.preview_package",
+                "备份包预览耗时",
+                started_at.elapsed().as_millis() as u64,
+                true,
+                None,
+            );
+            value
+        }
+        Err(error) => {
+            record_perf_metric(
+                "backup.preview_package",
+                "备份包预览耗时",
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            );
+            return Err(error);
+        }
+    };
+    Ok(BackupPackagePreviewResponse {
+        success: true,
+        message: "已读取备份包".to_string(),
+        data: BackupPackagePreviewData {
+            includes: manifest.includes.clone(),
+            stats: manifest.stats.clone(),
+            warnings: backup_preview_warnings_from_manifest(&manifest),
+            restore_options: BackupRestoreOptions {
+                can_restore_settings: manifest.includes.settings,
+                can_restore_text_history: manifest.includes.text_history,
+                can_restore_image_history: manifest.includes.image_history,
+            },
+            manifest,
+        },
+    })
+}
+
+#[tauri::command]
+pub async fn restore_backup_package(
+    request: BackupRestoreRequest,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<BackupRestoreResultResponse, String> {
+    let started_at = std::time::Instant::now();
+    let result = match execute_restore_backup_package(state.inner().clone(), request).await {
+        Ok(value) => {
+            record_perf_metric(
+                "backup.restore",
+                "备份恢复耗时",
+                started_at.elapsed().as_millis() as u64,
+                true,
+                None,
+            );
+            value
+        }
+        Err(error) => {
+            record_perf_metric(
+                "backup.restore",
+                "备份恢复耗时",
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            );
+            return Err(error);
+        }
+    };
+    cleanup_dir(&result.extracted_dir);
+    if let Some(rollback_dir) = &result.rollback_dir {
+        cleanup_dir(rollback_dir);
+    }
+    Ok(BackupRestoreResultResponse {
+        success: true,
+        message: "备份恢复完成".to_string(),
+        data: result.data,
+    })
+}
+
+#[tauri::command]
+pub async fn get_backup_settings() -> Result<BackupSettingsData, String> {
+    current_backup_settings()
+}
+
+#[tauri::command]
+pub async fn save_backup_settings(request: SaveBackupSettingsRequest) -> Result<BackupSettingsData, String> {
+    let mut settings = load_settings()?;
+    settings.backup_enabled = request.enabled;
+    settings.backup_frequency = if request.frequency.trim().is_empty() {
+        "weekly".to_string()
+    } else {
+        request.frequency.trim().to_string()
+    };
+    settings.backup_target_dir = request.target_dir.trim().to_string();
+    settings.backup_max_count = request.max_backup_count.clamp(1, 50);
+    save_settings(&settings)?;
+    current_backup_settings()
+}
+
+#[tauri::command]
+pub async fn list_backup_history() -> Result<Vec<BackupHistoryItem>, String> {
+    let settings = current_backup_settings()?;
+    if settings.target_dir.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    list_backup_history_items(Path::new(&settings.target_dir))
+}
+
+#[tauri::command]
+pub async fn delete_backup_history_item(request: DeleteBackupHistoryItemRequest) -> Result<(), String> {
+    let path = PathBuf::from(request.file_path);
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| format!("删除备份文件失败: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn run_manual_backup(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<BackupExportResultResponse, String> {
+    let started_at = std::time::Instant::now();
+    let settings = current_backup_settings()?;
+    if settings.target_dir.trim().is_empty() {
+        return Err("请先配置自动备份目录".to_string());
+    }
+    let target_path = Path::new(&settings.target_dir).join(default_backup_file_name());
+    let response = match export_backup_internal(&target_path, state.inner()).await {
+        Ok(value) => {
+            record_perf_metric(
+                "backup.manual_export",
+                "手动备份耗时",
+                started_at.elapsed().as_millis() as u64,
+                true,
+                None,
+            );
+            value
+        }
+        Err(error) => {
+            record_perf_metric(
+                "backup.manual_export",
+                "手动备份耗时",
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            );
+            return Err(error);
+        }
+    };
+
+    let history_items = list_backup_history_items(Path::new(&settings.target_dir))?;
+    if history_items.len() > settings.max_backup_count {
+        for item in history_items.iter().skip(settings.max_backup_count) {
+            let _ = fs::remove_file(&item.file_path);
+        }
+    }
+
+    Ok(BackupExportResultResponse {
+        success: true,
+        message: "手动备份完成".to_string(),
+        data: response,
+    })
+}
+
+#[tauri::command]
+pub async fn get_manual_longshot_availability() -> Result<ManualLongshotAvailability, String> {
+    #[cfg(not(feature = "longshot-opencv"))]
+    {
+        return Ok(ManualLongshotAvailability {
+            status: "unavailable_missing_dependency".to_string(),
+            phase: "idle".to_string(),
+            summary: "当前构建未启用长截图依赖".to_string(),
+            details: vec![
+                "需要启用 longshot-opencv feature".to_string(),
+                "默认构建未携带 OpenCV 长截图能力".to_string(),
+                "该问题属于构建能力缺失，无法通过当前运行时自动修复".to_string(),
+            ],
+            session_id: None,
+            recent_failure_kind: None,
+            recent_failure_message: None,
+            recent_failure_at: None,
+        });
+    }
+
+    #[cfg(feature = "longshot-opencv")]
+    {
+        let recent_failure = crate::features::screenshot::longshot::get_last_manual_longshot_failure();
+        let session_id = crate::features::screenshot::longshot::active_manual_longshot_session_id();
+        if let Some(session_id) = session_id {
+            let status = crate::features::screenshot::longshot::get_manual_longshot_status(session_id)
+                .map_err(|e| format!("读取长截图状态失败: {}", e))?;
+            return Ok(ManualLongshotAvailability {
+                status: "busy".to_string(),
+                phase: status.phase.clone(),
+                summary: status.user_message,
+                details: vec![
+                    format!("当前阶段: {}", status.phase),
+                    "请先完成或取消当前长截图会话".to_string(),
+                ],
+                session_id: Some(session_id),
+                recent_failure_kind: recent_failure.as_ref().map(|item| item.failure_kind.clone()),
+                recent_failure_message: recent_failure.as_ref().map(|item| item.message.clone()),
+                recent_failure_at: recent_failure.as_ref().map(|item| item.occurred_at),
+            });
+        }
+        match crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path() {
+            Ok(path) => Ok(ManualLongshotAvailability {
+                status: "available".to_string(),
+                phase: "idle".to_string(),
+                summary: "长截图当前可用".to_string(),
+                details: vec![
+                    format!("已检测到 FFmpeg: {}", path.display()),
+                    "当前构建已启用 longshot-opencv feature".to_string(),
+                ],
+                session_id: None,
+                recent_failure_kind: recent_failure.as_ref().map(|item| item.failure_kind.clone()),
+                recent_failure_message: recent_failure.as_ref().map(|item| item.message.clone()),
+                recent_failure_at: recent_failure.as_ref().map(|item| item.occurred_at),
+            }),
+            Err(err) => Ok(ManualLongshotAvailability {
+                status: "unavailable_missing_dependency".to_string(),
+                phase: "idle".to_string(),
+                summary: "长截图依赖未就绪".to_string(),
+                details: vec![
+                    err,
+                    "请先确保 FFmpeg 可执行文件可用，再重新检查".to_string(),
+                    "若当前构建未携带 longshot-opencv feature，也需要切换到支持长截图的构建".to_string(),
+                ],
+                session_id: None,
+                recent_failure_kind: recent_failure.as_ref().map(|item| item.failure_kind.clone()),
+                recent_failure_message: recent_failure.as_ref().map(|item| item.message.clone()),
+                recent_failure_at: recent_failure.as_ref().map(|item| item.occurred_at),
+            }),
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn get_diagnostic_items(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<Vec<DiagnosticItem>, String> {
+    build_diagnostic_items_inner(state.inner()).await
+}
+
+#[tauri::command]
+pub async fn get_diagnostic_overview(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<DiagnosticOverview, String> {
+    let items = build_diagnostic_items_inner(state.inner()).await?;
+    let error_count = items.iter().filter(|item| item.status == "error").count();
+    let warning_count = items.iter().filter(|item| item.status == "warning").count();
+    let overall_status = if error_count > 0 {
+        "error"
+    } else if warning_count > 0 {
+        "warning"
+    } else {
+        "healthy"
+    };
+    Ok(DiagnosticOverview {
+        overall_status: overall_status.to_string(),
+        error_count,
+        warning_count,
+        checked_at: now_unix_ms() as i64,
+    })
+}
+
+#[tauri::command]
+pub async fn run_diagnostic_action(
+    request: DiagnosticActionRequest,
+) -> Result<DiagnosticActionResult, String> {
+    match request.action_key.as_str() {
+        "diagnostic.refresh" => Ok(DiagnosticActionResult {
+            success: true,
+            action_key: request.action_key,
+            message: "诊断状态已刷新".to_string(),
+            needs_refresh: true,
+            should_restart: false,
+            navigate_to: None,
+            external_url: None,
+        }),
+        "image-storage.open-settings" => Ok(DiagnosticActionResult {
+            success: true,
+            action_key: request.action_key,
+            message: "请检查剪贴板设置中的图片容量限制".to_string(),
+            needs_refresh: false,
+            should_restart: false,
+            navigate_to: Some("clipboard".to_string()),
+            external_url: None,
+        }),
+        "recording-degrade.open-settings" => Ok(DiagnosticActionResult {
+            success: true,
+            action_key: request.action_key,
+            message: "请检查录屏设置与依赖状态".to_string(),
+            needs_refresh: false,
+            should_restart: false,
+            navigate_to: Some("recording".to_string()),
+            external_url: None,
+        }),
+        "copy-paste-dedup.open-settings" => Ok(DiagnosticActionResult {
+            success: true,
+            action_key: request.action_key,
+            message: "请检查划词与回写设置".to_string(),
+            needs_refresh: false,
+            should_restart: false,
+            navigate_to: Some("selection".to_string()),
+            external_url: None,
+        }),
+        "longshot.open-settings" => Ok(DiagnosticActionResult {
+            success: true,
+            action_key: request.action_key,
+            message: "请检查截图设置与长截图能力".to_string(),
+            needs_refresh: false,
+            should_restart: false,
+            navigate_to: Some("screenshot".to_string()),
+            external_url: None,
+        }),
+        "longshot.show-help" => Ok(DiagnosticActionResult {
+            success: true,
+            action_key: request.action_key,
+            message: "长截图依赖修复建议：1) 先下载并配置 FFmpeg；2) 确认 ffmpeg 可在命令行直接执行；3) 若仍不可用，检查当前构建是否启用 longshot-opencv feature；4) 回到诊断页重新检查。".to_string(),
+            needs_refresh: false,
+            should_restart: false,
+            navigate_to: Some("diagnostic".to_string()),
+            external_url: None,
+        }),
+        "longshot.download-ffmpeg" => Ok(DiagnosticActionResult {
+            success: true,
+            action_key: request.action_key,
+            message: "已准备 FFmpeg 下载页".to_string(),
+            needs_refresh: false,
+            should_restart: false,
+            navigate_to: None,
+            external_url: Some("https://ffmpeg.org/download.html".to_string()),
+        }),
+        "longshot.show-build-help" => Ok(DiagnosticActionResult {
+            success: true,
+            action_key: request.action_key,
+            message: "当前长截图除 FFmpeg 外，还要求构建启用 longshot-opencv feature。若诊断仍提示构建未启用，只能切换到支持长截图的构建产物。".to_string(),
+            needs_refresh: false,
+            should_restart: false,
+            navigate_to: Some("diagnostic".to_string()),
+            external_url: None,
+        }),
+        "longshot.show-runtime-help" => Ok(DiagnosticActionResult {
+            success: true,
+            action_key: request.action_key,
+            message: "长截图运行失败建议：重新开始一次长截图；若仍失败，优先检查滚动区域大小、依赖环境与最近失败原因。".to_string(),
+            needs_refresh: false,
+            should_restart: false,
+            navigate_to: Some("diagnostic".to_string()),
+            external_url: None,
+        }),
+        "dependencies.download-vc-runtime" => Ok(DiagnosticActionResult {
+            success: true,
+            action_key: request.action_key,
+            message: "已准备 VC Runtime 下载链接".to_string(),
+            needs_refresh: false,
+            should_restart: false,
+            navigate_to: None,
+            external_url: Some("https://aka.ms/vs/17/release/vc_redist.x64.exe".to_string()),
+        }),
+        "copy-paste-dedup.reset-metrics" => {
+            COPY_PASTE_DEDUP_TOTAL_REQUESTS.store(0, Ordering::Relaxed);
+            COPY_PASTE_DEDUP_HIT_COUNT.store(0, Ordering::Relaxed);
+            COPY_PASTE_DEDUP_REQUEST_ID_HIT_COUNT.store(0, Ordering::Relaxed);
+            COPY_PASTE_DEDUP_TEXT_HASH_HIT_COUNT.store(0, Ordering::Relaxed);
+            COPY_PASTE_DEDUP_LOG_COUNT.store(0, Ordering::Relaxed);
+            if let Some(lock) = COPY_PASTE_DEDUP_WINDOW_STATS.get() {
+                let mut stats = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                stats.window_start_ms = now_unix_ms();
+                stats.requests = 0;
+                stats.hits = 0;
+                stats.last_hit_at_ms = 0;
+            }
+            Ok(DiagnosticActionResult {
+                success: true,
+                action_key: request.action_key,
+                message: "回写去重计数已清零".to_string(),
+                needs_refresh: true,
+                should_restart: false,
+                navigate_to: None,
+                external_url: None,
+            })
+        }
+        "perf-metrics.reset" => {
+            reset_perf_metrics();
+            Ok(DiagnosticActionResult {
+                success: true,
+                action_key: request.action_key,
+                message: "性能采样已清零".to_string(),
+                needs_refresh: true,
+                should_restart: false,
+                navigate_to: None,
+                external_url: None,
+            })
+        }
+        _ => Err(format!("不支持的诊断动作: {}", request.action_key)),
     }
 }
 
@@ -4104,12 +6050,8 @@ pub async fn start_manual_longshot(
         ));
     }
     // 在真正启动采样前先隐藏截图窗，避免首帧录入UI边框
-    if let Some(window) = app.get_webview_window("screenshot") {
-        let _ = window.hide();
-    }
-    if let Some(window) = app.get_webview_window("longshot_border") {
-        let _ = window.hide();
-    }
+    let _ = hide_overlay_window_by_label(&app, "screenshot");
+    let _ = hide_overlay_window_by_label(&app, "longshot_border");
     tauri::async_runtime::spawn_blocking(|| std::thread::sleep(std::time::Duration::from_millis(90)))
         .await
         .map_err(|e| format!("等待截图窗口隐藏失败: {}", e))?;
@@ -4171,15 +6113,28 @@ pub async fn get_manual_longshot_status(
 
 #[tauri::command]
 pub async fn recognize_image_ocr(png_base64: String) -> Result<serde_json::Value, String> {
+    let started_at = std::time::Instant::now();
     match crate::services::native_ocr::recognize_png_base64(&png_base64).await {
-        Ok(result) => Ok(serde_json::json!({
-            "success": true,
-            "paragraphs": result.paragraphs
-        })),
-        Err(e) => Ok(serde_json::json!({
-            "success": false,
-            "error": e
-        })),
+        Ok(result) => {
+            record_perf_metric("ocr.recognize", "OCR识别耗时", started_at.elapsed().as_millis() as u64, true, None);
+            Ok(serde_json::json!({
+                "success": true,
+                "paragraphs": result.paragraphs
+            }))
+        }
+        Err(e) => {
+            record_perf_metric(
+                "ocr.recognize",
+                "OCR识别耗时",
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some(e.clone()),
+            );
+            Ok(serde_json::json!({
+                "success": false,
+                "error": e
+            }))
+        }
     }
 }
 
@@ -4264,7 +6219,7 @@ pub async fn choose_screenshot_save_path(app: AppHandle) -> Result<serde_json::V
     if let Some(window) = screenshot_window.as_ref() {
         let _ = window.set_always_on_top(true);
         let _ = window.set_ignore_cursor_events(false);
-        let _ = window.set_focus();
+        let _ = focus_overlay_window_by_label(&app, "screenshot");
     }
 
     let selected_path = selected_path_result
@@ -4297,16 +6252,19 @@ pub async fn save_screenshot_to_path(
         return Err("保存路径为空".to_string());
     }
 
-    let png_data = base64::engine::general_purpose::STANDARD
-        .decode(&png_base64)
-        .map_err(|e| format!("Base64解码失败: {}", e))?;
-
     let target_path = PathBuf::from(&output_path);
-    if let Some(parent) = target_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建保存目录失败: {}", e))?;
-    }
+    timed_sync("screenshot.save_file", "截图保存耗时", || {
+        let png_data = base64::engine::general_purpose::STANDARD
+            .decode(&png_base64)
+            .map_err(|e| format!("Base64解码失败: {}", e))?;
 
-    fs::write(&target_path, &png_data).map_err(|e| format!("写入文件失败: {}", e))?;
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("创建保存目录失败: {}", e))?;
+        }
+
+        fs::write(&target_path, &png_data).map_err(|e| format!("写入文件失败: {}", e))?;
+        Ok::<(), String>(())
+    })?;
 
     Ok(serde_json::json!({
         "success": true,
@@ -4381,6 +6339,7 @@ pub async fn save_screenshot(
 ) -> Result<serde_json::Value, String> {
     use base64::Engine;
     use std::time::{SystemTime, UNIX_EPOCH};
+    let started_at = std::time::Instant::now();
 
     log::info!("保存截图到文件");
 
@@ -4421,6 +6380,7 @@ pub async fn save_screenshot(
 
     let Some(path_buf) = selected_path else {
         log::info!("用户取消保存");
+        record_perf_metric("screenshot.save_dialog", "截图保存对话框总耗时", started_at.elapsed().as_millis() as u64, true, None);
         return Ok(serde_json::json!({
             "success": false,
             "cancelled": true,
@@ -4430,6 +6390,7 @@ pub async fn save_screenshot(
 
     fs::write(&path_buf, &png_data)
         .map_err(|e| format!("写入文件失败: {}", e))?;
+    record_perf_metric("screenshot.save_dialog", "截图保存对话框总耗时", started_at.elapsed().as_millis() as u64, true, None);
     log::info!("截图已保存到: {}", path_buf.display());
 
     Ok(serde_json::json!({
@@ -4484,12 +6445,13 @@ pub async fn pin_screenshot_on_screen(
         .initialization_script(&payload_init_script)
         .build()
         .map_err(|e| format!("创建固定图片窗口失败: {}", e))?;
+    bind_overlay_window_events(&window, app.clone(), label.clone());
 
     let window_clone = window.clone();
     let _ = window_clone.set_resizable(true);
     let _ = window_clone.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
     let _ = window_clone.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
-    let _ = window_clone.show();
+    let _ = show_overlay_window_by_label(&app, &label, false);
     let script = format!(
         "window.__PINNED_IMAGE_PAYLOAD__ = {}; window.dispatchEvent(new CustomEvent('pinned-image-data', {{ detail: {} }}));",
         payload, payload
@@ -4581,20 +6543,19 @@ fn set_screenshot_window_passthrough_internal(app: &AppHandle, enabled: bool) ->
         .set_ignore_cursor_events(enabled)
         .map_err(|e| format!("设置截图窗口输入穿透失败: {}", e))?;
     if !enabled {
-        let _ = window.set_focus();
+        let _ = focus_overlay_window_by_label(&app, "screenshot");
     }
     Ok(())
 }
 
 fn set_screenshot_window_visibility_internal(app: &AppHandle, visible: bool) -> Result<(), String> {
-    let Some(window) = app.get_webview_window("screenshot") else {
+    if app.get_webview_window("screenshot").is_none() {
         return Ok(());
-    };
+    }
     if visible {
-        let _ = window.show();
-        let _ = window.set_focus();
+        show_overlay_window_by_label(app, "screenshot", true)?;
     } else {
-        let _ = window.hide();
+        hide_overlay_window_by_label(app, "screenshot")?;
     }
     Ok(())
 }
@@ -4620,6 +6581,8 @@ fn ensure_longshot_toolbar_window(app: &AppHandle) -> Result<(tauri::WebviewWind
     .inner_size(320.0, 180.0)
     .build()
     .map_err(|e| format!("创建长截图工具栏窗口失败: {}", e))?;
+    let _ = window.set_content_protected(true);
+    bind_overlay_window_events(&window, app.clone(), label);
     Ok((window, true))
 }
 
@@ -4643,6 +6606,8 @@ fn ensure_longshot_border_window(app: &AppHandle) -> Result<(tauri::WebviewWindo
     .skip_taskbar(true)
     .build()
     .map_err(|e| format!("创建长截图边框窗口失败: {}", e))?;
+    let _ = window.set_content_protected(true);
+    bind_overlay_window_events(&window, app.clone(), label);
     let _ = window.set_ignore_cursor_events(true);
     Ok((window, true))
 }
@@ -4666,8 +6631,11 @@ fn place_longshot_toolbar_near_anchor(
         return;
     };
     let (toolbar_w, toolbar_h) = (260i32, 430i32);
-    let default_x = anchor.x + anchor.width as i32 + 12;
-    let default_y = anchor.y + (anchor.height as i32 / 2) - (toolbar_h / 2);
+    let anchor_w = anchor.width as i32;
+    let anchor_h = anchor.height as i32;
+    let margin = 12i32;
+    let default_x = anchor.x + anchor_w + margin;
+    let default_y = anchor.y + (anchor_h / 2) - (toolbar_h / 2);
     let Some(screen_window) = app.get_webview_window("screenshot") else {
         let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
             default_x, default_y,
@@ -4686,16 +6654,38 @@ fn place_longshot_toolbar_near_anchor(
     let max_x = mon_pos.x + mon_size.width as i32 - toolbar_w - 8;
     let min_y = mon_pos.y + 8;
     let max_y = mon_pos.y + mon_size.height as i32 - toolbar_h - 8;
+    let anchor_left = anchor.x;
+    let anchor_top = anchor.y;
+    let anchor_right = anchor.x + anchor_w;
+    let anchor_bottom = anchor.y + anchor_h;
 
-    let mut x = default_x;
-    if x > max_x {
-        x = anchor.x - toolbar_w - 12;
-    }
-    if x < min_x {
-        x = min_x;
-    }
-    let y = default_y.clamp(min_y, max_y);
-    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)));
+    let clamp_candidate = |x: i32, y: i32| -> (i32, i32) {
+        (x.clamp(min_x, max_x), y.clamp(min_y, max_y))
+    };
+    let intersects_anchor = |x: i32, y: i32| -> bool {
+        let right = x + toolbar_w;
+        let bottom = y + toolbar_h;
+        x < anchor_right && right > anchor_left && y < anchor_bottom && bottom > anchor_top
+    };
+
+    let mut candidates = vec![
+        clamp_candidate(anchor_right + margin, default_y),
+        clamp_candidate(anchor_left - toolbar_w - margin, default_y),
+        clamp_candidate(anchor_left + (anchor_w - toolbar_w) / 2, anchor_bottom + margin),
+        clamp_candidate(anchor_left + (anchor_w - toolbar_w) / 2, anchor_top - toolbar_h - margin),
+        (max_x, min_y),
+    ];
+    candidates.dedup();
+
+    let chosen = candidates
+        .iter()
+        .copied()
+        .find(|(x, y)| !intersects_anchor(*x, *y))
+        .unwrap_or((max_x, min_y));
+
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
+        chosen.0, chosen.1,
+    )));
 }
 
 #[tauri::command]
@@ -4714,6 +6704,7 @@ pub async fn show_longshot_toolbar(
     anchor: Option<LongshotToolbarAnchor>,
 ) -> Result<(), String> {
     let (window, _created) = ensure_longshot_toolbar_window(&app)?;
+    let _ = window.set_content_protected(true);
     let _ = window.emit(
         "manual-longshot-toolbar-reset",
         serde_json::json!({
@@ -4725,8 +6716,7 @@ pub async fn show_longshot_toolbar(
         height: 430.0,
     }));
     place_longshot_toolbar_near_anchor(&app, &window, anchor);
-    let _ = window.show();
-    let _ = window.set_focus();
+    show_overlay_window_by_label(&app, "longshot_toolbar", true)?;
     Ok(())
 }
 
@@ -4736,6 +6726,7 @@ pub async fn show_longshot_border(
     anchor: LongshotToolbarAnchor,
 ) -> Result<(), String> {
     let (window, _created) = ensure_longshot_border_window(&app)?;
+    let _ = window.set_content_protected(true);
     // 边框窗外扩，确保边框不进入实际采集区域
     const BORDER_OUTSET: i32 = 2;
     let width = (anchor.width as i32 + BORDER_OUTSET * 2).max(2) as u32;
@@ -4745,15 +6736,13 @@ pub async fn show_longshot_border(
         anchor.x - BORDER_OUTSET,
         anchor.y - BORDER_OUTSET,
     )));
-    let _ = window.show();
+    show_overlay_window_by_label(&app, "longshot_border", false)?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn hide_longshot_border(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("longshot_border") {
-        let _ = window.hide();
-    }
+    let _ = hide_overlay_window_by_label(&app, "longshot_border");
     Ok(())
 }
 
@@ -4796,9 +6785,7 @@ pub async fn snap_longshot_toolbar_window(app: AppHandle) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn hide_longshot_toolbar(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("longshot_toolbar") {
-        let _ = window.hide();
-    }
+    let _ = hide_overlay_window_by_label(&app, "longshot_toolbar");
     Ok(())
 }
 
@@ -4966,6 +6953,7 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
         }
     }
     log::info!("打开截图编辑窗口");
+    let started_at = std::time::Instant::now();
 
     use crate::features::screenshot::capture;
     if !capture::try_begin_screenshot() {
@@ -4976,6 +6964,13 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
         Ok(data) => data,
         Err(e) => {
             capture::set_screenshot_in_progress(false);
+            record_perf_metric(
+                "screenshot.open_prepare",
+                "截图打开准备耗时",
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some(e.to_string()),
+            );
             return Err(format!("截图失败: {}", e));
         }
     };
@@ -4983,6 +6978,13 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
     let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
     let image_path = write_screenshot_boot_image(&rgba, width, height, session_id).map_err(|e| {
         capture::set_screenshot_in_progress(false);
+        record_perf_metric(
+            "screenshot.open_prepare",
+            "截图打开准备耗时",
+            started_at.elapsed().as_millis() as u64,
+            false,
+            Some(e.clone()),
+        );
         e
     })?;
 
@@ -4992,7 +6994,7 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
         {
-            bind_screenshot_window_lifecycle(&window);
+            bind_screenshot_window_lifecycle(&window, &app);
         }
         let payload = serde_json::json!({
             "image_path": image_path,
@@ -5012,6 +7014,7 @@ window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {payload} }})
 window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ session_id: {session_id}, mode: '{selection_mode}' }} }}));"
         );
 
+        let app_for_window = app.clone();
         thread::spawn(move || {
             let _ = window.set_always_on_top(true);
             let _ = window.set_ignore_cursor_events(false);
@@ -5030,10 +7033,23 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
                 thread::sleep(Duration::from_millis(25));
             }
             if injected {
-                let _ = window.show();
-                let _ = window.set_focus();
+                record_perf_metric(
+                    "screenshot.open_prepare",
+                    "截图打开准备耗时",
+                    started_at.elapsed().as_millis() as u64,
+                    true,
+                    None,
+                );
+                let _ = show_overlay_window_by_label(&app_for_window, "screenshot", true);
             } else {
-                let _ = window.hide();
+                record_perf_metric(
+                    "screenshot.open_prepare",
+                    "截图打开准备耗时",
+                    started_at.elapsed().as_millis() as u64,
+                    false,
+                    Some("截图窗口脚本注入失败".to_string()),
+                );
+                let _ = hide_overlay_window_by_label(&app_for_window, "screenshot");
                 cleanup_all_screenshot_boot_images();
                 capture::set_screenshot_in_progress(false);
             }
@@ -5071,18 +7087,32 @@ window.__SCREENSHOT_BOOT__.pendingMode = '{}';",
             .fullscreen(true)
             .on_page_load(move |window, _| {
                 let _ = window.eval(&boot_script);
-                let _ = window.show();
-                let _ = window.set_focus();
+                let app_handle = window.app_handle();
+                let _ = show_overlay_window_by_label(&app_handle, "screenshot", true);
             })
             .build()
             .map_err(|e| {
                 cleanup_all_screenshot_boot_images();
                 capture::set_screenshot_in_progress(false);
+                record_perf_metric(
+                    "screenshot.open_prepare",
+                    "截图打开准备耗时",
+                    started_at.elapsed().as_millis() as u64,
+                    false,
+                    Some(e.to_string()),
+                );
                 format!("创建截图窗口失败: {}", e)
             })?;
-        bind_screenshot_window_lifecycle(&window);
+        bind_screenshot_window_lifecycle(&window, &app);
         let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
         let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: origin_x, y: origin_y }));
+        record_perf_metric(
+            "screenshot.open_prepare",
+            "截图打开准备耗时",
+            started_at.elapsed().as_millis() as u64,
+            true,
+            None,
+        );
     }
 
     Ok(())
@@ -5126,7 +7156,7 @@ window.__SCREENSHOT_BOOT__.pendingData = null;\
 window.__SCREENSHOT_BOOT__.pendingStartSessionId = 0;\
 window.__SCREENSHOT_BOOT__.pendingMode = null;",
         );
-        let _ = window.hide();
+        let _ = hide_overlay_window_by_label(&app, "screenshot");
     }
     cleanup_all_screenshot_boot_images();
     features::screenshot::capture::set_screenshot_in_progress(false);

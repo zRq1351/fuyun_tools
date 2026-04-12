@@ -149,6 +149,7 @@ const isWindowMaximized = ref(false)
 const isWriteBackInFlight = ref(false)
 let unlistenResultClean = null
 let unlistenResultUpdate = null
+let unlistenWritebackResult = null
 let initDataHandler = null
 let onStorageThemeChange = null
 let unlistenWindowResize = null
@@ -370,6 +371,16 @@ onMounted(async () => {
         }
       }
     })
+    unlistenWritebackResult = await listen('writeback-result', (event) => {
+      const payload = event.payload || {}
+      if (payload.source !== '结果窗') return
+      if (payload.success) {
+        const target = payload.targetWindowTitle ? `：${payload.targetWindowTitle}` : ''
+        ElMessage.success(`回写成功${target}`)
+      } else {
+        handleAppError(payload.detail || '未知错误', '回写失败')
+      }
+    })
   } catch (error) {
     console.error('Failed to setup listeners:', error)
   }
@@ -395,6 +406,10 @@ onBeforeUnmount(() => {
   if (unlistenResultUpdate) {
     unlistenResultUpdate()
     unlistenResultUpdate = null
+  }
+  if (unlistenWritebackResult) {
+    unlistenWritebackResult()
+    unlistenWritebackResult = null
   }
 })
 

@@ -1,6 +1,5 @@
 <template>
-  <el-config-provider :locale="zhCn">
-    <div :class="{ dark: isDark }" class="settings-container">
+  <div :class="{ dark: isDark }" class="settings-container">
       <div class="header">
         <div class="header-title">
           <h1>设置中心</h1>
@@ -59,6 +58,12 @@
           <div v-else-if="activeTab === 'ai'">
             <AISettings ref="aiSettingsRef" :form="form"/>
           </div>
+          <div v-else-if="activeTab === 'backup'">
+            <BackupSettings/>
+          </div>
+          <div v-else-if="activeTab === 'diagnostic'">
+            <DiagnosticSettings @navigate="handleNavigateTab"/>
+          </div>
 
           <div v-else-if="isDevMode && activeTab === 'developer'">
             <DeveloperSettings/>
@@ -84,14 +89,25 @@
         </p>
         <p>版本 {{ currentVersion }} | © {{ new Date().getFullYear() }} fuyun_tools</p>
       </div>
-    </div>
-  </el-config-provider>
+  </div>
 </template>
 
 <script setup>
 import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from 'vue'
+import {provideGlobalConfig} from 'element-plus'
 import zhCn from 'element-plus/dist/locale/zh-cn'
-import {Camera, Cpu, DocumentCopy, InfoFilled, Moon, Setting, Sunny, VideoCamera} from '@element-plus/icons-vue'
+import {
+  Camera,
+  Cpu,
+  DocumentCopy,
+  FolderOpened,
+  InfoFilled,
+  Moon,
+  Setting,
+  Sunny,
+  VideoCamera,
+  WarningFilled
+} from '@element-plus/icons-vue'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import {listen} from '@tauri-apps/api/event'
 import {AISettingsService, RecordingService} from '../../services/ipc'
@@ -100,8 +116,12 @@ import ScreenshotSettings from './components/ScreenshotSettings.vue'
 import RecordingSettings from './components/RecordingSettings.vue'
 import SelectionSettings from './components/SelectionSettings.vue'
 import AISettings from './components/AISettings.vue'
+import BackupSettings from './components/BackupSettings.vue'
+import DiagnosticSettings from './components/DiagnosticSettings.vue'
 import AboutSettings from './components/AboutSettings.vue'
 import DeveloperSettings from '@dev/DeveloperSettings'
+
+provideGlobalConfig({locale: zhCn})
 
 const activeTab = ref('clipboard')
 const isDark = ref(false)
@@ -156,6 +176,18 @@ const sections = computed(() => {
       label: 'AI',
       description: '配置服务提供商、模型参数与提示词模板',
       icon: Cpu
+    },
+    {
+      key: 'backup',
+      label: '数据备份',
+      description: '导出备份包、恢复预览与自动备份配置',
+      icon: FolderOpened
+    },
+    {
+      key: 'diagnostic',
+      label: '诊断与修复',
+      description: '查看核心健康状态并执行诊断动作',
+      icon: WarningFilled
     }
   ]
   if (isDevMode) {
@@ -234,6 +266,12 @@ const autoSaveText = computed(() => {
 })
 
 const currentSection = computed(() => sections.value.find((section) => section.key === activeTab.value) || sections.value[0])
+
+const handleNavigateTab = (tab) => {
+  if (typeof tab === 'string' && sections.value.some((section) => section.key === tab)) {
+    activeTab.value = tab
+  }
+}
 
 const buildFormSnapshot = () => ({
     textMaxItems: form.textMaxItems,
@@ -992,54 +1030,54 @@ body {
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
 }
 
-.content :deep(.setting-section-card) {
+.content .setting-section-card {
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 12px;
   box-shadow: none;
 }
 
-.content :deep(.setting-section-card + .setting-section-card) {
+.content .setting-section-card + .setting-section-card {
   margin-top: 16px;
 }
 
-.content :deep(.setting-section-card .el-card__header) {
+.content .setting-section-card .el-card__header {
   padding: 12px 16px;
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
-.content :deep(.setting-section-card .el-card__body) {
+.content .setting-section-card .el-card__body {
   padding: 14px 16px 12px;
 }
 
-.content :deep(.section-title) {
+.content .section-title {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.2px;
 }
 
-.content :deep(.el-form-item) {
+.content .el-form-item {
   margin-bottom: 14px;
 }
 
-.content :deep(.el-form-item__label) {
+.content .el-form-item__label {
   font-weight: 600;
   padding-bottom: 6px;
 }
 
-.content :deep(.el-input),
-.content :deep(.el-select),
-.content :deep(.el-input-number) {
+.content .el-input,
+.content .el-select,
+.content .el-input-number {
   width: 100%;
 }
 
-.content :deep(.el-switch + .form-hint),
-.content :deep(.el-input + .form-hint),
-.content :deep(.el-select + .form-hint),
-.content :deep(.el-input-number + .form-hint) {
+.content .el-switch + .form-hint,
+.content .el-input + .form-hint,
+.content .el-select + .form-hint,
+.content .el-input-number + .form-hint {
   margin-top: 6px;
 }
 
-.dark .content :deep(.setting-section-card) {
+.dark .content .setting-section-card {
   border-color: rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.02);
 }

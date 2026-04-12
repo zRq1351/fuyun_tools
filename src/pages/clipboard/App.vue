@@ -170,6 +170,7 @@
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ArrowLeftBold, ArrowRightBold, Check} from '@element-plus/icons-vue'
+import {ElMessage} from 'element-plus'
 import {listen} from '@tauri-apps/api/event'
 import {AIService, ClipboardService, WindowService} from '../../services/ipc'
 import {handleAppError} from '../../utils/errorHandler'
@@ -213,6 +214,7 @@ let unlistenShowWindow = null
 let unlistenHistoryPayloadUpdated = null
 let unlistenHistoryItemUpdated = null
 let unlistenTextItemPromoted = null
+let unlistenWritebackResult = null
 let windowBlurHandler = null
 let isPageReloading = false
 let beforeUnloadHandler = null
@@ -406,6 +408,16 @@ const init = async () => {
     unlistenTextItemPromoted = await listen('text-item-promoted', (event) => {
       const content = event?.payload?.content
       promoteLocalByContent(content)
+    })
+    unlistenWritebackResult = await listen('writeback-result', (event) => {
+      const payload = event.payload || {}
+      if (payload.source !== '文本') return
+      if (payload.success) {
+        const target = payload.targetWindowTitle ? `：${payload.targetWindowTitle}` : ''
+        ElMessage.success(`文本回填成功${target}`)
+      } else {
+        handleAppError(payload.detail || '未知错误', '文本回填失败')
+      }
     })
 
     windowBlurHandler = async () => {
@@ -740,6 +752,10 @@ onBeforeUnmount(() => {
   if (unlistenTextItemPromoted) {
     unlistenTextItemPromoted()
     unlistenTextItemPromoted = null
+  }
+  if (unlistenWritebackResult) {
+    unlistenWritebackResult()
+    unlistenWritebackResult = null
   }
   if (windowBlurHandler) {
     window.removeEventListener('blur', windowBlurHandler)

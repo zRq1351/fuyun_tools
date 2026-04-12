@@ -105,6 +105,7 @@
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ArrowLeftBold, ArrowRightBold, Check} from '@element-plus/icons-vue'
+import {ElMessage} from 'element-plus'
 import {listen} from '@tauri-apps/api/event'
 import {convertFileSrc} from '@tauri-apps/api/core'
 import {open as openDialog} from '@tauri-apps/plugin-dialog'
@@ -167,6 +168,7 @@ let unlistenItemPromoted = null
 let unlistenHistoryPayloadUpdated = null
 let unlistenHistoryItemAdded = null
 let unlistenPreviewReady = null
+let unlistenWritebackResult = null
 let pendingHistorySync = false
 let historyUpdateTimer = null
 let initialPageRetryTimer = null
@@ -1775,6 +1777,16 @@ onMounted(async () => {
       demoteLocalItemFromTop(itemId)
     }
   })
+  unlistenWritebackResult = await listen('writeback-result', (event) => {
+    const payload = event.payload || {}
+    if (payload.source !== '图片') return
+    if (payload.success) {
+      const target = payload.targetWindowTitle ? `：${payload.targetWindowTitle}` : ''
+      ElMessage.success(`图片回填成功${target}`)
+    } else {
+      ElMessage.error(`图片回填失败：${String(payload.detail || '未知错误')}`)
+    }
+  })
 
   // 监听预览就绪事件
   unlistenPreviewReady = await listen('preview-ready', (event) => {
@@ -1841,6 +1853,10 @@ onBeforeUnmount(() => {
   if (unlistenPreviewReady) {
     unlistenPreviewReady()
     unlistenPreviewReady = null
+  }
+  if (unlistenWritebackResult) {
+    unlistenWritebackResult()
+    unlistenWritebackResult = null
   }
   window.removeEventListener('keydown', handleWindowKeydown)
   window.removeEventListener('keyup', handleWindowKeyup)

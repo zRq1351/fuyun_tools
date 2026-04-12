@@ -21,9 +21,13 @@ use crate::ui::commands_recording::{
     stop_recording, toggle_recording_from_shortcut, update_recording_audio_capture,
 };
 use crate::ui::tray_menu::rebuild_tray_menu;
-use crate::ui::window_manager::{show_clipboard_window, show_image_clipboard_window};
+use crate::ui::window_manager::{
+    bind_overlay_window_events, bind_standard_window_close_to_hide, hide_overlay_window_by_label,
+    show_clipboard_window, show_image_clipboard_window, show_standard_window_by_label,
+};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -41,6 +45,33 @@ fn now_unix_ms_u64() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn start_auto_backup_scheduler(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
+    thread::spawn(move || loop {
+        match tauri::async_runtime::block_on(crate::ui::commands::run_auto_backup_tick(state.clone())) {
+            Ok(true) => {
+                let _ = app_handle.emit(
+                    "backup-run-updated",
+                    serde_json::json!({
+                        "status": "success",
+                    }),
+                );
+            }
+            Ok(false) => {}
+            Err(error) => {
+                log::warn!("自动备份执行失败: {}", error);
+                let _ = app_handle.emit(
+                    "backup-run-updated",
+                    serde_json::json!({
+                        "status": "failed",
+                        "message": error,
+                    }),
+                );
+            }
+        }
+        thread::sleep(std::time::Duration::from_secs(300));
+    });
 }
 
 /// 启动划词选择监听器
@@ -67,29 +98,33 @@ pub fn run() {
         .manage(state_arc.clone())
         .setup(move |app| {
             if let Some(settings_window) = app.get_webview_window("settings") {
-                let settings_window_clone = settings_window.clone();
-                settings_window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = settings_window_clone.hide();
-                    }
-                });
+                bind_standard_window_close_to_hide(&settings_window);
             }
             if let Some(recording_window) = app.get_webview_window("recording_toolbar") {
-                let recording_window_clone = recording_window.clone();
-                recording_window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = recording_window_clone.hide();
-                    }
-                });
+                bind_overlay_window_events(&recording_window, app.handle().clone(), "recording_toolbar");
             }
-            if let Some(image_window) = app.get_webview_window("image_clipboard") {
-                let _ = image_window.hide();
+            if app.get_webview_window("image_clipboard").is_some() {
+                let _ = hide_overlay_window_by_label(&app.handle().clone(), "image_clipboard");
+            }
+            if let Some(window) = app.get_webview_window("clipboard") {
+                bind_overlay_window_events(&window, app.handle().clone(), "clipboard");
+            }
+            if let Some(window) = app.get_webview_window("image_clipboard") {
+                bind_overlay_window_events(&window, app.handle().clone(), "image_clipboard");
+            }
+            if let Some(window) = app.get_webview_window("selection_toolbar") {
+                bind_overlay_window_events(&window, app.handle().clone(), "selection_toolbar");
+            }
+            if let Some(window) = app.get_webview_window("image_preview") {
+                bind_overlay_window_events(&window, app.handle().clone(), "image_preview");
+            }
+            if let Some(window) = app.get_webview_window("screenshot") {
+                bind_overlay_window_events(&window, app.handle().clone(), "screenshot");
             }
 
             let app_handle = app.handle();
             rebuild_tray_menu(app_handle, state_arc.clone());
+            start_auto_backup_scheduler(app_handle.clone(), state_arc.clone());
             let state_clone = state_arc.clone();
             let app_handle_clone = app_handle.clone();
             let hot_key = {
@@ -284,8 +319,7 @@ pub fn run() {
                 });
                 let _ = app_handle.emit("shortcut-conflict-warning", payload.clone());
                 if let Some(settings_window) = app.get_webview_window("settings") {
-                    let _ = settings_window.show();
-                    let _ = settings_window.set_focus();
+                    let _ = show_standard_window_by_label(&app.handle().clone(), "settings");
                     let script = format!("window.__SHORTCUT_CONFLICT__ = {};", payload);
                     let _ = settings_window.eval(&script);
                 }
@@ -388,6 +422,18 @@ pub fn run() {
             get_provider_config,
             remove_ai_provider,
             get_all_configured_providers,
+            preview_backup_export,
+            export_backup_to_path,
+            preview_backup_package,
+            restore_backup_package,
+            list_backup_history,
+            delete_backup_history_item,
+            run_manual_backup,
+            get_backup_settings,
+            save_backup_settings,
+            get_diagnostic_overview,
+            get_diagnostic_items,
+            run_diagnostic_action,
             get_image_preview_by_id,
             check_previews_ready,
             copy_image_clipboard_item_to_directory,
@@ -400,6 +446,7 @@ pub fn run() {
             cancel_manual_longshot,
             finish_manual_longshot,
             get_manual_longshot_status,
+            get_manual_longshot_availability,
             recognize_image_ocr,
             capture_region,
             choose_screenshot_save_path,

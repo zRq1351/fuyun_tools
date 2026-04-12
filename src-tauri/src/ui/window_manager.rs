@@ -1,4 +1,4 @@
-use crate::core::app_state::AppState;
+use crate::core::app_state::{AppState, ForegroundTargetSnapshot, OverlayLifecycleRecord};
 use crate::core::config::{CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN, CTRL_KEY};
 use crate::sync::Mutex;
 use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex};
@@ -14,9 +14,10 @@ use winapi::shared::windef::RECT;
 use winapi::um::processthreadsapi::GetCurrentProcessId;
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::{
-    keybd_event, GetForegroundWindow, GetSystemMetrics, GetWindowTextW, GetWindowThreadProcessId,
-    SystemParametersInfoW, KEYEVENTF_KEYUP, SM_CYSCREEN, SPI_GETWORKAREA, VK_CONTROL, VK_LCONTROL,
-    VK_RCONTROL,
+    keybd_event, BringWindowToTop, GetForegroundWindow, GetSystemMetrics, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindow, SetForegroundWindow, ShowWindow,
+    SystemParametersInfoW, KEYEVENTF_KEYUP, SM_CYSCREEN, SPI_GETWORKAREA, SW_RESTORE, VK_CONTROL,
+    VK_LCONTROL, VK_RCONTROL,
 };
 
 pub static ENIGO_INSTANCE: LazyLock<Arc<Mutex<Option<enigo::Enigo>>>> =
@@ -39,6 +40,185 @@ fn notify_window_visibility_changed() {
     };
     *seq = seq.wrapping_add(1);
     cvar.notify_all();
+}
+
+fn set_active_overlay_window(app_handle: &AppHandle, label: Option<&str>) {
+    let Some(state) = app_handle.try_state::<Arc<Mutex<AppState>>>() else {
+        return;
+    };
+    let mut guard = lock_arc_mutex(state.inner());
+    guard.active_overlay_window = label.map(|value| value.to_string());
+}
+
+fn emit_overlay_window_lifecycle(app_handle: &AppHandle, label: &str, action: &str, focused: bool) {
+    if let Some(state) = app_handle.try_state::<Arc<Mutex<AppState>>>() {
+        let mut guard = lock_arc_mutex(state.inner());
+        let record = OverlayLifecycleRecord {
+            label: label.to_string(),
+            action: action.to_string(),
+            focused,
+            occurred_at: now_ms(),
+        };
+        guard.last_overlay_lifecycle = Some(record.clone());
+        guard.overlay_lifecycle_history.push(record);
+        if guard.overlay_lifecycle_history.len() > 6 {
+            let drain_count = guard.overlay_lifecycle_history.len().saturating_sub(6);
+            guard.overlay_lifecycle_history.drain(0..drain_count);
+        }
+    }
+    let _ = app_handle.emit(
+        "overlay-window-lifecycle",
+        serde_json::json!({
+            "label": label,
+            "action": action,
+            "focused": focused,
+        }),
+    );
+}
+
+fn show_overlay_window(
+    app_handle: &AppHandle,
+    label: &str,
+    window: &tauri::WebviewWindow,
+    focus: bool,
+) -> bool {
+    if window.show().is_err() {
+        return false;
+    }
+    if focus {
+        let _ = window.set_focus();
+        set_active_overlay_window(app_handle, Some(label));
+    } else {
+        set_active_overlay_window(app_handle, Some(label));
+    }
+    emit_overlay_window_lifecycle(app_handle, label, "shown", focus);
+    true
+}
+
+fn hide_overlay_window(app_handle: &AppHandle, label: &str, window: &tauri::WebviewWindow) {
+    let _ = window.hide();
+    let should_clear = app_handle
+        .try_state::<Arc<Mutex<AppState>>>()
+        .map(|state| {
+            let guard = lock_arc_mutex(state.inner());
+            guard.active_overlay_window.as_deref() == Some(label)
+        })
+        .unwrap_or(false);
+    if should_clear {
+        set_active_overlay_window(app_handle, None);
+    }
+    emit_overlay_window_lifecycle(app_handle, label, "hidden", false);
+}
+
+pub fn bind_overlay_window_events(window: &tauri::WebviewWindow, app_handle: AppHandle, label: impl Into<String>) {
+    let label = label.into();
+    let window_clone = window.clone();
+    window.on_window_event(move |event| match event {
+        tauri::WindowEvent::CloseRequested { api, .. } => {
+            api.prevent_close();
+            hide_overlay_window(&app_handle, &label, &window_clone);
+        }
+        tauri::WindowEvent::Destroyed => {
+            let should_clear = app_handle
+                .try_state::<Arc<Mutex<AppState>>>()
+                .map(|state| {
+                    let mut guard = lock_arc_mutex(state.inner());
+                    let clear = guard.active_overlay_window.as_deref() == Some(label.as_str());
+                    if clear {
+                        guard.active_overlay_window = None;
+                    }
+                    let record = OverlayLifecycleRecord {
+                        label: label.clone(),
+                        action: "destroyed".to_string(),
+                        focused: false,
+                        occurred_at: now_ms(),
+                    };
+                    guard.last_overlay_lifecycle = Some(record.clone());
+                    guard.overlay_lifecycle_history.push(record);
+                    if guard.overlay_lifecycle_history.len() > 6 {
+                        let drain_count = guard.overlay_lifecycle_history.len().saturating_sub(6);
+                        guard.overlay_lifecycle_history.drain(0..drain_count);
+                    }
+                    clear
+                })
+                .unwrap_or(false);
+            if should_clear {
+                let _ = app_handle.emit(
+                    "overlay-window-lifecycle",
+                    serde_json::json!({
+                        "label": label,
+                        "action": "destroyed",
+                        "focused": false,
+                    }),
+                );
+            }
+        }
+        _ => {}
+    });
+}
+
+pub fn show_overlay_window_by_label(app_handle: &AppHandle, label: &str, focus: bool) -> Result<(), String> {
+    let window = app_handle
+        .get_webview_window(label)
+        .ok_or_else(|| format!("窗口不存在: {}", label))?;
+    if show_overlay_window(app_handle, label, &window, focus) {
+        Ok(())
+    } else {
+        Err(format!("显示窗口失败: {}", label))
+    }
+}
+
+pub fn hide_overlay_window_by_label(app_handle: &AppHandle, label: &str) -> Result<(), String> {
+    let window = app_handle
+        .get_webview_window(label)
+        .ok_or_else(|| format!("窗口不存在: {}", label))?;
+    hide_overlay_window(app_handle, label, &window);
+    Ok(())
+}
+
+pub fn focus_overlay_window_by_label(app_handle: &AppHandle, label: &str) -> Result<(), String> {
+    let window = app_handle
+        .get_webview_window(label)
+        .ok_or_else(|| format!("窗口不存在: {}", label))?;
+    window
+        .set_focus()
+        .map_err(|e| format!("设置窗口焦点失败 {}: {}", label, e))?;
+    set_active_overlay_window(app_handle, Some(label));
+    emit_overlay_window_lifecycle(app_handle, label, "focused", true);
+    Ok(())
+}
+
+pub fn bind_standard_window_close_to_hide(window: &tauri::WebviewWindow) {
+    let window_clone = window.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = window_clone.hide();
+        }
+    });
+}
+
+pub fn show_standard_window_by_label(app_handle: &AppHandle, label: &str) -> Result<(), String> {
+    let window = app_handle
+        .get_webview_window(label)
+        .ok_or_else(|| format!("窗口不存在: {}", label))?;
+    window
+        .show()
+        .map_err(|e| format!("显示窗口失败 {}: {}", label, e))?;
+    window
+        .set_focus()
+        .map_err(|e| format!("设置窗口焦点失败 {}: {}", label, e))?;
+    Ok(())
+}
+
+pub fn hide_standard_window_by_label(app_handle: &AppHandle, label: &str) -> Result<(), String> {
+    let window = app_handle
+        .get_webview_window(label)
+        .ok_or_else(|| format!("窗口不存在: {}", label))?;
+    window
+        .hide()
+        .map_err(|e| format!("隐藏窗口失败 {}: {}", label, e))?;
+    Ok(())
 }
 
 /// 清理ENIGO实例资源
@@ -74,6 +254,38 @@ fn release_ctrl_key_once(enigo: &mut enigo::Enigo) -> Result<(), String> {
     release_ctrl_key_with_fallback(enigo)
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForegroundWindowInfo {
+    pub title: String,
+    pub pid: u32,
+    pub hwnd: isize,
+}
+
+pub fn remember_external_foreground_window(app_handle: &AppHandle) {
+    let Some(state) = app_handle.try_state::<Arc<Mutex<AppState>>>() else {
+        return;
+    };
+    let (is_fuyun, info) = foreground_window_info();
+    if is_fuyun || info.pid == 0 {
+        return;
+    }
+    let mut guard = lock_arc_mutex(state.inner());
+    guard.last_external_foreground = Some(ForegroundTargetSnapshot {
+        title: info.title,
+        pid: info.pid,
+        hwnd: info.hwnd,
+    });
+}
+
+pub fn clear_external_foreground_snapshot(app_handle: &AppHandle) {
+    let Some(state) = app_handle.try_state::<Arc<Mutex<AppState>>>() else {
+        return;
+    };
+    let mut guard = lock_arc_mutex(state.inner());
+    guard.last_external_foreground = None;
+}
+
 pub fn force_release_ctrl_key() -> Result<(), String> {
     use enigo::{Enigo, Settings};
     let mut last_error = None;
@@ -104,8 +316,16 @@ pub fn force_release_ctrl_key() -> Result<(), String> {
     Err(last_error.unwrap_or_else(|| "释放 Ctrl 键失败".to_string()))
 }
 
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
 /// 显示剪贴板窗口
 pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
+    remember_external_foreground_window(&app_handle);
     let (selected_index, bottom_offset, manager_arc) = {
         let mut state_guard = lock_arc_mutex(&state);
         if state_guard.is_visible {
@@ -139,8 +359,7 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
         thread::spawn(move || {
             if let Some(window) = app_handle_clone.get_webview_window("clipboard") {
                 set_window_position(&window, bottom_offset);
-                if window.show().is_ok() {
-                    let _ = window.set_focus();
+                if show_overlay_window(&app_handle_clone, "clipboard", &window, true) {
                     let payload = serde_json::json!({
                         "history": history_clone,
                         "categories": categories_clone,
@@ -157,6 +376,7 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
 }
 
 pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
+    remember_external_foreground_window(&app_handle);
     let (already_visible, selected_index, bottom_offset, manager_arc, should_sync_history) = {
         let mut state_guard = lock_arc_mutex(&state);
         let already_visible = state_guard.is_image_visible;
@@ -196,9 +416,9 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
         thread::spawn(move || {
             if let Some(window) = app_handle_clone.get_webview_window("image_clipboard") {
                 set_window_position(&window, bottom_offset);
-                if already_visible || window.show().is_ok() {
+                if already_visible || show_overlay_window(&app_handle_clone, "image_clipboard", &window, true) {
                     if !already_visible {
-                        let _ = window.set_focus();
+                        set_active_overlay_window(&app_handle_clone, Some("image_clipboard"));
                     }
                     let mut payload = serde_json::json!({
                         "bottomOffset": bottom_offset,
@@ -232,7 +452,7 @@ pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
     }
 
     if let Some(window) = app_handle.get_webview_window("clipboard") {
-        let _ = window.hide();
+        hide_overlay_window(&app_handle, "clipboard", &window);
     }
     {
         let mut state_guard = lock_arc_mutex(&state);
@@ -253,7 +473,7 @@ pub fn hide_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
     }
 
     if let Some(window) = app_handle.get_webview_window("image_clipboard") {
-        let _ = window.hide();
+        hide_overlay_window(&app_handle, "image_clipboard", &window);
     }
     {
         let mut state_guard = lock_arc_mutex(&state);
@@ -342,8 +562,7 @@ pub fn show_image_preview_window(
         "is_final": true
     });
     let _ = window.set_always_on_top(false);
-    let _ = window.show();
-    let _ = window.set_focus();
+    let _ = show_overlay_window(&app_handle, "image_preview", &window, true);
     let _ = app_handle.emit("show-image-preview", payload);
     Ok(())
 }
@@ -363,8 +582,7 @@ pub fn show_image_preview_lowres_window(
         "is_final": false
     });
     let _ = window.set_always_on_top(false);
-    let _ = window.show();
-    let _ = window.set_focus();
+    let _ = show_overlay_window(&app_handle, "image_preview", &window, true);
     let _ = app_handle.emit("show-image-preview", payload);
     Ok(())
 }
@@ -375,8 +593,7 @@ pub fn show_image_preview_loading_window(app_handle: AppHandle, request_id: Stri
         .ok_or_else(|| "图片预览窗口不存在".to_string())?;
     prepare_image_preview_window(&window)?;
     let _ = window.set_always_on_top(false);
-    let _ = window.show();
-    let _ = window.set_focus();
+    let _ = show_overlay_window(&app_handle, "image_preview", &window, true);
     let payload = serde_json::json!({
         "request_id": request_id,
         "loading": true
@@ -403,7 +620,7 @@ fn prepare_image_preview_window(window: &tauri::WebviewWindow) -> Result<(), Str
 
 pub fn hide_image_preview_window(app_handle: AppHandle) {
     if let Some(window) = app_handle.get_webview_window("image_preview") {
-        let _ = window.hide();
+        hide_overlay_window(&app_handle, "image_preview", &window);
     }
 }
 
@@ -460,6 +677,7 @@ fn show_selection_toolbar_internal(
     anchor_pos: Option<(i32, i32)>,
     ignore_setting: bool,
 ) {
+    remember_external_foreground_window(&app_handle);
     if !ignore_setting {
         if let Some(state) = app_handle.try_state::<Arc<Mutex<AppState>>>() {
             let state_guard = lock_arc_mutex(state.inner());
@@ -474,7 +692,7 @@ fn show_selection_toolbar_internal(
         set_toolbar_window(&toolbar_window, anchor_pos);
         let _ = toolbar_window.set_always_on_top(false);
         let _ = toolbar_window.set_always_on_top(true);
-        if toolbar_window.show().is_ok() {
+        if show_overlay_window(&app_handle, "selection_toolbar", &toolbar_window, false) {
             if let Err(e) = app_handle.emit("selected-text", selected_text) {
                 log::error!("未能发送选择文本到前端:{}", e);
             }
@@ -554,7 +772,7 @@ pub fn hide_selection_toolbar_impl(app_handle: AppHandle) {
             if is_visible {
                 if let Ok(has_focus) = toolbar_window.is_focused() {
                     if !has_focus {
-                        let _ = toolbar_window.hide();
+                        hide_overlay_window(&app_handle, "selection_toolbar", &toolbar_window);
                     }
                 }
             }
@@ -574,20 +792,20 @@ pub fn handle_selection_toolbar_autoclose(app_handle: &AppHandle, click_pos: Opt
                     let wh = size.height as i32;
 
                     if mx < wx || mx > wx + ww || my < wy || my > wy + wh {
-                        let _ = window.hide();
+                        hide_overlay_window(app_handle, "selection_toolbar", &window);
                     }
                 }
             } else if let Ok(false) = window.is_focused() {
-                let _ = window.hide();
+                hide_overlay_window(app_handle, "selection_toolbar", &window);
             }
         }
     }
 }
 
 /// 模拟粘贴操作
-pub fn simulate_paste() -> Result<(), String> {
+pub fn simulate_paste(app_handle: &AppHandle) -> Result<ForegroundWindowInfo, String> {
     use enigo::{Enigo, Settings};
-    wait_for_foreground_ready_for_paste()?;
+    let target = wait_for_foreground_ready_for_paste(app_handle)?;
 
     {
         let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);
@@ -600,7 +818,7 @@ pub fn simulate_paste() -> Result<(), String> {
             execute_ctrl_v_with_safety(enigo)?;
         }
     }
-    Ok(())
+    Ok(target)
 }
 
 /// 执行 Ctrl+V 操作，确保 Ctrl 键总是被正确释放
@@ -634,39 +852,78 @@ fn execute_ctrl_v_with_safety(enigo: &mut enigo::Enigo) -> Result<(), String> {
     Ok(())
 }
 
-fn wait_for_foreground_ready_for_paste() -> Result<(), String> {
+fn wait_for_foreground_ready_for_paste(app_handle: &AppHandle) -> Result<ForegroundWindowInfo, String> {
+    let expected_target = app_handle
+        .try_state::<Arc<Mutex<AppState>>>()
+        .and_then(|state| {
+            let guard = lock_arc_mutex(state.inner());
+            guard.last_external_foreground.clone()
+        });
     let mut stable_not_fuyun_count = 0usize;
+    let mut stable_expected_count = 0usize;
+    let mut last_pid = 0u32;
     let mut last_title = String::new();
     let mut interval = Duration::from_millis(8);
     let max_interval = Duration::from_millis(40);
+    let mut restore_attempted = false;
     for _ in 0..24 {
-        let (is_fuyun, title) = foreground_window_info();
+        let (is_fuyun, info) = foreground_window_info();
         if !is_fuyun {
-            if title == last_title {
+            if let Some(expected) = expected_target.as_ref() {
+                if info.pid == expected.pid && info.title == expected.title {
+                    stable_expected_count += 1;
+                    if stable_expected_count >= 2 {
+                        return Ok(info);
+                    }
+                } else {
+                    stable_expected_count = 0;
+                    if !restore_attempted {
+                        let _ = try_restore_foreground_target(expected);
+                        restore_attempted = true;
+                    }
+                }
+            }
+            if info.pid == last_pid && info.title == last_title {
                 stable_not_fuyun_count += 1;
             } else {
                 stable_not_fuyun_count = 1;
-                last_title = title;
+                last_pid = info.pid;
+                last_title = info.title.clone();
             }
             if stable_not_fuyun_count >= 2 {
-                return Ok(());
+                return Ok(info);
             }
         } else {
             stable_not_fuyun_count = 0;
+            stable_expected_count = 0;
         }
         thread::sleep(interval);
         interval = std::cmp::min(interval.saturating_mul(2), max_interval);
     }
-    let (_, title) = foreground_window_info();
-    Err(format!("前台窗口未就绪，当前窗口标题: {}", title))
+    let (_, info) = foreground_window_info();
+    if let Some(expected) = expected_target {
+        Err(format!(
+            "前台窗口未恢复到原目标窗口，期望: {} (pid={})，当前: {} (pid={})",
+            expected.title, expected.pid, info.title, info.pid
+        ))
+    } else {
+        Err(format!("前台窗口未就绪，当前窗口标题: {}", info.title))
+    }
 }
 
 #[cfg(target_os = "windows")]
-fn foreground_window_info() -> (bool, String) {
+fn foreground_window_info() -> (bool, ForegroundWindowInfo) {
     unsafe {
         let hwnd = GetForegroundWindow();
         if hwnd.is_null() {
-            return (false, "unknown".to_string());
+            return (
+                false,
+                ForegroundWindowInfo {
+                    title: "unknown".to_string(),
+                    pid: 0,
+                    hwnd: 0,
+                },
+            );
         }
         let mut pid: DWORD = 0;
         GetWindowThreadProcessId(hwnd, &mut pid);
@@ -677,13 +934,49 @@ fn foreground_window_info() -> (bool, String) {
         } else {
             "untitled".to_string()
         };
-        (pid != 0 && pid == GetCurrentProcessId(), title)
+        (
+            pid != 0 && pid == GetCurrentProcessId(),
+            ForegroundWindowInfo {
+                title,
+                pid,
+                hwnd: hwnd as isize,
+            },
+        )
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn foreground_window_info() -> (bool, String) {
-    (false, "unknown".to_string())
+fn foreground_window_info() -> (bool, ForegroundWindowInfo) {
+    (
+        false,
+        ForegroundWindowInfo {
+            title: "unknown".to_string(),
+            pid: 0,
+            hwnd: 0,
+        },
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn try_restore_foreground_target(target: &ForegroundTargetSnapshot) -> bool {
+    unsafe {
+        let hwnd = target.hwnd as winapi::shared::windef::HWND;
+        if hwnd.is_null() || IsWindow(hwnd) == 0 {
+            return false;
+        }
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        } else {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+        let _ = BringWindowToTop(hwnd);
+        SetForegroundWindow(hwnd) != 0
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn try_restore_foreground_target(_target: &ForegroundTargetSnapshot) -> bool {
+    false
 }
 
 /// 显示结果窗口
@@ -695,19 +988,19 @@ pub async fn show_result_window(
     target_language: String,
     app: AppHandle,
 ) -> Result<(), String> {
+    remember_external_foreground_window(&app);
     let window_label = format!("result_{}", window_type);
 
     if let Some(existing_window) = app.get_webview_window(&window_label) {
         position_result_window_near_toolbar(&existing_window, &app);
         if let Ok(is_visible) = existing_window.is_visible() {
             if !is_visible {
-                let _ = existing_window.show();
+                let _ = show_overlay_window(&app, &window_label, &existing_window, true);
             }
         } else {
-            let _ = existing_window.show();
+            let _ = show_overlay_window(&app, &window_label, &existing_window, true);
         }
-
-        let _ = existing_window.set_focus();
+        let _ = focus_overlay_window_by_label(&app, &window_label);
 
         let payload = serde_json::json!({
             "type": window_type.clone(),
@@ -743,10 +1036,10 @@ pub async fn show_result_window(
         })
         .build()
         .map_err(|e| format!("创建窗口失败: {}", e))?;
+    bind_overlay_window_events(&window, app.clone(), window_label.clone());
 
     position_result_window_near_toolbar(&window, &app);
-    let _ = window.show();
-    let _ = window.set_focus();
+    let _ = show_overlay_window(&app, &window_label, &window, true);
     Ok(())
 }
 

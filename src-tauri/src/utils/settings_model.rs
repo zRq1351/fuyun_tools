@@ -86,6 +86,18 @@ pub struct AppSettingsData {
     pub explanation_prompt_template: String,
     #[serde(default = "default_image_fill_verify_mode")]
     pub image_fill_verify_mode: String,
+    #[serde(default = "default_backup_enabled")]
+    pub backup_enabled: bool,
+    #[serde(default = "default_backup_frequency")]
+    pub backup_frequency: String,
+    #[serde(default)]
+    pub backup_target_dir: String,
+    #[serde(default = "default_backup_max_count")]
+    pub backup_max_count: usize,
+    #[serde(default)]
+    pub backup_last_run_at: i64,
+    #[serde(default = "default_backup_last_run_status")]
+    pub backup_last_run_status: String,
 }
 
 impl Default for AppSettingsData {
@@ -129,6 +141,12 @@ impl Default for AppSettingsData {
             translation_prompt_template: default_translation_prompt_template(),
             explanation_prompt_template: default_explanation_prompt_template(),
             image_fill_verify_mode: default_image_fill_verify_mode(),
+            backup_enabled: default_backup_enabled(),
+            backup_frequency: default_backup_frequency(),
+            backup_target_dir: String::new(),
+            backup_max_count: default_backup_max_count(),
+            backup_last_run_at: 0,
+            backup_last_run_status: default_backup_last_run_status(),
         }
     }
 }
@@ -251,6 +269,22 @@ fn default_clipboard_bottom_offset() -> i32 {
 
 fn default_image_fill_verify_mode() -> String {
     "fast".to_string()
+}
+
+fn default_backup_enabled() -> bool {
+    false
+}
+
+fn default_backup_frequency() -> String {
+    "weekly".to_string()
+}
+
+fn default_backup_max_count() -> usize {
+    5
+}
+
+fn default_backup_last_run_status() -> String {
+    "idle".to_string()
 }
 
 pub fn default_translation_prompt_template() -> String {

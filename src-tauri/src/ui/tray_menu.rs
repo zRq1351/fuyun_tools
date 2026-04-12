@@ -1,6 +1,6 @@
 use crate::core::app_state::{AppState, TrayMenuItems};
 use crate::sync::Mutex;
-use crate::ui::window_manager::cleanup_enigo_instance;
+use crate::ui::window_manager::{cleanup_enigo_instance, show_standard_window_by_label};
 #[cfg(debug_assertions)]
 use crate::utils::utils_helpers::get_logs_dir_path;
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{menu::CheckMenuItemBuilder, AppHandle, Manager};
+use tauri::{menu::CheckMenuItemBuilder, AppHandle};
 use tauri_plugin_autostart::ManagerExt;
 #[cfg(debug_assertions)]
 use tauri_plugin_opener::OpenerExt;
@@ -156,10 +156,7 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
 
 /// 打开设置窗口
 pub fn open_settings(app: &AppHandle) {
-    if let Some(settings_window) = app.get_webview_window("settings") {
-        let _ = settings_window.show();
-        let _ = settings_window.set_focus();
-    }
+    let _ = show_standard_window_by_label(app, "settings");
 }
 
 /// 处理退出事件

@@ -1,3 +1,6 @@
+pub mod backup_archive;
+pub mod backup_model;
+pub mod backup_restore;
 pub mod clipboard;
 pub mod database;
 pub mod image_clipboard;

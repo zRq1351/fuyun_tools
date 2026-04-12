@@ -54,6 +54,7 @@ mod fallback {
     pub struct ManualLongshotStatus {
         pub session_id: u64,
         pub state: String,
+        pub phase: String,
         pub region: LongshotRegion,
         pub frame_count: u64,
         pub dropped_frames: u64,
@@ -61,6 +62,16 @@ mod fallback {
         pub stitched_width: u32,
         pub last_confidence: f32,
         pub last_error: Option<String>,
+        pub failure_kind: Option<String>,
+        pub user_message: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ManualLongshotFailureRecord {
+        pub failure_kind: String,
+        pub message: String,
+        pub occurred_at: i64,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +121,10 @@ mod fallback {
     }
 
     pub fn active_manual_longshot_session_id() -> Option<u64> {
+        None
+    }
+
+    pub fn get_last_manual_longshot_failure() -> Option<ManualLongshotFailureRecord> {
         None
     }
 

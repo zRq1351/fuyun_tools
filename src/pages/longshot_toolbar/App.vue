@@ -1,21 +1,27 @@
 <template>
-  <div class="panel" data-tauri-drag-region>
-    <div class="header">
-      <div class="title">{{ paused ? '长截图已暂停' : '长截图进行中' }}</div>
+  <div class="panel">
+    <div class="header" data-tauri-drag-region>
+      <div class="title" data-tauri-drag-region>{{ titleText }}</div>
       <div class="actions no-drag">
-        <button class="btn" @click="togglePause">{{ paused ? '继续' : '暂停' }}</button>
-        <button class="btn primary" @click="finish">完成</button>
-        <button class="btn danger" @click="cancel">取消</button>
+        <button :disabled="phase === 'finishing' || phase === 'canceling' || phase === 'failed'" class="btn"
+                @click="togglePause">{{ paused ? '继续' : '暂停' }}
+        </button>
+        <button :disabled="phase === 'finishing' || phase === 'canceling' || phase === 'failed'" class="btn primary"
+                @click="finish">完成
+        </button>
+        <button :disabled="phase === 'canceling'" class="btn danger" @click="cancel">取消</button>
       </div>
     </div>
 
-    <div class="preview-wrap">
-      <img v-if="previewSrc" :src="previewSrc" alt="longshot preview" class="preview"/>
-      <div v-else class="preview-empty">等待预览...</div>
+    <div class="preview-wrap" data-tauri-drag-region>
+      <img v-if="previewSrc" :src="previewSrc" alt="longshot preview" class="preview" data-tauri-drag-region
+           draggable="false"/>
+      <div v-else class="preview-empty" data-tauri-drag-region>等待预览...</div>
       <div v-if="previewSrc && viewportStyle" class="viewport-marker" :style="viewportStyle"></div>
     </div>
 
-    <div class="meta">
+    <div class="meta" data-tauri-drag-region>
+      状态 {{ phaseText }} ·
       高度 {{ stitchedHeight }} px · 帧 {{ frameCount }} · 丢帧 {{ droppedFrames }} · 置信度
       {{ Number(lastConfidence || 0).toFixed(2) }}
     </div>
@@ -28,6 +34,7 @@ import {invoke} from '@tauri-apps/api/core'
 import {listen} from '@tauri-apps/api/event'
 
 const paused = ref(false)
+const phase = ref('starting')
 const previewSrc = ref('')
 const stitchedHeight = ref(0)
 const captureHeight = ref(0)
@@ -53,9 +60,31 @@ const cancel = async () => {
   await invoke('longshot_toolbar_action', {action: 'cancel'})
 }
 
+const phaseText = computed(() => {
+  if (phase.value === 'starting') return '准备中'
+  if (phase.value === 'running') return '进行中'
+  if (phase.value === 'paused') return '已暂停'
+  if (phase.value === 'finishing') return '收尾中'
+  if (phase.value === 'canceling') return '取消中'
+  if (phase.value === 'failed') return '失败'
+  if (phase.value === 'done') return '已完成'
+  return '未知'
+})
+
+const titleText = computed(() => {
+  if (phase.value === 'paused') return '长截图已暂停'
+  if (phase.value === 'finishing') return '长截图收尾中'
+  if (phase.value === 'canceling') return '长截图取消中'
+  if (phase.value === 'failed') return '长截图失败'
+  if (phase.value === 'done') return '长截图已完成'
+  if (phase.value === 'starting') return '长截图准备中'
+  return '长截图进行中'
+})
+
 onMounted(async () => {
   unlistenProgress = await listen('manual-longshot-progress', (event) => {
     const payload = event.payload || {}
+    phase.value = String(payload.phase || phase.value || 'running')
     stitchedHeight.value = Number(payload.stitchedHeight || 0)
     captureHeight.value = Number(payload.captureHeight || 0)
     frameCount.value = Number(payload.frameCount || 0)
@@ -72,8 +101,11 @@ onMounted(async () => {
   unlistenLifecycle = await listen('manual-longshot-lifecycle', (event) => {
     const payload = event.payload || {}
     const state = String(payload.state || '')
+    phase.value = String(payload.phase || phase.value)
     if (state === 'paused') paused.value = true
     if (state === 'resumed' || state === 'started' || state === 'running') paused.value = false
+    if (phase.value === 'running' || phase.value === 'starting') paused.value = false
+    if (phase.value === 'paused') paused.value = true
   })
   unlistenReset = await listen('manual-longshot-toolbar-reset', () => {
     previewSrc.value = ''
@@ -83,6 +115,7 @@ onMounted(async () => {
     droppedFrames.value = 0
     lastConfidence.value = 0
     paused.value = false
+    phase.value = 'starting'
   })
   window.addEventListener('mouseup', scheduleSnap)
 })

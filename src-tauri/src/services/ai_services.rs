@@ -1,5 +1,6 @@
 use crate::core::app_state::AppState as SharedAppState;
 use crate::core::error::{AppError, AppResult, ErrorCode};
+use crate::core::perf_metrics::record_perf_metric;
 use crate::services::ai_client::{AIClient, AIConfig};
 use crate::sync::Mutex;
 use crate::ui::window_manager::{hide_selection_toolbar_impl, show_result_window, update_result_window};
@@ -8,6 +9,8 @@ use crate::utils::utils_helpers::{
 };
 use serde::Deserialize;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 fn lock_state<'a>(state: &'a Arc<Mutex<SharedAppState>>) -> crate::sync::MutexGuard<'a, SharedAppState> {
@@ -219,6 +222,7 @@ async fn execute_stream_request(
     app: AppHandle,
     state_arc: Arc<Mutex<SharedAppState>>,
 ) -> Result<(), AppError> {
+    let started_at = Instant::now();
     let text = request.text.trim().to_string();
     if text.is_empty() {
         let msg = match kind {
@@ -300,8 +304,26 @@ async fn execute_stream_request(
     }
 
     let state_for_stream = state_arc.clone();
+    let first_chunk_recorded = AtomicBool::new(false);
     let result = client
         .generate_text_stream(messages.as_str(), Some(1000), |content_chunk| {
+            if !content_chunk.is_empty()
+                && !first_chunk_recorded.swap(true, Ordering::Relaxed)
+            {
+                record_perf_metric(
+                    match kind {
+                        AiStreamKind::Translation => "ai.translation.first_chunk",
+                        AiStreamKind::Explanation => "ai.explanation.first_chunk",
+                    },
+                    match kind {
+                        AiStreamKind::Translation => "AI翻译首字返回",
+                        AiStreamKind::Explanation => "AI解释首字返回",
+                    },
+                    started_at.elapsed().as_millis() as u64,
+                    true,
+                    None,
+                );
+            }
             if !is_operation_active(&state_for_stream, kind, operation_id) {
                 log::info!(
                     "{}流已被新请求接管，停止旧流: op_id={}",
@@ -327,6 +349,19 @@ async fn execute_stream_request(
 
     match result {
         Ok(()) => {
+            record_perf_metric(
+                match kind {
+                    AiStreamKind::Translation => "ai.translation.total",
+                    AiStreamKind::Explanation => "ai.explanation.total",
+                },
+                match kind {
+                    AiStreamKind::Translation => "AI翻译总耗时",
+                    AiStreamKind::Explanation => "AI解释总耗时",
+                },
+                started_at.elapsed().as_millis() as u64,
+                true,
+                None,
+            );
             if is_operation_active(&state_arc, kind, operation_id) {
                 log::info!("{}完成: op_id={}", kind.display_name(), operation_id);
             } else {
@@ -338,6 +373,35 @@ async fn execute_stream_request(
             }
         }
         Err(e) => {
+            let error_message = e.to_string();
+            if !first_chunk_recorded.load(Ordering::Relaxed) {
+                record_perf_metric(
+                    match kind {
+                        AiStreamKind::Translation => "ai.translation.first_chunk",
+                        AiStreamKind::Explanation => "ai.explanation.first_chunk",
+                    },
+                    match kind {
+                        AiStreamKind::Translation => "AI翻译首字返回",
+                        AiStreamKind::Explanation => "AI解释首字返回",
+                    },
+                    started_at.elapsed().as_millis() as u64,
+                    false,
+                    Some(error_message.clone()),
+                );
+            }
+            record_perf_metric(
+                match kind {
+                    AiStreamKind::Translation => "ai.translation.total",
+                    AiStreamKind::Explanation => "ai.explanation.total",
+                },
+                match kind {
+                    AiStreamKind::Translation => "AI翻译总耗时",
+                    AiStreamKind::Explanation => "AI解释总耗时",
+                },
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error_message.clone()),
+            );
             if !is_operation_active(&state_arc, kind, operation_id) {
                 log::info!(
                     "忽略过期{}错误: op_id={}, error={}",

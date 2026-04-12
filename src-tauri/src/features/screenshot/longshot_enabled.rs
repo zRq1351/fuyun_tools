@@ -13,7 +13,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 
 #[cfg(target_os = "windows")]
@@ -22,6 +22,7 @@ const MAX_STITCHED_HEIGHT: u32 = 20_000;
 const MAX_STITCHED_PIXELS: u64 = 120_000_000;
 static NEXT_LONGSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 static MANUAL_LONGSHOT_RUNTIME: OnceLock<StdMutex<Option<ManualLongshotRuntime>>> = OnceLock::new();
+static LAST_LONGSHOT_FAILURE: OnceLock<StdMutex<Option<ManualLongshotFailureRecord>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +68,7 @@ fn default_longshot_preview_interval_ms() -> u32 {
 pub struct ManualLongshotStatus {
     pub session_id: u64,
     pub state: String,
+    pub phase: String,
     pub region: LongshotRegion,
     pub frame_count: u64,
     pub dropped_frames: u64,
@@ -74,6 +76,8 @@ pub struct ManualLongshotStatus {
     pub stitched_width: u32,
     pub last_confidence: f32,
     pub last_error: Option<String>,
+    pub failure_kind: Option<String>,
+    pub user_message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +90,14 @@ pub struct ManualLongshotFinishResult {
     pub image_path: String,
     pub frame_count: u64,
     pub dropped_frames: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManualLongshotFailureRecord {
+    pub failure_kind: String,
+    pub message: String,
+    pub occurred_at: i64,
 }
 
 struct ManualLongshotControl {
@@ -101,6 +113,62 @@ struct ManualLongshotRuntime {
     worker: Option<JoinHandle<()>>,
 }
 
+fn status_phase(state: &str) -> String {
+    match state {
+        "starting" => "starting",
+        "running" => "running",
+        "paused" => "paused",
+        "finishing" => "finishing",
+        "canceling" => "canceling",
+        "failed" | "error" => "failed",
+        "ended" => "done",
+        _ => "unknown",
+    }
+    .to_string()
+}
+
+fn map_failure_kind(error: &str) -> String {
+    let text = error.to_lowercase();
+    if text.contains("longshot-opencv")
+        || text.contains("opencv")
+        || text.contains("ffmpeg")
+        || text.contains("未启用")
+        || text.contains("未检测到")
+    {
+        "missing_dependency".to_string()
+    } else if text.contains("会话") || text.contains("id 不匹配") || text.contains("进行中") {
+        "busy".to_string()
+    } else if text.contains("取消") {
+        "cancelled".to_string()
+    } else {
+        "runtime_error".to_string()
+    }
+}
+
+fn user_message_for_state(state: &str, failure_kind: Option<&str>, last_error: Option<&str>) -> String {
+    match state {
+        "starting" => "正在准备长截图环境".to_string(),
+        "running" => "长截图进行中，请继续滚动目标内容".to_string(),
+        "paused" => "长截图已暂停，可继续或完成".to_string(),
+        "finishing" => "正在收尾并生成长截图结果".to_string(),
+        "canceling" => "正在取消长截图并回收资源".to_string(),
+        "ended" => "长截图已完成".to_string(),
+        "failed" | "error" => match failure_kind.unwrap_or("runtime_error") {
+            "missing_dependency" => "长截图依赖未就绪，请检查 FFmpeg 或 OpenCV 环境".to_string(),
+            "busy" => "已有长截图会话正在运行，请先完成或取消".to_string(),
+            "cancelled" => "长截图已取消".to_string(),
+            _ => format!(
+                "长截图失败，请重试或查看诊断信息{}",
+                last_error
+                    .filter(|value| !value.is_empty())
+                    .map(|value| format!("：{}", value))
+                    .unwrap_or_default()
+            ),
+        },
+        _ => "长截图状态未知，请重新检查".to_string(),
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct AlignEstimate {
     overlap_rows: i32,
@@ -113,6 +181,30 @@ struct AlignEstimate {
 
 fn runtime_slot() -> &'static StdMutex<Option<ManualLongshotRuntime>> {
     MANUAL_LONGSHOT_RUNTIME.get_or_init(|| StdMutex::new(None))
+}
+
+fn last_failure_slot() -> &'static StdMutex<Option<ManualLongshotFailureRecord>> {
+    LAST_LONGSHOT_FAILURE.get_or_init(|| StdMutex::new(None))
+}
+
+fn set_last_failure(failure_kind: &str, message: &str) {
+    if let Ok(mut slot) = last_failure_slot().lock() {
+        *slot = Some(ManualLongshotFailureRecord {
+            failure_kind: failure_kind.to_string(),
+            message: message.to_string(),
+            occurred_at: now_ms(),
+        });
+    }
+}
+
+fn clear_last_failure() {
+    if let Ok(mut slot) = last_failure_slot().lock() {
+        *slot = None;
+    }
+}
+
+pub fn get_last_manual_longshot_failure() -> Option<ManualLongshotFailureRecord> {
+    last_failure_slot().lock().ok()?.clone()
 }
 
 fn clear_runtime_if_finished(session_id: u64) {
@@ -170,7 +262,8 @@ pub fn start_manual_longshot(
         paused: AtomicBool::new(false),
         status: StdMutex::new(ManualLongshotStatus {
             session_id,
-            state: "running".to_string(),
+            state: "starting".to_string(),
+            phase: "starting".to_string(),
             region: request.region.clone(),
             frame_count: 0,
             dropped_frames: 0,
@@ -178,6 +271,8 @@ pub fn start_manual_longshot(
             stitched_width: request.region.width,
             last_confidence: 0.0,
             last_error: None,
+            failure_kind: None,
+            user_message: "正在准备长截图环境".to_string(),
         }),
         result: StdMutex::new(None),
     });
@@ -200,6 +295,8 @@ pub fn start_manual_longshot(
         serde_json::json!({
             "sessionId": session_id,
             "state": "started",
+            "phase": "starting",
+            "userMessage": "正在准备长截图环境",
         }),
     );
 
@@ -214,12 +311,16 @@ pub fn pause_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Stri
         runtime.control.paused.store(true, Ordering::Release);
         if let Ok(mut status) = runtime.control.status.lock() {
             status.state = "paused".to_string();
+            status.phase = status_phase(&status.state);
+            status.user_message = user_message_for_state(&status.state, None, None);
         }
         let _ = app.emit(
             "manual-longshot-lifecycle",
             serde_json::json!({
                 "sessionId": session_id,
                 "state": "paused",
+                "phase": "paused",
+                "userMessage": "长截图已暂停，可继续或完成",
             }),
         );
         Ok(())
@@ -231,12 +332,16 @@ pub fn resume_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
         runtime.control.paused.store(false, Ordering::Release);
         if let Ok(mut status) = runtime.control.status.lock() {
             status.state = "running".to_string();
+            status.phase = status_phase(&status.state);
+            status.user_message = user_message_for_state(&status.state, None, None);
         }
         let _ = app.emit(
             "manual-longshot-lifecycle",
             serde_json::json!({
                 "sessionId": session_id,
                 "state": "resumed",
+                "phase": "running",
+                "userMessage": "长截图进行中，请继续滚动目标内容",
             }),
         );
         Ok(())
@@ -258,6 +363,8 @@ pub fn cancel_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
     runtime.control.paused.store(false, Ordering::Release);
     if let Ok(mut status) = runtime.control.status.lock() {
         status.state = "canceling".to_string();
+        status.phase = status_phase(&status.state);
+        status.user_message = user_message_for_state(&status.state, None, None);
     }
     let worker = runtime.worker.take();
     drop(slot);
@@ -276,6 +383,8 @@ pub fn cancel_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
         serde_json::json!({
             "sessionId": session_id,
             "state": "canceled",
+            "phase": "canceling",
+            "userMessage": "正在取消长截图并回收资源",
         }),
     );
     Ok(())
@@ -300,6 +409,8 @@ pub fn finish_manual_longshot(
     runtime.control.paused.store(false, Ordering::Release);
     if let Ok(mut status) = runtime.control.status.lock() {
         status.state = "finishing".to_string();
+        status.phase = status_phase(&status.state);
+        status.user_message = user_message_for_state(&status.state, None, None);
     }
     let worker = runtime.worker.take();
     let control = runtime.control.clone();
@@ -331,6 +442,8 @@ pub fn finish_manual_longshot(
         serde_json::json!({
             "sessionId": session_id,
             "state": "ended",
+            "phase": "done",
+            "userMessage": "长截图已完成",
             "width": final_result.width,
             "height": final_result.height,
         }),
@@ -353,7 +466,8 @@ pub fn active_manual_longshot_session_id() -> Option<u64> {
     let slot = runtime_slot().lock().ok()?;
     let runtime = slot.as_ref()?;
     let status = runtime.control.status.lock().ok()?;
-    if status.state == "running"
+    if status.state == "starting"
+        || status.state == "running"
         || status.state == "paused"
         || status.state == "finishing"
         || status.state == "canceling"
@@ -394,15 +508,24 @@ fn run_longshot_worker(
     };
     let run_result = run_longshot_worker_inner(&app, &control, &request);
     if let Err(err) = run_result {
+        let failure_kind = map_failure_kind(&err);
+        let user_message = user_message_for_state("failed", Some(&failure_kind), Some(&err));
+        set_last_failure(&failure_kind, &err);
         if let Ok(mut status) = control.status.lock() {
-            status.state = "error".to_string();
+            status.state = "failed".to_string();
+            status.phase = "failed".to_string();
             status.last_error = Some(err.clone());
+            status.failure_kind = Some(failure_kind.clone());
+            status.user_message = user_message.clone();
         }
         let _ = app.emit(
             "manual-longshot-lifecycle",
             serde_json::json!({
                 "sessionId": session_id,
-                "state": "error",
+                "state": "failed",
+                "phase": "failed",
+                "failureKind": failure_kind,
+                "userMessage": user_message,
                 "message": err,
             }),
         );
@@ -519,14 +642,19 @@ fn run_longshot_worker_inner(
             let mut first_frame_session_id = 0u64;
             if let Ok(mut status) = control.status.lock() {
                 first_frame_session_id = status.session_id;
+                status.state = "running".to_string();
+                status.phase = "running".to_string();
                 status.frame_count = 1;
                 status.stitched_width = stitched_width;
                 status.stitched_height = stitched_height;
+                status.user_message = user_message_for_state(&status.state, None, None);
             }
             let _ = app.emit(
                 "manual-longshot-first-frame",
                 serde_json::json!({
                     "sessionId": first_frame_session_id,
+                    "phase": "running",
+                    "userMessage": "长截图进行中，请继续滚动目标内容",
                 }),
             );
             continue;
@@ -601,6 +729,8 @@ fn run_longshot_worker_inner(
             status.stitched_width = stitched_width;
             if status.state != "paused" {
                 status.state = "running".to_string();
+                status.phase = "running".to_string();
+                status.user_message = user_message_for_state(&status.state, None, None);
             }
         }
 
@@ -620,6 +750,8 @@ fn run_longshot_worker_inner(
                         "captureHeight": status.region.height,
                         "captureWidth": status.region.width,
                         "lastConfidence": status.last_confidence,
+                        "phase": status.phase,
+                        "userMessage": status.user_message,
                     }),
                 );
             }
@@ -736,9 +868,20 @@ fn run_longshot_worker_inner(
     if let Ok(mut status) = control.status.lock() {
         if status.state != "canceled" {
             status.state = "ended".to_string();
+            status.phase = "done".to_string();
+            status.failure_kind = None;
+            status.user_message = user_message_for_state(&status.state, None, None);
         }
     }
+    clear_last_failure();
     Ok(())
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }
 
 fn capture_single_bgr_frame(request: &StartManualLongshotRequest) -> Result<Mat, String> {

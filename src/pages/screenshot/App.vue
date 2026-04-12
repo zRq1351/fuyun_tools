@@ -141,7 +141,12 @@
         </button>
 
         <div class="divider"></div>
-        <button class="tool-btn" title="长截图" @click="enterManualLongshotMode">
+        <button
+            :disabled="manualLongshotAvailability.status !== 'available' && manualLongshotAvailability.status !== 'busy'"
+            :title="manualLongshotButtonTitle"
+            class="tool-btn"
+            @click="enterManualLongshotMode"
+        >
           <svg aria-hidden="true" class="tool-icon-wrap" fill="none" viewBox="0 0 16 16">
             <path d="M8 1.5 L6.2 3.3 M8 1.5 L9.8 3.3 M8 1.5 V5" stroke="currentColor" stroke-linecap="round"
                   stroke-linejoin="round" stroke-width="1.4"/>
@@ -407,7 +412,15 @@ let fallbackRequestedWithoutSession = false
 let screenshotFallbackTimer = null
 const manualLongshotSessionId = ref(0)
 const manualLongshotRunning = ref(false)
+const manualLongshotPhase = ref('idle')
 const manualLongshotHint = ref('')
+const manualLongshotAvailability = reactive({
+  status: 'unknown',
+  phase: 'idle',
+  summary: '',
+  details: [],
+  sessionId: null
+})
 const longshotOverlayOnly = ref(false)
 const longshotResultActive = ref(false)
 const longshotRawPngBase64 = ref('')
@@ -424,6 +437,7 @@ let unlistenManualLongshotShortcutFinished = null
 let unlistenManualLongshotShortcutCanceled = null
 let unlistenManualLongshotShortcutPaused = null
 let unlistenManualLongshotShortcutResumed = null
+let manualLongshotAvailabilityRefreshTimer = null
 
 // 物理像素比例
 const dpr = window.devicePixelRatio || 1
@@ -486,6 +500,11 @@ const exportRouteIndicator = computed(() => {
     ]
   }
 })
+const manualLongshotButtonTitle = computed(() => {
+  if (manualLongshotAvailability.status === 'available') return '长截图'
+  if (manualLongshotAvailability.status === 'busy') return '已有长截图会话正在运行'
+  return manualLongshotAvailability.summary || '长截图当前不可用'
+})
 const selectionInfoText = computed(() => {
   const width = Math.max(0, Math.round(rect.width * dpr))
   const height = Math.max(0, Math.round(rect.height * dpr))
@@ -538,6 +557,72 @@ function getPathBasename(filePath) {
   const normalized = String(filePath || '').replace(/\\/g, '/')
   const parts = normalized.split('/')
   return parts[parts.length - 1] || normalized
+}
+
+async function refreshManualLongshotAvailability() {
+  try {
+    const payload = await ScreenshotService.getManualLongshotAvailability()
+    manualLongshotAvailability.status = payload?.status || 'unknown'
+    manualLongshotAvailability.phase = payload?.phase || 'idle'
+    manualLongshotAvailability.summary = payload?.summary || ''
+    manualLongshotAvailability.details = Array.isArray(payload?.details) ? payload.details : []
+    manualLongshotAvailability.sessionId = payload?.sessionId ?? null
+    manualLongshotPhase.value = manualLongshotAvailability.phase
+  } catch (error) {
+    manualLongshotAvailability.status = 'unknown'
+    manualLongshotAvailability.phase = 'idle'
+    manualLongshotAvailability.summary = String(error || '长截图状态获取失败')
+    manualLongshotAvailability.details = []
+    manualLongshotAvailability.sessionId = null
+    manualLongshotPhase.value = 'idle'
+  }
+}
+
+function scheduleManualLongshotAvailabilityRefresh(delay = 180) {
+  if (manualLongshotAvailabilityRefreshTimer) {
+    window.clearTimeout(manualLongshotAvailabilityRefreshTimer)
+    manualLongshotAvailabilityRefreshTimer = null
+  }
+  manualLongshotAvailabilityRefreshTimer = window.setTimeout(async () => {
+    manualLongshotAvailabilityRefreshTimer = null
+    await refreshManualLongshotAvailability()
+  }, delay)
+}
+
+function cleanupManualLongshotUi(restoreVisibility = true) {
+  manualLongshotRunning.value = false
+  manualLongshotSessionId.value = 0
+  longshotOverlayOnly.value = false
+  pendingLongshotBorderAnchor.value = null
+  longshotBorderShown.value = false
+  regionSelectMode.value = 'screenshot'
+  if (restoreVisibility) {
+    invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
+    })
+  }
+  invoke('hide_longshot_border').catch(() => {
+  })
+  invoke('hide_longshot_toolbar').catch(() => {
+  })
+  scheduleManualLongshotAvailabilityRefresh()
+}
+
+function applyManualLongshotPhase(payload = {}) {
+  const phase = String(payload.phase || '')
+  const userMessage = String(payload.userMessage || '')
+  if (phase) {
+    manualLongshotPhase.value = phase
+  }
+  if (phase === 'paused') {
+    manualLongshotRunning.value = false
+  } else if (phase === 'running' || phase === 'starting' || phase === 'finishing') {
+    manualLongshotRunning.value = true
+  } else if (phase === 'canceling' || phase === 'done' || phase === 'failed') {
+    manualLongshotRunning.value = false
+  }
+  if (userMessage) {
+    manualLongshotHint.value = userMessage
+  }
 }
 
 let screenshotPixelCanvas = null
@@ -692,6 +777,7 @@ watchPostEffect(() => {
 
 // 初始化与通信
 onMounted(async () => {
+  await refreshManualLongshotAvailability()
   window.addEventListener('screenshot-data', handleScreenshotData)
   window.addEventListener('start-region-select', handleStartRegionSelect)
   window.addEventListener('screenshot-reset', handleScreenshotReset)
@@ -700,6 +786,7 @@ onMounted(async () => {
     const payload = event.payload || {}
     const sessionId = Number(payload.sessionId || 0)
     if (manualLongshotSessionId.value > 0 && sessionId !== manualLongshotSessionId.value) return
+    applyManualLongshotPhase(payload)
     const stitchedHeight = Number(payload.stitchedHeight || 0)
     const frameCount = Number(payload.frameCount || 0)
     const dropped = Number(payload.droppedFrames || 0)
@@ -715,6 +802,7 @@ onMounted(async () => {
     const payload = event.payload || {}
     const sessionId = Number(payload.sessionId || 0)
     if (manualLongshotSessionId.value > 0 && sessionId !== manualLongshotSessionId.value) return
+    applyManualLongshotPhase(payload)
     if (pendingLongshotBorderAnchor.value && !longshotBorderShown.value) {
       invoke('show_longshot_border', {anchor: pendingLongshotBorderAnchor.value}).catch(() => {
       })
@@ -726,24 +814,21 @@ onMounted(async () => {
     const sessionId = Number(payload.sessionId || 0)
     if (manualLongshotSessionId.value > 0 && sessionId !== manualLongshotSessionId.value) return
     const stateName = String(payload.state || '')
+    applyManualLongshotPhase(payload)
     if (stateName === 'started' || stateName === 'resumed') {
-      manualLongshotRunning.value = true
       if (!manualLongshotHint.value) {
         manualLongshotHint.value = '请在选区内手动滚动，完成后点击勾号'
       }
-    } else if (stateName === 'paused') {
-      manualLongshotRunning.value = false
-      manualLongshotHint.value = '长截图已暂停，点击播放继续'
-    } else if (stateName === 'ended') {
-      manualLongshotRunning.value = false
-      manualLongshotHint.value = '长截图已完成'
     } else if (stateName === 'canceled') {
-      manualLongshotRunning.value = false
-      manualLongshotSessionId.value = 0
+      manualLongshotPhase.value = 'canceling'
+      cleanupManualLongshotUi(true)
       manualLongshotHint.value = '长截图已取消'
-    } else if (stateName === 'error') {
-      manualLongshotRunning.value = false
-      manualLongshotHint.value = `长截图失败：${String(payload.message || '未知错误')}`
+    } else if (stateName === 'failed' || stateName === 'error') {
+      manualLongshotPhase.value = 'failed'
+      cleanupManualLongshotUi(true)
+      manualLongshotHint.value = String(payload.userMessage || `长截图失败：${String(payload.message || '未知错误')}`)
+    } else if (stateName === 'ended') {
+      scheduleManualLongshotAvailabilityRefresh()
     }
   })
   unlistenManualLongshotShortcutFinished = await listen('manual-longshot-shortcut-finished', (event) => {
@@ -755,22 +840,17 @@ onMounted(async () => {
     }
   })
   unlistenManualLongshotShortcutCanceled = await listen('manual-longshot-shortcut-canceled', () => {
-    manualLongshotRunning.value = false
-    manualLongshotSessionId.value = 0
-    longshotOverlayOnly.value = false
-    pendingLongshotBorderAnchor.value = null
-    longshotBorderShown.value = false
+    manualLongshotPhase.value = 'canceling'
+    cleanupManualLongshotUi(true)
     manualLongshotHint.value = '长截图已取消'
-    regionSelectMode.value = 'screenshot'
-    invoke('set_screenshot_window_visible', {visible: true}).catch(() => {})
-    invoke('hide_longshot_border').catch(() => {})
-    invoke('hide_longshot_toolbar').catch(() => {})
   })
   unlistenManualLongshotShortcutPaused = await listen('manual-longshot-shortcut-paused', () => {
+    manualLongshotPhase.value = 'paused'
     manualLongshotRunning.value = false
     manualLongshotHint.value = '已暂停（可点击按钮操作）。继续: Ctrl+Alt+P，完成: Ctrl+Alt+Enter，取消: Ctrl+Alt+Backspace'
   })
   unlistenManualLongshotShortcutResumed = await listen('manual-longshot-shortcut-resumed', () => {
+    manualLongshotPhase.value = 'running'
     manualLongshotRunning.value = true
     manualLongshotHint.value = '已恢复滚动采样。暂停/恢复: Ctrl+Alt+P，完成: Ctrl+Alt+Enter，取消: Ctrl+Alt+Backspace'
   })
@@ -816,6 +896,10 @@ onUnmounted(() => {
     window.clearTimeout(screenshotFallbackTimer)
     screenshotFallbackTimer = null
   }
+  if (manualLongshotAvailabilityRefreshTimer) {
+    window.clearTimeout(manualLongshotAvailabilityRefreshTimer)
+    manualLongshotAvailabilityRefreshTimer = null
+  }
 })
 
 function handleScreenshotReset() {
@@ -849,6 +933,7 @@ function handleScreenshotReset() {
   fallbackRequestedWithoutSession = false
   manualLongshotSessionId.value = 0
   manualLongshotRunning.value = false
+  manualLongshotPhase.value = 'idle'
   manualLongshotHint.value = ''
   longshotResultActive.value = false
   longshotRawPngBase64.value = ''
@@ -1063,6 +1148,7 @@ async function toggleManualLongshotRunning() {
       if (sid > 0) {
         manualLongshotSessionId.value = sid
         manualLongshotRunning.value = true
+        manualLongshotPhase.value = 'starting'
         await invoke('show_longshot_toolbar', {anchor: region})
         manualLongshotHint.value = '长截图已开始，可直接看到目标窗口滚动'
       } else {
@@ -1076,20 +1162,18 @@ async function toggleManualLongshotRunning() {
     if (manualLongshotRunning.value) {
       await ScreenshotService.pauseManualLongshot(manualLongshotSessionId.value)
       manualLongshotRunning.value = false
+      manualLongshotPhase.value = 'paused'
       manualLongshotHint.value = '长截图已暂停，点击播放继续'
     } else {
       await ScreenshotService.resumeManualLongshot(manualLongshotSessionId.value)
       manualLongshotRunning.value = true
+      manualLongshotPhase.value = 'running'
       manualLongshotHint.value = '继续滚动中，已切到悬浮预览窗'
     }
   } catch (error) {
     await invoke('set_screenshot_window_visible', {visible: true}).catch(() => {})
-    await invoke('hide_longshot_border').catch(() => {})
-    await invoke('hide_longshot_toolbar').catch(() => {})
-    longshotOverlayOnly.value = false
-    pendingLongshotBorderAnchor.value = null
-    longshotBorderShown.value = false
-    manualLongshotRunning.value = false
+    cleanupManualLongshotUi(false)
+    manualLongshotPhase.value = 'failed'
     manualLongshotHint.value = `长截图操作失败：${String(error)}`
   }
 }
@@ -1097,17 +1181,13 @@ async function toggleManualLongshotRunning() {
 async function finishManualLongshotCapture() {
   if (manualLongshotSessionId.value <= 0) return
   try {
+    const sessionId = manualLongshotSessionId.value
     await invoke('set_screenshot_window_visible', {visible: true})
-    await invoke('hide_longshot_border')
-    await invoke('hide_longshot_toolbar')
-    pendingLongshotBorderAnchor.value = null
-    longshotBorderShown.value = false
-    const result = await ScreenshotService.finishManualLongshot(manualLongshotSessionId.value)
+    cleanupManualLongshotUi(false)
+    const result = await ScreenshotService.finishManualLongshot(sessionId)
     applyManualLongshotResult(result || {})
   } catch (error) {
-    await invoke('set_screenshot_window_visible', {visible: true}).catch(() => {})
-    await invoke('hide_longshot_border').catch(() => {})
-    await invoke('hide_longshot_toolbar').catch(() => {})
+    cleanupManualLongshotUi(true)
     manualLongshotHint.value = `完成长截图失败：${String(error)}`
   }
 }
@@ -1120,17 +1200,9 @@ function cancelManualLongshotCapture(updateHint = true, restoreVisibility = true
       !!pendingLongshotBorderAnchor.value ||
       longshotBorderShown.value
   manualLongshotRunning.value = false
+  manualLongshotPhase.value = 'canceling'
   manualLongshotSessionId.value = 0
-  pendingLongshotBorderAnchor.value = null
-  longshotBorderShown.value = false
-  if (restoreVisibility && hadLongshotRuntime) {
-    invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
-    })
-  }
-  invoke('hide_longshot_border').catch(() => {
-  })
-  invoke('hide_longshot_toolbar').catch(() => {
-  })
+  cleanupManualLongshotUi(restoreVisibility && hadLongshotRuntime)
   if (sid > 0) {
     ScreenshotService.cancelManualLongshot(sid).catch(() => {
     })
@@ -1165,14 +1237,9 @@ function applyManualLongshotResult(result) {
   rect.height = window.innerHeight
   manualLongshotSessionId.value = 0
   manualLongshotRunning.value = false
-  longshotOverlayOnly.value = false
+  manualLongshotPhase.value = 'done'
+  cleanupManualLongshotUi(true)
   manualLongshotHint.value = ''
-  invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
-  })
-  invoke('hide_longshot_border').catch(() => {
-  })
-  invoke('hide_longshot_toolbar').catch(() => {
-  })
 }
 
 function hasOverlayForLongshotExport() {
@@ -1729,6 +1796,14 @@ function setTool(toolId) {
 }
 
 function enterManualLongshotMode() {
+  if (manualLongshotAvailability.status !== 'available' && manualLongshotAvailability.status !== 'busy') {
+    manualLongshotHint.value = manualLongshotAvailability.summary || '长截图当前不可用'
+    return
+  }
+  if (manualLongshotAvailability.status === 'busy' && !manualLongshotSessionId.value) {
+    manualLongshotHint.value = '已有长截图会话正在运行，请先完成或取消'
+    return
+  }
   cancelManualLongshotCapture(false)
   finishInlineEdit()
   regionSelectMode.value = 'manual_longshot'

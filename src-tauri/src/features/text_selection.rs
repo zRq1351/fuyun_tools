@@ -77,7 +77,9 @@ impl SelectionProcessingGuard {
         }
         guard.selection_guard_epoch = guard.selection_guard_epoch.wrapping_add(1);
         let epoch = guard.selection_guard_epoch;
+        guard.is_selection_capture_active = true;
         guard.is_processing_selection = true;
+        guard.is_updating_clipboard = false;
         drop(guard);
         Some(Self { state, epoch })
     }
@@ -87,7 +89,9 @@ impl Drop for SelectionProcessingGuard {
     fn drop(&mut self) {
         let mut state = lock_arc_mutex(&self.state);
         if state.selection_guard_epoch == self.epoch {
+            state.is_selection_capture_active = false;
             state.is_processing_selection = false;
+            state.is_updating_clipboard = state.is_text_writeback_active || state.is_image_writeback_active;
         }
     }
 }
