@@ -2528,8 +2528,18 @@ pub async fn clear_image_history(
         .await
         .map_err(|e| to_frontend_error_string(AppError::new(ErrorCode::ClipboardError, "清理图片历史失败").with_details(e)))?;
 
-    // 通知图片窗口更新数据
-    emit_image_history_payload(&app, state.inner().clone());
+    // 清理操作必须强制通知前端
+    let is_visible = {
+        let mut state_guard = lock_arc_mutex(state.inner());
+        // 无论窗口是否可见，都标记为 dirty，确保下次打开时会重新加载
+        state_guard.image_history_dirty = true;
+        state_guard.is_image_visible
+    };
+    
+    // 如果窗口当前可见，立即发送事件通知前端刷新
+    if is_visible {
+        emit_image_history_payload(&app, state.inner().clone());
+    }
 
     Ok(removed)
 }

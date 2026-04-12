@@ -1259,13 +1259,42 @@ const applyPayload = (data, options = {}) => {
 const mergeShowWindowPayload = (data) => {
   clearPrefetchedPage()
   const incoming = Array.isArray(data?.history) ? data.history.filter((item) => item?.id) : []
-  if (incoming.length > 0) {
+
+  // 判断是否为完整快照：包含 history 字段且数据结构完整
+  const hasHistoryField = Object.prototype.hasOwnProperty.call(data, 'history') && Array.isArray(data.history)
+  const isFullSnapshot = hasHistoryField && (incoming.length === 0 || (incoming.length > 0 && incoming[0]?.image_path !== undefined))
+
+  if (isFullSnapshot) {
+    // 完整快照：直接替换历史数据
+    if (incoming.length === 0) {
+      // 清理全部后，history 为空数组，直接清空
+      history.value = []
+    } else {
+      // 有数据时，完全替换
+      const front = []
+      for (const item of incoming) {
+        if (!item?.id) continue
+        front.push({
+          id: item.id,
+          width: item.width ?? 0,
+          height: item.height ?? 0,
+          preview_png_base64: item.preview_png_base64 ?? item.previewPngBase64 ?? '',
+          image_path: item.image_path ?? item.imagePath ?? ''
+        })
+      }
+      history.value = front
+    }
+
+    const loadedCount = history.value.length
+    totalCount.value = loadedCount
+    pageOffset.value = loadedCount
+  } else if (incoming.length > 0) {
+    // 增量更新：合并新旧数据
     const {loadedItems, existingById} = getLoadedHistorySnapshot()
     const incomingIds = new Set()
 
     const keepCount = getHistoryRetentionLimit(incoming.length)
 
-    // 修复：正确处理所有传入的图片，而不是只处理第一张
     const front = []
     for (const item of incoming) {
       if (!item?.id) continue
@@ -1281,7 +1310,6 @@ const mergeShowWindowPayload = (data) => {
       })
     }
 
-    // 保留现有历史记录中不在传入数据中的项目
     const rest = []
     for (const item of loadedItems) {
       if (!incomingIds.has(item.id)) {
@@ -1289,13 +1317,14 @@ const mergeShowWindowPayload = (data) => {
       }
     }
 
-    // 合并并限制总数
     const nextHistory = [...front, ...rest].slice(0, keepCount)
     history.value = nextHistory
-    const loadedCount = nextHistory.length
+
+    const loadedCount = history.value.length
     totalCount.value = Math.max(totalCount.value || 0, loadedCount)
     pageOffset.value = Math.max(pageOffset.value || 0, loadedCount)
   }
+
   if (!isAddingCategory.value) {
     if (data?.categories) {
       categoryMap.value = data.categories
@@ -1755,14 +1784,29 @@ onMounted(async () => {
   unlistenHistoryPayloadUpdated = await listen('image-history-payload-updated', (event) => {
     if (isAddingCategory.value) return
     const payload = event.payload || {}
+
+    // 检测是否为清理操作：如果 payload 包含 history 数组，说明是清理后的状态通知
+    const hasHistoryArray = Array.isArray(payload.history)
+
+    // 清理操作必须执行完整同步，不受数据量限制
+    if (hasHistoryArray) {
+      applyImagePayloadMeta(payload)
+      clearPrefetchedPage()
+      pageOffset.value = 0
+      totalCount.value = 0
+      hasMore.value = false
+      loadMoreIntent.value = false
+      void syncHistory()
+      return
+    }
+
+    // 非清理操作的正常流程
     if (shouldDeferHeavyPayloadApply(payload)) {
       scheduleHistorySync(0)
       return
     }
+
     applyImagePayloadMeta(payload)
-    if (Array.isArray(payload.history)) {
-      scheduleHistorySync(0)
-    }
   })
   unlistenHistoryItemAdded = await listen('image-history-item-added', (event) => {
     if (isAddingCategory.value) return
