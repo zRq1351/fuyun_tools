@@ -320,6 +320,11 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
     )
         .execute(&mut *conn)
         .await;
+    
+    // 迁移:为 pinned_items 表添加 position 列(如果不存在)
+    let _ = sqlx::query("ALTER TABLE pinned_items ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+        .execute(&mut *conn)
+        .await;
 
     Ok(())
 }
@@ -1476,5 +1481,158 @@ pub async fn delete_history_item_by_content(content: &str) -> Result<(), String>
 
     tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
 
+    Ok(())
+}
+
+/// 合并历史数据:保留现有记录,只添加备份中不存在的新记录
+pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(), String> {
+    let mut conn = open_history_db_async().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+    let now_ms = now_unix_ms();
+    
+    // 获取当前已存在的 item_id 集合
+    let existing_ids: HashSet<String> = sqlx::query_scalar::<_, String>("SELECT DISTINCT item_id FROM history_items WHERE item_id IS NOT NULL AND item_id != ''")
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| format!("读取现有记录失败: {}", e))?
+        .into_iter()
+        .collect();
+    
+    // 只插入不存在的记录
+    let mut new_count = 0;
+    for (idx, item) in data.items.iter().enumerate().rev() {
+        let item_id = stable_history_item_id(item);
+        if existing_ids.contains(&item_id) {
+            continue; // 跳过已存在的记录
+        }
+        
+        let ts = now_ms - (idx as i64);
+        sqlx::query(
+            "INSERT INTO history_items(content, item_id, created_at, updated_at)
+             VALUES(?1, ?2, ?3, ?3)",
+        )
+            .bind(item)
+            .bind(&item_id)
+            .bind(ts)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("写入新历史记录失败: {}", e))?;
+        new_count += 1;
+    }
+    
+    log::info!("合并文本历史: 新增 {} 条记录", new_count);
+    
+    // 合并分类信息(只添加新的)
+    for (item, category) in &data.categories {
+        let item_id = stable_history_item_id(item);
+        if existing_ids.contains(&item_id) {
+            // 如果记录已存在,更新分类
+            sqlx::query(
+                "INSERT INTO categories(content, category, item_id) VALUES(?1, ?2, ?3)
+                 ON CONFLICT(item_id) DO UPDATE SET content = ?1, category = ?2",
+            )
+                .bind(item)
+                .bind(category)
+                .bind(&item_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("更新分类失败: {}", e))?;
+        } else {
+            // 如果记录不存在,也添加分类(以备后续插入记录时使用)
+            sqlx::query(
+                "INSERT OR IGNORE INTO categories(content, category, item_id) VALUES(?1, ?2, ?3)",
+            )
+                .bind(item)
+                .bind(category)
+                .bind(&item_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("写入分类失败: {}", e))?;
+        }
+    }
+    
+    // 合并且分类列表(只添加不存在的)
+    let existing_categories: HashSet<String> = sqlx::query_scalar::<_, String>("SELECT category FROM category_list")
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| format!("读取分类列表失败: {}", e))?
+        .into_iter()
+        .collect();
+    
+    for category in &data.category_list {
+        if !existing_categories.contains(category) {
+            sqlx::query("INSERT INTO category_list(category) VALUES(?)")
+                .bind(category)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("写入分类列表失败: {}", e))?;
+        }
+    }
+    
+    // 合并且置顶项(追加到末尾)
+    let existing_pinned: HashSet<String> = sqlx::query_scalar::<_, String>("SELECT DISTINCT item_id FROM pinned_items WHERE item_id IS NOT NULL AND item_id != ''")
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| format!("读取置顶项失败: {}", e))?
+        .into_iter()
+        .collect();
+    
+    // 检测 pinned_items 表是否有 position 列
+    let has_position = sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM pinned_items")
+        .fetch_one(&mut *tx)
+        .await
+        .is_ok();
+    
+    if has_position {
+        // 有 position 列,使用位置排序
+        let current_max_position = sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM pinned_items")
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| format!("读取最大位置失败: {}", e))?
+            .unwrap_or(-1);
+        
+        let mut position = current_max_position + 1;
+        for (idx, item) in data.pinned_items.iter().enumerate() {
+            let item_id = stable_history_item_id(item);
+            if existing_pinned.contains(&item_id) {
+                continue; // 跳过已置顶的
+            }
+            
+            let pinned_at = now_ms - (idx as i64);
+            sqlx::query(
+                "INSERT INTO pinned_items(content, pinned_at, item_id, position) VALUES(?1, ?2, ?3, ?4)
+                 ON CONFLICT(item_id) DO NOTHING",
+            )
+                .bind(item)
+                .bind(pinned_at)
+                .bind(&item_id)
+                .bind(position)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("写入置顶项失败: {}", e))?;
+            position += 1;
+        }
+    } else {
+        // 没有 position 列,简单插入
+        for (idx, item) in data.pinned_items.iter().enumerate() {
+            let item_id = stable_history_item_id(item);
+            if existing_pinned.contains(&item_id) {
+                continue; // 跳过已置顶的
+            }
+            
+            let pinned_at = now_ms - (idx as i64);
+            sqlx::query(
+                "INSERT OR IGNORE INTO pinned_items(content, pinned_at, item_id) VALUES(?1, ?2, ?3)",
+            )
+                .bind(item)
+                .bind(pinned_at)
+                .bind(&item_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("写入置顶项失败: {}", e))?;
+        }
+    }
+    
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }

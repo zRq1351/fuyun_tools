@@ -117,10 +117,17 @@ pub struct BackupRestoreRequest {
     pub restore_image_history: bool,
     #[serde(default = "default_create_rollback_point")]
     pub create_rollback_point: bool,
+    /// 恢复策略: "merge"(合并) 或 "overwrite"(覆盖),默认为 "merge"
+    #[serde(default = "default_restore_strategy")]
+    pub restore_strategy: String,
 }
 
 fn default_create_rollback_point() -> bool {
     true
+}
+
+fn default_restore_strategy() -> String {
+    "merge".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

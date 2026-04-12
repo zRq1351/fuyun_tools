@@ -3,7 +3,7 @@ use crate::utils::image_clipboard::{
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqliteSynchronous};
 use sqlx::{Row, Sqlite, SqliteConnection, Transaction};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::future::Future;
@@ -248,6 +248,29 @@ async fn init_image_store_schema_async(conn: &mut SqliteConnection) -> Result<()
         "CREATE INDEX IF NOT EXISTS idx_image_pinned_position ON image_pinned(position)",
     )
         .await?;
+    
+    // ========== 数据库迁移:为旧版本表添加缺失的 position 列 ==========
+    
+    // 迁移 1: image_items 表添加 position 列
+    let _ = sqlx::query("ALTER TABLE image_items ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+        .execute(&mut *conn)
+        .await;
+    
+    // 迁移 2: image_category_list 表添加 position 列
+    let _ = sqlx::query("ALTER TABLE image_category_list ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+        .execute(&mut *conn)
+        .await;
+    
+    // 迁移 3: image_tags 表添加 position 列
+    let _ = sqlx::query("ALTER TABLE image_tags ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+        .execute(&mut *conn)
+        .await;
+    
+    // 迁移 4: image_pinned 表添加 position 列
+    let _ = sqlx::query("ALTER TABLE image_pinned ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+        .execute(&mut *conn)
+        .await;
+    
     Ok(())
 }
 
@@ -704,35 +727,52 @@ pub fn sync_pinned_order(pinned_items: &[String]) -> Result<(), String> {
 }
 
 pub async fn sync_pinned_order_async(pinned_items: &[String]) -> Result<(), String> {
+    let pool = get_pool().await?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| format!("创建置顶事务失败: {}", e))?;
+    
+    // 检测 position 列是否存在
+    let has_position = match sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM image_pinned")
+        .fetch_one(&mut *tx)
+        .await
     {
-        let pool = get_pool().await?;
-        let mut tx = pool
-            .begin()
-            .await
-            .map_err(|e| format!("创建置顶事务失败: {}", e))?;
-        reset_temp_position_table(&mut tx, "temp_target_image_pinned", "item_id").await?;
-        fill_temp_position_table(
-            &mut tx,
-            "temp_target_image_pinned",
-            "item_id",
-            pinned_items,
-        )
-            .await?;
+        Ok(_) => {
+            log::info!("检测到 image_pinned 表有 position 列");
+            true
+        }
+        Err(e) => {
+            log::warn!("image_pinned 表没有 position 列,使用兼容模式: {}", e);
+            false
+        }
+    };
+    
+    reset_temp_position_table(&mut tx, "temp_target_image_pinned", "item_id").await?;
+    fill_temp_position_table(
+        &mut tx,
+        "temp_target_image_pinned",
+        "item_id",
+        pinned_items,
+    )
+        .await?;
 
-        sqlx::query(
-            "
-            DELETE FROM image_pinned
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM temp_target_image_pinned target
-                WHERE target.item_id = image_pinned.item_id
-            )
-            ",
+    sqlx::query(
+        "
+        DELETE FROM image_pinned
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM temp_target_image_pinned target
+            WHERE target.item_id = image_pinned.item_id
         )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("清理置顶失败: {}", e))?;
+        ",
+    )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("清理置顶失败: {}", e))?;
 
+    if has_position {
+        // 有 position 列,使用完整逻辑
         sqlx::query(
             "
             UPDATE image_pinned
@@ -768,10 +808,24 @@ pub async fn sync_pinned_order_async(pinned_items: &[String]) -> Result<(), Stri
             .execute(&mut *tx)
             .await
             .map_err(|e| format!("写入置顶失败: {}", e))?;
-        tx.commit()
+    } else {
+        // 没有 position 列,只插入 item_id
+        log::info!("使用兼容模式插入置顶项,共 {} 个", pinned_items.len());
+        sqlx::query(
+            "
+            INSERT OR IGNORE INTO image_pinned (item_id)
+            SELECT target.item_id
+            FROM temp_target_image_pinned target
+            ",
+        )
+            .execute(&mut *tx)
             .await
-            .map_err(|e| format!("提交置顶事务失败: {}", e))
+            .map_err(|e| format!("写入置顶失败: {}", e))?;
     }
+    
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交置顶事务失败: {}", e))
 }
 
 pub fn delete_categories_by_category(category: &str) -> Result<(), String> {
@@ -789,10 +843,32 @@ pub async fn delete_categories_by_category_async(category: &str) -> Result<(), S
 }
 
 pub fn load_all_data() -> Result<ImageHistoryData, String> {
-    block_on_result(async {
-        let pool = get_pool().await?;
-        let mut conn = pool.acquire().await.map_err(|e| format!("获取连接失败: {}", e))?;
-        let item_rows = sqlx::query(
+    block_on_result(load_all_data_async())
+}
+
+pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
+    let pool = get_pool().await?;
+    let mut conn = pool.acquire().await.map_err(|e| format!("获取连接失败: {}", e))?;
+    
+    log::info!("开始加载图片历史数据...");
+    
+    // 检测 image_items 表是否有 position 列
+    let has_items_position = match sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM image_items")
+        .fetch_one(conn.as_mut())
+        .await
+    {
+        Ok(_) => {
+            log::info!("image_items 表有 position 列");
+            true
+        }
+        Err(e) => {
+            log::warn!("image_items 表没有 position 列: {}", e);
+            false
+        }
+    };
+    
+    let item_rows = if has_items_position {
+        sqlx::query(
             "
             SELECT
               hi.item_id,
@@ -805,65 +881,126 @@ pub fn load_all_data() -> Result<ImageHistoryData, String> {
         )
             .fetch_all(conn.as_mut())
             .await
+            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?
+    } else {
+        sqlx::query(
+            "
+            SELECT
+              hi.item_id,
+              hi.width,
+              hi.height,
+              hi.image_path
+            FROM image_items hi
+            ",
+        )
+            .fetch_all(conn.as_mut())
+            .await
+            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?
+    };
+    let mut items = Vec::new();
+    for row in item_rows {
+        let id: String = row.try_get(0).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+        let width: i64 = row.try_get(1).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+        let height: i64 = row.try_get(2).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+        let image_path: String = row.try_get(3).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+        items.push(ImageHistoryItem {
+            id: id.clone(),
+            width: width.max(0) as u32,
+            height: height.max(0) as u32,
+            image_path,
+            rgba_bytes: Vec::new(),
+            signature: id,
+            lazy_load: true,
+            cached_signature: None,
+        });
+    }
+
+    let mut categories = HashMap::new();
+    let category_rows = sqlx::query("SELECT item_id, category FROM image_categories")
+        .fetch_all(conn.as_mut())
+        .await
         .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-        let mut items = Vec::new();
-        for row in item_rows {
-            let id: String = row.try_get(0).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            let width: i64 = row.try_get(1).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            let height: i64 = row.try_get(2).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            let image_path: String = row.try_get(3).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            items.push(ImageHistoryItem {
-                id: id.clone(),
-                width: width.max(0) as u32,
-                height: height.max(0) as u32,
-                image_path,
-                rgba_bytes: Vec::new(),
-                signature: id,
-                lazy_load: true,
-                cached_signature: None,
-            });
-        }
+    for row in category_rows {
+        let item_id: String = row.try_get(0).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+        let category: String = row.try_get(1).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+        categories.insert(item_id, category);
+    }
 
-        let mut categories = HashMap::new();
-        let category_rows = sqlx::query("SELECT item_id, category FROM image_categories")
+    let mut image_tags: HashMap<String, Vec<String>> = HashMap::new();
+    
+    // 检测 image_tags 表是否有 position 列
+    let has_tags_position = match sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM image_tags")
+        .fetch_one(conn.as_mut())
+        .await
+    {
+        Ok(_) => {
+            log::info!("image_tags 表有 position 列");
+            true
+        }
+        Err(e) => {
+            log::warn!("image_tags 表没有 position 列: {}", e);
+            false
+        }
+    };
+    
+    let tag_rows = if has_tags_position {
+        sqlx::query("SELECT item_id, tag FROM image_tags ORDER BY item_id, position ASC")
             .fetch_all(conn.as_mut())
             .await
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-        for row in category_rows {
-            let item_id: String = row.try_get(0).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            let category: String = row.try_get(1).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            categories.insert(item_id, category);
-        }
-
-        let mut image_tags: HashMap<String, Vec<String>> = HashMap::new();
-        let tag_rows = sqlx::query("SELECT item_id, tag FROM image_tags ORDER BY item_id, position ASC")
+            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?
+    } else {
+        sqlx::query("SELECT item_id, tag FROM image_tags")
             .fetch_all(conn.as_mut())
             .await
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-        for row in tag_rows {
-            let item_id: String = row.try_get(0).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            let tag: String = row.try_get(1).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-            image_tags.entry(item_id).or_default().push(tag);
+            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?
+    };
+    for row in tag_rows {
+        let item_id: String = row.try_get(0).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+        let tag: String = row.try_get(1).map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+        image_tags.entry(item_id).or_default().push(tag);
+    }
+
+    let category_list = load_category_list_cached(conn.as_mut()).await?;
+
+    // 尝试使用 position 排序,如果失败则不使用排序(兼容旧数据库)
+    let has_pinned_position = match sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM image_pinned")
+        .fetch_one(conn.as_mut())
+        .await
+    {
+        Ok(_) => {
+            log::info!("image_pinned 表有 position 列");
+            true
         }
-
-        let category_list = load_category_list_cached(conn.as_mut()).await?;
-
-        let pinned_rows = sqlx::query("SELECT item_id FROM image_pinned ORDER BY position ASC")
+        Err(e) => {
+            log::warn!("image_pinned 表没有 position 列: {}", e);
+            false
+        }
+    };
+    
+    let pinned_rows = if has_pinned_position {
+        // 有 position 列,使用排序
+        sqlx::query("SELECT item_id FROM image_pinned ORDER BY position ASC")
             .fetch_all(conn.as_mut())
             .await
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
-        let pinned_items = pinned_rows
-            .into_iter()
-            .filter_map(|row| row.try_get::<String, _>(0).ok())
-            .collect::<Vec<_>>();
+            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?
+    } else {
+        // 没有 position 列,不排序
+        sqlx::query("SELECT item_id FROM image_pinned")
+            .fetch_all(conn.as_mut())
+            .await
+            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?
+    };
+    let pinned_items = pinned_rows
+        .into_iter()
+        .filter_map(|row| row.try_get::<String, _>(0).ok())
+        .collect::<Vec<_>>();
 
-        Ok(ImageHistoryData {
-            items,
-            categories,
-            category_list,
-            image_tags,
-            pinned_items,
-        })
+    Ok(ImageHistoryData {
+        items,
+        categories,
+        category_list,
+        image_tags,
+        pinned_items,
     })
 }
 
@@ -1181,5 +1318,95 @@ pub async fn delete_async_previews_bulk_async(item_ids: &[String]) -> Result<(),
     tx.commit()
         .await
         .map_err(|e| format!("提交批量删除预览事务失败: {}", e))?;
+    Ok(())
+}
+
+/// 添加分类(如果不存在)
+pub async fn add_category_if_not_exists_async(category: &str) -> Result<(), String> {
+    let pool = get_pool().await?;
+    sqlx::query(
+        "INSERT OR IGNORE INTO image_category_list(category) VALUES(?)",
+    )
+        .bind(category)
+        .execute(pool.as_ref())
+        .await
+        .map_err(|e| format!("添加分类失败: {}", e))?;
+    invalidate_category_list_cache();
+    Ok(())
+}
+
+/// 合并且置顶项:将新项追加到当前置顶列表末尾,跳过已存在的
+pub async fn merge_pinned_items_async(item_ids: &[String]) -> Result<(), String> {
+    if item_ids.is_empty() {
+        return Ok(());
+    }
+    
+    let pool = get_pool().await?;
+    let mut conn = pool.acquire().await.map_err(|e| format!("获取连接失败: {}", e))?;
+    
+    // 获取当前已置顶的 item_id 集合
+    let existing_pinned: HashSet<String> = sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT item_id FROM image_pinned WHERE item_id IS NOT NULL AND item_id != ''"
+    )
+        .fetch_all(conn.as_mut())
+        .await
+        .map_err(|e| format!("读取已置顶项失败: {}", e))?
+        .into_iter()
+        .collect();
+    
+    // 尝试获取当前最大 position,如果失败则使用简单插入
+    let use_position = sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT MAX(position) FROM image_pinned"
+    )
+        .fetch_one(conn.as_mut())
+        .await
+        .is_ok();
+    
+    if use_position {
+        // 有 position 列,使用位置排序
+        let current_max_position = match sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(position) FROM image_pinned"
+        )
+            .fetch_one(conn.as_mut())
+            .await
+        {
+            Ok(val) => val.unwrap_or(-1),
+            Err(_) => -1, // 如果失败,从 -1 开始
+        };
+        
+        let mut position = current_max_position + 1;
+        for item_id in item_ids {
+            if existing_pinned.contains(item_id) {
+                continue; // 跳过已置顶的
+            }
+            
+            sqlx::query(
+                "INSERT INTO image_pinned(item_id, position) VALUES(?1, ?2)
+                 ON CONFLICT(item_id) DO NOTHING",
+            )
+                .bind(item_id)
+                .bind(position)
+                .execute(conn.as_mut())
+                .await
+                .map_err(|e| format!("插入置顶项失败: {}", e))?;
+            position += 1;
+        }
+    } else {
+        // 没有 position 列,简单插入
+        for item_id in item_ids {
+            if existing_pinned.contains(item_id) {
+                continue; // 跳过已置顶的
+            }
+            
+            sqlx::query(
+                "INSERT OR IGNORE INTO image_pinned(item_id) VALUES(?1)",
+            )
+                .bind(item_id)
+                .execute(conn.as_mut())
+                .await
+                .map_err(|e| format!("插入置顶项失败: {}", e))?;
+        }
+    }
+    
     Ok(())
 }

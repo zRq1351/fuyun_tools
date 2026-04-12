@@ -143,7 +143,8 @@ pub async fn restore_backup_package(
         }
         if restore_modules.text_history {
             let started_at = Instant::now();
-            restore_text_history(&state, &extracted_dir).await.map_err(|error| {
+            let strategy = request.restore_strategy.clone();
+            restore_text_history(&state, &extracted_dir, &strategy).await.map_err(|error| {
                 record_backup_restore_stage_metric(
                     "restore_text_history",
                     "备份恢复文本历史耗时",
@@ -163,7 +164,8 @@ pub async fn restore_backup_package(
         }
         if restore_modules.image_history {
             let started_at = Instant::now();
-            restore_image_history(&state, &extracted_dir).await.map_err(|error| {
+            let strategy = request.restore_strategy.clone();
+            restore_image_history(&state, &extracted_dir, &strategy).await.map_err(|error| {
                 record_backup_restore_stage_metric(
                     "restore_image_history",
                     "备份恢复图片历史耗时",
@@ -233,14 +235,20 @@ pub async fn restore_backup_package(
 
 async fn create_rollback_point(state: &std::sync::Arc<crate::sync::Mutex<AppState>>) -> Result<PathBuf, String> {
     let rollback_dir = create_backup_temp_dir()?;
+    
+    // 先读取 settings,释放 state 锁
     let settings = {
         let guard = state.lock().unwrap_or_else(|never| match never {});
         guard.settings.clone()
     };
+    
+    // 再读取 text_snapshot,避免嵌套锁定
     let text_snapshot = {
         let guard = state.lock().unwrap_or_else(|never| match never {});
-        let clipboard = guard
-            .clipboard_manager
+        let clipboard_manager_arc = guard.clipboard_manager.clone();
+        drop(guard); // 释放 state 锁
+        
+        let clipboard = clipboard_manager_arc
             .lock()
             .map_err(|_| "读取文字历史失败".to_string())?;
         crate::utils::database::ClipboardHistoryData {
@@ -250,7 +258,9 @@ async fn create_rollback_point(state: &std::sync::Arc<crate::sync::Mutex<AppStat
             pinned_items: clipboard.get_pinned_items(),
         }
     };
-    let image_snapshot = image_store::load_all_data()?;
+    
+    // 使用异步版本,避免在 tokio 运行时中嵌套调用 block_on
+    let image_snapshot = image_store::load_all_data_async().await?;
 
     let settings_wrapper = crate::utils::backup_model::BackupSettingsFile { settings };
     let text_wrapper = BackupTextHistoryFile {
@@ -298,8 +308,9 @@ async fn create_rollback_point(state: &std::sync::Arc<crate::sync::Mutex<AppStat
 
 async fn apply_rollback(state: &std::sync::Arc<crate::sync::Mutex<AppState>>, rollback_dir: &Path) -> Result<(), String> {
     restore_settings(state, rollback_dir).await?;
-    restore_text_history(state, rollback_dir).await?;
-    restore_image_history(state, rollback_dir).await?;
+    // 回滚时使用覆盖模式,确保完全恢复到备份前状态
+    restore_text_history(state, rollback_dir, "overwrite").await?;
+    restore_image_history(state, rollback_dir, "overwrite").await?;
     Ok(())
 }
 
@@ -313,32 +324,59 @@ async fn restore_settings(state: &std::sync::Arc<crate::sync::Mutex<AppState>>, 
     Ok(())
 }
 
-async fn restore_text_history(state: &std::sync::Arc<crate::sync::Mutex<AppState>>, extracted_dir: &Path) -> Result<(), String> {
+async fn restore_text_history(state: &std::sync::Arc<crate::sync::Mutex<AppState>>, extracted_dir: &Path, strategy: &str) -> Result<(), String> {
     let bytes = fs::read(extracted_dir.join(text_history_path())).map_err(|e| format!("读取文字历史备份失败: {}", e))?;
     let wrapper =
         serde_json::from_slice::<BackupTextHistoryFile>(&bytes).map_err(|e| format!("解析文字历史备份失败: {}", e))?;
-    crate::utils::database::save_history_data_snapshot_async(&wrapper.snapshot).await?;
+    
+    // 根据策略选择合并或覆盖模式
+    if strategy.eq_ignore_ascii_case("overwrite") {
+        // 覆盖模式:完全替换现有数据
+        crate::utils::database::save_history_data_snapshot_async(&wrapper.snapshot).await?;
+        log::info!("文本历史恢复: 使用覆盖模式");
+    } else {
+        // 合并模式:保留现有记录,只添加备份中不存在的新记录
+        crate::utils::database::merge_history_data_async(&wrapper.snapshot).await?;
+        log::info!("文本历史恢复: 使用合并模式");
+    }
+    
     let mut guard = state.lock().unwrap_or_else(|never| match never {});
     let _ = &mut guard;
     Ok(())
 }
 
-async fn restore_image_history(state: &std::sync::Arc<crate::sync::Mutex<AppState>>, extracted_dir: &Path) -> Result<(), String> {
+async fn restore_image_history(state: &std::sync::Arc<crate::sync::Mutex<AppState>>, extracted_dir: &Path, strategy: &str) -> Result<(), String> {
     let bytes = fs::read(extracted_dir.join(image_history_path())).map_err(|e| format!("读取图片历史备份失败: {}", e))?;
     let wrapper = serde_json::from_slice::<BackupImageHistoryFile>(&bytes)
         .map_err(|e| format!("解析图片历史备份失败: {}", e))?;
 
-    image_store::clear_all_history_async().await?;
     let blob_root = app_blob_dir()?;
-    if blob_root.exists() {
-        fs::remove_dir_all(&blob_root).map_err(|e| format!("清理旧图片目录失败: {}", e))?;
+    
+    if strategy.eq_ignore_ascii_case("overwrite") {
+        // 覆盖模式:清空现有数据
+        image_store::clear_all_history_async().await?;
+        if blob_root.exists() {
+            fs::remove_dir_all(&blob_root).map_err(|e| format!("清理旧图片目录失败: {}", e))?;
+        }
+        log::info!("图片历史恢复: 使用覆盖模式");
+    } else {
+        // 合并模式:保留现有记录
+        log::info!("图片历史恢复: 使用合并模式");
     }
+    
     fs::create_dir_all(&blob_root).map_err(|e| format!("创建图片目录失败: {}", e))?;
 
     for (position, item) in wrapper.items.iter().enumerate() {
         let source = extracted_dir.join("image_history").join(&item.blob_path);
         let extension = source.extension().and_then(|ext| ext.to_str()).unwrap_or("png");
         let target = blob_root.join(format!("{}.{}", item.id, extension));
+        
+        // 如果是合并模式且文件已存在,跳过
+        if !strategy.eq_ignore_ascii_case("overwrite") && target.exists() {
+            log::info!("图片文件已存在,跳过: {}", item.id);
+            continue;
+        }
+        
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("创建图片父目录失败: {}", e))?;
         }
@@ -354,17 +392,45 @@ async fn restore_image_history(state: &std::sync::Arc<crate::sync::Mutex<AppStat
             lazy_load: true,
             cached_signature: None,
         };
-        image_store::upsert_item_async(&history_item, position).await?;
+        
+        if strategy.eq_ignore_ascii_case("overwrite") {
+            // 覆盖模式:直接插入
+            image_store::upsert_item_async(&history_item, position).await?;
+        } else {
+            // 合并模式:如果已存在则跳过
+            if let Err(e) = image_store::upsert_item_async(&history_item, position).await {
+                log::warn!("插入图片记录失败(可能已存在): {}, 错误: {}", item.id, e);
+            }
+        }
     }
 
-    for (item_id, category) in &wrapper.categories {
-        image_store::upsert_category_async(item_id, category).await?;
+    if strategy.eq_ignore_ascii_case("overwrite") {
+        // 覆盖模式:完全替换分类、标签和置顶
+        for (item_id, category) in &wrapper.categories {
+            image_store::upsert_category_async(item_id, category).await?;
+        }
+        image_store::sync_category_list_order_async(&wrapper.category_list).await?;
+        for (item_id, tags) in &wrapper.image_tags {
+            image_store::sync_tags_for_item_async(item_id, tags).await?;
+        }
+        image_store::sync_pinned_order_async(&wrapper.pinned_items).await?;
+    } else {
+        // 合并模式:只添加新的
+        for (item_id, category) in &wrapper.categories {
+            image_store::upsert_category_async(item_id, category).await?;
+        }
+        // 注意:不覆盖分类列表顺序,只添加新的分类
+        for category in &wrapper.category_list {
+            if let Err(_) = image_store::add_category_if_not_exists_async(category).await {
+                // 如果分类已存在,忽略错误
+            }
+        }
+        for (item_id, tags) in &wrapper.image_tags {
+            image_store::sync_tags_for_item_async(item_id, tags).await?;
+        }
+        // 合并且置顶项:将备份中的置顶项添加到当前置顶列表末尾
+        image_store::merge_pinned_items_async(&wrapper.pinned_items).await?;
     }
-    image_store::sync_category_list_order_async(&wrapper.category_list).await?;
-    for (item_id, tags) in &wrapper.image_tags {
-        image_store::sync_tags_for_item_async(item_id, tags).await?;
-    }
-    image_store::sync_pinned_order_async(&wrapper.pinned_items).await?;
 
     let preview_item_ids = wrapper.items.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
     if !preview_item_ids.is_empty() {
@@ -376,17 +442,41 @@ async fn restore_image_history(state: &std::sync::Arc<crate::sync::Mutex<AppStat
 }
 
 async fn rebuild_runtime_managers(state: &std::sync::Arc<crate::sync::Mutex<AppState>>) -> Result<(), String> {
+    // 先读取配置,然后释放 state 锁
+    let (text_max_items, grouped_items_protected, image_max_items, image_disk_limit_mb) = {
+        let guard = state.lock().unwrap_or_else(|never| match never {});
+        (
+            guard.settings.text_max_items,
+            guard.settings.grouped_items_protected_from_limit,
+            guard.settings.image_max_items,
+            guard.settings.image_disk_limit_mb,
+        )
+    };
+    
+    // 在阻塞任务中创建新的管理器实例,避免在 tokio 运行时中嵌套调用 block_on
+    let new_clipboard_manager = tauri::async_runtime::spawn_blocking(move || {
+        std::sync::Arc::new(crate::sync::Mutex::new(ClipboardManager::new(
+            text_max_items,
+            grouped_items_protected,
+        )))
+    })
+    .await
+    .map_err(|e| format!("创建剪贴板管理器失败: {}", e))?;
+    
+    let new_image_clipboard_manager = tauri::async_runtime::spawn_blocking(move || {
+        std::sync::Arc::new(crate::sync::Mutex::new(ImageClipboardManager::new(
+            image_max_items,
+            image_disk_limit_mb,
+            grouped_items_protected,
+        )))
+    })
+    .await
+    .map_err(|e| format!("创建图片剪贴板管理器失败: {}", e))?;
+    
+    // 重新获取 state 锁并替换管理器
     let mut guard = state.lock().unwrap_or_else(|never| match never {});
-    let settings = guard.settings.clone();
-    guard.clipboard_manager = std::sync::Arc::new(crate::sync::Mutex::new(ClipboardManager::new(
-        settings.text_max_items,
-        settings.grouped_items_protected_from_limit,
-    )));
-    guard.image_clipboard_manager = std::sync::Arc::new(crate::sync::Mutex::new(ImageClipboardManager::new(
-        settings.image_max_items,
-        settings.image_disk_limit_mb,
-        settings.grouped_items_protected_from_limit,
-    )));
+    guard.clipboard_manager = new_clipboard_manager;
+    guard.image_clipboard_manager = new_image_clipboard_manager;
     Ok(())
 }
 

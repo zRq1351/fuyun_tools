@@ -144,6 +144,22 @@
             恢复图片历史
           </el-checkbox>
         </div>
+
+        <div class="checkbox-group" style="margin-top: 12px;">
+          <span style="color: var(--el-text-color-regular); font-size: 14px;">恢复策略：</span>
+          <el-radio-group v-model="restoreStrategy">
+            <el-radio-button label="merge">
+              <el-tooltip content="保留现有记录，只添加备份中不存在的新记录" placement="top">
+                <span>合并模式</span>
+              </el-tooltip>
+            </el-radio-button>
+            <el-radio-button label="overwrite">
+              <el-tooltip content="完全覆盖现有数据，谨慎使用" placement="top">
+                <span>覆盖模式</span>
+              </el-tooltip>
+            </el-radio-button>
+          </el-radio-group>
+        </div>
       </div>
     </el-card>
 
@@ -197,6 +213,7 @@ const packagePath = ref('')
 const history = ref([])
 const lastResult = ref('')
 const restoreMode = ref('full')
+const restoreStrategy = ref('merge')  // 'merge' or 'overwrite'
 const restoreSettings = ref(true)
 const restoreTextHistory = ref(true)
 const restoreImageHistory = ref(true)
@@ -362,10 +379,12 @@ const restoreBackup = async () => {
     ElMessage.warning('请选择至少一个恢复模块')
     return
   }
+
+  const strategyText = restoreStrategy.value === 'merge' ? '合并模式（保留现有记录）' : '覆盖模式（完全替换数据）'
   await ElMessageBox.confirm(
-      '恢复会覆盖所选模块，并自动创建本地回滚点。API Key 不会自动恢复。',
+      `恢复策略：${strategyText}\n\n恢复会覆盖所选模块，并自动创建本地回滚点。API Key 不会自动恢复。`,
       '确认恢复',
-      {type: 'warning'}
+      {type: restoreStrategy.value === 'overwrite' ? 'error' : 'warning'}
   )
   restoring.value = true
   try {
@@ -375,7 +394,8 @@ const restoreBackup = async () => {
       restoreSettings: restoreMode.value === 'full' ? true : restoreSettings.value,
       restoreTextHistory: restoreMode.value === 'full' ? true : restoreTextHistory.value,
       restoreImageHistory: restoreMode.value === 'full' ? true : restoreImageHistory.value,
-      createRollbackPoint: true
+      createRollbackPoint: true,
+      restoreStrategy: restoreStrategy.value
     })
     lastResult.value = `恢复完成：${response.message}`
     ElMessage.success('备份恢复完成')
