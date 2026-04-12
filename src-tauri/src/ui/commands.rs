@@ -834,7 +834,6 @@ fn is_duplicate_copy_paste_request(text: &str, request_id: Option<&str>) -> bool
     false
 }
 
-#[cfg(debug_assertions)]
 fn get_copy_paste_dedup_debug_state_value() -> serde_json::Value {
     let now_ms = now_unix_ms();
     let dedup_window_ms = COPY_PASTE_DEDUP_WINDOW_MS.load(Ordering::Relaxed);
