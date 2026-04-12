@@ -38,199 +38,217 @@ pub async fn restore_backup_package(
 ) -> Result<RestoreExecutionResult, String> {
     let package_path = PathBuf::from(&request.package_path);
     let extracted_dir = create_backup_temp_dir()?;
-    let extract_started_at = Instant::now();
-    extract_package_to_dir(&package_path, &extracted_dir).map_err(|error| {
+    let execution: Result<(BackupRestoreResultData, Option<PathBuf>), (String, Option<PathBuf>)> = async {
+        let extract_started_at = Instant::now();
+        extract_package_to_dir(&package_path, &extracted_dir).map_err(|error| {
+            record_backup_restore_stage_metric(
+                "extract_package",
+                "备份恢复解压耗时",
+                extract_started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            );
+            (error, None)
+        })?;
         record_backup_restore_stage_metric(
             "extract_package",
             "备份恢复解压耗时",
             extract_started_at.elapsed().as_millis() as u64,
-            false,
-            Some(error.clone()),
+            true,
+            None,
         );
-        error
-    })?;
-    record_backup_restore_stage_metric(
-        "extract_package",
-        "备份恢复解压耗时",
-        extract_started_at.elapsed().as_millis() as u64,
-        true,
-        None,
-    );
 
-    let manifest_started_at = Instant::now();
-    let manifest = read_manifest_from_package(&package_path).map_err(|error| {
+        let manifest_started_at = Instant::now();
+        let manifest = read_manifest_from_package(&package_path).map_err(|error| {
+            record_backup_restore_stage_metric(
+                "read_manifest",
+                "备份恢复读取清单耗时",
+                manifest_started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            );
+            (error, None)
+        })?;
         record_backup_restore_stage_metric(
             "read_manifest",
             "备份恢复读取清单耗时",
             manifest_started_at.elapsed().as_millis() as u64,
-            false,
-            Some(error.clone()),
+            true,
+            None,
         );
-        error
-    })?;
-    record_backup_restore_stage_metric(
-        "read_manifest",
-        "备份恢复读取清单耗时",
-        manifest_started_at.elapsed().as_millis() as u64,
-        true,
-        None,
-    );
-    let validate_started_at = Instant::now();
-    validate_manifest_checksums(&extracted_dir, &manifest).map_err(|error| {
+        let validate_started_at = Instant::now();
+        validate_manifest_checksums(&extracted_dir, &manifest).map_err(|error| {
+            record_backup_restore_stage_metric(
+                "validate_checksums",
+                "备份恢复校验耗时",
+                validate_started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            );
+            (error, None)
+        })?;
         record_backup_restore_stage_metric(
             "validate_checksums",
             "备份恢复校验耗时",
             validate_started_at.elapsed().as_millis() as u64,
-            false,
-            Some(error.clone()),
+            true,
+            None,
         );
-        error
-    })?;
-    record_backup_restore_stage_metric(
-        "validate_checksums",
-        "备份恢复校验耗时",
-        validate_started_at.elapsed().as_millis() as u64,
-        true,
-        None,
-    );
 
-    let rollback_dir = if request.create_rollback_point {
-        let rollback_started_at = Instant::now();
-        let rollback = create_rollback_point(&state).await.map_err(|error| {
+        let rollback_dir = if request.create_rollback_point {
+            let rollback_started_at = Instant::now();
+            let rollback = create_rollback_point(&state).await.map_err(|error| {
+                record_backup_restore_stage_metric(
+                    "create_rollback",
+                    "备份恢复创建回滚点耗时",
+                    rollback_started_at.elapsed().as_millis() as u64,
+                    false,
+                    Some(error.clone()),
+                );
+                (error, None)
+            })?;
             record_backup_restore_stage_metric(
                 "create_rollback",
                 "备份恢复创建回滚点耗时",
                 rollback_started_at.elapsed().as_millis() as u64,
-                false,
-                Some(error.clone()),
+                true,
+                None,
             );
-            error
-        })?;
-        record_backup_restore_stage_metric(
-            "create_rollback",
-            "备份恢复创建回滚点耗时",
-            rollback_started_at.elapsed().as_millis() as u64,
-            true,
-            None,
-        );
-        Some(rollback)
-    } else {
-        None
-    };
+            Some(rollback)
+        } else {
+            None
+        };
 
-    let restore_modules = resolve_restore_modules(&request, &manifest);
-
-    let result = async {
-        if restore_modules.settings {
-            let started_at = Instant::now();
-            restore_settings(&state, &extracted_dir).await.map_err(|error| {
+        let restore_modules = resolve_restore_modules(&request, &manifest);
+        let restore_result = async {
+            if restore_modules.settings {
+                let started_at = Instant::now();
+                restore_settings(&state, &extracted_dir).await.map_err(|error| {
+                    record_backup_restore_stage_metric(
+                        "restore_settings",
+                        "备份恢复设置耗时",
+                        started_at.elapsed().as_millis() as u64,
+                        false,
+                        Some(error.clone()),
+                    );
+                    error
+                })?;
                 record_backup_restore_stage_metric(
                     "restore_settings",
                     "备份恢复设置耗时",
                     started_at.elapsed().as_millis() as u64,
-                    false,
-                    Some(error.clone()),
+                    true,
+                    None,
                 );
-                error
-            })?;
-            record_backup_restore_stage_metric(
-                "restore_settings",
-                "备份恢复设置耗时",
-                started_at.elapsed().as_millis() as u64,
-                true,
-                None,
-            );
-        }
-        if restore_modules.text_history {
-            let started_at = Instant::now();
-            let strategy = request.restore_strategy.clone();
-            restore_text_history(&state, &extracted_dir, &strategy).await.map_err(|error| {
+            }
+            if restore_modules.text_history {
+                let started_at = Instant::now();
+                let strategy = request.restore_strategy.clone();
+                restore_text_history(&state, &extracted_dir, &strategy).await.map_err(|error| {
+                    record_backup_restore_stage_metric(
+                        "restore_text_history",
+                        "备份恢复文本历史耗时",
+                        started_at.elapsed().as_millis() as u64,
+                        false,
+                        Some(error.clone()),
+                    );
+                    error
+                })?;
                 record_backup_restore_stage_metric(
                     "restore_text_history",
                     "备份恢复文本历史耗时",
                     started_at.elapsed().as_millis() as u64,
-                    false,
-                    Some(error.clone()),
+                    true,
+                    None,
                 );
-                error
-            })?;
-            record_backup_restore_stage_metric(
-                "restore_text_history",
-                "备份恢复文本历史耗时",
-                started_at.elapsed().as_millis() as u64,
-                true,
-                None,
-            );
-        }
-        if restore_modules.image_history {
-            let started_at = Instant::now();
-            let strategy = request.restore_strategy.clone();
-            restore_image_history(&state, &extracted_dir, &strategy).await.map_err(|error| {
+            }
+            if restore_modules.image_history {
+                let started_at = Instant::now();
+                let strategy = request.restore_strategy.clone();
+                restore_image_history(&state, &extracted_dir, &strategy).await.map_err(|error| {
+                    record_backup_restore_stage_metric(
+                        "restore_image_history",
+                        "备份恢复图片历史耗时",
+                        started_at.elapsed().as_millis() as u64,
+                        false,
+                        Some(error.clone()),
+                    );
+                    error
+                })?;
                 record_backup_restore_stage_metric(
                     "restore_image_history",
                     "备份恢复图片历史耗时",
                     started_at.elapsed().as_millis() as u64,
+                    true,
+                    None,
+                );
+            }
+            let rebuild_started_at = Instant::now();
+            rebuild_runtime_managers(&state).await.map_err(|error| {
+                record_backup_restore_stage_metric(
+                    "rebuild_runtime",
+                    "备份恢复重建运行时耗时",
+                    rebuild_started_at.elapsed().as_millis() as u64,
                     false,
                     Some(error.clone()),
                 );
                 error
             })?;
             record_backup_restore_stage_metric(
-                "restore_image_history",
-                "备份恢复图片历史耗时",
-                started_at.elapsed().as_millis() as u64,
-                true,
-                None,
-            );
-        }
-        let rebuild_started_at = Instant::now();
-        rebuild_runtime_managers(&state).await.map_err(|error| {
-            record_backup_restore_stage_metric(
                 "rebuild_runtime",
                 "备份恢复重建运行时耗时",
                 rebuild_started_at.elapsed().as_millis() as u64,
-                false,
-                Some(error.clone()),
+                true,
+                None,
             );
-            error
-        })?;
-        record_backup_restore_stage_metric(
-            "rebuild_runtime",
-            "备份恢复重建运行时耗时",
-            rebuild_started_at.elapsed().as_millis() as u64,
-            true,
-            None,
-        );
-        Ok::<(), String>(())
+            Ok::<(), String>(())
+        }
+        .await;
+
+        if let Err(error) = restore_result {
+            if let Some(rollback) = rollback_dir.as_ref() {
+                if let Err(rollback_error) = apply_rollback(&state, rollback).await {
+                    return Err((format!("{}，自动回滚失败: {}", error, rollback_error), rollback_dir));
+                }
+                if let Err(rebuild_error) = rebuild_runtime_managers(&state).await {
+                    return Err((
+                        format!("{}，自动回滚后重建运行时失败: {}", error, rebuild_error),
+                        rollback_dir,
+                    ));
+                }
+                return Err((format!("{}，已自动回滚", error), rollback_dir));
+            }
+            return Err((error, rollback_dir));
+        }
+
+        let response = BackupRestoreResultData {
+            mode: request.mode.clone(),
+            restored: restore_modules,
+            rollback_point_created: rollback_dir.is_some(),
+            warnings: vec![
+                "API Key 不会自动恢复，请在 AI 设置中重新填写".to_string(),
+                "图片预览缓存会在后续按需重新生成".to_string(),
+            ],
+        };
+
+        Ok((response, rollback_dir))
     }
     .await;
 
-    if let Err(err) = result {
-        if let Some(rollback) = &rollback_dir {
-            apply_rollback(&state, rollback).await?;
-            rebuild_runtime_managers(&state).await?;
+    match execution {
+        Ok((data, rollback_dir)) => Ok(RestoreExecutionResult {
+            data,
+            extracted_dir,
+            rollback_dir,
+        }),
+        Err((error, rollback_dir)) => {
             cleanup_dir(&extracted_dir);
-            return Err(format!("{}，已自动回滚", err));
+            if let Some(path) = rollback_dir.as_ref() {
+                cleanup_dir(path);
+            }
+            Err(error)
         }
-        cleanup_dir(&extracted_dir);
-        return Err(err);
     }
-
-    let response = BackupRestoreResultData {
-        mode: request.mode.clone(),
-        restored: restore_modules,
-        rollback_point_created: rollback_dir.is_some(),
-        warnings: vec![
-            "API Key 不会自动恢复，请在 AI 设置中重新填写".to_string(),
-            "图片预览缓存会在后续按需重新生成".to_string(),
-        ],
-    };
-
-    Ok(RestoreExecutionResult {
-        data: response,
-        extracted_dir,
-        rollback_dir,
-    })
 }
 
 async fn create_rollback_point(state: &std::sync::Arc<crate::sync::Mutex<AppState>>) -> Result<PathBuf, String> {
@@ -370,18 +388,20 @@ async fn restore_image_history(state: &std::sync::Arc<crate::sync::Mutex<AppStat
         let source = extracted_dir.join("image_history").join(&item.blob_path);
         let extension = source.extension().and_then(|ext| ext.to_str()).unwrap_or("png");
         let target = blob_root.join(format!("{}.{}", item.id, extension));
-        
-        // 如果是合并模式且文件已存在,跳过
-        if !strategy.eq_ignore_ascii_case("overwrite") && target.exists() {
-            log::info!("图片文件已存在,跳过: {}", item.id);
+        let overwrite = strategy.eq_ignore_ascii_case("overwrite");
+        let item_exists = image_store::item_exists_async(&item.id).await?;
+        if !overwrite && target.exists() && item_exists {
+            log::info!("图片文件和记录均已存在,跳过: {}", item.id);
             continue;
         }
-        
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("创建图片父目录失败: {}", e))?;
+
+        if !target.exists() || overwrite {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|e| format!("创建图片父目录失败: {}", e))?;
+            }
+            fs::copy(&source, &target)
+                .map_err(|e| format!("恢复图片文件失败 {}: {}", source.display(), e))?;
         }
-        fs::copy(&source, &target)
-            .map_err(|e| format!("恢复图片文件失败 {}: {}", source.display(), e))?;
         let history_item = ImageHistoryItem {
             id: item.id.clone(),
             width: item.width,
@@ -392,14 +412,16 @@ async fn restore_image_history(state: &std::sync::Arc<crate::sync::Mutex<AppStat
             lazy_load: true,
             cached_signature: None,
         };
-        
-        if strategy.eq_ignore_ascii_case("overwrite") {
+
+        if overwrite {
             // 覆盖模式:直接插入
             image_store::upsert_item_async(&history_item, position).await?;
         } else {
-            // 合并模式:如果已存在则跳过
-            if let Err(e) = image_store::upsert_item_async(&history_item, position).await {
-                log::warn!("插入图片记录失败(可能已存在): {}, 错误: {}", item.id, e);
+            if item_exists {
+                continue;
+            }
+            if let Err(error) = image_store::upsert_item_async(&history_item, position).await {
+                log::warn!("插入图片记录失败(可能已存在): {}, 错误: {}", item.id, error);
             }
         }
     }

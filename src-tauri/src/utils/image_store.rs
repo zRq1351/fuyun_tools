@@ -342,6 +342,19 @@ pub async fn upsert_item_async(item: &ImageHistoryItem, position: usize) -> Resu
     Ok(())
 }
 
+pub async fn item_exists_async(item_id: &str) -> Result<bool, String> {
+    let pool = get_pool().await?;
+    let exists = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM image_items WHERE item_id = ?1 LIMIT 1",
+    )
+    .bind(item_id)
+    .fetch_optional(pool.as_ref())
+    .await
+    .map_err(|e| format!("查询图片历史数据库失败: {}", e))?
+    .is_some();
+    Ok(exists)
+}
+
 pub fn delete_item(item_id: &str) -> Result<(), String> {
     block_on_result(delete_item_async(item_id))
 }

@@ -84,6 +84,7 @@ static COPY_PASTE_DEDUP_WINDOW_STATS: OnceLock<StdMutex<DedupWindowStats>> = Onc
 static VC_RUNTIME_FORCE_MISSING: AtomicBool = AtomicBool::new(false);
 static SCREENSHOT_EXPORT_FONT_BYTES: OnceLock<StdMutex<HashMap<String, Arc<Vec<u8>>>>> = OnceLock::new();
 static AUTO_BACKUP_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+static BACKUP_JOB_MUTEX: OnceLock<tauri::async_runtime::Mutex<()>> = OnceLock::new();
 static LAST_WRITEBACK_RESULT: OnceLock<StdMutex<Option<WriteBackExecutionResult>>> = OnceLock::new();
 
 struct RecentCopyPaste {
@@ -4577,6 +4578,10 @@ pub async fn run_auto_backup_tick(
     if AUTO_BACKUP_IN_FLIGHT.swap(true, Ordering::AcqRel) {
         return Ok(false);
     }
+    let _backup_job_guard = BACKUP_JOB_MUTEX
+        .get_or_init(|| tauri::async_runtime::Mutex::new(()))
+        .lock()
+        .await;
     let mut raw_settings = load_settings()?;
     raw_settings.backup_last_run_at = now_unix_ms() as i64;
     raw_settings.backup_last_run_status = "running".to_string();
@@ -5225,6 +5230,10 @@ pub async fn export_backup_to_path(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<BackupExportResultResponse, String> {
     let started_at = std::time::Instant::now();
+    let _backup_job_guard = BACKUP_JOB_MUTEX
+        .get_or_init(|| tauri::async_runtime::Mutex::new(()))
+        .lock()
+        .await;
     let target = PathBuf::from(request.target_path);
     let result = export_backup_internal(&target, state.inner()).await;
     if let Err(err) = &result {
@@ -5302,6 +5311,10 @@ pub async fn restore_backup_package(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<BackupRestoreResultResponse, String> {
     let started_at = std::time::Instant::now();
+    let _backup_job_guard = BACKUP_JOB_MUTEX
+        .get_or_init(|| tauri::async_runtime::Mutex::new(()))
+        .lock()
+        .await;
     let result = match execute_restore_backup_package(state.inner().clone(), request).await {
         Ok(value) => {
             record_perf_metric(
@@ -5366,10 +5379,33 @@ pub async fn list_backup_history() -> Result<Vec<BackupHistoryItem>, String> {
 
 #[tauri::command]
 pub async fn delete_backup_history_item(request: DeleteBackupHistoryItemRequest) -> Result<(), String> {
-    let path = PathBuf::from(request.file_path);
-    if path.exists() {
-        fs::remove_file(&path).map_err(|e| format!("删除备份文件失败: {}", e))?;
+    let settings = current_backup_settings()?;
+    if settings.target_dir.trim().is_empty() {
+        return Err("未配置备份目录".to_string());
     }
+    let path = PathBuf::from(request.file_path);
+    if !path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.ends_with(".fytbk.zip"))
+        .unwrap_or(false)
+    {
+        return Err("仅允许删除 .fytbk.zip 备份文件".to_string());
+    }
+    let target_dir = PathBuf::from(settings.target_dir);
+    let canonical_target_dir = target_dir
+        .canonicalize()
+        .map_err(|e| format!("读取备份目录失败: {}", e))?;
+    if !path.exists() {
+        return Ok(());
+    }
+    let canonical_path = path
+        .canonicalize()
+        .map_err(|e| format!("读取备份文件路径失败: {}", e))?;
+    if !canonical_path.starts_with(&canonical_target_dir) {
+        return Err("禁止删除备份目录之外的文件".to_string());
+    }
+    fs::remove_file(&canonical_path).map_err(|e| format!("删除备份文件失败: {}", e))?;
     Ok(())
 }
 
@@ -5378,6 +5414,10 @@ pub async fn run_manual_backup(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<BackupExportResultResponse, String> {
     let started_at = std::time::Instant::now();
+    let _backup_job_guard = BACKUP_JOB_MUTEX
+        .get_or_init(|| tauri::async_runtime::Mutex::new(()))
+        .lock()
+        .await;
     let settings = current_backup_settings()?;
     if settings.target_dir.trim().is_empty() {
         return Err("请先配置自动备份目录".to_string());

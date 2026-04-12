@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -14,15 +15,29 @@ const MANIFEST_PATH: &str = "manifest.json";
 const SETTINGS_PATH: &str = "settings/settings.json";
 const TEXT_HISTORY_PATH: &str = "text_history/history.json";
 const IMAGE_HISTORY_PATH: &str = "image_history/image_history.json";
+static BACKUP_TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub fn create_backup_temp_dir() -> Result<PathBuf, String> {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let dir = std::env::temp_dir().join(format!("fuyun_tools_backup_{}", timestamp));
-    fs::create_dir_all(&dir).map_err(|e| format!("创建临时备份目录失败: {}", e))?;
-    Ok(dir)
+    let pid = std::process::id();
+    let base_counter = BACKUP_TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_root = std::env::temp_dir();
+    for attempt in 0..8u64 {
+        let nonce = base_counter.saturating_add(attempt);
+        let dir = temp_root.join(format!(
+            "fuyun_tools_backup_{}_{}_{}",
+            timestamp, pid, nonce
+        ));
+        match fs::create_dir(&dir) {
+            Ok(_) => return Ok(dir),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("创建临时备份目录失败: {}", error)),
+        }
+    }
+    Err("创建临时备份目录失败: 目录名冲突".to_string())
 }
 
 pub fn write_backup_payload(
