@@ -652,9 +652,9 @@ fn merge_system_audio_into_video(
     Ok(())
 }
 
-// 🔧 性能优化：快速音频合并（无需重编码）
+// 🔧 性能优化：快速音频合并（简化处理链）
 // 适用于单个音频片段且延迟<100ms的场景
-// 速度比完整合并快 10-50倍
+// 注意：WAV -> MP4 必须重新编码为 AAC，不能直接 copy
 fn merge_audio_fast(
     ffmpeg_path: &std::path::Path,
     video_path: &PathBuf,
@@ -667,7 +667,7 @@ fn merge_audio_fast(
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
 
-    // 使用 stream copy，无需重编码
+    // 🔧 修复：WAV 必须重新编码为 AAC，不能直接 copy
     cmd.arg("-hide_banner")
         .arg("-loglevel")
         .arg("warning")
@@ -679,7 +679,9 @@ fn merge_audio_fast(
         .arg("-c:v")
         .arg("copy")
         .arg("-c:a")
-        .arg("copy")  // 直接复制音频流，不重编码
+        .arg("aac")  // 🔧 修复：重新编码为 AAC
+        .arg("-b:a")
+        .arg("128k")
         .arg("-movflags")
         .arg("+faststart")
         .arg(&merged_path);
@@ -1580,6 +1582,16 @@ pub fn start_recording(
             .filter(|pid| *pid > 0)
             .collect::<Vec<_>>();
         runtime.mic_audio_device_id = request.microphone_device_id.clone();
+
+        // 🔧 诊断日志：记录音频捕获配置
+        log::info!(
+            "录制启动 - 音频配置: capture_system_audio={}, system_audio_device_id={:?}, capture_microphone={}, mic_device_id={:?}",
+            capture_system_audio,
+            system_audio_device_id,
+            capture_microphone,
+            request.microphone_device_id
+        );
+        
         runtime.system_audio_enabled_flag = Some(Arc::new(AtomicBool::new(capture_system_audio)));
         runtime.mic_audio_enabled_flag = Some(Arc::new(AtomicBool::new(capture_microphone)));
         runtime.recording_pause_flag = Some(Arc::new(AtomicBool::new(false)));
@@ -1596,7 +1608,11 @@ pub fn start_recording(
         }
         // 系统音频关闭时不占用 loopback 设备；重新开启时再创建新音频分段并在合成阶段按 start_ms 对齐。
         if capture_system_audio {
-            let _ = ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, true);
+            log::info!("🔧 尝试启动系统音频捕获...");
+            match ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, true) {
+                Ok(()) => log::info!("✅ 系统音频捕获启动成功"),
+                Err(e) => log::error!("❌ 系统音频捕获启动失败: {}", e),
+            }
         }
         if capture_microphone {
             let _ = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true);
