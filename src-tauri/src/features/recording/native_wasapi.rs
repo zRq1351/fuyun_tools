@@ -81,6 +81,12 @@ fn capture_process_loopback_to_wav(
         };
         let mut writer = WavWriter::create(&output_path, spec)
             .map_err(|e| format!("创建进程音频文件失败(pid={}): {}", process_id, e))?;
+        // ✅ 添加诊断日志：确认文件创建成功
+        if let Ok(meta) = std::fs::metadata(&output_path) {
+            log::info!("进程音频文件创建成功(pid={}): {:?}, 大小: {} bytes", process_id, output_path.file_name(), meta.len());
+        } else {
+            log::warn!("进程音频文件创建后检查失败(pid={}): {:?}", process_id, output_path.file_name());
+        }
         let mut queue = std::collections::VecDeque::<u8>::new();
         let blockalign = desired_format.get_blockalign() as usize;
         audio_client
@@ -92,12 +98,18 @@ fn capture_process_loopback_to_wav(
         while !stop_flag.load(Ordering::SeqCst) {
             let new_frames = capture_client
                 .get_next_packet_size()
-                .map_err(|e| format!("读取进程音频包大小失败(pid={}): {}", process_id, e))?
+                .map_err(|e| {
+                    log::warn!("进程音频包大小读取失败(pid={}): {}", process_id, e);
+                    format!("读取进程音频包大小失败(pid={}): {}", process_id, e)
+                })?
                 .unwrap_or(0);
             if new_frames > 0 {
                 capture_client
                     .read_from_device_to_deque(&mut queue)
-                    .map_err(|e| format!("读取进程音频数据失败(pid={}): {}", process_id, e))?;
+                    .map_err(|e| {
+                        log::warn!("进程音频数据读取失败(pid={}): {}", process_id, e);
+                        format!("读取进程音频数据失败(pid={}): {}", process_id, e)
+                    })?;
             }
             while queue.len() >= 4 {
                 let b0 = queue.pop_front().unwrap_or(0);
@@ -115,16 +127,39 @@ fn capture_process_loopback_to_wav(
                 let _ = writer.write_sample(out);
             }
             if event.wait_for_event(50).is_err() {
+                // ✅ 添加诊断日志：事件等待失败（可能是进程退出或音频设备断开）
+                log::warn!("进程音频事件等待失败(pid={})，继续尝试...", process_id);
                 std::thread::sleep(Duration::from_millis(10));
             }
             if blockalign == 0 {
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
+
+        // ✅ 添加诊断日志：记录循环退出原因
+        log::info!("进程音频采集循环结束(pid={}), stop_flag={}", process_id, stop_flag.load(Ordering::SeqCst));
+
+        // 检查文件是否存在
+        if let Ok(meta) = std::fs::metadata(&output_path) {
+            log::info!("进程音频文件在循环退出后存在(pid={}): {:?}, 大小: {} bytes", process_id, output_path.file_name(), meta.len());
+        } else {
+            log::warn!("进程音频文件在循环退出后不存在(pid={}): {:?}", process_id, output_path.file_name());
+        }
+        
         let _ = audio_client.stop_stream();
         writer
             .finalize()
-            .map_err(|e| format!("完成进程音频文件失败(pid={}): {}", process_id, e))?;
+            .map_err(|e| {
+                log::error!("进程音频文件完成失败(pid={}): {}", process_id, e);
+                format!("完成进程音频文件失败(pid={}): {}", process_id, e)
+            })?;
+
+        // ✅ 添加诊断日志：记录最终文件状态
+        match std::fs::metadata(&output_path) {
+            Ok(meta) => log::info!("进程音频文件最终状态(pid={}): {:?}, 大小: {} bytes", process_id, output_path.file_name(), meta.len()),
+            Err(e) => log::warn!("进程音频文件最终状态检查失败(pid={}): {:?}, {}", process_id, output_path.file_name(), e),
+        }
+        
         Ok(())
     };
     let result = run();
@@ -157,6 +192,7 @@ pub fn start_process_loopback_wavs(
         let worker_enabled = thread_enabled.clone();
         let worker_pause = thread_pause.clone();
         let worker_startup_tx = startup_tx.clone();
+        let worker_path = path.clone(); // ✅ 克隆 path 用于线程退出后检查
         workers.push(std::thread::spawn(move || {
             if let Err(e) = capture_process_loopback_to_wav(
                 pid,
@@ -167,6 +203,18 @@ pub fn start_process_loopback_wavs(
                 Some(worker_startup_tx),
             ) {
                 log::error!("进程音频采集线程异常退出(pid={}): {}", pid, e);
+                // ✅ 添加诊断日志：检查文件状态
+                match std::fs::metadata(&worker_path) {
+                    Ok(meta) => log::warn!("进程音频线程退出后文件仍存在: {:?}, 大小: {} bytes", worker_path.file_name(), meta.len()),
+                    Err(e) => log::warn!("进程音频线程退出后文件不存在: {:?}, {}", worker_path.file_name(), e),
+                }
+            } else {
+                log::info!("进程音频采集线程正常退出(pid={})", pid);
+                // ✅ 添加诊断日志：检查文件状态
+                match std::fs::metadata(&worker_path) {
+                    Ok(meta) => log::info!("进程音频线程正常退出后文件存在: {:?}, 大小: {} bytes", worker_path.file_name(), meta.len()),
+                    Err(e) => log::warn!("进程音频线程正常退出后文件不存在: {:?}, {}", worker_path.file_name(), e),
+                }
             }
         }));
     }
@@ -416,7 +464,22 @@ pub fn start_system_loopback_wav_with_device(
             let writer_cb = writer.clone();
             let enabled_cb = enabled_flag.clone();
             let pause_cb = recording_pause_flag.clone();
+
+            // ✅ 添加诊断日志：记录音频线程启动时的状态
+            log::info!(
+                "WASAPI音频线程启动: {:?}, enabled={}, pause={}",
+                thread_output.file_name(),
+                enabled_flag.load(Ordering::SeqCst),
+                recording_pause_flag.load(Ordering::SeqCst)
+            );
+            
             let err_fn = |err| eprintln!("WASAPI 捕获错误: {}", err);
+
+            // ✅ 添加诊断日志：记录文件创建状态
+            match std::fs::metadata(&thread_output) {
+                Ok(meta) => log::info!("WASAPI音频文件创建成功: {:?}, 大小: {} bytes", thread_output.file_name(), meta.len()),
+                Err(e) => log::warn!("WASAPI音频文件创建后检查失败: {:?}, {}", thread_output.file_name(), e),
+            }
             let stream = match sample_format {
                 CpalSampleFormat::F32 => device
                     .build_input_stream(
@@ -725,7 +788,22 @@ pub fn start_microphone_wav_with_device(
             let writer_cb = writer.clone();
             let enabled_cb = enabled_flag.clone();
             let pause_cb = recording_pause_flag.clone();
+
+            // ✅ 添加诊断日志：记录麦克风线程启动时的状态
+            log::info!(
+                "WASAPI麦克风线程启动: {:?}, enabled={}, pause={}",
+                thread_output.file_name(),
+                enabled_flag.load(Ordering::SeqCst),
+                recording_pause_flag.load(Ordering::SeqCst)
+            );
+            
             let err_fn = |err| eprintln!("WASAPI 麦克风捕获错误: {}", err);
+
+            // ✅ 添加诊断日志：记录文件创建状态
+            match std::fs::metadata(&thread_output) {
+                Ok(meta) => log::info!("WASAPI麦克风文件创建成功: {:?}, 大小: {} bytes", thread_output.file_name(), meta.len()),
+                Err(e) => log::warn!("WASAPI麦克风文件创建后检查失败: {:?}, {}", thread_output.file_name(), e),
+            }
             let stream = match sample_format {
                 CpalSampleFormat::F32 => device
                     .build_input_stream(

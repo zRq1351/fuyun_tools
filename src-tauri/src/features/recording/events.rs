@@ -65,3 +65,20 @@ pub fn emit_recording_stats_updated(
     });
     let _ = app.emit("recording-stats-updated", payload);
 }
+
+/// 发送音频合并进度事件
+pub fn emit_recording_audio_merging(
+    app: &AppHandle,
+    session_id: Option<&str>,
+    status: &str,  // "started", "progress", "completed", "failed"
+    progress: Option<u8>,  // 0-100
+    message: Option<&str>,
+) {
+    let payload = json!({
+        "sessionId": session_id,
+        "status": status,
+        "progress": progress,
+        "message": message
+    });
+    let _ = app.emit("recording-audio-merging", payload);
+}

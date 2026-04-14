@@ -339,6 +339,7 @@ let unlistenRecordingFinished = null;
 let unlistenRecordingError = null;
 let unlistenForceCompact = null;
 let unlistenRecordingRegionSelected = null;
+let unlistenAudioMerging = null;  // ✅ 新增：监听音频合并事件
 let keepSettingsOpenUntilTs = 0;
 let autoCollapseAfterStartPending = false;
 let lastElapsedUiSyncAt = 0;
@@ -945,6 +946,25 @@ onMounted(async () => {
     capsuleSettingsVisible.value = true;
     void syncCapsuleLayout();
   });
+
+  // ✅ 监听音频合并进度事件
+  unlistenAudioMerging = await listen("recording-audio-merging", (event) => {
+    const payload = event.payload || {};
+    const status = String(payload.status || "");
+    const message = String(payload.message || "");
+    const progress = payload.progress;
+
+    if (status === "started") {
+      // 开始合并，显示提示
+      showInlineNotice(message || "正在后台合并音频...", "warning");
+    } else if (status === "completed") {
+      // 合并完成，清除提示
+      clearInlineNotice();
+    } else if (status === "failed") {
+      // 合并失败，显示错误（但视频文件已保存）
+      showInlineNotice(message || "音频合并失败，视频文件已保存", "error");
+    }
+  });
   try {
     await refreshRecordableWindows();
   } catch (_e) {
@@ -1009,6 +1029,7 @@ onBeforeUnmount(() => {
   if (unlistenRecordingError) unlistenRecordingError();
   if (unlistenForceCompact) unlistenForceCompact();
   if (unlistenRecordingRegionSelected) unlistenRecordingRegionSelected();
+  if (unlistenAudioMerging) unlistenAudioMerging();  // ✅ 清理事件监听
 });
 </script>
 

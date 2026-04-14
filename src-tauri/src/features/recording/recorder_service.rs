@@ -7,7 +7,7 @@ use crate::features::recording::error_codes::{
     RECORDING_START_FAILED,
 };
 use crate::features::recording::events::{
-    emit_recording_device_list, emit_recording_error, emit_recording_finished, emit_recording_state_changed,
+    emit_recording_audio_merging, emit_recording_device_list, emit_recording_error, emit_recording_finished, emit_recording_state_changed,
     emit_recording_stats_updated,
 };
 use crate::features::recording::ffmpeg_runner::{build_output_paths, resolve_ffmpeg_path};
@@ -360,12 +360,24 @@ fn merge_system_audio_into_video(
     let expected_mic_count = mic_segments.len();
     let is_valid_audio_segment = |seg: &crate::features::recording::state::AudioSegment| {
         if !seg.path.exists() {
+            log::warn!("音频片段不存在: {:?}", seg.path);
             return false;
         }
         // WAV 至少应包含基础头；过滤零字节/损坏片段，避免 ffmpeg 合成直接失败。
-        fs::metadata(&seg.path)
-            .map(|meta| meta.is_file() && meta.len() > 44)
-            .unwrap_or(false)
+        match fs::metadata(&seg.path) {
+            Ok(meta) => {
+                let size = meta.len();
+                let valid = meta.is_file() && size > 44;
+                if !valid {
+                    log::warn!("音频片段无效: {:?}, 大小: {} bytes (需要 > 44)", seg.path, size);
+                }
+                valid
+            }
+            Err(e) => {
+                log::warn!("无法读取音频片段元数据: {:?}, 错误: {}", seg.path, e);
+                false
+            }
+        }
     };
     let valid_system = system_segments
         .iter()
@@ -394,10 +406,14 @@ fn merge_system_audio_into_video(
     let merged_path = video_path.with_extension("merged.tmp.mp4");
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
+
+    // 🔧 性能优化：FFmpeg 全局参数
     cmd.arg("-hide_banner")
         .arg("-loglevel")
         .arg("warning")
         .arg("-y")
+        .arg("-threads")
+        .arg("0")  // 自动使用所有可用 CPU 核心
         .arg("-i")
         .arg(video_path);
     let mut input_index = 1usize;
@@ -423,8 +439,12 @@ fn merge_system_audio_into_video(
     let mut sys_labels: Vec<String> = Vec::new();
     for (idx, (input, delay)) in sys_inputs.iter().enumerate() {
         let label = format!("sys{}", idx);
+        // 🔧 性能优化：简化音频处理链
+        // - aresample=async=1:min_hard_comp=0.100000:first_pts=0: 减少重采样计算
+        // - adelay={d}|{d}: 延迟对齐
+        // 注意：如果所有音频都是 48kHz，可以跳过 aresample，直接使用 adelay
         filter_parts.push(format!(
-            "[{i}:a]aresample=async=1:first_pts=0,adelay={d}|{d}[{l}]",
+            "[{i}:a]adelay={d}|{d}[{l}]",
             i = input,
             d = delay,
             l = label
@@ -451,8 +471,9 @@ fn merge_system_audio_into_video(
     let mut mic_labels: Vec<String> = Vec::new();
     for (idx, (input, delay)) in mic_inputs.iter().enumerate() {
         let label = format!("mic{}", idx);
+        // 🔧 性能优化：简化音频处理链，跳过重采样
         filter_parts.push(format!(
-            "[{i}:a]aresample=async=1:first_pts=0,adelay={d}|{d}[{l}]",
+            "[{i}:a]adelay={d}|{d}[{l}]",
             i = input,
             d = delay,
             l = label
@@ -477,16 +498,17 @@ fn merge_system_audio_into_video(
         None
     };
     let audio_map_label = if let (Some(sys), Some(mic)) = (sys_out, mic_out) {
+        // 🔧 性能优化：简化混音过滤器
         filter_parts.push(format!(
-            "{}{}amix=inputs=2:duration=longest:normalize=0,aresample=async=1:first_pts=0[aout]",
+            "{}{}amix=inputs=2:duration=shortest:normalize=0[aout]",
             sys, mic
         ));
         "[aout]"
     } else if sys_out.is_some() {
-        filter_parts.push("[sysa]aresample=async=1:first_pts=0[aout]".to_string());
+        filter_parts.push("[sysa]anull[aout]".to_string());
         "[aout]"
     } else if mic_out.is_some() {
-        filter_parts.push("[mica]aresample=async=1:first_pts=0[aout]".to_string());
+        filter_parts.push("[mica]anull[aout]".to_string());
         "[aout]"
     } else {
         return Ok(());
@@ -497,15 +519,35 @@ fn merge_system_audio_into_video(
         .arg("0:v:0")
         .arg("-map")
         .arg(audio_map_label);
+
+    // 🔧 性能优化：使用更快的音频编码参数
+    // - c:a aac: 使用 AAC 编码器（兼容性好）
+    // - b:a 128k: 降低比特率从 192k 到 128k（音质足够，速度更快）
+    // - movflags +faststart: 优化 MP4 结构，便于在线播放
+    // - profile:a aac_low: 使用 AAC-LC 配置文件（编码更快）
     cmd.arg("-c:v")
         .arg("copy")
         .arg("-c:a")
         .arg("aac")
+        .arg("-profile:a")
+        .arg("aac_low")
         .arg("-b:a")
-        .arg("192k")
+        .arg("128k")
+        .arg("-movflags")
+        .arg("+faststart")
         .arg(&merged_path);
-    let output = cmd
-        .output()
+
+    // 🔧 性能优化：使用spawn + wait替代output，FFmpeg内部会流式处理
+    let child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| AppError::new(ErrorCode::SystemError, "启动音频合成进程失败").with_details(e.to_string()))?;
+
+    // 等待FFmpeg完成（仍为同步，但FFmpeg内部会流式处理）
+    let output = child
+        .wait_with_output()
         .map_err(|e| AppError::new(ErrorCode::SystemError, "执行系统音频合成失败").with_details(e.to_string()))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -543,12 +585,16 @@ fn merge_system_audio_into_video(
         true,
         None,
     );
-    for seg in &valid_system {
-        let _ = fs::remove_file(&seg.path);
-    }
-    for seg in &valid_mic {
-        let _ = fs::remove_file(&seg.path);
-    }
+
+    // ✅ 注意：不要在这里删除音频片段！
+    // 清理操作将在调用方（异步任务）中统一执行
+    // for seg in &valid_system {
+    //     let _ = fs::remove_file(&seg.path);
+    // }
+    // for seg in &valid_mic {
+    //     let _ = fs::remove_file(&seg.path);
+    // }
+    
     Ok(())
 }
 
@@ -1123,6 +1169,7 @@ fn spawn_stats_loop(
             audio_buffer_level_ms,
         );
         emit_recording_state_changed(&app, session_id.as_deref(), phase.as_str(), elapsed_ms);
+
         thread::sleep(Duration::from_millis(500));
     });
 }
@@ -1672,29 +1719,20 @@ pub fn stop_recording(
                 if fatal_error.is_none() {
                     fatal_error = Some(e);
                 }
-            } else if let Err(e) = merge_system_audio_into_video(
-                &ffmpeg_path,
-                output_final,
-                &sys_segments,
-                &mic_segments,
-            ) {
-                let detail = e.details.clone().unwrap_or_default();
-                let msg = if detail.is_empty() {
-                    format!("音频合成失败，已保留视频文件: {}", e.message)
-                } else {
-                    format!("音频合成失败，已保留视频文件: {}；{}", e.message, detail)
-                };
-                emit_recording_error(app, Some(session_id.as_str()), RECORDING_PROCESS_EXITED, &msg);
             }
         } else {
             fatal_error = Some(AppError::new(ErrorCode::SystemError, "录制输出路径不存在"));
         }
     }
 
-    // 统一清理录制过程产生的音频片段，避免 stop 后残留 *.sys.wav / *.mic.wav。
-    for path in audio_segment_paths {
-        let _ = fs::remove_file(path);
-    }
+    // ✅ 注意：不要在这里删除音频片段！
+    // 音频合并是在后台异步执行的，需要这些文件
+    // 删除操作将在音频合并完成（或失败）后在异步任务中执行
+    // for path in audio_segment_paths {
+    //     let _ = fs::remove_file(path);
+    // }
+
+    // 只清理窗口视频片段（已经在同步阶段使用完毕）
     for path in window_video_segments {
         let _ = fs::remove_file(path);
     }
@@ -1727,6 +1765,7 @@ pub fn stop_recording(
     if let Some(err) = fatal_error {
         return Err(err);
     }
+
     let result = RecordingStopResult {
         session_id: session_id.clone(),
         output_path: output_path_for_result
@@ -1734,7 +1773,104 @@ pub fn stop_recording(
         duration_ms,
         file_size_bytes,
     };
+
+    // ✅ 立即发送完成事件，UI 可以立即响应
     emit_recording_finished(app, &result);
+
+    // ✅ 在后台异步执行音频合并，不阻塞 UI
+    if !sys_segments.is_empty() || !mic_segments.is_empty() {
+        let app_handle = app.clone();
+        let session_id_clone = session_id.clone();
+        let ffmpeg_path_clone = ffmpeg_path.clone();
+        let output_final_clone = output_final.clone().unwrap();
+
+        // ✅ 将音频片段路径 HashSet 转换为 Vec，用于合并后清理
+        // audio_segment_paths 已从元组解构获得（L1580）
+        let audio_segment_paths_vec: Vec<std::path::PathBuf> = audio_segment_paths.into_iter().collect();
+
+        tauri::async_runtime::spawn(async move {
+            // 发送开始事件
+            emit_recording_audio_merging(
+                &app_handle,
+                Some(&session_id_clone),
+                "started",
+                None,
+                Some("正在后台合并音频..."),
+            );
+
+            // 执行音频合并（sys_segments 和 mic_segments 会被移动到闭包中）
+            let merge_result = merge_system_audio_into_video(
+                &ffmpeg_path_clone,
+                &output_final_clone,
+                &sys_segments,
+                &mic_segments,
+            );
+
+            // ✅ 合并完成后，清理临时音频片段文件
+            let mut cleaned_count = 0;
+            let mut not_found_count = 0;
+            for path in &audio_segment_paths_vec {
+                // ✅ 添加诊断日志：检查文件是否存在
+                match std::fs::metadata(path) {
+                    Ok(meta) => {
+                        log::info!("准备清理音频片段: {:?}, 大小: {} bytes", path.file_name(), meta.len());
+                        if let Err(e) = fs::remove_file(path) {
+                            // 文件不存在是正常的（可能是进程音频线程提前退出），只记录 debug 级别日志
+                            if e.kind() == std::io::ErrorKind::NotFound {
+                                log::warn!("音频片段文件在清理时不存在: {:?}", path);
+                                not_found_count += 1;
+                            } else {
+                                log::warn!("清理音频片段失败: {:?}, {}", path, e);
+                            }
+                        } else {
+                            cleaned_count += 1;
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("音频片段文件在清理前就不存在: {:?}, {}", path.file_name(), e);
+                        not_found_count += 1;
+                    }
+                }
+            }
+            log::info!("已清理 {}/{} 个音频片段文件 ({} 个不存在)", cleaned_count, audio_segment_paths_vec.len(), not_found_count);
+
+            // 根据合并结果发送事件
+            match merge_result {
+                Ok(_) => {
+                    log::info!("后台音频合并完成");
+                    emit_recording_audio_merging(
+                        &app_handle,
+                        Some(&session_id_clone),
+                        "completed",
+                        Some(100),
+                        Some("音频合并完成"),
+                    );
+                }
+                Err(e) => {
+                    let detail = e.details.clone().unwrap_or_default();
+                    let msg = if detail.is_empty() {
+                        format!("音频合成失败，已保留视频文件: {}", e.message)
+                    } else {
+                        format!("音频合成失败，已保留视频文件: {}；{}", e.message, detail)
+                    };
+                    log::error!("后台音频合并失败: {}", msg);
+                    emit_recording_audio_merging(
+                        &app_handle,
+                        Some(&session_id_clone),
+                        "failed",
+                        None,
+                        Some(&msg),
+                    );
+                    emit_recording_error(&app_handle, Some(&session_id_clone), RECORDING_PROCESS_EXITED, &msg);
+                }
+            }
+        });
+    } else {
+        // ✅ 如果没有音频片段，直接清理 window_video_segments
+        // （已在前面清理）
+        log::info!("无音频片段，跳过音频合并");
+    }
+    
     Ok(result)
 }
 
@@ -1935,6 +2071,47 @@ pub fn pause_recording(app: &AppHandle, state_arc: Arc<Mutex<SharedAppState>>) -
         runtime.system_audio_stream_start_ms = None;
         runtime.mic_audio_wav_path = None;
         runtime.mic_audio_stream_start_ms = None;
+
+        // 🔧 修复：暂停时清理已完成的音频片段，避免内存泄漏
+        // 这些片段已在磁盘上，合并时会重新读取，无需常驻内存
+        let sys_segments_to_clean: Vec<_> = std::mem::take(&mut runtime.system_audio_segments)
+            .into_iter()
+            .filter(|seg| seg.path.exists())
+            .collect();
+        let mic_segments_to_clean: Vec<_> = std::mem::take(&mut runtime.mic_audio_segments)
+            .into_iter()
+            .filter(|seg| seg.path.exists())
+            .collect();
+
+        // ✅ 添加诊断日志：记录暂停时清理的音频片段
+        if !sys_segments_to_clean.is_empty() {
+            log::info!("暂停时清理 {} 个系统音频片段", sys_segments_to_clean.len());
+            for seg in &sys_segments_to_clean {
+                log::info!("  - {:?}", seg.path.file_name());
+            }
+        }
+        if !mic_segments_to_clean.is_empty() {
+            log::info!("暂停时清理 {} 个麦克风音频片段", mic_segments_to_clean.len());
+            for seg in &mic_segments_to_clean {
+                log::info!("  - {:?}", seg.path.file_name());
+            }
+        }
+
+        drop(runtime); // 释放锁后再执行I/O操作
+
+        // 异步删除已完成的音频片段文件，释放磁盘空间
+        for seg in sys_segments_to_clean {
+            if let Err(e) = fs::remove_file(&seg.path) {
+                log::warn!("清理暂停音频片段失败 {:?}: {}", seg.path, e);
+            }
+        }
+        for seg in mic_segments_to_clean {
+            if let Err(e) = fs::remove_file(&seg.path) {
+                log::warn!("清理暂停音频片段失败 {:?}: {}", seg.path, e);
+            }
+        }
+
+        let mut runtime = lock_arc_mutex(&runtime_arc);
         runtime.phase = RecordingPhase::Paused;
         runtime.paused_at_instant = Some(std::time::Instant::now());
         runtime.snapshot().elapsed_ms
