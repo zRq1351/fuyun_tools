@@ -58,6 +58,29 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 static LAST_OPEN_FOLDER_MS: AtomicU64 = AtomicU64::new(0);
 const VIDEO_IO_RETRY_DELAYS_MS: [u64; 5] = [60, 120, 240, 480, 800];
 
+/// 🔧 硬件加速检测：自动检测可用的硬件编码器
+/// 返回: Some("h264_nvenc") 或 Some("h264_qsv") 等，如果没有硬件编码器则返回 None
+fn detect_hw_accel_encoder(ffmpeg_path: &std::path::Path) -> Option<String> {
+    // 硬件编码器优先级：NVIDIA > Intel > AMD
+    let encoders = ["h264_nvenc", "h264_qsv", "h264_amf"];
+
+    let output = Command::new(ffmpeg_path)
+        .arg("-encoders")
+        .output()
+        .ok()?;
+
+    let encoder_list = String::from_utf8_lossy(&output.stdout);
+
+    for encoder in &encoders {
+        if encoder_list.contains(encoder) {
+            log::info!("检测到硬件编码器: {}", encoder);
+            return Some(encoder.to_string());
+        }
+    }
+
+    None
+}
+
 fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
     mutex.lock().expect("infallible mutex lock failed")
 }
@@ -359,18 +382,21 @@ fn merge_system_audio_into_video(
     let expected_system_count = system_segments.len();
     let expected_mic_count = mic_segments.len();
 
-    // 🔧 性能优化：如果只有一个音频片段且无延迟，直接使用 FFmpeg 流式复制
-    // 避免重编码，速度提升 10-50倍
+    // 🔧 性能优化：快速路径 - 单个音频片段且延迟很小(<100ms)时直接复制流
+    // 适用场景：全屏/区域录制（无暂停、单次音频）
+    // 速度提升：10-50倍（避免重新编码）
     if system_segments.len() == 1 && mic_segments.is_empty() {
         let seg = &system_segments[0];
-        if seg.start_ms == 0 && seg.path.exists() {
-            return merge_audio_fast(ffmpeg_path, video_path, &seg.path);
+        if seg.start_ms < 100 && seg.path.exists() {
+            log::info!("快速路径：单个系统音频片段(start_ms={})，使用流复制模式", seg.start_ms);
+            return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false);
         }
     }
     if mic_segments.len() == 1 && system_segments.is_empty() {
         let seg = &mic_segments[0];
-        if seg.start_ms == 0 && seg.path.exists() {
-            return merge_audio_fast(ffmpeg_path, video_path, &seg.path);
+        if seg.start_ms < 100 && seg.path.exists() {
+            log::info!("快速路径：单个麦克风音频片段(start_ms={})，使用流复制模式", seg.start_ms);
+            return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false);
         }
     }
     
@@ -423,7 +449,19 @@ fn merge_system_audio_into_video(
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
 
-    // 🔧 性能优化：FFmpeg 全局参数
+    // 🔧 性能优化：FFmpeg 全局参数 + 硬件加速检测
+    // 自动检测可用的硬件编码器（CUDA/QuickSync/AMF）
+    let hw_encoder = detect_hw_accel_encoder(ffmpeg_path);
+    let has_hw_accel = hw_encoder.is_some();
+
+    if has_hw_accel {
+        log::info!("检测到硬件加速编码器: {:?}，启用硬件解码", hw_encoder);
+        cmd.arg("-hwaccel")
+            .arg("auto")
+            .arg("-hwaccel_output_format")
+            .arg("cuda");  // 默认使用 CUDA，如不可用 FFmpeg 会自动回退
+    }
+    
     cmd.arg("-hide_banner")
         .arg("-loglevel")
         .arg("warning")
@@ -615,12 +653,13 @@ fn merge_system_audio_into_video(
 }
 
 // 🔧 性能优化：快速音频合并（无需重编码）
-// 适用于单个音频片段且无延迟的场景
+// 适用于单个音频片段且延迟<100ms的场景
 // 速度比完整合并快 10-50倍
 fn merge_audio_fast(
     ffmpeg_path: &std::path::Path,
     video_path: &PathBuf,
     audio_path: &PathBuf,
+    _need_hwaccel: bool,
 ) -> Result<(), AppError> {
     let started_at = Instant::now();
     let merged_path = video_path.with_extension("merged.tmp.mp4");

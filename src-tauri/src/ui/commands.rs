@@ -14,9 +14,9 @@ use crate::ui::tray_menu::open_settings;
 use crate::ui::window_manager::{
     bind_overlay_window_events, focus_overlay_window_by_label, hide_clipboard_window, hide_image_clipboard_window,
     hide_image_preview_window, hide_overlay_window_by_label, set_window_position,
+    show_clipboard_window,
+    show_image_clipboard_window, show_image_preview_loading_window, show_image_preview_window,
     show_overlay_window_by_label,
-    show_clipboard_window, show_image_clipboard_window, show_image_preview_loading_window,
-    show_image_preview_window,
 };
 use crate::utils::backup_archive::{
     cleanup_dir, create_backup_temp_dir, read_manifest_from_package, write_backup_payload, zip_backup_dir,
@@ -4254,6 +4254,38 @@ pub async fn check_vc_runtime_dependencies() -> Result<serde_json::Value, String
     }
 }
 
+/// 🔧 视频硬件加速编码器检测：自动检测可用的硬件编码器
+/// 返回: Some("h264_nvenc") 或 Some("h264_qsv") 等，如果没有硬件编码器则返回 None
+fn detect_video_hw_accel_encoder(ffmpeg_path: &std::path::Path) -> Option<String> {
+    use std::process::Command;
+
+    // 硬件编码器优先级：NVIDIA > Intel > AMD
+    let encoders = ["h264_nvenc", "h264_qsv", "h264_amf"];
+
+    let mut cmd = Command::new(ffmpeg_path);
+    cmd.arg("-encoders");
+
+    // 🔧 修复：隐藏控制台窗口，避免黑框一闪而过
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = cmd.output().ok()?;
+
+    let encoder_list = String::from_utf8_lossy(&output.stdout);
+
+    for encoder in &encoders {
+        if encoder_list.contains(encoder) {
+            return Some(encoder.to_string());
+        }
+    }
+
+    None
+}
+
 fn sanitize_settings_for_backup(settings: &crate::utils::settings_model::AppSettingsData) -> crate::utils::settings_model::AppSettingsData {
     let mut sanitized = settings.clone();
     for config in sanitized.provider_configs.values_mut() {
@@ -4690,6 +4722,13 @@ async fn build_diagnostic_items_inner(
     } else {
         "当前录屏主链路未强制降级".to_string()
     };
+
+    // 🔧 性能优化：检测视频硬件加速编码器
+    let hw_encoder_info = if let Ok(ffmpeg_path) = crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path() {
+        detect_video_hw_accel_encoder(&ffmpeg_path)
+    } else {
+        None
+    };
     perf_metrics.sort_by(|a, b| {
         b.avg_duration_ms
             .partial_cmp(&a.avg_duration_ms)
@@ -5011,6 +5050,13 @@ async fn build_diagnostic_items_inner(
                     if settings.dev_force_ffmpeg_window_capture { "已开启" } else { "未开启" }
                 ),
                 format!("录屏开关: {}", if settings.recording_enabled { "已启用" } else { "未启用" }),
+                format!(
+                    "视频硬件加速: {}",
+                    match &hw_encoder_info {
+                        Some(encoder) => format!("已检测到 {}", encoder),
+                        None => "未检测到（使用软件编码）".to_string(),
+                    }
+                ),
             ],
             actions: vec![
                 DiagnosticAction {
