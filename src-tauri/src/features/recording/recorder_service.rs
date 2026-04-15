@@ -543,25 +543,25 @@ fn merge_system_audio_into_video(
         .arg("-map")
         .arg(audio_map_label);
 
-    // 🔧 性能优化：使用更快的音频编码参数
-    // - c:a aac: 使用 AAC 编码器（兼容性好）
-    // - b:a 128k: 降低比特率从 192k 到 128k（音质足够，速度更快）
-    // - movflags +faststart: 优化 MP4 结构，便于在线播放
-    // - profile:a aac_low: 使用 AAC-LC 配置文件（编码更快）
-
-    // 🔧 方案1：项目录制的视频始终是 H.264 格式，直接使用流复制模式
-    // 无需检测视频编码格式，避免额外的 FFmpeg 进程开销
-    cmd.arg("-c:v").arg("copy");
-
-    cmd.arg("-c:a")
+    // 🔧 性能优化：使用最快的 AAC 编码参数
+    // - c:a aac: 使用 AAC 编码器
+    // - b:a 128k: 比特率 128kbps（音质与速度的平衡）
+    // - profile:a aac_low: AAC-LC 快速配置
+    // - movflags +faststart: 优化 MP4 结构
+    // - threads 0: 自动使用所有 CPU 核心
+    cmd.arg("-c:v")
+        .arg("copy")
+        .arg("-c:a")
         .arg("aac")
-        .arg("-profile:a")
-        .arg("aac_low")
         .arg("-b:a")
         .arg("128k")
+        .arg("-profile:a")
+        .arg("aac_low")
         .arg("-movflags")
         .arg("+faststart")
         .arg(&merged_path);
+
+    log::info!("🔧 开始音频合并，系统音频片段: {}, 麦克风片段: {}", valid_system.len(), valid_mic.len());
 
     // 🔧 性能优化：使用spawn + wait替代output，FFmpeg内部会流式处理
     let child = cmd
@@ -611,6 +611,12 @@ fn merge_system_audio_into_video(
         true,
         None,
     );
+
+    let elapsed_ms = started_at.elapsed().as_millis();
+    log::info!("✅ 音频合并完成，耗时: {}ms ({:.1}s)", elapsed_ms, elapsed_ms as f64 / 1000.0);
+    if elapsed_ms > 5000 {
+        log::warn!("⚠️ 音频合并耗时较长({}ms)，建议优化方案", elapsed_ms);
+    }
 
     // ✅ 注意：不要在这里删除音频片段！
     // 清理操作将在调用方（异步任务）中统一执行
