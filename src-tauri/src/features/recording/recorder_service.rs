@@ -654,7 +654,7 @@ fn merge_system_audio_into_video(
 
 // 🔧 性能优化：快速音频合并（简化处理链）
 // 适用于单个音频片段且延迟<100ms的场景
-// 注意：WAV -> MP4 必须重新编码为 AAC，不能直接 copy
+// 注意：支持 WAV 和 AAC 两种格式
 fn merge_audio_fast(
     ffmpeg_path: &std::path::Path,
     video_path: &PathBuf,
@@ -667,7 +667,11 @@ fn merge_audio_fast(
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
 
-    // 🔧 修复：WAV 必须重新编码为 AAC，不能直接 copy
+    // 🔧 方案2：检测音频格式，AAC 可直接 copy，WAV 需重编码
+    let is_aac = audio_path.extension()
+        .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
+        .unwrap_or(false);
+    
     cmd.arg("-hide_banner")
         .arg("-loglevel")
         .arg("warning")
@@ -679,7 +683,7 @@ fn merge_audio_fast(
         .arg("-c:v")
         .arg("copy")
         .arg("-c:a")
-        .arg("aac")  // 🔧 修复：重新编码为 AAC
+        .arg(if is_aac { "copy" } else { "aac" })  // 🔧 AAC 直接 copy，WAV 重编码
         .arg("-b:a")
         .arg("128k")
         .arg("-movflags")
@@ -736,7 +740,11 @@ fn merge_audio_fast(
         None,
     );
 
-    log::info!("快速音频合并完成，耗时: {}ms", started_at.elapsed().as_millis());
+    let elapsed_ms = started_at.elapsed().as_millis();
+    log::info!("✅ 快速音频合并完成，耗时: {}ms (WAV→AAC重编码)", elapsed_ms);
+    if elapsed_ms > 500 {
+        log::warn!("⚠️ 快速路径耗时较长({}ms)，考虑优化方案", elapsed_ms);
+    }
     Ok(())
 }
 
@@ -881,6 +889,7 @@ fn ensure_system_audio_capture_started(
     let start_ms = runtime.snapshot().elapsed_ms;
     let seg_idx = runtime.system_audio_segments.len();
     if !runtime.system_audio_process_ids.is_empty() {
+        // 应用音频仍然使用 WAV（因为多进程混音复杂）
         let process_ids = runtime.system_audio_process_ids.clone();
         let output_paths = process_ids
             .iter()
