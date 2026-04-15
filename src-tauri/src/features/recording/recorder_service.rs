@@ -58,51 +58,6 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 static LAST_OPEN_FOLDER_MS: AtomicU64 = AtomicU64::new(0);
 const VIDEO_IO_RETRY_DELAYS_MS: [u64; 5] = [60, 120, 240, 480, 800];
 
-/// 🔧 硬件加速检测：自动检测可用的硬件编码器
-/// 返回: Some("h264_nvenc") 或 Some("h264_qsv") 等，如果没有硬件编码器则返回 None
-fn detect_hw_accel_encoder(ffmpeg_path: &std::path::Path) -> Option<String> {
-    // 硬件编码器优先级：NVIDIA > Intel > AMD
-    let encoders = ["h264_nvenc", "h264_qsv", "h264_amf"];
-
-    let output = Command::new(ffmpeg_path)
-        .arg("-encoders")
-        .output()
-        .ok()?;
-
-    let encoder_list = String::from_utf8_lossy(&output.stdout);
-
-    for encoder in &encoders {
-        if encoder_list.contains(encoder) {
-            log::info!("检测到硬件编码器: {}", encoder);
-            return Some(encoder.to_string());
-        }
-    }
-
-    None
-}
-
-/// 检测视频编码格式
-/// 返回视频编码器名称（如 "h264", "hevc", "vp9" 等）
-fn detect_video_codec(ffmpeg_path: &std::path::Path, video_path: &PathBuf) -> Result<String, AppError> {
-    let output = Command::new(ffmpeg_path)
-        .args(&[
-            "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=codec_name",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            video_path.to_str().unwrap(),
-        ])
-        .output()
-        .map_err(|e| AppError::new(ErrorCode::SystemError, "检测视频编码失败").with_details(e.to_string()))?;
-
-    let codec = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if codec.is_empty() {
-        return Err(AppError::new(ErrorCode::SystemError, "无法检测视频编码格式"));
-    }
-
-    log::info!("检测到视频编码格式: {}", codec);
-    Ok(codec)
-}
 
 fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
     mutex.lock().expect("infallible mutex lock failed")
@@ -472,26 +427,9 @@ fn merge_system_audio_into_video(
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
 
-    // 🔧 性能优化：FFmpeg 全局参数 + 硬件加速检测
-    // 自动检测可用的硬件编码器（CUDA/QuickSync/AMF）
-    let hw_encoder = detect_hw_accel_encoder(ffmpeg_path);
-    let has_hw_accel = hw_encoder.is_some();
-
-    // 🔧 方案1：检测视频编码格式，决定是否使用流复制模式
-    let video_codec = detect_video_codec(ffmpeg_path, video_path)
-        .unwrap_or_else(|e| {
-            log::warn!("检测视频编码失败: {}，将使用重编码模式", e);
-            "unknown".to_string()
-        });
-    let can_copy_video = video_codec == "h264" || video_codec == "hevc";
-
-    if has_hw_accel && !can_copy_video {
-        log::info!("检测到硬件加速编码器: {:?}，启用硬件解码", hw_encoder);
-        cmd.arg("-hwaccel")
-            .arg("auto")
-            .arg("-hwaccel_output_format")
-            .arg("cuda");  // 默认使用 CUDA，如不可用 FFmpeg 会自动回退
-    }
+    // 🔧 性能优化：项目录制的视频始终是 H.264 格式，直接使用流复制模式
+    // 无需检测视频编码格式，避免额外的 FFmpeg 进程开销
+    log::info!("✅ 视频编码格式为 H.264，使用流复制模式（无重编码）");
     
     cmd.arg("-hide_banner")
         .arg("-loglevel")
@@ -611,24 +549,9 @@ fn merge_system_audio_into_video(
     // - movflags +faststart: 优化 MP4 结构，便于在线播放
     // - profile:a aac_low: 使用 AAC-LC 配置文件（编码更快）
 
-    // 🔧 方案1：根据视频编码格式决定是否使用流复制模式
-    if can_copy_video {
-        log::info!("✅ 视频编码格式为 {}，使用流复制模式（无重编码）", video_codec);
-        cmd.arg("-c:v").arg("copy");
-    } else {
-        log::info!("⚠️ 视频编码格式为 {}，需要重编码", video_codec);
-        // 使用硬件编码器（如果可用）
-        if let Some(ref encoder) = hw_encoder {
-            log::info!("✅ 使用硬件编码器: {}", encoder);
-            cmd.arg("-c:v").arg(encoder);
-            cmd.arg("-preset").arg("fast");
-        } else {
-            log::info!("⚠️ 使用软件编码器（ultrafast 预设）");
-            cmd.arg("-c:v").arg("libx264");
-            cmd.arg("-preset").arg("ultrafast");
-            cmd.arg("-tune").arg("fastdecode");
-        }
-    }
+    // 🔧 方案1：项目录制的视频始终是 H.264 格式，直接使用流复制模式
+    // 无需检测视频编码格式，避免额外的 FFmpeg 进程开销
+    cmd.arg("-c:v").arg("copy");
 
     cmd.arg("-c:a")
         .arg("aac")
