@@ -1401,25 +1401,20 @@ function loadImageFromBase64(base64Data) {
 function loadImageFromPath(imagePath) {
   const fileUrl = buildFileUrlFromPath(imagePath)
   if (!fileUrl) {
+    console.error('❌ 无法构建文件URL:', imagePath)
     isCaptureReady.value = false
     return
   }
+
+  console.log('🔍 开始加载截图:', {
+    imagePath,
+    fileUrl: fileUrl.substring(0, 100) + '...',
+    timestamp: new Date().toISOString()
+  })
+
+  // 🔧 修复：直接使用 img.src，和 image_preview 一样，避免 fetch 的权限问题
   revokeScreenshotObjectUrl()
-  fetch(fileUrl)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
-        }
-        return response.blob()
-      })
-      .then((blob) => {
-        screenshotObjectUrl = URL.createObjectURL(blob)
-        loadImageFromSrc(screenshotObjectUrl)
-      })
-      .catch((error) => {
-        console.error('加载截图文件失败:', error)
-        isCaptureReady.value = false
-      })
+  loadImageFromSrc(fileUrl)
 }
 
 function resetAnnotationStateForNewImage() {
