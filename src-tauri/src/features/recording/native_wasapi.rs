@@ -3,7 +3,9 @@ use cpal::{Sample, SampleFormat as CpalSampleFormat, StreamConfig};
 use hound::{SampleFormat, WavWriter};
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::io::Write;
 use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -21,6 +23,14 @@ pub struct WasapiCaptureHandle {
     pub stop_flag: Arc<AtomicBool>,
     pub join: Option<std::thread::JoinHandle<()>>,
     pub output_path: PathBuf,
+}
+
+// 🔧 方案A：FFmpeg 实时 AAC 编码句柄
+pub struct WasapiFfmpegHandle {
+    pub stop_flag: Arc<AtomicBool>,
+    pub join: Option<std::thread::JoinHandle<()>>,
+    pub output_path: PathBuf,
+    pub ffmpeg_child: Arc<Mutex<Option<Child>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -1020,5 +1030,179 @@ pub fn start_microphone_wav_with_device(
         stop_flag,
         join: Some(handle),
         output_path,
+    })
+}
+
+// 🔧 方案A：使用 FFmpeg 管道实时编码 AAC（而非 WAV）
+pub fn start_system_loopback_aac_with_device(
+    device_desc_key: Option<String>,
+    output_path: PathBuf,
+    enabled_flag: Arc<AtomicBool>,
+    recording_pause_flag: Arc<AtomicBool>,
+) -> Result<WasapiFfmpegHandle, String> {
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let thread_stop_flag = stop_flag.clone();
+    let thread_output = output_path.clone();
+    let thread_device_key = device_desc_key.clone();
+    let ffmpeg_child = Arc::new(Mutex::new(None::<Child>));
+    let thread_ffmpeg = ffmpeg_child.clone();
+    let (tx, rx) = mpsc::channel::<Result<(), String>>();
+
+    let handle = std::thread::spawn(move || {
+        let run = || -> Result<(), String> {
+            // 🔧 解析 FFmpeg 路径
+            let ffmpeg_path = crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path()
+                .map_err(|e| format!("解析 FFmpeg 路径失败: {}", e))?;
+
+            // 1. 启动 FFmpeg 子进程，从 stdin 读取 PCM F32LE，输出 AAC
+            let mut ffmpeg_cmd = Command::new(&ffmpeg_path);
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                ffmpeg_cmd.creation_flags(CREATE_NO_WINDOW);
+            }
+
+            ffmpeg_cmd
+                .args(&[
+                    "-f", "f32le",           // 输入格式：32位浮点小端
+                    "-ar", "48000",          // 采样率：48kHz
+                    "-ac", "2",              // 声道数：立体声
+                    "-i", "-",               // 从 stdin 读取
+                    "-c:a", "aac",           // 编码器：AAC
+                    "-b:a", "128k",          // 比特率：128kbps
+                    "-profile:a", "aac_low", // 快速配置
+                    "-y",                    // 覆盖输出文件
+                    thread_output.to_str().ok_or("无效的输出路径")?,
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+
+            let mut child = ffmpeg_cmd
+                .spawn()
+                .map_err(|e| format!("启动 FFmpeg 失败: {}", e))?;
+
+            let stdin = child.stdin.take()
+                .ok_or("无法获取 FFmpeg stdin")?;
+
+            {
+                if let Ok(mut guard) = thread_ffmpeg.lock() {
+                    *guard = Some(child);
+                }
+            }
+
+            log::info!("🔧 FFmpeg AAC 编码管道已启动: {:?}", thread_output.file_name());
+
+            // 2. WASAPI 捕获音频并写入 FFmpeg stdin
+            let host = cpal::host_from_id(cpal::HostId::Wasapi)
+                .map_err(|e| format!("WASAPI 主机不可用: {}", e))?;
+
+            let device = if let Some(key) = thread_device_key.as_ref() {
+                if let Ok(devs) = host.output_devices() {
+                    let mut picked = None;
+                    for d in devs {
+                        if let Ok(desc) = d.description() {
+                            if desc.to_string() == *key {
+                                picked = Some(d);
+                                break;
+                            }
+                        }
+                    }
+                    picked
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+                .or_else(|| host.default_output_device())
+                .ok_or_else(|| "未找到输出设备".to_string())?;
+
+            let config: StreamConfig = StreamConfig {
+                channels: 2,
+                sample_rate: 48_000,
+                buffer_size: cpal::BufferSize::Default,
+            };
+
+            // 3. 将音频数据直接写入 FFmpeg stdin（F32LE 格式）
+            let stdin_writer = Arc::new(Mutex::new(Some(std::io::BufWriter::new(stdin))));
+            let stdin_cb = stdin_writer.clone();
+            let enabled_cb = enabled_flag.clone();
+            let pause_cb = recording_pause_flag.clone();
+
+            log::info!(
+                "WASAPI+FFmpeg线程启动: {:?}, enabled={}, pause={}",
+                thread_output.file_name(),
+                enabled_flag.load(Ordering::SeqCst),
+                recording_pause_flag.load(Ordering::SeqCst)
+            );
+
+            let err_fn = |err| eprintln!("WASAPI 捕获错误: {}", err);
+
+            let stream = device
+                .build_input_stream(
+                    &config,
+                    move |data: &[f32], _| {
+                        if let Ok(mut guard) = stdin_cb.lock() {
+                            if let Some(writer) = guard.as_mut() {
+                                let enabled = enabled_cb.load(Ordering::SeqCst)
+                                    && !pause_cb.load(Ordering::SeqCst);
+                                if enabled {
+                                    // 直接写入 F32LE 原始数据到 FFmpeg
+                                    for &sample in data {
+                                        let bytes = sample.to_le_bytes();
+                                        let _ = writer.write_all(&bytes);
+                                    }
+                                } else {
+                                    // 禁用时写入静音
+                                    let silence = vec![0u8; data.len() * 4];
+                                    let _ = writer.write_all(&silence);
+                                }
+                                let _ = writer.flush();
+                            }
+                        }
+                    },
+                    err_fn,
+                    Some(Duration::from_millis(100)),
+                )
+                .map_err(|e| format!("创建输入流失败: {}", e))?;
+
+            stream.play().map_err(|e| format!("启动输入流失败: {}", e))?;
+            let _ = tx.send(Ok(()));
+
+            // 等待停止信号
+            while !thread_stop_flag.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+
+            drop(stream);
+            log::info!("WASAPI 流已停止，等待 FFmpeg 完成编码...");
+
+            // 关闭 stdin 触发 FFmpeg 完成编码
+            if let Ok(mut guard) = stdin_writer.lock() {
+                if let Some(writer) = guard.take() {
+                    drop(writer); // 关闭 stdin
+                }
+            }
+
+            log::info!("✅ FFmpeg AAC 编码完成: {:?}", thread_output.file_name());
+            Ok(())
+        };
+        if let Err(e) = run() {
+            let _ = tx.send(Err(e));
+        }
+    });
+
+    let init = rx
+        .recv_timeout(Duration::from_secs(2))
+        .map_err(|_| "启动 WASAPI+FFmpeg 捕获超时".to_string())??;
+    let _ = init;
+
+    Ok(WasapiFfmpegHandle {
+        stop_flag,
+        join: Some(handle),
+        output_path,
+        ffmpeg_child,
     })
 }

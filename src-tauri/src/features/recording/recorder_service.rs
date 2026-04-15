@@ -13,7 +13,7 @@ use crate::features::recording::events::{
 use crate::features::recording::ffmpeg_runner::{build_output_paths, resolve_ffmpeg_path};
 use crate::features::recording::native_wasapi::{
     list_audio_processes, start_microphone_wav_with_device, start_process_loopback_wavs,
-    start_system_loopback_wav_with_device,
+    start_system_loopback_aac_with_device,
 };
 use crate::features::recording::state::RecordingPhase;
 use crate::features::recording::types::{
@@ -383,13 +383,17 @@ fn merge_system_audio_into_video(
             log::warn!("音频片段不存在: {:?}", seg.path);
             return false;
         }
-        // WAV 至少应包含基础头；过滤零字节/损坏片段，避免 ffmpeg 合成直接失败。
+        // 🔧 支持 WAV 和 AAC 格式
+        let is_aac = seg.path.extension()
+            .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
+            .unwrap_or(false);
+        let min_size = if is_aac { 7 } else { 44 };  // AAC 最小 7 bytes (ADTS header), WAV 最小 44 bytes
         match fs::metadata(&seg.path) {
             Ok(meta) => {
                 let size = meta.len();
-                let valid = meta.is_file() && size > 44;
+                let valid = meta.is_file() && size > min_size;
                 if !valid {
-                    log::warn!("音频片段无效: {:?}, 大小: {} bytes (需要 > 44)", seg.path, size);
+                    log::warn!("音频片段无效: {:?}, 大小: {} bytes (需要 > {})", seg.path, size, min_size);
                 }
                 valid
             }
@@ -543,23 +547,36 @@ fn merge_system_audio_into_video(
         .arg("-map")
         .arg(audio_map_label);
 
-    // 🔧 性能优化：使用最快的 AAC 编码参数
-    // - c:a aac: 使用 AAC 编码器
-    // - b:a 128k: 比特率 128kbps（音质与速度的平衡）
-    // - profile:a aac_low: AAC-LC 快速配置
-    // - movflags +faststart: 优化 MP4 结构
-    // - threads 0: 自动使用所有 CPU 核心
-    cmd.arg("-c:v")
-        .arg("copy")
-        .arg("-c:a")
-        .arg("aac")
-        .arg("-b:a")
-        .arg("128k")
-        .arg("-profile:a")
-        .arg("aac_low")
-        .arg("-movflags")
-        .arg("+faststart")
-        .arg(&merged_path);
+    // 🔧 性能优化：检测所有音频片段是否都是 AAC 格式
+    let all_aac = valid_system.iter().chain(valid_mic.iter()).all(|seg| {
+        seg.path.extension()
+            .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
+            .unwrap_or(false)
+    });
+
+    if all_aac {
+        log::info!("✅ 所有音频片段均为 AAC 格式，使用流复制模式（无重编码）");
+        cmd.arg("-c:v")
+            .arg("copy")
+            .arg("-c:a")
+            .arg("copy")  // 🔧 AAC 直接 copy
+            .arg("-movflags")
+            .arg("+faststart")
+            .arg(&merged_path);
+    } else {
+        log::info!("🔧 检测到 WAV 音频，需要重编码为 AAC");
+        cmd.arg("-c:v")
+            .arg("copy")
+            .arg("-c:a")
+            .arg("aac")
+            .arg("-b:a")
+            .arg("128k")
+            .arg("-profile:a")
+            .arg("aac_low")
+            .arg("-movflags")
+            .arg("+faststart")
+            .arg(&merged_path);
+    }
 
     log::info!("🔧 开始音频合并，系统音频片段: {}, 麦克风片段: {}", valid_system.len(), valid_mic.len());
 
@@ -719,13 +736,18 @@ fn merge_audio_fast(
     );
 
     let elapsed_ms = started_at.elapsed().as_millis();
-    log::info!("✅ 快速音频合并完成，耗时: {}ms (WAV→AAC重编码)", elapsed_ms);
-    if elapsed_ms > 500 {
+    let operation = if is_aac { "AAC流复制" } else { "WAV→AAC重编码" };
+    log::info!("✅ 快速音频合并完成，耗时: {}ms ({})", elapsed_ms, operation);
+    // 🔧 调整警告阈值：AAC 流复制通常 <1s，WAV 重编码可能 >5s
+    let warn_threshold = if is_aac { 2000 } else { 5000 };
+    if elapsed_ms > warn_threshold {
         log::warn!("⚠️ 快速路径耗时较长({}ms)，考虑优化方案", elapsed_ms);
     }
     Ok(())
 }
 
+// 🔧 保留用于未来可能的视频验证需求
+#[allow(dead_code)]
 fn validate_video_input_for_merge(
     ffmpeg_path: &std::path::Path,
     video_path: &PathBuf,
@@ -776,6 +798,8 @@ fn rename_recording_output_with_retry(output_tmp: &PathBuf, output_final: &PathB
     Err(AppError::new(ErrorCode::IoError, "重命名录制文件失败").with_details(last_err))
 }
 
+// 🔧 保留用于未来可能的视频验证需求
+#[allow(dead_code)]
 fn validate_video_input_for_merge_with_retry(
     ffmpeg_path: &std::path::Path,
     video_path: &PathBuf,
@@ -911,9 +935,12 @@ fn ensure_system_audio_capture_started(
     } else {
         output_dir.join(format!("{}.sys.{}.wav", session_id, seg_idx))
     };
-    let first_try = start_system_loopback_wav_with_device(
+
+    // 🔧 方案A：使用 FFmpeg 实时 AAC 编码，而非 WAV
+    let sys_aac = sys_wav.with_extension("aac");
+    let first_try = start_system_loopback_aac_with_device(
         runtime.system_audio_device_id.clone(),
-        sys_wav.clone(),
+        sys_aac.clone(),
         enabled_flag.clone(),
         pause_flag.clone(),
     );
@@ -922,7 +949,7 @@ fn ensure_system_audio_capture_started(
         Err(first_err) => {
             if runtime.system_audio_device_id.is_some() {
                 runtime.system_audio_device_id = None;
-                start_system_loopback_wav_with_device(None, sys_wav.clone(), enabled_flag, pause_flag)
+                start_system_loopback_aac_with_device(None, sys_aac.clone(), enabled_flag, pause_flag)
                     .map_err(|second_err| format!("{}；回退默认设备失败: {}", first_err, second_err))
             } else {
                 Err(first_err)
@@ -931,7 +958,7 @@ fn ensure_system_audio_capture_started(
     };
     match start_result {
         Ok(handle) => {
-            runtime.system_audio_wav_path = Some(sys_wav);
+            runtime.system_audio_wav_path = Some(sys_aac);  // 🔧 存储 AAC 路径
             runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
             runtime.system_audio_thread = handle.join;
             runtime.system_audio_stream_start_ms = Some(start_ms);
@@ -1751,6 +1778,16 @@ pub fn stop_recording(
     let mut fatal_error: Option<AppError> = None;
     let mut pending_window_capture_unavailable_details: Option<String> = None;
 
+    // 🔧 性能优化：立即停止音频捕获，避免等待视频处理完成后才停止
+    log::info!("🔧 设置音频停止信号...");
+    if let Some(flag) = system_audio_stop_flag.as_ref() {
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    if let Some(flag) = mic_audio_stop_flag.as_ref() {
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    log::info!("✅ 音频停止信号已设置");
+
     if let Some(process) = process.as_mut() {
         #[cfg(target_os = "windows")]
         if was_paused {
@@ -1829,41 +1866,58 @@ pub fn stop_recording(
     }
 
     if let (Some(output_tmp), Some(output_final)) = (output_tmp.as_ref(), output_final.as_ref()) {
+        log::info!("🔧 开始视频后处理...");
+        let video_post_start = std::time::Instant::now();
+        
         if target_type == "window" && fatal_error.is_none() {
+            log::info!("🔧 合并窗口视频片段...");
             if let Err(e) = concat_video_segments(&ffmpeg_path, &window_video_segments, output_tmp) {
                 fatal_error = Some(e);
             }
         }
         if fatal_error.is_none() {
+            log::info!("🔧 重命名输出文件...");
             if let Err(e) = rename_recording_output_with_retry(output_tmp, output_final) {
                 fatal_error = Some(e);
             }
         }
+
+        log::info!("✅ 视频后处理完成，耗时: {}ms", video_post_start.elapsed().as_millis());
     } else if fatal_error.is_none() {
         fatal_error = Some(AppError::new(ErrorCode::SystemError, "录制输出路径不存在"));
     }
 
-    if let Some(flag) = system_audio_stop_flag.as_ref() {
-        flag.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
+    // 🔧 等待音频线程退出（停止信号已在前面设置）
+    log::info!("🔧 等待系统音频线程退出...");
+    let sys_audio_join_start = std::time::Instant::now();
     if let Some(join) = system_audio_thread {
         let _ = join.join();
     }
-    if let Some(flag) = mic_audio_stop_flag.as_ref() {
-        flag.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
+    log::info!("✅ 系统音频线程已退出，耗时: {}ms", sys_audio_join_start.elapsed().as_millis());
+
+    log::info!("🔧 等待麦克风音频线程退出...");
+    let mic_audio_join_start = std::time::Instant::now();
     if let Some(join) = mic_audio_thread {
         let _ = join.join();
     }
+    log::info!("✅ 麦克风音频线程已退出，耗时: {}ms", mic_audio_join_start.elapsed().as_millis());
 
     if fatal_error.is_none() {
-        if let Some(output_final) = output_final.as_ref() {
-            if let Err(e) = validate_video_input_for_merge_with_retry(&ffmpeg_path, output_final) {
-                if fatal_error.is_none() {
-                    fatal_error = Some(e);
-                }
-            }
-        } else {
+        // 🔧 性能优化：跳过视频验证，音频合并时会自然验证
+        // 之前的验证会导致 10-20 秒的延迟（FFmpeg 扫描整个视频文件）
+        // if let Some(output_final) = output_final.as_ref() {
+        //     log::info!("🔧 验证视频文件完整性...");
+        //     let validate_start = std::time::Instant::now();
+        //     if let Err(e) = validate_video_input_for_merge_with_retry(&ffmpeg_path, output_final) {
+        //         if fatal_error.is_none() {
+        //             fatal_error = Some(e);
+        //         }
+        //     }
+        //     log::info!("✅ 视频验证完成，耗时: {}ms", validate_start.elapsed().as_millis());
+        // } else {
+        //     fatal_error = Some(AppError::new(ErrorCode::SystemError, "录制输出路径不存在"));
+        // }
+        if output_final.is_none() {
             fatal_error = Some(AppError::new(ErrorCode::SystemError, "录制输出路径不存在"));
         }
     }
