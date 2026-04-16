@@ -681,15 +681,40 @@ pub fn start_system_loopback_wav_with_device(
             };
             stream.play().map_err(|e| format!("启动输入流失败: {}", e))?;
             let _ = tx.send(Ok(()));
+
+            // 等待停止信号
             while !thread_stop_flag.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(100));
             }
+
+            // 关键修复：收到停止信号后，继续录制更长时间以确保音频完全覆盖视频最后一段
+            // 测试表明FFmpeg收到"q"命令后处理最后一帧的时间可能超过2秒
+            log::info!("收到停止信号，继续录制2000ms以确保音频完全覆盖视频最后一段...");
+            std::thread::sleep(Duration::from_millis(2000));
+
+            // 停止音频流，让CPAL完成最后的回调
+            let _ = stream.pause();
+
+            // 等待一小段时间，确保音频回调处理完最后的缓冲区数据
+            // 这是必要的，因为CPAL可能在回调中还有待处理的数据
+            std::thread::sleep(Duration::from_millis(300));
+
+            // 销毁流，释放资源
             drop(stream);
+
+            // 确保所有音频数据都已写入文件
             if let Ok(mut guard) = writer.lock() {
                 if let Some(w) = guard.take() {
                     let _ = w.finalize();
                 }
             }
+
+            // 记录文件最终状态
+            match std::fs::metadata(&thread_output) {
+                Ok(meta) => log::info!("✅ WASAPI音频文件最终大小: {:?}, {} bytes", thread_output.file_name(), meta.len()),
+                Err(e) => log::warn!("❌ WASAPI音频文件最终状态检查失败: {:?}, {}", thread_output.file_name(), e),
+            }
+            
             Ok(())
         };
         if let Err(e) = run() {
@@ -1005,15 +1030,40 @@ pub fn start_microphone_wav_with_device(
             };
             stream.play().map_err(|e| format!("启动麦克风输入流失败: {}", e))?;
             let _ = tx.send(Ok(()));
+
+            // 等待停止信号
             while !thread_stop_flag.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(100));
             }
+
+            // 关键修复：收到停止信号后，继续录制更长时间以确保音频完全覆盖视频最后一段
+            // 测试表明FFmpeg收到"q"命令后处理最后一帧的时间可能超过2秒
+            log::info!("收到麦克风停止信号，继续录制2000ms以确保音频完全覆盖视频最后一段...");
+            std::thread::sleep(Duration::from_millis(2000));
+
+            // 停止音频流，让CPAL完成最后的回调
+            let _ = stream.pause();
+
+            // 等待一小段时间，确保音频回调处理完最后的缓冲区数据
+            // 这是必要的，因为CPAL可能在回调中还有待处理的数据
+            std::thread::sleep(Duration::from_millis(300));
+
+            // 销毁流，释放资源
             drop(stream);
+
+            // 确保所有音频数据都已写入文件
             if let Ok(mut guard) = writer.lock() {
                 if let Some(w) = guard.take() {
                     let _ = w.finalize();
                 }
             }
+
+            // 记录文件最终状态
+            match std::fs::metadata(&thread_output) {
+                Ok(meta) => log::info!("✅ WASAPI麦克风文件最终大小: {:?}, {} bytes", thread_output.file_name(), meta.len()),
+                Err(e) => log::warn!("❌ WASAPI麦克风文件最终状态检查失败: {:?}, {}", thread_output.file_name(), e),
+            }
+            
             Ok(())
         };
         if let Err(e) = run() {
@@ -1175,6 +1225,11 @@ pub fn start_system_loopback_aac_with_device(
             while !thread_stop_flag.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(100));
             }
+
+            // 关键修复：收到停止信号后，继续录制更长时间以确保音频完全覆盖视频最后一段
+            // 测试表明FFmpeg收到"q"命令后处理最后一帧的时间可能超过2秒
+            log::info!("收到停止信号，继续录制2000ms以确保音频完全覆盖视频最后一段...");
+            std::thread::sleep(Duration::from_millis(2000));
 
             drop(stream);
             log::info!("WASAPI 流已停止，等待 FFmpeg 完成编码...");

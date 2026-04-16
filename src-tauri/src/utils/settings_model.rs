@@ -34,6 +34,8 @@ pub struct AppSettingsData {
     pub screenshot_enabled: bool,
     #[serde(default = "default_recording_hot_key")]
     pub recording_hot_key: String,
+    #[serde(default = "default_recording_mic_toggle_hot_key")]
+    pub recording_mic_toggle_hot_key: String,
     #[serde(default = "default_recording_enabled")]
     pub recording_enabled: bool,
     #[serde(default = "default_recording_default_fps")]
@@ -115,6 +117,7 @@ impl Default for AppSettingsData {
             screenshot_hot_key: default_screenshot_hot_key(),
             screenshot_enabled: default_screenshot_enabled(),
             recording_hot_key: default_recording_hot_key(),
+            recording_mic_toggle_hot_key: default_recording_mic_toggle_hot_key(),
             recording_enabled: default_recording_enabled(),
             recording_default_fps: default_recording_default_fps(),
             recording_default_video_bitrate_kbps: default_recording_default_video_bitrate_kbps(),
@@ -193,6 +196,10 @@ fn default_screenshot_hot_key() -> String {
 
 fn default_recording_hot_key() -> String {
     DEFAULT_RECORDING_SHORTCUT.to_string()
+}
+
+fn default_recording_mic_toggle_hot_key() -> String {
+    "Ctrl+Space".to_string()
 }
 
 fn default_recording_default_fps() -> u32 {

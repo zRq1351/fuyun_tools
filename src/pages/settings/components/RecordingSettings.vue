@@ -26,6 +26,23 @@
             </template>
           </el-input>
         </el-form-item>
+        <el-form-item label="麦克风切换快捷键">
+          <el-input
+              :class="{ recording: isMicToggleHotkeyRecording }"
+              :model-value="micToggleDisplayValue"
+              placeholder="例如: Ctrl+Space"
+              readonly
+          >
+            <template #append>
+              <el-button :type="isMicToggleHotkeyRecording ? 'danger' : 'primary'" @click="toggleMicToggleHotkey">
+                <el-icon>
+                  <component :is="isMicToggleHotkeyRecording ? VideoPause : Edit"/>
+                </el-icon>
+              </el-button>
+            </template>
+          </el-input>
+          <div class="form-hint">录制过程中使用该快捷键快速开启/关闭麦克风</div>
+        </el-form-item>
       </div>
 
       <div class="setting-group">
@@ -90,6 +107,12 @@ const {
   currentDisplayValue: recordingDisplayValue,
   toggleRecording: toggleRecordingHotkey
 } = useShortcutRecorder(props.form, 'recordingToggleShortcut')
+
+const {
+  isRecording: isMicToggleHotkeyRecording,
+  currentDisplayValue: micToggleDisplayValue,
+  toggleRecording: toggleMicToggleHotkey
+} = useShortcutRecorder(props.form, 'recordingMicToggleShortcut')
 
 const effectiveOutputDir = ref('')
 

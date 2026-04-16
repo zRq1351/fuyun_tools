@@ -18,7 +18,7 @@ use crate::ui::commands_recording::{
     cancel_recording, check_recording_ffmpeg, download_recording_ffmpeg, get_recording_output_dir, get_recording_state,
     list_recording_audio_devices, list_recording_audio_processes, list_recording_system_output_devices, open_recording_folder, pause_recording,
     resize_recording_toolbar, resume_recording, run_recording_regression, show_recording_toolbar, start_recording,
-    stop_recording, toggle_recording_from_shortcut, update_recording_audio_capture,
+    stop_recording, toggle_microphone_from_shortcut, toggle_recording_from_shortcut, update_recording_audio_capture,
 };
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{
@@ -143,6 +143,10 @@ pub fn run() {
                 let guard = lock_state(&state_arc);
                 guard.settings.recording_hot_key.clone()
             };
+            let recording_mic_toggle_hot_key = {
+                let guard = lock_state(&state_arc);
+                guard.settings.recording_mic_toggle_hot_key.clone()
+            };
             let text_clipboard_enabled = {
                 let guard = lock_state(&state_arc);
                 guard.settings.text_clipboard_enabled
@@ -256,6 +260,32 @@ pub fn run() {
                 {
                     log::warn!("录屏快捷键 '{}' 注册失败: {}", recording_hot_key, e);
                     shortcut_conflicts.push(format!("录屏：{}", recording_hot_key));
+                }
+            }
+
+            // 注册麦克风快捷键（按住开启，松开关闭）
+            let app_handle_clone_mic = app_handle.clone();
+            if recording_enabled {
+                if let Err(e) = app.global_shortcut()
+                    .on_shortcut(recording_mic_toggle_hot_key.as_str(), move |_app, _shortcut, event| {
+                        let app_handle_inner = app_handle_clone_mic.clone();
+                        match event.state {
+                            ShortcutState::Pressed => {
+                                // 按下快捷键：开启麦克风
+                                tauri::async_runtime::spawn(async move {
+                                    toggle_microphone_from_shortcut(app_handle_inner, true).await;
+                                });
+                            }
+                            ShortcutState::Released => {
+                                // 松开快捷键：关闭麦克风
+                                tauri::async_runtime::spawn(async move {
+                                    toggle_microphone_from_shortcut(app_handle_inner, false).await;
+                                });
+                            }
+                        }
+                    })
+                {
+                    log::warn!("麦克风切换快捷键 '{}' 注册失败: {}", recording_mic_toggle_hot_key, e);
                 }
             }
 

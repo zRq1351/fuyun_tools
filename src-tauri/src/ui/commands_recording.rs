@@ -602,13 +602,15 @@ pub async fn resize_recording_toolbar(
                 preferred_height.clamp(320, max_height_logical.max(320)),
             )
         } else {
-            (180, 40)
+            // 胶囊模式：增加宽度以容纳麦克风按钮（原180px + 麦克风按钮30px）
+            (210, 40)
         }
     } else if request.compact_mode {
         if request.open_overlay {
             (400, 730)
         } else {
-            (180, 40)
+            // 紧凑模式：同样增加宽度以容纳麦克风按钮
+            (210, 40)
         }
     } else {
         let h = if request.open_select {
@@ -667,4 +669,96 @@ pub async fn toggle_recording_from_shortcut(
         let _ = show_overlay_window_by_label(&app, "recording_toolbar", true);
     }
     let _ = app.emit("recording-toolbar-force-compact", ());
+}
+
+/// 切换麦克风状态的辅助函数（供快捷键调用）
+/// `enable`: true=按下快捷键（启用麦克风），false=松开快捷键（禁用麦克风）
+pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
+    use crate::features::recording::recorder_service;
+
+    let key_state = if enable { "按下" } else { "释放" };
+    log::info!("麦克风快捷键{}（目标状态：{}）", key_state, enable);
+
+    let state_arc = {
+        let app_state = app.state::<Arc<Mutex<crate::core::app_state::SharedAppState>>>();
+        app_state.inner().clone()
+    };
+
+    // 获取当前录制状态
+    let current_state = recorder_service::get_recording_state(state_arc.clone());
+
+    // 只有在录制中或暂停时才能切换麦克风
+    if current_state.state != "recording" && current_state.state != "paused" {
+        log::warn!("无法切换麦克风：当前不在录制状态 (state={})", current_state.state);
+        return;
+    }
+
+    // 获取录制运行时的麦克风设备ID
+    let mic_device_id = {
+        let state_guard = state_arc.lock().unwrap();
+        let runtime = &state_guard.recording_runtime;
+        let runtime_guard = runtime.lock().unwrap();
+        runtime_guard.mic_audio_device_id.clone()
+    };
+
+    // 如果没有选择麦克风设备，无法切换
+    if mic_device_id.is_none() {
+        log::warn!("无法切换麦克风：未选择麦克风设备");
+        return;
+    }
+
+    // 发送即时UI反馈事件
+    if enable {
+        // 按下快捷键：立即显示麦克风开启状态
+        let _ = app.emit("recording-mic-key-pressed", serde_json::json!({}));
+    } else {
+        // 松开快捷键：立即显示麦克风关闭状态
+        let _ = app.emit("recording-mic-key-released", serde_json::json!({}));
+    }
+
+    // 记录当前系统音频状态用于调试
+    let (sys_audio_enabled, sys_audio_thread_exists) = {
+        let state_guard = state_arc.lock().unwrap();
+        let runtime = &state_guard.recording_runtime;
+        let runtime_guard = runtime.lock().unwrap();
+
+        let sys_enabled = runtime_guard.system_audio_enabled_flag
+            .as_ref()
+            .map(|f| f.load(std::sync::atomic::Ordering::SeqCst))
+            .unwrap_or(false);
+
+        (
+            sys_enabled,
+            runtime_guard.system_audio_thread.is_some()
+        )
+    };
+
+    log::info!("快捷键操作：麦克风{}，系统音频状态: {} (线程存在: {})", 
+        if enable { "启用" } else { "禁用" }, 
+        sys_audio_enabled, 
+        sys_audio_thread_exists);
+
+    // 只修改麦克风状态，保持系统音频状态不变（传入None让函数使用当前值）
+    match recorder_service::update_audio_capture(
+        &app,
+        state_arc,
+        None, // 不改变系统音频状态，使用当前值
+        None, // 不改变系统音频设备，使用当前值
+        Some(enable), // 启用或禁用麦克风
+        mic_device_id.clone(),
+    ) {
+        Ok(_) => {
+            log::info!("麦克风已{}", if enable { "启用" } else { "禁用" });
+            let _ = app.emit("recording-mic-toggled", serde_json::json!({
+                "enabled": enable
+            }));
+        }
+        Err(e) => {
+            log::error!("切换麦克风失败: {}", e);
+            let _ = app.emit("recording-error", serde_json::json!({
+                "message": format!("切换麦克风失败: {}", e),
+                "code": "MIC_TOGGLE_FAILED"
+            }));
+        }
+    }
 }

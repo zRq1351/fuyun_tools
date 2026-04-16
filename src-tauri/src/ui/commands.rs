@@ -9,7 +9,7 @@ use crate::services::image_clipboard_manager::{
     emit_image_history_payload, set_image_clipboard_listener_enabled,
 };
 use crate::sync::Mutex;
-use crate::ui::commands_recording::toggle_recording_from_shortcut;
+use crate::ui::commands_recording::{toggle_microphone_from_shortcut, toggle_recording_from_shortcut};
 use crate::ui::tray_menu::open_settings;
 use crate::ui::window_manager::{
     bind_overlay_window_events, focus_overlay_window_by_label, hide_clipboard_window, hide_image_clipboard_window,
@@ -3126,6 +3126,10 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
             serde_json::Value::String(settings.recording_hot_key.clone()),
         );
         result.insert(
+            "recording_mic_toggle_hot_key".to_string(),
+            serde_json::Value::String(settings.recording_mic_toggle_hot_key.clone()),
+        );
+        result.insert(
             "recording_enabled".to_string(),
             serde_json::Value::Bool(settings.recording_enabled),
         );
@@ -3367,6 +3371,7 @@ pub async fn save_app_settings(
     image_hot_key: Option<String>,
     screenshot_hot_key: Option<String>,
     recording_hot_key: Option<String>,
+    recording_mic_toggle_hot_key: Option<String>,
     text_clipboard_enabled: Option<bool>,
     image_clipboard_enabled: Option<bool>,
     screenshot_enabled: Option<bool>,
@@ -3681,6 +3686,101 @@ pub async fn save_app_settings(
                 register_recording_shortcut(&app, state.inner().clone(), recording_hot_key_val.as_str())?;
             }
             settings.recording_hot_key = recording_hot_key_val.clone();
+        }
+    }
+
+    // 处理麦克风切换快捷键更新
+    if let Some(ref mic_toggle_hot_key_val) = recording_mic_toggle_hot_key {
+        if mic_toggle_hot_key_val.is_empty() {
+            return Err(frontend_error(
+                ErrorCode::ValidationError,
+                "麦克风切换快捷键不能为空",
+                "recording_mic_toggle_hot_key is empty",
+            ));
+        }
+        if mic_toggle_hot_key_val != &settings.recording_mic_toggle_hot_key {
+            // 检查是否与其他快捷键冲突
+            let effective_hot_key = hot_key.clone().unwrap_or_else(|| settings.hot_key.clone());
+            let effective_image_hot_key = image_hot_key
+                .clone()
+                .unwrap_or_else(|| settings.image_hot_key.clone());
+            let effective_screenshot_hot_key = screenshot_hot_key
+                .clone()
+                .unwrap_or_else(|| settings.screenshot_hot_key.clone());
+            let effective_recording_hot_key = recording_hot_key
+                .clone()
+                .unwrap_or_else(|| settings.recording_hot_key.clone());
+
+            if mic_toggle_hot_key_val == &effective_hot_key
+                || mic_toggle_hot_key_val == &effective_image_hot_key
+                || mic_toggle_hot_key_val == &effective_screenshot_hot_key
+                || mic_toggle_hot_key_val == &effective_recording_hot_key
+            {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    "麦克风切换快捷键不能与其他快捷键相同",
+                    format!(
+                        "hot_key={}, image_hot_key={}, screenshot_hot_key={}, recording_hot_key={}, mic_toggle_hot_key={}",
+                        effective_hot_key,
+                        effective_image_hot_key,
+                        effective_screenshot_hot_key,
+                        effective_recording_hot_key,
+                        mic_toggle_hot_key_val
+                    ),
+                ));
+            }
+
+            if app
+                .global_shortcut()
+                .is_registered(mic_toggle_hot_key_val.as_str())
+            {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    format!("麦克风切换快捷键被占用：{}", mic_toggle_hot_key_val),
+                    "mic toggle global shortcut already registered",
+                ));
+            }
+
+            // 注销旧快捷键
+            if let Err(e) = app
+                .global_shortcut()
+                .unregister(settings.recording_mic_toggle_hot_key.as_str())
+            {
+                log::warn!(
+                    "注销旧麦克风切换快捷键 '{}' 失败: {}",
+                    settings.recording_mic_toggle_hot_key,
+                    e
+                );
+            }
+
+            // 注册新快捷键（按住开启，松开关闭）
+            if settings.recording_enabled {
+                let app_handle_for_mic = app.clone();
+                if let Err(e) = app.global_shortcut()
+                    .on_shortcut(mic_toggle_hot_key_val.as_str(), move |_app, _shortcut, event| {
+                        let app_handle_inner = app_handle_for_mic.clone();
+                        match event.state {
+                            ShortcutState::Pressed => {
+                                // 按下：开启麦克风
+                                tauri::async_runtime::spawn(async move {
+                                    toggle_microphone_from_shortcut(app_handle_inner, true).await;
+                                });
+                            }
+                            ShortcutState::Released => {
+                                // 松开：关闭麦克风
+                                tauri::async_runtime::spawn(async move {
+                                    toggle_microphone_from_shortcut(app_handle_inner, false).await;
+                                });
+                            }
+                        }
+                    })
+                {
+                    log::warn!("注册麦克风切换快捷键 '{}' 失败: {}", mic_toggle_hot_key_val, e);
+                    return Err(format!("注册麦克风切换快捷键失败: {}", e));
+                }
+            }
+
+            settings.recording_mic_toggle_hot_key = mic_toggle_hot_key_val.clone();
         }
     }
 

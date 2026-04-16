@@ -1778,56 +1778,88 @@ pub fn stop_recording(
     let mut fatal_error: Option<AppError> = None;
     let mut pending_window_capture_unavailable_details: Option<String> = None;
 
-    // 🔧 性能优化：立即停止音频捕获，避免等待视频处理完成后才停止
-    log::info!("🔧 设置音频停止信号...");
-    if let Some(flag) = system_audio_stop_flag.as_ref() {
-        flag.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-    if let Some(flag) = mic_audio_stop_flag.as_ref() {
-        flag.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-    log::info!("✅ 音频停止信号已设置");
+    // 关键修复：根据录制类型采用不同的停止顺序，确保音频录制到视频完全停止的时刻
+    // 问题：音频提前停止导致视频最后一段没有声音
 
-    if let Some(process) = process.as_mut() {
-        #[cfg(target_os = "windows")]
-        if was_paused {
-            let _ = set_process_threads_suspended(process.id(), false);
-        }
-        if let Some(stdin) = process.stdin.as_mut() {
-            let _ = stdin.write_all(b"q\n");
-        }
-    }
-    let mut exited = false;
-    if let Some(process) = process.as_mut() {
-        for _ in 0..80 {
-            if let Ok(Some(_)) = process.try_wait() {
-                exited = true;
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-        if !exited {
-            let _ = process.kill();
-            let _ = process.wait();
-        }
-    }
-    if let Some(join) = wgc_thread {
-        match join.join() {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
-                if is_benign_wgc_stop_error(&e) {
-                    log::warn!("窗口录制停止返回可忽略状态: {}", e);
-                } else if is_item_convert_failed(&e) {
-                    pending_window_capture_unavailable_details = Some(e);
-                } else if fatal_error.is_none() {
-                    fatal_error = Some(AppError::new(ErrorCode::SystemError, "窗口录制停止失败").with_details(e));
+    if target_type == "window" {
+        // 窗口录制（WGC）：先停止WGC线程，再停止音频
+        log::info!("🔧 窗口录制：首先停止WGC线程...");
+        if let Some(join) = wgc_thread {
+            match join.join() {
+                Ok(Ok(())) => {
+                    log::info!("✅ WGC线程已退出");
+                }
+                Ok(Err(e)) => {
+                    if is_benign_wgc_stop_error(&e) {
+                        log::warn!("窗口录制停止返回可忽略状态: {}", e);
+                    } else if is_item_convert_failed(&e) {
+                        pending_window_capture_unavailable_details = Some(e);
+                    } else if fatal_error.is_none() {
+                        fatal_error = Some(AppError::new(ErrorCode::SystemError, "窗口录制停止失败").with_details(e));
+                    }
+                }
+                Err(_) => {
+                    if fatal_error.is_none() {
+                        fatal_error = Some(AppError::new(ErrorCode::SystemError, "窗口录制线程异常退出"));
+                    }
                 }
             }
-            Err(_) => {
-                if fatal_error.is_none() {
-                    fatal_error = Some(AppError::new(ErrorCode::SystemError, "窗口录制线程异常退出"));
-                }
+        }
+        persist_wgc_capture_fallback_if_needed(&state_arc);
+
+        // WGC线程已停止，现在停止音频
+        log::info!("🔧 WGC已停止，现在设置音频停止信号...");
+        if let Some(flag) = system_audio_stop_flag.as_ref() {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        if let Some(flag) = mic_audio_stop_flag.as_ref() {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        log::info!("✅ 音频停止信号已设置");
+    } else {
+        // 非窗口录制（FFmpeg）：先停止FFmpeg进程，再停止音频
+        log::info!("🔧 非窗口录制：首先停止视频录制进程...");
+        if let Some(process) = process.as_mut() {
+            #[cfg(target_os = "windows")]
+            if was_paused {
+                let _ = set_process_threads_suspended(process.id(), false);
             }
+            if let Some(stdin) = process.stdin.as_mut() {
+                let _ = stdin.write_all(b"q\n");
+            }
+        }
+
+        // 等待FFmpeg进程退出（需要时间处理最后一帧并写入文件）
+        log::info!("🔧 等待视频录制进程退出...");
+        let mut video_exited = false;
+        if let Some(process) = process.as_mut() {
+            for _ in 0..80 {
+                if let Ok(Some(_)) = process.try_wait() {
+                    video_exited = true;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            if !video_exited {
+                let _ = process.kill();
+                let _ = process.wait();
+            }
+        }
+        log::info!("✅ 视频录制进程已退出");
+
+        // FFmpeg进程已停止，现在停止音频
+        log::info!("🔧 视频已完全停止，现在设置音频停止信号...");
+        if let Some(flag) = system_audio_stop_flag.as_ref() {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        if let Some(flag) = mic_audio_stop_flag.as_ref() {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        log::info!("✅ 音频停止信号已设置");
+
+        // 对于非窗口录制，wgc_thread应该为None，不需要处理
+        if wgc_thread.is_some() {
+            log::warn!("非窗口录制模式下发现意外的WGC线程");
         }
     }
     persist_wgc_capture_fallback_if_needed(&state_arc);

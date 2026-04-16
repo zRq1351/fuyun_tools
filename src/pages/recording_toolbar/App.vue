@@ -79,6 +79,26 @@
             </button>
           </el-tooltip>
           <el-tooltip
+              :content="micToggleTooltip"
+              :disabled="!capsuleSettingsVisible"
+              :offset="10"
+              :show-after="300"
+              effect="dark"
+              placement="bottom"
+              popper-class="recording-toolbar-tooltip"
+          >
+            <button
+                :class="['collapsed-mic-toggle-btn', 'no-drag', { 'is-muted': isMicMuted || !canToggleMic, 'is-active': !isMicMuted && canToggleMic, 'is-disabled': !canToggleMic || !microphoneDeviceId }]"
+                :disabled="!canToggleMic || !microphoneDeviceId"
+                type="button"
+                @click.stop="toggleMicState"
+            >
+              <el-icon class="collapsed-mic-icon">
+                <component :is="isMicMuted || !canToggleMic ? MicOff : Mic" :size="13" :stroke-width="2.2"/>
+              </el-icon>
+            </button>
+          </el-tooltip>
+          <el-tooltip
               :offset="10"
               :show-after="300"
               :disabled="!capsuleSettingsVisible"
@@ -298,7 +318,7 @@ import {listen} from "@tauri-apps/api/event";
 import {invoke} from "@tauri-apps/api/core";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import {AISettingsService, RecordingService} from "@/services/ipc.js";
-import {Settings} from "lucide-vue-next";
+import {Mic, MicOff, Settings} from "lucide-vue-next";
 
 provideGlobalConfig({locale: zhCn});
 
@@ -308,6 +328,7 @@ const recordingFeatureEnabled = ref(true);
 
 const captureSystemAudio = ref(false);
 const captureMicrophone = ref(false);
+const isMicMuted = ref(false); // 麦克风临时静音状态
 const systemOutputId = ref(null);
 const microphoneDeviceId = ref(null);
 const systemOutputs = ref([]);
@@ -340,6 +361,9 @@ let unlistenRecordingError = null;
 let unlistenForceCompact = null;
 let unlistenRecordingRegionSelected = null;
 let unlistenAudioMerging = null;  // ✅ 新增：监听音频合并事件
+let unlistenMicToggled = null;  // ✅ 新增：监听麦克风切换事件
+let unlistenMicKeyPressed = null;  // ✅ 新增：监听麦克风按键按下事件
+let unlistenMicKeyReleased = null;  // ✅ 新增：监听麦克风按键释放事件
 let keepSettingsOpenUntilTs = 0;
 let autoCollapseAfterStartPending = false;
 let lastElapsedUiSyncAt = 0;
@@ -401,6 +425,15 @@ const canStop = computed(
         !isBusy.value &&
         (currentRecordingState.value === "recording" || currentRecordingState.value === "paused"),
 );
+const canToggleMic = computed(() => {
+  const s = rawRecordingState.value;
+  return microphoneDeviceId.value && (s === "recording" || s === "paused");
+});
+const micToggleTooltip = computed(() => {
+  if (!microphoneDeviceId.value) return "请先在设置中选择麦克风设备";
+  if (!canToggleMic.value) return "录制过程中才能切换麦克风状态";
+  return isMicMuted.value ? "点击开启麦克风（Ctrl+Space）" : "点击关闭麦克风（Ctrl+Space）";
+});
 
 const measureCapsuleContentHeight = () => {
   const barEl = document.querySelector(".bar");
@@ -554,6 +587,8 @@ const toggleRecordingState = async () => {
           recordTargetType.value === "window"
               ? recordableWindows.value.find((w) => (w.hwnd || w.title) === recordTargetWindowId.value) || null
               : null;
+      // 每次开始录制时，麦克风默认禁用，图标显示为静音状态
+      isMicMuted.value = true;
       await RecordingService.start({
         targetType: recordTargetType.value,
         targetId,
@@ -564,7 +599,7 @@ const toggleRecordingState = async () => {
         captureSystemAudio: captureSystemAudio.value,
         systemAudioDeviceId: systemOutputId.value,
         systemAudioProcessIds: captureSystemAudio.value ? systemAudioProcessIds.value : [],
-        captureMicrophone: captureMicrophone.value,
+        captureMicrophone: false, // 每次开始录制时麦克风默认为禁用状态
         microphoneDeviceId: microphoneDeviceId.value,
         captureCursor: captureCursor.value,
         fps: fps.value,
@@ -619,6 +654,23 @@ const closeCapsule = async () => {
   try {
     await getCurrentWindow().hide();
   } catch (_e) {
+  }
+};
+
+const toggleMicState = async () => {
+  if (!canToggleMic.value || isBusy.value) return;
+  try {
+    const newMutedState = !isMicMuted.value;
+    await RecordingService.updateAudioCapture({
+      captureSystemAudio: captureSystemAudio.value,
+      systemAudioDeviceId: systemOutputId.value || "",
+      captureMicrophone: !newMutedState, // muted=false时启用，muted=true时禁用
+      microphoneDeviceId: microphoneDeviceId.value || "",
+    });
+    isMicMuted.value = newMutedState;
+    showInlineNotice(newMutedState ? "麦克风已临时关闭" : "麦克风已重新开启", "warning");
+  } catch (e) {
+    showBackendErrorInSettings(`切换麦克风状态失败: ${String(e)}`);
   }
 };
 
@@ -701,10 +753,12 @@ const onMicrophoneDeviceChange = async (deviceId) => {
   const nextId = nextCapture ? id : null;
   captureMicrophone.value = id.length > 0;
   microphoneDeviceId.value = id.length > 0 ? id : null;
+  // 重置静音状态
+  isMicMuted.value = false;
   if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
     try {
       if (prevCapture && nextCapture && prevId && nextId && prevId !== nextId) {
-        // 录制中切换设备：自动执行“先关后开”，避免用户手动两步操作
+        // 录制中切换设备：自动执行"先关后开"，避免用户手动两步操作
         await RecordingService.updateAudioCapture({
           captureMicrophone: false,
           microphoneDeviceId: prevId || "",
@@ -883,6 +937,10 @@ onMounted(async () => {
       state.elapsedMs = nextElapsedMs;
       lastElapsedUiSyncAt = now;
     }
+    // 当录制停止或出错时，重置麦克风静音状态
+    if (nextState === "idle" || nextState === "error") {
+      isMicMuted.value = false;
+    }
     if (nextState === "recording" && capsuleSettingsVisible.value && autoCollapseAfterStartPending) {
       capsuleSettingsVisible.value = false;
       void syncCapsuleLayout();
@@ -965,6 +1023,26 @@ onMounted(async () => {
       showInlineNotice(message || "音频合并失败，视频文件已保存", "error");
     }
   });
+
+  // ✅ 监听麦克风切换事件（来自后端快捷键）
+  unlistenMicToggled = await listen("recording-mic-toggled", (event) => {
+    const payload = event.payload || {};
+    isMicMuted.value = !payload.enabled;
+    const action = payload.enabled ? "开启" : "关闭";
+    showInlineNotice(`麦克风已${action}（快捷键）`, "warning");
+  });
+
+  // ✅ 监听麦克风快捷键按下事件（用于即时响应 UI）
+  unlistenMicKeyPressed = await listen("recording-mic-key-pressed", () => {
+    // 按下快捷键时立即显示麦克风开启状态
+    isMicMuted.value = false;
+  });
+
+  // ✅ 监听麦克风快捷键释放事件
+  unlistenMicKeyReleased = await listen("recording-mic-key-released", () => {
+    // 松开快捷键时立即显示麦克风关闭状态
+    isMicMuted.value = true;
+  });
   try {
     await refreshRecordableWindows();
   } catch (_e) {
@@ -1030,6 +1108,9 @@ onBeforeUnmount(() => {
   if (unlistenForceCompact) unlistenForceCompact();
   if (unlistenRecordingRegionSelected) unlistenRecordingRegionSelected();
   if (unlistenAudioMerging) unlistenAudioMerging();  // ✅ 清理事件监听
+  if (unlistenMicToggled) unlistenMicToggled();
+  if (unlistenMicKeyPressed) unlistenMicKeyPressed();
+  if (unlistenMicKeyReleased) unlistenMicKeyReleased();
 });
 </script>
 
@@ -1599,5 +1680,61 @@ body,
 .no-drag :deep(.el-select),
 .no-drag :deep(.el-switch) {
   cursor: default;
+}
+
+.collapsed-mic-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #344055;
+  background: #202937;
+  color: #dfebfc;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.collapsed-mic-toggle-btn:hover:not(:disabled) {
+  background: rgba(45, 62, 88, 0.95);
+}
+
+.collapsed-mic-toggle-btn:active:not(:disabled) {
+  background: rgba(25, 35, 50, 0.95);
+  transform: scale(0.96);
+}
+
+.collapsed-mic-toggle-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.collapsed-mic-toggle-btn.is-disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: rgba(60, 70, 85, 0.6);
+  color: #8a95a5;
+}
+
+.collapsed-mic-toggle-btn.is-muted {
+  background: rgba(180, 60, 60, 0.85);
+  color: #ffd6d6;
+}
+
+.collapsed-mic-toggle-btn.is-muted:hover:not(:disabled) {
+  background: rgba(200, 70, 70, 0.95);
+}
+
+.collapsed-mic-toggle-btn.is-active {
+  color: #dfebfc;
+}
+
+.collapsed-mic-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 </style>
