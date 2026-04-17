@@ -132,7 +132,9 @@ impl AdaptivePoller {
             self.mode = PollMode::Idle;
             let next_ms = (self.current_interval.as_millis() as u64).saturating_mul(2);
             let max_idle = self.cfg.idle_interval.as_millis() as u64;
-            let capped = next_ms.min(max_idle).max(self.cfg.warm_interval.as_millis() as u64);
+            let capped = next_ms
+                .min(max_idle)
+                .max(self.cfg.warm_interval.as_millis() as u64);
             self.current_interval = Duration::from_millis(capped);
             return;
         }

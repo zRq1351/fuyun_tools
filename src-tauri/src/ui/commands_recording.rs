@@ -4,8 +4,8 @@ use crate::core::perf_metrics::record_perf_metric;
 use crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path;
 use crate::features::recording::recorder_service;
 use crate::features::recording::types::{
-    AudioInputDevice, AudioProcessItem, RecordingRegressionReport, RecordingRuntimeState, RecordingSessionInfo, RecordingStopResult,
-    SessionRequest, StartRecordingRequest,
+    AudioInputDevice, AudioProcessItem, RecordingRegressionReport, RecordingRuntimeState,
+    RecordingSessionInfo, RecordingStopResult, SessionRequest, StartRecordingRequest,
 };
 use crate::sync::Mutex;
 use crate::ui::window_manager::{bind_overlay_window_events, show_overlay_window_by_label};
@@ -155,7 +155,9 @@ fn compute_file_sha256(path: &Path) -> Result<String, String> {
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 8192];
     loop {
-        let n = file.read(&mut buf).map_err(|e| format!("读取下载文件失败: {}", e))?;
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("读取下载文件失败: {}", e))?;
         if n == 0 {
             break;
         }
@@ -169,7 +171,10 @@ fn compute_file_sha256(path: &Path) -> Result<String, String> {
     Ok(hex)
 }
 
-fn verify_downloaded_exe_integrity(path: &Path, expected_sha256: Option<&str>) -> Result<(), String> {
+fn verify_downloaded_exe_integrity(
+    path: &Path,
+    expected_sha256: Option<&str>,
+) -> Result<(), String> {
     let mut header = [0u8; 2];
     let mut file = fs::File::open(path).map_err(|e| format!("读取下载文件失败: {}", e))?;
     file.read_exact(&mut header)
@@ -245,7 +250,10 @@ pub async fn download_recording_ffmpeg(
         .await
         .map_err(|e| format!("下载请求失败: {}", e))?;
     if !response.status().is_success() {
-        return Err(format!("下载 ffmpeg 失败，HTTP 状态: {}", response.status()));
+        return Err(format!(
+            "下载 ffmpeg 失败，HTTP 状态: {}",
+            response.status()
+        ));
     }
     let total_bytes = response.content_length();
     let mut downloaded_bytes: u64 = 0;
@@ -275,7 +283,8 @@ pub async fn download_recording_ffmpeg(
             },
         );
     }
-    file.flush().map_err(|e| format!("刷新下载文件失败: {}", e))?;
+    file.flush()
+        .map_err(|e| format!("刷新下载文件失败: {}", e))?;
 
     let metadata = fs::metadata(&tmp_path).map_err(|e| format!("读取下载文件失败: {}", e))?;
     if metadata.len() == 0 {
@@ -325,23 +334,29 @@ fn move_window_top_center(window: &tauri::WebviewWindow) {
     }
 }
 
-fn ensure_recording_toolbar_window(app: &AppHandle) -> Result<(tauri::WebviewWindow, bool), String> {
+fn ensure_recording_toolbar_window(
+    app: &AppHandle,
+) -> Result<(tauri::WebviewWindow, bool), String> {
     let label = "recording_toolbar";
     if let Some(existing) = app.get_webview_window(label) {
         return Ok((existing, false));
     }
-    let window = tauri::WebviewWindowBuilder::new(app, label, WebviewUrl::App("recording_toolbar.html".into()))
-        .title("录制工具栏")
-        .visible(false)
-        .resizable(false)
-        .decorations(false)
-        .shadow(false)
-        .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .inner_size(530.0, 64.0)
-        .build()
-        .map_err(|e| format!("创建录制工具栏窗口失败: {}", e))?;
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        WebviewUrl::App("recording_toolbar.html".into()),
+    )
+    .title("录制工具栏")
+    .visible(false)
+    .resizable(false)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .inner_size(530.0, 64.0)
+    .build()
+    .map_err(|e| format!("创建录制工具栏窗口失败: {}", e))?;
 
     bind_overlay_window_events(&window, app.clone(), label);
 
@@ -357,7 +372,8 @@ pub async fn start_recording(
     let started_at = Instant::now();
     let state_arc = state.inner().clone();
     let result = run_blocking_command(move || {
-        recorder_service::start_recording(&app, state_arc, request).map_err(to_frontend_error_string)
+        recorder_service::start_recording(&app, state_arc, request)
+            .map_err(to_frontend_error_string)
     })
     .await;
     match &result {
@@ -387,38 +403,39 @@ pub async fn stop_recording(
 ) -> Result<RecordingStopResult, String> {
     let started_at = Instant::now();
     let state_arc = state.inner().clone();
-    let result = run_blocking_command(move || match recorder_service::stop_recording(&app, state_arc.clone(), request.clone()) {
-        Ok(result) => {
-            let auto_open_folder = {
-                let guard = state_arc.lock().expect("infallible mutex lock failed");
-                guard.settings.recording_auto_open_folder
-            };
-            if auto_open_folder {
-                if let Err(e) = recorder_service::open_recording_folder(&app, state_arc.clone()) {
-                    log::warn!("录制完成自动打开目录失败: {}", e);
+    let result = run_blocking_command(move || {
+        match recorder_service::stop_recording(&app, state_arc.clone(), request.clone()) {
+            Ok(result) => {
+                let auto_open_folder = {
+                    let guard = state_arc.lock().expect("infallible mutex lock failed");
+                    guard.settings.recording_auto_open_folder
+                };
+                if auto_open_folder {
+                    if let Err(e) = recorder_service::open_recording_folder(&app, state_arc.clone())
+                    {
+                        log::warn!("录制完成自动打开目录失败: {}", e);
+                    }
                 }
+                Ok(result)
             }
-            Ok(result)
-        }
-        Err(stop_err) => {
-            let fallback_req = SessionRequest {
-                session_id: request.session_id.clone(),
-            };
-            match recorder_service::cancel_recording(&app, state_arc.clone(), fallback_req) {
-                Ok(()) => {
-                    log::warn!("stop_recording 失败，已自动执行 cancel_recording 兜底清理");
-                    Err(to_frontend_error_string(stop_err))
-                }
-                Err(cancel_err) => {
-                    log::warn!(
-                        "stop_recording 失败，且 cancel_recording 兜底清理也失败: {}",
-                        cancel_err
-                    );
-                    let merged_err = stop_err.with_details(format!(
-                        "自动兜底清理失败: {}",
-                        cancel_err
-                    ));
-                    Err(to_frontend_error_string(merged_err))
+            Err(stop_err) => {
+                let fallback_req = SessionRequest {
+                    session_id: request.session_id.clone(),
+                };
+                match recorder_service::cancel_recording(&app, state_arc.clone(), fallback_req) {
+                    Ok(()) => {
+                        log::warn!("stop_recording 失败，已自动执行 cancel_recording 兜底清理");
+                        Err(to_frontend_error_string(stop_err))
+                    }
+                    Err(cancel_err) => {
+                        log::warn!(
+                            "stop_recording 失败，且 cancel_recording 兜底清理也失败: {}",
+                            cancel_err
+                        );
+                        let merged_err =
+                            stop_err.with_details(format!("自动兜底清理失败: {}", cancel_err));
+                        Err(to_frontend_error_string(merged_err))
+                    }
                 }
             }
         }
@@ -451,9 +468,10 @@ pub async fn cancel_recording(
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
     run_blocking_command(move || {
-        recorder_service::cancel_recording(&app, state_arc, request).map_err(to_frontend_error_string)
+        recorder_service::cancel_recording(&app, state_arc, request)
+            .map_err(to_frontend_error_string)
     })
-        .await
+    .await
 }
 
 #[tauri::command]
@@ -462,7 +480,10 @@ pub async fn pause_recording(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
-    run_blocking_command(move || recorder_service::pause_recording(&app, state_arc).map_err(to_frontend_error_string)).await
+    run_blocking_command(move || {
+        recorder_service::pause_recording(&app, state_arc).map_err(to_frontend_error_string)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -471,8 +492,10 @@ pub async fn resume_recording(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
-    run_blocking_command(move || recorder_service::resume_recording(&app, state_arc).map_err(to_frontend_error_string))
-        .await
+    run_blocking_command(move || {
+        recorder_service::resume_recording(&app, state_arc).map_err(to_frontend_error_string)
+    })
+    .await
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -502,7 +525,7 @@ pub async fn update_recording_audio_capture(
         )
         .map_err(to_frontend_error_string)
     })
-        .await
+    .await
 }
 
 #[tauri::command]
@@ -516,13 +539,12 @@ pub async fn get_recording_state(
 pub async fn get_recording_output_dir(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<String, String> {
-    recorder_service::get_recording_output_dir(state.inner().clone()).map_err(to_frontend_error_string)
+    recorder_service::get_recording_output_dir(state.inner().clone())
+        .map_err(to_frontend_error_string)
 }
 
 #[tauri::command]
-pub async fn list_recording_audio_devices(
-    app: AppHandle,
-) -> Result<Vec<AudioInputDevice>, String> {
+pub async fn list_recording_audio_devices(app: AppHandle) -> Result<Vec<AudioInputDevice>, String> {
     recorder_service::list_audio_devices(&app).map_err(to_frontend_error_string)
 }
 
@@ -545,7 +567,8 @@ pub async fn open_recording_folder(
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    recorder_service::open_recording_folder(&app, state.inner().clone()).map_err(to_frontend_error_string)
+    recorder_service::open_recording_folder(&app, state.inner().clone())
+        .map_err(to_frontend_error_string)
 }
 
 #[tauri::command]
@@ -653,15 +676,13 @@ pub async fn run_recording_regression(
 ) -> Result<RecordingRegressionReport, String> {
     let state_arc = state.inner().clone();
     run_blocking_command(move || {
-        recorder_service::run_recording_regression(&app, state_arc).map_err(to_frontend_error_string)
+        recorder_service::run_recording_regression(&app, state_arc)
+            .map_err(to_frontend_error_string)
     })
-        .await
+    .await
 }
 
-pub async fn toggle_recording_from_shortcut(
-    app: AppHandle,
-    _state: Arc<Mutex<SharedAppState>>,
-) {
+pub async fn toggle_recording_from_shortcut(app: AppHandle, _state: Arc<Mutex<SharedAppState>>) {
     if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
         // Set compact size and position before showing to avoid opening flicker/jump.
         let _ = window.set_size(tauri::LogicalSize::new(180.0, 40.0));
@@ -689,7 +710,10 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
 
     // 只有在录制中或暂停时才能切换麦克风
     if current_state.state != "recording" && current_state.state != "paused" {
-        log::warn!("无法切换麦克风：当前不在录制状态 (state={})", current_state.state);
+        log::warn!(
+            "无法切换麦克风：当前不在录制状态 (state={})",
+            current_state.state
+        );
         return;
     }
 
@@ -722,43 +746,49 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
         let runtime = &state_guard.recording_runtime;
         let runtime_guard = runtime.lock().unwrap();
 
-        let sys_enabled = runtime_guard.system_audio_enabled_flag
+        let sys_enabled = runtime_guard
+            .system_audio_enabled_flag
             .as_ref()
             .map(|f| f.load(std::sync::atomic::Ordering::SeqCst))
             .unwrap_or(false);
 
-        (
-            sys_enabled,
-            runtime_guard.system_audio_thread.is_some()
-        )
+        (sys_enabled, runtime_guard.system_audio_thread.is_some())
     };
 
-    log::info!("快捷键操作：麦克风{}，系统音频状态: {} (线程存在: {})", 
-        if enable { "启用" } else { "禁用" }, 
-        sys_audio_enabled, 
-        sys_audio_thread_exists);
+    log::info!(
+        "快捷键操作：麦克风{}，系统音频状态: {} (线程存在: {})",
+        if enable { "启用" } else { "禁用" },
+        sys_audio_enabled,
+        sys_audio_thread_exists
+    );
 
     // 只修改麦克风状态，保持系统音频状态不变（传入None让函数使用当前值）
     match recorder_service::update_audio_capture(
         &app,
         state_arc,
-        None, // 不改变系统音频状态，使用当前值
-        None, // 不改变系统音频设备，使用当前值
+        None,         // 不改变系统音频状态，使用当前值
+        None,         // 不改变系统音频设备，使用当前值
         Some(enable), // 启用或禁用麦克风
         mic_device_id.clone(),
     ) {
         Ok(_) => {
             log::info!("麦克风已{}", if enable { "启用" } else { "禁用" });
-            let _ = app.emit("recording-mic-toggled", serde_json::json!({
-                "enabled": enable
-            }));
+            let _ = app.emit(
+                "recording-mic-toggled",
+                serde_json::json!({
+                    "enabled": enable
+                }),
+            );
         }
         Err(e) => {
             log::error!("切换麦克风失败: {}", e);
-            let _ = app.emit("recording-error", serde_json::json!({
-                "message": format!("切换麦克风失败: {}", e),
-                "code": "MIC_TOGGLE_FAILED"
-            }));
+            let _ = app.emit(
+                "recording-error",
+                serde_json::json!({
+                    "message": format!("切换麦克风失败: {}", e),
+                    "code": "MIC_TOGGLE_FAILED"
+                }),
+            );
         }
     }
 }

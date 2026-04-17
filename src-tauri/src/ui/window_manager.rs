@@ -110,7 +110,11 @@ fn hide_overlay_window(app_handle: &AppHandle, label: &str, window: &tauri::Webv
     emit_overlay_window_lifecycle(app_handle, label, "hidden", false);
 }
 
-pub fn bind_overlay_window_events(window: &tauri::WebviewWindow, app_handle: AppHandle, label: impl Into<String>) {
+pub fn bind_overlay_window_events(
+    window: &tauri::WebviewWindow,
+    app_handle: AppHandle,
+    label: impl Into<String>,
+) {
     let label = label.into();
     let window_clone = window.clone();
     window.on_window_event(move |event| match event {
@@ -157,7 +161,11 @@ pub fn bind_overlay_window_events(window: &tauri::WebviewWindow, app_handle: App
     });
 }
 
-pub fn show_overlay_window_by_label(app_handle: &AppHandle, label: &str, focus: bool) -> Result<(), String> {
+pub fn show_overlay_window_by_label(
+    app_handle: &AppHandle,
+    label: &str,
+    focus: bool,
+) -> Result<(), String> {
     let window = app_handle
         .get_webview_window(label)
         .ok_or_else(|| format!("窗口不存在: {}", label))?;
@@ -416,7 +424,9 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
         thread::spawn(move || {
             if let Some(window) = app_handle_clone.get_webview_window("image_clipboard") {
                 set_window_position(&window, bottom_offset);
-                if already_visible || show_overlay_window(&app_handle_clone, "image_clipboard", &window, true) {
+                if already_visible
+                    || show_overlay_window(&app_handle_clone, "image_clipboard", &window, true)
+                {
                     if !already_visible {
                         set_active_overlay_window(&app_handle_clone, Some("image_clipboard"));
                     }
@@ -587,7 +597,10 @@ pub fn show_image_preview_lowres_window(
     Ok(())
 }
 
-pub fn show_image_preview_loading_window(app_handle: AppHandle, request_id: String) -> Result<(), String> {
+pub fn show_image_preview_loading_window(
+    app_handle: AppHandle,
+    request_id: String,
+) -> Result<(), String> {
     let window = app_handle
         .get_webview_window("image_preview")
         .ok_or_else(|| "图片预览窗口不存在".to_string())?;
@@ -650,13 +663,7 @@ pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
 fn get_taskbar_safe_offset() -> i32 {
     unsafe {
         let mut work_area: RECT = std::mem::zeroed();
-        if SystemParametersInfoW(
-            SPI_GETWORKAREA,
-            0,
-            &mut work_area as *mut _ as *mut _,
-            0,
-        ) != 0
-        {
+        if SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut work_area as *mut _ as *mut _, 0) != 0 {
             let screen_height = GetSystemMetrics(SM_CYSCREEN);
             return (screen_height - work_area.bottom).max(0);
         }
@@ -810,7 +817,10 @@ pub fn simulate_paste(app_handle: &AppHandle) -> Result<ForegroundWindowInfo, St
     {
         let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);
         if enigo_guard.is_none() {
-            *enigo_guard = Some(Enigo::new(&Settings::default()).map_err(|e| format!("初始化粘贴输入器失败: {}", e))?);
+            *enigo_guard = Some(
+                Enigo::new(&Settings::default())
+                    .map_err(|e| format!("初始化粘贴输入器失败: {}", e))?,
+            );
         }
 
         if let Some(ref mut enigo) = *enigo_guard {
@@ -852,7 +862,9 @@ fn execute_ctrl_v_with_safety(enigo: &mut enigo::Enigo) -> Result<(), String> {
     Ok(())
 }
 
-fn wait_for_foreground_ready_for_paste(app_handle: &AppHandle) -> Result<ForegroundWindowInfo, String> {
+fn wait_for_foreground_ready_for_paste(
+    app_handle: &AppHandle,
+) -> Result<ForegroundWindowInfo, String> {
     let expected_target = app_handle
         .try_state::<Arc<Mutex<AppState>>>()
         .and_then(|state| {
@@ -1008,7 +1020,10 @@ pub async fn show_result_window(
             "content": content.clone(),
             "targetLanguage": target_language.clone()
         });
-        let script = format!("window.__INITIAL_DATA__ = {}; window.dispatchEvent(new Event('init-data'));", payload);
+        let script = format!(
+            "window.__INITIAL_DATA__ = {}; window.dispatchEvent(new Event('init-data'));",
+            payload
+        );
         let _ = existing_window.eval(&script);
 
         return Ok(());
@@ -1019,23 +1034,23 @@ pub async fn show_result_window(
         &window_label,
         tauri::WebviewUrl::App("result_display.html".into()),
     )
-        .title(&title)
-        .visible(false)
-        .inner_size(560.0, 360.0)
-        .resizable(true)
-        .decorations(false)
-        .on_page_load(move |window, _| {
-            let payload = serde_json::json!({
+    .title(&title)
+    .visible(false)
+    .inner_size(560.0, 360.0)
+    .resizable(true)
+    .decorations(false)
+    .on_page_load(move |window, _| {
+        let payload = serde_json::json!({
             "type": window_type.clone(),
             "original": original.clone(),
             "content": content.clone(),
             "targetLanguage": target_language.clone()
         });
-            let script = format!("window.__INITIAL_DATA__ = {};", payload);
-            let _ = window.eval(&script);
-        })
-        .build()
-        .map_err(|e| format!("创建窗口失败: {}", e))?;
+        let script = format!("window.__INITIAL_DATA__ = {};", payload);
+        let _ = window.eval(&script);
+    })
+    .build()
+    .map_err(|e| format!("创建窗口失败: {}", e))?;
     bind_overlay_window_events(&window, app.clone(), window_label.clone());
 
     position_result_window_near_toolbar(&window, &app);

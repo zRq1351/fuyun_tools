@@ -66,9 +66,7 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
             }
 
             let current_content = {
-                let manager = manager_arc
-                    .lock()
-                    .expect("infallible mutex lock failed");
+                let manager = manager_arc.lock().expect("infallible mutex lock failed");
                 manager.get_content(&app_handle)
             };
 
@@ -95,7 +93,11 @@ pub fn stop_clipboard_listener() {
     }
 }
 
-pub fn set_clipboard_listener_enabled(app_handle: AppHandle, state: Arc<Mutex<AppState>>, enabled: bool) {
+pub fn set_clipboard_listener_enabled(
+    app_handle: AppHandle,
+    state: Arc<Mutex<AppState>>,
+    enabled: bool,
+) {
     if enabled {
         start_clipboard_listener(app_handle, state);
     } else {
@@ -104,7 +106,11 @@ pub fn set_clipboard_listener_enabled(app_handle: AppHandle, state: Arc<Mutex<Ap
 }
 
 /// 添加到剪贴板历史记录
-pub fn add_to_clipboard_history(app_handle: &AppHandle, content: String, state: Arc<Mutex<AppState>>) {
+pub fn add_to_clipboard_history(
+    app_handle: &AppHandle,
+    content: String,
+    state: Arc<Mutex<AppState>>,
+) {
     if content.trim().is_empty() {
         return;
     }
@@ -121,13 +127,14 @@ pub fn add_to_clipboard_history(app_handle: &AppHandle, content: String, state: 
 
     let (manager_arc, should_emit) = {
         let state_guard = lock_state(&state);
-        (state_guard.clipboard_manager.clone(), state_guard.is_visible)
+        (
+            state_guard.clipboard_manager.clone(),
+            state_guard.is_visible,
+        )
     };
 
     let payload = {
-        let manager = manager_arc
-            .lock()
-            .expect("infallible mutex lock failed");
+        let manager = manager_arc.lock().expect("infallible mutex lock failed");
         manager.add_to_history(content);
         if !should_emit {
             None

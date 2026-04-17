@@ -56,20 +56,34 @@ fn is_system_or_invalid_process(process_name: &str) -> bool {
     let lower = process_name.to_lowercase();
     matches!(
         lower.as_str(),
-        "textinputhost.exe" | "textinputhost" |
-        "applicationframehost.exe" | "applicationframehost" |
-        "runtimebroker.exe" | "runtimebroker" |
-        "svchost.exe" | "svchost" |
-        "shellhost.exe" | "shellhost" |
-        "searchhost.exe" | "searchhost" |
-        "taskhostw.exe" | "taskhostw" |
-        "dwm.exe" | "dwm" |
-        "systemsettings.exe" | "systemsettings" |
-        "widgetboard.exe" | "widgetboard" |
-        "widgetservice.exe" | "widgetservice" |
-        "startmenuexperiencehost.exe" | "startmenuexperiencehost" |
-        "phoneexperiencehost.exe" | "phoneexperiencehost" |
-        "crossdeviceresume.exe" | "crossdeviceresume"
+        "textinputhost.exe"
+            | "textinputhost"
+            | "applicationframehost.exe"
+            | "applicationframehost"
+            | "runtimebroker.exe"
+            | "runtimebroker"
+            | "svchost.exe"
+            | "svchost"
+            | "shellhost.exe"
+            | "shellhost"
+            | "searchhost.exe"
+            | "searchhost"
+            | "taskhostw.exe"
+            | "taskhostw"
+            | "dwm.exe"
+            | "dwm"
+            | "systemsettings.exe"
+            | "systemsettings"
+            | "widgetboard.exe"
+            | "widgetboard"
+            | "widgetservice.exe"
+            | "widgetservice"
+            | "startmenuexperiencehost.exe"
+            | "startmenuexperiencehost"
+            | "phoneexperiencehost.exe"
+            | "phoneexperiencehost"
+            | "crossdeviceresume.exe"
+            | "crossdeviceresume"
     )
 }
 
@@ -125,15 +139,18 @@ fn get_window_process_name(hwnd: winapi::shared::windef::HWND) -> Option<String>
 #[cfg(target_os = "windows")]
 fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
     use std::ptr::NonNull;
-    use winapi::um::winuser::{
-        EnumWindows, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
-        GetWindowTextW, IsWindowVisible, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
-    };
     use winapi::shared::windef::RECT;
+    use winapi::um::winuser::{
+        EnumWindows, GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+        IsWindowVisible, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
+    };
 
     let mut windows = Vec::new();
 
-    unsafe extern "system" fn enum_callback(hwnd: winapi::shared::windef::HWND, lparam: winapi::shared::minwindef::LPARAM) -> i32 {
+    unsafe extern "system" fn enum_callback(
+        hwnd: winapi::shared::windef::HWND,
+        lparam: winapi::shared::minwindef::LPARAM,
+    ) -> i32 {
         let Some(mut windows_ptr) = NonNull::new(lparam as *mut Vec<WindowInfo>) else {
             return 0;
         };

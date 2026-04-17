@@ -1,12 +1,13 @@
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous, SqlitePool, SqlitePoolOptions};
-use sqlx::{Connection, Row, Sqlite, SqliteConnection, Transaction};
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
+};
+use sqlx::{Row, Sqlite, SqliteConnection, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::OnceCell;
 use xxhash_rust::xxh3::xxh3_64;
@@ -120,8 +121,7 @@ async fn get_history_db_pool() -> Result<&'static SqlitePool, String> {
         .get_or_try_init(|| async {
             let db_path = get_history_db_path();
             if let Some(parent) = db_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("创建历史数据库目录失败: {}", e))?;
+                fs::create_dir_all(parent).map_err(|e| format!("创建历史数据库目录失败: {}", e))?;
             }
             let pool = SqlitePoolOptions::new()
                 .max_connections(5)
@@ -180,9 +180,9 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         CREATE INDEX IF NOT EXISTS idx_pinned_items_content ON pinned_items(content);
         ",
     )
-        .execute(&mut *conn)
-        .await
-        .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
 
     let _ = sqlx::query("DROP INDEX IF EXISTS idx_history_items_content_hash")
         .execute(&mut *conn)
@@ -196,18 +196,18 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
          SET created_at = CAST(strftime('%s','now') AS INTEGER) * 1000
          WHERE created_at <= 0",
     )
-        .execute(&mut *conn)
-        .await
-        .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
 
     sqlx::query(
         "UPDATE history_items
          SET updated_at = created_at
          WHERE updated_at <= 0",
     )
-        .execute(&mut *conn)
-        .await
-        .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
 
     sqlx::query(
         "
@@ -221,9 +221,9 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         WHERE item_id IS NULL OR item_id = ''
         ",
     )
-        .execute(&mut *conn)
-        .await
-        .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
 
     sqlx::query(
         "
@@ -237,12 +237,16 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         WHERE item_id IS NULL OR item_id = ''
         ",
     )
-        .execute(&mut *conn)
-        .await
-        .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
 
     // Migrate categories and pinned_items to use item_id as PRIMARY KEY
-    let categories_info: Vec<sqlx::sqlite::SqliteRow> = sqlx::query("PRAGMA table_info(categories)").fetch_all(&mut *conn).await.unwrap_or_default();
+    let categories_info: Vec<sqlx::sqlite::SqliteRow> =
+        sqlx::query("PRAGMA table_info(categories)")
+            .fetch_all(&mut *conn)
+            .await
+            .unwrap_or_default();
     let mut item_id_is_pk_categories = false;
     for r in categories_info {
         let name: String = r.try_get("name").unwrap_or_default();
@@ -268,7 +272,10 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         ).execute(&mut *conn).await;
     }
 
-    let pinned_info: Vec<sqlx::sqlite::SqliteRow> = sqlx::query("PRAGMA table_info(pinned_items)").fetch_all(&mut *conn).await.unwrap_or_default();
+    let pinned_info: Vec<sqlx::sqlite::SqliteRow> = sqlx::query("PRAGMA table_info(pinned_items)")
+        .fetch_all(&mut *conn)
+        .await
+        .unwrap_or_default();
     let mut item_id_is_pk_pinned = false;
     for r in pinned_info {
         let name: String = r.try_get("name").unwrap_or_default();
@@ -303,8 +310,8 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         );
         ",
     )
-        .execute(&mut *conn)
-        .await;
+    .execute(&mut *conn)
+    .await;
 
     let _ = sqlx::query(
         "
@@ -313,8 +320,8 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         FROM history_items
         ",
     )
-        .execute(&mut *conn)
-        .await;
+    .execute(&mut *conn)
+    .await;
 
     let _ = sqlx::query(
         "
@@ -322,9 +329,9 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         WHERE rowid NOT IN (SELECT id FROM history_items)
         ",
     )
-        .execute(&mut *conn)
-        .await;
-    
+    .execute(&mut *conn)
+    .await;
+
     // 迁移:为 pinned_items 表添加 position 列(如果不存在)
     let _ = sqlx::query("ALTER TABLE pinned_items ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
         .execute(&mut *conn)
@@ -373,10 +380,11 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
     }
 
     // 使用 created_at DESC 排序（最新的在前）
-    let item_rows = sqlx::query("SELECT content FROM history_items ORDER BY created_at DESC, id DESC")
-        .fetch_all(&mut conn)
-        .await
-        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+    let item_rows =
+        sqlx::query("SELECT content FROM history_items ORDER BY created_at DESC, id DESC")
+            .fetch_all(&mut conn)
+            .await
+            .map_err(|e| format!("读取历史数据库失败: {}", e))?;
     let items = item_rows
         .into_iter()
         .filter_map(|row| row.try_get::<String, _>(0).ok())
@@ -426,9 +434,10 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
     }))
 }
 
-
 fn resolve_history_sort(sort_by: Option<String>, sort_order: Option<String>) -> &'static str {
-    let by = sort_by.unwrap_or_else(|| "updatedAt".to_string()).to_lowercase();
+    let by = sort_by
+        .unwrap_or_else(|| "updatedAt".to_string())
+        .to_lowercase();
     let order = sort_order
         .unwrap_or_else(|| "desc".to_string())
         .to_lowercase();
@@ -513,10 +522,9 @@ fn adjust_to_char_boundary(s: &str, idx: usize, backward: bool) -> usize {
     }
 }
 
-fn block_on_result<T>(future: impl Future<Output=Result<T, String>>) -> Result<T, String> {
+fn block_on_result<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> {
     tauri::async_runtime::block_on(future)
 }
-
 
 pub fn load_history_data() -> Result<ClipboardHistoryData, String> {
     if let Some(sqlite_data) = block_on_result(load_history_data_from_sqlite_async())? {
@@ -647,7 +655,9 @@ pub async fn load_history_page_data_async(
                     position: clamp_i64_to_usize(row.try_get::<i64, _>(0).unwrap_or(0)),
                     id,
                     content,
-                    category: row.try_get::<String, _>(3).unwrap_or_else(|_| "未分类".to_string()),
+                    category: row
+                        .try_get::<String, _>(3)
+                        .unwrap_or_else(|_| "未分类".to_string()),
                     pinned: row.try_get::<i64, _>(4).unwrap_or(0) == 1,
                     updated_at: row.try_get::<i64, _>(5).unwrap_or(0),
                     snippet: None,
@@ -716,7 +726,9 @@ pub async fn load_history_page_data_async(
                     position: clamp_i64_to_usize(row.try_get::<i64, _>(0).unwrap_or(0)),
                     id,
                     content,
-                    category: row.try_get::<String, _>(3).unwrap_or_else(|_| "未分类".to_string()),
+                    category: row
+                        .try_get::<String, _>(3)
+                        .unwrap_or_else(|_| "未分类".to_string()),
                     pinned: row.try_get::<i64, _>(4).unwrap_or(0) == 1,
                     updated_at: row.try_get::<i64, _>(5).unwrap_or(0),
                     snippet: None,
@@ -745,7 +757,10 @@ pub async fn load_history_page_data_async(
 /// 清空所有历史记录
 pub async fn clear_all_history() -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("创建事务失败: {}", e))?;
 
     sqlx::query("DELETE FROM history_items")
         .execute(&mut *tx)
@@ -768,13 +783,18 @@ pub async fn clear_all_history() -> Result<(), String> {
         .await
         .map_err(|e| format!("清空置顶项失败: {}", e))?;
 
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 
 pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("创建事务失败: {}", e))?;
     let now_ms = now_unix_ms();
     let mut seen_item_ids = HashSet::new();
     let mut history_entries: Vec<(String, String, i64)> = Vec::new();
@@ -798,24 +818,24 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
              SET content = ?1, created_at = ?2, updated_at = ?2
              WHERE item_id = ?3",
         )
-            .bind(content)
-            .bind(*ts)
-            .bind(item_id)
+        .bind(content)
+        .bind(*ts)
+        .bind(item_id)
         .execute(&mut *tx)
         .await
-            .map_err(|e| format!("更新历史记录失败: {}", e))?
-            .rows_affected();
+        .map_err(|e| format!("更新历史记录失败: {}", e))?
+        .rows_affected();
         if updated == 0 {
             sqlx::query(
                 "INSERT INTO history_items(content, item_id, created_at, updated_at)
                  VALUES(?1, ?2, ?3, ?3)",
             )
-                .bind(content)
-                .bind(item_id)
-                .bind(*ts)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("写入历史记录失败: {}", e))?;
+            .bind(content)
+            .bind(item_id)
+            .bind(*ts)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("写入历史记录失败: {}", e))?;
         }
     }
 
@@ -843,7 +863,7 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
             "item_id",
             &desired_item_ids,
         )
-            .await?;
+        .await?;
 
         sqlx::query(
             "
@@ -857,9 +877,9 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
               )
             ",
         )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("清理历史记录失败: {}", e))?;
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("清理历史记录失败: {}", e))?;
         sqlx::query(
             "
             DELETE FROM categories
@@ -872,9 +892,9 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
               )
             ",
         )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("清理分类失败: {}", e))?;
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("清理分类失败: {}", e))?;
         sqlx::query(
             "
             DELETE FROM pinned_items
@@ -887,9 +907,9 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
               )
             ",
         )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("清理置顶项失败: {}", e))?;
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("清理置顶项失败: {}", e))?;
         let _ = sqlx::query(
             "
             DELETE FROM history_items_fts
@@ -902,8 +922,8 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
               )
             ",
         )
-            .execute(&mut *tx)
-            .await;
+        .execute(&mut *tx)
+        .await;
     }
 
     for (item, category) in &data.categories {
@@ -915,12 +935,12 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
             "INSERT INTO categories(content, category, item_id) VALUES(?1, ?2, ?3)
              ON CONFLICT(item_id) DO UPDATE SET content = ?1, category = ?2",
         )
-            .bind(item)
-            .bind(category)
-            .bind(&item_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("写入分类失败: {}", e))?;
+        .bind(item)
+        .bind(category)
+        .bind(&item_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("写入分类失败: {}", e))?;
     }
 
     sqlx::query("DELETE FROM category_list")
@@ -945,22 +965,22 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
             "INSERT INTO pinned_items(content, pinned_at, item_id) VALUES(?1, ?2, ?3)
              ON CONFLICT(item_id) DO UPDATE SET content = ?1, pinned_at = ?2",
         )
-            .bind(item)
-            .bind(pinned_at)
-            .bind(&item_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("写入置顶项失败: {}", e))?;
+        .bind(item)
+        .bind(pinned_at)
+        .bind(&item_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("写入置顶项失败: {}", e))?;
     }
 
     for item_id in &desired_item_ids {
         let rowid = sqlx::query_scalar::<_, i64>(
             "SELECT id FROM history_items WHERE item_id = ? ORDER BY id DESC LIMIT 1",
         )
-            .bind(item_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| format!("读取历史记录失败: {}", e))?;
+        .bind(item_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| format!("读取历史记录失败: {}", e))?;
         if let Some(rowid) = rowid {
             let _ = sqlx::query(
                 "INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content)
@@ -968,20 +988,25 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
                  FROM history_items
                  WHERE id = ?",
             )
-                .bind(rowid)
-                .execute(&mut *tx)
-                .await;
+            .bind(rowid)
+            .execute(&mut *tx)
+            .await;
         }
     }
 
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 
 /// 仅同步 history_items 的顺序与内容（高频路径优化），并清理失效关联。
 pub async fn save_history_items_only_async(items: &[String]) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("创建事务失败: {}", e))?;
     let now_ms = now_unix_ms();
     let mut seen_item_ids = HashSet::new();
     let mut history_entries: Vec<(String, String, i64)> = Vec::new();
@@ -1004,24 +1029,24 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
              SET content = ?1, created_at = ?2, updated_at = ?2
              WHERE item_id = ?3",
         )
-            .bind(content)
-            .bind(*ts)
-            .bind(item_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("更新历史记录失败: {}", e))?
-            .rows_affected();
+        .bind(content)
+        .bind(*ts)
+        .bind(item_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("更新历史记录失败: {}", e))?
+        .rows_affected();
         if updated == 0 {
             sqlx::query(
                 "INSERT INTO history_items(content, item_id, created_at, updated_at)
                  VALUES(?1, ?2, ?3, ?3)",
             )
-                .bind(content)
-                .bind(item_id)
-                .bind(*ts)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("写入历史记录失败: {}", e))?;
+            .bind(content)
+            .bind(item_id)
+            .bind(*ts)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("写入历史记录失败: {}", e))?;
         }
     }
 
@@ -1030,7 +1055,9 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
             .execute(&mut *tx)
             .await
             .map_err(|e| format!("清理历史记录失败: {}", e))?;
-        let _ = sqlx::query("DELETE FROM history_items_fts").execute(&mut *tx).await;
+        let _ = sqlx::query("DELETE FROM history_items_fts")
+            .execute(&mut *tx)
+            .await;
         sqlx::query("DELETE FROM categories")
             .execute(&mut *tx)
             .await
@@ -1047,7 +1074,7 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
             "item_id",
             &desired_item_ids,
         )
-            .await?;
+        .await?;
 
         sqlx::query(
             "
@@ -1061,9 +1088,9 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
               )
             ",
         )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("清理历史记录失败: {}", e))?;
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("清理历史记录失败: {}", e))?;
         sqlx::query(
             "
             DELETE FROM categories
@@ -1076,9 +1103,9 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
               )
             ",
         )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("清理分类失败: {}", e))?;
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("清理分类失败: {}", e))?;
         sqlx::query(
             "
             DELETE FROM pinned_items
@@ -1091,9 +1118,9 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
               )
             ",
         )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("清理置顶项失败: {}", e))?;
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("清理置顶项失败: {}", e))?;
         let _ = sqlx::query(
             "
             DELETE FROM history_items_fts
@@ -1106,18 +1133,18 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
               )
             ",
         )
-            .execute(&mut *tx)
-            .await;
+        .execute(&mut *tx)
+        .await;
     }
 
     for item_id in &desired_item_ids {
         let rowid = sqlx::query_scalar::<_, i64>(
             "SELECT id FROM history_items WHERE item_id = ? ORDER BY id DESC LIMIT 1",
         )
-            .bind(item_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| format!("读取历史记录失败: {}", e))?;
+        .bind(item_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| format!("读取历史记录失败: {}", e))?;
         if let Some(rowid) = rowid {
             let _ = sqlx::query(
                 "INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content)
@@ -1125,13 +1152,15 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
                  FROM history_items
                  WHERE id = ?",
             )
-                .bind(rowid)
-                .execute(&mut *tx)
-                .await;
+            .bind(rowid)
+            .execute(&mut *tx)
+            .await;
         }
     }
 
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 
@@ -1141,7 +1170,10 @@ pub async fn save_categories_state_async(
     category_list: &[String],
 ) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("创建事务失败: {}", e))?;
 
     sqlx::query("DELETE FROM categories")
         .execute(&mut *tx)
@@ -1158,12 +1190,12 @@ pub async fn save_categories_state_async(
             "INSERT INTO categories(content, category, item_id)
              VALUES(?1, ?2, ?3)",
         )
-            .bind(content)
-            .bind(category)
-            .bind(item_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("写入分类失败: {}", e))?;
+        .bind(content)
+        .bind(category)
+        .bind(item_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("写入分类失败: {}", e))?;
     }
 
     for category in category_list {
@@ -1174,14 +1206,19 @@ pub async fn save_categories_state_async(
             .map_err(|e| format!("写入分类列表失败: {}", e))?;
     }
 
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 
 /// 仅同步置顶顺序（按 pinned_items 向量顺序重建 pinned_at）。
 pub async fn save_pinned_items_order_async(pinned_items: &[String]) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("创建事务失败: {}", e))?;
 
     sqlx::query("DELETE FROM pinned_items")
         .execute(&mut *tx)
@@ -1197,15 +1234,17 @@ pub async fn save_pinned_items_order_async(pinned_items: &[String]) -> Result<()
             "INSERT INTO pinned_items(content, pinned_at, item_id)
              VALUES(?1, ?2, ?3)",
         )
-            .bind(content)
-            .bind(pinned_at)
-            .bind(item_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("写入置顶项失败: {}", e))?;
+        .bind(content)
+        .bind(pinned_at)
+        .bind(item_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("写入置顶项失败: {}", e))?;
     }
 
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 
@@ -1217,14 +1256,14 @@ pub async fn pin_item(content: &str) -> Result<(), String> {
 
     sqlx::query(
         "INSERT INTO pinned_items(content, pinned_at, item_id) VALUES(?1, ?2, ?3)
-         ON CONFLICT(item_id) DO UPDATE SET pinned_at = ?2, content = ?1"
+         ON CONFLICT(item_id) DO UPDATE SET pinned_at = ?2, content = ?1",
     )
-        .bind(content)
-        .bind(now_ms)
-        .bind(&item_id)
-        .execute(&mut conn)
-        .await
-        .map_err(|e| format!("置顶失败: {}", e))?;
+    .bind(content)
+    .bind(now_ms)
+    .bind(&item_id)
+    .execute(&mut conn)
+    .await
+    .map_err(|e| format!("置顶失败: {}", e))?;
 
     Ok(())
 }
@@ -1249,13 +1288,13 @@ pub async fn set_item_category(item_id: &str, category: &str) -> Result<(), Stri
 
     sqlx::query(
         "INSERT INTO categories(content, category, item_id) VALUES('', ?1, ?2)
-         ON CONFLICT(item_id) DO UPDATE SET category = ?1"
+         ON CONFLICT(item_id) DO UPDATE SET category = ?1",
     )
-        .bind(category)
-        .bind(item_id)
-        .execute(&mut conn)
-        .await
-        .map_err(|e| format!("设置分类失败: {}", e))?;
+    .bind(category)
+    .bind(item_id)
+    .execute(&mut conn)
+    .await
+    .map_err(|e| format!("设置分类失败: {}", e))?;
 
     Ok(())
 }
@@ -1278,13 +1317,12 @@ pub async fn add_category_to_list(category: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
 
     // 检查是否已存在
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM category_list WHERE category = ?)"
-    )
-        .bind(category)
-        .fetch_one(&mut conn)
-        .await
-        .map_err(|e| format!("检查分类是否存在失败: {}", e))?;
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM category_list WHERE category = ?)")
+            .bind(category)
+            .fetch_one(&mut conn)
+            .await
+            .map_err(|e| format!("检查分类是否存在失败: {}", e))?;
 
     if !exists {
         sqlx::query("INSERT INTO category_list(category) VALUES(?)")
@@ -1313,7 +1351,10 @@ pub async fn remove_category_from_list(category: &str) -> Result<(), String> {
 /// 从映射表与分类列表同时删除指定分类（增量操作）
 pub async fn remove_category_everywhere(category: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("开启事务失败: {}", e))?;
 
     sqlx::query("DELETE FROM categories WHERE category = ?")
         .bind(category)
@@ -1327,7 +1368,9 @@ pub async fn remove_category_everywhere(category: &str) -> Result<(), String> {
         .await
         .map_err(|e| format!("删除分类失败: {}", e))?;
 
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 
@@ -1337,16 +1380,13 @@ pub async fn delete_history_items_bulk(contents: &[String]) -> Result<(), String
         return Ok(());
     }
     let mut conn = open_history_db_async().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("开启事务失败: {}", e))?;
 
     reset_temp_text_table(&mut tx, "temp_delete_history_contents", "content").await?;
-    fill_temp_text_table(
-        &mut tx,
-        "temp_delete_history_contents",
-        "content",
-        contents,
-    )
-        .await?;
+    fill_temp_text_table(&mut tx, "temp_delete_history_contents", "content", contents).await?;
 
     let _ = sqlx::query(
         "
@@ -1360,8 +1400,8 @@ pub async fn delete_history_items_bulk(contents: &[String]) -> Result<(), String
         )
         ",
     )
-        .execute(&mut *tx)
-        .await;
+    .execute(&mut *tx)
+    .await;
     sqlx::query(
         "
         DELETE FROM categories
@@ -1374,9 +1414,9 @@ pub async fn delete_history_items_bulk(contents: &[String]) -> Result<(), String
         )
         ",
     )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("删除分类关联失败: {}", e))?;
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("删除分类关联失败: {}", e))?;
     sqlx::query(
         "
         DELETE FROM pinned_items
@@ -1389,9 +1429,9 @@ pub async fn delete_history_items_bulk(contents: &[String]) -> Result<(), String
         )
         ",
     )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("删除置顶关联失败: {}", e))?;
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("删除置顶关联失败: {}", e))?;
     sqlx::query(
         "
         DELETE FROM history_items
@@ -1402,16 +1442,21 @@ pub async fn delete_history_items_bulk(contents: &[String]) -> Result<(), String
         )
         ",
     )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("删除历史记录失败: {}", e))?;
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("删除历史记录失败: {}", e))?;
 
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 pub async fn delete_history_item_by_content(content: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("开启事务失败: {}", e))?;
 
     reset_temp_text_table(&mut tx, "temp_delete_history_contents", "content").await?;
     fill_temp_text_table(
@@ -1420,7 +1465,7 @@ pub async fn delete_history_item_by_content(content: &str) -> Result<(), String>
         "content",
         &[content.to_string()],
     )
-        .await?;
+    .await?;
 
     let _ = sqlx::query(
         "
@@ -1434,8 +1479,8 @@ pub async fn delete_history_item_by_content(content: &str) -> Result<(), String>
         )
         ",
     )
-        .execute(&mut *tx)
-        .await;
+    .execute(&mut *tx)
+    .await;
     sqlx::query(
         "
         DELETE FROM categories
@@ -1448,9 +1493,9 @@ pub async fn delete_history_item_by_content(content: &str) -> Result<(), String>
         )
         ",
     )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("删除分类关联失败: {}", e))?;
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("删除分类关联失败: {}", e))?;
     sqlx::query(
         "
         DELETE FROM pinned_items
@@ -1463,9 +1508,9 @@ pub async fn delete_history_item_by_content(content: &str) -> Result<(), String>
         )
         ",
     )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("删除置顶关联失败: {}", e))?;
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("删除置顶关联失败: {}", e))?;
     sqlx::query(
         "
         DELETE FROM history_items
@@ -1476,11 +1521,13 @@ pub async fn delete_history_item_by_content(content: &str) -> Result<(), String>
         )
         ",
     )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("删除历史记录失败: {}", e))?;
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("删除历史记录失败: {}", e))?;
 
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
 
     Ok(())
 }
@@ -1488,17 +1535,22 @@ pub async fn delete_history_item_by_content(content: &str) -> Result<(), String>
 /// 合并历史数据:保留现有记录,只添加备份中不存在的新记录
 pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
-    let now_ms = now_unix_ms();
-    
-    // 获取当前已存在的 item_id 集合
-    let existing_ids: HashSet<String> = sqlx::query_scalar::<_, String>("SELECT DISTINCT item_id FROM history_items WHERE item_id IS NOT NULL AND item_id != ''")
-        .fetch_all(&mut *tx)
+    let mut tx = conn
+        .begin()
         .await
-        .map_err(|e| format!("读取现有记录失败: {}", e))?
-        .into_iter()
-        .collect();
-    
+        .map_err(|e| format!("创建事务失败: {}", e))?;
+    let now_ms = now_unix_ms();
+
+    // 获取当前已存在的 item_id 集合
+    let existing_ids: HashSet<String> = sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT item_id FROM history_items WHERE item_id IS NOT NULL AND item_id != ''",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|e| format!("读取现有记录失败: {}", e))?
+    .into_iter()
+    .collect();
+
     // 只插入不存在的记录
     let mut new_count = 0;
     for (idx, item) in data.items.iter().enumerate().rev() {
@@ -1506,23 +1558,23 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
         if existing_ids.contains(&item_id) {
             continue; // 跳过已存在的记录
         }
-        
+
         let ts = now_ms - (idx as i64);
         sqlx::query(
             "INSERT INTO history_items(content, item_id, created_at, updated_at)
              VALUES(?1, ?2, ?3, ?3)",
         )
-            .bind(item)
-            .bind(&item_id)
-            .bind(ts)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("写入新历史记录失败: {}", e))?;
+        .bind(item)
+        .bind(&item_id)
+        .bind(ts)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("写入新历史记录失败: {}", e))?;
         new_count += 1;
     }
-    
+
     log::info!("合并文本历史: 新增 {} 条记录", new_count);
-    
+
     // 合并分类信息(只添加新的)
     for (item, category) in &data.categories {
         let item_id = stable_history_item_id(item);
@@ -1532,34 +1584,35 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
                 "INSERT INTO categories(content, category, item_id) VALUES(?1, ?2, ?3)
                  ON CONFLICT(item_id) DO UPDATE SET content = ?1, category = ?2",
             )
-                .bind(item)
-                .bind(category)
-                .bind(&item_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("更新分类失败: {}", e))?;
+            .bind(item)
+            .bind(category)
+            .bind(&item_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("更新分类失败: {}", e))?;
         } else {
             // 如果记录不存在,也添加分类(以备后续插入记录时使用)
             sqlx::query(
                 "INSERT OR IGNORE INTO categories(content, category, item_id) VALUES(?1, ?2, ?3)",
             )
-                .bind(item)
-                .bind(category)
-                .bind(&item_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("写入分类失败: {}", e))?;
+            .bind(item)
+            .bind(category)
+            .bind(&item_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("写入分类失败: {}", e))?;
         }
     }
-    
+
     // 合并且分类列表(只添加不存在的)
-    let existing_categories: HashSet<String> = sqlx::query_scalar::<_, String>("SELECT category FROM category_list")
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(|e| format!("读取分类列表失败: {}", e))?
-        .into_iter()
-        .collect();
-    
+    let existing_categories: HashSet<String> =
+        sqlx::query_scalar::<_, String>("SELECT category FROM category_list")
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| format!("读取分类列表失败: {}", e))?
+            .into_iter()
+            .collect();
+
     for category in &data.category_list {
         if !existing_categories.contains(category) {
             sqlx::query("INSERT INTO category_list(category) VALUES(?)")
@@ -1569,36 +1622,40 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
                 .map_err(|e| format!("写入分类列表失败: {}", e))?;
         }
     }
-    
+
     // 合并且置顶项(追加到末尾)
-    let existing_pinned: HashSet<String> = sqlx::query_scalar::<_, String>("SELECT DISTINCT item_id FROM pinned_items WHERE item_id IS NOT NULL AND item_id != ''")
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(|e| format!("读取置顶项失败: {}", e))?
-        .into_iter()
-        .collect();
-    
+    let existing_pinned: HashSet<String> = sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT item_id FROM pinned_items WHERE item_id IS NOT NULL AND item_id != ''",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|e| format!("读取置顶项失败: {}", e))?
+    .into_iter()
+    .collect();
+
     // 检测 pinned_items 表是否有 position 列
-    let has_position = sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM pinned_items")
-        .fetch_one(&mut *tx)
-        .await
-        .is_ok();
-    
-    if has_position {
-        // 有 position 列,使用位置排序
-        let current_max_position = sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM pinned_items")
+    let has_position =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM pinned_items")
             .fetch_one(&mut *tx)
             .await
-            .map_err(|e| format!("读取最大位置失败: {}", e))?
-            .unwrap_or(-1);
-        
+            .is_ok();
+
+    if has_position {
+        // 有 position 列,使用位置排序
+        let current_max_position =
+            sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM pinned_items")
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| format!("读取最大位置失败: {}", e))?
+                .unwrap_or(-1);
+
         let mut position = current_max_position + 1;
         for (idx, item) in data.pinned_items.iter().enumerate() {
             let item_id = stable_history_item_id(item);
             if existing_pinned.contains(&item_id) {
                 continue; // 跳过已置顶的
             }
-            
+
             let pinned_at = now_ms - (idx as i64);
             sqlx::query(
                 "INSERT INTO pinned_items(content, pinned_at, item_id, position) VALUES(?1, ?2, ?3, ?4)
@@ -1620,7 +1677,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
             if existing_pinned.contains(&item_id) {
                 continue; // 跳过已置顶的
             }
-            
+
             let pinned_at = now_ms - (idx as i64);
             sqlx::query(
                 "INSERT OR IGNORE INTO pinned_items(content, pinned_at, item_id) VALUES(?1, ?2, ?3)",
@@ -1633,7 +1690,9 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
                 .map_err(|e| format!("写入置顶项失败: {}", e))?;
         }
     }
-    
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }

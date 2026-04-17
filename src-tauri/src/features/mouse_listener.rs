@@ -21,7 +21,7 @@ use winapi::um::libloaderapi::GetModuleHandleW;
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::{
     CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, PM_REMOVE,
+    TranslateMessage, UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
     WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
     WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_USER,
 };
@@ -48,19 +48,17 @@ struct GlobalState {
     detection_notify: Arc<(std::sync::Mutex<bool>, Condvar)>,
 }
 
-static GLOBAL_STATE: LazyLock<GlobalState> = LazyLock::new(|| {
-    GlobalState {
-        mouse_action_state: Arc::new(Mutex::new(MouseActionState::Idle)),
-        ctrl_left_pressed: AtomicBool::new(false),
-        ctrl_right_pressed: AtomicBool::new(false),
-        needs_detection: AtomicBool::new(false),
-        last_processed_time: Arc::new(Mutex::new(std::time::Instant::now())),
-        last_mouse_pos: Arc::new(Mutex::new((0, 0))),
-        detection_anchor_pos: Arc::new(Mutex::new((0, 0))),
-        last_toolbar_emit: Arc::new(Mutex::new(None)),
-        last_click: Arc::new(Mutex::new(None)),
-        detection_notify: Arc::new((std::sync::Mutex::new(false), Condvar::new())),
-    }
+static GLOBAL_STATE: LazyLock<GlobalState> = LazyLock::new(|| GlobalState {
+    mouse_action_state: Arc::new(Mutex::new(MouseActionState::Idle)),
+    ctrl_left_pressed: AtomicBool::new(false),
+    ctrl_right_pressed: AtomicBool::new(false),
+    needs_detection: AtomicBool::new(false),
+    last_processed_time: Arc::new(Mutex::new(std::time::Instant::now())),
+    last_mouse_pos: Arc::new(Mutex::new((0, 0))),
+    detection_anchor_pos: Arc::new(Mutex::new((0, 0))),
+    last_toolbar_emit: Arc::new(Mutex::new(None)),
+    last_click: Arc::new(Mutex::new(None)),
+    detection_notify: Arc::new((std::sync::Mutex::new(false), Condvar::new())),
 });
 
 static LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
@@ -112,15 +110,21 @@ fn handle_hook_event(
             log::debug!("检测到左Ctrl键按下");
         }
         HookEvent::CtrlRightPress => {
-            GLOBAL_STATE.ctrl_right_pressed.store(true, Ordering::SeqCst);
+            GLOBAL_STATE
+                .ctrl_right_pressed
+                .store(true, Ordering::SeqCst);
             log::debug!("检测到右Ctrl键按下");
         }
         HookEvent::CtrlLeftRelease => {
-            GLOBAL_STATE.ctrl_left_pressed.store(false, Ordering::SeqCst);
+            GLOBAL_STATE
+                .ctrl_left_pressed
+                .store(false, Ordering::SeqCst);
             log::debug!("检测到左Ctrl键释放");
         }
         HookEvent::CtrlRightRelease => {
-            GLOBAL_STATE.ctrl_right_pressed.store(false, Ordering::SeqCst);
+            GLOBAL_STATE
+                .ctrl_right_pressed
+                .store(false, Ordering::SeqCst);
             log::debug!("检测到右Ctrl键释放");
         }
         HookEvent::LeftButtonPress(last_x, last_y) => {
@@ -187,10 +191,12 @@ fn handle_hook_event(
                                 log::info!("当前应用窗口可见或正在处理回填，跳过划词检测触发");
                                 return;
                             }
-                            let last_processed = { *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) };
+                            let last_processed =
+                                { *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) };
                             if up_time.duration_since(last_processed) > Duration::from_millis(100) {
                                 {
-                                    let mut pos_guard = lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
+                                    let mut pos_guard =
+                                        lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
                                     *pos_guard = (last_x, last_y);
                                 }
                                 GLOBAL_STATE.needs_detection.store(true, Ordering::SeqCst);
@@ -299,7 +305,11 @@ unsafe extern "system" fn low_level_keyboard_proc(
 }
 
 #[cfg(target_os = "windows")]
-unsafe extern "system" fn low_level_mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn low_level_mouse_proc(
+    code: i32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     if code == HC_ACTION {
         let mouse = &*(lparam as *const MSLLHOOKSTRUCT);
         let x = mouse.pt.x;
@@ -343,7 +353,8 @@ fn start_windows_hook_listener(app_handle: AppHandle, state: Arc<Mutex<SharedApp
         }
 
         let module = GetModuleHandleW(std::ptr::null());
-        let keyboard_hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(low_level_keyboard_proc), module, 0);
+        let keyboard_hook =
+            SetWindowsHookExW(WH_KEYBOARD_LL, Some(low_level_keyboard_proc), module, 0);
         let mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), module, 0);
 
         if keyboard_hook.is_null() || mouse_hook.is_null() {
@@ -374,7 +385,7 @@ fn start_windows_hook_listener(app_handle: AppHandle, state: Arc<Mutex<SharedApp
             }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
-            
+
             while let Ok(event) = rx.try_recv() {
                 handle_hook_event(event, &state, &app_handle);
             }
@@ -485,88 +496,91 @@ impl MouseListener {
         let detection_thread_app_handle = app_handle.clone();
         let detection_state = state.clone();
 
-        thread::spawn(move || {
-            loop {
-                if !LISTENER_ENABLED.load(Ordering::SeqCst) {
-                    thread::sleep(Duration::from_millis(200));
+        thread::spawn(move || loop {
+            if !LISTENER_ENABLED.load(Ordering::SeqCst) {
+                thread::sleep(Duration::from_millis(200));
+                continue;
+            }
+
+            if !GLOBAL_STATE.needs_detection.swap(false, Ordering::SeqCst) {
+                wait_detection_pending(Duration::from_millis(50));
+                continue;
+            }
+
+            {
+                if capture::is_screenshot_in_progress() {
                     continue;
                 }
 
-                if !GLOBAL_STATE.needs_detection.swap(false, Ordering::SeqCst) {
-                    wait_detection_pending(Duration::from_millis(50));
+                let (selection_enabled, should_skip_detection) = {
+                    let state_guard = lock_arc_mutex(&detection_state);
+                    (
+                        state_guard.settings.selection_enabled,
+                        state_guard.is_visible
+                            || state_guard.is_image_visible
+                            || state_guard.is_processing_selection
+                            || state_guard.is_updating_clipboard,
+                    )
+                };
+
+                if !selection_enabled {
                     continue;
                 }
 
-                {
-                    if capture::is_screenshot_in_progress() {
-                        continue;
-                    }
+                if should_skip_detection {
+                    continue;
+                }
 
-                    let (selection_enabled, should_skip_detection) = {
-                        let state_guard = lock_arc_mutex(&detection_state);
-                        (
-                            state_guard.settings.selection_enabled,
-                            state_guard.is_visible
-                                || state_guard.is_image_visible
-                                || state_guard.is_processing_selection
-                                || state_guard.is_updating_clipboard,
-                        )
-                    };
+                let clipboard_manager = {
+                    let state_guard = lock_arc_mutex(&detection_state);
+                    state_guard.clipboard_manager.clone()
+                };
 
-                    if !selection_enabled {
-                        continue;
-                    }
-
-                    if should_skip_detection {
-                        continue;
-                    }
-
-                    let clipboard_manager = {
-                        let state_guard = lock_arc_mutex(&detection_state);
-                        state_guard.clipboard_manager.clone()
-                    };
-
-                    if let Some(text) = perform_text_selection_detection(
-                        &detection_thread_app_handle,
-                        clipboard_manager,
-                    ) {
-                        if !text.trim().is_empty() && is_valid_selection(&text) {
-                            log::info!("检测到有效的选中文本: '{}'", text);
-                            let app_handle_clone = detection_thread_app_handle.clone();
-                            let text_clone = text.clone();
-                            let anchor_pos = {
-                                let pos_guard = lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
-                                *pos_guard
+                if let Some(text) = perform_text_selection_detection(
+                    &detection_thread_app_handle,
+                    clipboard_manager,
+                ) {
+                    if !text.trim().is_empty() && is_valid_selection(&text) {
+                        log::info!("检测到有效的选中文本: '{}'", text);
+                        let app_handle_clone = detection_thread_app_handle.clone();
+                        let text_clone = text.clone();
+                        let anchor_pos = {
+                            let pos_guard = lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
+                            *pos_guard
+                        };
+                        let should_debounce = {
+                            let mut last_emit_guard =
+                                lock_arc_mutex(&GLOBAL_STATE.last_toolbar_emit);
+                            let now = std::time::Instant::now();
+                            let should_skip = if let Some((last_text, last_anchor, last_time)) =
+                                last_emit_guard.as_ref()
+                            {
+                                (last_anchor.0 - anchor_pos.0).abs() <= 6
+                                    && (last_anchor.1 - anchor_pos.1).abs() <= 6
+                                    && *last_text == text
+                                    && now.duration_since(*last_time) <= Duration::from_millis(300)
+                            } else {
+                                false
                             };
-                            let should_debounce = {
-                                let mut last_emit_guard = lock_arc_mutex(&GLOBAL_STATE.last_toolbar_emit);
-                                let now = std::time::Instant::now();
-                                let should_skip = if let Some((last_text, last_anchor, last_time)) =
-                                    last_emit_guard.as_ref()
-                                {
-                                    (last_anchor.0 - anchor_pos.0).abs() <= 6
-                                        && (last_anchor.1 - anchor_pos.1).abs() <= 6
-                                        && *last_text == text
-                                        && now.duration_since(*last_time) <= Duration::from_millis(300)
-                                } else {
-                                    false
-                                };
-                                if !should_skip {
-                                    *last_emit_guard = Some((text.clone(), anchor_pos, now));
-                                }
-                                should_skip
-                            };
-                            if should_debounce {
-                                log::info!("命中划词工具栏去抖策略，跳过重复弹窗");
-                                continue;
+                            if !should_skip {
+                                *last_emit_guard = Some((text.clone(), anchor_pos, now));
                             }
-
-                            tauri::async_runtime::spawn(async move {
-                                log::info!("准备调用 show_selection_toolbar_impl");
-                                show_selection_toolbar_impl(app_handle_clone, text_clone, Some(anchor_pos));
-                                log::info!("已调用 show_selection_toolbar_impl");
-                            });
+                            should_skip
+                        };
+                        if should_debounce {
+                            log::info!("命中划词工具栏去抖策略，跳过重复弹窗");
+                            continue;
                         }
+
+                        tauri::async_runtime::spawn(async move {
+                            log::info!("准备调用 show_selection_toolbar_impl");
+                            show_selection_toolbar_impl(
+                                app_handle_clone,
+                                text_clone,
+                                Some(anchor_pos),
+                            );
+                            log::info!("已调用 show_selection_toolbar_impl");
+                        });
                     }
                 }
             }

@@ -10,8 +10,7 @@ use std::sync::Arc;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::utils::utils_helpers::{
-    find_best_replacement_candidate, load_history_data,
-    ClipboardHistoryData,
+    find_best_replacement_candidate, load_history_data, ClipboardHistoryData,
 };
 enum PersistTask {
     HistoryOnly(Vec<String>),
@@ -82,20 +81,18 @@ impl ClipboardManager {
                 let mut latest_categories: Option<(HashMap<String, String>, Vec<String>)> = None;
                 let mut latest_pinned: Option<Vec<String>> = None;
                 let mut clear_all = false;
-                let mut absorb = |task: PersistTask| {
-                    match task {
-                        PersistTask::HistoryOnly(items) => latest_history = Some(items),
-                        PersistTask::CategoriesOnly {
-                            categories,
-                            category_list,
-                        } => latest_categories = Some((categories, category_list)),
-                        PersistTask::PinnedOnly(items) => latest_pinned = Some(items),
-                        PersistTask::ClearAll => {
-                            clear_all = true;
-                            latest_history = None;
-                            latest_categories = None;
-                            latest_pinned = None;
-                        }
+                let mut absorb = |task: PersistTask| match task {
+                    PersistTask::HistoryOnly(items) => latest_history = Some(items),
+                    PersistTask::CategoriesOnly {
+                        categories,
+                        category_list,
+                    } => latest_categories = Some((categories, category_list)),
+                    PersistTask::PinnedOnly(items) => latest_pinned = Some(items),
+                    PersistTask::ClearAll => {
+                        clear_all = true;
+                        latest_history = None;
+                        latest_categories = None;
+                        latest_pinned = None;
                     }
                 };
                 absorb(first);
@@ -103,7 +100,9 @@ impl ClipboardManager {
                     absorb(next);
                 }
                 if clear_all {
-                    if let Err(e) = tauri::async_runtime::block_on(crate::utils::database::clear_all_history()) {
+                    if let Err(e) =
+                        tauri::async_runtime::block_on(crate::utils::database::clear_all_history())
+                    {
                         log::error!("清理历史记录失败: {}", e);
                     }
                 }
@@ -135,7 +134,9 @@ impl ClipboardManager {
         });
 
         if !initial_snapshot.items.is_empty() {
-            if let Err(e) = persist_tx.send(PersistTask::HistoryOnly(initial_snapshot.items.clone())) {
+            if let Err(e) =
+                persist_tx.send(PersistTask::HistoryOnly(initial_snapshot.items.clone()))
+            {
                 log::error!("提交初始历史记录保存任务失败: {}", e);
             }
         }
@@ -148,13 +149,16 @@ impl ClipboardManager {
             }
         }
         if !initial_snapshot.pinned_items.is_empty() {
-            if let Err(e) = persist_tx.send(PersistTask::PinnedOnly(initial_snapshot.pinned_items.clone())) {
+            if let Err(e) = persist_tx.send(PersistTask::PinnedOnly(
+                initial_snapshot.pinned_items.clone(),
+            )) {
                 log::error!("提交初始置顶保存任务失败: {}", e);
             }
         }
 
         // 初始化布隆过滤器
-        let mut bloom_filter = BloomFilter::with_rate(BLOOM_FILTER_ERROR_RATE, BLOOM_FILTER_CAPACITY);
+        let mut bloom_filter =
+            BloomFilter::with_rate(BLOOM_FILTER_ERROR_RATE, BLOOM_FILTER_CAPACITY);
 
         // 将现有历史记录添加到布隆过滤器
         for item in &history_data.items {
@@ -282,7 +286,8 @@ impl ClipboardManager {
             if !normalized_category.is_empty()
                 && normalized_category != "未分类"
                 && normalized_category != "全部"
-                && !category_list.contains(&normalized_category) {
+                && !category_list.contains(&normalized_category)
+            {
                 category_list.push(normalized_category);
             }
 
@@ -298,7 +303,8 @@ impl ClipboardManager {
         let normalized_category = category.trim().to_string();
         if !normalized_category.is_empty()
             && normalized_category != "未分类"
-            && normalized_category != "全部" {
+            && normalized_category != "全部"
+        {
             {
                 let mut category_list = lock_arc_mutex(&self.category_list);
                 if !category_list.contains(&normalized_category) {
@@ -318,7 +324,10 @@ impl ClipboardManager {
 
             let normalized_category = category.trim().to_string();
 
-            if normalized_category.is_empty() || normalized_category == "未分类" || normalized_category == "全部" {
+            if normalized_category.is_empty()
+                || normalized_category == "未分类"
+                || normalized_category == "全部"
+            {
                 categories.remove(&item_id);
             } else {
                 categories.insert(item_id, normalized_category.clone());
@@ -334,9 +343,16 @@ impl ClipboardManager {
         Ok(())
     }
 
-    pub async fn set_category_async(&self, item_id: String, category: String) -> Result<(), String> {
+    pub async fn set_category_async(
+        &self,
+        item_id: String,
+        category: String,
+    ) -> Result<(), String> {
         let normalized_category = category.trim().to_string();
-        if normalized_category.is_empty() || normalized_category == "未分类" || normalized_category == "全部" {
+        if normalized_category.is_empty()
+            || normalized_category == "未分类"
+            || normalized_category == "全部"
+        {
             {
                 let mut categories = lock_arc_mutex(&self.categories);
                 categories.remove(&item_id);
@@ -390,7 +406,11 @@ impl ClipboardManager {
 
         // 优化：使用 len() 获取字节长度，避免 O(N) 遍历超大字符串的 chars
         let content_len = content.len();
-        log::debug!("添加到历史记录，长度: {}, 当前数量: {}", content_len, history.len());
+        log::debug!(
+            "添加到历史记录，长度: {}, 当前数量: {}",
+            content_len,
+            history.len()
+        );
 
         // 优化：布隆过滤器预筛选 - O(1) 快速检查
         let bloom_filter = self.bloom_filter.lock();
@@ -403,7 +423,10 @@ impl ClipboardManager {
 
             // 检查精确缓存
             if let Some(cached_index) = exact_index_cache.get(&content_hash).copied() {
-                if history.get(cached_index).is_some_and(|item| item == &content) {
+                if history
+                    .get(cached_index)
+                    .is_some_and(|item| item == &content)
+                {
                     if cached_index != 0 {
                         let exact_item = history.remove(cached_index);
                         history.insert(0, exact_item);
@@ -434,14 +457,15 @@ impl ClipboardManager {
                 *fingerprints = build_history_fingerprints(&history);
                 self.history_cache_dirty.store(false, Ordering::Relaxed);
             }
-            if let Some(exact_index) = fingerprints
-                .iter()
-                .enumerate()
-                .position(|(idx, (item_len, item_hash))| {
-                    *item_len == content_len
-                        && *item_hash == content_hash
-                        && history.get(idx).is_some_and(|item| item == &content)
-                })
+            if let Some(exact_index) =
+                fingerprints
+                    .iter()
+                    .enumerate()
+                    .position(|(idx, (item_len, item_hash))| {
+                        *item_len == content_len
+                            && *item_hash == content_hash
+                            && history.get(idx).is_some_and(|item| item == &content)
+                    })
             {
                 if exact_index != 0 {
                     let exact_item = history.remove(exact_index);
@@ -484,11 +508,14 @@ impl ClipboardManager {
             find_best_replacement_candidate(&content, candidate_history, similarity_threshold)
         {
             log::info!("检测到相似版本，正在处理: {}", comparison.reason);
-            log::info!("相似度: {:.4}, 完整性: {:?}", 
-                      comparison.similarity_score, 
-                      comparison.new_completeness);
+            log::info!(
+                "相似度: {:.4}, 完整性: {:?}",
+                comparison.similarity_score,
+                comparison.new_completeness
+            );
 
-            if comparison.reason.contains("子集") || comparison.reason.contains("找回完整版本") {
+            if comparison.reason.contains("子集") || comparison.reason.contains("找回完整版本")
+            {
                 let complete_version = history.remove(replace_index);
                 history.insert(0, complete_version);
                 log::info!("已将完整版本移动到最前面");
@@ -546,7 +573,7 @@ impl ClipboardManager {
         pinned_items.clear();
 
         self.enqueue_clear_all_persist();
-        
+
         log::info!("历史记录已清空");
         Ok(())
     }
@@ -730,7 +757,8 @@ impl ClipboardManager {
         item: Option<String>,
         pinned: bool,
     ) -> Result<(), String> {
-        let resolved_item = item.or_else(|| index.and_then(|idx| self.get_history().get(idx).cloned()))
+        let resolved_item = item
+            .or_else(|| index.and_then(|idx| self.get_history().get(idx).cloned()))
             .ok_or_else(|| "索引超出范围".to_string())?;
         self.set_pinned_async(resolved_item, pinned).await
     }
@@ -785,9 +813,7 @@ impl ClipboardManager {
             let before = history.len();
 
             match mode {
-                "all" => {
-                    (before, Vec::new(), true)
-                }
+                "all" => (before, Vec::new(), true),
                 "unclassified" | "unclassified_unpinned" => {
                     let classified: HashSet<String> = categories.keys().cloned().collect();
                     let pinned: HashSet<String> = pinned_items.iter().cloned().collect();
@@ -838,11 +864,15 @@ impl ClipboardManager {
                 normalize_pinned_items(&mut pinned_items, &history);
                 apply_pin_order(&mut history, &pinned_items);
             }
-            
+
             self.history_cache_dirty.store(true, Ordering::Relaxed);
         }
 
-        let removed = if should_clear_all { before } else { removed_count };
+        let removed = if should_clear_all {
+            before
+        } else {
+            removed_count
+        };
         Ok(removed)
     }
 
@@ -900,13 +930,10 @@ fn shrink_text_history_with_group_protection(
         return;
     }
     while history.len() > max_items {
-        if let Some(pos) = history
-            .iter()
-            .rposition(|item| {
-                let item_id = crate::utils::database::stable_history_item_id(item);
-                !categories.contains_key(&item_id)
-            })
-        {
+        if let Some(pos) = history.iter().rposition(|item| {
+            let item_id = crate::utils::database::stable_history_item_id(item);
+            !categories.contains_key(&item_id)
+        }) {
             let removed = history.remove(pos);
             let item_id = crate::utils::database::stable_history_item_id(&removed);
             categories.remove(&item_id);

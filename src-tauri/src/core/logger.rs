@@ -44,7 +44,8 @@ pub fn build_logger() -> tauri_plugin_log::Builder {
             // 过滤掉一些嘈杂的库日志
             if metadata.target().starts_with("tao::")
                 || metadata.target().starts_with("mio::")
-                || metadata.target().starts_with("hyper::") {
+                || metadata.target().starts_with("hyper::")
+            {
                 return false;
             }
             true

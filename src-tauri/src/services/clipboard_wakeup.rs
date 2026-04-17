@@ -7,7 +7,8 @@ static CLIPBOARD_WAKE_EVENT_COUNT: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
 #[cfg(target_os = "windows")]
-fn wake_window_senders() -> &'static std::sync::Mutex<std::collections::HashMap<isize, mpsc::Sender<()>>> {
+fn wake_window_senders(
+) -> &'static std::sync::Mutex<std::collections::HashMap<isize, mpsc::Sender<()>>> {
     static SENDERS: std::sync::OnceLock<
         std::sync::Mutex<std::collections::HashMap<isize, mpsc::Sender<()>>>,
     > = std::sync::OnceLock::new();
@@ -29,7 +30,10 @@ impl WakeHub {
         let owner_weak = std::sync::Arc::downgrade(&owner);
         if let Ok(mut guard) = self.subscribers.lock() {
             guard.retain(|entry| entry.owner.upgrade().is_some());
-            guard.push(WakeSubscriber { tx, owner: owner_weak });
+            guard.push(WakeSubscriber {
+                tx,
+                owner: owner_weak,
+            });
         }
         ClipboardWakeSubscription { rx, owner }
     }
@@ -65,10 +69,7 @@ impl ClipboardWakeSubscription {
         self.rx.recv()
     }
 
-    pub fn recv_timeout(
-        &self,
-        timeout: Duration,
-    ) -> Result<WakeSignal, mpsc::RecvTimeoutError> {
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<WakeSignal, mpsc::RecvTimeoutError> {
         let _ = &self.owner;
         self.rx.recv_timeout(timeout)
     }

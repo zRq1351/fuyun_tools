@@ -126,7 +126,8 @@ pub fn read_manifest_from_package(package_path: &Path) -> Result<BackupManifest,
     manifest_file
         .read_to_string(&mut content)
         .map_err(|e| format!("读取 manifest 失败: {}", e))?;
-    serde_json::from_str::<BackupManifest>(&content).map_err(|e| format!("解析 manifest 失败: {}", e))
+    serde_json::from_str::<BackupManifest>(&content)
+        .map_err(|e| format!("解析 manifest 失败: {}", e))
 }
 
 pub fn extract_package_to_dir(package_path: &Path, target_dir: &Path) -> Result<(), String> {
@@ -149,13 +150,17 @@ pub fn extract_package_to_dir(package_path: &Path, target_dir: &Path) -> Result<
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("创建解压父目录失败: {}", e))?;
         }
-        let mut output = File::create(&output_path).map_err(|e| format!("创建解压文件失败: {}", e))?;
+        let mut output =
+            File::create(&output_path).map_err(|e| format!("创建解压文件失败: {}", e))?;
         std::io::copy(&mut zipped, &mut output).map_err(|e| format!("写入解压文件失败: {}", e))?;
     }
     Ok(())
 }
 
-pub fn validate_manifest_checksums(extracted_dir: &Path, manifest: &BackupManifest) -> Result<(), String> {
+pub fn validate_manifest_checksums(
+    extracted_dir: &Path,
+    manifest: &BackupManifest,
+) -> Result<(), String> {
     let actual = compute_checksums(extracted_dir)?;
     for (path, expected) in &manifest.checksums {
         match actual.get(path) {
@@ -187,7 +192,8 @@ fn write_json<T: serde::Serialize>(path: PathBuf, value: &T) -> Result<(), Strin
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
     }
-    let bytes = serde_json::to_vec_pretty(value).map_err(|e| format!("序列化备份数据失败: {}", e))?;
+    let bytes =
+        serde_json::to_vec_pretty(value).map_err(|e| format!("序列化备份数据失败: {}", e))?;
     fs::write(&path, bytes).map_err(|e| format!("写入备份数据失败 {}: {}", path.display(), e))
 }
 
@@ -199,7 +205,9 @@ fn collect_files(root: &Path) -> Result<Vec<PathBuf>, String> {
 }
 
 fn collect_files_recursive(root: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
-    for entry in fs::read_dir(root).map_err(|e| format!("读取目录失败 {}: {}", root.display(), e))? {
+    for entry in
+        fs::read_dir(root).map_err(|e| format!("读取目录失败 {}: {}", root.display(), e))?
+    {
         let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
         let path = entry.path();
         if path.is_dir() {
@@ -232,7 +240,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     let digest = hasher.finalize();
-    digest.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+    digest
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>()
 }
 
 fn now_ms() -> i64 {

@@ -1,6 +1,6 @@
 use crate::core::config::{
-    ProviderConfig, DEFAULT_IMAGE_TOGGLE_SHORTCUT, DEFAULT_RECORDING_SHORTCUT, DEFAULT_SCREENSHOT_SHORTCUT,
-    DEFAULT_TOGGLE_SHORTCUT,
+    ProviderConfig, DEFAULT_IMAGE_TOGGLE_SHORTCUT, DEFAULT_RECORDING_SHORTCUT,
+    DEFAULT_SCREENSHOT_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT,
 };
 use crate::utils::system_utils::get_default_app_version;
 use keyring::Entry;
@@ -132,9 +132,11 @@ impl Default for AppSettingsData {
             recording_max_duration_minutes: default_recording_max_duration_minutes(),
             recording_file_name_template: default_recording_file_name_template(),
             recording_ffmpeg_download_url: default_recording_ffmpeg_download_url(),
-            recording_window_audio_sync_advance_ms: default_recording_window_audio_sync_advance_ms(),
+            recording_window_audio_sync_advance_ms: default_recording_window_audio_sync_advance_ms(
+            ),
             recording_wgc_force_default_border: default_recording_wgc_force_default_border(),
-            recording_wgc_force_default_dirty_region: default_recording_wgc_force_default_dirty_region(),
+            recording_wgc_force_default_dirty_region:
+                default_recording_wgc_force_default_dirty_region(),
             dev_force_ffmpeg_window_capture: default_dev_force_ffmpeg_window_capture(),
             ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
@@ -311,7 +313,11 @@ struct MigrationVersion {
 
 impl MigrationVersion {
     const fn new(major: u32, minor: u32, patch: u32) -> Self {
-        Self { major, minor, patch }
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 }
 
@@ -340,7 +346,11 @@ fn parse_migration_version(raw: &str) -> Option<MigrationVersion> {
 }
 
 impl AppSettingsData {
-    pub fn set_provider_api_key(&mut self, provider_key: &str, api_key: &str) -> Result<(), String> {
+    pub fn set_provider_api_key(
+        &mut self,
+        provider_key: &str,
+        api_key: &str,
+    ) -> Result<(), String> {
         if let Some(config) = self.provider_configs.get_mut(provider_key) {
             config.encrypted_api_key.clear();
         }
@@ -434,8 +444,10 @@ impl AppSettingsData {
                     log::info!("发现旧版加密密钥，正在迁移提供商: {}", provider_key);
                     use base64::engine::general_purpose::STANDARD;
                     use base64::Engine as _;
-                    let decrypted_result = STANDARD.decode(&config.encrypted_api_key).ok().and_then(
-                        |encrypted| {
+                    let decrypted_result = STANDARD
+                        .decode(&config.encrypted_api_key)
+                        .ok()
+                        .and_then(|encrypted| {
                             let decrypted: Vec<u8> = encrypted
                                 .iter()
                                 .enumerate()
@@ -444,10 +456,11 @@ impl AppSettingsData {
                                 })
                                 .collect();
                             String::from_utf8(decrypted).ok()
-                        },
-                    );
+                        });
                     if let Some(api_key) = decrypted_result {
-                        if let Ok(entry) = Entry::new("fuyun_tools", &format!("api_key_{}", provider_key)) {
+                        if let Ok(entry) =
+                            Entry::new("fuyun_tools", &format!("api_key_{}", provider_key))
+                        {
                             if let Err(e) = entry.set_password(&api_key) {
                                 log::error!("迁移密钥失败: {}", e);
                             } else {
@@ -553,10 +566,14 @@ impl AppSettingsData {
         if self.recording_default_fps == 0 || self.recording_default_fps > 120 {
             return Err("recording_default_fps必须在1-120之间".to_string());
         }
-        if self.recording_default_video_bitrate_kbps < 500 || self.recording_default_video_bitrate_kbps > 50000 {
+        if self.recording_default_video_bitrate_kbps < 500
+            || self.recording_default_video_bitrate_kbps > 50000
+        {
             return Err("recording_default_video_bitrate_kbps必须在500-50000之间".to_string());
         }
-        if self.recording_default_audio_bitrate_kbps < 32 || self.recording_default_audio_bitrate_kbps > 512 {
+        if self.recording_default_audio_bitrate_kbps < 32
+            || self.recording_default_audio_bitrate_kbps > 512
+        {
             return Err("recording_default_audio_bitrate_kbps必须在32-512之间".to_string());
         }
         if self.recording_max_duration_minutes == 0 || self.recording_max_duration_minutes > 1440 {
@@ -578,7 +595,10 @@ impl AppSettingsData {
         // 验证API URL格式（基本检查）
         for (provider_name, config) in &self.provider_configs {
             if !config.api_url.is_empty() && !config.api_url.starts_with("https://") {
-                return Err(format!("提供商 {} 的API URL格式无效，必须以https://开头", provider_name));
+                return Err(format!(
+                    "提供商 {} 的API URL格式无效，必须以https://开头",
+                    provider_name
+                ));
             }
         }
 
@@ -596,13 +616,21 @@ impl AppSettingsData {
         }
 
         // 验证提示模板包含必需的占位符
-        if !self.translation_prompt_template.contains("{text}") || !self.translation_prompt_template.contains("{target_language}") {
+        if !self.translation_prompt_template.contains("{text}")
+            || !self
+                .translation_prompt_template
+                .contains("{target_language}")
+        {
             return Err("翻译提示模板必须包含{text}和{target_language}占位符".to_string());
         }
-        if !self.explanation_prompt_template.contains("{text}") || !self.explanation_prompt_template.contains("{target_language}") {
+        if !self.explanation_prompt_template.contains("{text}")
+            || !self
+                .explanation_prompt_template
+                .contains("{target_language}")
+        {
             return Err("解释提示模板必须包含{text}和{target_language}占位符".to_string());
         }
-        
+
         Ok(())
     }
 
@@ -733,11 +761,17 @@ impl AppSettingsData {
         if self.recording_default_fps == 0 || self.recording_default_fps > 120 {
             self.recording_default_fps = default_recording_default_fps();
         }
-        if self.recording_default_video_bitrate_kbps < 500 || self.recording_default_video_bitrate_kbps > 50000 {
-            self.recording_default_video_bitrate_kbps = default_recording_default_video_bitrate_kbps();
+        if self.recording_default_video_bitrate_kbps < 500
+            || self.recording_default_video_bitrate_kbps > 50000
+        {
+            self.recording_default_video_bitrate_kbps =
+                default_recording_default_video_bitrate_kbps();
         }
-        if self.recording_default_audio_bitrate_kbps < 32 || self.recording_default_audio_bitrate_kbps > 512 {
-            self.recording_default_audio_bitrate_kbps = default_recording_default_audio_bitrate_kbps();
+        if self.recording_default_audio_bitrate_kbps < 32
+            || self.recording_default_audio_bitrate_kbps > 512
+        {
+            self.recording_default_audio_bitrate_kbps =
+                default_recording_default_audio_bitrate_kbps();
         }
         if self.recording_max_duration_minutes == 0 || self.recording_max_duration_minutes > 1440 {
             self.recording_max_duration_minutes = default_recording_max_duration_minutes();
@@ -749,7 +783,8 @@ impl AppSettingsData {
             self.recording_ffmpeg_download_url = default_recording_ffmpeg_download_url();
         }
         if self.recording_window_audio_sync_advance_ms > 500 {
-            self.recording_window_audio_sync_advance_ms = default_recording_window_audio_sync_advance_ms();
+            self.recording_window_audio_sync_advance_ms =
+                default_recording_window_audio_sync_advance_ms();
         }
         if self.clipboard_bottom_offset < 0 || self.clipboard_bottom_offset > 400 {
             self.clipboard_bottom_offset = default_clipboard_bottom_offset();
@@ -784,7 +819,8 @@ impl AppSettingsData {
                 model_name: default_model,
                 encrypted_api_key: String::new(),
             };
-            self.provider_configs.insert(self.ai_provider.clone(), config);
+            self.provider_configs
+                .insert(self.ai_provider.clone(), config);
             log::info!("为提供商 {} 创建默认配置", self.ai_provider);
         }
     }
@@ -810,7 +846,11 @@ impl AppSettingsData {
 
 pub fn initialize_builtin_providers(settings: &mut AppSettingsData) {
     use crate::core::config::{AIProvider, ProviderConfig};
-    let builtin_providers = [AIProvider::DeepSeek, AIProvider::Qwen, AIProvider::XiaoMiMimo];
+    let builtin_providers = [
+        AIProvider::DeepSeek,
+        AIProvider::Qwen,
+        AIProvider::XiaoMiMimo,
+    ];
     for provider in builtin_providers {
         let provider_key = provider.to_string();
         let (default_url, default_model) = provider.get_default_config();

@@ -90,7 +90,9 @@ pub fn record_perf_metric(
     success: bool,
     error: Option<String>,
 ) {
-    let mut guard = metrics_store().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = metrics_store()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let metric = guard
         .entry(key.to_string())
         .or_insert_with(|| PerfMetricAggregate::new(label));
@@ -112,7 +114,9 @@ pub fn record_perf_metric(
 }
 
 pub fn get_perf_metrics_snapshot() -> Vec<PerfMetricSnapshot> {
-    let guard = metrics_store().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let guard = metrics_store()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     guard
         .iter()
         .map(|(key, value)| value.snapshot(key))
@@ -120,7 +124,9 @@ pub fn get_perf_metrics_snapshot() -> Vec<PerfMetricSnapshot> {
 }
 
 pub fn reset_perf_metrics() {
-    let mut guard = metrics_store().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = metrics_store()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     guard.clear();
 }
 
@@ -132,7 +138,13 @@ where
     let started_at = Instant::now();
     match f() {
         Ok(value) => {
-            record_perf_metric(key, label, started_at.elapsed().as_millis() as u64, true, None);
+            record_perf_metric(
+                key,
+                label,
+                started_at.elapsed().as_millis() as u64,
+                true,
+                None,
+            );
             Ok(value)
         }
         Err(error) => {

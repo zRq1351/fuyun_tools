@@ -42,10 +42,7 @@ impl SelectionRegion {
 
     /// 获取右下角坐标
     pub fn bottom_right(&self) -> (i32, i32) {
-        (
-            self.x + self.width as i32,
-            self.y + self.height as i32,
-        )
+        (self.x + self.width as i32, self.y + self.height as i32)
     }
 
     /// 计算面积

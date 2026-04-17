@@ -91,14 +91,19 @@ impl Drop for SelectionProcessingGuard {
         if state.selection_guard_epoch == self.epoch {
             state.is_selection_capture_active = false;
             state.is_processing_selection = false;
-            state.is_updating_clipboard = state.is_text_writeback_active || state.is_image_writeback_active;
+            state.is_updating_clipboard =
+                state.is_text_writeback_active || state.is_image_writeback_active;
         }
     }
 }
 
 enum ClipboardSnapshot {
     Text(String),
-    Image { rgba: Vec<u8>, width: u32, height: u32 },
+    Image {
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
     Empty,
 }
 
@@ -119,8 +124,7 @@ fn get_selected_text_windows(
     let _processing_guard = SelectionProcessingGuard::acquire(state_manager.inner().clone())?;
 
     // 1. 获取原始剪贴板内容（用于后续恢复）
-    let original_snapshot =
-        capture_clipboard_snapshot(&clipboard_manager, app_handle);
+    let original_snapshot = capture_clipboard_snapshot(&clipboard_manager, app_handle);
     let original_text = match &original_snapshot {
         ClipboardSnapshot::Text(text) => Some(text.clone()),
         _ => None,
@@ -162,13 +166,18 @@ fn get_selected_text_windows(
     );
 
     // 5. 恢复原始剪贴板内容
-    restore_clipboard_snapshot(&clipboard_manager, app_handle, &original_snapshot, &new_content);
+    restore_clipboard_snapshot(
+        &clipboard_manager,
+        app_handle,
+        &original_snapshot,
+        &new_content,
+    );
 
     match &new_content {
         Some(content) => {
             log::info!("成功捕获选中文本，长度: {}", content.len());
             new_content
-        },
+        }
         None => {
             log::warn!("未能捕获选中文本");
             None
@@ -193,7 +202,11 @@ fn capture_clipboard_snapshot(
             let rgba = image.rgba().to_vec();
             if width > 0 && height > 0 && !rgba.is_empty() {
                 log::debug!("捕获到原始图片剪贴板: {}x{}", width, height);
-                ClipboardSnapshot::Image { rgba, width, height }
+                ClipboardSnapshot::Image {
+                    rgba,
+                    width,
+                    height,
+                }
             } else {
                 ClipboardSnapshot::Empty
             }
@@ -236,7 +249,7 @@ fn wait_for_clipboard_update(
     let wake_rx = subscribe_clipboard_wake_events();
 
     log::info!("使用事件优先+轮询兜底检测模式");
-    
+
     while start_time.elapsed() < CAPTURE_RETRY_MAX_DURATION {
         attempts += 1;
         let _ = wake_rx.recv_timeout(CAPTURE_RETRY_INTERVAL);
@@ -244,9 +257,8 @@ fn wait_for_clipboard_update(
         let sequence_changed = current_sequence != 0
             && sequence_before_copy != 0
             && current_sequence != sequence_before_copy;
-        let should_read_content = sequence_changed
-            || sequence_before_copy == 0
-            || attempts % 4 == 0;
+        let should_read_content =
+            sequence_changed || sequence_before_copy == 0 || attempts % 4 == 0;
         if !should_read_content {
             continue;
         }
@@ -256,20 +268,29 @@ fn wait_for_clipboard_update(
         if let Some(ref current) = current_content {
             if let Some(ref original) = original_content {
                 if current != original || sequence_changed {
-                    log::info!("第{}次尝试成功捕获内容，耗时: {:?}", 
-                              attempts, start_time.elapsed());
+                    log::info!(
+                        "第{}次尝试成功捕获内容，耗时: {:?}",
+                        attempts,
+                        start_time.elapsed()
+                    );
                     return current_content;
                 }
             } else if !current.is_empty() {
-                log::info!("第{}次尝试成功捕获新内容，耗时: {:?}", 
-                          attempts, start_time.elapsed());
+                log::info!(
+                    "第{}次尝试成功捕获新内容，耗时: {:?}",
+                    attempts,
+                    start_time.elapsed()
+                );
                 return current_content;
             }
         }
     }
 
-    log::debug!("重试{}次后仍未捕获到新内容，总耗时: {:?}",
-               attempts, start_time.elapsed());
+    log::debug!(
+        "重试{}次后仍未捕获到新内容，总耗时: {:?}",
+        attempts,
+        start_time.elapsed()
+    );
     None
 }
 
@@ -317,11 +338,16 @@ fn restore_clipboard_snapshot(
                 Err(e) => log::error!("恢复文本剪贴板内容失败: {}", e),
             }
         }
-        ClipboardSnapshot::Image { rgba, width, height } => {
+        ClipboardSnapshot::Image {
+            rgba,
+            width,
+            height,
+        } => {
             let image = Image::new_owned(rgba.clone(), *width, *height);
-            let result = crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
-                app_handle.clipboard().write_image(&image)
-            });
+            let result =
+                crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
+                    app_handle.clipboard().write_image(&image)
+                });
             match result {
                 Ok(()) => log::debug!("已恢复原始图片剪贴板内容"),
                 Err(e) => log::error!("恢复图片剪贴板内容失败: {}", e),

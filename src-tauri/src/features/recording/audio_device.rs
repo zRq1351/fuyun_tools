@@ -75,7 +75,9 @@ pub fn probe_system_audio_source(ffmpeg_path: &Path, source: &str) -> bool {
     let _ = source;
     #[cfg(target_os = "windows")]
     {
-        list_system_audio_sources(Path::new("")).map(|v| !v.is_empty()).unwrap_or(false)
+        list_system_audio_sources(Path::new(""))
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)
     }
     #[cfg(not(target_os = "windows"))]
     {
