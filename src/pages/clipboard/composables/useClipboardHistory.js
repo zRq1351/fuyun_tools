@@ -1,4 +1,4 @@
-import {computed, ref} from 'vue'
+import {ref, watch} from 'vue'
 import {CategoryService, ClipboardService} from '../../../services/ipc'
 
 export function useClipboardHistory() {
@@ -20,28 +20,34 @@ export function useClipboardHistory() {
         return categoryMap.value[item_id] || '未分类'
     }
 
-    const visibleHistory = computed(() => {
-        const keyword = searchKeyword.value.trim().toLowerCase()
-        return pagedHistory.value
-            .filter((entry) => {
-                const category = getItemCategory(entry.id)
-                if (categoryFilter.value !== '全部' && category !== categoryFilter.value) {
-                    return false
-                }
-                if (!keyword) {
-                    return true
-                }
-                const content = String(entry.content || '').toLowerCase()
-                const snippet = String(entry.snippet || '').toLowerCase()
-                return content.includes(keyword) || snippet.includes(keyword)
-            })
-            .map((entry) => ({
-                id: entry.id,
-                content: entry.content,
-                index: entry.position,
-                snippet: entry.snippet || ''
-            }))
-    })
+    const visibleHistory = ref([])
+    let filterTimeout = null
+
+    watch([pagedHistory, searchKeyword, categoryFilter, categoryMap], () => {
+        if (filterTimeout) clearTimeout(filterTimeout)
+        filterTimeout = setTimeout(() => {
+            const keyword = searchKeyword.value.trim().toLowerCase()
+            visibleHistory.value = pagedHistory.value
+                .filter((entry) => {
+                    const category = getItemCategory(entry.id)
+                    if (categoryFilter.value !== '全部' && category !== categoryFilter.value) {
+                        return false
+                    }
+                    if (!keyword) {
+                        return true
+                    }
+                    const content = String(entry.content || '').toLowerCase()
+                    const snippet = String(entry.snippet || '').toLowerCase()
+                    return content.includes(keyword) || snippet.includes(keyword)
+                })
+                .map((entry) => ({
+                    id: entry.id,
+                    content: entry.content,
+                    index: entry.position,
+                    snippet: entry.snippet || ''
+                }))
+        }, 300)
+    }, { deep: true, immediate: true })
 
     const updateSelection = (index, shouldScroll = false, contentRef = null, visibleIndex = null) => {
         if (index < 0 || index >= history.value.length) return
@@ -53,10 +59,14 @@ export function useClipboardHistory() {
             history.value = []
             return
         }
-        const maxPosition = pagedHistory.value.reduce((max, entry) => Math.max(max, entry.position), -1)
-        const nextHistory = new Array(maxPosition + 1).fill('')
+        const nextHistory = []
         for (const entry of pagedHistory.value) {
             nextHistory[entry.position] = entry.content
+        }
+        for (let i = 0; i < nextHistory.length; i++) {
+            if (nextHistory[i] === undefined) {
+                nextHistory[i] = ''
+            }
         }
         history.value = nextHistory
     }

@@ -1408,7 +1408,7 @@ function loadImageFromPath(imagePath) {
 
   console.log('🔍 开始加载截图:', {
     imagePath,
-    fileUrl: fileUrl.substring(0, 100) + '...',
+    fileUrl: Array.from(fileUrl).slice(0, 100).join('') + '...',
     timestamp: new Date().toISOString()
   })
 

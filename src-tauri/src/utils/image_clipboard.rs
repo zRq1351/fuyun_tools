@@ -2991,14 +2991,18 @@ fn read_images_from_windows_file_clipboard() -> Vec<ClipboardImagePayload> {
         if OpenClipboard(std::ptr::null_mut()) == 0 {
             return Vec::new();
         }
+        
+        // 确保在 panic 等情况下也能关闭剪贴板
+        scopeguard::defer! {
+            CloseClipboard();
+        }
+        
         let handle = GetClipboardData(CF_HDROP as UINT);
         if handle.is_null() {
-            CloseClipboard();
             return Vec::new();
         }
         let count = DragQueryFileW(handle as *mut _, 0xFFFFFFFF, std::ptr::null_mut(), 0);
         if count == 0 {
-            CloseClipboard();
             return Vec::new();
         }
         let mut result: Vec<ClipboardImagePayload> = Vec::new();
@@ -3021,7 +3025,6 @@ fn read_images_from_windows_file_clipboard() -> Vec<ClipboardImagePayload> {
             }
             index += 1;
         }
-        CloseClipboard();
         result
     }
 }

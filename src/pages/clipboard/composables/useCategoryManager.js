@@ -1,7 +1,8 @@
 import {nextTick, ref} from 'vue'
 import {CategoryService} from '../../../services/ipc'
 
-export function useCategoryManager(categories, categoryMap, categoryFilter) {
+export function useCategoryManager(categories, categoryMap, categoryFilter, options = {}) {
+    const { onCategoryAdded, onCategoryRemoved } = options
     const isAddingCategory = ref(false)
     const newCategoryName = ref('')
     const newCategoryInputRef = ref(null)
@@ -15,7 +16,11 @@ export function useCategoryManager(categories, categoryMap, categoryFilter) {
 
         categoryMap.value[item] = category
         if (!categories.value.includes(category)) {
-            categories.value.push(category)
+            if (onCategoryAdded) {
+                onCategoryAdded(category)
+            } else {
+                categories.value = [...categories.value, category]
+            }
         }
 
         try {
@@ -40,7 +45,11 @@ export function useCategoryManager(categories, categoryMap, categoryFilter) {
     const removeCategory = async (category) => {
         if (!canDeleteCategory(category)) return
 
-        categories.value = categories.value.filter((item) => item !== category)
+        if (onCategoryRemoved) {
+            onCategoryRemoved(category)
+        } else {
+            categories.value = categories.value.filter((item) => item !== category)
+        }
         Object.keys(categoryMap.value).forEach((item) => {
             if (categoryMap.value[item] === category) {
                 delete categoryMap.value[item]
@@ -76,7 +85,11 @@ export function useCategoryManager(categories, categoryMap, categoryFilter) {
         newCategoryName.value = ''
         if (category && category !== '未分类' && category !== '全部') {
             if (!categories.value.includes(category)) {
-                categories.value.push(category)
+                if (onCategoryAdded) {
+                    onCategoryAdded(category)
+                } else {
+                    categories.value = [...categories.value, category]
+                }
                 try {
                     await CategoryService.addCategory(category)
                 } catch (error) {

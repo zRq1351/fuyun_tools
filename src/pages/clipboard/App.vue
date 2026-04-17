@@ -284,6 +284,7 @@ const promoteItem = async (index, item) => {
     }
     setLocalPinnedByContent(item, !shouldPin)
     console.error('置顶失败:', error)
+    handleAppError(error, '置顶失败')
   }
 }
 
@@ -483,6 +484,7 @@ const selectAndFillDirect = async (index) => {
     hideClipboardWindow()
   } catch (error) {
     console.error('填充内容失败:', error)
+    handleAppError(error, '填充内容失败')
   }
 }
 
@@ -549,7 +551,10 @@ const resolveSelectedText = () => {
 }
 
 const triggerAiFlow = async (rawText, mode) => {
-  const text = typeof rawText === 'string' ? rawText.trim() : ''
+  let text = typeof rawText === 'string' ? rawText.trim() : ''
+  if (text.length > 5000) {
+    text = Array.from(text).slice(0, 5000).join('')
+  }
   if (!text || aiActionLoading.value) return
   aiActionLoading.value = true
   try {

@@ -40,80 +40,91 @@ pub fn create_backup_temp_dir() -> Result<PathBuf, String> {
     Err("创建临时备份目录失败: 目录名冲突".to_string())
 }
 
-pub fn write_backup_payload(
+pub async fn write_backup_payload(
     temp_dir: &Path,
     prepared: &PreparedBackupData,
     app_version: &str,
 ) -> Result<BackupManifest, String> {
-    let settings_file = BackupSettingsFile {
-        settings: prepared.settings.clone(),
-    };
-    let text_file = BackupTextHistoryFile {
-        snapshot: prepared.text_history.clone(),
-    };
-    let image_file = BackupImageHistoryFile {
-        items: prepared.image_history.items.clone(),
-        categories: prepared.image_history.categories.clone(),
-        category_list: prepared.image_history.category_list.clone(),
-        image_tags: prepared.image_history.image_tags.clone(),
-        pinned_items: prepared.image_history.pinned_items.clone(),
-    };
+    let temp_dir = temp_dir.to_path_buf();
+    let prepared = prepared.clone();
+    let app_version = app_version.to_string();
+    
+    tokio::task::spawn_blocking(move || {
+        let settings_file = BackupSettingsFile {
+            settings: prepared.settings.clone(),
+        };
+        let text_file = BackupTextHistoryFile {
+            snapshot: prepared.text_history.clone(),
+        };
+        let image_file = BackupImageHistoryFile {
+            items: prepared.image_history.items.clone(),
+            categories: prepared.image_history.categories.clone(),
+            category_list: prepared.image_history.category_list.clone(),
+            image_tags: prepared.image_history.image_tags.clone(),
+            pinned_items: prepared.image_history.pinned_items.clone(),
+        };
 
-    write_json(temp_dir.join(SETTINGS_PATH), &settings_file)?;
-    write_json(temp_dir.join(TEXT_HISTORY_PATH), &text_file)?;
-    write_json(temp_dir.join(IMAGE_HISTORY_PATH), &image_file)?;
+        write_json(temp_dir.join(SETTINGS_PATH), &settings_file)?;
+        write_json(temp_dir.join(TEXT_HISTORY_PATH), &text_file)?;
+        write_json(temp_dir.join(IMAGE_HISTORY_PATH), &image_file)?;
 
-    for blob in &prepared.blobs {
-        let target_path = temp_dir.join(&blob.package_path);
-        if let Some(parent) = target_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("创建备份图片目录失败: {}", e))?;
+        for blob in &prepared.blobs {
+            let target_path = temp_dir.join(&blob.package_path);
+            if let Some(parent) = target_path.parent() {
+                fs::create_dir_all(parent).map_err(|e| format!("创建备份图片目录失败: {}", e))?;
+            }
+            fs::copy(&blob.source_path, &target_path)
+                .map_err(|e| format!("复制图片文件失败 {}: {}", blob.source_path, e))?;
         }
-        fs::copy(&blob.source_path, &target_path)
-            .map_err(|e| format!("复制图片文件失败 {}: {}", blob.source_path, e))?;
-    }
 
-    let created_at = now_ms();
-    let manifest = BackupManifest {
-        backup_format_version: 1,
-        app_name: "fuyun_tools".to_string(),
-        app_version: app_version.to_string(),
-        created_at,
-        platform: "windows".to_string(),
-        includes: prepared.includes.clone(),
-        stats: prepared.stats.clone(),
-        checksums: compute_checksums(temp_dir)?,
-    };
-    write_json(temp_dir.join(MANIFEST_PATH), &manifest)?;
-    Ok(manifest)
+        let created_at = now_ms();
+        let manifest = BackupManifest {
+            backup_format_version: 1,
+            app_name: "fuyun_tools".to_string(),
+            app_version: app_version.to_string(),
+            created_at,
+            platform: "windows".to_string(),
+            includes: prepared.includes.clone(),
+            stats: prepared.stats.clone(),
+            checksums: compute_checksums(&temp_dir)?,
+        };
+        write_json(temp_dir.join(MANIFEST_PATH), &manifest)?;
+        Ok(manifest)
+    }).await.unwrap_or_else(|_| Err("写入备份任务崩溃".to_string()))
 }
 
-pub fn zip_backup_dir(source_dir: &Path, target_path: &Path) -> Result<u64, String> {
-    if let Some(parent) = target_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建备份输出目录失败: {}", e))?;
-    }
-    let file = File::create(target_path).map_err(|e| format!("创建备份包失败: {}", e))?;
-    let mut zip = ZipWriter::new(file);
-    let options: FileOptions<'_, ()> = FileOptions::default()
-        .compression_method(CompressionMethod::Deflated)
-        .unix_permissions(0o644);
+pub async fn zip_backup_dir(source_dir: &Path, target_path: &Path) -> Result<u64, String> {
+    let source_dir = source_dir.to_path_buf();
+    let target_path = target_path.to_path_buf();
+    
+    tokio::task::spawn_blocking(move || {
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("创建备份输出目录失败: {}", e))?;
+        }
+        let file = File::create(&target_path).map_err(|e| format!("创建备份包失败: {}", e))?;
+        let mut zip = ZipWriter::new(file);
+        let options: FileOptions<'_, ()> = FileOptions::default()
+            .compression_method(CompressionMethod::Deflated)
+            .unix_permissions(0o644);
 
-    for entry in collect_files(source_dir)? {
-        let rel = entry
-            .strip_prefix(source_dir)
-            .map_err(|e| format!("构建备份包路径失败: {}", e))?
-            .to_string_lossy()
-            .replace('\\', "/");
-        zip.start_file(rel, options)
-            .map_err(|e| format!("写入备份包失败: {}", e))?;
-        let bytes = fs::read(&entry).map_err(|e| format!("读取待打包文件失败: {}", e))?;
-        zip.write_all(&bytes)
-            .map_err(|e| format!("写入备份包内容失败: {}", e))?;
-    }
+        for entry in collect_files(&source_dir)? {
+            let rel = entry
+                .strip_prefix(&source_dir)
+                .map_err(|e| format!("构建备份包路径失败: {}", e))?
+                .to_string_lossy()
+                .replace('\\', "/");
+            zip.start_file(rel, options)
+                .map_err(|e| format!("写入备份包失败: {}", e))?;
+            let bytes = fs::read(&entry).map_err(|e| format!("读取待打包文件失败: {}", e))?;
+            zip.write_all(&bytes)
+                .map_err(|e| format!("写入备份包内容失败: {}", e))?;
+        }
 
-    zip.finish()
-        .map_err(|e| format!("完成备份包写入失败: {}", e))?;
-    let metadata = fs::metadata(target_path).map_err(|e| format!("读取备份包大小失败: {}", e))?;
-    Ok(metadata.len())
+        zip.finish()
+            .map_err(|e| format!("完成备份包写入失败: {}", e))?;
+        let metadata = fs::metadata(&target_path).map_err(|e| format!("读取备份包大小失败: {}", e))?;
+        Ok(metadata.len())
+    }).await.unwrap_or_else(|_| Err("压缩备份任务崩溃".to_string()))
 }
 
 pub fn read_manifest_from_package(package_path: &Path) -> Result<BackupManifest, String> {

@@ -10,7 +10,7 @@
         v-for="(entry, index) in visibleHistory"
         :id="'clipboard-item-' + entry.index"
         :key="entry.content"
-        v-memo="[entry.content, entry.index, selectedIndex === entry.index, getItemCategory(entry.content), isPinned(entry.content), entry.snippet]"
+        v-memo="[entry.content, entry.index, selectedIndex === entry.index, getItemCategory(entry.content), isPinned(entry.content), entry.snippet, highlightKeyword]"
         class="clipboard-item"
         :class="{ selected: selectedIndex === entry.index }"
         @click="handleClick(entry.index)"
@@ -59,7 +59,7 @@
 </template>
 
 <script setup>
-import {computed, onUnmounted, ref} from 'vue'
+import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {Close, Link, Loading} from '@element-plus/icons-vue'
 import {Pin} from 'lucide-vue-next'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
@@ -302,8 +302,10 @@ const handleVisibilityChange = () => {
   }
 }
 
-window.addEventListener('blur', stopDragging)
-document.addEventListener('visibilitychange', handleVisibilityChange)
+onMounted(() => {
+  window.addEventListener('blur', stopDragging)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+})
 
 const handleWheel = (e) => {
   if (!contentRef.value) return
