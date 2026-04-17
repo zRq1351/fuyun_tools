@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
-use sqlx::{Row, Sqlite, SqliteConnection, Transaction};
+use sqlx::{Acquire, Row, Sqlite, SqliteConnection, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
