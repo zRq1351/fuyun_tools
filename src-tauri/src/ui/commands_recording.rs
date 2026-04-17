@@ -407,7 +407,7 @@ pub async fn stop_recording(
         match recorder_service::stop_recording(&app, state_arc.clone(), request.clone()) {
             Ok(result) => {
                 let auto_open_folder = {
-                    let guard = state_arc.lock().expect("infallible mutex lock failed");
+                    let guard = state_arc.lock().unwrap_or_else(|e| e.into_inner());
                     guard.settings.recording_auto_open_folder
                 };
                 if auto_open_folder {
@@ -717,12 +717,25 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
         return;
     }
 
-    // 获取录制运行时的麦克风设备ID
-    let mic_device_id = {
-        let state_guard = state_arc.lock().unwrap();
-        let runtime = &state_guard.recording_runtime;
-        let runtime_guard = runtime.lock().unwrap();
-        runtime_guard.mic_audio_device_id.clone()
+    let runtime_arc = {
+        let state_guard = state_arc.lock().unwrap_or_else(|e| e.into_inner());
+        state_guard.recording_runtime.clone()
+    };
+
+    // 获取录制运行时的麦克风设备ID和系统音频状态
+    let (mic_device_id, sys_audio_enabled, sys_audio_thread_exists) = {
+        let runtime_guard = runtime_arc.lock().unwrap_or_else(|e| e.into_inner());
+        let sys_enabled = runtime_guard
+            .system_audio_enabled_flag
+            .as_ref()
+            .map(|f| f.load(std::sync::atomic::Ordering::SeqCst))
+            .unwrap_or(false);
+
+        (
+            runtime_guard.mic_audio_device_id.clone(),
+            sys_enabled,
+            runtime_guard.system_audio_thread.is_some(),
+        )
     };
 
     // 如果没有选择麦克风设备，无法切换
@@ -739,21 +752,6 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
         // 松开快捷键：立即显示麦克风关闭状态
         let _ = app.emit("recording-mic-key-released", serde_json::json!({}));
     }
-
-    // 记录当前系统音频状态用于调试
-    let (sys_audio_enabled, sys_audio_thread_exists) = {
-        let state_guard = state_arc.lock().unwrap();
-        let runtime = &state_guard.recording_runtime;
-        let runtime_guard = runtime.lock().unwrap();
-
-        let sys_enabled = runtime_guard
-            .system_audio_enabled_flag
-            .as_ref()
-            .map(|f| f.load(std::sync::atomic::Ordering::SeqCst))
-            .unwrap_or(false);
-
-        (sys_enabled, runtime_guard.system_audio_thread.is_some())
-    };
 
     log::info!(
         "快捷键操作：麦克风{}，系统音频状态: {} (线程存在: {})",

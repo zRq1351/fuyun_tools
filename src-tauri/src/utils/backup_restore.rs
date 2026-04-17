@@ -41,7 +41,12 @@ pub async fn restore_backup_package(
     let execution: Result<(BackupRestoreResultData, Option<PathBuf>), (String, Option<PathBuf>)> =
         async {
             let extract_started_at = Instant::now();
-            extract_package_to_dir(&package_path, &extracted_dir).map_err(|error| {
+            let pkg_path = package_path.clone();
+            let ext_dir = extracted_dir.clone();
+            tokio::task::spawn_blocking(move || extract_package_to_dir(&pkg_path, &ext_dir))
+                .await
+                .unwrap_or_else(|_| Err("解压任务被取消或崩溃".to_string()))
+                .map_err(|error| {
                 record_backup_restore_stage_metric(
                     "extract_package",
                     "备份恢复解压耗时",
@@ -60,7 +65,11 @@ pub async fn restore_backup_package(
             );
 
             let manifest_started_at = Instant::now();
-            let manifest = read_manifest_from_package(&package_path).map_err(|error| {
+            let pkg_path2 = package_path.clone();
+            let manifest = tokio::task::spawn_blocking(move || read_manifest_from_package(&pkg_path2))
+                .await
+                .unwrap_or_else(|_| Err("读取清单任务被取消或崩溃".to_string()))
+                .map_err(|error| {
                 record_backup_restore_stage_metric(
                     "read_manifest",
                     "备份恢复读取清单耗时",
@@ -77,8 +86,14 @@ pub async fn restore_backup_package(
                 true,
                 None,
             );
+            
             let validate_started_at = Instant::now();
-            validate_manifest_checksums(&extracted_dir, &manifest).map_err(|error| {
+            let ext_dir2 = extracted_dir.clone();
+            let manifest_clone = manifest.clone();
+            tokio::task::spawn_blocking(move || validate_manifest_checksums(&ext_dir2, &manifest_clone))
+                .await
+                .unwrap_or_else(|_| Err("校验任务被取消或崩溃".to_string()))
+                .map_err(|error| {
                 record_backup_restore_stage_metric(
                     "validate_checksums",
                     "备份恢复校验耗时",
@@ -304,49 +319,57 @@ async fn create_rollback_point(
         &image_snapshot.pinned_items,
     )?;
 
-    fs::create_dir_all(rollback_dir.join("settings"))
-        .map_err(|e| format!("创建回滚目录失败: {}", e))?;
-    fs::create_dir_all(rollback_dir.join("text_history"))
-        .map_err(|e| format!("创建回滚目录失败: {}", e))?;
-    fs::create_dir_all(rollback_dir.join("image_history"))
-        .map_err(|e| format!("创建回滚目录失败: {}", e))?;
-    fs::write(
-        rollback_dir.join(settings_path()),
-        serde_json::to_vec_pretty(&settings_wrapper)
-            .map_err(|e| format!("序列化回滚设置失败: {}", e))?,
-    )
-    .map_err(|e| format!("写入回滚设置失败: {}", e))?;
-    fs::write(
-        rollback_dir.join(text_history_path()),
-        serde_json::to_vec_pretty(&text_wrapper)
-            .map_err(|e| format!("序列化回滚文本失败: {}", e))?,
-    )
-    .map_err(|e| format!("写入回滚文本失败: {}", e))?;
-    fs::write(
-        rollback_dir.join(image_history_path()),
-        serde_json::to_vec_pretty(&image_wrapper)
-            .map_err(|e| format!("序列化回滚图片失败: {}", e))?,
-    )
-    .map_err(|e| format!("写入回滚图片失败: {}", e))?;
-
     let blob_target_dir = rollback_dir.join("image_history").join("blobs");
-    fs::create_dir_all(&blob_target_dir).map_err(|e| format!("创建回滚图片目录失败: {}", e))?;
-    for item in &image_snapshot.items {
-        if item.image_path.is_empty() {
-            continue;
+    let rollback_dir_clone = rollback_dir.clone();
+    let image_snapshot_items = image_snapshot.items.clone();
+    
+    tokio::task::spawn_blocking(move || {
+        fs::create_dir_all(rollback_dir_clone.join("settings"))
+            .map_err(|e| format!("创建回滚目录失败: {}", e))?;
+        fs::create_dir_all(rollback_dir_clone.join("text_history"))
+            .map_err(|e| format!("创建回滚目录失败: {}", e))?;
+        fs::create_dir_all(rollback_dir_clone.join("image_history"))
+            .map_err(|e| format!("创建回滚目录失败: {}", e))?;
+        fs::write(
+            rollback_dir_clone.join(settings_path()),
+            serde_json::to_vec_pretty(&settings_wrapper)
+                .map_err(|e| format!("序列化回滚设置失败: {}", e))?,
+        )
+        .map_err(|e| format!("写入回滚设置失败: {}", e))?;
+        fs::write(
+            rollback_dir_clone.join(text_history_path()),
+            serde_json::to_vec_pretty(&text_wrapper)
+                .map_err(|e| format!("序列化回滚文本失败: {}", e))?,
+        )
+        .map_err(|e| format!("写入回滚文本失败: {}", e))?;
+        fs::write(
+            rollback_dir_clone.join(image_history_path()),
+            serde_json::to_vec_pretty(&image_wrapper)
+                .map_err(|e| format!("序列化回滚图片失败: {}", e))?,
+        )
+        .map_err(|e| format!("写入回滚图片失败: {}", e))?;
+
+        fs::create_dir_all(&blob_target_dir).map_err(|e| format!("创建回滚图片目录失败: {}", e))?;
+        for item in &image_snapshot_items {
+            if item.image_path.is_empty() {
+                continue;
+            }
+            let source = PathBuf::from(&item.image_path);
+            if !source.exists() {
+                continue;
+            }
+            let extension = source
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("png");
+            let file_name = format!("{}.{}", item.id, extension);
+            fs::copy(&source, blob_target_dir.join(file_name))
+                .map_err(|e| format!("复制回滚图片失败 {}: {}", source.display(), e))?;
         }
-        let source = PathBuf::from(&item.image_path);
-        if !source.exists() {
-            continue;
-        }
-        let extension = source
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("png");
-        let file_name = format!("{}.{}", item.id, extension);
-        fs::copy(&source, blob_target_dir.join(file_name))
-            .map_err(|e| format!("复制回滚图片失败 {}: {}", source.display(), e))?;
-    }
+        Ok::<(), String>(())
+    })
+    .await
+    .unwrap_or_else(|_| Err("创建回滚点任务被取消或崩溃".to_string()))?;
 
     Ok(rollback_dir)
 }

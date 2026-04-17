@@ -937,6 +937,7 @@ const fillById = async (itemId) => {
     await ImageClipboardService.selectAndFillById(itemId)
   } catch (error) {
     console.error('回填图片失败:', error)
+    ElMessage.error(`回填图片失败: ${String(error)}`)
   } finally {
     window.setTimeout(() => {
       isFilling.value = false
@@ -950,6 +951,7 @@ const openFullscreen = async (itemId) => {
     await ImageClipboardService.openPreviewWindowById(itemId)
   } catch (error) {
     console.error('打开预览窗口失败:', error)
+    ElMessage.error(`打开预览窗口失败: ${String(error)}`)
   }
 }
 
@@ -997,6 +999,7 @@ const promoteImageItem = async (itemId) => {
 
   } catch (error) {
     console.error('置顶图片失败:', error)
+    ElMessage.error(`置顶图片失败: ${String(error)}`)
     // 如果失败，回退到重新加载
     await syncHistory()
   }
@@ -1847,11 +1850,8 @@ onMounted(async () => {
       if (itemIndex >= 0) {
         // 从 previewUrl 中提取 base64 部分
         const base64 = previewUrl.replace('data:image/png;base64,', '')
-        // 使用展开运算符创建新对象，确保 Vue 检测到变化
-        history.value[itemIndex] = {
-          ...history.value[itemIndex],
-          preview_png_base64: base64
-        }
+        // 直接在对象上更新，避免完整替换对象导致的不必要重渲染
+        history.value[itemIndex].preview_png_base64 = base64
       }
 
     }

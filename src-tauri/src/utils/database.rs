@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
-use sqlx::{Acquire, Row, Sqlite, SqliteConnection, Transaction};
+use sqlx::{Acquire, QueryBuilder, Row, Sqlite, SqliteConnection, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -93,17 +93,57 @@ async fn fill_temp_text_table(
     column_name: &str,
     values: &[String],
 ) -> Result<(), String> {
-    let insert_sql = format!(
-        "INSERT OR IGNORE INTO {} ({}) VALUES (?1)",
-        table_name, column_name
-    );
-    for value in values {
-        sqlx::query(&insert_sql)
-            .bind(value)
+    if values.is_empty() {
+        return Ok(());
+    }
+    for chunk in values.chunks(500) {
+        let mut query_builder: QueryBuilder<Sqlite> =
+            QueryBuilder::new(format!("INSERT OR IGNORE INTO {} ({}) ", table_name, column_name));
+        query_builder.push_values(chunk, |mut b, val| {
+            b.push_bind(val);
+        });
+        let query = query_builder.build();
+        query
             .execute(&mut **tx)
             .await
             .map_err(|e| format!("写入临时表失败: {}", e))?;
     }
+    Ok(())
+}
+
+async fn bulk_upsert_history_items(
+    tx: &mut Transaction<'_, Sqlite>,
+    entries: &[(String, String, i64)],
+) -> Result<(), String> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    sqlx::query("CREATE TEMP TABLE IF NOT EXISTS temp_upsert_history (item_id TEXT PRIMARY KEY, content TEXT, ts INTEGER)")
+        .execute(&mut **tx).await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM temp_upsert_history").execute(&mut **tx).await.map_err(|e| e.to_string())?;
+    
+    for chunk in entries.chunks(300) {
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("INSERT INTO temp_upsert_history (item_id, content, ts) ");
+        qb.push_values(chunk, |mut b, (id, c, ts)| {
+            b.push_bind(id).push_bind(c).push_bind(*ts);
+        });
+        qb.build().execute(&mut **tx).await.map_err(|e| format!("写入临时记录失败: {}", e))?;
+    }
+    
+    sqlx::query("
+        UPDATE history_items 
+        SET content = (SELECT content FROM temp_upsert_history t WHERE t.item_id = history_items.item_id),
+            created_at = (SELECT ts FROM temp_upsert_history t WHERE t.item_id = history_items.item_id),
+            updated_at = (SELECT ts FROM temp_upsert_history t WHERE t.item_id = history_items.item_id)
+        WHERE item_id IN (SELECT item_id FROM temp_upsert_history)
+    ").execute(&mut **tx).await.map_err(|e| format!("批量更新历史记录失败: {}", e))?;
+    
+    sqlx::query("
+        INSERT INTO history_items (item_id, content, created_at, updated_at)
+        SELECT item_id, content, ts, ts FROM temp_upsert_history t
+        WHERE NOT EXISTS (SELECT 1 FROM history_items h WHERE h.item_id = t.item_id)
+    ").execute(&mut **tx).await.map_err(|e| format!("批量插入历史记录失败: {}", e))?;
+    
     Ok(())
 }
 
@@ -381,7 +421,7 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
 
     // 使用 created_at DESC 排序（最新的在前）
     let item_rows =
-        sqlx::query("SELECT content FROM history_items ORDER BY created_at DESC, id DESC")
+        sqlx::query("SELECT content FROM history_items ORDER BY created_at DESC, id DESC LIMIT 100000")
             .fetch_all(&mut *conn)
             .await
             .map_err(|e| format!("读取历史数据库失败: {}", e))?;
@@ -812,32 +852,7 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         .collect::<Vec<_>>();
     let desired_item_id_set = desired_item_ids.iter().cloned().collect::<HashSet<_>>();
 
-    for (item_id, content, ts) in &history_entries {
-        let updated = sqlx::query(
-            "UPDATE history_items
-             SET content = ?1, created_at = ?2, updated_at = ?2
-             WHERE item_id = ?3",
-        )
-        .bind(content)
-        .bind(*ts)
-        .bind(item_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("更新历史记录失败: {}", e))?
-        .rows_affected();
-        if updated == 0 {
-            sqlx::query(
-                "INSERT INTO history_items(content, item_id, created_at, updated_at)
-                 VALUES(?1, ?2, ?3, ?3)",
-            )
-            .bind(content)
-            .bind(item_id)
-            .bind(*ts)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("写入历史记录失败: {}", e))?;
-        }
-    }
+    bulk_upsert_history_items(&mut tx, &history_entries).await?;
 
     if desired_item_ids.is_empty() {
         sqlx::query("DELETE FROM history_items")
@@ -1023,32 +1038,7 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
         .map(|(item_id, _, _)| item_id.clone())
         .collect::<Vec<_>>();
 
-    for (item_id, content, ts) in &history_entries {
-        let updated = sqlx::query(
-            "UPDATE history_items
-             SET content = ?1, created_at = ?2, updated_at = ?2
-             WHERE item_id = ?3",
-        )
-        .bind(content)
-        .bind(*ts)
-        .bind(item_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("更新历史记录失败: {}", e))?
-        .rows_affected();
-        if updated == 0 {
-            sqlx::query(
-                "INSERT INTO history_items(content, item_id, created_at, updated_at)
-                 VALUES(?1, ?2, ?3, ?3)",
-            )
-            .bind(content)
-            .bind(item_id)
-            .bind(*ts)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("写入历史记录失败: {}", e))?;
-        }
-    }
+    bulk_upsert_history_items(&mut tx, &history_entries).await?;
 
     if desired_item_ids.is_empty() {
         sqlx::query("DELETE FROM history_items")
@@ -1552,25 +1542,25 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
     .collect();
 
     // 只插入不存在的记录
-    let mut new_count = 0;
+    let mut new_entries = Vec::new();
     for (idx, item) in data.items.iter().enumerate().rev() {
         let item_id = stable_history_item_id(item);
         if existing_ids.contains(&item_id) {
             continue; // 跳过已存在的记录
         }
-
         let ts = now_ms - (idx as i64);
-        sqlx::query(
-            "INSERT INTO history_items(content, item_id, created_at, updated_at)
-             VALUES(?1, ?2, ?3, ?3)",
-        )
-        .bind(item)
-        .bind(&item_id)
-        .bind(ts)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("写入新历史记录失败: {}", e))?;
-        new_count += 1;
+        new_entries.push((item_id, item.clone(), ts));
+    }
+
+    let new_count = new_entries.len();
+    for chunk in new_entries.chunks(300) {
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+            "INSERT INTO history_items(content, item_id, created_at, updated_at) "
+        );
+        qb.push_values(chunk, |mut b, (id, c, ts)| {
+            b.push_bind(c).push_bind(id).push_bind(*ts).push_bind(*ts);
+        });
+        qb.build().execute(&mut *tx).await.map_err(|e| format!("写入新历史记录失败: {}", e))?;
     }
 
     log::info!("合并文本历史: 新增 {} 条记录", new_count);

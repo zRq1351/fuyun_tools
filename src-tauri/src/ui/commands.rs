@@ -4983,7 +4983,7 @@ async fn export_backup_internal(
         guard.settings.version.clone()
     };
     let payload_started_at = std::time::Instant::now();
-    let manifest_result = write_backup_payload(&temp_dir, &prepared, &app_version);
+    let manifest_result = write_backup_payload(&temp_dir, &prepared, &app_version).await;
     if let Err(err) = manifest_result {
         record_perf_metric(
             "backup.export_stage.write_payload",
@@ -5004,7 +5004,7 @@ async fn export_backup_internal(
         None,
     );
     let zip_started_at = std::time::Instant::now();
-    let zip_result = zip_backup_dir(&temp_dir, target_path);
+    let zip_result = zip_backup_dir(&temp_dir, target_path).await;
     cleanup_dir(&temp_dir);
     let file_size_bytes = match zip_result {
         Ok(value) => {

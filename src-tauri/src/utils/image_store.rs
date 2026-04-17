@@ -2,7 +2,7 @@ use crate::utils::image_clipboard::{
     ImageHistoryData, ImageHistoryItem, ImageHistoryPageData, ImageHistoryPageItem,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqliteSynchronous};
-use sqlx::{Row, Sqlite, SqliteConnection, Transaction};
+use sqlx::{QueryBuilder, Row, Sqlite, SqliteConnection, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -103,13 +103,17 @@ async fn fill_temp_text_table(
     column_name: &str,
     values: &[String],
 ) -> Result<(), String> {
-    let insert_sql = format!(
-        "INSERT OR IGNORE INTO {} ({}) VALUES (?1)",
-        table_name, column_name
-    );
-    for value in values {
-        sqlx::query(&insert_sql)
-            .bind(value)
+    if values.is_empty() {
+        return Ok(());
+    }
+    for chunk in values.chunks(500) {
+        let mut query_builder: QueryBuilder<Sqlite> =
+            QueryBuilder::new(format!("INSERT OR IGNORE INTO {} ({}) ", table_name, column_name));
+        query_builder.push_values(chunk, |mut b, val| {
+            b.push_bind(val);
+        });
+        let query = query_builder.build();
+        query
             .execute(&mut **tx)
             .await
             .map_err(|e| format!("写入图片临时表失败: {}", e))?;
@@ -146,14 +150,20 @@ async fn fill_temp_position_table(
     key_column: &str,
     values: &[String],
 ) -> Result<(), String> {
-    let insert_sql = format!(
-        "INSERT OR REPLACE INTO {} ({}, position) VALUES (?1, ?2)",
-        table_name, key_column
-    );
-    for (position, value) in values.iter().enumerate() {
-        sqlx::query(&insert_sql)
-            .bind(value)
-            .bind(position as i64)
+    if values.is_empty() {
+        return Ok(());
+    }
+    let chunk_size = 500;
+    for (chunk_idx, chunk) in values.chunks(chunk_size).enumerate() {
+        let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
+            "INSERT OR REPLACE INTO {} ({}, position) ",
+            table_name, key_column
+        ));
+        query_builder.push_values(chunk.iter().enumerate(), |mut b, (i, val)| {
+            b.push_bind(val).push_bind((chunk_idx * chunk_size + i) as i64);
+        });
+        let query = query_builder.build();
+        query
             .execute(&mut **tx)
             .await
             .map_err(|e| format!("写入图片顺序临时表失败: {}", e))?;
@@ -931,6 +941,7 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
               hi.image_path
             FROM image_items hi
             ORDER BY hi.position ASC
+            LIMIT 100000
             ",
         )
         .fetch_all(conn.as_mut())
@@ -945,6 +956,7 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
               hi.height,
               hi.image_path
             FROM image_items hi
+            LIMIT 100000
             ",
         )
         .fetch_all(conn.as_mut())

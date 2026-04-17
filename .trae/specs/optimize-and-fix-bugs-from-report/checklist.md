@@ -1,0 +1,14 @@
+- [x] `ClipboardList.vue` 的事件监听已被正确注册与注销
+- [x] `ImageClipboardList.vue` 的事件监听已被正确注册与注销
+- [x] `ClipboardList.vue` 的 `v-memo` 依赖包含 `highlightKeyword`
+- [x] `useClipboardHistory.js` 中不再生成无用的稀疏大数组
+- [x] `useClipboardHistory.js` 中的搜索过滤不会引发主线程严重阻塞
+- [x] `App.vue` 中的图片更新不会全量替换对象
+- [x] `useCategoryManager.js` 的修改不再破坏 Vue 的单向数据流
+- [x] `App.vue` 中的数据截断逻辑保证当前 selectedIndex 的安全
+- [x] 所有的 I/O 或删除操作失败时会抛出明确的 UI 错误提示
+- [x] `image_clipboard.rs` 中使用了 RAII 机制安全释放剪贴板资源
+- [x] `database.rs` 和 `image_store.rs` 采用了批量 SQL 插入或更新
+- [x] `database.rs` 和 `image_store.rs` 的查询不再无限制全量拉取数据
+- [x] `backup_restore.rs` 的文件复制与解压运行在 `spawn_blocking` 中
+- [x] `commands_recording.rs` 中的 Mutex 获取控制在最小范围内，无不必要的跨 await 阻塞
