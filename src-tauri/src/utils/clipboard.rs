@@ -311,7 +311,7 @@ impl ClipboardManager {
     }
 
     /// 设置条目分类
-    pub fn set_category(&self, item: String, category: String) -> Result<(), String> {
+    pub fn set_category(&self, item_id: String, category: String) -> Result<(), String> {
         let (categories_clone, category_list_clone) = {
             let mut categories = lock_arc_mutex(&self.categories);
             let mut category_list = lock_arc_mutex(&self.category_list);
@@ -319,9 +319,9 @@ impl ClipboardManager {
             let normalized_category = category.trim().to_string();
 
             if normalized_category.is_empty() || normalized_category == "未分类" || normalized_category == "全部" {
-                categories.remove(&item);
+                categories.remove(&item_id);
             } else {
-                categories.insert(item, normalized_category.clone());
+                categories.insert(item_id, normalized_category.clone());
                 if !category_list.contains(&normalized_category) {
                     category_list.push(normalized_category);
                 }
@@ -334,24 +334,24 @@ impl ClipboardManager {
         Ok(())
     }
 
-    pub async fn set_category_async(&self, item: String, category: String) -> Result<(), String> {
+    pub async fn set_category_async(&self, item_id: String, category: String) -> Result<(), String> {
         let normalized_category = category.trim().to_string();
         if normalized_category.is_empty() || normalized_category == "未分类" || normalized_category == "全部" {
             {
                 let mut categories = lock_arc_mutex(&self.categories);
-                categories.remove(&item);
+                categories.remove(&item_id);
             }
-            crate::utils::database::remove_item_category(&item).await?;
+            crate::utils::database::remove_item_category(&item_id).await?;
         } else {
             {
                 let mut categories = lock_arc_mutex(&self.categories);
                 let mut category_list = lock_arc_mutex(&self.category_list);
-                categories.insert(item.clone(), normalized_category.clone());
+                categories.insert(item_id.clone(), normalized_category.clone());
                 if !category_list.contains(&normalized_category) {
                     category_list.push(normalized_category.clone());
                 }
             }
-            crate::utils::database::set_item_category(&item, &normalized_category).await?;
+            crate::utils::database::set_item_category(&item_id, &normalized_category).await?;
             crate::utils::database::add_category_to_list(&normalized_category).await?;
         }
         Ok(())
@@ -388,7 +388,8 @@ impl ClipboardManager {
     pub fn add_to_history(&self, content: String) {
         let mut history = lock_arc_mutex(&self.history);
 
-        let content_len = content.chars().count();
+        // 优化：使用 len() 获取字节长度，避免 O(N) 遍历超大字符串的 chars
+        let content_len = content.len();
         log::debug!("添加到历史记录，长度: {}, 当前数量: {}", content_len, history.len());
 
         // 优化：布隆过滤器预筛选 - O(1) 快速检查
@@ -474,7 +475,8 @@ impl ClipboardManager {
         let scan_len = if content_len >= LONG_TEXT_DEDUP_THRESHOLD {
             history.len().min(LONG_TEXT_DEDUP_SCAN_LIMIT)
         } else {
-            history.len()
+            // 优化：限制小文本的扫描范围，避免历史记录很大时出现 O(N) 遍历阻塞
+            history.len().min(LONG_TEXT_DEDUP_SCAN_LIMIT * 2)
         };
         let candidate_history = &history[..scan_len];
 
@@ -580,8 +582,9 @@ impl ClipboardManager {
             self.exact_index_cache.lock().clear();
             self.history_cache_dirty.store(true, Ordering::Relaxed);
 
+            let item_id = crate::utils::database::stable_history_item_id(&item);
             let mut categories = lock_arc_mutex(&self.categories);
-            categories.remove(&item);
+            categories.remove(&item_id);
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             normalize_pinned_items(&mut pinned_items, &history);
 
@@ -749,9 +752,15 @@ impl ClipboardManager {
             "unclassified" | "unclassified_unpinned" => {
                 let classified: HashSet<String> = categories.keys().cloned().collect();
                 let pinned: HashSet<String> = pinned_items.iter().cloned().collect();
-                history.retain(|item| classified.contains(item) || pinned.contains(item));
-                let history_set: HashSet<String> = history.iter().cloned().collect();
-                categories.retain(|item, _| history_set.contains(item));
+                history.retain(|item| {
+                    let item_id = crate::utils::database::stable_history_item_id(item);
+                    classified.contains(&item_id) || pinned.contains(item)
+                });
+                let history_ids: HashSet<String> = history
+                    .iter()
+                    .map(|item| crate::utils::database::stable_history_item_id(item))
+                    .collect();
+                categories.retain(|item_id, _| history_ids.contains(item_id));
                 normalize_pinned_items(&mut pinned_items, &history);
                 apply_pin_order(&mut history, &pinned_items);
             }
@@ -817,9 +826,15 @@ impl ClipboardManager {
             } else {
                 let classified: HashSet<String> = categories.keys().cloned().collect();
                 let pinned: HashSet<String> = pinned_items.iter().cloned().collect();
-                history.retain(|item| classified.contains(item) || pinned.contains(item));
-                let history_set: HashSet<String> = history.iter().cloned().collect();
-                categories.retain(|item, _| history_set.contains(item));
+                history.retain(|item| {
+                    let item_id = crate::utils::database::stable_history_item_id(item);
+                    classified.contains(&item_id) || pinned.contains(item)
+                });
+                let history_ids: HashSet<String> = history
+                    .iter()
+                    .map(|item| crate::utils::database::stable_history_item_id(item))
+                    .collect();
+                categories.retain(|item_id, _| history_ids.contains(item_id));
                 normalize_pinned_items(&mut pinned_items, &history);
                 apply_pin_order(&mut history, &pinned_items);
             }
@@ -878,7 +893,8 @@ fn shrink_text_history_with_group_protection(
         if history.len() > max_items {
             let removed = history.split_off(max_items);
             for item in removed {
-                categories.remove(&item);
+                let item_id = crate::utils::database::stable_history_item_id(&item);
+                categories.remove(&item_id);
             }
         }
         return;
@@ -886,10 +902,14 @@ fn shrink_text_history_with_group_protection(
     while history.len() > max_items {
         if let Some(pos) = history
             .iter()
-            .rposition(|item| !categories.contains_key(item))
+            .rposition(|item| {
+                let item_id = crate::utils::database::stable_history_item_id(item);
+                !categories.contains_key(&item_id)
+            })
         {
             let removed = history.remove(pos);
-            categories.remove(&removed);
+            let item_id = crate::utils::database::stable_history_item_id(&removed);
+            categories.remove(&item_id);
         } else {
             break;
         }

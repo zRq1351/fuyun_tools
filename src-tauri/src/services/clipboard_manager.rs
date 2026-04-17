@@ -49,6 +49,7 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
             let (is_updating, manager_arc) = {
                 let state_guard = lock_state(&state);
                 if !state_guard.settings.text_clipboard_enabled {
+                    last_content.clear();
                     continue;
                 }
                 (

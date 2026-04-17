@@ -10,7 +10,7 @@
         v-for="(entry, index) in visibleHistory"
         :id="'clipboard-item-' + entry.index"
         :key="entry.index"
-        v-memo="[entry.content, entry.index, selectedIndex, getItemCategory(entry.content), isPinned(entry.content), entry.snippet]"
+        v-memo="[entry.content, entry.index, selectedIndex, getItemCategory(entry.id), isPinned(entry.content), entry.snippet]"
         class="clipboard-item"
         :class="{ selected: selectedIndex === entry.index }"
         @click="handleClick(entry.index)"
@@ -35,7 +35,7 @@
       </div>
       <div class="index">{{ index + 1 }}</div>
       <div class="category-wrap" @click.stop>
-        <div class="category-chip">{{ getItemCategory(entry.content) }}</div>
+        <div class="category-chip">{{ getItemCategory(entry.id) }}</div>
       </div>
       <div class="item-content">{{ entry.content }}</div>
       <div v-if="entry.snippet" class="item-snippet">

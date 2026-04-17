@@ -16,15 +16,15 @@ export function useClipboardHistory() {
     const sortBy = ref('pinnedFirst')
     const sortOrder = ref('asc')
 
-    const getItemCategory = (item) => {
-        return categoryMap.value[item] || '未分类'
+    const getItemCategory = (item_id) => {
+        return categoryMap.value[item_id] || '未分类'
     }
 
     const visibleHistory = computed(() => {
         const keyword = searchKeyword.value.trim().toLowerCase()
         return pagedHistory.value
             .filter((entry) => {
-                const category = getItemCategory(entry.content)
+                const category = getItemCategory(entry.id)
                 if (categoryFilter.value !== '全部' && category !== categoryFilter.value) {
                     return false
                 }
@@ -36,6 +36,7 @@ export function useClipboardHistory() {
                 return content.includes(keyword) || snippet.includes(keyword)
             })
             .map((entry) => ({
+                id: entry.id,
                 content: entry.content,
                 index: entry.position,
                 snippet: entry.snippet || ''
@@ -205,17 +206,18 @@ export function useClipboardHistory() {
             }
         }
         try {
-            const removedItem = item || removedEntry?.content || history.value[index]
-            if (removedItem && categoryMap.value[removedItem]) {
-                delete categoryMap.value[removedItem]
+            const removedItemContent = item || removedEntry?.content || history.value[index]
+            const removedItemId = removedEntry?.id
+            if (removedItemId && categoryMap.value[removedItemId]) {
+                delete categoryMap.value[removedItemId]
                 try {
-                    await CategoryService.setItemCategory(removedItem, "")
+                    await CategoryService.setItemCategory(removedItemContent, "")
                 } catch (error) {
                     console.error('移除分类失败:', error)
                 }
             }
 
-            await ClipboardService.removeItem(index, removedItem || null)
+            await ClipboardService.removeItem(index, removedItemContent || null)
         } catch (error) {
             console.error('删除失败:', error)
             await resetAndReloadHistory()
