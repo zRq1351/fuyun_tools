@@ -170,21 +170,18 @@ fn ngram_similarity(text1: &str, text2: &str, n: usize) -> f64 {
 
     // 构建 n-gram 集合
     let mut ngrams1 = std::collections::HashSet::new();
-    let mut ngrams2 = std::collections::HashSet::new();
-
-    for i in 0..=chars1.len() - n {
-        let ngram: String = chars1[i..i + n].iter().collect();
-        ngrams1.insert(ngram);
+    for window in chars1.windows(n) {
+        ngrams1.insert(window);
     }
 
-    for i in 0..=chars2.len() - n {
-        let ngram: String = chars2[i..i + n].iter().collect();
-        ngrams2.insert(ngram);
+    let mut ngrams2 = std::collections::HashSet::new();
+    for window in chars2.windows(n) {
+        ngrams2.insert(window);
     }
 
     // 计算 Jaccard 相似度
     let intersection = ngrams1.intersection(&ngrams2).count();
-    let union = ngrams1.union(&ngrams2).count();
+    let union = ngrams1.len() + ngrams2.len() - intersection;
 
     if union == 0 {
         0.0
@@ -229,17 +226,20 @@ pub fn calculate_text_similarity(text1: &str, text2: &str) -> f64 {
     }
     let chars1: Vec<char> = text1.chars().collect();
     let chars2: Vec<char> = text2.chars().collect();
-    let mut dp = vec![vec![0; len2 + 1]; len1 + 1];
+    let mut dp = vec![0; len2 + 1];
     for i in 1..=len1 {
+        let mut prev = 0;
         for j in 1..=len2 {
+            let temp = dp[j];
             if chars1[i - 1] == chars2[j - 1] {
-                dp[i][j] = dp[i - 1][j - 1] + 1;
+                dp[j] = prev + 1;
             } else {
-                dp[i][j] = dp[i - 1][j].max(dp[i][j - 1]);
+                dp[j] = dp[j].max(dp[j - 1]);
             }
+            prev = temp;
         }
     }
-    let lcs_length = dp[len1][len2];
+    let lcs_length = dp[len2];
     let max_len = len1.max(len2);
     if max_len == 0 {
         0.0

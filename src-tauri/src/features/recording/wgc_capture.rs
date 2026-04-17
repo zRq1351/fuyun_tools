@@ -326,7 +326,7 @@ pub fn start_window_capture_to_mp4(
             } else {
                 return Ok(());
             }
-            thread::sleep(Duration::from_millis(30));
+            thread::sleep(Duration::from_millis(100));
         }
     });
     Ok(WgcCaptureHandle {
