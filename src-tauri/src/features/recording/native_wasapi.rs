@@ -1036,17 +1036,15 @@ pub fn start_microphone_wav_with_device(
                 std::thread::sleep(Duration::from_millis(100));
             }
 
-            // 关键修复：收到停止信号后，继续录制更长时间以确保音频完全覆盖视频最后一段
-            // 测试表明FFmpeg收到"q"命令后处理最后一帧的时间可能超过2秒
-            log::info!("收到麦克风停止信号，继续录制2000ms以确保音频完全覆盖视频最后一段...");
-            std::thread::sleep(Duration::from_millis(2000));
+            // 🔧 优化：麦克风停止时不额外延迟，立即关闭流
+            // 原因：enabled_flag=false时已写入静音，继续录制只会增加文件大小
+            log::info!("收到麦克风停止信号，立即停止音频流...");
 
             // 停止音频流，让CPAL完成最后的回调
             let _ = stream.pause();
 
-            // 等待一小段时间，确保音频回调处理完最后的缓冲区数据
-            // 这是必要的，因为CPAL可能在回调中还有待处理的数据
-            std::thread::sleep(Duration::from_millis(300));
+            // 短暂等待确保音频回调处理完最后的缓冲区数据
+            std::thread::sleep(Duration::from_millis(100));
 
             // 销毁流，释放资源
             drop(stream);
@@ -1226,22 +1224,48 @@ pub fn start_system_loopback_aac_with_device(
                 std::thread::sleep(Duration::from_millis(100));
             }
 
-            // 关键修复：收到停止信号后，继续录制更长时间以确保音频完全覆盖视频最后一段
-            // 测试表明FFmpeg收到"q"命令后处理最后一帧的时间可能超过2秒
-            log::info!("收到停止信号，继续录制2000ms以确保音频完全覆盖视频最后一段...");
-            std::thread::sleep(Duration::from_millis(2000));
+            // 🔧 优化：系统音频停止时不固定sleep，而是等待FFmpeg编码完成
+            let stop_start = std::time::Instant::now();
+            log::info!("收到系统音频停止信号，关闭FFmpeg输入流...");
 
             drop(stream);
-            log::info!("WASAPI 流已停止，等待 FFmpeg 完成编码...");
+            log::info!("WASAPI 流已停止");
 
             // 关闭 stdin 触发 FFmpeg 完成编码
             if let Ok(mut guard) = stdin_writer.lock() {
                 if let Some(writer) = guard.take() {
-                    drop(writer); // 关闭 stdin
+                    drop(writer); // 关闭 stdin，FFmpeg会检测到EOF并完成编码
                 }
             }
 
-            log::info!("✅ FFmpeg AAC 编码完成: {:?}", thread_output.file_name());
+            // 🔧 主动等待 FFmpeg 进程退出（带超时）
+            log::info!("等待 FFmpeg AAC 编码完成...");
+            if let Ok(mut guard) = thread_ffmpeg.lock() {
+                if let Some(ref mut child) = *guard {
+                    // 等待FFmpeg退出，最多5秒
+                    for _ in 0..50 {
+                        match child.try_wait() {
+                            Ok(Some(status)) => {
+                                log::info!("✅ FFmpeg AAC 编码完成: {:?}, exit_status={}, 耗时={}ms", 
+                                    thread_output.file_name(), status, stop_start.elapsed().as_millis());
+                                break;
+                            }
+                            Ok(None) => {
+                                std::thread::sleep(Duration::from_millis(100));
+                            }
+                            Err(e) => {
+                                log::warn!("检查 FFmpeg 状态失败: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                    // 如果超时，强制杀死进程
+                    if child.try_wait().ok().flatten().is_none() {
+                        log::warn!("FFmpeg 编码超时，强制终止");
+                        let _ = child.kill();
+                    }
+                }
+            }
             Ok(())
         };
         if let Err(e) = run() {

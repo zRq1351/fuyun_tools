@@ -467,9 +467,8 @@ fn merge_system_audio_into_video(
     for (idx, (input, delay)) in sys_inputs.iter().enumerate() {
         let label = format!("sys{}", idx);
         // 🔧 性能优化：简化音频处理链
-        // - aresample=async=1:min_hard_comp=0.100000:first_pts=0: 减少重采样计算
-        // - adelay={d}|{d}: 延迟对齐
-        // 注意：如果所有音频都是 48kHz，可以跳过 aresample，直接使用 adelay
+        // - adelay={d}|{d}: 延迟对齐到视频时间轴
+        // 注意：delay是片段创建时的elapsed_ms，表示该片段应从视频的哪个时间点开始播放
         filter_parts.push(format!(
             "[{i}:a]adelay={d}|{d}[{l}]",
             i = input,
@@ -498,7 +497,8 @@ fn merge_system_audio_into_video(
     let mut mic_labels: Vec<String> = Vec::new();
     for (idx, (input, delay)) in mic_inputs.iter().enumerate() {
         let label = format!("mic{}", idx);
-        // 🔧 性能优化：简化音频处理链，跳过重采样
+        // 🔧 性能优化：简化音频处理链，使用adelay对齐到视频时间轴
+        // delay是该片段创建时的elapsed_ms，确保多段麦克风音频正确对齐
         filter_parts.push(format!(
             "[{i}:a]adelay={d}|{d}[{l}]",
             i = input,
@@ -579,6 +579,22 @@ fn merge_system_audio_into_video(
     }
 
     log::info!("🔧 开始音频合并，系统音频片段: {}, 麦克风片段: {}", valid_system.len(), valid_mic.len());
+    
+    // 🔧 添加时序验证日志
+    for (idx, seg) in valid_system.iter().enumerate() {
+        if let Ok(meta) = std::fs::metadata(&seg.path) {
+            let duration_ms = meta.len() * 1000 / (48000 * 2 * 2); // AAC估算
+            log::info!("  系统音频片段{}: start_ms={}, file_size={} bytes, estimated_duration={}ms", 
+                idx, seg.start_ms, meta.len(), duration_ms);
+        }
+    }
+    for (idx, seg) in valid_mic.iter().enumerate() {
+        if let Ok(meta) = std::fs::metadata(&seg.path) {
+            let duration_ms = meta.len() * 1000 / (48000 * 2); // WAV单声道16bit
+            log::info!("  麦克风片段{}: start_ms={}, file_size={} bytes, estimated_duration={}ms", 
+                idx, seg.start_ms, meta.len(), duration_ms);
+        }
+    }
 
     // 🔧 性能优化：使用spawn + wait替代output，FFmpeg内部会流式处理
     let child = cmd
@@ -1777,6 +1793,10 @@ pub fn stop_recording(
 
     let mut fatal_error: Option<AppError> = None;
     let mut pending_window_capture_unavailable_details: Option<String> = None;
+    
+    // 🔧 记录停止流程开始时间
+    let stop_started_at = std::time::Instant::now();
+    let mut video_exit_elapsed: Option<std::time::Duration> = None;
 
     // 关键修复：根据录制类型采用不同的停止顺序，确保音频录制到视频完全停止的时刻
     // 问题：音频提前停止导致视频最后一段没有声音
@@ -1817,8 +1837,19 @@ pub fn stop_recording(
         }
         log::info!("✅ 音频停止信号已设置");
     } else {
-        // 非窗口录制（FFmpeg）：先停止FFmpeg进程，再停止音频
-        log::info!("🔧 非窗口录制：首先停止视频录制进程...");
+        // 非窗口录制（FFmpeg）：同时停止视频和音频，避免音频冗余
+        log::info!("🔧 非窗口录制：同时发送音视频停止信号...");
+        
+        // 1. 首先发送音频停止信号（音频线程会继续录制2秒以确保覆盖）
+        if let Some(flag) = system_audio_stop_flag.as_ref() {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        if let Some(flag) = mic_audio_stop_flag.as_ref() {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        log::info!("✅ 音频停止信号已设置");
+        
+        // 2. 然后停止FFmpeg进程
         if let Some(process) = process.as_mut() {
             #[cfg(target_os = "windows")]
             if was_paused {
@@ -1829,8 +1860,9 @@ pub fn stop_recording(
             }
         }
 
-        // 等待FFmpeg进程退出（需要时间处理最后一帧并写入文件）
+        // 3. 等待FFmpeg进程退出（需要时间处理最后一帧并写入文件）
         log::info!("🔧 等待视频录制进程退出...");
+        let video_exit_start = std::time::Instant::now();
         let mut video_exited = false;
         if let Some(process) = process.as_mut() {
             for _ in 0..80 {
@@ -1845,17 +1877,8 @@ pub fn stop_recording(
                 let _ = process.wait();
             }
         }
-        log::info!("✅ 视频录制进程已退出");
-
-        // FFmpeg进程已停止，现在停止音频
-        log::info!("🔧 视频已完全停止，现在设置音频停止信号...");
-        if let Some(flag) = system_audio_stop_flag.as_ref() {
-            flag.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-        if let Some(flag) = mic_audio_stop_flag.as_ref() {
-            flag.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-        log::info!("✅ 音频停止信号已设置");
+        video_exit_elapsed = Some(video_exit_start.elapsed());
+        log::info!("✅ 视频录制进程已退出，耗时: {}ms", video_exit_elapsed.unwrap().as_millis());
 
         // 对于非窗口录制，wgc_thread应该为None，不需要处理
         if wgc_thread.is_some() {
@@ -1925,14 +1948,33 @@ pub fn stop_recording(
     if let Some(join) = system_audio_thread {
         let _ = join.join();
     }
-    log::info!("✅ 系统音频线程已退出，耗时: {}ms", sys_audio_join_start.elapsed().as_millis());
+    let sys_audio_elapsed = sys_audio_join_start.elapsed().as_millis();
+    if sys_audio_elapsed > 100 {
+        log::info!("✅ 系统音频线程已退出，join耗时: {}ms", sys_audio_elapsed);
+    } else {
+        log::debug!("✅ 系统音频线程已退出，join耗时: {}ms", sys_audio_elapsed);
+    }
 
     log::info!("🔧 等待麦克风音频线程退出...");
     let mic_audio_join_start = std::time::Instant::now();
     if let Some(join) = mic_audio_thread {
         let _ = join.join();
     }
-    log::info!("✅ 麦克风音频线程已退出，耗时: {}ms", mic_audio_join_start.elapsed().as_millis());
+    let mic_audio_elapsed = mic_audio_join_start.elapsed().as_millis();
+    if mic_audio_elapsed > 100 {
+        log::info!("✅ 麦克风音频线程已退出，join耗时: {}ms", mic_audio_elapsed);
+    } else {
+        log::debug!("✅ 麦克风音频线程已退出，join耗时: {}ms", mic_audio_elapsed);
+    }
+    
+    // 🔧 记录总停止耗时
+    let total_stop_ms = stop_started_at.elapsed().as_millis();
+    log::info!("📊 录制停止总耗时: {}ms (视频={ }ms, 系统音频={}ms, 麦克风={}ms)",
+        total_stop_ms,
+        video_exit_elapsed.map(|e| e.as_millis()).unwrap_or(0),
+        sys_audio_elapsed,
+        mic_audio_elapsed
+    );
 
     if fatal_error.is_none() {
         // 🔧 性能优化：跳过视频验证，音频合并时会自然验证
