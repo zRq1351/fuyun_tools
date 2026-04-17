@@ -199,7 +199,11 @@ fn calculate_text_similarity_fast(text1: &str, text2: &str, len1: usize, len2: u
     }
     let max_len = len1.max(len2) as f64;
     let min_len = len1.min(len2) as f64;
-    let length_ratio = if max_len == 0.0 { 0.0 } else { min_len / max_len };
+    let length_ratio = if max_len == 0.0 {
+        0.0
+    } else {
+        min_len / max_len
+    };
     if text1.contains(text2) || text2.contains(text1) {
         return length_ratio.max(0.85);
     }
@@ -337,7 +341,9 @@ fn detect_text_completeness_with_similarity(
 
 fn count_punctuation(text: &str) -> usize {
     let punctuation_chars = ['。', '！', '？', '.', '!', '?', '；', ';', '，', ','];
-    text.chars().filter(|&c| punctuation_chars.contains(&c)).count()
+    text.chars()
+        .filter(|&c| punctuation_chars.contains(&c))
+        .count()
 }
 
 fn is_more_complete_sentence(new_text: &str, old_text: &str) -> bool {
@@ -363,10 +369,10 @@ fn is_truncated_sentence(text: &str) -> bool {
     let truncation_indicators = ['，', ',', '、', '(', '[', '{', '"', '\''];
     truncation_indicators.contains(&last_char)
         || (!has_sentence_endings(trimmed)
-        && (trimmed.ends_with("但非")
-        || trimmed.ends_with("但是")
-        || trimmed.ends_with("而且")
-        || trimmed.ends_with("并且")))
+            && (trimmed.ends_with("但非")
+                || trimmed.ends_with("但是")
+                || trimmed.ends_with("而且")
+                || trimmed.ends_with("并且")))
 }
 
 fn is_subset_of(new_text: &str, old_text: &str) -> bool {
@@ -386,7 +392,11 @@ fn stable_text_hash(text: &str) -> u64 {
     xxh3_64(text.as_bytes())
 }
 
-pub fn compare_versions(old_text: &str, new_text: &str, similarity_threshold: f64) -> VersionComparison {
+pub fn compare_versions(
+    old_text: &str,
+    new_text: &str,
+    similarity_threshold: f64,
+) -> VersionComparison {
     let cache_key = VersionCompareCacheKey {
         old_hash: stable_text_hash(old_text),
         new_hash: stable_text_hash(new_text),
@@ -404,9 +414,7 @@ pub fn compare_versions(old_text: &str, new_text: &str, similarity_threshold: f6
             should_replace: false,
             reason: "版本相同，无需替换".to_string(),
         };
-        VERSION_COMPARE_CACHE
-            .lock()
-            .put(cache_key, result.clone());
+        VERSION_COMPARE_CACHE.lock().put(cache_key, result.clone());
         return result;
     }
     let similarity = calculate_text_similarity(old_text, new_text);
@@ -426,7 +434,10 @@ pub fn compare_versions(old_text: &str, new_text: &str, similarity_threshold: f6
                         (false, "版本相同，无需替换".to_string())
                     }
                 } else if is_subset_of(new_text, old_text) {
-                    (true, "新版本是已有完整版本的子集，移动完整版本到前面".to_string())
+                    (
+                        true,
+                        "新版本是已有完整版本的子集，移动完整版本到前面".to_string(),
+                    )
                 } else {
                     let old_is_truncated = is_truncated_sentence(old_text);
                     let new_is_complete = has_sentence_endings(new_text);
@@ -469,9 +480,7 @@ pub fn compare_versions(old_text: &str, new_text: &str, similarity_threshold: f6
         should_replace,
         reason,
     };
-    VERSION_COMPARE_CACHE
-        .lock()
-        .put(cache_key, result.clone());
+    VERSION_COMPARE_CACHE.lock().put(cache_key, result.clone());
     result
 }
 
@@ -512,8 +521,8 @@ pub fn find_best_replacement_candidate(
                 Some((_, existing_comparison)) => {
                     if comparison.similarity_score > existing_comparison.similarity_score
                         || (comparison.similarity_score == existing_comparison.similarity_score
-                        && (matches!(comparison.new_completeness, TextCompleteness::Complete)
-                        || comparison.reason.contains("更完整")))
+                            && (matches!(comparison.new_completeness, TextCompleteness::Complete)
+                                || comparison.reason.contains("更完整")))
                     {
                         best_candidate = Some((index, comparison));
                     }

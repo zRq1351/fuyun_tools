@@ -36,10 +36,7 @@ pub fn emit_recording_finished(app: &AppHandle, result: &RecordingStopResult) {
     let _ = app.emit("recording-finished", payload);
 }
 
-pub fn emit_recording_device_list(
-    app: &AppHandle,
-    microphones: Vec<AudioInputDevice>,
-) {
+pub fn emit_recording_device_list(app: &AppHandle, microphones: Vec<AudioInputDevice>) {
     let payload = json!({
         "microphones": microphones
     });
@@ -70,8 +67,8 @@ pub fn emit_recording_stats_updated(
 pub fn emit_recording_audio_merging(
     app: &AppHandle,
     session_id: Option<&str>,
-    status: &str,  // "started", "progress", "completed", "failed"
-    progress: Option<u8>,  // 0-100
+    status: &str,         // "started", "progress", "completed", "failed"
+    progress: Option<u8>, // 0-100
     message: Option<&str>,
 ) {
     let payload = json!({

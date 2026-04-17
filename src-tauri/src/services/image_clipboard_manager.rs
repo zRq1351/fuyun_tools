@@ -91,9 +91,15 @@ fn maybe_log_queue_metrics() {
     }
     let dequeued = IMAGE_QUEUE_METRICS.dequeued.load(Ordering::Relaxed);
     let dropped_full = IMAGE_QUEUE_METRICS.dropped_full.load(Ordering::Relaxed);
-    let dropped_duplicate = IMAGE_QUEUE_METRICS.dropped_duplicate.load(Ordering::Relaxed);
-    let dropped_screenshot = IMAGE_QUEUE_METRICS.dropped_screenshot.load(Ordering::Relaxed);
-    let wait_total = IMAGE_QUEUE_METRICS.queue_wait_ms_total.load(Ordering::Relaxed);
+    let dropped_duplicate = IMAGE_QUEUE_METRICS
+        .dropped_duplicate
+        .load(Ordering::Relaxed);
+    let dropped_screenshot = IMAGE_QUEUE_METRICS
+        .dropped_screenshot
+        .load(Ordering::Relaxed);
+    let wait_total = IMAGE_QUEUE_METRICS
+        .queue_wait_ms_total
+        .load(Ordering::Relaxed);
     let avg_wait = if dequeued > 0 {
         wait_total as f64 / dequeued as f64
     } else {
@@ -120,15 +126,16 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
         if !state_guard.is_image_visible {
             state_guard.image_history_dirty = true;
         }
-        (state_guard.image_clipboard_manager.clone(), state_guard.is_image_visible)
+        (
+            state_guard.image_clipboard_manager.clone(),
+            state_guard.is_image_visible,
+        )
     };
     if !should_emit {
         return;
     }
     let manager = {
-        let guard = manager_arc
-            .lock()
-            .expect("infallible mutex lock failed");
+        let guard = manager_arc.lock().expect("infallible mutex lock failed");
         guard.clone()
     };
     let payload = serde_json::json!({
@@ -144,7 +151,6 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
         state_guard.image_history_dirty = false;
     }
 }
-
 
 // 快速去重：存储最近图片的采样数据用于快速比较
 const SAMPLE_POINTS: usize = 10;
@@ -175,11 +181,18 @@ fn matches_recent_sample(width: u32, height: u32, rgba: &[u8]) -> bool {
     let recent = RECENT_IMAGE_SAMPLES.lock();
 
     // 只检查最近 3 张
-    for (idx, (recent_width, recent_height, recent_sample)) in recent.iter().rev().take(3).enumerate() {
+    for (idx, (recent_width, recent_height, recent_sample)) in
+        recent.iter().rev().take(3).enumerate()
+    {
         if *recent_width == width && *recent_height == height {
             // 比较采样点
             if recent_sample == &sample {
-                log::info!("[重复检查] 图片 {}x{} 与最近第 {} 张图片采样命中，继续执行强签名校验", width, height, idx + 1);
+                log::info!(
+                    "[重复检查] 图片 {}x{} 与最近第 {} 张图片采样命中，继续执行强签名校验",
+                    width,
+                    height,
+                    idx + 1
+                );
                 return true;
             }
         }
@@ -286,12 +299,7 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, w
                         }
                     };
                     let manager = manager.clone();
-                    manager.add_rgba_image_with_source_blob(
-                        rgba,
-                        width,
-                        height,
-                        source_blob,
-                    );
+                    manager.add_rgba_image_with_source_blob(rgba, width, height, source_blob);
                     let history_preview = manager.get_history_preview();
                     let pinned_set = manager
                         .get_pinned_items()
@@ -432,7 +440,10 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                     for (rgba, width, height, source_blob) in images {
                         // 检查队列容量
                         if queue.len() >= MAX_QUEUE_SIZE {
-                            log::warn!("[监听线程] 待处理队列已满（{}），丢弃最早的图片", MAX_QUEUE_SIZE);
+                            log::warn!(
+                                "[监听线程] 待处理队列已满（{}），丢弃最早的图片",
+                                MAX_QUEUE_SIZE
+                            );
                             queue.pop_front();
                             IMAGE_QUEUE_METRICS
                                 .dropped_full
@@ -448,9 +459,14 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                         });
                         IMAGE_QUEUE_METRICS.enqueued.fetch_add(1, Ordering::Relaxed);
                         observe_queue_len(queue.len());
-                        log::info!("[监听线程] 图片入队: {}x{}, 当前队列长度: {}", width, height, queue.len());
+                        log::info!(
+                            "[监听线程] 图片入队: {}x{}, 当前队列长度: {}",
+                            width,
+                            height,
+                            queue.len()
+                        );
                     }
-                    drop(queue);  // 释放锁
+                    drop(queue); // 释放锁
 
                     // 通知处理线程有新任务
                     let (lock, cvar) = &**QUEUE_NOTIFY;

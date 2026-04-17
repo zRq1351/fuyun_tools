@@ -14,7 +14,8 @@ use std::sync::{
 use std::time::Duration;
 use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 use wasapi::{
-    initialize_mta, AudioClient, DeviceEnumerator, Direction, SampleType, SessionState, StreamMode, WaveFormat,
+    initialize_mta, AudioClient, DeviceEnumerator, Direction, SampleType, SessionState, StreamMode,
+    WaveFormat,
 };
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::GetWindowThreadProcessId;
@@ -39,7 +40,8 @@ pub struct AudioProcessInfo {
     pub name: String,
 }
 
-static AUDIO_RECENT_ACTIVITY: std::sync::OnceLock<Mutex<HashMap<u32, u64>>> = std::sync::OnceLock::new();
+static AUDIO_RECENT_ACTIVITY: std::sync::OnceLock<Mutex<HashMap<u32, u64>>> =
+    std::sync::OnceLock::new();
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -93,9 +95,18 @@ fn capture_process_loopback_to_wav(
             .map_err(|e| format!("创建进程音频文件失败(pid={}): {}", process_id, e))?;
         // ✅ 添加诊断日志：确认文件创建成功
         if let Ok(meta) = std::fs::metadata(&output_path) {
-            log::info!("进程音频文件创建成功(pid={}): {:?}, 大小: {} bytes", process_id, output_path.file_name(), meta.len());
+            log::info!(
+                "进程音频文件创建成功(pid={}): {:?}, 大小: {} bytes",
+                process_id,
+                output_path.file_name(),
+                meta.len()
+            );
         } else {
-            log::warn!("进程音频文件创建后检查失败(pid={}): {:?}", process_id, output_path.file_name());
+            log::warn!(
+                "进程音频文件创建后检查失败(pid={}): {:?}",
+                process_id,
+                output_path.file_name()
+            );
         }
         let mut queue = std::collections::VecDeque::<u8>::new();
         let blockalign = desired_format.get_blockalign() as usize;
@@ -147,29 +158,50 @@ fn capture_process_loopback_to_wav(
         }
 
         // ✅ 添加诊断日志：记录循环退出原因
-        log::info!("进程音频采集循环结束(pid={}), stop_flag={}", process_id, stop_flag.load(Ordering::SeqCst));
+        log::info!(
+            "进程音频采集循环结束(pid={}), stop_flag={}",
+            process_id,
+            stop_flag.load(Ordering::SeqCst)
+        );
 
         // 检查文件是否存在
         if let Ok(meta) = std::fs::metadata(&output_path) {
-            log::info!("进程音频文件在循环退出后存在(pid={}): {:?}, 大小: {} bytes", process_id, output_path.file_name(), meta.len());
+            log::info!(
+                "进程音频文件在循环退出后存在(pid={}): {:?}, 大小: {} bytes",
+                process_id,
+                output_path.file_name(),
+                meta.len()
+            );
         } else {
-            log::warn!("进程音频文件在循环退出后不存在(pid={}): {:?}", process_id, output_path.file_name());
+            log::warn!(
+                "进程音频文件在循环退出后不存在(pid={}): {:?}",
+                process_id,
+                output_path.file_name()
+            );
         }
-        
+
         let _ = audio_client.stop_stream();
-        writer
-            .finalize()
-            .map_err(|e| {
-                log::error!("进程音频文件完成失败(pid={}): {}", process_id, e);
-                format!("完成进程音频文件失败(pid={}): {}", process_id, e)
-            })?;
+        writer.finalize().map_err(|e| {
+            log::error!("进程音频文件完成失败(pid={}): {}", process_id, e);
+            format!("完成进程音频文件失败(pid={}): {}", process_id, e)
+        })?;
 
         // ✅ 添加诊断日志：记录最终文件状态
         match std::fs::metadata(&output_path) {
-            Ok(meta) => log::info!("进程音频文件最终状态(pid={}): {:?}, 大小: {} bytes", process_id, output_path.file_name(), meta.len()),
-            Err(e) => log::warn!("进程音频文件最终状态检查失败(pid={}): {:?}, {}", process_id, output_path.file_name(), e),
+            Ok(meta) => log::info!(
+                "进程音频文件最终状态(pid={}): {:?}, 大小: {} bytes",
+                process_id,
+                output_path.file_name(),
+                meta.len()
+            ),
+            Err(e) => log::warn!(
+                "进程音频文件最终状态检查失败(pid={}): {:?}, {}",
+                process_id,
+                output_path.file_name(),
+                e
+            ),
         }
-        
+
         Ok(())
     };
     let result = run();
@@ -215,15 +247,31 @@ pub fn start_process_loopback_wavs(
                 log::error!("进程音频采集线程异常退出(pid={}): {}", pid, e);
                 // ✅ 添加诊断日志：检查文件状态
                 match std::fs::metadata(&worker_path) {
-                    Ok(meta) => log::warn!("进程音频线程退出后文件仍存在: {:?}, 大小: {} bytes", worker_path.file_name(), meta.len()),
-                    Err(e) => log::warn!("进程音频线程退出后文件不存在: {:?}, {}", worker_path.file_name(), e),
+                    Ok(meta) => log::warn!(
+                        "进程音频线程退出后文件仍存在: {:?}, 大小: {} bytes",
+                        worker_path.file_name(),
+                        meta.len()
+                    ),
+                    Err(e) => log::warn!(
+                        "进程音频线程退出后文件不存在: {:?}, {}",
+                        worker_path.file_name(),
+                        e
+                    ),
                 }
             } else {
                 log::info!("进程音频采集线程正常退出(pid={})", pid);
                 // ✅ 添加诊断日志：检查文件状态
                 match std::fs::metadata(&worker_path) {
-                    Ok(meta) => log::info!("进程音频线程正常退出后文件存在: {:?}, 大小: {} bytes", worker_path.file_name(), meta.len()),
-                    Err(e) => log::warn!("进程音频线程正常退出后文件不存在: {:?}, {}", worker_path.file_name(), e),
+                    Ok(meta) => log::info!(
+                        "进程音频线程正常退出后文件存在: {:?}, 大小: {} bytes",
+                        worker_path.file_name(),
+                        meta.len()
+                    ),
+                    Err(e) => log::warn!(
+                        "进程音频线程正常退出后文件不存在: {:?}, {}",
+                        worker_path.file_name(),
+                        e
+                    ),
                 }
             }
         }));
@@ -276,10 +324,10 @@ pub fn start_process_loopback_wavs(
 pub fn list_audio_processes() -> Vec<AudioProcessInfo> {
     let refresh = RefreshKind::nothing().with_processes(ProcessRefreshKind::everything());
     let sys = System::new_with_specifics(refresh);
-    
+
     let window_titles = visible_window_process_titles();
     let visible_pids = window_titles.keys().copied().collect::<HashSet<u32>>();
-    
+
     let active_now = active_audio_process_ids();
     let now = now_ms();
     let recent_map = AUDIO_RECENT_ACTIVITY.get_or_init(|| Mutex::new(HashMap::new()));
@@ -355,8 +403,12 @@ fn active_audio_process_ids() -> HashSet<u32> {
         return set;
     };
     for i in 0..count {
-        let Ok(control) = session_enum.get_session(i) else { continue };
-        let Ok(state) = control.get_state() else { continue };
+        let Ok(control) = session_enum.get_session(i) else {
+            continue;
+        };
+        let Ok(state) = control.get_state() else {
+            continue;
+        };
         if state == SessionState::Active {
             if let Ok(pid) = control.get_process_id() {
                 if pid > 0 {
@@ -430,8 +482,8 @@ pub fn start_system_loopback_wav_with_device(
             } else {
                 None
             }
-                .or_else(|| host.default_output_device())
-                .ok_or_else(|| "未找到输出设备".to_string())?;
+            .or_else(|| host.default_output_device())
+            .ok_or_else(|| "未找到输出设备".to_string())?;
             // 选择可用采样配置：优先 supported_input_configs，其次 default_output_config，最后兜底 48kHz/立体声/F32
             let mut sample_format = CpalSampleFormat::F32;
             let mut config: StreamConfig = StreamConfig {
@@ -482,13 +534,21 @@ pub fn start_system_loopback_wav_with_device(
                 enabled_flag.load(Ordering::SeqCst),
                 recording_pause_flag.load(Ordering::SeqCst)
             );
-            
+
             let err_fn = |err| eprintln!("WASAPI 捕获错误: {}", err);
 
             // ✅ 添加诊断日志：记录文件创建状态
             match std::fs::metadata(&thread_output) {
-                Ok(meta) => log::info!("WASAPI音频文件创建成功: {:?}, 大小: {} bytes", thread_output.file_name(), meta.len()),
-                Err(e) => log::warn!("WASAPI音频文件创建后检查失败: {:?}, {}", thread_output.file_name(), e),
+                Ok(meta) => log::info!(
+                    "WASAPI音频文件创建成功: {:?}, 大小: {} bytes",
+                    thread_output.file_name(),
+                    meta.len()
+                ),
+                Err(e) => log::warn!(
+                    "WASAPI音频文件创建后检查失败: {:?}, {}",
+                    thread_output.file_name(),
+                    e
+                ),
             }
             let stream = match sample_format {
                 CpalSampleFormat::F32 => device
@@ -500,7 +560,11 @@ pub fn start_system_loopback_wav_with_device(
                                     let enabled = enabled_cb.load(Ordering::SeqCst)
                                         && !pause_cb.load(Ordering::SeqCst);
                                     for &v in data {
-                                        let s = if enabled { (v * i16::MAX as f32) as i16 } else { 0 };
+                                        let s = if enabled {
+                                            (v * i16::MAX as f32) as i16
+                                        } else {
+                                            0
+                                        };
                                         let _ = writer.write_sample(s);
                                     }
                                 }
@@ -523,7 +587,8 @@ pub fn start_system_loopback_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let _ = writer.write_sample(if enabled { v } else { 0 });
+                                            let _ =
+                                                writer.write_sample(if enabled { v } else { 0 });
                                         }
                                     }
                                 }
@@ -546,7 +611,8 @@ pub fn start_system_loopback_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let s: i16 =
+                                                if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }
@@ -570,7 +636,8 @@ pub fn start_system_loopback_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let s: i16 =
+                                                if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }
@@ -594,7 +661,8 @@ pub fn start_system_loopback_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let s: i16 =
+                                                if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }
@@ -618,7 +686,8 @@ pub fn start_system_loopback_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let s: i16 =
+                                                if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }
@@ -642,7 +711,8 @@ pub fn start_system_loopback_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let s: i16 =
+                                                if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }
@@ -666,7 +736,8 @@ pub fn start_system_loopback_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let s: i16 =
+                                                if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }
@@ -679,7 +750,9 @@ pub fn start_system_loopback_wav_with_device(
                 }
                 _ => return Err("不支持的采样格式".to_string()),
             };
-            stream.play().map_err(|e| format!("启动输入流失败: {}", e))?;
+            stream
+                .play()
+                .map_err(|e| format!("启动输入流失败: {}", e))?;
             let _ = tx.send(Ok(()));
 
             // 等待停止信号
@@ -711,10 +784,18 @@ pub fn start_system_loopback_wav_with_device(
 
             // 记录文件最终状态
             match std::fs::metadata(&thread_output) {
-                Ok(meta) => log::info!("✅ WASAPI音频文件最终大小: {:?}, {} bytes", thread_output.file_name(), meta.len()),
-                Err(e) => log::warn!("❌ WASAPI音频文件最终状态检查失败: {:?}, {}", thread_output.file_name(), e),
+                Ok(meta) => log::info!(
+                    "✅ WASAPI音频文件最终大小: {:?}, {} bytes",
+                    thread_output.file_name(),
+                    meta.len()
+                ),
+                Err(e) => log::warn!(
+                    "❌ WASAPI音频文件最终状态检查失败: {:?}, {}",
+                    thread_output.file_name(),
+                    e
+                ),
             }
-            
+
             Ok(())
         };
         if let Err(e) = run() {
@@ -778,8 +859,8 @@ pub fn start_microphone_wav_with_device(
             } else {
                 None
             }
-                .or_else(|| host.default_input_device())
-                .ok_or_else(|| "未找到输入设备".to_string())?;
+            .or_else(|| host.default_input_device())
+            .ok_or_else(|| "未找到输入设备".to_string())?;
 
             let mut sample_format = CpalSampleFormat::F32;
             let mut config: StreamConfig = StreamConfig {
@@ -831,13 +912,21 @@ pub fn start_microphone_wav_with_device(
                 enabled_flag.load(Ordering::SeqCst),
                 recording_pause_flag.load(Ordering::SeqCst)
             );
-            
+
             let err_fn = |err| eprintln!("WASAPI 麦克风捕获错误: {}", err);
 
             // ✅ 添加诊断日志：记录文件创建状态
             match std::fs::metadata(&thread_output) {
-                Ok(meta) => log::info!("WASAPI麦克风文件创建成功: {:?}, 大小: {} bytes", thread_output.file_name(), meta.len()),
-                Err(e) => log::warn!("WASAPI麦克风文件创建后检查失败: {:?}, {}", thread_output.file_name(), e),
+                Ok(meta) => log::info!(
+                    "WASAPI麦克风文件创建成功: {:?}, 大小: {} bytes",
+                    thread_output.file_name(),
+                    meta.len()
+                ),
+                Err(e) => log::warn!(
+                    "WASAPI麦克风文件创建后检查失败: {:?}, {}",
+                    thread_output.file_name(),
+                    e
+                ),
             }
             let stream = match sample_format {
                 CpalSampleFormat::F32 => device
@@ -849,7 +938,11 @@ pub fn start_microphone_wav_with_device(
                                     let enabled = enabled_cb.load(Ordering::SeqCst)
                                         && !pause_cb.load(Ordering::SeqCst);
                                     for &v in data {
-                                        let s = if enabled { (v * i16::MAX as f32) as i16 } else { 0 };
+                                        let s = if enabled {
+                                            (v * i16::MAX as f32) as i16
+                                        } else {
+                                            0
+                                        };
                                         let _ = writer.write_sample(s);
                                     }
                                 }
@@ -872,7 +965,8 @@ pub fn start_microphone_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let _ = writer.write_sample(if enabled { v } else { 0 });
+                                            let _ =
+                                                writer.write_sample(if enabled { v } else { 0 });
                                         }
                                     }
                                 }
@@ -895,7 +989,8 @@ pub fn start_microphone_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let s: i16 =
+                                                if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }
@@ -919,7 +1014,8 @@ pub fn start_microphone_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let s: i16 =
+                                                if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }
@@ -943,7 +1039,8 @@ pub fn start_microphone_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let s: i16 =
+                                                if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }
@@ -967,7 +1064,8 @@ pub fn start_microphone_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let s: i16 =
+                                                if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }
@@ -991,7 +1089,8 @@ pub fn start_microphone_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let s: i16 =
+                                                if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }
@@ -1015,7 +1114,8 @@ pub fn start_microphone_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let s: i16 = if enabled { v.to_sample::<i16>() } else { 0 };
+                                            let s: i16 =
+                                                if enabled { v.to_sample::<i16>() } else { 0 };
                                             let _ = writer.write_sample(s);
                                         }
                                     }
@@ -1028,7 +1128,9 @@ pub fn start_microphone_wav_with_device(
                 }
                 _ => return Err("不支持的采样格式".to_string()),
             };
-            stream.play().map_err(|e| format!("启动麦克风输入流失败: {}", e))?;
+            stream
+                .play()
+                .map_err(|e| format!("启动麦克风输入流失败: {}", e))?;
             let _ = tx.send(Ok(()));
 
             // 等待停止信号
@@ -1058,10 +1160,18 @@ pub fn start_microphone_wav_with_device(
 
             // 记录文件最终状态
             match std::fs::metadata(&thread_output) {
-                Ok(meta) => log::info!("✅ WASAPI麦克风文件最终大小: {:?}, {} bytes", thread_output.file_name(), meta.len()),
-                Err(e) => log::warn!("❌ WASAPI麦克风文件最终状态检查失败: {:?}, {}", thread_output.file_name(), e),
+                Ok(meta) => log::info!(
+                    "✅ WASAPI麦克风文件最终大小: {:?}, {} bytes",
+                    thread_output.file_name(),
+                    meta.len()
+                ),
+                Err(e) => log::warn!(
+                    "❌ WASAPI麦克风文件最终状态检查失败: {:?}, {}",
+                    thread_output.file_name(),
+                    e
+                ),
             }
-            
+
             Ok(())
         };
         if let Err(e) = run() {
@@ -1113,14 +1223,21 @@ pub fn start_system_loopback_aac_with_device(
 
             ffmpeg_cmd
                 .args(&[
-                    "-f", "f32le",           // 输入格式：32位浮点小端
-                    "-ar", "48000",          // 采样率：48kHz
-                    "-ac", "2",              // 声道数：立体声
-                    "-i", "-",               // 从 stdin 读取
-                    "-c:a", "aac",           // 编码器：AAC
-                    "-b:a", "128k",          // 比特率：128kbps
-                    "-profile:a", "aac_low", // 快速配置
-                    "-y",                    // 覆盖输出文件
+                    "-f",
+                    "f32le", // 输入格式：32位浮点小端
+                    "-ar",
+                    "48000", // 采样率：48kHz
+                    "-ac",
+                    "2", // 声道数：立体声
+                    "-i",
+                    "-", // 从 stdin 读取
+                    "-c:a",
+                    "aac", // 编码器：AAC
+                    "-b:a",
+                    "128k", // 比特率：128kbps
+                    "-profile:a",
+                    "aac_low", // 快速配置
+                    "-y",      // 覆盖输出文件
                     thread_output.to_str().ok_or("无效的输出路径")?,
                 ])
                 .stdin(Stdio::piped())
@@ -1131,8 +1248,7 @@ pub fn start_system_loopback_aac_with_device(
                 .spawn()
                 .map_err(|e| format!("启动 FFmpeg 失败: {}", e))?;
 
-            let stdin = child.stdin.take()
-                .ok_or("无法获取 FFmpeg stdin")?;
+            let stdin = child.stdin.take().ok_or("无法获取 FFmpeg stdin")?;
 
             {
                 if let Ok(mut guard) = thread_ffmpeg.lock() {
@@ -1140,7 +1256,10 @@ pub fn start_system_loopback_aac_with_device(
                 }
             }
 
-            log::info!("🔧 FFmpeg AAC 编码管道已启动: {:?}", thread_output.file_name());
+            log::info!(
+                "🔧 FFmpeg AAC 编码管道已启动: {:?}",
+                thread_output.file_name()
+            );
 
             // 2. WASAPI 捕获音频并写入 FFmpeg stdin
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
@@ -1164,8 +1283,8 @@ pub fn start_system_loopback_aac_with_device(
             } else {
                 None
             }
-                .or_else(|| host.default_output_device())
-                .ok_or_else(|| "未找到输出设备".to_string())?;
+            .or_else(|| host.default_output_device())
+            .ok_or_else(|| "未找到输出设备".to_string())?;
 
             let config: StreamConfig = StreamConfig {
                 channels: 2,
@@ -1216,7 +1335,9 @@ pub fn start_system_loopback_aac_with_device(
                 )
                 .map_err(|e| format!("创建输入流失败: {}", e))?;
 
-            stream.play().map_err(|e| format!("启动输入流失败: {}", e))?;
+            stream
+                .play()
+                .map_err(|e| format!("启动输入流失败: {}", e))?;
             let _ = tx.send(Ok(()));
 
             // 等待停止信号
@@ -1246,8 +1367,12 @@ pub fn start_system_loopback_aac_with_device(
                     for _ in 0..50 {
                         match child.try_wait() {
                             Ok(Some(status)) => {
-                                log::info!("✅ FFmpeg AAC 编码完成: {:?}, exit_status={}, 耗时={}ms", 
-                                    thread_output.file_name(), status, stop_start.elapsed().as_millis());
+                                log::info!(
+                                    "✅ FFmpeg AAC 编码完成: {:?}, exit_status={}, 耗时={}ms",
+                                    thread_output.file_name(),
+                                    status,
+                                    stop_start.elapsed().as_millis()
+                                );
                                 break;
                             }
                             Ok(None) => {

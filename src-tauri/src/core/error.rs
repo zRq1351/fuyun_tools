@@ -91,7 +91,12 @@ fn compact_error_details(raw: &str) -> String {
 pub fn to_frontend_error_string(err: AppError) -> String {
     match err.details.as_deref() {
         Some(details) if !details.trim().is_empty() => {
-            format!("[{}] {}；{}", err.code, err.message, compact_error_details(details))
+            format!(
+                "[{}] {}；{}",
+                err.code,
+                err.message,
+                compact_error_details(details)
+            )
         }
         _ => format!("[{}] {}", err.code, err.message),
     }
@@ -160,4 +165,3 @@ impl From<serde_json::Error> for AppError {
         AppError::new(ErrorCode::SystemError, format!("JSON 解析错误: {}", err))
     }
 }
-

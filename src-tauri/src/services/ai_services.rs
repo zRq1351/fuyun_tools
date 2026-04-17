@@ -3,17 +3,21 @@ use crate::core::error::{AppError, AppResult, ErrorCode};
 use crate::core::perf_metrics::record_perf_metric;
 use crate::services::ai_client::{AIClient, AIConfig};
 use crate::sync::Mutex;
-use crate::ui::window_manager::{hide_selection_toolbar_impl, show_result_window, update_result_window};
+use crate::ui::window_manager::{
+    hide_selection_toolbar_impl, show_result_window, update_result_window,
+};
 use crate::utils::utils_helpers::{
     default_explanation_prompt_template, default_translation_prompt_template,
 };
 use serde::Deserialize;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-fn lock_state<'a>(state: &'a Arc<Mutex<SharedAppState>>) -> crate::sync::MutexGuard<'a, SharedAppState> {
+fn lock_state<'a>(
+    state: &'a Arc<Mutex<SharedAppState>>,
+) -> crate::sync::MutexGuard<'a, SharedAppState> {
     state.lock().expect("infallible mutex lock failed")
 }
 
@@ -23,7 +27,10 @@ fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
         let settings_snapshot = state_guard.settings.clone();
 
         if settings_snapshot.ai_provider.is_empty() {
-            return Err(AppError::new(ErrorCode::ConfigError, "未配置AI提供商，请在设置中选择提供商"));
+            return Err(AppError::new(
+                ErrorCode::ConfigError,
+                "未配置AI提供商，请在设置中选择提供商",
+            ));
         }
 
         if !settings_snapshot
@@ -69,12 +76,7 @@ fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
         let api_url = provider_config.api_url.clone();
         let model_name = provider_config.model_name.clone();
 
-        (
-            settings_snapshot,
-            provider_key,
-            api_url,
-            model_name,
-        )
+        (settings_snapshot, provider_key, api_url, model_name)
     };
 
     if !api_url.starts_with("https://") {
@@ -85,10 +87,12 @@ fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
     }
 
     log::info!("正在验证提供商 {} 的配置", provider_key);
-    let api_key = settings_snapshot.get_provider_api_key(&provider_key).map_err(|e| {
-        log::error!("读取密钥库失败: {}", e);
-        AppError::new(ErrorCode::SystemError, format!("读取密钥库失败: {}", e))
-    })?;
+    let api_key = settings_snapshot
+        .get_provider_api_key(&provider_key)
+        .map_err(|e| {
+            log::error!("读取密钥库失败: {}", e);
+            AppError::new(ErrorCode::SystemError, format!("读取密钥库失败: {}", e))
+        })?;
 
     if api_key.is_empty() {
         log::warn!("提供商 {} 的API密钥为空", provider_key);
@@ -177,7 +181,11 @@ fn set_active_operation(state: &Arc<Mutex<SharedAppState>>, kind: AiStreamKind, 
     }
 }
 
-fn is_operation_active(state: &Arc<Mutex<SharedAppState>>, kind: AiStreamKind, operation_id: u64) -> bool {
+fn is_operation_active(
+    state: &Arc<Mutex<SharedAppState>>,
+    kind: AiStreamKind,
+    operation_id: u64,
+) -> bool {
     let state_guard = lock_state(state);
     match kind {
         AiStreamKind::Translation => state_guard.active_translation_op_id == operation_id,
@@ -240,7 +248,9 @@ async fn execute_stream_request(
         }
     };
 
-    let operation_id = request.op_id.unwrap_or_else(|| next_ai_operation_id(&state_arc));
+    let operation_id = request
+        .op_id
+        .unwrap_or_else(|| next_ai_operation_id(&state_arc));
     set_active_operation(&state_arc, kind, operation_id);
     let client: AIClient = get_or_create_ai_client(state_arc.clone()).await?;
 
@@ -307,9 +317,7 @@ async fn execute_stream_request(
     let first_chunk_recorded = AtomicBool::new(false);
     let result = client
         .generate_text_stream(messages.as_str(), Some(1000), |content_chunk| {
-            if !content_chunk.is_empty()
-                && !first_chunk_recorded.swap(true, Ordering::Relaxed)
-            {
+            if !content_chunk.is_empty() && !first_chunk_recorded.swap(true, Ordering::Relaxed) {
                 record_perf_metric(
                     match kind {
                         AiStreamKind::Translation => "ai.translation.first_chunk",

@@ -4,19 +4,21 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use windows_capture::capture::{CaptureControlError, Context, GraphicsCaptureApiHandler};
-use windows_capture::encoder::{AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder};
-use windows_capture::frame::Frame;
-use windows_capture::graphics_capture_api::InternalCaptureControl;
-use windows_capture::settings::{
-    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, MinimumUpdateIntervalSettings,
-    SecondaryWindowSettings, Settings,
-};
-use windows_capture::window::Window;
 #[cfg(target_os = "windows")]
 use winapi::shared::windef::RECT;
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::{GetWindowRect, IsIconic, IsWindow, IsWindowVisible};
+use windows_capture::capture::{CaptureControlError, Context, GraphicsCaptureApiHandler};
+use windows_capture::encoder::{
+    AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
+};
+use windows_capture::frame::Frame;
+use windows_capture::graphics_capture_api::InternalCaptureControl;
+use windows_capture::settings::{
+    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
+    MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
+};
+use windows_capture::window::Window;
 
 static WGC_FORCE_DEFAULT_BORDER: AtomicBool = AtomicBool::new(false);
 static WGC_FORCE_DEFAULT_DIRTY_REGION: AtomicBool = AtomicBool::new(false);
@@ -77,7 +79,9 @@ fn validate_hwnd_target(hwnd: usize) -> Result<(), String> {
 
 pub fn get_window_rect_from_target(target_id: &str) -> Result<(i32, i32, u32, u32), String> {
     let window = parse_window_target(target_id)?;
-    let rect = window.rect().map_err(|e| format!("读取窗口尺寸失败: {}", e))?;
+    let rect = window
+        .rect()
+        .map_err(|e| format!("读取窗口尺寸失败: {}", e))?;
     let width = (rect.right - rect.left).max(1) as u32;
     let height = (rect.bottom - rect.top).max(1) as u32;
     Ok((rect.left, rect.top, width, height))
@@ -85,7 +89,9 @@ pub fn get_window_rect_from_target(target_id: &str) -> Result<(i32, i32, u32, u3
 
 pub fn get_window_title_from_target(target_id: &str) -> Result<String, String> {
     let window = parse_window_target(target_id)?;
-    window.title().map_err(|e| format!("读取窗口标题失败: {}", e))
+    window
+        .title()
+        .map_err(|e| format!("读取窗口标题失败: {}", e))
 }
 
 pub fn validate_window_capture_target(target_id: &str) -> Result<(), String> {
@@ -159,20 +165,26 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
             ContainerSettingsBuilder::default(),
             &ctx.flags.output_path,
         )
-            .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
         Ok(Self {
             encoder: Some(encoder),
             flags: ctx.flags,
         })
     }
 
-    fn on_frame_arrived(&mut self, frame: &mut Frame, _capture_control: InternalCaptureControl) -> Result<(), Self::Error> {
+    fn on_frame_arrived(
+        &mut self,
+        frame: &mut Frame,
+        _capture_control: InternalCaptureControl,
+    ) -> Result<(), Self::Error> {
         if self.flags.pause_flag.load(Ordering::Relaxed) {
             return Ok(());
         }
         if self.flags.first_frame_elapsed_ms.load(Ordering::Relaxed) == u64::MAX {
             let elapsed_ms = self.flags.capture_origin_instant.elapsed().as_millis() as u64;
-            self.flags.first_frame_elapsed_ms.store(elapsed_ms, Ordering::Relaxed);
+            self.flags
+                .first_frame_elapsed_ms
+                .store(elapsed_ms, Ordering::Relaxed);
         }
         if let Some(encoder) = self.encoder.as_mut() {
             encoder.send_frame(frame).map_err(|e| e.to_string())?;
@@ -212,7 +224,9 @@ pub fn start_window_capture_to_mp4(
     prefer_default_border: bool,
 ) -> Result<WgcCaptureHandle, String> {
     let window = parse_window_target(target_id)?;
-    let rect = window.rect().map_err(|e| format!("读取窗口尺寸失败: {}", e))?;
+    let rect = window
+        .rect()
+        .map_err(|e| format!("读取窗口尺寸失败: {}", e))?;
     let width = (rect.right - rect.left).max(1) as u32;
     let height = (rect.bottom - rect.top).max(1) as u32;
     let target_id = target_id.trim().to_string();
@@ -237,11 +251,12 @@ pub fn start_window_capture_to_mp4(
     };
     let stop_flag_for_thread = stop_flag.clone();
     let join = thread::spawn(move || {
-        let draw_border_setting = if prefer_default_border || WGC_FORCE_DEFAULT_BORDER.load(Ordering::Relaxed) {
-            DrawBorderSettings::Default
-        } else {
-            DrawBorderSettings::WithoutBorder
-        };
+        let draw_border_setting =
+            if prefer_default_border || WGC_FORCE_DEFAULT_BORDER.load(Ordering::Relaxed) {
+                DrawBorderSettings::Default
+            } else {
+                DrawBorderSettings::WithoutBorder
+            };
         let mut dirty_region_setting = if WGC_FORCE_DEFAULT_DIRTY_REGION.load(Ordering::Relaxed) {
             DirtyRegionSettings::Default
         } else {

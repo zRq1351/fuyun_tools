@@ -80,5 +80,9 @@ pub fn build_output_paths(output_dir: &Path) -> (PathBuf, PathBuf, String) {
     let session_id = format!("rec-{}", timestamp_ms);
     let final_name = format!("{}.mp4", session_id);
     let tmp_name = format!("{}.tmp.mp4", session_id);
-    (output_dir.join(tmp_name), output_dir.join(final_name), session_id)
+    (
+        output_dir.join(tmp_name),
+        output_dir.join(final_name),
+        session_id,
+    )
 }

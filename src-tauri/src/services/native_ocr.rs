@@ -42,8 +42,8 @@ pub async fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, S
         .map_err(|e| format!("OCR Base64解码失败: {}", e))?;
 
     fn preprocess_png_bytes(input: &[u8]) -> Result<Vec<u8>, String> {
-        let image = image::load_from_memory(input)
-            .map_err(|e| format!("OCR 预处理加载图片失败: {}", e))?;
+        let image =
+            image::load_from_memory(input).map_err(|e| format!("OCR 预处理加载图片失败: {}", e))?;
         let target_w = (image.width().max(1) * 2).min(4096);
         let target_h = (image.height().max(1) * 2).min(4096);
         let resized = image.resize_exact(target_w, target_h, FilterType::Lanczos3);
@@ -68,8 +68,8 @@ pub async fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, S
         png_bytes: &[u8],
         language_tag: Option<&str>,
     ) -> Result<NativeOcrResult, String> {
-        let stream = InMemoryRandomAccessStream::new()
-            .map_err(|e| format!("OCR 创建内存流失败: {}", e))?;
+        let stream =
+            InMemoryRandomAccessStream::new().map_err(|e| format!("OCR 创建内存流失败: {}", e))?;
         let writer = DataWriter::CreateDataWriter(&stream)
             .map_err(|e| format!("OCR 创建DataWriter失败: {}", e))?;
         writer
@@ -121,19 +121,27 @@ pub async fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, S
             .map_err(|e| format!("OCR 读取行结果失败: {}", e))?;
         let mut paragraph_lines = Vec::new();
         for i in 0..lines.Size().unwrap_or(0) {
-            let line = lines.GetAt(i).map_err(|e| format!("OCR 读取行失败: {}", e))?;
-            let text = line.Text().map_err(|e| format!("OCR 读取行文本失败: {}", e))?;
+            let line = lines
+                .GetAt(i)
+                .map_err(|e| format!("OCR 读取行失败: {}", e))?;
+            let text = line
+                .Text()
+                .map_err(|e| format!("OCR 读取行文本失败: {}", e))?;
             let line_text = text.to_string().trim().to_string();
             if line_text.is_empty() {
                 continue;
             }
-            let words = line.Words().map_err(|e| format!("OCR 读取行词失败: {}", e))?;
+            let words = line
+                .Words()
+                .map_err(|e| format!("OCR 读取行词失败: {}", e))?;
             let mut min_x = f64::MAX;
             let mut min_y = f64::MAX;
             let mut max_x: f64 = 0.0;
             let mut max_y: f64 = 0.0;
             for wi in 0..words.Size().unwrap_or(0) {
-                let word = words.GetAt(wi).map_err(|e| format!("OCR 读取词失败: {}", e))?;
+                let word = words
+                    .GetAt(wi)
+                    .map_err(|e| format!("OCR 读取词失败: {}", e))?;
                 let rect = word
                     .BoundingRect()
                     .map_err(|e| format!("OCR 读取词框失败: {}", e))?;

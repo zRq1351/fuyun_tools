@@ -91,8 +91,7 @@ fn capture_screen_region_internal(
     width: u32,
     height: u32,
 ) -> Result<(Vec<u8>, u32, u32), String> {
-    let screens = screenshots::Screen::all()
-        .map_err(|e| format!("获取屏幕列表失败: {}", e))?;
+    let screens = screenshots::Screen::all().map_err(|e| format!("获取屏幕列表失败: {}", e))?;
 
     if screens.is_empty() {
         return Err("未检测到屏幕".to_string());
@@ -140,7 +139,8 @@ fn capture_screen_region_internal(
         .get(best_screen_index.unwrap_or(0))
         .ok_or_else(|| "无法获取目标屏幕".to_string())?;
 
-    let image = screen.capture()
+    let image = screen
+        .capture()
         .map_err(|e| format!("捕获屏幕失败: {}", e))?;
 
     let img_width = image.width();
@@ -175,7 +175,12 @@ fn capture_screen_region_internal(
         return Err("裁剪图片数据长度不匹配".to_string());
     }
 
-    log::info!("截图成功: {}x{}, 数据大小: {} bytes", width, height, rgba_data.len());
+    log::info!(
+        "截图成功: {}x{}, 数据大小: {} bytes",
+        width,
+        height,
+        rgba_data.len()
+    );
 
     Ok((rgba_data, width, height))
 }
@@ -185,8 +190,7 @@ fn capture_screen_region_internal(
 /// # Returns
 /// * `Result<(Vec<u8>, u32, u32, i32, i32)>` - (RGBA像素数据, 宽度, 高度, 屏幕原点X, 屏幕原点Y)
 pub fn capture_full_screen() -> Result<(Vec<u8>, u32, u32, i32, i32), String> {
-    let screens = screenshots::Screen::all()
-        .map_err(|e| format!("获取屏幕列表失败: {}", e))?;
+    let screens = screenshots::Screen::all().map_err(|e| format!("获取屏幕列表失败: {}", e))?;
 
     if screens.is_empty() {
         return Err("未检测到屏幕".to_string());
@@ -232,8 +236,7 @@ pub fn capture_full_screen() -> Result<(Vec<u8>, u32, u32, i32, i32), String> {
 /// # Returns
 /// * `Result<(u32, u32)>` - (宽度, 高度)
 pub fn get_screen_size() -> Result<(u32, u32), String> {
-    let screens = screenshots::Screen::all()
-        .map_err(|e| format!("获取屏幕列表失败: {}", e))?;
+    let screens = screenshots::Screen::all().map_err(|e| format!("获取屏幕列表失败: {}", e))?;
 
     let (_, _, width, height) = resolve_virtual_screen_bounds(&screens)?;
     Ok((width, height))

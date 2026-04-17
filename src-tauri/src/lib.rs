@@ -1,9 +1,9 @@
 pub mod core;
+pub mod features;
 pub mod services;
+pub mod sync;
 pub mod ui;
 pub mod utils;
-pub mod features;
-pub mod sync;
 
 use crate::core::app_state::AppState;
 use crate::core::error::install_global_panic_hook;
@@ -15,10 +15,12 @@ use crate::services::image_clipboard_manager::{
 use crate::sync::Mutex;
 use crate::ui::commands::*;
 use crate::ui::commands_recording::{
-    cancel_recording, check_recording_ffmpeg, download_recording_ffmpeg, get_recording_output_dir, get_recording_state,
-    list_recording_audio_devices, list_recording_audio_processes, list_recording_system_output_devices, open_recording_folder, pause_recording,
-    resize_recording_toolbar, resume_recording, run_recording_regression, show_recording_toolbar, start_recording,
-    stop_recording, toggle_microphone_from_shortcut, toggle_recording_from_shortcut, update_recording_audio_capture,
+    cancel_recording, check_recording_ffmpeg, download_recording_ffmpeg, get_recording_output_dir,
+    get_recording_state, list_recording_audio_devices, list_recording_audio_processes,
+    list_recording_system_output_devices, open_recording_folder, pause_recording,
+    resize_recording_toolbar, resume_recording, run_recording_regression, show_recording_toolbar,
+    start_recording, stop_recording, toggle_microphone_from_shortcut,
+    toggle_recording_from_shortcut, update_recording_audio_capture,
 };
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{
@@ -49,7 +51,9 @@ fn now_unix_ms_u64() -> u64 {
 
 fn start_auto_backup_scheduler(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     thread::spawn(move || loop {
-        match tauri::async_runtime::block_on(crate::ui::commands::run_auto_backup_tick(state.clone())) {
+        match tauri::async_runtime::block_on(crate::ui::commands::run_auto_backup_tick(
+            state.clone(),
+        )) {
             Ok(true) => {
                 let _ = app_handle.emit(
                     "backup-run-updated",
@@ -81,11 +85,7 @@ pub fn start_text_selection_listener(app_handle: AppHandle, state: Arc<Mutex<App
         state_guard.settings.selection_enabled
     };
 
-    features::mouse_listener::set_selection_listener_enabled(
-        app_handle,
-        state,
-        selection_enabled,
-    );
+    features::mouse_listener::set_selection_listener_enabled(app_handle, state, selection_enabled);
 }
 
 /// 运行Tauri应用程序
@@ -101,7 +101,11 @@ pub fn run() {
                 bind_standard_window_close_to_hide(&settings_window);
             }
             if let Some(recording_window) = app.get_webview_window("recording_toolbar") {
-                bind_overlay_window_events(&recording_window, app.handle().clone(), "recording_toolbar");
+                bind_overlay_window_events(
+                    &recording_window,
+                    app.handle().clone(),
+                    "recording_toolbar",
+                );
             }
             if app.get_webview_window("image_clipboard").is_some() {
                 let _ = hide_overlay_window_by_label(&app.handle().clone(), "image_clipboard");
@@ -165,8 +169,9 @@ pub fn run() {
             };
             let mut shortcut_conflicts: Vec<String> = Vec::new();
             if text_clipboard_enabled {
-                if let Err(e) = app.global_shortcut()
-                    .on_shortcut(hot_key.as_str(), move |_app, _shortcut, event| {
+                if let Err(e) = app.global_shortcut().on_shortcut(
+                    hot_key.as_str(),
+                    move |_app, _shortcut, event| {
                         if let ShortcutState::Pressed = event.state {
                             let state_guard = lock_state(&state_clone);
                             if !state_guard.settings.text_clipboard_enabled {
@@ -175,12 +180,15 @@ pub fn run() {
                             if !state_guard.is_visible && !state_guard.is_image_visible {
                                 drop(state_guard);
                                 crate::ui::commands::interrupt_text_fill_flow(&state_clone);
-                                show_clipboard_window(app_handle_clone.clone(), state_clone.clone());
+                                show_clipboard_window(
+                                    app_handle_clone.clone(),
+                                    state_clone.clone(),
+                                );
                                 features::mouse_listener::reset_ctrl_key_state();
                             }
                         }
-                    })
-                {
+                    },
+                ) {
                     log::warn!("文字窗口快捷键 '{}' 注册失败: {}", hot_key, e);
                     shortcut_conflicts.push(format!("文字窗口：{}", hot_key));
                 }
@@ -189,8 +197,9 @@ pub fn run() {
             let state_clone_image = state_arc.clone();
             let app_handle_clone_image = app_handle.clone();
             if image_clipboard_enabled {
-                if let Err(e) = app.global_shortcut()
-                    .on_shortcut(image_hot_key.as_str(), move |_app, _shortcut, event| {
+                if let Err(e) = app.global_shortcut().on_shortcut(
+                    image_hot_key.as_str(),
+                    move |_app, _shortcut, event| {
                         if let ShortcutState::Pressed = event.state {
                             let state_guard = lock_state(&state_clone_image);
                             if !state_guard.settings.image_clipboard_enabled {
@@ -199,11 +208,14 @@ pub fn run() {
                             if !state_guard.is_visible && !state_guard.is_image_visible {
                                 drop(state_guard);
                                 crate::ui::commands::interrupt_image_fill_flow(&state_clone_image);
-                                show_image_clipboard_window(app_handle_clone_image.clone(), state_clone_image.clone());
+                                show_image_clipboard_window(
+                                    app_handle_clone_image.clone(),
+                                    state_clone_image.clone(),
+                                );
                             }
                         }
-                    })
-                {
+                    },
+                ) {
                     log::warn!("图片窗口快捷键 '{}' 注册失败: {}", image_hot_key, e);
                     shortcut_conflicts.push(format!("图片窗口：{}", image_hot_key));
                 }
@@ -212,8 +224,9 @@ pub fn run() {
             let app_handle_clone_screenshot = app_handle.clone();
             let state_clone_screenshot = state_arc.clone();
             if screenshot_enabled {
-                if let Err(e) = app.global_shortcut()
-                    .on_shortcut(screenshot_hot_key.as_str(), move |_app, _shortcut, event| {
+                if let Err(e) = app.global_shortcut().on_shortcut(
+                    screenshot_hot_key.as_str(),
+                    move |_app, _shortcut, event| {
                         if let ShortcutState::Pressed = event.state {
                             let state_guard = lock_state(&state_clone_screenshot);
                             if !state_guard.settings.screenshot_enabled {
@@ -222,13 +235,18 @@ pub fn run() {
                             drop(state_guard);
                             let app_handle_inner = app_handle_clone_screenshot.clone();
                             tauri::async_runtime::spawn(async move {
-                                if let Err(e) = crate::ui::commands::open_screenshot_editor(app_handle_inner, None).await {
+                                if let Err(e) = crate::ui::commands::open_screenshot_editor(
+                                    app_handle_inner,
+                                    None,
+                                )
+                                .await
+                                {
                                     log::error!("截图失败: {}", e);
                                 }
                             });
                         }
-                    })
-                {
+                    },
+                ) {
                     log::warn!("截图快捷键 '{}' 注册失败: {}", screenshot_hot_key, e);
                     shortcut_conflicts.push(format!("截图：{}", screenshot_hot_key));
                 }
@@ -237,12 +255,17 @@ pub fn run() {
             let app_handle_clone_recording = app_handle.clone();
             let state_clone_recording = state_arc.clone();
             if recording_enabled {
-                if let Err(e) = app.global_shortcut()
-                    .on_shortcut(recording_hot_key.as_str(), move |_app, _shortcut, event| {
+                if let Err(e) = app.global_shortcut().on_shortcut(
+                    recording_hot_key.as_str(),
+                    move |_app, _shortcut, event| {
                         if let ShortcutState::Pressed = event.state {
                             let now_ms = now_unix_ms_u64();
-                            let last_ms = RECORDING_SHORTCUT_LAST_TRIGGER_MS.load(Ordering::Relaxed);
-                            if last_ms > 0 && now_ms.saturating_sub(last_ms) < RECORDING_SHORTCUT_MIN_INTERVAL_MS {
+                            let last_ms =
+                                RECORDING_SHORTCUT_LAST_TRIGGER_MS.load(Ordering::Relaxed);
+                            if last_ms > 0
+                                && now_ms.saturating_sub(last_ms)
+                                    < RECORDING_SHORTCUT_MIN_INTERVAL_MS
+                            {
                                 return;
                             }
                             if RECORDING_SHORTCUT_IN_FLIGHT.swap(true, Ordering::AcqRel) {
@@ -256,8 +279,8 @@ pub fn run() {
                                 RECORDING_SHORTCUT_IN_FLIGHT.store(false, Ordering::Release);
                             });
                         }
-                    })
-                {
+                    },
+                ) {
                     log::warn!("录屏快捷键 '{}' 注册失败: {}", recording_hot_key, e);
                     shortcut_conflicts.push(format!("录屏：{}", recording_hot_key));
                 }
@@ -266,8 +289,9 @@ pub fn run() {
             // 注册麦克风快捷键（按住开启，松开关闭）
             let app_handle_clone_mic = app_handle.clone();
             if recording_enabled {
-                if let Err(e) = app.global_shortcut()
-                    .on_shortcut(recording_mic_toggle_hot_key.as_str(), move |_app, _shortcut, event| {
+                if let Err(e) = app.global_shortcut().on_shortcut(
+                    recording_mic_toggle_hot_key.as_str(),
+                    move |_app, _shortcut, event| {
                         let app_handle_inner = app_handle_clone_mic.clone();
                         match event.state {
                             ShortcutState::Pressed => {
@@ -283,16 +307,20 @@ pub fn run() {
                                 });
                             }
                         }
-                    })
-                {
-                    log::warn!("麦克风切换快捷键 '{}' 注册失败: {}", recording_mic_toggle_hot_key, e);
+                    },
+                ) {
+                    log::warn!(
+                        "麦克风切换快捷键 '{}' 注册失败: {}",
+                        recording_mic_toggle_hot_key,
+                        e
+                    );
                 }
             }
 
             let app_handle_clone_longshot_finish = app_handle.clone();
-            if let Err(e) = app
-                .global_shortcut()
-                .on_shortcut("Ctrl+Alt+Enter", move |_app, _shortcut, event| {
+            if let Err(e) = app.global_shortcut().on_shortcut(
+                "Ctrl+Alt+Enter",
+                move |_app, _shortcut, event| {
                     if let ShortcutState::Pressed = event.state {
                         let app_handle_inner = app_handle_clone_longshot_finish.clone();
                         tauri::async_runtime::spawn(async move {
@@ -302,15 +330,15 @@ pub fn run() {
                             .await;
                         });
                     }
-                })
-            {
+                },
+            ) {
                 log::warn!("长截图完成快捷键注册失败: {}", e);
             }
 
             let app_handle_clone_longshot_cancel = app_handle.clone();
-            if let Err(e) = app
-                .global_shortcut()
-                .on_shortcut("Ctrl+Alt+Backspace", move |_app, _shortcut, event| {
+            if let Err(e) = app.global_shortcut().on_shortcut(
+                "Ctrl+Alt+Backspace",
+                move |_app, _shortcut, event| {
                     if let ShortcutState::Pressed = event.state {
                         let app_handle_inner = app_handle_clone_longshot_cancel.clone();
                         tauri::async_runtime::spawn(async move {
@@ -320,26 +348,27 @@ pub fn run() {
                             .await;
                         });
                     }
-                })
-            {
+                },
+            ) {
                 log::warn!("长截图取消快捷键注册失败: {}", e);
             }
 
             let app_handle_clone_longshot_pause = app_handle.clone();
-            if let Err(e) = app
-                .global_shortcut()
-                .on_shortcut("Ctrl+Alt+P", move |_app, _shortcut, event| {
+            if let Err(e) = app.global_shortcut().on_shortcut(
+                "Ctrl+Alt+P",
+                move |_app, _shortcut, event| {
                     if let ShortcutState::Pressed = event.state {
                         let app_handle_inner = app_handle_clone_longshot_pause.clone();
                         tauri::async_runtime::spawn(async move {
-                            let _ = crate::ui::commands::toggle_manual_longshot_pause_from_shortcut(
-                                app_handle_inner,
-                            )
-                            .await;
+                            let _ =
+                                crate::ui::commands::toggle_manual_longshot_pause_from_shortcut(
+                                    app_handle_inner,
+                                )
+                                .await;
                         });
                     }
-                })
-            {
+                },
+            ) {
                 log::warn!("长截图暂停/恢复快捷键注册失败: {}", e);
             }
 
@@ -367,7 +396,9 @@ pub fn run() {
             );
 
             // 初始化异步预览生成器，支持事件通知
-            crate::utils::image_clipboard::init_preview_generator_with_app_handle(app_handle.clone());
+            crate::utils::image_clipboard::init_preview_generator_with_app_handle(
+                app_handle.clone(),
+            );
 
             emit_image_history_payload(app_handle, state_arc.clone());
 

@@ -22,7 +22,8 @@ const MAX_STITCHED_HEIGHT: u32 = 20_000;
 const MAX_STITCHED_PIXELS: u64 = 120_000_000;
 static NEXT_LONGSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 static MANUAL_LONGSHOT_RUNTIME: OnceLock<StdMutex<Option<ManualLongshotRuntime>>> = OnceLock::new();
-static LAST_LONGSHOT_FAILURE: OnceLock<StdMutex<Option<ManualLongshotFailureRecord>>> = OnceLock::new();
+static LAST_LONGSHOT_FAILURE: OnceLock<StdMutex<Option<ManualLongshotFailureRecord>>> =
+    OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,7 +137,8 @@ fn map_failure_kind(error: &str) -> String {
         || text.contains("未检测到")
     {
         "missing_dependency".to_string()
-    } else if text.contains("会话") || text.contains("id 不匹配") || text.contains("进行中") {
+    } else if text.contains("会话") || text.contains("id 不匹配") || text.contains("进行中")
+    {
         "busy".to_string()
     } else if text.contains("取消") {
         "cancelled".to_string()
@@ -145,7 +147,11 @@ fn map_failure_kind(error: &str) -> String {
     }
 }
 
-fn user_message_for_state(state: &str, failure_kind: Option<&str>, last_error: Option<&str>) -> String {
+fn user_message_for_state(
+    state: &str,
+    failure_kind: Option<&str>,
+    last_error: Option<&str>,
+) -> String {
     match state {
         "starting" => "正在准备长截图环境".to_string(),
         "running" => "长截图进行中，请继续滚动目标内容".to_string(),
@@ -430,11 +436,9 @@ pub fn finish_manual_longshot(
             .lock()
             .map_err(|_| "长截图状态锁不可用".to_string())?
             .clone();
-        return Err(
-            status
-                .last_error
-                .unwrap_or_else(|| "长截图结束失败，未生成结果图片".to_string()),
-        );
+        return Err(status
+            .last_error
+            .unwrap_or_else(|| "长截图结束失败，未生成结果图片".to_string()));
     };
 
     let _ = app.emit(
@@ -562,7 +566,10 @@ fn run_longshot_worker_inner(
         .arg("-offset_y")
         .arg(request.region.y.to_string())
         .arg("-video_size")
-        .arg(format!("{}x{}", request.region.width, request.region.height))
+        .arg(format!(
+            "{}x{}",
+            request.region.width, request.region.height
+        ))
         .arg("-i")
         .arg("desktop")
         .arg("-pix_fmt")
@@ -699,7 +706,10 @@ fn run_longshot_worker_inner(
         }
         if !dropped {
             let append = frame_color
-                .row_range(&core::Range::new(estimate.overlap_rows, frame_color.rows()).map_err(to_cv_err)?)
+                .row_range(
+                    &core::Range::new(estimate.overlap_rows, frame_color.rows())
+                        .map_err(to_cv_err)?,
+                )
                 .map_err(to_cv_err)?
                 .try_clone()
                 .map_err(to_cv_err)?;
@@ -794,7 +804,9 @@ fn run_longshot_worker_inner(
         if let Ok(final_frame_color) = capture_single_bgr_frame(request) {
             let final_frame_gray = to_gray_mat(&final_frame_color)?;
             if let Some(prev) = anchor_frame.as_ref() {
-                let moved = frames_mean_absdiff(prev, &final_frame_gray).map(|v| v > 1.2).unwrap_or(true);
+                let moved = frames_mean_absdiff(prev, &final_frame_gray)
+                    .map(|v| v > 1.2)
+                    .unwrap_or(true);
                 if moved {
                     // 根因级修复：finish 时不再依赖“门控是否放行”，而是确定性并入最终帧
                     // 这样不会因尾段门控丢帧造成“最后一部分缺失”
@@ -907,7 +919,10 @@ fn capture_single_bgr_frame(request: &StartManualLongshotRequest) -> Result<Mat,
         .arg("-offset_y")
         .arg(request.region.y.to_string())
         .arg("-video_size")
-        .arg(format!("{}x{}", request.region.width, request.region.height))
+        .arg(format!(
+            "{}x{}",
+            request.region.width, request.region.height
+        ))
         .arg("-i")
         .arg("desktop")
         .arg("-frames:v")
@@ -1004,8 +1019,7 @@ fn estimate_overlap(prev: &Mat, curr: &Mat) -> Result<AlignEstimate, String> {
     .map_err(to_cv_err)?;
 
     let template_overlap_small = (small_rows - max_loc.y).clamp(1, small_rows - 1);
-    let template_overlap = ((template_overlap_small as f64) / downsample_scale)
-        .round() as i32;
+    let template_overlap = ((template_overlap_small as f64) / downsample_scale).round() as i32;
     let template_overlap = template_overlap.clamp(1, rows - 1);
 
     let mut prev32 = Mat::default();
@@ -1046,7 +1060,11 @@ fn estimate_overlap(prev: &Mat, curr: &Mat) -> Result<AlignEstimate, String> {
     let overlap_rows = refine_overlap_rows(prev, curr, base_overlap, refine_radius)?;
     let unique_rows = rows - overlap_rows;
     let diff = (phase_unique - unique_rows).abs();
-    let phase_factor = if response > 0.02 && diff <= 48 { 1.0 } else { 0.85 };
+    let phase_factor = if response > 0.02 && diff <= 48 {
+        1.0
+    } else {
+        0.85
+    };
     let seam_cost = overlap_sad_cost(prev, curr, overlap_rows).unwrap_or(255.0);
     let seam_factor = if seam_cost < 6.0 {
         1.0
@@ -1090,7 +1108,12 @@ fn dynamic_refine_radius(template_conf: f32, phase_response: f32) -> i32 {
     radius.clamp(12, 56)
 }
 
-fn refine_overlap_rows(prev: &Mat, curr: &Mat, seed_overlap: i32, radius: i32) -> Result<i32, String> {
+fn refine_overlap_rows(
+    prev: &Mat,
+    curr: &Mat,
+    seed_overlap: i32,
+    radius: i32,
+) -> Result<i32, String> {
     let rows = prev.rows();
     let seed = seed_overlap.clamp(1, rows - 1);
     let min_overlap = (seed - radius).max(8);
@@ -1281,7 +1304,11 @@ fn mat_to_bgra_bytes(image_mat: &Mat) -> Result<Vec<u8>, String> {
     }
 }
 
-fn mat_to_preview_base64(image_mat: &Mat, max_width: i32, max_height: i32) -> Result<String, String> {
+fn mat_to_preview_base64(
+    image_mat: &Mat,
+    max_width: i32,
+    max_height: i32,
+) -> Result<String, String> {
     if image_mat.cols() <= 0 || image_mat.rows() <= 0 {
         return Err("预览图为空".to_string());
     }
@@ -1317,7 +1344,10 @@ fn build_longshot_result_image_path(session_id: u64) -> Result<std::path::PathBu
     Ok(dir.join(format!("longshot_result_{}.png", session_id)))
 }
 
-fn write_longshot_result_image(image_mat: &Mat, session_id: u64) -> Result<std::path::PathBuf, String> {
+fn write_longshot_result_image(
+    image_mat: &Mat,
+    session_id: u64,
+) -> Result<std::path::PathBuf, String> {
     let width = image_mat.cols().max(0) as u32;
     let height = image_mat.rows().max(0) as u32;
     if width == 0 || height == 0 {
