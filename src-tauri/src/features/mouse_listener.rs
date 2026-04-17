@@ -20,10 +20,10 @@ use winapi::shared::minwindef::{LPARAM, LRESULT, WPARAM};
 use winapi::um::libloaderapi::GetModuleHandleW;
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::{
-    CallNextHookEx, DispatchMessageW, PeekMessageW, PostThreadMessageW, SetWindowsHookExW,
+    CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
     TranslateMessage, UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, PM_REMOVE,
     WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_USER,
 };
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::{GetAsyncKeyState, VK_LCONTROL, VK_RCONTROL};
@@ -287,6 +287,10 @@ unsafe extern "system" fn low_level_keyboard_proc(
             if let Ok(guard) = hook_event_sender().lock() {
                 if let Some(tx) = guard.as_ref() {
                     let _ = tx.send(event);
+                    let thread_id = HOOK_THREAD_ID.load(Ordering::SeqCst);
+                    if thread_id != 0 {
+                        PostThreadMessageW(thread_id, WM_USER, 0, 0);
+                    }
                 }
             }
         }
@@ -310,6 +314,10 @@ unsafe extern "system" fn low_level_mouse_proc(code: i32, wparam: WPARAM, lparam
             if let Ok(guard) = hook_event_sender().lock() {
                 if let Some(tx) = guard.as_ref() {
                     let _ = tx.send(event);
+                    let thread_id = HOOK_THREAD_ID.load(Ordering::SeqCst);
+                    if thread_id != 0 {
+                        PostThreadMessageW(thread_id, WM_USER, 0, 0);
+                    }
                 }
             }
         }
@@ -356,23 +364,20 @@ fn start_windows_hook_listener(app_handle: AppHandle, state: Arc<Mutex<SharedApp
 
         log::info!("划词低级键鼠 Hook 已启动");
         let mut msg: MSG = std::mem::zeroed();
-        let mut should_quit = false;
         loop {
-            while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
-                if msg.message == WM_QUIT {
-                    should_quit = true;
-                    break;
-                }
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
+            let ret = GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0);
+            if ret == 0 || ret == -1 {
+                break;
             }
+            if msg.message == WM_QUIT {
+                break;
+            }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+            
             while let Ok(event) = rx.try_recv() {
                 handle_hook_event(event, &state, &app_handle);
             }
-            if should_quit {
-                break;
-            }
-            thread::sleep(Duration::from_millis(1));
         }
 
         let _ = UnhookWindowsHookEx(keyboard_hook);

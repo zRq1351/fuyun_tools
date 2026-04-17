@@ -248,8 +248,9 @@ fn candidate_prefilter(old_text: &str, new_text: &str) -> bool {
     if old_text.is_empty() || new_text.is_empty() {
         return true;
     }
-    let len_old = old_text.chars().count();
-    let len_new = new_text.chars().count();
+    // 优化：使用 len() 替代 chars().count() 实现 O(1) 长度比对，避免在超大文本上退化为 O(N) 阻塞
+    let len_old = old_text.len();
+    let len_new = new_text.len();
     let min_len = len_old.min(len_new) as f64;
     let max_len = len_old.max(len_new) as f64;
     if max_len > 0.0 && (min_len / max_len) < CANDIDATE_LEN_RATIO_MIN {
@@ -495,6 +496,10 @@ pub fn find_best_replacement_candidate(
         if started.elapsed() >= budget {
             timed_out = true;
             break;
+        }
+        // 优化：跳过超长文本的模糊匹配，避免 O(N) 甚至 O(N^2) 耗时阻塞
+        if old_text.len() > 100_000 || new_text.len() > 100_000 {
+            continue;
         }
         if !candidate_prefilter(old_text, new_text) {
             continue;

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous, SqlitePool, SqlitePoolOptions};
 use sqlx::{Connection, Row, Sqlite, SqliteConnection, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -8,10 +8,10 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::OnceCell;
 use xxhash_rust::xxh3::xxh3_64;
 
-static HISTORY_SCHEMA_READY: AtomicBool = AtomicBool::new(false);
-static HISTORY_SCHEMA_STATE: AtomicU8 = AtomicU8::new(0); // 0:未初始化 1:初始化中 2:已完成
+static HISTORY_DB_POOL: OnceCell<SqlitePool> = OnceCell::const_new();
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ClipboardHistoryData {
@@ -115,32 +115,36 @@ fn db_options(db_path: &PathBuf) -> SqliteConnectOptions {
         .busy_timeout(Duration::from_millis(1200))
 }
 
-async fn open_history_db_async() -> Result<SqliteConnection, String> {
-    let db_path = get_history_db_path();
-    if let Some(parent) = db_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建历史数据库目录失败: {}", e))?;
-    }
-    let mut conn = SqliteConnection::connect_with(&db_options(&db_path))
+async fn get_history_db_pool() -> Result<&'static SqlitePool, String> {
+    HISTORY_DB_POOL
+        .get_or_try_init(|| async {
+            let db_path = get_history_db_path();
+            if let Some(parent) = db_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("创建历史数据库目录失败: {}", e))?;
+            }
+            let pool = SqlitePoolOptions::new()
+                .max_connections(5)
+                .connect_with(db_options(&db_path))
+                .await
+                .map_err(|e| format!("打开历史数据库池失败: {}", e))?;
+
+            let mut conn = pool
+                .acquire()
+                .await
+                .map_err(|e| format!("获取数据库连接失败: {}", e))?;
+            ensure_history_db_schema_async(&mut conn).await?;
+
+            Ok(pool)
+        })
         .await
-        .map_err(|e| format!("打开历史数据库失败: {}", e))?;
-    if !HISTORY_SCHEMA_READY.load(Ordering::Acquire) {
-        if HISTORY_SCHEMA_STATE
-            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
-        {
-            if let Err(e) = ensure_history_db_schema_async(&mut conn).await {
-                HISTORY_SCHEMA_STATE.store(0, Ordering::Release);
-                return Err(e);
-            }
-            HISTORY_SCHEMA_READY.store(true, Ordering::Release);
-            HISTORY_SCHEMA_STATE.store(2, Ordering::Release);
-        } else {
-            while HISTORY_SCHEMA_STATE.load(Ordering::Acquire) == 1 {
-                sqlx::__rt::sleep(Duration::from_millis(1)).await;
-            }
-        }
-    }
-    Ok(conn)
+}
+
+async fn open_history_db_async() -> Result<sqlx::pool::PoolConnection<sqlx::Sqlite>, String> {
+    let pool = get_history_db_pool().await?;
+    pool.acquire()
+        .await
+        .map_err(|e| format!("获取数据库连接失败: {}", e))
 }
 
 async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(), String> {
@@ -378,20 +382,20 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
         .filter_map(|row| row.try_get::<String, _>(0).ok())
         .collect::<Vec<_>>();
 
-    // 分类表：content 为主键
-    let category_rows = sqlx::query("SELECT content, category FROM categories")
+    // 分类表：使用 item_id 作为键
+    let category_rows = sqlx::query("SELECT item_id, category FROM categories")
         .fetch_all(&mut conn)
         .await
         .map_err(|e| format!("读取历史数据库失败: {}", e))?;
     let mut categories = HashMap::new();
     for row in category_rows {
-        let content: String = row
+        let item_id: String = row
             .try_get(0)
             .map_err(|e| format!("读取历史数据库失败: {}", e))?;
         let category: String = row
             .try_get(1)
             .map_err(|e| format!("读取历史数据库失败: {}", e))?;
-        categories.insert(content, category);
+        categories.insert(item_id, category);
     }
 
     // 分类列表：使用 id 排序
@@ -1240,17 +1244,15 @@ pub async fn unpin_item(content: &str) -> Result<(), String> {
 }
 
 /// 设置记录分类（增量操作）
-pub async fn set_item_category(content: &str, category: &str) -> Result<(), String> {
+pub async fn set_item_category(item_id: &str, category: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
-    let item_id = stable_history_item_id(content);
 
     sqlx::query(
-        "INSERT INTO categories(content, category, item_id) VALUES(?1, ?2, ?3)
-         ON CONFLICT(item_id) DO UPDATE SET category = ?2, content = ?1"
+        "INSERT INTO categories(content, category, item_id) VALUES('', ?1, ?2)
+         ON CONFLICT(item_id) DO UPDATE SET category = ?1"
     )
-        .bind(content)
         .bind(category)
-        .bind(&item_id)
+        .bind(item_id)
         .execute(&mut conn)
         .await
         .map_err(|e| format!("设置分类失败: {}", e))?;
@@ -1259,12 +1261,11 @@ pub async fn set_item_category(content: &str, category: &str) -> Result<(), Stri
 }
 
 /// 删除记录分类（增量操作）
-pub async fn remove_item_category(content: &str) -> Result<(), String> {
+pub async fn remove_item_category(item_id: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
-    let item_id = stable_history_item_id(content);
 
-    sqlx::query("DELETE FROM categories WHERE item_id = ?")
-        .bind(&item_id)
+    sqlx::query("DELETE FROM categories WHERE item_id = ?1")
+        .bind(item_id)
         .execute(&mut conn)
         .await
         .map_err(|e| format!("删除分类失败: {}", e))?;
