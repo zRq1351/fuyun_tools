@@ -60,7 +60,7 @@ fn now_unix_ms() -> i64 {
         .unwrap_or(0)
 }
 
-fn stable_history_item_id(content: &str) -> String {
+pub fn stable_history_item_id(content: &str) -> String {
     format!("{:016x}", xxh3_64(content.as_bytes()))
 }
 
@@ -359,19 +359,19 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
     let mut conn = open_history_db_async().await?;
 
     let history_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM history_items")
-        .fetch_one(&mut conn)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| format!("读取历史数据库失败: {}", e))?;
     let categories_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM categories")
-        .fetch_one(&mut conn)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| format!("读取历史数据库失败: {}", e))?;
     let category_list_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM category_list")
-        .fetch_one(&mut conn)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| format!("读取历史数据库失败: {}", e))?;
     let pinned_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM pinned_items")
-        .fetch_one(&mut conn)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| format!("读取历史数据库失败: {}", e))?;
 
@@ -382,7 +382,7 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
     // 使用 created_at DESC 排序（最新的在前）
     let item_rows =
         sqlx::query("SELECT content FROM history_items ORDER BY created_at DESC, id DESC")
-            .fetch_all(&mut conn)
+            .fetch_all(&mut *conn)
             .await
             .map_err(|e| format!("读取历史数据库失败: {}", e))?;
     let items = item_rows
@@ -392,7 +392,7 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
 
     // 分类表：使用 item_id 作为键
     let category_rows = sqlx::query("SELECT item_id, category FROM categories")
-        .fetch_all(&mut conn)
+        .fetch_all(&mut *conn)
         .await
         .map_err(|e| format!("读取历史数据库失败: {}", e))?;
     let mut categories = HashMap::new();
@@ -408,7 +408,7 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
 
     // 分类列表：使用 id 排序
     let category_rows = sqlx::query("SELECT category FROM category_list ORDER BY id ASC")
-        .fetch_all(&mut conn)
+        .fetch_all(&mut *conn)
         .await
         .map_err(|e| format!("读取历史数据库失败: {}", e))?;
     let category_list = category_rows
@@ -418,7 +418,7 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
 
     // 置顶表：content 为主键，按 pinned_at 排序
     let pinned_rows = sqlx::query("SELECT content FROM pinned_items ORDER BY pinned_at DESC")
-        .fetch_all(&mut conn)
+        .fetch_all(&mut *conn)
         .await
         .map_err(|e| format!("读取历史数据库失败: {}", e))?;
     let pinned_items = pinned_rows
@@ -602,7 +602,7 @@ pub async fn load_history_page_data_async(
             .bind(category_filter.as_deref())
             .bind(pinned_flag)
             .bind(fts_keyword.as_deref())
-            .fetch_one(&mut conn)
+            .fetch_one(&mut *conn)
             .await
             .map_err(|e| format!("读取历史总数失败: {}", e))?;
 
@@ -640,7 +640,7 @@ pub async fn load_history_page_data_async(
             .bind(fts_keyword.as_deref())
             .bind(limit_i64)
             .bind(offset_i64)
-            .fetch_all(&mut conn)
+            .fetch_all(&mut *conn)
             .await
             .map_err(|e| format!("读取历史数据库失败: {}", e))?;
         let items = rows
@@ -680,7 +680,7 @@ pub async fn load_history_page_data_async(
             .bind(category_filter.as_deref())
             .bind(pinned_flag)
             .bind(keyword_filter.as_deref())
-            .fetch_one(&mut conn)
+            .fetch_one(&mut *conn)
             .await
             .map_err(|e| format!("读取历史总数失败: {}", e))?;
 
@@ -711,7 +711,7 @@ pub async fn load_history_page_data_async(
             .bind(keyword_filter.as_deref())
             .bind(limit_i64)
             .bind(offset_i64)
-            .fetch_all(&mut conn)
+            .fetch_all(&mut *conn)
             .await
             .map_err(|e| format!("读取历史数据库失败: {}", e))?;
         let items = rows
@@ -1261,7 +1261,7 @@ pub async fn pin_item(content: &str) -> Result<(), String> {
     .bind(content)
     .bind(now_ms)
     .bind(&item_id)
-    .execute(&mut conn)
+    .execute(&mut *conn)
     .await
     .map_err(|e| format!("置顶失败: {}", e))?;
 
@@ -1275,7 +1275,7 @@ pub async fn unpin_item(content: &str) -> Result<(), String> {
 
     sqlx::query("DELETE FROM pinned_items WHERE item_id = ?")
         .bind(&item_id)
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await
         .map_err(|e| format!("取消置顶失败: {}", e))?;
 
@@ -1292,7 +1292,7 @@ pub async fn set_item_category(item_id: &str, category: &str) -> Result<(), Stri
     )
     .bind(category)
     .bind(item_id)
-    .execute(&mut conn)
+    .execute(&mut *conn)
     .await
     .map_err(|e| format!("设置分类失败: {}", e))?;
 
@@ -1305,7 +1305,7 @@ pub async fn remove_item_category(item_id: &str) -> Result<(), String> {
 
     sqlx::query("DELETE FROM categories WHERE item_id = ?1")
         .bind(item_id)
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await
         .map_err(|e| format!("删除分类失败: {}", e))?;
 
@@ -1320,14 +1320,14 @@ pub async fn add_category_to_list(category: &str) -> Result<(), String> {
     let exists: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM category_list WHERE category = ?)")
             .bind(category)
-            .fetch_one(&mut conn)
+            .fetch_one(&mut *conn)
             .await
             .map_err(|e| format!("检查分类是否存在失败: {}", e))?;
 
     if !exists {
         sqlx::query("INSERT INTO category_list(category) VALUES(?)")
             .bind(category)
-            .execute(&mut conn)
+            .execute(&mut *conn)
             .await
             .map_err(|e| format!("添加分类失败: {}", e))?;
     }
@@ -1341,7 +1341,7 @@ pub async fn remove_category_from_list(category: &str) -> Result<(), String> {
 
     sqlx::query("DELETE FROM category_list WHERE category = ?")
         .bind(category)
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await
         .map_err(|e| format!("删除分类失败: {}", e))?;
 
