@@ -1039,7 +1039,7 @@ fn ensure_system_audio_capture_started(
         return match first_try {
             Ok(handle) => {
                 runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
-                runtime.system_audio_thread = handle.join;
+                runtime.system_audio_thread = handle.joins.into_iter().next();
                 runtime.system_audio_stream_start_ms = Some(start_ms);
                 for p in output_paths {
                     runtime.system_audio_segments.push(
@@ -1162,7 +1162,7 @@ fn ensure_mic_capture_started(
         Ok(handle) => {
             runtime.mic_audio_wav_path = Some(mic_wav);
             runtime.mic_audio_stop_flag = Some(handle.stop_flag.clone());
-            runtime.mic_audio_thread = handle.join;
+            runtime.mic_audio_thread = handle.joins.into_iter().next();
             runtime.mic_audio_stream_start_ms = Some(start_ms);
             if let Some(path) = runtime.mic_audio_wav_path.clone() {
                 runtime
