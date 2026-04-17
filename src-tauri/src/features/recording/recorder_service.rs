@@ -527,7 +527,7 @@ fn merge_system_audio_into_video(
     let audio_map_label = if let (Some(sys), Some(mic)) = (sys_out, mic_out) {
         // 🔧 性能优化：简化混音过滤器
         filter_parts.push(format!(
-            "{}{}amix=inputs=2:duration=shortest:normalize=0[aout]",
+            "{}{}amix=inputs=2:duration=longest:normalize=0[aout]",
             sys, mic
         ));
         "[aout]"
