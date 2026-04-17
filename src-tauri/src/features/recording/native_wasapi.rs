@@ -22,7 +22,7 @@ use winapi::um::winuser::GetWindowThreadProcessId;
 
 pub struct WasapiCaptureHandle {
     pub stop_flag: Arc<AtomicBool>,
-    pub join: Option<std::thread::JoinHandle<()>>,
+    pub joins: Vec<std::thread::JoinHandle<()>>,
     pub output_path: PathBuf,
 }
 
@@ -53,7 +53,7 @@ fn now_ms() -> u64 {
 impl WasapiCaptureHandle {
     pub fn stop(self) {
         self.stop_flag.store(true, Ordering::SeqCst);
-        if let Some(join) = self.join {
+        for join in self.joins {
             let _ = join.join();
         }
     }
@@ -306,17 +306,9 @@ pub fn start_process_loopback_wavs(
             startup_errors.join(" | ")
         ));
     }
-    let handle = std::thread::spawn(move || {
-        while !thread_stop.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        for worker in workers {
-            let _ = worker.join();
-        }
-    });
     Ok(WasapiCaptureHandle {
         stop_flag,
-        join: Some(handle),
+        joins: workers,
         output_path: PathBuf::from(""),
     })
 }
@@ -810,7 +802,7 @@ pub fn start_system_loopback_wav_with_device(
 
     Ok(WasapiCaptureHandle {
         stop_flag,
-        join: Some(handle),
+        joins: vec![handle],
         output_path,
     })
 }
@@ -1186,7 +1178,7 @@ pub fn start_microphone_wav_with_device(
 
     Ok(WasapiCaptureHandle {
         stop_flag,
-        join: Some(handle),
+        joins: vec![handle],
         output_path,
     })
 }

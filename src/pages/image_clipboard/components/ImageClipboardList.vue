@@ -166,8 +166,14 @@ let dragScrollRafId = 0
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
+let scrollRafId = 0
 const handleScroll = () => {
-  emit('content-scroll')
+  if (!scrollRafId) {
+    scrollRafId = requestAnimationFrame(() => {
+      emit('content-scroll')
+      scrollRafId = 0
+    })
+  }
 }
 
 const stopDragging = () => {

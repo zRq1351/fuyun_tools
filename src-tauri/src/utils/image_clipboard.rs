@@ -1912,7 +1912,7 @@ impl ImageClipboardManager {
             if len == 0 {
                 continue;
             }
-            history[idx].rgba_bytes.clear();
+            history[idx].rgba_bytes = Vec::new();
             total = total.saturating_sub(len);
         }
         for id in deferred_protected {
@@ -1930,7 +1930,7 @@ impl ImageClipboardManager {
             if len == 0 {
                 continue;
             }
-            history[idx].rgba_bytes.clear();
+            history[idx].rgba_bytes = Vec::new();
             total = total.saturating_sub(len);
         }
     }
@@ -1990,6 +1990,10 @@ impl ImageClipboardManager {
 
         std::thread::spawn(move || {
             loop {
+                if Arc::strong_count(&current_memory_usage) <= 1 {
+                    log::info!("ImageClipboardManager 被释放，退出内存监控线程");
+                    break;
+                }
                 std::thread::sleep(Duration::from_millis(MEMORY_MONITOR_INTERVAL_MS));
 
                 let now = SystemTime::now()
