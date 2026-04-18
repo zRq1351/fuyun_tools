@@ -1,71 +1,73 @@
 <template>
   <div
-      ref="contentRef"
+      v-bind="containerProps"
       class="content"
       @mousedown="handleMouseDown"
       @scroll="handleScroll"
       @wheel.prevent="handleWheel"
   >
-    <div
-        v-for="entry in visibleHistory"
-        :id="`image-item-${entry.index}`"
-        :key="entry.item.id"
-        v-memo="[
-          entry.item.id,
-          selectedIndex === entry.index,
-          entry.pinned,
-          entry.category,
-          entry.tags.join('|'),
-          entry.item.preview_png_base64,
-          entry.item.image_path
-        ]"
-        :class="{ selected: selectedIndex === entry.index }"
-        :draggable="isCtrlKeyPressed"
-        class="clipboard-item"
-        @click="handleClick(entry.index)"
-        @dblclick="handleDoubleClick(entry.item.id)"
-        @dragend="handleDragEnd"
-        @dragstart="handleDragStart($event, entry.item.id)"
-        @mouseenter="handleItemHover(entry.index)"
-        @contextmenu.prevent="showContextMenu($event, entry.item.id)"
-    >
-      <div class="delete-btn" @click.stop="deleteItem(entry.item.id, entry.index)">
-        <el-icon>
-          <Close/>
-        </el-icon>
-      </div>
-      <button class="download-btn" title="下载到目录" @click.stop="downloadItem(entry.item.id)">
-        <el-icon>
-          <Download/>
-        </el-icon>
-      </button>
-      <button class="fullscreen-btn" title="全屏预览" @click.stop="openFullscreen(entry.item.id)">
-        <el-icon>
-          <FullScreen/>
-        </el-icon>
-      </button>
-      <button :class="{ active: entry.pinned }" class="pin-btn" title="置顶"
-              @click.stop="promoteItem(entry.item.id)">
-        <Pin class="pin-lucide"/>
-      </button>
-      <div class="index-tools">
-        <div class="index">{{ entry.index + 1 }}</div>
-      </div>
-      <div class="category-wrap">
-        <div class="category-chip">{{ entry.category }}</div>
-      </div>
-      <div class="tag-wrap">
-        <div v-if="entry.tags.length" class="tag-chip-list">
-          <span v-for="tag in entry.tags" :key="`${entry.item.id}-${tag}`" class="tag-chip">#{{
-              tag
-            }}</span>
+    <div v-bind="wrapperProps" class="virtual-wrapper">
+      <div
+          v-for="virtualRow in list"
+          :id="`image-item-${virtualRow.data.index}`"
+          :key="virtualRow.data.item.id"
+          v-memo="[
+            virtualRow.data.item.id,
+            selectedIndex === virtualRow.data.index,
+            virtualRow.data.pinned,
+            virtualRow.data.category,
+            virtualRow.data.tags.join('|'),
+            virtualRow.data.item.preview_png_base64,
+            virtualRow.data.item.image_path
+          ]"
+          :class="{ selected: selectedIndex === virtualRow.data.index }"
+          :draggable="isCtrlKeyPressed"
+          class="clipboard-item"
+          @click="handleClick(virtualRow.data.index)"
+          @dblclick="handleDoubleClick(virtualRow.data.item.id)"
+          @dragend="handleDragEnd"
+          @dragstart="handleDragStart($event, virtualRow.data.item.id)"
+          @mouseenter="handleItemHover(virtualRow.data.index)"
+          @contextmenu.prevent="showContextMenu($event, virtualRow.data.item.id)"
+      >
+        <div class="delete-btn" @click.stop="deleteItem(virtualRow.data.item.id, virtualRow.data.index)">
+          <el-icon>
+            <Close/>
+          </el-icon>
         </div>
-        <div v-else class="tag-chip-empty">无标签</div>
-      </div>
-      <div class="item-content">
-        <img :src="getPreviewDataUrl(entry.item)" alt="" class="image-preview" decoding="async" draggable="false"
-             @dragstart.prevent/>
-        <div class="image-meta">{{ entry.item.width }} × {{ entry.item.height }}</div>
+        <button class="download-btn" title="下载到目录" @click.stop="downloadItem(virtualRow.data.item.id)">
+          <el-icon>
+            <Download/>
+          </el-icon>
+        </button>
+        <button class="fullscreen-btn" title="全屏预览" @click.stop="openFullscreen(virtualRow.data.item.id)">
+          <el-icon>
+            <FullScreen/>
+          </el-icon>
+        </button>
+        <button :class="{ active: virtualRow.data.pinned }" class="pin-btn" title="置顶"
+                @click.stop="promoteItem(virtualRow.data.item.id)">
+          <Pin class="pin-lucide"/>
+        </button>
+        <div class="index-tools">
+          <div class="index">{{ virtualRow.data.index + 1 }}</div>
+        </div>
+        <div class="category-wrap">
+          <div class="category-chip">{{ virtualRow.data.category }}</div>
+        </div>
+        <div class="tag-wrap">
+          <div v-if="virtualRow.data.tags.length" class="tag-chip-list">
+            <span v-for="tag in virtualRow.data.tags" :key="`${virtualRow.data.item.id}-${tag}`" class="tag-chip">#{{
+                tag
+              }}</span>
+          </div>
+          <div v-else class="tag-chip-empty">无标签</div>
+        </div>
+        <div class="item-content">
+          <img :src="getPreviewDataUrl(virtualRow.data.item)" alt="" class="image-preview" decoding="async" draggable="false"
+               @dragstart.prevent/>
+          <div class="image-meta">{{ virtualRow.data.item.width }} × {{ virtualRow.data.item.height }}</div>
+        </div>
       </div>
     </div>
     <div v-if="showTailLoadMoreHint" class="load-more-tail-indicator">
@@ -77,7 +79,6 @@
         <span>{{ isLoadingMore ? '加载中' : '加载更多' }}</span>
       </div>
     </div>
-    <div aria-hidden="true" class="spacer"></div>
   </div>
 </template>
 
@@ -85,6 +86,7 @@
 import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {Close, Download, FullScreen, Loading} from '@element-plus/icons-vue'
 import {Pin} from 'lucide-vue-next'
+import {useVirtualList} from '@vueuse/core'
 
 const props = defineProps({
   visibleHistory: {
@@ -155,7 +157,13 @@ const props = defineProps({
 
 const emit = defineEmits(['content-scroll', 'load-more-intent'])
 
-const contentRef = ref(null)
+const visibleHistoryComputed = computed(() => props.visibleHistory)
+const { list, containerProps, wrapperProps } = useVirtualList(visibleHistoryComputed, {
+  itemWidth: 258,
+  overscan: 10
+})
+
+const contentRef = containerProps.ref
 let isDown = false
 let isDragging = false
 let startX = 0
@@ -298,14 +306,17 @@ defineExpose({
   flex: 1;
   min-width: 0;
   min-height: 0;
-  display: flex;
-  gap: 8px;
   padding: 8px;
-  flex-direction: row;
   overflow-x: auto;
   overflow-y: hidden;
   margin-top: 10px;
   scrollbar-width: none;
+}
+
+.virtual-wrapper {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
 }
 
 .content::-webkit-scrollbar {
@@ -336,11 +347,6 @@ defineExpose({
 
 .content.is-dragging .clipboard-item {
   pointer-events: none;
-}
-
-.spacer {
-  flex: 0 0 742px;
-  height: 1px;
 }
 
 .load-more-tail-indicator {
@@ -381,6 +387,7 @@ defineExpose({
   position: relative;
   user-select: none;
   width: 250px;
+  margin-right: 8px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;

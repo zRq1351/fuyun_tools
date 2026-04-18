@@ -24,9 +24,9 @@ struct PendingImageTask {
     enqueued_at: Instant,
 }
 
-/// 待处理图片队列与条件变量
-static PENDING_IMAGE_QUEUE: LazyLock<Arc<(StdMutex<VecDeque<PendingImageTask>>, Condvar)>> =
-    LazyLock::new(|| Arc::new((StdMutex::new(VecDeque::new()), Condvar::new())));
+static IMAGE_WORKER_SENDERS: LazyLock<StdMutex<Vec<mpsc::SyncSender<PendingImageTask>>>> = 
+    LazyLock::new(|| StdMutex::new(Vec::new()));
+static NEXT_WORKER_INDEX: AtomicUsize = AtomicUsize::new(0);
 
 /// 队列最大容量，防止内存溢出
 const MAX_QUEUE_SIZE: usize = 20;
@@ -218,32 +218,21 @@ pub fn clear_recent_samples() {
 }
 
 /// 处理队列中的待处理图片任务
-fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, worker_id: usize) {
+fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, worker_id: usize, rx: mpsc::Receiver<PendingImageTask>) {
     log::info!("[处理线程-{}] 图片处理线程已启动，等待任务...", worker_id);
-    loop {
-        let task = {
-            let (lock, cvar) = &**PENDING_IMAGE_QUEUE;
-            let mut queue = lock.lock().unwrap();
-            while queue.is_empty() {
-                log::trace!("[处理线程-{}] 队列为空，等待新任务通知...", worker_id);
-                queue = cvar.wait(queue).unwrap();
-            }
-            let t = queue.pop_front().unwrap();
-            let wait_ms = t.enqueued_at.elapsed().as_millis() as u64;
-            IMAGE_QUEUE_METRICS.dequeued.fetch_add(1, Ordering::Relaxed);
-            IMAGE_QUEUE_METRICS
-                .queue_wait_ms_total
-                .fetch_add(wait_ms, Ordering::Relaxed);
-            log::info!(
-                "[处理线程-{}] 图片出队: {}x{}, 队列等待={}ms, 剩余队列长度: {}",
-                worker_id,
-                t.width,
-                t.height,
-                wait_ms,
-                queue.len()
-            );
-            t
-        };
+    while let Ok(task) = rx.recv() {
+        let wait_ms = task.enqueued_at.elapsed().as_millis() as u64;
+        IMAGE_QUEUE_METRICS.dequeued.fetch_add(1, Ordering::Relaxed);
+        IMAGE_QUEUE_METRICS
+            .queue_wait_ms_total
+            .fetch_add(wait_ms, Ordering::Relaxed);
+        log::info!(
+            "[处理线程-{}] 图片出队: {}x{}, 队列等待={}ms",
+            worker_id,
+            task.width,
+            task.height,
+            wait_ms
+        );
 
         if capture::is_screenshot_in_progress() && !task.allow_when_screenshot {
             IMAGE_QUEUE_METRICS
@@ -334,8 +323,8 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, w
                     state_guard.image_history_dirty = true;
                 }
 
-                log::info!("[处理线程-{}] 图片处理流程完成", worker_id);
-                maybe_log_queue_metrics();
+        log::info!("[处理线程-{}] 图片处理流程完成", worker_id);
+        maybe_log_queue_metrics();
     }
 }
 
@@ -344,11 +333,14 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
     {
+        let mut senders = IMAGE_WORKER_SENDERS.lock().unwrap();
         for worker_id in 0..IMAGE_QUEUE_WORKER_COUNT {
+            let (tx, rx) = mpsc::sync_channel(MAX_QUEUE_SIZE);
+            senders.push(tx);
             let app_handle_clone = app_handle.clone();
             let state_clone = state.clone();
             thread::spawn(move || {
-                process_pending_queue(&app_handle_clone, &state_clone, worker_id + 1);
+                process_pending_queue(&app_handle_clone, &state_clone, worker_id + 1, rx);
             });
         }
     }
@@ -404,40 +396,45 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
             match image {
                 Ok(images) => {
                     log::info!("[监听线程] 成功读取 {} 张图片", images.len());
-                    let (lock, cvar) = &**PENDING_IMAGE_QUEUE;
-                    let mut queue = lock.lock().unwrap();
+                    let senders = IMAGE_WORKER_SENDERS.lock().unwrap();
+                    if senders.is_empty() {
+                        continue;
+                    }
                     for (rgba, width, height, source_blob) in images {
-                        // 检查队列容量
-                        if queue.len() >= MAX_QUEUE_SIZE {
-                            log::warn!(
-                                "[监听线程] 待处理队列已满（{}），丢弃最早的图片",
-                                MAX_QUEUE_SIZE
-                            );
-                            queue.pop_front();
-                            IMAGE_QUEUE_METRICS
-                                .dropped_full
-                                .fetch_add(1, Ordering::Relaxed);
-                        }
-                        queue.push_back(PendingImageTask {
+                        let worker_idx = NEXT_WORKER_INDEX.fetch_add(1, Ordering::Relaxed) % senders.len();
+                        let tx = &senders[worker_idx];
+                        let task = PendingImageTask {
                             rgba,
                             width,
                             height,
                             source_blob,
                             allow_when_screenshot,
                             enqueued_at: Instant::now(),
-                        });
-                        IMAGE_QUEUE_METRICS.enqueued.fetch_add(1, Ordering::Relaxed);
-                        observe_queue_len(queue.len());
-                        log::info!(
-                            "[监听线程] 图片入队: {}x{}, 当前队列长度: {}",
-                            width,
-                            height,
-                            queue.len()
-                        );
+                        };
+                        match tx.try_send(task) {
+                            Ok(_) => {
+                                IMAGE_QUEUE_METRICS.enqueued.fetch_add(1, Ordering::Relaxed);
+                                log::info!(
+                                    "[监听线程] 图片已分发给处理线程-{}: {}x{}",
+                                    worker_idx + 1,
+                                    width,
+                                    height
+                                );
+                            }
+                            Err(mpsc::TrySendError::Full(_)) => {
+                                log::warn!(
+                                    "[监听线程] 处理线程-{} 待处理队列已满，丢弃图片",
+                                    worker_idx + 1
+                                );
+                                IMAGE_QUEUE_METRICS
+                                    .dropped_full
+                                    .fetch_add(1, Ordering::Relaxed);
+                            }
+                            Err(mpsc::TrySendError::Disconnected(_)) => {
+                                log::error!("[监听线程] 处理线程-{} 通道已断开", worker_idx + 1);
+                            }
+                        }
                     }
-                    cvar.notify_all();
-                    drop(queue); // 释放锁
-                    log::info!("[监听线程] 已通知处理线程");
                     maybe_log_queue_metrics();
                 }
                 Err(e) => {

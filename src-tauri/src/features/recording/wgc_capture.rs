@@ -19,6 +19,7 @@ use windows_capture::settings::{
     MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
 };
 use windows_capture::window::Window;
+use image::{ImageBuffer, Rgba};
 
 static WGC_FORCE_DEFAULT_BORDER: AtomicBool = AtomicBool::new(false);
 static WGC_FORCE_DEFAULT_DIRTY_REGION: AtomicBool = AtomicBool::new(false);
@@ -187,7 +188,29 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                 .store(elapsed_ms, Ordering::Relaxed);
         }
         if let Some(encoder) = self.encoder.as_mut() {
-            encoder.send_frame(frame).map_err(|e| e.to_string())?;
+            let frame_w = frame.width();
+            let frame_h = frame.height();
+            if frame_w != self.flags.width || frame_h != self.flags.height {
+                let timestamp = frame.timestamp().map_err(|e| e.to_string())?.Duration;
+                let mut buffer = frame.buffer().map_err(|e| e.to_string())?;
+                let mut vec = Vec::new();
+                let pixels = buffer.as_nopadding_buffer(&mut vec);
+                if let Some(img) = ImageBuffer::<Rgba<u8>, &[u8]>::from_raw(frame_w, frame_h, pixels) {
+                    let resized = image::imageops::resize(
+                        &img,
+                        self.flags.width,
+                        self.flags.height,
+                        image::imageops::FilterType::Nearest,
+                    );
+                    encoder
+                        .send_frame_buffer(resized.as_raw().as_slice(), timestamp)
+                        .map_err(|e| e.to_string())?;
+                } else {
+                    return Err("Failed to create ImageBuffer from frame".to_string());
+                }
+            } else {
+                encoder.send_frame(frame).map_err(|e| e.to_string())?;
+            }
         }
         Ok(())
     }

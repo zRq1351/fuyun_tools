@@ -23,23 +23,10 @@ export function useClipboardHistory() {
     const visibleHistory = ref([])
     let filterTimeout = null
 
-    watch([pagedHistory, searchKeyword, categoryFilter, categoryMap], () => {
+    watch([pagedHistory, categoryMap], () => {
         if (filterTimeout) clearTimeout(filterTimeout)
         filterTimeout = setTimeout(() => {
-            const keyword = searchKeyword.value.trim().toLowerCase()
             visibleHistory.value = pagedHistory.value
-                .filter((entry) => {
-                    const category = getItemCategory(entry.id)
-                    if (categoryFilter.value !== '全部' && category !== categoryFilter.value) {
-                        return false
-                    }
-                    if (!keyword) {
-                        return true
-                    }
-                    const content = String(entry.content || '').toLowerCase()
-                    const snippet = String(entry.snippet || '').toLowerCase()
-                    return content.includes(keyword) || snippet.includes(keyword)
-                })
                 .map((entry) => ({
                     id: entry.id,
                     content: entry.content,

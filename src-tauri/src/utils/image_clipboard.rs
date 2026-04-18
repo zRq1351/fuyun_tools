@@ -947,15 +947,10 @@ impl ImageClipboardManager {
             if let Some(&existing_index) = signature_index.get(&signature) {
                 if existing_index < history.len() {
                     if existing_index != 0 {
-                        let moved_signature = history[existing_index].signature.clone();
                         let moved_item_id = history[existing_index].id.clone();
                         let moved = history.remove(existing_index);
                         history.insert(0, moved);
-                        signature_index_move_to_front(
-                            &mut signature_index,
-                            &moved_signature,
-                            existing_index,
-                        );
+                        self.signature_index_dirty.store(true, Ordering::SeqCst);
                         drop(signature_index);
                         drop(history);
                         if let Err(e) = image_store::sync_item_positions_incremental(
@@ -1153,12 +1148,11 @@ impl ImageClipboardManager {
     pub fn remove_from_history(&self, index: usize) -> Result<(String, String, String), String> {
         let (removed_id, removed_path, removed_signature, item_ids_after_remove) = {
             let mut history = lock_arc_mutex(&self.history);
-            let mut signature_index = lock_arc_mutex(&self.signature_index);
             if index >= history.len() {
                 return Err("索引超出范围".to_string());
             }
             let removed = history.remove(index);
-            signature_index_remove(&mut signature_index, &removed.signature, index);
+            self.signature_index_dirty.store(true, Ordering::SeqCst);
             let ids = history
                 .iter()
                 .map(|item| item.id.clone())
@@ -1218,17 +1212,15 @@ impl ImageClipboardManager {
 
     pub fn promote_to_top(&self, index: usize) -> Result<(), String> {
         let mut history = lock_arc_mutex(&self.history);
-        let mut signature_index = lock_arc_mutex(&self.signature_index);
         if index >= history.len() {
             return Err("索引超出范围".to_string());
         }
         if index == 0 {
             return Ok(());
         }
-        let moved_signature = history[index].signature.clone();
         let moved = history.remove(index);
         history.insert(0, moved);
-        signature_index_move_to_front(&mut signature_index, &moved_signature, index);
+        self.signature_index_dirty.store(true, Ordering::SeqCst);
         let item_ids = history
             .iter()
             .map(|item| item.id.clone())
@@ -1265,7 +1257,6 @@ impl ImageClipboardManager {
 
     pub fn promote_to_top_in_memory_by_id(&self, item_id: &str) -> Result<(), String> {
         let mut history = lock_arc_mutex(&self.history);
-        let mut signature_index = lock_arc_mutex(&self.signature_index);
         let index = history
             .iter()
             .position(|item| item.id == item_id)
@@ -1273,10 +1264,9 @@ impl ImageClipboardManager {
         if index == 0 {
             return Ok(());
         }
-        let moved_signature = history[index].signature.clone();
         let moved = history.remove(index);
         history.insert(0, moved);
-        signature_index_move_to_front(&mut signature_index, &moved_signature, index);
+        self.signature_index_dirty.store(true, Ordering::SeqCst);
         Ok(())
     }
 
@@ -2127,38 +2117,9 @@ fn build_signature_index(history: &[ImageHistoryItem]) -> HashMap<String, usize>
         .collect()
 }
 
-fn signature_index_move_to_front(
-    signature_index: &mut HashMap<String, usize>,
-    moved_signature: &str,
-    from_index: usize,
-) {
-    if from_index == 0 {
-        return;
-    }
-    for index in signature_index.values_mut() {
-        if *index < from_index {
-            *index += 1;
-        }
-    }
-    if let Some(existing) = signature_index.get_mut(moved_signature) {
-        *existing = 0;
-    } else {
-        signature_index.insert(moved_signature.to_string(), 0);
-    }
-}
 
-fn signature_index_remove(
-    signature_index: &mut HashMap<String, usize>,
-    removed_signature: &str,
-    removed_index: usize,
-) {
-    signature_index.remove(removed_signature);
-    for index in signature_index.values_mut() {
-        if *index > removed_index {
-            *index -= 1;
-        }
-    }
-}
+
+
 
 fn shrink_image_history_with_group_protection(
     history: &mut Vec<ImageHistoryItem>,
@@ -2179,18 +2140,36 @@ fn shrink_image_history_with_group_protection(
         }
         return Vec::new();
     }
-    let mut removed_paths = Vec::new();
-    while history.len() > max_items {
-        if let Some(pos) = history
-            .iter()
-            .rposition(|entry| !categories.contains_key(&entry.id))
-        {
-            let removed = history.remove(pos);
-            categories.remove(&removed.id);
-            removed_paths.push(removed.image_path);
-        } else {
-            break;
+    let excess = history.len().saturating_sub(max_items);
+    if excess == 0 {
+        return Vec::new();
+    }
+
+    let mut removed_count = 0;
+    let mut to_remove = HashSet::new();
+
+    for (i, item) in history.iter().enumerate().rev() {
+        if !categories.contains_key(&item.id) {
+            to_remove.insert(i);
+            removed_count += 1;
+            if removed_count == excess {
+                break;
+            }
         }
+    }
+
+    let mut removed_paths = Vec::new();
+    if removed_count > 0 {
+        let mut idx = 0;
+        history.retain(|entry| {
+            let keep = !to_remove.contains(&idx);
+            if !keep {
+                categories.remove(&entry.id);
+                removed_paths.push(entry.image_path.clone());
+            }
+            idx += 1;
+            keep
+        });
     }
     removed_paths
 }
@@ -2204,23 +2183,39 @@ fn shrink_image_history_by_disk_limit(
     if disk_limit_bytes == 0 {
         return Vec::new();
     }
-    let mut removed_paths = Vec::new();
     let mut total = history.iter().fold(0u64, |acc, item| {
         acc.saturating_add(file_size_bytes(&item.image_path))
     });
-    while total > disk_limit_bytes {
-        let removable_pos = history
-            .iter()
-            .rposition(|item| !pinned_items.iter().any(|id| id == &item.id));
-        let Some(pos) = removable_pos else {
-            break;
-        };
-        let removed = history.remove(pos);
-        let file_size = file_size_bytes(&removed.image_path);
-        total = total.saturating_sub(file_size);
-        categories.remove(&removed.id);
-        pinned_items.retain(|id| id != &removed.id);
-        removed_paths.push(removed.image_path);
+    if total <= disk_limit_bytes {
+        return Vec::new();
+    }
+
+    let mut to_remove = HashSet::new();
+    let pinned_set: HashSet<&String> = pinned_items.iter().collect();
+
+    for (i, item) in history.iter().enumerate().rev() {
+        if !pinned_set.contains(&item.id) {
+            to_remove.insert(i);
+            total = total.saturating_sub(file_size_bytes(&item.image_path));
+            if total <= disk_limit_bytes {
+                break;
+            }
+        }
+    }
+
+    let mut removed_paths = Vec::new();
+    if !to_remove.is_empty() {
+        let mut idx = 0;
+        history.retain(|item| {
+            let keep = !to_remove.contains(&idx);
+            if !keep {
+                categories.remove(&item.id);
+                pinned_items.retain(|id| id != &item.id);
+                removed_paths.push(item.image_path.clone());
+            }
+            idx += 1;
+            keep
+        });
     }
     removed_paths
 }
