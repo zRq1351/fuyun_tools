@@ -1876,7 +1876,7 @@ fn try_replace_text_clipboard_after_remove(
 
     let next_item = {
         let manager = lock_arc_mutex(&manager_arc);
-        manager.get_history().first().cloned()
+        manager.get_latest_item()
     };
     if let Some(next) = next_item {
         let manager = lock_arc_mutex(&manager_arc);
@@ -6407,12 +6407,15 @@ pub async fn download_vc_runtime_installer(
         let total_bytes = response.content_length();
         let mut downloaded_bytes: u64 = 0;
         let mut stream = response.bytes_stream();
-        let mut file =
-            fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
+        let mut file = tokio::fs::File::create(&tmp_path)
+            .await
+            .map_err(|e| format!("创建临时文件失败: {}", e))?;
 
         while let Some(chunk_res) = stream.next().await {
             let chunk = chunk_res.map_err(|e| format!("下载数据流失败: {}", e))?;
+            use tokio::io::AsyncWriteExt;
             file.write_all(&chunk)
+                .await
                 .map_err(|e| format!("写入临时文件失败: {}", e))?;
             downloaded_bytes = downloaded_bytes.saturating_add(chunk.len() as u64);
             let progress_percent = total_bytes.and_then(|total| {
@@ -6434,6 +6437,7 @@ pub async fn download_vc_runtime_installer(
             );
         }
         file.flush()
+            .await
             .map_err(|e| format!("刷新下载文件失败: {}", e))?;
         let metadata = fs::metadata(&tmp_path).map_err(|e| format!("读取下载文件失败: {}", e))?;
         if metadata.len() == 0 {

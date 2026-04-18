@@ -1,9 +1,9 @@
-import {ref, watch} from 'vue'
+import {ref, shallowRef, watch} from 'vue'
 import {CategoryService, ClipboardService} from '../../../services/ipc'
 
 export function useClipboardHistory() {
-    const history = ref([])
-    const pagedHistory = ref([])
+    const historyMap = ref({})
+    const pagedHistory = shallowRef([])
     const selectedIndex = ref(-1)
     const searchKeyword = ref('')
     const categoryFilter = ref('全部')
@@ -47,28 +47,23 @@ export function useClipboardHistory() {
                     snippet: entry.snippet || ''
                 }))
         }, 300)
-    }, { deep: true, immediate: true })
+    }, { immediate: true })
 
     const updateSelection = (index, shouldScroll = false, contentRef = null, visibleIndex = null) => {
-        if (index < 0 || index >= history.value.length) return
+        if (index < 0) return
         selectedIndex.value = index
     }
 
     const rebuildHistoryArray = () => {
         if (pagedHistory.value.length === 0) {
-            history.value = []
+            historyMap.value = {}
             return
         }
-        const nextHistory = []
+        const nextHistory = {}
         for (const entry of pagedHistory.value) {
             nextHistory[entry.position] = entry.content
         }
-        for (let i = 0; i < nextHistory.length; i++) {
-            if (nextHistory[i] === undefined) {
-                nextHistory[i] = ''
-            }
-        }
-        history.value = nextHistory
+        historyMap.value = nextHistory
     }
 
     const sortPageItems = (entries) => {
@@ -216,7 +211,7 @@ export function useClipboardHistory() {
             }
         }
         try {
-            const removedItemContent = item || removedEntry?.content || history.value[index]
+            const removedItemContent = item || removedEntry?.content || historyMap.value[index]
             const removedItemId = removedEntry?.id
             if (removedItemId && categoryMap.value[removedItemId]) {
                 delete categoryMap.value[removedItemId]
@@ -246,7 +241,7 @@ export function useClipboardHistory() {
     const applyPayloadSnapshot = (payload = {}) => {
         const incomingHistory = Array.isArray(payload.history) ? payload.history : []
         if (incomingHistory.length === 0) {
-            history.value = []
+            historyMap.value = {}
             pagedHistory.value = []
             totalCount.value = 0
             pageOffset.value = 0
@@ -254,7 +249,11 @@ export function useClipboardHistory() {
             selectedIndex.value = -1
             return
         }
-        history.value = incomingHistory.slice()
+        const nextHistory = {}
+        for (let i = 0; i < incomingHistory.length; i++) {
+            nextHistory[i] = incomingHistory[i]
+        }
+        historyMap.value = nextHistory
         const categoriesFromPayload = payload?.categories && typeof payload.categories === 'object'
             ? payload.categories
             : categoryMap.value
@@ -369,7 +368,7 @@ export function useClipboardHistory() {
     }
 
     return {
-        history,
+        historyMap,
         selectedIndex,
         searchKeyword,
         categoryFilter,

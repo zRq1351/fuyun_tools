@@ -18,7 +18,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 fn lock_state<'a>(
     state: &'a Arc<Mutex<SharedAppState>>,
 ) -> crate::sync::MutexGuard<'a, SharedAppState> {
-    state.lock().expect("infallible mutex lock failed")
+    state.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() })
 }
 
 fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {

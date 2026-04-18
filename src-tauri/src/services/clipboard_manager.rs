@@ -10,7 +10,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
-    state.lock().expect("infallible mutex lock failed")
+    state.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() })
 }
 
 fn clipboard_listener_stop_tx() -> &'static std::sync::Mutex<Option<Sender<()>>> {
@@ -66,7 +66,7 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
             }
 
             let current_content = {
-                let manager = manager_arc.lock().expect("infallible mutex lock failed");
+                let manager = manager_arc.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
                 manager.get_content(&app_handle)
             };
 
@@ -134,13 +134,13 @@ pub fn add_to_clipboard_history(
     };
 
     let payload = {
-        let manager = manager_arc.lock().expect("infallible mutex lock failed");
+        let manager = manager_arc.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
         manager.add_to_history(content);
         if !should_emit {
             None
         } else {
-            let history = manager.get_history();
-            let latest_item = history.first().cloned().unwrap_or_default();
+            let history_len = manager.get_history_len();
+            let latest_item = manager.get_latest_item().unwrap_or_default();
             let is_pinned = if latest_item.is_empty() {
                 false
             } else {
@@ -148,7 +148,7 @@ pub fn add_to_clipboard_history(
             };
             Some(serde_json::json!({
                 "latest_item": latest_item,
-                "history_len": history.len(),
+                "history_len": history_len,
                 "is_pinned": is_pinned
             }))
         }

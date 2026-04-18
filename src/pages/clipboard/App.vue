@@ -221,7 +221,7 @@ let beforeUnloadHandler = null
 let pageHideHandler = null
 
 const {
-  history,
+  historyMap,
   selectedIndex,
   searchKeyword,
   categoryFilter,
@@ -388,7 +388,7 @@ const init = async () => {
         return
       }
       const incomingPinnedSet = new Set(Array.isArray(payload.pinned_items) ? payload.pinned_items : [])
-      const currentSet = new Set(history.value)
+      const currentSet = new Set(Object.values(historyMap.value))
       const addedContents = incomingHistory.filter((content) => !currentSet.has(content))
       for (let i = addedContents.length - 1; i >= 0; i -= 1) {
         const content = addedContents[i]
@@ -544,10 +544,10 @@ const handleDrop = async (event, category) => {
 const buildOpId = () => Date.now() * 1000 + Math.floor(Math.random() * 1000)
 
 const resolveSelectedText = () => {
-  if (selectedIndex.value < 0 || selectedIndex.value >= history.value.length) {
+  if (selectedIndex.value < 0) {
     return ''
   }
-  return history.value[selectedIndex.value] || ''
+  return historyMap.value[selectedIndex.value] || ''
 }
 
 const triggerAiFlow = async (rawText, mode) => {
@@ -684,7 +684,7 @@ const handleKeydown = async (event) => {
       break
     case 'Enter':
       event.preventDefault()
-      if (selectedIndex.value >= 0 && selectedIndex.value < history.value.length) {
+      if (selectedIndex.value >= 0 && historyMap.value[selectedIndex.value]) {
         const visibleIndex = visibleHistory.value.findIndex((entry) => entry.index === selectedIndex.value)
         if (visibleIndex >= 0) {
           selectAndFillDirect(selectedIndex.value)
