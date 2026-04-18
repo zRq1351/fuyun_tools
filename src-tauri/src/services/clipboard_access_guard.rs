@@ -9,6 +9,6 @@ fn clipboard_access_mutex() -> &'static Mutex<()> {
 pub fn with_clipboard_access_lock<T>(f: impl FnOnce() -> T) -> T {
     let _guard = clipboard_access_mutex()
         .lock()
-        .unwrap_or_else(|e| e.into_inner());
+        .unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
     f()
 }

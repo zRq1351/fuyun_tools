@@ -62,7 +62,7 @@ static LAST_OPEN_FOLDER_MS: AtomicU64 = AtomicU64::new(0);
 const VIDEO_IO_RETRY_DELAYS_MS: [u64; 5] = [60, 120, 240, 480, 800];
 
 fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|e| e.into_inner())
+    mutex.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() })
 }
 
 fn suppress_console_window(command: &mut Command) -> &mut Command {

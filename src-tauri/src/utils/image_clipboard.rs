@@ -59,7 +59,7 @@ static IMAGE_PERSIST_QUEUE_TIMEOUT_DROP_COUNT: AtomicU64 = AtomicU64::new(0);
 static IMAGE_PERSIST_QUEUE_WAIT_MS_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 fn lock_arc_mutex<T>(mutex: &'_ Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|e| e.into_inner())
+    mutex.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() })
 }
 
 fn push_persist_task_with_timeout(
@@ -137,7 +137,7 @@ pub fn is_fast_fill_verify_mode_enabled() -> bool {
 pub fn get_async_preview(item_id: &str) -> Option<(u32, u32, String)> {
     let generator = PREVIEW_GENERATOR
         .lock()
-        .unwrap_or_else(|e| e.into_inner());
+        .unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
     generator.get_preview(item_id)
 }
 
@@ -145,7 +145,7 @@ pub fn get_async_preview(item_id: &str) -> Option<(u32, u32, String)> {
 pub fn is_preview_ready(item_id: &str) -> bool {
     let generator = PREVIEW_GENERATOR
         .lock()
-        .unwrap_or_else(|e| e.into_inner());
+        .unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
     generator.get_preview(item_id).is_some()
 }
 
@@ -179,7 +179,7 @@ static PREVIEW_GENERATOR: LazyLock<Arc<Mutex<PreviewGenerator>>> =
 pub fn init_preview_generator_with_app_handle(app_handle: tauri::AppHandle) {
     let mut generator = PREVIEW_GENERATOR
         .lock()
-        .unwrap_or_else(|e| e.into_inner());
+        .unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
     *generator = PreviewGenerator::new(Some(app_handle));
 }
 
@@ -207,7 +207,7 @@ impl PreviewGenerator {
                 let item_id = task.item_id.clone();
 
                 // 存储到内存缓存
-                let mut cache = cache_clone.lock().unwrap_or_else(|e| e.into_inner());
+                let mut cache = cache_clone.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
                 cache.put(
                     item_id.clone(),
                     (preview_width, preview_height, preview_base64.clone()),
@@ -233,25 +233,8 @@ impl PreviewGenerator {
                     preview_height,
                     preview_base64,
                 };
-                if let Err(e) = persist_tx_clone.try_send(persist_task) {
-                    match e {
-                        TrySendError::Full(task) => {
-                            log::warn!("预览落库队列已满，改为后台线程直接落库: {}", task.item_id);
-                            std::thread::spawn(move || {
-                                if let Err(err) = image_store::save_async_preview(
-                                    &task.item_id,
-                                    task.preview_width,
-                                    task.preview_height,
-                                    &task.preview_base64,
-                                ) {
-                                    log::error!("保存异步预览到数据库失败: {}", err);
-                                }
-                            });
-                        }
-                        TrySendError::Disconnected(task) => {
-                            log::error!("预览落库队列已断开: {}", task.item_id);
-                        }
-                    }
+                if let Err(e) = persist_tx_clone.send(persist_task) {
+                    log::error!("发送预览落库任务失败: {}", e);
                 }
 
                 log::debug!(
@@ -295,7 +278,7 @@ impl PreviewGenerator {
         if let Some(preview) = self
             .preview_cache
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() })
             .get(item_id)
         {
             return Some(preview.clone());
@@ -306,7 +289,7 @@ impl PreviewGenerator {
             // 加载到内存缓存
             self.preview_cache
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() })
                 .put(item_id.to_string(), preview.clone());
             return Some(preview);
         }
@@ -1057,7 +1040,7 @@ impl ImageClipboardManager {
             };
             let generator = PREVIEW_GENERATOR
                 .lock()
-                .unwrap_or_else(|e| e.into_inner());
+                .unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
             generator.submit_task(preview_task);
             log::debug!("已提交异步预览生成任务: {} ({}x{})", id, width, height);
         }

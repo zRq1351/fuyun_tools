@@ -85,7 +85,7 @@ fn hook_event_sender() -> &'static StdMutex<Option<Sender<HookEvent>>> {
 static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
 fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
-    mutex.lock().unwrap_or_else(|e| e.into_inner())
+    mutex.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() })
 }
 
 fn notify_detection_pending() {

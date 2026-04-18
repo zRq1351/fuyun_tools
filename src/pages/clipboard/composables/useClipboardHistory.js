@@ -1,9 +1,9 @@
-import {ref, watch} from 'vue'
+import {ref, shallowRef, watch} from 'vue'
 import {CategoryService, ClipboardService} from '../../../services/ipc'
 
 export function useClipboardHistory() {
     const historyMap = ref({})
-    const pagedHistory = ref([])
+    const pagedHistory = shallowRef([])
     const selectedIndex = ref(-1)
     const searchKeyword = ref('')
     const categoryFilter = ref('全部')
@@ -47,7 +47,7 @@ export function useClipboardHistory() {
                     snippet: entry.snippet || ''
                 }))
         }, 300)
-    }, { deep: true, immediate: true })
+    }, { immediate: true })
 
     const updateSelection = (index, shouldScroll = false, contentRef = null, visibleIndex = null) => {
         if (index < 0) return
