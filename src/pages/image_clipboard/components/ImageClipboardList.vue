@@ -320,6 +320,7 @@ defineExpose({
   display: flex;
   flex-direction: row;
   height: 100%;
+  flex-shrink: 0;
 }
 
 .content::after {
