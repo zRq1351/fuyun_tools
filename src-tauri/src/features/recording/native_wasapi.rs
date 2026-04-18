@@ -102,8 +102,12 @@ fn capture_process_loopback_to_wav(
             bits_per_sample: 16,
             sample_format: SampleFormat::Int,
         };
-        let mut writer = WavWriter::create(&output_path, spec)
+        // 🔧 性能优化：使用 1MB 大缓冲区的 BufWriter 避免高频 I/O 瓶颈
+        let file = std::fs::File::create(&output_path)
             .map_err(|e| format!("创建进程音频文件失败(pid={}): {}", process_id, e))?;
+        let buf_writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
+        let mut writer = hound::WavWriter::new(buf_writer, spec)
+            .map_err(|e| format!("初始化 WAV 写入器失败(pid={}): {}", process_id, e))?;
         // ✅ 添加诊断日志：确认文件创建成功
         if let Ok(meta) = std::fs::metadata(&output_path) {
             log::info!(
@@ -127,7 +131,22 @@ fn capture_process_loopback_to_wav(
         if let Some(tx) = startup_tx.as_ref() {
             let _ = tx.send((process_id, Ok(())));
         }
+
+        // 🔧 修复 A/V 严重不同步：通过时钟对齐补充静音数据
+        let mut active_time_ns: u64 = 0;
+        let mut last_loop_time = std::time::Instant::now();
+        let mut actual_total_samples: u64 = 0;
+
         while !stop_flag.load(Ordering::SeqCst) {
+            let now = std::time::Instant::now();
+            let dt_ns = now.duration_since(last_loop_time).as_nanos() as u64;
+            last_loop_time = now;
+
+            let is_paused = recording_pause_flag.load(Ordering::SeqCst);
+            if !is_paused {
+                active_time_ns += dt_ns;
+            }
+
             let new_frames = capture_client
                 .get_next_packet_size()
                 .map_err(|e| {
@@ -159,9 +178,25 @@ fn capture_process_loopback_to_wav(
                         0
                     };
                     let _ = writer.write_sample(out);
+                    actual_total_samples += 1;
                 }
             }
             queue.drain(..processed);
+
+            // 🔧 如果目标应用静音导致 WASAPI 不投递音频包，则根据时间流逝填充静音数据
+            if !is_paused {
+                let expected_total_samples = ((active_time_ns as f64 / 1_000_000_000.0) * 48000.0) as u64 * 2;
+                if expected_total_samples > actual_total_samples {
+                    let padding_needed = expected_total_samples - actual_total_samples;
+                    // 容忍 50ms (4800 samples) 的抖动，避免在正常数据到达前过度填充
+                    if padding_needed > 4800 {
+                        for _ in 0..padding_needed {
+                            let _ = writer.write_sample(0i16);
+                        }
+                        actual_total_samples += padding_needed;
+                    }
+                }
+            }
 
             if event.wait_for_event(50).is_err() {
                 // ✅ 添加诊断日志：事件等待失败（可能是进程退出或音频设备断开）
@@ -528,8 +563,12 @@ pub fn start_system_loopback_wav_with_device(
                 bits_per_sample: 16,
                 sample_format: SampleFormat::Int,
             };
-            let writer = WavWriter::create(&thread_output, spec)
+            // 🔧 性能优化：使用 1MB 大缓冲区的 BufWriter 避免高频 I/O 瓶颈
+            let file = std::fs::File::create(&thread_output)
                 .map_err(|e| format!("创建 wav 文件失败: {}", e))?;
+            let buf_writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
+            let writer = hound::WavWriter::new(buf_writer, spec)
+                .map_err(|e| format!("初始化 WAV 写入器失败: {}", e))?;
             let writer = Arc::new(Mutex::new(Some(writer)));
             let writer_cb = writer.clone();
             let enabled_cb = enabled_flag.clone();
@@ -906,8 +945,12 @@ pub fn start_microphone_wav_with_device(
                 bits_per_sample: 16,
                 sample_format: SampleFormat::Int,
             };
-            let writer = WavWriter::create(&thread_output, spec)
+            // 🔧 性能优化：使用 1MB 大缓冲区的 BufWriter 避免高频 I/O 瓶颈
+            let file = std::fs::File::create(&thread_output)
                 .map_err(|e| format!("创建麦克风 wav 文件失败: {}", e))?;
+            let buf_writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
+            let writer = hound::WavWriter::new(buf_writer, spec)
+                .map_err(|e| format!("初始化麦克风 WAV 写入器失败: {}", e))?;
             let writer = Arc::new(Mutex::new(Some(writer)));
             let writer_cb = writer.clone();
             let enabled_cb = enabled_flag.clone();
