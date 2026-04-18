@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use image::{ImageBuffer, Rgba};
 #[cfg(target_os = "windows")]
 use winapi::shared::windef::RECT;
 #[cfg(target_os = "windows")]
@@ -19,7 +20,6 @@ use windows_capture::settings::{
     MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
 };
 use windows_capture::window::Window;
-use image::{ImageBuffer, Rgba};
 
 static WGC_FORCE_DEFAULT_BORDER: AtomicBool = AtomicBool::new(false);
 static WGC_FORCE_DEFAULT_DIRTY_REGION: AtomicBool = AtomicBool::new(false);
@@ -192,7 +192,7 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
             let frame_h = frame.height();
             if frame_w != self.flags.width || frame_h != self.flags.height {
                 let timestamp = frame.timestamp().map_err(|e| e.to_string())?.Duration;
-                let mut buffer = frame.buffer().map_err(|e| e.to_string())?;
+                let buffer = frame.buffer().map_err(|e| e.to_string())?;
                 let mut vec = Vec::new();
                 let pixels = buffer.as_nopadding_buffer(&mut vec);
                 if let Some(img) = ImageBuffer::<Rgba<u8>, &[u8]>::from_raw(frame_w, frame_h, pixels) {

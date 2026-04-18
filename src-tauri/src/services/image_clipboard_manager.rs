@@ -4,11 +4,11 @@ use crate::services::clipboard_wakeup::subscribe_clipboard_wake_events;
 use crate::sync::Mutex;
 use crate::utils::image_clipboard::ImageClipboardManager;
 use parking_lot::Mutex as ParkingMutex;
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::OnceLock;
-use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex};
+use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -64,21 +64,6 @@ fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a
     state.lock().unwrap()
 }
 
-fn observe_queue_len(len: usize) {
-    let watermark = &IMAGE_QUEUE_METRICS.queue_len_high_watermark;
-    loop {
-        let current = watermark.load(Ordering::Relaxed);
-        if len <= current {
-            break;
-        }
-        if watermark
-            .compare_exchange(current, len, Ordering::Relaxed, Ordering::Relaxed)
-            .is_ok()
-        {
-            break;
-        }
-    }
-}
 
 fn maybe_log_queue_metrics() {
     let enqueued = IMAGE_QUEUE_METRICS.enqueued.load(Ordering::Relaxed);

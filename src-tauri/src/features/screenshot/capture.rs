@@ -287,7 +287,6 @@ pub fn rgba_to_base64_png(rgba: &[u8], width: u32, height: u32) -> Result<String
     use base64::engine::general_purpose::STANDARD;
     use base64::write::EncoderWriter;
     use image::ImageEncoder;
-    use std::io::Write;
 
     let mut base64_output = Vec::new();
     {
