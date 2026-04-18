@@ -73,7 +73,7 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
             if let Some(current_content) = current_content {
                 if !current_content.is_empty() && current_content != last_content {
                     add_to_clipboard_history(&app_handle, current_content.clone(), state.clone());
-                    last_content = current_content.clone();
+                    last_content = current_content;
                     log::info!("检测到剪贴板内容变化，已添加到历史记录");
                 }
             }
