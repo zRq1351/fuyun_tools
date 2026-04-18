@@ -26,7 +26,7 @@ static WINDOW_VISIBILITY_NOTIFY: LazyLock<Arc<(StdMutex<u64>, Condvar)>> =
     LazyLock::new(|| Arc::new((StdMutex::new(0), Condvar::new())));
 
 fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
-    mutex.lock().expect("infallible mutex lock failed")
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn notify_window_visibility_changed() {

@@ -1,4 +1,4 @@
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread;
 use std::time::Duration;
 
@@ -25,7 +25,7 @@ struct WakeHub {
 
 impl WakeHub {
     fn subscribe(&self) -> ClipboardWakeSubscription {
-        let (tx, rx) = mpsc::channel::<WakeSignal>();
+        let (tx, rx) = mpsc::sync_channel::<WakeSignal>(1);
         let owner = std::sync::Arc::new(());
         let owner_weak = std::sync::Arc::downgrade(&owner);
         if let Ok(mut guard) = self.subscribers.lock() {
@@ -48,13 +48,14 @@ impl WakeHub {
             if entry.owner.upgrade().is_none() {
                 return false;
             }
-            entry.tx.send(WakeSignal::Event).is_ok()
+            let _ = entry.tx.try_send(WakeSignal::Event);
+            true
         });
     }
 }
 
 struct WakeSubscriber {
-    tx: mpsc::Sender<WakeSignal>,
+    tx: SyncSender<WakeSignal>,
     owner: std::sync::Weak<()>,
 }
 

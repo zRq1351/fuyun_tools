@@ -62,7 +62,7 @@ static LAST_OPEN_FOLDER_MS: AtomicU64 = AtomicU64::new(0);
 const VIDEO_IO_RETRY_DELAYS_MS: [u64; 5] = [60, 120, 240, 480, 800];
 
 fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
-    mutex.lock().expect("infallible mutex lock failed")
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn suppress_console_window(command: &mut Command) -> &mut Command {
@@ -1218,10 +1218,15 @@ fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
                 continue;
             }
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !file_name.ends_with(".tmp.mp4") {
-                continue;
+            if file_name.ends_with(".tmp.mp4")
+                || file_name.contains(".sys.")
+                || file_name.contains(".mic.")
+            {
+                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                if ext == "mp4" || ext == "wav" || ext == "aac" {
+                    let _ = fs::remove_file(path);
+                }
             }
-            let _ = fs::remove_file(path);
         }
     }
 }

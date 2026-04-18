@@ -1876,7 +1876,7 @@ fn try_replace_text_clipboard_after_remove(
 
     let next_item = {
         let manager = lock_arc_mutex(&manager_arc);
-        manager.get_history().first().cloned()
+        manager.get_latest_item()
     };
     if let Some(next) = next_item {
         let manager = lock_arc_mutex(&manager_arc);

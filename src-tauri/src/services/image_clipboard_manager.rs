@@ -65,7 +65,7 @@ fn image_listener_stop_tx() -> &'static StdMutex<Option<Sender<()>>> {
 }
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
-    state.lock().expect("infallible mutex lock failed")
+    state.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn observe_queue_len(len: usize) {
@@ -135,7 +135,7 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
         return;
     }
     let manager = {
-        let guard = manager_arc.lock().expect("infallible mutex lock failed");
+        let guard = manager_arc.lock().unwrap_or_else(|e| e.into_inner());
         guard.clone()
     };
     let payload = serde_json::json!({

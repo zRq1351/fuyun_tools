@@ -31,7 +31,18 @@ pub struct WasapiFfmpegHandle {
     pub stop_flag: Arc<AtomicBool>,
     pub join: Option<std::thread::JoinHandle<()>>,
     pub output_path: PathBuf,
-    pub ffmpeg_child: Arc<Mutex<Option<Child>>>,
+    pub ffmpeg_child: Arc<Mutex<Option<ChildGuard>>>,
+}
+
+pub struct ChildGuard(pub Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Ok(None) = self.0.try_wait() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1194,7 +1205,7 @@ pub fn start_system_loopback_aac_with_device(
     let thread_stop_flag = stop_flag.clone();
     let thread_output = output_path.clone();
     let thread_device_key = device_desc_key.clone();
-    let ffmpeg_child = Arc::new(Mutex::new(None::<Child>));
+    let ffmpeg_child = Arc::new(Mutex::new(None::<ChildGuard>));
     let thread_ffmpeg = ffmpeg_child.clone();
     let (tx, rx) = mpsc::channel::<Result<(), String>>();
 
@@ -1244,7 +1255,7 @@ pub fn start_system_loopback_aac_with_device(
 
             {
                 if let Ok(mut guard) = thread_ffmpeg.lock() {
-                    *guard = Some(child);
+                    *guard = Some(ChildGuard(child));
                 }
             }
 
@@ -1357,7 +1368,7 @@ pub fn start_system_loopback_aac_with_device(
                 if let Some(ref mut child) = *guard {
                     // 等待FFmpeg退出，最多5秒
                     for _ in 0..50 {
-                        match child.try_wait() {
+                        match child.0.try_wait() {
                             Ok(Some(status)) => {
                                 log::info!(
                                     "✅ FFmpeg AAC 编码完成: {:?}, exit_status={}, 耗时={}ms",
@@ -1377,9 +1388,9 @@ pub fn start_system_loopback_aac_with_device(
                         }
                     }
                     // 如果超时，强制杀死进程
-                    if child.try_wait().ok().flatten().is_none() {
+                    if child.0.try_wait().ok().flatten().is_none() {
                         log::warn!("FFmpeg 编码超时，强制终止");
-                        let _ = child.kill();
+                        let _ = child.0.kill();
                     }
                 }
             }

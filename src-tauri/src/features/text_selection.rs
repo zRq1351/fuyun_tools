@@ -58,7 +58,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use winapi::um::winuser::GetClipboardSequenceNumber;
 
 fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
-    mutex.lock().expect("infallible mutex lock failed")
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 struct SelectionProcessingGuard {
