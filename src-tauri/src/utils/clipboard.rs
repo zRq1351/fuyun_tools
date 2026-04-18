@@ -860,17 +860,37 @@ fn shrink_text_history_with_group_protection(
         }
         return;
     }
-    while history.len() > max_items {
-        if let Some(pos) = history.iter().rposition(|item| {
-            let item_id = crate::utils::database::stable_history_item_id(item);
-            !categories.contains_key(&item_id)
-        }) {
-            let removed = history.remove(pos);
-            let item_id = crate::utils::database::stable_history_item_id(&removed);
-            categories.remove(&item_id);
-        } else {
-            break;
+
+    let excess = history.len().saturating_sub(max_items);
+    if excess == 0 {
+        return;
+    }
+
+    let mut removed_count = 0;
+    let mut to_remove = HashSet::new();
+
+    for (i, item) in history.iter().enumerate().rev() {
+        let item_id = crate::utils::database::stable_history_item_id(item);
+        if !categories.contains_key(&item_id) {
+            to_remove.insert(i);
+            removed_count += 1;
+            if removed_count == excess {
+                break;
+            }
         }
+    }
+
+    if removed_count > 0 {
+        let mut idx = 0;
+        history.retain(|item| {
+            let keep = !to_remove.contains(&idx);
+            if !keep {
+                let item_id = crate::utils::database::stable_history_item_id(item);
+                categories.remove(&item_id);
+            }
+            idx += 1;
+            keep
+        });
     }
 }
 

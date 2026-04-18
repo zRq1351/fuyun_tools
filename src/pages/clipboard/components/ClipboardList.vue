@@ -1,48 +1,50 @@
 <template>
   <div
-      ref="contentRef"
+      v-bind="containerProps"
       class="content"
       @mousedown="handleMouseDown"
       @scroll="handleScroll"
       @wheel.prevent="handleWheel"
   >
-    <div
-        v-for="(entry, index) in visibleHistory"
-        :id="'clipboard-item-' + entry.index"
-        :key="entry.content"
-        v-memo="[entry.content, entry.index, selectedIndex === entry.index, getItemCategory(entry.content), isPinned(entry.content), entry.snippet, highlightKeyword]"
-        class="clipboard-item"
-        :class="{ selected: selectedIndex === entry.index }"
-        @click="handleClick(entry.index)"
-        @dblclick="handleDoubleClick(entry.index)"
-        @contextmenu.prevent="showContextMenu($event, entry.content, index)"
-    >
-      <div v-if="isWebUrl(entry.content)" class="open-btn" @click.stop="openWebUrl(entry.content)">
-        <el-icon>
-          <Link/>
-        </el-icon>
-      </div>
-      <div :class="{ active: isPinned(entry.content) }" class="pin-btn"
-           @click.stop="promoteItem(entry.index, entry.content)">
-        <el-icon>
-          <Pin/>
-        </el-icon>
-      </div>
-      <div class="delete-btn" @click.stop="deleteItem(entry.index, entry.content)">
-        <el-icon>
-          <Close/>
-        </el-icon>
-      </div>
-      <div class="index">{{ index + 1 }}</div>
-      <div class="category-wrap" @click.stop>
-        <div class="category-chip">{{ getItemCategory(entry.content) }}</div>
-      </div>
-      <div class="item-content">{{ entry.content }}</div>
-      <div v-if="entry.snippet" class="item-snippet">
-        <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
-          <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
-          <span v-else>{{ part.text }}</span>
-        </template>
+    <div v-bind="wrapperProps" class="virtual-wrapper">
+      <div
+          v-for="virtualRow in list"
+          :id="'clipboard-item-' + virtualRow.data.index"
+          :key="virtualRow.data.content"
+          v-memo="[virtualRow.data.content, virtualRow.data.index, selectedIndex === virtualRow.data.index, getItemCategory(virtualRow.data.content), isPinned(virtualRow.data.content), virtualRow.data.snippet, highlightKeyword]"
+          class="clipboard-item"
+          :class="{ selected: selectedIndex === virtualRow.data.index }"
+          @click="handleClick(virtualRow.data.index)"
+          @dblclick="handleDoubleClick(virtualRow.data.index)"
+          @contextmenu.prevent="showContextMenu($event, virtualRow.data.content, virtualRow.index)"
+      >
+        <div v-if="isWebUrl(virtualRow.data.content)" class="open-btn" @click.stop="openWebUrl(virtualRow.data.content)">
+          <el-icon>
+            <Link/>
+          </el-icon>
+        </div>
+        <div :class="{ active: isPinned(virtualRow.data.content) }" class="pin-btn"
+             @click.stop="promoteItem(virtualRow.data.index, virtualRow.data.content)">
+          <el-icon>
+            <Pin/>
+          </el-icon>
+        </div>
+        <div class="delete-btn" @click.stop="deleteItem(virtualRow.data.index, virtualRow.data.content)">
+          <el-icon>
+            <Close/>
+          </el-icon>
+        </div>
+        <div class="index">{{ virtualRow.index + 1 }}</div>
+        <div class="category-wrap" @click.stop>
+          <div class="category-chip">{{ getItemCategory(virtualRow.data.content) }}</div>
+        </div>
+        <div class="item-content">{{ virtualRow.data.content }}</div>
+        <div v-if="virtualRow.data.snippet" class="item-snippet">
+          <template v-for="(part, partIndex) in renderHighlightParts(virtualRow.data.snippet)" :key="partIndex">
+            <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
+            <span v-else>{{ part.text }}</span>
+          </template>
+        </div>
       </div>
     </div>
     <div v-if="showTailLoadMoreHint" class="load-more-tail-indicator">
@@ -54,15 +56,15 @@
         <span>{{ isLoadingMore ? '加载中' : '加载更多' }}</span>
       </div>
     </div>
-    <div class="spacer"></div>
   </div>
 </template>
 
 <script setup>
-import {computed, onMounted, onUnmounted, ref} from 'vue'
+import {computed, onMounted, onUnmounted, ref, watch} from 'vue'
 import {Close, Link, Loading} from '@element-plus/icons-vue'
 import {Pin} from 'lucide-vue-next'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
+import {useVirtualList} from '@vueuse/core'
 
 const props = defineProps({
   visibleHistory: {
@@ -124,7 +126,13 @@ const props = defineProps({
 })
 const emit = defineEmits(['content-scroll', 'load-more-intent'])
 
-const contentRef = ref(null)
+const visibleHistoryComputed = computed(() => props.visibleHistory)
+const { list, containerProps, wrapperProps } = useVirtualList(visibleHistoryComputed, {
+  itemWidth: 258,
+  overscan: 10
+})
+
+const contentRef = containerProps.ref
 let isDown = false
 let isDragging = false
 let startX = 0
@@ -327,14 +335,17 @@ defineExpose({
 .content {
   flex: 1;
   min-height: 0;
-  display: flex;
-  gap: 8px;
   padding: 8px;
-  flex-direction: row;
   overflow-x: auto;
   overflow-y: hidden;
   margin-top: 10px;
   scrollbar-width: none;
+}
+
+.virtual-wrapper {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
 }
 
 .content::-webkit-scrollbar {
@@ -356,11 +367,6 @@ defineExpose({
 .content.is-dragging .open-btn,
 .content.is-dragging .pin-btn {
   opacity: 0 !important;
-}
-
-.spacer {
-  flex: 0 0 742px;
-  height: 1px;
 }
 
 .load-more-tail-indicator {
@@ -401,6 +407,7 @@ defineExpose({
   position: relative;
   user-select: none;
   width: 250px;
+  margin-right: 8px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
