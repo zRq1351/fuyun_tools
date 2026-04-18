@@ -276,53 +276,7 @@ fn build_exit_error_with_stderr(
     format!("录制进程异常退出: {}；stderr: {}", status_text, tail)
 }
 
-#[cfg(target_os = "windows")]
-fn set_process_threads_suspended(process_id: u32, suspend: bool) -> Result<(), AppError> {
-    unsafe {
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-        if snapshot == INVALID_HANDLE_VALUE {
-            return Err(AppError::new(ErrorCode::SystemError, "获取线程快照失败"));
-        }
-        let mut entry: THREADENTRY32 = std::mem::zeroed();
-        entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
-        let mut ok = Thread32First(snapshot, &mut entry) != 0;
-        let mut first_error: Option<String> = None;
-        while ok {
-            if entry.th32OwnerProcessID == process_id {
-                let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID);
-                if !thread.is_null() {
-                    let ret = if suspend {
-                        SuspendThread(thread)
-                    } else {
-                        ResumeThread(thread)
-                    };
-                    if ret == u32::MAX && first_error.is_none() {
-                        first_error = Some(format!(
-                            "{}线程失败，thread_id={}",
-                            if suspend { "暂停" } else { "恢复" },
-                            entry.th32ThreadID
-                        ));
-                    }
-                    let _ = CloseHandle(thread);
-                }
-            }
-            ok = Thread32Next(snapshot, &mut entry) != 0;
-        }
-        let _ = CloseHandle(snapshot);
-        if let Some(details) = first_error {
-            return Err(AppError::new(
-                ErrorCode::SystemError,
-                if suspend {
-                    "暂停录制失败"
-                } else {
-                    "恢复录制失败"
-                },
-            )
-            .with_details(details));
-        }
-        Ok(())
-    }
-}
+// fn set_process_threads_suspended removed since it is no longer used and caused video corruption.
 
 fn resolve_output_dir(
     state: &SharedAppState,
@@ -614,37 +568,19 @@ fn merge_system_audio_into_video(
         .arg("-map")
         .arg(audio_map_label);
 
-    // 🔧 性能优化：检测所有音频片段是否都是 AAC 格式
-    let all_aac = valid_system.iter().chain(valid_mic.iter()).all(|seg| {
-        seg.path
-            .extension()
-            .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
-            .unwrap_or(false)
-    });
-
-    if all_aac {
-        log::info!("✅ 所有音频片段均为 AAC 格式，使用流复制模式（无重编码）");
-        cmd.arg("-c:v")
-            .arg("copy")
-            .arg("-c:a")
-            .arg("copy") // 🔧 AAC 直接 copy
-            .arg("-movflags")
-            .arg("+faststart")
-            .arg(&merged_path);
-    } else {
-        log::info!("🔧 检测到 WAV 音频，需要重编码为 AAC");
-        cmd.arg("-c:v")
-            .arg("copy")
-            .arg("-c:a")
-            .arg("aac")
-            .arg("-b:a")
-            .arg("128k")
-            .arg("-profile:a")
-            .arg("aac_low")
-            .arg("-movflags")
-            .arg("+faststart")
-            .arg(&merged_path);
-    }
+    // FFmpeg filter_complex requires re-encoding, so we cannot use -c:a copy here.
+    log::info!("🔧 需要通过 filter_complex 合并音频，必须重编码为 AAC");
+    cmd.arg("-c:v")
+        .arg("copy")
+        .arg("-c:a")
+        .arg("aac")
+        .arg("-b:a")
+        .arg("128k")
+        .arg("-profile:a")
+        .arg("aac_low")
+        .arg("-movflags")
+        .arg("+faststart")
+        .arg(&merged_path);
 
     log::info!(
         "🔧 开始音频合并，系统音频片段: {}, 麦克风片段: {}",
@@ -688,6 +624,9 @@ fn merge_system_audio_into_video(
             AppError::new(ErrorCode::SystemError, "启动音频合成进程失败")
                 .with_details(e.to_string())
         })?;
+
+    // 🔧 绑定到 Job Object
+    crate::features::recording::job_object::assign_to_global_job_object(&child);
 
     // 等待FFmpeg完成（仍为同步，但FFmpeg内部会流式处理）
     let output = child.wait_with_output().map_err(|e| {
@@ -800,6 +739,9 @@ fn merge_audio_fast(
             AppError::new(ErrorCode::SystemError, "启动快速音频合并失败")
                 .with_details(e.to_string())
         })?;
+
+    // 🔧 绑定到 Job Object
+    crate::features::recording::job_object::assign_to_global_job_object(&child);
 
     let output = child.wait_with_output().map_err(|e| {
         AppError::new(ErrorCode::SystemError, "执行快速音频合并失败").with_details(e.to_string())
@@ -1467,6 +1409,104 @@ fn spawn_stats_loop(
     });
 }
 
+fn spawn_ffmpeg_video_segment(
+    ffmpeg_path: &std::path::Path,
+    target_type: &str,
+    target_id: &str,
+    fps: u32,
+    capture_cursor: bool,
+    video_bitrate: u32,
+    output_path: &PathBuf,
+) -> Result<(std::process::Child, std::process::ChildStderr), AppError> {
+    let mut args = Vec::new();
+    match target_type {
+        "window" => {
+            return Err(AppError::new(ErrorCode::ValidationError, "WGC 模式不支持 FFmpeg 分段录制"));
+        }
+        "gdigrab_window" => {
+            args.push("-f".into());
+            args.push("gdigrab".into());
+            args.push("-framerate".into());
+            args.push(format!("{}", fps));
+            args.push("-draw_mouse".into());
+            args.push(if capture_cursor { "1".into() } else { "0".into() });
+            args.push("-i".into());
+            args.push(format!("title={}", target_id));
+        }
+        "region" => {
+            let (x, y, width, height) = parse_region_target(target_id).ok_or_else(|| {
+                AppError::new(ErrorCode::ValidationError, "区域录制参数无效").with_details(format!("target_id={}", target_id))
+            })?;
+            let (x, y, width, height) = normalize_region_to_virtual_screen(x, y, width, height)
+                .ok_or_else(|| {
+                    AppError::new(ErrorCode::ValidationError, "区域录制参数无效").with_details("virtual screen unavailable")
+                })?;
+            args.push("-f".into());
+            args.push("gdigrab".into());
+            args.push("-framerate".into());
+            args.push(format!("{}", fps));
+            args.push("-draw_mouse".into());
+            args.push(if capture_cursor { "1".into() } else { "0".into() });
+            args.push("-offset_x".into());
+            args.push(x.to_string());
+            args.push("-offset_y".into());
+            args.push(y.to_string());
+            args.push("-video_size".into());
+            args.push(format!("{}x{}", width, height));
+            args.push("-i".into());
+            args.push("desktop".into());
+        }
+        _ => {
+            args.push("-f".into());
+            args.push("gdigrab".into());
+            args.push("-framerate".into());
+            args.push(format!("{}", fps));
+            args.push("-draw_mouse".into());
+            args.push(if capture_cursor { "1".into() } else { "0".into() });
+            args.push("-i".into());
+            args.push("desktop".into());
+        }
+    }
+    
+    args.push("-map".to_string());
+    args.push("0:v:0".to_string());
+    args.push("-vf".to_string());
+    args.push("scale=trunc(iw/2)*2:trunc(ih/2)*2".to_string());
+    args.extend_from_slice(&[
+        "-c:v".to_string(),
+        "libx264".to_string(),
+        "-preset".to_string(),
+        "veryfast".to_string(),
+        "-pix_fmt".to_string(),
+        "yuv420p".to_string(),
+        "-b:v".to_string(),
+        format!("{}k", video_bitrate),
+    ]);
+    args.push("-an".to_string());
+    args.push(output_path.to_string_lossy().to_string());
+
+    let mut command = Command::new(ffmpeg_path);
+    suppress_console_window(&mut command);
+    command
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn().map_err(|e| {
+        AppError::new(ErrorCode::SystemError, "启动录制片段失败").with_details(e.to_string())
+    })?;
+    
+    // 🔧 将录制进程绑定到 Job Object 以确保随主进程退出
+    crate::features::recording::job_object::assign_to_global_job_object(&child);
+    
+    let stderr = child.stderr.take().ok_or_else(|| {
+        AppError::new(ErrorCode::SystemError, "获取录制进程 stderr 失败")
+    })?;
+
+    Ok((child, stderr))
+}
+
 pub fn start_recording(
     app: &AppHandle,
     state_arc: Arc<Mutex<SharedAppState>>,
@@ -1651,103 +1691,28 @@ pub fn start_recording(
             }
         }
 
-        match target_type.as_str() {
-            "window" => {
-                // 已在上方通过 WGC 启动，此处留空
-            }
-            "gdigrab_window" => {
-                args.push("-f".into());
-                args.push("gdigrab".into());
-                args.push("-framerate".into());
-                args.push(format!("{}", fps));
-                args.push("-draw_mouse".into());
-                args.push(if capture_cursor {
-                    "1".into()
-                } else {
-                    "0".into()
-                });
-                args.push("-i".into());
-                args.push(format!("title={}", target_id));
-            }
-            "region" => {
-                let (x, y, width, height) = parse_region_target(&target_id).ok_or_else(|| {
-                    rollback_starting("区域录制参数无效", format!("target_id={}", target_id))
-                })?;
-                let (x, y, width, height) = normalize_region_to_virtual_screen(x, y, width, height)
-                    .ok_or_else(|| {
-                        rollback_starting(
-                            "区域录制参数无效",
-                            "virtual screen unavailable".to_string(),
-                        )
-                    })?;
-                args.push("-f".into());
-                args.push("gdigrab".into());
-                args.push("-framerate".into());
-                args.push(format!("{}", fps));
-                args.push("-draw_mouse".into());
-                args.push(if capture_cursor {
-                    "1".into()
-                } else {
-                    "0".into()
-                });
-                args.push("-offset_x".into());
-                args.push(x.to_string());
-                args.push("-offset_y".into());
-                args.push(y.to_string());
-                args.push("-video_size".into());
-                args.push(format!("{}x{}", width, height));
-                args.push("-i".into());
-                args.push("desktop".into());
-            }
-            _ => {
-                args.push("-f".into());
-                args.push("gdigrab".into());
-                args.push("-framerate".into());
-                args.push(format!("{}", fps));
-                args.push("-draw_mouse".into());
-                args.push(if capture_cursor {
-                    "1".into()
-                } else {
-                    "0".into()
-                });
-                args.push("-i".into());
-                args.push("desktop".into());
-            }
-        }
         let (child_opt, stderr_opt) = if target_type != "window" {
-            // 删除 ffmpeg 系统音频输入路径，改为 Rust 原生 WASAPI 录制（后处理合成）
-            args.push("-map".to_string());
-            args.push("0:v:0".to_string());
-            // yuv420p + libx264 要求偶数宽高，区域框选常出现奇数尺寸，统一做偶数对齐避免 -22
-            args.push("-vf".to_string());
-            args.push("scale=trunc(iw/2)*2:trunc(ih/2)*2".to_string());
-            args.extend_from_slice(&[
-                "-c:v".to_string(),
-                "libx264".to_string(),
-                "-preset".to_string(),
-                "veryfast".to_string(),
-                "-pix_fmt".to_string(),
-                "yuv420p".to_string(),
-                "-b:v".to_string(),
-                format!("{}k", video_bitrate),
-            ]);
-            args.push("-an".to_string());
-            args.push(tmp_path.to_string_lossy().to_string());
-            let mut command = Command::new(&ffmpeg_path);
-            suppress_console_window(&mut command);
-            command
-                .args(args)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::piped());
-            let mut child = command.spawn().map_err(|e| {
-                runtime.phase = RecordingPhase::Error;
-                runtime.last_error = Some(e.to_string());
-                emit_recording_error(app, None, RECORDING_START_FAILED, "录制进程启动失败");
-                AppError::new(ErrorCode::SystemError, "启动录制失败").with_details(e.to_string())
-            })?;
-            let stderr = child.stderr.take();
-            (Some(child), stderr)
+            let first_segment_path = build_window_segment_path(&output_dir, &session_id, 0);
+            match spawn_ffmpeg_video_segment(
+                &ffmpeg_path,
+                &target_type,
+                &target_id,
+                fps,
+                capture_cursor,
+                video_bitrate,
+                &first_segment_path,
+            ) {
+                Ok((child, stderr)) => {
+                    window_segment_path = Some(first_segment_path);
+                    (Some(child), Some(stderr))
+                }
+                Err(e) => {
+                    runtime.phase = RecordingPhase::Error;
+                    runtime.last_error = Some(e.to_string());
+                    emit_recording_error(app, None, RECORDING_START_FAILED, "录制进程启动失败");
+                    return Err(rollback_starting("启动录制失败", e.to_string()));
+                }
+            }
         } else {
             (None, None)
         };
@@ -2042,12 +2007,9 @@ pub fn stop_recording(
 
         // 2. 然后停止FFmpeg进程
         if let Some(process) = process.as_mut() {
-            #[cfg(target_os = "windows")]
-            if was_paused {
-                let _ = set_process_threads_suspended(process.id(), false);
-            }
             if let Some(stdin) = process.stdin.as_mut() {
                 let _ = stdin.write_all(b"q\n");
+                let _ = stdin.flush();
             }
         }
 
@@ -2118,8 +2080,8 @@ pub fn stop_recording(
         log::info!("🔧 开始视频后处理...");
         let video_post_start = std::time::Instant::now();
 
-        if target_type == "window" && fatal_error.is_none() {
-            log::info!("🔧 合并窗口视频片段...");
+        if !window_video_segments.is_empty() && fatal_error.is_none() {
+            log::info!("🔧 合并视频片段...");
             if let Err(e) = concat_video_segments(&ffmpeg_path, &window_video_segments, output_tmp)
             {
                 fatal_error = Some(e);
@@ -2496,18 +2458,14 @@ pub fn pause_recording(
             if let Some(flag) = runtime.wgc_stop_flag.as_ref() {
                 flag.store(true, Ordering::SeqCst);
             }
-        } else if let Some(process) = runtime.process.as_mut() {
-            #[cfg(target_os = "windows")]
-            {
-                set_process_threads_suspended(process.id(), true)?;
-            }
-            #[cfg(not(target_os = "windows"))]
+        } else if let Some(mut process) = runtime.process.take() {
+            // 🔧 修复暴力的线程挂起，改为优雅地向 FFmpeg 发送退出信号（q）
             if let Some(stdin) = process.stdin.as_mut() {
-                stdin.write_all(b"p\n").map_err(|e| {
-                    AppError::new(ErrorCode::SystemError, "暂停录制失败")
-                        .with_details(e.to_string())
-                })?;
+                let _ = stdin.write_all(b"q\n");
+                let _ = stdin.flush();
             }
+            // 等待进程退出以完成当前视频片段
+            let _ = process.wait();
         }
         if let Some(flag) = runtime.recording_pause_flag.as_ref() {
             flag.store(true, Ordering::SeqCst);
@@ -2692,21 +2650,6 @@ pub fn resume_recording(
         let fps = runtime.fps;
         let video_bitrate_kbps = runtime.video_bitrate_kbps;
         let capture_cursor = runtime.capture_cursor;
-        if runtime.target_type != "window" {
-            if let Some(process) = runtime.process.as_mut() {
-                #[cfg(target_os = "windows")]
-                {
-                    set_process_threads_suspended(process.id(), false)?;
-                }
-                #[cfg(not(target_os = "windows"))]
-                if let Some(stdin) = process.stdin.as_mut() {
-                    stdin.write_all(b"p\n").map_err(|e| {
-                        AppError::new(ErrorCode::SystemError, "恢复录制失败")
-                            .with_details(e.to_string())
-                    })?;
-                }
-            }
-        }
         (
             is_window_target,
             target_id,
@@ -2741,6 +2684,29 @@ pub fn resume_recording(
         None
     };
 
+    let ffmpeg_process = if !is_window_target {
+        let ffmpeg_path = resolve_ffmpeg_path().map_err(|e| {
+            AppError::new(ErrorCode::SystemError, "恢复录制失败: 找不到 ffmpeg").with_details(e)
+        })?;
+        let mut runtime = lock_arc_mutex(&runtime_arc);
+        let target_type = runtime.target_type.clone();
+        drop(runtime);
+        
+        let (child, stderr) = spawn_ffmpeg_video_segment(
+            &ffmpeg_path,
+            &target_type,
+            &target_id,
+            fps,
+            capture_cursor,
+            video_bitrate_kbps,
+            &next_segment_path,
+        )?;
+        
+        Some((child, stderr))
+    } else {
+        None
+    };
+
     let mut runtime = lock_arc_mutex(&runtime_arc);
     if runtime.phase != RecordingPhase::Paused {
         return Err(AppError::new(
@@ -2748,6 +2714,17 @@ pub fn resume_recording(
             "录制状态已变化，请刷新状态后重试",
         ));
     }
+    
+    // 如果是非窗口录制，记录新分段
+    if !is_window_target {
+        runtime.window_segment_index = next_segment_index;
+        runtime.window_video_segments.push(next_segment_path.clone());
+        if let Some((child, stderr)) = ffmpeg_process {
+            runtime.process = Some(child);
+            spawn_stderr_parser(app.clone(), runtime_arc.clone(), session_id_for_audio.clone(), stderr);
+        }
+    }
+    
     if let Some(handle) = window_handle {
         runtime.window_segment_index = next_segment_index;
         runtime.window_video_segments.push(next_segment_path);
