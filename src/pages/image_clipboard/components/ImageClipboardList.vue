@@ -175,7 +175,8 @@ const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
 let scrollRafId = 0
-const handleScroll = () => {
+const handleScroll = (e) => {
+  containerProps.onScroll?.(e)
   if (!scrollRafId) {
     scrollRafId = requestAnimationFrame(() => {
       emit('content-scroll')
@@ -306,6 +307,8 @@ defineExpose({
   flex: 1;
   min-width: 0;
   min-height: 0;
+  display: flex;
+  flex-direction: row;
   padding: 8px;
   overflow-x: auto;
   overflow-y: hidden;
@@ -314,6 +317,7 @@ defineExpose({
 }
 
 .virtual-wrapper {
+  flex-shrink: 0;
   display: flex;
   flex-direction: row;
   height: 100%;
@@ -350,6 +354,7 @@ defineExpose({
 }
 
 .load-more-tail-indicator {
+  flex-shrink: 0;
   width: 56px;
   flex: 0 0 56px;
   min-height: 100%;
