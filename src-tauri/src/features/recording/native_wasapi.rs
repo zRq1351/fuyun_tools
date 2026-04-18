@@ -1,6 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat as CpalSampleFormat, StreamConfig};
-use hound::{SampleFormat, WavWriter};
+use hound::SampleFormat;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::Write;

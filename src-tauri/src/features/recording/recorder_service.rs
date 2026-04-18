@@ -42,16 +42,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 #[cfg(target_os = "windows")]
-use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
-#[cfg(target_os = "windows")]
-use winapi::um::processthreadsapi::{OpenThread, ResumeThread, SuspendThread};
-#[cfg(target_os = "windows")]
-use winapi::um::tlhelp32::{
-    CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
-};
-#[cfg(target_os = "windows")]
-use winapi::um::winnt::THREAD_SUSPEND_RESUME;
-#[cfg(target_os = "windows")]
 use winapi::um::winuser::{
     GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
 };
@@ -1616,7 +1606,7 @@ pub fn start_recording(
         bootstrap_force_default_dirty_region_from_settings(
             settings_snapshot.recording_wgc_force_default_dirty_region,
         );
-        let mut args: Vec<String> = vec![
+        let _args: Vec<String> = vec![
             "-hide_banner".into(),
             "-loglevel".into(),
             "warning".into(),
@@ -1707,8 +1697,6 @@ pub fn start_recording(
                     (Some(child), Some(stderr))
                 }
                 Err(e) => {
-                    runtime.phase = RecordingPhase::Error;
-                    runtime.last_error = Some(e.to_string());
                     emit_recording_error(app, None, RECORDING_START_FAILED, "录制进程启动失败");
                     return Err(rollback_starting("启动录制失败", e.to_string()));
                 }
@@ -1833,7 +1821,7 @@ pub fn stop_recording(
     let (
         session_id,
         target_type,
-        was_paused,
+        _was_paused,
         mut process,
         wgc_thread,
         wgc_first_frame_elapsed_ms,
@@ -2688,7 +2676,7 @@ pub fn resume_recording(
         let ffmpeg_path = resolve_ffmpeg_path().map_err(|e| {
             AppError::new(ErrorCode::SystemError, "恢复录制失败: 找不到 ffmpeg").with_details(e)
         })?;
-        let mut runtime = lock_arc_mutex(&runtime_arc);
+        let runtime = lock_arc_mutex(&runtime_arc);
         let target_type = runtime.target_type.clone();
         drop(runtime);
         
