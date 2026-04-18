@@ -125,6 +125,9 @@ fn capture_process_loopback_to_wav(
         }
         let mut queue = std::collections::VecDeque::<u8>::new();
         let blockalign = desired_format.get_blockalign() as usize;
+        if blockalign == 0 {
+            return Err(format!("无效的 blockalign: 0 (pid={})", process_id));
+        }
         audio_client
             .start_stream()
             .map_err(|e| format!("启动进程 loopback 失败(pid={}): {}", process_id, e))?;
@@ -201,9 +204,6 @@ fn capture_process_loopback_to_wav(
             if event.wait_for_event(50).is_err() {
                 // ✅ 添加诊断日志：事件等待失败（可能是进程退出或音频设备断开）
                 log::warn!("进程音频事件等待失败(pid={})，继续尝试...", process_id);
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            if blockalign == 0 {
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
@@ -807,17 +807,19 @@ pub fn start_system_loopback_wav_with_device(
                 std::thread::sleep(Duration::from_millis(100));
             }
 
-            // 关键修复：收到停止信号后，继续录制更长时间以确保音频完全覆盖视频最后一段
-            // 测试表明FFmpeg收到"q"命令后处理最后一帧的时间可能超过2秒
-            log::info!("收到停止信号，继续录制2000ms以确保音频完全覆盖视频最后一段...");
-            std::thread::sleep(Duration::from_millis(2000));
+            // 关键修复：收到停止信号后，填充静音数据以确保音频完全覆盖视频最后一段，而不是硬编码阻塞延时
+            log::info!("收到停止信号，填充2000ms静音数据以确保音频完全覆盖视频最后一段...");
+            if let Ok(mut guard) = writer.lock() {
+                if let Some(w) = guard.as_mut() {
+                    // 48000 samples/sec * 2 seconds * 2 channels = 192000 samples
+                    for _ in 0..(48000 * 2 * 2) {
+                        let _ = w.write_sample(0i16);
+                    }
+                }
+            }
 
             // 停止音频流，让CPAL完成最后的回调
             let _ = stream.pause();
-
-            // 等待一小段时间，确保音频回调处理完最后的缓冲区数据
-            // 这是必要的，因为CPAL可能在回调中还有待处理的数据
-            std::thread::sleep(Duration::from_millis(300));
 
             // 销毁流，释放资源
             drop(stream);
@@ -1344,10 +1346,10 @@ pub fn start_system_loopback_aac_with_device(
             };
 
             // 3. 将音频数据写入 FFmpeg stdin（无锁缓冲池模式）
-            let (tx_audio, rx_audio) = std::sync::mpsc::sync_channel::<Vec<u8>>(100);
-            let (tx_pool, rx_pool) = std::sync::mpsc::sync_channel::<Vec<u8>>(100);
+            let (tx_audio, rx_audio) = std::sync::mpsc::channel::<Vec<u8>>();
+            let (tx_pool, rx_pool) = std::sync::mpsc::channel::<Vec<u8>>();
             for _ in 0..50 {
-                let _ = tx_pool.try_send(Vec::with_capacity(4096));
+                let _ = tx_pool.send(Vec::with_capacity(4096));
             }
             
             let mut writer_opt = Some(std::io::BufWriter::new(stdin));
@@ -1361,7 +1363,7 @@ pub fn start_system_loopback_aac_with_device(
                         let _ = writer.flush();
                     }
                     data.clear();
-                    let _ = tx_pool.try_send(data);
+                    let _ = tx_pool.send(data);
                 }
                 if let Some(writer) = writer_opt.take() {
                     drop(writer); // Close stdin triggers FFmpeg EOF
@@ -1396,7 +1398,7 @@ pub fn start_system_loopback_aac_with_device(
                         } else {
                             buffer.resize(data.len() * 4, 0);
                         }
-                        let _ = tx_cb.try_send(buffer);
+                        let _ = tx_cb.send(buffer);
                     },
                     err_fn,
                     Some(Duration::from_millis(100)),
