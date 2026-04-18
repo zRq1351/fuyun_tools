@@ -195,19 +195,32 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                 let buffer = frame.buffer().map_err(|e| e.to_string())?;
                 let mut vec = Vec::new();
                 let pixels = buffer.as_nopadding_buffer(&mut vec);
-                if let Some(img) = ImageBuffer::<Rgba<u8>, &[u8]>::from_raw(frame_w, frame_h, pixels) {
-                    let resized = image::imageops::resize(
-                        &img,
-                        self.flags.width,
-                        self.flags.height,
-                        image::imageops::FilterType::Nearest,
-                    );
-                    encoder
-                        .send_frame_buffer(resized.as_raw().as_slice(), timestamp)
-                        .map_err(|e| e.to_string())?;
-                } else {
-                    return Err("Failed to create ImageBuffer from frame".to_string());
+                
+                // Fast manual nearest-neighbor resize to avoid high CPU usage
+                let target_w = self.flags.width as usize;
+                let target_h = self.flags.height as usize;
+                let src_w = frame_w as usize;
+                let src_h = frame_h as usize;
+                let mut resized = vec![0u8; target_w * target_h * 4];
+                
+                for y in 0..target_h {
+                    let src_y = (y * src_h) / target_h;
+                    let src_row_start = src_y * src_w * 4;
+                    let dst_row_start = y * target_w * 4;
+                    
+                    for x in 0..target_w {
+                        let src_x = (x * src_w) / target_w;
+                        let src_idx = src_row_start + src_x * 4;
+                        let dst_idx = dst_row_start + x * 4;
+                        
+                        // Copy BGRA/RGBA pixels (4 bytes)
+                        resized[dst_idx..dst_idx + 4].copy_from_slice(&pixels[src_idx..src_idx + 4]);
+                    }
                 }
+                
+                encoder
+                    .send_frame_buffer(&resized, timestamp)
+                    .map_err(|e| e.to_string())?;
             } else {
                 encoder.send_frame(frame).map_err(|e| e.to_string())?;
             }

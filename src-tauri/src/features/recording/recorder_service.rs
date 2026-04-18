@@ -1143,12 +1143,23 @@ pub fn list_audio_process_items() -> Result<Vec<AudioProcessItem>, AppError> {
 }
 
 fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
+    let threshold = SystemTime::now() - Duration::from_secs(24 * 3600); // 24 hours
     if let Ok(entries) = fs::read_dir(output_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_file() {
                 continue;
             }
+            
+            // Only clean files older than 24 hours to prevent race conditions with other running instances
+            if let Ok(metadata) = entry.metadata() {
+                if let Ok(modified) = metadata.modified() {
+                    if modified > threshold {
+                        continue;
+                    }
+                }
+            }
+            
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if file_name.ends_with(".tmp.mp4")
                 || file_name.contains(".sys.")
@@ -1943,30 +1954,42 @@ pub fn stop_recording(
         // 窗口录制（WGC）：先停止WGC线程，再停止音频
         log::info!("🔧 窗口录制：首先停止WGC线程...");
         if let Some(join) = wgc_thread {
-            match join.join() {
-                Ok(Ok(())) => {
-                    log::info!("✅ WGC线程已退出");
+            let mut wgc_exited = false;
+            for _ in 0..50 { // wait up to 5 seconds
+                if join.is_finished() {
+                    wgc_exited = true;
+                    break;
                 }
-                Ok(Err(e)) => {
-                    if is_benign_wgc_stop_error(&e) {
-                        log::warn!("窗口录制停止返回可忽略状态: {}", e);
-                    } else if is_item_convert_failed(&e) {
-                        pending_window_capture_unavailable_details = Some(e);
-                    } else if fatal_error.is_none() {
-                        fatal_error = Some(
-                            AppError::new(ErrorCode::SystemError, "窗口录制停止失败")
-                                .with_details(e),
-                        );
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            if wgc_exited {
+                match join.join() {
+                    Ok(Ok(())) => {
+                        log::info!("✅ WGC线程已退出");
+                    }
+                    Ok(Err(e)) => {
+                        if is_benign_wgc_stop_error(&e) {
+                            log::warn!("窗口录制停止返回可忽略状态: {}", e);
+                        } else if is_item_convert_failed(&e) {
+                            pending_window_capture_unavailable_details = Some(e);
+                        } else if fatal_error.is_none() {
+                            fatal_error = Some(
+                                AppError::new(ErrorCode::SystemError, "窗口录制停止失败")
+                                    .with_details(e),
+                            );
+                        }
+                    }
+                    Err(_) => {
+                        if fatal_error.is_none() {
+                            fatal_error = Some(AppError::new(
+                                ErrorCode::SystemError,
+                                "窗口录制线程异常退出",
+                            ));
+                        }
                     }
                 }
-                Err(_) => {
-                    if fatal_error.is_none() {
-                        fatal_error = Some(AppError::new(
-                            ErrorCode::SystemError,
-                            "窗口录制线程异常退出",
-                        ));
-                    }
-                }
+            } else {
+                log::warn!("WGC 线程停止超时，放弃等待以防死锁");
             }
         }
         persist_wgc_capture_fallback_if_needed(&state_arc);
@@ -2220,12 +2243,14 @@ pub fn stop_recording(
             );
 
             // 执行音频合并（sys_segments 和 mic_segments 会被移动到闭包中）
-            let merge_result = merge_system_audio_into_video(
-                &ffmpeg_path_clone,
-                &output_final_clone,
-                &sys_segments,
-                &mic_segments,
-            );
+            let merge_result = tauri::async_runtime::spawn_blocking(move || {
+                merge_system_audio_into_video(
+                    &ffmpeg_path_clone,
+                    &output_final_clone,
+                    &sys_segments,
+                    &mic_segments,
+                )
+            }).await.unwrap_or_else(|e| Err(AppError::new(ErrorCode::SystemError, "音频合并任务崩溃").with_details(e.to_string())));
 
             // ✅ 合并完成后，清理临时音频片段文件
             let mut cleaned_count = 0;
@@ -2393,7 +2418,13 @@ pub fn cancel_recording(
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
     if let Some(join) = wgc_thread {
-        let _ = join.join();
+        for _ in 0..50 {
+            if join.is_finished() {
+                let _ = join.join();
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
     if let Some(flag) = system_audio_stop_flag.as_ref() {
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -2484,30 +2515,42 @@ pub fn pause_recording(
 
     if target_type == "window" {
         if let Some(join) = wgc_thread {
-            match join.join() {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => {
-                    if !is_benign_wgc_stop_error(&e) {
+            let mut wgc_exited = false;
+            for _ in 0..50 {
+                if join.is_finished() {
+                    wgc_exited = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            if wgc_exited {
+                match join.join() {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        if !is_benign_wgc_stop_error(&e) {
+                            let mut runtime = lock_arc_mutex(&runtime_arc);
+                            runtime.phase = RecordingPhase::Recording;
+                            if let Some(flag) = runtime.recording_pause_flag.as_ref() {
+                                flag.store(false, Ordering::SeqCst);
+                            }
+                            return Err(AppError::new(ErrorCode::SystemError, "暂停窗口录制失败")
+                                .with_details(e));
+                        }
+                    }
+                    Err(_) => {
                         let mut runtime = lock_arc_mutex(&runtime_arc);
                         runtime.phase = RecordingPhase::Recording;
                         if let Some(flag) = runtime.recording_pause_flag.as_ref() {
                             flag.store(false, Ordering::SeqCst);
                         }
-                        return Err(AppError::new(ErrorCode::SystemError, "暂停窗口录制失败")
-                            .with_details(e));
+                        return Err(AppError::new(
+                            ErrorCode::SystemError,
+                            "暂停窗口录制失败：线程异常退出",
+                        ));
                     }
                 }
-                Err(_) => {
-                    let mut runtime = lock_arc_mutex(&runtime_arc);
-                    runtime.phase = RecordingPhase::Recording;
-                    if let Some(flag) = runtime.recording_pause_flag.as_ref() {
-                        flag.store(false, Ordering::SeqCst);
-                    }
-                    return Err(AppError::new(
-                        ErrorCode::SystemError,
-                        "暂停窗口录制失败：线程异常退出",
-                    ));
-                }
+            } else {
+                log::warn!("WGC 线程暂停超时，放弃等待以防死锁");
             }
         }
     }
