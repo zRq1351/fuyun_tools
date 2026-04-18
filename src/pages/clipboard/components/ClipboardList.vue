@@ -6,7 +6,14 @@
       @scroll="handleScroll"
       @wheel.prevent="handleWheel"
   >
-    <div v-bind="wrapperProps" class="virtual-wrapper">
+    <div
+        class="virtual-wrapper"
+        :style="{
+          width: (parseFloat(wrapperProps.style?.width || 0) + parseFloat(wrapperProps.style?.marginLeft || 0)) + 'px',
+          paddingLeft: wrapperProps.style?.marginLeft || '0px',
+          boxSizing: 'border-box'
+        }"
+    >
       <div
           v-for="virtualRow in list"
           :id="'clipboard-item-' + virtualRow.data.index"
