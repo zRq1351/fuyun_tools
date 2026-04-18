@@ -9,7 +9,7 @@
     <div
         class="virtual-wrapper"
         :style="{
-          width: (parseFloat(wrapperProps.style?.width || 0) + parseFloat(wrapperProps.style?.marginLeft || 0)) + 'px',
+          width: (visibleHistory.length * 258) + 'px',
           paddingLeft: wrapperProps.style?.marginLeft || '0px',
           boxSizing: 'border-box'
         }"
