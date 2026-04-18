@@ -76,6 +76,10 @@ pub fn capture_screen_region(
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok();
 
+    if !owns_screenshot_state {
+        return Err("截图功能正在进行中，无法并发启动".to_string());
+    }
+
     let result = capture_screen_region_internal(x, y, width, height);
 
     if owns_screenshot_state {
@@ -166,8 +170,18 @@ fn capture_screen_region_internal(
     for row in y..(y + height) {
         let start = ((row * img_width + x) * 4) as usize;
         let end = start + (width * 4) as usize;
-        if end <= image.as_raw().len() {
-            rgba_data.extend_from_slice(&image.as_raw()[start..end]);
+        let src = image.as_raw();
+        if end <= src.len() {
+            rgba_data.extend_from_slice(&src[start..end]);
+        } else if start < src.len() {
+            // 部分越界，用黑色/透明补齐
+            let available = src.len() - start;
+            rgba_data.extend_from_slice(&src[start..src.len()]);
+            let padding = (width * 4) as usize - available;
+            rgba_data.extend(std::iter::repeat(0).take(padding));
+        } else {
+            // 完全越界
+            rgba_data.extend(std::iter::repeat(0).take((width * 4) as usize));
         }
     }
 
@@ -197,6 +211,16 @@ pub fn capture_full_screen() -> Result<(Vec<u8>, u32, u32, i32, i32), String> {
     }
 
     let (origin_x, origin_y, width, height) = resolve_virtual_screen_bounds(&screens)?;
+
+    // 单屏幕优化：直接返回截图数据，避免全尺寸零数组分配与拷贝
+    if screens.len() == 1 {
+        let screen = &screens[0];
+        let image = screen
+            .capture()
+            .map_err(|e| format!("捕获单屏幕失败: {}", e))?;
+        return Ok((image.into_raw(), width, height, origin_x, origin_y));
+    }
+
     let mut rgba_data = vec![0_u8; (width as usize) * (height as usize) * 4];
 
     for screen in &screens {
@@ -260,10 +284,18 @@ pub fn rgba_to_png_bytes(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>
 
 /// 将RGBA数据转换为PNG Base64字符串
 pub fn rgba_to_base64_png(rgba: &[u8], width: u32, height: u32) -> Result<String, String> {
-    use base64::Engine;
-    let png_data = rgba_to_png_bytes(rgba, width, height)?;
+    use base64::engine::general_purpose::STANDARD;
+    use base64::write::EncoderWriter;
+    use image::ImageEncoder;
+    use std::io::Write;
 
-    let base64_str = base64::engine::general_purpose::STANDARD.encode(&png_data);
-
-    Ok(base64_str)
+    let mut base64_output = Vec::new();
+    {
+        let mut encoder_writer = EncoderWriter::new(&mut base64_output, &STANDARD);
+        let encoder = image::codecs::png::PngEncoder::new(&mut encoder_writer);
+        encoder
+            .write_image(rgba, width, height, image::ColorType::Rgba8.into())
+            .map_err(|e| format!("编码PNG/Base64失败: {}", e))?;
+    }
+    String::from_utf8(base64_output).map_err(|e| format!("Base64转字符串失败: {}", e))
 }
