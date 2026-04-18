@@ -65,7 +65,7 @@ fn image_listener_stop_tx() -> &'static StdMutex<Option<Sender<()>>> {
 }
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
-    state.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() })
+    state.lock().unwrap()
 }
 
 fn observe_queue_len(len: usize) {
@@ -135,7 +135,7 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
         return;
     }
     let manager = {
-        let guard = manager_arc.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
+        let guard = manager_arc.lock().unwrap();
         guard.clone()
     };
     let payload = serde_json::json!({

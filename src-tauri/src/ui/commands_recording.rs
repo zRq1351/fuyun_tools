@@ -16,7 +16,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -287,6 +287,7 @@ pub async fn download_recording_ffmpeg(
             },
         );
     }
+    use tokio::io::AsyncWriteExt;
     file.flush()
         .await
         .map_err(|e| format!("刷新下载文件失败: {}", e))?;
@@ -412,7 +413,7 @@ pub async fn stop_recording(
         match recorder_service::stop_recording(&app, state_arc.clone(), request.clone()) {
             Ok(result) => {
                 let auto_open_folder = {
-                    let guard = state_arc.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
+                    let guard = state_arc.lock().unwrap();
                     guard.settings.recording_auto_open_folder
                 };
                 if auto_open_folder {
@@ -723,13 +724,13 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
     }
 
     let runtime_arc = {
-        let state_guard = state_arc.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
+        let state_guard = state_arc.lock().unwrap();
         state_guard.recording_runtime.clone()
     };
 
     // 获取录制运行时的麦克风设备ID和系统音频状态
     let (mic_device_id, sys_audio_enabled, sys_audio_thread_exists) = {
-        let runtime_guard = runtime_arc.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
+        let runtime_guard = runtime_arc.lock().unwrap();
         let sys_enabled = runtime_guard
             .system_audio_enabled_flag
             .as_ref()

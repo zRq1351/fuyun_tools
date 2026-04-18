@@ -1,12 +1,12 @@
 use crate::sync::Mutex;
 use bloom::{BloomFilter, ASMS};
 use lru::LruCache;
+use parking_lot::Condvar as ParkingCondvar;
 use parking_lot::Mutex as ParkingMutex;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use parking_lot::Condvar as ParkingCondvar;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::utils::utils_helpers::{
@@ -42,7 +42,7 @@ const BLOOM_FILTER_CAPACITY: u32 = 10000;
 const BLOOM_FILTER_ERROR_RATE: f32 = 0.01; // 1% 误判率
 
 fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
-    mutex.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() })
+    mutex.lock().unwrap()
 }
 
 fn stable_text_hash(text: &str) -> u64 {
@@ -281,8 +281,7 @@ impl ClipboardManager {
 
     /// 添加新分类
     pub fn add_category(&self, category: String) -> Result<(), String> {
-        let (categories_clone, category_list_clone) = {
-            let categories = lock_arc_mutex(&self.categories);
+        {
             let mut category_list = lock_arc_mutex(&self.category_list);
 
             let normalized_category = category.trim().to_string();
@@ -294,9 +293,7 @@ impl ClipboardManager {
             {
                 category_list.push(normalized_category);
             }
-
-            (categories.clone(), category_list.clone())
-        };
+        }
 
         self.enqueue_categories_only_persist();
 
@@ -322,7 +319,7 @@ impl ClipboardManager {
 
     /// 设置条目分类
     pub fn set_category(&self, item_id: String, category: String) -> Result<(), String> {
-        let (categories_clone, category_list_clone) = {
+        {
             let mut categories = lock_arc_mutex(&self.categories);
             let mut category_list = lock_arc_mutex(&self.category_list);
 
@@ -339,8 +336,7 @@ impl ClipboardManager {
                     category_list.push(normalized_category);
                 }
             }
-            (categories.clone(), category_list.clone())
-        };
+        }
 
         self.enqueue_categories_only_persist();
 
@@ -379,14 +375,13 @@ impl ClipboardManager {
 
     /// 移除分类
     pub fn remove_category(&self, category: String) -> Result<(), String> {
-        let (categories_clone, category_list_clone) = {
+        {
             let mut categories = lock_arc_mutex(&self.categories);
             let mut category_list = lock_arc_mutex(&self.category_list);
 
             category_list.retain(|c| c != &category);
             categories.retain(|_, v| v != &category);
-            (categories.clone(), category_list.clone())
-        };
+        }
 
         self.enqueue_categories_only_persist();
 
@@ -627,7 +622,7 @@ impl ClipboardManager {
     }
 
     pub fn promote_to_top(&self, index: usize) -> Result<String, String> {
-        let (item, history_clone, pinned_items) = {
+        let item = {
             let mut history = lock_arc_mutex(&self.history);
             if index >= history.len() {
                 return Err("索引超出范围".to_string());
@@ -651,7 +646,7 @@ impl ClipboardManager {
             self.exact_index_cache.lock().clear();
             self.history_cache_dirty.store(true, Ordering::Relaxed);
 
-            (item, history.clone(), pinned_items.clone())
+            item
         };
 
         self.enqueue_history_only_persist();

@@ -56,7 +56,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -69,6 +69,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_positioner::WindowExt;
+use tokio::io::AsyncWriteExt;
 use xxhash_rust::xxh3::xxh3_64;
 
 static NEXT_SCREENSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
@@ -6218,7 +6219,7 @@ pub async fn run_diagnostic_action(
             COPY_PASTE_DEDUP_TEXT_HASH_HIT_COUNT.store(0, Ordering::Relaxed);
             COPY_PASTE_DEDUP_LOG_COUNT.store(0, Ordering::Relaxed);
             if let Some(lock) = COPY_PASTE_DEDUP_WINDOW_STATS.get() {
-                let mut stats = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let mut stats = lock.lock().unwrap();
                 stats.window_start_ms = now_unix_ms();
                 stats.requests = 0;
                 stats.hits = 0;

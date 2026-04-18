@@ -10,7 +10,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
-    state.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() })
+    state.lock().unwrap()
 }
 
 fn clipboard_listener_stop_tx() -> &'static std::sync::Mutex<Option<Sender<()>>> {
@@ -66,7 +66,7 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
             }
 
             let current_content = {
-                let manager = manager_arc.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
+                let manager = manager_arc.lock().unwrap();
                 manager.get_content(&app_handle)
             };
 
@@ -134,7 +134,7 @@ pub fn add_to_clipboard_history(
     };
 
     let payload = {
-        let manager = manager_arc.lock().unwrap_or_else(|e| { log::error!("Mutex poisoned: {:?}", e); e.into_inner() });
+        let manager = manager_arc.lock().unwrap();
         manager.add_to_history(content);
         if !should_emit {
             None
