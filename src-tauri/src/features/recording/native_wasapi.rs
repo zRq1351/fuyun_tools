@@ -618,7 +618,7 @@ pub fn start_system_loopback_wav_with_device(
                             }
                         },
                         err_fn,
-                        Some(Duration::from_millis(100)),
+                        Some(Duration::from_millis(10)),
                     )
                     .map_err(|e| format!("创建输入流失败: {}", e))?,
                 CpalSampleFormat::I16 => {
@@ -641,7 +641,7 @@ pub fn start_system_loopback_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建输入流失败: {}", e))?
                 }
@@ -666,7 +666,7 @@ pub fn start_system_loopback_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建输入流失败: {}", e))?
                 }
@@ -691,7 +691,7 @@ pub fn start_system_loopback_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建输入流失败: {}", e))?
                 }
@@ -716,7 +716,7 @@ pub fn start_system_loopback_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建输入流失败: {}", e))?
                 }
@@ -741,7 +741,7 @@ pub fn start_system_loopback_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建输入流失败: {}", e))?
                 }
@@ -766,7 +766,7 @@ pub fn start_system_loopback_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建输入流失败: {}", e))?
                 }
@@ -791,7 +791,7 @@ pub fn start_system_loopback_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建输入流失败: {}", e))?
                 }
@@ -804,7 +804,7 @@ pub fn start_system_loopback_wav_with_device(
 
             // 等待停止信号
             while !thread_stop_flag.load(Ordering::SeqCst) {
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(10));
             }
 
             // 关键修复：收到停止信号后，填充静音数据以确保音频完全覆盖视频最后一段，而不是硬编码阻塞延时
@@ -1002,7 +1002,7 @@ pub fn start_microphone_wav_with_device(
                             }
                         },
                         err_fn,
-                        Some(Duration::from_millis(100)),
+                        Some(Duration::from_millis(10)),
                     )
                     .map_err(|e| format!("创建麦克风输入流失败: {}", e))?,
                 CpalSampleFormat::I16 => {
@@ -1025,7 +1025,7 @@ pub fn start_microphone_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
                 }
@@ -1050,7 +1050,7 @@ pub fn start_microphone_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
                 }
@@ -1075,7 +1075,7 @@ pub fn start_microphone_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
                 }
@@ -1100,7 +1100,7 @@ pub fn start_microphone_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
                 }
@@ -1125,7 +1125,7 @@ pub fn start_microphone_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
                 }
@@ -1150,7 +1150,7 @@ pub fn start_microphone_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
                 }
@@ -1175,7 +1175,7 @@ pub fn start_microphone_wav_with_device(
                                 }
                             },
                             err_fn,
-                            Some(Duration::from_millis(100)),
+                            Some(Duration::from_millis(10)),
                         )
                         .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
                 }
@@ -1188,7 +1188,7 @@ pub fn start_microphone_wav_with_device(
 
             // 等待停止信号
             while !thread_stop_flag.load(Ordering::SeqCst) {
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(10));
             }
 
             // 🔧 优化：麦克风停止时不额外延迟，立即关闭流
@@ -1199,7 +1199,7 @@ pub fn start_microphone_wav_with_device(
             let _ = stream.pause();
 
             // 短暂等待确保音频回调处理完最后的缓冲区数据
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(10));
 
             // 销毁流，释放资源
             drop(stream);
@@ -1401,7 +1401,7 @@ pub fn start_system_loopback_aac_with_device(
                         let _ = tx_cb.send(buffer);
                     },
                     err_fn,
-                    Some(Duration::from_millis(100)),
+                    Some(Duration::from_millis(10)),
                 )
                 .map_err(|e| format!("创建输入流失败: {}", e))?;
 
@@ -1412,7 +1412,7 @@ pub fn start_system_loopback_aac_with_device(
 
             // 等待停止信号
             while !thread_stop_flag.load(Ordering::SeqCst) {
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(10));
             }
 
             // 🔧 优化：系统音频停止时不固定sleep，而是等待FFmpeg编码完成
@@ -1443,7 +1443,7 @@ pub fn start_system_loopback_aac_with_device(
                                 break;
                             }
                             Ok(None) => {
-                                std::thread::sleep(Duration::from_millis(100));
+                                std::thread::sleep(Duration::from_millis(10));
                             }
                             Err(e) => {
                                 log::warn!("检查 FFmpeg 状态失败: {}", e);

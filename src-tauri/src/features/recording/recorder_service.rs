@@ -1955,12 +1955,12 @@ pub fn stop_recording(
         log::info!("🔧 窗口录制：首先停止WGC线程...");
         if let Some(join) = wgc_thread {
             let mut wgc_exited = false;
-            for _ in 0..50 { // wait up to 5 seconds
+            for _ in 0..500 { // wait up to 5 seconds
                 if join.is_finished() {
                     wgc_exited = true;
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(10));
             }
             if wgc_exited {
                 match join.join() {
@@ -2029,12 +2029,12 @@ pub fn stop_recording(
         let video_exit_start = std::time::Instant::now();
         let mut video_exited = false;
         if let Some(process) = process.as_mut() {
-            for _ in 0..80 {
+            for _ in 0..800 {
                 if let Ok(Some(_)) = process.try_wait() {
                     video_exited = true;
                     break;
                 }
-                thread::sleep(Duration::from_millis(100));
+                thread::sleep(Duration::from_millis(10));
             }
             if !video_exited {
                 let _ = process.kill();
@@ -2418,12 +2418,12 @@ pub fn cancel_recording(
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
     if let Some(join) = wgc_thread {
-        for _ in 0..50 {
+        for _ in 0..500 {
             if join.is_finished() {
                 let _ = join.join();
                 break;
             }
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
     if let Some(flag) = system_audio_stop_flag.as_ref() {
@@ -2483,8 +2483,20 @@ pub fn pause_recording(
                 let _ = stdin.write_all(b"q\n");
                 let _ = stdin.flush();
             }
-            // 等待进程退出以完成当前视频片段
-            let _ = process.wait();
+            // 等待进程退出以完成当前视频片段，加入超时机制防死锁
+            let mut exited = false;
+            for _ in 0..300 {
+                if let Ok(Some(_)) = process.try_wait() {
+                    exited = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            if !exited {
+                log::warn!("FFmpeg 暂停时未能在规定时间内退出，强制结束");
+                let _ = process.kill();
+                let _ = process.wait();
+            }
         }
         if let Some(flag) = runtime.recording_pause_flag.as_ref() {
             flag.store(true, Ordering::SeqCst);
@@ -2516,12 +2528,12 @@ pub fn pause_recording(
     if target_type == "window" {
         if let Some(join) = wgc_thread {
             let mut wgc_exited = false;
-            for _ in 0..50 {
+            for _ in 0..500 {
                 if join.is_finished() {
                     wgc_exited = true;
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(10));
             }
             if wgc_exited {
                 match join.join() {
