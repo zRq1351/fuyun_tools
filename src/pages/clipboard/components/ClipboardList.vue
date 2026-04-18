@@ -338,7 +338,7 @@ defineExpose({
   min-height: 0;
   display: flex;
   flex-direction: row;
-  padding: 8px;
+  padding: 8px 8px 8px 8px;
   overflow-x: auto;
   overflow-y: hidden;
   margin-top: 10px;
@@ -346,10 +346,15 @@ defineExpose({
 }
 
 .virtual-wrapper {
-  flex-shrink: 0;
   display: flex;
   flex-direction: row;
   height: 100%;
+}
+
+.content::after {
+  content: '';
+  flex-shrink: 0;
+  width: 1px;
 }
 
 .content::-webkit-scrollbar {
@@ -386,6 +391,7 @@ defineExpose({
   color: rgba(166, 213, 255, 0.9);
   user-select: none;
   pointer-events: none;
+  margin-right: 8px;
 }
 
 .load-more-tail-text {
