@@ -143,21 +143,26 @@ fn capture_process_loopback_to_wav(
                         format!("读取进程音频数据失败(pid={}): {}", process_id, e)
                     })?;
             }
-            while queue.len() >= 4 {
-                let b0 = queue.pop_front().unwrap_or(0);
-                let b1 = queue.pop_front().unwrap_or(0);
-                let b2 = queue.pop_front().unwrap_or(0);
-                let b3 = queue.pop_front().unwrap_or(0);
-                let sample = f32::from_le_bytes([b0, b1, b2, b3]);
-                let out = if enabled_flag.load(Ordering::SeqCst)
-                    && !recording_pause_flag.load(Ordering::SeqCst)
-                {
-                    (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16
-                } else {
-                    0
-                };
-                let _ = writer.write_sample(out);
+            let enabled = enabled_flag.load(Ordering::SeqCst) && !recording_pause_flag.load(Ordering::SeqCst);
+            
+            let slices = queue.as_slices();
+            let mut processed = 0;
+            
+            for slice in &[slices.0, slices.1] {
+                let chunks = slice.chunks_exact(4);
+                processed += chunks.len() * 4;
+                for chunk in chunks {
+                    let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                    let out = if enabled {
+                        (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16
+                    } else {
+                        0
+                    };
+                    let _ = writer.write_sample(out);
+                }
             }
+            queue.drain(..processed);
+
             if event.wait_for_event(50).is_err() {
                 // ✅ 添加诊断日志：事件等待失败（可能是进程退出或音频设备断开）
                 log::warn!("进程音频事件等待失败(pid={})，继续尝试...", process_id);
@@ -1295,9 +1300,32 @@ pub fn start_system_loopback_aac_with_device(
                 buffer_size: cpal::BufferSize::Default,
             };
 
-            // 3. 将音频数据直接写入 FFmpeg stdin（F32LE 格式）
-            let stdin_writer = Arc::new(Mutex::new(Some(std::io::BufWriter::new(stdin))));
-            let stdin_cb = stdin_writer.clone();
+            // 3. 将音频数据写入 FFmpeg stdin（无锁缓冲池模式）
+            let (tx_audio, rx_audio) = std::sync::mpsc::sync_channel::<Vec<u8>>(100);
+            let (tx_pool, rx_pool) = std::sync::mpsc::sync_channel::<Vec<u8>>(100);
+            for _ in 0..50 {
+                let _ = tx_pool.try_send(Vec::with_capacity(4096));
+            }
+            
+            let mut writer_opt = Some(std::io::BufWriter::new(stdin));
+            let writer_thread = std::thread::spawn(move || {
+                while let Ok(mut data) = rx_audio.recv() {
+                    if data.is_empty() {
+                        break;
+                    }
+                    if let Some(writer) = writer_opt.as_mut() {
+                        let _ = writer.write_all(&data);
+                        let _ = writer.flush();
+                    }
+                    data.clear();
+                    let _ = tx_pool.try_send(data);
+                }
+                if let Some(writer) = writer_opt.take() {
+                    drop(writer); // Close stdin triggers FFmpeg EOF
+                }
+            });
+
+            let tx_cb = tx_audio.clone();
             let enabled_cb = enabled_flag.clone();
             let pause_cb = recording_pause_flag.clone();
 
@@ -1314,24 +1342,18 @@ pub fn start_system_loopback_aac_with_device(
                 .build_input_stream(
                     &config,
                     move |data: &[f32], _| {
-                        if let Ok(mut guard) = stdin_cb.lock() {
-                            if let Some(writer) = guard.as_mut() {
-                                let enabled = enabled_cb.load(Ordering::SeqCst)
-                                    && !pause_cb.load(Ordering::SeqCst);
-                                if enabled {
-                                    // 直接写入 F32LE 原始数据到 FFmpeg
-                                    for &sample in data {
-                                        let bytes = sample.to_le_bytes();
-                                        let _ = writer.write_all(&bytes);
-                                    }
-                                } else {
-                                    // 禁用时写入静音
-                                    let silence = vec![0u8; data.len() * 4];
-                                    let _ = writer.write_all(&silence);
-                                }
-                                let _ = writer.flush();
+                        let enabled = enabled_cb.load(Ordering::SeqCst)
+                            && !pause_cb.load(Ordering::SeqCst);
+                        let mut buffer = rx_pool.try_recv().unwrap_or_else(|_| Vec::with_capacity(data.len() * 4));
+                        buffer.clear();
+                        if enabled {
+                            for &sample in data {
+                                buffer.extend_from_slice(&sample.to_le_bytes());
                             }
+                        } else {
+                            buffer.resize(data.len() * 4, 0);
                         }
+                        let _ = tx_cb.try_send(buffer);
                     },
                     err_fn,
                     Some(Duration::from_millis(100)),
@@ -1356,18 +1378,15 @@ pub fn start_system_loopback_aac_with_device(
             log::info!("WASAPI 流已停止");
 
             // 关闭 stdin 触发 FFmpeg 完成编码
-            if let Ok(mut guard) = stdin_writer.lock() {
-                if let Some(writer) = guard.take() {
-                    drop(writer); // 关闭 stdin，FFmpeg会检测到EOF并完成编码
-                }
-            }
+            let _ = tx_audio.send(Vec::new()); // send EOF to writer thread
+            let _ = writer_thread.join(); // Wait for writer thread to finish closing stdin
 
             // 🔧 主动等待 FFmpeg 进程退出（带超时）
             log::info!("等待 FFmpeg AAC 编码完成...");
             if let Ok(mut guard) = thread_ffmpeg.lock() {
                 if let Some(ref mut child) = *guard {
-                    // 等待FFmpeg退出，最多5秒
-                    for _ in 0..50 {
+                    // 等待FFmpeg退出，最多15秒
+                    for _ in 0..150 {
                         match child.0.try_wait() {
                             Ok(Some(status)) => {
                                 log::info!(

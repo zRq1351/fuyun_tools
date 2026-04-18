@@ -24,13 +24,9 @@ struct PendingImageTask {
     enqueued_at: Instant,
 }
 
-/// 待处理图片队列
-static PENDING_IMAGE_QUEUE: LazyLock<ParkingMutex<VecDeque<PendingImageTask>>> =
-    LazyLock::new(|| ParkingMutex::new(VecDeque::new()));
-
-/// 队列通知机制：用于在有新任务时唤醒处理线程
-static QUEUE_NOTIFY: LazyLock<Arc<(StdMutex<u64>, Condvar)>> =
-    LazyLock::new(|| Arc::new((StdMutex::new(0), Condvar::new())));
+/// 待处理图片队列与条件变量
+static PENDING_IMAGE_QUEUE: LazyLock<Arc<(StdMutex<VecDeque<PendingImageTask>>, Condvar)>> =
+    LazyLock::new(|| Arc::new((StdMutex::new(VecDeque::new()), Condvar::new())));
 
 /// 队列最大容量，防止内存溢出
 const MAX_QUEUE_SIZE: usize = 20;
@@ -226,40 +222,41 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, w
     log::info!("[处理线程-{}] 图片处理线程已启动，等待任务...", worker_id);
     loop {
         let task = {
-            let mut queue = PENDING_IMAGE_QUEUE.lock();
-            let task = queue.pop_front();
-            if let Some(ref t) = task {
-                let wait_ms = t.enqueued_at.elapsed().as_millis() as u64;
-                IMAGE_QUEUE_METRICS.dequeued.fetch_add(1, Ordering::Relaxed);
-                IMAGE_QUEUE_METRICS
-                    .queue_wait_ms_total
-                    .fetch_add(wait_ms, Ordering::Relaxed);
-                log::info!(
-                    "[处理线程-{}] 图片出队: {}x{}, 队列等待={}ms, 剩余队列长度: {}",
-                    worker_id,
-                    t.width,
-                    t.height,
-                    wait_ms,
-                    queue.len()
-                );
+            let (lock, cvar) = &**PENDING_IMAGE_QUEUE;
+            let mut queue = lock.lock().unwrap();
+            while queue.is_empty() {
+                log::trace!("[处理线程-{}] 队列为空，等待新任务通知...", worker_id);
+                queue = cvar.wait(queue).unwrap();
             }
-            task
+            let t = queue.pop_front().unwrap();
+            let wait_ms = t.enqueued_at.elapsed().as_millis() as u64;
+            IMAGE_QUEUE_METRICS.dequeued.fetch_add(1, Ordering::Relaxed);
+            IMAGE_QUEUE_METRICS
+                .queue_wait_ms_total
+                .fetch_add(wait_ms, Ordering::Relaxed);
+            log::info!(
+                "[处理线程-{}] 图片出队: {}x{}, 队列等待={}ms, 剩余队列长度: {}",
+                worker_id,
+                t.width,
+                t.height,
+                wait_ms,
+                queue.len()
+            );
+            t
         };
 
-        match task {
-            Some(task) => {
-                if capture::is_screenshot_in_progress() && !task.allow_when_screenshot {
-                    IMAGE_QUEUE_METRICS
-                        .dropped_screenshot
-                        .fetch_add(1, Ordering::Relaxed);
-                    log::info!(
-                        "[处理线程-{}] 截图进行中，跳过图片任务: {}x{}",
-                        worker_id,
-                        task.width,
-                        task.height
-                    );
-                    continue;
-                }
+        if capture::is_screenshot_in_progress() && !task.allow_when_screenshot {
+            IMAGE_QUEUE_METRICS
+                .dropped_screenshot
+                .fetch_add(1, Ordering::Relaxed);
+            log::info!(
+                "[处理线程-{}] 截图进行中，跳过图片任务: {}x{}",
+                worker_id,
+                task.width,
+                task.height
+            );
+            continue;
+        }
                 // 快速采样仅作粗筛，不能直接丢图；真正去重交给后续完整签名。
                 if matches_recent_sample(task.width, task.height, &task.rgba) {
                     log::debug!(
@@ -339,35 +336,6 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, w
 
                 log::info!("[处理线程-{}] 图片处理流程完成", worker_id);
                 maybe_log_queue_metrics();
-            }
-            None => {
-                // 队列为空，等待通知而不是退出循环
-                log::trace!("[处理线程-{}] 队列为空，等待新任务通知...", worker_id);
-                let (lock, cvar) = &**QUEUE_NOTIFY;
-                let mut notify_seq = match lock.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => {
-                        log::error!("[处理线程-{}] 通知锁已中毒，尝试恢复继续处理", worker_id);
-                        poisoned.into_inner()
-                    }
-                };
-                let observed_seq = *notify_seq;
-                while *notify_seq == observed_seq {
-                    notify_seq = match cvar.wait(notify_seq) {
-                        Ok(guard) => guard,
-                        Err(poisoned) => {
-                            log::error!(
-                                "[处理线程-{}] 通知条件变量等待异常（锁中毒），尝试恢复继续处理",
-                                worker_id
-                            );
-                            poisoned.into_inner()
-                        }
-                    };
-                }
-                log::trace!("[处理线程-{}] 收到新任务通知，继续处理", worker_id);
-                continue;
-            }
-        }
     }
 }
 
@@ -436,7 +404,8 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
             match image {
                 Ok(images) => {
                     log::info!("[监听线程] 成功读取 {} 张图片", images.len());
-                    let mut queue = PENDING_IMAGE_QUEUE.lock();
+                    let (lock, cvar) = &**PENDING_IMAGE_QUEUE;
+                    let mut queue = lock.lock().unwrap();
                     for (rgba, width, height, source_blob) in images {
                         // 检查队列容量
                         if queue.len() >= MAX_QUEUE_SIZE {
@@ -466,19 +435,8 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                             queue.len()
                         );
                     }
-                    drop(queue); // 释放锁
-
-                    // 通知处理线程有新任务
-                    let (lock, cvar) = &**QUEUE_NOTIFY;
-                    let mut notified = match lock.lock() {
-                        Ok(guard) => guard,
-                        Err(poisoned) => {
-                            log::error!("[监听线程] 通知锁已中毒，尝试恢复继续通知");
-                            poisoned.into_inner()
-                        }
-                    };
-                    *notified = notified.wrapping_add(1);
                     cvar.notify_all();
+                    drop(queue); // 释放锁
                     log::info!("[监听线程] 已通知处理线程");
                     maybe_log_queue_metrics();
                 }
