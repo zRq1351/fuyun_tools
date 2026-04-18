@@ -175,7 +175,8 @@ const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
 let scrollRafId = 0
-const handleScroll = () => {
+const handleScroll = (e) => {
+  containerProps.onScroll?.(e)
   if (!scrollRafId) {
     scrollRafId = requestAnimationFrame(() => {
       emit('content-scroll')
@@ -306,7 +307,9 @@ defineExpose({
   flex: 1;
   min-width: 0;
   min-height: 0;
-  padding: 8px;
+  display: flex;
+  flex-direction: row;
+  padding: 8px 8px 8px 8px;
   overflow-x: auto;
   overflow-y: hidden;
   margin-top: 10px;
@@ -317,6 +320,12 @@ defineExpose({
   display: flex;
   flex-direction: row;
   height: 100%;
+}
+
+.content::after {
+  content: '';
+  flex-shrink: 0;
+  width: 1px;
 }
 
 .content::-webkit-scrollbar {
@@ -350,6 +359,7 @@ defineExpose({
 }
 
 .load-more-tail-indicator {
+  flex-shrink: 0;
   width: 56px;
   flex: 0 0 56px;
   min-height: 100%;
@@ -361,6 +371,7 @@ defineExpose({
   color: rgba(166, 213, 255, 0.9);
   user-select: none;
   pointer-events: none;
+  margin-right: 8px;
 }
 
 .load-more-tail-text {
