@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use image::{ImageBuffer, Rgba};
 #[cfg(target_os = "windows")]
 use winapi::shared::windef::RECT;
 #[cfg(target_os = "windows")]
