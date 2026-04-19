@@ -445,14 +445,6 @@ export function useClipboardHistory() {
         }
     }
 
-    const setSort = async (_nextSortBy, nextSortOrder) => {
-        sortBy.value = 'pinnedFirst'
-        sortOrder.value = nextSortOrder || 'asc'
-        const {pinned, unpinned} = buildSortedGroups()
-        applyGroupedEntries(pinned, unpinned)
-        rebuildHistoryArray()
-    }
-
     const setPageSize = async (nextPageSize) => {
         const parsed = Number(nextPageSize)
         const normalized = [10, 30, 50].includes(parsed) ? parsed : 50
@@ -667,7 +659,6 @@ export function useClipboardHistory() {
         hasMore,
         isLoadingPage,
         sortBy,
-        sortOrder,
         getItemCategory,
         updateSelection,
         deleteItem,
@@ -676,7 +667,6 @@ export function useClipboardHistory() {
         syncHistoryIncremental,
         loadMoreHistory,
         loadTailPage,
-        setSort,
         setPageSize,
         promoteLocalById,
         setLocalPinnedById,
