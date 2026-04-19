@@ -232,7 +232,14 @@ export function useClipboardHistory() {
             }
         }
         const merged = Array.from(map.values())
-        pagedHistory.value = sortPageItems(merged)
+            
+            // 校准合并后的 position 以免旧数据的 position 造成乱序
+            merged.sort((a, b) => a.position - b.position)
+            merged.forEach((entry, index) => {
+                entry.position = index;
+            });
+            
+            pagedHistory.value = sortPageItems(merged)
     }
 
     const loadHistoryPage = async ({reset = false} = {}) => {
@@ -319,6 +326,7 @@ export function useClipboardHistory() {
                     ...existing,
                     id: item.id,
                     content: item.content,
+                    // 不应该使用 existing.position 如果 item 有自己的 position
                     position: item.position ?? existing.position ?? 0,
                     snippet: item.snippet ?? existing.snippet ?? '',
                     pinned: item.pinned ?? existing.pinned ?? false,
@@ -338,6 +346,12 @@ export function useClipboardHistory() {
 
             // 合并：新数据在前，旧数据在后
             const merged = [...front, ...rest]
+            
+            // 重新校准 position 以防顺序错乱
+            merged.forEach((entry, index) => {
+                entry.position = index;
+            });
+            
             pagedHistory.value = sortPageItems(merged)
 
             totalCount.value = Number.isFinite(response?.total)
