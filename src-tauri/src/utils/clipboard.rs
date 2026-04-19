@@ -440,6 +440,7 @@ impl ClipboardManager {
                         &mut history,
                         self.max_items,
                         &mut categories,
+                        &pinned_items,
                         self.grouped_items_protected_from_limit,
                     );
                     normalize_pinned_items(&mut pinned_items, &history);
@@ -480,6 +481,7 @@ impl ClipboardManager {
                     &mut history,
                     self.max_items,
                     &mut categories,
+                    &pinned_items,
                     self.grouped_items_protected_from_limit,
                 );
                 normalize_pinned_items(&mut pinned_items, &history);
@@ -593,6 +595,7 @@ impl ClipboardManager {
                 &mut history,
                 max_items,
                 &mut categories,
+                &pinned_items,
                 self.grouped_items_protected_from_limit,
             );
             normalize_pinned_items(&mut pinned_items, &history);
