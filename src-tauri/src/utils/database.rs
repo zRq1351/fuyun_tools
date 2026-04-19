@@ -413,9 +413,9 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
         return Ok(None);
     }
 
-    // 使用 created_at DESC 排序（最新的在前）
+    // 使用 updated_at DESC 排序（最新更新/复制的在前）
     let item_rows =
-        sqlx::query("SELECT content FROM history_items ORDER BY created_at DESC, id DESC LIMIT 100000")
+        sqlx::query("SELECT content FROM history_items ORDER BY updated_at DESC, id DESC LIMIT 100000")
             .fetch_all(&mut *conn)
             .await
             .map_err(|e| format!("读取历史数据库失败: {}", e))?;
@@ -477,17 +477,17 @@ fn resolve_history_sort(sort_by: Option<String>, sort_order: Option<String>) -> 
         .to_lowercase();
     match (by.as_str(), order.as_str()) {
         ("pinnedfirst", "asc") | ("pinned_first", "asc") =>
-            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at DESC, hi.created_at ASC, hi.id ASC",
+            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at ASC, hi.updated_at ASC, hi.id ASC",
         ("pinnedfirst", _) | ("pinned_first", _) =>
-            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at DESC, hi.created_at DESC, hi.id DESC",
+            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at DESC, hi.updated_at DESC, hi.id DESC",
         ("updatedat", "asc") | ("updated_at", "asc") => "hi.updated_at ASC, hi.id ASC",
         ("updatedat", _) | ("updated_at", _) => "hi.updated_at DESC, hi.id DESC",
         ("createdat", "asc") | ("created_at", "asc") => "hi.created_at ASC, hi.id ASC",
         ("createdat", _) | ("created_at", _) => "hi.created_at DESC, hi.id DESC",
         ("id", "asc") => "hi.id ASC",
         ("id", _) => "hi.id DESC",
-        _ if order == "asc" => "hi.created_at ASC, hi.id ASC",
-        _ => "hi.created_at DESC, hi.id DESC",
+        _ if order == "asc" => "hi.updated_at ASC, hi.id ASC",
+        _ => "hi.updated_at DESC, hi.id DESC",
     }
 }
 
