@@ -8,14 +8,14 @@
   >
     <div
         v-for="(entry, index) in visibleHistory"
-        :id="'clipboard-item-' + entry.index"
+        :id="'clipboard-item-' + entry.id"
         :key="entry.id"
         v-memo="[entry.content, entry.index, selectedItemId, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
         :class="{ selected: selectedItemId === entry.id }"
         class="clipboard-item"
         draggable="true"
-        @click="handleClick(entry.index)"
-        @dblclick="handleDoubleClick(entry.index, entry.id)"
+        @click="handleClick(entry.id)"
+        @dblclick="handleDoubleClick(entry.id)"
         @contextmenu.prevent="showContextMenu($event, entry.id, index)"
         @dragstart="handleDragStart($event, entry.id)"
         @dragend="handleDragEnd"
@@ -73,7 +73,7 @@ const props = defineProps({
     required: true
   },
   selectedItemId: {
-    type: Number,
+    type: String,
     required: true
   },
   getItemCategory: {
@@ -208,11 +208,11 @@ onUnmounted(() => {
   window.removeEventListener('dragend', handleGlobalDragEnd)
 })
 
-const handleClick = (entryIndex) => {
-  props.updateSelection(entryIndex, false, contentRef.value, null)
+const handleClick = (entryId) => {
+  props.updateSelection(entryId, false, contentRef.value, null)
 }
 
-const handleDoubleClick = (entryIndex, entryId) => {
+const handleDoubleClick = (entryId) => {
   props.selectAndFillDirect(entryId)
 }
 

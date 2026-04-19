@@ -313,7 +313,7 @@ const hideClipboardWindow = () => {
 const selectedStatusText = computed(() => {
   const total = totalCount.value || visibleHistory.value.length
   if (total === 0) return '当前无选中项'
-  const current = visibleHistory.value.findIndex((entry) => entry.index === selectedItemId.value)
+  const current = visibleHistory.value.findIndex((entry) => entry.id === selectedItemId.value)
   const display = current >= 0 ? current + 1 : 1
   return `当前选中：第 ${display} / ${total} 条`
 })
@@ -456,13 +456,23 @@ const showWindow = async (data) => {
   }
   syncWindowPayload(data)
 
-  selectedItemId.value = data.selectedItemId || (visibleHistory.value.length > 0 ? visibleHistory.value[0].id : '')
+  const resolvedSelectedId = (() => {
+    if (typeof data.selectedItemId === 'string' && data.selectedItemId) {
+      return data.selectedItemId
+    }
+    if (typeof data.selectedIndex === 'number') {
+      const entry = visibleHistory.value.find((e) => e.index === data.selectedIndex)
+      if (entry?.id) return entry.id
+    }
+    return visibleHistory.value.length > 0 ? visibleHistory.value[0].id : ''
+  })()
+  selectedItemId.value = resolvedSelectedId
   isVisible.value = true
   loadMoreIntent.value = false
 
   if (visibleHistory.value.length > 0) {
-    if (!visibleHistory.value.some((entry) => entry.index === selectedItemId.value)) {
-      selectedItemId.value = visibleHistory.value[0].index
+    if (!visibleHistory.value.some((entry) => entry.id === selectedItemId.value)) {
+      selectedItemId.value = visibleHistory.value[0].id
     }
     const contentRef = clipboardListRef.value?.contentRef
     updateSelection(selectedItemId.value, true, contentRef)
@@ -540,10 +550,10 @@ const handleDrop = async (event, category) => {
 const buildOpId = () => Date.now() * 1000 + Math.floor(Math.random() * 1000)
 
 const resolveSelectedText = () => {
-  if (selectedItemId.value < 0) {
+  if (!selectedItemId.value) {
     return ''
   }
-  const entry = visibleHistory.value.find((e) => e.index === selectedItemId.value)
+  const entry = visibleHistory.value.find((e) => e.id === selectedItemId.value)
   return entry ? entry.content : ''
 }
 
@@ -602,7 +612,7 @@ const isInputLikeTarget = (target) => {
 const ensureKeyboardSelectionVisible = async () => {
   await nextTick()
   const selected = selectedItemId.value
-  if (selected < 0) return
+  if (!selected) return
   const element = document.getElementById(`clipboard-item-${selected}`)
   const containerRefOrEl = clipboardListRef.value?.contentRef
   const container = containerRefOrEl?.value || containerRefOrEl || element?.closest('.content')
@@ -641,7 +651,7 @@ const scrollToStart = async () => {
     container.scrollLeft = 0
   }
   if (visibleHistory.value.length > 0) {
-    selectedItemId.value = visibleHistory.value[0].index
+    selectedItemId.value = visibleHistory.value[0].id
     await ensureKeyboardSelectionVisible()
   }
 }
@@ -662,7 +672,7 @@ const scrollToEnd = async () => {
     }
   }
   if (visibleHistory.value.length > 0) {
-    selectedItemId.value = visibleHistory.value[visibleHistory.value.length - 1].index
+    selectedItemId.value = visibleHistory.value[visibleHistory.value.length - 1].id
     await ensureKeyboardSelectionVisible()
   }
 }
@@ -691,8 +701,8 @@ const handleKeydown = async (event) => {
       break
     case 'Enter':
       event.preventDefault()
-      if (selectedItemId.value >= 0) {
-        const entry = visibleHistory.value.find((entry) => entry.index === selectedItemId.value)
+      if (selectedItemId.value) {
+        const entry = visibleHistory.value.find((entry) => entry.id === selectedItemId.value)
         if (entry) {
           selectAndFillDirect(entry.id)
         }
@@ -737,12 +747,12 @@ watch([searchKeyword, categoryFilter], () => {
 
 watch(visibleHistory, (list) => {
   if (!Array.isArray(list) || list.length === 0) {
-    selectedItemId.value = -1
+    selectedItemId.value = ''
     return
   }
-  const exists = list.some((entry) => entry.index === selectedItemId.value)
+  const exists = list.some((entry) => entry.id === selectedItemId.value)
   if (!exists) {
-    selectedItemId.value = list[0].index
+    selectedItemId.value = list[0].id
   }
 })
 
