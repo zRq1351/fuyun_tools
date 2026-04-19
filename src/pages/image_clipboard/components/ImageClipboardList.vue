@@ -12,6 +12,7 @@
         :key="entry.item.id"
         v-memo="[
           entry.item.id,
+          entry.index,
           selectedIndex === entry.index,
           entry.pinned,
           entry.category,
