@@ -84,7 +84,7 @@
         :handle-drag-end="handleDragEnd"
         :handle-drag-start="handleDragStart"
         :select-and-fill-direct="selectAndFillDirect"
-        :selected-index="selectedIndex"
+        :selected-item-id="selectedItemId"
         :show-context-menu="showContextMenu"
         :is-pinned="isItemPinned"
         :promote-item="promoteItem"
@@ -222,7 +222,7 @@ let beforeUnloadHandler = null
 let pageHideHandler = null
 
 const {
-  selectedIndex,
+  selectedItemId,
   searchKeyword,
   categoryFilter,
   categoryMap,
@@ -313,7 +313,7 @@ const hideClipboardWindow = () => {
 const selectedStatusText = computed(() => {
   const total = totalCount.value || visibleHistory.value.length
   if (total === 0) return '当前无选中项'
-  const current = visibleHistory.value.findIndex((entry) => entry.index === selectedIndex.value)
+  const current = visibleHistory.value.findIndex((entry) => entry.index === selectedItemId.value)
   const display = current >= 0 ? current + 1 : 1
   return `当前选中：第 ${display} / ${total} 条`
 })
@@ -456,16 +456,16 @@ const showWindow = async (data) => {
   }
   syncWindowPayload(data)
 
-  selectedIndex.value = data.selectedIndex !== undefined ? data.selectedIndex : 0
+  selectedItemId.value = data.selectedItemId || (visibleHistory.value.length > 0 ? visibleHistory.value[0].id : '')
   isVisible.value = true
   loadMoreIntent.value = false
 
   if (visibleHistory.value.length > 0) {
-    if (!visibleHistory.value.some((entry) => entry.index === selectedIndex.value)) {
-      selectedIndex.value = visibleHistory.value[0].index
+    if (!visibleHistory.value.some((entry) => entry.index === selectedItemId.value)) {
+      selectedItemId.value = visibleHistory.value[0].index
     }
     const contentRef = clipboardListRef.value?.contentRef
-    updateSelection(selectedIndex.value, true, contentRef)
+    updateSelection(selectedItemId.value, true, contentRef)
   }
 
   nextTick(() => {
@@ -540,10 +540,10 @@ const handleDrop = async (event, category) => {
 const buildOpId = () => Date.now() * 1000 + Math.floor(Math.random() * 1000)
 
 const resolveSelectedText = () => {
-  if (selectedIndex.value < 0) {
+  if (selectedItemId.value < 0) {
     return ''
   }
-  const entry = visibleHistory.value.find((e) => e.index === selectedIndex.value)
+  const entry = visibleHistory.value.find((e) => e.index === selectedItemId.value)
   return entry ? entry.content : ''
 }
 
@@ -601,7 +601,7 @@ const isInputLikeTarget = (target) => {
 
 const ensureKeyboardSelectionVisible = async () => {
   await nextTick()
-  const selected = selectedIndex.value
+  const selected = selectedItemId.value
   if (selected < 0) return
   const element = document.getElementById(`clipboard-item-${selected}`)
   const containerRefOrEl = clipboardListRef.value?.contentRef
@@ -641,7 +641,7 @@ const scrollToStart = async () => {
     container.scrollLeft = 0
   }
   if (visibleHistory.value.length > 0) {
-    selectedIndex.value = visibleHistory.value[0].index
+    selectedItemId.value = visibleHistory.value[0].index
     await ensureKeyboardSelectionVisible()
   }
 }
@@ -662,7 +662,7 @@ const scrollToEnd = async () => {
     }
   }
   if (visibleHistory.value.length > 0) {
-    selectedIndex.value = visibleHistory.value[visibleHistory.value.length - 1].index
+    selectedItemId.value = visibleHistory.value[visibleHistory.value.length - 1].index
     await ensureKeyboardSelectionVisible()
   }
 }
@@ -691,8 +691,8 @@ const handleKeydown = async (event) => {
       break
     case 'Enter':
       event.preventDefault()
-      if (selectedIndex.value >= 0) {
-        const entry = visibleHistory.value.find((entry) => entry.index === selectedIndex.value)
+      if (selectedItemId.value >= 0) {
+        const entry = visibleHistory.value.find((entry) => entry.index === selectedItemId.value)
         if (entry) {
           selectAndFillDirect(entry.id)
         }
@@ -737,12 +737,12 @@ watch([searchKeyword, categoryFilter], () => {
 
 watch(visibleHistory, (list) => {
   if (!Array.isArray(list) || list.length === 0) {
-    selectedIndex.value = -1
+    selectedItemId.value = -1
     return
   }
-  const exists = list.some((entry) => entry.index === selectedIndex.value)
+  const exists = list.some((entry) => entry.index === selectedItemId.value)
   if (!exists) {
-    selectedIndex.value = list[0].index
+    selectedItemId.value = list[0].index
   }
 })
 

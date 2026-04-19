@@ -5,8 +5,7 @@ const buildSelectAndFillRequest = (itemId, opId) => ({
     opId
 });
 const buildSelectAndFillImageByIdRequest = (itemId, opId) => ({itemId, opId});
-const normalizeOptionalIndex = (index) =>
-    Number.isInteger(index) && index >= 0 ? index : null;
+
 const buildStreamTranslateRequest = (text, sourceLanguage, targetLanguage, opId, sceneHint) => ({
     text,
     sourceLanguage,
@@ -176,8 +175,8 @@ export const ClipboardService = {
         }),
 
     /**
-     * 删除剪贴板条目
-     * @param {number} index
+     * 删除剪贴板项目
+     * @param {string} itemId
      * @returns {Promise<void>}
      */
     removeItem: (itemId) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, { itemId }),
@@ -187,7 +186,6 @@ export const ClipboardService = {
 
     /**
      * 选择并填充内容
-     * @param {number} index
      * @param {string} itemId
      * @returns {Promise<void>}
      */

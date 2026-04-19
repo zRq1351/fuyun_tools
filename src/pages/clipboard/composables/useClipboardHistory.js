@@ -3,7 +3,7 @@ import {CategoryService, ClipboardService} from '../../../services/ipc'
 
 export function useClipboardHistory() {
         const pagedHistory = shallowRef([])
-    const selectedIndex = ref(-1)
+    const selectedItemId = ref('')
     const searchKeyword = ref('')
     const categoryFilter = ref('全部')
     const categoryMap = ref({})
@@ -152,9 +152,9 @@ export function useClipboardHistory() {
             }))
     })
 
-    const updateSelection = (index, shouldScroll = false, contentRef = null, visibleIndex = null) => {
-        if (index < 0) return
-        selectedIndex.value = index
+    const updateSelection = (itemId, shouldScroll = false, contentRef = null, visibleIndex = null) => {
+        if (!itemId) return
+        selectedItemId.value = itemId
     }
 
     const rebuildHistoryArray = () => {
@@ -259,9 +259,9 @@ export function useClipboardHistory() {
             hasMore.value = nextOffset < totalCount.value
             rebuildHistoryArray()
             if (pagedHistory.value.length === 0) {
-                selectedIndex.value = -1
-            } else if (!pagedHistory.value.some((entry) => entry.position === selectedIndex.value)) {
-                selectedIndex.value = pagedHistory.value[0].position
+                selectedItemId.value = ''
+            } else if (!pagedHistory.value.some((entry) => entry.id === selectedItemId.value)) {
+                selectedItemId.value = pagedHistory.value[0].id
             }
         } catch (error) {
             console.error('加载分页历史失败:', error)
@@ -348,9 +348,9 @@ export function useClipboardHistory() {
             rebuildHistoryArray()
 
             if (pagedHistory.value.length === 0) {
-                selectedIndex.value = -1
-            } else if (!pagedHistory.value.some((entry) => entry.position === selectedIndex.value)) {
-                selectedIndex.value = pagedHistory.value[0].position
+                selectedItemId.value = ''
+            } else if (!pagedHistory.value.some((entry) => entry.id === selectedItemId.value)) {
+                selectedItemId.value = pagedHistory.value[0].id
             }
 
             bumpFilterDataRevision()
@@ -435,9 +435,9 @@ export function useClipboardHistory() {
             hasMore.value = pageOffset.value < totalCount.value
             
             if (pagedHistory.value.length === 0) {
-                selectedIndex.value = -1
-            } else if (!pagedHistory.value.some((entry) => entry.position === selectedIndex.value)) {
-                selectedIndex.value = pagedHistory.value[0].position
+                selectedItemId.value = ''
+            } else if (!pagedHistory.value.some((entry) => entry.id === selectedItemId.value)) {
+                selectedItemId.value = pagedHistory.value[0].id
             }
         }
         
@@ -460,10 +460,10 @@ export function useClipboardHistory() {
     const moveSelection = (direction, contentRef) => {
         const visible = visibleHistory.value
         if (visible.length === 0) return
-        let visibleIndex = visible.findIndex((entry) => entry.index === selectedIndex.value)
+        let visibleIndex = visible.findIndex((entry) => entry.id === selectedItemId.value)
         if (visibleIndex < 0) visibleIndex = 0
         const nextVisibleIndex = Math.max(0, Math.min(visible.length - 1, visibleIndex + direction))
-        updateSelection(visible[nextVisibleIndex].index, true, contentRef, nextVisibleIndex)
+        updateSelection(visible[nextVisibleIndex].id, true, contentRef, nextVisibleIndex)
     }
 
     const applyPayloadSnapshot = (payload = {}) => {
@@ -473,7 +473,7 @@ export function useClipboardHistory() {
             totalCount.value = 0
             pageOffset.value = 0
             hasMore.value = false
-            selectedIndex.value = -1
+            selectedItemId.value = ''
             return
         }
         const nextHistory = {}
@@ -519,9 +519,9 @@ export function useClipboardHistory() {
         pageOffset.value = loadedCount
         hasMore.value = loadedCount < sortedFiltered.length
         if (pagedHistory.value.length === 0) {
-            selectedIndex.value = -1
-        } else if (!pagedHistory.value.some((entry) => entry.position === selectedIndex.value)) {
-            selectedIndex.value = pagedHistory.value[0].position
+            selectedItemId.value = ''
+        } else if (!pagedHistory.value.some((entry) => entry.id === selectedItemId.value)) {
+            selectedItemId.value = pagedHistory.value[0].id
         }
     }
 
@@ -598,7 +598,7 @@ export function useClipboardHistory() {
     }
 
     return {
-                selectedIndex,
+                selectedItemId,
         searchKeyword,
         categoryFilter,
         categoryMap,

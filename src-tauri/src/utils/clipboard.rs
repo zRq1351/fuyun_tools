@@ -255,8 +255,8 @@ impl ClipboardManager {
     }
 
     pub fn get_history_item(&self, item_id: &str) -> Option<String> {
-        let index = self.find_index_by_id(item_id)?;
         let history = lock_arc_mutex(&self.history);
+        let index = self.find_index_by_id_with_lock(&history, item_id)?;
         history.get(index).cloned()
     }
 
@@ -603,34 +603,26 @@ impl ClipboardManager {
         }
     }
 
-    fn find_index_by_id(&self, item_id: &str) -> Option<usize> {
+    fn find_index_by_id_with_lock(&self, history: &crate::sync::MutexGuard<'_, Vec<String>>, item_id: &str) -> Option<usize> {
         let target_hash = u64::from_str_radix(item_id, 16).ok()?;
 
         {
             let mut cache = self.exact_index_cache.lock();
             if let Some(&idx) = cache.get(&target_hash) {
-                let history = lock_arc_mutex(&self.history);
                 if idx < history.len() && stable_text_hash(&history[idx]) == target_hash {
                     return Some(idx);
                 }
             }
         }
 
-        self.ensure_fingerprints_sync();
-        let fingerprints = lock_arc_mutex(&self.history_fingerprints);
-        if let Some(idx) = fingerprints.iter().position(|(_, h)| *h == target_hash) {
-            return Some(idx);
-        }
-
-        let history = lock_arc_mutex(&self.history);
         history.iter().position(|entry| stable_text_hash(entry) == target_hash)
     }
 
     /// 移除指定历史记录
     pub fn remove_from_history(&self, item_id: &str) -> Result<String, String> {
-        let index = self.find_index_by_id(item_id).ok_or_else(|| "找不到目标项目".to_string())?;
-        
         let mut history = lock_arc_mutex(&self.history);
+        let index = self.find_index_by_id_with_lock(&history, item_id).ok_or_else(|| "找不到目标项目".to_string())?;
+        
         if index < history.len() {
             let item = history.remove(index);
             self.exact_index_cache.lock().clear();
@@ -651,8 +643,8 @@ impl ClipboardManager {
 
     pub fn promote_to_top(&self, item_id: &str) -> Result<String, String> {
         let item = {
-            let index = self.find_index_by_id(item_id).ok_or_else(|| "找不到目标项目".to_string())?;
             let mut history = lock_arc_mutex(&self.history);
+            let index = self.find_index_by_id_with_lock(&history, item_id).ok_or_else(|| "找不到目标项目".to_string())?;
 
             if index >= history.len() {
                 return Err("索引超出范围".to_string());
@@ -691,8 +683,8 @@ impl ClipboardManager {
         item_id: &str,
     ) -> Result<String, String> {
         let item = {
-            let index = self.find_index_by_id(item_id).ok_or_else(|| "找不到目标项目".to_string())?;
             let mut history = lock_arc_mutex(&self.history);
+            let index = self.find_index_by_id_with_lock(&history, item_id).ok_or_else(|| "找不到目标项目".to_string())?;
 
             if index >= history.len() {
                 return Err("索引超出范围".to_string());

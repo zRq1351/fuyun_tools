@@ -10,8 +10,8 @@
         v-for="(entry, index) in visibleHistory"
         :id="'clipboard-item-' + entry.index"
         :key="entry.id"
-        v-memo="[entry.content, entry.index, selectedIndex, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
-        :class="{ selected: selectedIndex === entry.index }"
+        v-memo="[entry.content, entry.index, selectedItemId, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
+        :class="{ selected: selectedItemId === entry.id }"
         class="clipboard-item"
         draggable="true"
         @click="handleClick(entry.index)"
@@ -72,7 +72,7 @@ const props = defineProps({
     type: Array,
     required: true
   },
-  selectedIndex: {
+  selectedItemId: {
     type: Number,
     required: true
   },
