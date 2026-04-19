@@ -41,7 +41,7 @@ const EXACT_INDEX_CACHE_CAPACITY: usize = 2048;
 const BLOOM_FILTER_CAPACITY: u32 = 10000;
 const BLOOM_FILTER_ERROR_RATE: f32 = 0.01; // 1% 误判率
 
-fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
+pub fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
     mutex.lock().unwrap()
 }
 
