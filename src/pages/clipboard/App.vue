@@ -222,7 +222,6 @@ let beforeUnloadHandler = null
 let pageHideHandler = null
 
 const {
-  historyMap,
   selectedIndex,
   searchKeyword,
   categoryFilter,
@@ -280,7 +279,7 @@ const {
 
 const isItemPinned = (id) => pinnedItems.value.includes(id)
 
-const promoteItem = async (index, id) => {
+const promoteItem = async (id) => {
   const shouldPin = !isItemPinned(id)
   if (shouldPin) {
     pinnedItems.value = [id, ...pinnedItems.value.filter((p) => p !== id)]
@@ -289,7 +288,7 @@ const promoteItem = async (index, id) => {
   }
   setLocalPinnedById(id, shouldPin)
   try {
-    await ClipboardService.setItemPinned(index, id, shouldPin)
+    await ClipboardService.setItemPinned(id, shouldPin)
   } catch (error) {
     if (shouldPin) {
       pinnedItems.value = pinnedItems.value.filter((p) => p !== id)
@@ -474,9 +473,9 @@ const showWindow = async (data) => {
   })
 }
 
-const selectAndFillDirect = async (index, itemId = null) => {
+const selectAndFillDirect = async (itemId) => {
   try {
-    await ClipboardService.selectAndFill(index, itemId)
+    await ClipboardService.selectAndFill(itemId, null)
     hideClipboardWindow()
   } catch (error) {
     console.error('填充内容失败:', error)
@@ -695,7 +694,7 @@ const handleKeydown = async (event) => {
       if (selectedIndex.value >= 0) {
         const entry = visibleHistory.value.find((entry) => entry.index === selectedIndex.value)
         if (entry) {
-          selectAndFillDirect(selectedIndex.value, entry.id)
+          selectAndFillDirect(entry.id)
         }
       }
       break

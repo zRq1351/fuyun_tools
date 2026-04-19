@@ -199,7 +199,6 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
             updated_at INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS categories (
-            content TEXT,
             category TEXT NOT NULL,
             item_id TEXT PRIMARY KEY
         );
@@ -208,17 +207,14 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
             category TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS pinned_items (
-            content TEXT,
             pinned_at INTEGER NOT NULL DEFAULT 0,
             item_id TEXT PRIMARY KEY
         );
         CREATE INDEX IF NOT EXISTS idx_history_items_created_at ON history_items(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_history_items_item_id ON history_items(item_id);
         CREATE INDEX IF NOT EXISTS idx_categories_category ON categories(category);
-        CREATE INDEX IF NOT EXISTS idx_categories_content ON categories(content);
-        CREATE INDEX IF NOT EXISTS idx_pinned_items_pinned_at ON pinned_items(pinned_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_pinned_items_content ON pinned_items(content);
-        ",
+                CREATE INDEX IF NOT EXISTS idx_pinned_items_pinned_at ON pinned_items(pinned_at DESC);
+                ",
     )
     .execute(&mut *conn)
     .await
@@ -300,12 +296,11 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         let _ = sqlx::query(
             "
             CREATE TABLE categories_new (
-                content TEXT,
                 category TEXT NOT NULL,
                 item_id TEXT PRIMARY KEY
             );
-            INSERT OR IGNORE INTO categories_new(content, category, item_id)
-            SELECT content, category, item_id FROM categories WHERE item_id IS NOT NULL AND item_id != '';
+            INSERT OR IGNORE INTO categories_new(category, item_id)
+            SELECT category, item_id FROM categories WHERE item_id IS NOT NULL AND item_id != '';
             DROP TABLE categories;
             ALTER TABLE categories_new RENAME TO categories;
             "
@@ -329,12 +324,11 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         let _ = sqlx::query(
             "
             CREATE TABLE pinned_items_new (
-                content TEXT,
                 pinned_at INTEGER NOT NULL DEFAULT 0,
                 item_id TEXT PRIMARY KEY
             );
-            INSERT OR IGNORE INTO pinned_items_new(content, pinned_at, item_id)
-            SELECT content, pinned_at, item_id FROM pinned_items WHERE item_id IS NOT NULL AND item_id != '';
+            INSERT OR IGNORE INTO pinned_items_new(pinned_at, item_id)
+            SELECT pinned_at, item_id FROM pinned_items WHERE item_id IS NOT NULL AND item_id != '';
             DROP TABLE pinned_items;
             ALTER TABLE pinned_items_new RENAME TO pinned_items;
             "
@@ -946,16 +940,10 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         if !desired_item_id_set.contains(item_id_str) {
             continue;
         }
-        let content_for_cat = history_entries
-            .iter()
-            .find(|(id, _, _)| id == item_id_str)
-            .map(|(_, c, _)| c.clone())
-            .unwrap_or_default();
         sqlx::query(
-            "INSERT INTO categories(content, category, item_id) VALUES(?1, ?2, ?3)
-             ON CONFLICT(item_id) DO UPDATE SET content = ?1, category = ?2",
+            "INSERT INTO categories(category, item_id) VALUES(?1, ?2)
+             ON CONFLICT(item_id) DO UPDATE SET category = ?1",
         )
-        .bind(content_for_cat)
         .bind(category)
         .bind(item_id_str)
         .execute(&mut *tx)
@@ -980,17 +968,11 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         if !desired_item_id_set.contains(item_id_str) {
             continue;
         }
-        let content_for_pin = history_entries
-            .iter()
-            .find(|(id, _, _)| id == item_id_str)
-            .map(|(_, c, _)| c.clone())
-            .unwrap_or_default();
         let pinned_at = now_ms - (idx as i64);
         sqlx::query(
-            "INSERT INTO pinned_items(content, pinned_at, item_id) VALUES(?1, ?2, ?3)
-             ON CONFLICT(item_id) DO UPDATE SET content = ?1, pinned_at = ?2",
+            "INSERT INTO pinned_items(pinned_at, item_id) VALUES(?1, ?2)
+             ON CONFLICT(item_id) DO UPDATE SET pinned_at = ?1",
         )
-        .bind(content_for_pin)
         .bind(pinned_at)
         .bind(item_id_str)
         .execute(&mut *tx)
@@ -1186,8 +1168,7 @@ pub async fn save_categories_state_async(
 
     for (item_id, category) in categories {
         sqlx::query(
-            "INSERT INTO categories(content, category, item_id)
-             SELECT content, ?1, ?2 FROM history_items WHERE item_id = ?2 LIMIT 1",
+            "INSERT INTO categories(category, item_id) VALUES (?1, ?2)",
         )
         .bind(category)
         .bind(item_id)
@@ -1228,8 +1209,7 @@ pub async fn save_pinned_items_order_async(pinned_items: &[String]) -> Result<()
         // 较新的 pinned_at 表示更靠前的置顶项。
         let pinned_at = base_ts + (pinned_items.len().saturating_sub(idx) as i64);
         sqlx::query(
-            "INSERT INTO pinned_items(content, pinned_at, item_id)
-             SELECT content, ?1, ?2 FROM history_items WHERE item_id = ?2 LIMIT 1",
+            "INSERT INTO pinned_items(pinned_at, item_id) VALUES (?1, ?2)",
         )
         .bind(pinned_at)
         .bind(item_id)
@@ -1249,19 +1229,20 @@ pub async fn pin_item(item_id: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
     let now = now_unix_ms();
 
-    let content_opt: Option<String> = sqlx::query_scalar("SELECT content FROM history_items WHERE item_id = ?1 LIMIT 1")
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM history_items WHERE item_id = ?1)")
         .bind(item_id)
-        .fetch_optional(&mut *conn)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| format!("查找记录内容失败: {}", e))?;
 
-    let content = content_opt.ok_or_else(|| "目标记录不存在".to_string())?;
+    if !exists {
+        return Err("目标记录不存在".to_string());
+    }
 
     sqlx::query(
-        "INSERT INTO pinned_items(content, pinned_at, item_id) VALUES(?1, ?2, ?3)
-         ON CONFLICT(item_id) DO UPDATE SET content = ?1, pinned_at = ?2",
+        "INSERT INTO pinned_items(pinned_at, item_id) VALUES(?1, ?2)
+         ON CONFLICT(item_id) DO UPDATE SET pinned_at = ?1",
     )
-    .bind(content)
     .bind(now)
     .bind(item_id)
     .execute(&mut *conn)
@@ -1296,10 +1277,7 @@ pub async fn set_item_category(item_id: &str, category: &str) -> Result<(), Stri
 
     if exists {
         sqlx::query(
-            "INSERT INTO categories(content, category, item_id) 
-             SELECT content, ?1, item_id FROM history_items 
-             WHERE item_id = ?2
-             LIMIT 1
+            "INSERT INTO categories(category, item_id) VALUES (?1, ?2)
              ON CONFLICT(item_id) DO UPDATE SET category = ?1",
         )
         .bind(category)
@@ -1436,14 +1414,12 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
 
     // 合并分类信息(只添加新的)
     for (item_id, category) in &data.categories {
-        let content_for_cat = data.items.iter().find(|c| &stable_history_item_id(c) == item_id).cloned().unwrap_or_default();
         if existing_ids.contains(item_id) {
             // 如果记录已存在,更新分类
             sqlx::query(
-                "INSERT INTO categories(content, category, item_id) VALUES(?1, ?2, ?3)
-                 ON CONFLICT(item_id) DO UPDATE SET content = ?1, category = ?2",
+                "INSERT INTO categories(category, item_id) VALUES(?1, ?2)
+             ON CONFLICT(item_id) DO UPDATE SET category = ?1",
             )
-            .bind(&content_for_cat)
             .bind(category)
             .bind(item_id)
             .execute(&mut *tx)
@@ -1452,9 +1428,8 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
         } else {
             // 如果记录不存在,也添加分类(以备后续插入记录时使用)
             sqlx::query(
-                "INSERT OR IGNORE INTO categories(content, category, item_id) VALUES(?1, ?2, ?3)",
+                "INSERT OR IGNORE INTO categories(category, item_id) VALUES(?1, ?2)",
             )
-            .bind(&content_for_cat)
             .bind(category)
             .bind(item_id)
             .execute(&mut *tx)
@@ -1514,13 +1489,11 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
                 continue; // 跳过已置顶的
             }
 
-            let content_for_pin = data.items.iter().find(|c| &stable_history_item_id(c) == item_id).cloned().unwrap_or_default();
             let pinned_at = now_ms - (idx as i64);
             sqlx::query(
-                "INSERT INTO pinned_items(content, pinned_at, item_id, position) VALUES(?1, ?2, ?3, ?4)
+                "INSERT INTO pinned_items(pinned_at, item_id, position) VALUES(?1, ?2, ?3)
                  ON CONFLICT(item_id) DO NOTHING",
             )
-                .bind(&content_for_pin)
                 .bind(pinned_at)
                 .bind(item_id)
                 .bind(position)
@@ -1536,12 +1509,10 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
                 continue; // 跳过已置顶的
             }
 
-            let content_for_pin = data.items.iter().find(|c| &stable_history_item_id(c) == item_id).cloned().unwrap_or_default();
             let pinned_at = now_ms - (idx as i64);
             sqlx::query(
-                "INSERT OR IGNORE INTO pinned_items(content, pinned_at, item_id) VALUES(?1, ?2, ?3)",
+                "INSERT OR IGNORE INTO pinned_items(pinned_at, item_id) VALUES(?1, ?2)",
             )
-                .bind(&content_for_pin)
                 .bind(pinned_at)
                 .bind(item_id)
                 .execute(&mut *tx)

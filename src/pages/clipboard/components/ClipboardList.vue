@@ -9,7 +9,7 @@
     <div
         v-for="(entry, index) in visibleHistory"
         :id="'clipboard-item-' + entry.index"
-        :key="entry.index"
+        :key="entry.id"
         v-memo="[entry.content, entry.index, selectedIndex, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
         :class="{ selected: selectedIndex === entry.index }"
         class="clipboard-item"
@@ -26,12 +26,12 @@
         </el-icon>
       </div>
       <div :class="{ active: isPinned(entry.id) }" class="pin-btn"
-           @click.stop="promoteItem(entry.index, entry.id)">
+           @click.stop="promoteItem(entry.id)">
         <el-icon>
           <Pin/>
         </el-icon>
       </div>
-      <div class="delete-btn" @click.stop="deleteItem(entry.index, entry.id)">
+      <div class="delete-btn" @click.stop="deleteItem(entry.id)">
         <el-icon>
           <Close/>
         </el-icon>
@@ -213,7 +213,7 @@ const handleClick = (entryIndex) => {
 }
 
 const handleDoubleClick = (entryIndex, entryId) => {
-  props.selectAndFillDirect(entryIndex, entryId)
+  props.selectAndFillDirect(entryId)
 }
 
 const isWebUrl = (value) => {

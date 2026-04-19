@@ -1,7 +1,6 @@
 import {invoke} from '@tauri-apps/api/core';
 
-const buildSelectAndFillRequest = (index, itemId, opId) => ({
-    index: normalizeOptionalIndex(index),
+const buildSelectAndFillRequest = (itemId, opId) => ({
     itemId,
     opId
 });
@@ -181,19 +180,9 @@ export const ClipboardService = {
      * @param {number} index
      * @returns {Promise<void>}
      */
-    removeItem: (index, itemId = null) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, {
-        index: normalizeOptionalIndex(index),
-        itemId
-    }),
-    setItemPinned: (index, itemId, pinned) => invoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, {
-        index: normalizeOptionalIndex(index),
-        itemId,
-        pinned
-    }),
-    promoteItem: (index, itemId = null) => invoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, {
-        index: normalizeOptionalIndex(index),
-        itemId
-    }),
+    removeItem: (itemId) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, { itemId }),
+    setItemPinned: (itemId, pinned) => invoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, { itemId, pinned }),
+    promoteItem: (itemId) => invoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, { itemId }),
     clearHistory: (mode) => invoke(IPC_COMMANDS.CLEAR_TEXT_HISTORY, {mode}),
 
     /**
@@ -202,8 +191,8 @@ export const ClipboardService = {
      * @param {string} itemId
      * @returns {Promise<void>}
      */
-    selectAndFill: (index, itemId, opId) =>
-        invoke(IPC_COMMANDS.SELECT_AND_FILL, {request: buildSelectAndFillRequest(index, itemId, opId)}),
+    selectAndFill: (itemId, opId) =>
+        invoke(IPC_COMMANDS.SELECT_AND_FILL, {request: buildSelectAndFillRequest(itemId, opId)}),
 
     /**
      * 复制文本到剪贴板
