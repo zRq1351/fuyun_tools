@@ -65,12 +65,16 @@
     </div>
 
     <div v-if="visibleHistory.length === 0" class="empty-state">
-      <el-empty :image-size="100" description="暂无剪切板记录">
+      <el-empty v-if="!isLoadingPage" :image-size="100" description="暂无剪切板记录">
         <template #description>
           <p>暂无剪切板记录</p>
           <p class="hint">复制内容后会自动添加</p>
         </template>
       </el-empty>
+      <div v-else class="loading-state">
+        <el-icon class="is-loading" :size="40"><Loading /></el-icon>
+        <p>正在加载...</p>
+      </div>
     </div>
 
     <ClipboardList
@@ -169,7 +173,7 @@
 
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
-import {ArrowLeftBold, ArrowRightBold, Check} from '@element-plus/icons-vue'
+import {ArrowLeftBold, ArrowRightBold, Check, Loading} from '@element-plus/icons-vue'
 import {ElMessage} from 'element-plus'
 import {listen} from '@tauri-apps/api/event'
 import {AIService, ClipboardService, WindowService} from '../../services/ipc'
@@ -742,7 +746,7 @@ const handleKeydown = async (event) => {
 // 这样可以保留前端已有的数据（包括刚分类的项）
 let filterDebounceTimer = null
 
-watch([searchKeyword, categoryFilter], () => {
+watch([searchKeyword, categoryFilter], (newVals, oldVals) => {
   if (!isVisible.value) return
 
   // 如果正在更新分类，跳过重新加载，避免竞态条件
@@ -751,15 +755,22 @@ watch([searchKeyword, categoryFilter], () => {
     return
   }
 
+  const [newSearch, newCategory] = newVals
+  const [oldSearch, oldCategory] = oldVals
+
   if (filterDebounceTimer) {
     clearTimeout(filterDebounceTimer)
   }
+  
+  // 对于单纯的分类切换，缩短防抖时间以提升响应速度
+  const delay = newSearch !== oldSearch ? 300 : 50
+
   filterDebounceTimer = setTimeout(() => {
-    console.log('[Watch 触发] 切换分类或搜索, 重新加载第一页数据, categoryFilter:', categoryFilter.value)
     loadMoreIntent.value = false
-    // 切换分类或搜索时，应该重置并加载，因为不同分类下的数据总数和分页不同
-    resetAndReloadHistory()
-  }, 300)
+    // 使用增量同步代替全量重置，避免整个页面刷新的闪烁感
+    // 这样可以保留前端已有的数据（包括刚分类的项），体验更接近图片剪切板
+    syncHistoryIncremental()
+  }, delay)
 })
 
 watch(visibleHistory, (list) => {
@@ -885,6 +896,16 @@ onBeforeUnmount(() => {
   align-items: center;
   min-height: 0;
   color: #fff;
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: rgba(166, 213, 255, 0.88);
+  font-size: 14px;
 }
 
 .ai-quick-panel-wrap {

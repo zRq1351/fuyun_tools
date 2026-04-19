@@ -234,30 +234,46 @@ export function useClipboardHistory() {
             }
             return
         }
-        const map = new Map(pagedHistory.value.map((entry) => [entry.position, entry]))
+        
+        const existingIds = new Set(pagedHistory.value.map(entry => entry.id))
+        const newItems = []
         for (const item of items) {
-            map.set(item.position, item)
-            // 更新分类索引
+            if (!existingIds.has(item.id)) {
+                newItems.push({
+                    ...item,
+                    position: 0
+                })
+            }
             if (item.id) {
                 setItemCategoryLocal(item.id, item.category || '未分类')
             }
         }
-        const merged = Array.from(map.values())
+        
+        const merged = [...pagedHistory.value, ...newItems]
+        merged.forEach((entry, index) => {
+            entry.position = index;
+        });
+        
+        pagedHistory.value = sortPageItems(merged)
+    }
 
-            // 校准合并后的 position 以免旧数据的 position 造成乱序
-            merged.sort((a, b) => a.position - b.position)
-            merged.forEach((entry, index) => {
-                entry.position = index;
-            });
-
-            pagedHistory.value = sortPageItems(merged)
+    const getActiveCategoryCount = () => {
+        const activeCategory = categoryFilter.value === '全部' ? null : categoryFilter.value;
+        if (!activeCategory) return pagedHistory.value.length;
+        let count = 0;
+        for (const item of pagedHistory.value) {
+            if (item.category === activeCategory || getItemCategory(item.id) === activeCategory) {
+                count++;
+            }
+        }
+        return count;
     }
 
     const loadHistoryPage = async ({reset = false} = {}) => {
         if (isLoadingPage.value) return
         isLoadingPage.value = true
         try {
-            const offset = reset ? 0 : pageOffset.value
+            const offset = reset ? 0 : getActiveCategoryCount()
             const keyword = searchKeyword.value.trim()
             const category = categoryFilter.value === '全部' ? null : categoryFilter.value
             const response = await ClipboardService.getHistoryPage({
@@ -271,10 +287,9 @@ export function useClipboardHistory() {
             })
             const items = Array.isArray(response?.items) ? response.items : []
             mergePageItems(items, reset)
-            totalCount.value = Number.isFinite(response?.total) ? response.total : pagedHistory.value.length
-            const nextOffset = offset + items.length
-            pageOffset.value = nextOffset
-            hasMore.value = nextOffset < totalCount.value
+            totalCount.value = Number.isFinite(response?.total) ? response.total : getActiveCategoryCount()
+            pageOffset.value = pagedHistory.value.length
+            hasMore.value = getActiveCategoryCount() < totalCount.value
             rebuildHistoryArray()
             if (pagedHistory.value.length === 0) {
                 selectedItemId.value = ''
@@ -301,13 +316,12 @@ export function useClipboardHistory() {
         isLoadingPage.value = true
         try {
             const keyword = searchKeyword.value.trim()
+            const category = categoryFilter.value === '全部' ? null : categoryFilter.value
 
-            // 重点修改：增量拉取最新数据时，强制拉取全部分类的数据，避免由于在某个子分类下拉取导致漏掉其他新数据，
-            // 或者由于带上了 category 过滤导致返回的 position 不是全局连续的，从而在合并后引起乱序。
             const response = await ClipboardService.getHistoryPage({
                 offset: 0,
                 limit: Math.max(pageSize.value, 30),
-                category: null, // 始终拉取全局最新的数据
+                category,
                 pinnedOnly: false,
                 keyword: keyword || null,
                 sortBy: sortBy.value,
@@ -318,9 +332,9 @@ export function useClipboardHistory() {
             if (items.length === 0) {
                 // 没有新数据，只更新总数
                 if (Number.isFinite(response?.total)) {
-                    totalCount.value = Math.max(Number(response.total), pagedHistory.value.length, Number(totalCount.value) || 0)
+                    totalCount.value = Math.max(Number(response.total), getActiveCategoryCount(), Number(totalCount.value) || 0)
                     pageOffset.value = pagedHistory.value.length
-                    hasMore.value = pageOffset.value < totalCount.value
+                    hasMore.value = getActiveCategoryCount() < totalCount.value
                 }
                 bumpFilterDataRevision()
                 return
@@ -360,8 +374,8 @@ export function useClipboardHistory() {
             // 合并：新数据在前，旧数据在后
             const merged = [...front, ...rest]
 
-            // 重新校准 position 以防顺序错乱
-            merged.sort((a, b) => a.position - b.position)
+            // 不再按照旧的 position 排序，因为不同分类拉取的数据 position 可能重叠
+            // 直接保持新拉取的数据在前面，旧数据在后面的顺序，并重新赋予连续的 position
             merged.forEach((entry, index) => {
                 entry.position = index;
             });
@@ -369,10 +383,10 @@ export function useClipboardHistory() {
             pagedHistory.value = sortPageItems(merged);
 
             totalCount.value = Number.isFinite(response?.total)
-                ? Math.max(Number(response.total), merged.length, Number(totalCount.value) || 0)
-                : Math.max(totalCount.value || 0, merged.length)
-            pageOffset.value = merged.length
-            hasMore.value = pageOffset.value < totalCount.value
+                ? Math.max(Number(response.total), getActiveCategoryCount(), Number(totalCount.value) || 0)
+                : Math.max(totalCount.value || 0, getActiveCategoryCount())
+            pageOffset.value = pagedHistory.value.length
+            hasMore.value = getActiveCategoryCount() < totalCount.value
             rebuildHistoryArray()
 
             if (pagedHistory.value.length === 0) {
@@ -396,7 +410,7 @@ export function useClipboardHistory() {
 
     const loadTailPage = async () => {
         if (!hasMore.value || isLoadingPage.value) return false
-        const loadedCount = pagedHistory.value.length
+        const loadedCount = getActiveCategoryCount()
         const exactTotal = Math.max(Number(totalCount.value) || 0, loadedCount)
         const targetOffset = Math.max(0, exactTotal - (Number(pageSize.value) || 10))
         if (targetOffset <= 0 && loadedCount >= exactTotal) {
@@ -418,8 +432,8 @@ export function useClipboardHistory() {
             })
             const items = Array.isArray(response?.items) ? response.items : []
             mergePageItems(items, false)
-            totalCount.value = Number.isFinite(response?.total) ? response.total : pagedHistory.value.length
-            pageOffset.value = targetOffset + items.length
+            totalCount.value = Number.isFinite(response?.total) ? response.total : getActiveCategoryCount()
+            pageOffset.value = pagedHistory.value.length
             hasMore.value = false
             rebuildHistoryArray()
             return true
@@ -458,9 +472,9 @@ export function useClipboardHistory() {
             pagedHistory.value.splice(localIndex, 1)
             const {pinned, unpinned} = buildSortedGroups()
             applyGroupedEntries(pinned, unpinned)
-            totalCount.value = Math.max(0, (Number.isFinite(totalCount.value) ? totalCount.value : pagedHistory.value.length + 1) - 1)
-            pageOffset.value = Math.max(0, Math.min(pageOffset.value, totalCount.value))
-            hasMore.value = pageOffset.value < totalCount.value
+            totalCount.value = Math.max(0, (Number.isFinite(totalCount.value) ? totalCount.value : getActiveCategoryCount() + 1) - 1)
+            pageOffset.value = pagedHistory.value.length
+            hasMore.value = getActiveCategoryCount() < totalCount.value
             
             if (pagedHistory.value.length === 0) {
                 selectedItemId.value = ''
@@ -554,8 +568,8 @@ export function useClipboardHistory() {
         }))
         
         totalCount.value = sortedFiltered.length
-        pageOffset.value = loadedCount
-        hasMore.value = loadedCount < sortedFiltered.length
+        pageOffset.value = pagedHistory.value.length
+        hasMore.value = getActiveCategoryCount() < sortedFiltered.length
         
         if (pagedHistory.value.length === 0) {
             selectedItemId.value = ''
@@ -617,10 +631,10 @@ export function useClipboardHistory() {
         } else {
             nextUnpinned.unshift(incoming)
         }
-        totalCount.value = (Number.isFinite(totalCount.value) ? totalCount.value : pagedHistory.value.length - 1) + 1
+        totalCount.value = (Number.isFinite(totalCount.value) ? totalCount.value : getActiveCategoryCount() - 1) + 1
         applyGroupedEntries(nextPinned, nextUnpinned)
-        pageOffset.value = Math.max(pageOffset.value, pagedHistory.value.length)
-        hasMore.value = pageOffset.value < totalCount.value
+        pageOffset.value = pagedHistory.value.length
+        hasMore.value = getActiveCategoryCount() < totalCount.value
         rebuildHistoryArray()
         setItemCategoryLocal(id, '未分类')
         bumpFilterDataRevision()
