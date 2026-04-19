@@ -13,9 +13,12 @@
         v-memo="[entry.content, entry.index, selectedIndex, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
         :class="{ selected: selectedIndex === entry.index }"
         class="clipboard-item"
+        draggable="true"
         @click="handleClick(entry.index)"
         @dblclick="handleDoubleClick(entry.index, entry.id)"
         @contextmenu.prevent="showContextMenu($event, entry.id, index)"
+        @dragstart="handleDragStart($event, entry.id)"
+        @dragend="handleDragEnd"
     >
       <div v-if="isWebUrl(entry.content)" class="open-btn" @click.stop="openWebUrl(entry.content)">
         <el-icon>

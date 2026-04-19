@@ -1706,6 +1706,7 @@ impl ImageClipboardManager {
             &mut history,
             self.max_items,
             &mut categories,
+            &pinned_items,
             self.grouped_items_protected_from_limit,
         );
         cleanup_image_blob_files_async(removed_paths);
@@ -1916,6 +1917,7 @@ impl ImageClipboardManager {
             &mut history,
             self.max_items,
             &mut categories,
+            &pinned_items,
             self.grouped_items_protected_from_limit,
         );
         let disk_removed_paths = shrink_image_history_by_disk_limit(
@@ -2125,6 +2127,7 @@ fn shrink_image_history_with_group_protection(
     history: &mut Vec<ImageHistoryItem>,
     max_items: usize,
     categories: &mut HashMap<String, String>,
+    pinned_items: &[String],
     grouped_items_protected_from_limit: bool,
 ) -> Vec<String> {
     if !grouped_items_protected_from_limit {
@@ -2147,9 +2150,10 @@ fn shrink_image_history_with_group_protection(
 
     let mut removed_count = 0;
     let mut to_remove = HashSet::new();
+    let pinned_set: HashSet<&String> = pinned_items.iter().collect();
 
     for (i, item) in history.iter().enumerate().rev() {
-        if !categories.contains_key(&item.id) {
+        if !categories.contains_key(&item.id) && !pinned_set.contains(&item.id) {
             to_remove.insert(i);
             removed_count += 1;
             if removed_count == excess {
