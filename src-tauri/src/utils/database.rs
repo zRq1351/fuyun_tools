@@ -477,17 +477,17 @@ fn resolve_history_sort(sort_by: Option<String>, sort_order: Option<String>) -> 
         .to_lowercase();
     match (by.as_str(), order.as_str()) {
         ("pinnedfirst", "asc") | ("pinned_first", "asc") =>
-            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at ASC, hi.updated_at ASC, hi.id ASC",
-        ("pinnedfirst", _) | ("pinned_first", _) =>
             "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at DESC, hi.updated_at DESC, hi.id DESC",
-        ("updatedat", "asc") | ("updated_at", "asc") => "hi.updated_at ASC, hi.id ASC",
-        ("updatedat", _) | ("updated_at", _) => "hi.updated_at DESC, hi.id DESC",
-        ("createdat", "asc") | ("created_at", "asc") => "hi.created_at ASC, hi.id ASC",
-        ("createdat", _) | ("created_at", _) => "hi.created_at DESC, hi.id DESC",
-        ("id", "asc") => "hi.id ASC",
-        ("id", _) => "hi.id DESC",
-        _ if order == "asc" => "hi.updated_at ASC, hi.id ASC",
-        _ => "hi.updated_at DESC, hi.id DESC",
+        ("pinnedfirst", _) | ("pinned_first", _) =>
+            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at ASC, hi.updated_at ASC, hi.id ASC",
+        ("updatedat", "asc") | ("updated_at", "asc") => "hi.updated_at DESC, hi.id DESC",
+        ("updatedat", _) | ("updated_at", _) => "hi.updated_at ASC, hi.id ASC",
+        ("createdat", "asc") | ("created_at", "asc") => "hi.created_at DESC, hi.id DESC",
+        ("createdat", _) | ("created_at", _) => "hi.created_at ASC, hi.id ASC",
+        ("id", "asc") => "hi.id DESC",
+        ("id", _) => "hi.id ASC",
+        _ if order == "asc" => "hi.updated_at DESC, hi.id DESC",
+        _ => "hi.updated_at ASC, hi.id ASC",
     }
 }
 
