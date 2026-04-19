@@ -392,10 +392,7 @@ const init = async () => {
     unlistenWritebackResult = await listen('writeback-result', (event) => {
       const payload = event.payload || {}
       if (payload.source !== '文本') return
-      if (payload.success) {
-        const target = payload.targetWindowTitle ? `：${payload.targetWindowTitle}` : ''
-        ElMessage.success(`文本回填成功${target}`)
-      } else {
+      if (!payload.success) {
         handleAppError(payload.detail || '未知错误', '文本回填失败')
       }
     })

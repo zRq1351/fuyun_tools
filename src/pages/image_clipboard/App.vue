@@ -1827,10 +1827,7 @@ onMounted(async () => {
   unlistenWritebackResult = await listen('writeback-result', (event) => {
     const payload = event.payload || {}
     if (payload.source !== '图片') return
-    if (payload.success) {
-      const target = payload.targetWindowTitle ? `：${payload.targetWindowTitle}` : ''
-      ElMessage.success(`图片回填成功${target}`)
-    } else {
+    if (!payload.success) {
       ElMessage.error(`图片回填失败：${String(payload.detail || '未知错误')}`)
     }
   })
