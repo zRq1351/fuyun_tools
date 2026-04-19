@@ -256,11 +256,11 @@ export const ImageClipboardService = {
 export const CategoryService = {
     /**
      * 设置条目分类
-     * @param {string} item
+     * @param {string} itemId
      * @param {string} category
      * @returns {Promise<void>}
      */
-    setItemCategory: (item, category) => invoke(IPC_COMMANDS.SET_ITEM_CATEGORY, {item, category}),
+    setItemCategory: (itemId, category) => invoke(IPC_COMMANDS.SET_ITEM_CATEGORY, {itemId, category}),
 
     /**
      * 删除分类

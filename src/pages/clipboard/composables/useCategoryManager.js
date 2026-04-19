@@ -13,14 +13,14 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
     const newCategoryName = ref('')
     const newCategoryInputRef = ref(null)
 
-    const setItemCategory = async (item, value) => {
+    const setItemCategory = async (itemId, value) => {
         const category = (value || '').trim()
         if (!category) {
-            await removeItemCategory(item)
+            await removeItemCategory(itemId)
             return
         }
 
-        console.log('[设置分类] 开始, item:', item, 'category:', category)
+        console.log('[设置分类] 开始, itemId:', itemId, 'category:', category)
 
         // 设置标志位，防止 watch 触发重新加载
         if (setIsUpdatingCategory) {
@@ -30,10 +30,10 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
 
         // 使用与图片一致的 setItemCategoryLocal，更新 map + 索引
         if (setItemCategoryLocal) {
-            setItemCategoryLocal(item, category)
+            setItemCategoryLocal(itemId, category)
         } else {
             // 降级方案：直接更新 map
-            categoryMap.value[item] = category
+            categoryMap.value[itemId] = category
         }
 
         if (!categories.value.includes(category)) {
@@ -51,7 +51,7 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
         }
 
         try {
-            await CategoryService.setItemCategory(item, category)
+            await CategoryService.setItemCategory(itemId, category)
             console.log('[设置分类] 后端保存成功')
         } catch (error) {
             console.error('保存分类失败:', error)
@@ -59,7 +59,7 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             // 后端保存完成后，延迟重置标志位，给 computed 一些时间稳定
             // 增加延迟时间，确保 watch 不会在标志位清除前触发
             setTimeout(() => {
-                console.log('[分类更新完成] 清除标志位, item:', item, 'category:', category)
+                console.log('[分类更新完成] 清除标志位, itemId:', itemId, 'category:', category)
                 if (setIsUpdatingCategory) {
                     setIsUpdatingCategory(false)
                 }
@@ -67,9 +67,9 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
         }
     }
 
-    const removeItemCategory = async (item) => {
-        if (!item) return
-        if (categoryMap.value[item]) {
+    const removeItemCategory = async (itemId) => {
+        if (!itemId) return
+        if (categoryMap.value[itemId]) {
             // 设置标志位，防止 watch 触发重新加载
             if (setIsUpdatingCategory) {
                 setIsUpdatingCategory(true)
@@ -77,9 +77,9 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
 
             // 使用与图片一致的 removeItemCategoryLocal
             if (options.removeItemCategoryLocal) {
-                options.removeItemCategoryLocal(item)
+                options.removeItemCategoryLocal(itemId)
             } else {
-                delete categoryMap.value[item]
+                delete categoryMap.value[itemId]
             }
 
             // 通知外部刷新过滤数据
@@ -88,13 +88,13 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             }
 
             try {
-                await CategoryService.setItemCategory(item, "")
+                await CategoryService.setItemCategory(itemId, "")
             } catch (error) {
                 console.error('移除分类失败:', error)
             } finally {
                 // 后端保存完成后，延迟重置标志位
                 setTimeout(() => {
-                    console.log('[分类移除完成] 清除标志位, item:', item)
+                    console.log('[分类移除完成] 清除标志位, itemId:', itemId)
                     if (setIsUpdatingCategory) {
                         setIsUpdatingCategory(false)
                     }
