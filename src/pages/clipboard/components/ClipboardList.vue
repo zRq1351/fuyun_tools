@@ -10,7 +10,7 @@
         v-for="(entry, index) in visibleHistory"
         :id="'clipboard-item-' + entry.id"
         :key="entry.id"
-        v-memo="[entry.content, entry.index, selectedItemId, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
+        v-memo="[entry.content, index, selectedItemId, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
         :class="{ selected: selectedItemId === entry.id }"
         class="clipboard-item"
         :draggable="isCtrlKeyPressed"
