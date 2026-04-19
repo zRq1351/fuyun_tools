@@ -169,6 +169,7 @@ let unlistenHistoryPayloadUpdated = null
 let unlistenHistoryItemAdded = null
 let unlistenPreviewReady = null
 let unlistenWritebackResult = null
+let writebackErrorMsg = null
 let pendingHistorySync = false
 let historyUpdateTimer = null
 let initialPageRetryTimer = null
@@ -929,6 +930,10 @@ const scrollToEnd = async () => {
 }
 
 const fillById = async (itemId) => {
+  if (writebackErrorMsg) {
+    writebackErrorMsg.close()
+    writebackErrorMsg = null
+  }
   if (isFilling.value) return
   isFilling.value = true
   isVisible.value = false
@@ -937,7 +942,11 @@ const fillById = async (itemId) => {
     await ImageClipboardService.selectAndFillById(itemId)
   } catch (error) {
     console.error('回填图片失败:', error)
-    ElMessage.error(`回填图片失败: ${String(error)}`)
+    writebackErrorMsg = ElMessage.error({
+      message: `回填图片失败: ${String(error)}`,
+      duration: 0,
+      showClose: true
+    })
   } finally {
     window.setTimeout(() => {
       isFilling.value = false
@@ -1827,8 +1836,18 @@ onMounted(async () => {
   unlistenWritebackResult = await listen('writeback-result', (event) => {
     const payload = event.payload || {}
     if (payload.source !== '图片') return
+    
+    if (writebackErrorMsg) {
+      writebackErrorMsg.close()
+      writebackErrorMsg = null
+    }
+
     if (!payload.success) {
-      ElMessage.error(`图片回填失败：${String(payload.detail || '未知错误')}`)
+      writebackErrorMsg = ElMessage.error({
+        message: `图片回填失败：${String(payload.detail || '未知错误')}`,
+        duration: 0,
+        showClose: true
+      })
     }
   })
 

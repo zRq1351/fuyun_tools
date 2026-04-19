@@ -214,6 +214,7 @@ let unlistenHistoryPayloadUpdated = null
 let unlistenHistoryItemUpdated = null
 let unlistenTextItemPromoted = null
 let unlistenWritebackResult = null
+let writebackErrorMsg = null
 let windowBlurHandler = null
 let isPageReloading = false
 let beforeUnloadHandler = null
@@ -392,8 +393,18 @@ const init = async () => {
     unlistenWritebackResult = await listen('writeback-result', (event) => {
       const payload = event.payload || {}
       if (payload.source !== '文本') return
+      
+      if (writebackErrorMsg) {
+        writebackErrorMsg.close()
+        writebackErrorMsg = null
+      }
+
       if (!payload.success) {
-        handleAppError(payload.detail || '未知错误', '文本回填失败')
+        writebackErrorMsg = ElMessage.error({
+          message: `文本回填失败：${payload.detail || '未知错误'}`,
+          duration: 0,
+          showClose: true
+        })
       }
     })
 
@@ -468,12 +479,20 @@ const showWindow = async (data) => {
 }
 
 const selectAndFillDirect = async (itemId) => {
+  if (writebackErrorMsg) {
+    writebackErrorMsg.close()
+    writebackErrorMsg = null
+  }
   try {
     await ClipboardService.selectAndFill(itemId, null)
     hideClipboardWindow()
   } catch (error) {
     console.error('填充内容失败:', error)
-    handleAppError(error, '填充内容失败')
+    writebackErrorMsg = ElMessage.error({
+      message: `填充内容失败: ${String(error)}`,
+      duration: 0,
+      showClose: true
+    })
   }
 }
 
