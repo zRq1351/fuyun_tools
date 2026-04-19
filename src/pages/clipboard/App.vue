@@ -4,7 +4,6 @@
       class="container"
       tabindex="-1"
       @mousedown="handleContainerMouseDown"
-      @keydown="handleKeydown"
   >
     <ClipboardToolbar
         v-model:category-filter="categoryFilter"
@@ -86,6 +85,7 @@
         :select-and-fill-direct="selectAndFillDirect"
         :selected-item-id="selectedItemId"
         :show-context-menu="showContextMenu"
+        :is-ctrl-key-pressed="isCtrlKeyPressed"
         :is-pinned="isItemPinned"
         :promote-item="promoteItem"
         :update-selection="updateSelection"
@@ -186,6 +186,7 @@ const containerRef = ref(null)
 const clipboardListRef = ref(null)
 const contextMenuRef = ref(null)
 const isVisible = ref(false)
+const isCtrlKeyPressed = ref(false)
 const categories = ref(['未分类'])
 const pinnedItems = ref([])
 
@@ -417,6 +418,7 @@ const init = async () => {
     })
 
     windowBlurHandler = async () => {
+      isCtrlKeyPressed.value = false
       if (isPageReloading) {
         return
       }
@@ -436,6 +438,8 @@ const init = async () => {
     }
     window.addEventListener('beforeunload', beforeUnloadHandler)
     window.addEventListener('pagehide', pageHideHandler)
+    window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('keyup', handleKeyup)
 
     isVisible.value = true
     let payload = null
@@ -523,6 +527,10 @@ const assignToCategory = async (category) => {
 }
 
 const handleDragStart = (event, id) => {
+  if (!isCtrlKeyPressed.value) {
+    event.preventDefault()
+    return
+  }
   dragItem.value = id
   event.dataTransfer.effectAllowed = 'copy'
   event.dataTransfer.setData('text/plain', id)
@@ -677,7 +685,16 @@ const scrollToEnd = async () => {
   }
 }
 
+const handleKeyup = (event) => {
+  if (!event.ctrlKey) {
+    isCtrlKeyPressed.value = false
+  }
+}
+
 const handleKeydown = async (event) => {
+  if (event.ctrlKey) {
+    isCtrlKeyPressed.value = true
+  }
   if (!isVisible.value) return
   if (isInputLikeTarget(event.target)) return
 
@@ -803,6 +820,8 @@ onBeforeUnmount(() => {
     window.removeEventListener('pagehide', pageHideHandler)
     pageHideHandler = null
   }
+  window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('keyup', handleKeyup)
   if (filterDebounceTimer) {
     clearTimeout(filterDebounceTimer)
     filterDebounceTimer = null

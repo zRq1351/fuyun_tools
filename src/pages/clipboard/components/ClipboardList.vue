@@ -13,7 +13,7 @@
         v-memo="[entry.content, entry.index, selectedItemId, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
         :class="{ selected: selectedItemId === entry.id }"
         class="clipboard-item"
-        draggable="true"
+        :draggable="isCtrlKeyPressed"
         @click="handleClick(entry.id)"
         @dblclick="handleDoubleClick(entry.id)"
         @contextmenu.prevent="showContextMenu($event, entry.id, index)"
@@ -112,6 +112,10 @@ const props = defineProps({
     type: Function,
     required: true
   },
+  isCtrlKeyPressed: {
+    type: Boolean,
+    default: false
+  },
   highlightKeyword: {
     type: String,
     default: ''
@@ -209,13 +213,6 @@ onUnmounted(() => {
 })
 
 const handleItemDragStart = (e, id) => {
-  // 如果我们正在自定义的鼠标横向拖拽滚动，则禁止原生的 HTML5 拖拽事件
-  if (isDragging || isDown) {
-    e.preventDefault();
-    return false;
-  }
-  
-  // 否则执行外部传入的正常拖拽（用于把剪切板项拖给其他分类等）
   if (typeof props.handleDragStart === 'function') {
     props.handleDragStart(e, id);
   }

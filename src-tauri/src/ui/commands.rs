@@ -2390,9 +2390,18 @@ pub async fn get_clipboard_full_snapshot(
 
 #[tauri::command]
 pub async fn get_clipboard_history_page(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
     request: ClipboardHistoryPageRequest,
 ) -> Result<ClipboardHistoryPageData, String> {
     let started_at = std::time::Instant::now();
+    let history_items = {
+        let state_guard = crate::utils::clipboard::lock_arc_mutex(&state);
+        let manager = crate::utils::clipboard::lock_arc_mutex(&state_guard.clipboard_manager);
+        manager.get_history()
+    };
+    if let Err(e) = crate::utils::database::save_history_items_only_async(&history_items).await {
+        log::error!("Failed to sync history before querying page: {}", e);
+    }
     let result = load_history_page_data_async(
         request.offset,
         request.limit,
