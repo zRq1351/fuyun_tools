@@ -738,10 +738,10 @@ watch([searchKeyword, categoryFilter], () => {
     clearTimeout(filterDebounceTimer)
   }
   filterDebounceTimer = setTimeout(() => {
-    console.log('[Watch 触发] 增量同步历史数据, categoryFilter:', categoryFilter.value)
+    console.log('[Watch 触发] 切换分类或搜索, 重新加载第一页数据, categoryFilter:', categoryFilter.value)
     loadMoreIntent.value = false
-    // 使用增量同步，保留现有数据
-    syncHistoryIncremental()
+    // 切换分类或搜索时，应该重置并加载，因为不同分类下的数据总数和分页不同
+    resetAndReloadHistory()
   }, 300)
 })
 

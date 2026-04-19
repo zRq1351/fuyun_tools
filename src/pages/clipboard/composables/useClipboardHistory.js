@@ -162,7 +162,7 @@ export function useClipboardHistory() {
 
     const sortPageItems = (entries) => {
         const merged = entries.slice()
-        const orderKey = 'pinnedFirst'
+        const orderKey = sortBy.value
         merged.sort((a, b) => {
             if (orderKey === 'pinnedFirst') {
                 const pinDiff = (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
@@ -171,14 +171,14 @@ export function useClipboardHistory() {
                 if (a.pinned && b.pinned) {
                     return diff
                 }
-                return sortOrder.value === 'desc' ? -diff : diff
+                return diff // position 已经是全局正确排序的数字，不用管 sortOrder.value 因为拉取的时候已经排序好了
             }
             if (orderKey === 'updatedAt') {
-                const diff = (a.updatedAt || 0) - (b.updatedAt || 0)
-                return sortOrder.value === 'desc' ? -diff : diff
+                const diff = (b.updatedAt || 0) - (a.updatedAt || 0) // 默认 updatedAt desc (新更新的在前)
+                if (diff !== 0) return sortOrder.value === 'asc' ? -diff : diff
+                return a.position - b.position
             }
-            const diff = a.position - b.position
-            return sortOrder.value === 'desc' ? -diff : diff
+            return a.position - b.position
         })
         return merged
     }
@@ -214,7 +214,18 @@ export function useClipboardHistory() {
             categorySearchIndex.clear()
             itemCategorySnapshot.clear()
             keywordCategoryMatchCache.clear()
-            pagedHistory.value = sortPageItems(items)
+            
+            // 为了防止乱序，强制使用从0开始的连续 position 覆盖服务端给的可能是不连续的 position
+            const resetItems = items.map((item, index) => ({
+                ...item,
+                position: index
+            }));
+            
+            pagedHistory.value = sortPageItems(resetItems)
+            // 校准 reset 数据后的 position
+            pagedHistory.value.forEach((entry, index) => {
+                entry.position = index;
+            });
             // 重建索引
             for (const item of items) {
                 if (item.id) {
@@ -232,13 +243,13 @@ export function useClipboardHistory() {
             }
         }
         const merged = Array.from(map.values())
-            
+
             // 校准合并后的 position 以免旧数据的 position 造成乱序
             merged.sort((a, b) => a.position - b.position)
             merged.forEach((entry, index) => {
                 entry.position = index;
             });
-            
+
             pagedHistory.value = sortPageItems(merged)
     }
 
@@ -290,11 +301,13 @@ export function useClipboardHistory() {
         isLoadingPage.value = true
         try {
             const keyword = searchKeyword.value.trim()
-            const category = categoryFilter.value === '全部' ? null : categoryFilter.value
+
+            // 重点修改：增量拉取最新数据时，强制拉取全部分类的数据，避免由于在某个子分类下拉取导致漏掉其他新数据，
+            // 或者由于带上了 category 过滤导致返回的 position 不是全局连续的，从而在合并后引起乱序。
             const response = await ClipboardService.getHistoryPage({
                 offset: 0,
                 limit: Math.max(pageSize.value, 30),
-                category,
+                category: null, // 始终拉取全局最新的数据
                 pinnedOnly: false,
                 keyword: keyword || null,
                 sortBy: sortBy.value,
