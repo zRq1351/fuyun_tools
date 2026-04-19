@@ -1,13 +1,11 @@
 import {invoke} from '@tauri-apps/api/core';
 
-const buildSelectAndFillRequest = (index, itemId, opId) => ({
-    index: normalizeOptionalIndex(index),
+const buildSelectAndFillRequest = (itemId, opId) => ({
     itemId,
     opId
 });
 const buildSelectAndFillImageByIdRequest = (itemId, opId) => ({itemId, opId});
-const normalizeOptionalIndex = (index) =>
-    Number.isInteger(index) && index >= 0 ? index : null;
+
 const buildStreamTranslateRequest = (text, sourceLanguage, targetLanguage, opId, sceneHint) => ({
     text,
     sourceLanguage,
@@ -177,33 +175,22 @@ export const ClipboardService = {
         }),
 
     /**
-     * 删除剪贴板条目
-     * @param {number} index
+     * 删除剪贴板项目
+     * @param {string} itemId
      * @returns {Promise<void>}
      */
-    removeItem: (index, itemId = null) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, {
-        index: normalizeOptionalIndex(index),
-        itemId
-    }),
-    setItemPinned: (index, itemId, pinned) => invoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, {
-        index: normalizeOptionalIndex(index),
-        itemId,
-        pinned
-    }),
-    promoteItem: (index, itemId = null) => invoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, {
-        index: normalizeOptionalIndex(index),
-        itemId
-    }),
+    removeItem: (itemId) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, { itemId }),
+    setItemPinned: (itemId, pinned) => invoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, { itemId, pinned }),
+    promoteItem: (itemId) => invoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, { itemId }),
     clearHistory: (mode) => invoke(IPC_COMMANDS.CLEAR_TEXT_HISTORY, {mode}),
 
     /**
      * 选择并填充内容
-     * @param {number} index
      * @param {string} itemId
      * @returns {Promise<void>}
      */
-    selectAndFill: (index, itemId, opId) =>
-        invoke(IPC_COMMANDS.SELECT_AND_FILL, {request: buildSelectAndFillRequest(index, itemId, opId)}),
+    selectAndFill: (itemId, opId) =>
+        invoke(IPC_COMMANDS.SELECT_AND_FILL, {request: buildSelectAndFillRequest(itemId, opId)}),
 
     /**
      * 复制文本到剪贴板

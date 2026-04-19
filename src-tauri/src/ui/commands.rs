@@ -1071,8 +1071,7 @@ pub struct ImageHistoryResponse {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SelectAndFillRequest {
-    index: Option<usize>,
-    item_id: Option<String>,
+    item_id: String,
     #[serde(default)]
     op_id: Option<u64>,
 }
@@ -1923,7 +1922,6 @@ fn execute_select_and_fill_text(
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
 ) -> AppResult<String> {
-    let index = request.index;
     let item_id = request.item_id;
     let fill_seq = begin_fill_sequence(&state, FillKind::Text);
     let operation_id = request.op_id.unwrap_or(fill_seq);
@@ -1931,10 +1929,10 @@ fn execute_select_and_fill_text(
 
     let item_content = {
         let manager = lock_arc_mutex(&manager_arc);
-        manager.promote_to_top(index, item_id).map_err(|e| {
+        manager.promote_to_top(&item_id).map_err(|e| {
             AppError::new(
                 ErrorCode::ClipboardError,
-                format!("索引 {:?} 超出范围", index),
+                "找不到目标项目".to_string(),
             )
             .with_details(e)
         })?
@@ -1969,34 +1967,16 @@ fn execute_select_and_fill_text(
 }
 
 fn execute_remove_clipboard_item(
-    index: Option<usize>,
-    item_id: Option<String>,
+    item_id: String,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
 ) -> AppResult<()> {
-    log::info!(
-        "删除剪贴板项目，索引: {:?}, item_id存在: {}",
-        index,
-        item_id.is_some()
-    );
+    log::info!("删除剪贴板项目: {}", item_id);
     let manager_arc = get_clipboard_manager_arc(&state);
     with_updating_clipboard(&state, || -> Result<(), String> {
-        let resolved_index = {
-            let manager = lock_arc_mutex(&manager_arc);
-            if let Some(target_id) = item_id.as_ref().filter(|v| !v.trim().is_empty()) {
-                manager
-                    .get_history()
-                    .iter()
-                    .position(|entry| &crate::utils::database::stable_history_item_id(entry) == target_id)
-                    .or(index)
-                    .ok_or_else(|| "索引超出范围".to_string())?
-            } else {
-                index.ok_or_else(|| "索引超出范围".to_string())?
-            }
-        };
         let removed_item = {
             let manager = lock_arc_mutex(&manager_arc);
-            manager.remove_from_history(resolved_index)?
+            manager.remove_from_history(&item_id)?
         };
         try_replace_text_clipboard_after_remove(&state, &app, &removed_item);
         Ok(())
@@ -2659,8 +2639,7 @@ pub async fn set_image_item_tags(
 
 #[tauri::command]
 pub async fn set_clipboard_item_pinned(
-    index: Option<usize>,
-    item_id: Option<String>,
+    item_id: String,
     pinned: bool,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -2670,7 +2649,7 @@ pub async fn set_clipboard_item_pinned(
         guard.clone()
     };
     manager
-        .set_pinned_by_selector_async(index, item_id, pinned)
+        .set_pinned_by_selector_async(&item_id, pinned)
         .await
         .map_err(|e| {
             if e == "索引超出范围" {
@@ -2706,8 +2685,7 @@ pub async fn set_image_item_pinned(
 
 #[tauri::command]
 pub async fn promote_clipboard_item(
-    index: Option<usize>,
-    item_id: Option<String>,
+    item_id: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<String, String> {
     let manager_arc = get_clipboard_manager_arc(state.inner());
@@ -2716,7 +2694,7 @@ pub async fn promote_clipboard_item(
         guard.clone()
     };
     manager
-        .promote_to_top_async(index, item_id)
+        .promote_to_top_async(&item_id)
         .await
         .map(|item| crate::utils::database::stable_history_item_id(&item))
         .map_err(|e| {
@@ -3072,14 +3050,13 @@ pub async fn select_and_fill(
 
 #[tauri::command]
 pub async fn remove_clipboard_item(
-    index: Option<usize>,
-    item_id: Option<String>,
+    item_id: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        execute_remove_clipboard_item(index, item_id, state_arc, app).map_err(to_frontend_error_string)
+        execute_remove_clipboard_item(item_id, state_arc, app).map_err(to_frontend_error_string)
     })
     .await
     .map_err(|e| {
