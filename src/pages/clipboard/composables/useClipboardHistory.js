@@ -469,33 +469,40 @@ export function useClipboardHistory() {
     const applyPayloadSnapshot = (payload = {}) => {
         const incomingHistory = Array.isArray(payload.history) ? payload.history : []
         if (incomingHistory.length === 0) {
-                        pagedHistory.value = []
+            pagedHistory.value = []
             totalCount.value = 0
             pageOffset.value = 0
             hasMore.value = false
             selectedItemId.value = ''
             return
         }
-        const nextHistory = {}
-        for (let i = 0; i < incomingHistory.length; i++) {
-            nextHistory[i] = incomingHistory[i].content
-        }
-        historyMap.value = nextHistory
+        
         const categoriesFromPayload = payload?.categories && typeof payload.categories === 'object'
             ? payload.categories
             : categoryMap.value
+            
+        // 预先建立分类索引
+        categorySearchIndex.clear()
+        itemCategorySnapshot.clear()
+        keywordCategoryMatchCache.clear()
+        
         const activeCategory = categoryFilter.value === '全部' ? null : categoryFilter.value
         const keyword = searchKeyword.value.trim().toLowerCase()
         const pinnedSet = new Set(Array.isArray(payload.pinned_items) ? payload.pinned_items : [])
+        
         const filtered = incomingHistory
-            .map((item, position) => ({
-                id: item.id,
-                content: item.content,
-                position,
-                snippet: '',
-                pinned: pinnedSet.has(item.id),
-                category: categoriesFromPayload?.[item.id] || '未分类'
-            }))
+            .map((item, position) => {
+                const category = categoriesFromPayload?.[item.id] || '未分类'
+                setItemCategoryLocal(item.id, category)
+                return {
+                    id: item.id,
+                    content: item.content,
+                    position,
+                    snippet: '',
+                    pinned: pinnedSet.has(item.id),
+                    category
+                }
+            })
             .filter((entry) => {
                 if (activeCategory && entry.category !== activeCategory) {
                     return false
@@ -505,9 +512,11 @@ export function useClipboardHistory() {
                 }
                 return true
             })
+            
         const loadedTarget = Math.max(pageOffset.value || 0, pageSize.value)
         const sortedFiltered = sortPageItems(filtered)
         const loadedCount = Math.min(sortedFiltered.length, loadedTarget)
+        
         pagedHistory.value = sortedFiltered.slice(0, loadedCount).map((entry) => ({
             id: entry.id,
             content: entry.content,
@@ -515,14 +524,18 @@ export function useClipboardHistory() {
             snippet: entry.snippet,
             pinned: entry.pinned
         }))
+        
         totalCount.value = sortedFiltered.length
         pageOffset.value = loadedCount
         hasMore.value = loadedCount < sortedFiltered.length
+        
         if (pagedHistory.value.length === 0) {
             selectedItemId.value = ''
         } else if (!pagedHistory.value.some((entry) => entry.id === selectedItemId.value)) {
             selectedItemId.value = pagedHistory.value[0].id
         }
+        
+        bumpFilterDataRevision()
     }
 
     const setLocalPinnedById = (id, pinned) => {
@@ -560,6 +573,8 @@ export function useClipboardHistory() {
             }
             applyGroupedEntries(nextPinned, nextUnpinned)
             rebuildHistoryArray()
+            setItemCategoryLocal(id, existing.category || '未分类')
+            bumpFilterDataRevision()
             return
         }
         const incoming = {
@@ -579,6 +594,8 @@ export function useClipboardHistory() {
         pageOffset.value = Math.max(pageOffset.value, pagedHistory.value.length)
         hasMore.value = pageOffset.value < totalCount.value
         rebuildHistoryArray()
+        setItemCategoryLocal(id, '未分类')
+        bumpFilterDataRevision()
     }
 
     const promoteLocalById = (id) => {
