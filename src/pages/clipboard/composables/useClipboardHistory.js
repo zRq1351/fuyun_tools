@@ -370,6 +370,43 @@ export function useClipboardHistory() {
         await loadHistoryPage({reset: false})
     }
 
+    const loadTailPage = async () => {
+        if (!hasMore.value || isLoadingPage.value) return false
+        const loadedCount = pagedHistory.value.length
+        const exactTotal = Math.max(Number(totalCount.value) || 0, loadedCount)
+        const targetOffset = Math.max(0, exactTotal - (Number(pageSize.value) || 10))
+        if (targetOffset <= 0 && loadedCount >= exactTotal) {
+            return false
+        }
+        
+        isLoadingPage.value = true
+        try {
+            const keyword = searchKeyword.value.trim()
+            const category = categoryFilter.value === '全部' ? null : categoryFilter.value
+            const response = await ClipboardService.getHistoryPage({
+                offset: targetOffset,
+                limit: pageSize.value,
+                category,
+                pinnedOnly: false,
+                keyword: keyword || null,
+                sortBy: sortBy.value,
+                sortOrder: sortOrder.value
+            })
+            const items = Array.isArray(response?.items) ? response.items : []
+            mergePageItems(items, false)
+            totalCount.value = Number.isFinite(response?.total) ? response.total : pagedHistory.value.length
+            pageOffset.value = targetOffset + items.length
+            hasMore.value = false
+            rebuildHistoryArray()
+            return true
+        } catch (error) {
+            console.error('加载尾页失败:', error)
+            return false
+        } finally {
+            isLoadingPage.value = false
+        }
+    }
+
     const setSort = async (_nextSortBy, nextSortOrder) => {
         sortBy.value = 'pinnedFirst'
         sortOrder.value = nextSortOrder || 'asc'
@@ -583,6 +620,7 @@ export function useClipboardHistory() {
         resetAndReloadHistory,
         syncHistoryIncremental,
         loadMoreHistory,
+        loadTailPage,
         setSort,
         setPageSize,
         promoteLocalByContent,
