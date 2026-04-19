@@ -810,7 +810,7 @@ impl ClipboardManager {
                 let pinned: HashSet<String> = pinned_items.iter().cloned().collect();
                 history.retain(|item| {
                     let item_id = crate::utils::database::stable_history_item_id(item);
-                    classified.contains(&item_id) || pinned.contains(item)
+                    classified.contains(&item_id) || pinned.contains(&item_id)
                 });
                 let history_ids: HashSet<String> = history
                     .iter()

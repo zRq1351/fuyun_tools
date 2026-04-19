@@ -2340,8 +2340,14 @@ pub async fn get_clipboard_history(
 ) -> Result<HistoryResponse, String> {
     let manager_arc = get_clipboard_manager_arc(state.inner());
     let manager = lock_arc_mutex(&manager_arc);
+    let history_items: Vec<TextHistoryItem> = manager.get_history().into_iter().map(|content| {
+        TextHistoryItem {
+            id: crate::utils::database::stable_history_item_id(&content),
+            content,
+        }
+    }).collect();
     Ok(HistoryResponse {
-        history: manager.get_history(),
+        history: history_items,
         categories: manager.get_categories(),
         category_list: manager.get_category_list(),
         pinned_items: manager.get_pinned_items(),
@@ -2363,7 +2369,12 @@ pub async fn get_clipboard_full_snapshot(
     };
 
     let text_manager = lock_arc_mutex(&text_manager_arc);
-    let text_history = text_manager.get_history();
+    let text_history_items: Vec<TextHistoryItem> = text_manager.get_history().into_iter().map(|content| {
+        TextHistoryItem {
+            id: crate::utils::database::stable_history_item_id(&content),
+            content,
+        }
+    }).collect();
     let text_categories = text_manager.get_categories();
     let text_category_list = text_manager.get_category_list();
     let text_pinned_items = text_manager.get_pinned_items();
@@ -2378,7 +2389,7 @@ pub async fn get_clipboard_full_snapshot(
     drop(image_manager);
 
     Ok(ClipboardFullSnapshot {
-        text_history,
+        text_history: text_history_items,
         text_categories,
         text_category_list,
         text_pinned_items,
