@@ -186,7 +186,10 @@ export const ClipboardService = {
         itemId,
         pinned
     }),
-    promoteItem: (index) => invoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, {index}),
+    promoteItem: (index, itemId = null) => invoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, {
+        index: normalizeOptionalIndex(index),
+        itemId
+    }),
     clearHistory: (mode) => invoke(IPC_COMMANDS.CLEAR_TEXT_HISTORY, {mode}),
 
     /**

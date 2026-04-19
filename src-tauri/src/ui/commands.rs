@@ -1923,16 +1923,17 @@ fn execute_select_and_fill_text(
     app: AppHandle,
 ) -> AppResult<String> {
     let index = request.index;
+    let item_id = request.item_id;
     let fill_seq = begin_fill_sequence(&state, FillKind::Text);
     let operation_id = request.op_id.unwrap_or(fill_seq);
     let manager_arc = get_clipboard_manager_arc(&state);
 
     let item_content = {
         let manager = lock_arc_mutex(&manager_arc);
-        manager.promote_to_top(index).map_err(|e| {
+        manager.promote_to_top(index, item_id).map_err(|e| {
             AppError::new(
                 ErrorCode::ClipboardError,
-                format!("索引 {} 超出范围", index),
+                format!("索引 {:?} 超出范围", index),
             )
             .with_details(e)
         })?
@@ -1952,10 +1953,11 @@ fn execute_select_and_fill_text(
             let _ = state_ref;
             let manager = lock_arc_mutex(&manager_arc_for_fill);
             manager.set_clipboard_content(app_handle, &item_content_clone)?;
+            let item_id = crate::utils::database::stable_history_item_id(&item_content_clone);
             let _ = app_handle.emit(
                 "text-item-promoted",
                 serde_json::json!({
-                    "content": item_content_clone,
+                    "id": item_id,
                 }),
             );
             Ok(())
@@ -2692,7 +2694,8 @@ pub async fn set_image_item_pinned(
 
 #[tauri::command]
 pub async fn promote_clipboard_item(
-    index: usize,
+    index: Option<usize>,
+    item_id: Option<String>,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<String, String> {
     let manager_arc = get_clipboard_manager_arc(state.inner());
@@ -2701,7 +2704,7 @@ pub async fn promote_clipboard_item(
         guard.clone()
     };
     manager
-        .promote_to_top_async(index)
+        .promote_to_top_async(index, item_id)
         .await
         .map(|item| crate::utils::database::stable_history_item_id(&item))
         .map_err(|e| {

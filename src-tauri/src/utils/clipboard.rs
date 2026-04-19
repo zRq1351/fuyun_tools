@@ -621,23 +621,33 @@ impl ClipboardManager {
         }
     }
 
-    pub fn promote_to_top(&self, index: usize) -> Result<String, String> {
+    pub fn promote_to_top(&self, index: Option<usize>, item_id: Option<String>) -> Result<String, String> {
         let item = {
             let mut history = lock_arc_mutex(&self.history);
-            if index >= history.len() {
+            let resolved_index = if let Some(target_id) = item_id.as_ref().filter(|v| !v.trim().is_empty()) {
+                history
+                    .iter()
+                    .position(|entry| &crate::utils::database::stable_history_item_id(entry) == target_id)
+                    .or(index)
+                    .ok_or_else(|| "索引超出范围".to_string())?
+            } else {
+                index.ok_or_else(|| "索引超出范围".to_string())?
+            };
+
+            if resolved_index >= history.len() {
                 return Err("索引超出范围".to_string());
             }
-            if index == 0 {
+            if resolved_index == 0 {
                 let item = history[0].clone();
                 return Ok(item);
             }
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             normalize_pinned_items(&mut pinned_items, &history);
-            let item = history.remove(index);
-            let item_id = crate::utils::database::stable_history_item_id(&item);
-            if pinned_items.iter().any(|p| p == &item_id) {
-                pinned_items.retain(|p| p != &item_id);
-                pinned_items.insert(0, item_id.clone());
+            let item = history.remove(resolved_index);
+            let item_id_val = crate::utils::database::stable_history_item_id(&item);
+            if pinned_items.iter().any(|p| p == &item_id_val) {
+                pinned_items.retain(|p| p != &item_id_val);
+                pinned_items.insert(0, item_id_val.clone());
                 history.insert(0, item.clone());
             } else {
                 let insert_pos = pinned_items.len().min(history.len());
@@ -656,18 +666,32 @@ impl ClipboardManager {
         Ok(item)
     }
 
-    pub async fn promote_to_top_async(&self, index: usize) -> Result<String, String> {
+    pub async fn promote_to_top_async(
+        &self,
+        index: Option<usize>,
+        item_id: Option<String>,
+    ) -> Result<String, String> {
         let item = {
             let mut history = lock_arc_mutex(&self.history);
-            if index >= history.len() {
+            let resolved_index = if let Some(target_id) = item_id.as_ref().filter(|v| !v.trim().is_empty()) {
+                history
+                    .iter()
+                    .position(|entry| &crate::utils::database::stable_history_item_id(entry) == target_id)
+                    .or(index)
+                    .ok_or_else(|| "索引超出范围".to_string())?
+            } else {
+                index.ok_or_else(|| "索引超出范围".to_string())?
+            };
+
+            if resolved_index >= history.len() {
                 return Err("索引超出范围".to_string());
             }
-            if index == 0 {
+            if resolved_index == 0 {
                 return Ok(history[0].clone());
             }
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             normalize_pinned_items(&mut pinned_items, &history);
-            let item = history.remove(index);
+            let item = history.remove(resolved_index);
             let item_id = crate::utils::database::stable_history_item_id(&item);
             if pinned_items.iter().any(|p| p == &item_id) {
                 pinned_items.retain(|p| p != &item_id);
