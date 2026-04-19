@@ -489,7 +489,7 @@ export function useClipboardHistory() {
         }
         const nextHistory = {}
         for (let i = 0; i < incomingHistory.length; i++) {
-            nextHistory[i] = incomingHistory[i]
+            nextHistory[i] = incomingHistory[i].content
         }
         historyMap.value = nextHistory
         const categoriesFromPayload = payload?.categories && typeof payload.categories === 'object'
@@ -499,12 +499,13 @@ export function useClipboardHistory() {
         const keyword = searchKeyword.value.trim().toLowerCase()
         const pinnedSet = new Set(Array.isArray(payload.pinned_items) ? payload.pinned_items : [])
         const filtered = incomingHistory
-            .map((content, position) => ({
-                content,
+            .map((item, position) => ({
+                id: item.id,
+                content: item.content,
                 position,
                 snippet: '',
-                pinned: pinnedSet.has(content),
-                category: categoriesFromPayload?.[content] || '未分类'
+                pinned: pinnedSet.has(item.id),
+                category: categoriesFromPayload?.[item.id] || '未分类'
             }))
             .filter((entry) => {
                 if (activeCategory && entry.category !== activeCategory) {
@@ -519,6 +520,7 @@ export function useClipboardHistory() {
         const sortedFiltered = sortPageItems(filtered)
         const loadedCount = Math.min(sortedFiltered.length, loadedTarget)
         pagedHistory.value = sortedFiltered.slice(0, loadedCount).map((entry) => ({
+            id: entry.id,
             content: entry.content,
             position: entry.position,
             snippet: entry.snippet,

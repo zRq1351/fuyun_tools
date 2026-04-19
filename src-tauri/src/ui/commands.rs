@@ -3061,13 +3061,13 @@ pub async fn select_and_fill(
 #[tauri::command]
 pub async fn remove_clipboard_item(
     index: Option<usize>,
-    item: Option<String>,
+    item_id: Option<String>,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        execute_remove_clipboard_item(index, item, state_arc, app).map_err(to_frontend_error_string)
+        execute_remove_clipboard_item(index, item_id, state_arc, app).map_err(to_frontend_error_string)
     })
     .await
     .map_err(|e| {
