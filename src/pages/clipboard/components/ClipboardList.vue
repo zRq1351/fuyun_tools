@@ -28,7 +28,7 @@
           <Pin/>
         </el-icon>
       </div>
-      <div class="delete-btn" @click.stop="deleteItem(entry.index, entry.content)">
+      <div class="delete-btn" @click.stop="deleteItem(entry.index, entry.id)">
         <el-icon>
           <Close/>
         </el-icon>

@@ -429,9 +429,9 @@ export function useClipboardHistory() {
         await resetAndReloadHistory()
     }
 
-    const deleteItem = async (index, item = '') => {
+    const deleteItem = async (index, itemId = '') => {
         const localIndex = pagedHistory.value.findIndex(
-            (entry) => entry.position === index || (!!item && entry.content === item)
+            (entry) => entry.position === index || (!!itemId && entry.id === itemId)
         )
         let removedEntry = null
         if (localIndex >= 0) {
@@ -450,8 +450,7 @@ export function useClipboardHistory() {
             }
         }
         try {
-            const removedItemContent = item || removedEntry?.content || historyMap.value[index]
-            const removedItemId = removedEntry?.id
+            const removedItemId = itemId || removedEntry?.id
             if (removedItemId && categoryMap.value[removedItemId]) {
                 removeItemCategoryLocal(removedItemId)
                 try {
@@ -461,7 +460,7 @@ export function useClipboardHistory() {
                 }
             }
 
-            await ClipboardService.removeItem(index, removedItemContent || null)
+            await ClipboardService.removeItem(index, removedItemId || null)
         } catch (error) {
             console.error('删除失败:', error)
             await resetAndReloadHistory()

@@ -177,13 +177,13 @@ export const ClipboardService = {
      * @param {number} index
      * @returns {Promise<void>}
      */
-    removeItem: (index, item = null) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, {
+    removeItem: (index, itemId = null) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, {
         index: normalizeOptionalIndex(index),
-        item
+        itemId
     }),
-    setItemPinned: (index, item, pinned) => invoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, {
+    setItemPinned: (index, itemId, pinned) => invoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, {
         index: normalizeOptionalIndex(index),
-        item,
+        itemId,
         pinned
     }),
     promoteItem: (index) => invoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, {index}),

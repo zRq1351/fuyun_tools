@@ -1245,18 +1245,25 @@ pub async fn save_pinned_items_order_async(pinned_items: &[String]) -> Result<()
 }
 
 /// 置顶记录（增量操作）
-pub async fn pin_item(content: &str) -> Result<(), String> {
+pub async fn pin_item(item_id: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
-    let now_ms = now_unix_ms();
-    let item_id = stable_history_item_id(content);
+    let now = now_unix_ms();
+
+    let content_opt: Option<String> = sqlx::query_scalar("SELECT content FROM history_items WHERE item_id = ?1 LIMIT 1")
+        .bind(item_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(|e| format!("查找记录内容失败: {}", e))?;
+
+    let content = content_opt.ok_or_else(|| "目标记录不存在".to_string())?;
 
     sqlx::query(
         "INSERT INTO pinned_items(content, pinned_at, item_id) VALUES(?1, ?2, ?3)
-         ON CONFLICT(item_id) DO UPDATE SET pinned_at = ?2, content = ?1",
+         ON CONFLICT(item_id) DO UPDATE SET content = ?1, pinned_at = ?2",
     )
     .bind(content)
-    .bind(now_ms)
-    .bind(&item_id)
+    .bind(now)
+    .bind(item_id)
     .execute(&mut *conn)
     .await
     .map_err(|e| format!("置顶失败: {}", e))?;
@@ -1265,12 +1272,11 @@ pub async fn pin_item(content: &str) -> Result<(), String> {
 }
 
 /// 取消置顶（增量操作）
-pub async fn unpin_item(content: &str) -> Result<(), String> {
+pub async fn unpin_item(item_id: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
-    let item_id = stable_history_item_id(content);
 
-    sqlx::query("DELETE FROM pinned_items WHERE item_id = ?")
-        .bind(&item_id)
+    sqlx::query("DELETE FROM pinned_items WHERE item_id = ?1")
+        .bind(item_id)
         .execute(&mut *conn)
         .await
         .map_err(|e| format!("取消置顶失败: {}", e))?;
@@ -1383,163 +1389,7 @@ pub async fn remove_category_everywhere(category: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 根据内容批量删除历史记录（增量操作）
-pub async fn delete_history_items_bulk(contents: &[String]) -> Result<(), String> {
-    if contents.is_empty() {
-        return Ok(());
-    }
-    let mut conn = open_history_db_async().await?;
-    let mut tx = conn
-        .begin()
-        .await
-        .map_err(|e| format!("开启事务失败: {}", e))?;
 
-    reset_temp_text_table(&mut tx, "temp_delete_history_contents", "content").await?;
-    fill_temp_text_table(&mut tx, "temp_delete_history_contents", "content", contents).await?;
-
-    let _ = sqlx::query(
-        "
-        DELETE FROM history_items_fts
-        WHERE EXISTS (
-            SELECT 1
-            FROM history_items hi
-            JOIN temp_delete_history_contents target
-              ON target.content = hi.content
-            WHERE hi.item_id = history_items_fts.item_id
-        )
-        ",
-    )
-    .execute(&mut *tx)
-    .await;
-    sqlx::query(
-        "
-        DELETE FROM categories
-        WHERE EXISTS (
-            SELECT 1
-            FROM history_items hi
-            JOIN temp_delete_history_contents target
-              ON target.content = hi.content
-            WHERE hi.item_id = categories.item_id
-        )
-        ",
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| format!("删除分类关联失败: {}", e))?;
-    sqlx::query(
-        "
-        DELETE FROM pinned_items
-        WHERE EXISTS (
-            SELECT 1
-            FROM history_items hi
-            JOIN temp_delete_history_contents target
-              ON target.content = hi.content
-            WHERE hi.item_id = pinned_items.item_id
-        )
-        ",
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| format!("删除置顶关联失败: {}", e))?;
-    sqlx::query(
-        "
-        DELETE FROM history_items
-        WHERE EXISTS (
-            SELECT 1
-            FROM temp_delete_history_contents target
-            WHERE target.content = history_items.content
-        )
-        ",
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| format!("删除历史记录失败: {}", e))?;
-
-    tx.commit()
-        .await
-        .map_err(|e| format!("提交事务失败: {}", e))?;
-    Ok(())
-}
-pub async fn delete_history_item_by_content(content: &str) -> Result<(), String> {
-    let mut conn = open_history_db_async().await?;
-    let mut tx = conn
-        .begin()
-        .await
-        .map_err(|e| format!("开启事务失败: {}", e))?;
-
-    reset_temp_text_table(&mut tx, "temp_delete_history_contents", "content").await?;
-    fill_temp_text_table(
-        &mut tx,
-        "temp_delete_history_contents",
-        "content",
-        &[content.to_string()],
-    )
-    .await?;
-
-    let _ = sqlx::query(
-        "
-        DELETE FROM history_items_fts
-        WHERE EXISTS (
-            SELECT 1
-            FROM history_items hi
-            JOIN temp_delete_history_contents target
-              ON target.content = hi.content
-            WHERE hi.item_id = history_items_fts.item_id
-        )
-        ",
-    )
-    .execute(&mut *tx)
-    .await;
-    sqlx::query(
-        "
-        DELETE FROM categories
-        WHERE EXISTS (
-            SELECT 1
-            FROM history_items hi
-            JOIN temp_delete_history_contents target
-              ON target.content = hi.content
-            WHERE hi.item_id = categories.item_id
-        )
-        ",
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| format!("删除分类关联失败: {}", e))?;
-    sqlx::query(
-        "
-        DELETE FROM pinned_items
-        WHERE EXISTS (
-            SELECT 1
-            FROM history_items hi
-            JOIN temp_delete_history_contents target
-              ON target.content = hi.content
-            WHERE hi.item_id = pinned_items.item_id
-        )
-        ",
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| format!("删除置顶关联失败: {}", e))?;
-    sqlx::query(
-        "
-        DELETE FROM history_items
-        WHERE EXISTS (
-            SELECT 1
-            FROM temp_delete_history_contents target
-            WHERE target.content = history_items.content
-        )
-        ",
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| format!("删除历史记录失败: {}", e))?;
-
-    tx.commit()
-        .await
-        .map_err(|e| format!("提交事务失败: {}", e))?;
-
-    Ok(())
-}
 
 /// 合并历史数据:保留现有记录,只添加备份中不存在的新记录
 pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(), String> {

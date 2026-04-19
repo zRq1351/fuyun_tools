@@ -1967,24 +1967,24 @@ fn execute_select_and_fill_text(
 
 fn execute_remove_clipboard_item(
     index: Option<usize>,
-    item: Option<String>,
+    item_id: Option<String>,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
 ) -> AppResult<()> {
     log::info!(
-        "删除剪贴板项目，索引: {:?}, 内容存在: {}",
+        "删除剪贴板项目，索引: {:?}, item_id存在: {}",
         index,
-        item.is_some()
+        item_id.is_some()
     );
     let manager_arc = get_clipboard_manager_arc(&state);
     with_updating_clipboard(&state, || -> Result<(), String> {
         let resolved_index = {
             let manager = lock_arc_mutex(&manager_arc);
-            if let Some(content) = item.as_ref().filter(|v| !v.trim().is_empty()) {
+            if let Some(target_id) = item_id.as_ref().filter(|v| !v.trim().is_empty()) {
                 manager
                     .get_history()
                     .iter()
-                    .position(|entry| entry == content)
+                    .position(|entry| &crate::utils::database::stable_history_item_id(entry) == target_id)
                     .or(index)
                     .ok_or_else(|| "索引超出范围".to_string())?
             } else {
@@ -2447,7 +2447,7 @@ fn default_image_page_limit() -> usize {
 
 #[tauri::command]
 pub async fn set_item_category(
-    item: String,
+    item_id: String,
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -2457,7 +2457,7 @@ pub async fn set_item_category(
         guard.clone()
     };
     manager
-        .set_category_async(item, category)
+        .set_category_async(item_id, category)
         .await
         .map_err(|e| {
             to_frontend_error_string(
