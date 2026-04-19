@@ -1685,11 +1685,7 @@ fn simulate_paste_with_retry(
                 stage: "pasted".to_string(),
                 target_window_title: target.title,
                 target_window_pid: target.pid,
-                detail: format!(
-                    "{}回填成功，耗时 {}ms",
-                    label,
-                    started_at.elapsed().as_millis()
-                ),
+                detail: String::new(),
                 operation_id,
             })
         }
