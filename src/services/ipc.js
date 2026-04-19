@@ -1,6 +1,10 @@
 import {invoke} from '@tauri-apps/api/core';
 
-const buildSelectAndFillRequest = (index, opId) => ({index, opId});
+const buildSelectAndFillRequest = (index, itemId, opId) => ({
+    index: normalizeOptionalIndex(index),
+    itemId,
+    opId
+});
 const buildSelectAndFillImageByIdRequest = (itemId, opId) => ({itemId, opId});
 const normalizeOptionalIndex = (index) =>
     Number.isInteger(index) && index >= 0 ? index : null;
@@ -195,10 +199,11 @@ export const ClipboardService = {
     /**
      * 选择并填充内容
      * @param {number} index
+     * @param {string} itemId
      * @returns {Promise<void>}
      */
-    selectAndFill: (index, opId) =>
-        invoke(IPC_COMMANDS.SELECT_AND_FILL, {request: buildSelectAndFillRequest(index, opId)}),
+    selectAndFill: (index, itemId, opId) =>
+        invoke(IPC_COMMANDS.SELECT_AND_FILL, {request: buildSelectAndFillRequest(index, itemId, opId)}),
 
     /**
      * 复制文本到剪贴板

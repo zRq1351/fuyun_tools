@@ -1071,7 +1071,8 @@ pub struct ImageHistoryResponse {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SelectAndFillRequest {
-    index: usize,
+    index: Option<usize>,
+    item_id: Option<String>,
     #[serde(default)]
     op_id: Option<u64>,
 }

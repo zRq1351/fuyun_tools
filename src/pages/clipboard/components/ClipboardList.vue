@@ -14,7 +14,7 @@
         :class="{ selected: selectedIndex === entry.index }"
         class="clipboard-item"
         @click="handleClick(entry.index)"
-        @dblclick="handleDoubleClick(entry.index)"
+        @dblclick="handleDoubleClick(entry.index, entry.id)"
         @contextmenu.prevent="showContextMenu($event, entry.id, index)"
     >
       <div v-if="isWebUrl(entry.content)" class="open-btn" @click.stop="openWebUrl(entry.content)">
@@ -209,8 +209,8 @@ const handleClick = (entryIndex) => {
   props.updateSelection(entryIndex, false, contentRef.value, null)
 }
 
-const handleDoubleClick = (entryIndex) => {
-  props.selectAndFillDirect(entryIndex)
+const handleDoubleClick = (entryIndex, entryId) => {
+  props.selectAndFillDirect(entryIndex, entryId)
 }
 
 const isWebUrl = (value) => {

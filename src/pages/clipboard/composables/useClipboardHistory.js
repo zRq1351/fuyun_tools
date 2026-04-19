@@ -20,8 +20,8 @@ export function useClipboardHistory() {
     const filterDataRevision = ref(0)
 
     // 添加分类搜索索引，与图片保持一致
-    const categorySearchIndex = new Map()  // Map<category, Set<content>>
-    const itemCategorySnapshot = new Map()  // Map<content, category>
+    const categorySearchIndex = new Map()  // Map<category, Set<id>>
+    const itemCategorySnapshot = new Map()  // Map<id, category>
     const keywordCategoryMatchCache = new Map()
 
     const getItemCategory = (item_id) => {

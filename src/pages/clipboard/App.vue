@@ -474,9 +474,9 @@ const showWindow = async (data) => {
   })
 }
 
-const selectAndFillDirect = async (index) => {
+const selectAndFillDirect = async (index, itemId = null) => {
   try {
-    await ClipboardService.selectAndFill(index)
+    await ClipboardService.selectAndFill(index, itemId)
     hideClipboardWindow()
   } catch (error) {
     console.error('填充内容失败:', error)
@@ -693,9 +693,9 @@ const handleKeydown = async (event) => {
     case 'Enter':
       event.preventDefault()
       if (selectedIndex.value >= 0) {
-        const visibleIndex = visibleHistory.value.findIndex((entry) => entry.index === selectedIndex.value)
-        if (visibleIndex >= 0) {
-          selectAndFillDirect(selectedIndex.value)
+        const entry = visibleHistory.value.find((entry) => entry.index === selectedIndex.value)
+        if (entry) {
+          selectAndFillDirect(selectedIndex.value, entry.id)
         }
       }
       break
