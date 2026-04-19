@@ -1,6 +1,10 @@
 import {invoke} from '@tauri-apps/api/core';
 
-const buildSelectAndFillRequest = (index, opId) => ({index, opId});
+const buildSelectAndFillRequest = (index, itemId, opId) => ({
+    index: normalizeOptionalIndex(index),
+    itemId,
+    opId
+});
 const buildSelectAndFillImageByIdRequest = (itemId, opId) => ({itemId, opId});
 const normalizeOptionalIndex = (index) =>
     Number.isInteger(index) && index >= 0 ? index : null;
@@ -177,25 +181,29 @@ export const ClipboardService = {
      * @param {number} index
      * @returns {Promise<void>}
      */
-    removeItem: (index, item = null) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, {
+    removeItem: (index, itemId = null) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, {
         index: normalizeOptionalIndex(index),
-        item
+        itemId
     }),
-    setItemPinned: (index, item, pinned) => invoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, {
+    setItemPinned: (index, itemId, pinned) => invoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, {
         index: normalizeOptionalIndex(index),
-        item,
+        itemId,
         pinned
     }),
-    promoteItem: (index) => invoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, {index}),
+    promoteItem: (index, itemId = null) => invoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, {
+        index: normalizeOptionalIndex(index),
+        itemId
+    }),
     clearHistory: (mode) => invoke(IPC_COMMANDS.CLEAR_TEXT_HISTORY, {mode}),
 
     /**
      * 选择并填充内容
      * @param {number} index
+     * @param {string} itemId
      * @returns {Promise<void>}
      */
-    selectAndFill: (index, opId) =>
-        invoke(IPC_COMMANDS.SELECT_AND_FILL, {request: buildSelectAndFillRequest(index, opId)}),
+    selectAndFill: (index, itemId, opId) =>
+        invoke(IPC_COMMANDS.SELECT_AND_FILL, {request: buildSelectAndFillRequest(index, itemId, opId)}),
 
     /**
      * 复制文本到剪贴板
@@ -256,11 +264,11 @@ export const ImageClipboardService = {
 export const CategoryService = {
     /**
      * 设置条目分类
-     * @param {string} item
+     * @param {string} itemId
      * @param {string} category
      * @returns {Promise<void>}
      */
-    setItemCategory: (item, category) => invoke(IPC_COMMANDS.SET_ITEM_CATEGORY, {item, category}),
+    setItemCategory: (itemId, category) => invoke(IPC_COMMANDS.SET_ITEM_CATEGORY, {itemId, category}),
 
     /**
      * 删除分类

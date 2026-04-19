@@ -142,10 +142,12 @@ pub fn add_to_clipboard_history(
             let is_pinned = if latest_item.is_empty() {
                 false
             } else {
-                manager.get_pinned_items().iter().any(|v| v == &latest_item)
+                let item_id = crate::utils::database::stable_history_item_id(&latest_item);
+                manager.get_pinned_items().iter().any(|v| v == &item_id)
             };
             Some(serde_json::json!({
                 "latest_item": latest_item,
+                "latest_item_id": crate::utils::database::stable_history_item_id(&latest_item),
                 "history_len": history_len,
                 "is_pinned": is_pinned
             }))

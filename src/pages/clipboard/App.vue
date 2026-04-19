@@ -243,8 +243,8 @@ const {
   loadTailPage,
   setSort,
   setPageSize,
-  promoteLocalByContent,
-  setLocalPinnedByContent,
+  promoteLocalById,
+  setLocalPinnedById,
   insertLocalIncomingContent,
   applyPayloadSnapshot,
   bumpFilterDataRevision,
@@ -278,25 +278,25 @@ const {
   startWindowOffsetDrag
 } = useWindowOffset()
 
-const isItemPinned = (item) => pinnedItems.value.includes(item)
+const isItemPinned = (id) => pinnedItems.value.includes(id)
 
-const promoteItem = async (index, item) => {
-  const shouldPin = !isItemPinned(item)
+const promoteItem = async (index, id) => {
+  const shouldPin = !isItemPinned(id)
   if (shouldPin) {
-    pinnedItems.value = [item, ...pinnedItems.value.filter((p) => p !== item)]
+    pinnedItems.value = [id, ...pinnedItems.value.filter((p) => p !== id)]
   } else {
-    pinnedItems.value = pinnedItems.value.filter((p) => p !== item)
+    pinnedItems.value = pinnedItems.value.filter((p) => p !== id)
   }
-  setLocalPinnedByContent(item, shouldPin)
+  setLocalPinnedById(id, shouldPin)
   try {
-    await ClipboardService.setItemPinned(index, item, shouldPin)
+    await ClipboardService.setItemPinned(index, id, shouldPin)
   } catch (error) {
     if (shouldPin) {
-      pinnedItems.value = pinnedItems.value.filter((p) => p !== item)
+      pinnedItems.value = pinnedItems.value.filter((p) => p !== id)
     } else {
-      pinnedItems.value = [item, ...pinnedItems.value.filter((p) => p !== item)]
+      pinnedItems.value = [id, ...pinnedItems.value.filter((p) => p !== id)]
     }
-    setLocalPinnedByContent(item, !shouldPin)
+    setLocalPinnedById(id, !shouldPin)
     console.error('置顶失败:', error)
     handleAppError(error, '置顶失败')
   }
@@ -389,40 +389,22 @@ const init = async () => {
       void showWindow(event.payload)
     })
     unlistenHistoryPayloadUpdated = await listen('clipboard-history-payload-updated', (event) => {
-      const payload = event.payload || {}
-      if (payload.categories) {
-        categoryMap.value = payload.categories
-      }
-      if (Array.isArray(payload.category_list)) {
-        const list = payload.category_list.filter(c => c !== '未分类' && c !== '全部')
-        categories.value = ['未分类', ...Array.from(new Set(list))]
-      }
-      const incomingHistory = Array.isArray(payload.history) ? payload.history : []
-      if (incomingHistory.length === 0) {
-        return
-      }
-      const incomingPinnedSet = new Set(Array.isArray(payload.pinned_items) ? payload.pinned_items : [])
-      const currentSet = new Set(Object.values(historyMap.value))
-      const addedContents = incomingHistory.filter((content) => !currentSet.has(content))
-      for (let i = addedContents.length - 1; i >= 0; i -= 1) {
-        const content = addedContents[i]
-        insertLocalIncomingContent(content, incomingPinnedSet.has(content))
-      }
-      if (Array.isArray(payload.pinned_items)) {
-        pinnedItems.value = payload.pinned_items
-      }
+      // 全量更新不再采用增量 push，而是由 syncHistoryIncremental 自主处理，
+      // 如果后端需要前端重新加载最新数据，可以直接调用 syncHistoryIncremental
+      syncHistoryIncremental()
     })
     unlistenHistoryItemUpdated = await listen('clipboard-history-item-updated', (event) => {
       const payload = event?.payload || {}
       const latestItem = typeof payload.latest_item === 'string' ? payload.latest_item : ''
-      if (!latestItem) {
+      const latestItemId = typeof payload.latest_item_id === 'string' ? payload.latest_item_id : ''
+      if (!latestItem || !latestItemId) {
         return
       }
-      insertLocalIncomingContent(latestItem, Boolean(payload.is_pinned))
+      insertLocalIncomingContent(latestItem, latestItemId, Boolean(payload.is_pinned))
     })
     unlistenTextItemPromoted = await listen('text-item-promoted', (event) => {
-      const content = event?.payload?.content
-      promoteLocalByContent(content)
+      const id = event?.payload?.id
+      promoteLocalById(id)
     })
     unlistenWritebackResult = await listen('writeback-result', (event) => {
       const payload = event.payload || {}
@@ -492,9 +474,9 @@ const showWindow = async (data) => {
   })
 }
 
-const selectAndFillDirect = async (index) => {
+const selectAndFillDirect = async (index, itemId = null) => {
   try {
-    await ClipboardService.selectAndFill(index)
+    await ClipboardService.selectAndFill(index, itemId)
     hideClipboardWindow()
   } catch (error) {
     console.error('填充内容失败:', error)
@@ -522,18 +504,19 @@ const handleContainerMouseDown = (event) => {
 }
 
 const assignToCategory = async (category) => {
+  const itemKey = contextMenuItem.value // this is id
   await runCategoryAssignment({
-    itemKey: contextMenuItem.value,
+    itemKey,
     category,
     persist: (itemKey, nextCategory) => setItemCategory(itemKey, nextCategory),
     onFinally: closeContextMenu
   })
 }
 
-const handleDragStart = (event, item) => {
-  dragItem.value = item
+const handleDragStart = (event, id) => {
+  dragItem.value = id
   event.dataTransfer.effectAllowed = 'copy'
-  event.dataTransfer.setData('text/plain', item)
+  event.dataTransfer.setData('text/plain', id)
 }
 
 const handleDragEnd = () => {
@@ -549,7 +532,7 @@ const handleDrop = async (event, category) => {
   }
 
   await runCategoryAssignment({
-    itemKey: dragItem.value,
+    itemKey: dragItem.value, // this is id
     category,
     persist: (itemKey, nextCategory) => setItemCategory(itemKey, nextCategory)
   })
@@ -561,7 +544,8 @@ const resolveSelectedText = () => {
   if (selectedIndex.value < 0) {
     return ''
   }
-  return historyMap.value[selectedIndex.value] || ''
+  const entry = visibleHistory.value.find((e) => e.index === selectedIndex.value)
+  return entry ? entry.content : ''
 }
 
 const triggerAiFlow = async (rawText, mode) => {
@@ -604,7 +588,9 @@ const triggerAiFromSelection = async (mode) => {
 }
 
 const triggerAiFromContextMenu = async (mode) => {
-  const text = contextMenuItem.value || ''
+  const id = contextMenuItem.value
+  const entry = visibleHistory.value.find((e) => e.id === id)
+  const text = entry ? entry.content : ''
   closeContextMenu()
   await triggerAiFlow(text, mode)
 }
@@ -706,10 +692,10 @@ const handleKeydown = async (event) => {
       break
     case 'Enter':
       event.preventDefault()
-      if (selectedIndex.value >= 0 && historyMap.value[selectedIndex.value]) {
-        const visibleIndex = visibleHistory.value.findIndex((entry) => entry.index === selectedIndex.value)
-        if (visibleIndex >= 0) {
-          selectAndFillDirect(selectedIndex.value)
+      if (selectedIndex.value >= 0) {
+        const entry = visibleHistory.value.find((entry) => entry.index === selectedIndex.value)
+        if (entry) {
+          selectAndFillDirect(selectedIndex.value, entry.id)
         }
       }
       break

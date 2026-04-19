@@ -10,32 +10,35 @@
         v-for="(entry, index) in visibleHistory"
         :id="'clipboard-item-' + entry.index"
         :key="entry.index"
-        v-memo="[entry.content, entry.index, selectedIndex, getItemCategory(entry.content), isPinned(entry.content), entry.snippet]"
+        v-memo="[entry.content, entry.index, selectedIndex, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
         :class="{ selected: selectedIndex === entry.index }"
         class="clipboard-item"
+        draggable="true"
         @click="handleClick(entry.index)"
-        @dblclick="handleDoubleClick(entry.index)"
-        @contextmenu.prevent="showContextMenu($event, entry.content, index)"
+        @dblclick="handleDoubleClick(entry.index, entry.id)"
+        @contextmenu.prevent="showContextMenu($event, entry.id, index)"
+        @dragstart="handleDragStart($event, entry.id)"
+        @dragend="handleDragEnd"
     >
       <div v-if="isWebUrl(entry.content)" class="open-btn" @click.stop="openWebUrl(entry.content)">
         <el-icon>
           <Link/>
         </el-icon>
       </div>
-      <div :class="{ active: isPinned(entry.content) }" class="pin-btn"
-           @click.stop="promoteItem(entry.index, entry.content)">
+      <div :class="{ active: isPinned(entry.id) }" class="pin-btn"
+           @click.stop="promoteItem(entry.index, entry.id)">
         <el-icon>
           <Pin/>
         </el-icon>
       </div>
-      <div class="delete-btn" @click.stop="deleteItem(entry.index, entry.content)">
+      <div class="delete-btn" @click.stop="deleteItem(entry.index, entry.id)">
         <el-icon>
           <Close/>
         </el-icon>
       </div>
       <div class="index">{{ index + 1 }}</div>
       <div class="category-wrap" @click.stop>
-        <div class="category-chip">{{ getItemCategory(entry.content) }}</div>
+        <div class="category-chip">{{ getItemCategory(entry.id) }}</div>
       </div>
       <div class="item-content">{{ entry.content }}</div>
       <div v-if="entry.snippet" class="item-snippet">
@@ -209,8 +212,8 @@ const handleClick = (entryIndex) => {
   props.updateSelection(entryIndex, false, contentRef.value, null)
 }
 
-const handleDoubleClick = (entryIndex) => {
-  props.selectAndFillDirect(entryIndex)
+const handleDoubleClick = (entryIndex, entryId) => {
+  props.selectAndFillDirect(entryIndex, entryId)
 }
 
 const isWebUrl = (value) => {

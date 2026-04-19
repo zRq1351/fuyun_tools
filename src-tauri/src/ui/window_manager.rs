@@ -348,10 +348,17 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
         )
     };
 
-    let (history, categories, category_list, pinned_items) = {
+    let (history_items, categories, category_list, pinned_items) = {
         let manager = lock_arc_mutex(&manager_arc);
+        let history = manager.get_history();
+        let items: Vec<serde_json::Value> = history.iter().map(|content| {
+            serde_json::json!({
+                "id": crate::utils::database::stable_history_item_id(content),
+                "content": content,
+            })
+        }).collect();
         (
-            manager.get_history(),
+            items,
             manager.get_categories(),
             manager.get_category_list(),
             manager.get_pinned_items(),
@@ -360,7 +367,7 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
 
     if let Some(_window) = app_handle.get_webview_window("clipboard") {
         let app_handle_clone = app_handle.clone();
-        let history_clone = history.clone();
+        let history_clone = history_items.clone();
         let categories_clone = categories.clone();
         let category_list_clone = category_list.clone();
         let pinned_items_clone = pinned_items.clone();

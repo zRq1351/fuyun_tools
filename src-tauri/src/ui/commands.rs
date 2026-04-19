@@ -1071,7 +1071,8 @@ pub struct ImageHistoryResponse {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SelectAndFillRequest {
-    index: usize,
+    index: Option<usize>,
+    item_id: Option<String>,
     #[serde(default)]
     op_id: Option<u64>,
 }
@@ -1923,16 +1924,17 @@ fn execute_select_and_fill_text(
     app: AppHandle,
 ) -> AppResult<String> {
     let index = request.index;
+    let item_id = request.item_id;
     let fill_seq = begin_fill_sequence(&state, FillKind::Text);
     let operation_id = request.op_id.unwrap_or(fill_seq);
     let manager_arc = get_clipboard_manager_arc(&state);
 
     let item_content = {
         let manager = lock_arc_mutex(&manager_arc);
-        manager.promote_to_top(index).map_err(|e| {
+        manager.promote_to_top(index, item_id).map_err(|e| {
             AppError::new(
                 ErrorCode::ClipboardError,
-                format!("索引 {} 超出范围", index),
+                format!("索引 {:?} 超出范围", index),
             )
             .with_details(e)
         })?
@@ -1952,10 +1954,11 @@ fn execute_select_and_fill_text(
             let _ = state_ref;
             let manager = lock_arc_mutex(&manager_arc_for_fill);
             manager.set_clipboard_content(app_handle, &item_content_clone)?;
+            let item_id = crate::utils::database::stable_history_item_id(&item_content_clone);
             let _ = app_handle.emit(
                 "text-item-promoted",
                 serde_json::json!({
-                    "content": item_content_clone,
+                    "id": item_id,
                 }),
             );
             Ok(())
@@ -1967,24 +1970,24 @@ fn execute_select_and_fill_text(
 
 fn execute_remove_clipboard_item(
     index: Option<usize>,
-    item: Option<String>,
+    item_id: Option<String>,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
 ) -> AppResult<()> {
     log::info!(
-        "删除剪贴板项目，索引: {:?}, 内容存在: {}",
+        "删除剪贴板项目，索引: {:?}, item_id存在: {}",
         index,
-        item.is_some()
+        item_id.is_some()
     );
     let manager_arc = get_clipboard_manager_arc(&state);
     with_updating_clipboard(&state, || -> Result<(), String> {
         let resolved_index = {
             let manager = lock_arc_mutex(&manager_arc);
-            if let Some(content) = item.as_ref().filter(|v| !v.trim().is_empty()) {
+            if let Some(target_id) = item_id.as_ref().filter(|v| !v.trim().is_empty()) {
                 manager
                     .get_history()
                     .iter()
-                    .position(|entry| entry == content)
+                    .position(|entry| &crate::utils::database::stable_history_item_id(entry) == target_id)
                     .or(index)
                     .ok_or_else(|| "索引超出范围".to_string())?
             } else {
@@ -2338,8 +2341,14 @@ pub async fn get_clipboard_history(
 ) -> Result<HistoryResponse, String> {
     let manager_arc = get_clipboard_manager_arc(state.inner());
     let manager = lock_arc_mutex(&manager_arc);
+    let history_items: Vec<TextHistoryItem> = manager.get_history().into_iter().map(|content| {
+        TextHistoryItem {
+            id: crate::utils::database::stable_history_item_id(&content),
+            content,
+        }
+    }).collect();
     Ok(HistoryResponse {
-        history: manager.get_history(),
+        history: history_items,
         categories: manager.get_categories(),
         category_list: manager.get_category_list(),
         pinned_items: manager.get_pinned_items(),
@@ -2361,7 +2370,12 @@ pub async fn get_clipboard_full_snapshot(
     };
 
     let text_manager = lock_arc_mutex(&text_manager_arc);
-    let text_history = text_manager.get_history();
+    let text_history_items: Vec<TextHistoryItem> = text_manager.get_history().into_iter().map(|content| {
+        TextHistoryItem {
+            id: crate::utils::database::stable_history_item_id(&content),
+            content,
+        }
+    }).collect();
     let text_categories = text_manager.get_categories();
     let text_category_list = text_manager.get_category_list();
     let text_pinned_items = text_manager.get_pinned_items();
@@ -2376,7 +2390,7 @@ pub async fn get_clipboard_full_snapshot(
     drop(image_manager);
 
     Ok(ClipboardFullSnapshot {
-        text_history,
+        text_history: text_history_items,
         text_categories,
         text_category_list,
         text_pinned_items,
@@ -2447,7 +2461,7 @@ fn default_image_page_limit() -> usize {
 
 #[tauri::command]
 pub async fn set_item_category(
-    item: String,
+    item_id: String,
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -2457,7 +2471,7 @@ pub async fn set_item_category(
         guard.clone()
     };
     manager
-        .set_category_async(item, category)
+        .set_category_async(item_id, category)
         .await
         .map_err(|e| {
             to_frontend_error_string(
@@ -2646,7 +2660,7 @@ pub async fn set_image_item_tags(
 #[tauri::command]
 pub async fn set_clipboard_item_pinned(
     index: Option<usize>,
-    item: Option<String>,
+    item_id: Option<String>,
     pinned: bool,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -2656,7 +2670,7 @@ pub async fn set_clipboard_item_pinned(
         guard.clone()
     };
     manager
-        .set_pinned_by_selector_async(index, item, pinned)
+        .set_pinned_by_selector_async(index, item_id, pinned)
         .await
         .map_err(|e| {
             if e == "索引超出范围" {
@@ -2692,18 +2706,19 @@ pub async fn set_image_item_pinned(
 
 #[tauri::command]
 pub async fn promote_clipboard_item(
-    index: usize,
+    index: Option<usize>,
+    item_id: Option<String>,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let manager_arc = get_clipboard_manager_arc(state.inner());
     let manager = {
         let guard = lock_arc_mutex(&manager_arc);
         guard.clone()
     };
     manager
-        .promote_to_top_async(index)
+        .promote_to_top_async(index, item_id)
         .await
-        .map(|_| ())
+        .map(|item| crate::utils::database::stable_history_item_id(&item))
         .map_err(|e| {
             to_frontend_error_string(
                 AppError::new(ErrorCode::ClipboardError, "置顶文本失败").with_details(e),
@@ -3058,13 +3073,13 @@ pub async fn select_and_fill(
 #[tauri::command]
 pub async fn remove_clipboard_item(
     index: Option<usize>,
-    item: Option<String>,
+    item_id: Option<String>,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
     app: AppHandle,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        execute_remove_clipboard_item(index, item, state_arc, app).map_err(to_frontend_error_string)
+        execute_remove_clipboard_item(index, item_id, state_arc, app).map_err(to_frontend_error_string)
     })
     .await
     .map_err(|e| {
