@@ -1272,28 +1272,73 @@ pub async fn unpin_item(content: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 设置记录分类（增量操作）
+/// 设置记录分类(增量操作)
 pub async fn set_item_category(item_id: &str, category: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
 
-    sqlx::query(
-        "INSERT INTO categories(content, category, item_id) VALUES('', ?1, ?2)
-         ON CONFLICT(item_id) DO UPDATE SET category = ?1",
-    )
-    .bind(category)
-    .bind(item_id)
-    .execute(&mut *conn)
-    .await
-    .map_err(|e| format!("设置分类失败: {}", e))?;
+    // 首先检查该 item_id 是否存在于 history_items 表中
+    // 如果不存在,说明传入的是文本内容,需要根据内容查找或创建记录
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM history_items WHERE item_id = ?1 OR content = ?1)")
+        .bind(item_id)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|e| format!("检查记录是否存在失败: {}", e))?;
+
+    if !exists {
+        // 如果记录不存在,需要先创建历史记录
+        let new_item_id = stable_history_item_id(item_id);
+        let now = now_unix_ms();
+        
+        sqlx::query(
+            "INSERT INTO history_items(content, item_id, created_at, updated_at) VALUES(?1, ?2, ?3, ?3)",
+        )
+        .bind(item_id)
+        .bind(&new_item_id)
+        .bind(now)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| format!("创建历史记录失败: {}", e))?;
+        
+        // 使用新的 item_id 进行分类设置
+        sqlx::query(
+            "INSERT INTO categories(content, category, item_id) VALUES(?1, ?2, ?3)
+             ON CONFLICT(item_id) DO UPDATE SET category = ?2",
+        )
+        .bind(item_id)
+        .bind(category)
+        .bind(&new_item_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| format!("设置分类失败: {}", e))?;
+    } else {
+        // 记录已存在,直接设置分类
+        sqlx::query(
+            "INSERT INTO categories(content, category, item_id) 
+             SELECT content, ?1, COALESCE(item_id, ?2) FROM history_items 
+             WHERE item_id = ?2 OR content = ?2
+             LIMIT 1
+             ON CONFLICT(item_id) DO UPDATE SET category = ?1",
+        )
+        .bind(category)
+        .bind(item_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| format!("设置分类失败: {}", e))?;
+    }
 
     Ok(())
 }
 
-/// 删除记录分类（增量操作）
+/// 删除记录分类(增量操作)
 pub async fn remove_item_category(item_id: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
 
-    sqlx::query("DELETE FROM categories WHERE item_id = ?1")
+    // 首先尝试通过 item_id 查找,如果找不到则尝试通过 content 查找
+    sqlx::query(
+        "DELETE FROM categories WHERE item_id = ?1 OR item_id IN (
+            SELECT item_id FROM history_items WHERE content = ?1 LIMIT 1
+        )"
+    )
         .bind(item_id)
         .execute(&mut *conn)
         .await

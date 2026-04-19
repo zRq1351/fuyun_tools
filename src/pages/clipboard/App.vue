@@ -210,6 +210,7 @@ const isAiSettingsCollapsed = ref(true)
 const translationTargetLanguage = ref(localStorage.getItem('clipboard_ai_target_language') || '简体中文')
 const explanationTargetLanguage = ref(localStorage.getItem('clipboard_ai_explain_language') || '中文')
 const loadMoreIntent = ref(false)
+const isUpdatingCategory = ref(false)  // 防止分类更新时的竞态条件
 let unlistenShowWindow = null
 let unlistenHistoryPayloadUpdated = null
 let unlistenHistoryItemUpdated = null
@@ -237,13 +238,18 @@ const {
   deleteItem: originalDeleteItem,
   moveSelection,
   resetAndReloadHistory,
+  syncHistoryIncremental,
   loadMoreHistory,
   setSort,
   setPageSize,
   promoteLocalByContent,
   setLocalPinnedByContent,
   insertLocalIncomingContent,
-  applyPayloadSnapshot
+  applyPayloadSnapshot,
+  bumpFilterDataRevision,
+  setItemCategoryLocal,
+  removeItemCategoryLocal,
+  rebuildCategorySearchIndex
 } = useClipboardHistory()
 
 const {
@@ -256,7 +262,14 @@ const {
   startCreateCategory,
   confirmCreateCategory,
   cancelCreateCategory
-} = useCategoryManager(categories, categoryMap, categoryFilter)
+} = useCategoryManager(categories, categoryMap, categoryFilter, {
+  bumpFilterDataRevision,
+  setIsUpdatingCategory: (value) => {
+    isUpdatingCategory.value = value
+  },
+  setItemCategoryLocal,
+  removeItemCategoryLocal
+})
 
 const {
   bottomOffset,
@@ -704,16 +717,28 @@ const handleKeydown = async (event) => {
   }
 }
 
+// 监听搜索和分类过滤变化，使用增量同步而不是全量重置
+// 这样可以保留前端已有的数据（包括刚分类的项）
 let filterDebounceTimer = null
+
 watch([searchKeyword, categoryFilter], () => {
   if (!isVisible.value) return
+
+  // 如果正在更新分类，跳过重新加载，避免竞态条件
+  if (isUpdatingCategory.value) {
+    console.log('[分类更新中] 跳过重新加载')
+    return
+  }
+
   if (filterDebounceTimer) {
     clearTimeout(filterDebounceTimer)
   }
   filterDebounceTimer = setTimeout(() => {
+    console.log('[Watch 触发] 增量同步历史数据, categoryFilter:', categoryFilter.value)
     loadMoreIntent.value = false
-    resetAndReloadHistory()
-  }, 160)
+    // 使用增量同步，保留现有数据
+    syncHistoryIncremental()
+  }, 300)
 })
 
 watch(visibleHistory, (list) => {

@@ -1,53 +1,48 @@
 <template>
   <div
-      v-bind="containerProps"
+      ref="contentRef"
       class="content"
       @mousedown="handleMouseDown"
       @scroll="handleScroll"
       @wheel.prevent="handleWheel"
   >
     <div
-        class="virtual-wrapper"
-        :style="wrapperProps.style"
+        v-for="(entry, index) in visibleHistory"
+        :id="'clipboard-item-' + entry.index"
+        :key="entry.index"
+        v-memo="[entry.content, entry.index, selectedIndex, getItemCategory(entry.content), isPinned(entry.content), entry.snippet]"
+        :class="{ selected: selectedIndex === entry.index }"
+        class="clipboard-item"
+        @click="handleClick(entry.index)"
+        @dblclick="handleDoubleClick(entry.index)"
+        @contextmenu.prevent="showContextMenu($event, entry.content, index)"
     >
-      <div
-          v-for="virtualRow in list"
-          :id="'clipboard-item-' + virtualRow.data.index"
-          :key="virtualRow.data.content"
-          v-memo="[virtualRow.data.content, virtualRow.data.index, selectedIndex === virtualRow.data.index, getItemCategory(virtualRow.data.content), isPinned(virtualRow.data.content), virtualRow.data.snippet, highlightKeyword]"
-          class="clipboard-item"
-          :class="{ selected: selectedIndex === virtualRow.data.index }"
-          @click="handleClick(virtualRow.data.index)"
-          @dblclick="handleDoubleClick(virtualRow.data.index)"
-          @contextmenu.prevent="showContextMenu($event, virtualRow.data.content, virtualRow.index)"
-      >
-        <div v-if="isWebUrl(virtualRow.data.content)" class="open-btn" @click.stop="openWebUrl(virtualRow.data.content)">
-          <el-icon>
-            <Link/>
-          </el-icon>
-        </div>
-        <div :class="{ active: isPinned(virtualRow.data.content) }" class="pin-btn"
-             @click.stop="promoteItem(virtualRow.data.index, virtualRow.data.content)">
-          <el-icon>
-            <Pin/>
-          </el-icon>
-        </div>
-        <div class="delete-btn" @click.stop="deleteItem(virtualRow.data.index, virtualRow.data.content)">
-          <el-icon>
-            <Close/>
-          </el-icon>
-        </div>
-        <div class="index">{{ virtualRow.index + 1 }}</div>
-        <div class="category-wrap" @click.stop>
-          <div class="category-chip">{{ getItemCategory(virtualRow.data.content) }}</div>
-        </div>
-        <div class="item-content">{{ virtualRow.data.content }}</div>
-        <div v-if="virtualRow.data.snippet" class="item-snippet">
-          <template v-for="(part, partIndex) in renderHighlightParts(virtualRow.data.snippet)" :key="partIndex">
-            <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
-            <span v-else>{{ part.text }}</span>
-          </template>
-        </div>
+      <div v-if="isWebUrl(entry.content)" class="open-btn" @click.stop="openWebUrl(entry.content)">
+        <el-icon>
+          <Link/>
+        </el-icon>
+      </div>
+      <div :class="{ active: isPinned(entry.content) }" class="pin-btn"
+           @click.stop="promoteItem(entry.index, entry.content)">
+        <el-icon>
+          <Pin/>
+        </el-icon>
+      </div>
+      <div class="delete-btn" @click.stop="deleteItem(entry.index, entry.content)">
+        <el-icon>
+          <Close/>
+        </el-icon>
+      </div>
+      <div class="index">{{ index + 1 }}</div>
+      <div class="category-wrap" @click.stop>
+        <div class="category-chip">{{ getItemCategory(entry.content) }}</div>
+      </div>
+      <div class="item-content">{{ entry.content }}</div>
+      <div v-if="entry.snippet" class="item-snippet">
+        <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
+          <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
+          <span v-else>{{ part.text }}</span>
+        </template>
       </div>
     </div>
     <div v-if="showTailLoadMoreHint" class="load-more-tail-indicator">
@@ -59,15 +54,15 @@
         <span>{{ isLoadingMore ? '加载中' : '加载更多' }}</span>
       </div>
     </div>
+    <div class="spacer"></div>
   </div>
 </template>
 
 <script setup>
-import {computed, onMounted, onUnmounted, ref, watch} from 'vue'
+import {computed, onUnmounted, ref} from 'vue'
 import {Close, Link, Loading} from '@element-plus/icons-vue'
 import {Pin} from 'lucide-vue-next'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
-import {useVirtualList} from '@vueuse/core'
 
 const props = defineProps({
   visibleHistory: {
@@ -129,13 +124,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['content-scroll', 'load-more-intent'])
 
-const visibleHistoryComputed = computed(() => props.visibleHistory)
-const { list, containerProps, wrapperProps } = useVirtualList(visibleHistoryComputed, {
-  itemWidth: 258,
-  overscan: 10
-})
-
-const contentRef = containerProps.ref
+const contentRef = ref(null)
 let isDown = false
 let isDragging = false
 let startX = 0
@@ -143,15 +132,8 @@ let scrollLeftVal = 0
 let dragTargetScrollLeft = 0
 let dragScrollRafId = 0
 
-let scrollRafId = 0
-const handleScroll = (e) => {
-  containerProps.onScroll?.(e)
-  if (!scrollRafId) {
-    scrollRafId = requestAnimationFrame(() => {
-      emit('content-scroll')
-      scrollRafId = 0
-    })
-  }
+const handleScroll = () => {
+  emit('content-scroll')
 }
 
 const renderHighlightParts = (text) => {
@@ -314,10 +296,8 @@ const handleVisibilityChange = () => {
   }
 }
 
-onMounted(() => {
-  window.addEventListener('blur', stopDragging)
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-})
+window.addEventListener('blur', stopDragging)
+document.addEventListener('visibilitychange', handleVisibilityChange)
 
 const handleWheel = (e) => {
   if (!contentRef.value) return
@@ -340,25 +320,13 @@ defineExpose({
   flex: 1;
   min-height: 0;
   display: flex;
+  gap: 8px;
+  padding: 8px;
   flex-direction: row;
-  padding: 8px 8px 8px 8px;
   overflow-x: auto;
   overflow-y: hidden;
   margin-top: 10px;
   scrollbar-width: none;
-}
-
-.virtual-wrapper {
-  display: flex;
-  flex-direction: row;
-  height: 100%;
-  flex-shrink: 0;
-}
-
-.content::after {
-  content: '';
-  flex-shrink: 0;
-  width: 1px;
 }
 
 .content::-webkit-scrollbar {
@@ -382,8 +350,12 @@ defineExpose({
   opacity: 0 !important;
 }
 
+.spacer {
+  flex: 0 0 742px;
+  height: 1px;
+}
+
 .load-more-tail-indicator {
-  flex-shrink: 0;
   width: 56px;
   flex: 0 0 56px;
   min-height: 100%;
@@ -395,7 +367,6 @@ defineExpose({
   color: rgba(166, 213, 255, 0.9);
   user-select: none;
   pointer-events: none;
-  margin-right: 8px;
 }
 
 .load-more-tail-text {
@@ -422,7 +393,6 @@ defineExpose({
   position: relative;
   user-select: none;
   width: 250px;
-  margin-right: 8px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
