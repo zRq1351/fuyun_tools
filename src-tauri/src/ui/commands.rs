@@ -2646,7 +2646,7 @@ pub async fn set_image_item_tags(
 #[tauri::command]
 pub async fn set_clipboard_item_pinned(
     index: Option<usize>,
-    item: Option<String>,
+    item_id: Option<String>,
     pinned: bool,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -2656,7 +2656,7 @@ pub async fn set_clipboard_item_pinned(
         guard.clone()
     };
     manager
-        .set_pinned_by_selector_async(index, item, pinned)
+        .set_pinned_by_selector_async(index, item_id, pinned)
         .await
         .map_err(|e| {
             if e == "索引超出范围" {
@@ -2694,7 +2694,7 @@ pub async fn set_image_item_pinned(
 pub async fn promote_clipboard_item(
     index: usize,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let manager_arc = get_clipboard_manager_arc(state.inner());
     let manager = {
         let guard = lock_arc_mutex(&manager_arc);
@@ -2703,7 +2703,7 @@ pub async fn promote_clipboard_item(
     manager
         .promote_to_top_async(index)
         .await
-        .map(|_| ())
+        .map(|item| crate::utils::database::stable_history_item_id(&item))
         .map_err(|e| {
             to_frontend_error_string(
                 AppError::new(ErrorCode::ClipboardError, "置顶文本失败").with_details(e),

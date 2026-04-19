@@ -633,9 +633,10 @@ impl ClipboardManager {
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             normalize_pinned_items(&mut pinned_items, &history);
             let item = history.remove(index);
-            if pinned_items.iter().any(|p| p == &item) {
-                pinned_items.retain(|p| p != &item);
-                pinned_items.insert(0, item.clone());
+            let item_id = crate::utils::database::stable_history_item_id(&item);
+            if pinned_items.iter().any(|p| p == &item_id) {
+                pinned_items.retain(|p| p != &item_id);
+                pinned_items.insert(0, item_id.clone());
                 history.insert(0, item.clone());
             } else {
                 let insert_pos = pinned_items.len().min(history.len());
@@ -666,9 +667,10 @@ impl ClipboardManager {
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             normalize_pinned_items(&mut pinned_items, &history);
             let item = history.remove(index);
-            if pinned_items.iter().any(|p| p == &item) {
-                pinned_items.retain(|p| p != &item);
-                pinned_items.insert(0, item.clone());
+            let item_id = crate::utils::database::stable_history_item_id(&item);
+            if pinned_items.iter().any(|p| p == &item_id) {
+                pinned_items.retain(|p| p != &item_id);
+                pinned_items.insert(0, item_id.clone());
                 history.insert(0, item.clone());
             } else {
                 let insert_pos = pinned_items.len().min(history.len());
@@ -682,18 +684,19 @@ impl ClipboardManager {
         Ok(item)
     }
 
-    pub fn set_pinned(&self, item: String, pinned: bool) -> Result<(), String> {
+    pub fn set_pinned(&self, item_id: String, pinned: bool) -> Result<(), String> {
         let mut history = lock_arc_mutex(&self.history);
-        if !history.iter().any(|existing| existing == &item) {
+        let exists = history.iter().any(|existing| crate::utils::database::stable_history_item_id(existing) == item_id);
+        if !exists {
             return Err("目标条目不存在".to_string());
         }
         let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         if pinned {
-            if !pinned_items.iter().any(|p| p == &item) {
-                pinned_items.insert(0, item.clone());
+            if !pinned_items.iter().any(|p| p == &item_id) {
+                pinned_items.insert(0, item_id.clone());
             }
         } else {
-            pinned_items.retain(|p| p != &item);
+            pinned_items.retain(|p| p != &item_id);
         }
         normalize_pinned_items(&mut pinned_items, &history);
         apply_pin_order(&mut history, &pinned_items);
@@ -704,19 +707,20 @@ impl ClipboardManager {
         Ok(())
     }
 
-    pub async fn set_pinned_async(&self, item: String, pinned: bool) -> Result<(), String> {
+    pub async fn set_pinned_async(&self, item_id: String, pinned: bool) -> Result<(), String> {
         {
             let mut history = lock_arc_mutex(&self.history);
-            if !history.iter().any(|existing| existing == &item) {
+            let exists = history.iter().any(|existing| crate::utils::database::stable_history_item_id(existing) == item_id);
+            if !exists {
                 return Err("目标条目不存在".to_string());
             }
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             if pinned {
-                if !pinned_items.iter().any(|p| p == &item) {
-                    pinned_items.insert(0, item.clone());
+                if !pinned_items.iter().any(|p| p == &item_id) {
+                    pinned_items.insert(0, item_id.clone());
                 }
             } else {
-                pinned_items.retain(|p| p != &item);
+                pinned_items.retain(|p| p != &item_id);
             }
             normalize_pinned_items(&mut pinned_items, &history);
             apply_pin_order(&mut history, &pinned_items);
@@ -724,19 +728,20 @@ impl ClipboardManager {
         }
 
         let db_result = if pinned {
-            crate::utils::database::pin_item(&item).await
+            crate::utils::database::pin_item(&item_id).await
         } else {
-            crate::utils::database::unpin_item(&item).await
+            crate::utils::database::unpin_item(&item_id).await
         };
 
         if db_result.is_err() {
             let mut history = lock_arc_mutex(&self.history);
-            if history.iter().any(|existing| existing == &item) {
+            let exists = history.iter().any(|existing| crate::utils::database::stable_history_item_id(existing) == item_id);
+            if exists {
                 let mut pinned_items = lock_arc_mutex(&self.pinned_items);
                 if pinned {
-                    pinned_items.retain(|p| p != &item);
-                } else if !pinned_items.iter().any(|p| p == &item) {
-                    pinned_items.insert(0, item.clone());
+                    pinned_items.retain(|p| p != &item_id);
+                } else if !pinned_items.iter().any(|p| p == &item_id) {
+                    pinned_items.insert(0, item_id.clone());
                 }
                 normalize_pinned_items(&mut pinned_items, &history);
                 apply_pin_order(&mut history, &pinned_items);
@@ -752,11 +757,11 @@ impl ClipboardManager {
     pub async fn set_pinned_by_selector_async(
         &self,
         index: Option<usize>,
-        item: Option<String>,
+        item_id: Option<String>,
         pinned: bool,
     ) -> Result<(), String> {
-        let resolved_item = item
-            .or_else(|| index.and_then(|idx| self.get_history_item(idx)))
+        let resolved_item = item_id
+            .or_else(|| index.and_then(|idx| self.get_history_item(idx)).map(|c| crate::utils::database::stable_history_item_id(&c)))
             .ok_or_else(|| "索引超出范围".to_string())?;
         self.set_pinned_async(resolved_item, pinned).await
     }
@@ -891,21 +896,32 @@ fn shrink_text_history_with_group_protection(
 }
 
 fn normalize_pinned_items(pinned_items: &mut Vec<String>, history: &[String]) {
-    let existing: HashSet<&String> = history.iter().collect();
-    let mut seen = HashSet::new();
-    pinned_items.retain(|item| existing.contains(item) && seen.insert(item.clone()));
+    let history_ids: HashSet<String> = history.iter().map(|item| crate::utils::database::stable_history_item_id(item)).collect();
+    pinned_items.retain(|p| history_ids.contains(p));
 }
 
 fn apply_pin_order(history: &mut Vec<String>, pinned_items: &[String]) {
-    if pinned_items.is_empty() || history.is_empty() {
-        return;
-    }
-    let mut ordered = Vec::with_capacity(history.len());
-    for pinned in pinned_items {
-        if let Some(pos) = history.iter().position(|item| item == pinned) {
-            ordered.push(history.remove(pos));
+    let mut pinned_set: HashSet<String> = pinned_items.iter().cloned().collect();
+    let mut pinned_list = Vec::new();
+    let mut unpinned_list = Vec::new();
+
+    for item in history.drain(..) {
+        let item_id = crate::utils::database::stable_history_item_id(&item);
+        if pinned_set.remove(&item_id) {
+            pinned_list.push(item);
+        } else {
+            unpinned_list.push(item);
         }
     }
-    ordered.append(history);
-    *history = ordered;
+
+    let mut pinned_map: HashMap<String, String> = pinned_list.into_iter().map(|item| (crate::utils::database::stable_history_item_id(&item), item)).collect();
+    let mut sorted_pinned = Vec::new();
+    for p in pinned_items {
+        if let Some(item) = pinned_map.remove(p) {
+            sorted_pinned.push(item);
+        }
+    }
+
+    history.extend(sorted_pinned);
+    history.extend(unpinned_list);
 }

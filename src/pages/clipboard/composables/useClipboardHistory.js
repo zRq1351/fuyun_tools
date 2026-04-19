@@ -35,49 +35,49 @@ export function useClipboardHistory() {
     }
 
     // 移除分类索引
-    const removeCategoryIndexForItem = (content) => {
-        const oldCategory = itemCategorySnapshot.get(content)
+    const removeCategoryIndexForItem = (id) => {
+        const oldCategory = itemCategorySnapshot.get(id)
         if (!oldCategory) {
-            itemCategorySnapshot.delete(content)
+            itemCategorySnapshot.delete(id)
             return
         }
         const contentSet = categorySearchIndex.get(oldCategory)
         if (contentSet) {
-            contentSet.delete(content)
+            contentSet.delete(id)
             if (contentSet.size === 0) {
                 categorySearchIndex.delete(oldCategory)
             }
         }
-        itemCategorySnapshot.delete(content)
+        itemCategorySnapshot.delete(id)
     }
 
     // 应用分类索引
-    const applyCategoryIndexForItem = (content, category) => {
-        removeCategoryIndexForItem(content)
+    const applyCategoryIndexForItem = (id, category) => {
+        removeCategoryIndexForItem(id)
         const normalized = String(category || '未分类')
-        itemCategorySnapshot.set(content, normalized)
+        itemCategorySnapshot.set(id, normalized)
         let contentSet = categorySearchIndex.get(normalized)
         if (!contentSet) {
             contentSet = new Set()
             categorySearchIndex.set(normalized, contentSet)
         }
-        contentSet.add(content)
+        contentSet.add(id)
     }
 
     // 设置分类（本地），与图片的 setItemCategoryLocal 一致
-    const setItemCategoryLocal = (content, category) => {
-        if (!content) return
+    const setItemCategoryLocal = (id, category) => {
+        if (!id) return
         const normalized = String(category || '未分类')
-        categoryMap.value[content] = normalized
-        applyCategoryIndexForItem(content, normalized)
+        categoryMap.value[id] = normalized
+        applyCategoryIndexForItem(id, normalized)
         keywordCategoryMatchCache.clear()
     }
 
     // 移除分类（本地）
-    const removeItemCategoryLocal = (content) => {
-        if (!content) return
-        delete categoryMap.value[content]
-        removeCategoryIndexForItem(content)
+    const removeItemCategoryLocal = (id) => {
+        if (!id) return
+        delete categoryMap.value[id]
+        removeCategoryIndexForItem(id)
         keywordCategoryMatchCache.clear()
     }
 
@@ -87,8 +87,8 @@ export function useClipboardHistory() {
         itemCategorySnapshot.clear()
         keywordCategoryMatchCache.clear()
         const currentCategoryMap = categoryMap.value || {}
-        for (const content of Object.keys(currentCategoryMap)) {
-            applyCategoryIndexForItem(content, currentCategoryMap[content] || '未分类')
+        for (const id of Object.keys(currentCategoryMap)) {
+            applyCategoryIndexForItem(id, currentCategoryMap[id] || '未分类')
         }
     }
 
@@ -100,15 +100,15 @@ export function useClipboardHistory() {
         if (cached) {
             return cached
         }
-        const matchedContents = new Set()
-        for (const [category, contentSet] of categorySearchIndex.entries()) {
+        const matchedIds = new Set()
+        for (const [category, idSet] of categorySearchIndex.entries()) {
             if (!String(category).toLowerCase().includes(keyword)) continue
-            for (const content of contentSet) {
-                matchedContents.add(content)
+            for (const id of idSet) {
+                matchedIds.add(id)
             }
         }
-        keywordCategoryMatchCache.set(cacheKey, matchedContents)
-        return matchedContents
+        keywordCategoryMatchCache.set(cacheKey, matchedIds)
+        return matchedIds
     }
 
     // 使用 computed 实现与图片一致的即时响应过滤，并使用索引加速
@@ -121,24 +121,25 @@ export function useClipboardHistory() {
         const keyword = searchKeyword.value.trim().toLowerCase()
 
         // 使用分类索引快速过滤
-        const categoryFilteredContents = activeCategory
+        const categoryFilteredIds = activeCategory
             ? (categorySearchIndex.get(activeCategory) || new Set())
             : null
 
         // 使用关键词索引（如果有关键词）
-        const keywordMatchedContents = keyword ? getKeywordCategoryMatchedIds(keyword) : null
+        const keywordMatchedIds = keyword ? getKeywordCategoryMatchedIds(keyword) : null
 
         return pagedHistory.value
             .filter((entry) => {
+                const id = entry.id
                 const content = entry.content
 
                 // 分类过滤：使用索引 O(1)
-                if (categoryFilteredContents && !categoryFilteredContents.has(content)) {
+                if (categoryFilteredIds && !categoryFilteredIds.has(id)) {
                     return false
                 }
 
                 // 关键词过滤：使用索引 O(1)
-                if (keywordMatchedContents && !keywordMatchedContents.has(content)) {
+                if (keywordMatchedIds && !keywordMatchedIds.has(id)) {
                     return false
                 }
 
@@ -226,8 +227,8 @@ export function useClipboardHistory() {
             pagedHistory.value = sortPageItems(items)
             // 重建索引
             for (const item of items) {
-                if (item.content) {
-                    setItemCategoryLocal(item.content, item.category || '未分类')
+                if (item.id) {
+                    setItemCategoryLocal(item.id, item.category || '未分类')
                 }
             }
             return
@@ -236,8 +237,8 @@ export function useClipboardHistory() {
         for (const item of items) {
             map.set(item.position, item)
             // 更新分类索引
-            if (item.content) {
-                setItemCategoryLocal(item.content, item.category || '未分类')
+            if (item.id) {
+                setItemCategoryLocal(item.id, item.category || '未分类')
             }
         }
         const merged = Array.from(map.values())
@@ -316,16 +317,17 @@ export function useClipboardHistory() {
             }
 
             // 获取现有数据的快照
-            const existingByContent = new Map(pagedHistory.value.map(entry => [entry.content, entry]))
-            const incomingContents = new Set(items.map(item => item.content))
+            const existingById = new Map(pagedHistory.value.map(entry => [entry.id, entry]))
+            const incomingIds = new Set(items.map(item => item.id))
 
             // 构建新数据列表（前部）
             const front = []
             for (const item of items) {
-                if (!item.content) continue
-                const existing = existingByContent.get(item.content) || {}
+                if (!item.id) continue
+                const existing = existingById.get(item.id) || {}
                 front.push({
                     ...existing,
+                    id: item.id,
                     content: item.content,
                     position: item.position ?? existing.position ?? 0,
                     snippet: item.snippet ?? existing.snippet ?? '',
@@ -333,13 +335,13 @@ export function useClipboardHistory() {
                     category: item.category || existing.category || '未分类'
                 })
                 // 更新分类索引
-                setItemCategoryLocal(item.content, item.category || '未分类')
+                setItemCategoryLocal(item.id, item.category || '未分类')
             }
 
             // 保留不在新数据中的旧项（后部）
             const rest = []
             for (const entry of pagedHistory.value) {
-                if (!incomingContents.has(entry.content)) {
+                if (!incomingIds.has(entry.id)) {
                     rest.push(entry)
                 }
             }
@@ -451,9 +453,9 @@ export function useClipboardHistory() {
             const removedItemContent = item || removedEntry?.content || historyMap.value[index]
             const removedItemId = removedEntry?.id
             if (removedItemId && categoryMap.value[removedItemId]) {
-                delete categoryMap.value[removedItemId]
+                removeItemCategoryLocal(removedItemId)
                 try {
-                    await CategoryService.setItemCategory(removedItemContent, "")
+                    await CategoryService.setItemCategory(removedItemId, "")
                 } catch (error) {
                     console.error('移除分类失败:', error)
                 }
@@ -533,17 +535,17 @@ export function useClipboardHistory() {
         }
     }
 
-    const setLocalPinnedByContent = (content, pinned) => {
-        if (!content) return
-        const target = pagedHistory.value.find((entry) => entry.content === content)
+    const setLocalPinnedById = (id, pinned) => {
+        if (!id) return
+        const target = pagedHistory.value.find((entry) => entry.id === id)
         if (!target) return
         const {pinned: pinnedEntries, unpinned: unpinnedEntries} = buildSortedGroups()
         const normalizedTarget = {
             ...target,
             pinned
         }
-        const nextPinned = pinnedEntries.filter((entry) => entry.content !== content)
-        const nextUnpinned = unpinnedEntries.filter((entry) => entry.content !== content)
+        const nextPinned = pinnedEntries.filter((entry) => entry.id !== id)
+        const nextUnpinned = unpinnedEntries.filter((entry) => entry.id !== id)
         if (pinned) {
             nextPinned.unshift(normalizedTarget)
         } else {
@@ -553,14 +555,14 @@ export function useClipboardHistory() {
         rebuildHistoryArray()
     }
 
-    const insertLocalIncomingContent = (content, pinned = false) => {
-        if (!content) return
-        const existing = pagedHistory.value.find((entry) => entry.content === content)
+    const insertLocalIncomingContent = (content, id, pinned = false) => {
+        if (!content || !id) return
+        const existing = pagedHistory.value.find((entry) => entry.id === id)
         const {pinned: pinnedEntries, unpinned: unpinnedEntries} = buildSortedGroups()
-        const nextPinned = pinnedEntries.filter((entry) => entry.content !== content)
-        const nextUnpinned = unpinnedEntries.filter((entry) => entry.content !== content)
+        const nextPinned = pinnedEntries.filter((entry) => entry.id !== id)
+        const nextUnpinned = unpinnedEntries.filter((entry) => entry.id !== id)
         if (existing) {
-            const normalized = {...existing, pinned}
+            const normalized = {...existing, content, pinned}
             if (pinned) {
                 nextPinned.unshift(normalized)
             } else {
@@ -571,6 +573,7 @@ export function useClipboardHistory() {
             return
         }
         const incoming = {
+            id,
             content,
             position: 0,
             snippet: '',
@@ -588,13 +591,13 @@ export function useClipboardHistory() {
         rebuildHistoryArray()
     }
 
-    const promoteLocalByContent = (content) => {
-        if (!content || pagedHistory.value.length < 2) return
-        const target = pagedHistory.value.find((entry) => entry.content === content)
+    const promoteLocalById = (id) => {
+        if (!id || pagedHistory.value.length < 2) return
+        const target = pagedHistory.value.find((entry) => entry.id === id)
         if (!target) return
         const {pinned: pinnedEntries, unpinned: unpinnedEntries} = buildSortedGroups()
-        const nextPinned = pinnedEntries.filter((entry) => entry.content !== content)
-        const nextUnpinned = unpinnedEntries.filter((entry) => entry.content !== content)
+        const nextPinned = pinnedEntries.filter((entry) => entry.id !== id)
+        const nextUnpinned = unpinnedEntries.filter((entry) => entry.id !== id)
         if (target.pinned) {
             nextPinned.unshift({...target, pinned: true})
         } else {
@@ -627,8 +630,8 @@ export function useClipboardHistory() {
         loadTailPage,
         setSort,
         setPageSize,
-        promoteLocalByContent,
-        setLocalPinnedByContent,
+        promoteLocalById,
+        setLocalPinnedById,
         insertLocalIncomingContent,
         applyPayloadSnapshot,
         bumpFilterDataRevision,
