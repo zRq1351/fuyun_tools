@@ -114,14 +114,7 @@
           >
             每页{{ pageSize }}
           </button>
-          <button
-              :title="`切换排序方向（当前：${sortOrderText}）`"
-              class="nav-action-btn"
-              type="button"
-              @click="toggleSortOrder"
-          >
-            {{ sortOrderText }}
-          </button>
+
           <button aria-label="回到开头" class="nav-action-btn icon-btn" title="回到开头" type="button"
                   @click="scrollToStart">
             <el-icon>
@@ -236,7 +229,6 @@ const {
   totalCount,
   hasMore,
   isLoadingPage,
-  sortOrder,
   getItemCategory,
   updateSelection,
   deleteItem: originalDeleteItem,
@@ -245,7 +237,6 @@ const {
   syncHistoryIncremental,
   loadMoreHistory,
   loadTailPage,
-  setSort,
   setPageSize,
   promoteLocalById,
   setLocalPinnedById,
@@ -343,8 +334,6 @@ const keywordHitCount = computed(() => {
   }).length
 })
 
-const sortOrderText = computed(() => sortOrder.value === 'desc' ? '降序' : '升序')
-
 const PAGE_SIZE_OPTIONS = [10, 30, 50]
 const normalizePageSize = (value) => {
   const parsed = Number(value)
@@ -357,16 +346,6 @@ const cyclePageSize = async () => {
   const next = PAGE_SIZE_OPTIONS[(currentIndex + 1) % PAGE_SIZE_OPTIONS.length]
   await setPageSize(next)
   localStorage.setItem('clipboard_history_page_size', String(next))
-}
-
-const persistSortState = () => {
-  localStorage.setItem('clipboard_history_sort_order', sortOrder.value)
-}
-
-const toggleSortOrder = async () => {
-  const nextSortOrder = sortOrder.value === 'desc' ? 'asc' : 'desc'
-  await setSort('pinnedFirst', nextSortOrder)
-  persistSortState()
 }
 
 const syncWindowPayload = (payload = {}) => {
@@ -791,9 +770,7 @@ watch([contextMenuVisible, contextMenuX, contextMenuY], async ([visible]) => {
 })
 
 onMounted(() => {
-  const savedSortOrder = localStorage.getItem('clipboard_history_sort_order')
   const savedPageSize = localStorage.getItem('clipboard_history_page_size')
-  sortOrder.value = savedSortOrder === 'desc' ? 'desc' : 'asc'
   pageSize.value = normalizePageSize(savedPageSize)
   init()
 })
