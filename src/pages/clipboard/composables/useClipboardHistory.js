@@ -343,16 +343,17 @@ export function useClipboardHistory() {
                     rest.push(entry)
                 }
             }
-
+            
             // 合并：新数据在前，旧数据在后
             const merged = [...front, ...rest]
-            
+
             // 重新校准 position 以防顺序错乱
+            merged.sort((a, b) => a.position - b.position)
             merged.forEach((entry, index) => {
                 entry.position = index;
             });
-            
-            pagedHistory.value = sortPageItems(merged)
+
+            pagedHistory.value = sortPageItems(merged);
 
             totalCount.value = Number.isFinite(response?.total)
                 ? Math.max(Number(response.total), merged.length, Number(totalCount.value) || 0)
