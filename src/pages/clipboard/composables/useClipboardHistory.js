@@ -290,11 +290,13 @@ export function useClipboardHistory() {
         isLoadingPage.value = true
         try {
             const keyword = searchKeyword.value.trim()
-            const category = categoryFilter.value === '全部' ? null : categoryFilter.value
+
+            // 重点修改：增量拉取最新数据时，强制拉取全部分类的数据，避免由于在某个子分类下拉取导致漏掉其他新数据，
+            // 或者由于带上了 category 过滤导致返回的 position 不是全局连续的，从而在合并后引起乱序。
             const response = await ClipboardService.getHistoryPage({
                 offset: 0,
                 limit: Math.max(pageSize.value, 30),
-                category,
+                category: null, // 始终拉取全局最新的数据
                 pinnedOnly: false,
                 keyword: keyword || null,
                 sortBy: sortBy.value,
