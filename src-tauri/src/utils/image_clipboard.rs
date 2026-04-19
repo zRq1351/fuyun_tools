@@ -654,6 +654,7 @@ impl ImageClipboardManager {
                 &mut history,
                 max_items,
                 &mut categories,
+                &pinned_items,
                 self.grouped_items_protected_from_limit,
             );
             cleanup_image_blob_files_async(overflow_paths);
@@ -981,6 +982,7 @@ impl ImageClipboardManager {
                 &mut history,
                 self.max_items,
                 &mut categories,
+                &pinned_items,
                 self.grouped_items_protected_from_limit,
             );
             cleanup_image_blob_files_async(overflow_paths);

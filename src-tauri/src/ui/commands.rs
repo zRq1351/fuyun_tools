@@ -981,8 +981,14 @@ fn bind_screenshot_window_lifecycle(window: &tauri::WebviewWindow, app: &AppHand
 }
 
 #[derive(serde::Serialize)]
+pub struct TextHistoryItem {
+    pub id: String,
+    pub content: String,
+}
+
+#[derive(serde::Serialize)]
 pub struct HistoryResponse {
-    history: Vec<String>,
+    history: Vec<TextHistoryItem>,
     categories: HashMap<String, String>,
     category_list: Vec<String>,
     pinned_items: Vec<String>,
@@ -992,7 +998,7 @@ pub struct HistoryResponse {
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipboardFullSnapshot {
-    pub text_history: Vec<String>,
+    pub text_history: Vec<TextHistoryItem>,
     pub text_categories: HashMap<String, String>,
     pub text_category_list: Vec<String>,
     pub text_pinned_items: Vec<String>,
