@@ -240,6 +240,7 @@ const {
   resetAndReloadHistory,
   syncHistoryIncremental,
   loadMoreHistory,
+  loadTailPage,
   setSort,
   setPageSize,
   promoteLocalByContent,
@@ -665,8 +666,16 @@ const scrollToEnd = async () => {
   if (container) {
     container.scrollLeft = Math.max(0, container.scrollWidth - container.clientWidth)
   }
-  loadMoreIntent.value = true
-  await tryLoadMoreByScroll()
+  if (hasMore.value) {
+    try {
+      await loadTailPage()
+      await nextTick()
+    } catch (error) {
+      console.error('加载文字尾页失败:', error)
+      await syncHistoryIncremental()
+      await nextTick()
+    }
+  }
   if (visibleHistory.value.length > 0) {
     selectedIndex.value = visibleHistory.value[visibleHistory.value.length - 1].index
     await ensureKeyboardSelectionVisible()
