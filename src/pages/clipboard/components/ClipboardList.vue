@@ -17,7 +17,7 @@
         @click="handleClick(entry.id)"
         @dblclick="handleDoubleClick(entry.id)"
         @contextmenu.prevent="showContextMenu($event, entry.id, index)"
-        @dragstart="handleDragStart($event, entry.id)"
+        @dragstart="handleItemDragStart($event, entry.id)"
         @dragend="handleDragEnd"
     >
       <div v-if="isWebUrl(entry.content)" class="open-btn" @click.stop="openWebUrl(entry.content)">
@@ -208,6 +208,19 @@ onUnmounted(() => {
   window.removeEventListener('dragend', handleGlobalDragEnd)
 })
 
+const handleItemDragStart = (e, id) => {
+  // 如果我们正在自定义的鼠标横向拖拽滚动，则禁止原生的 HTML5 拖拽事件
+  if (isDragging || isDown) {
+    e.preventDefault();
+    return false;
+  }
+  
+  // 否则执行外部传入的正常拖拽（用于把剪切板项拖给其他分类等）
+  if (typeof props.handleDragStart === 'function') {
+    props.handleDragStart(e, id);
+  }
+}
+
 const handleClick = (entryId) => {
   props.updateSelection(entryId, false, contentRef.value, null)
 }
@@ -253,6 +266,10 @@ const handleMouseDown = (e) => {
     dragTargetScrollLeft = scrollLeftVal
   }
 
+  // 防止原生的 dragstart 干扰我们自定义的鼠标拖拽滚动
+  // 仅在点击项内容时才允许拖拽（如果是项内拖拽文字等，我们这里统一拦截可能影响，但由于列表是整体，所以拦截整个列表的默认行为）
+  // e.preventDefault() 这里不能直接加，否则点击事件会失效。
+
   window.addEventListener('mousemove', handleGlobalMouseMove)
   window.addEventListener('mouseup', handleGlobalMouseUp, true)
   window.addEventListener('dragend', handleGlobalDragEnd)
@@ -275,9 +292,18 @@ const handleGlobalMouseMove = (e) => {
     contentRef.value.style.cursor = 'grabbing'
     contentRef.value.classList.add('is-dragging')
     document.body.style.userSelect = 'none'
+    
+    // 如果开始拖拽了，则取消当前所有的选区，防止选中文字
+    if (window.getSelection) {
+      window.getSelection().removeAllRanges();
+    }
   }
 
   if (!isDragging) return
+  
+  // 在拖拽状态下阻止默认事件，防止触发原生的 HTML5 拖拽导致 mousemove 丢失
+  e.preventDefault();
+  
   dragTargetScrollLeft = scrollLeftVal - walk
   const maxScrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
   if (dragTargetScrollLeft > maxScrollLeft + 36) {
