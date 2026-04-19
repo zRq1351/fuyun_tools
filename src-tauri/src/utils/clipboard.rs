@@ -608,9 +608,8 @@ impl ClipboardManager {
             self.exact_index_cache.lock().clear();
             self.history_cache_dirty.store(true, Ordering::Relaxed);
 
-            let item_id = crate::utils::database::stable_history_item_id(&item);
             let mut categories = lock_arc_mutex(&self.categories);
-            categories.remove(&item_id);
+            categories.remove(&item);
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             normalize_pinned_items(&mut pinned_items, &history);
 
@@ -854,8 +853,7 @@ fn shrink_text_history_with_group_protection(
         if history.len() > max_items {
             let removed = history.split_off(max_items);
             for item in removed {
-                let item_id = crate::utils::database::stable_history_item_id(&item);
-                categories.remove(&item_id);
+                categories.remove(&item);
             }
         }
         return;
@@ -870,8 +868,7 @@ fn shrink_text_history_with_group_protection(
     let mut to_remove = HashSet::new();
 
     for (i, item) in history.iter().enumerate().rev() {
-        let item_id = crate::utils::database::stable_history_item_id(item);
-        if !categories.contains_key(&item_id) {
+        if !categories.contains_key(item) {
             to_remove.insert(i);
             removed_count += 1;
             if removed_count == excess {
@@ -885,8 +882,7 @@ fn shrink_text_history_with_group_protection(
         history.retain(|item| {
             let keep = !to_remove.contains(&idx);
             if !keep {
-                let item_id = crate::utils::database::stable_history_item_id(item);
-                categories.remove(&item_id);
+                categories.remove(item);
             }
             idx += 1;
             keep

@@ -113,6 +113,10 @@ export function useClipboardHistory() {
 
     // 使用 computed 实现与图片一致的即时响应过滤，并使用索引加速
     const visibleHistory = computed(() => {
+        // 访问 filterDataRevision 触发响应式更新
+        // eslint-disable-next-line no-unused-expressions
+        filterDataRevision.value
+        
         const activeCategory = categoryFilter.value === '全部' ? null : categoryFilter.value
         const keyword = searchKeyword.value.trim().toLowerCase()
 

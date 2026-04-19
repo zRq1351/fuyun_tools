@@ -430,20 +430,20 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
         .filter_map(|row| row.try_get::<String, _>(0).ok())
         .collect::<Vec<_>>();
 
-    // 分类表：使用 item_id 作为键
-    let category_rows = sqlx::query("SELECT item_id, category FROM categories")
+    // 分类表：使用 content 作为键
+    let category_rows = sqlx::query("SELECT content, category FROM categories WHERE content IS NOT NULL AND content != ''")
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| format!("读取历史数据库失败: {}", e))?;
     let mut categories = HashMap::new();
     for row in category_rows {
-        let item_id: String = row
+        let content: String = row
             .try_get(0)
             .map_err(|e| format!("读取历史数据库失败: {}", e))?;
         let category: String = row
             .try_get(1)
             .map_err(|e| format!("读取历史数据库失败: {}", e))?;
-        categories.insert(item_id, category);
+        categories.insert(content, category);
     }
 
     // 分类列表：使用 id 排序
