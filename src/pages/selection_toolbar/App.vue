@@ -166,16 +166,6 @@ onMounted(async () => {
         clearTimeout(hoverTimeout)
         hoverTimeout = null
       }
-      try {
-        const factor = await appWindow.scaleFactor()
-        const physicalPos = await appWindow.outerPosition()
-        const logicalX = physicalPos.x / factor
-        const logicalY = physicalPos.y / factor
-        const shrunkX = logicalX + (240 - 64) / 2
-        const shrunkY = logicalY + (100 - 64) / 2
-        await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
-        await appWindow.setSize(new LogicalSize(64, 64))
-      } catch(e) {}
     }
     window.addEventListener('selection-toolbar-text', onDomText)
     unlistenDomText = () => window.removeEventListener('selection-toolbar-text', onDomText)
@@ -186,16 +176,6 @@ onMounted(async () => {
         clearTimeout(hoverTimeout)
         hoverTimeout = null
       }
-      try {
-        const factor = await appWindow.scaleFactor()
-        const physicalPos = await appWindow.outerPosition()
-        const logicalX = physicalPos.x / factor
-        const logicalY = physicalPos.y / factor
-        const shrunkX = logicalX + (240 - 64) / 2
-        const shrunkY = logicalY + (100 - 64) / 2
-        await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
-        await appWindow.setSize(new LogicalSize(64, 64))
-      } catch(e) {}
     })
 
     // Fallback listener for fast mouse exits from the window
