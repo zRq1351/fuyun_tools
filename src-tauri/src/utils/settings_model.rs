@@ -157,7 +157,7 @@ impl Default for AppSettingsData {
 }
 
 fn default_selection_enabled() -> bool {
-    false
+    true
 }
 
 fn default_text_clipboard_enabled() -> bool {
