@@ -82,7 +82,6 @@ const onMouseLeave = () => {
     clearTimeout(hoverTimeout)
   }
   hoverTimeout = setTimeout(async () => {
-    isHovered.value = false
     try {
       const factor = await appWindow.scaleFactor()
       const physicalPos = await appWindow.outerPosition()
@@ -94,10 +93,14 @@ const onMouseLeave = () => {
 
       await appWindow.setSize(new LogicalSize(42, 42))
       await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
+      
+      // 在缩小窗口后再改变内部状态，防止视觉抖动
+      isHovered.value = false
     } catch (e) {
       console.error(e)
+      isHovered.value = false
     }
-  }, 50)
+  }, 100)
 }
 
 const getSafeSelectedText = () => selectedText.value.trim()
@@ -135,7 +138,6 @@ const runAction = async (executor, errorMessage) => {
       clearTimeout(hoverTimeout)
       hoverTimeout = null
     }
-    isHovered.value = false
     try {
       const factor = await appWindow.scaleFactor()
       const physicalPos = await appWindow.outerPosition()
@@ -145,7 +147,10 @@ const runAction = async (executor, errorMessage) => {
       const shrunkY = logicalY + (50 - 42) / 2
       await appWindow.setSize(new LogicalSize(42, 42))
       await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
-    } catch (e) {}
+      isHovered.value = false
+    } catch (e) {
+      isHovered.value = false
+    }
     
     await executor(text)
   } catch (error) {
@@ -167,6 +172,9 @@ onMounted(async () => {
         clearTimeout(hoverTimeout)
         hoverTimeout = null
       }
+      try {
+        await appWindow.setSize(new LogicalSize(42, 42))
+      } catch(e) {}
     }
     window.addEventListener('selection-toolbar-text', onDomText)
     unlistenDomText = () => window.removeEventListener('selection-toolbar-text', onDomText)
@@ -177,15 +185,14 @@ onMounted(async () => {
         clearTimeout(hoverTimeout)
         hoverTimeout = null
       }
+      try {
+        await appWindow.setSize(new LogicalSize(42, 42))
+      } catch(e) {}
     })
 
     // Fallback listener for fast mouse exits from the window
     window.addEventListener('mouseout', (e) => {
-      // 检查鼠标是否真的离开了整个 document
-      if (!e.relatedTarget && e.clientY >= 0 && e.clientX >= 0 && e.clientX <= window.innerWidth && e.clientY <= window.innerHeight) {
-        // 如果 clientX 和 clientY 还在窗口内部，说明是在子元素之间移动，不触发
-        return
-      }
+      // 当鼠标真正离开整个浏览器窗口(即 relatedTarget 为 null)时
       if (!e.relatedTarget) {
         onMouseLeave()
       }
@@ -198,7 +205,6 @@ onMounted(async () => {
           clearTimeout(hoverTimeout)
           hoverTimeout = null
         }
-        isHovered.value = false
         try {
           const factor = await appWindow.scaleFactor()
           const physicalPos = await appWindow.outerPosition()
@@ -208,7 +214,10 @@ onMounted(async () => {
           const shrunkY = logicalY + (50 - 42) / 2
           await appWindow.setSize(new LogicalSize(42, 42))
           await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
-        } catch (e) {}
+          isHovered.value = false
+        } catch (e) {
+          isHovered.value = false
+        }
       }
     })
   } catch (error) {
