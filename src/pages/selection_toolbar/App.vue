@@ -49,11 +49,17 @@ const isHovered = ref(false)
 let unlistenSelectedText = null
 let unlistenDomText = null
 let unlistenFocus = null
+let hoverTimeout = null
 
 const appWindow = getCurrentWindow()
 
 const onMouseEnter = async () => {
+  if (hoverTimeout) {
+    clearTimeout(hoverTimeout)
+    hoverTimeout = null
+  }
   if (isHovered.value) return
+  isHovered.value = true
   try {
     const factor = await appWindow.scaleFactor()
     const physicalPos = await appWindow.outerPosition()
@@ -68,26 +74,30 @@ const onMouseEnter = async () => {
   } catch (e) {
     console.error(e)
   }
-  isHovered.value = true
 }
 
-const onMouseLeave = async () => {
+const onMouseLeave = () => {
   if (!isHovered.value) return
-  isHovered.value = false
-  try {
-    const factor = await appWindow.scaleFactor()
-    const physicalPos = await appWindow.outerPosition()
-    const logicalX = physicalPos.x / factor
-    const logicalY = physicalPos.y / factor
-
-    const shrunkX = logicalX + (176 - 42) / 2
-    const shrunkY = logicalY + (50 - 42) / 2
-
-    await appWindow.setSize(new LogicalSize(42, 42))
-    await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
-  } catch (e) {
-    console.error(e)
+  if (hoverTimeout) {
+    clearTimeout(hoverTimeout)
   }
+  hoverTimeout = setTimeout(async () => {
+    isHovered.value = false
+    try {
+      const factor = await appWindow.scaleFactor()
+      const physicalPos = await appWindow.outerPosition()
+      const logicalX = physicalPos.x / factor
+      const logicalY = physicalPos.y / factor
+
+      const shrunkX = logicalX + (176 - 42) / 2
+      const shrunkY = logicalY + (50 - 42) / 2
+
+      await appWindow.setSize(new LogicalSize(42, 42))
+      await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
+    } catch (e) {
+      console.error(e)
+    }
+  }, 50)
 }
 
 const getSafeSelectedText = () => selectedText.value.trim()
@@ -121,7 +131,22 @@ const runAction = async (executor, errorMessage) => {
   if (!text || actionLoading.value) return
   actionLoading.value = true
   try {
+    if (hoverTimeout) {
+      clearTimeout(hoverTimeout)
+      hoverTimeout = null
+    }
     isHovered.value = false
+    try {
+      const factor = await appWindow.scaleFactor()
+      const physicalPos = await appWindow.outerPosition()
+      const logicalX = physicalPos.x / factor
+      const logicalY = physicalPos.y / factor
+      const shrunkX = logicalX + (176 - 42) / 2
+      const shrunkY = logicalY + (50 - 42) / 2
+      await appWindow.setSize(new LogicalSize(42, 42))
+      await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
+    } catch (e) {}
+    
     await executor(text)
   } catch (error) {
     handleAppError(error, errorMessage)
@@ -138,25 +163,52 @@ onMounted(async () => {
     const onDomText = async (event) => {
       selectedText.value = typeof event?.detail === 'string' ? event.detail : ''
       isHovered.value = false
+      if (hoverTimeout) {
+        clearTimeout(hoverTimeout)
+        hoverTimeout = null
+      }
     }
     window.addEventListener('selection-toolbar-text', onDomText)
     unlistenDomText = () => window.removeEventListener('selection-toolbar-text', onDomText)
     unlistenSelectedText = await listen('selected-text', async (event) => {
       selectedText.value = typeof event.payload === 'string' ? event.payload : ''
       isHovered.value = false
+      if (hoverTimeout) {
+        clearTimeout(hoverTimeout)
+        hoverTimeout = null
+      }
     })
 
     // Fallback listener for fast mouse exits from the window
     window.addEventListener('mouseout', (e) => {
+      // 检查鼠标是否真的离开了整个 document
+      if (!e.relatedTarget && e.clientY >= 0 && e.clientX >= 0 && e.clientX <= window.innerWidth && e.clientY <= window.innerHeight) {
+        // 如果 clientX 和 clientY 还在窗口内部，说明是在子元素之间移动，不触发
+        return
+      }
       if (!e.relatedTarget) {
         onMouseLeave()
       }
     })
 
     // Reset state when the window loses focus
-    unlistenFocus = await appWindow.onFocusChanged(({ payload: focused }) => {
+    unlistenFocus = await appWindow.onFocusChanged(async ({ payload: focused }) => {
       if (!focused) {
+        if (hoverTimeout) {
+          clearTimeout(hoverTimeout)
+          hoverTimeout = null
+        }
         isHovered.value = false
+        try {
+          const factor = await appWindow.scaleFactor()
+          const physicalPos = await appWindow.outerPosition()
+          const logicalX = physicalPos.x / factor
+          const logicalY = physicalPos.y / factor
+          const shrunkX = logicalX + (176 - 42) / 2
+          const shrunkY = logicalY + (50 - 42) / 2
+          await appWindow.setSize(new LogicalSize(42, 42))
+          await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
+        } catch (e) {}
       }
     })
   } catch (error) {
@@ -254,7 +306,7 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
   flex-direction: row;
-  gap: 5px;
+  gap: 0;
   width: auto;
   box-sizing: border-box;
 }
@@ -264,7 +316,7 @@ body {
 }
 
 .toolbar-button {
-  background: rgba(255, 255, 255, 0.08);
+  background: transparent;
   border: none;
   color: #eef3ff;
   width: 52px;
@@ -276,12 +328,13 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(255, 255, 255, 0.08);
   position: relative;
   overflow: hidden;
+  margin: 0 2.5px;
 }
 
 .toolbar-button:hover {
+  background: rgba(255, 255, 255, 0.08);
   transform: translateY(-1px);
 }
 
