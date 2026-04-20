@@ -50,39 +50,6 @@
 
       <div class="right-controls">
         <el-tooltip
-            content="回写到原应用"
-            :show-after="500"
-            placement="bottom"
-        >
-          <div class="icon-btn writeback-btn" @click="handleWriteBack">
-            <el-icon>
-              <Position/>
-            </el-icon>
-          </div>
-        </el-tooltip>
-        <el-tooltip
-            :show-after="500"
-            content="复制原文"
-            placement="bottom"
-        >
-          <div class="icon-btn copy-btn" @click="copyOriginalText">
-            <el-icon>
-              <DocumentCopy/>
-            </el-icon>
-          </div>
-        </el-tooltip>
-        <el-tooltip
-            :show-after="500"
-            content="复制结果"
-            placement="bottom"
-        >
-          <div class="icon-btn copy-btn" @click="copyResultText">
-            <el-icon>
-              <DocumentCopy/>
-            </el-icon>
-          </div>
-        </el-tooltip>
-        <el-tooltip
             :content="showOriginal ? '隐藏原文' : '显示原文'"
             :show-after="500"
             placement="bottom"
@@ -97,27 +64,67 @@
       </div>
     </div>
 
-    <div
-        v-if="showOriginal"
-        ref="originalRef"
-        class="content original-content"
-        v-html="originalHtml"
-        @wheel.stop.prevent="handleContentWheel('original', $event)"
-    ></div>
-
-    <div
-        ref="resultRef"
-        class="content result-content"
-        @scroll="handleResultScroll"
-        @wheel.stop.prevent="handleContentWheel('result', $event)"
-    >
-      <div v-if="isWaitingResult && !resultText" class="loading-wrap">
-        <span class="loading-dot"></span>
-        <span class="loading-dot"></span>
-        <span class="loading-dot"></span>
-        <span class="loading-text">正在生成结果</span>
+    <div v-if="showOriginal" class="content-wrapper original-wrapper">
+      <div class="content-actions">
+        <el-tooltip
+            :show-after="500"
+            content="复制原文"
+            placement="bottom"
+        >
+          <div class="icon-btn action-btn copy-btn" @click="copyOriginalText">
+            <el-icon>
+              <DocumentCopy/>
+            </el-icon>
+          </div>
+        </el-tooltip>
       </div>
-      <div v-html="resultHtml"></div>
+      <div
+          ref="originalRef"
+          class="content original-content"
+          v-html="originalHtml"
+          @wheel.stop.prevent="handleContentWheel('original', $event)"
+      ></div>
+    </div>
+
+    <div class="content-wrapper result-wrapper">
+      <div class="content-actions">
+        <el-tooltip
+            content="回写到原应用"
+            :show-after="500"
+            placement="bottom"
+        >
+          <div class="icon-btn action-btn writeback-btn" @click="handleWriteBack">
+            <el-icon>
+              <Position/>
+            </el-icon>
+          </div>
+        </el-tooltip>
+        <el-tooltip
+            :show-after="500"
+            content="复制结果"
+            placement="bottom"
+        >
+          <div class="icon-btn action-btn copy-btn" @click="copyResultText">
+            <el-icon>
+              <DocumentCopy/>
+            </el-icon>
+          </div>
+        </el-tooltip>
+      </div>
+      <div
+          ref="resultRef"
+          class="content result-content"
+          @scroll="handleResultScroll"
+          @wheel.stop.prevent="handleContentWheel('result', $event)"
+      >
+        <div v-if="isWaitingResult && !resultText" class="loading-wrap">
+          <span class="loading-dot"></span>
+          <span class="loading-dot"></span>
+          <span class="loading-dot"></span>
+          <span class="loading-text">正在生成结果</span>
+        </div>
+        <div v-html="resultHtml"></div>
+      </div>
     </div>
   </div>
 </template>
@@ -647,9 +654,11 @@ body.theme-light {
 }
 
 .container.theme-light .writeback-btn:hover {
-  color: #2b8a3e;
-  background: rgba(103, 194, 58, 0.16);
+  color: #2b8a3e !important;
+  background: rgba(103, 194, 58, 0.16) !important;
 }
+
+
 
 .container.theme-light .content {
   background: linear-gradient(150deg, rgba(249, 252, 255, 0.97), rgba(241, 247, 255, 0.96));
@@ -789,8 +798,54 @@ body.theme-light {
 }
 
 .writeback-btn:hover {
-  color: #67c23a;
-  background: rgba(103, 194, 58, 0.18);
+  color: #67c23a !important;
+  background: rgba(103, 194, 58, 0.18) !important;
+}
+
+.content-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.original-wrapper {
+  flex: 0 0 auto;
+  max-height: 30%;
+}
+
+.result-wrapper {
+  flex: 1;
+}
+
+.content-actions {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  display: flex;
+  gap: 6px;
+  z-index: 10;
+}
+
+.content-actions .action-btn {
+  background: rgba(35, 43, 60, 0.6);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(173, 198, 255, 0.1);
+}
+
+.content-actions .action-btn:hover {
+  background: rgba(146, 176, 237, 0.3);
+  border-color: rgba(173, 198, 255, 0.3);
+}
+
+.container.theme-light .content-actions .action-btn {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(154, 172, 206, 0.3);
+}
+
+.container.theme-light .content-actions .action-btn:hover {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(154, 172, 206, 0.5);
 }
 
 .content {
@@ -801,6 +856,7 @@ body.theme-light {
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
   padding: 15px;
+  padding-top: 36px;
   background: linear-gradient(150deg, rgba(29, 37, 54, 0.96), rgba(20, 27, 41, 0.94));
   border-radius: 10px;
   border: 1px solid rgba(166, 189, 240, 0.18);
@@ -810,8 +866,6 @@ body.theme-light {
 }
 
 .original-content {
-  flex: 0 0 auto;
-  max-height: 30%;
   background: linear-gradient(150deg, rgba(28, 48, 40, 0.9), rgba(20, 35, 30, 0.9));
   border-left: 4px solid #53c58a;
   color: #d5eee2;
@@ -820,7 +874,6 @@ body.theme-light {
 
 .result-content {
   border-left: 4px solid #63aaf6;
-  min-height: 0;
   position: relative;
 }
 
