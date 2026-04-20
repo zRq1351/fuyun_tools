@@ -352,7 +352,7 @@ fn ensure_recording_toolbar_window(
         label,
         WebviewUrl::App("recording_toolbar.html".into()),
     )
-    .title("录制工具栏")
+    .title("")
     .visible(false)
     .resizable(false)
     .decorations(false)
