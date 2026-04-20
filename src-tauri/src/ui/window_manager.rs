@@ -704,6 +704,7 @@ fn ensure_selection_toolbar_window(
     .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
+    .accept_first_mouse(true)
     .build()
     .map_err(|e| format!("创建划词工具栏窗口失败: {}", e))?;
 
@@ -728,7 +729,7 @@ fn show_selection_toolbar_internal(
             return;
         }
     }
-    
+
     let toolbar_window = match ensure_selection_toolbar_window(&app_handle) {
         Ok(w) => w,
         Err(e) => {

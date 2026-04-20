@@ -2775,15 +2775,15 @@ pub async fn clear_image_history(
             )
         })?;
 
-    
+
     let is_visible = {
         let mut state_guard = lock_arc_mutex(state.inner());
-        
+
         state_guard.image_history_dirty = true;
         state_guard.is_image_visible
     };
 
-    
+
     if is_visible {
         emit_image_history_payload(&app, state.inner().clone());
     }
@@ -3229,6 +3229,7 @@ pub async fn show_selection_toolbar_with_text(
         .transparent(true)
         .always_on_top(true)
         .skip_taskbar(true)
+        .accept_first_mouse(true)
         .build()
         .map_err(|e| format!("创建划词工具栏窗口失败: {}", e))?;
         bind_overlay_window_events(&toolbar_window, app.clone(), "selection_toolbar");
@@ -3340,10 +3341,10 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         let settings = load_settings()
             .map_err(|e| frontend_error(ErrorCode::ConfigError, "读取AI设置失败", e))?;
 
-        
+
         let mut result = HashMap::new();
 
-        
+
         result.insert(
             "version".to_string(),
             serde_json::Value::String(settings.version.clone()),
@@ -3489,7 +3490,7 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
             serde_json::Value::String(settings.image_fill_verify_mode.clone()),
         );
 
-        
+
         let mut provider_configs_map: HashMap<String, serde_json::Value> = HashMap::new();
 
         let provider_keys: Vec<String> = settings.provider_configs.keys().cloned().collect();
@@ -3679,7 +3680,7 @@ pub async fn save_app_settings(
 
     settings.version = version;
 
-    
+
     if let Some(val) = text_max_items {
         settings.max_items = val;
         settings.text_max_items = val;
@@ -3780,7 +3781,7 @@ pub async fn save_app_settings(
         settings.recording_window_audio_sync_advance_ms = val.clamp(0, 500);
     }
 
-    
+
     if let Some(ref hot_key_val) = hot_key {
         if hot_key_val.is_empty() {
             return Err(frontend_error(
@@ -3806,7 +3807,7 @@ pub async fn save_app_settings(
         }
     }
 
-    
+
     if let Some(ref image_hot_key_val) = image_hot_key {
         if image_hot_key_val.is_empty() {
             return Err(frontend_error(
@@ -3817,7 +3818,7 @@ pub async fn save_app_settings(
         }
 
         if image_hot_key_val != &settings.image_hot_key {
-            
+
             if let Some(ref hot_key_val) = hot_key {
                 if image_hot_key_val == hot_key_val {
                     return Err(frontend_error(
@@ -3975,7 +3976,7 @@ pub async fn save_app_settings(
         }
     }
 
-    
+
     if let Some(ref mic_toggle_hot_key_val) = recording_mic_toggle_hot_key {
         if mic_toggle_hot_key_val.is_empty() {
             return Err(frontend_error(
@@ -3985,7 +3986,7 @@ pub async fn save_app_settings(
             ));
         }
         if mic_toggle_hot_key_val != &settings.recording_mic_toggle_hot_key {
-            
+
             let effective_hot_key = hot_key.clone().unwrap_or_else(|| settings.hot_key.clone());
             let effective_image_hot_key = image_hot_key
                 .clone()
@@ -4027,7 +4028,7 @@ pub async fn save_app_settings(
                 ));
             }
 
-            
+
             if let Err(e) = app
                 .global_shortcut()
                 .unregister(settings.recording_mic_toggle_hot_key.as_str())
@@ -4039,7 +4040,7 @@ pub async fn save_app_settings(
                 );
             }
 
-            
+
             if settings.recording_enabled {
                 let app_handle_for_mic = app.clone();
                 if let Err(e) = app.global_shortcut().on_shortcut(
@@ -4048,13 +4049,13 @@ pub async fn save_app_settings(
                         let app_handle_inner = app_handle_for_mic.clone();
                         match event.state {
                             ShortcutState::Pressed => {
-                                
+
                                 tauri::async_runtime::spawn(async move {
                                     toggle_microphone_from_shortcut(app_handle_inner, true).await;
                                 });
                             }
                             ShortcutState::Released => {
-                                
+
                                 tauri::async_runtime::spawn(async move {
                                     toggle_microphone_from_shortcut(app_handle_inner, false).await;
                                 });
@@ -4152,7 +4153,7 @@ pub async fn save_app_settings(
         }
     }
 
-    
+
     if let Some(ref ai_provider_val) = ai_provider {
         if ai_provider_val.is_empty() {
             return Err(frontend_error(
@@ -4163,7 +4164,7 @@ pub async fn save_app_settings(
         }
         settings.ai_provider = ai_provider_val.clone();
 
-        
+
         let mut need_update_config = false;
         let config = settings
             .provider_configs
@@ -4180,7 +4181,7 @@ pub async fn save_app_settings(
             config.model_name = model_name.clone();
         }
 
-        
+
         if let Some(ref api_key) = ai_api_key {
             if api_key != "********" {
                 settings
@@ -6679,7 +6680,7 @@ pub async fn start_manual_longshot(
             "screenshot feature disabled",
         ));
     }
-    
+
     let _ = hide_overlay_window_by_label(&app, "screenshot");
     let _ = hide_overlay_window_by_label(&app, "longshot_border");
     tauri::async_runtime::spawn_blocking(|| {

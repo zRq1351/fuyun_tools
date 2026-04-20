@@ -232,7 +232,6 @@ fn get_current_clipboard_content_with_manager(
 }
 
 /// 等待剪贴板更新
-///
 fn wait_for_clipboard_update(
     clipboard_manager: &Arc<Mutex<ClipboardManager>>,
     app_handle: &AppHandle,
