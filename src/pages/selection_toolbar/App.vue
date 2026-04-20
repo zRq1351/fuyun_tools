@@ -77,11 +77,13 @@ const onMouseEnter = async () => {
 }
 
 const onMouseLeave = () => {
-  if (!isHovered.value) return
   if (hoverTimeout) {
     clearTimeout(hoverTimeout)
   }
+  
   hoverTimeout = setTimeout(async () => {
+    if (!isHovered.value) return // 已经收起，不重复执行
+    isHovered.value = false
     try {
       const factor = await appWindow.scaleFactor()
       const physicalPos = await appWindow.outerPosition()
@@ -93,12 +95,8 @@ const onMouseLeave = () => {
 
       await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
       await appWindow.setSize(new LogicalSize(42, 42))
-      
-      // 在缩小窗口后再改变内部状态，防止视觉抖动
-      isHovered.value = false
     } catch (e) {
       console.error(e)
-      isHovered.value = false
     }
   }, 100)
 }
@@ -206,10 +204,25 @@ onMounted(async () => {
 
     // Fallback listener for fast mouse exits from the window
     window.addEventListener('mouseout', (e) => {
-      // 当鼠标真正离开整个浏览器窗口(即 relatedTarget 为 null)时
-      if (!e.relatedTarget && isHovered.value) {
+      // 检查是否真正离开了工具栏范围
+      // e.relatedTarget 不存在说明移出了窗口
+      // 如果存在，说明移动到了另一个元素，我们需要判断该元素是否在我们的 toolbar 内部
+      if (!e.relatedTarget) {
         onMouseLeave()
+      } else {
+        // 检查新目标是否还在 document.body 内（或者我们能掌控的 DOM 树内）
+        // 由于这是 Tauri 应用，relatedTarget 通常在内部
+        // 但保险起见，如果移到了 html/body 边缘之外
+        const isInside = document.body.contains(e.relatedTarget)
+        if (!isInside) {
+           onMouseLeave()
+        }
       }
+    })
+
+    // 原生 mouseleave 兜底
+    document.documentElement.addEventListener('mouseleave', () => {
+      onMouseLeave()
     })
 
     // Reset state when the window loses focus
