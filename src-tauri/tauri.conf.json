@@ -107,6 +107,36 @@
         "resizable": true,
         "maximizable": false,
         "minimizable": false
+      },
+      {
+        "label": "result_translation",
+        "title": "翻译结果",
+        "url": "result_display.html",
+        "visible": false,
+        "resizable": true,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "backgroundColor": [0, 0, 0, 0],
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": true,
+        "center": false
+      },
+      {
+        "label": "result_explanation",
+        "title": "解释结果",
+        "url": "result_display.html",
+        "visible": false,
+        "resizable": true,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "backgroundColor": [0, 0, 0, 0],
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": true,
+        "center": false
       }
     ],
     "security": {

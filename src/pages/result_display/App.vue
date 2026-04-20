@@ -471,11 +471,12 @@ body {
   margin: 0;
   width: 100%;
   height: 100%;
+  background: transparent !important;
 }
 
 body {
   padding: 0;
-  background: radial-gradient(120% 130% at 0% 0%, #20293a 0%, #161c28 46%, #111622 100%);
+  background: transparent !important;
   color: #f2f6ff;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   overflow: hidden;
@@ -484,7 +485,7 @@ body {
 }
 
 body.theme-light {
-  background: radial-gradient(120% 130% at 0% 0%, #f2f6ff 0%, #eef3ff 46%, #e8eefb 100%);
+  background: transparent !important;
   color: #1f2a3d;
 }
 
@@ -492,6 +493,12 @@ body.theme-light {
   width: 100%;
   height: 100%;
   overflow: hidden;
+  background: radial-gradient(120% 130% at 0% 0%, #20293a 0%, #161c28 46%, #111622 100%);
+  border-radius: 12px;
+}
+
+body.theme-light #app {
+  background: radial-gradient(120% 130% at 0% 0%, #f2f6ff 0%, #eef3ff 46%, #e8eefb 100%);
 }
 </style>
 

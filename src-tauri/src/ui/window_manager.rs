@@ -1079,6 +1079,10 @@ pub async fn show_result_window(
     .inner_size(560.0, 360.0)
     .resizable(true)
     .decorations(false)
+    .transparent(true)
+    .shadow(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
     .on_page_load(move |window, _| {
         let payload = serde_json::json!({
             "type": window_type.clone(),
