@@ -347,7 +347,6 @@ html, body, #app {
   border-radius: 10px;
   padding: 5px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
   flex-direction: row;
