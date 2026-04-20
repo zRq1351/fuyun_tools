@@ -766,12 +766,14 @@ pub fn show_selection_toolbar_force_impl(
 
 /// 设置工具栏窗口位置
 fn set_toolbar_window(window: &tauri::WebviewWindow, anchor_pos: Option<(i32, i32)>) {
+    let initial_width = 42u32;
+    let initial_height = 42u32;
     let expanded_width = 176u32;
     let expanded_height = 50u32;
     let offset = 12i32;
-    let _ = window.set_size(tauri::LogicalSize::new(expanded_width, expanded_height));
+    let _ = window.set_size(tauri::LogicalSize::new(initial_width, initial_height));
     if let Some((mx, my)) = anchor_pos {
-        let mut x = mx - (expanded_width as i32 / 2);
+        let mut x = mx - (initial_width as i32 / 2);
         let mut y = my + offset;
         let monitor_from_anchor = window
             .available_monitors()
