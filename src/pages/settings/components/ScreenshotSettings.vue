@@ -16,14 +16,16 @@
             readonly
         >
           <template #append>
-            <el-button :type="isScreenshotRecording ? 'danger' : 'primary'" @click="toggleScreenshotRecording" title="修改快捷键">
-              <el-icon>
-                <component :is="isScreenshotRecording ? VideoPause : Edit"/>
-              </el-icon>
-            </el-button>
-            <el-button @click="resetScreenshotRecording" title="恢复默认快捷键">
-              <el-icon><RefreshLeft /></el-icon>
-            </el-button>
+            <el-button-group>
+              <el-button :type="isScreenshotRecording ? 'danger' : 'primary'" @click="toggleScreenshotRecording" title="修改快捷键">
+                <el-icon>
+                  <component :is="isScreenshotRecording ? VideoPause : Edit"/>
+                </el-icon>
+              </el-button>
+              <el-button @click="resetScreenshotRecording" title="恢复默认快捷键">
+                <el-icon><RefreshLeft /></el-icon>
+              </el-button>
+            </el-button-group>
           </template>
         </el-input>
         <div class="form-hint">点击编辑按钮来自定义打开截图窗口的快捷键</div>
