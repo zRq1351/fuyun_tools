@@ -843,16 +843,13 @@ pub fn simulate_paste(app_handle: &AppHandle) -> Result<ForegroundWindowInfo, St
 fn execute_ctrl_v_with_safety(enigo: &mut enigo::Enigo) -> Result<(), String> {
     use enigo::{Direction, Key, Keyboard};
 
-    thread::sleep(Duration::from_millis(10));
+    thread::sleep(Duration::from_millis(100));
 
-    // 按下 Ctrl 键
     enigo
         .key(CTRL_KEY, Direction::Press)
         .map_err(|e| format!("按下 Ctrl 失败: {}", e))?;
 
-    // 等待系统处理组合键前缀
-    thread::sleep(Duration::from_millis(30));
-    // 按下 V 键（使用 Unicode）
+    thread::sleep(Duration::from_millis(100));
     enigo
         .key(Key::Unicode('v'), Direction::Click)
         .map_err(|e| {
@@ -860,10 +857,8 @@ fn execute_ctrl_v_with_safety(enigo: &mut enigo::Enigo) -> Result<(), String> {
             format!("发送 V 键失败: {}", e)
         })?;
 
-    // 等待一段时间
-    thread::sleep(Duration::from_millis(85));
+    thread::sleep(Duration::from_millis(100));
 
-    // 正常释放 Ctrl 键
     release_ctrl_key_once(enigo)?;
 
     log::info!("已发送 Ctrl+V 模拟按键");

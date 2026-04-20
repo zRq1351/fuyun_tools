@@ -9,24 +9,18 @@ use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
 
-/// 执行 Ctrl+C 操作，确保 Ctrl 键总是被正确释放
-/// 使用 defer 模式，确保即使发生错误也能释放 Ctrl 键
 fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
-    // 按下 Ctrl 键
     match enigo.key(CTRL_KEY, enigo::Direction::Press) {
         Ok(_) => {}
         Err(e) => return Err(format!("按下 Ctrl 键失败: {:?}", e)),
     }
 
-    // 等待一小段时间，确保系统和目标应用有足够时间处理 Ctrl 按下事件（Release 模式下执行过快会导致目标应用无法识别组合键）
-    thread::sleep(Duration::from_millis(30));
+    thread::sleep(Duration::from_millis(100));
 
-    // 定义释放函数，用于异常处理
     fn release_ctrl(enigo: &mut Enigo) -> Result<(), String> {
         release_ctrl_key_with_fallback(enigo).map_err(|e| format!("释放 Ctrl 键失败: {}", e))
     }
 
-    // 按下 C 键（使用 Unicode 发送）
     match enigo.key(Key::Unicode('c'), enigo::Direction::Click) {
         Ok(_) => {}
         Err(e) => {
@@ -35,10 +29,8 @@ fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
         }
     }
 
-    // 等待一小段时间，确保 C 键事件被处理
-    thread::sleep(Duration::from_millis(30));
+    thread::sleep(Duration::from_millis(100));
 
-    // 正常释放 Ctrl 键
     release_ctrl(enigo)?;
 
     log::info!("已发送 Ctrl+C 模拟按键");
