@@ -97,7 +97,7 @@ const onMouseLeave = () => {
     } catch (e) {
       console.error(e)
     }
-  }, 150) // 延长到150ms，进一步增强在按钮间滑动的容错率
+  }, 50)
 }
 
 const getSafeSelectedText = () => selectedText.value.trim()
@@ -306,7 +306,7 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
   flex-direction: row;
-  gap: 5px;
+  gap: 0;
   width: auto;
   box-sizing: border-box;
 }
@@ -316,7 +316,7 @@ body {
 }
 
 .toolbar-button {
-  background: rgba(255, 255, 255, 0.08);
+  background: transparent;
   border: none;
   color: #eef3ff;
   width: 52px;
@@ -328,12 +328,13 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(255, 255, 255, 0.08);
   position: relative;
   overflow: hidden;
+  margin: 0 2.5px;
 }
 
 .toolbar-button:hover {
+  background: rgba(255, 255, 255, 0.08);
   transform: translateY(-1px);
 }
 
