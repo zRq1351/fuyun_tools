@@ -1,45 +1,62 @@
 <template>
-  <div class="toolbar" data-tauri-drag-region>
-    <el-tooltip :show-after="500" content="翻译" placement="top">
-      <div :class="{ disabled: actionLoading }" class="toolbar-button translate-btn no-drag" @click="handleTranslate">
-        <el-icon class="btn-icon">
-          <collection/>
-        </el-icon>
-        <span class="btn-text">翻译</span>
-      </div>
-    </el-tooltip>
+  <div class="container" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
+    <div v-if="!isHovered" class="mini-icon" data-tauri-drag-region>
+      <el-icon class="magic-icon"><magic-stick/></el-icon>
+    </div>
+    
+    <div v-else class="toolbar" data-tauri-drag-region>
+      <el-tooltip :show-after="500" content="翻译" placement="top">
+        <div :class="{ disabled: actionLoading }" class="toolbar-button translate-btn no-drag" @click="handleTranslate">
+          <el-icon class="btn-icon">
+            <collection/>
+          </el-icon>
+          <span class="btn-text">翻译</span>
+        </div>
+      </el-tooltip>
 
-    <el-tooltip :show-after="500" content="解释" placement="top">
-      <div :class="{ disabled: actionLoading }" class="toolbar-button explain-btn no-drag" @click="handleExplain">
-        <el-icon class="btn-icon">
-          <chat-line-round/>
-        </el-icon>
-        <span class="btn-text">解释</span>
-      </div>
-    </el-tooltip>
+      <el-tooltip :show-after="500" content="解释" placement="top">
+        <div :class="{ disabled: actionLoading }" class="toolbar-button explain-btn no-drag" @click="handleExplain">
+          <el-icon class="btn-icon">
+            <chat-line-round/>
+          </el-icon>
+          <span class="btn-text">解释</span>
+        </div>
+      </el-tooltip>
 
-    <el-tooltip :show-after="500" content="复制" placement="top">
-      <div :class="{ disabled: actionLoading }" class="toolbar-button copy-btn no-drag" @click="handleCopy">
-        <el-icon class="btn-icon">
-          <document-copy/>
-        </el-icon>
-        <span class="btn-text">复制</span>
-      </div>
-    </el-tooltip>
+      <el-tooltip :show-after="500" content="复制" placement="top">
+        <div :class="{ disabled: actionLoading }" class="toolbar-button copy-btn no-drag" @click="handleCopy">
+          <el-icon class="btn-icon">
+            <document-copy/>
+          </el-icon>
+          <span class="btn-text">复制</span>
+        </div>
+      </el-tooltip>
+    </div>
   </div>
 </template>
 
 <script setup>
 import {onBeforeUnmount, onMounted, ref} from 'vue'
-import {ChatLineRound, Collection, DocumentCopy} from '@element-plus/icons-vue'
+import {ChatLineRound, Collection, DocumentCopy, MagicStick} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
 import {AIService, AISettingsService, ClipboardService, WindowService} from '../../services/ipc'
 import {handleAppError} from '../../utils/errorHandler'
 
 const selectedText = ref('')
 const actionLoading = ref(false)
+const isHovered = ref(false)
 let unlistenSelectedText = null
 let unlistenDomText = null
+
+const onMouseEnter = async () => {
+  if (isHovered.value) return
+  isHovered.value = true
+}
+
+const onMouseLeave = async () => {
+  if (!isHovered.value) return
+  isHovered.value = false
+}
 
 const getSafeSelectedText = () => selectedText.value.trim()
 const hasSelectionAiConfig = (settings) => {
@@ -85,13 +102,15 @@ onMounted(async () => {
     if (window.__SELECTION_TOOLBAR_TEXT__) {
       selectedText.value = String(window.__SELECTION_TOOLBAR_TEXT__)
     }
-    const onDomText = (event) => {
+    const onDomText = async (event) => {
       selectedText.value = typeof event?.detail === 'string' ? event.detail : ''
+      isHovered.value = false
     }
     window.addEventListener('selection-toolbar-text', onDomText)
     unlistenDomText = () => window.removeEventListener('selection-toolbar-text', onDomText)
-    unlistenSelectedText = await listen('selected-text', (event) => {
+    unlistenSelectedText = await listen('selected-text', async (event) => {
       selectedText.value = typeof event.payload === 'string' ? event.payload : ''
+      isHovered.value = false
     })
   } catch (error) {
     console.error('Listen error:', error)
@@ -146,6 +165,34 @@ body {
 </style>
 
 <style scoped>
+.container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mini-icon {
+  -webkit-app-region: drag;
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(145deg, rgba(22, 28, 38, 0.95), rgba(14, 18, 26, 0.95));
+  border-radius: 50%;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: all 0.2s ease;
+}
+
+.magic-icon {
+  font-size: 18px;
+  color: #eef3ff;
+}
+
 .toolbar {
   -webkit-app-region: drag;
   background: linear-gradient(145deg, rgba(22, 28, 38, 0.95), rgba(14, 18, 26, 0.95));

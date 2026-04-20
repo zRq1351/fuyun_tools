@@ -9,6 +9,15 @@
         <div class="form-hint">关闭后不再触发划词工具栏与AI功能</div>
       </el-form-item>
 
+      <el-form-item label="划词触发辅助键">
+        <el-select v-model="form.selectionModifierKey" placeholder="请选择">
+          <el-option label="无 (禁用 Ctrl 键触发)" value="" />
+          <el-option label="Alt 键" value="Alt" />
+          <el-option label="Ctrl 键" value="Ctrl" />
+        </el-select>
+        <div class="form-hint">设置必须按下特定辅助键并划词才触发，防止误触</div>
+      </el-form-item>
+
       <el-form-item label="翻译提示词模板">
         <el-input
             v-model="form.translationPromptTemplate"
