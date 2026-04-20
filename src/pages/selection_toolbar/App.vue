@@ -1,11 +1,12 @@
 <template>
-  <div class="container" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
-    <div v-if="!isHovered" class="mini-icon" data-tauri-drag-region>
-      <el-icon class="magic-icon"><magic-stick/></el-icon>
-    </div>
-    
-    <div v-else class="toolbar" data-tauri-drag-region>
-      <el-tooltip :show-after="500" content="翻译" placement="top">
+  <div class="container">
+    <div class="interactive-area" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
+      <div v-if="!isHovered" class="mini-icon" data-tauri-drag-region>
+        <el-icon class="magic-icon"><magic-stick/></el-icon>
+      </div>
+      
+      <div v-else class="toolbar" data-tauri-drag-region>
+        <el-tooltip :show-after="500" content="翻译" placement="top">
         <div :class="{ disabled: actionLoading }" class="toolbar-button translate-btn no-drag" @click="handleTranslate">
           <el-icon class="btn-icon">
             <collection/>
@@ -33,6 +34,7 @@
       </el-tooltip>
     </div>
   </div>
+</div>
 </template>
 
 <script setup>
@@ -66,11 +68,11 @@ const onMouseEnter = async () => {
     const logicalX = physicalPos.x / factor
     const logicalY = physicalPos.y / factor
 
-    const expandedX = logicalX - (176 - 42) / 2
-    const expandedY = logicalY - (50 - 42) / 2
+    const expandedX = logicalX - (200 - 42) / 2
+    const expandedY = logicalY - (70 - 42) / 2
 
     await appWindow.setPosition(new LogicalPosition(expandedX, expandedY))
-    await appWindow.setSize(new LogicalSize(176, 50))
+    await appWindow.setSize(new LogicalSize(200, 70))
   } catch (e) {
     console.error(e)
   }
@@ -90,8 +92,8 @@ const onMouseLeave = () => {
       const logicalX = physicalPos.x / factor
       const logicalY = physicalPos.y / factor
 
-      const shrunkX = logicalX + (176 - 42) / 2
-      const shrunkY = logicalY + (50 - 42) / 2
+      const shrunkX = logicalX + (200 - 42) / 2
+      const shrunkY = logicalY + (70 - 42) / 2
 
       await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
       await appWindow.setSize(new LogicalSize(42, 42))
@@ -141,8 +143,8 @@ const runAction = async (executor, errorMessage) => {
       const physicalPos = await appWindow.outerPosition()
       const logicalX = physicalPos.x / factor
       const logicalY = physicalPos.y / factor
-      const shrunkX = logicalX + (176 - 42) / 2
-      const shrunkY = logicalY + (50 - 42) / 2
+      const shrunkX = logicalX + (200 - 42) / 2
+      const shrunkY = logicalY + (70 - 42) / 2
       await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
       await appWindow.setSize(new LogicalSize(42, 42))
       isHovered.value = false
@@ -175,8 +177,8 @@ onMounted(async () => {
         const physicalPos = await appWindow.outerPosition()
         const logicalX = physicalPos.x / factor
         const logicalY = physicalPos.y / factor
-        const shrunkX = logicalX + (176 - 42) / 2
-        const shrunkY = logicalY + (50 - 42) / 2
+        const shrunkX = logicalX + (200 - 42) / 2
+        const shrunkY = logicalY + (70 - 42) / 2
         await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
         await appWindow.setSize(new LogicalSize(42, 42))
       } catch(e) {}
@@ -195,8 +197,8 @@ onMounted(async () => {
         const physicalPos = await appWindow.outerPosition()
         const logicalX = physicalPos.x / factor
         const logicalY = physicalPos.y / factor
-        const shrunkX = logicalX + (176 - 42) / 2
-        const shrunkY = logicalY + (50 - 42) / 2
+        const shrunkX = logicalX + (200 - 42) / 2
+        const shrunkY = logicalY + (70 - 42) / 2
         await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
         await appWindow.setSize(new LogicalSize(42, 42))
       } catch(e) {}
@@ -237,8 +239,8 @@ onMounted(async () => {
           const physicalPos = await appWindow.outerPosition()
           const logicalX = physicalPos.x / factor
           const logicalY = physicalPos.y / factor
-          const shrunkX = logicalX + (176 - 42) / 2
-          const shrunkY = logicalY + (50 - 42) / 2
+          const shrunkX = logicalX + (200 - 42) / 2
+          const shrunkY = logicalY + (70 - 42) / 2
           await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
           await appWindow.setSize(new LogicalSize(42, 42))
           isHovered.value = false
@@ -300,6 +302,7 @@ body {
   background: transparent;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   overflow: hidden;
+  pointer-events: none;
 }
 </style>
 
@@ -310,10 +313,19 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  pointer-events: none;
+}
+
+.interactive-area {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .mini-icon {
   -webkit-app-region: drag;
+  pointer-events: auto;
   width: 32px;
   height: 32px;
   background: linear-gradient(145deg, rgba(22, 28, 38, 0.95), rgba(14, 18, 26, 0.95));
@@ -334,6 +346,7 @@ body {
 
 .toolbar {
   -webkit-app-region: drag;
+  pointer-events: auto;
   background: linear-gradient(145deg, rgba(22, 28, 38, 0.95), rgba(14, 18, 26, 0.95));
   border-radius: 10px;
   padding: 5px;
