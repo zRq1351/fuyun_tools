@@ -72,6 +72,7 @@ export const IPC_COMMANDS = {
     IMAGE_WINDOW_BLUR: 'image_window_blur',
     SELECTION_TOOLBAR_BLUR: 'selection_toolbar_blur',
     OPEN_SETTINGS_WINDOW: 'open_settings_window',
+    RESIZE_SELECTION_TOOLBAR: 'resize_selection_toolbar',
 
     // AI 设置
     GET_AI_SETTINGS: 'get_ai_settings',
@@ -315,6 +316,7 @@ export const WindowService = {
      * @returns {Promise<void>}
      */
     selectionToolbarBlur: () => invoke(IPC_COMMANDS.SELECTION_TOOLBAR_BLUR),
+    resizeSelectionToolbar: (x, y, width, height) => invoke(IPC_COMMANDS.RESIZE_SELECTION_TOOLBAR, {x, y, width, height}),
 };
 
 /**

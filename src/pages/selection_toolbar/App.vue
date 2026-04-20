@@ -65,8 +65,12 @@ const onMouseEnter = async () => {
     const expandedX = logicalX - (240 - 64) / 2
     const expandedY = logicalY - (100 - 64) / 2
 
-    await appWindow.setPosition(new LogicalPosition(expandedX, expandedY))
-    await appWindow.setSize(new LogicalSize(240, 100))
+    const newPhysicalX = Math.round(expandedX * factor)
+    const newPhysicalY = Math.round(expandedY * factor)
+    const newPhysicalWidth = Math.round(240 * factor)
+    const newPhysicalHeight = Math.round(100 * factor)
+
+    await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
   } catch (e) {
     console.error(e)
   }
@@ -89,8 +93,12 @@ const onMouseLeave = () => {
       const shrunkX = logicalX + (240 - 64) / 2
       const shrunkY = logicalY + (100 - 64) / 2
 
-      await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
-      await appWindow.setSize(new LogicalSize(64, 64))
+      const newPhysicalX = Math.round(shrunkX * factor)
+      const newPhysicalY = Math.round(shrunkY * factor)
+      const newPhysicalWidth = Math.round(64 * factor)
+      const newPhysicalHeight = Math.round(64 * factor)
+
+      await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
     } catch (e) {
       console.error(e)
     }
@@ -139,8 +147,11 @@ const runAction = async (executor, errorMessage) => {
       const logicalY = physicalPos.y / factor
       const shrunkX = logicalX + (240 - 64) / 2
       const shrunkY = logicalY + (100 - 64) / 2
-      await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
-      await appWindow.setSize(new LogicalSize(64, 64))
+      const newPhysicalX = Math.round(shrunkX * factor)
+      const newPhysicalY = Math.round(shrunkY * factor)
+      const newPhysicalWidth = Math.round(64 * factor)
+      const newPhysicalHeight = Math.round(64 * factor)
+      await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
       isHovered.value = false
     } catch (e) {
       isHovered.value = false
@@ -215,8 +226,11 @@ onMounted(async () => {
           const logicalY = physicalPos.y / factor
           const shrunkX = logicalX + (240 - 64) / 2
           const shrunkY = logicalY + (100 - 64) / 2
-          await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
-          await appWindow.setSize(new LogicalSize(64, 64))
+          const newPhysicalX = Math.round(shrunkX * factor)
+          const newPhysicalY = Math.round(shrunkY * factor)
+          const newPhysicalWidth = Math.round(64 * factor)
+          const newPhysicalHeight = Math.round(64 * factor)
+          await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
           isHovered.value = false
         } catch (e) {
           isHovered.value = false
@@ -333,6 +347,19 @@ html, body, #app {
   gap: 0;
   width: auto;
   box-sizing: border-box;
+  animation: toolbarExpand 0.15s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  transform-origin: center center;
+}
+
+@keyframes toolbarExpand {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .toolbar-button {

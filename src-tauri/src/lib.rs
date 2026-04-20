@@ -466,6 +466,7 @@ pub fn run() {
             get_vc_runtime_debug_state,
             #[cfg(debug_assertions)]
             set_vc_runtime_debug_config,
+            resize_selection_toolbar,
             #[cfg(debug_assertions)]
             get_text_dedup_metrics,
             #[cfg(debug_assertions)]

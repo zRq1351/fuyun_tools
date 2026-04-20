@@ -6565,6 +6565,41 @@ pub async fn set_vc_runtime_debug_config(
 }
 
 #[tauri::command]
+pub async fn resize_selection_toolbar(
+    app: AppHandle,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("selection_toolbar") {
+        #[cfg(target_os = "windows")]
+        {
+            use winapi::um::winuser::{SetWindowPos, SWP_NOZORDER, SWP_NOACTIVATE, SWP_NOREDRAW};
+            if let Ok(hwnd) = window.hwnd() {
+                unsafe {
+                    SetWindowPos(
+                        hwnd.0 as winapi::shared::windef::HWND,
+                        std::ptr::null_mut(),
+                        x,
+                        y,
+                        width as i32,
+                        height as i32,
+                        SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = window.set_size(tauri::PhysicalSize::new(width, height));
+            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn copy_image_clipboard_item_to_directory(
     item_id: String,
     target_directory: String,
