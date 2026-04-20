@@ -18,14 +18,16 @@
               readonly
           >
             <template #append>
-              <el-button :type="isRecordingHotkeyRecording ? 'danger' : 'primary'" @click="toggleRecordingHotkey" title="修改快捷键">
-                <el-icon>
-                  <component :is="isRecordingHotkeyRecording ? VideoPause : Edit"/>
-                </el-icon>
-              </el-button>
-              <el-button @click="resetRecordingHotkey" title="恢复默认快捷键">
-                <el-icon><RefreshLeft /></el-icon>
-              </el-button>
+              <el-button-group>
+                <el-button :type="isRecordingHotkeyRecording ? 'danger' : 'primary'" @click="toggleRecordingHotkey" title="修改快捷键">
+                  <el-icon>
+                    <component :is="isRecordingHotkeyRecording ? VideoPause : Edit"/>
+                  </el-icon>
+                </el-button>
+                <el-button @click="resetRecordingHotkey" title="恢复默认快捷键">
+                  <el-icon><RefreshLeft /></el-icon>
+                </el-button>
+              </el-button-group>
             </template>
           </el-input>
         </el-form-item>
@@ -37,14 +39,16 @@
               readonly
           >
             <template #append>
-              <el-button :type="isMicToggleHotkeyRecording ? 'danger' : 'primary'" @click="toggleMicToggleHotkey" title="修改快捷键">
-                <el-icon>
-                  <component :is="isMicToggleHotkeyRecording ? VideoPause : Edit"/>
-                </el-icon>
-              </el-button>
-              <el-button @click="resetMicToggleHotkey" title="恢复默认快捷键">
-                <el-icon><RefreshLeft /></el-icon>
-              </el-button>
+              <el-button-group>
+                <el-button :type="isMicToggleHotkeyRecording ? 'danger' : 'primary'" @click="toggleMicToggleHotkey" title="修改快捷键">
+                  <el-icon>
+                    <component :is="isMicToggleHotkeyRecording ? VideoPause : Edit"/>
+                  </el-icon>
+                </el-button>
+                <el-button @click="resetMicToggleHotkey" title="恢复默认快捷键">
+                  <el-icon><RefreshLeft /></el-icon>
+                </el-button>
+              </el-button-group>
             </template>
           </el-input>
           <div class="form-hint">录制过程中使用该快捷键快速开启/关闭麦克风</div>

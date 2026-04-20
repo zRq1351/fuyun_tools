@@ -24,14 +24,16 @@
                 readonly
             >
               <template #append>
-                <el-button :type="isTextRecording ? 'danger' : 'primary'" @click="toggleTextRecording" title="修改快捷键">
-                  <el-icon>
-                    <component :is="isTextRecording ? VideoPause : Edit"/>
-                  </el-icon>
-                </el-button>
-                <el-button @click="resetTextRecording" title="恢复默认快捷键">
-                  <el-icon><RefreshLeft /></el-icon>
-                </el-button>
+                <el-button-group>
+                  <el-button :type="isTextRecording ? 'danger' : 'primary'" @click="toggleTextRecording" title="修改快捷键">
+                    <el-icon>
+                      <component :is="isTextRecording ? VideoPause : Edit"/>
+                    </el-icon>
+                  </el-button>
+                  <el-button @click="resetTextRecording" title="恢复默认快捷键">
+                    <el-icon><RefreshLeft /></el-icon>
+                  </el-button>
+                </el-button-group>
               </template>
             </el-input>
           </el-form-item>
@@ -43,14 +45,16 @@
                 readonly
             >
               <template #append>
-                <el-button :type="isImageRecording ? 'danger' : 'primary'" @click="toggleImageRecording" title="修改快捷键">
-                  <el-icon>
-                    <component :is="isImageRecording ? VideoPause : Edit"/>
-                  </el-icon>
-                </el-button>
-                <el-button @click="resetImageRecording" title="恢复默认快捷键">
-                  <el-icon><RefreshLeft /></el-icon>
-                </el-button>
+                <el-button-group>
+                  <el-button :type="isImageRecording ? 'danger' : 'primary'" @click="toggleImageRecording" title="修改快捷键">
+                    <el-icon>
+                      <component :is="isImageRecording ? VideoPause : Edit"/>
+                    </el-icon>
+                  </el-button>
+                  <el-button @click="resetImageRecording" title="恢复默认快捷键">
+                    <el-icon><RefreshLeft /></el-icon>
+                  </el-button>
+                </el-button-group>
               </template>
             </el-input>
           </el-form-item>
