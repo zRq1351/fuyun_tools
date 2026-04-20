@@ -39,6 +39,7 @@
 import {onBeforeUnmount, onMounted, ref} from 'vue'
 import {ChatLineRound, Collection, DocumentCopy, MagicStick} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
+import {getCurrentWindow, LogicalSize, LogicalPosition} from '@tauri-apps/api/window'
 import {AIService, AISettingsService, ClipboardService, WindowService} from '../../services/ipc'
 import {handleAppError} from '../../utils/errorHandler'
 
@@ -47,15 +48,46 @@ const actionLoading = ref(false)
 const isHovered = ref(false)
 let unlistenSelectedText = null
 let unlistenDomText = null
+let unlistenFocus = null
+
+const appWindow = getCurrentWindow()
 
 const onMouseEnter = async () => {
   if (isHovered.value) return
+  try {
+    const factor = await appWindow.scaleFactor()
+    const physicalPos = await appWindow.outerPosition()
+    const logicalX = physicalPos.x / factor
+    const logicalY = physicalPos.y / factor
+
+    const expandedX = logicalX - (176 - 42) / 2
+    const expandedY = logicalY - (50 - 42) / 2
+
+    await appWindow.setPosition(new LogicalPosition(expandedX, expandedY))
+    await appWindow.setSize(new LogicalSize(176, 50))
+  } catch (e) {
+    console.error(e)
+  }
   isHovered.value = true
 }
 
 const onMouseLeave = async () => {
   if (!isHovered.value) return
   isHovered.value = false
+  try {
+    const factor = await appWindow.scaleFactor()
+    const physicalPos = await appWindow.outerPosition()
+    const logicalX = physicalPos.x / factor
+    const logicalY = physicalPos.y / factor
+
+    const shrunkX = logicalX + (176 - 42) / 2
+    const shrunkY = logicalY + (50 - 42) / 2
+
+    await appWindow.setSize(new LogicalSize(42, 42))
+    await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
+  } catch (e) {
+    console.error(e)
+  }
 }
 
 const getSafeSelectedText = () => selectedText.value.trim()
@@ -89,6 +121,7 @@ const runAction = async (executor, errorMessage) => {
   if (!text || actionLoading.value) return
   actionLoading.value = true
   try {
+    isHovered.value = false
     await executor(text)
   } catch (error) {
     handleAppError(error, errorMessage)
@@ -112,6 +145,20 @@ onMounted(async () => {
       selectedText.value = typeof event.payload === 'string' ? event.payload : ''
       isHovered.value = false
     })
+
+    // Fallback listener for fast mouse exits from the window
+    window.addEventListener('mouseout', (e) => {
+      if (!e.relatedTarget) {
+        onMouseLeave()
+      }
+    })
+
+    // Reset state when the window loses focus
+    unlistenFocus = await appWindow.onFocusChanged(({ payload: focused }) => {
+      if (!focused) {
+        isHovered.value = false
+      }
+    })
   } catch (error) {
     console.error('Listen error:', error)
   }
@@ -125,6 +172,10 @@ onBeforeUnmount(() => {
   if (unlistenDomText) {
     unlistenDomText()
     unlistenDomText = null
+  }
+  if (unlistenFocus) {
+    unlistenFocus()
+    unlistenFocus = null
   }
 })
 
