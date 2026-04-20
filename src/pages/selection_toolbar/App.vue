@@ -91,8 +91,8 @@ const onMouseLeave = () => {
       const shrunkX = logicalX + (176 - 42) / 2
       const shrunkY = logicalY + (50 - 42) / 2
 
-      await appWindow.setSize(new LogicalSize(42, 42))
       await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
+      await appWindow.setSize(new LogicalSize(42, 42))
       
       // 在缩小窗口后再改变内部状态，防止视觉抖动
       isHovered.value = false
@@ -145,8 +145,8 @@ const runAction = async (executor, errorMessage) => {
       const logicalY = physicalPos.y / factor
       const shrunkX = logicalX + (176 - 42) / 2
       const shrunkY = logicalY + (50 - 42) / 2
-      await appWindow.setSize(new LogicalSize(42, 42))
       await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
+      await appWindow.setSize(new LogicalSize(42, 42))
       isHovered.value = false
     } catch (e) {
       isHovered.value = false
@@ -173,6 +173,13 @@ onMounted(async () => {
         hoverTimeout = null
       }
       try {
+        const factor = await appWindow.scaleFactor()
+        const physicalPos = await appWindow.outerPosition()
+        const logicalX = physicalPos.x / factor
+        const logicalY = physicalPos.y / factor
+        const shrunkX = logicalX + (176 - 42) / 2
+        const shrunkY = logicalY + (50 - 42) / 2
+        await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
         await appWindow.setSize(new LogicalSize(42, 42))
       } catch(e) {}
     }
@@ -186,6 +193,13 @@ onMounted(async () => {
         hoverTimeout = null
       }
       try {
+        const factor = await appWindow.scaleFactor()
+        const physicalPos = await appWindow.outerPosition()
+        const logicalX = physicalPos.x / factor
+        const logicalY = physicalPos.y / factor
+        const shrunkX = logicalX + (176 - 42) / 2
+        const shrunkY = logicalY + (50 - 42) / 2
+        await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
         await appWindow.setSize(new LogicalSize(42, 42))
       } catch(e) {}
     })
@@ -193,14 +207,14 @@ onMounted(async () => {
     // Fallback listener for fast mouse exits from the window
     window.addEventListener('mouseout', (e) => {
       // 当鼠标真正离开整个浏览器窗口(即 relatedTarget 为 null)时
-      if (!e.relatedTarget) {
+      if (!e.relatedTarget && isHovered.value) {
         onMouseLeave()
       }
     })
 
     // Reset state when the window loses focus
     unlistenFocus = await appWindow.onFocusChanged(async ({ payload: focused }) => {
-      if (!focused) {
+      if (!focused && isHovered.value) {
         if (hoverTimeout) {
           clearTimeout(hoverTimeout)
           hoverTimeout = null
@@ -212,8 +226,8 @@ onMounted(async () => {
           const logicalY = physicalPos.y / factor
           const shrunkX = logicalX + (176 - 42) / 2
           const shrunkY = logicalY + (50 - 42) / 2
-          await appWindow.setSize(new LogicalSize(42, 42))
           await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
+          await appWindow.setSize(new LogicalSize(42, 42))
           isHovered.value = false
         } catch (e) {
           isHovered.value = false
