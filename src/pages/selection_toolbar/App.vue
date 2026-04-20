@@ -49,6 +49,10 @@ let hoverTimeout = null
 
 const appWindow = getCurrentWindow()
 
+let stateVersion = 0
+let shrunkPhysicalX = null
+let shrunkPhysicalY = null
+
 const onMouseEnter = async () => {
   if (hoverTimeout) {
     clearTimeout(hoverTimeout)
@@ -56,9 +60,17 @@ const onMouseEnter = async () => {
   }
   if (isHovered.value) return
   isHovered.value = true
+  const currentVersion = ++stateVersion
+
   try {
     const factor = await appWindow.scaleFactor()
     const physicalPos = await appWindow.outerPosition()
+    if (stateVersion !== currentVersion) return
+
+    // 保存当前的缩小状态位置，以便后续精准恢复，防止窗口漂移
+    shrunkPhysicalX = physicalPos.x
+    shrunkPhysicalY = physicalPos.y
+
     const logicalX = physicalPos.x / factor
     const logicalY = physicalPos.y / factor
 
@@ -72,6 +84,40 @@ const onMouseEnter = async () => {
 
     await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
   } catch (e) {
+    isHovered.value = false
+    console.error(e)
+  }
+}
+
+const shrinkWindow = async (version) => {
+  try {
+    const factor = await appWindow.scaleFactor()
+    let newPhysicalX, newPhysicalY
+
+    if (shrunkPhysicalX !== null && shrunkPhysicalY !== null) {
+      newPhysicalX = shrunkPhysicalX
+      newPhysicalY = shrunkPhysicalY
+    } else {
+      const physicalPos = await appWindow.outerPosition()
+      const logicalX = physicalPos.x / factor
+      const logicalY = physicalPos.y / factor
+      const shrunkX = logicalX + (240 - 64) / 2
+      const shrunkY = logicalY + (100 - 64) / 2
+      newPhysicalX = Math.round(shrunkX * factor)
+      newPhysicalY = Math.round(shrunkY * factor)
+    }
+
+    if (version && stateVersion !== version) return
+
+    // 在获取到 factor 等异步数据后再更新 DOM，缩小 IPC 延迟带来的闪烁
+    isHovered.value = false
+
+    const newPhysicalWidth = Math.round(64 * factor)
+    const newPhysicalHeight = Math.round(64 * factor)
+
+    await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
+  } catch (e) {
+    isHovered.value = false
     console.error(e)
   }
 }
@@ -83,25 +129,8 @@ const onMouseLeave = () => {
   
   hoverTimeout = setTimeout(async () => {
     if (!isHovered.value) return // 已经收起，不重复执行
-    isHovered.value = false
-    try {
-      const factor = await appWindow.scaleFactor()
-      const physicalPos = await appWindow.outerPosition()
-      const logicalX = physicalPos.x / factor
-      const logicalY = physicalPos.y / factor
-
-      const shrunkX = logicalX + (240 - 64) / 2
-      const shrunkY = logicalY + (100 - 64) / 2
-
-      const newPhysicalX = Math.round(shrunkX * factor)
-      const newPhysicalY = Math.round(shrunkY * factor)
-      const newPhysicalWidth = Math.round(64 * factor)
-      const newPhysicalHeight = Math.round(64 * factor)
-
-      await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
-    } catch (e) {
-      console.error(e)
-    }
+    const currentVersion = ++stateVersion
+    await shrinkWindow(currentVersion)
   }, 100)
 }
 
@@ -140,22 +169,8 @@ const runAction = async (executor, errorMessage) => {
       clearTimeout(hoverTimeout)
       hoverTimeout = null
     }
-    try {
-      const factor = await appWindow.scaleFactor()
-      const physicalPos = await appWindow.outerPosition()
-      const logicalX = physicalPos.x / factor
-      const logicalY = physicalPos.y / factor
-      const shrunkX = logicalX + (240 - 64) / 2
-      const shrunkY = logicalY + (100 - 64) / 2
-      const newPhysicalX = Math.round(shrunkX * factor)
-      const newPhysicalY = Math.round(shrunkY * factor)
-      const newPhysicalWidth = Math.round(64 * factor)
-      const newPhysicalHeight = Math.round(64 * factor)
-      await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
-      isHovered.value = false
-    } catch (e) {
-      isHovered.value = false
-    }
+    const currentVersion = ++stateVersion
+    await shrinkWindow(currentVersion)
     
     await executor(text)
   } catch (error) {
@@ -172,7 +187,10 @@ onMounted(async () => {
     }
     const onDomText = async (event) => {
       selectedText.value = typeof event?.detail === 'string' ? event.detail : ''
-      isHovered.value = false
+      if (isHovered.value) {
+        const currentVersion = ++stateVersion
+        await shrinkWindow(currentVersion)
+      }
       if (hoverTimeout) {
         clearTimeout(hoverTimeout)
         hoverTimeout = null
@@ -182,7 +200,10 @@ onMounted(async () => {
     unlistenDomText = () => window.removeEventListener('selection-toolbar-text', onDomText)
     unlistenSelectedText = await listen('selected-text', async (event) => {
       selectedText.value = typeof event.payload === 'string' ? event.payload : ''
-      isHovered.value = false
+      if (isHovered.value) {
+        const currentVersion = ++stateVersion
+        await shrinkWindow(currentVersion)
+      }
       if (hoverTimeout) {
         clearTimeout(hoverTimeout)
         hoverTimeout = null
@@ -219,22 +240,8 @@ onMounted(async () => {
           clearTimeout(hoverTimeout)
           hoverTimeout = null
         }
-        try {
-          const factor = await appWindow.scaleFactor()
-          const physicalPos = await appWindow.outerPosition()
-          const logicalX = physicalPos.x / factor
-          const logicalY = physicalPos.y / factor
-          const shrunkX = logicalX + (240 - 64) / 2
-          const shrunkY = logicalY + (100 - 64) / 2
-          const newPhysicalX = Math.round(shrunkX * factor)
-          const newPhysicalY = Math.round(shrunkY * factor)
-          const newPhysicalWidth = Math.round(64 * factor)
-          const newPhysicalHeight = Math.round(64 * factor)
-          await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
-          isHovered.value = false
-        } catch (e) {
-          isHovered.value = false
-        }
+        const currentVersion = ++stateVersion
+        await shrinkWindow(currentVersion)
       }
     })
   } catch (error) {
