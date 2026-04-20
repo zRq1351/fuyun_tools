@@ -485,6 +485,17 @@ onUnmounted(() => {
   grid-template-columns: repeat(3, minmax(180px, 1fr));
 }
 
+.setting-group :deep(.el-input-group__append) {
+  display: flex;
+  flex-wrap: nowrap;
+  width: auto;
+}
+
+.setting-group :deep(.el-button-group) {
+  display: flex;
+  flex-wrap: nowrap;
+}
+
 .setting-group :deep(.el-form-item) {
   margin-bottom: 12px;
 }

@@ -232,6 +232,17 @@ onMounted(async () => {
   column-gap: 14px;
 }
 
+.setting-group :deep(.el-input-group__append) {
+  display: flex;
+  flex-wrap: nowrap;
+  width: auto;
+}
+
+.setting-group :deep(.el-button-group) {
+  display: flex;
+  flex-wrap: nowrap;
+}
+
 .recording :deep(.el-input__inner) {
   color: #f56c6c !important;
 }

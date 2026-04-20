@@ -77,6 +77,17 @@ const resetScreenshotRecording = () => {
   max-width: 560px;
 }
 
+.compact-card :deep(.el-input-group__append) {
+  display: flex;
+  flex-wrap: nowrap;
+  width: auto;
+}
+
+.compact-card :deep(.el-button-group) {
+  display: flex;
+  flex-wrap: nowrap;
+}
+
 .recording :deep(.el-input__inner) {
   color: #f56c6c !important;
 }
