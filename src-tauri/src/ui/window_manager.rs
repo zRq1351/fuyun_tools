@@ -852,9 +852,9 @@ fn execute_ctrl_v_with_safety(enigo: &mut enigo::Enigo) -> Result<(), String> {
 
     // 等待系统处理组合键前缀
     thread::sleep(Duration::from_millis(30));
-    // 按下 V 键（使用 Layout 提高组合键兼容性）
+    // 按下 V 键（使用 Unicode）
     enigo
-        .key(Key::Layout('v'), Direction::Click)
+        .key(Key::Unicode('v'), Direction::Click)
         .map_err(|e| {
             let _ = release_ctrl_key_once(enigo);
             format!("发送 V 键失败: {}", e)
