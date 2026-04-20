@@ -58,8 +58,8 @@ export function useShortcutRecorder(form, fieldKey = 'toggleShortcut') {
             }
         }
 
-        if (modifiers.length > 0 && key) {
-            recordedShortcut.value = [...modifiers, key].join('+')
+        if (key) {
+            recordedShortcut.value = modifiers.length > 0 ? [...modifiers, key].join('+') : key
             form[fieldKey] = recordedShortcut.value
             stopRecording()
             ElMessage.success(`已录制快捷键: ${recordedShortcut.value}`)

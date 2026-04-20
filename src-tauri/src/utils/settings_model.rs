@@ -550,19 +550,6 @@ impl AppSettingsData {
             return Err("image_fill_verify_mode必须是strict或fast".to_string());
         }
 
-        // 验证快捷键格式（基本检查）
-        if !self.hot_key.is_empty() && !self.hot_key.contains('+') {
-            return Err("快捷键格式无效，必须包含修饰键（如Ctrl+Alt+C）".to_string());
-        }
-        if !self.image_hot_key.is_empty() && !self.image_hot_key.contains('+') {
-            return Err("图片快捷键格式无效，必须包含修饰键（如Ctrl+Alt+X）".to_string());
-        }
-        if !self.screenshot_hot_key.is_empty() && !self.screenshot_hot_key.contains('+') {
-            return Err("截图快捷键格式无效，必须包含修饰键（如Ctrl+Alt+A）".to_string());
-        }
-        if !self.recording_hot_key.is_empty() && !self.recording_hot_key.contains('+') {
-            return Err("录屏快捷键格式无效，必须包含修饰键（如Ctrl+Alt+R）".to_string());
-        }
         if self.recording_default_fps == 0 || self.recording_default_fps > 120 {
             return Err("recording_default_fps必须在1-120之间".to_string());
         }

@@ -219,7 +219,8 @@ const form = reactive({
   toggleShortcut: '',
   imageToggleShortcut: '',
   screenshotToggleShortcut: '',
-  recordingToggleShortcut: '',
+  recordingToggleShortcut: 'Alt+R',
+  recordingMicToggleShortcut: 'Ctrl+Space',
   recordingDefaultFps: 30,
   recordingDefaultVideoBitrateKbps: 6000,
   recordingDefaultAudioBitrateKbps: 160,
@@ -286,6 +287,7 @@ const buildFormSnapshot = () => ({
     imageToggleShortcut: form.imageToggleShortcut,
     screenshotToggleShortcut: form.screenshotToggleShortcut,
     recordingToggleShortcut: form.recordingToggleShortcut,
+    recordingMicToggleShortcut: form.recordingMicToggleShortcut,
     recordingDefaultFps: form.recordingDefaultFps,
     recordingDefaultVideoBitrateKbps: form.recordingDefaultVideoBitrateKbps,
     recordingDefaultAudioBitrateKbps: form.recordingDefaultAudioBitrateKbps,
@@ -364,6 +366,9 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
   }
   if (source.recordingToggleShortcut !== initial.recordingToggleShortcut) {
     changedFields.recordingHotKey = source.recordingToggleShortcut
+  }
+  if (source.recordingMicToggleShortcut !== initial.recordingMicToggleShortcut) {
+    changedFields.recordingMicToggleHotKey = source.recordingMicToggleShortcut
   }
   if (source.recordingDefaultFps !== initial.recordingDefaultFps) {
     changedFields.recordingDefaultFps = source.recordingDefaultFps
@@ -787,6 +792,7 @@ onMounted(async () => {
     form.imageToggleShortcut = settings.image_hot_key || ''
     form.screenshotToggleShortcut = settings.screenshot_hot_key || ''
     form.recordingToggleShortcut = settings.recording_hot_key || 'Alt+R'
+    form.recordingMicToggleShortcut = settings.recording_mic_toggle_hot_key || 'Ctrl+Space'
     form.recordingDefaultFps = Number(settings.recording_default_fps || 30)
     form.recordingDefaultVideoBitrateKbps = Number(settings.recording_default_video_bitrate_kbps || 6000)
     form.recordingDefaultAudioBitrateKbps = Number(settings.recording_default_audio_bitrate_kbps || 160)
