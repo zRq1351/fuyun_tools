@@ -12,7 +12,7 @@
     "windows": [
       {
         "label": "clipboard",
-        "title": "fuyun_tools",
+        "title": "",
         "url": "clipboard.html",
         "visible": false,
         "decorations": false,
@@ -59,7 +59,7 @@
       },
       {
         "label": "image_clipboard",
-        "title": "图片剪切板",
+        "title": "",
         "url": "image_clipboard.html",
         "visible": false,
         "decorations": false,
@@ -76,7 +76,7 @@
       },
       {
         "label": "image_preview",
-        "title": "图片预览",
+        "title": "",
         "url": "image_preview.html",
         "visible": false,
         "decorations": false,
@@ -93,7 +93,7 @@
       },
       {
         "label": "screenshot",
-        "title": "截图编辑",
+        "title": "",
         "url": "screenshot.html",
         "visible": false,
         "decorations": false,
