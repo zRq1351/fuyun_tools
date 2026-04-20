@@ -5,34 +5,28 @@
         <el-icon class="magic-icon"><magic-stick/></el-icon>
       </div>
       
-      <div v-else class="toolbar" data-tauri-drag-region>
-        <el-tooltip :show-after="500" content="翻译" placement="top">
-        <div :class="{ disabled: actionLoading }" class="toolbar-button translate-btn no-drag" @click="handleTranslate">
+      <div v-else class="toolbar">
+        <div :class="{ disabled: actionLoading }" class="toolbar-button translate-btn" @click="handleTranslate">
           <el-icon class="btn-icon">
             <collection/>
           </el-icon>
           <span class="btn-text">翻译</span>
         </div>
-      </el-tooltip>
 
-      <el-tooltip :show-after="500" content="解释" placement="top">
-        <div :class="{ disabled: actionLoading }" class="toolbar-button explain-btn no-drag" @click="handleExplain">
+        <div :class="{ disabled: actionLoading }" class="toolbar-button explain-btn" @click="handleExplain">
           <el-icon class="btn-icon">
             <chat-line-round/>
           </el-icon>
           <span class="btn-text">解释</span>
         </div>
-      </el-tooltip>
 
-      <el-tooltip :show-after="500" content="复制" placement="top">
-        <div :class="{ disabled: actionLoading }" class="toolbar-button copy-btn no-drag" @click="handleCopy">
+        <div :class="{ disabled: actionLoading }" class="toolbar-button copy-btn" @click="handleCopy">
           <el-icon class="btn-icon">
             <document-copy/>
           </el-icon>
           <span class="btn-text">复制</span>
         </div>
-      </el-tooltip>
-    </div>
+      </div>
   </div>
 </div>
 </template>
@@ -345,7 +339,6 @@ body {
 }
 
 .toolbar {
-  -webkit-app-region: drag;
   pointer-events: auto;
   background: linear-gradient(145deg, rgba(22, 28, 38, 0.95), rgba(14, 18, 26, 0.95));
   border-radius: 10px;
@@ -358,10 +351,6 @@ body {
   gap: 0;
   width: auto;
   box-sizing: border-box;
-}
-
-.no-drag {
-  -webkit-app-region: no-drag;
 }
 
 .toolbar-button {
