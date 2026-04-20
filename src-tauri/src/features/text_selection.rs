@@ -26,8 +26,8 @@ fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
         release_ctrl_key_with_fallback(enigo).map_err(|e| format!("释放 Ctrl 键失败: {}", e))
     }
 
-    // 按下 C 键（使用 Layout 而非 Unicode，提高组合键兼容性）
-    match enigo.key(Key::Layout('c'), enigo::Direction::Click) {
+    // 按下 C 键（使用 Unicode 发送）
+    match enigo.key(Key::Unicode('c'), enigo::Direction::Click) {
         Ok(_) => {}
         Err(e) => {
             let _ = release_ctrl(enigo);
