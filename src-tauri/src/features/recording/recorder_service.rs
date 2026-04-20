@@ -358,9 +358,9 @@ fn merge_system_audio_into_video(
     let expected_system_count = system_segments.len();
     let expected_mic_count = mic_segments.len();
 
-    // 🔧 性能优化：快速路径 - 单个音频片段且延迟很小(<100ms)时直接复制流
-    // 适用场景：全屏/区域录制（无暂停、单次音频）
-    // 速度提升：10-50倍（避免重新编码）
+    
+    
+    
     if system_segments.len() == 1 && mic_segments.is_empty() {
         let seg = &system_segments[0];
         if seg.start_ms < 100 && seg.path.exists() {
@@ -387,13 +387,13 @@ fn merge_system_audio_into_video(
             log::warn!("音频片段不存在: {:?}", seg.path);
             return false;
         }
-        // 🔧 支持 WAV 和 AAC 格式
+        
         let is_aac = seg
             .path
             .extension()
             .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
             .unwrap_or(false);
-        let min_size = if is_aac { 7 } else { 44 }; // AAC 最小 7 bytes (ADTS header), WAV 最小 44 bytes
+        let min_size = if is_aac { 7 } else { 44 }; 
         match fs::metadata(&seg.path) {
             Ok(meta) => {
                 let size = meta.len();
@@ -442,8 +442,8 @@ fn merge_system_audio_into_video(
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
 
-    // 🔧 性能优化：项目录制的视频始终是 H.264 格式，直接使用流复制模式
-    // 无需检测视频编码格式，避免额外的 FFmpeg 进程开销
+    
+    
     log::info!("✅ 视频编码格式为 H.264，使用流复制模式（无重编码）");
 
     cmd.arg("-hide_banner")
@@ -451,7 +451,7 @@ fn merge_system_audio_into_video(
         .arg("warning")
         .arg("-y")
         .arg("-threads")
-        .arg("0") // 自动使用所有可用 CPU 核心
+        .arg("0") 
         .arg("-i")
         .arg(video_path);
     let mut input_index = 1usize;
@@ -477,9 +477,9 @@ fn merge_system_audio_into_video(
     let mut sys_labels: Vec<String> = Vec::new();
     for (idx, (input, delay)) in sys_inputs.iter().enumerate() {
         let label = format!("sys{}", idx);
-        // 🔧 性能优化：简化音频处理链
-        // - adelay={d}|{d}: 延迟对齐到视频时间轴
-        // 注意：delay是片段创建时的elapsed_ms，表示该片段应从视频的哪个时间点开始播放
+        
+        
+        
         filter_parts.push(format!(
             "[{i}:a]adelay={d}|{d}[{l}]",
             i = input,
@@ -508,8 +508,8 @@ fn merge_system_audio_into_video(
     let mut mic_labels: Vec<String> = Vec::new();
     for (idx, (input, delay)) in mic_inputs.iter().enumerate() {
         let label = format!("mic{}", idx);
-        // 🔧 性能优化：简化音频处理链，使用adelay对齐到视频时间轴
-        // delay是该片段创建时的elapsed_ms，确保多段麦克风音频正确对齐
+        
+        
         filter_parts.push(format!(
             "[{i}:a]adelay={d}|{d}[{l}]",
             i = input,
@@ -536,7 +536,7 @@ fn merge_system_audio_into_video(
         None
     };
     let audio_map_label = if let (Some(sys), Some(mic)) = (sys_out, mic_out) {
-        // 🔧 性能优化：简化混音过滤器
+        
         filter_parts.push(format!(
             "{}{}amix=inputs=2:duration=longest:normalize=0[aout]",
             sys, mic
@@ -558,7 +558,7 @@ fn merge_system_audio_into_video(
         .arg("-map")
         .arg(audio_map_label);
 
-    // FFmpeg filter_complex requires re-encoding, so we cannot use -c:a copy here.
+    
     log::info!("🔧 需要通过 filter_complex 合并音频，必须重编码为 AAC");
     cmd.arg("-c:v")
         .arg("copy")
@@ -578,10 +578,10 @@ fn merge_system_audio_into_video(
         valid_mic.len()
     );
 
-    // 🔧 添加时序验证日志
+    
     for (idx, seg) in valid_system.iter().enumerate() {
         if let Ok(meta) = std::fs::metadata(&seg.path) {
-            let duration_ms = meta.len() * 1000 / (48000 * 2 * 2); // AAC估算
+            let duration_ms = meta.len() * 1000 / (48000 * 2 * 2); 
             log::info!(
                 "  系统音频片段{}: start_ms={}, file_size={} bytes, estimated_duration={}ms",
                 idx,
@@ -593,7 +593,7 @@ fn merge_system_audio_into_video(
     }
     for (idx, seg) in valid_mic.iter().enumerate() {
         if let Ok(meta) = std::fs::metadata(&seg.path) {
-            let duration_ms = meta.len() * 1000 / (48000 * 2); // WAV单声道16bit
+            let duration_ms = meta.len() * 1000 / (48000 * 2); 
             log::info!(
                 "  麦克风片段{}: start_ms={}, file_size={} bytes, estimated_duration={}ms",
                 idx,
@@ -604,7 +604,7 @@ fn merge_system_audio_into_video(
         }
     }
 
-    // 🔧 性能优化：使用spawn + wait替代output，FFmpeg内部会流式处理
+    
     let child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -615,10 +615,10 @@ fn merge_system_audio_into_video(
                 .with_details(e.to_string())
         })?;
 
-    // 🔧 绑定到 Job Object
+    
     crate::features::recording::job_object::assign_to_global_job_object(&child);
 
-    // 等待FFmpeg完成（仍为同步，但FFmpeg内部会流式处理）
+    
     let output = child.wait_with_output().map_err(|e| {
         AppError::new(ErrorCode::SystemError, "执行系统音频合成失败").with_details(e.to_string())
     })?;
@@ -669,14 +669,14 @@ fn merge_system_audio_into_video(
         log::warn!("⚠️ 音频合并耗时较长({}ms)，建议优化方案", elapsed_ms);
     }
 
-    // ✅ 注意：不要在这里删除音频片段！
-    // 清理操作将在调用方（异步任务）中统一执行
-    // for seg in &valid_system {
-    //     let _ = fs::remove_file(&seg.path);
-    // }
-    // for seg in &valid_mic {
-    //     let _ = fs::remove_file(&seg.path);
-    // }
+    
+    
+    
+    
+    
+    
+    
+    
 
     Ok(())
 }
@@ -696,7 +696,7 @@ fn merge_audio_fast(
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
 
-    // 🔧 方案2：检测音频格式，AAC 可直接 copy，WAV 需重编码
+    
     let is_aac = audio_path
         .extension()
         .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
@@ -713,7 +713,7 @@ fn merge_audio_fast(
         .arg("-c:v")
         .arg("copy")
         .arg("-c:a")
-        .arg(if is_aac { "copy" } else { "aac" }) // 🔧 AAC 直接 copy，WAV 重编码
+        .arg(if is_aac { "copy" } else { "aac" }) 
         .arg("-b:a")
         .arg("128k")
         .arg("-movflags")
@@ -730,7 +730,7 @@ fn merge_audio_fast(
                 .with_details(e.to_string())
         })?;
 
-    // 🔧 绑定到 Job Object
+    
     crate::features::recording::job_object::assign_to_global_job_object(&child);
 
     let output = child.wait_with_output().map_err(|e| {
@@ -787,7 +787,7 @@ fn merge_audio_fast(
         elapsed_ms,
         operation
     );
-    // 🔧 调整警告阈值：AAC 流复制通常 <1s，WAV 重编码可能 >5s
+    
     let warn_threshold = if is_aac { 2000 } else { 5000 };
     if elapsed_ms > warn_threshold {
         log::warn!("⚠️ 快速路径耗时较长({}ms)，考虑优化方案", elapsed_ms);
@@ -948,7 +948,7 @@ fn ensure_system_audio_capture_started(
     let start_ms = runtime.snapshot().elapsed_ms;
     let seg_idx = runtime.system_audio_segments.len();
     if !runtime.system_audio_process_ids.is_empty() {
-        // 应用音频仍然使用 WAV（因为多进程混音复杂）
+        
         let process_ids = runtime.system_audio_process_ids.clone();
         let output_paths = process_ids
             .iter()
@@ -994,7 +994,7 @@ fn ensure_system_audio_capture_started(
         output_dir.join(format!("{}.sys.{}.wav", session_id, seg_idx))
     };
 
-    // 🔧 方案A：使用 FFmpeg 实时 AAC 编码，而非 WAV
+    
     let sys_aac = sys_wav.with_extension("aac");
     let first_try = start_system_loopback_aac_with_device(
         runtime.system_audio_device_id.clone(),
@@ -1021,7 +1021,7 @@ fn ensure_system_audio_capture_started(
     };
     match start_result {
         Ok(handle) => {
-            runtime.system_audio_wav_path = Some(sys_aac); // 🔧 存储 AAC 路径
+            runtime.system_audio_wav_path = Some(sys_aac); 
             runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
             runtime.system_audio_thread = handle.join;
             runtime.system_audio_stream_start_ms = Some(start_ms);
@@ -1123,7 +1123,7 @@ pub fn list_audio_devices(app: &AppHandle) -> Result<Vec<AudioInputDevice>, AppE
 }
 
 pub fn list_system_output_devices(_app: &AppHandle) -> Result<Vec<AudioInputDevice>, AppError> {
-    let ffmpeg_path = std::path::Path::new(""); // 未使用，仅为兼容签名
+    let ffmpeg_path = std::path::Path::new(""); 
     let outs = crate::features::recording::audio_device::list_system_audio_sources(ffmpeg_path)
         .map_err(|e| {
             AppError::new(ErrorCode::SystemError, "读取系统输出设备失败").with_details(e)
@@ -1143,7 +1143,7 @@ pub fn list_audio_process_items() -> Result<Vec<AudioProcessItem>, AppError> {
 }
 
 fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
-    let threshold = SystemTime::now() - Duration::from_secs(24 * 3600); // 24 hours
+    let threshold = SystemTime::now() - Duration::from_secs(24 * 3600); 
     if let Ok(entries) = fs::read_dir(output_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -1151,7 +1151,7 @@ fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
                 continue;
             }
             
-            // Only clean files older than 24 hours to prevent race conditions with other running instances
+            
             if let Ok(metadata) = entry.metadata() {
                 if let Ok(modified) = metadata.modified() {
                     if modified > threshold {

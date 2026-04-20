@@ -18,7 +18,7 @@ fn global_job_object() -> winapi::um::winnt::HANDLE {
         return current;
     }
 
-    // 创建新的 Job Object
+    
     let new_job = unsafe {
         let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null_mut());
         if !job.is_null() {
@@ -34,7 +34,7 @@ fn global_job_object() -> winapi::um::winnt::HANDLE {
         job
     };
 
-    // 尝试设置，如果已经被其他线程设置了，就关闭我们创建的
+    
     match JOB_OBJECT.compare_exchange(
         std::ptr::null_mut(),
         new_job,
@@ -43,7 +43,7 @@ fn global_job_object() -> winapi::um::winnt::HANDLE {
     ) {
         Ok(_) => new_job,
         Err(existing) => {
-            // 其他线程已经设置了，关闭我们创建的
+            
             if !new_job.is_null() {
                 unsafe { winapi::um::handleapi::CloseHandle(new_job); }
             }
@@ -64,5 +64,5 @@ pub fn assign_to_global_job_object(child: &std::process::Child) {
 
 #[cfg(not(target_os = "windows"))]
 pub fn assign_to_global_job_object(_child: &std::process::Child) {
-    // No-op on non-Windows
+    
 }

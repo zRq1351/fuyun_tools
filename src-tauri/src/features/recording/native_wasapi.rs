@@ -102,13 +102,13 @@ fn capture_process_loopback_to_wav(
             bits_per_sample: 16,
             sample_format: SampleFormat::Int,
         };
-        // 🔧 性能优化：使用 1MB 大缓冲区的 BufWriter 避免高频 I/O 瓶颈
+        
         let file = std::fs::File::create(&output_path)
             .map_err(|e| format!("创建进程音频文件失败(pid={}): {}", process_id, e))?;
         let buf_writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
         let mut writer = hound::WavWriter::new(buf_writer, spec)
             .map_err(|e| format!("初始化 WAV 写入器失败(pid={}): {}", process_id, e))?;
-        // ✅ 添加诊断日志：确认文件创建成功
+        
         if let Ok(meta) = std::fs::metadata(&output_path) {
             log::info!(
                 "进程音频文件创建成功(pid={}): {:?}, 大小: {} bytes",
@@ -135,7 +135,7 @@ fn capture_process_loopback_to_wav(
             let _ = tx.send((process_id, Ok(())));
         }
 
-        // 🔧 修复 A/V 严重不同步：通过时钟对齐补充静音数据
+        
         let mut active_time_ns: u64 = 0;
         let mut last_loop_time = std::time::Instant::now();
         let mut actual_total_samples: u64 = 0;
@@ -186,12 +186,12 @@ fn capture_process_loopback_to_wav(
             }
             queue.drain(..processed);
 
-            // 🔧 如果目标应用静音导致 WASAPI 不投递音频包，则根据时间流逝填充静音数据
+            
             if !is_paused {
                 let expected_total_samples = ((active_time_ns as f64 / 1_000_000_000.0) * 48000.0) as u64 * 2;
                 if expected_total_samples > actual_total_samples {
                     let padding_needed = expected_total_samples - actual_total_samples;
-                    // 容忍 50ms (4800 samples) 的抖动，避免在正常数据到达前过度填充
+                    
                     if padding_needed > 4800 {
                         for _ in 0..padding_needed {
                             let _ = writer.write_sample(0i16);
@@ -202,20 +202,20 @@ fn capture_process_loopback_to_wav(
             }
 
             if event.wait_for_event(50).is_err() {
-                // ✅ 添加诊断日志：事件等待失败（可能是进程退出或音频设备断开）
+                
                 log::warn!("进程音频事件等待失败(pid={})，继续尝试...", process_id);
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
 
-        // ✅ 添加诊断日志：记录循环退出原因
+        
         log::info!(
             "进程音频采集循环结束(pid={}), stop_flag={}",
             process_id,
             stop_flag.load(Ordering::SeqCst)
         );
 
-        // 检查文件是否存在
+        
         if let Ok(meta) = std::fs::metadata(&output_path) {
             log::info!(
                 "进程音频文件在循环退出后存在(pid={}): {:?}, 大小: {} bytes",
@@ -237,7 +237,7 @@ fn capture_process_loopback_to_wav(
             format!("完成进程音频文件失败(pid={}): {}", process_id, e)
         })?;
 
-        // ✅ 添加诊断日志：记录最终文件状态
+        
         match std::fs::metadata(&output_path) {
             Ok(meta) => log::info!(
                 "进程音频文件最终状态(pid={}): {:?}, 大小: {} bytes",
@@ -285,7 +285,7 @@ pub fn start_process_loopback_wavs(
         let worker_enabled = thread_enabled.clone();
         let worker_pause = thread_pause.clone();
         let worker_startup_tx = startup_tx.clone();
-        let worker_path = path.clone(); // ✅ 克隆 path 用于线程退出后检查
+        let worker_path = path.clone(); 
         workers.push(std::thread::spawn(move || {
             if let Err(e) = capture_process_loopback_to_wav(
                 pid,
@@ -296,7 +296,7 @@ pub fn start_process_loopback_wavs(
                 Some(worker_startup_tx),
             ) {
                 log::error!("进程音频采集线程异常退出(pid={}): {}", pid, e);
-                // ✅ 添加诊断日志：检查文件状态
+                
                 match std::fs::metadata(&worker_path) {
                     Ok(meta) => log::warn!(
                         "进程音频线程退出后文件仍存在: {:?}, 大小: {} bytes",
@@ -311,7 +311,7 @@ pub fn start_process_loopback_wavs(
                 }
             } else {
                 log::info!("进程音频采集线程正常退出(pid={})", pid);
-                // ✅ 添加诊断日志：检查文件状态
+                
                 match std::fs::metadata(&worker_path) {
                     Ok(meta) => log::info!(
                         "进程音频线程正常退出后文件存在: {:?}, 大小: {} bytes",
@@ -468,7 +468,7 @@ fn visible_window_process_titles() -> HashMap<u32, String> {
     let mut map = HashMap::new();
     if let Ok(windows) = crate::features::screenshot::window_detect::get_window_list() {
         for w in windows {
-            // 解析 hwnd
+            
             let hwnd_str = w.hwnd.trim_start_matches("0x");
             if let Ok(hwnd_val) = usize::from_str_radix(hwnd_str, 16) {
                 let hwnd = hwnd_val as winapi::shared::windef::HWND;
@@ -506,7 +506,7 @@ pub fn start_system_loopback_wav_with_device(
         let run = || -> Result<(), String> {
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
                 .map_err(|e| format!("WASAPI 主机不可用: {}", e))?;
-            // 选择设备：优先匹配描述文本，其次默认输出
+            
             let device = if let Some(key) = thread_device_key.as_ref() {
                 if let Ok(devs) = host.output_devices() {
                     let mut picked = None;
@@ -527,7 +527,7 @@ pub fn start_system_loopback_wav_with_device(
             }
             .or_else(|| host.default_output_device())
             .ok_or_else(|| "未找到输出设备".to_string())?;
-            // 选择可用采样配置：优先 supported_input_configs，其次 default_output_config，最后兜底 48kHz/立体声/F32
+            
             let mut sample_format = CpalSampleFormat::F32;
             let mut config: StreamConfig = StreamConfig {
                 channels: 2,
@@ -563,7 +563,7 @@ pub fn start_system_loopback_wav_with_device(
                 bits_per_sample: 16,
                 sample_format: SampleFormat::Int,
             };
-            // 🔧 性能优化：使用 1MB 大缓冲区的 BufWriter 避免高频 I/O 瓶颈
+            
             let file = std::fs::File::create(&thread_output)
                 .map_err(|e| format!("创建 wav 文件失败: {}", e))?;
             let buf_writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
@@ -574,7 +574,7 @@ pub fn start_system_loopback_wav_with_device(
             let enabled_cb = enabled_flag.clone();
             let pause_cb = recording_pause_flag.clone();
 
-            // ✅ 添加诊断日志：记录音频线程启动时的状态
+            
             log::info!(
                 "WASAPI音频线程启动: {:?}, enabled={}, pause={}",
                 thread_output.file_name(),
@@ -584,7 +584,7 @@ pub fn start_system_loopback_wav_with_device(
 
             let err_fn = |err| eprintln!("WASAPI 捕获错误: {}", err);
 
-            // ✅ 添加诊断日志：记录文件创建状态
+            
             match std::fs::metadata(&thread_output) {
                 Ok(meta) => log::info!(
                     "WASAPI音频文件创建成功: {:?}, 大小: {} bytes",
@@ -802,36 +802,36 @@ pub fn start_system_loopback_wav_with_device(
                 .map_err(|e| format!("启动输入流失败: {}", e))?;
             let _ = tx.send(Ok(()));
 
-            // 等待停止信号
+            
             while !thread_stop_flag.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(10));
             }
 
-            // 关键修复：收到停止信号后，填充静音数据以确保音频完全覆盖视频最后一段，而不是硬编码阻塞延时
+            
             log::info!("收到停止信号，填充2000ms静音数据以确保音频完全覆盖视频最后一段...");
             if let Ok(mut guard) = writer.lock() {
                 if let Some(w) = guard.as_mut() {
-                    // 48000 samples/sec * 2 seconds * 2 channels = 192000 samples
+                    
                     for _ in 0..(48000 * 2 * 2) {
                         let _ = w.write_sample(0i16);
                     }
                 }
             }
 
-            // 停止音频流，让CPAL完成最后的回调
+            
             let _ = stream.pause();
 
-            // 销毁流，释放资源
+            
             drop(stream);
 
-            // 确保所有音频数据都已写入文件
+            
             if let Ok(mut guard) = writer.lock() {
                 if let Some(w) = guard.take() {
                     let _ = w.finalize();
                 }
             }
 
-            // 记录文件最终状态
+            
             match std::fs::metadata(&thread_output) {
                 Ok(meta) => log::info!(
                     "✅ WASAPI音频文件最终大小: {:?}, {} bytes",
@@ -947,7 +947,7 @@ pub fn start_microphone_wav_with_device(
                 bits_per_sample: 16,
                 sample_format: SampleFormat::Int,
             };
-            // 🔧 性能优化：使用 1MB 大缓冲区的 BufWriter 避免高频 I/O 瓶颈
+            
             let file = std::fs::File::create(&thread_output)
                 .map_err(|e| format!("创建麦克风 wav 文件失败: {}", e))?;
             let buf_writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
@@ -958,7 +958,7 @@ pub fn start_microphone_wav_with_device(
             let enabled_cb = enabled_flag.clone();
             let pause_cb = recording_pause_flag.clone();
 
-            // ✅ 添加诊断日志：记录麦克风线程启动时的状态
+            
             log::info!(
                 "WASAPI麦克风线程启动: {:?}, enabled={}, pause={}",
                 thread_output.file_name(),
@@ -968,7 +968,7 @@ pub fn start_microphone_wav_with_device(
 
             let err_fn = |err| eprintln!("WASAPI 麦克风捕获错误: {}", err);
 
-            // ✅ 添加诊断日志：记录文件创建状态
+            
             match std::fs::metadata(&thread_output) {
                 Ok(meta) => log::info!(
                     "WASAPI麦克风文件创建成功: {:?}, 大小: {} bytes",
@@ -1186,32 +1186,32 @@ pub fn start_microphone_wav_with_device(
                 .map_err(|e| format!("启动麦克风输入流失败: {}", e))?;
             let _ = tx.send(Ok(()));
 
-            // 等待停止信号
+            
             while !thread_stop_flag.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(10));
             }
 
-            // 🔧 优化：麦克风停止时不额外延迟，立即关闭流
-            // 原因：enabled_flag=false时已写入静音，继续录制只会增加文件大小
+            
+            
             log::info!("收到麦克风停止信号，立即停止音频流...");
 
-            // 停止音频流，让CPAL完成最后的回调
+            
             let _ = stream.pause();
 
-            // 短暂等待确保音频回调处理完最后的缓冲区数据
+            
             std::thread::sleep(Duration::from_millis(10));
 
-            // 销毁流，释放资源
+            
             drop(stream);
 
-            // 确保所有音频数据都已写入文件
+            
             if let Ok(mut guard) = writer.lock() {
                 if let Some(w) = guard.take() {
                     let _ = w.finalize();
                 }
             }
 
-            // 记录文件最终状态
+            
             match std::fs::metadata(&thread_output) {
                 Ok(meta) => log::info!(
                     "✅ WASAPI麦克风文件最终大小: {:?}, {} bytes",
@@ -1261,11 +1261,11 @@ pub fn start_system_loopback_aac_with_device(
 
     let handle = std::thread::spawn(move || {
         let run = || -> Result<(), String> {
-            // 🔧 解析 FFmpeg 路径
+            
             let ffmpeg_path = crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path()
                 .map_err(|e| format!("解析 FFmpeg 路径失败: {}", e))?;
 
-            // 1. 启动 FFmpeg 子进程，从 stdin 读取 PCM F32LE，输出 AAC
+            
             let mut ffmpeg_cmd = Command::new(&ffmpeg_path);
             #[cfg(target_os = "windows")]
             {
@@ -1277,20 +1277,20 @@ pub fn start_system_loopback_aac_with_device(
             ffmpeg_cmd
                 .args(&[
                     "-f",
-                    "f32le", // 输入格式：32位浮点小端
+                    "f32le", 
                     "-ar",
-                    "48000", // 采样率：48kHz
+                    "48000", 
                     "-ac",
-                    "2", // 声道数：立体声
+                    "2", 
                     "-i",
-                    "-", // 从 stdin 读取
+                    "-", 
                     "-c:a",
-                    "aac", // 编码器：AAC
+                    "aac", 
                     "-b:a",
-                    "128k", // 比特率：128kbps
+                    "128k", 
                     "-profile:a",
-                    "aac_low", // 快速配置
-                    "-y",      // 覆盖输出文件
+                    "aac_low", 
+                    "-y",      
                     thread_output.to_str().ok_or("无效的输出路径")?,
                 ])
                 .stdin(Stdio::piped())
@@ -1314,7 +1314,7 @@ pub fn start_system_loopback_aac_with_device(
                 thread_output.file_name()
             );
 
-            // 2. WASAPI 捕获音频并写入 FFmpeg stdin
+            
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
                 .map_err(|e| format!("WASAPI 主机不可用: {}", e))?;
 
@@ -1345,7 +1345,7 @@ pub fn start_system_loopback_aac_with_device(
                 buffer_size: cpal::BufferSize::Default,
             };
 
-            // 3. 将音频数据写入 FFmpeg stdin（无锁缓冲池模式）
+            
             let (tx_audio, rx_audio) = std::sync::mpsc::channel::<Vec<u8>>();
             let (tx_pool, rx_pool) = std::sync::mpsc::channel::<Vec<u8>>();
             for _ in 0..50 {
@@ -1366,7 +1366,7 @@ pub fn start_system_loopback_aac_with_device(
                     let _ = tx_pool.send(data);
                 }
                 if let Some(writer) = writer_opt.take() {
-                    drop(writer); // Close stdin triggers FFmpeg EOF
+                    drop(writer); 
                 }
             });
 
@@ -1410,27 +1410,27 @@ pub fn start_system_loopback_aac_with_device(
                 .map_err(|e| format!("启动输入流失败: {}", e))?;
             let _ = tx.send(Ok(()));
 
-            // 等待停止信号
+            
             while !thread_stop_flag.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(10));
             }
 
-            // 🔧 优化：系统音频停止时不固定sleep，而是等待FFmpeg编码完成
+            
             let stop_start = std::time::Instant::now();
             log::info!("收到系统音频停止信号，关闭FFmpeg输入流...");
 
             drop(stream);
             log::info!("WASAPI 流已停止");
 
-            // 关闭 stdin 触发 FFmpeg 完成编码
-            let _ = tx_audio.send(Vec::new()); // send EOF to writer thread
-            let _ = writer_thread.join(); // Wait for writer thread to finish closing stdin
+            
+            let _ = tx_audio.send(Vec::new()); 
+            let _ = writer_thread.join(); 
 
-            // 🔧 主动等待 FFmpeg 进程退出（带超时）
+            
             log::info!("等待 FFmpeg AAC 编码完成...");
             if let Ok(mut guard) = thread_ffmpeg.lock() {
                 if let Some(ref mut child) = *guard {
-                    // 等待FFmpeg退出，最多15秒
+                    
                     for _ in 0..150 {
                         match child.0.try_wait() {
                             Ok(Some(status)) => {
@@ -1451,7 +1451,7 @@ pub fn start_system_loopback_aac_with_device(
                             }
                         }
                     }
-                    // 如果超时，强制杀死进程
+                    
                     if child.0.try_wait().ok().flatten().is_none() {
                         log::warn!("FFmpeg 编码超时，强制终止");
                         let _ = child.0.kill();

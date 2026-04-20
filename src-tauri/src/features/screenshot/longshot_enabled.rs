@@ -375,7 +375,7 @@ pub fn cancel_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
     let worker = runtime.worker.take();
     drop(slot);
     if let Some(handle) = worker {
-        // 两阶段收口：先返回给前端，再在后台等待采样线程退出，最后清空会话槽。
+        
         thread::spawn(move || {
             let _ = handle.join();
             clear_runtime_if_finished(session_id);
@@ -591,8 +591,8 @@ fn run_longshot_worker_inner(
     let start_at = Instant::now();
     let mut last_progress_emit = Instant::now();
     let mut frame_buf = vec![0u8; frame_bytes];
-    // 仅使用“已成功拼接到 stitched 的最后一帧”作为对齐基准，
-    // 避免丢弃帧污染基准导致累计重叠/错位。
+    
+    
     let mut anchor_frame: Option<Mat> = None;
     let mut stitched_segments: Vec<Mat> = Vec::new();
     let mut stitched_width: u32 = 0;
@@ -610,12 +610,12 @@ fn run_longshot_worker_inner(
                 .map(|s| s.state == "finishing")
                 .unwrap_or(false);
             if !finishing {
-                // cancel 等场景立即停
+                
                 break;
             }
             ended_by_finishing = true;
             if finishing_drain_left.is_none() {
-                // finish 时短暂排空 ffmpeg 缓冲，避免尾段丢失
+                
                 finishing_drain_left = Some(request.fps.clamp(6, 24));
             } else if finishing_drain_left == Some(0) {
                 break;
@@ -685,7 +685,7 @@ fn run_longshot_worker_inner(
         let mut dropped = false;
         let finishing_mode = finishing_drain_left.is_some();
         if finishing_mode {
-            // 收尾阶段放宽门控，优先避免“最后一段漏拼”
+            
             let tail_motion_ok = estimate.unique_rows >= 3
                 && estimate.phase_unique_rows >= 2
                 && (estimate.phase_unique_rows - estimate.unique_rows).abs() <= 44
@@ -695,7 +695,7 @@ fn run_longshot_worker_inner(
                 dropped = true;
             }
         } else {
-            // 常规阶段严格门控：必须检测到足够稳定的垂直位移
+            
             let motion_ok = estimate.unique_rows >= 8
                 && estimate.phase_unique_rows >= 6
                 && (estimate.phase_unique_rows - estimate.unique_rows).abs() <= 28
@@ -722,7 +722,7 @@ fn run_longshot_worker_inner(
                     MAX_STITCHED_HEIGHT, MAX_STITCHED_PIXELS
                 ));
             }
-            // 只有真正拼接成功后，才更新基准帧
+            
             anchor_frame = Some(frame_gray);
             consecutive_drops = 0;
         }
@@ -766,7 +766,7 @@ fn run_longshot_worker_inner(
                 );
             }
             if !stitched_segments.is_empty() {
-                // 仅在拼接高度变化时生成预览，避免频繁重复编码。
+                
                 if stitched_height > last_preview_stitched_height {
                     if let Ok(stitched_mat) = concat_segments(&stitched_segments) {
                         if let Ok(preview_base64) = mat_to_preview_base64(&stitched_mat, 300, 110) {
@@ -798,8 +798,8 @@ fn run_longshot_worker_inner(
     let _ = child.kill();
     let _ = child.wait();
 
-    // 根因级收尾：finish 触发后再抓取一帧“最终静态画面”参与拼接，
-    // 避免最后一次滚动发生在流式采样间隙而被整体漏掉。
+    
+    
     if ended_by_finishing {
         if let Ok(final_frame_color) = capture_single_bgr_frame(request) {
             let final_frame_gray = to_gray_mat(&final_frame_color)?;
@@ -808,8 +808,8 @@ fn run_longshot_worker_inner(
                     .map(|v| v > 1.2)
                     .unwrap_or(true);
                 if moved {
-                    // 根因级修复：finish 时不再依赖“门控是否放行”，而是确定性并入最终帧
-                    // 这样不会因尾段门控丢帧造成“最后一部分缺失”
+                    
+                    
                     let force_estimate = estimate_overlap(prev, &final_frame_gray).ok();
                     let overlap_rows = force_estimate
                         .as_ref()
@@ -989,7 +989,7 @@ fn estimate_overlap(prev: &Mat, curr: &Mat) -> Result<AlignEstimate, String> {
         return Err("长截图帧尺寸过小".to_string());
     }
 
-    // 先在降采样图上做粗估，显著降低模板匹配与相位相关成本。
+    
     let tpl_h = (small_rows / 4).clamp(32, 180).min(small_rows - 1);
     let template = curr_small
         .row_range(&core::Range::new(0, tpl_h).map_err(to_cv_err)?)
@@ -1037,9 +1037,9 @@ fn estimate_overlap(prev: &Mat, curr: &Mat) -> Result<AlignEstimate, String> {
     let phase_unique = ((phase_unique_small as f64) / downsample_scale).round() as i32;
     let phase_overlap = (rows - phase_unique).clamp(1, rows - 1);
 
-    // 根因修复：
-    // 过去这里偏向“更大 overlap”会在某些页面把内容裁掉过多，产生中段缺块。
-    // 改为候选 overlap 以 seam 代价选优，再进入精修，避免系统性过裁。
+    
+    
+    
     let mut candidates = vec![template_overlap];
     if response > 0.02 {
         candidates.push(phase_overlap);
@@ -1147,7 +1147,7 @@ fn overlap_sad_cost(prev: &Mat, curr: &Mat, overlap_rows: i32) -> Result<f64, St
         .row_range(&core::Range::new(overlap_rows - probe_h, overlap_rows).map_err(to_cv_err)?)
         .map_err(to_cv_err)?;
 
-    // 原图小窗精修：仅在中心列窗口内比较，减少每次精修的像素量。
+    
     let probe_w = cols.clamp(180, 720);
     let x0 = ((cols - probe_w) / 2).max(0);
     let x1 = (x0 + probe_w).min(cols);
@@ -1221,7 +1221,7 @@ fn mat_to_png_base64(image_mat: &Mat) -> Result<String, String> {
             )
         }
         3 => {
-            // OpenCV 常见彩色顺序为 BGR，编码前转为 RGB。
+            
             imgproc::cvt_color(
                 image_mat,
                 &mut packed,

@@ -263,9 +263,9 @@ const handleMouseDown = (e) => {
     dragTargetScrollLeft = scrollLeftVal
   }
 
-  // 防止原生的 dragstart 干扰我们自定义的鼠标拖拽滚动
-  // 仅在点击项内容时才允许拖拽（如果是项内拖拽文字等，我们这里统一拦截可能影响，但由于列表是整体，所以拦截整个列表的默认行为）
-  // e.preventDefault() 这里不能直接加，否则点击事件会失效。
+  
+  
+  
 
   window.addEventListener('mousemove', handleGlobalMouseMove)
   window.addEventListener('mouseup', handleGlobalMouseUp, true)
@@ -290,7 +290,7 @@ const handleGlobalMouseMove = (e) => {
     contentRef.value.classList.add('is-dragging')
     document.body.style.userSelect = 'none'
     
-    // 如果开始拖拽了，则取消当前所有的选区，防止选中文字
+    
     if (window.getSelection) {
       window.getSelection().removeAllRanges();
     }
@@ -298,7 +298,7 @@ const handleGlobalMouseMove = (e) => {
 
   if (!isDragging) return
   
-  // 在拖拽状态下阻止默认事件，防止触发原生的 HTML5 拖拽导致 mousemove 丢失
+  
   e.preventDefault();
   
   dragTargetScrollLeft = scrollLeftVal - walk

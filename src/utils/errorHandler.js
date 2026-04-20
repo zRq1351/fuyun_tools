@@ -22,22 +22,22 @@ export function handleAppError(error, context = '操作失败') {
     let code = null
     let details = null
 
-    // 尝试解析 AppError 结构
+    
     if (typeof error === 'object' && error !== null) {
-        // 检查是否是 Rust 返回的 AppError 结构
+        
         if (error.code && error.message) {
             code = error.code
             message = error.message
             details = error.details
         } else if (error.toString) {
-            // 处理普通 Error 对象或字符串错误
+            
             message = error.toString()
         }
     } else {
         message = String(error)
     }
 
-    // 根据错误代码提供更友好的提示
+    
     switch (code) {
         case ErrorCode.CONFIG_ERROR:
             ElMessage.error({
@@ -61,7 +61,7 @@ export function handleAppError(error, context = '操作失败') {
             })
             break
         default:
-            // 对于普通字符串错误，尝试进行简单的关键词匹配（兼容旧代码或未捕获的 panic）
+            
             if (message.includes('未配置AI提供商')) {
                 ElMessage.error('未配置 AI 提供商，请在设置中填写 API Key 与 Endpoint 后重试。')
             } else if (message.includes('API地址不能为空')) {

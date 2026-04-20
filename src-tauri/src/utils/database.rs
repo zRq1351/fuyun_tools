@@ -188,7 +188,7 @@ async fn open_history_db_async() -> Result<sqlx::pool::PoolConnection<sqlx::Sqli
 }
 
 async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(), String> {
-    // 创建表结构
+    
     sqlx::query(
         "
         CREATE TABLE IF NOT EXISTS history_items (
@@ -277,7 +277,7 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
     .await
     .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
 
-    // Migrate categories and pinned_items to use item_id as PRIMARY KEY
+    
     let categories_info: Vec<sqlx::sqlite::SqliteRow> =
         sqlx::query("PRAGMA table_info(categories)")
             .fetch_all(&mut *conn)
@@ -366,7 +366,7 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
     .execute(&mut *conn)
     .await;
 
-    // 迁移:为 pinned_items 表添加 position 列(如果不存在)
+    
     let _ = sqlx::query("ALTER TABLE pinned_items ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
         .execute(&mut *conn)
         .await;
@@ -413,7 +413,7 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
         return Ok(None);
     }
 
-    // 使用 updated_at DESC 排序（最新更新/复制的在前）
+    
     let item_rows =
         sqlx::query("SELECT content FROM history_items ORDER BY updated_at DESC, id DESC LIMIT 100000")
             .fetch_all(&mut *conn)
@@ -424,7 +424,7 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
         .filter_map(|row| row.try_get::<String, _>(0).ok())
         .collect::<Vec<_>>();
 
-    // 分类表：使用 item_id 作为键
+    
     let category_rows = sqlx::query("SELECT item_id, category FROM categories WHERE item_id IS NOT NULL AND item_id != ''")
         .fetch_all(&mut *conn)
         .await
@@ -440,7 +440,7 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
         categories.insert(item_id, category);
     }
 
-    // 分类列表：使用 id 排序
+    
     let category_rows = sqlx::query("SELECT category FROM category_list ORDER BY id ASC")
         .fetch_all(&mut *conn)
         .await
@@ -450,7 +450,7 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
         .filter_map(|row| row.try_get::<String, _>(0).ok())
         .collect::<Vec<_>>();
 
-    // 置顶表：使用 item_id 作为键
+    
     let pinned_rows = sqlx::query("SELECT item_id FROM pinned_items WHERE item_id IS NOT NULL AND item_id != '' ORDER BY pinned_at DESC")
         .fetch_all(&mut *conn)
         .await
@@ -1206,7 +1206,7 @@ pub async fn save_pinned_items_order_async(pinned_items: &[String]) -> Result<()
 
     let base_ts = now_unix_ms();
     for (idx, item_id) in pinned_items.iter().enumerate() {
-        // 较新的 pinned_at 表示更靠前的置顶项。
+        
         let pinned_at = base_ts + (pinned_items.len().saturating_sub(idx) as i64);
         sqlx::query(
             "INSERT INTO pinned_items(pinned_at, item_id) VALUES (?1, ?2)",
@@ -1309,7 +1309,7 @@ pub async fn remove_item_category(item_id: &str) -> Result<(), String> {
 pub async fn add_category_to_list(category: &str) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
 
-    // 检查是否已存在
+    
     let exists: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM category_list WHERE category = ?)")
             .bind(category)
@@ -1378,7 +1378,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
         .map_err(|e| format!("创建事务失败: {}", e))?;
     let now_ms = now_unix_ms();
 
-    // 获取当前已存在的 item_id 集合
+    
     let existing_ids: HashSet<String> = sqlx::query_scalar::<_, String>(
         "SELECT DISTINCT item_id FROM history_items WHERE item_id IS NOT NULL AND item_id != ''",
     )
@@ -1388,12 +1388,12 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
     .into_iter()
     .collect();
 
-    // 只插入不存在的记录
+    
     let mut new_entries = Vec::new();
     for (idx, item) in data.items.iter().enumerate().rev() {
         let item_id = stable_history_item_id(item);
         if existing_ids.contains(&item_id) {
-            continue; // 跳过已存在的记录
+            continue; 
         }
         let ts = now_ms - (idx as i64);
         new_entries.push((item_id, item.clone(), ts));
@@ -1412,10 +1412,10 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
 
     log::info!("合并文本历史: 新增 {} 条记录", new_count);
 
-    // 合并分类信息(只添加新的)
+    
     for (item_id, category) in &data.categories {
         if existing_ids.contains(item_id) {
-            // 如果记录已存在,更新分类
+            
             sqlx::query(
                 "INSERT INTO categories(category, item_id) VALUES(?1, ?2)
              ON CONFLICT(item_id) DO UPDATE SET category = ?1",
@@ -1426,7 +1426,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
             .await
             .map_err(|e| format!("更新分类失败: {}", e))?;
         } else {
-            // 如果记录不存在,也添加分类(以备后续插入记录时使用)
+            
             sqlx::query(
                 "INSERT OR IGNORE INTO categories(category, item_id) VALUES(?1, ?2)",
             )
@@ -1438,7 +1438,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
         }
     }
 
-    // 合并且分类列表(只添加不存在的)
+    
     let existing_categories: HashSet<String> =
         sqlx::query_scalar::<_, String>("SELECT category FROM category_list")
             .fetch_all(&mut *tx)
@@ -1457,7 +1457,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
         }
     }
 
-    // 合并且置顶项(追加到末尾)
+    
     let existing_pinned: HashSet<String> = sqlx::query_scalar::<_, String>(
         "SELECT DISTINCT item_id FROM pinned_items WHERE item_id IS NOT NULL AND item_id != ''",
     )
@@ -1467,7 +1467,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
     .into_iter()
     .collect();
 
-    // 检测 pinned_items 表是否有 position 列
+    
     let has_position =
         sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM pinned_items")
             .fetch_one(&mut *tx)
@@ -1475,7 +1475,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
             .is_ok();
 
     if has_position {
-        // 有 position 列,使用位置排序
+        
         let current_max_position =
             sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM pinned_items")
                 .fetch_one(&mut *tx)
@@ -1486,7 +1486,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
         let mut position = current_max_position + 1;
         for (idx, item_id) in data.pinned_items.iter().enumerate() {
             if existing_pinned.contains(item_id) {
-                continue; // 跳过已置顶的
+                continue; 
             }
 
             let pinned_at = now_ms - (idx as i64);
@@ -1503,10 +1503,10 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
             position += 1;
         }
     } else {
-        // 没有 position 列,简单插入
+        
         for (idx, item_id) in data.pinned_items.iter().enumerate() {
             if existing_pinned.contains(item_id) {
-                continue; // 跳过已置顶的
+                continue; 
             }
 
             let pinned_at = now_ms - (idx as i64);

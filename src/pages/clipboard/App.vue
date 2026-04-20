@@ -373,8 +373,8 @@ const init = async () => {
       void showWindow(event.payload)
     })
     unlistenHistoryPayloadUpdated = await listen('clipboard-history-payload-updated', (event) => {
-      // 全量更新不再采用增量 push，而是由 syncHistoryIncremental 自主处理，
-      // 如果后端需要前端重新加载最新数据，可以直接调用 syncHistoryIncremental
+      
+      
       syncHistoryIncremental()
     })
     unlistenHistoryItemUpdated = await listen('clipboard-history-item-updated', (event) => {
@@ -516,7 +516,7 @@ const handleContainerMouseDown = (event) => {
 }
 
 const assignToCategory = async (category) => {
-  const itemKey = contextMenuItem.value // this is id
+  const itemKey = contextMenuItem.value 
   await runCategoryAssignment({
     itemKey,
     category,
@@ -548,7 +548,7 @@ const handleDrop = async (event, category) => {
   }
 
   await runCategoryAssignment({
-    itemKey: dragItem.value, // this is id
+    itemKey: dragItem.value, 
     category,
     persist: (itemKey, nextCategory) => setItemCategory(itemKey, nextCategory)
   })
@@ -744,7 +744,7 @@ let filterDebounceTimer = null
 watch([searchKeyword, categoryFilter], (newVals, oldVals) => {
   if (!isVisible.value) return
 
-  // 如果正在更新分类，跳过重新加载，避免竞态条件
+  
   if (isUpdatingCategory.value) {
     console.log('[分类更新中] 跳过重新加载')
     return
@@ -757,13 +757,13 @@ watch([searchKeyword, categoryFilter], (newVals, oldVals) => {
     clearTimeout(filterDebounceTimer)
   }
   
-  // 对于单纯的分类切换，缩短防抖时间以提升响应速度
+  
   const delay = newSearch !== oldSearch ? 300 : 50
 
   filterDebounceTimer = setTimeout(() => {
     loadMoreIntent.value = false
-    // 使用增量同步代替全量重置，避免整个页面刷新的闪烁感
-    // 这样可以保留前端已有的数据（包括刚分类的项），体验更接近图片剪切板
+    
+    
     syncHistoryIncremental()
   }, delay)
 })

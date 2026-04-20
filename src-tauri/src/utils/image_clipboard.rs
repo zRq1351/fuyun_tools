@@ -206,7 +206,7 @@ impl PreviewGenerator {
                     build_preview_from_rgba(&task.rgba, task.width, task.height);
                 let item_id = task.item_id.clone();
 
-                // 存储到内存缓存
+                
                 let mut cache = cache_clone.lock().unwrap();
                 cache.put(
                     item_id.clone(),
@@ -214,7 +214,7 @@ impl PreviewGenerator {
                 );
                 drop(cache);
 
-                // 发送预览就绪事件通知前端
+                
                 if let Some(ref handle) = app_handle_clone {
                     let preview_url = format!("data:image/png;base64,{}", preview_base64);
                     let _ = handle.emit(
@@ -274,7 +274,7 @@ impl PreviewGenerator {
 
     /// 获取异步生成的预览（优先从内存缓存，其次从数据库）
     pub fn get_preview(&self, item_id: &str) -> Option<(u32, u32, String)> {
-        // 先从内存缓存查找
+        
         if let Some(preview) = self
             .preview_cache
             .lock()
@@ -284,9 +284,9 @@ impl PreviewGenerator {
             return Some(preview.clone());
         }
 
-        // 从数据库加载
+        
         if let Ok(Some(preview)) = image_store::load_async_preview(item_id) {
-            // 加载到内存缓存
+            
             self.preview_cache
                 .lock()
                 .unwrap()
@@ -394,7 +394,7 @@ pub struct ImageClipboardManager {
     max_items: usize,
     image_disk_limit_bytes: u64,
     grouped_items_protected_from_limit: bool,
-    // 内存管理优化字段
+    
     current_memory_usage: Arc<AtomicU64>,
     dynamic_memory_budget: Arc<AtomicU64>,
     last_memory_check: Arc<AtomicU64>,
@@ -436,7 +436,7 @@ impl ImageClipboardManager {
             max_items,
             image_disk_limit_bytes: image_disk_limit_mb.saturating_mul(1024 * 1024),
             grouped_items_protected_from_limit,
-            // 初始化内存管理优化字段
+            
             current_memory_usage: Arc::new(AtomicU64::new(0)),
             dynamic_memory_budget: Arc::new(AtomicU64::new(
                 IMAGE_FULL_RES_MEMORY_BUDGET_BYTES as u64,
@@ -444,7 +444,7 @@ impl ImageClipboardManager {
             last_memory_check: Arc::new(AtomicU64::new(0)),
         };
 
-        // 启动内存监控
+        
         manager.start_memory_monitor();
         manager.compact_history_after_load();
         if let Err(e) = image_store::init_image_store() {
@@ -918,7 +918,7 @@ impl ImageClipboardManager {
         height: u32,
         source_blob: Option<(Vec<u8>, String)>,
     ) {
-        // 阶段 2：计算签名
+        
         let signature = compute_signature(&rgba, width, height);
         let id = generate_item_id(&signature);
         let blob_ext = source_blob
@@ -1028,7 +1028,7 @@ impl ImageClipboardManager {
 
         let rgba_arc = Arc::new(rgba);
         if new_item_compact.is_some() {
-            // 仅当强签名确认插入为新图片后，才异步生成预览，避免重复图白白占用编码/I/O 队列。
+            
             let preview_task = PreviewGenerationTask {
                 item_id: id.clone(),
                 rgba: rgba_arc.clone(),
@@ -1162,7 +1162,7 @@ impl ImageClipboardManager {
             (removed.id, removed.image_path, removed.signature, ids)
         };
 
-        // 清理最近图片的采样缓存，避免删除后再复制被误判为重复
+        
         crate::services::image_clipboard_manager::clear_recent_samples();
 
         let pinned_snapshot = {
@@ -1278,7 +1278,7 @@ impl ImageClipboardManager {
             return Err("目标图片不存在".to_string());
         }
 
-        // 优化：记录旧位置，用于增量更新
+        
         let old_position = history.iter().position(|item| item.id == item_id);
 
         let mut pinned_items = lock_arc_mutex(&self.pinned_items);
@@ -1293,21 +1293,21 @@ impl ImageClipboardManager {
         apply_pin_order(&mut history, &pinned_items);
         self.signature_index_dirty.store(true, Ordering::SeqCst);
 
-        // 优化：计算新位置
+        
         let new_position = history.iter().position(|item| item.id == item_id);
 
         let pinned_snapshot = pinned_items.clone();
         drop(pinned_items);
         drop(history);
 
-        // 优化：使用增量更新而不是全量更新
+        
         if let (Some(old_pos), Some(new_pos)) = (old_position, new_position) {
             if old_pos != new_pos {
                 if let Err(e) =
                     image_store::sync_item_positions_incremental(&item_id, old_pos, new_pos)
                 {
                     log::error!("增量同步图片位置失败: {}", e);
-                    // 回退到全量同步
+                    
                     let history = lock_arc_mutex(&self.history);
                     let item_ids = history
                         .iter()
@@ -1406,14 +1406,14 @@ impl ImageClipboardManager {
             return Ok(0);
         }
 
-        // 释放锁后执行异步数据库操作
+        
         if should_clear_all {
             image_store::clear_all_history_async().await?;
         } else {
             image_store::delete_items_bulk_async(&removed_ids).await?;
         }
 
-        // 只有数据库操作成功后，才更新内存和清理文件
+        
         cleanup_image_blob_files_async(removed_paths);
         self.signature_index_dirty.store(true, Ordering::SeqCst);
 
@@ -1649,30 +1649,30 @@ impl ImageClipboardManager {
         use tauri_plugin_clipboard_manager::ClipboardExt;
         let mut last_error = String::new();
 
-        // 优化方案 6：针对大图片优化重试策略
-        // 检测图片大小，大图片使用更激进的重试策略
+        
+        
         let image_size = image.rgba().len();
-        let is_large_image = image_size > 1024 * 1024; // > 1MB
+        let is_large_image = image_size > 1024 * 1024; 
 
-        // 大图片使用更少的重试次数和更短的延迟
+        
         let retry_delays = if is_large_image {
-            // 大图片：3次重试，延迟更短
+            
             vec![5u64, 10, 15]
         } else {
-            // 小图片：保持原有策略但减少最大重试次数
+            
             vec![3u64, 6, 10, 16, 24]
         };
 
         for (attempt, delay_ms) in retry_delays.iter().enumerate() {
             match app_handle.clipboard().write_image(image) {
                 Ok(_) => {
-                    // 优化方案 6：大图片跳过验证或使用快速验证
+                    
                     if is_fast_fill_verify_mode() || is_large_image {
-                        // 大图片或快速模式：跳过验证，直接返回成功
+                        
                         return Ok(());
                     }
 
-                    // 小图片使用简化验证：只验证一次，延迟更短
+                    
                     std::thread::sleep(Duration::from_millis(3));
                     if let Ok(read_back) = app_handle.clipboard().read_image() {
                         if read_back.width() > 0
@@ -1786,12 +1786,12 @@ impl ImageClipboardManager {
     }
 
     fn read_item_rgba(&self, item: &ImageHistoryItem) -> Result<Vec<u8>, String> {
-        // 优化：检查是否已经缓存
+        
         if !item.rgba_bytes.is_empty() {
             return Ok(item.rgba_bytes.clone());
         }
 
-        // 优化：检查 pending 中是否有数据
+        
         let pending = lock_arc_mutex(&self.pending_images);
         if let Some(data) = pending.get(&item.id) {
             if data.width == item.width && data.height == item.height {
@@ -1800,7 +1800,7 @@ impl ImageClipboardManager {
         }
         drop(pending);
 
-        // 优化：延迟加载 - 只有在真正需要时才从磁盘读取
+        
         if item.lazy_load {
             log::debug!("延迟加载图片: {} ({}x{})", item.id, item.width, item.height);
         }
@@ -1978,7 +1978,7 @@ impl ImageClipboardManager {
                     .unwrap_or_default()
                     .as_millis() as u64;
 
-                // 检查是否需要更新内存预算
+                
                 let last_check = last_memory_check.load(Ordering::Relaxed);
                 if now.saturating_sub(last_check) < MEMORY_MONITOR_INTERVAL_MS {
                     continue;
@@ -1986,16 +1986,16 @@ impl ImageClipboardManager {
 
                 last_memory_check.store(now, Ordering::Relaxed);
 
-                // 获取当前内存使用情况
+                
                 let current_usage = current_memory_usage.load(Ordering::Relaxed);
                 let current_budget = dynamic_memory_budget.load(Ordering::Relaxed);
 
-                // 动态调整内存预算
+                
                 let new_budget = if current_usage > current_budget * 9 / 10 {
-                    // 使用率超过90%，增加预算
+                    
                     (current_budget * 12 / 10).min(DYNAMIC_MEMORY_BUDGET_MAX as u64)
                 } else if current_usage < current_budget * 5 / 10 {
-                    // 使用率低于50%，减少预算
+                    
                     (current_budget * 8 / 10).max(DYNAMIC_MEMORY_BUDGET_MIN as u64)
                 } else {
                     current_budget
@@ -2233,7 +2233,7 @@ fn file_size_bytes(path: &str) -> u64 {
 pub(crate) fn compute_signature(rgba: &[u8], width: u32, height: u32) -> String {
     use xxhash_rust::xxh3::xxh3_64;
 
-    // 阶段 1：使用 xxHash 和智能采样策略
+    
     let mut combined = Vec::with_capacity(12);
     combined.extend_from_slice(&width.to_le_bytes());
     combined.extend_from_slice(&height.to_le_bytes());
@@ -2244,26 +2244,26 @@ pub(crate) fn compute_signature(rgba: &[u8], width: u32, height: u32) -> String 
         return format!("{:016x}", hash);
     }
 
-    // 智能采样：根据图片大小调整采样点数
+    
     let total_pixels = width as usize * height as usize;
     let sample_points = if total_pixels > 2_000_000 {
-        // > 2MP
-        64 // 大图片用更少的采样点
+        
+        64 
     } else if total_pixels > 500_000 {
-        // > 0.5MP
-        96 // 中等图片
+        
+        96 
     } else {
-        128 // 小图片用更多采样点
+        128 
     };
 
-    // 采样策略：取首、中、尾各 N 字节
+    
     let sample_size = (rgba.len() / sample_points).max(1);
 
-    // 首部采样
+    
     let head_end = sample_size.min(rgba.len());
     combined.extend_from_slice(&rgba[..head_end]);
 
-    // 中部采样
+    
     if rgba.len() > sample_size * 2 {
         let mid = rgba.len() / 2;
         let mid_start = mid.saturating_sub(sample_size / 2);
@@ -2271,7 +2271,7 @@ pub(crate) fn compute_signature(rgba: &[u8], width: u32, height: u32) -> String 
         combined.extend_from_slice(&rgba[mid_start..mid_end]);
     }
 
-    // 尾部采样
+    
     if rgba.len() > sample_size {
         let tail_start = rgba.len().saturating_sub(sample_size);
         combined.extend_from_slice(&rgba[tail_start..]);
@@ -2393,7 +2393,7 @@ fn rgba_to_png_base64(rgba: &[u8], width: u32, height: u32) -> Result<String, St
 }
 
 fn read_image_blob(path: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
-    // 检查文件大小，决定是否使用分块处理
+    
     let file_size = std::fs::metadata(path)
         .map(|m| m.len() as usize)
         .unwrap_or(0);
@@ -2406,7 +2406,7 @@ fn read_image_blob(path: &str, width: u32, height: u32) -> Result<Vec<u8>, Strin
         return read_large_image_blob_chunked(path, width, height);
     }
 
-    // 小图片直接读取
+    
     let bytes = std::fs::read(path).map_err(|e| format!("读取图片二进制失败: {}", e))?;
     if bytes.is_empty() {
         return Err("图片数据为空".to_string());
@@ -2432,7 +2432,7 @@ fn read_large_image_blob_chunked(path: &str, width: u32, height: u32) -> Result<
     let file = std::fs::File::open(path).map_err(|e| format!("打开图片文件失败: {}", e))?;
     let mut reader = std::io::BufReader::new(file);
 
-    // 分块读取文件内容
+    
     let mut bytes = Vec::new();
     let mut chunk = vec![0u8; IMAGE_CHUNK_SIZE];
 
@@ -2445,7 +2445,7 @@ fn read_large_image_blob_chunked(path: &str, width: u32, height: u32) -> Result<
         }
         bytes.extend_from_slice(&chunk[..bytes_read]);
 
-        // 如果累计大小超过阈值，记录警告
+        
         if bytes.len() > LARGE_IMAGE_THRESHOLD * 2 {
             log::warn!(
                 "图片文件过大 ({}MB)，可能影响性能",
@@ -2458,7 +2458,7 @@ fn read_large_image_blob_chunked(path: &str, width: u32, height: u32) -> Result<
         return Err("图片数据为空".to_string());
     }
 
-    // 解码图片
+    
     let decoded = image::load_from_memory(&bytes).map_err(|e| format!("解码大图片失败: {}", e))?;
     let rgba = decoded.to_rgba8();
 
@@ -2858,7 +2858,7 @@ fn build_preview_from_rgba(rgba: &[u8], width: u32, height: u32) -> (u32, u32, S
     if preview_width == 0 || preview_height == 0 {
         return (0, 0, String::new());
     }
-    // 修复：将RGBA数据编码为PNG格式的Base64，而不是直接编码RGBA原始数据
+    
     let png_bytes =
         match rgba_to_png_bytes_for_storage(preview.as_raw(), preview_width, preview_height) {
             Ok(bytes) => bytes,
@@ -2976,7 +2976,7 @@ fn read_images_from_windows_file_clipboard() -> Vec<ClipboardImagePayload> {
             return Vec::new();
         }
         
-        // 确保在 panic 等情况下也能关闭剪贴板
+        
         scopeguard::defer! {
             CloseClipboard();
         }

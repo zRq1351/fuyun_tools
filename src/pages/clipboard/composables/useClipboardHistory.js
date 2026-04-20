@@ -15,12 +15,12 @@ export function useClipboardHistory() {
     const sortBy = ref('pinnedFirst')
     const sortOrder = ref('asc')
 
-    // 添加与图片一致的过滤机制
+    
     const filterDataRevision = ref(0)
 
-    // 添加分类搜索索引，与图片保持一致
-    const categorySearchIndex = new Map()  // Map<category, Set<id>>
-    const itemCategorySnapshot = new Map()  // Map<id, category>
+    
+    const categorySearchIndex = new Map()  
+    const itemCategorySnapshot = new Map()  
     const keywordCategoryMatchCache = new Map()
 
     const getItemCategory = (item_id) => {
@@ -29,11 +29,11 @@ export function useClipboardHistory() {
 
     const bumpFilterDataRevision = () => {
         filterDataRevision.value += 1
-        // 清除缓存
+        
         keywordCategoryMatchCache.clear()
     }
 
-    // 移除分类索引
+    
     const removeCategoryIndexForItem = (id) => {
         const oldCategory = itemCategorySnapshot.get(id)
         if (!oldCategory) {
@@ -50,7 +50,7 @@ export function useClipboardHistory() {
         itemCategorySnapshot.delete(id)
     }
 
-    // 应用分类索引
+    
     const applyCategoryIndexForItem = (id, category) => {
         removeCategoryIndexForItem(id)
         const normalized = String(category || '未分类')
@@ -63,7 +63,7 @@ export function useClipboardHistory() {
         contentSet.add(id)
     }
 
-    // 设置分类（本地），与图片的 setItemCategoryLocal 一致
+    
     const setItemCategoryLocal = (id, category) => {
         if (!id) return
         const normalized = String(category || '未分类')
@@ -72,7 +72,7 @@ export function useClipboardHistory() {
         keywordCategoryMatchCache.clear()
     }
 
-    // 移除分类（本地）
+    
     const removeItemCategoryLocal = (id) => {
         if (!id) return
         delete categoryMap.value[id]
@@ -80,7 +80,7 @@ export function useClipboardHistory() {
         keywordCategoryMatchCache.clear()
     }
 
-    // 重建分类搜索索引
+    
     const rebuildCategorySearchIndex = () => {
         categorySearchIndex.clear()
         itemCategorySnapshot.clear()
@@ -91,7 +91,7 @@ export function useClipboardHistory() {
         }
     }
 
-    // 获取关键词匹配的分类ID集合
+    
     const getKeywordCategoryMatchedIds = (keyword) => {
         if (!keyword) return null
         const cacheKey = `${filterDataRevision.value}|${keyword}`
@@ -110,21 +110,21 @@ export function useClipboardHistory() {
         return matchedIds
     }
 
-    // 使用 computed 实现与图片一致的即时响应过滤，并使用索引加速
+    
     const visibleHistory = computed(() => {
-        // 访问 filterDataRevision 触发响应式更新
-        // eslint-disable-next-line no-unused-expressions
+        
+        
         filterDataRevision.value
         
         const activeCategory = categoryFilter.value === '全部' ? null : categoryFilter.value
         const keyword = searchKeyword.value.trim().toLowerCase()
 
-        // 使用分类索引快速过滤
+        
         const categoryFilteredIds = activeCategory
             ? (categorySearchIndex.get(activeCategory) || new Set())
             : null
 
-        // 使用关键词索引（如果有关键词）
+        
         const keywordMatchedIds = keyword ? getKeywordCategoryMatchedIds(keyword) : null
 
         return pagedHistory.value
@@ -132,12 +132,12 @@ export function useClipboardHistory() {
                 const id = entry.id
                 const content = entry.content
 
-                // 分类过滤：使用索引 O(1)
+                
                 if (categoryFilteredIds && !categoryFilteredIds.has(id)) {
                     return false
                 }
 
-                // 关键词过滤：使用索引 O(1)
+                
                 if (keywordMatchedIds && !keywordMatchedIds.has(id)) {
                     return false
                 }
@@ -171,10 +171,10 @@ export function useClipboardHistory() {
                 if (a.pinned && b.pinned) {
                     return diff
                 }
-                return diff // position 已经是全局正确排序的数字，不用管 sortOrder.value 因为拉取的时候已经排序好了
+                return diff 
             }
             if (orderKey === 'updatedAt') {
-                const diff = (b.updatedAt || 0) - (a.updatedAt || 0) // 默认 updatedAt desc (新更新的在前)
+                const diff = (b.updatedAt || 0) - (a.updatedAt || 0) 
                 if (diff !== 0) return sortOrder.value === 'asc' ? -diff : diff
                 return a.position - b.position
             }
@@ -210,23 +210,23 @@ export function useClipboardHistory() {
 
     const mergePageItems = (items, reset) => {
         if (reset) {
-            // 重置时清空索引
+            
             categorySearchIndex.clear()
             itemCategorySnapshot.clear()
             keywordCategoryMatchCache.clear()
             
-            // 为了防止乱序，强制使用从0开始的连续 position 覆盖服务端给的可能是不连续的 position
+            
             const resetItems = items.map((item, index) => ({
                 ...item,
                 position: index
             }));
             
             pagedHistory.value = sortPageItems(resetItems)
-            // 校准 reset 数据后的 position
+            
             pagedHistory.value.forEach((entry, index) => {
                 entry.position = index;
             });
-            // 重建索引
+            
             for (const item of items) {
                 if (item.id) {
                     setItemCategoryLocal(item.id, item.category || '未分类')
@@ -310,7 +310,7 @@ export function useClipboardHistory() {
         await loadHistoryPage({reset: true})
     }
 
-    // 增量同步：保留现有数据，只更新前端没有的项（与图片的 mergeIncrementalPageIntoState 一致）
+    
     const syncHistoryIncremental = async () => {
         if (isLoadingPage.value) return
         isLoadingPage.value = true
@@ -330,7 +330,7 @@ export function useClipboardHistory() {
             const items = Array.isArray(response?.items) ? response.items : []
 
             if (items.length === 0) {
-                // 没有新数据，只更新总数
+                
                 if (Number.isFinite(response?.total)) {
                     totalCount.value = Math.max(Number(response.total), getActiveCategoryCount(), Number(totalCount.value) || 0)
                     pageOffset.value = pagedHistory.value.length
@@ -340,11 +340,11 @@ export function useClipboardHistory() {
                 return
             }
 
-            // 获取现有数据的快照
+            
             const existingById = new Map(pagedHistory.value.map(entry => [entry.id, entry]))
             const incomingIds = new Set(items.map(item => item.id))
 
-            // 构建新数据列表（前部）
+            
             const front = []
             for (const item of items) {
                 if (!item.id) continue
@@ -353,17 +353,17 @@ export function useClipboardHistory() {
                     ...existing,
                     id: item.id,
                     content: item.content,
-                    // 不应该使用 existing.position 如果 item 有自己的 position
+                    
                     position: item.position ?? existing.position ?? 0,
                     snippet: item.snippet ?? existing.snippet ?? '',
                     pinned: item.pinned ?? existing.pinned ?? false,
                     category: item.category || existing.category || '未分类'
                 })
-                // 更新分类索引
+                
                 setItemCategoryLocal(item.id, item.category || '未分类')
             }
 
-            // 保留不在新数据中的旧项（后部）
+            
             const rest = []
             for (const entry of pagedHistory.value) {
                 if (!incomingIds.has(entry.id)) {
@@ -371,11 +371,11 @@ export function useClipboardHistory() {
                 }
             }
             
-            // 合并：新数据在前，旧数据在后
+            
             const merged = [...front, ...rest]
 
-            // 不再按照旧的 position 排序，因为不同分类拉取的数据 position 可能重叠
-            // 直接保持新拉取的数据在前面，旧数据在后面的顺序，并重新赋予连续的 position
+            
+            
             merged.forEach((entry, index) => {
                 entry.position = index;
             });
@@ -515,7 +515,7 @@ export function useClipboardHistory() {
             ? payload.categories
             : categoryMap.value
             
-        // 预先建立分类索引
+        
         categorySearchIndex.clear()
         itemCategorySnapshot.clear()
         keywordCategoryMatchCache.clear()

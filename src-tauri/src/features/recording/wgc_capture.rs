@@ -195,7 +195,7 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                 let mut vec = Vec::new();
                 let pixels = buffer.as_nopadding_buffer(&mut vec);
                 
-                // Fast manual nearest-neighbor resize to avoid high CPU usage
+                
                 let target_w = self.flags.width as usize;
                 let target_h = self.flags.height as usize;
                 let src_w = frame_w as usize;
@@ -212,7 +212,7 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                         let src_idx = src_row_start + src_x * 4;
                         let dst_idx = dst_row_start + x * 4;
                         
-                        // Copy BGRA/RGBA pixels (4 bytes)
+                        
                         resized[dst_idx..dst_idx + 4].copy_from_slice(&pixels[src_idx..src_idx + 4]);
                     }
                 }
@@ -337,7 +337,7 @@ pub fn start_window_capture_to_mp4(
                         Err(e) => {
                             let details = format!("{:?}", e);
                             if is_border_config_unsupported(&details) {
-                                // 当前环境不支持 border 配置：切到 Default 并吞掉本次 stop 错误。
+                                
                                 WGC_FORCE_DEFAULT_BORDER.store(true, Ordering::Relaxed);
                                 log::warn!(
                                     "WGC stop 命中 BorderConfigUnsupported，后续会话回退 DrawBorderSettings::Default"

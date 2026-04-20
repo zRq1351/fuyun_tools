@@ -161,12 +161,12 @@ fn matches_recent_sample(width: u32, height: u32, rgba: &[u8]) -> bool {
     let sample = extract_sample_points(rgba, width, height);
     let recent = RECENT_IMAGE_SAMPLES.lock();
 
-    // 只检查最近 3 张
+    
     for (idx, (recent_width, recent_height, recent_sample)) in
         recent.iter().rev().take(3).enumerate()
     {
         if *recent_width == width && *recent_height == height {
-            // 比较采样点
+            
             if recent_sample == &sample {
                 log::info!(
                     "[重复检查] 图片 {}x{} 与最近第 {} 张图片采样命中，继续执行强签名校验",
@@ -186,10 +186,10 @@ fn matches_recent_sample(width: u32, height: u32, rgba: &[u8]) -> bool {
 fn update_recent_samples_with_sample(width: u32, height: u32, sample: [u8; SAMPLE_POINTS]) {
     let mut recent = RECENT_IMAGE_SAMPLES.lock();
 
-    // 添加新的采样
+    
     recent.push((width, height, sample));
 
-    // 只保留最近 5 张
+    
     if recent.len() > 5 {
         recent.remove(0);
     }
@@ -231,7 +231,7 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, w
             );
             continue;
         }
-                // 快速采样仅作粗筛，不能直接丢图；真正去重交给后续完整签名。
+                
                 if matches_recent_sample(task.width, task.height, &task.rgba) {
                     log::debug!(
                         "[处理线程-{}] 图片采样命中，进入强签名去重: {}x{}",
@@ -289,7 +289,7 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, w
                     height
                 );
 
-                // 更新采样缓存
+                
                 update_recent_samples_with_sample(width, height, sample);
 
                 let is_image_visible = {
@@ -341,7 +341,7 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
         *guard = Some(stop_tx);
     }
 
-    // 启动监听线程
+    
     thread::spawn(move || {
         let wake_rx = subscribe_clipboard_wake_events();
 
@@ -376,7 +376,7 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
 
             log::info!("[监听线程] 收到剪贴板变化事件");
 
-            // 简化：所有图片都直接入队，由队列机制统一处理
+            
             let image = ImageClipboardManager::read_clipboard_images_rgba(&app_handle);
             match image {
                 Ok(images) => {
