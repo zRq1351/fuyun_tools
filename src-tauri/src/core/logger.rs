@@ -27,7 +27,7 @@ impl Default for LogConfig {
         Self {
             level: LevelFilter::Info,
             targets,
-            max_file_size: 2 * 1024 * 1024, // 2MB
+            max_file_size: 2 * 1024 * 1024, 
         }
     }
 }
@@ -41,7 +41,7 @@ pub fn build_logger() -> tauri_plugin_log::Builder {
         .max_file_size(config.max_file_size)
         .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
         .filter(|metadata| {
-            // 过滤掉一些嘈杂的库日志
+            
             if metadata.target().starts_with("tao::")
                 || metadata.target().starts_with("mio::")
                 || metadata.target().starts_with("hyper::")

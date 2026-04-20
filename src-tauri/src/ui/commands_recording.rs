@@ -84,12 +84,12 @@ fn get_recording_ffmpeg_path() -> Result<PathBuf, String> {
 }
 
 fn get_preferred_install_ffmpeg_path() -> Result<PathBuf, String> {
-    // Dev mode: prefer src-tauri/bin/ffmpeg.exe so both check/start/download use one location.
+    
     if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
         let p = PathBuf::from(manifest_dir).join("bin").join("ffmpeg.exe");
         return Ok(p);
     }
-    // Production: install beside executable.
+    
     get_recording_ffmpeg_path()
 }
 
@@ -558,7 +558,7 @@ pub async fn list_recording_audio_devices(app: AppHandle) -> Result<Vec<AudioInp
 pub async fn list_recording_system_output_devices(
     app: AppHandle,
 ) -> Result<Vec<AudioInputDevice>, String> {
-    // 复用 list_system_audio_sources（内部已切到 WASAPI 枚举）
+    
     recorder_service::list_system_output_devices(&app).map_err(to_frontend_error_string)
 }
 
@@ -690,7 +690,7 @@ pub async fn run_recording_regression(
 
 pub async fn toggle_recording_from_shortcut(app: AppHandle, _state: Arc<Mutex<SharedAppState>>) {
     if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
-        // Set compact size and position before showing to avoid opening flicker/jump.
+        
         let _ = window.set_size(tauri::LogicalSize::new(180.0, 40.0));
         move_window_top_center(&window);
         let _ = show_overlay_window_by_label(&app, "recording_toolbar", true);
@@ -711,10 +711,10 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
         app_state.inner().clone()
     };
 
-    // 获取当前录制状态
+    
     let current_state = recorder_service::get_recording_state(state_arc.clone());
 
-    // 只有在录制中或暂停时才能切换麦克风
+    
     if current_state.state != "recording" && current_state.state != "paused" {
         log::warn!(
             "无法切换麦克风：当前不在录制状态 (state={})",
@@ -728,7 +728,7 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
         state_guard.recording_runtime.clone()
     };
 
-    // 获取录制运行时的麦克风设备ID和系统音频状态
+    
     let (mic_device_id, sys_audio_enabled, sys_audio_thread_exists) = {
         let runtime_guard = runtime_arc.lock().unwrap();
         let sys_enabled = runtime_guard
@@ -744,18 +744,18 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
         )
     };
 
-    // 如果没有选择麦克风设备，无法切换
+    
     if mic_device_id.is_none() {
         log::warn!("无法切换麦克风：未选择麦克风设备");
         return;
     }
 
-    // 发送即时UI反馈事件
+    
     if enable {
-        // 按下快捷键：立即显示麦克风开启状态
+        
         let _ = app.emit("recording-mic-key-pressed", serde_json::json!({}));
     } else {
-        // 松开快捷键：立即显示麦克风关闭状态
+        
         let _ = app.emit("recording-mic-key-released", serde_json::json!({}));
     }
 
@@ -766,13 +766,13 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
         sys_audio_thread_exists
     );
 
-    // 只修改麦克风状态，保持系统音频状态不变（传入None让函数使用当前值）
+    
     match recorder_service::update_audio_capture(
         &app,
         state_arc,
-        None,         // 不改变系统音频状态，使用当前值
-        None,         // 不改变系统音频设备，使用当前值
-        Some(enable), // 启用或禁用麦克风
+        None,         
+        None,         
+        Some(enable), 
         mic_device_id.clone(),
     ) {
         Ok(_) => {

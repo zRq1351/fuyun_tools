@@ -330,7 +330,7 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
   const initial = initialFormState.value
   const source = snapshot
 
-  // 检查每个字段是否有变化
+  
   if (source.textMaxItems !== initial.textMaxItems) {
     changedFields.textMaxItems = source.textMaxItems
   }
@@ -413,7 +413,7 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
     changedFields.devForceFfmpegWindowCapture = source.devForceFfmpegWindowCapture
   }
 
-  // 处理 AI 提供商
+  
   let selectedProvider = source.aiProvider
   if (selectedProvider === 'custom') {
     if (!source.customProviderName) {
@@ -480,10 +480,10 @@ const persistSettings = async (
     return
   }
 
-  // 获取变化的字段
+  
   const changedFields = getChangedFields(snapshot)
 
-  // 如果没有变化，不执行保存
+  
   if (!changedFields) {
     if (!pendingPersistSnapshot && getChangedFields() === null) {
       autoSaveState.value = 'idle'
@@ -503,7 +503,7 @@ const persistSettings = async (
       const runtimeStatus = await AISettingsService.checkVcRuntimeDependencies()
       const missing = Array.isArray(runtimeStatus?.missing) ? runtimeStatus.missing : []
       if (missing.length > 0) {
-        // 依赖缺失时先回退开关状态，避免出现“已启用但不可用”的中间态
+        
         suppressNextAutoSave.value = true
         form.screenshotEnabled = false
         snapshot.screenshotEnabled = false
@@ -515,7 +515,7 @@ const persistSettings = async (
     if (changedFields.recordingEnabled === true) {
       const ffmpegStatus = await RecordingService.checkFfmpeg()
       if (!ffmpegStatus?.exists) {
-        // 依赖缺失时先回退开关状态，避免出现“已启用但不可用”的中间态
+        
         suppressNextAutoSave.value = true
         form.recordingEnabled = false
         snapshot.recordingEnabled = false
@@ -573,10 +573,10 @@ const persistSettings = async (
       }
     }
 
-    // 只保存变化的字段
+    
     await AISettingsService.savePartialSettings(changedFields)
 
-    // 处理自定义提供商
+    
     if (changedFields.aiProvider) {
       let selectedProvider = snapshot.aiProvider
       if (selectedProvider === 'custom') {
@@ -598,7 +598,7 @@ const persistSettings = async (
     }
     autoSaveState.value = 'saved'
 
-    // 仅使用当前成功保存的快照更新基线，避免旧请求覆盖新输入
+    
     saveInitialFormState(snapshot)
 
     autoSaveStateResetTimer = window.setTimeout(() => {
@@ -743,7 +743,7 @@ const showVcRuntimeMissingWarning = async (payload) => {
     }
     ElMessage.success('VC Runtime 安装完成，请重新启用截图功能')
   } catch {
-    // 用户选择稍后处理
+    
   }
 }
 
@@ -830,9 +830,9 @@ onMounted(async () => {
     ElMessage.error(`加载设置失败: ${error}`)
     autoSaveState.value = 'error'
   } finally {
-    // 先保存初始状态，再设置 isInitializing 为 false
+    
     saveInitialFormState()
-    // 设置跳过下一次 watch 触发的标志
+    
     skipNextWatch.value = true
     isInitializing.value = false
   }

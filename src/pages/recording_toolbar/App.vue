@@ -474,7 +474,7 @@ const showInlineNotice = (message, type = "error") => {
     clearTimeout(inlineNoticeTimer);
     inlineNoticeTimer = null;
   }
-  // 移除自动清除定时器，让提示常驻，直到被主动清理或用户操作
+  
 };
 
 const clearInlineNotice = () => {
@@ -489,7 +489,7 @@ const showBackendErrorInSettings = async (message) => {
   const text = String(message || "录屏异常");
   keepSettingsOpenUntilTs = Date.now() + 3000;
   capsuleSettingsVisible.value = true;
-  // 如果当前已经有横幅且是 error，将新的错误追加到后面，而不是直接覆盖，保留原始根因
+  
   if (inlineNotice.value && inlineNoticeType.value === "error" && inlineNotice.value !== text) {
     if (!inlineNotice.value.includes(text)) {
       showInlineNotice(`${inlineNotice.value} | 连锁异常: ${text}`, "error");
@@ -587,7 +587,7 @@ const toggleRecordingState = async () => {
           recordTargetType.value === "window"
               ? recordableWindows.value.find((w) => (w.hwnd || w.title) === recordTargetWindowId.value) || null
               : null;
-      // 每次开始录制时，麦克风默认禁用，图标显示为静音状态
+      
       isMicMuted.value = true;
       await RecordingService.start({
         targetType: recordTargetType.value,
@@ -599,7 +599,7 @@ const toggleRecordingState = async () => {
         captureSystemAudio: captureSystemAudio.value,
         systemAudioDeviceId: systemOutputId.value,
         systemAudioProcessIds: captureSystemAudio.value ? systemAudioProcessIds.value : [],
-        captureMicrophone: false, // 每次开始录制时麦克风默认为禁用状态
+        captureMicrophone: false, 
         microphoneDeviceId: microphoneDeviceId.value,
         captureCursor: captureCursor.value,
         fps: fps.value,
@@ -664,7 +664,7 @@ const toggleMicState = async () => {
     await RecordingService.updateAudioCapture({
       captureSystemAudio: captureSystemAudio.value,
       systemAudioDeviceId: systemOutputId.value || "",
-      captureMicrophone: !newMutedState, // muted=false时启用，muted=true时禁用
+      captureMicrophone: !newMutedState, 
       microphoneDeviceId: microphoneDeviceId.value || "",
     });
     isMicMuted.value = newMutedState;
@@ -677,7 +677,7 @@ const toggleMicState = async () => {
 const onWindowBlur = () => {
   if (!capsuleSettingsVisible.value) return;
   if (Date.now() < keepSettingsOpenUntilTs) return;
-  // 如果当前正在展示任何内联通知（如报错、警告或时长到达提示），禁止自动折叠
+  
   if (inlineNotice.value) return;
   capsuleSettingsVisible.value = false;
 };
@@ -713,7 +713,7 @@ const onSystemAudioDeviceChange = async (deviceId) => {
   if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
     try {
       if (prevCapture && nextCapture && prevId && nextId && prevId !== nextId) {
-        // 录制中切换设备：自动执行“先关后开”，避免用户手动两步操作
+        
         await RecordingService.updateAudioCapture({
           captureSystemAudio: false,
           systemAudioDeviceId: prevId || "",
@@ -753,12 +753,12 @@ const onMicrophoneDeviceChange = async (deviceId) => {
   const nextId = nextCapture ? id : null;
   captureMicrophone.value = id.length > 0;
   microphoneDeviceId.value = id.length > 0 ? id : null;
-  // 重置静音状态
+  
   isMicMuted.value = false;
   if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
     try {
       if (prevCapture && nextCapture && prevId && nextId && prevId !== nextId) {
-        // 录制中切换设备：自动执行"先关后开"，避免用户手动两步操作
+        
         await RecordingService.updateAudioCapture({
           captureMicrophone: false,
           microphoneDeviceId: prevId || "",
@@ -909,7 +909,7 @@ const onToolbarSettingChange = async (key, rawValue) => {
   } else if (key === "recordingToolbarContentProtected") {
     const v = rawValue === true;
     captureToolbar.value = v;
-    // setting 字段是“内容保护”，与 UI 的“捕获工具栏”语义相反
+    
     patch.recordingToolbarContentProtected = !v;
   } else {
     return;
@@ -937,7 +937,7 @@ onMounted(async () => {
       state.elapsedMs = nextElapsedMs;
       lastElapsedUiSyncAt = now;
     }
-    // 当录制停止或出错时，重置麦克风静音状态
+    
     if (nextState === "idle" || nextState === "error") {
       isMicMuted.value = false;
     }
@@ -954,7 +954,7 @@ onMounted(async () => {
     state.state = "idle";
     state.sessionId = null;
 
-    // 如果是因为错误/超长导致自动结束，此时横幅上已经有提示，不要清空并折叠，而是保留提示让用户看见
+    
     if (!inlineNotice.value) {
       clearInlineNotice();
       capsuleSettingsVisible.value = false;
@@ -983,7 +983,7 @@ onMounted(async () => {
     if (Date.now() < keepSettingsOpenUntilTs) {
       return;
     }
-    // 如果有未被确认的横幅提示，拒绝强制折叠
+    
     if (inlineNotice.value) return;
     capsuleSettingsVisible.value = false;
     void syncCapsuleLayout();
@@ -1005,7 +1005,7 @@ onMounted(async () => {
     void syncCapsuleLayout();
   });
 
-  // ✅ 监听音频合并进度事件
+  
   unlistenAudioMerging = await listen("recording-audio-merging", (event) => {
     const payload = event.payload || {};
     const status = String(payload.status || "");
@@ -1013,18 +1013,18 @@ onMounted(async () => {
     const progress = payload.progress;
 
     if (status === "started") {
-      // 开始合并，显示提示
+      
       showInlineNotice(message || "正在后台合并音频...", "warning");
     } else if (status === "completed") {
-      // 合并完成，清除提示
+      
       clearInlineNotice();
     } else if (status === "failed") {
-      // 合并失败，显示错误（但视频文件已保存）
+      
       showInlineNotice(message || "音频合并失败，视频文件已保存", "error");
     }
   });
 
-  // ✅ 监听麦克风切换事件（来自后端快捷键）
+  
   unlistenMicToggled = await listen("recording-mic-toggled", (event) => {
     const payload = event.payload || {};
     isMicMuted.value = !payload.enabled;
@@ -1032,15 +1032,15 @@ onMounted(async () => {
     showInlineNotice(`麦克风已${action}（快捷键）`, "warning");
   });
 
-  // ✅ 监听麦克风快捷键按下事件（用于即时响应 UI）
+  
   unlistenMicKeyPressed = await listen("recording-mic-key-pressed", () => {
-    // 按下快捷键时立即显示麦克风开启状态
+    
     isMicMuted.value = false;
   });
 
-  // ✅ 监听麦克风快捷键释放事件
+  
   unlistenMicKeyReleased = await listen("recording-mic-key-released", () => {
-    // 松开快捷键时立即显示麦克风关闭状态
+    
     isMicMuted.value = true;
   });
   try {
@@ -1107,7 +1107,7 @@ onBeforeUnmount(() => {
   if (unlistenRecordingError) unlistenRecordingError();
   if (unlistenForceCompact) unlistenForceCompact();
   if (unlistenRecordingRegionSelected) unlistenRecordingRegionSelected();
-  if (unlistenAudioMerging) unlistenAudioMerging();  // ✅ 清理事件监听
+  if (unlistenAudioMerging) unlistenAudioMerging();  
   if (unlistenMicToggled) unlistenMicToggled();
   if (unlistenMicKeyPressed) unlistenMicKeyPressed();
   if (unlistenMicKeyReleased) unlistenMicKeyReleased();

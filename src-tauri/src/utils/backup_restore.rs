@@ -281,17 +281,17 @@ async fn create_rollback_point(
 ) -> Result<PathBuf, String> {
     let rollback_dir = create_backup_temp_dir()?;
 
-    // 先读取 settings,释放 state 锁
+    
     let settings = {
         let guard = state.lock().unwrap_or_else(|never| match never {});
         guard.settings.clone()
     };
 
-    // 再读取 text_snapshot,避免嵌套锁定
+    
     let text_snapshot = {
         let guard = state.lock().unwrap_or_else(|never| match never {});
         let clipboard_manager_arc = guard.clipboard_manager.clone();
-        drop(guard); // 释放 state 锁
+        drop(guard); 
 
         let clipboard = clipboard_manager_arc
             .lock()
@@ -304,7 +304,7 @@ async fn create_rollback_point(
         }
     };
 
-    // 使用异步版本,避免在 tokio 运行时中嵌套调用 block_on
+    
     let image_snapshot = image_store::load_all_data_async().await?;
 
     let settings_wrapper = crate::utils::backup_model::BackupSettingsFile { settings };
@@ -379,7 +379,7 @@ async fn apply_rollback(
     rollback_dir: &Path,
 ) -> Result<(), String> {
     restore_settings(state, rollback_dir).await?;
-    // 回滚时使用覆盖模式,确保完全恢复到备份前状态
+    
     restore_text_history(state, rollback_dir, "overwrite").await?;
     restore_image_history(state, rollback_dir, "overwrite").await?;
     Ok(())
@@ -409,13 +409,13 @@ async fn restore_text_history(
     let wrapper = serde_json::from_slice::<BackupTextHistoryFile>(&bytes)
         .map_err(|e| format!("解析文字历史备份失败: {}", e))?;
 
-    // 根据策略选择合并或覆盖模式
+    
     if strategy.eq_ignore_ascii_case("overwrite") {
-        // 覆盖模式:完全替换现有数据
+        
         crate::utils::database::save_history_data_snapshot_async(&wrapper.snapshot).await?;
         log::info!("文本历史恢复: 使用覆盖模式");
     } else {
-        // 合并模式:保留现有记录,只添加备份中不存在的新记录
+        
         crate::utils::database::merge_history_data_async(&wrapper.snapshot).await?;
         log::info!("文本历史恢复: 使用合并模式");
     }
@@ -438,14 +438,14 @@ async fn restore_image_history(
     let blob_root = app_blob_dir()?;
 
     if strategy.eq_ignore_ascii_case("overwrite") {
-        // 覆盖模式:清空现有数据
+        
         image_store::clear_all_history_async().await?;
         if blob_root.exists() {
             fs::remove_dir_all(&blob_root).map_err(|e| format!("清理旧图片目录失败: {}", e))?;
         }
         log::info!("图片历史恢复: 使用覆盖模式");
     } else {
-        // 合并模式:保留现有记录
+        
         log::info!("图片历史恢复: 使用合并模式");
     }
 
@@ -484,7 +484,7 @@ async fn restore_image_history(
         };
 
         if overwrite {
-            // 覆盖模式:直接插入
+            
             image_store::upsert_item_async(&history_item, position).await?;
         } else {
             if item_exists {
@@ -497,7 +497,7 @@ async fn restore_image_history(
     }
 
     if strategy.eq_ignore_ascii_case("overwrite") {
-        // 覆盖模式:完全替换分类、标签和置顶
+        
         for (item_id, category) in &wrapper.categories {
             image_store::upsert_category_async(item_id, category).await?;
         }
@@ -507,20 +507,20 @@ async fn restore_image_history(
         }
         image_store::sync_pinned_order_async(&wrapper.pinned_items).await?;
     } else {
-        // 合并模式:只添加新的
+        
         for (item_id, category) in &wrapper.categories {
             image_store::upsert_category_async(item_id, category).await?;
         }
-        // 注意:不覆盖分类列表顺序,只添加新的分类
+        
         for category in &wrapper.category_list {
             if let Err(_) = image_store::add_category_if_not_exists_async(category).await {
-                // 如果分类已存在,忽略错误
+                
             }
         }
         for (item_id, tags) in &wrapper.image_tags {
             image_store::sync_tags_for_item_async(item_id, tags).await?;
         }
-        // 合并且置顶项:将备份中的置顶项添加到当前置顶列表末尾
+        
         image_store::merge_pinned_items_async(&wrapper.pinned_items).await?;
     }
 
@@ -540,7 +540,7 @@ async fn restore_image_history(
 async fn rebuild_runtime_managers(
     state: &std::sync::Arc<crate::sync::Mutex<AppState>>,
 ) -> Result<(), String> {
-    // 先读取配置,然后释放 state 锁
+    
     let (text_max_items, grouped_items_protected, image_max_items, image_disk_limit_mb) = {
         let guard = state.lock().unwrap_or_else(|never| match never {});
         (
@@ -551,7 +551,7 @@ async fn rebuild_runtime_managers(
         )
     };
 
-    // 在阻塞任务中创建新的管理器实例,避免在 tokio 运行时中嵌套调用 block_on
+    
     let new_clipboard_manager = tauri::async_runtime::spawn_blocking(move || {
         std::sync::Arc::new(crate::sync::Mutex::new(ClipboardManager::new(
             text_max_items,
@@ -571,7 +571,7 @@ async fn rebuild_runtime_managers(
     .await
     .map_err(|e| format!("创建图片剪贴板管理器失败: {}", e))?;
 
-    // 重新获取 state 锁并替换管理器
+    
     let mut guard = state.lock().unwrap_or_else(|never| match never {});
     guard.clipboard_manager = new_clipboard_manager;
     guard.image_clipboard_manager = new_image_clipboard_manager;

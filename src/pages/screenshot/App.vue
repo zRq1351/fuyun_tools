@@ -715,20 +715,20 @@ const toolbarStyle = computed(() => {
   let top = rect.y + rect.height + 10
   let right = window.innerWidth - (rect.x + rect.width)
 
-  // 底部溢出则放上方
+  
   if (top + 100 > window.innerHeight) {
     top = rect.y - 60
     if (currentTool.value !== 'select' && currentTool.value !== 'picker') {
-      top -= 40 // 二级菜单空间
+      top -= 40 
     }
   }
-  // 上方也溢出则放内部底部
+  
   if (top < 0) {
     top = rect.y + rect.height - 60 - 10
   }
 
   if (right < 10) right = 10
-  if (right + 300 > window.innerWidth) right = window.innerWidth - 300 // 基础防溢出
+  if (right + 300 > window.innerWidth) right = window.innerWidth - 300 
 
   return {
     top: `${top}px`,
@@ -1135,7 +1135,7 @@ async function toggleManualLongshotRunning() {
       pendingLongshotBorderAnchor.value = region
       longshotBorderShown.value = false
       await invoke('set_screenshot_window_visible', {visible: false})
-      // 等待截图窗真正退出桌面合成，再启动长截图采样，避免首帧混入鼠标/覆盖层。
+      
       await new Promise(resolve => setTimeout(resolve, 80))
       const result = await ScreenshotService.startManualLongshot({
         region,
@@ -1258,7 +1258,7 @@ function base64ToBlob(base64, mime = 'image/png') {
 
 function resolveExportBase64() {
   if (longshotResultActive.value && longshotRawPngBase64.value && !hasOverlayForLongshotExport()) {
-    // 长截图优先走原始拼接结果，避免超长 canvas 导出被浏览器尺寸上限截断
+    
     return longshotRawPngBase64.value
   }
   const cropCanvas = getCroppedCanvas()
@@ -1412,7 +1412,7 @@ function loadImageFromPath(imagePath) {
     timestamp: new Date().toISOString()
   })
 
-  // 🔧 修复：直接使用 img.src，和 image_preview 一样，避免 fetch 的权限问题
+  
   revokeScreenshotObjectUrl()
   loadImageFromSrc(fileUrl)
 }
@@ -1446,10 +1446,10 @@ function initCanvas() {
 
   const ctx = canvas.value.getContext('2d')
   if (!ctx) return
-  // 仅放大坐标系，物理像素保持不变
+  
   ctx.scale(dpr, dpr)
 
-  // 保存一张纯净版的快照用于重置
+  
   saveToHistory()
   isCaptureReady.value = true
 }
@@ -1525,7 +1525,7 @@ function onMouseDown(e) {
         startPoint.y = p.y
         Object.assign(startRect, rect)
       } else {
-        // 点击外部重新选择
+        
         state.value = 'selecting'
         startPoint.x = p.x
         startPoint.y = p.y
@@ -1533,16 +1533,16 @@ function onMouseDown(e) {
         rect.y = p.y
         rect.width = 0
         rect.height = 0
-        // 重置画布
+        
         if (history.value.length > 0) {
           historyIndex.value = 0
           restoreFromHistory()
         }
       }
     } else {
-      // 绘制模式
+      
       if (!isInside(p.x, p.y, rect) && currentTool.value !== 'picker') {
-        // 外部点击，取消选择并重新选择
+        
         state.value = 'selecting'
         startPoint.x = p.x
         startPoint.y = p.y
@@ -1551,7 +1551,7 @@ function onMouseDown(e) {
         rect.width = 0
         rect.height = 0
         currentTool.value = 'select'
-        // 重置画布
+        
         if (history.value.length > 0) {
           historyIndex.value = 0
           restoreFromHistory()
@@ -1572,7 +1572,7 @@ function onMouseMove(e) {
   if (state.value === 'idle') {
     highlightedWindow.value = detectWindowAt(p.x, p.y)
   } else if (state.value === 'selecting') {
-    // 鼠标拖动框选区域
+    
     const x = Math.min(startPoint.x, p.x)
     const y = Math.min(startPoint.y, p.y)
     const width = Math.abs(p.x - startPoint.x)
@@ -1707,7 +1707,7 @@ function cancelSelection() {
   rect.height = 0
   regionConfirmAnchor.ready = false
   currentTool.value = 'select'
-  // 重置画布到最初
+  
   if (history.value.length > 0) {
     historyIndex.value = 0
     restoreFromHistory()
@@ -1758,7 +1758,7 @@ function handleResize(e) {
     height += dy;
   }
 
-  // 反向处理
+  
   if (width < 0) {
     x += width;
     width = -width;
@@ -1809,12 +1809,12 @@ function enterManualLongshotMode() {
   selectedShapeId.value = null
   const keepCurrentSelection = hasSelection.value && state.value === 'selected'
   if (keepCurrentSelection) {
-    // 复用当前选区，避免切换长截图后再次框选
+    
     manualLongshotHint.value = '已切换长截图，点击播放开始采样'
     state.value = 'selected'
     return
   }
-  // 无有效选区时再进入重新框选流程
+  
   manualLongshotHint.value = '先框选滚动区域，再点击播放开始采样'
   state.value = 'idle'
   textItems.value = []
@@ -1863,7 +1863,7 @@ function handleCanvasMouseDown(event) {
       points: [{x: drawStart.x, y: drawStart.y}]
     }
   } else if (['line', 'arrow', 'rect', 'circle'].includes(currentTool.value)) {
-    // 拖拽形状时需要保留之前的快照，以防留痕
+    
     currentDrawingSnapshot = ctx.getImageData(0, 0, canvas.value.width, canvas.value.height)
   }
 }
@@ -1894,7 +1894,7 @@ function handleCanvasMouseMove(event) {
     applyMosaicAtScenePoint(ctx, x, y, Number(lineWidth.value) || 1)
     activeRasterCommand?.points?.push({x, y})
   } else if (['line', 'arrow', 'rect', 'circle'].includes(currentTool.value)) {
-    // 恢复快照
+    
     const oldTransform = ctx.getTransform()
     ctx.resetTransform()
     ctx.putImageData(currentDrawingSnapshot, 0, 0)
@@ -2843,14 +2843,14 @@ function getCroppedCanvas() {
     throw new Error('裁剪画布上下文创建失败')
   }
 
-  // 绘制底图
+  
   ctx.drawImage(
       screenshotImg.value,
       sourceX, sourceY, sourceWidth, sourceHeight,
       0, 0, sourceWidth, sourceHeight
   )
 
-  // 绘制涂鸦层
+  
   const drawCtx = canvas.value.getContext('2d')
   if (!drawCtx) {
     throw new Error('绘制画布上下文获取失败')
@@ -2860,7 +2860,7 @@ function getCroppedCanvas() {
   const overlayData = drawCtx.getImageData(sourceX, sourceY, sourceWidth, sourceHeight)
   drawCtx.setTransform(oldTransform)
 
-  // 将涂鸦层叠加到最终图像
+  
   const tempCanvas = document.createElement('canvas')
   tempCanvas.width = sourceWidth
   tempCanvas.height = sourceHeight
@@ -2889,7 +2889,7 @@ function getLongshotFullCanvas() {
   }
   ctx.drawImage(screenshotImg.value, 0, 0, imageW, imageH)
 
-  // 长图在编辑页使用 contain 展示，导出时按 contain 视口做统一比例映射
+  
   const view = getLongshotImageViewportRect(imageW, imageH)
   if (canvas.value) {
     ctx.drawImage(
@@ -3217,9 +3217,9 @@ async function saveAndClose() {
       return
     }
 
-    // 只要后端持有源图，就统一走后端导出。
-    // 长截图带马赛克/画笔时如果走前端 canvas 直存，容易与长图视口映射产生偏差；
-    // 后端已经具备完整的长截图栅格/矢量导出能力，这里统一收口到同一条保存链路。
+    
+    
+    
     const shouldSaveRenderedImageDirectly = !sourceImagePath.value
 
     if (shouldSaveRenderedImageDirectly) {
@@ -3258,7 +3258,7 @@ async function saveAndClose() {
 
 async function close() {
   try {
-    // 普通截图关闭不应再触发“恢复截图窗口可见”，否则会与 close_screenshot_window 竞态。
+    
     cancelManualLongshotCapture(false, false)
     await invoke('close_screenshot_window')
   } catch (error) {

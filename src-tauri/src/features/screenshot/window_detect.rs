@@ -156,18 +156,18 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
         };
         let windows = windows_ptr.as_mut();
 
-        // 检查窗口是否可见
+        
         if IsWindowVisible(hwnd) == 0 {
-            return 1; // 继续枚举
+            return 1; 
         }
 
-        // 排除工具窗口
+        
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
         if (ex_style & WS_EX_TOOLWINDOW as i32) != 0 {
             return 1;
         }
 
-        // 获取窗口标题
+        
         let title_len = GetWindowTextLengthW(hwnd);
         if title_len == 0 {
             return 1;
@@ -188,12 +188,12 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
             return 1;
         }
 
-        // 判断是否被 DWM 隐藏 (Cloaked)
+        
         if is_cloaked(hwnd) {
             return 1;
         }
 
-        // 获取窗口位置
+        
         let mut rect: RECT = std::mem::zeroed();
         if GetWindowRect(hwnd, &mut rect) == 0 {
             return 1;
@@ -202,7 +202,7 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
         let width = (rect.right - rect.left) as u32;
         let height = (rect.bottom - rect.top) as u32;
 
-        // 排除太小的窗口
+        
         if width < 50 || height < 50 {
             return 1;
         }
@@ -217,7 +217,7 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
             height,
         });
 
-        1 // 继续枚举
+        1 
     }
 
     unsafe {
@@ -229,14 +229,14 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
 
 #[cfg(target_os = "macos")]
 fn get_window_list_macos() -> Result<Vec<WindowInfo>, String> {
-    // macOS 实现（需要使用Cocoa API）
-    // 这里返回空列表，实际实现需要使用objc或cocoa crate
+    
+    
     Ok(Vec::new())
 }
 
 #[cfg(target_os = "linux")]
 fn get_window_list_linux() -> Result<Vec<WindowInfo>, String> {
-    // Linux实现（需要使用X11或Wayland API）
-    // 这里返回空列表，实际实现需要使用x11 crate
+    
+    
     Ok(Vec::new())
 }

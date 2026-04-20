@@ -2775,15 +2775,15 @@ pub async fn clear_image_history(
             )
         })?;
 
-    // 清理操作必须强制通知前端
+    
     let is_visible = {
         let mut state_guard = lock_arc_mutex(state.inner());
-        // 无论窗口是否可见，都标记为 dirty，确保下次打开时会重新加载
+        
         state_guard.image_history_dirty = true;
         state_guard.is_image_visible
     };
 
-    // 如果窗口当前可见，立即发送事件通知前端刷新
+    
     if is_visible {
         emit_image_history_payload(&app, state.inner().clone());
     }
@@ -3340,10 +3340,10 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         let settings = load_settings()
             .map_err(|e| frontend_error(ErrorCode::ConfigError, "读取AI设置失败", e))?;
 
-        // 转换为HashMap格式，便于前端处理
+        
         let mut result = HashMap::new();
 
-        // 添加基本设置
+        
         result.insert(
             "version".to_string(),
             serde_json::Value::String(settings.version.clone()),
@@ -3489,7 +3489,7 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
             serde_json::Value::String(settings.image_fill_verify_mode.clone()),
         );
 
-        // 处理provider_configs，将encrypted_api_key替换为解密后的api_key
+        
         let mut provider_configs_map: HashMap<String, serde_json::Value> = HashMap::new();
 
         let provider_keys: Vec<String> = settings.provider_configs.keys().cloned().collect();
@@ -3679,7 +3679,7 @@ pub async fn save_app_settings(
 
     settings.version = version;
 
-    // 部分更新：只更新传入的字段
+    
     if let Some(val) = text_max_items {
         settings.max_items = val;
         settings.text_max_items = val;
@@ -3780,7 +3780,7 @@ pub async fn save_app_settings(
         settings.recording_window_audio_sync_advance_ms = val.clamp(0, 500);
     }
 
-    // 处理快捷键更新
+    
     if let Some(ref hot_key_val) = hot_key {
         if hot_key_val.is_empty() {
             return Err(frontend_error(
@@ -3806,7 +3806,7 @@ pub async fn save_app_settings(
         }
     }
 
-    // 处理图片快捷键更新
+    
     if let Some(ref image_hot_key_val) = image_hot_key {
         if image_hot_key_val.is_empty() {
             return Err(frontend_error(
@@ -3817,7 +3817,7 @@ pub async fn save_app_settings(
         }
 
         if image_hot_key_val != &settings.image_hot_key {
-            // 检查是否与文字快捷键冲突
+            
             if let Some(ref hot_key_val) = hot_key {
                 if image_hot_key_val == hot_key_val {
                     return Err(frontend_error(
@@ -3975,7 +3975,7 @@ pub async fn save_app_settings(
         }
     }
 
-    // 处理麦克风切换快捷键更新
+    
     if let Some(ref mic_toggle_hot_key_val) = recording_mic_toggle_hot_key {
         if mic_toggle_hot_key_val.is_empty() {
             return Err(frontend_error(
@@ -3985,7 +3985,7 @@ pub async fn save_app_settings(
             ));
         }
         if mic_toggle_hot_key_val != &settings.recording_mic_toggle_hot_key {
-            // 检查是否与其他快捷键冲突
+            
             let effective_hot_key = hot_key.clone().unwrap_or_else(|| settings.hot_key.clone());
             let effective_image_hot_key = image_hot_key
                 .clone()
@@ -4027,7 +4027,7 @@ pub async fn save_app_settings(
                 ));
             }
 
-            // 注销旧快捷键
+            
             if let Err(e) = app
                 .global_shortcut()
                 .unregister(settings.recording_mic_toggle_hot_key.as_str())
@@ -4039,7 +4039,7 @@ pub async fn save_app_settings(
                 );
             }
 
-            // 注册新快捷键（按住开启，松开关闭）
+            
             if settings.recording_enabled {
                 let app_handle_for_mic = app.clone();
                 if let Err(e) = app.global_shortcut().on_shortcut(
@@ -4048,13 +4048,13 @@ pub async fn save_app_settings(
                         let app_handle_inner = app_handle_for_mic.clone();
                         match event.state {
                             ShortcutState::Pressed => {
-                                // 按下：开启麦克风
+                                
                                 tauri::async_runtime::spawn(async move {
                                     toggle_microphone_from_shortcut(app_handle_inner, true).await;
                                 });
                             }
                             ShortcutState::Released => {
-                                // 松开：关闭麦克风
+                                
                                 tauri::async_runtime::spawn(async move {
                                     toggle_microphone_from_shortcut(app_handle_inner, false).await;
                                 });
@@ -4152,7 +4152,7 @@ pub async fn save_app_settings(
         }
     }
 
-    // 处理 AI 提供商更新
+    
     if let Some(ref ai_provider_val) = ai_provider {
         if ai_provider_val.is_empty() {
             return Err(frontend_error(
@@ -4163,7 +4163,7 @@ pub async fn save_app_settings(
         }
         settings.ai_provider = ai_provider_val.clone();
 
-        // 处理 API 配置
+        
         let mut need_update_config = false;
         let config = settings
             .provider_configs
@@ -4180,7 +4180,7 @@ pub async fn save_app_settings(
             config.model_name = model_name.clone();
         }
 
-        // 处理 API 密钥
+        
         if let Some(ref api_key) = ai_api_key {
             if api_key != "********" {
                 settings
@@ -6679,7 +6679,7 @@ pub async fn start_manual_longshot(
             "screenshot feature disabled",
         ));
     }
-    // 在真正启动采样前先隐藏截图窗，避免首帧录入UI边框
+    
     let _ = hide_overlay_window_by_label(&app, "screenshot");
     let _ = hide_overlay_window_by_label(&app, "longshot_border");
     tauri::async_runtime::spawn_blocking(|| {

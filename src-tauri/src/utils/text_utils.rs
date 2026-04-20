@@ -154,7 +154,7 @@ fn ngram_similarity(text1: &str, text2: &str, n: usize) -> f64 {
     let chars2: Vec<char> = text2.chars().collect();
 
     if chars1.len() < n || chars2.len() < n {
-        // 文本太短，使用简单的字符匹配
+        
         let min_len = chars1.len().min(chars2.len());
         if min_len == 0 {
             return 0.0;
@@ -168,7 +168,7 @@ fn ngram_similarity(text1: &str, text2: &str, n: usize) -> f64 {
         return matches as f64 / min_len as f64;
     }
 
-    // 构建 n-gram 集合
+    
     let mut ngrams1 = std::collections::HashSet::new();
     for window in chars1.windows(n) {
         ngrams1.insert(window);
@@ -179,7 +179,7 @@ fn ngram_similarity(text1: &str, text2: &str, n: usize) -> f64 {
         ngrams2.insert(window);
     }
 
-    // 计算 Jaccard 相似度
+    
     let intersection = ngrams1.intersection(&ngrams2).count();
     let union = ngrams1.len() + ngrams2.len() - intersection;
 
@@ -252,7 +252,7 @@ fn candidate_prefilter(old_text: &str, new_text: &str) -> bool {
     if old_text.is_empty() || new_text.is_empty() {
         return true;
     }
-    // 优化：使用 len() 替代 chars().count() 实现 O(1) 长度比对，避免在超大文本上退化为 O(N) 阻塞
+    
     let len_old = old_text.len();
     let len_new = new_text.len();
     let min_len = len_old.min(len_new) as f64;
@@ -264,13 +264,13 @@ fn candidate_prefilter(old_text: &str, new_text: &str) -> bool {
         return true;
     }
 
-    // 优化：使用 n-gram 相似度进行快速预筛选（比 LCS 快得多）
+    
     let ngram_sim = ngram_similarity(old_text, new_text, NGRAM_SIZE);
     if ngram_sim >= NGRAM_SIMILARITY_THRESHOLD {
         return true;
     }
 
-    // 回退到原有的前缀/后缀匹配
+    
     let head = prefix_match_ratio(old_text, new_text, 32);
     let tail = suffix_match_ratio(old_text, new_text, 32);
     head >= CANDIDATE_EDGE_MATCH_MIN || tail >= CANDIDATE_EDGE_MATCH_MIN
@@ -506,7 +506,7 @@ pub fn find_best_replacement_candidate(
             timed_out = true;
             break;
         }
-        // 优化：跳过超长文本的模糊匹配，避免 O(N) 甚至 O(N^2) 耗时阻塞
+        
         if old_text.len() > 100_000 || new_text.len() > 100_000 {
             continue;
         }
