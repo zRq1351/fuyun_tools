@@ -33,7 +33,9 @@ export function useShortcutRecorder(form, fieldKey = 'toggleShortcut') {
         if (event.shiftKey) modifiers.push('Shift')
 
         let key = ''
-        if (event.key.length === 1 && /[a-zA-Z0-9]/.test(event.key)) {
+        if (event.code === 'Space') {
+            key = 'Space'
+        } else if (event.key.length === 1 && /[a-zA-Z0-9]/.test(event.key)) {
             key = event.key.toUpperCase()
         } else {
             const k = event.key.toLowerCase()

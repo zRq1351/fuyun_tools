@@ -18,10 +18,13 @@
               readonly
           >
             <template #append>
-              <el-button :type="isRecordingHotkeyRecording ? 'danger' : 'primary'" @click="toggleRecordingHotkey">
+              <el-button :type="isRecordingHotkeyRecording ? 'danger' : 'primary'" @click="toggleRecordingHotkey" title="修改快捷键">
                 <el-icon>
                   <component :is="isRecordingHotkeyRecording ? VideoPause : Edit"/>
                 </el-icon>
+              </el-button>
+              <el-button @click="resetRecordingHotkey" title="恢复默认快捷键">
+                <el-icon><RefreshLeft /></el-icon>
               </el-button>
             </template>
           </el-input>
@@ -34,10 +37,13 @@
               readonly
           >
             <template #append>
-              <el-button :type="isMicToggleHotkeyRecording ? 'danger' : 'primary'" @click="toggleMicToggleHotkey">
+              <el-button :type="isMicToggleHotkeyRecording ? 'danger' : 'primary'" @click="toggleMicToggleHotkey" title="修改快捷键">
                 <el-icon>
                   <component :is="isMicToggleHotkeyRecording ? VideoPause : Edit"/>
                 </el-icon>
+              </el-button>
+              <el-button @click="resetMicToggleHotkey" title="恢复默认快捷键">
+                <el-icon><RefreshLeft /></el-icon>
               </el-button>
             </template>
           </el-input>
@@ -90,10 +96,11 @@
 
 <script setup>
 import {computed, onMounted, ref} from 'vue'
-import {Edit, FolderOpened, VideoPause} from '@element-plus/icons-vue'
+import {Edit, FolderOpened, VideoPause, RefreshLeft} from '@element-plus/icons-vue'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
 import {RecordingService} from '../../../services/ipc'
 import {open} from '@tauri-apps/plugin-dialog'
+import {ElMessage} from 'element-plus'
 
 const props = defineProps({
   form: {
@@ -105,14 +112,28 @@ const props = defineProps({
 const {
   isRecording: isRecordingHotkeyRecording,
   currentDisplayValue: recordingDisplayValue,
-  toggleRecording: toggleRecordingHotkey
+  toggleRecording: toggleRecordingHotkey,
+  stopRecording: stopRecordingHotkeyRecording
 } = useShortcutRecorder(props.form, 'recordingToggleShortcut')
 
 const {
   isRecording: isMicToggleHotkeyRecording,
   currentDisplayValue: micToggleDisplayValue,
-  toggleRecording: toggleMicToggleHotkey
+  toggleRecording: toggleMicToggleHotkey,
+  stopRecording: stopMicToggleHotkeyRecording
 } = useShortcutRecorder(props.form, 'recordingMicToggleShortcut')
+
+const resetRecordingHotkey = () => {
+  stopRecordingHotkeyRecording()
+  props.form.recordingToggleShortcut = 'Alt+R'
+  ElMessage.success('已恢复录屏快捷键默认值: Alt+R')
+}
+
+const resetMicToggleHotkey = () => {
+  stopMicToggleHotkeyRecording()
+  props.form.recordingMicToggleShortcut = 'Ctrl+Space'
+  ElMessage.success('已恢复麦克风切换快捷键默认值: Ctrl+Space')
+}
 
 const effectiveOutputDir = ref('')
 

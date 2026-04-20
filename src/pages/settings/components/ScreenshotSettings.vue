@@ -16,10 +16,13 @@
             readonly
         >
           <template #append>
-            <el-button :type="isScreenshotRecording ? 'danger' : 'primary'" @click="toggleScreenshotRecording">
+            <el-button :type="isScreenshotRecording ? 'danger' : 'primary'" @click="toggleScreenshotRecording" title="修改快捷键">
               <el-icon>
                 <component :is="isScreenshotRecording ? VideoPause : Edit"/>
               </el-icon>
+            </el-button>
+            <el-button @click="resetScreenshotRecording" title="恢复默认快捷键">
+              <el-icon><RefreshLeft /></el-icon>
             </el-button>
           </template>
         </el-input>
@@ -30,8 +33,9 @@
 </template>
 
 <script setup>
-import {Edit, VideoPause} from '@element-plus/icons-vue'
+import {Edit, VideoPause, RefreshLeft} from '@element-plus/icons-vue'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
+import {ElMessage} from 'element-plus'
 
 const props = defineProps({
   form: {
@@ -43,8 +47,16 @@ const props = defineProps({
 const {
   isRecording: isScreenshotRecording,
   currentDisplayValue: screenshotDisplayValue,
-  toggleRecording: toggleScreenshotRecording
+  toggleRecording: toggleScreenshotRecording,
+  stopRecording: stopScreenshotRecording
 } = useShortcutRecorder(props.form, 'screenshotToggleShortcut')
+
+const resetScreenshotRecording = () => {
+  stopScreenshotRecording()
+  const isMac = navigator.userAgent.toLowerCase().includes('mac')
+  props.form.screenshotToggleShortcut = isMac ? 'Cmd+Shift+s' : 'Ctrl+Shift+s'
+  ElMessage.success(`已恢复打开截图窗口快捷键默认值: ${props.form.screenshotToggleShortcut}`)
+}
 </script>
 
 <style scoped>

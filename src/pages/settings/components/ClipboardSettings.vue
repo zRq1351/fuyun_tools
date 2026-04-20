@@ -24,10 +24,13 @@
                 readonly
             >
               <template #append>
-                <el-button :type="isTextRecording ? 'danger' : 'primary'" @click="toggleTextRecording">
+                <el-button :type="isTextRecording ? 'danger' : 'primary'" @click="toggleTextRecording" title="修改快捷键">
                   <el-icon>
                     <component :is="isTextRecording ? VideoPause : Edit"/>
                   </el-icon>
+                </el-button>
+                <el-button @click="resetTextRecording" title="恢复默认快捷键">
+                  <el-icon><RefreshLeft /></el-icon>
                 </el-button>
               </template>
             </el-input>
@@ -40,10 +43,13 @@
                 readonly
             >
               <template #append>
-                <el-button :type="isImageRecording ? 'danger' : 'primary'" @click="toggleImageRecording">
+                <el-button :type="isImageRecording ? 'danger' : 'primary'" @click="toggleImageRecording" title="修改快捷键">
                   <el-icon>
                     <component :is="isImageRecording ? VideoPause : Edit"/>
                   </el-icon>
+                </el-button>
+                <el-button @click="resetImageRecording" title="恢复默认快捷键">
+                  <el-icon><RefreshLeft /></el-icon>
                 </el-button>
               </template>
             </el-input>
@@ -157,11 +163,12 @@
 
 <script setup>
 import {computed, onMounted, onUnmounted, ref} from 'vue'
-import {Edit, FolderOpened, Picture, VideoPause} from '@element-plus/icons-vue'
+import {Edit, FolderOpened, Picture, VideoPause, RefreshLeft} from '@element-plus/icons-vue'
 import {open} from '@tauri-apps/plugin-dialog'
 import {listen} from '@tauri-apps/api/event'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
 import {ClipboardService, ImageClipboardService} from '../../../services/ipc'
+import {ElMessage, ElMessageBox} from 'element-plus'
 
 const props = defineProps({
   form: {
@@ -173,13 +180,30 @@ const props = defineProps({
 const {
   isRecording: isTextRecording,
   currentDisplayValue: textDisplayValue,
-  toggleRecording: toggleTextRecording
+  toggleRecording: toggleTextRecording,
+  stopRecording: stopTextRecording
 } = useShortcutRecorder(props.form, 'toggleShortcut')
+
 const {
   isRecording: isImageRecording,
   currentDisplayValue: imageDisplayValue,
-  toggleRecording: toggleImageRecording
+  toggleRecording: toggleImageRecording,
+  stopRecording: stopImageRecording
 } = useShortcutRecorder(props.form, 'imageToggleShortcut')
+
+const resetTextRecording = () => {
+  stopTextRecording()
+  const isMac = navigator.userAgent.toLowerCase().includes('mac')
+  props.form.toggleShortcut = isMac ? 'Cmd+Shift+z' : 'Ctrl+Shift+z'
+  ElMessage.success(`已恢复打开剪贴板窗口快捷键默认值: ${props.form.toggleShortcut}`)
+}
+
+const resetImageRecording = () => {
+  stopImageRecording()
+  const isMac = navigator.userAgent.toLowerCase().includes('mac')
+  props.form.imageToggleShortcut = isMac ? 'Cmd+Shift+x' : 'Ctrl+Shift+x'
+  ElMessage.success(`已恢复打开图片剪贴板窗口快捷键默认值: ${props.form.imageToggleShortcut}`)
+}
 
 let unlistenImportProgress = null
 const importingImages = ref(false)
