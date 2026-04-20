@@ -18,13 +18,16 @@ fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
         Err(e) => return Err(format!("按下 Ctrl 键失败: {:?}", e)),
     }
 
+    // 等待一小段时间，确保系统和目标应用有足够时间处理 Ctrl 按下事件（Release 模式下执行过快会导致目标应用无法识别组合键）
+    thread::sleep(Duration::from_millis(30));
+
     // 定义释放函数，用于异常处理
     fn release_ctrl(enigo: &mut Enigo) -> Result<(), String> {
         release_ctrl_key_with_fallback(enigo).map_err(|e| format!("释放 Ctrl 键失败: {}", e))
     }
 
-    // 按下 C 键
-    match enigo.key(Key::Unicode('c'), enigo::Direction::Click) {
+    // 按下 C 键（使用 Layout 而非 Unicode，提高组合键兼容性）
+    match enigo.key(Key::Layout('c'), enigo::Direction::Click) {
         Ok(_) => {}
         Err(e) => {
             let _ = release_ctrl(enigo);
@@ -32,8 +35,8 @@ fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
         }
     }
 
-    // 等待一小段时间
-    thread::sleep(Duration::from_millis(20));
+    // 等待一小段时间，确保 C 键事件被处理
+    thread::sleep(Duration::from_millis(30));
 
     // 正常释放 Ctrl 键
     release_ctrl(enigo)?;
