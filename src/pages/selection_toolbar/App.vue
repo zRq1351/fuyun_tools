@@ -290,12 +290,15 @@ const handleCopy = async () => {
 </script>
 
 <style>
-body {
-  margin: 0;
-  padding: 0;
-  background: transparent;
+html, body, #app {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  background: transparent !important;
+  background-color: transparent !important;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  overflow: hidden;
+  overflow: hidden !important;
   pointer-events: none;
 }
 </style>
