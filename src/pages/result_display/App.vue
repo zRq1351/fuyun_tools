@@ -89,17 +89,6 @@
     <div class="content-wrapper result-wrapper">
       <div class="content-actions">
         <el-tooltip
-            content="回写到原应用"
-            :show-after="500"
-            placement="bottom"
-        >
-          <div class="icon-btn action-btn writeback-btn" @click="handleWriteBack">
-            <el-icon>
-              <Position/>
-            </el-icon>
-          </div>
-        </el-tooltip>
-        <el-tooltip
             :show-after="500"
             content="复制结果"
             placement="bottom"
@@ -134,7 +123,7 @@ import {computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue'
 import {marked} from 'marked'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWindow} from '@tauri-apps/api/window'
-import {CloseBold, CopyDocument, DocumentCopy, FullScreen, Hide, Minus, Position, View} from '@element-plus/icons-vue'
+import {CloseBold, CopyDocument, DocumentCopy, FullScreen, Hide, Minus, View} from '@element-plus/icons-vue'
 import {AIService, ClipboardService} from '@/services/ipc.js'
 import {handleAppError} from '@/utils/errorHandler.js'
 
@@ -153,10 +142,8 @@ const originalRef = ref(null)
 const isWaitingResult = ref(false)
 const loadingStartedAt = ref(0)
 const isWindowMaximized = ref(false)
-const isWriteBackInFlight = ref(false)
 let unlistenResultClean = null
 let unlistenResultUpdate = null
-let unlistenWritebackResult = null
 let initDataHandler = null
 let onStorageThemeChange = null
 let unlistenWindowResize = null
@@ -378,16 +365,6 @@ onMounted(async () => {
         }
       }
     })
-    unlistenWritebackResult = await listen('writeback-result', (event) => {
-      const payload = event.payload || {}
-      if (payload.source !== '结果窗') return
-      if (payload.success) {
-        const target = payload.targetWindowTitle ? `：${payload.targetWindowTitle}` : ''
-        ElMessage.success(`回写成功${target}`)
-      } else {
-        handleAppError(payload.detail || '未知错误', '回写失败')
-      }
-    })
   } catch (error) {
     console.error('Failed to setup listeners:', error)
   }
@@ -413,10 +390,6 @@ onBeforeUnmount(() => {
   if (unlistenResultUpdate) {
     unlistenResultUpdate()
     unlistenResultUpdate = null
-  }
-  if (unlistenWritebackResult) {
-    unlistenWritebackResult()
-    unlistenWritebackResult = null
   }
 })
 
@@ -465,21 +438,6 @@ const handleLanguageChange = async () => {
     isWaitingResult.value = false
     handleAppError(error, '请求失败')
     resultText.value = `Error: ${error.message || error}`
-  }
-}
-
-const handleWriteBack = async () => {
-  if (isWriteBackInFlight.value) return
-  const text = resultText.value.trim()
-  if (!text) return
-  const requestId = `wb-${Date.now()}-${text.length}`
-  isWriteBackInFlight.value = true
-  try {
-    await ClipboardService.copyAndPasteText(text, requestId)
-  } catch (error) {
-    handleAppError(error, '回写失败')
-  } finally {
-    isWriteBackInFlight.value = false
   }
 }
 
@@ -653,13 +611,6 @@ body.theme-light {
   color: #1d3158;
 }
 
-.container.theme-light .writeback-btn:hover {
-  color: #2b8a3e !important;
-  background: rgba(103, 194, 58, 0.16) !important;
-}
-
-
-
 .container.theme-light .content {
   background: linear-gradient(150deg, rgba(249, 252, 255, 0.97), rgba(241, 247, 255, 0.96));
   border: 1px solid rgba(162, 182, 218, 0.45);
@@ -795,11 +746,6 @@ body.theme-light {
 .toggle-btn:hover {
   color: #409eff;
   background: rgba(64, 158, 255, 0.18);
-}
-
-.writeback-btn:hover {
-  color: #67c23a !important;
-  background: rgba(103, 194, 58, 0.18) !important;
 }
 
 .content-wrapper {
