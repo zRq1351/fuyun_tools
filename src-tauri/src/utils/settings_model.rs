@@ -563,6 +563,10 @@ impl AppSettingsData {
         if !self.recording_hot_key.is_empty() && !self.recording_hot_key.contains('+') {
             return Err("录屏快捷键格式无效，必须包含修饰键（如Ctrl+Alt+R）".to_string());
         }
+        if !self.recording_mic_toggle_hot_key.is_empty() && !self.recording_mic_toggle_hot_key.contains('+') {
+            return Err("麦克风切换快捷键格式无效，必须包含修饰键（如Ctrl+Space）".to_string());
+        }
+
         if self.recording_default_fps == 0 || self.recording_default_fps > 120 {
             return Err("recording_default_fps必须在1-120之间".to_string());
         }
