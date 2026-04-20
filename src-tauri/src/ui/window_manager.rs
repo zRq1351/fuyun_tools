@@ -685,6 +685,32 @@ fn get_taskbar_safe_offset() -> i32 {
 }
 
 /// 打开划词工具栏
+fn ensure_selection_toolbar_window(
+    app: &AppHandle,
+) -> Result<tauri::WebviewWindow, String> {
+    let label = "selection_toolbar";
+    if let Some(existing) = app.get_webview_window(label) {
+        return Ok(existing);
+    }
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App("selection_toolbar.html".into()),
+    )
+    .visible(false)
+    .resizable(false)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .build()
+    .map_err(|e| format!("创建划词工具栏窗口失败: {}", e))?;
+
+    bind_overlay_window_events(&window, app.clone(), label);
+    Ok(window)
+}
+
 fn show_selection_toolbar_internal(
     app_handle: AppHandle,
     selected_text: String,
@@ -702,14 +728,21 @@ fn show_selection_toolbar_internal(
             return;
         }
     }
-    if let Some(toolbar_window) = app_handle.get_webview_window("selection_toolbar") {
-        set_toolbar_window(&toolbar_window, anchor_pos);
-        let _ = toolbar_window.set_always_on_top(false);
-        let _ = toolbar_window.set_always_on_top(true);
-        if show_overlay_window(&app_handle, "selection_toolbar", &toolbar_window, false) {
-            if let Err(e) = app_handle.emit("selected-text", selected_text) {
-                log::error!("未能发送选择文本到前端:{}", e);
-            }
+    
+    let toolbar_window = match ensure_selection_toolbar_window(&app_handle) {
+        Ok(w) => w,
+        Err(e) => {
+            log::error!("{}", e);
+            return;
+        }
+    };
+
+    set_toolbar_window(&toolbar_window, anchor_pos);
+    let _ = toolbar_window.set_always_on_top(false);
+    let _ = toolbar_window.set_always_on_top(true);
+    if show_overlay_window(&app_handle, "selection_toolbar", &toolbar_window, false) {
+        if let Err(e) = app_handle.emit("selected-text", selected_text) {
+            log::error!("未能发送选择文本到前端:{}", e);
         }
     }
 }
