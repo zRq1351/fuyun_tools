@@ -121,7 +121,9 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "focus": true,
-        "center": false
+        "center": false,
+        "width": 560,
+        "height": 360
       },
       {
         "label": "result_explanation",
@@ -136,7 +138,9 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "focus": true,
-        "center": false
+        "center": false,
+        "width": 560,
+        "height": 360
       }
     ],
     "security": {
