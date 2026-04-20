@@ -26,7 +26,7 @@ use winapi::um::winuser::{
     WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_USER,
 };
 #[cfg(target_os = "windows")]
-use winapi::um::winuser::{GetAsyncKeyState, VK_LCONTROL, VK_RCONTROL};
+use winapi::um::winuser::{GetAsyncKeyState, VK_LCONTROL, VK_RCONTROL, VK_LMENU, VK_RMENU};
 
 #[derive(Debug, Clone, PartialEq)]
 enum MouseActionState {
@@ -176,7 +176,21 @@ fn handle_hook_event(
                         log::info!("检测到双击/三击操作");
                     }
                     if !is_foreground_window_console() {
-                        if !is_ctrl_effectively_pressed() {
+                        let modifier_key = {
+                            let state_guard = lock_arc_mutex(listener_state);
+                            state_guard.settings.selection_modifier_key.clone()
+                        };
+                        
+                        let is_alt = is_alt_pressed_by_os();
+                        let is_ctrl = is_ctrl_effectively_pressed();
+                        
+                        let modifier_matched = match modifier_key.as_str() {
+                            "Alt" => is_alt,
+                            "Ctrl" => is_ctrl,
+                            _ => !is_ctrl,
+                        };
+
+                        if modifier_matched {
                             if capture::is_screenshot_in_progress() {
                                 return;
                             }
@@ -207,7 +221,7 @@ fn handle_hook_event(
                                 log::info!("操作过于频繁，跳过此次检测");
                             }
                         } else {
-                            log::info!("Ctrl键被按下，忽略此次点击");
+                            log::info!("辅助键条件不满足，忽略此次点击");
                         }
                     } else {
                         log::info!("当前在命令行/终端环境中，跳过划词检测");
@@ -444,6 +458,19 @@ fn is_ctrl_pressed_by_os() -> bool {
 
 #[cfg(not(target_os = "windows"))]
 fn is_ctrl_pressed_by_os() -> bool {
+    false
+}
+
+#[cfg(target_os = "windows")]
+fn is_alt_pressed_by_os() -> bool {
+    unsafe {
+        (GetAsyncKeyState(VK_LMENU) as u16 & 0x8000) != 0
+            || (GetAsyncKeyState(VK_RMENU) as u16 & 0x8000) != 0
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_alt_pressed_by_os() -> bool {
     false
 }
 

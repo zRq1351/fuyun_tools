@@ -241,6 +241,7 @@ const form = reactive({
   apiKey: '',
   customProviderName: '',
   selectionEnabled: true,
+  selectionModifierKey: '',
   translationPromptTemplate: '',
   explanationPromptTemplate: '',
   imageFillVerifyMode: 'fast'
@@ -308,6 +309,7 @@ const buildFormSnapshot = () => ({
     apiKey: form.apiKey,
     customProviderName: form.customProviderName,
     selectionEnabled: form.selectionEnabled,
+    selectionModifierKey: form.selectionModifierKey,
     translationPromptTemplate: form.translationPromptTemplate,
     explanationPromptTemplate: form.explanationPromptTemplate,
     imageFillVerifyMode: form.imageFillVerifyMode
@@ -436,6 +438,9 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
   }
   if (source.selectionEnabled !== initial.selectionEnabled) {
     changedFields.selectionEnabled = source.selectionEnabled
+  }
+  if (source.selectionModifierKey !== initial.selectionModifierKey) {
+    changedFields.selectionModifierKey = source.selectionModifierKey
   }
   if (source.translationPromptTemplate !== initial.translationPromptTemplate) {
     changedFields.translationPromptTemplate = source.translationPromptTemplate
@@ -808,6 +813,7 @@ onMounted(async () => {
     form.recordingWindowAudioSyncAdvanceMs = Number(settings.recording_window_audio_sync_advance_ms ?? 80)
     form.devForceFfmpegWindowCapture = settings.dev_force_ffmpeg_window_capture === true
     form.selectionEnabled = settings.selection_enabled === true
+    form.selectionModifierKey = settings.selection_modifier_key || ''
     form.groupedItemsProtectedFromLimit = settings.grouped_items_protected_from_limit !== false
     form.translationPromptTemplate = settings.translation_prompt_template || ''
     form.explanationPromptTemplate = settings.explanation_prompt_template || ''

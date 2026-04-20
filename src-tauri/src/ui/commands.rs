@@ -3474,6 +3474,10 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
             serde_json::Value::Bool(settings.selection_enabled),
         );
         result.insert(
+            "selection_modifier_key".to_string(),
+            serde_json::Value::String(settings.selection_modifier_key.clone()),
+        );
+        result.insert(
             "grouped_items_protected_from_limit".to_string(),
             serde_json::Value::Bool(settings.grouped_items_protected_from_limit),
         );
@@ -3650,6 +3654,7 @@ pub async fn save_app_settings(
     screenshot_enabled: Option<bool>,
     recording_enabled: Option<bool>,
     selection_enabled: Option<bool>,
+    selection_modifier_key: Option<String>,
     grouped_items_protected_from_limit: Option<bool>,
     translation_prompt_template: Option<String>,
     explanation_prompt_template: Option<String>,
@@ -3705,6 +3710,9 @@ pub async fn save_app_settings(
     }
     if let Some(val) = selection_enabled {
         settings.selection_enabled = val;
+    }
+    if let Some(val) = selection_modifier_key {
+        settings.selection_modifier_key = val;
     }
     if let Some(val) = grouped_items_protected_from_limit {
         settings.grouped_items_protected_from_limit = val;

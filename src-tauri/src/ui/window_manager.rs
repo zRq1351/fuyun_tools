@@ -766,12 +766,12 @@ pub fn show_selection_toolbar_force_impl(
 
 /// 设置工具栏窗口位置
 fn set_toolbar_window(window: &tauri::WebviewWindow, anchor_pos: Option<(i32, i32)>) {
-    let toolbar_width = 176u32;
-    let toolbar_height = 50u32;
+    let expanded_width = 176u32;
+    let expanded_height = 50u32;
     let offset = 12i32;
-    let _ = window.set_size(tauri::LogicalSize::new(toolbar_width, toolbar_height));
+    let _ = window.set_size(tauri::LogicalSize::new(expanded_width, expanded_height));
     if let Some((mx, my)) = anchor_pos {
-        let mut x = mx - (toolbar_width as i32 / 2);
+        let mut x = mx - (expanded_width as i32 / 2);
         let mut y = my + offset;
         let monitor_from_anchor = window
             .available_monitors()
@@ -793,10 +793,10 @@ fn set_toolbar_window(window: &tauri::WebviewWindow, anchor_pos: Option<(i32, i3
             let monitor_size = monitor.size();
             let min_x = monitor_pos.x;
             let min_y = monitor_pos.y;
-            let max_x = monitor_pos.x + monitor_size.width as i32 - toolbar_width as i32;
-            let max_y = monitor_pos.y + monitor_size.height as i32 - toolbar_height as i32;
+            let max_x = monitor_pos.x + monitor_size.width as i32 - expanded_width as i32;
+            let max_y = monitor_pos.y + monitor_size.height as i32 - expanded_height as i32;
             let below_y = my + offset;
-            let above_y = my - toolbar_height as i32 - offset;
+            let above_y = my - expanded_height as i32 - offset;
             if below_y <= max_y {
                 y = below_y;
             } else if above_y >= min_y {
