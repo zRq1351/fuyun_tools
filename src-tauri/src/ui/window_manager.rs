@@ -850,10 +850,11 @@ fn execute_ctrl_v_with_safety(enigo: &mut enigo::Enigo) -> Result<(), String> {
         .key(CTRL_KEY, Direction::Press)
         .map_err(|e| format!("按下 Ctrl 失败: {}", e))?;
 
-    // 按下 V 键（使用 Click，一次性按下释放，避免 V 键卡住）
-    thread::sleep(Duration::from_millis(12));
+    // 等待系统处理组合键前缀
+    thread::sleep(Duration::from_millis(30));
+    // 按下 V 键（使用 Layout 提高组合键兼容性）
     enigo
-        .key(Key::Unicode('v'), Direction::Click)
+        .key(Key::Layout('v'), Direction::Click)
         .map_err(|e| {
             let _ = release_ctrl_key_once(enigo);
             format!("发送 V 键失败: {}", e)
