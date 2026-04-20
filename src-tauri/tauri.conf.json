@@ -28,7 +28,7 @@
       },
       {
         "label": "selection_toolbar",
-        "title": "fuyun_tools",
+        "title": "",
         "url": "selection_toolbar.html",
         "visible": false,
         "resizable": false,

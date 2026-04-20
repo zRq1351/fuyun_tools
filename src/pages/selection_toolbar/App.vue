@@ -62,11 +62,11 @@ const onMouseEnter = async () => {
     const logicalX = physicalPos.x / factor
     const logicalY = physicalPos.y / factor
 
-    const expandedX = logicalX - (200 - 42) / 2
-    const expandedY = logicalY - (70 - 42) / 2
+    const expandedX = logicalX - (240 - 42) / 2
+    const expandedY = logicalY - (100 - 42) / 2
 
     await appWindow.setPosition(new LogicalPosition(expandedX, expandedY))
-    await appWindow.setSize(new LogicalSize(200, 70))
+    await appWindow.setSize(new LogicalSize(240, 100))
   } catch (e) {
     console.error(e)
   }
@@ -86,8 +86,8 @@ const onMouseLeave = () => {
       const logicalX = physicalPos.x / factor
       const logicalY = physicalPos.y / factor
 
-      const shrunkX = logicalX + (200 - 42) / 2
-      const shrunkY = logicalY + (70 - 42) / 2
+      const shrunkX = logicalX + (240 - 42) / 2
+      const shrunkY = logicalY + (100 - 42) / 2
 
       await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
       await appWindow.setSize(new LogicalSize(42, 42))
@@ -137,8 +137,8 @@ const runAction = async (executor, errorMessage) => {
       const physicalPos = await appWindow.outerPosition()
       const logicalX = physicalPos.x / factor
       const logicalY = physicalPos.y / factor
-      const shrunkX = logicalX + (200 - 42) / 2
-      const shrunkY = logicalY + (70 - 42) / 2
+      const shrunkX = logicalX + (240 - 42) / 2
+      const shrunkY = logicalY + (100 - 42) / 2
       await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
       await appWindow.setSize(new LogicalSize(42, 42))
       isHovered.value = false
@@ -171,8 +171,8 @@ onMounted(async () => {
         const physicalPos = await appWindow.outerPosition()
         const logicalX = physicalPos.x / factor
         const logicalY = physicalPos.y / factor
-        const shrunkX = logicalX + (200 - 42) / 2
-        const shrunkY = logicalY + (70 - 42) / 2
+        const shrunkX = logicalX + (240 - 42) / 2
+        const shrunkY = logicalY + (100 - 42) / 2
         await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
         await appWindow.setSize(new LogicalSize(42, 42))
       } catch(e) {}
@@ -191,8 +191,8 @@ onMounted(async () => {
         const physicalPos = await appWindow.outerPosition()
         const logicalX = physicalPos.x / factor
         const logicalY = physicalPos.y / factor
-        const shrunkX = logicalX + (200 - 42) / 2
-        const shrunkY = logicalY + (70 - 42) / 2
+        const shrunkX = logicalX + (240 - 42) / 2
+        const shrunkY = logicalY + (100 - 42) / 2
         await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
         await appWindow.setSize(new LogicalSize(42, 42))
       } catch(e) {}
@@ -233,8 +233,8 @@ onMounted(async () => {
           const physicalPos = await appWindow.outerPosition()
           const logicalX = physicalPos.x / factor
           const logicalY = physicalPos.y / factor
-          const shrunkX = logicalX + (200 - 42) / 2
-          const shrunkY = logicalY + (70 - 42) / 2
+          const shrunkX = logicalX + (240 - 42) / 2
+          const shrunkY = logicalY + (100 - 42) / 2
           await appWindow.setPosition(new LogicalPosition(shrunkX, shrunkY))
           await appWindow.setSize(new LogicalSize(42, 42))
           isHovered.value = false
