@@ -701,7 +701,6 @@ pub async fn resize_recording_toolbar(
             }
 
             if let Ok(hwnd) = window.hwnd() {
-                use windows::Win32::Foundation::HWND;
                 use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOP, SWP_NOZORDER, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE};
                 
                 let mut flags = SWP_NOZORDER | SWP_NOACTIVATE;
@@ -716,7 +715,7 @@ pub async fn resize_recording_toolbar(
                 let y = new_y.unwrap_or(0);
                 
                 unsafe {
-                    let _ = SetWindowPos(HWND(hwnd.0 as _), Some(HWND_TOP), x, y, physical_width, physical_height, flags);
+                    let _ = SetWindowPos(hwnd, Some(HWND_TOP), x, y, physical_width, physical_height, flags);
                 }
             } else {
                 // Fallback to Tauri methods
