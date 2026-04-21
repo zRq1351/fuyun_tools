@@ -358,9 +358,6 @@ fn merge_system_audio_into_video(
     let expected_system_count = system_segments.len();
     let expected_mic_count = mic_segments.len();
 
-    
-    
-    
     if system_segments.len() == 1 && mic_segments.is_empty() {
         let seg = &system_segments[0];
         if seg.start_ms < 100 && seg.path.exists() {
@@ -387,13 +384,13 @@ fn merge_system_audio_into_video(
             log::warn!("音频片段不存在: {:?}", seg.path);
             return false;
         }
-        
+
         let is_aac = seg
             .path
             .extension()
             .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
             .unwrap_or(false);
-        let min_size = if is_aac { 7 } else { 44 }; 
+        let min_size = if is_aac { 7 } else { 44 };
         match fs::metadata(&seg.path) {
             Ok(meta) => {
                 let size = meta.len();
@@ -442,8 +439,6 @@ fn merge_system_audio_into_video(
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
 
-    
-    
     log::info!("✅ 视频编码格式为 H.264，使用流复制模式（无重编码）");
 
     cmd.arg("-hide_banner")
@@ -451,7 +446,7 @@ fn merge_system_audio_into_video(
         .arg("warning")
         .arg("-y")
         .arg("-threads")
-        .arg("0") 
+        .arg("0")
         .arg("-i")
         .arg(video_path);
     let mut input_index = 1usize;
@@ -477,9 +472,7 @@ fn merge_system_audio_into_video(
     let mut sys_labels: Vec<String> = Vec::new();
     for (idx, (input, delay)) in sys_inputs.iter().enumerate() {
         let label = format!("sys{}", idx);
-        
-        
-        
+
         filter_parts.push(format!(
             "[{i}:a]adelay={d}|{d}[{l}]",
             i = input,
@@ -508,8 +501,7 @@ fn merge_system_audio_into_video(
     let mut mic_labels: Vec<String> = Vec::new();
     for (idx, (input, delay)) in mic_inputs.iter().enumerate() {
         let label = format!("mic{}", idx);
-        
-        
+
         filter_parts.push(format!(
             "[{i}:a]adelay={d}|{d}[{l}]",
             i = input,
@@ -536,7 +528,6 @@ fn merge_system_audio_into_video(
         None
     };
     let audio_map_label = if let (Some(sys), Some(mic)) = (sys_out, mic_out) {
-        
         filter_parts.push(format!(
             "{}{}amix=inputs=2:duration=longest:normalize=0[aout]",
             sys, mic
@@ -558,7 +549,6 @@ fn merge_system_audio_into_video(
         .arg("-map")
         .arg(audio_map_label);
 
-    
     log::info!("🔧 需要通过 filter_complex 合并音频，必须重编码为 AAC");
     cmd.arg("-c:v")
         .arg("copy")
@@ -578,10 +568,9 @@ fn merge_system_audio_into_video(
         valid_mic.len()
     );
 
-    
     for (idx, seg) in valid_system.iter().enumerate() {
         if let Ok(meta) = std::fs::metadata(&seg.path) {
-            let duration_ms = meta.len() * 1000 / (48000 * 2 * 2); 
+            let duration_ms = meta.len() * 1000 / (48000 * 2 * 2);
             log::info!(
                 "  系统音频片段{}: start_ms={}, file_size={} bytes, estimated_duration={}ms",
                 idx,
@@ -593,7 +582,7 @@ fn merge_system_audio_into_video(
     }
     for (idx, seg) in valid_mic.iter().enumerate() {
         if let Ok(meta) = std::fs::metadata(&seg.path) {
-            let duration_ms = meta.len() * 1000 / (48000 * 2); 
+            let duration_ms = meta.len() * 1000 / (48000 * 2);
             log::info!(
                 "  麦克风片段{}: start_ms={}, file_size={} bytes, estimated_duration={}ms",
                 idx,
@@ -604,7 +593,6 @@ fn merge_system_audio_into_video(
         }
     }
 
-    
     let child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -615,10 +603,8 @@ fn merge_system_audio_into_video(
                 .with_details(e.to_string())
         })?;
 
-    
     crate::features::recording::job_object::assign_to_global_job_object(&child);
 
-    
     let output = child.wait_with_output().map_err(|e| {
         AppError::new(ErrorCode::SystemError, "执行系统音频合成失败").with_details(e.to_string())
     })?;
@@ -669,15 +655,6 @@ fn merge_system_audio_into_video(
         log::warn!("⚠️ 音频合并耗时较长({}ms)，建议优化方案", elapsed_ms);
     }
 
-    
-    
-    
-    
-    
-    
-    
-    
-
     Ok(())
 }
 
@@ -696,7 +673,6 @@ fn merge_audio_fast(
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
 
-    
     let is_aac = audio_path
         .extension()
         .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
@@ -713,7 +689,7 @@ fn merge_audio_fast(
         .arg("-c:v")
         .arg("copy")
         .arg("-c:a")
-        .arg(if is_aac { "copy" } else { "aac" }) 
+        .arg(if is_aac { "copy" } else { "aac" })
         .arg("-b:a")
         .arg("128k")
         .arg("-movflags")
@@ -730,7 +706,6 @@ fn merge_audio_fast(
                 .with_details(e.to_string())
         })?;
 
-    
     crate::features::recording::job_object::assign_to_global_job_object(&child);
 
     let output = child.wait_with_output().map_err(|e| {
@@ -787,7 +762,7 @@ fn merge_audio_fast(
         elapsed_ms,
         operation
     );
-    
+
     let warn_threshold = if is_aac { 2000 } else { 5000 };
     if elapsed_ms > warn_threshold {
         log::warn!("⚠️ 快速路径耗时较长({}ms)，考虑优化方案", elapsed_ms);
@@ -948,7 +923,6 @@ fn ensure_system_audio_capture_started(
     let start_ms = runtime.snapshot().elapsed_ms;
     let seg_idx = runtime.system_audio_segments.len();
     if !runtime.system_audio_process_ids.is_empty() {
-        
         let process_ids = runtime.system_audio_process_ids.clone();
         let output_paths = process_ids
             .iter()
@@ -994,7 +968,6 @@ fn ensure_system_audio_capture_started(
         output_dir.join(format!("{}.sys.{}.wav", session_id, seg_idx))
     };
 
-    
     let sys_aac = sys_wav.with_extension("aac");
     let first_try = start_system_loopback_aac_with_device(
         runtime.system_audio_device_id.clone(),
@@ -1021,7 +994,7 @@ fn ensure_system_audio_capture_started(
     };
     match start_result {
         Ok(handle) => {
-            runtime.system_audio_wav_path = Some(sys_aac); 
+            runtime.system_audio_wav_path = Some(sys_aac);
             runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
             runtime.system_audio_thread = handle.join;
             runtime.system_audio_stream_start_ms = Some(start_ms);
@@ -1123,7 +1096,7 @@ pub fn list_audio_devices(app: &AppHandle) -> Result<Vec<AudioInputDevice>, AppE
 }
 
 pub fn list_system_output_devices(_app: &AppHandle) -> Result<Vec<AudioInputDevice>, AppError> {
-    let ffmpeg_path = std::path::Path::new(""); 
+    let ffmpeg_path = std::path::Path::new("");
     let outs = crate::features::recording::audio_device::list_system_audio_sources(ffmpeg_path)
         .map_err(|e| {
             AppError::new(ErrorCode::SystemError, "读取系统输出设备失败").with_details(e)
@@ -1143,15 +1116,14 @@ pub fn list_audio_process_items() -> Result<Vec<AudioProcessItem>, AppError> {
 }
 
 fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
-    let threshold = SystemTime::now() - Duration::from_secs(24 * 3600); 
+    let threshold = SystemTime::now() - Duration::from_secs(24 * 3600);
     if let Ok(entries) = fs::read_dir(output_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_file() {
                 continue;
             }
-            
-            
+
             if let Ok(metadata) = entry.metadata() {
                 if let Ok(modified) = metadata.modified() {
                     if modified > threshold {
@@ -1159,7 +1131,7 @@ fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
                     }
                 }
             }
-            
+
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if file_name.ends_with(".tmp.mp4")
                 || file_name.contains(".sys.")
@@ -1422,7 +1394,10 @@ fn spawn_ffmpeg_video_segment(
     let mut args = Vec::new();
     match target_type {
         "window" => {
-            return Err(AppError::new(ErrorCode::ValidationError, "WGC 模式不支持 FFmpeg 分段录制"));
+            return Err(AppError::new(
+                ErrorCode::ValidationError,
+                "WGC 模式不支持 FFmpeg 分段录制",
+            ));
         }
         "gdigrab_window" => {
             args.push("-f".into());
@@ -1430,24 +1405,34 @@ fn spawn_ffmpeg_video_segment(
             args.push("-framerate".into());
             args.push(format!("{}", fps));
             args.push("-draw_mouse".into());
-            args.push(if capture_cursor { "1".into() } else { "0".into() });
+            args.push(if capture_cursor {
+                "1".into()
+            } else {
+                "0".into()
+            });
             args.push("-i".into());
             args.push(format!("title={}", target_id));
         }
         "region" => {
             let (x, y, width, height) = parse_region_target(target_id).ok_or_else(|| {
-                AppError::new(ErrorCode::ValidationError, "区域录制参数无效").with_details(format!("target_id={}", target_id))
+                AppError::new(ErrorCode::ValidationError, "区域录制参数无效")
+                    .with_details(format!("target_id={}", target_id))
             })?;
             let (x, y, width, height) = normalize_region_to_virtual_screen(x, y, width, height)
                 .ok_or_else(|| {
-                    AppError::new(ErrorCode::ValidationError, "区域录制参数无效").with_details("virtual screen unavailable")
+                    AppError::new(ErrorCode::ValidationError, "区域录制参数无效")
+                        .with_details("virtual screen unavailable")
                 })?;
             args.push("-f".into());
             args.push("gdigrab".into());
             args.push("-framerate".into());
             args.push(format!("{}", fps));
             args.push("-draw_mouse".into());
-            args.push(if capture_cursor { "1".into() } else { "0".into() });
+            args.push(if capture_cursor {
+                "1".into()
+            } else {
+                "0".into()
+            });
             args.push("-offset_x".into());
             args.push(x.to_string());
             args.push("-offset_y".into());
@@ -1463,12 +1448,16 @@ fn spawn_ffmpeg_video_segment(
             args.push("-framerate".into());
             args.push(format!("{}", fps));
             args.push("-draw_mouse".into());
-            args.push(if capture_cursor { "1".into() } else { "0".into() });
+            args.push(if capture_cursor {
+                "1".into()
+            } else {
+                "0".into()
+            });
             args.push("-i".into());
             args.push("desktop".into());
         }
     }
-    
+
     args.push("-map".to_string());
     args.push("0:v:0".to_string());
     args.push("-vf".to_string());
@@ -1497,13 +1486,14 @@ fn spawn_ffmpeg_video_segment(
     let mut child = command.spawn().map_err(|e| {
         AppError::new(ErrorCode::SystemError, "启动录制片段失败").with_details(e.to_string())
     })?;
-    
+
     // 🔧 将录制进程绑定到 Job Object 以确保随主进程退出
     crate::features::recording::job_object::assign_to_global_job_object(&child);
-    
-    let stderr = child.stderr.take().ok_or_else(|| {
-        AppError::new(ErrorCode::SystemError, "获取录制进程 stderr 失败")
-    })?;
+
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| AppError::new(ErrorCode::SystemError, "获取录制进程 stderr 失败"))?;
 
     Ok((child, stderr))
 }
@@ -1955,7 +1945,8 @@ pub fn stop_recording(
         log::info!("🔧 窗口录制：首先停止WGC线程...");
         if let Some(join) = wgc_thread {
             let mut wgc_exited = false;
-            for _ in 0..500 { // wait up to 5 seconds
+            for _ in 0..500 {
+                // wait up to 5 seconds
                 if join.is_finished() {
                     wgc_exited = true;
                     break;
@@ -2250,7 +2241,12 @@ pub fn stop_recording(
                     &sys_segments,
                     &mic_segments,
                 )
-            }).await.unwrap_or_else(|e| Err(AppError::new(ErrorCode::SystemError, "音频合并任务崩溃").with_details(e.to_string())));
+            })
+            .await
+            .unwrap_or_else(|e| {
+                Err(AppError::new(ErrorCode::SystemError, "音频合并任务崩溃")
+                    .with_details(e.to_string()))
+            });
 
             // ✅ 合并完成后，清理临时音频片段文件
             let mut cleaned_count = 0;
@@ -2734,7 +2730,7 @@ pub fn resume_recording(
         let runtime = lock_arc_mutex(&runtime_arc);
         let target_type = runtime.target_type.clone();
         drop(runtime);
-        
+
         let (child, stderr) = spawn_ffmpeg_video_segment(
             &ffmpeg_path,
             &target_type,
@@ -2744,7 +2740,7 @@ pub fn resume_recording(
             video_bitrate_kbps,
             &next_segment_path,
         )?;
-        
+
         Some((child, stderr))
     } else {
         None
@@ -2757,17 +2753,24 @@ pub fn resume_recording(
             "录制状态已变化，请刷新状态后重试",
         ));
     }
-    
+
     // 如果是非窗口录制，记录新分段
     if !is_window_target {
         runtime.window_segment_index = next_segment_index;
-        runtime.window_video_segments.push(next_segment_path.clone());
+        runtime
+            .window_video_segments
+            .push(next_segment_path.clone());
         if let Some((child, stderr)) = ffmpeg_process {
             runtime.process = Some(child);
-            spawn_stderr_parser(app.clone(), runtime_arc.clone(), session_id_for_audio.clone(), stderr);
+            spawn_stderr_parser(
+                app.clone(),
+                runtime_arc.clone(),
+                session_id_for_audio.clone(),
+                stderr,
+            );
         }
     }
-    
+
     if let Some(handle) = window_handle {
         runtime.window_segment_index = next_segment_index;
         runtime.window_video_segments.push(next_segment_path);

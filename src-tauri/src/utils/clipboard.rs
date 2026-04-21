@@ -75,13 +75,14 @@ impl ClipboardManager {
         let persist_state = Arc::new((
             ParkingMutex::new(PersistState {
                 history_dirty: !initial_snapshot.items.is_empty(),
-                categories_dirty: !initial_snapshot.categories.is_empty() || !initial_snapshot.category_list.is_empty(),
+                categories_dirty: !initial_snapshot.categories.is_empty()
+                    || !initial_snapshot.category_list.is_empty(),
                 pinned_dirty: !initial_snapshot.pinned_items.is_empty(),
                 clear_all: false,
             }),
             ParkingCondvar::new(),
         ));
-        
+
         let history_arc = Arc::new(Mutex::new(history_data.items.clone()));
         let categories_arc = Arc::new(Mutex::new(history_data.categories.clone()));
         let category_list_arc = Arc::new(Mutex::new(history_data.category_list.clone()));
@@ -97,15 +98,19 @@ impl ClipboardManager {
             let (lock, cvar) = &*state_clone;
             loop {
                 let mut state = lock.lock();
-                while !state.history_dirty && !state.categories_dirty && !state.pinned_dirty && !state.clear_all {
+                while !state.history_dirty
+                    && !state.categories_dirty
+                    && !state.pinned_dirty
+                    && !state.clear_all
+                {
                     cvar.wait(&mut state);
                 }
-                
+
                 let history_dirty = state.history_dirty;
                 let categories_dirty = state.categories_dirty;
                 let pinned_dirty = state.pinned_dirty;
                 let clear_all = state.clear_all;
-                
+
                 state.history_dirty = false;
                 state.categories_dirty = false;
                 state.pinned_dirty = false;
@@ -606,7 +611,11 @@ impl ClipboardManager {
         }
     }
 
-    fn find_index_by_id_with_lock(&self, history: &crate::sync::MutexGuard<'_, Vec<String>>, item_id: &str) -> Option<usize> {
+    fn find_index_by_id_with_lock(
+        &self,
+        history: &crate::sync::MutexGuard<'_, Vec<String>>,
+        item_id: &str,
+    ) -> Option<usize> {
         let target_hash = u64::from_str_radix(item_id, 16).ok()?;
 
         {
@@ -618,14 +627,18 @@ impl ClipboardManager {
             }
         }
 
-        history.iter().position(|entry| stable_text_hash(entry) == target_hash)
+        history
+            .iter()
+            .position(|entry| stable_text_hash(entry) == target_hash)
     }
 
     /// 移除指定历史记录
     pub fn remove_from_history(&self, item_id: &str) -> Result<String, String> {
         let mut history = lock_arc_mutex(&self.history);
-        let index = self.find_index_by_id_with_lock(&history, item_id).ok_or_else(|| "找不到目标项目".to_string())?;
-        
+        let index = self
+            .find_index_by_id_with_lock(&history, item_id)
+            .ok_or_else(|| "找不到目标项目".to_string())?;
+
         if index < history.len() {
             let item = history.remove(index);
             self.exact_index_cache.lock().clear();
@@ -647,7 +660,9 @@ impl ClipboardManager {
     pub fn promote_to_top(&self, item_id: &str) -> Result<String, String> {
         let item = {
             let mut history = lock_arc_mutex(&self.history);
-            let index = self.find_index_by_id_with_lock(&history, item_id).ok_or_else(|| "找不到目标项目".to_string())?;
+            let index = self
+                .find_index_by_id_with_lock(&history, item_id)
+                .ok_or_else(|| "找不到目标项目".to_string())?;
 
             if index >= history.len() {
                 return Err("索引超出范围".to_string());
@@ -681,13 +696,12 @@ impl ClipboardManager {
         Ok(item)
     }
 
-    pub async fn promote_to_top_async(
-        &self,
-        item_id: &str,
-    ) -> Result<String, String> {
+    pub async fn promote_to_top_async(&self, item_id: &str) -> Result<String, String> {
         let item = {
             let mut history = lock_arc_mutex(&self.history);
-            let index = self.find_index_by_id_with_lock(&history, item_id).ok_or_else(|| "找不到目标项目".to_string())?;
+            let index = self
+                .find_index_by_id_with_lock(&history, item_id)
+                .ok_or_else(|| "找不到目标项目".to_string())?;
 
             if index >= history.len() {
                 return Err("索引超出范围".to_string());
@@ -717,7 +731,9 @@ impl ClipboardManager {
 
     pub fn set_pinned(&self, item_id: String, pinned: bool) -> Result<(), String> {
         let mut history = lock_arc_mutex(&self.history);
-        let exists = history.iter().any(|existing| crate::utils::database::stable_history_item_id(existing) == item_id);
+        let exists = history
+            .iter()
+            .any(|existing| crate::utils::database::stable_history_item_id(existing) == item_id);
         if !exists {
             return Err("目标条目不存在".to_string());
         }
@@ -741,7 +757,9 @@ impl ClipboardManager {
     pub async fn set_pinned_async(&self, item_id: String, pinned: bool) -> Result<(), String> {
         {
             let mut history = lock_arc_mutex(&self.history);
-            let exists = history.iter().any(|existing| crate::utils::database::stable_history_item_id(existing) == item_id);
+            let exists = history.iter().any(|existing| {
+                crate::utils::database::stable_history_item_id(existing) == item_id
+            });
             if !exists {
                 return Err("目标条目不存在".to_string());
             }
@@ -766,7 +784,9 @@ impl ClipboardManager {
 
         if db_result.is_err() {
             let mut history = lock_arc_mutex(&self.history);
-            let exists = history.iter().any(|existing| crate::utils::database::stable_history_item_id(existing) == item_id);
+            let exists = history.iter().any(|existing| {
+                crate::utils::database::stable_history_item_id(existing) == item_id
+            });
             if exists {
                 let mut pinned_items = lock_arc_mutex(&self.pinned_items);
                 if pinned {
@@ -929,7 +949,10 @@ fn shrink_text_history_with_group_protection(
 }
 
 fn normalize_pinned_items(pinned_items: &mut Vec<String>, history: &[String]) {
-    let history_ids: HashSet<String> = history.iter().map(|item| crate::utils::database::stable_history_item_id(item)).collect();
+    let history_ids: HashSet<String> = history
+        .iter()
+        .map(|item| crate::utils::database::stable_history_item_id(item))
+        .collect();
     pinned_items.retain(|p| history_ids.contains(p));
 }
 
@@ -947,7 +970,10 @@ fn apply_pin_order(history: &mut Vec<String>, pinned_items: &[String]) {
         }
     }
 
-    let mut pinned_map: HashMap<String, String> = pinned_list.into_iter().map(|item| (crate::utils::database::stable_history_item_id(&item), item)).collect();
+    let mut pinned_map: HashMap<String, String> = pinned_list
+        .into_iter()
+        .map(|item| (crate::utils::database::stable_history_item_id(&item), item))
+        .collect();
     let mut sorted_pinned = Vec::new();
     for p in pinned_items {
         if let Some(item) = pinned_map.remove(p) {

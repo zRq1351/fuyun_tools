@@ -375,7 +375,6 @@ pub fn cancel_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
     let worker = runtime.worker.take();
     drop(slot);
     if let Some(handle) = worker {
-        
         thread::spawn(move || {
             let _ = handle.join();
             clear_runtime_if_finished(session_id);
@@ -591,8 +590,7 @@ fn run_longshot_worker_inner(
     let start_at = Instant::now();
     let mut last_progress_emit = Instant::now();
     let mut frame_buf = vec![0u8; frame_bytes];
-    
-    
+
     let mut anchor_frame: Option<Mat> = None;
     let mut stitched_segments: Vec<Mat> = Vec::new();
     let mut stitched_width: u32 = 0;
@@ -610,12 +608,10 @@ fn run_longshot_worker_inner(
                 .map(|s| s.state == "finishing")
                 .unwrap_or(false);
             if !finishing {
-                
                 break;
             }
             ended_by_finishing = true;
             if finishing_drain_left.is_none() {
-                
                 finishing_drain_left = Some(request.fps.clamp(6, 24));
             } else if finishing_drain_left == Some(0) {
                 break;
@@ -685,7 +681,6 @@ fn run_longshot_worker_inner(
         let mut dropped = false;
         let finishing_mode = finishing_drain_left.is_some();
         if finishing_mode {
-            
             let tail_motion_ok = estimate.unique_rows >= 3
                 && estimate.phase_unique_rows >= 2
                 && (estimate.phase_unique_rows - estimate.unique_rows).abs() <= 44
@@ -695,7 +690,6 @@ fn run_longshot_worker_inner(
                 dropped = true;
             }
         } else {
-            
             let motion_ok = estimate.unique_rows >= 8
                 && estimate.phase_unique_rows >= 6
                 && (estimate.phase_unique_rows - estimate.unique_rows).abs() <= 28
@@ -722,7 +716,7 @@ fn run_longshot_worker_inner(
                     MAX_STITCHED_HEIGHT, MAX_STITCHED_PIXELS
                 ));
             }
-            
+
             anchor_frame = Some(frame_gray);
             consecutive_drops = 0;
         }
@@ -766,7 +760,6 @@ fn run_longshot_worker_inner(
                 );
             }
             if !stitched_segments.is_empty() {
-                
                 if stitched_height > last_preview_stitched_height {
                     if let Ok(stitched_mat) = concat_segments(&stitched_segments) {
                         if let Ok(preview_base64) = mat_to_preview_base64(&stitched_mat, 300, 110) {
@@ -798,8 +791,6 @@ fn run_longshot_worker_inner(
     let _ = child.kill();
     let _ = child.wait();
 
-    
-    
     if ended_by_finishing {
         if let Ok(final_frame_color) = capture_single_bgr_frame(request) {
             let final_frame_gray = to_gray_mat(&final_frame_color)?;
@@ -808,8 +799,6 @@ fn run_longshot_worker_inner(
                     .map(|v| v > 1.2)
                     .unwrap_or(true);
                 if moved {
-                    
-                    
                     let force_estimate = estimate_overlap(prev, &final_frame_gray).ok();
                     let overlap_rows = force_estimate
                         .as_ref()
@@ -989,7 +978,6 @@ fn estimate_overlap(prev: &Mat, curr: &Mat) -> Result<AlignEstimate, String> {
         return Err("长截图帧尺寸过小".to_string());
     }
 
-    
     let tpl_h = (small_rows / 4).clamp(32, 180).min(small_rows - 1);
     let template = curr_small
         .row_range(&core::Range::new(0, tpl_h).map_err(to_cv_err)?)
@@ -1037,9 +1025,6 @@ fn estimate_overlap(prev: &Mat, curr: &Mat) -> Result<AlignEstimate, String> {
     let phase_unique = ((phase_unique_small as f64) / downsample_scale).round() as i32;
     let phase_overlap = (rows - phase_unique).clamp(1, rows - 1);
 
-    
-    
-    
     let mut candidates = vec![template_overlap];
     if response > 0.02 {
         candidates.push(phase_overlap);
@@ -1147,7 +1132,6 @@ fn overlap_sad_cost(prev: &Mat, curr: &Mat, overlap_rows: i32) -> Result<f64, St
         .row_range(&core::Range::new(overlap_rows - probe_h, overlap_rows).map_err(to_cv_err)?)
         .map_err(to_cv_err)?;
 
-    
     let probe_w = cols.clamp(180, 720);
     let x0 = ((cols - probe_w) / 2).max(0);
     let x1 = (x0 + probe_w).min(cols);
@@ -1221,7 +1205,6 @@ fn mat_to_png_base64(image_mat: &Mat) -> Result<String, String> {
             )
         }
         3 => {
-            
             imgproc::cvt_color(
                 image_mat,
                 &mut packed,

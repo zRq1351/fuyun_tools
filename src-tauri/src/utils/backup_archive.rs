@@ -48,7 +48,7 @@ pub async fn write_backup_payload(
     let temp_dir = temp_dir.to_path_buf();
     let prepared = prepared.clone();
     let app_version = app_version.to_string();
-    
+
     tokio::task::spawn_blocking(move || {
         let settings_file = BackupSettingsFile {
             settings: prepared.settings.clone(),
@@ -90,13 +90,15 @@ pub async fn write_backup_payload(
         };
         write_json(temp_dir.join(MANIFEST_PATH), &manifest)?;
         Ok(manifest)
-    }).await.unwrap_or_else(|_| Err("写入备份任务崩溃".to_string()))
+    })
+    .await
+    .unwrap_or_else(|_| Err("写入备份任务崩溃".to_string()))
 }
 
 pub async fn zip_backup_dir(source_dir: &Path, target_path: &Path) -> Result<u64, String> {
     let source_dir = source_dir.to_path_buf();
     let target_path = target_path.to_path_buf();
-    
+
     tokio::task::spawn_blocking(move || {
         if let Some(parent) = target_path.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("创建备份输出目录失败: {}", e))?;
@@ -122,9 +124,12 @@ pub async fn zip_backup_dir(source_dir: &Path, target_path: &Path) -> Result<u64
 
         zip.finish()
             .map_err(|e| format!("完成备份包写入失败: {}", e))?;
-        let metadata = fs::metadata(&target_path).map_err(|e| format!("读取备份包大小失败: {}", e))?;
+        let metadata =
+            fs::metadata(&target_path).map_err(|e| format!("读取备份包大小失败: {}", e))?;
         Ok(metadata.len())
-    }).await.unwrap_or_else(|_| Err("压缩备份任务崩溃".to_string()))
+    })
+    .await
+    .unwrap_or_else(|_| Err("压缩备份任务崩溃".to_string()))
 }
 
 pub fn read_manifest_from_package(package_path: &Path) -> Result<BackupManifest, String> {

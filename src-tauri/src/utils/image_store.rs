@@ -107,8 +107,10 @@ async fn fill_temp_text_table(
         return Ok(());
     }
     for chunk in values.chunks(500) {
-        let mut query_builder: QueryBuilder<Sqlite> =
-            QueryBuilder::new(format!("INSERT OR IGNORE INTO {} ({}) ", table_name, column_name));
+        let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
+            "INSERT OR IGNORE INTO {} ({}) ",
+            table_name, column_name
+        ));
         query_builder.push_values(chunk, |mut b, val| {
             b.push_bind(val);
         });
@@ -160,7 +162,8 @@ async fn fill_temp_position_table(
             table_name, key_column
         ));
         query_builder.push_values(chunk.iter().enumerate(), |mut b, (i, val)| {
-            b.push_bind(val).push_bind((chunk_idx * chunk_size + i) as i64);
+            b.push_bind(val)
+                .push_bind((chunk_idx * chunk_size + i) as i64);
         });
         let query = query_builder.build();
         query

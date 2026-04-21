@@ -18,7 +18,6 @@ fn global_job_object() -> winapi::um::winnt::HANDLE {
         return current;
     }
 
-    
     let new_job = unsafe {
         let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null_mut());
         if !job.is_null() {
@@ -34,7 +33,6 @@ fn global_job_object() -> winapi::um::winnt::HANDLE {
         job
     };
 
-    
     match JOB_OBJECT.compare_exchange(
         std::ptr::null_mut(),
         new_job,
@@ -43,9 +41,10 @@ fn global_job_object() -> winapi::um::winnt::HANDLE {
     ) {
         Ok(_) => new_job,
         Err(existing) => {
-            
             if !new_job.is_null() {
-                unsafe { winapi::um::handleapi::CloseHandle(new_job); }
+                unsafe {
+                    winapi::um::handleapi::CloseHandle(new_job);
+                }
             }
             existing
         }
@@ -63,6 +62,4 @@ pub fn assign_to_global_job_object(child: &std::process::Child) {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn assign_to_global_job_object(_child: &std::process::Child) {
-    
-}
+pub fn assign_to_global_job_object(_child: &std::process::Child) {}

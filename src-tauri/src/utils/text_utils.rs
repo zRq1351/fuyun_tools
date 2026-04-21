@@ -154,7 +154,6 @@ fn ngram_similarity(text1: &str, text2: &str, n: usize) -> f64 {
     let chars2: Vec<char> = text2.chars().collect();
 
     if chars1.len() < n || chars2.len() < n {
-        
         let min_len = chars1.len().min(chars2.len());
         if min_len == 0 {
             return 0.0;
@@ -168,7 +167,6 @@ fn ngram_similarity(text1: &str, text2: &str, n: usize) -> f64 {
         return matches as f64 / min_len as f64;
     }
 
-    
     let mut ngrams1 = std::collections::HashSet::new();
     for window in chars1.windows(n) {
         ngrams1.insert(window);
@@ -179,7 +177,6 @@ fn ngram_similarity(text1: &str, text2: &str, n: usize) -> f64 {
         ngrams2.insert(window);
     }
 
-    
     let intersection = ngrams1.intersection(&ngrams2).count();
     let union = ngrams1.len() + ngrams2.len() - intersection;
 
@@ -252,7 +249,7 @@ fn candidate_prefilter(old_text: &str, new_text: &str) -> bool {
     if old_text.is_empty() || new_text.is_empty() {
         return true;
     }
-    
+
     let len_old = old_text.len();
     let len_new = new_text.len();
     let min_len = len_old.min(len_new) as f64;
@@ -264,13 +261,11 @@ fn candidate_prefilter(old_text: &str, new_text: &str) -> bool {
         return true;
     }
 
-    
     let ngram_sim = ngram_similarity(old_text, new_text, NGRAM_SIZE);
     if ngram_sim >= NGRAM_SIMILARITY_THRESHOLD {
         return true;
     }
 
-    
     let head = prefix_match_ratio(old_text, new_text, 32);
     let tail = suffix_match_ratio(old_text, new_text, 32);
     head >= CANDIDATE_EDGE_MATCH_MIN || tail >= CANDIDATE_EDGE_MATCH_MIN
@@ -506,7 +501,7 @@ pub fn find_best_replacement_candidate(
             timed_out = true;
             break;
         }
-        
+
         if old_text.len() > 100_000 || new_text.len() > 100_000 {
             continue;
         }

@@ -194,29 +194,28 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                 let buffer = frame.buffer().map_err(|e| e.to_string())?;
                 let mut vec = Vec::new();
                 let pixels = buffer.as_nopadding_buffer(&mut vec);
-                
-                
+
                 let target_w = self.flags.width as usize;
                 let target_h = self.flags.height as usize;
                 let src_w = frame_w as usize;
                 let src_h = frame_h as usize;
                 let mut resized = vec![0u8; target_w * target_h * 4];
-                
+
                 for y in 0..target_h {
                     let src_y = (y * src_h) / target_h;
                     let src_row_start = src_y * src_w * 4;
                     let dst_row_start = y * target_w * 4;
-                    
+
                     for x in 0..target_w {
                         let src_x = (x * src_w) / target_w;
                         let src_idx = src_row_start + src_x * 4;
                         let dst_idx = dst_row_start + x * 4;
-                        
-                        
-                        resized[dst_idx..dst_idx + 4].copy_from_slice(&pixels[src_idx..src_idx + 4]);
+
+                        resized[dst_idx..dst_idx + 4]
+                            .copy_from_slice(&pixels[src_idx..src_idx + 4]);
                     }
                 }
-                
+
                 encoder
                     .send_frame_buffer(&resized, timestamp)
                     .map_err(|e| e.to_string())?;
@@ -337,7 +336,6 @@ pub fn start_window_capture_to_mp4(
                         Err(e) => {
                             let details = format!("{:?}", e);
                             if is_border_config_unsupported(&details) {
-                                
                                 WGC_FORCE_DEFAULT_BORDER.store(true, Ordering::Relaxed);
                                 log::warn!(
                                     "WGC stop 命中 BorderConfigUnsupported，后续会话回退 DrawBorderSettings::Default"

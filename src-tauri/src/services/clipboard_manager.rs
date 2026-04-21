@@ -53,8 +53,7 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
                     continue;
                 }
                 (
-                    state_guard.is_updating_clipboard
-                        || state_guard.is_processing_selection,
+                    state_guard.is_updating_clipboard || state_guard.is_processing_selection,
                     state_guard.clipboard_manager.clone(),
                 )
             };

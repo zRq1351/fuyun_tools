@@ -156,18 +156,15 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
         };
         let windows = windows_ptr.as_mut();
 
-        
         if IsWindowVisible(hwnd) == 0 {
-            return 1; 
+            return 1;
         }
 
-        
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
         if (ex_style & WS_EX_TOOLWINDOW as i32) != 0 {
             return 1;
         }
 
-        
         let title_len = GetWindowTextLengthW(hwnd);
         if title_len == 0 {
             return 1;
@@ -188,12 +185,10 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
             return 1;
         }
 
-        
         if is_cloaked(hwnd) {
             return 1;
         }
 
-        
         let mut rect: RECT = std::mem::zeroed();
         if GetWindowRect(hwnd, &mut rect) == 0 {
             return 1;
@@ -202,7 +197,6 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
         let width = (rect.right - rect.left) as u32;
         let height = (rect.bottom - rect.top) as u32;
 
-        
         if width < 50 || height < 50 {
             return 1;
         }
@@ -217,7 +211,7 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
             height,
         });
 
-        1 
+        1
     }
 
     unsafe {
@@ -229,14 +223,10 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
 
 #[cfg(target_os = "macos")]
 fn get_window_list_macos() -> Result<Vec<WindowInfo>, String> {
-    
-    
     Ok(Vec::new())
 }
 
 #[cfg(target_os = "linux")]
 fn get_window_list_linux() -> Result<Vec<WindowInfo>, String> {
-    
-    
     Ok(Vec::new())
 }

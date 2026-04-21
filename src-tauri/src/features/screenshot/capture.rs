@@ -174,13 +174,11 @@ fn capture_screen_region_internal(
         if end <= src.len() {
             rgba_data.extend_from_slice(&src[start..end]);
         } else if start < src.len() {
-            
             let available = src.len() - start;
             rgba_data.extend_from_slice(&src[start..src.len()]);
             let padding = (width * 4) as usize - available;
             rgba_data.extend(std::iter::repeat(0).take(padding));
         } else {
-            
             rgba_data.extend(std::iter::repeat(0).take((width * 4) as usize));
         }
     }
@@ -212,7 +210,6 @@ pub fn capture_full_screen() -> Result<(Vec<u8>, u32, u32, i32, i32), String> {
 
     let (origin_x, origin_y, width, height) = resolve_virtual_screen_bounds(&screens)?;
 
-    
     if screens.len() == 1 {
         let screen = &screens[0];
         let image = screen

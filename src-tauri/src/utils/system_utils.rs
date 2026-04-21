@@ -117,7 +117,7 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
     let keys_migrated = settings.migrate_legacy_api_keys();
     let old_version = settings.version.clone();
     settings.migrate_from_old();
-    
+
     // 反序列化后再序列化，如果两者内容不同，说明有缺失的默认字段被补全，触发保存
     let new_contents = serde_json::to_string_pretty(&settings)
         .map_err(|e| format!("序列化设置以对比失败: {}", e))?;

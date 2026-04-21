@@ -84,12 +84,11 @@ fn get_recording_ffmpeg_path() -> Result<PathBuf, String> {
 }
 
 fn get_preferred_install_ffmpeg_path() -> Result<PathBuf, String> {
-    
     if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
         let p = PathBuf::from(manifest_dir).join("bin").join("ffmpeg.exe");
         return Ok(p);
     }
-    
+
     get_recording_ffmpeg_path()
 }
 
@@ -333,7 +332,7 @@ fn move_window_top_center(window: &tauri::WebviewWindow, target_logical_width: O
         let scale_factor = window.scale_factor().unwrap_or(1.0);
         let mon_pos = monitor.position();
         let mon_size = monitor.size();
-        
+
         let physical_width = if let Some(w) = target_logical_width {
             (w * scale_factor).round() as i32
         } else if let Ok(size) = window.outer_size() {
@@ -349,7 +348,7 @@ fn move_window_top_center(window: &tauri::WebviewWindow, target_logical_width: O
             return;
         }
     }
-    
+
     let _ = window.move_window(tauri_plugin_positioner::Position::TopCenter);
 }
 
@@ -571,7 +570,6 @@ pub async fn list_recording_audio_devices(app: AppHandle) -> Result<Vec<AudioInp
 pub async fn list_recording_system_output_devices(
     app: AppHandle,
 ) -> Result<Vec<AudioInputDevice>, String> {
-    
     recorder_service::list_system_output_devices(&app).map_err(to_frontend_error_string)
 }
 
@@ -674,29 +672,94 @@ pub async fn resize_recording_toolbar(
         })
         .unwrap_or(true);
 
-    let is_shrinking = prev_size.as_ref().map(|s| {
-        let prev_w = ((s.width as f64) / scale_factor).round() as u32;
-        width_logical < prev_w
-    }).unwrap_or(false);
+    let is_shrinking = prev_size
+        .as_ref()
+        .map(|s| {
+            let prev_w = ((s.width as f64) / scale_factor).round() as u32;
+            width_logical < prev_w
+        })
+        .unwrap_or(false);
 
-    // When shrinking, move the window first to align its left edge closer to the new center
-    // This reduces the horizontal jump when the right edge is later shrunk by set_size
-    if request.recenter && is_shrinking {
-        move_window_top_center(&window, Some(width_logical as f64));
+    #[cfg(target_os = "windows")]
+    {
+        if need_resize || request.recenter {
+            let physical_width = (width_logical as f64 * scale_factor).round() as i32;
+            let physical_height = (height_logical as f64 * scale_factor).round() as i32;
+
+            let mut new_x = None;
+            let mut new_y = None;
+
+            if request.recenter {
+                if let Ok(Some(monitor)) = window.current_monitor() {
+                    let mon_pos = monitor.position();
+                    let mon_size = monitor.size();
+                    new_x = Some(mon_pos.x + (mon_size.width as i32 - physical_width) / 2);
+                    new_y = Some(mon_pos.y);
+                } else {
+                    // Fallback if we can't get the monitor, just use move_window_top_center later
+                }
+            }
+
+            if let Ok(hwnd) = window.hwnd() {
+                use windows::Win32::Foundation::HWND;
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+                };
+
+                let mut flags = SWP_NOZORDER | SWP_NOACTIVATE;
+                if new_x.is_none() {
+                    flags |= SWP_NOMOVE;
+                }
+                if !need_resize {
+                    flags |= SWP_NOSIZE;
+                }
+
+                let x = new_x.unwrap_or(0);
+                let y = new_y.unwrap_or(0);
+
+                unsafe {
+                    let _ =
+                        SetWindowPos(hwnd, HWND_TOP, x, y, physical_width, physical_height, flags);
+                }
+            } else {
+                // Fallback to Tauri methods
+                if request.recenter && is_shrinking {
+                    move_window_top_center(&window, Some(width_logical as f64));
+                }
+                if need_resize {
+                    let _ = window.set_size(target_size);
+                }
+                if request.recenter && !is_shrinking {
+                    move_window_top_center(&window, Some(width_logical as f64));
+                }
+            }
+        }
     }
 
-    if need_resize {
-        window
-            .set_size(target_size)
-            .map_err(|e| format!("调整录制工具栏窗口尺寸失败: {}", e))?;
+    #[cfg(not(target_os = "windows"))]
+    {
+        // When shrinking, move the window first to align its left edge closer to the new center
+        // This reduces the horizontal jump when the right edge is later shrunk by set_size
+        if request.recenter && is_shrinking {
+            move_window_top_center(&window, Some(width_logical as f64));
+        }
+
+        if need_resize {
+            window
+                .set_size(target_size)
+                .map_err(|e| format!("调整录制工具栏窗口尺寸失败: {}", e))?;
+        }
+
+        // When expanding, move the window after setting the size
+        if request.recenter && !is_shrinking {
+            move_window_top_center(&window, Some(width_logical as f64));
+        }
     }
+
     let _ = window.set_min_size::<tauri::Size>(None);
     let _ = window.set_max_size::<tauri::Size>(None);
     let _ = window.set_resizable(false);
-    // When expanding, move the window after setting the size
-    if request.recenter && !is_shrinking {
-        move_window_top_center(&window, Some(width_logical as f64));
-    }
+
     Ok(())
 }
 #[tauri::command]
@@ -714,7 +777,6 @@ pub async fn run_recording_regression(
 
 pub async fn toggle_recording_from_shortcut(app: AppHandle, _state: Arc<Mutex<SharedAppState>>) {
     if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
-        
         let target_width = 210.0;
         let _ = window.set_size(tauri::LogicalSize::new(target_width, 40.0));
         move_window_top_center(&window, Some(target_width));
@@ -736,10 +798,8 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
         app_state.inner().clone()
     };
 
-    
     let current_state = recorder_service::get_recording_state(state_arc.clone());
 
-    
     if current_state.state != "recording" && current_state.state != "paused" {
         log::warn!(
             "无法切换麦克风：当前不在录制状态 (state={})",
@@ -753,7 +813,6 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
         state_guard.recording_runtime.clone()
     };
 
-    
     let (mic_device_id, sys_audio_enabled, sys_audio_thread_exists) = {
         let runtime_guard = runtime_arc.lock().unwrap();
         let sys_enabled = runtime_guard
@@ -769,18 +828,14 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
         )
     };
 
-    
     if mic_device_id.is_none() {
         log::warn!("无法切换麦克风：未选择麦克风设备");
         return;
     }
 
-    
     if enable {
-        
         let _ = app.emit("recording-mic-key-pressed", serde_json::json!({}));
     } else {
-        
         let _ = app.emit("recording-mic-key-released", serde_json::json!({}));
     }
 
@@ -791,13 +846,12 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
         sys_audio_thread_exists
     );
 
-    
     match recorder_service::update_audio_capture(
         &app,
         state_arc,
-        None,         
-        None,         
-        Some(enable), 
+        None,
+        None,
+        Some(enable),
         mic_device_id.clone(),
     ) {
         Ok(_) => {
