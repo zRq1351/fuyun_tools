@@ -1,4 +1,3 @@
-pub mod test_bounds;
 pub mod commands;
 pub mod commands_recording;
 pub mod tray_menu;
