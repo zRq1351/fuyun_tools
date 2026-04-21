@@ -1,8 +1,10 @@
 /
 <template>
   <div class="container">
-    <div class="interactive-area" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
-      <div :class="{ 'active': !isHovered }" class="mini-icon" data-tauri-drag-region>
+    <div class="interactive-area" @mouseleave="onMouseLeave">
+      <div :class="{ 'active': !isHovered }" class="mini-icon"
+           data-tauri-drag-region
+           @mouseenter="onMouseEnter">
         <el-icon class="magic-icon">
           <magic-stick/>
         </el-icon>
