@@ -354,21 +354,21 @@ pub fn run() {
             }
 
             let app_handle_clone_longshot_pause = app_handle.clone();
-            if let Err(e) = app.global_shortcut().on_shortcut(
-                "Ctrl+Alt+P",
-                move |_app, _shortcut, event| {
-                    if let ShortcutState::Pressed = event.state {
-                        let app_handle_inner = app_handle_clone_longshot_pause.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let _ =
+            if let Err(e) =
+                app.global_shortcut()
+                    .on_shortcut("Ctrl+Alt+P", move |_app, _shortcut, event| {
+                        if let ShortcutState::Pressed = event.state {
+                            let app_handle_inner = app_handle_clone_longshot_pause.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let _ =
                                 crate::ui::commands::toggle_manual_longshot_pause_from_shortcut(
                                     app_handle_inner,
                                 )
                                 .await;
-                        });
-                    }
-                },
-            ) {
+                            });
+                        }
+                    })
+            {
                 log::warn!("长截图暂停/恢复快捷键注册失败: {}", e);
             }
 

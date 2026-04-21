@@ -1932,11 +1932,7 @@ fn execute_select_and_fill_text(
     let item_content = {
         let manager = lock_arc_mutex(&manager_arc);
         manager.promote_to_top(&item_id).map_err(|e| {
-            AppError::new(
-                ErrorCode::ClipboardError,
-                "找不到目标项目".to_string(),
-            )
-            .with_details(e)
+            AppError::new(ErrorCode::ClipboardError, "找不到目标项目".to_string()).with_details(e)
         })?
     };
 
@@ -2323,12 +2319,14 @@ pub async fn get_clipboard_history(
 ) -> Result<HistoryResponse, String> {
     let manager_arc = get_clipboard_manager_arc(state.inner());
     let manager = lock_arc_mutex(&manager_arc);
-    let history_items: Vec<TextHistoryItem> = manager.get_history().into_iter().map(|content| {
-        TextHistoryItem {
+    let history_items: Vec<TextHistoryItem> = manager
+        .get_history()
+        .into_iter()
+        .map(|content| TextHistoryItem {
             id: crate::utils::database::stable_history_item_id(&content),
             content,
-        }
-    }).collect();
+        })
+        .collect();
     Ok(HistoryResponse {
         history: history_items,
         categories: manager.get_categories(),
@@ -2352,12 +2350,14 @@ pub async fn get_clipboard_full_snapshot(
     };
 
     let text_manager = lock_arc_mutex(&text_manager_arc);
-    let text_history_items: Vec<TextHistoryItem> = text_manager.get_history().into_iter().map(|content| {
-        TextHistoryItem {
+    let text_history_items: Vec<TextHistoryItem> = text_manager
+        .get_history()
+        .into_iter()
+        .map(|content| TextHistoryItem {
             id: crate::utils::database::stable_history_item_id(&content),
             content,
-        }
-    }).collect();
+        })
+        .collect();
     let text_categories = text_manager.get_categories();
     let text_category_list = text_manager.get_category_list();
     let text_pinned_items = text_manager.get_pinned_items();
@@ -2775,14 +2775,12 @@ pub async fn clear_image_history(
             )
         })?;
 
-
     let is_visible = {
         let mut state_guard = lock_arc_mutex(state.inner());
 
         state_guard.image_history_dirty = true;
         state_guard.is_image_visible
     };
-
 
     if is_visible {
         emit_image_history_payload(&app, state.inner().clone());
@@ -3341,9 +3339,7 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
         let settings = load_settings()
             .map_err(|e| frontend_error(ErrorCode::ConfigError, "读取AI设置失败", e))?;
 
-
         let mut result = HashMap::new();
-
 
         result.insert(
             "version".to_string(),
@@ -3493,7 +3489,6 @@ pub async fn get_ai_settings() -> Result<HashMap<String, serde_json::Value>, Str
             "image_fill_verify_mode".to_string(),
             serde_json::Value::String(settings.image_fill_verify_mode.clone()),
         );
-
 
         let mut provider_configs_map: HashMap<String, serde_json::Value> = HashMap::new();
 
@@ -3685,7 +3680,6 @@ pub async fn save_app_settings(
 
     settings.version = version;
 
-
     if let Some(val) = text_max_items {
         settings.max_items = val;
         settings.text_max_items = val;
@@ -3789,7 +3783,6 @@ pub async fn save_app_settings(
         settings.recording_window_audio_sync_advance_ms = val.clamp(0, 500);
     }
 
-
     if let Some(ref hot_key_val) = hot_key {
         if hot_key_val.is_empty() {
             return Err(frontend_error(
@@ -3815,7 +3808,6 @@ pub async fn save_app_settings(
         }
     }
 
-
     if let Some(ref image_hot_key_val) = image_hot_key {
         if image_hot_key_val.is_empty() {
             return Err(frontend_error(
@@ -3826,7 +3818,6 @@ pub async fn save_app_settings(
         }
 
         if image_hot_key_val != &settings.image_hot_key {
-
             if let Some(ref hot_key_val) = hot_key {
                 if image_hot_key_val == hot_key_val {
                     return Err(frontend_error(
@@ -3984,7 +3975,6 @@ pub async fn save_app_settings(
         }
     }
 
-
     if let Some(ref mic_toggle_hot_key_val) = recording_mic_toggle_hot_key {
         if mic_toggle_hot_key_val.is_empty() {
             return Err(frontend_error(
@@ -3994,7 +3984,6 @@ pub async fn save_app_settings(
             ));
         }
         if mic_toggle_hot_key_val != &settings.recording_mic_toggle_hot_key {
-
             let effective_hot_key = hot_key.clone().unwrap_or_else(|| settings.hot_key.clone());
             let effective_image_hot_key = image_hot_key
                 .clone()
@@ -4036,7 +4025,6 @@ pub async fn save_app_settings(
                 ));
             }
 
-
             if let Err(e) = app
                 .global_shortcut()
                 .unregister(settings.recording_mic_toggle_hot_key.as_str())
@@ -4048,7 +4036,6 @@ pub async fn save_app_settings(
                 );
             }
 
-
             if settings.recording_enabled {
                 let app_handle_for_mic = app.clone();
                 if let Err(e) = app.global_shortcut().on_shortcut(
@@ -4057,13 +4044,11 @@ pub async fn save_app_settings(
                         let app_handle_inner = app_handle_for_mic.clone();
                         match event.state {
                             ShortcutState::Pressed => {
-
                                 tauri::async_runtime::spawn(async move {
                                     toggle_microphone_from_shortcut(app_handle_inner, true).await;
                                 });
                             }
                             ShortcutState::Released => {
-
                                 tauri::async_runtime::spawn(async move {
                                     toggle_microphone_from_shortcut(app_handle_inner, false).await;
                                 });
@@ -4161,7 +4146,6 @@ pub async fn save_app_settings(
         }
     }
 
-
     if let Some(ref ai_provider_val) = ai_provider {
         if ai_provider_val.is_empty() {
             return Err(frontend_error(
@@ -4171,7 +4155,6 @@ pub async fn save_app_settings(
             ));
         }
         settings.ai_provider = ai_provider_val.clone();
-
 
         let mut need_update_config = false;
         let config = settings
@@ -4188,7 +4171,6 @@ pub async fn save_app_settings(
         if let Some(ref model_name) = ai_model_name {
             config.model_name = model_name.clone();
         }
-
 
         if let Some(ref api_key) = ai_api_key {
             if api_key != "********" {
@@ -6575,7 +6557,7 @@ pub async fn resize_selection_toolbar(
     if let Some(window) = app.get_webview_window("selection_toolbar") {
         #[cfg(target_os = "windows")]
         {
-            use winapi::um::winuser::{SetWindowPos, SWP_NOZORDER, SWP_NOACTIVATE};
+            use winapi::um::winuser::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
             if let Ok(hwnd) = window.hwnd() {
                 unsafe {
                     SetWindowPos(

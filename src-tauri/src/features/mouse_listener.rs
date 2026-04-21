@@ -26,7 +26,7 @@ use winapi::um::winuser::{
     WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_USER,
 };
 #[cfg(target_os = "windows")]
-use winapi::um::winuser::{GetAsyncKeyState, VK_LCONTROL, VK_RCONTROL, VK_LMENU, VK_RMENU};
+use winapi::um::winuser::{GetAsyncKeyState, VK_LCONTROL, VK_LMENU, VK_RCONTROL, VK_RMENU};
 
 #[derive(Debug, Clone, PartialEq)]
 enum MouseActionState {
@@ -180,10 +180,10 @@ fn handle_hook_event(
                             let state_guard = lock_arc_mutex(listener_state);
                             state_guard.settings.selection_modifier_key.clone()
                         };
-                        
+
                         let is_alt = is_alt_pressed_by_os();
                         let is_ctrl = is_ctrl_effectively_pressed();
-                        
+
                         let modifier_matched = match modifier_key.as_str() {
                             "Alt" => is_alt,
                             "Ctrl" => is_ctrl,

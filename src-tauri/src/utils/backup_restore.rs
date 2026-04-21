@@ -47,15 +47,15 @@ pub async fn restore_backup_package(
                 .await
                 .unwrap_or_else(|_| Err("解压任务被取消或崩溃".to_string()))
                 .map_err(|error| {
-                record_backup_restore_stage_metric(
-                    "extract_package",
-                    "备份恢复解压耗时",
-                    extract_started_at.elapsed().as_millis() as u64,
-                    false,
-                    Some(error.clone()),
-                );
-                (error, None)
-            })?;
+                    record_backup_restore_stage_metric(
+                        "extract_package",
+                        "备份恢复解压耗时",
+                        extract_started_at.elapsed().as_millis() as u64,
+                        false,
+                        Some(error.clone()),
+                    );
+                    (error, None)
+                })?;
             record_backup_restore_stage_metric(
                 "extract_package",
                 "备份恢复解压耗时",
@@ -66,19 +66,20 @@ pub async fn restore_backup_package(
 
             let manifest_started_at = Instant::now();
             let pkg_path2 = package_path.clone();
-            let manifest = tokio::task::spawn_blocking(move || read_manifest_from_package(&pkg_path2))
-                .await
-                .unwrap_or_else(|_| Err("读取清单任务被取消或崩溃".to_string()))
-                .map_err(|error| {
-                record_backup_restore_stage_metric(
-                    "read_manifest",
-                    "备份恢复读取清单耗时",
-                    manifest_started_at.elapsed().as_millis() as u64,
-                    false,
-                    Some(error.clone()),
-                );
-                (error, None)
-            })?;
+            let manifest =
+                tokio::task::spawn_blocking(move || read_manifest_from_package(&pkg_path2))
+                    .await
+                    .unwrap_or_else(|_| Err("读取清单任务被取消或崩溃".to_string()))
+                    .map_err(|error| {
+                        record_backup_restore_stage_metric(
+                            "read_manifest",
+                            "备份恢复读取清单耗时",
+                            manifest_started_at.elapsed().as_millis() as u64,
+                            false,
+                            Some(error.clone()),
+                        );
+                        (error, None)
+                    })?;
             record_backup_restore_stage_metric(
                 "read_manifest",
                 "备份恢复读取清单耗时",
@@ -86,14 +87,16 @@ pub async fn restore_backup_package(
                 true,
                 None,
             );
-            
+
             let validate_started_at = Instant::now();
             let ext_dir2 = extracted_dir.clone();
             let manifest_clone = manifest.clone();
-            tokio::task::spawn_blocking(move || validate_manifest_checksums(&ext_dir2, &manifest_clone))
-                .await
-                .unwrap_or_else(|_| Err("校验任务被取消或崩溃".to_string()))
-                .map_err(|error| {
+            tokio::task::spawn_blocking(move || {
+                validate_manifest_checksums(&ext_dir2, &manifest_clone)
+            })
+            .await
+            .unwrap_or_else(|_| Err("校验任务被取消或崩溃".to_string()))
+            .map_err(|error| {
                 record_backup_restore_stage_metric(
                     "validate_checksums",
                     "备份恢复校验耗时",
@@ -281,17 +284,15 @@ async fn create_rollback_point(
 ) -> Result<PathBuf, String> {
     let rollback_dir = create_backup_temp_dir()?;
 
-    
     let settings = {
         let guard = state.lock().unwrap_or_else(|never| match never {});
         guard.settings.clone()
     };
 
-    
     let text_snapshot = {
         let guard = state.lock().unwrap_or_else(|never| match never {});
         let clipboard_manager_arc = guard.clipboard_manager.clone();
-        drop(guard); 
+        drop(guard);
 
         let clipboard = clipboard_manager_arc
             .lock()
@@ -304,7 +305,6 @@ async fn create_rollback_point(
         }
     };
 
-    
     let image_snapshot = image_store::load_all_data_async().await?;
 
     let settings_wrapper = crate::utils::backup_model::BackupSettingsFile { settings };
@@ -322,7 +322,7 @@ async fn create_rollback_point(
     let blob_target_dir = rollback_dir.join("image_history").join("blobs");
     let rollback_dir_clone = rollback_dir.clone();
     let image_snapshot_items = image_snapshot.items.clone();
-    
+
     tokio::task::spawn_blocking(move || {
         fs::create_dir_all(rollback_dir_clone.join("settings"))
             .map_err(|e| format!("创建回滚目录失败: {}", e))?;
@@ -379,7 +379,7 @@ async fn apply_rollback(
     rollback_dir: &Path,
 ) -> Result<(), String> {
     restore_settings(state, rollback_dir).await?;
-    
+
     restore_text_history(state, rollback_dir, "overwrite").await?;
     restore_image_history(state, rollback_dir, "overwrite").await?;
     Ok(())
@@ -409,13 +409,10 @@ async fn restore_text_history(
     let wrapper = serde_json::from_slice::<BackupTextHistoryFile>(&bytes)
         .map_err(|e| format!("解析文字历史备份失败: {}", e))?;
 
-    
     if strategy.eq_ignore_ascii_case("overwrite") {
-        
         crate::utils::database::save_history_data_snapshot_async(&wrapper.snapshot).await?;
         log::info!("文本历史恢复: 使用覆盖模式");
     } else {
-        
         crate::utils::database::merge_history_data_async(&wrapper.snapshot).await?;
         log::info!("文本历史恢复: 使用合并模式");
     }
@@ -438,14 +435,12 @@ async fn restore_image_history(
     let blob_root = app_blob_dir()?;
 
     if strategy.eq_ignore_ascii_case("overwrite") {
-        
         image_store::clear_all_history_async().await?;
         if blob_root.exists() {
             fs::remove_dir_all(&blob_root).map_err(|e| format!("清理旧图片目录失败: {}", e))?;
         }
         log::info!("图片历史恢复: 使用覆盖模式");
     } else {
-        
         log::info!("图片历史恢复: 使用合并模式");
     }
 
@@ -484,7 +479,6 @@ async fn restore_image_history(
         };
 
         if overwrite {
-            
             image_store::upsert_item_async(&history_item, position).await?;
         } else {
             if item_exists {
@@ -497,7 +491,6 @@ async fn restore_image_history(
     }
 
     if strategy.eq_ignore_ascii_case("overwrite") {
-        
         for (item_id, category) in &wrapper.categories {
             image_store::upsert_category_async(item_id, category).await?;
         }
@@ -507,20 +500,17 @@ async fn restore_image_history(
         }
         image_store::sync_pinned_order_async(&wrapper.pinned_items).await?;
     } else {
-        
         for (item_id, category) in &wrapper.categories {
             image_store::upsert_category_async(item_id, category).await?;
         }
-        
+
         for category in &wrapper.category_list {
-            if let Err(_) = image_store::add_category_if_not_exists_async(category).await {
-                
-            }
+            if let Err(_) = image_store::add_category_if_not_exists_async(category).await {}
         }
         for (item_id, tags) in &wrapper.image_tags {
             image_store::sync_tags_for_item_async(item_id, tags).await?;
         }
-        
+
         image_store::merge_pinned_items_async(&wrapper.pinned_items).await?;
     }
 
@@ -540,7 +530,6 @@ async fn restore_image_history(
 async fn rebuild_runtime_managers(
     state: &std::sync::Arc<crate::sync::Mutex<AppState>>,
 ) -> Result<(), String> {
-    
     let (text_max_items, grouped_items_protected, image_max_items, image_disk_limit_mb) = {
         let guard = state.lock().unwrap_or_else(|never| match never {});
         (
@@ -551,7 +540,6 @@ async fn rebuild_runtime_managers(
         )
     };
 
-    
     let new_clipboard_manager = tauri::async_runtime::spawn_blocking(move || {
         std::sync::Arc::new(crate::sync::Mutex::new(ClipboardManager::new(
             text_max_items,
@@ -571,7 +559,6 @@ async fn rebuild_runtime_managers(
     .await
     .map_err(|e| format!("创建图片剪贴板管理器失败: {}", e))?;
 
-    
     let mut guard = state.lock().unwrap_or_else(|never| match never {});
     guard.clipboard_manager = new_clipboard_manager;
     guard.image_clipboard_manager = new_image_clipboard_manager;

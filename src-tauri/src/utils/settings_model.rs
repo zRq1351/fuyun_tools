@@ -536,7 +536,6 @@ impl AppSettingsData {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-
         if self.max_items == 0 || self.max_items > 1000 {
             return Err("max_items必须在1-1000之间".to_string());
         }
@@ -547,16 +546,13 @@ impl AppSettingsData {
             return Err("image_max_items必须在1-1000之间".to_string());
         }
 
-
         if self.image_disk_limit_mb < 100 || self.image_disk_limit_mb > 102400 {
             return Err("image_disk_limit_mb必须在100-102400之间".to_string());
         }
 
-
         if self.image_fill_verify_mode != "strict" && self.image_fill_verify_mode != "fast" {
             return Err("image_fill_verify_mode必须是strict或fast".to_string());
         }
-
 
         if !self.hot_key.is_empty() && !self.hot_key.contains('+') {
             return Err("快捷键格式无效，必须包含修饰键（如Ctrl+Alt+C）".to_string());
@@ -570,7 +566,9 @@ impl AppSettingsData {
         if !self.recording_hot_key.is_empty() && !self.recording_hot_key.contains('+') {
             return Err("录屏快捷键格式无效，必须包含修饰键（如Ctrl+Alt+R）".to_string());
         }
-        if !self.recording_mic_toggle_hot_key.is_empty() && !self.recording_mic_toggle_hot_key.contains('+') {
+        if !self.recording_mic_toggle_hot_key.is_empty()
+            && !self.recording_mic_toggle_hot_key.contains('+')
+        {
             return Err("麦克风切换快捷键格式无效，必须包含修饰键（如Ctrl+Space）".to_string());
         }
 
@@ -603,7 +601,6 @@ impl AppSettingsData {
             return Err("recording_window_audio_sync_advance_ms必须在0-500之间".to_string());
         }
 
-
         for (provider_name, config) in &self.provider_configs {
             if !config.api_url.is_empty() && !config.api_url.starts_with("https://") {
                 return Err(format!(
@@ -613,11 +610,9 @@ impl AppSettingsData {
             }
         }
 
-
         if self.clipboard_bottom_offset < 0 || self.clipboard_bottom_offset > 400 {
             return Err("clipboard_bottom_offset必须在0-400之间".to_string());
         }
-
 
         if self.translation_prompt_template.trim().is_empty() {
             return Err("翻译提示模板不能为空".to_string());
@@ -625,7 +620,6 @@ impl AppSettingsData {
         if self.explanation_prompt_template.trim().is_empty() {
             return Err("解释提示模板不能为空".to_string());
         }
-
 
         if !self.translation_prompt_template.contains("{text}")
             || !self

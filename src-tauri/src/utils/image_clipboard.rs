@@ -135,17 +135,13 @@ pub fn is_fast_fill_verify_mode_enabled() -> bool {
 
 /// 获取异步生成的预览（全局访问）
 pub fn get_async_preview(item_id: &str) -> Option<(u32, u32, String)> {
-    let generator = PREVIEW_GENERATOR
-        .lock()
-        .unwrap();
+    let generator = PREVIEW_GENERATOR.lock().unwrap();
     generator.get_preview(item_id)
 }
 
 /// 检查预览是否已就绪（全局访问）
 pub fn is_preview_ready(item_id: &str) -> bool {
-    let generator = PREVIEW_GENERATOR
-        .lock()
-        .unwrap();
+    let generator = PREVIEW_GENERATOR.lock().unwrap();
     generator.get_preview(item_id).is_some()
 }
 
@@ -177,9 +173,7 @@ static PREVIEW_GENERATOR: LazyLock<Arc<Mutex<PreviewGenerator>>> =
 
 /// 带 AppHandle 的预览生成器初始化
 pub fn init_preview_generator_with_app_handle(app_handle: tauri::AppHandle) {
-    let mut generator = PREVIEW_GENERATOR
-        .lock()
-        .unwrap();
+    let mut generator = PREVIEW_GENERATOR.lock().unwrap();
     *generator = PreviewGenerator::new(Some(app_handle));
 }
 
@@ -206,7 +200,6 @@ impl PreviewGenerator {
                     build_preview_from_rgba(&task.rgba, task.width, task.height);
                 let item_id = task.item_id.clone();
 
-                
                 let mut cache = cache_clone.lock().unwrap();
                 cache.put(
                     item_id.clone(),
@@ -214,7 +207,6 @@ impl PreviewGenerator {
                 );
                 drop(cache);
 
-                
                 if let Some(ref handle) = app_handle_clone {
                     let preview_url = format!("data:image/png;base64,{}", preview_base64);
                     let _ = handle.emit(
@@ -274,19 +266,11 @@ impl PreviewGenerator {
 
     /// 获取异步生成的预览（优先从内存缓存，其次从数据库）
     pub fn get_preview(&self, item_id: &str) -> Option<(u32, u32, String)> {
-        
-        if let Some(preview) = self
-            .preview_cache
-            .lock()
-            .unwrap()
-            .get(item_id)
-        {
+        if let Some(preview) = self.preview_cache.lock().unwrap().get(item_id) {
             return Some(preview.clone());
         }
 
-        
         if let Ok(Some(preview)) = image_store::load_async_preview(item_id) {
-            
             self.preview_cache
                 .lock()
                 .unwrap()
@@ -394,7 +378,7 @@ pub struct ImageClipboardManager {
     max_items: usize,
     image_disk_limit_bytes: u64,
     grouped_items_protected_from_limit: bool,
-    
+
     current_memory_usage: Arc<AtomicU64>,
     dynamic_memory_budget: Arc<AtomicU64>,
     last_memory_check: Arc<AtomicU64>,
@@ -436,7 +420,7 @@ impl ImageClipboardManager {
             max_items,
             image_disk_limit_bytes: image_disk_limit_mb.saturating_mul(1024 * 1024),
             grouped_items_protected_from_limit,
-            
+
             current_memory_usage: Arc::new(AtomicU64::new(0)),
             dynamic_memory_budget: Arc::new(AtomicU64::new(
                 IMAGE_FULL_RES_MEMORY_BUDGET_BYTES as u64,
@@ -444,7 +428,6 @@ impl ImageClipboardManager {
             last_memory_check: Arc::new(AtomicU64::new(0)),
         };
 
-        
         manager.start_memory_monitor();
         manager.compact_history_after_load();
         if let Err(e) = image_store::init_image_store() {
@@ -918,7 +901,6 @@ impl ImageClipboardManager {
         height: u32,
         source_blob: Option<(Vec<u8>, String)>,
     ) {
-        
         let signature = compute_signature(&rgba, width, height);
         let id = generate_item_id(&signature);
         let blob_ext = source_blob
@@ -1028,16 +1010,13 @@ impl ImageClipboardManager {
 
         let rgba_arc = Arc::new(rgba);
         if new_item_compact.is_some() {
-            
             let preview_task = PreviewGenerationTask {
                 item_id: id.clone(),
                 rgba: rgba_arc.clone(),
                 width,
                 height,
             };
-            let generator = PREVIEW_GENERATOR
-                .lock()
-                .unwrap();
+            let generator = PREVIEW_GENERATOR.lock().unwrap();
             generator.submit_task(preview_task);
             log::debug!("已提交异步预览生成任务: {} ({}x{})", id, width, height);
         }
@@ -1162,7 +1141,6 @@ impl ImageClipboardManager {
             (removed.id, removed.image_path, removed.signature, ids)
         };
 
-        
         crate::services::image_clipboard_manager::clear_recent_samples();
 
         let pinned_snapshot = {
@@ -1278,7 +1256,6 @@ impl ImageClipboardManager {
             return Err("目标图片不存在".to_string());
         }
 
-        
         let old_position = history.iter().position(|item| item.id == item_id);
 
         let mut pinned_items = lock_arc_mutex(&self.pinned_items);
@@ -1293,21 +1270,19 @@ impl ImageClipboardManager {
         apply_pin_order(&mut history, &pinned_items);
         self.signature_index_dirty.store(true, Ordering::SeqCst);
 
-        
         let new_position = history.iter().position(|item| item.id == item_id);
 
         let pinned_snapshot = pinned_items.clone();
         drop(pinned_items);
         drop(history);
 
-        
         if let (Some(old_pos), Some(new_pos)) = (old_position, new_position) {
             if old_pos != new_pos {
                 if let Err(e) =
                     image_store::sync_item_positions_incremental(&item_id, old_pos, new_pos)
                 {
                     log::error!("增量同步图片位置失败: {}", e);
-                    
+
                     let history = lock_arc_mutex(&self.history);
                     let item_ids = history
                         .iter()
@@ -1406,14 +1381,12 @@ impl ImageClipboardManager {
             return Ok(0);
         }
 
-        
         if should_clear_all {
             image_store::clear_all_history_async().await?;
         } else {
             image_store::delete_items_bulk_async(&removed_ids).await?;
         }
 
-        
         cleanup_image_blob_files_async(removed_paths);
         self.signature_index_dirty.store(true, Ordering::SeqCst);
 
@@ -1649,30 +1622,22 @@ impl ImageClipboardManager {
         use tauri_plugin_clipboard_manager::ClipboardExt;
         let mut last_error = String::new();
 
-        
-        
         let image_size = image.rgba().len();
-        let is_large_image = image_size > 1024 * 1024; 
+        let is_large_image = image_size > 1024 * 1024;
 
-        
         let retry_delays = if is_large_image {
-            
             vec![5u64, 10, 15]
         } else {
-            
             vec![3u64, 6, 10, 16, 24]
         };
 
         for (attempt, delay_ms) in retry_delays.iter().enumerate() {
             match app_handle.clipboard().write_image(image) {
                 Ok(_) => {
-                    
                     if is_fast_fill_verify_mode() || is_large_image {
-                        
                         return Ok(());
                     }
 
-                    
                     std::thread::sleep(Duration::from_millis(3));
                     if let Ok(read_back) = app_handle.clipboard().read_image() {
                         if read_back.width() > 0
@@ -1786,12 +1751,10 @@ impl ImageClipboardManager {
     }
 
     fn read_item_rgba(&self, item: &ImageHistoryItem) -> Result<Vec<u8>, String> {
-        
         if !item.rgba_bytes.is_empty() {
             return Ok(item.rgba_bytes.clone());
         }
 
-        
         let pending = lock_arc_mutex(&self.pending_images);
         if let Some(data) = pending.get(&item.id) {
             if data.width == item.width && data.height == item.height {
@@ -1800,7 +1763,6 @@ impl ImageClipboardManager {
         }
         drop(pending);
 
-        
         if item.lazy_load {
             log::debug!("延迟加载图片: {} ({}x{})", item.id, item.width, item.height);
         }
@@ -1965,50 +1927,43 @@ impl ImageClipboardManager {
         let dynamic_memory_budget = self.dynamic_memory_budget.clone();
         let last_memory_check = self.last_memory_check.clone();
 
-        std::thread::spawn(move || {
-            loop {
-                if Arc::strong_count(&current_memory_usage) <= 1 {
-                    log::info!("ImageClipboardManager 被释放，退出内存监控线程");
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(MEMORY_MONITOR_INTERVAL_MS));
+        std::thread::spawn(move || loop {
+            if Arc::strong_count(&current_memory_usage) <= 1 {
+                log::info!("ImageClipboardManager 被释放，退出内存监控线程");
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(MEMORY_MONITOR_INTERVAL_MS));
 
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
 
-                
-                let last_check = last_memory_check.load(Ordering::Relaxed);
-                if now.saturating_sub(last_check) < MEMORY_MONITOR_INTERVAL_MS {
-                    continue;
-                }
+            let last_check = last_memory_check.load(Ordering::Relaxed);
+            if now.saturating_sub(last_check) < MEMORY_MONITOR_INTERVAL_MS {
+                continue;
+            }
 
-                last_memory_check.store(now, Ordering::Relaxed);
+            last_memory_check.store(now, Ordering::Relaxed);
 
-                
-                let current_usage = current_memory_usage.load(Ordering::Relaxed);
-                let current_budget = dynamic_memory_budget.load(Ordering::Relaxed);
+            let current_usage = current_memory_usage.load(Ordering::Relaxed);
+            let current_budget = dynamic_memory_budget.load(Ordering::Relaxed);
 
-                
-                let new_budget = if current_usage > current_budget * 9 / 10 {
-                    
-                    (current_budget * 12 / 10).min(DYNAMIC_MEMORY_BUDGET_MAX as u64)
-                } else if current_usage < current_budget * 5 / 10 {
-                    
-                    (current_budget * 8 / 10).max(DYNAMIC_MEMORY_BUDGET_MIN as u64)
-                } else {
-                    current_budget
-                };
+            let new_budget = if current_usage > current_budget * 9 / 10 {
+                (current_budget * 12 / 10).min(DYNAMIC_MEMORY_BUDGET_MAX as u64)
+            } else if current_usage < current_budget * 5 / 10 {
+                (current_budget * 8 / 10).max(DYNAMIC_MEMORY_BUDGET_MIN as u64)
+            } else {
+                current_budget
+            };
 
-                if new_budget != current_budget {
-                    dynamic_memory_budget.store(new_budget, Ordering::Relaxed);
-                    log::info!(
-                        "动态调整内存预算: {}MB -> {}MB",
-                        current_budget / (1024 * 1024),
-                        new_budget / (1024 * 1024)
-                    );
-                }
+            if new_budget != current_budget {
+                dynamic_memory_budget.store(new_budget, Ordering::Relaxed);
+                log::info!(
+                    "动态调整内存预算: {}MB -> {}MB",
+                    current_budget / (1024 * 1024),
+                    new_budget / (1024 * 1024)
+                );
             }
         });
     }
@@ -2121,10 +2076,6 @@ fn build_signature_index(history: &[ImageHistoryItem]) -> HashMap<String, usize>
         .collect()
 }
 
-
-
-
-
 fn shrink_image_history_with_group_protection(
     history: &mut Vec<ImageHistoryItem>,
     max_items: usize,
@@ -2233,7 +2184,6 @@ fn file_size_bytes(path: &str) -> u64 {
 pub(crate) fn compute_signature(rgba: &[u8], width: u32, height: u32) -> String {
     use xxhash_rust::xxh3::xxh3_64;
 
-    
     let mut combined = Vec::with_capacity(12);
     combined.extend_from_slice(&width.to_le_bytes());
     combined.extend_from_slice(&height.to_le_bytes());
@@ -2244,26 +2194,20 @@ pub(crate) fn compute_signature(rgba: &[u8], width: u32, height: u32) -> String 
         return format!("{:016x}", hash);
     }
 
-    
     let total_pixels = width as usize * height as usize;
     let sample_points = if total_pixels > 2_000_000 {
-        
-        64 
+        64
     } else if total_pixels > 500_000 {
-        
-        96 
+        96
     } else {
-        128 
+        128
     };
 
-    
     let sample_size = (rgba.len() / sample_points).max(1);
 
-    
     let head_end = sample_size.min(rgba.len());
     combined.extend_from_slice(&rgba[..head_end]);
 
-    
     if rgba.len() > sample_size * 2 {
         let mid = rgba.len() / 2;
         let mid_start = mid.saturating_sub(sample_size / 2);
@@ -2271,7 +2215,6 @@ pub(crate) fn compute_signature(rgba: &[u8], width: u32, height: u32) -> String 
         combined.extend_from_slice(&rgba[mid_start..mid_end]);
     }
 
-    
     if rgba.len() > sample_size {
         let tail_start = rgba.len().saturating_sub(sample_size);
         combined.extend_from_slice(&rgba[tail_start..]);
@@ -2393,7 +2336,6 @@ fn rgba_to_png_base64(rgba: &[u8], width: u32, height: u32) -> Result<String, St
 }
 
 fn read_image_blob(path: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
-    
     let file_size = std::fs::metadata(path)
         .map(|m| m.len() as usize)
         .unwrap_or(0);
@@ -2406,7 +2348,6 @@ fn read_image_blob(path: &str, width: u32, height: u32) -> Result<Vec<u8>, Strin
         return read_large_image_blob_chunked(path, width, height);
     }
 
-    
     let bytes = std::fs::read(path).map_err(|e| format!("读取图片二进制失败: {}", e))?;
     if bytes.is_empty() {
         return Err("图片数据为空".to_string());
@@ -2432,7 +2373,6 @@ fn read_large_image_blob_chunked(path: &str, width: u32, height: u32) -> Result<
     let file = std::fs::File::open(path).map_err(|e| format!("打开图片文件失败: {}", e))?;
     let mut reader = std::io::BufReader::new(file);
 
-    
     let mut bytes = Vec::new();
     let mut chunk = vec![0u8; IMAGE_CHUNK_SIZE];
 
@@ -2445,7 +2385,6 @@ fn read_large_image_blob_chunked(path: &str, width: u32, height: u32) -> Result<
         }
         bytes.extend_from_slice(&chunk[..bytes_read]);
 
-        
         if bytes.len() > LARGE_IMAGE_THRESHOLD * 2 {
             log::warn!(
                 "图片文件过大 ({}MB)，可能影响性能",
@@ -2458,7 +2397,6 @@ fn read_large_image_blob_chunked(path: &str, width: u32, height: u32) -> Result<
         return Err("图片数据为空".to_string());
     }
 
-    
     let decoded = image::load_from_memory(&bytes).map_err(|e| format!("解码大图片失败: {}", e))?;
     let rgba = decoded.to_rgba8();
 
@@ -2858,7 +2796,7 @@ fn build_preview_from_rgba(rgba: &[u8], width: u32, height: u32) -> (u32, u32, S
     if preview_width == 0 || preview_height == 0 {
         return (0, 0, String::new());
     }
-    
+
     let png_bytes =
         match rgba_to_png_bytes_for_storage(preview.as_raw(), preview_width, preview_height) {
             Ok(bytes) => bytes,
@@ -2975,12 +2913,11 @@ fn read_images_from_windows_file_clipboard() -> Vec<ClipboardImagePayload> {
         if OpenClipboard(std::ptr::null_mut()) == 0 {
             return Vec::new();
         }
-        
-        
+
         scopeguard::defer! {
             CloseClipboard();
         }
-        
+
         let handle = GetClipboardData(CF_HDROP as UINT);
         if handle.is_null() {
             return Vec::new();

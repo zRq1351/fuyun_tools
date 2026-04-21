@@ -24,7 +24,7 @@ struct PendingImageTask {
     enqueued_at: Instant,
 }
 
-static IMAGE_WORKER_SENDERS: LazyLock<StdMutex<Vec<mpsc::SyncSender<PendingImageTask>>>> = 
+static IMAGE_WORKER_SENDERS: LazyLock<StdMutex<Vec<mpsc::SyncSender<PendingImageTask>>>> =
     LazyLock::new(|| StdMutex::new(Vec::new()));
 static NEXT_WORKER_INDEX: AtomicUsize = AtomicUsize::new(0);
 
@@ -63,7 +63,6 @@ fn image_listener_stop_tx() -> &'static StdMutex<Option<Sender<()>>> {
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
     state.lock().unwrap()
 }
-
 
 fn maybe_log_queue_metrics() {
     let enqueued = IMAGE_QUEUE_METRICS.enqueued.load(Ordering::Relaxed);
@@ -161,12 +160,10 @@ fn matches_recent_sample(width: u32, height: u32, rgba: &[u8]) -> bool {
     let sample = extract_sample_points(rgba, width, height);
     let recent = RECENT_IMAGE_SAMPLES.lock();
 
-    
     for (idx, (recent_width, recent_height, recent_sample)) in
         recent.iter().rev().take(3).enumerate()
     {
         if *recent_width == width && *recent_height == height {
-            
             if recent_sample == &sample {
                 log::info!(
                     "[重复检查] 图片 {}x{} 与最近第 {} 张图片采样命中，继续执行强签名校验",
@@ -186,10 +183,8 @@ fn matches_recent_sample(width: u32, height: u32, rgba: &[u8]) -> bool {
 fn update_recent_samples_with_sample(width: u32, height: u32, sample: [u8; SAMPLE_POINTS]) {
     let mut recent = RECENT_IMAGE_SAMPLES.lock();
 
-    
     recent.push((width, height, sample));
 
-    
     if recent.len() > 5 {
         recent.remove(0);
     }
@@ -203,7 +198,12 @@ pub fn clear_recent_samples() {
 }
 
 /// 处理队列中的待处理图片任务
-fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, worker_id: usize, rx: mpsc::Receiver<PendingImageTask>) {
+fn process_pending_queue(
+    app_handle: &AppHandle,
+    state: &Arc<Mutex<AppState>>,
+    worker_id: usize,
+    rx: mpsc::Receiver<PendingImageTask>,
+) {
     log::info!("[处理线程-{}] 图片处理线程已启动，等待任务...", worker_id);
     while let Ok(task) = rx.recv() {
         let wait_ms = task.enqueued_at.elapsed().as_millis() as u64;
@@ -231,82 +231,81 @@ fn process_pending_queue(app_handle: &AppHandle, state: &Arc<Mutex<AppState>>, w
             );
             continue;
         }
-                
-                if matches_recent_sample(task.width, task.height, &task.rgba) {
-                    log::debug!(
-                        "[处理线程-{}] 图片采样命中，进入强签名去重: {}x{}",
-                        worker_id,
-                        task.width,
-                        task.height
-                    );
+
+        if matches_recent_sample(task.width, task.height, &task.rgba) {
+            log::debug!(
+                "[处理线程-{}] 图片采样命中，进入强签名去重: {}x{}",
+                worker_id,
+                task.width,
+                task.height
+            );
+        }
+
+        log::info!(
+            "[处理线程-{}] 开始处理图片任务: {}x{}",
+            worker_id,
+            task.width,
+            task.height
+        );
+
+        let manager_arc = {
+            let state_guard = lock_state(state);
+            state_guard.image_clipboard_manager.clone()
+        };
+
+        let sample = extract_sample_points(&task.rgba, task.width, task.height);
+        let PendingImageTask {
+            rgba,
+            width,
+            height,
+            source_blob,
+            ..
+        } = task;
+        let delta_item = {
+            let manager = match manager_arc.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    log::error!("[处理线程-{}] 获取 manager 锁失败: {:?}", worker_id, e);
+                    continue;
                 }
+            };
+            let manager = manager.clone();
+            manager.add_rgba_image_with_source_blob(rgba, width, height, source_blob);
+            let history_preview = manager.get_history_preview();
+            let pinned_set = manager
+                .get_pinned_items()
+                .into_iter()
+                .collect::<HashSet<_>>();
+            history_preview
+                .iter()
+                .find(|item| !pinned_set.contains(&item.id))
+                .cloned()
+                .or_else(|| history_preview.first().cloned())
+        };
+        log::info!(
+            "[处理线程-{}] 图片处理成功: {}x{}",
+            worker_id,
+            width,
+            height
+        );
 
-                log::info!(
-                    "[处理线程-{}] 开始处理图片任务: {}x{}",
-                    worker_id,
-                    task.width,
-                    task.height
-                );
+        update_recent_samples_with_sample(width, height, sample);
 
-                let manager_arc = {
-                    let state_guard = lock_state(state);
-                    state_guard.image_clipboard_manager.clone()
-                };
-
-                let sample = extract_sample_points(&task.rgba, task.width, task.height);
-                let PendingImageTask {
-                    rgba,
-                    width,
-                    height,
-                    source_blob,
-                    ..
-                } = task;
-                let delta_item = {
-                    let manager = match manager_arc.lock() {
-                        Ok(guard) => guard,
-                        Err(e) => {
-                            log::error!("[处理线程-{}] 获取 manager 锁失败: {:?}", worker_id, e);
-                            continue;
-                        }
-                    };
-                    let manager = manager.clone();
-                    manager.add_rgba_image_with_source_blob(rgba, width, height, source_blob);
-                    let history_preview = manager.get_history_preview();
-                    let pinned_set = manager
-                        .get_pinned_items()
-                        .into_iter()
-                        .collect::<HashSet<_>>();
-                    history_preview
-                        .iter()
-                        .find(|item| !pinned_set.contains(&item.id))
-                        .cloned()
-                        .or_else(|| history_preview.first().cloned())
-                };
-                log::info!(
-                    "[处理线程-{}] 图片处理成功: {}x{}",
-                    worker_id,
-                    width,
-                    height
-                );
-
-                
-                update_recent_samples_with_sample(width, height, sample);
-
-                let is_image_visible = {
-                    let state_guard = lock_state(state);
-                    state_guard.is_image_visible
-                };
-                if is_image_visible {
-                    if let Some(item) = delta_item {
-                        let payload = serde_json::json!({ "item": item });
-                        let _ = app_handle.emit("image-history-item-added", payload);
-                    } else {
-                        emit_image_history_payload(app_handle, state.clone());
-                    }
-                } else {
-                    let mut state_guard = lock_state(state);
-                    state_guard.image_history_dirty = true;
-                }
+        let is_image_visible = {
+            let state_guard = lock_state(state);
+            state_guard.is_image_visible
+        };
+        if is_image_visible {
+            if let Some(item) = delta_item {
+                let payload = serde_json::json!({ "item": item });
+                let _ = app_handle.emit("image-history-item-added", payload);
+            } else {
+                emit_image_history_payload(app_handle, state.clone());
+            }
+        } else {
+            let mut state_guard = lock_state(state);
+            state_guard.image_history_dirty = true;
+        }
 
         log::info!("[处理线程-{}] 图片处理流程完成", worker_id);
         maybe_log_queue_metrics();
@@ -341,7 +340,6 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
         *guard = Some(stop_tx);
     }
 
-    
     thread::spawn(move || {
         let wake_rx = subscribe_clipboard_wake_events();
 
@@ -376,7 +374,6 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
 
             log::info!("[监听线程] 收到剪贴板变化事件");
 
-            
             let image = ImageClipboardManager::read_clipboard_images_rgba(&app_handle);
             match image {
                 Ok(images) => {
@@ -386,7 +383,8 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                         continue;
                     }
                     for (rgba, width, height, source_blob) in images {
-                        let worker_idx = NEXT_WORKER_INDEX.fetch_add(1, Ordering::Relaxed) % senders.len();
+                        let worker_idx =
+                            NEXT_WORKER_INDEX.fetch_add(1, Ordering::Relaxed) % senders.len();
                         let tx = &senders[worker_idx];
                         let task = PendingImageTask {
                             rgba,

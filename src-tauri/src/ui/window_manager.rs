@@ -351,12 +351,15 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
     let (history_items, categories, category_list, pinned_items) = {
         let manager = lock_arc_mutex(&manager_arc);
         let history = manager.get_history();
-        let items: Vec<serde_json::Value> = history.iter().map(|content| {
-            serde_json::json!({
-                "id": crate::utils::database::stable_history_item_id(content),
-                "content": content,
+        let items: Vec<serde_json::Value> = history
+            .iter()
+            .map(|content| {
+                serde_json::json!({
+                    "id": crate::utils::database::stable_history_item_id(content),
+                    "content": content,
+                })
             })
-        }).collect();
+            .collect();
         (
             items,
             manager.get_categories(),
@@ -685,9 +688,7 @@ fn get_taskbar_safe_offset() -> i32 {
 }
 
 /// 打开划词工具栏
-fn ensure_selection_toolbar_window(
-    app: &AppHandle,
-) -> Result<tauri::WebviewWindow, String> {
+fn ensure_selection_toolbar_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
     let label = "selection_toolbar";
     if let Some(existing) = app.get_webview_window(label) {
         return Ok(existing);
