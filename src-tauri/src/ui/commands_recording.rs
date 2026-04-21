@@ -674,6 +674,17 @@ pub async fn resize_recording_toolbar(
         })
         .unwrap_or(true);
 
+    let is_shrinking = prev_size.as_ref().map(|s| {
+        let prev_w = ((s.width as f64) / scale_factor).round() as u32;
+        width_logical < prev_w
+    }).unwrap_or(false);
+
+    // When shrinking, move the window first to align its left edge closer to the new center
+    // This reduces the horizontal jump when the right edge is later shrunk by set_size
+    if request.recenter && is_shrinking {
+        move_window_top_center(&window, Some(width_logical as f64));
+    }
+
     if need_resize {
         window
             .set_size(target_size)
@@ -682,8 +693,8 @@ pub async fn resize_recording_toolbar(
     let _ = window.set_min_size::<tauri::Size>(None);
     let _ = window.set_max_size::<tauri::Size>(None);
     let _ = window.set_resizable(false);
-    // Recenter only when caller explicitly asks for it.
-    if request.recenter {
+    // When expanding, move the window after setting the size
+    if request.recenter && !is_shrinking {
         move_window_top_center(&window, Some(width_logical as f64));
     }
     Ok(())

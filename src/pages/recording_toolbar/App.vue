@@ -462,7 +462,7 @@ const syncCapsuleLayout = async () => {
       await RecordingService.resizeToolbar(false, true, true, "capsule", true, targetHeight, null);
     } else {
       // Closing: wait for CSS animation to finish before shrinking Tauri window
-      await new Promise((resolve) => setTimeout(resolve, 350));
+      await new Promise((resolve) => setTimeout(resolve, 400));
       // Double check it's still closed after the delay
       if (!capsuleSettingsVisible.value) {
         await RecordingService.resizeToolbar(false, false, true, "capsule", true, null, null);
@@ -1446,7 +1446,7 @@ body {
 }
 
 .capsule-settings-panel {
-  width: 100%;
+  width: 376px;
   display: flex;
   flex-direction: column;
   gap: 10px;
