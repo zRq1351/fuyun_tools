@@ -459,13 +459,13 @@ const syncCapsuleLayout = async () => {
       await nextTick(); // Ensure any internal v-if (like inlineNotice) has rendered
       const targetHeight = measureCapsuleContentHeight();
       // Opening: resize Tauri window first so the CSS animation has space to play
-      await RecordingService.resizeToolbar(false, true, true, "capsule", false, targetHeight, null);
+      await RecordingService.resizeToolbar(false, true, true, "capsule", true, targetHeight, null);
     } else {
       // Closing: wait for CSS animation to finish before shrinking Tauri window
       await new Promise((resolve) => setTimeout(resolve, 350));
       // Double check it's still closed after the delay
       if (!capsuleSettingsVisible.value) {
-        await RecordingService.resizeToolbar(false, false, true, "capsule", false, null, null);
+        await RecordingService.resizeToolbar(false, false, true, "capsule", true, null, null);
       }
     }
   } catch (_e) {
@@ -663,7 +663,6 @@ const toggleCapsuleSettings = () => {
 
 const closeCapsule = async () => {
   capsuleSettingsVisible.value = false;
-  await syncCapsuleLayout();
   try {
     await getCurrentWindow().hide();
   } catch (_e) {
@@ -1136,10 +1135,17 @@ body {
 }
 
 html,
-body,
+body {
+  height: 100%;
+  background: transparent;
+}
+
 #app {
   height: 100%;
   background: transparent;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
 }
 
 .recording-toolbar-select-popper.el-popper {

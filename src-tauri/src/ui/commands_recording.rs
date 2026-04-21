@@ -328,16 +328,29 @@ pub async fn download_recording_ffmpeg(
     })
 }
 
-fn move_window_top_center(window: &tauri::WebviewWindow) {
-    if let (Ok(size), Ok(Some(monitor))) = (window.outer_size(), window.current_monitor()) {
+fn move_window_top_center(window: &tauri::WebviewWindow, target_logical_width: Option<f64>) {
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let scale_factor = window.scale_factor().unwrap_or(1.0);
         let mon_pos = monitor.position();
         let mon_size = monitor.size();
-        let x = mon_pos.x + (mon_size.width as i32 - size.width as i32) / 2;
-        let y = mon_pos.y;
-        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
-    } else {
-        let _ = window.move_window(tauri_plugin_positioner::Position::TopCenter);
+        
+        let physical_width = if let Some(w) = target_logical_width {
+            (w * scale_factor).round() as i32
+        } else if let Ok(size) = window.outer_size() {
+            size.width as i32
+        } else {
+            0
+        };
+
+        if physical_width > 0 {
+            let x = mon_pos.x + (mon_size.width as i32 - physical_width) / 2;
+            let y = mon_pos.y;
+            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+            return;
+        }
     }
+    
+    let _ = window.move_window(tauri_plugin_positioner::Position::TopCenter);
 }
 
 fn ensure_recording_toolbar_window(
@@ -580,11 +593,11 @@ pub async fn open_recording_folder(
 #[tauri::command]
 pub async fn show_recording_toolbar(app: AppHandle) -> Result<(), String> {
     let (window, _created) = ensure_recording_toolbar_window(&app)?;
-    let _ = window.set_size(tauri::PhysicalSize::new(530, 64));
+    let _ = window.set_size(tauri::LogicalSize::new(530.0, 64.0));
     let _ = window.set_min_size::<tauri::Size>(None);
     let _ = window.set_max_size::<tauri::Size>(None);
     let _ = window.set_resizable(false);
-    move_window_top_center(&window);
+    move_window_top_center(&window, Some(530.0));
     let content_protected = load_settings()
         .map(|settings| settings.recording_toolbar_content_protected)
         .unwrap_or(false);
@@ -671,7 +684,7 @@ pub async fn resize_recording_toolbar(
     let _ = window.set_resizable(false);
     // Recenter only when caller explicitly asks for it.
     if request.recenter {
-        move_window_top_center(&window);
+        move_window_top_center(&window, Some(width_logical as f64));
     }
     Ok(())
 }
@@ -691,8 +704,9 @@ pub async fn run_recording_regression(
 pub async fn toggle_recording_from_shortcut(app: AppHandle, _state: Arc<Mutex<SharedAppState>>) {
     if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
         
-        let _ = window.set_size(tauri::LogicalSize::new(180.0, 40.0));
-        move_window_top_center(&window);
+        let target_width = 210.0;
+        let _ = window.set_size(tauri::LogicalSize::new(target_width, 40.0));
+        move_window_top_center(&window, Some(target_width));
         let _ = show_overlay_window_by_label(&app, "recording_toolbar", true);
     }
     let _ = app.emit("recording-toolbar-force-compact", ());
