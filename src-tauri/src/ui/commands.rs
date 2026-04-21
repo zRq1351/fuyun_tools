@@ -6575,7 +6575,7 @@ pub async fn resize_selection_toolbar(
     if let Some(window) = app.get_webview_window("selection_toolbar") {
         #[cfg(target_os = "windows")]
         {
-            use winapi::um::winuser::{SetWindowPos, SWP_NOZORDER, SWP_NOACTIVATE, SWP_NOREDRAW};
+            use winapi::um::winuser::{SetWindowPos, SWP_NOZORDER, SWP_NOACTIVATE};
             if let Ok(hwnd) = window.hwnd() {
                 unsafe {
                     SetWindowPos(
