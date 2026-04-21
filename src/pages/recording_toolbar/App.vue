@@ -467,7 +467,7 @@ const syncCapsuleLayout = async () => {
       await RecordingService.resizeToolbar(false, false, true, "capsule", true, null, null, true); // keepWidth=true
 
       // Phase 2: Wait for CSS width animation to complete (from 400px to 210px)
-      await new Promise((resolve) => setTimeout(resolve, 320));
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       // Phase 3: Now shrink both width and height to final size
       if (!capsuleSettingsVisible.value) {
@@ -1269,11 +1269,11 @@ body {
   overflow: hidden;
   cursor: move;
   -webkit-app-region: drag;
-  transition: width 0.3s ease-out,
-  min-height 0.3s ease-out,
-  border-radius 0.3s ease-out,
-  padding 0.3s ease-out,
-  background 0.25s ease;
+  transition: width 0.18s ease-out,
+  min-height 0.18s ease-out,
+  border-radius 0.18s ease-out,
+  padding 0.18s ease-out,
+  background 0.15s ease;
 }
 
 .bar.bar-collapsed {
@@ -1434,10 +1434,10 @@ body {
 .capsule-settings-panel-wrapper {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 0.25s ease-out,
-  margin-top 0.25s ease-out,
-  padding-top 0.25s ease-out,
-  border-top-color 0.2s ease-out;
+  transition: grid-template-rows 0.18s ease-out,
+  margin-top 0.18s ease-out,
+  padding-top 0.18s ease-out,
+  border-top-color 0.15s ease-out;
   width: 100%;
   margin-top: 0;
   padding-top: 0;
