@@ -10,111 +10,61 @@
           class="collapsed-shell"
       >
         <div class="collapsed-shell-row">
-          <el-tooltip
-              :offset="10"
-              :show-after="300"
-              :disabled="!isSettingsPanelOpen"
-              content="停止录制"
-              effect="dark"
-              placement="bottom"
-              popper-class="recording-toolbar-tooltip"
+          <button
+              :disabled="!canStop"
+              class="collapsed-stop-btn no-drag"
+              type="button"
+              @click.stop="stop"
           >
-            <button
-                :disabled="!canStop"
-                class="collapsed-stop-btn no-drag"
-                type="button"
-                @click.stop="stop"
-            >
-              <span class="collapsed-stop-icon"></span>
-            </button>
-          </el-tooltip>
-          <el-tooltip
-              :content="capsuleTooltipContent"
-              :offset="10"
-              :show-after="300"
-              :disabled="!isSettingsPanelOpen"
-              effect="dark"
-              placement="bottom"
-              popper-class="recording-toolbar-tooltip"
+            <span class="collapsed-stop-icon"></span>
+          </button>
+          <div
+              :data-state="currentRecordingState"
+              class="collapsed-pill"
+              @click.stop="toggleRecordingState"
           >
-            <div
-                :data-state="currentRecordingState"
-                class="collapsed-pill"
-                @click.stop="toggleRecordingState"
-            >
-              <span class="collapsed-pill-content">
-                <span
-                    v-if="currentRecordingState === 'recording'"
-                    class="recording-dot"
-                ></span>
-                <span
-                    v-else-if="currentRecordingState === 'paused'"
-                    class="recording-pause-square"
-                ></span>
-                <span
-                    v-else-if="currentRecordingState === 'idle'"
-                    class="recording-ready-dot"
-                ></span>
-                <span class="collapsed-pill-text">{{ collapsedDisplayText }}</span>
-              </span>
-            </div>
-          </el-tooltip>
-          <el-tooltip
-              :offset="10"
-              :show-after="300"
-              :disabled="!isSettingsPanelOpen"
-              content="设置"
-              effect="dark"
-              placement="bottom"
-              popper-class="recording-toolbar-tooltip"
+            <span class="collapsed-pill-content">
+              <span
+                  v-if="currentRecordingState === 'recording'"
+                  class="recording-dot"
+              ></span>
+              <span
+                  v-else-if="currentRecordingState === 'paused'"
+                  class="recording-pause-square"
+              ></span>
+              <span
+                  v-else-if="currentRecordingState === 'idle'"
+                  class="recording-ready-dot"
+              ></span>
+              <span class="collapsed-pill-text">{{ collapsedDisplayText }}</span>
+            </span>
+          </div>
+          <button
+              class="collapsed-expand-btn no-drag"
+              type="button"
+              @click.stop="toggleCapsuleSettings"
           >
-            <button
-                class="collapsed-expand-btn no-drag"
-                type="button"
-                @click.stop="toggleCapsuleSettings"
-            >
-              <el-icon class="collapsed-expand-icon">
-                <Settings :size="13" :stroke-width="2.2"/>
-              </el-icon>
-            </button>
-          </el-tooltip>
-          <el-tooltip
-              :content="micToggleTooltip"
-              :disabled="!isSettingsPanelOpen"
-              :offset="10"
-              :show-after="300"
-              effect="dark"
-              placement="bottom"
-              popper-class="recording-toolbar-tooltip"
+            <el-icon class="collapsed-expand-icon">
+              <Settings :size="13" :stroke-width="2.2"/>
+            </el-icon>
+          </button>
+          <button
+              :class="['collapsed-mic-toggle-btn', 'no-drag', { 'is-muted': isMicMuted || !canToggleMic, 'is-active': !isMicMuted && canToggleMic, 'is-disabled': !canToggleMic || !microphoneDeviceId }]"
+              :disabled="!canToggleMic || !microphoneDeviceId"
+              type="button"
+              @click.stop="toggleMicState"
           >
-            <button
-                :class="['collapsed-mic-toggle-btn', 'no-drag', { 'is-muted': isMicMuted || !canToggleMic, 'is-active': !isMicMuted && canToggleMic, 'is-disabled': !canToggleMic || !microphoneDeviceId }]"
-                :disabled="!canToggleMic || !microphoneDeviceId"
-                type="button"
-                @click.stop="toggleMicState"
-            >
-              <el-icon class="collapsed-mic-icon">
-                <component :is="isMicMuted || !canToggleMic ? MicOff : Mic" :size="13" :stroke-width="2.2"/>
-              </el-icon>
-            </button>
-          </el-tooltip>
-          <el-tooltip
-              :offset="10"
-              :show-after="300"
-              :disabled="!isSettingsPanelOpen"
-              content="关闭"
-              effect="dark"
-              placement="bottom"
-              popper-class="recording-toolbar-tooltip"
+            <el-icon class="collapsed-mic-icon">
+              <component :is="isMicMuted || !canToggleMic ? MicOff : Mic" :size="13" :stroke-width="2.2"/>
+            </el-icon>
+          </button>
+          <button
+              class="collapsed-close-btn no-drag"
+              type="button"
+              @click.stop="closeCapsule"
           >
-            <button
-                class="collapsed-close-btn no-drag"
-                type="button"
-                @click.stop="closeCapsule"
-            >
-              ×
-            </button>
-          </el-tooltip>
+            ×
+          </button>
         </div>
         <div class="capsule-settings-panel-wrapper" :class="{ 'is-open': capsuleSettingsVisible }">
           <div class="capsule-settings-panel no-drag">
@@ -250,19 +200,12 @@
                 :disabled="!canEditRecordingConfig"
                 @change="onToolbarSettingChange('recordingCaptureCursor', $event)"
             />
-            <el-tooltip
-                content="开启后，录制画面会包含当前悬浮工具栏；关闭后，工具栏会尝试从录制画面中隐藏。"
-                effect="dark"
-                placement="top"
-                popper-class="recording-toolbar-tooltip"
-            >
               <el-switch
                   v-model="captureToolbar"
                   active-text="捕获工具栏"
                   :disabled="!canEditRecordingConfig"
                   @change="onToolbarSettingChange('recordingToolbarContentProtected', $event)"
               />
-            </el-tooltip>
           </div>
           <div class="toolbar-settings-row">
             <span class="toolbar-settings-label">默认帧率</span>
@@ -456,22 +399,21 @@ const measureCapsuleContentHeight = () => {
 const syncCapsuleLayout = async () => {
   try {
     if (capsuleSettingsVisible.value) {
-      await nextTick(); // Ensure any internal v-if (like inlineNotice) has rendered
+      await nextTick();
       const targetHeight = measureCapsuleContentHeight();
-      // Opening: resize Tauri window first so the CSS animation has space to play
       await RecordingService.resizeToolbar(false, true, true, "capsule", true, targetHeight, null);
     } else {
-      // Closing: Two-phase approach to prevent visual flicker
-      // Phase 1: Keep width at 400px, only shrink height to 40px
-      // This allows CSS width transition to animate smoothly without button squeezing
-      await RecordingService.resizeToolbar(false, false, true, "capsule", true, null, null, true); // keepWidth=true
+      // Closing: Two-phase approach
+      // Phase 1: Keep window width at 400px (keepWidth=true), shrink height to 40px, recenter
+      // The CSS will animate .bar width from 400px to 210px, but window is still 400px so no clipping
+      await RecordingService.resizeToolbar(false, false, true, "capsule", true, null, null, true);
 
-      // Phase 2: Wait for CSS width animation to complete (from 400px to 210px)
+      // Phase 2: Wait for CSS width transition to complete (0.18s)
       await new Promise((resolve) => setTimeout(resolve, 200));
 
-      // Phase 3: Now shrink both width and height to final size
+      // Phase 3: Now shrink window width to 210px. The .bar is already 210px so no clipping
       if (!capsuleSettingsVisible.value) {
-        await RecordingService.resizeToolbar(false, false, true, "capsule", true, null, null, false); // keepWidth=false
+        await RecordingService.resizeToolbar(false, false, true, "capsule", true, null, null, false);
       }
     }
   } catch (_e) {
