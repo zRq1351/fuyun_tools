@@ -10,6 +10,16 @@
           class="collapsed-shell"
       >
         <div class="collapsed-shell-row">
+          <div class="drag-handle" title="按住拖动" @mousedown.prevent>
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="9" cy="5" r="1"></circle>
+              <circle cx="9" cy="12" r="1"></circle>
+              <circle cx="9" cy="19" r="1"></circle>
+              <circle cx="15" cy="5" r="1"></circle>
+              <circle cx="15" cy="12" r="1"></circle>
+              <circle cx="15" cy="19" r="1"></circle>
+            </svg>
+          </div>
           <el-tooltip
               :offset="10"
               :show-after="300"
@@ -39,7 +49,7 @@
           >
             <div
                 :data-state="currentRecordingState"
-                class="collapsed-pill"
+                class="collapsed-pill no-drag"
                 @click.stop="toggleRecordingState"
             >
               <span class="collapsed-pill-content">
@@ -1265,7 +1275,7 @@ body,
 }
 
 .bar.bar-collapsed {
-  width: 210px;
+  width: 230px;
   min-height: 40px;
   height: auto;
   padding: 9px 6px;
@@ -1277,8 +1287,8 @@ body,
   border: 1px solid transparent;
   overflow: hidden;
   box-sizing: border-box;
-  cursor: default;
-  -webkit-app-region: no-drag;
+  cursor: move;
+  -webkit-app-region: drag;
   clip-path: inset(0 round 999px);
 }
 
@@ -1313,6 +1323,22 @@ body,
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 20px;
+  color: #5c6c8c;
+  cursor: move;
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+}
+
+.drag-handle:hover {
+  color: #8da2c8;
 }
 
 .collapsed-pill {

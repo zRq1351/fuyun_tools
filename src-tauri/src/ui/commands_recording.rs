@@ -333,7 +333,7 @@ fn move_window_top_center(window: &tauri::WebviewWindow) {
         let mon_pos = monitor.position();
         let mon_size = monitor.size();
         let x = mon_pos.x + (mon_size.width as i32 - size.width as i32) / 2;
-        let y = mon_pos.y;
+        let y = mon_pos.y + 40;
         let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     } else {
         let _ = window.move_window(tauri_plugin_positioner::Position::TopCenter);
@@ -579,12 +579,14 @@ pub async fn open_recording_folder(
 
 #[tauri::command]
 pub async fn show_recording_toolbar(app: AppHandle) -> Result<(), String> {
-    let (window, _created) = ensure_recording_toolbar_window(&app)?;
+    let (window, created) = ensure_recording_toolbar_window(&app)?;
     let _ = window.set_size(tauri::PhysicalSize::new(530, 64));
     let _ = window.set_min_size::<tauri::Size>(None);
     let _ = window.set_max_size::<tauri::Size>(None);
     let _ = window.set_resizable(false);
-    move_window_top_center(&window);
+    if created {
+        move_window_top_center(&window);
+    }
     let content_protected = load_settings()
         .map(|settings| settings.recording_toolbar_content_protected)
         .unwrap_or(false);
@@ -631,15 +633,15 @@ pub async fn resize_recording_toolbar(
                 preferred_height.clamp(320, max_height_logical.max(320)),
             )
         } else {
-            // 胶囊模式：增加宽度以容纳麦克风按钮（原180px + 麦克风按钮30px）
-            (210, 40)
+            // 胶囊模式：增加宽度以容纳麦克风按钮和拖动柄（230px）
+            (230, 40)
         }
     } else if request.compact_mode {
         if request.open_overlay {
             (400, 730)
         } else {
-            // 紧凑模式：同样增加宽度以容纳麦克风按钮
-            (210, 40)
+            // 紧凑模式：增加宽度以容纳麦克风按钮和拖动柄
+            (230, 40)
         }
     } else {
         let h = if request.open_select {
@@ -689,10 +691,12 @@ pub async fn run_recording_regression(
 }
 
 pub async fn toggle_recording_from_shortcut(app: AppHandle, _state: Arc<Mutex<SharedAppState>>) {
-    if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
+    if let Ok((window, created)) = ensure_recording_toolbar_window(&app) {
         
-        let _ = window.set_size(tauri::LogicalSize::new(180.0, 40.0));
-        move_window_top_center(&window);
+        let _ = window.set_size(tauri::LogicalSize::new(230.0, 40.0));
+        if created {
+            move_window_top_center(&window);
+        }
         let _ = show_overlay_window_by_label(&app, "recording_toolbar", true);
     }
     let _ = app.emit("recording-toolbar-force-compact", ());
