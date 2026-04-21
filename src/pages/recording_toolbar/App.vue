@@ -13,7 +13,7 @@
           <el-tooltip
               :offset="10"
               :show-after="300"
-              :disabled="!capsuleSettingsVisible"
+              :disabled="!isSettingsPanelOpen"
               content="停止录制"
               effect="dark"
               placement="bottom"
@@ -32,7 +32,7 @@
               :content="capsuleTooltipContent"
               :offset="10"
               :show-after="300"
-              :disabled="!capsuleSettingsVisible"
+              :disabled="!isSettingsPanelOpen"
               effect="dark"
               placement="bottom"
               popper-class="recording-toolbar-tooltip"
@@ -62,7 +62,7 @@
           <el-tooltip
               :offset="10"
               :show-after="300"
-              :disabled="!capsuleSettingsVisible"
+              :disabled="!isSettingsPanelOpen"
               content="设置"
               effect="dark"
               placement="bottom"
@@ -80,7 +80,7 @@
           </el-tooltip>
           <el-tooltip
               :content="micToggleTooltip"
-              :disabled="!capsuleSettingsVisible"
+              :disabled="!isSettingsPanelOpen"
               :offset="10"
               :show-after="300"
               effect="dark"
@@ -101,7 +101,7 @@
           <el-tooltip
               :offset="10"
               :show-after="300"
-              :disabled="!capsuleSettingsVisible"
+              :disabled="!isSettingsPanelOpen"
               content="关闭"
               effect="dark"
               placement="bottom"
@@ -116,15 +116,13 @@
             </button>
           </el-tooltip>
         </div>
-        <div
-            v-if="capsuleSettingsVisible"
-            class="capsule-settings-panel no-drag"
-        >
-          <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
-               title="点击关闭提示" @click="clearInlineNotice">
-            {{ inlineNotice }}
-            <span class="inline-notice-close">×</span>
-          </div>
+        <div class="capsule-settings-panel-wrapper" :class="{ 'is-open': capsuleSettingsVisible }">
+          <div class="capsule-settings-panel no-drag">
+            <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
+                 title="点击关闭提示" @click="clearInlineNotice">
+              {{ inlineNotice }}
+              <span class="inline-notice-close">×</span>
+            </div>
           <div class="toolbar-settings-title-row">
             <div class="toolbar-settings-title">录制设置</div>
             <span v-if="recordTargetType === 'region'" class="target-region-meta">
@@ -307,6 +305,7 @@
           </div>
         </div>
       </div>
+    </div>
   </div>
 </template>
 
@@ -436,25 +435,39 @@ const micToggleTooltip = computed(() => {
 });
 
 const measureCapsuleContentHeight = () => {
-  const barEl = document.querySelector(".bar");
-  const naturalHeight = Number(barEl?.scrollHeight || 0);
-  if (!Number.isFinite(naturalHeight) || naturalHeight <= 0) {
-    return null;
-  }
-  return Math.max(320, Math.ceil(naturalHeight + 2));
+  const panelEl = document.querySelector(".capsule-settings-panel");
+  const shellRowEl = document.querySelector(".collapsed-shell-row");
+  if (!panelEl || !shellRowEl) return 730; // fallback
+  
+  // .bar padding and border when open: 12px padding + 1px border top/bottom = 26px
+  const barPadding = 26;
+  // shell row height
+  const shellH = shellRowEl.scrollHeight || 20;
+  // wrapper margin-top (12) + padding-top (12) = 24px
+  const wrapperGap = 24;
+  // wrapper border
+  const wrapperBorder = 1;
+  // panel actual height
+  const panelH = panelEl.scrollHeight || 0;
+  
+  return Math.ceil(barPadding + shellH + wrapperGap + wrapperBorder + panelH + 4);
 };
 
 const syncCapsuleLayout = async () => {
   try {
-    let capsuleContentHeight = null;
     if (capsuleSettingsVisible.value) {
-      await nextTick();
-      await new Promise((resolve) => {
-        requestAnimationFrame(() => resolve());
-      });
-      capsuleContentHeight = measureCapsuleContentHeight();
+      await nextTick(); // Ensure any internal v-if (like inlineNotice) has rendered
+      const targetHeight = measureCapsuleContentHeight();
+      // Opening: resize Tauri window first so the CSS animation has space to play
+      await RecordingService.resizeToolbar(false, true, true, "capsule", false, targetHeight, null);
+    } else {
+      // Closing: wait for CSS animation to finish before shrinking Tauri window
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      // Double check it's still closed after the delay
+      if (!capsuleSettingsVisible.value) {
+        await RecordingService.resizeToolbar(false, false, true, "capsule", false, null, null);
+      }
     }
-    await RecordingService.resizeToolbar(false, capsuleSettingsVisible.value, true, "capsule", false, capsuleContentHeight, null);
   } catch (_e) {
   }
 };
@@ -1244,26 +1257,28 @@ body,
   overflow: hidden;
   cursor: move;
   -webkit-app-region: drag;
-  transition: none !important;
-  animation: none !important;
+  transition: width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+              min-height 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+              border-radius 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+              padding 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+              background 0.35s ease;
 }
 
 .bar.bar-collapsed {
-  width: 100%;
-  height: 100%;
-  padding: 2px 6px;
+  width: 210px;
+  min-height: 40px;
+  height: auto;
+  padding: 9px 6px;
   gap: 0;
-  justify-content: center;
-  align-items: center;
+  justify-content: flex-start;
+  align-items: stretch;
   border-radius: 999px;
   background: transparent;
-  border: none;
+  border: 1px solid transparent;
   overflow: hidden;
   box-sizing: border-box;
   cursor: default;
   -webkit-app-region: no-drag;
-  transition: none !important;
-  animation: none !important;
   clip-path: inset(0 round 999px);
 }
 
@@ -1271,7 +1286,7 @@ body,
   justify-content: flex-start;
   align-items: stretch;
   padding: 12px;
-  height: auto;
+  width: 400px;
   border-radius: 12px;
   background: rgba(17, 22, 32, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -1285,9 +1300,9 @@ body,
 .collapsed-shell {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 0;
   width: 100%;
-  height: 100%;
+  height: auto;
   min-height: 0;
   flex-direction: column;
   justify-content: flex-start;
@@ -1315,10 +1330,9 @@ body,
   border: 1px solid #344055;
   user-select: none;
   cursor: pointer;
-  transition: none !important;
-  animation: none !important;
   background-clip: padding-box;
   clip-path: inset(0 round 999px);
+  transition: background 0.2s ease, border-color 0.2s ease;
 }
 
 .collapsed-pill:hover {
@@ -1405,27 +1419,44 @@ body,
   height: 22px;
 }
 
+.capsule-settings-panel-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+              margin-top 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+              padding-top 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+              border-top-color 0.35s ease;
+  width: 100%;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 1px solid transparent;
+}
+
+.capsule-settings-panel-wrapper.is-open {
+  grid-template-rows: 1fr;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top-color: rgba(255, 255, 255, 0.1);
+}
+
 .capsule-settings-panel {
   width: 100%;
-  margin-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 12px;
   display: flex;
   flex-direction: column;
-  flex: 0 0 auto;
-  min-height: 0;
   gap: 10px;
-  overflow-y: hidden;
-  overflow-x: hidden;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
   padding-right: 4px;
   box-sizing: border-box;
 }
 
-.capsule-settings-panel::-webkit-scrollbar {
-  width: 0;
-  height: 0;
+.capsule-settings-panel-wrapper.is-open .capsule-settings-panel {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.25s ease 0.15s;
 }
 
 
