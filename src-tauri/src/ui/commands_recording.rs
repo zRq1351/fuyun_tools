@@ -714,8 +714,10 @@ pub async fn resize_recording_toolbar(
                 let x = new_x.unwrap_or(0);
                 let y = new_y.unwrap_or(0);
                 
+                let hwnd_v062 = windows::Win32::Foundation::HWND(hwnd.0);
+                
                 unsafe {
-                    let _ = SetWindowPos(hwnd, Some(HWND_TOP), x, y, physical_width, physical_height, flags);
+                    let _ = SetWindowPos(hwnd_v062, Some(HWND_TOP), x, y, physical_width, physical_height, flags);
                 }
             } else {
                 // Fallback to Tauri methods
