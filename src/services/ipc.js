@@ -512,7 +512,8 @@ export const RecordingService = {
         layoutMode = 'capsule',
         recenter = false,
         capsuleContentHeight = null,
-        capsuleContentWidth = null
+        capsuleContentWidth = null,
+        keepWidth = false
     ) => invoke(IPC_COMMANDS.RESIZE_RECORDING_TOOLBAR, {
         request: {
             openSelect,
@@ -521,7 +522,8 @@ export const RecordingService = {
             layoutMode,
             recenter,
             capsuleContentHeight,
-            capsuleContentWidth
+            capsuleContentWidth,
+            keepWidth
         }
     }),
 };

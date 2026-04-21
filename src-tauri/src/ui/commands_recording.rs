@@ -48,6 +48,8 @@ pub struct ResizeRecordingToolbarRequest {
     pub capsule_content_height: Option<u32>,
     #[serde(default)]
     pub capsule_content_width: Option<u32>,
+    #[serde(default)]
+    pub keep_width: bool,
 }
 
 fn default_layout_mode() -> String {
@@ -662,7 +664,18 @@ pub async fn resize_recording_toolbar(
         };
         (530, h)
     };
-    let target_size = tauri::LogicalSize::new(width_logical as f64, height_logical as f64);
+    
+    // If keep_width is true, preserve the current window width
+    let final_width = if request.keep_width {
+        prev_size
+            .as_ref()
+            .map(|size| ((size.width as f64) / scale_factor).round() as u32)
+            .unwrap_or(width_logical)
+    } else {
+        width_logical
+    };
+    
+    let target_size = tauri::LogicalSize::new(final_width as f64, height_logical as f64);
     let need_resize = prev_size
         .as_ref()
         .map(|size| {

@@ -438,7 +438,7 @@ const measureCapsuleContentHeight = () => {
   const panelEl = document.querySelector(".capsule-settings-panel");
   const shellRowEl = document.querySelector(".collapsed-shell-row");
   if (!panelEl || !shellRowEl) return 730; // fallback
-  
+
   // .bar padding and border when open: 12px padding + 1px border top/bottom = 26px
   const barPadding = 26;
   // shell row height
@@ -449,7 +449,7 @@ const measureCapsuleContentHeight = () => {
   const wrapperBorder = 1;
   // panel actual height
   const panelH = panelEl.scrollHeight || 0;
-  
+
   return Math.ceil(barPadding + shellH + wrapperGap + wrapperBorder + panelH + 4);
 };
 
@@ -461,11 +461,17 @@ const syncCapsuleLayout = async () => {
       // Opening: resize Tauri window first so the CSS animation has space to play
       await RecordingService.resizeToolbar(false, true, true, "capsule", true, targetHeight, null);
     } else {
-      // Closing: wait for CSS animation to finish before shrinking Tauri window
-      await new Promise((resolve) => setTimeout(resolve, 400));
-      // Double check it's still closed after the delay
+      // Closing: Two-phase approach to prevent visual flicker
+      // Phase 1: Keep width at 400px, only shrink height to 40px
+      // This allows CSS width transition to animate smoothly without button squeezing
+      await RecordingService.resizeToolbar(false, false, true, "capsule", true, null, null, true); // keepWidth=true
+
+      // Phase 2: Wait for CSS width animation to complete (from 400px to 210px)
+      await new Promise((resolve) => setTimeout(resolve, 320));
+
+      // Phase 3: Now shrink both width and height to final size
       if (!capsuleSettingsVisible.value) {
-        await RecordingService.resizeToolbar(false, false, true, "capsule", true, null, null);
+        await RecordingService.resizeToolbar(false, false, true, "capsule", true, null, null, false); // keepWidth=false
       }
     }
   } catch (_e) {
@@ -487,7 +493,7 @@ const showInlineNotice = (message, type = "error") => {
     clearTimeout(inlineNoticeTimer);
     inlineNoticeTimer = null;
   }
-  
+
 };
 
 const clearInlineNotice = () => {
@@ -502,7 +508,7 @@ const showBackendErrorInSettings = async (message) => {
   const text = String(message || "录屏异常");
   keepSettingsOpenUntilTs = Date.now() + 3000;
   capsuleSettingsVisible.value = true;
-  
+
   if (inlineNotice.value && inlineNoticeType.value === "error" && inlineNotice.value !== text) {
     if (!inlineNotice.value.includes(text)) {
       showInlineNotice(`${inlineNotice.value} | 连锁异常: ${text}`, "error");
@@ -600,7 +606,7 @@ const toggleRecordingState = async () => {
           recordTargetType.value === "window"
               ? recordableWindows.value.find((w) => (w.hwnd || w.title) === recordTargetWindowId.value) || null
               : null;
-      
+
       isMicMuted.value = true;
       await RecordingService.start({
         targetType: recordTargetType.value,
@@ -612,7 +618,7 @@ const toggleRecordingState = async () => {
         captureSystemAudio: captureSystemAudio.value,
         systemAudioDeviceId: systemOutputId.value,
         systemAudioProcessIds: captureSystemAudio.value ? systemAudioProcessIds.value : [],
-        captureMicrophone: false, 
+        captureMicrophone: false,
         microphoneDeviceId: microphoneDeviceId.value,
         captureCursor: captureCursor.value,
         fps: fps.value,
@@ -676,7 +682,7 @@ const toggleMicState = async () => {
     await RecordingService.updateAudioCapture({
       captureSystemAudio: captureSystemAudio.value,
       systemAudioDeviceId: systemOutputId.value || "",
-      captureMicrophone: !newMutedState, 
+      captureMicrophone: !newMutedState,
       microphoneDeviceId: microphoneDeviceId.value || "",
     });
     isMicMuted.value = newMutedState;
@@ -689,7 +695,7 @@ const toggleMicState = async () => {
 const onWindowBlur = () => {
   if (!capsuleSettingsVisible.value) return;
   if (Date.now() < keepSettingsOpenUntilTs) return;
-  
+
   if (inlineNotice.value) return;
   capsuleSettingsVisible.value = false;
 };
@@ -725,7 +731,7 @@ const onSystemAudioDeviceChange = async (deviceId) => {
   if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
     try {
       if (prevCapture && nextCapture && prevId && nextId && prevId !== nextId) {
-        
+
         await RecordingService.updateAudioCapture({
           captureSystemAudio: false,
           systemAudioDeviceId: prevId || "",
@@ -765,12 +771,12 @@ const onMicrophoneDeviceChange = async (deviceId) => {
   const nextId = nextCapture ? id : null;
   captureMicrophone.value = id.length > 0;
   microphoneDeviceId.value = id.length > 0 ? id : null;
-  
+
   isMicMuted.value = false;
   if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
     try {
       if (prevCapture && nextCapture && prevId && nextId && prevId !== nextId) {
-        
+
         await RecordingService.updateAudioCapture({
           captureMicrophone: false,
           microphoneDeviceId: prevId || "",
@@ -921,7 +927,7 @@ const onToolbarSettingChange = async (key, rawValue) => {
   } else if (key === "recordingToolbarContentProtected") {
     const v = rawValue === true;
     captureToolbar.value = v;
-    
+
     patch.recordingToolbarContentProtected = !v;
   } else {
     return;
@@ -949,7 +955,7 @@ onMounted(async () => {
       state.elapsedMs = nextElapsedMs;
       lastElapsedUiSyncAt = now;
     }
-    
+
     if (nextState === "idle" || nextState === "error") {
       isMicMuted.value = false;
     }
@@ -966,7 +972,7 @@ onMounted(async () => {
     state.state = "idle";
     state.sessionId = null;
 
-    
+
     if (!inlineNotice.value) {
       clearInlineNotice();
       capsuleSettingsVisible.value = false;
@@ -995,7 +1001,7 @@ onMounted(async () => {
     if (Date.now() < keepSettingsOpenUntilTs) {
       return;
     }
-    
+
     if (inlineNotice.value) return;
     capsuleSettingsVisible.value = false;
     void syncCapsuleLayout();
@@ -1017,7 +1023,7 @@ onMounted(async () => {
     void syncCapsuleLayout();
   });
 
-  
+
   unlistenAudioMerging = await listen("recording-audio-merging", (event) => {
     const payload = event.payload || {};
     const status = String(payload.status || "");
@@ -1025,18 +1031,18 @@ onMounted(async () => {
     const progress = payload.progress;
 
     if (status === "started") {
-      
+
       showInlineNotice(message || "正在后台合并音频...", "warning");
     } else if (status === "completed") {
-      
+
       clearInlineNotice();
     } else if (status === "failed") {
-      
+
       showInlineNotice(message || "音频合并失败，视频文件已保存", "error");
     }
   });
 
-  
+
   unlistenMicToggled = await listen("recording-mic-toggled", (event) => {
     const payload = event.payload || {};
     isMicMuted.value = !payload.enabled;
@@ -1044,15 +1050,15 @@ onMounted(async () => {
     showInlineNotice(`麦克风已${action}（快捷键）`, "warning");
   });
 
-  
+
   unlistenMicKeyPressed = await listen("recording-mic-key-pressed", () => {
-    
+
     isMicMuted.value = false;
   });
 
-  
+
   unlistenMicKeyReleased = await listen("recording-mic-key-released", () => {
-    
+
     isMicMuted.value = true;
   });
   try {
@@ -1119,7 +1125,7 @@ onBeforeUnmount(() => {
   if (unlistenRecordingError) unlistenRecordingError();
   if (unlistenForceCompact) unlistenForceCompact();
   if (unlistenRecordingRegionSelected) unlistenRecordingRegionSelected();
-  if (unlistenAudioMerging) unlistenAudioMerging();  
+  if (unlistenAudioMerging) unlistenAudioMerging();
   if (unlistenMicToggled) unlistenMicToggled();
   if (unlistenMicKeyPressed) unlistenMicKeyPressed();
   if (unlistenMicKeyReleased) unlistenMicKeyReleased();
@@ -1263,11 +1269,11 @@ body {
   overflow: hidden;
   cursor: move;
   -webkit-app-region: drag;
-  transition: width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
-              min-height 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
-              border-radius 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
-              padding 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
-              background 0.35s ease;
+  transition: width 0.3s ease-out,
+  min-height 0.3s ease-out,
+  border-radius 0.3s ease-out,
+  padding 0.3s ease-out,
+  background 0.25s ease;
 }
 
 .bar.bar-collapsed {
@@ -1428,10 +1434,10 @@ body {
 .capsule-settings-panel-wrapper {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
-              margin-top 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
-              padding-top 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
-              border-top-color 0.35s ease;
+  transition: grid-template-rows 0.25s ease-out,
+  margin-top 0.25s ease-out,
+  padding-top 0.25s ease-out,
+  border-top-color 0.2s ease-out;
   width: 100%;
   margin-top: 0;
   padding-top: 0;
@@ -1454,7 +1460,7 @@ body {
   overflow: hidden;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.25s ease;
+  transition: opacity 0.15s ease-out;
   padding-right: 4px;
   box-sizing: border-box;
 }
@@ -1462,7 +1468,7 @@ body {
 .capsule-settings-panel-wrapper.is-open .capsule-settings-panel {
   opacity: 1;
   pointer-events: auto;
-  transition: opacity 0.25s ease 0.15s;
+  transition: opacity 0.2s ease-out 0.05s;
 }
 
 
