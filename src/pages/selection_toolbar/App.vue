@@ -2,7 +2,7 @@
   <div class="container">
     <div class="interactive-area" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
       <transition name="pop">
-        <div v-if="!isHovered" class="mini-icon" :class="{ 'flash-anim': isFlashing }" @animationend="isFlashing = false" data-tauri-drag-region>
+        <div v-if="!isHovered" class="mini-icon" data-tauri-drag-region>
           <el-icon class="magic-icon"><magic-stick/></el-icon>
         </div>
         
@@ -44,12 +44,10 @@ import {handleAppError} from '../../utils/errorHandler'
 const selectedText = ref('')
 const actionLoading = ref(false)
 const isHovered = ref(false)
-const isFlashing = ref(false)
 let unlistenSelectedText = null
 let unlistenDomText = null
 let unlistenFocus = null
 let hoverTimeout = null
-let autoExpandTimeout = null
 
 const appWindow = getCurrentWindow()
 
@@ -58,10 +56,6 @@ let shrunkPhysicalX = null
 let shrunkPhysicalY = null
 
 const onMouseEnter = async () => {
-  if (autoExpandTimeout) {
-    clearTimeout(autoExpandTimeout)
-    autoExpandTimeout = null
-  }
   if (hoverTimeout) {
     clearTimeout(hoverTimeout)
     hoverTimeout = null
@@ -105,7 +99,6 @@ const shrinkWindow = async (version) => {
     
     // 触发收起动画
     isHovered.value = false
-    isFlashing.value = true
 
     // 等待动画完成再缩小窗口，避免动画闪烁或被截断
     setTimeout(async () => {
@@ -135,7 +128,7 @@ const shrinkWindow = async (version) => {
       } catch (e) {
         console.error(e)
       }
-    }, 150)
+    }, 250)
   } catch (e) {
     isHovered.value = false
     console.error(e)
@@ -143,10 +136,6 @@ const shrinkWindow = async (version) => {
 }
 
 const onMouseLeave = () => {
-  if (autoExpandTimeout) {
-    clearTimeout(autoExpandTimeout)
-    autoExpandTimeout = null
-  }
   if (hoverTimeout) {
     clearTimeout(hoverTimeout)
   }
@@ -208,50 +197,30 @@ onMounted(async () => {
   try {
     if (window.__SELECTION_TOOLBAR_TEXT__) {
       selectedText.value = String(window.__SELECTION_TOOLBAR_TEXT__)
-      if (autoExpandTimeout) {
-        clearTimeout(autoExpandTimeout)
-      }
-      autoExpandTimeout = setTimeout(() => {
-        onMouseEnter()
-      }, 150)
     }
     const onDomText = async (event) => {
       selectedText.value = typeof event?.detail === 'string' ? event.detail : ''
-      isHovered.value = false
-      isFlashing.value = false
-      
+      if (isHovered.value) {
+        const currentVersion = ++stateVersion
+        await shrinkWindow(currentVersion)
+      }
       if (hoverTimeout) {
         clearTimeout(hoverTimeout)
         hoverTimeout = null
       }
-      
-      // 自动展开工具栏
-      if (autoExpandTimeout) {
-        clearTimeout(autoExpandTimeout)
-      }
-      autoExpandTimeout = setTimeout(() => {
-        onMouseEnter()
-      }, 150)
     }
     window.addEventListener('selection-toolbar-text', onDomText)
     unlistenDomText = () => window.removeEventListener('selection-toolbar-text', onDomText)
     unlistenSelectedText = await listen('selected-text', async (event) => {
       selectedText.value = typeof event.payload === 'string' ? event.payload : ''
-      isHovered.value = false
-      isFlashing.value = false
-
+      if (isHovered.value) {
+        const currentVersion = ++stateVersion
+        await shrinkWindow(currentVersion)
+      }
       if (hoverTimeout) {
         clearTimeout(hoverTimeout)
         hoverTimeout = null
       }
-      
-      // 自动展开工具栏
-      if (autoExpandTimeout) {
-        clearTimeout(autoExpandTimeout)
-      }
-      autoExpandTimeout = setTimeout(() => {
-        onMouseEnter()
-      }, 150)
     })
 
     // Fallback listener for fast mouse exits from the window
@@ -381,22 +350,12 @@ html, body, #app {
   justify-content: center;
   cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  transition: all 0.2s ease;
+  transition: box-shadow 0.2s ease, background 0.2s ease;
 }
 
 .magic-icon {
   font-size: 18px;
   color: #eef3ff;
-}
-
-@keyframes flash {
-  0% { transform: scale(1); filter: brightness(1); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
-  50% { transform: scale(1.15); filter: brightness(1.3); box-shadow: 0 0 15px rgba(255, 255, 255, 0.5); }
-  100% { transform: scale(1); filter: brightness(1); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
-}
-
-.flash-anim {
-  animation: flash 0.6s ease-in-out 0.15s;
 }
 
 .toolbar {
@@ -416,7 +375,7 @@ html, body, #app {
 
 .pop-enter-active,
 .pop-leave-active {
-  transition: all 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .pop-enter-from,
