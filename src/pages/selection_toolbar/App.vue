@@ -79,10 +79,14 @@ const onMouseEnter = async () => {
     isAnimating = true // 设置动画锁
 
     try {
-      // 先切换状态：隐藏魔法棒，显示工具栏
-      isHovered.value = true
+      // 先隐藏魔法棒
+      const miniIcon = document.querySelector('.mini-icon')
+      if (miniIcon) {
+        miniIcon.style.opacity = '0'
+        miniIcon.style.pointerEvents = 'none'
+      }
 
-      // 等待一帧确保CSS生效，魔法棒完全隐藏
+      // 等待一帧确保魔法棒隐藏生效
       await new Promise(resolve => requestAnimationFrame(resolve))
 
       const factor = await appWindow.scaleFactor()
@@ -104,8 +108,19 @@ const onMouseEnter = async () => {
       const newPhysicalWidth = Math.round(240 * factor)
       const newPhysicalHeight = Math.round(100 * factor)
 
-      // 再放大窗口，此时工具栏已显示
+      // 放大窗口，此时工具栏还未显示（opacity: 0）
       await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
+
+      // 等待窗口调整完成后，再显示工具栏
+      await new Promise(resolve => setTimeout(resolve, 50))
+      if (stateVersion !== currentVersion) return
+
+      // 恢复魔法棒的CSS状态并显示工具栏
+      if (miniIcon) {
+        miniIcon.style.removeProperty('opacity')
+        miniIcon.style.removeProperty('pointer-events')
+      }
+      isHovered.value = true
     } catch (e) {
       console.error(e)
     } finally {
