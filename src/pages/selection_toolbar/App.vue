@@ -48,6 +48,7 @@ let unlistenSelectedText = null
 let unlistenDomText = null
 let unlistenFocus = null
 let hoverTimeout = null
+let enterTimeout = null
 
 const appWindow = getCurrentWindow()
 
@@ -61,36 +62,42 @@ const onMouseEnter = async () => {
     hoverTimeout = null
   }
   if (isHovered.value) return
-  const currentVersion = ++stateVersion
+  if (enterTimeout) return
 
-  try {
-    const factor = await appWindow.scaleFactor()
-    const physicalPos = await appWindow.outerPosition()
-    if (stateVersion !== currentVersion) return
+  enterTimeout = setTimeout(async () => {
+    enterTimeout = null
+    if (isHovered.value) return
+    const currentVersion = ++stateVersion
 
-    // 保存当前的缩小状态位置，以便后续精准恢复，防止窗口漂移
-    shrunkPhysicalX = physicalPos.x
-    shrunkPhysicalY = physicalPos.y
+    try {
+      const factor = await appWindow.scaleFactor()
+      const physicalPos = await appWindow.outerPosition()
+      if (stateVersion !== currentVersion) return
 
-    const logicalX = physicalPos.x / factor
-    const logicalY = physicalPos.y / factor
+      // 保存当前的缩小状态位置，以便后续精准恢复，防止窗口漂移
+      shrunkPhysicalX = physicalPos.x
+      shrunkPhysicalY = physicalPos.y
 
-    const expandedX = logicalX - (240 - 64) / 2
-    const expandedY = logicalY - (100 - 64) / 2
+      const logicalX = physicalPos.x / factor
+      const logicalY = physicalPos.y / factor
 
-    const newPhysicalX = Math.round(expandedX * factor)
-    const newPhysicalY = Math.round(expandedY * factor)
-    const newPhysicalWidth = Math.round(240 * factor)
-    const newPhysicalHeight = Math.round(100 * factor)
+      const expandedX = logicalX - (240 - 64) / 2
+      const expandedY = logicalY - (100 - 64) / 2
 
-    // 先放大窗口，避免动画被截断
-    await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
-    
-    if (stateVersion !== currentVersion) return
-    isHovered.value = true
-  } catch (e) {
-    console.error(e)
-  }
+      const newPhysicalX = Math.round(expandedX * factor)
+      const newPhysicalY = Math.round(expandedY * factor)
+      const newPhysicalWidth = Math.round(240 * factor)
+      const newPhysicalHeight = Math.round(100 * factor)
+
+      // 先放大窗口，避免动画被截断
+      await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
+      
+      if (stateVersion !== currentVersion) return
+      isHovered.value = true
+    } catch (e) {
+      console.error(e)
+    }
+  }, 80)
 }
 
 const shrinkWindow = async (version) => {
@@ -128,7 +135,7 @@ const shrinkWindow = async (version) => {
       } catch (e) {
         console.error(e)
       }
-    }, 250)
+    }, 350)
   } catch (e) {
     isHovered.value = false
     console.error(e)
@@ -136,6 +143,11 @@ const shrinkWindow = async (version) => {
 }
 
 const onMouseLeave = () => {
+  if (enterTimeout) {
+    clearTimeout(enterTimeout)
+    enterTimeout = null
+  }
+  
   if (hoverTimeout) {
     clearTimeout(hoverTimeout)
   }
@@ -144,7 +156,7 @@ const onMouseLeave = () => {
     if (!isHovered.value) return // 已经收起，不重复执行
     const currentVersion = ++stateVersion
     await shrinkWindow(currentVersion)
-  }, 100)
+  }, 350)
 }
 
 const getSafeSelectedText = () => selectedText.value.trim()
@@ -182,6 +194,10 @@ const runAction = async (executor, errorMessage) => {
       clearTimeout(hoverTimeout)
       hoverTimeout = null
     }
+    if (enterTimeout) {
+      clearTimeout(enterTimeout)
+      enterTimeout = null
+    }
     const currentVersion = ++stateVersion
     await shrinkWindow(currentVersion)
     
@@ -208,6 +224,10 @@ onMounted(async () => {
         clearTimeout(hoverTimeout)
         hoverTimeout = null
       }
+      if (enterTimeout) {
+        clearTimeout(enterTimeout)
+        enterTimeout = null
+      }
     }
     window.addEventListener('selection-toolbar-text', onDomText)
     unlistenDomText = () => window.removeEventListener('selection-toolbar-text', onDomText)
@@ -220,6 +240,10 @@ onMounted(async () => {
       if (hoverTimeout) {
         clearTimeout(hoverTimeout)
         hoverTimeout = null
+      }
+      if (enterTimeout) {
+        clearTimeout(enterTimeout)
+        enterTimeout = null
       }
     })
 
@@ -252,6 +276,10 @@ onMounted(async () => {
         if (hoverTimeout) {
           clearTimeout(hoverTimeout)
           hoverTimeout = null
+        }
+        if (enterTimeout) {
+          clearTimeout(enterTimeout)
+          enterTimeout = null
         }
         const currentVersion = ++stateVersion
         await shrinkWindow(currentVersion)
@@ -342,73 +370,87 @@ html, body, #app {
   pointer-events: auto;
   width: 32px;
   height: 32px;
-  background: linear-gradient(145deg, rgba(22, 28, 38, 0.95), rgba(14, 18, 26, 0.95));
+  background: linear-gradient(145deg, rgba(28, 35, 48, 0.98), rgba(18, 22, 32, 0.98));
   border-radius: 50%;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  transition: box-shadow 0.2s ease, background 0.2s ease;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.mini-icon:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.15) inset;
 }
 
 .magic-icon {
   font-size: 18px;
   color: #eef3ff;
+  transition: transform 0.2s ease;
+}
+
+.mini-icon:hover .magic-icon {
+  transform: rotate(15deg);
 }
 
 .toolbar {
   pointer-events: auto;
-  background: linear-gradient(145deg, rgba(22, 28, 38, 0.95), rgba(14, 18, 26, 0.95));
-  border-radius: 10px;
-  padding: 5px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(145deg, rgba(28, 35, 48, 0.98), rgba(18, 22, 32, 0.98));
+  backdrop-filter: blur(12px);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+  border: 1px solid rgba(255, 255, 255, 0.15);
   display: flex;
   flex-direction: row;
-  gap: 0;
+  gap: 2px;
   width: auto;
   box-sizing: border-box;
   transform-origin: center center;
 }
 
-.pop-enter-active,
+.pop-enter-active {
+  transition: opacity 0.3s ease, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
 .pop-leave-active {
-  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: opacity 0.2s ease, transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .pop-enter-from,
 .pop-leave-to {
   opacity: 0;
-  transform: scale(0.6);
+  transform: scale(0.6) translateY(4px);
 }
 
 .toolbar-button {
   background: transparent;
   border: none;
   color: #eef3ff;
-  width: 52px;
-  height: 38px;
+  width: 56px;
+  height: 42px;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 17px;
-  transition: all 0.18s ease;
+  font-size: 18px;
+  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
   overflow: hidden;
-  margin: 0 2.5px;
+  margin: 0 2px;
 }
 
 .toolbar-button:hover {
-  background: rgba(255, 255, 255, 0.08);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .toolbar-button:active {
-  transform: scale(0.97);
+  transform: translateY(0) scale(0.95);
 }
 
 .toolbar-button.disabled {
@@ -419,7 +461,7 @@ html, body, #app {
 .btn-icon {
   opacity: 1;
   transform: translateY(0);
-  transition: all 0.18s ease;
+  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .btn-text {
@@ -428,13 +470,13 @@ html, body, #app {
   font-weight: 600;
   letter-spacing: 0.5px;
   opacity: 0;
-  transform: translateY(8px);
-  transition: all 0.18s ease;
+  transform: translateY(12px);
+  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .toolbar-button:hover .btn-icon {
   opacity: 0;
-  transform: translateY(-8px);
+  transform: translateY(-12px);
 }
 
 .toolbar-button:hover .btn-text {
@@ -446,15 +488,24 @@ html, body, #app {
   color: #7be682;
   background: linear-gradient(145deg, rgba(82, 165, 112, 0.22), rgba(44, 96, 65, 0.2));
 }
+.translate-btn:hover {
+  background: linear-gradient(145deg, rgba(82, 165, 112, 0.35), rgba(44, 96, 65, 0.3));
+}
 
 .explain-btn {
   color: #72b7ff;
   background: linear-gradient(145deg, rgba(84, 148, 230, 0.22), rgba(44, 83, 150, 0.2));
 }
+.explain-btn:hover {
+  background: linear-gradient(145deg, rgba(84, 148, 230, 0.35), rgba(44, 83, 150, 0.3));
+}
 
 .copy-btn {
   color: #f2c06d;
   background: linear-gradient(145deg, rgba(209, 152, 61, 0.22), rgba(133, 89, 35, 0.2));
+}
+.copy-btn:hover {
+  background: linear-gradient(145deg, rgba(209, 152, 61, 0.35), rgba(133, 89, 35, 0.3));
 }
 
 </style>
