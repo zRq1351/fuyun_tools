@@ -1,32 +1,34 @@
 <template>
   <div class="container">
     <div class="interactive-area" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
-      <div v-if="!isHovered" class="mini-icon" data-tauri-drag-region>
-        <el-icon class="magic-icon"><magic-stick/></el-icon>
-      </div>
-      
-      <div v-else class="toolbar">
-        <div :class="{ disabled: actionLoading }" class="toolbar-button translate-btn" @click="handleTranslate">
-          <el-icon class="btn-icon">
-            <collection/>
-          </el-icon>
-          <span class="btn-text">翻译</span>
+      <transition name="pop">
+        <div v-if="!isHovered" class="mini-icon" data-tauri-drag-region>
+          <el-icon class="magic-icon"><magic-stick/></el-icon>
         </div>
+        
+        <div v-else class="toolbar">
+          <div :class="{ disabled: actionLoading }" class="toolbar-button translate-btn" @click="handleTranslate">
+            <el-icon class="btn-icon">
+              <collection/>
+            </el-icon>
+            <span class="btn-text">翻译</span>
+          </div>
 
-        <div :class="{ disabled: actionLoading }" class="toolbar-button explain-btn" @click="handleExplain">
-          <el-icon class="btn-icon">
-            <chat-line-round/>
-          </el-icon>
-          <span class="btn-text">解释</span>
-        </div>
+          <div :class="{ disabled: actionLoading }" class="toolbar-button explain-btn" @click="handleExplain">
+            <el-icon class="btn-icon">
+              <chat-line-round/>
+            </el-icon>
+            <span class="btn-text">解释</span>
+          </div>
 
-        <div :class="{ disabled: actionLoading }" class="toolbar-button copy-btn" @click="handleCopy">
-          <el-icon class="btn-icon">
-            <document-copy/>
-          </el-icon>
-          <span class="btn-text">复制</span>
+          <div :class="{ disabled: actionLoading }" class="toolbar-button copy-btn" @click="handleCopy">
+            <el-icon class="btn-icon">
+              <document-copy/>
+            </el-icon>
+            <span class="btn-text">复制</span>
+          </div>
         </div>
-      </div>
+      </transition>
   </div>
 </div>
 </template>
@@ -59,7 +61,6 @@ const onMouseEnter = async () => {
     hoverTimeout = null
   }
   if (isHovered.value) return
-  isHovered.value = true
   const currentVersion = ++stateVersion
 
   try {
@@ -82,40 +83,52 @@ const onMouseEnter = async () => {
     const newPhysicalWidth = Math.round(240 * factor)
     const newPhysicalHeight = Math.round(100 * factor)
 
+    // 先放大窗口，避免动画被截断
     await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
+    
+    if (stateVersion !== currentVersion) return
+    isHovered.value = true
   } catch (e) {
-    isHovered.value = false
     console.error(e)
   }
 }
 
 const shrinkWindow = async (version) => {
   try {
-    const factor = await appWindow.scaleFactor()
-    let newPhysicalX, newPhysicalY
-
-    if (shrunkPhysicalX !== null && shrunkPhysicalY !== null) {
-      newPhysicalX = shrunkPhysicalX
-      newPhysicalY = shrunkPhysicalY
-    } else {
-      const physicalPos = await appWindow.outerPosition()
-      const logicalX = physicalPos.x / factor
-      const logicalY = physicalPos.y / factor
-      const shrunkX = logicalX + (240 - 64) / 2
-      const shrunkY = logicalY + (100 - 64) / 2
-      newPhysicalX = Math.round(shrunkX * factor)
-      newPhysicalY = Math.round(shrunkY * factor)
-    }
-
     if (version && stateVersion !== version) return
-
-    // 在获取到 factor 等异步数据后再更新 DOM，缩小 IPC 延迟带来的闪烁
+    
+    // 触发收起动画
     isHovered.value = false
 
-    const newPhysicalWidth = Math.round(64 * factor)
-    const newPhysicalHeight = Math.round(64 * factor)
+    // 等待动画完成再缩小窗口，避免动画闪烁或被截断
+    setTimeout(async () => {
+      if (version && stateVersion !== version) return
+      
+      try {
+        const factor = await appWindow.scaleFactor()
+        let newPhysicalX, newPhysicalY
 
-    await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
+        if (shrunkPhysicalX !== null && shrunkPhysicalY !== null) {
+          newPhysicalX = shrunkPhysicalX
+          newPhysicalY = shrunkPhysicalY
+        } else {
+          const physicalPos = await appWindow.outerPosition()
+          const logicalX = physicalPos.x / factor
+          const logicalY = physicalPos.y / factor
+          const shrunkX = logicalX + (240 - 64) / 2
+          const shrunkY = logicalY + (100 - 64) / 2
+          newPhysicalX = Math.round(shrunkX * factor)
+          newPhysicalY = Math.round(shrunkY * factor)
+        }
+
+        const newPhysicalWidth = Math.round(64 * factor)
+        const newPhysicalHeight = Math.round(64 * factor)
+
+        await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
+      } catch (e) {
+        console.error(e)
+      }
+    }, 150)
   } catch (e) {
     isHovered.value = false
     console.error(e)
@@ -316,9 +329,12 @@ html, body, #app {
 
 .interactive-area {
   pointer-events: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
+}
+
+.mini-icon, .toolbar {
+  grid-area: 1 / 1;
 }
 
 .mini-icon {
@@ -354,19 +370,18 @@ html, body, #app {
   gap: 0;
   width: auto;
   box-sizing: border-box;
-  animation: toolbarExpand 0.15s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
   transform-origin: center center;
 }
 
-@keyframes toolbarExpand {
-  0% {
-    transform: scale(0.6);
-    opacity: 0;
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
+.pop-enter-active,
+.pop-leave-active {
+  transition: all 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.pop-enter-from,
+.pop-leave-to {
+  opacity: 0;
+  transform: scale(0.6);
 }
 
 .toolbar-button {
