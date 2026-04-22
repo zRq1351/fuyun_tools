@@ -10,6 +10,9 @@
           class="collapsed-shell"
       >
         <div class="collapsed-shell-row">
+          <div class="drag-handle">
+            <el-icon><GripVertical :size="13" :stroke-width="2.2"/></el-icon>
+          </div>
           <button
               :disabled="!canStop"
               class="collapsed-stop-btn no-drag"
@@ -260,7 +263,7 @@ import {listen} from "@tauri-apps/api/event";
 import {invoke} from "@tauri-apps/api/core";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import {AISettingsService, RecordingService} from "@/services/ipc.js";
-import {Mic, MicOff, Settings} from "lucide-vue-next";
+import {Mic, MicOff, Settings, GripVertical} from "lucide-vue-next";
 
 provideGlobalConfig({locale: zhCn});
 
@@ -401,20 +404,20 @@ const syncCapsuleLayout = async () => {
     if (capsuleSettingsVisible.value) {
       await nextTick();
       const targetHeight = measureCapsuleContentHeight();
-      await RecordingService.resizeToolbar(false, true, true, "capsule", true, targetHeight, null);
+      await RecordingService.resizeToolbar(false, true, true, "capsule", false, targetHeight, null);
     } else {
       // Closing: Two-phase approach
       // Phase 1: Keep window width at 400px and height at targetHeight (keepWidth=true, openOverlay=true)
       // The CSS will animate .bar width and height. The window remains large so no clipping.
       const targetHeight = measureCapsuleContentHeight();
-      await RecordingService.resizeToolbar(false, true, true, "capsule", true, targetHeight, null, true);
+      await RecordingService.resizeToolbar(false, true, true, "capsule", false, targetHeight, null, true);
 
       // Phase 2: Wait for CSS transition to complete (0.18s)
       await new Promise((resolve) => setTimeout(resolve, 200));
 
-      // Phase 3: Now shrink window width to 210px and height to 40px. The .bar is already small so no clipping.
+      // Phase 3: Now shrink window width to 226px and height to 40px. The .bar is already small so no clipping.
       if (!capsuleSettingsVisible.value) {
-        await RecordingService.resizeToolbar(false, false, true, "capsule", true, null, null, false);
+        await RecordingService.resizeToolbar(false, false, true, "capsule", false, null, null, false);
       }
     }
   } catch (_e) {
@@ -1210,8 +1213,8 @@ body {
   flex-wrap: nowrap;
   white-space: nowrap;
   overflow: hidden;
-  cursor: move;
-  -webkit-app-region: drag;
+  cursor: default;
+  -webkit-app-region: no-drag;
   transition: width 0.18s ease-out,
   min-height 0.18s ease-out,
   border-radius 0.18s ease-out,
@@ -1220,7 +1223,7 @@ body {
 }
 
 .bar.bar-collapsed {
-  width: 210px;
+  width: 226px;
   min-height: 40px;
   height: auto;
   padding: 9px 6px;
@@ -1722,5 +1725,20 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: move;
+  -webkit-app-region: drag;
+  color: #8a95a5;
+  padding: 0 2px;
+  height: 100%;
+}
+
+.drag-handle:hover {
+  color: #dfebfc;
 }
 </style>
