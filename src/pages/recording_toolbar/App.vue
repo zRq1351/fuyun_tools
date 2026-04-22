@@ -10,7 +10,7 @@
           class="collapsed-shell"
       >
         <div class="collapsed-shell-row">
-          <div class="drag-handle">
+          <div class="drag-handle" @mousedown.stop.prevent="startWindowDrag" title="拖动工具栏">
             <el-icon><GripVertical :size="13" :stroke-width="2.2"/></el-icon>
           </div>
           <button
@@ -422,6 +422,12 @@ const syncCapsuleLayout = async () => {
     }
   } catch (_e) {
   }
+};
+
+const startWindowDrag = () => {
+  getCurrentWindow().startDragging().catch((e) => {
+    console.error("拖动窗口失败:", e);
+  });
 };
 
 
@@ -1732,7 +1738,6 @@ body {
   align-items: center;
   justify-content: center;
   cursor: move;
-  -webkit-app-region: drag;
   color: #8a95a5;
   padding: 0 2px;
   height: 100%;
