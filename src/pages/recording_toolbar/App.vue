@@ -485,15 +485,18 @@ const pickRecordingRegion = async () => {
   if (isPickingRegion) return;
   isPickingRegion = true;
 
-  // 自动收起设置面板并隐藏工具栏窗口
-  capsuleSettingsVisible.value = false;
-
   // 先隐藏录制工具栏窗口，避免遮挡截图编辑器的遮罩层
   try {
     await getCurrentWindow().hide();
   } catch (_e) {
     // 忽略隐藏失败
   }
+  
+  // 自动收起设置面板（注意：由于前面已经 hide，这里的 DOM 变化不会立刻显示在屏幕上，但能保证截图结束后再次 show 时面板是收起状态）
+  capsuleSettingsVisible.value = false;
+
+  // 等待一点时间确保窗口完全从屏幕缓冲区隐藏，并等待 vue 收起面板的动画逻辑完成，防止被截图录制进去
+  await new Promise(resolve => setTimeout(resolve, 300));
 
   try {
     await invoke("open_screenshot_editor", {mode: "recording_region"});
