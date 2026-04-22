@@ -1323,9 +1323,9 @@ fn spawn_stats_loop(
                             no_video_frames = true;
                         }
                     }
-                } else if let Some(tmp_path) = runtime.output_path_tmp.as_ref() {
+                } else if let Some(current_seg) = runtime.window_video_segments.last() {
                     // FFmpeg 模式下，如果超过 4 秒文件依然是 0 字节，说明没录进任何有效视频帧
-                    if fs::metadata(tmp_path).map(|m| m.len()).unwrap_or(0) == 0 {
+                    if fs::metadata(current_seg).map(|m| m.len()).unwrap_or(0) == 0 {
                         no_video_frames = true;
                     }
                 }
