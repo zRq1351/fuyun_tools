@@ -1731,7 +1731,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: grab;
+  cursor: move;
   -webkit-app-region: drag;
   color: #8a95a5;
   padding: 0 2px;
@@ -1739,7 +1739,7 @@ body {
 }
 
 .drag-handle:active {
-  cursor: grabbing;
+  cursor: move;
 }
 
 .drag-handle:hover {
