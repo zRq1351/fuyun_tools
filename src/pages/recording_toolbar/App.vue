@@ -404,14 +404,15 @@ const syncCapsuleLayout = async () => {
       await RecordingService.resizeToolbar(false, true, true, "capsule", true, targetHeight, null);
     } else {
       // Closing: Two-phase approach
-      // Phase 1: Keep window width at 400px (keepWidth=true), shrink height to 40px, recenter
-      // The CSS will animate .bar width from 400px to 210px, but window is still 400px so no clipping
-      await RecordingService.resizeToolbar(false, false, true, "capsule", true, null, null, true);
+      // Phase 1: Keep window width at 400px and height at targetHeight (keepWidth=true, openOverlay=true)
+      // The CSS will animate .bar width and height. The window remains large so no clipping.
+      const targetHeight = measureCapsuleContentHeight();
+      await RecordingService.resizeToolbar(false, true, true, "capsule", true, targetHeight, null, true);
 
-      // Phase 2: Wait for CSS width transition to complete (0.18s)
+      // Phase 2: Wait for CSS transition to complete (0.18s)
       await new Promise((resolve) => setTimeout(resolve, 200));
 
-      // Phase 3: Now shrink window width to 210px. The .bar is already 210px so no clipping
+      // Phase 3: Now shrink window width to 210px and height to 40px. The .bar is already small so no clipping.
       if (!capsuleSettingsVisible.value) {
         await RecordingService.resizeToolbar(false, false, true, "capsule", true, null, null, false);
       }
