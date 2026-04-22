@@ -263,7 +263,7 @@ import {listen} from "@tauri-apps/api/event";
 import {invoke} from "@tauri-apps/api/core";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import {AISettingsService, RecordingService} from "@/services/ipc.js";
-import {Mic, MicOff, Settings, GripVertical} from "lucide-vue-next";
+import {GripVertical, Mic, MicOff, Settings} from "lucide-vue-next";
 
 provideGlobalConfig({locale: zhCn});
 
@@ -305,6 +305,7 @@ let unlistenRecordingFinished = null;
 let unlistenRecordingError = null;
 let unlistenForceCompact = null;
 let unlistenRecordingRegionSelected = null;
+let unlistenScreenshotReset = null;
 let unlistenAudioMerging = null;  // ✅ 新增：监听音频合并事件
 let unlistenMicToggled = null;  // ✅ 新增：监听麦克风切换事件
 let unlistenMicKeyPressed = null;  // ✅ 新增：监听麦克风按键按下事件
@@ -483,10 +484,26 @@ const showBackendErrorInSettings = async (message) => {
 const pickRecordingRegion = async () => {
   if (isPickingRegion) return;
   isPickingRegion = true;
+
+  // 自动收起设置面板并隐藏工具栏窗口
+  capsuleSettingsVisible.value = false;
+
+  // 先隐藏录制工具栏窗口，避免遮挡截图编辑器的遮罩层
+  try {
+    await getCurrentWindow().hide();
+  } catch (_e) {
+    // 忽略隐藏失败
+  }
+
   try {
     await invoke("open_screenshot_editor", {mode: "recording_region"});
   } catch (e) {
     showInlineNotice(`打开区域框选失败: ${String(e)}`, "error");
+    // 失败时重新显示工具栏
+    try {
+      await getCurrentWindow().show();
+    } catch (_e) {
+    }
   } finally {
     window.setTimeout(() => {
       isPickingRegion = false;
@@ -958,7 +975,7 @@ onMounted(async () => {
     capsuleSettingsVisible.value = false;
     void syncCapsuleLayout();
   });
-  unlistenRecordingRegionSelected = await listen("recording-region-selected", (event) => {
+  unlistenRecordingRegionSelected = await listen("recording-region-selected", async (event) => {
     const payload = event.payload || {};
     const x = Number(payload.x || 0);
     const y = Number(payload.y || 0);
@@ -971,8 +988,39 @@ onMounted(async () => {
     recordRegionHeight.value = height;
     regionSelectionReady.value = true;
     keepSettingsOpenUntilTs = Date.now() + 1500;
+
+    // 先显示窗口
+    try {
+      await getCurrentWindow().show();
+    } catch (_e) {
+    }
+
+    // 等待窗口显示后再展开设置面板
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // 展开设置面板（watch 监听器会自动调用 syncCapsuleLayout）
     capsuleSettingsVisible.value = true;
-    void syncCapsuleLayout();
+
+    // 等待下一帧确保 watch 已触发
+    await nextTick();
+
+    // 手动调用一次 resize 确保窗口正确展开
+    try {
+      const targetHeight = measureCapsuleContentHeight();
+      await RecordingService.resizeToolbar(false, true, false, "capsule", true, targetHeight, null);
+    } catch (e) {
+      console.error("展开录制工具栏失败:", e);
+    }
+  });
+
+  // 监听截图窗口关闭事件，确保工具栏重新显示
+  unlistenScreenshotReset = await listen("screenshot-reset", () => {
+    // 截图窗口关闭时（无论是完成还是取消），重新显示工具栏
+    try {
+      getCurrentWindow().show().catch(() => {
+      });
+    } catch (_e) {
+    }
   });
 
 
@@ -1077,6 +1125,7 @@ onBeforeUnmount(() => {
   if (unlistenRecordingError) unlistenRecordingError();
   if (unlistenForceCompact) unlistenForceCompact();
   if (unlistenRecordingRegionSelected) unlistenRecordingRegionSelected();
+  if (unlistenScreenshotReset) unlistenScreenshotReset();
   if (unlistenAudioMerging) unlistenAudioMerging();
   if (unlistenMicToggled) unlistenMicToggled();
   if (unlistenMicKeyPressed) unlistenMicKeyPressed();

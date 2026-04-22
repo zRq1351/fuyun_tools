@@ -318,63 +318,7 @@ pub fn run() {
                 }
             }
 
-            let app_handle_clone_longshot_finish = app_handle.clone();
-            if let Err(e) = app.global_shortcut().on_shortcut(
-                "Ctrl+Alt+Enter",
-                move |_app, _shortcut, event| {
-                    if let ShortcutState::Pressed = event.state {
-                        let app_handle_inner = app_handle_clone_longshot_finish.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let _ = crate::ui::commands::finish_manual_longshot_from_shortcut(
-                                app_handle_inner,
-                            )
-                            .await;
-                        });
-                    }
-                },
-            ) {
-                log::warn!("长截图完成快捷键注册失败: {}", e);
-                shortcut_conflicts.push(format!("长截图完成：Ctrl+Alt+Enter"));
-            }
 
-            let app_handle_clone_longshot_cancel = app_handle.clone();
-            if let Err(e) = app.global_shortcut().on_shortcut(
-                "Ctrl+Alt+Backspace",
-                move |_app, _shortcut, event| {
-                    if let ShortcutState::Pressed = event.state {
-                        let app_handle_inner = app_handle_clone_longshot_cancel.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let _ = crate::ui::commands::cancel_manual_longshot_from_shortcut(
-                                app_handle_inner,
-                            )
-                            .await;
-                        });
-                    }
-                },
-            ) {
-                log::warn!("长截图取消快捷键注册失败: {}", e);
-                shortcut_conflicts.push(format!("长截图取消：Ctrl+Alt+Backspace"));
-            }
-
-            let app_handle_clone_longshot_pause = app_handle.clone();
-            if let Err(e) =
-                app.global_shortcut()
-                    .on_shortcut("Ctrl+Alt+P", move |_app, _shortcut, event| {
-                        if let ShortcutState::Pressed = event.state {
-                            let app_handle_inner = app_handle_clone_longshot_pause.clone();
-                            tauri::async_runtime::spawn(async move {
-                                let _ =
-                                crate::ui::commands::toggle_manual_longshot_pause_from_shortcut(
-                                    app_handle_inner,
-                                )
-                                .await;
-                            });
-                        }
-                    })
-            {
-                log::warn!("长截图暂停/恢复快捷键注册失败: {}", e);
-                shortcut_conflicts.push(format!("长截图暂停/恢复：Ctrl+Alt+P"));
-            }
 
             if !shortcut_conflicts.is_empty() {
                 let payload = serde_json::json!({
