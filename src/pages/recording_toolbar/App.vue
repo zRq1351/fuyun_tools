@@ -1093,7 +1093,7 @@ body {
   height: 100%;
   background: transparent;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: flex-start;
 }
 

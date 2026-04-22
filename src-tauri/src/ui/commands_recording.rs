@@ -681,7 +681,7 @@ pub async fn resize_recording_toolbar(
         .map(|size| {
             let prev_w = ((size.width as f64) / scale_factor).round() as u32;
             let prev_h = ((size.height as f64) / scale_factor).round() as u32;
-            prev_w != width_logical || prev_h != height_logical
+            prev_w != final_width || prev_h != height_logical
         })
         .unwrap_or(true);
 
@@ -689,14 +689,14 @@ pub async fn resize_recording_toolbar(
         .as_ref()
         .map(|s| {
             let prev_w = ((s.width as f64) / scale_factor).round() as u32;
-            width_logical < prev_w
+            final_width < prev_w
         })
         .unwrap_or(false);
 
     #[cfg(target_os = "windows")]
     {
         if need_resize || request.recenter {
-            let physical_width = (width_logical as f64 * scale_factor).round() as i32;
+            let physical_width = (final_width as f64 * scale_factor).round() as i32;
             let physical_height = (height_logical as f64 * scale_factor).round() as i32;
 
             let mut new_x = None;
@@ -706,7 +706,13 @@ pub async fn resize_recording_toolbar(
                 if let Ok(Some(monitor)) = window.current_monitor() {
                     let mon_pos = monitor.position();
                     let mon_size = monitor.size();
-                    new_x = Some(mon_pos.x + (mon_size.width as i32 - physical_width) / 2);
+                    // For capsule/compact mode, always align left edge based on closed width (210) to prevent horizontal shaking
+                    let base_width = if is_capsule_layout || request.compact_mode {
+                        (210.0 * scale_factor).round() as i32
+                    } else {
+                        physical_width
+                    };
+                    new_x = Some(mon_pos.x + (mon_size.width as i32 - base_width) / 2);
                     new_y = Some(mon_pos.y);
                 } else {
                     // Fallback if we can't get the monitor, just use move_window_top_center later
@@ -734,14 +740,15 @@ pub async fn resize_recording_toolbar(
                 }
             } else {
                 // Fallback to Tauri methods
+                let base_logical = if is_capsule_layout || request.compact_mode { 210.0 } else { final_width as f64 };
                 if request.recenter && is_shrinking {
-                    move_window_top_center(&window, Some(width_logical as f64));
+                    move_window_top_center(&window, Some(base_logical));
                 }
                 if need_resize {
                     let _ = window.set_size(target_size);
                 }
                 if request.recenter && !is_shrinking {
-                    move_window_top_center(&window, Some(width_logical as f64));
+                    move_window_top_center(&window, Some(base_logical));
                 }
             }
         }
@@ -751,8 +758,9 @@ pub async fn resize_recording_toolbar(
     {
         // When shrinking, move the window first to align its left edge closer to the new center
         // This reduces the horizontal jump when the right edge is later shrunk by set_size
+        let base_logical = if is_capsule_layout || request.compact_mode { 210.0 } else { final_width as f64 };
         if request.recenter && is_shrinking {
-            move_window_top_center(&window, Some(width_logical as f64));
+            move_window_top_center(&window, Some(base_logical));
         }
 
         if need_resize {
@@ -763,7 +771,7 @@ pub async fn resize_recording_toolbar(
 
         // When expanding, move the window after setting the size
         if request.recenter && !is_shrinking {
-            move_window_top_center(&window, Some(width_logical as f64));
+            move_window_top_center(&window, Some(base_logical));
         }
     }
 
