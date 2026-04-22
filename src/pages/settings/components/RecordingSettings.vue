@@ -10,7 +10,7 @@
           <el-switch v-model="form.recordingEnabled" active-text="启用" inactive-text="停用"/>
           <div class="form-hint">停用后后端不再注册录屏快捷键，也不会响应录制命令</div>
         </el-form-item>
-        <el-form-item label="开始/停止录屏快捷键">
+        <el-form-item label="录屏快捷键">
           <el-input
               :class="{ recording: isRecordingHotkeyRecording }"
               :model-value="recordingDisplayValue"
@@ -31,7 +31,7 @@
             </template>
           </el-input>
         </el-form-item>
-        <el-form-item label="麦克风切换快捷键">
+        <el-form-item label="麦克风启用/关闭快捷键">
           <el-input
               :class="{ recording: isMicToggleHotkeyRecording }"
               :model-value="micToggleDisplayValue"
@@ -100,7 +100,7 @@
 
 <script setup>
 import {computed, onMounted, ref} from 'vue'
-import {Edit, FolderOpened, VideoPause, RefreshLeft} from '@element-plus/icons-vue'
+import {Edit, FolderOpened, RefreshLeft, VideoPause} from '@element-plus/icons-vue'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
 import {RecordingService} from '../../../services/ipc'
 import {open} from '@tauri-apps/plugin-dialog'
