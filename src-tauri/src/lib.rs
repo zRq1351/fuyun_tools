@@ -314,6 +314,7 @@ pub fn run() {
                         recording_mic_toggle_hot_key,
                         e
                     );
+                    shortcut_conflicts.push(format!("麦克风切换：{}", recording_mic_toggle_hot_key));
                 }
             }
 
@@ -333,6 +334,7 @@ pub fn run() {
                 },
             ) {
                 log::warn!("长截图完成快捷键注册失败: {}", e);
+                shortcut_conflicts.push(format!("长截图完成：Ctrl+Alt+Enter"));
             }
 
             let app_handle_clone_longshot_cancel = app_handle.clone();
@@ -351,6 +353,7 @@ pub fn run() {
                 },
             ) {
                 log::warn!("长截图取消快捷键注册失败: {}", e);
+                shortcut_conflicts.push(format!("长截图取消：Ctrl+Alt+Backspace"));
             }
 
             let app_handle_clone_longshot_pause = app_handle.clone();
@@ -370,6 +373,7 @@ pub fn run() {
                     })
             {
                 log::warn!("长截图暂停/恢复快捷键注册失败: {}", e);
+                shortcut_conflicts.push(format!("长截图暂停/恢复：Ctrl+Alt+P"));
             }
 
             if !shortcut_conflicts.is_empty() {
