@@ -204,7 +204,11 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                 for y in 0..target_h {
                     let src_y = (y * src_h) / target_h;
                     let src_row_start = src_y * src_w * 4;
-                    let dst_row_start = y * target_w * 4;
+                    
+                    // VideoEncoder::send_frame_buffer 期望的是 bottom-up 的 BGRA 数据
+                    // 因此需要垂直翻转图像
+                    let dst_y = target_h - 1 - y;
+                    let dst_row_start = dst_y * target_w * 4;
 
                     for x in 0..target_w {
                         let src_x = (x * src_w) / target_w;
