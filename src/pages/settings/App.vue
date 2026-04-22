@@ -613,14 +613,25 @@ const persistSettings = async (
       autoSaveStateResetTimer = null
     }, 1500)
   } catch (error) {
-    const raw = String(error || '')
-    if (raw.includes('快捷键被占用')) {
-      shortcutConflictMessage.value = raw.replace(/^Error:\s*/i, '')
-      activeTab.value = 'clipboard'
-    }
-    ElMessage.error(`保存失败: ${error}`)
-    autoSaveState.value = 'error'
-  } finally {
+      let raw = ''
+      if (typeof error === 'object' && error !== null) {
+        raw = error.message || JSON.stringify(error)
+      } else {
+        raw = String(error || '')
+      }
+      if (raw.includes('快捷键被占用')) {
+        shortcutConflictMessage.value = raw.replace(/^Error:\s*/i, '')
+        if (raw.includes('录屏') || raw.includes('麦克风')) {
+          activeTab.value = 'recording'
+        } else if (raw.includes('截图')) {
+          activeTab.value = 'screenshot'
+        } else {
+          activeTab.value = 'clipboard'
+        }
+      }
+      ElMessage.error(`保存失败: ${raw}`)
+      autoSaveState.value = 'error'
+    } finally {
     isAutoSaving.value = false
     if (pendingPersistSnapshot && pendingPersistVersion > persistVersion) {
       const retrySnapshot = pendingPersistSnapshot
