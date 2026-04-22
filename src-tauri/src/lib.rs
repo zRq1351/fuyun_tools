@@ -381,15 +381,6 @@ pub fn run() {
                     "conflicts": shortcut_conflicts.clone()
                 });
                 let _ = app_handle.emit("shortcut-conflict-warning", payload.clone());
-                
-                // Also show a native dialog so the user definitely sees it
-                use tauri_plugin_dialog::DialogExt;
-                let conflicts_str = shortcut_conflicts.join("\n");
-                let _ = app_handle.dialog()
-                    .message(format!("以下快捷键被其他程序占用，无法注册：\n\n{}\n\n请前往设置中修改。", conflicts_str))
-                    .title("快捷键冲突")
-                    .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
-                    .show(|_| {});
 
                 if let Some(settings_window) = app.get_webview_window("settings") {
                     let _ = show_standard_window_by_label(&app.handle().clone(), "settings");
