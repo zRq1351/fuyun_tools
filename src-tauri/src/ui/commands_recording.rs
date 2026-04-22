@@ -644,15 +644,15 @@ pub async fn resize_recording_toolbar(
                 preferred_height.clamp(320, max_height_logical.max(320)),
             )
         } else {
-            // 胶囊模式：增加宽度以容纳麦克风按钮（原180px + 麦克风按钮30px）
-            (210, 40)
+            // 胶囊模式：增加宽度以容纳拖拽图标、麦克风按钮等
+            (226, 40)
         }
     } else if request.compact_mode {
         if request.open_overlay {
             (400, 730)
         } else {
-            // 紧凑模式：同样增加宽度以容纳麦克风按钮
-            (210, 40)
+            // 紧凑模式：同样增加宽度以容纳麦克风按钮等
+            (226, 40)
         }
     } else {
         let h = if request.open_select {
@@ -706,9 +706,9 @@ pub async fn resize_recording_toolbar(
                 if let Ok(Some(monitor)) = window.current_monitor() {
                     let mon_pos = monitor.position();
                     let mon_size = monitor.size();
-                    // For capsule/compact mode, always align left edge based on closed width (210) to prevent horizontal shaking
+                    // For capsule/compact mode, always align left edge based on closed width (226) to prevent horizontal shaking
                     let base_width = if is_capsule_layout || request.compact_mode {
-                        (210.0 * scale_factor).round() as i32
+                        (226.0 * scale_factor).round() as i32
                     } else {
                         physical_width
                     };
@@ -740,7 +740,7 @@ pub async fn resize_recording_toolbar(
                 }
             } else {
                 // Fallback to Tauri methods
-                let base_logical = if is_capsule_layout || request.compact_mode { 210.0 } else { final_width as f64 };
+                let base_logical = if is_capsule_layout || request.compact_mode { 226.0 } else { final_width as f64 };
                 if request.recenter && is_shrinking {
                     move_window_top_center(&window, Some(base_logical));
                 }
@@ -758,7 +758,7 @@ pub async fn resize_recording_toolbar(
     {
         // When shrinking, move the window first to align its left edge closer to the new center
         // This reduces the horizontal jump when the right edge is later shrunk by set_size
-        let base_logical = if is_capsule_layout || request.compact_mode { 210.0 } else { final_width as f64 };
+        let base_logical = if is_capsule_layout || request.compact_mode { 226.0 } else { final_width as f64 };
         if request.recenter && is_shrinking {
             move_window_top_center(&window, Some(base_logical));
         }
@@ -796,7 +796,7 @@ pub async fn run_recording_regression(
 
 pub async fn toggle_recording_from_shortcut(app: AppHandle, _state: Arc<Mutex<SharedAppState>>) {
     if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
-        let target_width = 210.0;
+        let target_width = 226.0;
         let _ = window.set_size(tauri::LogicalSize::new(target_width, 40.0));
         move_window_top_center(&window, Some(target_width));
         let _ = show_overlay_window_by_label(&app, "recording_toolbar", true);
