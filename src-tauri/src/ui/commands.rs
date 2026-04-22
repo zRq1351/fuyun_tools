@@ -1333,7 +1333,7 @@ fn register_screenshot_shortcut(app: &AppHandle, hot_key: &str) -> Result<(), St
                 });
             }
         })
-        .map_err(|e| frontend_error(ErrorCode::SystemError, "注册截图快捷键失败", e.to_string()))?;
+        .map_err(|e| frontend_error(ErrorCode::ValidationError, format!("截图快捷键被占用或注册失败：{}", hot_key), e.to_string()))?;
     Ok(())
 }
 
@@ -3190,7 +3190,7 @@ fn register_recording_shortcut(
                 });
             }
         })
-        .map_err(|e| frontend_error(ErrorCode::SystemError, "注册录屏快捷键失败", e.to_string()))?;
+        .map_err(|e| frontend_error(ErrorCode::ValidationError, format!("录屏快捷键被占用或注册失败：{}", hot_key), e.to_string()))?;
     Ok(())
 }
 
@@ -4061,7 +4061,11 @@ pub async fn save_app_settings(
                         mic_toggle_hot_key_val,
                         e
                     );
-                    return Err(format!("注册麦克风切换快捷键失败: {}", e));
+                    return Err(frontend_error(
+                        ErrorCode::ValidationError,
+                        format!("麦克风切换快捷键被占用或注册失败：{}", mic_toggle_hot_key_val),
+                        e.to_string(),
+                    ));
                 }
             }
 
