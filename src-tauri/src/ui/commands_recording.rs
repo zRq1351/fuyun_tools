@@ -796,12 +796,17 @@ pub async fn run_recording_regression(
 
 pub async fn toggle_recording_from_shortcut(app: AppHandle, _state: Arc<Mutex<SharedAppState>>) {
     if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
-        let target_width = 226.0;
-        let _ = window.set_size(tauri::LogicalSize::new(target_width, 40.0));
-        move_window_top_center(&window, Some(target_width));
-        let _ = show_overlay_window_by_label(&app, "recording_toolbar", true);
+        let is_visible = window.is_visible().unwrap_or(false);
+        if is_visible {
+            let _ = crate::ui::window_manager::hide_overlay_window_by_label(&app, "recording_toolbar");
+        } else {
+            let target_width = 226.0;
+            let _ = window.set_size(tauri::LogicalSize::new(target_width, 40.0));
+            move_window_top_center(&window, Some(target_width));
+            let _ = show_overlay_window_by_label(&app, "recording_toolbar", true);
+            let _ = app.emit("recording-toolbar-force-compact", ());
+        }
     }
-    let _ = app.emit("recording-toolbar-force-compact", ());
 }
 
 /// 切换麦克风状态的辅助函数（供快捷键调用）
