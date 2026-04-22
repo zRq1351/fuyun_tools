@@ -1731,11 +1731,15 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: move;
+  cursor: grab;
   -webkit-app-region: drag;
   color: #8a95a5;
   padding: 0 2px;
   height: 100%;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 .drag-handle:hover {
