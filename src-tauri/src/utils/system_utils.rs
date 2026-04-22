@@ -2,10 +2,9 @@ use crate::utils::settings_model::{initialize_builtin_providers, AppSettingsData
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use once_cell::sync::Lazy;
+use std::sync::{Mutex, OnceLock};
 
-static SAVE_SETTINGS_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+static SAVE_SETTINGS_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 pub fn get_default_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
@@ -93,7 +92,7 @@ pub fn read_text_with_backup(path: &Path) -> Result<String, String> {
 }
 
 pub fn save_settings(settings: &AppSettingsData) -> Result<(), String> {
-    let _lock = SAVE_SETTINGS_LOCK.lock().unwrap();
+    let _lock = SAVE_SETTINGS_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
     let settings_path = get_settings_file_path();
     let json =
         serde_json::to_string_pretty(settings).map_err(|e| format!("序列化设置失败: {}", e))?;
