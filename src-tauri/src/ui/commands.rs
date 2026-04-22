@@ -7855,6 +7855,7 @@ window.__SCREENSHOT_BOOT__.pendingData = null;\
 window.__SCREENSHOT_BOOT__.pendingStartSessionId = 0;\
 window.__SCREENSHOT_BOOT__.pendingMode = null;",
         );
+        let _ = app.emit("screenshot-reset", ());
         let _ = hide_overlay_window_by_label(&app, "screenshot");
     }
     cleanup_all_screenshot_boot_images();
