@@ -619,6 +619,13 @@ const persistSettings = async (
       } else {
         raw = String(error || '')
       }
+      try {
+        const parsed = JSON.parse(raw)
+        if (parsed && parsed.message) {
+          raw = parsed.message
+        }
+      } catch (e) {}
+
       if (raw.includes('快捷键被占用')) {
         shortcutConflictMessage.value = raw.replace(/^Error:\s*/i, '')
         if (raw.includes('录屏') || raw.includes('麦克风')) {
