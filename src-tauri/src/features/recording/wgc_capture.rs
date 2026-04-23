@@ -139,6 +139,7 @@ struct WgcCaptureFlags {
     pause_flag: Arc<AtomicBool>,
     capture_origin_instant: std::time::Instant,
     first_frame_elapsed_ms: Arc<AtomicU64>,
+    first_frame_timestamp: Arc<std::sync::atomic::AtomicI64>,
     width: u32,
     height: u32,
     output_path: String,
@@ -187,45 +188,50 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                 .store(elapsed_ms, Ordering::Relaxed);
         }
         if let Some(encoder) = self.encoder.as_mut() {
+            let mut raw_timestamp = frame.timestamp().map_err(|e| e.to_string())?.Duration;
+            
+            let first_ts = self.flags.first_frame_timestamp.load(Ordering::Relaxed);
+            if first_ts == i64::MAX {
+                self.flags.first_frame_timestamp.store(raw_timestamp, Ordering::Relaxed);
+                raw_timestamp = 0;
+            } else {
+                raw_timestamp -= first_ts;
+            }
+
             let frame_w = frame.width();
             let frame_h = frame.height();
-            if frame_w != self.flags.width || frame_h != self.flags.height {
-                let timestamp = frame.timestamp().map_err(|e| e.to_string())?.Duration;
-                let buffer = frame.buffer().map_err(|e| e.to_string())?;
-                let mut vec = Vec::new();
-                let pixels = buffer.as_nopadding_buffer(&mut vec);
+            let buffer = frame.buffer().map_err(|e| e.to_string())?;
+            let mut vec = Vec::new();
+            let pixels = buffer.as_nopadding_buffer(&mut vec);
 
-                let target_w = self.flags.width as usize;
-                let target_h = self.flags.height as usize;
-                let src_w = frame_w as usize;
-                let src_h = frame_h as usize;
-                let mut resized = vec![0u8; target_w * target_h * 4];
+            let target_w = self.flags.width as usize;
+            let target_h = self.flags.height as usize;
+            let src_w = frame_w as usize;
+            let src_h = frame_h as usize;
+            let mut resized = vec![0u8; target_w * target_h * 4];
 
-                for y in 0..target_h {
-                    let src_y = (y * src_h) / target_h;
-                    let src_row_start = src_y * src_w * 4;
-                    
-                    // VideoEncoder::send_frame_buffer 期望的是 bottom-up 的 BGRA 数据
-                    // 因此需要垂直翻转图像
-                    let dst_y = target_h - 1 - y;
-                    let dst_row_start = dst_y * target_w * 4;
+            for y in 0..target_h {
+                let src_y = (y * src_h) / target_h;
+                let src_row_start = src_y * src_w * 4;
+                
+                // VideoEncoder::send_frame_buffer 期望的是 bottom-up 的 BGRA 数据
+                // 因此需要垂直翻转图像
+                let dst_y = target_h - 1 - y;
+                let dst_row_start = dst_y * target_w * 4;
 
-                    for x in 0..target_w {
-                        let src_x = (x * src_w) / target_w;
-                        let src_idx = src_row_start + src_x * 4;
-                        let dst_idx = dst_row_start + x * 4;
+                for x in 0..target_w {
+                    let src_x = (x * src_w) / target_w;
+                    let src_idx = src_row_start + src_x * 4;
+                    let dst_idx = dst_row_start + x * 4;
 
-                        resized[dst_idx..dst_idx + 4]
-                            .copy_from_slice(&pixels[src_idx..src_idx + 4]);
-                    }
+                    resized[dst_idx..dst_idx + 4]
+                        .copy_from_slice(&pixels[src_idx..src_idx + 4]);
                 }
-
-                encoder
-                    .send_frame_buffer(&resized, timestamp)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                encoder.send_frame(frame).map_err(|e| e.to_string())?;
             }
+
+            encoder
+                .send_frame_buffer(&resized, raw_timestamp)
+                .map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -271,11 +277,13 @@ pub fn start_window_capture_to_mp4(
     let stop_flag = Arc::new(AtomicBool::new(false));
     let pause_flag = Arc::new(AtomicBool::new(false));
     let first_frame_elapsed_ms = Arc::new(AtomicU64::new(u64::MAX));
+    let first_frame_timestamp = Arc::new(std::sync::atomic::AtomicI64::new(i64::MAX));
     let flags = WgcCaptureFlags {
         stop_flag: stop_flag.clone(),
         pause_flag: pause_flag.clone(),
         capture_origin_instant,
         first_frame_elapsed_ms: first_frame_elapsed_ms.clone(),
+        first_frame_timestamp,
         width,
         height,
         output_path: output_path.to_string_lossy().to_string(),
