@@ -360,20 +360,22 @@ fn merge_system_audio_into_video(
 
     if system_segments.len() == 1 && mic_segments.is_empty() {
         let seg = &system_segments[0];
-        if seg.start_ms < 100 && seg.path.exists() {
+        if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.path.exists() {
             log::info!(
-                "快速路径：单个系统音频片段(start_ms={})，使用流复制模式",
-                seg.start_ms
+                "快速路径：单个系统音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
+                seg.start_ms,
+                seg.trim_start_ms
             );
             return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false);
         }
     }
     if mic_segments.len() == 1 && system_segments.is_empty() {
         let seg = &mic_segments[0];
-        if seg.start_ms < 100 && seg.path.exists() {
+        if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.path.exists() {
             log::info!(
-                "快速路径：单个麦克风音频片段(start_ms={})，使用流复制模式",
-                seg.start_ms
+                "快速路径：单个麦克风音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
+                seg.start_ms,
+                seg.trim_start_ms
             );
             return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false);
         }
@@ -453,11 +455,17 @@ fn merge_system_audio_into_video(
     let mut sys_inputs: Vec<(usize, u64)> = Vec::new();
     let mut mic_inputs: Vec<(usize, u64)> = Vec::new();
     for seg in &valid_system {
+        if seg.trim_start_ms > 0 {
+            cmd.arg("-ss").arg(format!("{}.{:03}", seg.trim_start_ms / 1000, seg.trim_start_ms % 1000));
+        }
         cmd.arg("-i").arg(&seg.path);
         sys_inputs.push((input_index, seg.start_ms));
         input_index += 1;
     }
     for seg in &valid_mic {
+        if seg.trim_start_ms > 0 {
+            cmd.arg("-ss").arg(format!("{}.{:03}", seg.trim_start_ms / 1000, seg.trim_start_ms % 1000));
+        }
         cmd.arg("-i").arg(&seg.path);
         mic_inputs.push((input_index, seg.start_ms));
         input_index += 1;
@@ -483,18 +491,16 @@ fn merge_system_audio_into_video(
     }
     let sys_out = if !sys_labels.is_empty() {
         if sys_labels.len() == 1 {
-            filter_parts.push(format!(
-                "{}aresample=async=1:first_pts=0[sysa]",
-                sys_labels[0]
-            ));
+            // 单个输入，直接保留其 adelay 后的标签，不进行 aresample
+            Some(sys_labels[0].clone())
         } else {
             filter_parts.push(format!(
-                "{}amix=inputs={}:duration=longest:normalize=0,aresample=async=1:first_pts=0[sysa]",
+                "{}amix=inputs={}:duration=longest:normalize=0[sysa]",
                 sys_labels.join(""),
                 sys_labels.len()
             ));
+            Some("[sysa]".to_string())
         }
-        Some("[sysa]")
     } else {
         None
     };
@@ -512,32 +518,30 @@ fn merge_system_audio_into_video(
     }
     let mic_out = if !mic_labels.is_empty() {
         if mic_labels.len() == 1 {
-            filter_parts.push(format!(
-                "{}aresample=async=1:first_pts=0[mica]",
-                mic_labels[0]
-            ));
+            // 单个输入，直接保留其 adelay 后的标签
+            Some(mic_labels[0].clone())
         } else {
             filter_parts.push(format!(
-                "{}amix=inputs={}:duration=longest:normalize=0,aresample=async=1:first_pts=0[mica]",
+                "{}amix=inputs={}:duration=longest:normalize=0[mica]",
                 mic_labels.join(""),
                 mic_labels.len()
             ));
+            Some("[mica]".to_string())
         }
-        Some("[mica]")
     } else {
         None
     };
-    let audio_map_label = if let (Some(sys), Some(mic)) = (sys_out, mic_out) {
+    let audio_map_label = if let (Some(sys), Some(mic)) = (sys_out.as_ref(), mic_out.as_ref()) {
         filter_parts.push(format!(
             "{}{}amix=inputs=2:duration=longest:normalize=0[aout]",
             sys, mic
         ));
         "[aout]"
-    } else if sys_out.is_some() {
-        filter_parts.push("[sysa]anull[aout]".to_string());
+    } else if let Some(sys) = sys_out.as_ref() {
+        filter_parts.push(format!("{}anull[aout]", sys));
         "[aout]"
-    } else if mic_out.is_some() {
-        filter_parts.push("[mica]anull[aout]".to_string());
+    } else if let Some(mic) = mic_out.as_ref() {
+        filter_parts.push(format!("{}anull[aout]", mic));
         "[aout]"
     } else {
         return Ok(());
@@ -949,7 +953,7 @@ fn ensure_system_audio_capture_started(
                 runtime.system_audio_stream_start_ms = Some(start_ms);
                 for p in output_paths {
                     runtime.system_audio_segments.push(
-                        crate::features::recording::state::AudioSegment { path: p, start_ms },
+                        crate::features::recording::state::AudioSegment { path: p, start_ms, trim_start_ms: 0 },
                     );
                 }
                 Ok(())
@@ -1000,8 +1004,8 @@ fn ensure_system_audio_capture_started(
             runtime.system_audio_stream_start_ms = Some(start_ms);
             if let Some(path) = runtime.system_audio_wav_path.clone() {
                 runtime
-                    .system_audio_segments
-                    .push(crate::features::recording::state::AudioSegment { path, start_ms });
+                        .system_audio_segments
+                        .push(crate::features::recording::state::AudioSegment { path, start_ms, trim_start_ms: 0 });
             } else {
                 return Err("系统音频路径未设置".to_string());
             }
@@ -1072,7 +1076,7 @@ fn ensure_mic_capture_started(
             if let Some(path) = runtime.mic_audio_wav_path.clone() {
                 runtime
                     .mic_audio_segments
-                    .push(crate::features::recording::state::AudioSegment { path, start_ms });
+                    .push(crate::features::recording::state::AudioSegment { path, start_ms, trim_start_ms: 0 });
             } else {
                 return Err("麦克风音频路径未设置".to_string());
             }
@@ -2060,10 +2064,22 @@ pub fn stop_recording(
         } else if anchor_ms > 0 {
             let calibrated_anchor_ms = anchor_ms.saturating_add(wgc_audio_sync_advance_ms);
             for seg in &mut sys_segments {
-                seg.start_ms = seg.start_ms.saturating_sub(calibrated_anchor_ms);
+                if seg.start_ms < calibrated_anchor_ms {
+                    seg.trim_start_ms = calibrated_anchor_ms - seg.start_ms;
+                    seg.start_ms = 0;
+                } else {
+                    seg.start_ms = seg.start_ms - calibrated_anchor_ms;
+                    seg.trim_start_ms = 0;
+                }
             }
             for seg in &mut mic_segments {
-                seg.start_ms = seg.start_ms.saturating_sub(calibrated_anchor_ms);
+                if seg.start_ms < calibrated_anchor_ms {
+                    seg.trim_start_ms = calibrated_anchor_ms - seg.start_ms;
+                    seg.start_ms = 0;
+                } else {
+                    seg.start_ms = seg.start_ms - calibrated_anchor_ms;
+                    seg.trim_start_ms = 0;
+                }
             }
             log::info!(
                 "应用 WGC 首帧锚点校正: anchor_ms={}, advance_ms={}, calibrated_anchor_ms={}",

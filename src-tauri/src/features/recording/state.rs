@@ -11,6 +11,7 @@ use std::time::Instant;
 pub struct AudioSegment {
     pub path: PathBuf,
     pub start_ms: u64,
+    pub trim_start_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
