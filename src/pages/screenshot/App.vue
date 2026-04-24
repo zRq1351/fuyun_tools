@@ -44,6 +44,7 @@
         <div :class="{ 'is-active': state !== 'drawing' }" class="cutout-border"></div>
 
         <div v-if="(state === 'selecting' || state === 'resizing' || state === 'moving' || state === 'selected') && !longshotOverlayOnly"
+             :style="sizeInfoStyle"
              class="size-info">
           {{ selectionInfoText }}
         </div>
@@ -531,6 +532,13 @@ const recordingConfirmStyle = computed(() => {
     top: `${top}px`
   }
 })
+
+const sizeInfoStyle = computed(() => {
+  if (rect.y < 24) {
+    return { top: '4px', left: '4px' }
+  }
+  return { top: '-24px', left: '0' }
+})
 const pickerDisplayValue = computed(() => {
   return pickerDisplayMode.value === 'rgb' ? pickColorRgb.value : pickColor.value
 })
@@ -724,11 +732,19 @@ const toolbarStyle = computed(() => {
   }
   
   if (top < 0) {
-    top = rect.y + rect.height - 60 - 10
+    top = Math.max(10, rect.y + rect.height - 60 - 10)
+  }
+  
+  const estimatedToolbarHeight = 80
+  if (top + estimatedToolbarHeight > window.innerHeight) {
+    top = Math.max(10, window.innerHeight - estimatedToolbarHeight)
   }
 
   if (right < 10) right = 10
-  if (right + 300 > window.innerWidth) right = window.innerWidth - 300 
+  const estimatedToolbarWidth = 650 
+  if (right + estimatedToolbarWidth > window.innerWidth) {
+    right = Math.max(10, window.innerWidth - estimatedToolbarWidth)
+  }
 
   return {
     top: `${top}px`,
@@ -737,9 +753,19 @@ const toolbarStyle = computed(() => {
 })
 
 const pickerStyle = computed(() => {
+  let left = drawStart.x + 15
+  let top = drawStart.y + 15
+  const pickerWidth = 100
+  const pickerHeight = 40
+  if (left + pickerWidth > window.innerWidth) {
+    left = window.innerWidth - pickerWidth
+  }
+  if (top + pickerHeight > window.innerHeight) {
+    top = window.innerHeight - pickerHeight
+  }
   return {
-    left: `${drawStart.x + 15}px`,
-    top: `${drawStart.y + 15}px`
+    left: `${left}px`,
+    top: `${top}px`
   }
 })
 
