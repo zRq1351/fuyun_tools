@@ -242,6 +242,9 @@ const form = reactive({
   customProviderName: '',
   selectionEnabled: true,
   selectionModifierKey: '',
+  selectionCustomPrompts: [],
+  selectionWebSearchEnabled: true,
+  selectionWebSearchEngine: 'bing',
   translationPromptTemplate: '',
   explanationPromptTemplate: '',
   imageFillVerifyMode: 'fast'
@@ -310,6 +313,9 @@ const buildFormSnapshot = () => ({
     customProviderName: form.customProviderName,
     selectionEnabled: form.selectionEnabled,
     selectionModifierKey: form.selectionModifierKey,
+    selectionCustomPrompts: form.selectionCustomPrompts,
+    selectionWebSearchEnabled: form.selectionWebSearchEnabled,
+    selectionWebSearchEngine: form.selectionWebSearchEngine,
     translationPromptTemplate: form.translationPromptTemplate,
     explanationPromptTemplate: form.explanationPromptTemplate,
     imageFillVerifyMode: form.imageFillVerifyMode
@@ -441,6 +447,15 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
   }
   if (source.selectionModifierKey !== initial.selectionModifierKey) {
     changedFields.selectionModifierKey = source.selectionModifierKey
+  }
+  if (JSON.stringify(source.selectionCustomPrompts) !== JSON.stringify(initial.selectionCustomPrompts)) {
+    changedFields.selectionCustomPrompts = source.selectionCustomPrompts
+  }
+  if (source.selectionWebSearchEnabled !== initial.selectionWebSearchEnabled) {
+    changedFields.selectionWebSearchEnabled = source.selectionWebSearchEnabled
+  }
+  if (source.selectionWebSearchEngine !== initial.selectionWebSearchEngine) {
+    changedFields.selectionWebSearchEngine = source.selectionWebSearchEngine
   }
   if (source.translationPromptTemplate !== initial.translationPromptTemplate) {
     changedFields.translationPromptTemplate = source.translationPromptTemplate
@@ -832,6 +847,9 @@ onMounted(async () => {
     form.devForceFfmpegWindowCapture = settings.dev_force_ffmpeg_window_capture === true
     form.selectionEnabled = settings.selection_enabled === true
     form.selectionModifierKey = settings.selection_modifier_key || ''
+    form.selectionCustomPrompts = Array.isArray(settings.selection_custom_prompts) ? settings.selection_custom_prompts : []
+    form.selectionWebSearchEnabled = settings.selection_web_search_enabled !== false
+    form.selectionWebSearchEngine = settings.selection_web_search_engine || 'bing'
     form.groupedItemsProtectedFromLimit = settings.grouped_items_protected_from_limit !== false
     form.translationPromptTemplate = settings.translation_prompt_template || ''
     form.explanationPromptTemplate = settings.explanation_prompt_template || ''

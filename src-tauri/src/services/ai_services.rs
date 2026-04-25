@@ -137,59 +137,66 @@ fn next_ai_operation_id(state: &Arc<Mutex<SharedAppState>>) -> u64 {
     state_guard.ai_request_seq
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum AiStreamKind {
     Translation,
     Explanation,
+    CustomPrompt(String),
 }
 
 impl AiStreamKind {
-    fn kind_name(self) -> &'static str {
+    fn kind_name(&self) -> String {
         match self {
-            Self::Translation => "translation",
-            Self::Explanation => "explanation",
+            Self::Translation => "translation".to_string(),
+            Self::Explanation => "explanation".to_string(),
+            Self::CustomPrompt(_) => "custom_prompt".to_string(),
         }
     }
 
-    fn window_label(self) -> &'static str {
+    fn window_label(&self) -> String {
         match self {
-            Self::Translation => "result_translation",
-            Self::Explanation => "result_explanation",
+            Self::Translation => "result_translation".to_string(),
+            Self::Explanation => "result_explanation".to_string(),
+            Self::CustomPrompt(_) => "result_custom_prompt".to_string(),
         }
     }
 
-    fn window_title(self) -> &'static str {
+    fn window_title(&self) -> String {
         match self {
-            Self::Translation => "翻译结果",
-            Self::Explanation => "解释结果",
+            Self::Translation => "翻译结果".to_string(),
+            Self::Explanation => "解释结果".to_string(),
+            Self::CustomPrompt(name) => format!("{} 结果", name),
         }
     }
 
-    fn display_name(self) -> &'static str {
+    fn display_name(&self) -> String {
         match self {
-            Self::Translation => "翻译",
-            Self::Explanation => "解释",
+            Self::Translation => "翻译".to_string(),
+            Self::Explanation => "解释".to_string(),
+            Self::CustomPrompt(name) => name.clone(),
         }
     }
 }
 
-fn set_active_operation(state: &Arc<Mutex<SharedAppState>>, kind: AiStreamKind, operation_id: u64) {
+fn set_active_operation(state: &Arc<Mutex<SharedAppState>>, kind: &AiStreamKind, operation_id: u64) {
     let mut state_guard = lock_state(state);
     match kind {
         AiStreamKind::Translation => state_guard.active_translation_op_id = operation_id,
         AiStreamKind::Explanation => state_guard.active_explanation_op_id = operation_id,
+        AiStreamKind::CustomPrompt(_) => state_guard.active_custom_prompt_op_id = operation_id,
     }
 }
 
 fn is_operation_active(
     state: &Arc<Mutex<SharedAppState>>,
-    kind: AiStreamKind,
+    kind: &AiStreamKind,
     operation_id: u64,
 ) -> bool {
     let state_guard = lock_state(state);
     match kind {
         AiStreamKind::Translation => state_guard.active_translation_op_id == operation_id,
         AiStreamKind::Explanation => state_guard.active_explanation_op_id == operation_id,
+        AiStreamKind::CustomPrompt(_) => state_guard.active_custom_prompt_op_id == operation_id,
     }
 }
 
@@ -216,6 +223,17 @@ pub struct StreamExplainRequest {
     pub op_id: Option<u64>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamCustomPromptRequest {
+    pub text: String,
+    pub prompt_name: String,
+    #[serde(default)]
+    pub scene_hint: Option<String>,
+    #[serde(default)]
+    pub op_id: Option<u64>,
+}
+
 struct StreamExecutionRequest {
     text: String,
     source_language: Option<String>,
@@ -236,22 +254,26 @@ async fn execute_stream_request(
         let msg = match kind {
             AiStreamKind::Translation => "文本为空，无法翻译",
             AiStreamKind::Explanation => "文本为空，无法解释",
+            AiStreamKind::CustomPrompt(_) => "文本为空，无法执行",
         };
         return Err(AppError::new(ErrorCode::ValidationError, msg));
     }
 
     let configured_prompt = {
         let state_guard = lock_state(&state_arc);
-        match kind {
+        match &kind {
             AiStreamKind::Translation => state_guard.settings.translation_prompt_template.clone(),
             AiStreamKind::Explanation => state_guard.settings.explanation_prompt_template.clone(),
+            AiStreamKind::CustomPrompt(name) => {
+                state_guard.settings.selection_custom_prompts.iter().find(|p| &p.name == name).map(|p| p.prompt.clone()).unwrap_or_default()
+            }
         }
     };
 
     let operation_id = request
         .op_id
         .unwrap_or_else(|| next_ai_operation_id(&state_arc));
-    set_active_operation(&state_arc, kind, operation_id);
+    set_active_operation(&state_arc, &kind, operation_id);
     let client: AIClient = get_or_create_ai_client(state_arc.clone()).await?;
 
     show_result_window(
@@ -276,6 +298,7 @@ async fn execute_stream_request(
         match kind {
             AiStreamKind::Translation => default_translation_prompt_template(),
             AiStreamKind::Explanation => default_explanation_prompt_template(),
+            AiStreamKind::CustomPrompt(_) => "{text}".to_string(),
         }
     } else {
         configured_prompt
@@ -322,17 +345,19 @@ async fn execute_stream_request(
                     match kind {
                         AiStreamKind::Translation => "ai.translation.first_chunk",
                         AiStreamKind::Explanation => "ai.explanation.first_chunk",
+                        AiStreamKind::CustomPrompt(_) => "ai.custom_prompt.first_chunk",
                     },
                     match kind {
                         AiStreamKind::Translation => "AI翻译首字返回",
                         AiStreamKind::Explanation => "AI解释首字返回",
+                        AiStreamKind::CustomPrompt(_) => "AI自定义首字返回",
                     },
                     started_at.elapsed().as_millis() as u64,
                     true,
                     None,
                 );
             }
-            if !is_operation_active(&state_for_stream, kind, operation_id) {
+            if !is_operation_active(&state_for_stream, &kind, operation_id) {
                 log::info!(
                     "{}流已被新请求接管，停止旧流: op_id={}",
                     kind.display_name(),
@@ -361,16 +386,18 @@ async fn execute_stream_request(
                 match kind {
                     AiStreamKind::Translation => "ai.translation.total",
                     AiStreamKind::Explanation => "ai.explanation.total",
+                    AiStreamKind::CustomPrompt(_) => "ai.custom_prompt.total",
                 },
                 match kind {
                     AiStreamKind::Translation => "AI翻译总耗时",
                     AiStreamKind::Explanation => "AI解释总耗时",
+                    AiStreamKind::CustomPrompt(_) => "AI自定义总耗时",
                 },
                 started_at.elapsed().as_millis() as u64,
                 true,
                 None,
             );
-            if is_operation_active(&state_arc, kind, operation_id) {
+            if is_operation_active(&state_arc, &kind, operation_id) {
                 log::info!("{}完成: op_id={}", kind.display_name(), operation_id);
             } else {
                 log::info!(
@@ -387,10 +414,12 @@ async fn execute_stream_request(
                     match kind {
                         AiStreamKind::Translation => "ai.translation.first_chunk",
                         AiStreamKind::Explanation => "ai.explanation.first_chunk",
+                        AiStreamKind::CustomPrompt(_) => "ai.custom_prompt.first_chunk",
                     },
                     match kind {
                         AiStreamKind::Translation => "AI翻译首字返回",
                         AiStreamKind::Explanation => "AI解释首字返回",
+                        AiStreamKind::CustomPrompt(_) => "AI自定义首字返回",
                     },
                     started_at.elapsed().as_millis() as u64,
                     false,
@@ -401,16 +430,18 @@ async fn execute_stream_request(
                 match kind {
                     AiStreamKind::Translation => "ai.translation.total",
                     AiStreamKind::Explanation => "ai.explanation.total",
+                    AiStreamKind::CustomPrompt(_) => "ai.custom_prompt.total",
                 },
                 match kind {
                     AiStreamKind::Translation => "AI翻译总耗时",
                     AiStreamKind::Explanation => "AI解释总耗时",
+                    AiStreamKind::CustomPrompt(_) => "AI自定义总耗时",
                 },
                 started_at.elapsed().as_millis() as u64,
                 false,
                 Some(error_message.clone()),
             );
-            if !is_operation_active(&state_arc, kind, operation_id) {
+            if !is_operation_active(&state_arc, &kind, operation_id) {
                 log::info!(
                     "忽略过期{}错误: op_id={}, error={}",
                     kind.display_name(),
@@ -465,6 +496,28 @@ pub async fn stream_explain_text(
             text: request.text,
             source_language: None,
             target_language: request.target_language,
+            scene_hint: request.scene_hint,
+            op_id: request.op_id,
+        },
+        app,
+        state.inner().clone(),
+    )
+    .await
+}
+
+/// 流式执行自定义 Prompt
+#[tauri::command]
+pub async fn stream_custom_prompt_text(
+    request: StreamCustomPromptRequest,
+    app: AppHandle,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), AppError> {
+    execute_stream_request(
+        AiStreamKind::CustomPrompt(request.prompt_name),
+        StreamExecutionRequest {
+            text: request.text,
+            source_language: None,
+            target_language: "中文".to_string(), // 或者由前端传过来，目前简化处理
             scene_hint: request.scene_hint,
             op_id: request.op_id,
         },

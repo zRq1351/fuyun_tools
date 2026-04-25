@@ -43,6 +43,47 @@
         <div class="form-hint">用于划词解释，可通过变量控制输出风格</div>
       </el-form-item>
     </el-card>
+
+    <el-card class="setting-section-card" shadow="never">
+      <template #header>
+        <div class="section-title">网页搜索入口</div>
+      </template>
+      <el-form-item label="启用搜索入口">
+        <el-switch v-model="form.selectionWebSearchEnabled" active-text="启用" inactive-text="关闭"/>
+        <div class="form-hint">在划词工具栏中提供搜索引擎的快捷按钮</div>
+      </el-form-item>
+      <el-form-item label="默认搜索引擎" v-if="form.selectionWebSearchEnabled">
+        <el-select v-model="form.selectionWebSearchEngine" placeholder="请选择搜索引擎">
+          <el-option label="Bing" value="bing" />
+          <el-option label="Google" value="google" />
+          <el-option label="Baidu" value="baidu" />
+          <el-option label="DuckDuckGo" value="duckduckgo" />
+        </el-select>
+      </el-form-item>
+    </el-card>
+
+    <el-card class="setting-section-card" shadow="never">
+      <template #header>
+        <div class="section-title">自定义 AI 按钮</div>
+      </template>
+      <div class="form-hint" style="margin-bottom: 12px;">在工具栏上增加额外的功能按钮，如“总结”、“查文档”等。</div>
+      
+      <div v-for="(item, index) in form.selectionCustomPrompts" :key="index" class="custom-prompt-item">
+        <div class="prompt-header">
+          <el-input v-model="item.name" placeholder="按钮名称（例如：总结）" style="width: 200px;" />
+          <el-button type="danger" link @click="removeCustomPrompt(index)">删除</el-button>
+        </div>
+        <el-input
+            v-model="item.prompt"
+            :rows="3"
+            placeholder="提示词模板，必须包含 {text} 变量"
+            type="textarea"
+            style="margin-top: 8px;"
+        />
+      </div>
+
+      <el-button type="primary" plain @click="addCustomPrompt" style="margin-top: 12px;">+ 添加自定义按钮</el-button>
+    </el-card>
   </el-form>
 </template>
 
@@ -64,6 +105,20 @@ const resetTranslationPromptTemplate = () => {
 const resetExplanationPromptTemplate = () => {
   props.form.explanationPromptTemplate = DEFAULT_EXPLANATION_PROMPT_TEMPLATE
 }
+
+const addCustomPrompt = () => {
+  if (!props.form.selectionCustomPrompts) {
+    props.form.selectionCustomPrompts = []
+  }
+  props.form.selectionCustomPrompts.push({
+    name: '',
+    prompt: ''
+  })
+}
+
+const removeCustomPrompt = (index) => {
+  props.form.selectionCustomPrompts.splice(index, 1)
+}
 </script>
 
 <style scoped>
@@ -80,5 +135,19 @@ const resetExplanationPromptTemplate = () => {
 
 .form-actions {
   margin-top: 8px;
+}
+
+.custom-prompt-item {
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background-color: var(--el-fill-color-light);
+}
+
+.prompt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 </style>

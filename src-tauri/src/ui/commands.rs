@@ -3650,6 +3650,9 @@ pub async fn save_app_settings(
     recording_enabled: Option<bool>,
     selection_enabled: Option<bool>,
     selection_modifier_key: Option<String>,
+    selection_custom_prompts: Option<Vec<crate::utils::settings_model::CustomPrompt>>,
+    selection_web_search_enabled: Option<bool>,
+    selection_web_search_engine: Option<String>,
     grouped_items_protected_from_limit: Option<bool>,
     translation_prompt_template: Option<String>,
     explanation_prompt_template: Option<String>,
@@ -3707,6 +3710,15 @@ pub async fn save_app_settings(
     }
     if let Some(val) = selection_modifier_key {
         settings.selection_modifier_key = val;
+    }
+    if let Some(val) = selection_custom_prompts {
+        settings.selection_custom_prompts = val;
+    }
+    if let Some(val) = selection_web_search_enabled {
+        settings.selection_web_search_enabled = val;
+    }
+    if let Some(val) = selection_web_search_engine {
+        settings.selection_web_search_engine = val;
     }
     if let Some(val) = grouped_items_protected_from_limit {
         settings.grouped_items_protected_from_limit = val;

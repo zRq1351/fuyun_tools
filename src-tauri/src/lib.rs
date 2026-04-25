@@ -430,6 +430,7 @@ pub fn run() {
             test_ai_connection,
             stream_translate_text,
             stream_explain_text,
+            stream_custom_prompt_text,
             get_provider_config,
             remove_ai_provider,
             get_all_configured_providers,
