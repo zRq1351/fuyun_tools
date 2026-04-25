@@ -40,7 +40,7 @@
 import {onBeforeUnmount, onMounted, ref} from 'vue'
 import {ChatLineRound, Collection, DocumentCopy, MagicStick} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
-import {getCurrentWindow} from '@tauri-apps/api/window'
+import {getCurrentWindow, currentMonitor} from '@tauri-apps/api/window'
 import {AIService, AISettingsService, ClipboardService, WindowService} from '../../services/ipc'
 import {handleAppError} from '../../utils/errorHandler'
 
@@ -109,7 +109,7 @@ const onMouseEnter = async () => {
       const newPhysicalHeight = Math.round(100 * factor)
 
       // 获取当前显示器边界进行裁剪，防止放大后超出屏幕
-      const monitor = await appWindow.currentMonitor()
+      const monitor = await currentMonitor()
       if (monitor) {
         const minPhysicalX = monitor.position.x
         const minPhysicalY = monitor.position.y
