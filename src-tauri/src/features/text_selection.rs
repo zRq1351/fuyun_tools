@@ -175,13 +175,22 @@ fn get_selected_text_windows(
         sequence_before_copy,
     );
 
-    // 5. 恢复原始剪贴板内容
-    restore_clipboard_snapshot(
-        &clipboard_manager,
-        app_handle,
-        &original_snapshot,
-        &new_content,
-    );
+    let sequence_after_copy = get_clipboard_sequence_number();
+    let sequence_changed = sequence_after_copy != 0
+        && sequence_before_copy != 0
+        && sequence_after_copy != sequence_before_copy;
+
+    if new_content.is_none() && !sequence_changed {
+        log::debug!("未捕获到新内容且剪贴板序列号未改变，无需恢复，避免覆盖非文本/图片格式");
+    } else {
+        // 5. 恢复原始剪贴板内容
+        restore_clipboard_snapshot(
+            &clipboard_manager,
+            app_handle,
+            &original_snapshot,
+            &new_content,
+        );
+    }
 
     match &new_content {
         Some(content) => {
@@ -327,11 +336,9 @@ fn restore_clipboard_snapshot(
         .is_some_and(|(captured, current)| current == captured);
 
     if captured_content.is_none() {
-        log::debug!("未捕获到内容，无需恢复");
-        return;
-    }
-
-    if !still_holds_captured_text {
+        log::debug!("未捕获到有效文本内容，直接恢复原始剪贴板");
+        // 即使未捕获到有效文本，如果是因为复制了文件或图片导致剪贴板改变，也应恢复
+    } else if !still_holds_captured_text {
         log::info!("检测到剪贴板在捕获后被用户更改，已放弃恢复原始内容以避免覆盖用户操作");
         return;
     }

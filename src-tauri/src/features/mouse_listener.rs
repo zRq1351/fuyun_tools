@@ -199,32 +199,54 @@ fn handle_hook_event(
             };
                             
             // 智能判断是否为划词操作
-            let is_likely_text_selection = if is_drag && modifier_key.is_empty() {
-                // 无修饰键的拖拽，需要进一步判断
-                if has_seen_ibeam {
-                    // 拖拽过程中见过 IBEAM，肯定是划词
-                    true
-                } else {
-                    // 没见过 IBEAM，检查其他特征
-                    let end_is_ibeam = is_cursor_ibeam();
-                    if end_is_ibeam {
-                        // 结束时在文本区，可能是划词
-                        log::debug!("拖拽结束时光标为文本输入型");
+            let is_likely_text_selection = if modifier_key.is_empty() {
+                if is_drag {
+                    // 无修饰键的拖拽，需要进一步判断
+                    if has_seen_ibeam {
+                        // 拖拽过程中见过 IBEAM，肯定是划词
                         true
                     } else {
-                        // 检查移动轨迹：划词通常是近似直线
-                        let is_linear = check_linear_movement(&positions);
-                        if is_linear {
-                            log::debug!("拖拽轨迹呈线性，可能是划词");
+                        // 没见过 IBEAM，检查其他特征
+                        let end_is_ibeam = is_cursor_ibeam();
+                        if end_is_ibeam {
+                            // 结束时在文本区，可能是划词
+                            log::debug!("拖拽结束时光标为文本输入型");
                             true
                         } else {
-                            log::debug!("拖拽轨迹不规则，可能是窗口操作");
-                            false
+                            // 检查移动轨迹：划词通常是近似直线
+                            let is_linear = check_linear_movement(&positions);
+                            let is_horizontal_dominant = {
+                                if let (Some(first), Some(last)) = (positions.first(), positions.last()) {
+                                    let dx = (last.0 - first.0).abs() as f64;
+                                    let dy = (last.1 - first.1).abs() as f64;
+                                    // 过滤掉纯垂直的滑动（如滚动条）
+                                    dx > dy * 0.3 && dx > 10.0
+                                } else {
+                                    false
+                                }
+                            };
+
+                            if is_linear && is_horizontal_dominant {
+                                log::debug!("拖拽轨迹呈线性且包含水平移动，可能是划词");
+                                true
+                            } else {
+                                log::debug!("拖拽轨迹不规则或是垂直滑动，可能是窗口或滚动条操作");
+                                false
+                            }
                         }
                     }
+                } else if is_double_click {
+                    // 无修饰键的双击，必须要求光标是文本输入型，否则容易误判窗口操作或桌面图标操作
+                    let current_is_ibeam = is_cursor_ibeam();
+                    if !current_is_ibeam {
+                        log::debug!("无修饰键双击时，光标不是文本输入型，判定为非划词操作");
+                    }
+                    current_is_ibeam
+                } else {
+                    false
                 }
             } else {
-                // 有修饰键或不是拖拽，按原有逻辑
+                // 有修饰键，信任用户意图
                 true
             };
                             
