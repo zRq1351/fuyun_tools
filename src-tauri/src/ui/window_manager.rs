@@ -117,10 +117,17 @@ pub fn bind_overlay_window_events(
 ) {
     let label = label.into();
     let window_clone = window.clone();
+    // 判断是否为结果窗口（翻译/解释/自定义提示词）
+    let is_result_window = label.starts_with("result_");
+    
     window.on_window_event(move |event| match event {
         tauri::WindowEvent::CloseRequested { api, .. } => {
-            api.prevent_close();
-            hide_overlay_window(&app_handle, &label, &window_clone);
+            // 结果窗口允许真正关闭，其他窗口隐藏
+            if !is_result_window {
+                api.prevent_close();
+                hide_overlay_window(&app_handle, &label, &window_clone);
+            }
+            // 如果是结果窗口，不拦截，允许正常关闭
         }
         tauri::WindowEvent::Destroyed => {
             let should_clear = app_handle
