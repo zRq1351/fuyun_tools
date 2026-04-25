@@ -777,8 +777,7 @@ fn set_toolbar_window(window: &tauri::WebviewWindow, anchor_pos: Option<(i32, i3
     if let Some((mx, my)) = anchor_pos {
         let scale_factor = window.scale_factor().unwrap_or(1.0);
         let physical_initial_width = (initial_width as f64 * scale_factor) as i32;
-        let physical_expanded_width = (expanded_width as f64 * scale_factor) as i32;
-        let physical_expanded_height = (expanded_height as f64 * scale_factor) as i32;
+        let physical_initial_height = (initial_height as f64 * scale_factor) as i32;
         let offset = (logical_offset * scale_factor) as i32;
 
         let mut x = mx - (physical_initial_width / 2);
@@ -803,10 +802,10 @@ fn set_toolbar_window(window: &tauri::WebviewWindow, anchor_pos: Option<(i32, i3
             let monitor_size = monitor.size();
             let min_x = monitor_pos.x;
             let min_y = monitor_pos.y;
-            let max_x = monitor_pos.x + monitor_size.width as i32 - physical_expanded_width;
-            let max_y = monitor_pos.y + monitor_size.height as i32 - physical_expanded_height;
+            let max_x = monitor_pos.x + monitor_size.width as i32 - physical_initial_width;
+            let max_y = monitor_pos.y + monitor_size.height as i32 - physical_initial_height;
             let below_y = my + offset;
-            let above_y = my - physical_expanded_height - offset;
+            let above_y = my - physical_initial_height - offset;
             if below_y <= max_y {
                 y = below_y;
             } else if above_y >= min_y {

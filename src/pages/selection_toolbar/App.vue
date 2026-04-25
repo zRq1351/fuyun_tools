@@ -103,10 +103,22 @@ const onMouseEnter = async () => {
       const expandedX = logicalX - (240 - 64) / 2
       const expandedY = logicalY - (100 - 64) / 2
 
-      const newPhysicalX = Math.round(expandedX * factor)
-      const newPhysicalY = Math.round(expandedY * factor)
+      let newPhysicalX = Math.round(expandedX * factor)
+      let newPhysicalY = Math.round(expandedY * factor)
       const newPhysicalWidth = Math.round(240 * factor)
       const newPhysicalHeight = Math.round(100 * factor)
+
+      // 获取当前显示器边界进行裁剪，防止放大后超出屏幕
+      const monitor = await appWindow.currentMonitor()
+      if (monitor) {
+        const minPhysicalX = monitor.position.x
+        const minPhysicalY = monitor.position.y
+        const maxPhysicalX = monitor.position.x + monitor.size.width - newPhysicalWidth
+        const maxPhysicalY = monitor.position.y + monitor.size.height - newPhysicalHeight
+        
+        newPhysicalX = Math.max(minPhysicalX, Math.min(newPhysicalX, maxPhysicalX))
+        newPhysicalY = Math.max(minPhysicalY, Math.min(newPhysicalY, maxPhysicalY))
+      }
 
       // 放大窗口，此时工具栏还未显示（opacity: 0）
       await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
