@@ -10,6 +10,8 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
+    let is_console = crate::features::mouse_listener::is_foreground_window_console();
+
     match enigo.key(CTRL_KEY, enigo::Direction::Press) {
         Ok(_) => {}
         Err(e) => return Err(format!("按下 Ctrl 键失败: {:?}", e)),
@@ -21,11 +23,25 @@ fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
         release_ctrl_key_with_fallback(enigo).map_err(|e| format!("释放 Ctrl 键失败: {}", e))
     }
 
-    match enigo.key(Key::Unicode('c'), enigo::Direction::Click) {
+    let copy_key = if is_console {
+        #[cfg(target_os = "windows")]
+        {
+            // 0x2D is VK_INSERT
+            Key::Raw(0x2D)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Key::Unicode('c')
+        }
+    } else {
+        Key::Unicode('c')
+    };
+
+    match enigo.key(copy_key, enigo::Direction::Click) {
         Ok(_) => {}
         Err(e) => {
             let _ = release_ctrl(enigo);
-            return Err(format!("按下 C 键失败: {:?}", e));
+            return Err(format!("按下 C/Insert 键失败: {:?}", e));
         }
     }
 
@@ -33,7 +49,7 @@ fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
 
     release_ctrl(enigo)?;
 
-    log::info!("已发送 Ctrl+C 模拟按键");
+    log::info!("已发送复制模拟按键 (is_console: {})", is_console);
     Ok(())
 }
 
