@@ -203,40 +203,51 @@ fn handle_hook_event(
                 if is_drag {
                     // 无修饰键的拖拽，需要进一步判断
                     if has_seen_ibeam {
-                        // 拖拽过程中见过 IBEAM，肯定是划词
+                        // 在开始/滑动中/结束任何一处见过 IBEAM，直接判定为划词
+                        log::debug!("拖拽过程中检测到文本输入型光标，直接判定为划词");
                         true
                     } else {
-                        // 没见过 IBEAM，检查其他特征
-                        let end_is_ibeam = is_cursor_ibeam();
-                        if end_is_ibeam {
-                            // 结束时在文本区，可能是划词
-                            log::debug!("拖拽结束时光标为文本输入型");
-                            true
-                        } else {
-                            // 检查移动轨迹：划词通常是近似直线
-                            let is_linear = check_linear_movement(&positions);
-                            let is_horizontal_dominant = {
-                                if let (Some(first), Some(last)) = (positions.first(), positions.last()) {
-                                    let dx = (last.0 - first.0).abs() as f64;
-                                    let dy = (last.1 - first.1).abs() as f64;
-                                    // 过滤掉纯垂直的滑动（如滚动条）
-                                    dx > dy * 0.3 && dx > 10.0
-                                } else {
-                                    false
-                                }
-                            };
-
-                            if is_linear && is_horizontal_dominant {
-                                log::debug!("拖拽轨迹呈线性且包含水平移动，可能是划词");
-                                true
+                        // 完全没见过 IBEAM，根据轨迹特征判断
+                        let feature_linear = check_linear_movement(&positions);
+                        
+                        let feature_horizontal = {
+                            if let (Some(first), Some(last)) = (positions.first(), positions.last()) {
+                                let dx = (last.0 - first.0).abs() as f64;
+                                let dy = (last.1 - first.1).abs() as f64;
+                                dx > dy * 0.3 && dx > 10.0
                             } else {
-                                log::debug!("拖拽轨迹不规则或是垂直滑动，可能是窗口或滚动条操作");
                                 false
                             }
+                        };
+                        
+                        let feature_speed = {
+                            let total_distance = distance;
+                            let duration_ms = duration.as_millis() as f64;
+                            if duration_ms > 0.0 {
+                                let speed = total_distance / duration_ms;
+                                speed >= 0.2 && speed <= 10.0
+                            } else {
+                                false
+                            }
+                        };
+                        
+                        // 综合评分：至少满足2个特征才认为是划词
+                        let score = [
+                            feature_linear,
+                            feature_horizontal,
+                            feature_speed
+                        ].iter().filter(|&&x| x).count();
+                        
+                        if score >= 2 {
+                            log::debug!("拖拽操作通过综合判断 (得分: {}/3)，判定为划词", score);
+                            true
+                        } else {
+                            log::debug!("拖拽操作未通过综合判断 (得分: {}/3)，可能是窗口/滚动操作", score);
+                            false
                         }
                     }
                 } else if is_double_click {
-                    // 无修饰键的双击，必须要求光标是文本输入型，否则容易误判窗口操作或桌面图标操作
+                    // 无修饰键的双击，必须要求光标是文本输入型
                     let current_is_ibeam = is_cursor_ibeam();
                     if !current_is_ibeam {
                         log::debug!("无修饰键双击时，光标不是文本输入型，判定为非划词操作");
