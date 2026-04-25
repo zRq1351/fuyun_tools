@@ -3334,11 +3334,14 @@ pub async fn show_ocr_text_window(
 }
 
 #[tauri::command]
-pub async fn get_ai_settings() -> Result<serde_json::Value, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let settings = load_settings()
-            .map_err(|e| frontend_error(ErrorCode::ConfigError, "读取AI设置失败", e))?;
+pub async fn get_ai_settings(state: State<'_, Arc<Mutex<SharedAppState>>>) -> Result<serde_json::Value, String> {
+    // 直接从内存中的 AppState 获取配置，避免重复从磁盘加载
+    let settings = {
+        let state_guard = lock_arc_mutex(state.inner());
+        state_guard.settings.clone()
+    };
 
+    tauri::async_runtime::spawn_blocking(move || {
         // 直接将整个 settings 序列化为 JSON Value
         let mut settings_json = serde_json::to_value(&settings)
             .map_err(|e| frontend_error(ErrorCode::SystemError, "序列化设置失败", e.to_string()))?;

@@ -122,15 +122,17 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
     let old_version = settings.version.clone();
     settings.migrate_from_old();
 
-    // 反序列化后再序列化，如果两者内容不同，说明有缺失的默认字段被补全，触发保存
+    // 反序列化后再序列化，如果两者内容不同，说明有缺失的默认字段被补全
     let new_contents = serde_json::to_string_pretty(&settings)
         .map_err(|e| format!("序列化设置以对比失败: {}", e))?;
     let fields_added = contents != new_contents;
 
+    // 只有在版本变化、密钥迁移或字段添加时才保存，避免频繁IO
     if old_version != settings.version || keys_migrated || fields_added {
         log::info!("配置已更新或补全缺失字段，保存到文件");
         save_settings(&settings)?;
     }
+    
     let _provider_key = settings.ai_provider.to_string();
     Ok(settings)
 }
