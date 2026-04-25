@@ -26,8 +26,7 @@ fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
     let copy_key = if is_console {
         #[cfg(target_os = "windows")]
         {
-            // 0x2D is VK_INSERT
-            Key::Raw(0x2D)
+            Key::Insert
         }
         #[cfg(not(target_os = "windows"))]
         {
