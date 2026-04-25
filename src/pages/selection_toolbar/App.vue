@@ -32,16 +32,20 @@
           <span class="btn-text">复制</span>
         </div>
 
-        <div v-if="webSearchEnabled" :class="{ disabled: actionLoading }" class="toolbar-button search-btn" @click="handleWebSearch">
+        <div :class="{ disabled: actionLoading }" class="toolbar-button search-btn" @click="handleWebSearch">
           <el-icon class="btn-icon">
             <search/>
           </el-icon>
           <span class="btn-text">搜索</span>
         </div>
 
-        <div v-for="prompt in customPrompts" :key="prompt.name" :class="{ disabled: actionLoading }" class="toolbar-button custom-btn" @click="handleCustomPrompt(prompt.name)">
+        <div v-for="prompt in enabledCustomPrompts" :key="prompt.name"
+             :class="{ disabled: actionLoading }"
+             :style="{ color: prompt.color || '#909399', background: parseBackground(prompt.bg_color) }"
+             class="toolbar-button custom-btn"
+             @click="handleCustomPrompt(prompt.name)">
           <el-icon class="btn-icon">
-            <star/>
+            <component :is="getIconComponent(prompt.icon || 'Star')"/>
           </el-icon>
           <span class="btn-text">{{ prompt.name }}</span>
         </div>
@@ -51,18 +55,18 @@
 </template>
 
 <script setup>
-import {onBeforeUnmount, onMounted, ref} from 'vue'
-import {ChatLineRound, Collection, DocumentCopy, MagicStick, Search, Star} from '@element-plus/icons-vue'
+import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
+import * as ElementPlusIconsVue from '@element-plus/icons-vue'
+import {ChatLineRound, Collection, DocumentCopy, MagicStick, Search} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
-import {getCurrentWindow, currentMonitor} from '@tauri-apps/api/window'
-import {open} from '@tauri-apps/api/shell'
+import {currentMonitor, getCurrentWindow} from '@tauri-apps/api/window'
+import {openUrl} from '@tauri-apps/plugin-opener'
 import {AIService, AISettingsService, ClipboardService, WindowService} from '../../services/ipc'
-import {handleAppError} from '../../utils/errorHandler'
+import {handleAppError} from '@/utils/errorHandler.js'
 
 const selectedText = ref('')
 const actionLoading = ref(false)
 const isHovered = ref(false)
-const webSearchEnabled = ref(true)
 const webSearchEngine = ref('bing')
 const customPrompts = ref([])
 let unlistenSelectedText = null
@@ -73,6 +77,49 @@ let enterTimeout = null
 let isAnimating = false // 添加动画锁，防止重复触发
 
 const appWindow = getCurrentWindow()
+
+// 动态获取图标组件（仅支持 Element Plus）
+const getIconComponent = (iconName) => {
+  if (!iconName) return ElementPlusIconsVue.Star
+
+  const icon = ElementPlusIconsVue[iconName]
+  if (icon) {
+    return icon
+  }
+
+  // 默认返回 Star
+  return ElementPlusIconsVue.Star
+}
+
+// 过滤出启用的自定义按钮
+const enabledCustomPrompts = computed(() => {
+  return customPrompts.value.filter(prompt => prompt.enabled !== false)
+})
+
+// 解析背景颜色，处理渐变和纯色
+const parseBackground = (bgColor) => {
+  if (!bgColor) return 'linear-gradient(145deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05))'
+
+  // 如果是纯色或rgba，创建渐变效果
+  if (bgColor.startsWith('rgba') || bgColor.startsWith('#')) {
+    return `linear-gradient(145deg, ${bgColor}, ${adjustOpacity(bgColor, 0.5)})`
+  }
+
+  return bgColor
+}
+
+// 调整颜色的透明度
+const adjustOpacity = (color, opacityFactor) => {
+  if (color.startsWith('rgba')) {
+    const match = color.match(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/)
+    if (match) {
+      const [, r, g, b] = match
+      const newOpacity = (parseFloat(match[4]) * opacityFactor).toFixed(2)
+      return `rgba(${r}, ${g}, ${b}, ${newOpacity})`
+    }
+  }
+  return color
+}
 
 let stateVersion = 0
 let shrunkPhysicalX = null
@@ -110,9 +157,13 @@ const onMouseEnter = async () => {
     // 每次展开前重新加载配置以获取最新的按钮列表
     const settings = await AISettingsService.getSettings().catch(() => null)
     if (settings) {
-      webSearchEnabled.value = settings.selection_web_search_enabled !== false
       webSearchEngine.value = settings.selection_web_search_engine || 'bing'
       customPrompts.value = Array.isArray(settings.selection_custom_prompts) ? settings.selection_custom_prompts : []
+      console.log('[Toolbar] Loaded settings on expand, engine:', webSearchEngine.value)
+      console.log('[Toolbar] Custom prompts:', customPrompts.value)
+      console.log('[Toolbar] Full settings object:', settings)
+    } else {
+      console.log('[Toolbar] Failed to load settings on expand')
     }
 
     const factor = await appWindow.scaleFactor()
@@ -126,9 +177,9 @@ const onMouseEnter = async () => {
       const logicalX = physicalPos.x / factor
       const logicalY = physicalPos.y / factor
 
-      let buttonCount = 3
-      if (webSearchEnabled.value) buttonCount++
-      buttonCount += customPrompts.value.length
+      // 搜索按钮始终显示，基础按钮数 = 3(翻译、解释、复制) + 1(搜索)
+      let buttonCount = 4
+      buttonCount += enabledCustomPrompts.value.length
 
       const targetWidth = buttonCount * 60 + 12
       const targetHeight = 100
@@ -148,7 +199,7 @@ const onMouseEnter = async () => {
         const minPhysicalY = monitor.position.y
         const maxPhysicalX = monitor.position.x + monitor.size.width - newPhysicalWidth
         const maxPhysicalY = monitor.position.y + monitor.size.height - newPhysicalHeight
-        
+
         newPhysicalX = Math.max(minPhysicalX, Math.min(newPhysicalX, maxPhysicalX))
         newPhysicalY = Math.max(minPhysicalY, Math.min(newPhysicalY, maxPhysicalY))
       }
@@ -195,9 +246,9 @@ const shrinkWindow = async (version) => {
       const physicalPos = await appWindow.outerPosition()
       const logicalX = physicalPos.x / factor
       const logicalY = physicalPos.y / factor
-      let buttonCount = 3
-      if (webSearchEnabled.value) buttonCount++
-      buttonCount += customPrompts.value.length
+      // 搜索按钮始终显示，基础按钮数 = 3(翻译、解释、复制) + 1(搜索)
+      let buttonCount = 4
+      buttonCount += enabledCustomPrompts.value.length
       const currentWidth = buttonCount * 60 + 12
       const currentHeight = 100
 
@@ -410,6 +461,16 @@ const handleCopy = async () => {
 
 const handleWebSearch = async () => {
   await runAction(async (text) => {
+    // 点击搜索时重新获取最新设置
+    const settings = await AISettingsService.getSettings().catch(() => null)
+    if (settings) {
+      webSearchEngine.value = settings.selection_web_search_engine || 'bing'
+      console.log('[Search] Loaded settings, engine:', webSearchEngine.value)
+      console.log('[Search] Full settings object:', settings)
+    } else {
+      console.log('[Search] Failed to load settings, using default: bing')
+    }
+
     const query = encodeURIComponent(text)
     let url = ''
     switch (webSearchEngine.value) {
@@ -427,7 +488,8 @@ const handleWebSearch = async () => {
         url = `https://www.bing.com/search?q=${query}`
         break
     }
-    await open(url)
+    console.log('[Search] Opening URL:', url, 'with engine:', webSearchEngine.value)
+    await openUrl(url)
     await WindowService.selectionToolbarBlur()
   }, '搜索失败')
 }
@@ -527,12 +589,12 @@ html, body, #app {
 .toolbar.active {
   opacity: 1;
   pointer-events: auto;
-  background: linear-gradient(145deg, rgba(28, 35, 48, 0.98), rgba(18, 22, 32, 0.98));
-  backdrop-filter: blur(12px);
+  background: linear-gradient(145deg, rgba(28, 35, 48, 0.95), rgba(18, 22, 32, 0.95));
+  backdrop-filter: blur(8px);
   border-radius: 12px;
   padding: 6px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
   flex-direction: row;
   gap: 2px;
@@ -648,11 +710,10 @@ html, body, #app {
 }
 
 .custom-btn {
-  color: #f472b6;
-  background: linear-gradient(145deg, rgba(244, 114, 182, 0.22), rgba(190, 24, 93, 0.2));
+  /* 背景颜色通过 :style 动态设置 */
 }
 .custom-btn:hover {
-  background: linear-gradient(145deg, rgba(244, 114, 182, 0.35), rgba(190, 24, 93, 0.3));
+  filter: brightness(1.2);
 }
 
 </style>

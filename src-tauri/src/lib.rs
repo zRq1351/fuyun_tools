@@ -7,7 +7,7 @@ pub mod utils;
 
 use crate::core::app_state::AppState;
 use crate::core::error::install_global_panic_hook;
-use crate::services::ai_services::{stream_explain_text, stream_translate_text};
+use crate::services::ai_services::{stream_custom_prompt_text, stream_explain_text, stream_translate_text};
 use crate::services::clipboard_manager::set_clipboard_listener_enabled;
 use crate::services::image_clipboard_manager::{
     emit_image_history_payload, set_image_clipboard_listener_enabled,

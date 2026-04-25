@@ -15,6 +15,30 @@ const LEGACY_ENCRYPTION_KEY: &[u8] = b"fuyun_tools_encryption_key_2025!";
 pub struct CustomPrompt {
     pub name: String,
     pub prompt: String,
+    #[serde(default = "default_custom_prompt_icon")]
+    pub icon: String,
+    #[serde(default = "default_custom_prompt_color")]
+    pub color: String,
+    #[serde(default = "default_custom_prompt_bg_color")]
+    pub bg_color: String,
+    #[serde(default = "default_custom_prompt_enabled")]
+    pub enabled: bool,
+}
+
+fn default_custom_prompt_icon() -> String {
+    "Star".to_string()
+}
+
+fn default_custom_prompt_color() -> String {
+    "#909399".to_string()
+}
+
+fn default_custom_prompt_bg_color() -> String {
+    "rgba(255, 255, 255, 0.1)".to_string()
+}
+
+fn default_custom_prompt_enabled() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -18,6 +18,7 @@
     "selection_toolbar",
     "result_explanation",
     "result_translation",
+    "result_custom_prompt",
     "settings"
   ],
   "permissions": [

@@ -79,6 +79,7 @@ impl Clone for AppState {
             ai_request_seq: self.ai_request_seq,
             active_translation_op_id: self.active_translation_op_id,
             active_explanation_op_id: self.active_explanation_op_id,
+            active_custom_prompt_op_id: self.active_custom_prompt_op_id,
             last_external_foreground: self.last_external_foreground.clone(),
             active_overlay_window: self.active_overlay_window.clone(),
             last_overlay_lifecycle: self.last_overlay_lifecycle.clone(),

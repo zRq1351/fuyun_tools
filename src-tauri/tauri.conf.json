@@ -141,6 +141,28 @@
         "center": false,
         "width": 560,
         "height": 360
+      },
+      {
+        "label": "result_custom_prompt",
+        "title": "自定义 AI 结果",
+        "url": "result_display.html",
+        "visible": false,
+        "resizable": true,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "backgroundColor": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": true,
+        "center": false,
+        "width": 560,
+        "height": 360
       }
     ],
     "security": {

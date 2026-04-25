@@ -323,9 +323,8 @@ const buildFormSnapshot = () => ({
 
 // 保存初始状态快照
 const saveInitialFormState = (snapshot = buildFormSnapshot()) => {
-  initialFormState.value = {
-    ...snapshot
-  }
+  // 使用深拷贝，避免响应式对象的引用问题
+  initialFormState.value = JSON.parse(JSON.stringify(snapshot))
 }
 
 // 获取变化的字段
@@ -449,7 +448,13 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
     changedFields.selectionModifierKey = source.selectionModifierKey
   }
   if (JSON.stringify(source.selectionCustomPrompts) !== JSON.stringify(initial.selectionCustomPrompts)) {
+    console.log('[Settings] Detecting change in selectionCustomPrompts')
+    console.log('[Settings] Current:', JSON.stringify(source.selectionCustomPrompts))
+    console.log('[Settings] Initial:', JSON.stringify(initial.selectionCustomPrompts))
     changedFields.selectionCustomPrompts = source.selectionCustomPrompts
+    console.log('[Settings] selectionCustomPrompts changed:', source.selectionCustomPrompts)
+  } else {
+    console.log('[Settings] No change in selectionCustomPrompts')
   }
   if (source.selectionWebSearchEnabled !== initial.selectionWebSearchEnabled) {
     changedFields.selectionWebSearchEnabled = source.selectionWebSearchEnabled

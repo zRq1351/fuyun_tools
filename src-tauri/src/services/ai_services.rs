@@ -326,7 +326,7 @@ async fn execute_stream_request(
         &request.target_language,
     );
 
-    if let Some(window) = app.clone().get_webview_window(kind.window_label()) {
+    if let Some(window) = app.clone().get_webview_window(&kind.window_label()) {
         let _ = window.emit(
             "result-clean",
             serde_json::json!({
@@ -365,7 +365,7 @@ async fn execute_stream_request(
                 );
                 return false;
             }
-            if let Some(window) = app.get_webview_window(kind.window_label()) {
+            if let Some(window) = app.get_webview_window(&kind.window_label()) {
                 let payload = serde_json::json!({
                     "type": kind.kind_name(),
                     "content": content_chunk
