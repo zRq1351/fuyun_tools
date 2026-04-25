@@ -31,6 +31,20 @@
           </el-icon>
           <span class="btn-text">复制</span>
         </div>
+
+        <div v-if="webSearchEnabled" :class="{ disabled: actionLoading }" class="toolbar-button search-btn" @click="handleWebSearch">
+          <el-icon class="btn-icon">
+            <search/>
+          </el-icon>
+          <span class="btn-text">搜索</span>
+        </div>
+
+        <div v-for="prompt in customPrompts" :key="prompt.name" :class="{ disabled: actionLoading }" class="toolbar-button custom-btn" @click="handleCustomPrompt(prompt.name)">
+          <el-icon class="btn-icon">
+            <star/>
+          </el-icon>
+          <span class="btn-text">{{ prompt.name }}</span>
+        </div>
       </div>
   </div>
 </div>
@@ -38,15 +52,19 @@
 
 <script setup>
 import {onBeforeUnmount, onMounted, ref} from 'vue'
-import {ChatLineRound, Collection, DocumentCopy, MagicStick} from '@element-plus/icons-vue'
+import {ChatLineRound, Collection, DocumentCopy, MagicStick, Search, Star} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWindow, currentMonitor} from '@tauri-apps/api/window'
+import {open} from '@tauri-apps/api/shell'
 import {AIService, AISettingsService, ClipboardService, WindowService} from '../../services/ipc'
 import {handleAppError} from '../../utils/errorHandler'
 
 const selectedText = ref('')
 const actionLoading = ref(false)
 const isHovered = ref(false)
+const webSearchEnabled = ref(true)
+const webSearchEngine = ref('bing')
+const customPrompts = ref([])
 let unlistenSelectedText = null
 let unlistenDomText = null
 let unlistenFocus = null
@@ -87,9 +105,17 @@ const onMouseEnter = async () => {
       }
 
       // 等待一帧确保魔法棒隐藏生效
-      await new Promise(resolve => requestAnimationFrame(resolve))
+    await new Promise(resolve => requestAnimationFrame(resolve))
 
-      const factor = await appWindow.scaleFactor()
+    // 每次展开前重新加载配置以获取最新的按钮列表
+    const settings = await AISettingsService.getSettings().catch(() => null)
+    if (settings) {
+      webSearchEnabled.value = settings.selection_web_search_enabled !== false
+      webSearchEngine.value = settings.selection_web_search_engine || 'bing'
+      customPrompts.value = Array.isArray(settings.selection_custom_prompts) ? settings.selection_custom_prompts : []
+    }
+
+    const factor = await appWindow.scaleFactor()
       const physicalPos = await appWindow.outerPosition()
       if (stateVersion !== currentVersion) return
 
@@ -100,13 +126,20 @@ const onMouseEnter = async () => {
       const logicalX = physicalPos.x / factor
       const logicalY = physicalPos.y / factor
 
-      const expandedX = logicalX - (240 - 64) / 2
-      const expandedY = logicalY - (100 - 64) / 2
+      let buttonCount = 3
+      if (webSearchEnabled.value) buttonCount++
+      buttonCount += customPrompts.value.length
+
+      const targetWidth = buttonCount * 60 + 12
+      const targetHeight = 100
+
+      const expandedX = logicalX - (targetWidth - 64) / 2
+      const expandedY = logicalY - (targetHeight - 64) / 2
 
       let newPhysicalX = Math.round(expandedX * factor)
       let newPhysicalY = Math.round(expandedY * factor)
-      const newPhysicalWidth = Math.round(240 * factor)
-      const newPhysicalHeight = Math.round(100 * factor)
+      const newPhysicalWidth = Math.round(targetWidth * factor)
+      const newPhysicalHeight = Math.round(targetHeight * factor)
 
       // 获取当前显示器边界进行裁剪，防止放大后超出屏幕
       const monitor = await currentMonitor()
@@ -162,8 +195,14 @@ const shrinkWindow = async (version) => {
       const physicalPos = await appWindow.outerPosition()
       const logicalX = physicalPos.x / factor
       const logicalY = physicalPos.y / factor
-      const shrunkX = logicalX + (240 - 64) / 2
-      const shrunkY = logicalY + (100 - 64) / 2
+      let buttonCount = 3
+      if (webSearchEnabled.value) buttonCount++
+      buttonCount += customPrompts.value.length
+      const currentWidth = buttonCount * 60 + 12
+      const currentHeight = 100
+
+      const shrunkX = logicalX + (currentWidth - 64) / 2
+      const shrunkY = logicalY + (currentHeight - 64) / 2
       newPhysicalX = Math.round(shrunkX * factor)
       newPhysicalY = Math.round(shrunkY * factor)
     }
@@ -368,6 +407,39 @@ const handleCopy = async () => {
     await WindowService.selectionToolbarBlur()
   }, '复制失败')
 }
+
+const handleWebSearch = async () => {
+  await runAction(async (text) => {
+    const query = encodeURIComponent(text)
+    let url = ''
+    switch (webSearchEngine.value) {
+      case 'google':
+        url = `https://www.google.com/search?q=${query}`
+        break
+      case 'baidu':
+        url = `https://www.baidu.com/s?wd=${query}`
+        break
+      case 'duckduckgo':
+        url = `https://duckduckgo.com/?q=${query}`
+        break
+      case 'bing':
+      default:
+        url = `https://www.bing.com/search?q=${query}`
+        break
+    }
+    await open(url)
+    await WindowService.selectionToolbarBlur()
+  }, '搜索失败')
+}
+
+const handleCustomPrompt = async (promptName) => {
+  await runAction(async (text) => {
+    const ready = await ensureSelectionAiConfigured()
+    if (!ready) return
+    await WindowService.selectionToolbarBlur()
+    await AIService.streamCustomPrompt(text, promptName)
+  }, '执行自定义 Prompt 失败')
+}
 </script>
 
 <style>
@@ -565,6 +637,22 @@ html, body, #app {
 }
 .copy-btn:hover {
   background: linear-gradient(145deg, rgba(209, 152, 61, 0.35), rgba(133, 89, 35, 0.3));
+}
+
+.search-btn {
+  color: #a78bfa;
+  background: linear-gradient(145deg, rgba(167, 139, 250, 0.22), rgba(109, 40, 217, 0.2));
+}
+.search-btn:hover {
+  background: linear-gradient(145deg, rgba(167, 139, 250, 0.35), rgba(109, 40, 217, 0.3));
+}
+
+.custom-btn {
+  color: #f472b6;
+  background: linear-gradient(145deg, rgba(244, 114, 182, 0.22), rgba(190, 24, 93, 0.2));
+}
+.custom-btn:hover {
+  background: linear-gradient(145deg, rgba(244, 114, 182, 0.35), rgba(190, 24, 93, 0.3));
 }
 
 </style>

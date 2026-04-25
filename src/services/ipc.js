@@ -125,6 +125,7 @@ export const IPC_COMMANDS = {
     // AI 功能
     STREAM_TRANSLATE_TEXT: 'stream_translate_text',
     STREAM_EXPLAIN_TEXT: 'stream_explain_text',
+    STREAM_CUSTOM_PROMPT_TEXT: 'stream_custom_prompt_text',
     ...(__DEV_PANEL__ ? {
         GET_TEXT_DEDUP_METRICS: 'get_text_dedup_metrics',
         GET_IMAGE_STORAGE_METRICS: 'get_image_storage_metrics',
@@ -353,6 +354,10 @@ export const AISettingsService = {
      * @param {boolean} params.imageClipboardEnabled
      * @param {boolean} params.screenshotEnabled
      * @param {boolean} params.selectionEnabled
+     * @param {string} params.selectionModifierKey
+     * @param {Array<{name: string, prompt: string}>} params.selectionCustomPrompts
+     * @param {boolean} params.selectionWebSearchEnabled
+     * @param {string} params.selectionWebSearchEngine
      * @param {boolean} params.groupedItemsProtectedFromLimit
      * @param {string} params.translationPromptTemplate
      * @param {string} params.explanationPromptTemplate
@@ -375,6 +380,10 @@ export const AISettingsService = {
                        imageClipboardEnabled,
                        screenshotEnabled,
                        selectionEnabled,
+                       selectionModifierKey,
+                       selectionCustomPrompts,
+                       selectionWebSearchEnabled,
+                       selectionWebSearchEngine,
                        groupedItemsProtectedFromLimit,
                        translationPromptTemplate,
                        explanationPromptTemplate,
@@ -396,6 +405,10 @@ export const AISettingsService = {
             imageClipboardEnabled,
             screenshotEnabled,
             selectionEnabled,
+            selectionModifierKey,
+            selectionCustomPrompts,
+            selectionWebSearchEnabled,
+            selectionWebSearchEngine,
             groupedItemsProtectedFromLimit,
             translationPromptTemplate,
             explanationPromptTemplate,
@@ -485,6 +498,17 @@ export const AIService = {
     streamExplain: (text, targetLanguage, opId, sceneHint) =>
         invoke(IPC_COMMANDS.STREAM_EXPLAIN_TEXT, {
             request: buildStreamExplainRequest(text, targetLanguage, opId, sceneHint)
+        }),
+
+    /**
+     * 流式执行自定义 Prompt
+     * @param {string} text 选中文本
+     * @param {string} promptName Prompt 名称
+     * @returns {Promise<void>}
+     */
+    streamCustomPrompt: (text, promptName, opId, sceneHint) =>
+        invoke(IPC_COMMANDS.STREAM_CUSTOM_PROMPT_TEXT, {
+            request: { text, promptName, opId, sceneHint }
         }),
 };
 

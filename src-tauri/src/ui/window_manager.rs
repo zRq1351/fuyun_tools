@@ -770,16 +770,18 @@ pub fn show_selection_toolbar_force_impl(
 fn set_toolbar_window(window: &tauri::WebviewWindow, anchor_pos: Option<(i32, i32)>) {
     let initial_width = 64u32;
     let initial_height = 64u32;
-    let logical_offset = 12f64;
+    let logical_offset_x = 10f64;
+    let logical_offset_y = 15f64;
     let _ = window.set_size(tauri::LogicalSize::new(initial_width, initial_height));
     if let Some((mx, my)) = anchor_pos {
         let scale_factor = window.scale_factor().unwrap_or(1.0);
         let physical_initial_width = (initial_width as f64 * scale_factor) as i32;
         let physical_initial_height = (initial_height as f64 * scale_factor) as i32;
-        let offset = (logical_offset * scale_factor) as i32;
+        let offset_x = (logical_offset_x * scale_factor) as i32;
+        let offset_y = (logical_offset_y * scale_factor) as i32;
 
-        let mut x = mx - (physical_initial_width / 2);
-        let mut y = my + offset;
+        let mut x = mx + offset_x;
+        let mut y = my + offset_y;
         let monitor_from_anchor = window
             .available_monitors()
             .ok()
@@ -802,8 +804,8 @@ fn set_toolbar_window(window: &tauri::WebviewWindow, anchor_pos: Option<(i32, i3
             let min_y = monitor_pos.y;
             let max_x = monitor_pos.x + monitor_size.width as i32 - physical_initial_width;
             let max_y = monitor_pos.y + monitor_size.height as i32 - physical_initial_height;
-            let below_y = my + offset;
-            let above_y = my - physical_initial_height - offset;
+            let below_y = my + offset_y;
+            let above_y = my - physical_initial_height - offset_y;
             if below_y <= max_y {
                 y = below_y;
             } else if above_y >= min_y {

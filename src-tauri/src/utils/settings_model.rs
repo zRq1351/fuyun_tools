@@ -12,6 +12,12 @@ use std::time::Duration;
 const LEGACY_ENCRYPTION_KEY: &[u8] = b"fuyun_tools_encryption_key_2025!";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CustomPrompt {
+    pub name: String,
+    pub prompt: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AppSettingsData {
     pub version: String,
     pub max_items: usize,
@@ -80,6 +86,12 @@ pub struct AppSettingsData {
     pub selection_enabled: bool,
     #[serde(default = "default_selection_modifier_key")]
     pub selection_modifier_key: String,
+    #[serde(default = "default_selection_custom_prompts")]
+    pub selection_custom_prompts: Vec<CustomPrompt>,
+    #[serde(default = "default_selection_web_search_enabled")]
+    pub selection_web_search_enabled: bool,
+    #[serde(default = "default_selection_web_search_engine")]
+    pub selection_web_search_engine: String,
     #[serde(default = "default_grouped_items_protected_from_limit")]
     pub grouped_items_protected_from_limit: bool,
     #[serde(default = "default_clipboard_bottom_offset")]
@@ -144,6 +156,9 @@ impl Default for AppSettingsData {
             provider_configs: HashMap::new(),
             selection_enabled: true,
             selection_modifier_key: default_selection_modifier_key(),
+            selection_custom_prompts: default_selection_custom_prompts(),
+            selection_web_search_enabled: default_selection_web_search_enabled(),
+            selection_web_search_engine: default_selection_web_search_engine(),
             grouped_items_protected_from_limit: default_grouped_items_protected_from_limit(),
             clipboard_bottom_offset: default_clipboard_bottom_offset(),
             translation_prompt_template: default_translation_prompt_template(),
@@ -165,6 +180,18 @@ fn default_selection_enabled() -> bool {
 
 fn default_selection_modifier_key() -> String {
     "".to_string()
+}
+
+fn default_selection_custom_prompts() -> Vec<CustomPrompt> {
+    Vec::new()
+}
+
+fn default_selection_web_search_enabled() -> bool {
+    true
+}
+
+fn default_selection_web_search_engine() -> String {
+    "bing".to_string()
 }
 
 fn default_text_clipboard_enabled() -> bool {
