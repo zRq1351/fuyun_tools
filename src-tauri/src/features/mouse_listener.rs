@@ -27,11 +27,16 @@ use winapi::um::winuser::{
 };
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::{GetAsyncKeyState, VK_LCONTROL, VK_LMENU, VK_RCONTROL, VK_RMENU};
+#[cfg(target_os = "windows")]
+use winapi::um::winuser::{GetCursorInfo, CURSORINFO};
+#[cfg(target_os = "windows")]
+use winapi::um::winuser::{LoadCursorW, IDC_IBEAM};
 
 #[derive(Debug, Clone, PartialEq)]
 enum MouseActionState {
     Idle,
     MouseDown(i32, i32, std::time::Instant),
+    Dragging(i32, i32, std::time::Instant, bool, Vec<(i32, i32)>), // (start_x, start_y, time, has_seen_ibeam, positions)
     MouseUp(i32, i32, std::time::Instant),
 }
 
@@ -134,6 +139,7 @@ fn handle_hook_event(
             }
             handle_selection_toolbar_autoclose(listener_app_handle, Some((last_x, last_y)));
             log::debug!("检测到鼠标左键按下 at ({}, {})", last_x, last_y);
+            
             let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
             *state_guard = MouseActionState::MouseDown(last_x, last_y, current_time);
         }
@@ -145,91 +151,193 @@ fn handle_hook_event(
             log::debug!("检测到鼠标左键释放 at ({}, {})", last_x, last_y);
             let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
             let prev_state = std::mem::replace(&mut *state_guard, MouseActionState::Idle);
-            if let MouseActionState::MouseDown(down_x, down_y, down_time) = prev_state {
-                let up_time = current_time;
-                *state_guard = MouseActionState::MouseUp(last_x, last_y, up_time);
-                let distance = calculate_distance(down_x, down_y, last_x, last_y);
-                let duration = up_time.duration_since(down_time);
-                log::debug!(
-                    "鼠标移动距离: {:.2}px, 操作持续时间: {:?}ms",
-                    distance,
-                    duration.as_millis()
-                );
-                let is_drag = is_valid_drag_operation(distance, duration);
-                let is_double_click = if !is_drag {
-                    let mut last_click_guard = lock_arc_mutex(&GLOBAL_STATE.last_click);
-                    let result = if let Some((lx, ly, ltime)) = *last_click_guard {
-                        let click_dist = calculate_distance(lx, ly, last_x, last_y);
-                        let click_interval = up_time.duration_since(ltime);
-                        click_dist < 5.0 && click_interval.as_millis() < 500
-                    } else {
-                        false
-                    };
-                    *last_click_guard = Some((last_x, last_y, up_time));
-                    result
+            
+            // 处理从 MouseDown 或 Dragging 状态转换
+            let (down_x, down_y, down_time, has_seen_ibeam, positions) = match prev_state {
+                MouseActionState::MouseDown(x, y, t) => {
+                    // 从 MouseDown 直接到 MouseUp，检查当前光标
+                    let is_ibeam = is_cursor_ibeam();
+                    (x, y, t, is_ibeam, vec![(x, y), (last_x, last_y)])
+                }
+                MouseActionState::Dragging(x, y, t, seen_ibeam, pos) => {
+                    // 已经在拖拽过程中，使用记录的标志和轨迹
+                    (x, y, t, seen_ibeam, pos)
+                }
+                _ => return,
+            };
+            
+            let up_time = current_time;
+            *state_guard = MouseActionState::MouseUp(last_x, last_y, up_time);
+            let distance = calculate_distance(down_x, down_y, last_x, last_y);
+            let duration = up_time.duration_since(down_time);
+            log::debug!(
+                "鼠标移动距离: {:.2}px, 操作持续时间: {:?}ms",
+                distance,
+                duration.as_millis()
+            );
+            let is_drag = is_valid_drag_operation(distance, duration);
+            let is_double_click = if !is_drag {
+                let mut last_click_guard = lock_arc_mutex(&GLOBAL_STATE.last_click);
+                let result = if let Some((lx, ly, ltime)) = *last_click_guard {
+                    let click_dist = calculate_distance(lx, ly, last_x, last_y);
+                    let click_interval = up_time.duration_since(ltime);
+                    click_dist < 5.0 && click_interval.as_millis() < 500
                 } else {
-                    *lock_arc_mutex(&GLOBAL_STATE.last_click) = None;
                     false
                 };
-                if is_drag || is_double_click {
-                    if is_double_click {
-                        log::info!("检测到双击/三击操作");
-                    }
-                    let modifier_key = {
-                        let state_guard = lock_arc_mutex(listener_state);
-                        state_guard.settings.selection_modifier_key.clone()
-                    };
-
-                    let is_alt = is_alt_pressed_by_os();
-                    let is_ctrl = is_ctrl_effectively_pressed();
-
-                    let modifier_matched = match modifier_key.as_str() {
-                        "Alt" => is_alt,
-                        "Ctrl" => is_ctrl,
-                        _ => !is_ctrl,
-                    };
-
-                    if modifier_matched {
-                        if capture::is_screenshot_in_progress() {
-                            return;
-                        }
-                        let app_busy_or_visible = {
-                            let state_guard = lock_arc_mutex(listener_state);
-                            state_guard.is_visible
-                                || state_guard.is_image_visible
-                                || state_guard.is_processing_selection
-                                || state_guard.is_updating_clipboard
-                        };
-                        if app_busy_or_visible {
-                            log::info!("当前应用窗口可见或正在处理回填，跳过划词检测触发");
-                            return;
-                        }
-                        let last_processed =
-                            { *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) };
-                        if up_time.duration_since(last_processed) > Duration::from_millis(100) {
-                            {
-                                let mut pos_guard =
-                                    lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
-                                *pos_guard = (last_x, last_y);
-                            }
-                            GLOBAL_STATE.needs_detection.store(true, Ordering::SeqCst);
-                            notify_detection_pending();
-                            log::info!("设置划词检测标志");
-                            *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) = up_time;
-                        } else {
-                            log::info!("操作过于频繁，跳过此次检测");
-                        }
+                *last_click_guard = Some((last_x, last_y, up_time));
+                result
+            } else {
+                *lock_arc_mutex(&GLOBAL_STATE.last_click) = None;
+                false
+            };
+            
+            // 提前获取 modifier_key 用于智能判断
+            let modifier_key = {
+                let state_guard = lock_arc_mutex(listener_state);
+                state_guard.settings.selection_modifier_key.clone()
+            };
+                            
+            // 智能判断是否为划词操作
+            let is_likely_text_selection = if is_drag && modifier_key.is_empty() {
+                // 无修饰键的拖拽，需要进一步判断
+                if has_seen_ibeam {
+                    // 拖拽过程中见过 IBEAM，肯定是划词
+                    true
+                } else {
+                    // 没见过 IBEAM，检查其他特征
+                    let end_is_ibeam = is_cursor_ibeam();
+                    if end_is_ibeam {
+                        // 结束时在文本区，可能是划词
+                        log::debug!("拖拽结束时光标为文本输入型");
+                        true
                     } else {
-                        log::info!("辅助键条件不满足，忽略此次点击");
+                        // 检查移动轨迹：划词通常是近似直线
+                        let is_linear = check_linear_movement(&positions);
+                        if is_linear {
+                            log::debug!("拖拽轨迹呈线性，可能是划词");
+                            true
+                        } else {
+                            log::debug!("拖拽轨迹不规则，可能是窗口操作");
+                            false
+                        }
+                    }
+                }
+            } else {
+                // 有修饰键或不是拖拽，按原有逻辑
+                true
+            };
+                            
+            if is_drag || is_double_click {
+                if is_double_click {
+                    log::info!("检测到双击/三击操作");
+                }
+
+                let is_alt = is_alt_pressed_by_os();
+                let is_ctrl = is_ctrl_effectively_pressed();
+
+                let modifier_matched = match modifier_key.as_str() {
+                    "Alt" => is_alt,
+                    "Ctrl" => is_ctrl,
+                    _ => !is_ctrl,
+                };
+
+                // 无修饰键模式下，使用智能判断结果
+                let ibeam_check_passed = if modifier_key.is_empty() {
+                    is_likely_text_selection
+                } else {
+                    true // 有修饰键时不检查
+                };
+
+                if modifier_matched && ibeam_check_passed {
+                    if capture::is_screenshot_in_progress() {
+                        return;
+                    }
+                    let app_busy_or_visible = {
+                        let state_guard = lock_arc_mutex(listener_state);
+                        state_guard.is_visible
+                            || state_guard.is_image_visible
+                            || state_guard.is_processing_selection
+                            || state_guard.is_updating_clipboard
+                    };
+                    if app_busy_or_visible {
+                        log::info!("当前应用窗口可见或正在处理回填，跳过划词检测触发");
+                        return;
+                    }
+                    let last_processed =
+                        { *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) };
+                    if up_time.duration_since(last_processed) > Duration::from_millis(100) {
+                        {
+                            let mut pos_guard =
+                                lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
+                            *pos_guard = (last_x, last_y);
+                        }
+                        GLOBAL_STATE.needs_detection.store(true, Ordering::SeqCst);
+                        notify_detection_pending();
+                        log::info!("设置划词检测标志");
+                        *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) = up_time;
+                    } else {
+                        log::info!("操作过于频繁，跳过此次检测");
                     }
                 } else {
-                    log::debug!("不满足划词或双击条件，跳过");
+                    log::info!("辅助键条件不满足或未见文本光标，忽略此次点击");
                 }
+            } else {
+                log::debug!("不满足划词或双击条件，跳过");
             }
         }
         HookEvent::MouseMove(mouse_x, mouse_y) => {
             if let Ok(mut pos_guard) = GLOBAL_STATE.last_mouse_pos.try_lock() {
                 *pos_guard = (mouse_x, mouse_y);
+            }
+            
+            // 在拖拽过程中监测光标类型和轨迹
+            let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
+            match *state_guard {
+                MouseActionState::MouseDown(start_x, start_y, start_time) => {
+                    // 检查是否开始拖拽（移动距离超过阈值）
+                    let distance = calculate_distance(start_x, start_y, mouse_x, mouse_y);
+                    if distance >= 5.0 {
+                        // 转换为 Dragging 状态
+                        let is_ibeam = is_cursor_ibeam();
+                        *state_guard = MouseActionState::Dragging(
+                            start_x, start_y, start_time, is_ibeam, 
+                            vec![(start_x, start_y), (mouse_x, mouse_y)]
+                        );
+                        if is_ibeam {
+                            log::debug!("开始拖拽并检测到文本输入型光标");
+                        }
+                    }
+                }
+                MouseActionState::Dragging(start_x, start_y, start_time, has_seen_ibeam, ref positions) => {
+                    // 已经在拖拽过程中，持续监测
+                    let mut new_positions = positions.clone();
+                    new_positions.push((mouse_x, mouse_y));
+                    
+                    // 限制轨迹长度，只保留最近20个点
+                    if new_positions.len() > 20 {
+                        new_positions.drain(0..new_positions.len() - 20);
+                    }
+                    
+                    if !has_seen_ibeam {
+                        let is_ibeam_now = is_cursor_ibeam();
+                        if is_ibeam_now {
+                            log::debug!("拖拽过程中检测到文本输入型光标");
+                            *state_guard = MouseActionState::Dragging(
+                                start_x, start_y, start_time, true, new_positions
+                            );
+                        } else {
+                            *state_guard = MouseActionState::Dragging(
+                                start_x, start_y, start_time, false, new_positions
+                            );
+                        }
+                    } else {
+                        *state_guard = MouseActionState::Dragging(
+                            start_x, start_y, start_time, true, new_positions
+                        );
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -468,6 +576,73 @@ fn is_alt_pressed_by_os() -> bool {
 #[cfg(not(target_os = "windows"))]
 fn is_alt_pressed_by_os() -> bool {
     false
+}
+
+/// 检查当前光标是否为文本输入型（IDC_IBEAM）
+#[cfg(target_os = "windows")]
+fn is_cursor_ibeam() -> bool {
+    unsafe {
+        let mut cursor_info: CURSORINFO = std::mem::zeroed();
+        cursor_info.cbSize = std::mem::size_of::<CURSORINFO>() as u32;
+        
+        if GetCursorInfo(&mut cursor_info) == 0 {
+            log::warn!("GetCursorInfo 调用失败");
+            return false;
+        }
+        
+        // 获取系统标准的 IBEAM 光标句柄
+        let ibeam_cursor = LoadCursorW(std::ptr::null_mut(), IDC_IBEAM);
+        if ibeam_cursor.is_null() {
+            log::warn!("LoadCursorW(IDC_IBEAM) 调用失败");
+            return false;
+        }
+        
+        // 比较当前光标与 IBEAM 光标
+        let is_ibeam = cursor_info.hCursor == ibeam_cursor;
+        
+        if !is_ibeam {
+            log::debug!("当前光标不是文本输入型 (IBEAM)，hCursor={:?}, IBEAM={:?}", 
+                       cursor_info.hCursor, ibeam_cursor);
+        }
+        
+        is_ibeam
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_cursor_ibeam() -> bool {
+    // 非 Windows 平台默认返回 true，不进行检查
+    true
+}
+
+/// 检查移动轨迹是否呈线性（划词通常是直线）
+fn check_linear_movement(positions: &[(i32, i32)]) -> bool {
+    if positions.len() < 3 {
+        // 点数太少，无法判断
+        return true;
+    }
+    
+    // 使用最小二乘法拟合直线，计算 R² 值
+    let n = positions.len() as f64;
+    let sum_x: f64 = positions.iter().map(|(x, _)| *x as f64).sum();
+    let sum_y: f64 = positions.iter().map(|(_, y)| *y as f64).sum();
+    let sum_xy: f64 = positions.iter().map(|(x, y)| (*x as f64) * (*y as f64)).sum();
+    let sum_x2: f64 = positions.iter().map(|(x, _)| (*x as f64).powi(2)).sum();
+    let sum_y2: f64 = positions.iter().map(|(_, y)| (*y as f64).powi(2)).sum();
+    
+    // 计算相关系数 r
+    let numerator = n * sum_xy - sum_x * sum_y;
+    let denominator = ((n * sum_x2 - sum_x.powi(2)) * (n * sum_y2 - sum_y.powi(2))).sqrt();
+    
+    if denominator < 1e-10 {
+        return false;
+    }
+    
+    let r = numerator / denominator;
+    let r_squared = r * r;
+    
+    // R² > 0.9 认为是线性运动
+    r_squared > 0.9
 }
 
 fn clear_ctrl_key_state_silent() {
