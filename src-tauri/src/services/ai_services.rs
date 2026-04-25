@@ -4,7 +4,7 @@ use crate::core::perf_metrics::record_perf_metric;
 use crate::services::ai_client::{AIClient, AIConfig};
 use crate::sync::Mutex;
 use crate::ui::window_manager::{
-    hide_selection_toolbar_impl, show_result_window, update_result_window,
+    hide_selection_toolbar_impl, show_result_window,
 };
 use crate::utils::utils_helpers::{
     default_explanation_prompt_template, default_translation_prompt_template,
@@ -153,14 +153,6 @@ impl AiStreamKind {
         }
     }
 
-    fn window_label(&self) -> String {
-        match self {
-            Self::Translation => "result_translation".to_string(),
-            Self::Explanation => "result_explanation".to_string(),
-            Self::CustomPrompt(_) => "result_custom_prompt".to_string(),
-        }
-    }
-
     fn window_title(&self) -> String {
         match self {
             Self::Translation => "翻译结果".to_string(),
@@ -276,7 +268,8 @@ async fn execute_stream_request(
     set_active_operation(&state_arc, &kind, operation_id);
     let client: AIClient = get_or_create_ai_client(state_arc.clone()).await?;
 
-    show_result_window(
+    // 显示结果窗口并获取窗口标签
+    let window_label = show_result_window(
         kind.window_title().to_string(),
         "".to_string(),
         kind.kind_name().to_string(),
@@ -326,12 +319,14 @@ async fn execute_stream_request(
         &request.target_language,
     );
 
-    if let Some(window) = app.clone().get_webview_window(&kind.window_label()) {
+    // 发送清理事件到新创建的窗口
+    if let Some(window) = app.clone().get_webview_window(&window_label) {
         let _ = window.emit(
             "result-clean",
             serde_json::json!({
                 "type": kind.kind_name(),
-                "opId": operation_id
+                "opId": operation_id,
+                "windowLabel": window_label
             }),
         );
     }
@@ -365,16 +360,18 @@ async fn execute_stream_request(
                 );
                 return false;
             }
-            if let Some(window) = app.get_webview_window(&kind.window_label()) {
+            // 使用新创建的窗口标签发送更新事件
+            if let Some(window) = app.get_webview_window(&window_label) {
                 let payload = serde_json::json!({
                     "type": kind.kind_name(),
-                    "content": content_chunk
+                    "content": content_chunk,
+                    "windowLabel": window_label
                 });
                 if let Err(e) = window.emit("result-update", payload) {
                     log::error!("更新{}结果窗口失败: {}", kind.display_name(), e);
                 }
             } else {
-                log::error!("{}窗口不存在", kind.kind_name());
+                log::error!("{}窗口不存在: {}", kind.kind_name(), window_label);
             }
             true
         })
@@ -451,9 +448,17 @@ async fn execute_stream_request(
                 return Ok(());
             }
             let error_msg = format!("{}失败: {}", kind.display_name(), e.message);
-            update_result_window(error_msg.clone(), kind.kind_name().to_string(), app)
-                .await
-                .map_err(|e| AppError::new(ErrorCode::SystemError, e))?;
+            // 发送错误信息到新创建的窗口
+            if let Some(window) = app.get_webview_window(&window_label) {
+                let _ = window.emit(
+                    "result-update",
+                    serde_json::json!({
+                        "type": kind.kind_name(),
+                        "content": error_msg.clone(),
+                        "windowLabel": window_label
+                    }),
+                );
+            }
             log::error!("{}", error_msg);
         }
     }

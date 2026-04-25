@@ -1052,35 +1052,14 @@ pub async fn show_result_window(
     original: String,
     target_language: String,
     app: AppHandle,
-) -> Result<(), String> {
+) -> Result<String, String> {
     remember_external_foreground_window(&app);
-    let window_label = format!("result_{}", window_type);
-
-    if let Some(existing_window) = app.get_webview_window(&window_label) {
-        position_result_window_near_toolbar(&existing_window, &app);
-        if let Ok(is_visible) = existing_window.is_visible() {
-            if !is_visible {
-                let _ = show_overlay_window(&app, &window_label, &existing_window, true);
-            }
-        } else {
-            let _ = show_overlay_window(&app, &window_label, &existing_window, true);
-        }
-        let _ = focus_overlay_window_by_label(&app, &window_label);
-
-        let payload = serde_json::json!({
-            "type": window_type.clone(),
-            "original": original.clone(),
-            "content": content.clone(),
-            "targetLanguage": target_language.clone()
-        });
-        let script = format!(
-            "window.__INITIAL_DATA__ = {}; window.dispatchEvent(new Event('init-data'));",
-            payload
-        );
-        let _ = existing_window.eval(&script);
-
-        return Ok(());
-    }
+    // 使用时间戳生成唯一窗口标签，确保每次都创建新窗口
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let window_label = format!("result_{}_{}", window_type, timestamp);
 
     let window = tauri::WebviewWindowBuilder::new(
         &app,
@@ -1095,7 +1074,7 @@ pub async fn show_result_window(
     .transparent(true)
     .shadow(false)
     .always_on_top(true)
-    .skip_taskbar(true)
+    .skip_taskbar(false)
     .on_page_load(move |window, _| {
         let payload = serde_json::json!({
             "type": window_type.clone(),
@@ -1112,7 +1091,7 @@ pub async fn show_result_window(
 
     position_result_window_near_toolbar(&window, &app);
     let _ = show_overlay_window(&app, &window_label, &window, true);
-    Ok(())
+    Ok(window_label)
 }
 
 fn position_result_window_near_toolbar(window: &tauri::WebviewWindow, app: &AppHandle) {

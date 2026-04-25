@@ -17,8 +17,11 @@
     "longshot_border",
     "selection_toolbar",
     "result_explanation",
+    "result_explanation_*",
     "result_translation",
+    "result_translation_*",
     "result_custom_prompt",
+    "result_custom_prompt_*",
     "settings"
   ],
   "permissions": [

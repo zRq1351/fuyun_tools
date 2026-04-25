@@ -142,6 +142,7 @@ const originalRef = ref(null)
 const isWaitingResult = ref(false)
 const loadingStartedAt = ref(0)
 const isWindowMaximized = ref(false)
+const currentWindowLabel = ref('')
 let unlistenResultClean = null
 let unlistenResultUpdate = null
 let initDataHandler = null
@@ -312,6 +313,14 @@ onMounted(async () => {
     await syncWindowMaximized()
   })
 
+  // 获取当前窗口标签
+  try {
+    // Tauri v2 中窗口标签可以通过 label 属性直接访问
+    currentWindowLabel.value = currentWindow.label || ''
+  } catch (error) {
+    console.error('Failed to get window label:', error)
+  }
+
   initDataHandler = () => {
     const initialData = window.__INITIAL_DATA__
     if (initialData) {
@@ -340,6 +349,8 @@ onMounted(async () => {
   try {
     unlistenResultClean = await listen('result-clean', (event) => {
       const data = event.payload
+      // 验证窗口标签，只处理当前窗口的事件
+      if (data && data.windowLabel && data.windowLabel !== currentWindowLabel.value) return
       if (data && data.type && data.type !== mode.value) return
       resultText.value = ''
       shouldAutoFollow.value = true
@@ -349,6 +360,8 @@ onMounted(async () => {
 
     unlistenResultUpdate = await listen('result-update', (event) => {
       const data = event.payload
+      // 验证窗口标签，只处理当前窗口的事件
+      if (data && data.windowLabel && data.windowLabel !== currentWindowLabel.value) return
       if (data && data.type && data.type !== mode.value) return
       if (data.content) {
         resultText.value += data.content
