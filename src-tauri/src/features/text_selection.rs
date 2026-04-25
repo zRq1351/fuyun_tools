@@ -24,11 +24,11 @@ fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
     }
 
     let copy_key = if is_console {
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
         {
             Key::Insert
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "macos")]
         {
             Key::Unicode('c')
         }
