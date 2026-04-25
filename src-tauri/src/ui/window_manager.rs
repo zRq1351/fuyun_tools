@@ -770,8 +770,6 @@ pub fn show_selection_toolbar_force_impl(
 fn set_toolbar_window(window: &tauri::WebviewWindow, anchor_pos: Option<(i32, i32)>) {
     let initial_width = 64u32;
     let initial_height = 64u32;
-    let expanded_width = 240u32;
-    let expanded_height = 100u32;
     let logical_offset = 12f64;
     let _ = window.set_size(tauri::LogicalSize::new(initial_width, initial_height));
     if let Some((mx, my)) = anchor_pos {
