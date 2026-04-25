@@ -175,56 +175,52 @@ fn handle_hook_event(
                     if is_double_click {
                         log::info!("检测到双击/三击操作");
                     }
-                    if !is_foreground_window_console() {
-                        let modifier_key = {
+                    let modifier_key = {
+                        let state_guard = lock_arc_mutex(listener_state);
+                        state_guard.settings.selection_modifier_key.clone()
+                    };
+
+                    let is_alt = is_alt_pressed_by_os();
+                    let is_ctrl = is_ctrl_effectively_pressed();
+
+                    let modifier_matched = match modifier_key.as_str() {
+                        "Alt" => is_alt,
+                        "Ctrl" => is_ctrl,
+                        _ => !is_ctrl,
+                    };
+
+                    if modifier_matched {
+                        if capture::is_screenshot_in_progress() {
+                            return;
+                        }
+                        let app_busy_or_visible = {
                             let state_guard = lock_arc_mutex(listener_state);
-                            state_guard.settings.selection_modifier_key.clone()
+                            state_guard.is_visible
+                                || state_guard.is_image_visible
+                                || state_guard.is_processing_selection
+                                || state_guard.is_updating_clipboard
                         };
-
-                        let is_alt = is_alt_pressed_by_os();
-                        let is_ctrl = is_ctrl_effectively_pressed();
-
-                        let modifier_matched = match modifier_key.as_str() {
-                            "Alt" => is_alt,
-                            "Ctrl" => is_ctrl,
-                            _ => !is_ctrl,
-                        };
-
-                        if modifier_matched {
-                            if capture::is_screenshot_in_progress() {
-                                return;
+                        if app_busy_or_visible {
+                            log::info!("当前应用窗口可见或正在处理回填，跳过划词检测触发");
+                            return;
+                        }
+                        let last_processed =
+                            { *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) };
+                        if up_time.duration_since(last_processed) > Duration::from_millis(100) {
+                            {
+                                let mut pos_guard =
+                                    lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
+                                *pos_guard = (last_x, last_y);
                             }
-                            let app_busy_or_visible = {
-                                let state_guard = lock_arc_mutex(listener_state);
-                                state_guard.is_visible
-                                    || state_guard.is_image_visible
-                                    || state_guard.is_processing_selection
-                                    || state_guard.is_updating_clipboard
-                            };
-                            if app_busy_or_visible {
-                                log::info!("当前应用窗口可见或正在处理回填，跳过划词检测触发");
-                                return;
-                            }
-                            let last_processed =
-                                { *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) };
-                            if up_time.duration_since(last_processed) > Duration::from_millis(100) {
-                                {
-                                    let mut pos_guard =
-                                        lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
-                                    *pos_guard = (last_x, last_y);
-                                }
-                                GLOBAL_STATE.needs_detection.store(true, Ordering::SeqCst);
-                                notify_detection_pending();
-                                log::info!("设置划词检测标志");
-                                *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) = up_time;
-                            } else {
-                                log::info!("操作过于频繁，跳过此次检测");
-                            }
+                            GLOBAL_STATE.needs_detection.store(true, Ordering::SeqCst);
+                            notify_detection_pending();
+                            log::info!("设置划词检测标志");
+                            *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) = up_time;
                         } else {
-                            log::info!("辅助键条件不满足，忽略此次点击");
+                            log::info!("操作过于频繁，跳过此次检测");
                         }
                     } else {
-                        log::info!("当前在命令行/终端环境中，跳过划词检测");
+                        log::info!("辅助键条件不满足，忽略此次点击");
                     }
                 } else {
                     log::debug!("不满足划词或双击条件，跳过");
@@ -625,11 +621,6 @@ fn perform_text_selection_detection(
 ) -> Option<String> {
     log::info!("开始执行划词检测");
 
-    if is_foreground_window_console() {
-        log::info!("在命令行/终端环境中，跳过划词检测");
-        return None;
-    }
-
     match get_selected_text(app_handle, clipboard_manager) {
         Some(text) if !text.trim().is_empty() => {
             log::info!("成功获取选中文本: '{}'", text);
@@ -670,7 +661,7 @@ fn is_valid_drag_operation(distance: f64, duration: Duration) -> bool {
 }
 
 /// 检查当前前台窗口是否为命令行窗口
-fn is_foreground_window_console() -> bool {
+pub fn is_foreground_window_console() -> bool {
     {
         #[cfg(target_os = "windows")]
         unsafe {
