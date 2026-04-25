@@ -3351,15 +3351,15 @@ pub async fn get_ai_settings(state: State<'_, Arc<Mutex<SharedAppState>>>) -> Re
             let mut provider_configs_map: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
             
             for provider_key in settings.provider_configs.keys() {
-                if let Ok(api_key) = settings.get_provider_api_key(provider_key) {
-                    if let Some(decrypted_config) = settings.provider_configs.get(provider_key) {
-                        let config_obj = serde_json::json!({
-                            "api_url": decrypted_config.api_url,
-                            "model_name": decrypted_config.model_name,
-                            "api_key": if api_key.is_empty() { "" } else { "********" }
-                        });
-                        provider_configs_map.insert(provider_key.clone(), config_obj);
-                    }
+                if let Some(decrypted_config) = settings.provider_configs.get(provider_key) {
+                    // 不再调用 get_provider_api_key()，直接返回脱敏标记
+                    // 这样可以避免每次访问都读取密钥环，提升性能
+                    let config_obj = serde_json::json!({
+                        "api_url": decrypted_config.api_url,
+                        "model_name": decrypted_config.model_name,
+                        "api_key": "********"  // 始终返回脱敏标记
+                    });
+                    provider_configs_map.insert(provider_key.clone(), config_obj);
                 }
             }
 
