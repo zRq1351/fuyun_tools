@@ -23,8 +23,9 @@ pub struct OcrParagraph {
 }
 
 /// 使用 ocr-rs 进行 OCR 识别
-pub async fn recognize_with_ocr_rs(png_base64: &str) -> Result<Vec<OcrParagraph>, String> {
+pub async fn recognize_with_ocr_rs(png_base64: &str, app_handle: &tauri::AppHandle) -> Result<Vec<OcrParagraph>, String> {
     use base64::Engine;
+    use tauri::Manager;
     
     log::info!("初始化 ocr-rs 引擎...");
     
@@ -39,18 +40,17 @@ pub async fn recognize_with_ocr_rs(png_base64: &str) -> Result<Vec<OcrParagraph>
     
     log::info!("开始 OCR 识别...");
     
+    let resource_dir = app_handle.path().resource_dir().map_err(|e| format!("获取资源目录失败: {}", e))?;
+
     // 执行 OCR（在阻塞线程中运行）
     let result = tokio::task::spawn_blocking(move || {
-        // 获取模型路径（相对于可执行文件目录）
-        let exe_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-            .unwrap_or_else(|| PathBuf::from("."));
-        
-        let det_model = exe_dir.join("models").join("PP-OCRv5_mobile_det.mnn");
-        let rec_model = exe_dir.join("models").join("PP-OCRv5_mobile_rec.mnn");
-        let charset = exe_dir.join("models").join("ppocr_keys_v5.txt");
-        
+        // 获取模型路径（从资源目录）
+        let base_dir = resource_dir;
+
+        let det_model = base_dir.join("models").join("PP-OCRv5_mobile_det.mnn");
+        let rec_model = base_dir.join("models").join("PP-OCRv5_mobile_rec.mnn");
+        let charset = base_dir.join("models").join("ppocr_keys_v5.txt");
+
         // 检查模型文件是否存在
         if !det_model.exists() {
             return Err(format!("检测模型不存在: {:?}", det_model));
