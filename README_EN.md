@@ -2,12 +2,16 @@
 
 [中文](README.md) | [English](README_EN.md)
 
+![Version](https://img.shields.io/badge/version-0.6.77-blue)
+![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+![License](https://img.shields.io/badge/license-GPL--2.0-green)
+
 fuyun_tools is a desktop productivity tool running in the system tray, focused on four things:
 
-- Better clipboard history management
-- AI text selection translation/explanation on Windows
-- Fast screenshot capture and image OCR on Windows
-- Screen recording with audio capture on Windows
+- **Clipboard Management**: Efficiently record and manage text and image clipboard history
+- **AI Text Selection Assistant**: Smart translation and explanation on Windows
+- **Screenshot & OCR**: Quick screenshot capture with text extraction from images
+- **Screen Recording**: Professional recording with system audio and microphone capture
 
 Core positioning:
 
@@ -25,48 +29,76 @@ In addition, this project itself follows an AI full-process development workflow
 
 ### 📋 Clipboard Management
 
-- Automatically records clipboard history for quick reuse
-- Supports search, categorization, deletion, and history size limits
-- Supports both keyboard and mouse workflows (arrow keys, enter, wheel)
-- Supports in-window AI actions (`T` translate / `E` explain)
-- Supports one-click right-click menu actions to translate/explain the current item
-- Supports configurable translation target language and explanation language
+- **Auto Capture**: Real-time clipboard change detection with quick paste-back to any application
+- **Smart Search**: Keyword search to quickly locate historical records
+- **Category Management**: Custom category tags for organizing important content by scenario
+- **Pin Protection**: Important items can be pinned,不受 capacity limits
+- **Dual Input Methods**: Supports both keyboard (arrow keys, enter) and mouse (wheel, click) operations
+- **AI Integration**: Direct AI usage within the window (`T` translate / `E` explain)
+- **Right-Click Menu**: One-click "translate/explain" for the selected item
+- **Language Configuration**: Customize translation target language and explanation language
+- **Unified Identifier**: Text and image clipboards use item_id at the底层 level for smoother switching
 
 ### 🖼️ Image Clipboard Management
 
-- Automatically detects and stores images copied to the clipboard with thumbnail lists
-- Supports image search and category management for quick organization
-- Supports double-click image fill back to the currently focused document/app
-- Supports large-image preview for detailed viewing
-- Image history and categories are persisted locally and available after restart
+- **Auto Detection**: Detects images in clipboard and automatically generates thumbnail lists
+- **Smart Search**: Search image history by category and keywords
+- **Quick Paste**: Double-click thumbnails to paste directly at cursor position
+- **Large Preview**: Full-screen image viewing with zoom and pan support
+- **Persistent Storage**: Image history and categories saved locally, available after restart
+- **Disk Management**: Configurable image storage limit (default 2GB) with automatic cleanup of old images
+- **Performance Optimization**: Async preview generation, fixed long-list scrolling lag issues
 
 ### 🔎 Image OCR (Windows)
 
-- Pinned image window supports right-click OCR recognition
-- Recognition results are shown in a dedicated OCR text window for copy/reuse
-- OCR is currently available on Windows only
+- **Pinned Window OCR**: Right-click in pinned image window to trigger OCR recognition
+- **Dedicated Result Display**: Recognition results shown in a separate text window for copying
+- **Windows Native**: Based on Windows Media OCR API, no internet required
+- **Platform Support**: Currently supports Windows 10/11 only
 
 ### 🎥 Screen Recording (Windows)
 
-- Adds a recording capsule toolbar with hotkey trigger and one-click start/pause/resume/stop
-- Supports system output audio and microphone device selection (native WASAPI pipeline)
-- Supports FPS, video bitrate, audio bitrate, and cursor capture settings
-- On first enable, automatically checks `ffmpeg.exe`; if missing, downloads on demand with real-time progress
-- When recording is disabled, the capsule shows a direct disabled state to prevent accidental actions
+- **Floating Capsule**: Lightweight recording control bar with hotkey activation
+- **One-Click Control**: Start, pause, resume, stop - simple and intuitive operation
+- **Audio Capture**:
+    - System audio output (based on native WASAPI capture pipeline)
+    - Microphone device selection with multi-device switching support
+    - Real-time microphone toggle during recording (hotkey `Ctrl+Space`)
+- **Parameter Configuration**:
+    - Frame Rate: 1-120 FPS (default 30)
+    - Video Bitrate: 500-50000 kbps (default 6000)
+    - Audio Bitrate: 32-512 kbps (default 160)
+    - Cursor Capture: Optional mouse pointer capture
+    - Toolbar Protection: Option to hide recording capsule in video
+- **Region Selection**: Supports full-screen or specific window recording
+- **ffmpeg Management**: Auto-detection and on-demand download on first enable with real-time progress
+- **State Protection**: Capsule shows disabled state when feature is turned off to prevent accidental triggers
+- **Audio Optimization**: Fixed system audio disappearance issue when recording microphone, improved stop logic
 
 ### 🔤 AI Text Selection Assistant (Windows)
 
-- Supports drag, double-click, and triple-click selection scenarios
-- Automatically shows a selection toolbar for translate/explain/copy
-- Result windows support streaming output for faster feedback
-- Result windows support one-click write-back to the source app (copy + auto paste)
+- **Multi-Scenario Selection**: Supports drag, double-click, triple-click, and other text selection methods
+- **Smart Popup**: Selection toolbar automatically appears after text selection
+- **Core Functions**:
+    - Translate: Translate selected text to target language
+    - Explain: Explain professional content in plain language
+    - Copy: Quickly copy selected text
+    - Custom Prompts: Support for personalized AI instructions
+- **Streaming Output**: Result window displays AI-generated content in real-time
+- **One-Click Write-Back**: Copy and auto-paste back to original position
+- **Web Search**: Optional Bing search engine for quick related content lookup
 
 ### 🤖 AI Service Configuration
 
-- Built-in DeepSeek / Qwen (`qwen`) / Xiaomi Mimo (`xiaomimimo`) providers
-- Supports adding any OpenAI-compatible custom provider
-- Supports deleting custom providers directly in dropdown options
-- API keys are stored in the system credential manager (keyring)
+- **Built-in Providers**:
+    - DeepSeek: High-performance conversation model
+    - Qwen (`qwen`): Alibaba's large language model
+    - Xiaomi Mimo (`xiaomimimo`): Xiaomi's self-developed model
+- **Custom Extension**: Support for adding any OpenAI-compatible custom provider
+- **Easy Management**: Delete custom providers directly from dropdown options
+- **Secure Storage**: API keys stored in system credential manager (keyring) with encryption
+- **Connection Test**: Immediate connectivity validation after configuration
+- **Prompt Templates**: Customize system prompts for translation and explanation
 
 ### ⚙️ System Integration
 
@@ -221,7 +253,7 @@ Extra entries in development builds:
 
 ---
 
-## Local Development
+## 🛠️ Local Development
 
 ### Tech Stack
 
