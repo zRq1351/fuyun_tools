@@ -3286,7 +3286,7 @@ pub async fn show_ocr_text_window(
         .title("OCR识别结果")
         .visible(false)
         .decorations(false)
-        .always_on_top(false)
+        .always_on_top(true)
         .resizable(true)
         .inner_size(560.0, 240.0)
         .build()
@@ -3321,7 +3321,7 @@ pub async fn show_ocr_text_window(
         target_width as u32,
         target_height as u32,
     ));
-    let _ = window.set_always_on_top(false);
+    let _ = window.set_always_on_top(true);
     let _ = window.set_position(tauri::PhysicalPosition::new(target_x, target_y));
     let _ = show_overlay_window_by_label(&app, &result_label, true);
 
