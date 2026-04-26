@@ -92,8 +92,16 @@ function handleContextMenu(event) {
   let x = event.clientX
   let y = event.clientY
   
-  if (x + 140 > window.innerWidth) x = window.innerWidth - 140
-  if (y + 120 > window.innerHeight) y = window.innerHeight - 120
+  // 菜单实际高度约为 160px，宽度约为 140px
+  const menuWidth = 140
+  const menuHeight = 160
+  
+  if (x + menuWidth > window.innerWidth) {
+    x = Math.max(0, window.innerWidth - menuWidth)
+  }
+  if (y + menuHeight > window.innerHeight) {
+    y = Math.max(0, window.innerHeight - menuHeight)
+  }
   
   contextMenu.value = {
     show: true,
@@ -484,6 +492,8 @@ onUnmounted(() => {
   border-radius: 6px;
   padding: 4px 0;
   min-width: 140px;
+  max-height: 100vh;
+  overflow-y: auto;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   color: #fff;
   font-size: 13px;
