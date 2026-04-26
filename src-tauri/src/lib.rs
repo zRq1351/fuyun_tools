@@ -95,6 +95,11 @@ pub fn run() {
     let state_arc = Arc::new(Mutex::new(initial_state));
 
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(core::logger::build_logger().build())
         .manage(state_arc.clone())
         .setup(move |app| {
             if let Some(settings_window) = app.get_webview_window("settings") {
@@ -391,6 +396,7 @@ pub fn run() {
             set_image_item_pinned,
             promote_clipboard_item,
             promote_image_clipboard_item_by_id,
+            recognize_image_ocr,
             clear_text_history,
             clear_image_history,
             count_import_image_files,

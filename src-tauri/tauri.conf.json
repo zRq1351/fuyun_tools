@@ -193,6 +193,7 @@
     "active": true,
     "targets": "all",
     "resources": [
+      "models/*",
       "../LICENSE",
       "../docs/THIRD_PARTY_NOTICES.md",
       "../docs/GPLv2",

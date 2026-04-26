@@ -139,7 +139,7 @@ async function runOcr(base64, width, height) {
   isRecognizing.value = true
   ocrStatusMessage.value = ''
   try {
-    const result = await invoke('recognize_image_ocr', {pngBase64: base64})
+    const result = await invoke('recognize_image_ocr', { pngBase64: base64 })
     if (taskId !== ocrTaskId) return []
     if (!result?.success) {
       ocrStatusMessage.value = result?.error || '本地OCR识别失败'
