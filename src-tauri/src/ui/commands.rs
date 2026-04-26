@@ -6674,7 +6674,7 @@ pub async fn recognize_image_ocr(
         }
     };
     
-    match crate::services::ocr_engine::recognize_image(&png_base64, engine_type).await {
+    match crate::services::ocr_engine::recognize_image(&png_base64, engine_type, &_app).await {
         Ok(result) => {
             record_perf_metric(
                 "ocr.recognize",

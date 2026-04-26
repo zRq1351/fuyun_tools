@@ -1,6 +1,5 @@
 use ocr_rs::{OcrEngine, OcrEngineConfig};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize)]
 pub struct OcrLine {
