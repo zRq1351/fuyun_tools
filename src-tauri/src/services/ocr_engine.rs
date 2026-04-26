@@ -43,11 +43,11 @@ impl Default for OcrEngineType {
 }
 
 /// 统一的 OCR 识别接口
-pub async fn recognize_image(png_base64: &str, engine_type: OcrEngineType, app_handle: &tauri::AppHandle) -> Result<OcrResult, String> {
+pub async fn recognize_image(png_bytes: &[u8], engine_type: OcrEngineType, app_handle: &tauri::AppHandle) -> Result<OcrResult, String> {
     match engine_type {
         OcrEngineType::WindowsNative => {
             log::debug!("使用 Windows 原生 OCR 引擎");
-            let result = crate::services::native_ocr::recognize_png_base64(png_base64).await?;
+            let result = crate::services::native_ocr::recognize_png_bytes(png_bytes).await?;
             
             // 转换为统一格式
             Ok(OcrResult {
@@ -71,7 +71,7 @@ pub async fn recognize_image(png_base64: &str, engine_type: OcrEngineType, app_h
             log::info!("使用 ocr-rs (Rust) 引擎");
             
             // 调用 ocr-rs
-            let paragraphs = crate::services::ocr_rs_engine::recognize_with_ocr_rs(png_base64, app_handle).await?;
+            let paragraphs = crate::services::ocr_rs_engine::recognize_with_ocr_rs(png_bytes, app_handle).await?;
             
             // 转换为统一格式
             Ok(OcrResult {
