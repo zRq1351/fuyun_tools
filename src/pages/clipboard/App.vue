@@ -97,6 +97,7 @@
         :is-loading-page="isLoadingPage"
         @content-scroll="tryLoadMoreByScroll"
         @load-more-intent="handleLoadMoreIntent"
+        @preview="handlePreview"
         :visible-history="visibleHistory"
     />
 
@@ -130,6 +131,18 @@
         </div>
       </div>
     </div>
+
+    <!-- 预览弹窗 -->
+    <el-dialog
+        v-model="previewVisible"
+        title="内容预览"
+        width="80%"
+        :before-close="closePreview"
+        custom-class="preview-dialog"
+        destroy-on-close
+    >
+      <div class="preview-content" v-html="renderedPreviewHtml"></div>
+    </el-dialog>
 
     <div
         v-if="contextMenuVisible"
@@ -167,8 +180,9 @@
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ArrowLeftBold, ArrowRightBold, Check, Loading} from '@element-plus/icons-vue'
-import {ElMessage} from 'element-plus'
-import {listen} from '@tauri-apps/api/event'
+  import {ElMessage} from 'element-plus'
+  import {marked} from 'marked'
+  import {listen} from '@tauri-apps/api/event'
 import {AIService, ClipboardService, WindowService} from '../../services/ipc'
 import {handleAppError} from '../../utils/errorHandler'
 import ClipboardToolbar from './components/ClipboardToolbar.vue'
@@ -207,8 +221,29 @@ const aiActionLoading = ref(false)
 const isAiSettingsCollapsed = ref(true)
 const translationTargetLanguage = ref(localStorage.getItem('clipboard_ai_target_language') || '简体中文')
 const explanationTargetLanguage = ref(localStorage.getItem('clipboard_ai_explain_language') || '中文')
-const loadMoreIntent = ref(false)
-const isUpdatingCategory = ref(false)  // 防止分类更新时的竞态条件
+  const loadMoreIntent = ref(false)
+  const previewVisible = ref(false)
+  const previewContent = ref('')
+  
+  const renderer = new marked.Renderer()
+  const renderMarkdownSafely = (markdownText) =>
+      marked.parse(markdownText || '', {
+        renderer,
+        gfm: true,
+        breaks: true
+      })
+  const renderedPreviewHtml = computed(() => renderMarkdownSafely(previewContent.value))
+
+  const handlePreview = (content) => {
+    previewContent.value = content
+    previewVisible.value = true
+  }
+  const closePreview = () => {
+    previewVisible.value = false
+    previewContent.value = ''
+  }
+
+  const isUpdatingCategory = ref(false)  // 防止分类更新时的竞态条件
 let unlistenShowWindow = null
 let unlistenHistoryPayloadUpdated = null
 let unlistenHistoryItemUpdated = null
@@ -565,11 +600,8 @@ const resolveSelectedText = () => {
 }
 
 const triggerAiFlow = async (rawText, mode) => {
-  let text = typeof rawText === 'string' ? rawText.trim() : ''
-  if (text.length > 5000) {
-    text = Array.from(text).slice(0, 5000).join('')
-  }
-  if (!text || aiActionLoading.value) return
+    let text = typeof rawText === 'string' ? rawText.trim() : ''
+    if (!text || aiActionLoading.value) return
   aiActionLoading.value = true
   try {
     await WindowService.blur()
@@ -859,6 +891,71 @@ onBeforeUnmount(() => {
   color: #a9d7ff !important;
   font-weight: 700;
   background: rgba(64, 158, 255, 0.26) !important;
+}
+
+.preview-dialog {
+  background: linear-gradient(160deg, rgba(20, 24, 32, 0.95), rgba(12, 14, 20, 0.95)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 12px !important;
+}
+
+.preview-dialog .el-dialog__title {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.preview-dialog .el-dialog__body {
+  padding: 20px !important;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.preview-content {
+  color: #dcdfe6;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.preview-content pre {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.preview-content code {
+  font-family: 'Courier New', Courier, monospace;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.preview-content blockquote {
+  border-left: 4px solid rgba(255, 255, 255, 0.2);
+  margin: 0;
+  padding-left: 16px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.preview-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.preview-content th,
+.preview-content td {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 8px;
+}
+
+.preview-content a {
+  color: #409eff;
+  text-decoration: none;
+}
+
+.preview-content a:hover {
+  text-decoration: underline;
 }
 
 </style>
