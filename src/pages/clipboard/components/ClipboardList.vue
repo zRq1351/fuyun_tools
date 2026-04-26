@@ -25,6 +25,11 @@
           <Link/>
         </el-icon>
       </div>
+      <div class="preview-btn" @click.stop="emit('preview', entry.content)">
+        <el-icon>
+          <View/>
+        </el-icon>
+      </div>
       <div :class="{ active: isPinned(entry.id) }" class="pin-btn"
            @click.stop="promoteItem(entry.id)">
         <el-icon>
@@ -63,7 +68,7 @@
 
 <script setup>
 import {computed, onUnmounted, ref} from 'vue'
-import {Close, Link, Loading} from '@element-plus/icons-vue'
+import {Close, Link, Loading, View} from '@element-plus/icons-vue'
 import {Pin} from 'lucide-vue-next'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
 
@@ -129,7 +134,7 @@ const props = defineProps({
     default: false
   }
 })
-const emit = defineEmits(['content-scroll', 'load-more-intent'])
+const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
 let isDown = false
@@ -251,9 +256,9 @@ const openWebUrl = async (value) => {
 }
 
 const handleMouseDown = (e) => {
-  if (e.target.closest('.delete-btn') || e.target.closest('.open-btn') || e.target.closest('.pin-btn')) {
-    return
-  }
+    if (e.target.closest('.delete-btn') || e.target.closest('.open-btn') || e.target.closest('.pin-btn') || e.target.closest('.preview-btn')) {
+      return
+    }
 
   isDown = true
   isDragging = false
@@ -370,7 +375,37 @@ defineExpose({
   box-shadow: none !important;
 }
 
-.content.is-dragging .delete-btn,
+.preview-btn {
+  position: absolute;
+  top: 5px;
+  right: 80px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 10;
+}
+
+.preview-btn:hover {
+  background: var(--el-color-primary, #409eff);
+}
+
+.preview-btn .el-icon {
+  font-size: 12px;
+}
+
+.clipboard-item:hover .preview-btn {
+  opacity: 1;
+}
+
+.content.is-dragging .preview-btn,
+  .content.is-dragging .delete-btn,
 .content.is-dragging .open-btn,
 .content.is-dragging .pin-btn {
   opacity: 0 !important;
