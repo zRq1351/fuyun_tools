@@ -64,6 +64,7 @@ export default defineConfig(({mode}) => {
                     clipboard: resolve(__dirname, 'clipboard.html'),
                     image_clipboard: resolve(__dirname, 'image_clipboard.html'),
                     image_preview: resolve(__dirname, 'image_preview.html'),
+                    text_preview: resolve(__dirname, 'text_preview.html'),
                     selection_toolbar: resolve(__dirname, 'selection_toolbar.html'),
                     result_display: resolve(__dirname, 'result_display.html'),
                     screenshot: resolve(__dirname, 'screenshot.html'),
