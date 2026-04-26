@@ -1097,6 +1097,28 @@ pub struct ItemIdRequest {
 }
 
 #[tauri::command]
+pub async fn open_text_preview_window(
+    text: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    crate::ui::window_manager::show_text_preview_window(app, text)
+}
+
+#[tauri::command]
+pub async fn close_text_preview_window(app: AppHandle) -> Result<(), String> {
+    crate::ui::window_manager::hide_text_preview_window(app);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn start_text_preview_window_drag(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("text_preview") {
+        let _ = window.start_dragging();
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn open_image_preview_window_by_id(
     request: ItemIdRequest,
     state: State<'_, Arc<Mutex<SharedAppState>>>,

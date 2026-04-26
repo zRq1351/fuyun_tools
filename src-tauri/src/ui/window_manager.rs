@@ -654,6 +654,32 @@ pub fn hide_image_preview_window(app_handle: AppHandle) {
     }
 }
 
+pub fn show_text_preview_window(
+    app_handle: AppHandle,
+    text: String,
+) -> Result<(), String> {
+    let window = app_handle
+        .get_webview_window("text_preview")
+        .ok_or_else(|| "文本预览窗口不存在".to_string())?;
+    
+    // 复用图片预览窗口的大小和位置逻辑
+    prepare_image_preview_window(&window)?;
+
+    let payload = serde_json::json!({
+        "text": text
+    });
+    let _ = window.set_always_on_top(false);
+    let _ = show_overlay_window(&app_handle, "text_preview", &window, true);
+    let _ = app_handle.emit("show-text-preview", payload);
+    Ok(())
+}
+
+pub fn hide_text_preview_window(app_handle: AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("text_preview") {
+        hide_overlay_window(&app_handle, "text_preview", &window);
+    }
+}
+
 /// 设置窗口位置和大小
 pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
     if let Ok(Some(monitor)) = window.current_monitor() {

@@ -46,6 +46,9 @@ export const IPC_COMMANDS = {
     OPEN_IMAGE_PREVIEW_WINDOW_BY_ID: 'open_image_preview_window_by_id',
     CLOSE_IMAGE_PREVIEW_WINDOW: 'close_image_preview_window',
     START_IMAGE_PREVIEW_WINDOW_DRAG: 'start_image_preview_window_drag',
+    OPEN_TEXT_PREVIEW_WINDOW: 'open_text_preview_window',
+    CLOSE_TEXT_PREVIEW_WINDOW: 'close_text_preview_window',
+    START_TEXT_PREVIEW_WINDOW_DRAG: 'start_text_preview_window_drag',
     COPY_IMAGE_CLIPBOARD_ITEM_TO_DIRECTORY: 'copy_image_clipboard_item_to_directory',
     COPY_TEXT: 'copy_text',
     COPY_AND_PASTE_TEXT: 'copy_and_paste_text',
@@ -236,6 +239,12 @@ export const ImageClipboardService = {
         invoke(IPC_COMMANDS.OPEN_IMAGE_PREVIEW_WINDOW_BY_ID, {request: {itemId}}),
     closePreviewWindow: () => invoke(IPC_COMMANDS.CLOSE_IMAGE_PREVIEW_WINDOW),
     startPreviewWindowDrag: () => invoke(IPC_COMMANDS.START_IMAGE_PREVIEW_WINDOW_DRAG),
+
+    openTextPreviewWindow: (text) =>
+        invoke(IPC_COMMANDS.OPEN_TEXT_PREVIEW_WINDOW, {text}),
+    closeTextPreviewWindow: () => invoke(IPC_COMMANDS.CLOSE_TEXT_PREVIEW_WINDOW),
+    startTextPreviewWindowDrag: () => invoke(IPC_COMMANDS.START_TEXT_PREVIEW_WINDOW_DRAG),
+
     copyItemToDirectory: (itemId, targetDirectory) =>
         invoke(IPC_COMMANDS.COPY_IMAGE_CLIPBOARD_ITEM_TO_DIRECTORY, {itemId, targetDirectory}),
     setItemTags: (itemId, tags) => invoke(IPC_COMMANDS.SET_IMAGE_ITEM_TAGS, {itemId, tags}),
