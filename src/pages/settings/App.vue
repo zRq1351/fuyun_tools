@@ -247,7 +247,8 @@ const form = reactive({
   selectionWebSearchEngine: 'bing',
   translationPromptTemplate: '',
   explanationPromptTemplate: '',
-  imageFillVerifyMode: 'fast'
+  imageFillVerifyMode: 'fast',
+  ocrEngine: 'windows-native'
 })
 
 const toggleTheme = () => {
@@ -318,7 +319,8 @@ const buildFormSnapshot = () => ({
     selectionWebSearchEngine: form.selectionWebSearchEngine,
     translationPromptTemplate: form.translationPromptTemplate,
     explanationPromptTemplate: form.explanationPromptTemplate,
-    imageFillVerifyMode: form.imageFillVerifyMode
+  imageFillVerifyMode: form.imageFillVerifyMode,
+  ocrEngine: form.ocrEngine
 })
 
 // 保存初始状态快照
@@ -337,7 +339,7 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
   const initial = initialFormState.value
   const source = snapshot
 
-  
+
   if (source.textMaxItems !== initial.textMaxItems) {
     changedFields.textMaxItems = source.textMaxItems
   }
@@ -420,7 +422,7 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
     changedFields.devForceFfmpegWindowCapture = source.devForceFfmpegWindowCapture
   }
 
-  
+
   let selectedProvider = source.aiProvider
   if (selectedProvider === 'custom') {
     if (!source.customProviderName) {
@@ -471,6 +473,9 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
   if (source.imageFillVerifyMode !== initial.imageFillVerifyMode) {
     changedFields.imageFillVerifyMode = source.imageFillVerifyMode
   }
+  if (source.ocrEngine !== initial.ocrEngine) {
+    changedFields.ocrEngine = source.ocrEngine
+  }
 
   return Object.keys(changedFields).length > 0 ? changedFields : null
 }
@@ -505,10 +510,10 @@ const persistSettings = async (
     return
   }
 
-  
+
   const changedFields = getChangedFields(snapshot)
 
-  
+
   if (!changedFields) {
     if (!pendingPersistSnapshot && getChangedFields() === null) {
       autoSaveState.value = 'idle'
@@ -528,7 +533,7 @@ const persistSettings = async (
       const runtimeStatus = await AISettingsService.checkVcRuntimeDependencies()
       const missing = Array.isArray(runtimeStatus?.missing) ? runtimeStatus.missing : []
       if (missing.length > 0) {
-        
+
         suppressNextAutoSave.value = true
         form.screenshotEnabled = false
         snapshot.screenshotEnabled = false
@@ -540,7 +545,7 @@ const persistSettings = async (
     if (changedFields.recordingEnabled === true) {
       const ffmpegStatus = await RecordingService.checkFfmpeg()
       if (!ffmpegStatus?.exists) {
-        
+
         suppressNextAutoSave.value = true
         form.recordingEnabled = false
         snapshot.recordingEnabled = false
@@ -598,10 +603,10 @@ const persistSettings = async (
       }
     }
 
-    
+
     await AISettingsService.savePartialSettings(changedFields)
 
-    
+
     if (changedFields.aiProvider) {
       let selectedProvider = snapshot.aiProvider
       if (selectedProvider === 'custom') {
@@ -623,7 +628,7 @@ const persistSettings = async (
     }
     autoSaveState.value = 'saved'
 
-    
+
     saveInitialFormState(snapshot)
 
     autoSaveStateResetTimer = window.setTimeout(() => {
@@ -786,7 +791,7 @@ const showVcRuntimeMissingWarning = async (payload) => {
     }
     ElMessage.success('VC Runtime 安装完成，请重新启用截图功能')
   } catch {
-    
+
   }
 }
 
@@ -859,6 +864,7 @@ onMounted(async () => {
     form.translationPromptTemplate = settings.translation_prompt_template || ''
     form.explanationPromptTemplate = settings.explanation_prompt_template || ''
     form.imageFillVerifyMode = settings.image_fill_verify_mode === 'strict' ? 'strict' : 'fast'
+    form.ocrEngine = settings.ocr_engine || 'windows-native'
 
     if (aiSettingsRef.value) {
       aiSettingsRef.value.applyCurrentProviderConfig(settings)
@@ -877,9 +883,9 @@ onMounted(async () => {
     ElMessage.error(`加载设置失败: ${error}`)
     autoSaveState.value = 'error'
   } finally {
-    
+
     saveInitialFormState()
-    
+
     skipNextWatch.value = true
     isInitializing.value = false
   }

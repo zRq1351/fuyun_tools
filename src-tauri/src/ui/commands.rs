@@ -3499,6 +3499,7 @@ pub async fn save_app_settings(
     translation_prompt_template: Option<String>,
     explanation_prompt_template: Option<String>,
     image_fill_verify_mode: Option<String>,
+    ocr_engine: Option<String>,
     recording_default_fps: Option<u32>,
     recording_default_video_bitrate_kbps: Option<u32>,
     recording_default_audio_bitrate_kbps: Option<u32>,
@@ -3584,6 +3585,13 @@ pub async fn save_app_settings(
             "fast".to_string()
         } else {
             "strict".to_string()
+        };
+    }
+    if let Some(val) = ocr_engine {
+        settings.ocr_engine = if val == "ocr-rs" {
+            "ocr-rs".to_string()
+        } else {
+            "windows-native".to_string()
         };
     }
     if let Some(val) = recording_default_fps {
@@ -6628,9 +6636,45 @@ pub async fn get_manual_longshot_status(
 }
 
 #[tauri::command]
-pub async fn recognize_image_ocr(png_base64: String) -> Result<serde_json::Value, String> {
+pub async fn recognize_image_ocr(
+    png_base64: String,
+    engine: Option<String>,
+    _app: AppHandle,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<serde_json::Value, String> {
     let started_at = std::time::Instant::now();
-    match crate::services::native_ocr::recognize_png_base64(&png_base64).await {
+    
+    // 选择 OCR 引擎
+    let engine_type = match engine.as_deref() {
+        Some("ocr-rs") => {
+            log::info!("使用 ocr-rs (Rust) 引擎");
+            crate::services::ocr_engine::OcrEngineType::OcrRs
+        }
+        Some("windows-native") => {
+            log::debug!("使用 Windows 原生 OCR 引擎");
+            crate::services::ocr_engine::OcrEngineType::WindowsNative
+        }
+        None => {
+            // 从设置中读取默认引擎
+            let state_guard = lock_arc_mutex(state.inner());
+            let ocr_engine_setting = state_guard.settings.ocr_engine.clone();
+            drop(state_guard);
+            
+            if ocr_engine_setting == "ocr-rs" {
+                log::info!("使用设置中的 ocr-rs (Rust) 引擎");
+                crate::services::ocr_engine::OcrEngineType::OcrRs
+            } else {
+                log::debug!("使用设置中的 Windows 原生 OCR 引擎");
+                crate::services::ocr_engine::OcrEngineType::WindowsNative
+            }
+        }
+        _ => {
+            log::debug!("使用 Windows 原生 OCR 引擎");
+            crate::services::ocr_engine::OcrEngineType::WindowsNative
+        }
+    };
+    
+    match crate::services::ocr_engine::recognize_image(&png_base64, engine_type).await {
         Ok(result) => {
             record_perf_metric(
                 "ocr.recognize",

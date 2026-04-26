@@ -44,23 +44,71 @@ pub async fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, S
     fn preprocess_png_bytes(input: &[u8]) -> Result<Vec<u8>, String> {
         let image =
             image::load_from_memory(input).map_err(|e| format!("OCR 预处理加载图片失败: {}", e))?;
+        
+        // 策略1：适度放大（2倍），平衡清晰度和性能
         let target_w = (image.width().max(1) * 2).min(4096);
         let target_h = (image.height().max(1) * 2).min(4096);
         let resized = image.resize_exact(target_w, target_h, FilterType::Lanczos3);
+        
+        // 转换为灰度图
         let grayscale = resized.grayscale();
+        
+        // 增强对比度：使用直方图均衡化的简化版本
         let mut rgba = grayscale.to_rgba8();
+        
+        // 计算最小和最大像素值用于对比度拉伸
+        let mut min_val = 255u8;
+        let mut max_val = 0u8;
+        for px in rgba.pixels() {
+            let v = px[0];
+            if v < min_val { min_val = v; }
+            if v > max_val { max_val = v; }
+        }
+        
+        // 对比度拉伸：将[min_val, max_val]映射到[0, 255]
+        let range = if max_val > min_val { max_val - min_val } else { 1 };
         for px in rgba.pixels_mut() {
             let v = px[0];
-            let nv = if v < 168 { 0 } else { 255 };
+            // 对比度拉伸
+            let stretched = ((v as u32 - min_val as u32) * 255 / range as u32) as u8;
+            
+            // 自适应二值化：根据局部统计调整阈值
+            // 对于较暗的图片使用较低阈值，较亮的图片使用较高阈值
+            let threshold = if stretched < 128 { 140 } else { 168 };
+            let nv = if stretched < threshold { 0 } else { 255 };
+            
             px[0] = nv;
             px[1] = nv;
             px[2] = nv;
             px[3] = 255;
         }
+        
         let mut out = Vec::new();
         DynamicImage::ImageRgba8(rgba)
             .write_to(&mut std::io::Cursor::new(&mut out), ImageFormat::Png)
             .map_err(|e| format!("OCR 预处理编码失败: {}", e))?;
+        Ok(out)
+    }
+    
+    /// 轻度预处理：仅放大和灰度化，不进行二值化
+    /// 适用于已经清晰的图片
+    fn preprocess_png_bytes_light(input: &[u8]) -> Result<Vec<u8>, String> {
+        let image =
+            image::load_from_memory(input).map_err(|e| format!("OCR 轻度预处理加载图片失败: {}", e))?;
+        
+        // 仅放大1.5倍，保持更多细节
+        let target_w = (image.width().max(1) * 3 / 2).min(4096);
+        let target_h = (image.height().max(1) * 3 / 2).min(4096);
+        let resized = image.resize_exact(target_w, target_h, FilterType::Lanczos3);
+        
+        // 转换为灰度图但不二值化
+        let grayscale = resized.grayscale();
+        let rgba = grayscale.to_rgba8();
+        
+        let mut out = Vec::new();
+        DynamicImage::ImageRgba8(rgba)
+            .write_to(&mut std::io::Cursor::new(&mut out), ImageFormat::Png)
+            .map_err(|e| format!("OCR 轻度预处理编码失败: {}", e))?;
         Ok(out)
     }
 
@@ -127,7 +175,7 @@ pub async fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, S
             let text = line
                 .Text()
                 .map_err(|e| format!("OCR 读取行文本失败: {}", e))?;
-            let line_text = text.to_string().trim().to_string();
+            let line_text = clean_ocr_text(&text.to_string());
             if line_text.is_empty() {
                 continue;
             }
@@ -196,45 +244,123 @@ pub async fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, S
         })
     }
 
+    /// 增强的评分函数：考虑文本质量和长度
     fn score(result: &NativeOcrResult) -> usize {
         result
             .paragraphs
             .iter()
             .map(|p| {
                 let chars = p.text.chars().filter(|c| !c.is_whitespace()).count();
-                chars + p.lines.len() * 8
+                let lines = p.lines.len();
+                
+                // 基础分数：字符数 + 行数奖励
+                let base_score = chars + lines * 8;
+                
+                // 质量奖励：更长连续文本通常质量更高
+                let quality_bonus = if chars > 50 { 20 } else if chars > 20 { 10 } else { 0 };
+                
+                // 惩罚：如果行数太多但字符很少，可能是识别错误
+                let penalty = if lines > 0 && chars / lines < 3 { lines * 5 } else { 0 };
+                
+                base_score + quality_bonus - penalty
             })
             .sum()
     }
 
+    /// 清理OCR文本中的多余空格
+    /// - 中文文本：移除所有空格
+    /// - 英文文本：规范化空格（多个空格合并为一个）
+    /// - 中英混合：智能处理
+    fn clean_ocr_text(text: &str) -> String {
+        if text.is_empty() {
+            return text.to_string();
+        }
+
+        // 检测是否主要为中文（中文字符占比超过50%）
+        let chinese_count = text.chars().filter(|c| {
+            let cp = *c as u32;
+            (cp >= 0x4E00 && cp <= 0x9FFF) ||  // CJK统一汉字
+            (cp >= 0x3400 && cp <= 0x4DBF) ||  // CJK扩展A
+            (cp >= 0x20000 && cp <= 0x2A6DF)   // CJK扩展B
+        }).count();
+        
+        let total_chars = text.chars().filter(|c| !c.is_whitespace()).count();
+        
+        if total_chars == 0 {
+            return text.to_string();
+        }
+
+        let chinese_ratio = chinese_count as f64 / total_chars as f64;
+
+        if chinese_ratio > 0.5 {
+            // 主要是中文：移除所有空格
+            text.chars().filter(|c| !c.is_whitespace()).collect()
+        } else {
+            // 主要是英文或其他语言：规范化空格
+            let mut result = String::with_capacity(text.len());
+            let mut prev_was_space = false;
+            
+            for c in text.chars() {
+                if c.is_whitespace() {
+                    if !prev_was_space && !result.is_empty() {
+                        result.push(' ');
+                        prev_was_space = true;
+                    }
+                } else {
+                    result.push(c);
+                    prev_was_space = false;
+                }
+            }
+            
+            // 移除首尾空格
+            result.trim().to_string()
+        }
+    }
+
     let enhanced_png = preprocess_png_bytes(&png_bytes).ok();
+    let light_enhanced_png = preprocess_png_bytes_light(&png_bytes).ok();
+    
     let mut best_result = NativeOcrResult {
         paragraphs: Vec::new(),
     };
     let mut best_score = 0usize;
     let mut last_error = String::new();
 
-    let mut attempts: Vec<(&[u8], Option<&str>)> = vec![
-        (&png_bytes, Some("zh-Hans")),
-        (&png_bytes, Some("en-US")),
-        (&png_bytes, None),
+    // 多策略尝试：原始图 + 两种增强图 × 三种语言
+    let mut attempts: Vec<(&[u8], Option<&str>, &str)> = vec![
+        // 优先尝试中文（最常见的场景）
+        (&png_bytes, Some("zh-Hans"), "original-zh"),
+        (&png_bytes, Some("en-US"), "original-en"),
+        (&png_bytes, None, "original-auto"),
     ];
+    
+    // 增强版本（二值化）
     if let Some(enhanced) = enhanced_png.as_ref() {
-        attempts.push((enhanced.as_slice(), Some("zh-Hans")));
-        attempts.push((enhanced.as_slice(), Some("en-US")));
-        attempts.push((enhanced.as_slice(), None));
+        attempts.push((enhanced.as_slice(), Some("zh-Hans"), "enhanced-zh"));
+        attempts.push((enhanced.as_slice(), Some("en-US"), "enhanced-en"));
+        attempts.push((enhanced.as_slice(), None, "enhanced-auto"));
+    }
+    
+    // 轻度增强版本（保留更多细节）
+    if let Some(light) = light_enhanced_png.as_ref() {
+        attempts.push((light.as_slice(), Some("zh-Hans"), "light-zh"));
+        attempts.push((light.as_slice(), Some("en-US"), "light-en"));
+        attempts.push((light.as_slice(), None, "light-auto"));
     }
 
-    for (bytes, lang) in attempts {
+    for (bytes, lang, strategy_name) in attempts {
         match run_windows_ocr(bytes, lang).await {
             Ok(result) => {
                 let current_score = score(&result);
+                log::debug!("OCR策略 {} 得分: {}", strategy_name, current_score);
                 if current_score > best_score {
                     best_score = current_score;
                     best_result = result;
+                    log::info!("OCR采用策略: {}, 得分: {}", strategy_name, current_score);
                 }
             }
             Err(e) => {
+                log::debug!("OCR策略 {} 失败: {}", strategy_name, e);
                 last_error = e;
             }
         }

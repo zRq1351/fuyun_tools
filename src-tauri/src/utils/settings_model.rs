@@ -126,6 +126,8 @@ pub struct AppSettingsData {
     pub explanation_prompt_template: String,
     #[serde(default = "default_image_fill_verify_mode")]
     pub image_fill_verify_mode: String,
+    #[serde(default = "default_ocr_engine")]
+    pub ocr_engine: String,
     #[serde(default = "default_backup_enabled")]
     pub backup_enabled: bool,
     #[serde(default = "default_backup_frequency")]
@@ -188,6 +190,7 @@ impl Default for AppSettingsData {
             translation_prompt_template: default_translation_prompt_template(),
             explanation_prompt_template: default_explanation_prompt_template(),
             image_fill_verify_mode: default_image_fill_verify_mode(),
+            ocr_engine: default_ocr_engine(),
             backup_enabled: default_backup_enabled(),
             backup_frequency: default_backup_frequency(),
             backup_target_dir: String::new(),
@@ -336,6 +339,10 @@ fn default_clipboard_bottom_offset() -> i32 {
 
 fn default_image_fill_verify_mode() -> String {
     "fast".to_string()
+}
+
+fn default_ocr_engine() -> String {
+    "windows-native".to_string()
 }
 
 fn default_backup_enabled() -> bool {
