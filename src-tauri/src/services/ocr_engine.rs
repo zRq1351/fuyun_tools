@@ -38,7 +38,7 @@ pub enum OcrEngineType {
 
 impl Default for OcrEngineType {
     fn default() -> Self {
-        Self::WindowsNative
+        Self::OcrRs
     }
 }
 

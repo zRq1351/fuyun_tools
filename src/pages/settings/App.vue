@@ -248,7 +248,7 @@ const form = reactive({
   translationPromptTemplate: '',
   explanationPromptTemplate: '',
   imageFillVerifyMode: 'fast',
-  ocrEngine: 'windows-native'
+  ocrEngine: 'ocr-rs'
 })
 
 const toggleTheme = () => {
@@ -864,7 +864,7 @@ onMounted(async () => {
     form.translationPromptTemplate = settings.translation_prompt_template || ''
     form.explanationPromptTemplate = settings.explanation_prompt_template || ''
     form.imageFillVerifyMode = settings.image_fill_verify_mode === 'strict' ? 'strict' : 'fast'
-    form.ocrEngine = settings.ocr_engine || 'windows-native'
+    form.ocrEngine = settings.ocr_engine || 'ocr-rs'
 
     if (aiSettingsRef.value) {
       aiSettingsRef.value.applyCurrentProviderConfig(settings)

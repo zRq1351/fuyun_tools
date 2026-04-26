@@ -342,7 +342,7 @@ fn default_image_fill_verify_mode() -> String {
 }
 
 fn default_ocr_engine() -> String {
-    "windows-native".to_string()
+    "ocr-rs".to_string()
 }
 
 fn default_backup_enabled() -> bool {
