@@ -7026,8 +7026,8 @@ pub async fn pin_screenshot_on_screen(
 
     let window_clone = window.clone();
     let _ = window_clone.set_resizable(true);
-    let _ = window_clone.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
-    let _ = window_clone.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
+    let _ = window_clone.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: x as i32, y: y as i32 }));
+    let _ = window_clone.set_size(tauri::Size::Physical(tauri::PhysicalSize { width: width as u32, height: height as u32 }));
     let _ = show_overlay_window_by_label(&app, &label, false);
     let script = format!(
         "window.__PINNED_IMAGE_PAYLOAD__ = {}; window.dispatchEvent(new CustomEvent('pinned-image-data', {{ detail: {} }}));",
