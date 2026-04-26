@@ -2,7 +2,7 @@ use crate::services::clipboard_wakeup::subscribe_clipboard_wake_events;
 use crate::sync::Mutex;
 use crate::ui::window_manager::{release_ctrl_key_with_fallback, ENIGO_INSTANCE};
 use crate::utils::clipboard::ClipboardManager;
-use enigo::{Enigo, Key, Keyboard, Settings};
+use enigo::{Enigo, Keyboard, Settings};
 use log;
 use std::sync::Arc;
 use std::thread;
@@ -23,20 +23,7 @@ fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
         release_ctrl_key_with_fallback(enigo).map_err(|e| format!("释放 Ctrl 键失败: {}", e))
     }
 
-    let copy_key = if is_console {
-        #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
-        {
-            Key::Insert
-        }
-        #[cfg(target_os = "macos")]
-        {
-            Key::Unicode('c')
-        }
-    } else {
-        Key::Unicode('c')
-    };
-
-    match enigo.key(copy_key, enigo::Direction::Click) {
+    match enigo.key(C_KEY, enigo::Direction::Click) {
         Ok(_) => {}
         Err(e) => {
             let _ = release_ctrl(enigo);
@@ -60,14 +47,14 @@ const CAPTURE_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 const INITIAL_DELAY: Duration = Duration::from_millis(10);
 
 use crate::core::app_state::AppState as SharedAppState;
-use crate::core::config::CTRL_KEY;
+use crate::core::config::{CTRL_KEY, C_KEY};
 use tauri::image::Image;
 use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::GetClipboardSequenceNumber;
 
-fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
+fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap()
 }
 
