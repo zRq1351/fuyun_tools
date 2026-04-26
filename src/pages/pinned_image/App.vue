@@ -2,11 +2,48 @@
   <div ref="rootRef" class="pinned-image-root"
        @mousedown.left="handleRootMouseDown"
        @dblclick.left.stop.prevent="closeWindow"
-       @contextmenu.prevent="handleContextMenu">
+       @contextmenu.prevent="handleContextMenu"
+       @click="hideContextMenu">
     <img v-if="imageSrc" ref="imageRef" :src="imageSrc" alt="" class="pinned-image" draggable="false"
          @load="handleImageLoaded"/>
-    <div v-if="ocrEnabled && isRecognizing" class="ocr-status">识别中...</div>
-    <div v-else-if="ocrStatusMessage" class="ocr-status ocr-status-error">{{ ocrStatusMessage }}</div>
+
+    <!-- 透明实况文本层 -->
+    <div class="ocr-text-overlay" v-if="!isRecognizing && ocrLines.length > 0">
+      <span 
+        v-for="item in ocrLines" 
+        :key="item.id"
+        class="selectable-text"
+        :style="{
+          left: (item.x0 / sourceWidth * 100) + '%',
+          top: (item.y0 / sourceHeight * 100) + '%',
+          width: ((item.x1 - item.x0) / sourceWidth * 100) + '%',
+          height: ((item.y1 - item.y0) / sourceHeight * 100) + '%',
+          fontSize: ((item.y1 - item.y0) / sourceHeight * 100 * 0.8) + 'vh',
+          lineHeight: ((item.y1 - item.y0) / sourceHeight * 100) + 'vh'
+        }"
+        @mousedown.stop
+      >
+        {{ item.text }}
+      </span>
+    </div>
+
+    <!-- 扫描线动画 -->
+    <div v-if="ocrEnabled && isRecognizing" class="ocr-scanner"></div>
+
+    <!-- 轻量级错误提示 -->
+    <div v-if="toastMessage" class="ocr-toast" :class="{'ocr-toast-error': toastIsError}">
+      {{ toastMessage }}
+    </div>
+
+    <!-- 自定义右键菜单 -->
+    <div v-if="contextMenu.show" class="context-menu" :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }" @mousedown.stop>
+      <div class="menu-item" @click="copyAllText">复制全部文字</div>
+      <div class="menu-item" @click="openTextWindow">在独立窗口查看</div>
+      <div class="menu-divider"></div>
+      <div class="menu-item" @click="retryWithOcrRs">高精度重新识别</div>
+      <div class="menu-divider"></div>
+      <div class="menu-item" @click="closeWindow">关闭贴图</div>
+    </div>
   </div>
 </template>
 
@@ -27,10 +64,48 @@ const isRecognizing = ref(false)
 const ocrEnabled = ref(true)
 const sourceWidth = ref(0)
 const sourceHeight = ref(0)
-const ocrStatusMessage = ref('')
+
 const currentPngBase64 = ref('')
 const currentImageWidth = ref(0)
 const currentImageHeight = ref(0)
+
+const ocrLines = ref([])
+
+// Toast
+const toastMessage = ref('')
+const toastIsError = ref(false)
+let toastTimer = null
+
+function showToast(msg, isError = false) {
+  toastMessage.value = msg
+  toastIsError.value = isError
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toastMessage.value = ''
+  }, 3000)
+}
+
+// Context Menu
+const contextMenu = ref({ show: false, x: 0, y: 0 })
+
+function handleContextMenu(event) {
+  let x = event.clientX
+  let y = event.clientY
+  
+  if (x + 140 > window.innerWidth) x = window.innerWidth - 140
+  if (y + 120 > window.innerHeight) y = window.innerHeight - 120
+  
+  contextMenu.value = {
+    show: true,
+    x,
+    y
+  }
+}
+
+function hideContextMenu() {
+  contextMenu.value.show = false
+}
+
 let unlistenResized = null
 let resizeDebounceTimer = null
 let lastDragStartAt = 0
@@ -48,11 +123,16 @@ function applyPinnedPayload(detail) {
     sourceWidth.value = width
     sourceHeight.value = height
   }
-  ocrStatusMessage.value = '右键开始识别文字'
   currentPngBase64.value = detail.png_base64
   currentImageWidth.value = width
   currentImageHeight.value = height
   imageSrc.value = `data:image/png;base64,${detail.png_base64}`
+
+  // 静默触发OCR
+  ocrLines.value = []
+  setTimeout(() => {
+    runOcr(detail.png_base64, width, height)
+  }, 100)
 }
 
 function handlePinnedImageData(event) {
@@ -60,6 +140,7 @@ function handlePinnedImageData(event) {
 }
 
 async function closeWindow() {
+  hideContextMenu()
   try {
     if (windowLabel.value) {
       await invoke('close_pinned_image_window', {label: windowLabel.value})
@@ -83,15 +164,42 @@ async function startDrag() {
 }
 
 function handleRootMouseDown(event) {
+  hideContextMenu()
   startDrag()
 }
 
-async function handleContextMenu() {
-  if (isRecognizing.value) return
-  if (!currentPngBase64.value) return
-  const lines = await runOcr(currentPngBase64.value, currentImageWidth.value, currentImageHeight.value)
-  if (!lines.length) return
-  const text = lines.map(line => (line?.text || '').trim()).filter(Boolean).join('\n').trim()
+async function copyAllText() {
+  hideContextMenu()
+  if (isRecognizing.value) {
+    showToast('正在识别中，请稍候...', false)
+    return
+  }
+  if (!ocrLines.value.length) {
+    showToast('未识别到文字', true)
+    return
+  }
+  const text = ocrLines.value.map(line => (line?.text || '').trim()).filter(Boolean).join('\n').trim()
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    showToast('文字已复制', false)
+  } catch (e) {
+    console.error('复制失败', e)
+    showToast('复制失败', true)
+  }
+}
+
+async function openTextWindow() {
+  hideContextMenu()
+  if (isRecognizing.value) {
+    showToast('正在识别中，请稍候...', false)
+    return
+  }
+  if (!ocrLines.value.length) {
+    showToast('未识别到文字', true)
+    return
+  }
+  const text = ocrLines.value.map(line => (line?.text || '').trim()).filter(Boolean).join('\n').trim()
   if (!text) return
   try {
     await invoke('show_ocr_text_window', {
@@ -101,6 +209,17 @@ async function handleContextMenu() {
   } catch (error) {
     console.error('显示OCR文本窗口失败:', error)
   }
+}
+
+async function retryWithOcrRs() {
+  hideContextMenu()
+  if (isRecognizing.value) {
+    showToast('正在识别中，请稍候...', false)
+    return
+  }
+  if (!currentPngBase64.value) return
+  showToast('正在使用高精度引擎重新识别...', false)
+  await runOcr(currentPngBase64.value, currentImageWidth.value, currentImageHeight.value, 'ocr-rs')
 }
 
 function handleImageLoaded(event) {
@@ -133,33 +252,35 @@ function normalizeNativeOcrParagraphs(paragraphs, taskId) {
       .filter(Boolean)
 }
 
-async function runOcr(base64, width, height) {
+async function runOcr(base64, width, height, engine = null) {
   if (!ocrEnabled.value || !base64) return []
   const taskId = ++ocrTaskId
   isRecognizing.value = true
-  ocrStatusMessage.value = ''
+  toastMessage.value = ''
   try {
-    const result = await invoke('recognize_image_ocr', { pngBase64: base64 })
+    const payload = { pngBase64: base64 }
+    if (engine) {
+      payload.engine = engine
+    }
+    const result = await invoke('recognize_image_ocr', payload)
     if (taskId !== ocrTaskId) return []
     if (!result?.success) {
-      ocrStatusMessage.value = result?.error || '本地OCR识别失败'
+      showToast(result?.error || '本地OCR识别失败', true)
       return []
     }
     const lines = normalizeNativeOcrParagraphs(result?.paragraphs, taskId)
     if (!lines.length) {
-      ocrStatusMessage.value = '未识别到文字'
+      showToast('未识别到文字', true)
     }
     if (width > 0 && height > 0) {
       sourceWidth.value = width
       sourceHeight.value = height
     }
-    if (lines.length) {
-      ocrStatusMessage.value = '识别完成'
-    }
+    ocrLines.value = lines
     return lines
   } catch (error) {
     if (taskId !== ocrTaskId) return []
-    ocrStatusMessage.value = 'OCR 初始化失败'
+    showToast('OCR 初始化失败', true)
     console.error('固定窗口OCR识别失败:', error)
     return []
   } finally {
@@ -286,20 +407,101 @@ onUnmounted(() => {
   cursor: inherit;
 }
 
-.ocr-status {
+/* 扫描线动画 */
+.ocr-scanner {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 3;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
-  font-size: 12px;
-  padding: 3px 8px;
-  border-radius: 6px;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #0a84ff;
+  box-shadow: 0 0 10px #0a84ff, 0 0 20px #0a84ff;
+  animation: scan 1.5s infinite linear;
   pointer-events: none;
+  z-index: 2;
+}
+@keyframes scan {
+  0% { top: 0; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
 }
 
-.ocr-status.ocr-status-error {
-  background: rgba(120, 0, 0, 0.75);
+/* 轻量级提示 Toast */
+.ocr-toast {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: opacity 0.3s;
+}
+.ocr-toast-error {
+  background: rgba(220, 38, 38, 0.85);
+}
+
+/* 透明实况文本层 */
+.ocr-text-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.selectable-text {
+  position: absolute;
+  color: transparent;
+  user-select: text;
+  cursor: text;
+  white-space: nowrap;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.selectable-text::selection {
+  background: rgba(10, 132, 255, 0.4);
+  color: transparent;
+}
+
+/* 自定义右键菜单 */
+.context-menu {
+  position: absolute;
+  z-index: 20;
+  background: #2c2c2e;
+  border: 1px solid #3a3a3c;
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 140px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  color: #fff;
+  font-size: 13px;
+}
+
+.menu-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.menu-item:hover {
+  background: #0a84ff;
+}
+
+.menu-divider {
+  height: 1px;
+  background: #3a3a3c;
+  margin: 4px 0;
 }
 </style>
