@@ -40,8 +40,6 @@
       <div class="menu-item" @click="copyAllText">复制全部文字</div>
       <div class="menu-item" @click="openTextWindow">在独立窗口查看</div>
       <div class="menu-divider"></div>
-      <div class="menu-item" @click="retryWithOcrRs">高精度重新识别</div>
-      <div class="menu-divider"></div>
       <div class="menu-item" @click="closeWindow">关闭贴图</div>
     </div>
   </div>
@@ -211,17 +209,6 @@ async function openTextWindow() {
   } catch (error) {
     console.error('显示OCR文本窗口失败:', error)
   }
-}
-
-async function retryWithOcrRs() {
-  hideContextMenu()
-  if (isRecognizing.value) {
-    showToast('正在识别中，请稍候...', false)
-    return
-  }
-  if (!currentPngBase64.value) return
-  showToast('正在使用高精度引擎重新识别...', false)
-  await runOcr(currentPngBase64.value, currentImageWidth.value, currentImageHeight.value, 'ocr-rs')
 }
 
 function handleImageLoaded(event) {

@@ -3588,10 +3588,10 @@ pub async fn save_app_settings(
         };
     }
     if let Some(val) = ocr_engine {
-        settings.ocr_engine = if val == "ocr-rs" {
-            "ocr-rs".to_string()
-        } else {
+        settings.ocr_engine = if val == "windows-native" {
             "windows-native".to_string()
+        } else {
+            "ocr-rs".to_string()
         };
     }
     if let Some(val) = recording_default_fps {
