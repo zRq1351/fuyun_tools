@@ -3196,11 +3196,14 @@ async function pinToScreenAndClose() {
           ? Math.max(1, Number(screenshotImg.value?.height) || Math.round(rect.height))
           : Math.max(1, Math.round(rect.height))
     }
+    
+    const region = getGlobalSelectionRect()
+    
     const payload = {
       request: {
         pngBase64: base64,
-        x: Math.round(rect.x),
-        y: Math.round(rect.y),
+        x: region.x,
+        y: region.y,
         width: pinWidth,
         height: pinHeight
       }
