@@ -6637,7 +6637,7 @@ pub async fn get_manual_longshot_status(
 
 #[tauri::command]
 pub async fn recognize_image_ocr(
-    png_base64: String,
+    png_bytes: Vec<u8>,
     engine: Option<String>,
     _app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
@@ -6674,7 +6674,7 @@ pub async fn recognize_image_ocr(
         }
     };
     
-    match crate::services::ocr_engine::recognize_image(&png_base64, engine_type, &_app).await {
+    match crate::services::ocr_engine::recognize_image(&png_bytes, engine_type, &_app).await {
         Ok(result) => {
             record_perf_metric(
                 "ocr.recognize",

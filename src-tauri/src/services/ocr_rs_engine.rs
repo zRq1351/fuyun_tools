@@ -1,7 +1,7 @@
 use ocr_rs::{OcrEngine, OcrEngineConfig};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct OcrLine {
     pub text: String,
     pub x0: f64,
@@ -11,7 +11,7 @@ pub struct OcrLine {
     pub confidence: f32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct OcrParagraph {
     pub text: String,
     pub x0: f64,
@@ -22,19 +22,13 @@ pub struct OcrParagraph {
 }
 
 /// 使用 ocr-rs 进行 OCR 识别
-pub async fn recognize_with_ocr_rs(png_base64: &str, app_handle: &tauri::AppHandle) -> Result<Vec<OcrParagraph>, String> {
-    use base64::Engine;
+pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHandle) -> Result<Vec<OcrParagraph>, String> {
     use tauri::Manager;
     
     log::info!("初始化 ocr-rs 引擎...");
     
-    // 解码 base64
-    let image_data = base64::engine::general_purpose::STANDARD
-        .decode(png_base64)
-        .map_err(|e| format!("Base64解码失败: {}", e))?;
-    
     // 加载图片
-    let img = image::load_from_memory(&image_data)
+    let img = image::load_from_memory(image_data)
         .map_err(|e| format!("图片加载失败: {}", e))?;
     
     log::info!("开始 OCR 识别...");
@@ -81,28 +75,34 @@ pub async fn recognize_with_ocr_rs(png_base64: &str, app_handle: &tauri::AppHand
         log::info!("检测到 {} 个文本区域", ocr_results.len());
         
         // 转换为我们的格式
-        let mut paragraphs = Vec::new();
+        let mut lines = Vec::new();
         
         for result in ocr_results {
             let bbox = &result.bbox;
+            let text = result.text.clone();
+            if text.trim().is_empty() {
+                continue;
+            }
             
-            // 创建段落（每个检测结果作为一个段落）
-            paragraphs.push(OcrParagraph {
-                text: result.text.clone(),
+            lines.push(OcrLine {
+                text: clean_ocr_text(&text),
                 x0: bbox.rect.left() as f64,
                 y0: bbox.rect.top() as f64,
                 x1: (bbox.rect.left() + bbox.rect.width() as i32) as f64,
                 y1: (bbox.rect.top() + bbox.rect.height() as i32) as f64,
-                lines: vec![OcrLine {
-                    text: result.text,
-                    x0: bbox.rect.left() as f64,
-                    y0: bbox.rect.top() as f64,
-                    x1: (bbox.rect.left() + bbox.rect.width() as i32) as f64,
-                    y1: (bbox.rect.top() + bbox.rect.height() as i32) as f64,
-                    confidence: result.confidence,
-                }],
+                confidence: result.confidence,
             });
         }
+        
+        if lines.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // 按 Y 坐标排序（从上到下）
+        lines.sort_by(|a, b| a.y0.partial_cmp(&b.y0).unwrap_or(std::cmp::Ordering::Equal));
+
+        // 将相近的行合并为段落
+        let paragraphs = merge_lines_to_paragraphs(lines);
         
         Ok(paragraphs)
     })
@@ -113,4 +113,107 @@ pub async fn recognize_with_ocr_rs(png_base64: &str, app_handle: &tauri::AppHand
     log::info!("ocr-rs 识别完成，检测到 {} 个段落", result.len());
     
     Ok(result)
+}
+
+/// 清理 OCR 文本中的多余空格
+fn clean_ocr_text(text: &str) -> String {
+    if text.is_empty() {
+        return text.to_string();
+    }
+
+    // 检测是否主要为中文（中文字符占比超过50%）
+    let chinese_count = text.chars().filter(|c| {
+        let cp = *c as u32;
+        (cp >= 0x4E00 && cp <= 0x9FFF) ||  // CJK统一汉字
+        (cp >= 0x3400 && cp <= 0x4DBF) ||  // CJK扩展A
+        (cp >= 0x20000 && cp <= 0x2A6DF)   // CJK扩展B
+    }).count();
+    
+    let total_chars = text.chars().filter(|c| !c.is_whitespace()).count();
+    
+    if total_chars == 0 {
+        return text.to_string();
+    }
+
+    let chinese_ratio = chinese_count as f64 / total_chars as f64;
+
+    if chinese_ratio > 0.5 {
+        // 主要是中文：移除所有空格
+        text.chars().filter(|c| !c.is_whitespace()).collect()
+    } else {
+        // 主要是英文或其他语言：规范化空格
+        let mut result = String::with_capacity(text.len());
+        let mut prev_was_space = false;
+        
+        for c in text.chars() {
+            if c.is_whitespace() {
+                if !prev_was_space && !result.is_empty() {
+                    result.push(' ');
+                    prev_was_space = true;
+                }
+            } else {
+                result.push(c);
+                prev_was_space = false;
+            }
+        }
+        
+        // 移除首尾空格
+        result.trim().to_string()
+    }
+}
+
+/// 将行合并为段落（Y 坐标相近的行合并）
+fn merge_lines_to_paragraphs(lines: Vec<OcrLine>) -> Vec<OcrParagraph> {
+    if lines.is_empty() {
+        return Vec::new();
+    }
+
+    let mut paragraphs = Vec::new();
+    let mut current_lines = vec![lines[0].clone()];
+    let mut current_y = lines[0].y0;
+
+    for line in lines.iter().skip(1) {
+        // 如果 Y 坐标差距小于 20 像素，认为是同一段落
+        if (line.y0 - current_y).abs() < 20.0 {
+            current_lines.push(line.clone());
+        } else {
+            // 创建新段落
+            paragraphs.push(create_paragraph(current_lines));
+            current_lines = vec![line.clone()];
+            current_y = line.y0;
+        }
+    }
+
+    // 添加最后一个段落
+    if !current_lines.is_empty() {
+        paragraphs.push(create_paragraph(current_lines));
+    }
+
+    paragraphs
+}
+
+/// 创建段落
+fn create_paragraph(lines: Vec<OcrLine>) -> OcrParagraph {
+    let mut min_x = f64::MAX;
+    let mut min_y = f64::MAX;
+    let mut max_x = f64::MIN;
+    let mut max_y = f64::MIN;
+    let mut texts = Vec::new();
+
+    for line in &lines {
+        min_x = min_x.min(line.x0);
+        min_y = min_y.min(line.y0);
+        max_x = max_x.max(line.x1);
+        max_y = max_y.max(line.y1);
+        texts.push(line.text.clone());
+    }
+
+    OcrParagraph {
+        text: texts.join("\n"),
+        x0: min_x,
+        y0: min_y,
+        x1: max_x,
+        y1: max_y,
+        lines,
+    }
 }

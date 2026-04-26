@@ -28,18 +28,13 @@ pub struct NativeOcrResult {
 }
 
 #[cfg(target_os = "windows")]
-pub async fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, String> {
-    use base64::Engine;
+pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<NativeOcrResult, String> {
     use image::imageops::FilterType;
     use image::{DynamicImage, ImageFormat};
     use windows::Globalization::Language;
     use windows::Graphics::Imaging::BitmapDecoder;
     use windows::Media::Ocr::OcrEngine;
     use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
-
-    let png_bytes = base64::engine::general_purpose::STANDARD
-        .decode(png_base64)
-        .map_err(|e| format!("OCR Base64解码失败: {}", e))?;
 
     fn preprocess_png_bytes(input: &[u8]) -> Result<Vec<u8>, String> {
         let image =
@@ -317,23 +312,55 @@ pub async fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, S
         }
     }
 
-    let enhanced_png = preprocess_png_bytes(&png_bytes).ok();
-    let light_enhanced_png = preprocess_png_bytes_light(&png_bytes).ok();
-    
     let mut best_result = NativeOcrResult {
         paragraphs: Vec::new(),
     };
     let mut best_score = 0usize;
     let mut last_error = String::new();
 
-    // 多策略尝试：原始图 + 两种增强图 × 三种语言
-    let mut attempts: Vec<(&[u8], Option<&str>, &str)> = vec![
-        // 优先尝试中文（最常见的场景）
-        (&png_bytes, Some("zh-Hans"), "original-zh"),
-        (&png_bytes, Some("en-US"), "original-en"),
-        (&png_bytes, None, "original-auto"),
+    // 优先尝试原图策略
+    let original_attempts: Vec<(Option<&str>, &str)> = vec![
+        (Some("zh-Hans"), "original-zh"),
+        (Some("en-US"), "original-en"),
+        (None, "original-auto"),
     ];
+
+    for (lang, strategy_name) in original_attempts {
+        match run_windows_ocr(&png_bytes, lang).await {
+            Ok(result) => {
+                let current_score = score(&result);
+                log::debug!("OCR策略 {} 得分: {}", strategy_name, current_score);
+                if current_score > best_score {
+                    best_score = current_score;
+                    best_result = result;
+                    log::info!("OCR采用策略: {}, 得分: {}", strategy_name, current_score);
+                }
+            }
+            Err(e) => {
+                log::debug!("OCR策略 {} 失败: {}", strategy_name, e);
+                last_error = e;
+            }
+        }
+    }
+
+    // 快速返回机制：如果原图识别得分较高，直接返回，避免耗时的图像增强
+    if best_score >= 30 {
+        log::info!("原图识别得分 {} >= 30，触发快速返回", best_score);
+        return Ok(best_result);
+    }
+
+    // 如果原图效果不佳，在后台线程中执行耗时的图像增强
+    let png_bytes_clone1 = png_bytes.clone();
+    let enhanced_task = tokio::task::spawn_blocking(move || preprocess_png_bytes(&png_bytes_clone1).ok());
     
+    let png_bytes_clone2 = png_bytes.clone();
+    let light_enhanced_task = tokio::task::spawn_blocking(move || preprocess_png_bytes_light(&png_bytes_clone2).ok());
+
+    let enhanced_png = enhanced_task.await.unwrap_or(None);
+    let light_enhanced_png = light_enhanced_task.await.unwrap_or(None);
+
+    let mut attempts: Vec<(&[u8], Option<&str>, &str)> = Vec::new();
+
     // 增强版本（二值化）
     if let Some(enhanced) = enhanced_png.as_ref() {
         attempts.push((enhanced.as_slice(), Some("zh-Hans"), "enhanced-zh"));
@@ -373,6 +400,6 @@ pub async fn recognize_png_base64(png_base64: &str) -> Result<NativeOcrResult, S
 }
 
 #[cfg(not(target_os = "windows"))]
-pub async fn recognize_png_base64(_png_base64: &str) -> Result<NativeOcrResult, String> {
+pub async fn recognize_png_bytes(_png_bytes: &[u8]) -> Result<NativeOcrResult, String> {
     Err("当前平台暂不支持本地原生OCR".to_string())
 }
