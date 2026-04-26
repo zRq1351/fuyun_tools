@@ -6,6 +6,7 @@
     "clipboard",
     "image_clipboard",
     "image_preview",
+    "text_preview",
     "pinned_image_window",
     "pinned_image_*",
     "ocr_text_pinned_image_window",

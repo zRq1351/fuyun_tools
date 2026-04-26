@@ -28,11 +28,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, onBeforeUnmount } from 'vue'
-import { listen } from '@tauri-apps/api/event'
-import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
-import { ClipboardService } from '../../services/ipc'
-import { marked } from 'marked'
+import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
+import {listen} from '@tauri-apps/api/event'
+import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
+import {ImageClipboardService} from '../../services/ipc'
+import {marked} from 'marked'
 
 const currentWindow = getCurrentWebviewWindow()
 const animationState = ref('entering')
@@ -54,7 +54,7 @@ const startWindowDrag = async () => {
     await currentWindow.startDragging()
   } catch (e) {
     console.warn('tauri drag failed, falling back to ipc:', e)
-    ClipboardService.startTextPreviewWindowDrag()
+    ImageClipboardService.startTextPreviewWindowDrag()
   }
 }
 
@@ -62,7 +62,7 @@ const requestClose = (fromButton = false) => {
   if (animationState.value === 'leaving') return
   animationState.value = 'leaving'
   setTimeout(() => {
-    ClipboardService.closeTextPreviewWindow()
+    ImageClipboardService.closeTextPreviewWindow()
   }, 200)
 }
 
@@ -74,7 +74,7 @@ const handleKeydown = (e) => {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
-  
+
   unlisten = await listen('show-text-preview', (event) => {
     const payload = event.payload || {}
     if (payload.text) {

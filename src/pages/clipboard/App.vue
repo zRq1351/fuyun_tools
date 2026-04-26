@@ -170,9 +170,9 @@
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ArrowLeftBold, ArrowRightBold, Check, Loading} from '@element-plus/icons-vue'
-  import {ElMessage} from 'element-plus'
-  import {listen} from '@tauri-apps/api/event'
-import {AIService, ClipboardService, WindowService} from '../../services/ipc'
+import {ElMessage} from 'element-plus'
+import {listen} from '@tauri-apps/api/event'
+import {AIService, ClipboardService, ImageClipboardService, WindowService} from '../../services/ipc'
 import {handleAppError} from '../../utils/errorHandler'
 import ClipboardToolbar from './components/ClipboardToolbar.vue'
 import ClipboardList from './components/ClipboardList.vue'
@@ -213,7 +213,7 @@ const explanationTargetLanguage = ref(localStorage.getItem('clipboard_ai_explain
   const loadMoreIntent = ref(false)
 
   const handlePreview = (content) => {
-    ClipboardService.openTextPreviewWindow(content)
+    ImageClipboardService.openTextPreviewWindow(content)
   }
 
   const isUpdatingCategory = ref(false)
@@ -381,8 +381,8 @@ const init = async () => {
       void showWindow(event.payload)
     })
     unlistenHistoryPayloadUpdated = await listen('clipboard-history-payload-updated', (event) => {
-      
-      
+
+
       syncHistoryIncremental()
     })
     unlistenHistoryItemUpdated = await listen('clipboard-history-item-updated', (event) => {
@@ -401,7 +401,7 @@ const init = async () => {
     unlistenWritebackResult = await listen('writeback-result', (event) => {
       const payload = event.payload || {}
       if (payload.source !== '文本') return
-      
+
       if (writebackErrorMsg) {
         writebackErrorMsg.close()
         writebackErrorMsg = null
@@ -524,7 +524,7 @@ const handleContainerMouseDown = (event) => {
 }
 
 const assignToCategory = async (category) => {
-  const itemKey = contextMenuItem.value 
+  const itemKey = contextMenuItem.value
   await runCategoryAssignment({
     itemKey,
     category,
@@ -556,7 +556,7 @@ const handleDrop = async (event, category) => {
   }
 
   await runCategoryAssignment({
-    itemKey: dragItem.value, 
+    itemKey: dragItem.value,
     category,
     persist: (itemKey, nextCategory) => setItemCategory(itemKey, nextCategory)
   })
@@ -749,7 +749,7 @@ let filterDebounceTimer = null
 watch([searchKeyword, categoryFilter], (newVals, oldVals) => {
   if (!isVisible.value) return
 
-  
+
   if (isUpdatingCategory.value) {
     console.log('[分类更新中] 跳过重新加载')
     return
@@ -761,14 +761,14 @@ watch([searchKeyword, categoryFilter], (newVals, oldVals) => {
   if (filterDebounceTimer) {
     clearTimeout(filterDebounceTimer)
   }
-  
-  
+
+
   const delay = newSearch !== oldSearch ? 300 : 50
 
   filterDebounceTimer = setTimeout(() => {
     loadMoreIntent.value = false
-    
-    
+
+
     syncHistoryIncremental()
   }, delay)
 })

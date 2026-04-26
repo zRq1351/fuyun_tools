@@ -529,7 +529,34 @@ pub fn run() {
 
     match app {
         Ok(app) => {
-            app.run(|_app_handle, _event| {});
+            app.run(|app_handle, event| {
+                // 在应用退出前保存所有数据
+                if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                    log::info!("应用正在退出，正在保存数据...");
+                    
+                    // 获取状态并保存剪贴板历史
+                    let state_guard = lock_state(&state_arc);
+                    let clipboard_manager = state_guard.clipboard_manager.clone();
+                    let image_manager = state_guard.image_clipboard_manager.clone();
+                    drop(state_guard);
+                    
+                    // 保存文本剪贴板历史
+                    let text_manager = clipboard_manager.lock().unwrap();
+                    if let Err(e) = text_manager.save_history_on_exit() {
+                        log::error!("保存文本历史记录失败: {}", e);
+                    }
+                    drop(text_manager);
+                    
+                    // 保存图片剪贴板历史
+                    let img_manager = image_manager.lock().unwrap();
+                    if let Err(e) = img_manager.save_history_on_exit() {
+                        log::error!("保存图片历史记录失败: {}", e);
+                    }
+                    drop(img_manager);
+                    
+                    log::info!("数据保存完成，允许退出");
+                }
+            });
         }
         Err(e) => {
             log::error!("构建Tauri应用失败: {}", e);
