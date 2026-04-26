@@ -350,10 +350,11 @@ pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<NativeOcrResult, St
     }
 
     // 如果原图效果不佳，在后台线程中执行耗时的图像增强
-    let png_bytes_clone1 = png_bytes.clone();
+    let png_bytes_owned = png_bytes.to_vec();
+    let png_bytes_clone1 = png_bytes_owned.clone();
     let enhanced_task = tokio::task::spawn_blocking(move || preprocess_png_bytes(&png_bytes_clone1).ok());
     
-    let png_bytes_clone2 = png_bytes.clone();
+    let png_bytes_clone2 = png_bytes_owned.clone();
     let light_enhanced_task = tokio::task::spawn_blocking(move || preprocess_png_bytes_light(&png_bytes_clone2).ok());
 
     let enhanced_png = enhanced_task.await.unwrap_or(None);
