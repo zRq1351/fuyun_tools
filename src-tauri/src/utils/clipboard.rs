@@ -566,6 +566,52 @@ impl ClipboardManager {
         self.history_cache_dirty.store(false, Ordering::Relaxed);
     }
 
+    pub async fn update_item_content(&self, old_item_id: &str, new_content: String) -> Result<(), String> {
+        let mut history = lock_arc_mutex(&self.history);
+        let index = self
+            .find_index_by_id_with_lock(&history, old_item_id)
+            .ok_or_else(|| "找不到目标项目".to_string())?;
+
+        let old_content = history[index].clone();
+        if old_content == new_content {
+            return Ok(());
+        }
+
+        let new_item_id = crate::utils::database::stable_history_item_id(&new_content);
+
+        let mut categories = lock_arc_mutex(&self.categories);
+        if let Some(cat) = categories.remove(old_item_id) {
+            categories.insert(new_item_id.clone(), cat.clone());
+            let _ = crate::utils::database::set_item_category(&new_item_id, &cat).await;
+        }
+        let _ = crate::utils::database::remove_item_category(old_item_id).await;
+
+        let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+        let was_pinned = if let Some(pos) = pinned_items.iter().position(|id| id == old_item_id) {
+            pinned_items[pos] = new_item_id.clone();
+            true
+        } else {
+            false
+        };
+
+        if was_pinned {
+            let _ = crate::utils::database::pin_item(&new_item_id).await;
+            let _ = crate::utils::database::unpin_item(old_item_id).await;
+        }
+
+        history[index] = new_content.clone();
+
+        self.exact_index_cache.lock().clear();
+        self.history_cache_dirty.store(true, Ordering::Relaxed);
+        
+        let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
+        *fingerprints = build_history_fingerprints(&history);
+
+        self.enqueue_history_only_persist();
+
+        Ok(())
+    }
+
     /// 清空历史记录
     pub fn clear_history(&self) -> Result<(), String> {
         let mut history = lock_arc_mutex(&self.history);

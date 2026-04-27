@@ -384,6 +384,7 @@ pub fn run() {
             open_text_preview_window,
             close_text_preview_window,
             start_text_preview_window_drag,
+            update_text_item,
             warmup_image_clipboard_item_by_id,
             warmup_multiple_images,
             select_and_fill,
