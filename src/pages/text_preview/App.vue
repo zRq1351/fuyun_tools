@@ -85,7 +85,7 @@ const startEdit = async () => {
   isEditing.value = true
   await nextTick()
   if (textareaRef.value) {
-    textareaRef.value.focus()
+    textareaRef.value.focus({ preventScroll: true })
     textareaRef.value.setSelectionRange(0, 0)
     textareaRef.value.scrollTop = currentScrollTop
   }
