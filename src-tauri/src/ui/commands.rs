@@ -2676,6 +2676,7 @@ pub async fn update_text_item(
     item_id: String,
     new_content: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     let manager_arc = get_clipboard_manager_arc(state.inner());
     let manager = {
@@ -2683,14 +2684,25 @@ pub async fn update_text_item(
         guard.clone()
     };
 
-    manager
-        .update_item_content(&item_id, new_content)
+    let result = manager
+        .update_item_content(&item_id, new_content.clone())
         .await
         .map_err(|e| {
             to_frontend_error_string(
                 AppError::new(ErrorCode::ClipboardError, "更新文本内容失败").with_details(e),
             )
-        })
+        });
+
+    if result.is_ok() {
+        let new_item_id = crate::utils::database::stable_history_item_id(&new_content);
+        let _ = app.emit("text-item-replaced", serde_json::json!({
+            "old_id": item_id,
+            "new_id": new_item_id,
+            "new_content": new_content
+        }));
+    }
+
+    result
 }
 
 #[tauri::command]

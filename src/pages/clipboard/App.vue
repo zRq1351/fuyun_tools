@@ -221,6 +221,7 @@ let unlistenShowWindow = null
 let unlistenHistoryPayloadUpdated = null
 let unlistenHistoryItemUpdated = null
 let unlistenTextItemPromoted = null
+let unlistenTextItemReplaced = null
 let unlistenWritebackResult = null
 let writebackErrorMsg = null
 let windowBlurHandler = null
@@ -248,6 +249,7 @@ const {
   loadTailPage,
   setPageSize,
   promoteLocalById,
+  replaceLocalById,
   setLocalPinnedById,
   insertLocalIncomingContent,
   applyPayloadSnapshot,
@@ -397,6 +399,12 @@ const init = async () => {
     unlistenTextItemPromoted = await listen('text-item-promoted', (event) => {
       const id = event?.payload?.id
       promoteLocalById(id)
+    })
+    unlistenTextItemReplaced = await listen('text-item-replaced', (event) => {
+      const payload = event?.payload || {}
+      if (payload.old_id && payload.new_id) {
+        replaceLocalById(payload.old_id, payload.new_id, payload.new_content)
+      }
     })
     unlistenWritebackResult = await listen('writeback-result', (event) => {
       const payload = event.payload || {}
@@ -812,6 +820,10 @@ onBeforeUnmount(() => {
   if (unlistenTextItemPromoted) {
     unlistenTextItemPromoted()
     unlistenTextItemPromoted = null
+  }
+  if (unlistenTextItemReplaced) {
+    unlistenTextItemReplaced()
+    unlistenTextItemReplaced = null
   }
   if (unlistenWritebackResult) {
     unlistenWritebackResult()
