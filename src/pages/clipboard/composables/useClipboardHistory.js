@@ -648,7 +648,19 @@ export function useClipboardHistory() {
         rebuildHistoryArray()
     }
 
+    const replaceLocalById = (oldId, newId, newContent) => {
+        const index = pagedHistory.value.findIndex(item => item.id === oldId)
+        if (index !== -1) {
+            pagedHistory.value[index].id = newId
+            pagedHistory.value[index].content = newContent
+            if (selectedItemId.value === oldId) {
+                selectedItemId.value = newId
+            }
+        }
+    }
+
     return {
+        replaceLocalById,
                 selectedItemId,
         searchKeyword,
         categoryFilter,
