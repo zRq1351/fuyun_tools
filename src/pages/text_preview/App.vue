@@ -13,8 +13,7 @@
           title="拖动窗口"
           @mousedown.left.stop.prevent="startWindowDrag"
       >
-        <span></span><span></span><span></span>
-        <span></span><span></span><span></span>
+        <GripHorizontal :size="16" :stroke-width="2" />
       </div>
       <button class="viewer-close" @mousedown.left.stop.prevent @click.stop="requestClose(true)">关闭</button>
     </div>
@@ -31,6 +30,7 @@
 
 <script setup>
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
+import { GripHorizontal } from 'lucide-vue-next'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {ImageClipboardService} from '../../services/ipc'
@@ -124,18 +124,15 @@ onBeforeUnmount(() => {
 }
 
 .viewer-drag-icon {
-  width: 24px;
-  height: 16px;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 2px;
-  padding: 4px;
+  justify-content: center;
+  padding: 4px 6px;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.4);
+  color: rgba(255, 255, 255, 0.8);
   cursor: grab;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s, color 0.2s;
 }
 
 .viewer-drag-icon:active {
@@ -144,13 +141,7 @@ onBeforeUnmount(() => {
 
 .viewer-drag-icon:hover {
   background: rgba(0, 0, 0, 0.6);
-}
-
-.viewer-drag-icon span {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 1);
 }
 
 .viewer-close {
@@ -173,8 +164,8 @@ onBeforeUnmount(() => {
 }
 
 .viewer-card {
-  width: 100%;
-  height: 100%;
+  width: calc(100% - 32px);
+  height: calc(100% - 32px);
   background: linear-gradient(160deg, rgba(20, 24, 32, 0.95), rgba(12, 14, 20, 0.95));
   border-radius: 12px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
