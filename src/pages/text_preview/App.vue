@@ -203,21 +203,22 @@ onBeforeUnmount(() => {
   line-height: 1.6;
 }
 
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+.viewer-card ::-webkit-scrollbar {
+  display: block !important;
+  width: 8px !important;
+  height: 8px !important;
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
+.viewer-card ::-webkit-scrollbar-track {
+  background: transparent !important;
 }
 
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+.viewer-card ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2) !important;
+  border-radius: 4px !important;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+.viewer-card ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3) !important;
 }
 </style>
