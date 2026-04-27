@@ -15,30 +15,48 @@
       >
         <GripHorizontal :size="16" :stroke-width="2" />
       </div>
-      <button class="viewer-close" @mousedown.left.stop.prevent @click.stop="requestClose(true)">关闭</button>
+      <template v-if="!isEditing">
+        <button class="viewer-action-btn" @mousedown.left.stop.prevent @click.stop="startEdit">编辑</button>
+        <button class="viewer-action-btn" @mousedown.left.stop.prevent @click.stop="requestClose(true)">关闭</button>
+      </template>
+      <template v-else>
+        <button class="viewer-action-btn primary" @mousedown.left.stop.prevent @click.stop="saveEdit">保存到剪贴板</button>
+        <button class="viewer-action-btn" @mousedown.left.stop.prevent @click.stop="cancelEdit">取消</button>
+      </template>
     </div>
     <div
         :class="['viewer-card', animationState]"
         @click.stop
     >
       <div class="preview-content">
-        <FormattedContent :content="textContent" />
+        <textarea
+            v-if="isEditing"
+            v-model="editableText"
+            class="edit-textarea"
+            ref="textareaRef"
+            spellcheck="false"
+        ></textarea>
+        <FormattedContent v-else :content="textContent" />
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
+import {computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue'
 import { GripHorizontal } from 'lucide-vue-next'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
-import {ImageClipboardService} from '../../services/ipc'
+import {ImageClipboardService, ClipboardService} from '../../services/ipc'
 import FormattedContent from '../../components/FormattedContent.vue'
+import {ElMessage} from 'element-plus'
 
 const currentWindow = getCurrentWebviewWindow()
 const animationState = ref('entering')
 const textContent = ref('')
+const editableText = ref('')
+const isEditing = ref(false)
+const textareaRef = ref(null)
 
 let unlisten = null
 
@@ -59,9 +77,51 @@ const requestClose = (fromButton = false) => {
   }, 200)
 }
 
+const startEdit = async () => {
+  editableText.value = textContent.value
+  isEditing.value = true
+  await nextTick()
+  if (textareaRef.value) {
+    textareaRef.value.focus()
+  }
+}
+
+const cancelEdit = () => {
+  isEditing.value = false
+  editableText.value = ''
+}
+
+const saveEdit = async () => {
+  if (editableText.value.trim() === '') {
+    ElMessage.warning('内容不能为空')
+    return
+  }
+  if (editableText.value === textContent.value) {
+    isEditing.value = false
+    return
+  }
+  
+  try {
+    await ClipboardService.copyText(editableText.value)
+    textContent.value = editableText.value
+    isEditing.value = false
+    ElMessage.success('已保存到剪贴板')
+  } catch (error) {
+    console.error('保存修改失败:', error)
+    ElMessage.error('保存失败')
+  }
+}
+
 const handleKeydown = (e) => {
   if (e.key === 'Escape') {
-    requestClose()
+    if (isEditing.value) {
+      cancelEdit()
+    } else {
+      requestClose()
+    }
+  } else if ((e.ctrlKey || e.metaKey) && e.key === 's' && isEditing.value) {
+    e.preventDefault()
+    saveEdit()
   }
 }
 
@@ -144,7 +204,7 @@ onBeforeUnmount(() => {
   color: rgba(255, 255, 255, 1);
 }
 
-.viewer-close {
+.viewer-action-btn {
   background: rgba(0, 0, 0, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: white;
@@ -158,9 +218,32 @@ onBeforeUnmount(() => {
   user-select: none;
 }
 
-.viewer-close:hover {
-  background: rgba(255, 69, 58, 0.8);
-  border-color: rgba(255, 69, 58, 0.5);
+.viewer-action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.viewer-action-btn.primary {
+  background: rgba(64, 158, 255, 0.8);
+  border-color: rgba(64, 158, 255, 0.5);
+}
+
+.viewer-action-btn.primary:hover {
+  background: rgba(64, 158, 255, 1);
+  border-color: rgba(64, 158, 255, 0.8);
+}
+
+.edit-textarea {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #dcdfe6;
+  font-size: 15px;
+  line-height: 1.6;
+  font-family: inherit;
+  resize: none;
 }
 
 .viewer-card {
