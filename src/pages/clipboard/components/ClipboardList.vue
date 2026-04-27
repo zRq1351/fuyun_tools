@@ -45,7 +45,9 @@
       <div class="category-wrap" @click.stop>
         <div class="category-chip">{{ getItemCategory(entry.id) }}</div>
       </div>
-      <div class="item-content">{{ entry.content }}</div>
+      <div class="item-content">
+        <FormattedContent :content="entry.content" />
+      </div>
       <div v-if="entry.snippet" class="item-snippet">
         <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
           <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
@@ -71,6 +73,7 @@ import {computed, onUnmounted, ref} from 'vue'
 import {Close, Link, Loading, View} from '@element-plus/icons-vue'
 import {Pin} from 'lucide-vue-next'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
+import FormattedContent from '../../../components/FormattedContent.vue'
 
 const props = defineProps({
   visibleHistory: {
