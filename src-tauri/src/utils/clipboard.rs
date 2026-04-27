@@ -567,31 +567,48 @@ impl ClipboardManager {
     }
 
     pub async fn update_item_content(&self, old_item_id: &str, new_content: String) -> Result<(), String> {
-        let mut history = lock_arc_mutex(&self.history);
-        let index = self
-            .find_index_by_id_with_lock(&history, old_item_id)
-            .ok_or_else(|| "找不到目标项目".to_string())?;
+        // 在独立作用域中获取 index，然后释放 history 锁
+        let index = {
+            let history = lock_arc_mutex(&self.history);
+            let index = self
+                .find_index_by_id_with_lock(&history, old_item_id)
+                .ok_or_else(|| "找不到目标项目".to_string())?;
 
-        let old_content = history[index].clone();
-        if old_content == new_content {
-            return Ok(());
-        }
+            let old_content = history[index].clone();
+            if old_content == new_content {
+                return Ok(());
+            }
+            index
+        };
 
         let new_item_id = crate::utils::database::stable_history_item_id(&new_content);
 
-        let mut categories = lock_arc_mutex(&self.categories);
-        if let Some(cat) = categories.remove(old_item_id) {
-            categories.insert(new_item_id.clone(), cat.clone());
-            let _ = crate::utils::database::set_item_category(&new_item_id, &cat).await;
+        // 提取需要的数据，然后释放 categories 锁
+        let categories_to_update = {
+            let mut categories = lock_arc_mutex(&self.categories);
+            if let Some(cat) = categories.remove(old_item_id) {
+                categories.insert(new_item_id.clone(), cat.clone());
+                Some((new_item_id.clone(), cat))
+            } else {
+                None
+            }
+        };
+
+        // 执行异步数据库操作（此时所有锁都已释放）
+        if let Some((item_id, cat)) = categories_to_update {
+            let _ = crate::utils::database::set_item_category(&item_id, &cat).await;
         }
         let _ = crate::utils::database::remove_item_category(old_item_id).await;
 
-        let mut pinned_items = lock_arc_mutex(&self.pinned_items);
-        let was_pinned = if let Some(pos) = pinned_items.iter().position(|id| id == old_item_id) {
-            pinned_items[pos] = new_item_id.clone();
-            true
-        } else {
-            false
+        // 处理 pinned_items
+        let was_pinned = {
+            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+            if let Some(pos) = pinned_items.iter().position(|id| id == old_item_id) {
+                pinned_items[pos] = new_item_id.clone();
+                true
+            } else {
+                false
+            }
         };
 
         if was_pinned {
@@ -599,6 +616,8 @@ impl ClipboardManager {
             let _ = crate::utils::database::unpin_item(old_item_id).await;
         }
 
+        // 重新获取 history 锁来更新内容
+        let mut history = lock_arc_mutex(&self.history);
         history[index] = new_content.clone();
 
         self.exact_index_cache.lock().clear();
