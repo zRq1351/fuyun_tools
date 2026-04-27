@@ -20,7 +20,7 @@
         <button class="viewer-action-btn" @mousedown.left.stop.prevent @click.stop="requestClose(true)">关闭</button>
       </template>
       <template v-else>
-        <button class="viewer-action-btn primary" @mousedown.left.stop.prevent @click.stop="saveEdit">保存到剪贴板</button>
+        <button class="viewer-action-btn primary" @mousedown.left.stop.prevent @click.stop="saveEdit">保存</button>
         <button class="viewer-action-btn" @mousedown.left.stop.prevent @click.stop="cancelEdit">取消</button>
       </template>
     </div>
@@ -54,6 +54,7 @@ import {ElMessage} from 'element-plus'
 const currentWindow = getCurrentWebviewWindow()
 const animationState = ref('entering')
 const textContent = ref('')
+const itemId = ref(null)
 const editableText = ref('')
 const isEditing = ref(false)
 const textareaRef = ref(null)
@@ -117,10 +118,15 @@ const saveEdit = async () => {
   const currentScrollTop = textareaRef.value ? textareaRef.value.scrollTop : 0
 
   try {
-    await ClipboardService.copyText(editableText.value)
+    if (itemId.value) {
+      await ImageClipboardService.updateTextItem(itemId.value, editableText.value)
+    } else {
+      await ClipboardService.copyText(editableText.value)
+    }
+    
     textContent.value = editableText.value
     isEditing.value = false
-    ElMessage.success('已保存到剪贴板')
+    ElMessage.success('保存成功')
 
     await nextTick()
     const container = document.querySelector('.preview-content')
@@ -153,6 +159,11 @@ onMounted(async () => {
     const payload = event.payload || {}
     if (payload.text) {
       textContent.value = payload.text
+    }
+    if (payload.item_id) {
+      itemId.value = payload.item_id
+    } else {
+      itemId.value = null
     }
     setTimeout(() => {
       animationState.value = 'entered'

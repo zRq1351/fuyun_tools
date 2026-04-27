@@ -1099,9 +1099,10 @@ pub struct ItemIdRequest {
 #[tauri::command]
 pub async fn open_text_preview_window(
     text: String,
+    item_id: Option<String>,
     app: AppHandle,
 ) -> Result<(), String> {
-    crate::ui::window_manager::show_text_preview_window(app, text)
+    crate::ui::window_manager::show_text_preview_window(app, text, item_id)
 }
 
 #[tauri::command]
@@ -2668,6 +2669,28 @@ pub async fn set_image_item_tags(
             AppError::new(ErrorCode::ClipboardError, "设置图片标签失败").with_details(e),
         )
     })
+}
+
+#[tauri::command]
+pub async fn update_text_item(
+    item_id: String,
+    new_content: String,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    let manager_arc = get_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+
+    manager
+        .update_item_content(&item_id, new_content)
+        .await
+        .map_err(|e| {
+            to_frontend_error_string(
+                AppError::new(ErrorCode::ClipboardError, "更新文本内容失败").with_details(e),
+            )
+        })
 }
 
 #[tauri::command]

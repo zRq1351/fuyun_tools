@@ -657,6 +657,7 @@ pub fn hide_image_preview_window(app_handle: AppHandle) {
 pub fn show_text_preview_window(
     app_handle: AppHandle,
     text: String,
+    item_id: Option<String>,
 ) -> Result<(), String> {
     let window = app_handle
         .get_webview_window("text_preview")
@@ -666,7 +667,8 @@ pub fn show_text_preview_window(
     prepare_image_preview_window(&window)?;
 
     let payload = serde_json::json!({
-        "text": text
+        "text": text,
+        "item_id": item_id,
     });
     let _ = window.set_always_on_top(false);
     let _ = show_overlay_window(&app_handle, "text_preview", &window, true);

@@ -212,8 +212,8 @@ const translationTargetLanguage = ref(localStorage.getItem('clipboard_ai_target_
 const explanationTargetLanguage = ref(localStorage.getItem('clipboard_ai_explain_language') || '中文')
   const loadMoreIntent = ref(false)
 
-  const handlePreview = (content) => {
-    ImageClipboardService.openTextPreviewWindow(content)
+  const handlePreview = (content, id) => {
+    ImageClipboardService.openTextPreviewWindow(content, id)
   }
 
   const isUpdatingCategory = ref(false)

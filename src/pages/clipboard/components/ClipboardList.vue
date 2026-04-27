@@ -25,7 +25,7 @@
           <Link/>
         </el-icon>
       </div>
-      <div class="preview-btn" @click.stop="emit('preview', entry.content)">
+      <div class="preview-btn" @click.stop="emit('preview', entry.content, entry.id)">
         <el-icon>
           <View/>
         </el-icon>
