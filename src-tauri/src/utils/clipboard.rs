@@ -858,24 +858,8 @@ impl ClipboardManager {
         self.clear_history_by_mode(mode)
     }
 
-    /// 退出时确保所有待保存的数据都已写入数据库
+    /// 退出时保存历史（由异步持久化线程自动处理）
     pub fn save_history_on_exit(&self) -> Result<(), String> {
-        // 等待异步持久化线程完成所有待处理的保存操作
-        // 通过触发一次通知并短暂等待来确保数据落盘
-        let (lock, cvar) = &*self.persist_state;
-        {
-            let mut state = lock.lock();
-            // 如果有任何脏数据，标记为需要保存
-            if state.history_dirty || state.categories_dirty || state.pinned_dirty {
-                log::info!("退出时检测到未保存的更改，正在同步保存...");
-                cvar.notify_one();
-            }
-        }
-        
-        // 给异步线程一点时间来完成保存（最多等待500ms）
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        
-        log::info!("退出时数据保存完成");
         Ok(())
     }
 

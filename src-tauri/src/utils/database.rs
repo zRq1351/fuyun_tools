@@ -258,38 +258,6 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
     .await
     .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
 
-    sqlx::query(
-        "
-        UPDATE categories
-        SET item_id = (
-            SELECT hi.item_id
-            FROM history_items hi
-            WHERE hi.content = categories.content
-            LIMIT 1
-        )
-        WHERE item_id IS NULL OR item_id = ''
-        ",
-    )
-    .execute(&mut *conn)
-    .await
-    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
-
-    sqlx::query(
-        "
-        UPDATE pinned_items
-        SET item_id = (
-            SELECT hi.item_id
-            FROM history_items hi
-            WHERE hi.content = pinned_items.content
-            LIMIT 1
-        )
-        WHERE item_id IS NULL OR item_id = ''
-        ",
-    )
-    .execute(&mut *conn)
-    .await
-    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
-
     let categories_info: Vec<sqlx::sqlite::SqliteRow> =
         sqlx::query("PRAGMA table_info(categories)")
             .fetch_all(&mut *conn)
