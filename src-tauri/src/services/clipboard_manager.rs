@@ -35,15 +35,21 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
     thread::spawn(move || {
         let mut last_content = String::new();
         let wake_rx = subscribe_clipboard_wake_events();
+        let mut missed_event = false;
 
         loop {
             if stop_rx.try_recv().is_ok() {
                 break;
             }
-            match wake_rx.recv_timeout(Duration::from_millis(250)) {
-                Ok(_) => {}
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            let timeout_ms = if missed_event { 50 } else { 250 };
+            let has_event = match wake_rx.recv_timeout(Duration::from_millis(timeout_ms)) {
+                Ok(_) => true,
+                Err(mpsc::RecvTimeoutError::Timeout) => false,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+
+            if has_event {
+                missed_event = true;
             }
 
             let (is_updating, manager_arc) = {
@@ -61,6 +67,12 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
             if is_updating {
                 continue;
             }
+
+            if !missed_event {
+                continue;
+            }
+
+            missed_event = false;
 
             let current_content = {
                 let manager = manager_arc.lock().unwrap();

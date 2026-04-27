@@ -342,16 +342,23 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
 
     thread::spawn(move || {
         let wake_rx = subscribe_clipboard_wake_events();
+        let mut missed_event = false;
 
         loop {
             if stop_rx.try_recv().is_ok() {
                 break;
             }
-            match wake_rx.recv_timeout(Duration::from_millis(250)) {
-                Ok(_) => {}
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            let timeout_ms = if missed_event { 50 } else { 250 };
+            let has_event = match wake_rx.recv_timeout(Duration::from_millis(timeout_ms)) {
+                Ok(_) => true,
+                Err(mpsc::RecvTimeoutError::Timeout) => false,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+
+            if has_event {
+                missed_event = true;
             }
+
             let should_skip = {
                 let state_guard = lock_state(&state);
                 if !state_guard.settings.image_clipboard_enabled {
@@ -371,6 +378,12 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
             if screenshot_in_progress && !allow_when_screenshot {
                 continue;
             }
+
+            if !missed_event {
+                continue;
+            }
+
+            missed_event = false;
 
             log::info!("[监听线程] 收到剪贴板变化事件");
 
