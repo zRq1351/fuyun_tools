@@ -164,8 +164,8 @@ onBeforeUnmount(() => {
 }
 
 .viewer-card {
-  width: calc(100% - 32px);
-  height: calc(100% - 32px);
+  width: calc(100vw - 32px);
+  height: calc(100vh - 32px);
   background: linear-gradient(160deg, rgba(20, 24, 32, 0.95), rgba(12, 14, 20, 0.95));
   border-radius: 12px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
@@ -194,6 +194,7 @@ onBeforeUnmount(() => {
 
 .preview-content {
   flex: 1;
+  min-height: 0;
   padding: 40px;
   padding-top: 60px;
   overflow-y: auto;
