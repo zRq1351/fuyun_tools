@@ -1,6 +1,6 @@
 [package]
 name = "fuyun_tools"
-version = "0.6.77"
+version = "0.6.78"
 authors = ["zrq"]
 edition = "2021"
 
