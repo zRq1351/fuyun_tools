@@ -362,6 +362,7 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
             let should_skip = {
                 let state_guard = lock_state(&state);
                 if !state_guard.settings.image_clipboard_enabled {
+                    missed_event = false;
                     continue;
                 }
                 state_guard.is_updating_clipboard || state_guard.is_processing_selection

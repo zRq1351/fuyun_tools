@@ -129,6 +129,8 @@ fn get_selected_text_windows(
     let state_manager = app_handle.state::<Arc<Mutex<SharedAppState>>>();
     let _processing_guard = SelectionProcessingGuard::acquire(state_manager.inner().clone())?;
 
+    let start_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+
     // 1. 获取原始剪贴板内容（用于后续恢复）
     let original_snapshot = capture_clipboard_snapshot(&clipboard_manager, app_handle);
     let original_text = match &original_snapshot {
@@ -177,8 +179,7 @@ fn get_selected_text_windows(
         && sequence_after_copy != sequence_before_copy;
 
     let manual_c_time = MANUAL_CTRL_C_TIME.load(Ordering::SeqCst);
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let is_manual_copy = now.saturating_sub(manual_c_time) < 1000;
+    let is_manual_copy = manual_c_time >= start_time;
 
     if new_content.is_none() && !sequence_changed {
         log::debug!("未捕获到新内容且剪贴板序列号未改变，无需恢复，避免覆盖非文本/图片格式");
