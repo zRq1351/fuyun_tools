@@ -215,6 +215,7 @@
       "../docs/THIRD_PARTY_NOTICES.md",
       "../docs/GPLv2",
       "../docs/LGPLv2.1",
+      "../docs/Apache-2.0",
       "../docs/OpenCV_LICENSE"
     ],
     "icon": [

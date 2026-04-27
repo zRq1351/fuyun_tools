@@ -41,8 +41,9 @@ compliance information for releases.
 
 The following files must be included in application package/installer or an equivalent accessible location:
 
-- `GPLv2`
-- `LGPLv2.1`
+- `GPLv2` (for FFmpeg GPL components)
+- `LGPLv2.1` (for FFmpeg LGPL components)
+- `Apache-2.0` (for PaddleOCR, MNN, and OpenCV)
 - `THIRD_PARTY_NOTICES.md` (this file)
 - `OpenCV_LICENSE` (when OpenCV-related build is distributed)
 
@@ -60,3 +61,37 @@ The following files must be included in application package/installer or an equi
 - License: Apache License 2.0 (with bundled third-party notices included in distributed OpenCV license file)
 - Distribution in this application: OpenCV is linked for the `longshot-opencv` desktop feature.
 - Included license file in package: `OpenCV_LICENSE`
+
+## 7. PaddleOCR Models (PP-OCRv5)
+
+- Component: PaddleOCR PP-OCRv5 Models
+- Version: PP-OCRv5 (via ocr-rs library)
+- Upstream project page: https://github.com/PaddlePaddle/PaddleOCR
+- Upstream documentation: https://paddlepaddle.github.io/PaddleOCR/
+- License: Apache License 2.0
+- Models used in this application:
+  - `PP-OCRv5_mobile_det.mnn` - Text detection model (MNN format)
+  - `PP-OCRv5_mobile_rec.mnn` - Text recognition model (MNN format)
+  - `ppocr_keys_v5.txt` - Character dictionary for recognition
+- Distribution in this application: Bundled in `models` directory for offline OCR text recognition via ocr-rs library
+- Attribution requirement: Include Apache 2.0 license notice and copyright statement in distribution
+- Copyright: Copyright (c) 2020-2026 PaddlePaddle Authors. All Rights Reserved.
+
+## 8. MNN Inference Engine
+
+- Component: MNN (Mobile Neural Network)
+- Upstream project page: https://www.mnn.zone/
+- Upstream source repository: https://github.com/alibaba/MNN
+- License: Apache License 2.0
+- Distribution in this application: Used as inference engine for PaddleOCR models, built from source via ocr-rs library with `build-mnn-from-source` feature
+- Attribution requirement: Include Apache 2.0 license notice and copyright statement in distribution
+- Copyright: Copyright (c) Alibaba Group Holding Limited. All Rights Reserved.
+
+## 9. ocr-rs Library
+
+- Component: ocr-rs
+- Version: 2.2.2 (via crates.io)
+- Upstream repository: https://crates.io/crates/ocr-rs
+- License: Check upstream repository for exact license (typically MIT or Apache 2.0)
+- Distribution in this application: Rust library providing OCR functionality by integrating PaddleOCR models with MNN inference engine
+- Features used: `build-mnn-from-source`
