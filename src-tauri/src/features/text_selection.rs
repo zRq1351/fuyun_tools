@@ -53,6 +53,15 @@ use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::GetClipboardSequenceNumber;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+static MANUAL_CTRL_C_TIME: AtomicU64 = AtomicU64::new(0);
+
+pub fn mark_manual_ctrl_c() {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    MANUAL_CTRL_C_TIME.store(now, Ordering::SeqCst);
+}
 
 fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap()
@@ -167,8 +176,18 @@ fn get_selected_text_windows(
         && sequence_before_copy != 0
         && sequence_after_copy != sequence_before_copy;
 
+    let manual_c_time = MANUAL_CTRL_C_TIME.load(Ordering::SeqCst);
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let is_manual_copy = now.saturating_sub(manual_c_time) < 1000;
+
     if new_content.is_none() && !sequence_changed {
         log::debug!("未捕获到新内容且剪贴板序列号未改变，无需恢复，避免覆盖非文本/图片格式");
+    } else if is_manual_copy {
+        log::info!("检测到手动 Ctrl+C，跳过剪贴板快照恢复，并主动记录到历史");
+        if let Some(ref text) = new_content {
+            let manager = lock_arc_mutex(&clipboard_manager);
+            manager.add_to_history(text.clone());
+        }
     } else {
         // 5. 恢复原始剪贴板内容
         restore_clipboard_snapshot(

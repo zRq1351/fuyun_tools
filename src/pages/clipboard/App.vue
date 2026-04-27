@@ -710,6 +710,15 @@ const handleKeydown = async (event) => {
   if (!isVisible.value) return
   if (isInputLikeTarget(event.target)) return
 
+  if (event.ctrlKey && event.key >= '1' && event.key <= '9') {
+    event.preventDefault()
+    const index = parseInt(event.key, 10) - 1
+    if (index >= 0 && index < visibleHistory.value.length) {
+      selectAndFillDirect(visibleHistory.value[index].id)
+    }
+    return
+  }
+
   if (contextMenuVisible.value && event.key === 'Escape') {
     closeContextMenu()
     return
