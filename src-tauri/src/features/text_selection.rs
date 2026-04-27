@@ -53,14 +53,25 @@ use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::GetClipboardSequenceNumber;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static MANUAL_CTRL_C_TIME: AtomicU64 = AtomicU64::new(0);
+static ALLOW_CLIPBOARD_LISTENER_DURING_SELECTION: AtomicBool = AtomicBool::new(false);
 
 pub fn mark_manual_ctrl_c() {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     MANUAL_CTRL_C_TIME.store(now, Ordering::SeqCst);
+    // 允许剪贴板监听器在划词期间处理这次变化
+    ALLOW_CLIPBOARD_LISTENER_DURING_SELECTION.store(true, Ordering::SeqCst);
+}
+
+pub fn should_allow_clipboard_listener() -> bool {
+    ALLOW_CLIPBOARD_LISTENER_DURING_SELECTION.load(Ordering::SeqCst)
+}
+
+pub fn clear_manual_copy_flag() {
+    ALLOW_CLIPBOARD_LISTENER_DURING_SELECTION.store(false, Ordering::SeqCst);
 }
 
 fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
@@ -100,6 +111,8 @@ impl Drop for SelectionProcessingGuard {
             state.is_updating_clipboard =
                 state.is_text_writeback_active || state.is_image_writeback_active;
         }
+        // 清除手动复制标志，避免影响后续操作
+        clear_manual_copy_flag();
     }
 }
 
@@ -184,9 +197,20 @@ fn get_selected_text_windows(
         log::debug!("未捕获到新内容且剪贴板序列号未改变，无需恢复，避免覆盖非文本/图片格式");
     } else if is_manual_copy {
         log::info!("检测到手动 Ctrl+C，跳过剪贴板快照恢复，并主动记录到历史");
-        if let Some(ref text) = new_content {
-            let manager = lock_arc_mutex(&clipboard_manager);
-            manager.add_to_history(text.clone());
+        // 如果 new_content 为空，但序列号变了，说明剪贴板确实有变化，再尝试读取一次
+        let content_to_record = if new_content.is_none() && sequence_changed {
+            log::info!("手动 Ctrl+C 导致序列号变化但未捕获内容，尝试再次读取");
+            get_current_clipboard_content_with_manager(&clipboard_manager, app_handle)
+        } else {
+            new_content.clone()
+        };
+        
+        if let Some(ref text) = content_to_record {
+            if !text.trim().is_empty() {
+                let manager = lock_arc_mutex(&clipboard_manager);
+                manager.add_to_history(text.clone());
+                log::info!("已记录手动 Ctrl+C 的文本到历史，长度: {}", text.len());
+            }
         }
     } else {
         // 5. 恢复原始剪贴板内容

@@ -52,23 +52,29 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
                 missed_event = true;
             }
 
-            let (is_updating, manager_arc) = {
+            let (is_updating, is_processing_selection, manager_arc) = {
                 let state_guard = lock_state(&state);
                 if !state_guard.settings.text_clipboard_enabled {
                     last_content.clear();
                     continue;
                 }
                 (
-                    state_guard.is_updating_clipboard || state_guard.is_processing_selection,
+                    state_guard.is_updating_clipboard,
+                    state_guard.is_processing_selection,
                     state_guard.clipboard_manager.clone(),
                 )
             };
 
+            // 如果正在更新剪贴板，跳过
             if is_updating {
                 continue;
             }
 
-            if !missed_event {
+            // 如果正在处理划词，但检测到用户手动 Ctrl+C，允许处理这次变化
+            let allow_during_selection = is_processing_selection 
+                && crate::features::text_selection::should_allow_clipboard_listener();
+
+            if is_processing_selection && !allow_during_selection {
                 continue;
             }
 
@@ -124,14 +130,24 @@ pub fn add_to_clipboard_history(
         return;
     }
 
-    let should_skip = {
+    let (should_skip, allow_during_selection) = {
         let state_guard = lock_state(&state);
-        state_guard.is_processing_selection
+        let is_processing = state_guard.is_processing_selection;
+        let allow = is_processing 
+            && crate::features::text_selection::should_allow_clipboard_listener();
+        // 如果正在处理划词且不允许监听器处理，则跳过
+        (is_processing && !allow, allow)
     };
 
     if should_skip {
-        log::debug!("正在进行划词操作，跳过添加到历史记录");
+        log::debug!("正在进行划词操作且未检测到手动复制，跳过添加到历史记录");
         return;
+    }
+
+    if allow_during_selection {
+        log::info!("检测到划词期间的手动复制，允许添加到历史记录");
+        // 清除标志，避免后续重复处理
+        crate::features::text_selection::clear_manual_copy_flag();
     }
 
     let (manager_arc, should_emit) = {
