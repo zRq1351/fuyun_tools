@@ -8,7 +8,7 @@ use std::env;
 use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::sync::OnceCell;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -54,10 +54,7 @@ pub fn get_history_db_path() -> PathBuf {
 }
 
 fn now_unix_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::utils::utils_helpers::now_unix_ms_i64()
 }
 
 pub fn stable_history_item_id(content: &str) -> String {
@@ -331,24 +328,50 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
     .execute(&mut *conn)
     .await;
 
-    let _ = sqlx::query(
-        "
-        INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content)
-        SELECT id, COALESCE(item_id, ''), content
-        FROM history_items
-        ",
+    // P2 性能优化：仅在 FTS 表数据不同步时才重建索引
+    // 避免每次启动时对大量历史记录执行全量 INSERT OR REPLACE
+    let fts_row_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM history_items_fts"
     )
-    .execute(&mut *conn)
-    .await;
+    .fetch_one(&mut *conn)
+    .await
+    .unwrap_or(0);
 
-    let _ = sqlx::query(
-        "
-        DELETE FROM history_items_fts
-        WHERE rowid NOT IN (SELECT id FROM history_items)
-        ",
+    let history_row_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM history_items"
     )
-    .execute(&mut *conn)
-    .await;
+    .fetch_one(&mut *conn)
+    .await
+    .unwrap_or(0);
+
+    // 仅当行数不一致时才执行全量重建（跳过孤儿记录清理的额外查询）
+    if fts_row_count != history_row_count {
+        log::info!(
+            "FTS 索引需要同步 (fts={}, history={})，执行全量重建",
+            fts_row_count,
+            history_row_count
+        );
+        let _ = sqlx::query(
+            "
+            INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content)
+            SELECT id, COALESCE(item_id, ''), content
+            FROM history_items
+            ",
+        )
+        .execute(&mut *conn)
+        .await;
+
+        let _ = sqlx::query(
+            "
+            DELETE FROM history_items_fts
+            WHERE rowid NOT IN (SELECT id FROM history_items)
+            ",
+        )
+        .execute(&mut *conn)
+        .await;
+    } else {
+        log::debug!("FTS 索引已同步 ({} 行)，跳过重建", fts_row_count);
+    }
 
     let _ = sqlx::query("ALTER TABLE pinned_items ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
         .execute(&mut *conn)
@@ -474,14 +497,29 @@ fn resolve_history_sort(sort_by: Option<String>, sort_order: Option<String>) -> 
 }
 
 fn build_fts_query(keyword: &str) -> String {
-    let tokens = keyword
+    let trimmed = keyword.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let tokens = trimmed
         .split_whitespace()
-        .map(|token| token.trim().replace('"', ""))
+        .map(|token| {
+            // 转义反斜杠（FTS5 引号内的转义字符）并移除双引号
+            token
+                .trim()
+                .replace('\\', "\\\\")
+                .replace('"', "")
+        })
         .filter(|token| !token.is_empty())
         .map(|token| format!("\"{}\"*", token))
         .collect::<Vec<_>>();
     if tokens.is_empty() {
-        keyword.trim().to_string()
+        // 回退路径：对整个关键词进行转义并作为单个短语前缀查询
+        let escaped = trimmed.replace('\\', "\\\\").replace('"', "");
+        if escaped.is_empty() {
+            return String::new();
+        }
+        format!("\"{}\"*", escaped)
     } else {
         tokens.join(" AND ")
     }

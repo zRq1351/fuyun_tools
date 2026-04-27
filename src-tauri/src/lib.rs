@@ -30,7 +30,6 @@ use crate::ui::window_manager::{
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
@@ -43,10 +42,7 @@ fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a
 }
 
 fn now_unix_ms_u64() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    crate::utils::utils_helpers::now_unix_ms_u64()
 }
 
 fn start_auto_backup_scheduler(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {

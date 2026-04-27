@@ -150,6 +150,8 @@ struct WgcCaptureFlags {
 struct WgcCaptureHandler {
     encoder: Option<VideoEncoder>,
     flags: WgcCaptureFlags,
+    /// 缓存的输出帧缓冲区，避免每帧重新分配
+    resized_cache: Vec<u8>,
 }
 
 impl GraphicsCaptureApiHandler for WgcCaptureHandler {
@@ -167,8 +169,10 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
             &ctx.flags.output_path,
         )
         .map_err(|e| e.to_string())?;
+        let target_pixels = ctx.flags.width as usize * ctx.flags.height as usize;
         Ok(Self {
             encoder: Some(encoder),
+            resized_cache: vec![0u8; target_pixels * 4],
             flags: ctx.flags,
         })
     }
@@ -198,39 +202,82 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                 raw_timestamp -= first_ts;
             }
 
-            let frame_w = frame.width();
-            let frame_h = frame.height();
-            let buffer = frame.buffer().map_err(|e| e.to_string())?;
-            let mut vec = Vec::new();
-            let pixels = buffer.as_nopadding_buffer(&mut vec);
-
+            let frame_w = frame.width() as usize;
+            let frame_h = frame.height() as usize;
+            let mut buffer = frame.buffer().map_err(|e| e.to_string())?;
+            
+            // 获取帧的原始像素数据和行步长
+            // raw_buffer 包含行 padding，计算 stride = total_len / height
+            let raw_pixels = buffer.as_raw_buffer();
+            let stride = if frame_h > 0 { raw_pixels.len() / frame_h } else { frame_w * 4 };
+            
             let target_w = self.flags.width as usize;
             let target_h = self.flags.height as usize;
-            let src_w = frame_w as usize;
-            let src_h = frame_h as usize;
-            let mut resized = vec![0u8; target_w * target_h * 4];
+            let resized = &mut self.resized_cache;
 
-            for y in 0..target_h {
-                let src_y = (y * src_h) / target_h;
-                let src_row_start = src_y * src_w * 4;
-                
-                // VideoEncoder::send_frame_buffer 期望的是 bottom-up 的 BGRA 数据
-                // 因此需要垂直翻转图像
-                let dst_y = target_h - 1 - y;
-                let dst_row_start = dst_y * target_w * 4;
-
-                for x in 0..target_w {
-                    let src_x = (x * src_w) / target_w;
-                    let src_idx = src_row_start + src_x * 4;
-                    let dst_idx = dst_row_start + x * 4;
-
-                    resized[dst_idx..dst_idx + 4]
-                        .copy_from_slice(&pixels[src_idx..src_idx + 4]);
+            // 高性能路径：合并 nopadding + flip 为单次 unsafe 遍历
+            // 消除 as_nopadding_buffer 的额外全量复制 + bounds checking
+            if frame_w == target_w && frame_h == target_h {
+                // 尺寸匹配：单次遍历完成 nopadding + 垂直翻转
+                let row_bytes = target_w * 4;
+                // SAFETY: resized 已预分配为 target_w * target_h * 4，
+                // raw_pixels 来自 WGC 帧缓冲区，保证至少有 stride * frame_h 字节
+                unsafe {
+                    let src_ptr = raw_pixels.as_ptr();
+                    let dst_ptr = resized.as_mut_ptr();
+                    for y in 0..target_h {
+                        let src_offset = y * stride;
+                        let dst_offset = (target_h - 1 - y) * row_bytes;
+                        std::ptr::copy_nonoverlapping(
+                            src_ptr.add(src_offset),
+                            dst_ptr.add(dst_offset),
+                            row_bytes,
+                        );
+                    }
+                }
+            } else if frame_w == target_w {
+                // 宽度匹配：垂直缩放 + nopadding + flip
+                let row_bytes = target_w * 4;
+                unsafe {
+                    let src_ptr = raw_pixels.as_ptr();
+                    let dst_ptr = resized.as_mut_ptr();
+                    for y in 0..target_h {
+                        let src_y = (y * frame_h) / target_h;
+                        let src_offset = src_y * stride;
+                        let dst_offset = (target_h - 1 - y) * row_bytes;
+                        std::ptr::copy_nonoverlapping(
+                            src_ptr.add(src_offset),
+                            dst_ptr.add(dst_offset),
+                            row_bytes,
+                        );
+                    }
+                }
+            } else {
+                // 通用路径：缩放 + nopadding + flip
+                unsafe {
+                    let src_ptr = raw_pixels.as_ptr();
+                    let dst_ptr = resized.as_mut_ptr();
+                    for y in 0..target_h {
+                        let src_y = (y * frame_h) / target_h;
+                        let dst_y = target_h - 1 - y;
+                        let src_row_base = src_y * stride;
+                        let dst_row_base = dst_y * target_w * 4;
+                        for x in 0..target_w {
+                            let src_x = (x * frame_w) / target_w;
+                            let src_offset = src_row_base + src_x * 4;
+                            let dst_offset = dst_row_base + x * 4;
+                            std::ptr::copy_nonoverlapping(
+                                src_ptr.add(src_offset),
+                                dst_ptr.add(dst_offset),
+                                4,
+                            );
+                        }
+                    }
                 }
             }
 
             encoder
-                .send_frame_buffer(&resized, raw_timestamp)
+                .send_frame_buffer(resized, raw_timestamp)
                 .map_err(|e| e.to_string())?;
         }
         Ok(())

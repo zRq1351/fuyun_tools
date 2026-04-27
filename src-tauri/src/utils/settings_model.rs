@@ -334,7 +334,7 @@ fn default_grouped_items_protected_from_limit() -> bool {
 }
 
 fn default_clipboard_bottom_offset() -> i32 {
-    8
+    180
 }
 
 fn default_image_fill_verify_mode() -> String {
@@ -753,17 +753,17 @@ impl AppSettingsData {
         new_version: MigrationVersion,
     ) {
         log::info!("执行版本迁移: {:?} -> {:?}", old_version, new_version);
-        if old_version < MigrationVersion::new(0, 3, 0)
-            && new_version >= MigrationVersion::new(0, 3, 0)
-        {
-            log::info!("迁移至版本 3: 初始化AI提供商配置");
-            self.initialize_ai_provider_configs_if_needed();
-        }
         if old_version < MigrationVersion::new(0, 2, 0)
             && new_version >= MigrationVersion::new(0, 2, 0)
         {
             log::info!("迁移至版本 2: 确保基础配置完整性");
             self.ensure_basic_config_integrity();
+        }
+        if old_version < MigrationVersion::new(0, 3, 0)
+            && new_version >= MigrationVersion::new(0, 3, 0)
+        {
+            log::info!("迁移至版本 3: 初始化AI提供商配置");
+            self.initialize_ai_provider_configs_if_needed();
         }
     }
 

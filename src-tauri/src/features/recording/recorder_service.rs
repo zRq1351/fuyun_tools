@@ -38,7 +38,7 @@ use std::process::{ChildStderr, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime};
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 #[cfg(target_os = "windows")]
@@ -167,10 +167,7 @@ fn finalize_auto_stop_recording(
 // check_system_audio_capability removed in native WASAPI mode
 
 fn now_unix_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::utils::utils_helpers::now_unix_ms_i64()
 }
 
 fn parse_region_target(target_id: &str) -> Option<(i32, i32, u32, u32)> {
@@ -348,38 +345,98 @@ fn concat_video_segments(
     Ok(())
 }
 
+/// P4 辅助函数：使用 FFmpeg concat demuxer 拼接多个音频片段为单个文件（流复制，无重编码）
+fn concat_audio_segments(
+    ffmpeg_path: &std::path::Path,
+    segments: &[crate::features::recording::state::AudioSegment],
+) -> Result<PathBuf, String> {
+    if segments.is_empty() {
+        return Err("没有可拼接的音频片段".to_string());
+    }
+    if segments.len() == 1 {
+        return Ok(segments[0].path.clone());
+    }
+
+    let output_dir = segments[0]
+        .path
+        .parent()
+        .ok_or_else(|| "无法获取音频片段目录".to_string())?;
+    let concat_path = output_dir.join("concat_audio.tmp.wav");
+
+    let list_path = output_dir.join("concat_audio_list.txt");
+    let mut list_file = fs::File::create(&list_path)
+        .map_err(|e| format!("创建音频拼接列表失败: {}", e))?;
+    for seg in segments {
+        let seg_path = seg.path.to_string_lossy().replace('\'', "'\\''");
+        let line = format!("file '{}'\n", seg_path);
+        list_file
+            .write_all(line.as_bytes())
+            .map_err(|e| format!("写入音频拼接列表失败: {}", e))?;
+    }
+
+    let mut cmd = Command::new(ffmpeg_path);
+    suppress_console_window(&mut cmd);
+    let output = cmd
+        .arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("warning")
+        .arg("-y")
+        .arg("-f")
+        .arg("concat")
+        .arg("-safe")
+        .arg("0")
+        .arg("-i")
+        .arg(&list_path)
+        .arg("-c")
+        .arg("copy")
+        .arg(&concat_path)
+        .output()
+        .map_err(|e| format!("执行音频拼接失败: {}", e))?;
+
+    let _ = fs::remove_file(&list_path);
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let _ = fs::remove_file(&concat_path);
+        return Err(format!("音频拼接失败: {}", stderr));
+    }
+
+    Ok(concat_path)
+}
+
 fn merge_system_audio_into_video(
     ffmpeg_path: &std::path::Path,
     video_path: &PathBuf,
     system_segments: &[crate::features::recording::state::AudioSegment],
     mic_segments: &[crate::features::recording::state::AudioSegment],
+    audio_bitrate_kbps: u32,
 ) -> Result<(), AppError> {
     let started_at = Instant::now();
     let expected_system_count = system_segments.len();
     let expected_mic_count = mic_segments.len();
 
-    if system_segments.len() == 1 && mic_segments.is_empty() {
-        let seg = &system_segments[0];
-        if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.path.exists() {
-            log::info!(
-                "快速路径：单个系统音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
-                seg.start_ms,
-                seg.trim_start_ms
-            );
-            return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false);
+        if system_segments.len() == 1 && mic_segments.is_empty() {
+            let seg = &system_segments[0];
+            if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.path.exists() {
+                log::info!(
+                    "快速路径：单个系统音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
+                    seg.start_ms,
+                    seg.trim_start_ms
+                );
+                return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false, audio_bitrate_kbps);
+            }
         }
-    }
-    if mic_segments.len() == 1 && system_segments.is_empty() {
-        let seg = &mic_segments[0];
-        if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.path.exists() {
-            log::info!(
-                "快速路径：单个麦克风音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
-                seg.start_ms,
-                seg.trim_start_ms
-            );
-            return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false);
+        if mic_segments.len() == 1 && system_segments.is_empty() {
+            let seg = &mic_segments[0];
+            if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.path.exists() {
+                log::info!(
+                    "快速路径：单个麦克风音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
+                    seg.start_ms,
+                    seg.trim_start_ms
+                );
+                return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false, audio_bitrate_kbps);
+            }
         }
-    }
 
     let is_valid_audio_segment = |seg: &crate::features::recording::state::AudioSegment| {
         if !seg.path.exists() {
@@ -425,6 +482,29 @@ fn merge_system_audio_into_video(
         .collect::<Vec<_>>();
     let has_system = !valid_system.is_empty();
     let has_mic = !valid_mic.is_empty();
+    // P4 优化：多片段快速路径 — 当所有系统音频片段延迟极低且无裁剪时，
+    // 先用 concat 拼接为单个文件，再走快速路径，避免 amix 重编码
+    if valid_system.len() > 1 && valid_mic.is_empty() {
+        let all_low_latency = valid_system.iter().all(|s| s.start_ms < 200 && s.trim_start_ms == 0);
+        if all_low_latency {
+            let concat_result = concat_audio_segments(ffmpeg_path, &valid_system);
+            match concat_result {
+                Ok(concat_path) => {
+                    log::info!(
+                        "P4 快速路径：{}个系统音频片段已拼接，使用流复制模式",
+                        valid_system.len()
+                    );
+                    let result = merge_audio_fast(ffmpeg_path, video_path, &concat_path, false, audio_bitrate_kbps);
+                    let _ = fs::remove_file(&concat_path);
+                    return result;
+                }
+                Err(e) => {
+                    log::warn!("P4 多片段拼接失败，回退到 amix 模式: {}", e);
+                }
+            }
+        }
+    }
+
     if !has_system && !has_mic {
         if expected_system_count > 0 || expected_mic_count > 0 {
             log::warn!(
@@ -553,13 +633,13 @@ fn merge_system_audio_into_video(
         .arg("-map")
         .arg(audio_map_label);
 
-    log::info!("🔧 需要通过 filter_complex 合并音频，必须重编码为 AAC");
+    log::info!("🔧 需要通过 filter_complex 合并音频，必须重编码为 AAC ({}k)", audio_bitrate_kbps);
     cmd.arg("-c:v")
         .arg("copy")
         .arg("-c:a")
         .arg("aac")
         .arg("-b:a")
-        .arg("128k")
+        .arg(format!("{}k", audio_bitrate_kbps.max(32)))
         .arg("-profile:a")
         .arg("aac_low")
         .arg("-movflags")
@@ -670,6 +750,7 @@ fn merge_audio_fast(
     video_path: &PathBuf,
     audio_path: &PathBuf,
     _need_hwaccel: bool,
+    audio_bitrate_kbps: u32,
 ) -> Result<(), AppError> {
     let started_at = Instant::now();
     let merged_path = video_path.with_extension("merged.tmp.mp4");
@@ -695,7 +776,7 @@ fn merge_audio_fast(
         .arg("-c:a")
         .arg(if is_aac { "copy" } else { "aac" })
         .arg("-b:a")
-        .arg("128k")
+        .arg(format!("{}k", audio_bitrate_kbps.max(32)))
         .arg("-movflags")
         .arg("+faststart")
         .arg(&merged_path);
@@ -2062,7 +2143,12 @@ pub fn stop_recording(
                 );
             }
         } else if anchor_ms > 0 {
-            let calibrated_anchor_ms = anchor_ms.saturating_add(wgc_audio_sync_advance_ms);
+            // BUG-10 改进：使用实际测量的首帧延迟进行校正
+            // anchor_ms 已经是从录制开始到首帧的实际经过时间，直接作为校正值
+            // wgc_audio_sync_advance_ms 仅作为额外的安全裕量（可选）
+            // 当 anchor_ms 较大（>200ms）时，说明系统延迟本身已足够，不需要额外裕量
+            let safety_margin = if anchor_ms > 200 { 0 } else { wgc_audio_sync_advance_ms.min(20) };
+            let calibrated_anchor_ms = anchor_ms.saturating_add(safety_margin);
             for seg in &mut sys_segments {
                 if seg.start_ms < calibrated_anchor_ms {
                     seg.trim_start_ms = calibrated_anchor_ms - seg.start_ms;
@@ -2082,9 +2168,9 @@ pub fn stop_recording(
                 }
             }
             log::info!(
-                "应用 WGC 首帧锚点校正: anchor_ms={}, advance_ms={}, calibrated_anchor_ms={}",
+                "应用 WGC 首帧锚点校正: anchor_ms={}, safety_margin={}, calibrated_anchor_ms={}",
                 anchor_ms,
-                wgc_audio_sync_advance_ms,
+                safety_margin,
                 calibrated_anchor_ms
             );
         } else if let Some(details) = pending_window_capture_unavailable_details.take() {
@@ -2228,6 +2314,10 @@ pub fn stop_recording(
     emit_recording_finished(app, &result);
 
     // ✅ 在后台异步执行音频合并，不阻塞 UI
+    let runtime_audio_bitrate_kbps = {
+        let runtime = lock_arc_mutex(&runtime_arc);
+        runtime.audio_bitrate_kbps
+    };
     if !sys_segments.is_empty() || !mic_segments.is_empty() {
         let app_handle = app.clone();
         let session_id_clone = session_id.clone();
@@ -2256,6 +2346,7 @@ pub fn stop_recording(
                     &output_final_clone,
                     &sys_segments,
                     &mic_segments,
+                    runtime_audio_bitrate_kbps,
                 )
             })
             .await
@@ -2664,6 +2755,7 @@ pub fn resume_recording(
         fps,
         video_bitrate_kbps,
         capture_cursor,
+        paused_total_ms,
     ) = {
         let mut runtime = lock_arc_mutex(&runtime_arc);
         if runtime.phase != RecordingPhase::Paused {
@@ -2705,6 +2797,15 @@ pub fn resume_recording(
         let fps = runtime.fps;
         let video_bitrate_kbps = runtime.video_bitrate_kbps;
         let capture_cursor = runtime.capture_cursor;
+        // BUG-04 修复：记录暂停累计时长，用于后续音频时间戳校正
+        // 对于 FFmpeg 模式，暂停恢复后新视频分段从0开始，
+        // 但音频流的 elapsed_ms 包含暂停时间，需要在启动音频前校正
+        let paused_total_ms = runtime.paused_total_ms;
+        log::info!(
+            "恢复录制: paused_total_ms={}, elapsed_ms={}",
+            paused_total_ms,
+            runtime.snapshot().elapsed_ms
+        );
         (
             is_window_target,
             target_id,
@@ -2717,6 +2818,7 @@ pub fn resume_recording(
             fps,
             video_bitrate_kbps,
             capture_cursor,
+            paused_total_ms,
         )
     };
 
@@ -2805,6 +2907,20 @@ pub fn resume_recording(
             &session_id_for_audio,
             false,
         );
+        // BUG-04 修复：对于非窗口录制（FFmpeg），校正恢复后的音频起始时间戳
+        // 新视频分段从0开始，音频 start_ms 应减去暂停累计时长，以保持 A/V 对齐
+        if !is_window_target && paused_total_ms > 0 {
+            if let Some(last_seg) = runtime.system_audio_segments.last_mut() {
+                let original_start = last_seg.start_ms;
+                last_seg.start_ms = last_seg.start_ms.saturating_sub(paused_total_ms);
+                log::info!(
+                    "BUG-04校正: 系统音频 start_ms {} -> {} (减去暂停时长 {}ms)",
+                    original_start,
+                    last_seg.start_ms,
+                    paused_total_ms
+                );
+            }
+        }
     }
     if should_restore_mic_audio && runtime.mic_audio_thread.is_none() {
         let _ = ensure_mic_capture_started(
@@ -2814,6 +2930,19 @@ pub fn resume_recording(
             &session_id_for_audio,
             false,
         );
+        // BUG-04 修复：同上，校正麦克风音频的起始时间戳
+        if !is_window_target && paused_total_ms > 0 {
+            if let Some(last_seg) = runtime.mic_audio_segments.last_mut() {
+                let original_start = last_seg.start_ms;
+                last_seg.start_ms = last_seg.start_ms.saturating_sub(paused_total_ms);
+                log::info!(
+                    "BUG-04校正: 麦克风音频 start_ms {} -> {} (减去暂停时长 {}ms)",
+                    original_start,
+                    last_seg.start_ms,
+                    paused_total_ms
+                );
+            }
+        }
     }
     runtime.phase = RecordingPhase::Recording;
     let snapshot = runtime.snapshot();

@@ -77,10 +77,7 @@ fn metrics_store() -> &'static StdMutex<BTreeMap<String, PerfMetricAggregate>> {
 }
 
 fn now_unix_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    crate::utils::utils_helpers::now_unix_ms_u64()
 }
 
 pub fn record_perf_metric(
@@ -92,7 +89,7 @@ pub fn record_perf_metric(
 ) {
     let mut guard = metrics_store()
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap();
     let metric = guard
         .entry(key.to_string())
         .or_insert_with(|| PerfMetricAggregate::new(label));
@@ -116,7 +113,7 @@ pub fn record_perf_metric(
 pub fn get_perf_metrics_snapshot() -> Vec<PerfMetricSnapshot> {
     let guard = metrics_store()
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap();
     guard
         .iter()
         .map(|(key, value)| value.snapshot(key))
@@ -126,7 +123,7 @@ pub fn get_perf_metrics_snapshot() -> Vec<PerfMetricSnapshot> {
 pub fn reset_perf_metrics() {
     let mut guard = metrics_store()
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap();
     guard.clear();
 }
 

@@ -15,3 +15,21 @@ pub use crate::utils::text_utils::{
     find_best_replacement_candidate, get_dedup_scan_metrics, DedupScanMetrics, TextCompleteness,
     VersionComparison,
 };
+
+/// 统一的当前时间戳工具函数（毫秒，i64）
+/// 替代各文件中重复定义的 now_unix_ms()
+pub fn now_unix_ms_i64() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// 统一的当前时间戳工具函数（毫秒，u64）
+/// 替代各文件中重复定义的 now_unix_ms_u64()
+pub fn now_unix_ms_u64() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
