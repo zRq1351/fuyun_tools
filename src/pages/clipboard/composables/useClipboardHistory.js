@@ -651,11 +651,21 @@ export function useClipboardHistory() {
     const replaceLocalById = (oldId, newId, newContent) => {
         const index = pagedHistory.value.findIndex(item => item.id === oldId)
         if (index !== -1) {
-            pagedHistory.value[index].id = newId
-            pagedHistory.value[index].content = newContent
+            const item = pagedHistory.value[index]
+            
+            const oldCategory = categoryMap.value[oldId] || itemCategorySnapshot.get(oldId) || '未分类'
+            removeItemCategoryLocal(oldId)
+            setItemCategoryLocal(newId, oldCategory)
+            
+            pagedHistory.value.splice(index, 1, {
+                ...item,
+                id: newId,
+                content: newContent
+            })
             if (selectedItemId.value === oldId) {
                 selectedItemId.value = newId
             }
+            bumpFilterDataRevision()
         }
     }
 
