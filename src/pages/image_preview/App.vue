@@ -13,8 +13,7 @@
           title="拖动窗口"
           @mousedown.left.stop.prevent="startWindowDrag"
       >
-        <span></span><span></span><span></span>
-        <span></span><span></span><span></span>
+        <GripHorizontal :size="16" :stroke-width="2" />
       </div>
       <div class="viewer-zoom">{{ zoomPercent }}</div>
       <button class="viewer-close" @mousedown.left.stop.prevent @click.stop="requestClose(true)">关闭</button>
@@ -49,6 +48,7 @@
 
 <script setup>
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
+import { GripHorizontal } from 'lucide-vue-next'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {convertFileSrc} from '@tauri-apps/api/core'
@@ -370,27 +370,24 @@ html, body, #app {
 }
 
 .viewer-drag-icon {
-  width: 26px;
-  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   border: 1px solid rgba(255, 255, 255, 0.22);
   background: rgba(0, 0, 0, 0.6);
+  color: rgba(255, 255, 255, 0.86);
   border-radius: 8px;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 3px;
-  padding: 6px;
   box-sizing: border-box;
   cursor: move;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  transition: background-color 0.2s, color 0.2s;
 }
 
-.viewer-drag-icon span {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.86);
-  align-self: center;
-  justify-self: center;
+.viewer-drag-icon:hover {
+  background: rgba(0, 0, 0, 0.8);
+  color: rgba(255, 255, 255, 1);
 }
 
 .viewer-zoom {
