@@ -78,17 +78,30 @@ const requestClose = (fromButton = false) => {
 }
 
 const startEdit = async () => {
+  const container = document.querySelector('.preview-content')
+  const currentScrollTop = container ? container.scrollTop : 0
+
   editableText.value = textContent.value
   isEditing.value = true
   await nextTick()
   if (textareaRef.value) {
     textareaRef.value.focus()
+    textareaRef.value.setSelectionRange(0, 0)
+    textareaRef.value.scrollTop = currentScrollTop
   }
 }
 
-const cancelEdit = () => {
+const cancelEdit = async () => {
+  const currentScrollTop = textareaRef.value ? textareaRef.value.scrollTop : 0
+
   isEditing.value = false
   editableText.value = ''
+
+  await nextTick()
+  const container = document.querySelector('.preview-content')
+  if (container) {
+    container.scrollTop = currentScrollTop
+  }
 }
 
 const saveEdit = async () => {
@@ -97,15 +110,23 @@ const saveEdit = async () => {
     return
   }
   if (editableText.value === textContent.value) {
-    isEditing.value = false
+    cancelEdit()
     return
   }
   
+  const currentScrollTop = textareaRef.value ? textareaRef.value.scrollTop : 0
+
   try {
     await ClipboardService.copyText(editableText.value)
     textContent.value = editableText.value
     isEditing.value = false
     ElMessage.success('已保存到剪贴板')
+
+    await nextTick()
+    const container = document.querySelector('.preview-content')
+    if (container) {
+      container.scrollTop = currentScrollTop
+    }
   } catch (error) {
     console.error('保存修改失败:', error)
     ElMessage.error('保存失败')
