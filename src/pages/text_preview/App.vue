@@ -22,7 +22,9 @@
         :class="['viewer-card', animationState]"
         @click.stop
     >
-      <div class="preview-content" v-html="renderedHtml"></div>
+      <div class="preview-content">
+        <FormattedContent :content="textContent" />
+      </div>
     </div>
   </div>
 </template>
@@ -32,20 +34,11 @@ import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {ImageClipboardService} from '../../services/ipc'
-import {marked} from 'marked'
+import FormattedContent from '../../components/FormattedContent.vue'
 
 const currentWindow = getCurrentWebviewWindow()
 const animationState = ref('entering')
 const textContent = ref('')
-
-const renderer = new marked.Renderer()
-const renderedHtml = computed(() => {
-  return marked.parse(textContent.value || '', {
-    renderer,
-    gfm: true,
-    breaks: true
-  })
-})
 
 let unlisten = null
 
@@ -216,49 +209,6 @@ onBeforeUnmount(() => {
   color: #dcdfe6;
   font-size: 15px;
   line-height: 1.6;
-}
-
-.preview-content pre {
-  background: rgba(0, 0, 0, 0.3);
-  padding: 12px;
-  border-radius: 6px;
-  overflow-x: auto;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.preview-content code {
-  font-family: 'Courier New', Courier, monospace;
-  background: rgba(0, 0, 0, 0.2);
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-
-.preview-content blockquote {
-  border-left: 4px solid rgba(255, 255, 255, 0.2);
-  margin: 0;
-  padding-left: 16px;
-  color: rgba(255, 255, 255, 0.6);
-}
-
-.preview-content table {
-  border-collapse: collapse;
-  width: 100%;
-  margin-bottom: 16px;
-}
-
-.preview-content th,
-.preview-content td {
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  padding: 8px;
-}
-
-.preview-content a {
-  color: #409eff;
-  text-decoration: none;
-}
-
-.preview-content a:hover {
-  text-decoration: underline;
 }
 
 ::-webkit-scrollbar {

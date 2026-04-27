@@ -18,9 +18,12 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
     "@vueuse/core": "^14.2.1",
+    "dompurify": "^3.4.1",
     "element-plus": "^2.13.7",
+    "highlight.js": "^11.11.1",
     "lucide-vue-next": "^1.0.0",
     "marked": "^18.0.0",
+    "marked-highlight": "^2.2.4",
     "vue": "^3.5.32"
   },
   "devDependencies": {
