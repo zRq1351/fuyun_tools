@@ -240,8 +240,8 @@ export const ImageClipboardService = {
     closePreviewWindow: () => invoke(IPC_COMMANDS.CLOSE_IMAGE_PREVIEW_WINDOW),
     startPreviewWindowDrag: () => invoke(IPC_COMMANDS.START_IMAGE_PREVIEW_WINDOW_DRAG),
 
-    openTextPreviewWindow: (text, item_id = null) =>
-        invoke(IPC_COMMANDS.OPEN_TEXT_PREVIEW_WINDOW, {text, item_id}),
+    openTextPreviewWindow: (text, itemId = null) =>
+        invoke(IPC_COMMANDS.OPEN_TEXT_PREVIEW_WINDOW, {text, itemId}),
     closeTextPreviewWindow: () => invoke(IPC_COMMANDS.CLOSE_TEXT_PREVIEW_WINDOW),
     startTextPreviewWindowDrag: () => invoke(IPC_COMMANDS.START_TEXT_PREVIEW_WINDOW_DRAG),
     updateTextItem: (itemId, newContent) =>
