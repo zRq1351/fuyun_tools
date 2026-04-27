@@ -76,6 +76,7 @@ enum HookEvent {
     CtrlRightPress,
     CtrlLeftRelease,
     CtrlRightRelease,
+    CPress,
     LeftButtonPress(i32, i32),
     LeftButtonRelease(i32, i32),
     MouseMove(i32, i32),
@@ -131,6 +132,12 @@ fn handle_hook_event(
                 .ctrl_right_pressed
                 .store(false, Ordering::SeqCst);
             log::debug!("检测到右Ctrl键释放");
+        }
+        HookEvent::CPress => {
+            if is_any_ctrl_pressed() {
+                crate::features::text_selection::mark_manual_ctrl_c();
+                log::debug!("检测到手动 Ctrl+C");
+            }
         }
         HookEvent::LeftButtonPress(last_x, last_y) => {
             let current_time = std::time::Instant::now();
@@ -425,6 +432,8 @@ unsafe extern "system" fn low_level_keyboard_proc(
                     Some(HookEvent::CtrlLeftPress)
                 } else if keyboard.vkCode == VK_RCONTROL as u32 {
                     Some(HookEvent::CtrlRightPress)
+                } else if keyboard.vkCode == 0x43 { // 'C' key
+                    Some(HookEvent::CPress)
                 } else {
                     None
                 }

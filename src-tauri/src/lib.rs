@@ -182,15 +182,22 @@ pub fn run() {
                             if !state_guard.settings.text_clipboard_enabled {
                                 return;
                             }
-                            if !state_guard.is_visible && !state_guard.is_image_visible {
+                            if state_guard.is_visible {
                                 drop(state_guard);
-                                crate::ui::commands::interrupt_text_fill_flow(&state_clone);
-                                show_clipboard_window(
-                                    app_handle_clone.clone(),
-                                    state_clone.clone(),
-                                );
-                                features::mouse_listener::reset_ctrl_key_state();
+                                let _ = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone, "clipboard");
+                                return;
                             }
+                            let is_image_visible = state_guard.is_image_visible;
+                            drop(state_guard);
+                            if is_image_visible {
+                                let _ = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone, "image_clipboard");
+                            }
+                            crate::ui::commands::interrupt_text_fill_flow(&state_clone);
+                            show_clipboard_window(
+                                app_handle_clone.clone(),
+                                state_clone.clone(),
+                            );
+                            features::mouse_listener::reset_ctrl_key_state();
                         }
                     },
                 ) {
@@ -210,14 +217,21 @@ pub fn run() {
                             if !state_guard.settings.image_clipboard_enabled {
                                 return;
                             }
-                            if !state_guard.is_visible && !state_guard.is_image_visible {
+                            if state_guard.is_image_visible {
                                 drop(state_guard);
-                                crate::ui::commands::interrupt_image_fill_flow(&state_clone_image);
-                                show_image_clipboard_window(
-                                    app_handle_clone_image.clone(),
-                                    state_clone_image.clone(),
-                                );
+                                let _ = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone_image, "image_clipboard");
+                                return;
                             }
+                            let is_text_visible = state_guard.is_visible;
+                            drop(state_guard);
+                            if is_text_visible {
+                                let _ = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone_image, "clipboard");
+                            }
+                            crate::ui::commands::interrupt_image_fill_flow(&state_clone_image);
+                            show_image_clipboard_window(
+                                app_handle_clone_image.clone(),
+                                state_clone_image.clone(),
+                            );
                         }
                     },
                 ) {
