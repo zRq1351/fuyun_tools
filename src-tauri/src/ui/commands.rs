@@ -2676,39 +2676,21 @@ pub async fn update_text_item(
     item_id: String,
     new_content: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
-    app: AppHandle,
 ) -> Result<(), String> {
-    {
-        let mut state_guard = lock_arc_mutex(state.inner());
-        state_guard.is_updating_clipboard = true;
-    }
-
     let manager_arc = get_clipboard_manager_arc(state.inner());
     let manager = {
         let guard = lock_arc_mutex(&manager_arc);
         guard.clone()
     };
 
-    let result = async {
-        manager.update_item_content(&item_id, new_content.clone()).await?;
-        let _ = manager.set_clipboard_content(&app, &new_content);
-        Ok::<(), String>(())
-    }
-    .await;
-
-    // 延迟恢复 is_updating_clipboard 状态，避免系统剪贴板事件被监听到
-    let state_clone = state.inner().clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let mut state_guard = lock_arc_mutex(&state_clone);
-        state_guard.is_updating_clipboard = false;
-    });
-
-    result.map_err(|e| {
-        to_frontend_error_string(
-            AppError::new(ErrorCode::ClipboardError, "更新文本内容失败").with_details(e),
-        )
-    })
+    manager
+        .update_item_content(&item_id, new_content)
+        .await
+        .map_err(|e| {
+            to_frontend_error_string(
+                AppError::new(ErrorCode::ClipboardError, "更新文本内容失败").with_details(e),
+            )
+        })
 }
 
 #[tauri::command]
