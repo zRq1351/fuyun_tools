@@ -449,7 +449,9 @@ fn merge_system_audio_into_video(
             .extension()
             .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
             .unwrap_or(false);
-        let min_size = if is_aac { 7 } else { 44 };
+        // AAC 文件最低检查阈值：1024 字节（约 60-80ms 的 128kbps AAC 数据）
+        // 7 字节阈值过低，会将损坏/空的 AAC 文件误判为有效
+        let min_size = if is_aac { 1024 } else { 44 };
         match fs::metadata(&seg.path) {
             Ok(meta) => {
                 let size = meta.len();
@@ -804,6 +806,103 @@ fn merge_audio_fast(
         } else {
             format!("ffmpeg exit status: {}；stderr: {}", output.status, stderr)
         };
+
+        // 🔧 AAC 流复制失败时，回退到重编码模式重试一次
+        // 常见场景：AAC 文件格式不完整/损坏，流复制无法处理但重编码可以恢复
+        if is_aac {
+            log::warn!(
+                "⚠️ AAC 流复制失败，尝试重编码回退: {}",
+                details
+            );
+            let _ = fs::remove_file(&merged_path);
+
+            let mut retry_cmd = Command::new(ffmpeg_path);
+            suppress_console_window(&mut retry_cmd);
+            retry_cmd
+                .arg("-hide_banner")
+                .arg("-loglevel")
+                .arg("warning")
+                .arg("-y")
+                .arg("-i")
+                .arg(video_path)
+                .arg("-i")
+                .arg(audio_path)
+                .arg("-c:v")
+                .arg("copy")
+                .arg("-c:a")
+                .arg("aac")
+                .arg("-b:a")
+                .arg(format!("{}k", audio_bitrate_kbps.max(32)))
+                .arg("-profile:a")
+                .arg("aac_low")
+                .arg("-movflags")
+                .arg("+faststart")
+                .arg(&merged_path);
+
+            let retry_child = retry_cmd
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| {
+                    AppError::new(ErrorCode::SystemError, "启动AAC重编码回退失败")
+                        .with_details(e.to_string())
+                })?;
+
+            crate::features::recording::job_object::assign_to_global_job_object(&retry_child);
+
+            let retry_output = retry_child.wait_with_output().map_err(|e| {
+                AppError::new(ErrorCode::SystemError, "执行AAC重编码回退失败")
+                    .with_details(e.to_string())
+            })?;
+
+            if retry_output.status.success() {
+                log::info!("✅ AAC 重编码回退成功");
+                if video_path.exists() {
+                    let _ = fs::remove_file(video_path);
+                }
+                fs::rename(&merged_path, video_path).map_err(|e| {
+                    record_perf_metric(
+                        "recording.audio_merge",
+                        "录屏快速音频合并耗时(重编码回退)",
+                        started_at.elapsed().as_millis() as u64,
+                        false,
+                        Some(e.to_string()),
+                    );
+                    AppError::new(ErrorCode::IoError, "写入重编码回退文件失败")
+                        .with_details(e.to_string())
+                })?;
+                record_perf_metric(
+                    "recording.audio_merge",
+                    "录屏快速音频合并耗时(重编码回退)",
+                    started_at.elapsed().as_millis() as u64,
+                    true,
+                    None,
+                );
+                let elapsed_ms = started_at.elapsed().as_millis();
+                log::info!(
+                    "✅ 快速音频合并完成（AAC重编码回退），耗时: {}ms",
+                    elapsed_ms
+                );
+                return Ok(());
+            } else {
+                let retry_stderr = String::from_utf8_lossy(&retry_output.stderr)
+                    .trim()
+                    .to_string();
+                log::error!("❌ AAC 重编码回退也失败了: {}", retry_stderr);
+                let _ = fs::remove_file(&merged_path);
+                record_perf_metric(
+                    "recording.audio_merge",
+                    "录屏快速音频合并耗时",
+                    started_at.elapsed().as_millis() as u64,
+                    false,
+                    Some(format!("流复制失败:{}；重编码回退失败:{}", details, retry_stderr)),
+                );
+                return Err(AppError::new(ErrorCode::SystemError, "快速音频合并失败")
+                    .with_details(format!("流复制失败:{}；重编码回退失败:{}", details, retry_stderr)));
+            }
+        }
+
         record_perf_metric(
             "recording.audio_merge",
             "录屏快速音频合并耗时",

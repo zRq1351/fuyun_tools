@@ -1427,6 +1427,34 @@ pub fn start_system_loopback_aac_with_device(
                     }
                 }
             }
+
+            // 🔧 验证输出文件：检查 AAC 文件是否有效
+            match std::fs::metadata(&thread_output) {
+                Ok(meta) => {
+                    let size = meta.len();
+                    if size < 1024 {
+                        log::warn!(
+                            "⚠️ FFmpeg AAC 输出文件过小: {:?}, {} bytes — 可能编码数据不足",
+                            thread_output.file_name(),
+                            size
+                        );
+                    } else {
+                        log::info!(
+                            "✅ FFmpeg AAC 输出文件: {:?}, {} bytes",
+                            thread_output.file_name(),
+                            size
+                        );
+                    }
+                }
+                Err(e) => {
+                    log::warn!(
+                        "❌ FFmpeg AAC 输出文件不存在: {:?}, {}",
+                        thread_output.file_name(),
+                        e
+                    );
+                }
+            }
+
             Ok(())
         };
         if let Err(e) = run() {
