@@ -404,6 +404,54 @@ fn concat_audio_segments(
     Ok(concat_path)
 }
 
+/// 使用 FFmpeg 验证音频文件是否包含可解码的音频数据
+/// 返回 true 表示文件有效，false 表示文件损坏或为空
+fn validate_audio_file_with_ffmpeg(
+    ffmpeg_path: &std::path::Path,
+    audio_path: &std::path::Path,
+) -> bool {
+    let mut cmd = Command::new(ffmpeg_path);
+    suppress_console_window(&mut cmd);
+    match cmd
+        .arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-i")
+        .arg(audio_path)
+        .arg("-f")
+        .arg("null")
+        .arg("-")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => match child.wait_with_output() {
+            Ok(output) => {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    log::warn!(
+                        "音频文件验证失败: {:?}, exit={}, stderr={}",
+                        audio_path.file_name().unwrap_or_default(),
+                        output.status,
+                        stderr
+                    );
+                    return false;
+                }
+                true
+            }
+            Err(e) => {
+                log::warn!("音频文件验证执行失败: {:?}, {}", audio_path, e);
+                false
+            }
+        },
+        Err(e) => {
+            log::warn!("启动音频文件验证失败: {}", e);
+            false
+        }
+    }
+}
+
 fn merge_system_audio_into_video(
     ffmpeg_path: &std::path::Path,
     video_path: &PathBuf,
@@ -418,23 +466,35 @@ fn merge_system_audio_into_video(
         if system_segments.len() == 1 && mic_segments.is_empty() {
             let seg = &system_segments[0];
             if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.path.exists() {
-                log::info!(
-                    "快速路径：单个系统音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
-                    seg.start_ms,
-                    seg.trim_start_ms
-                );
-                return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false, audio_bitrate_kbps);
+                // 🔧 快速路径前验证音频文件是否可被 FFmpeg 读取
+                if validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
+                    log::info!(
+                        "快速路径：单个系统音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
+                        seg.start_ms,
+                        seg.trim_start_ms
+                    );
+                    return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false, audio_bitrate_kbps);
+                } else {
+                    log::warn!("快速路径：系统音频文件验证失败，跳过音频合并");
+                    return Ok(());
+                }
             }
         }
         if mic_segments.len() == 1 && system_segments.is_empty() {
             let seg = &mic_segments[0];
             if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.path.exists() {
-                log::info!(
-                    "快速路径：单个麦克风音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
-                    seg.start_ms,
-                    seg.trim_start_ms
-                );
-                return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false, audio_bitrate_kbps);
+                // 🔧 快速路径前验证音频文件是否可被 FFmpeg 读取
+                if validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
+                    log::info!(
+                        "快速路径：单个麦克风音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
+                        seg.start_ms,
+                        seg.trim_start_ms
+                    );
+                    return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false, audio_bitrate_kbps);
+                } else {
+                    log::warn!("快速路径：麦克风音频文件验证失败，跳过音频合并");
+                    return Ok(());
+                }
             }
         }
 
@@ -463,14 +523,21 @@ fn merge_system_audio_into_video(
                         size,
                         min_size
                     );
+                    return false;
                 }
-                valid
             }
             Err(e) => {
                 log::warn!("无法读取音频片段元数据: {:?}, 错误: {}", seg.path, e);
-                false
+                return false;
             }
         }
+        // 🔧 对 AAC 文件额外做 FFmpeg 解码验证
+        // 文件大小检查通过不代表数据可读（如容器头存在但音频数据为空）
+        if is_aac && !validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
+            log::warn!("音频片段 FFmpeg 验证失败: {:?}", seg.path);
+            return false;
+        }
+        true
     };
     let valid_system = system_segments
         .iter()
