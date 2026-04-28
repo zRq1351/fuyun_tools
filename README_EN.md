@@ -2,7 +2,7 @@
 
 [中文](README.md) | [English](README_EN.md)
 
-![Version](https://img.shields.io/badge/version-0.6.77-blue)
+![Version](https://img.shields.io/badge/version-0.6.78-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![License](https://img.shields.io/badge/license-GPL--2.0-green)
 
@@ -74,6 +74,8 @@ In addition, this project itself follows an AI full-process development workflow
 - **ffmpeg Management**: Auto-detection and on-demand download on first enable with real-time progress
 - **State Protection**: Capsule shows disabled state when feature is turned off to prevent accidental triggers
 - **Audio Optimization**: Fixed system audio disappearance issue when recording microphone, improved stop logic
+- **Audio Merge Enhancement**: FFmpeg audio file pre-validation, AAC stream copy auto-fallback to re-encoding, smart
+  filtering of corrupted audio files, ensuring recorded videos are preserved
 
 ### 🔤 AI Text Selection Assistant (Windows)
 
@@ -204,6 +206,9 @@ Installation steps:
 - **First-Run Dependency Check**: Automatically checks `ffmpeg.exe`; if missing, prompts download with real-time
   progress
 - **Disabled State**: When recording is disabled, the capsule shows a disabled state and prevents accidental actions
+- **Audio Merge Reliability**: Audio files are pre-validated with FFmpeg before merge; corrupted/empty files are
+  filtered out;
+  AAC stream copy failures auto-fallback to re-encoding; video files are preserved even if audio merge fails
 
 ### AI Configuration Tips
 
@@ -247,8 +252,11 @@ Extra entries in development builds:
   distributed under GPL/LGPL obligations.
 - The installer does not bundle `ffmpeg.exe` by default; it is downloaded on demand into local `bin` directory when
   recording is enabled.
-- Corresponding source and license disclosure for FFmpeg are documented in `docs/THIRD_PARTY_NOTICES.md`.
-- License texts should be shipped with releases: `docs/GPLv2`, `docs/LGPLv2.1` (and `docs/OpenCV_LICENSE` when
+- OCR functionality uses PaddleOCR PP-OCRv5 model (Apache 2.0 License) and MNN inference engine (Apache 2.0 License).
+- Corresponding source and license disclosure for FFmpeg, PaddleOCR, MNN are documented in
+  `docs/THIRD_PARTY_NOTICES.md`.
+- License texts should be shipped with releases: `docs/GPLv2`, `docs/LGPLv2.1`, `docs/Apache-2.0` (and
+  `docs/OpenCV_LICENSE` when
   OpenCV-related build is distributed).
 
 ---
@@ -298,6 +306,78 @@ The close flow has been optimized for responsiveness. Please update to the lates
 
 On first enable, the app checks whether `ffmpeg.exe` exists in the expected `bin` path. If missing, it guides an
 on-demand download.
+
+### 5) How to quickly switch microphone during recording?
+
+Use either of these methods:
+
+- **Click icon**: Click the microphone icon on the recording capsule
+- **Hotkey**: Use `Ctrl+Space` (customizable in settings)
+
+Press to enable, release to disable — perfect for impromptu commentary.
+
+### 6) Recording shows "audio merge failed" — what should I do?
+
+v0.6.78 has significantly improved audio merge reliability. If this still occurs:
+
+- **Video is preserved**: Even if audio merge fails, the video file itself is not lost
+- **Check system audio**: Ensure the system audio device was working during recording
+- **Disable system audio**: If system audio is not needed, turn it off in the recording capsule
+- **Update version**: Ensure you are using the latest version, which automatically handles corrupted audio files
+
+---
+
+## 📦 Latest Release (v0.6.78)
+
+### 🔊 Recording Audio Merge Enhancement
+
+- **FFmpeg Audio Pre-validation**: Audio files are validated with FFmpeg actual decoding before merge, filtering
+  corrupted/empty files
+- **AAC Stream Copy Auto-Fallback**: When AAC stream copy fails, automatically switches to re-encoding mode
+- **Smart Corrupted File Filtering**: Raised AAC file validity check threshold to prevent false positives
+- **Graceful Degradation**: Audio merge failure preserves the video-only file instead of causing total recording failure
+- **Enhanced Diagnostics**: FFmpeg AAC encoding output file size is automatically checked with diagnostic logging
+
+---
+
+## 📦 Previous Release (v0.6.77)
+
+### 🎥 Recording Enhancement
+
+- **Real-time Microphone Switch**: New real-time microphone switching with dedicated hotkey support (default
+  `Ctrl+Space`)
+- **Flexible Control**: More flexible device switching during recording, ideal for impromptu commentary
+- **Press-to-Talk**: Hotkey uses press-to-enable, release-to-disable interaction
+
+### 🔊 Audio Optimization
+
+- **Fix System Audio Disappearance**: Fixed occasional system audio disappearance when recording microphone
+- **Improved Stop Logic**: Enhanced audio stop logic for more stable recording completion
+- **WASAPI Pipeline**: Based on native WASAPI capture pipeline for better audio quality
+
+### 📋 Smoother Clipboard
+
+- **Unified Identifier**: Text and image clipboard logic switched to `item_id`
+- **Better Switching Experience**: Significantly improved switching fluency between text and image clipboards
+- **Seamless Transition**: Switching between the two windows feels more natural
+
+### 🛠️ History Fixes
+
+- **Fix Scrolling Lag**: Completely fixed clipboard history scrolling lag issues
+- **Fix Data Anomalies**: Resolved image data anomaly issues
+- **Long List Optimization**: Long lists are more reliable with significant performance improvements
+
+### ✨ Cleaner Interaction
+
+- **Remove Popup Alerts**: Removed auto-fill success popup notifications
+- **Less Distraction**: Provides a purer, non-intrusive experience
+- **Stay Focused**: Keeps users focused on their current task
+
+### ⚡ Performance Boost
+
+- **Code Refactoring**: Comprehensive deep analysis and refactoring of codebase
+- **Clean Redundancy**: Removed redundant tests and dependencies
+- **Smoother System**: Overall smoother operation and faster response
 
 ---
 
