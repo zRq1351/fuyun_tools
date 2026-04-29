@@ -13,7 +13,7 @@ use tauri_plugin_autostart::ManagerExt;
 #[cfg(debug_assertions)]
 use tauri_plugin_opener::OpenerExt;
 
-fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
+fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap()
 }
 

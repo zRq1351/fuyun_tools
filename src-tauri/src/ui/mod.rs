@@ -1,4 +1,11 @@
 pub mod commands;
+pub mod commands_backup;
+pub mod commands_clipboard;
+pub mod commands_diagnostic;
 pub mod commands_recording;
+pub mod commands_screenshot;
+pub mod commands_screenshot_render;
+pub mod commands_vc_runtime;
+pub mod commands_writeback;
 pub mod tray_menu;
 pub mod window_manager;

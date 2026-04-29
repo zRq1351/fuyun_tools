@@ -25,19 +25,16 @@ pub static ENIGO_INSTANCE: LazyLock<Arc<Mutex<Option<enigo::Enigo>>>> =
 static WINDOW_VISIBILITY_NOTIFY: LazyLock<Arc<(StdMutex<u64>, Condvar)>> =
     LazyLock::new(|| Arc::new((StdMutex::new(0), Condvar::new())));
 
-fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
+fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap()
 }
 
 fn notify_window_visibility_changed() {
     let (lock, cvar) = &**WINDOW_VISIBILITY_NOTIFY;
-    let mut seq = match lock.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            log::error!("窗口可见性通知锁中毒，尝试恢复");
-            poisoned.into_inner()
-        }
-    };
+    let mut seq = lock.lock().unwrap_or_else(|poisoned| {
+        log::error!("窗口可见性通知锁中毒，尝试恢复");
+        poisoned.into_inner()
+    });
     *seq = seq.wrapping_add(1);
     cvar.notify_all();
 }
@@ -530,13 +527,10 @@ pub fn wait_for_window_hidden(
     }
     let start = std::time::Instant::now();
     let (lock, cvar) = &**WINDOW_VISIBILITY_NOTIFY;
-    let mut seq = match lock.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            log::error!("等待窗口隐藏时通知锁中毒，尝试恢复");
-            poisoned.into_inner()
-        }
-    };
+    let mut seq = lock.lock().unwrap_or_else(|poisoned| {
+        log::error!("等待窗口隐藏时通知锁中毒，尝试恢复");
+        poisoned.into_inner()
+    });
     loop {
         let hidden = match window_label {
             "clipboard" => {

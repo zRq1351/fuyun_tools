@@ -14,6 +14,11 @@ use crate::services::image_clipboard_manager::{
 };
 use crate::sync::Mutex;
 use crate::ui::commands::*;
+use crate::ui::commands_backup::*;
+use crate::ui::commands_clipboard::*;
+use crate::ui::commands_diagnostic::*;
+use crate::ui::commands_screenshot::*;
+use crate::ui::commands_vc_runtime::*;
 use crate::ui::commands_recording::{
     cancel_recording, check_recording_ffmpeg, download_recording_ffmpeg, get_recording_output_dir,
     get_recording_state, list_recording_audio_devices, list_recording_audio_processes,
@@ -47,7 +52,7 @@ fn now_unix_ms_u64() -> u64 {
 
 fn start_auto_backup_scheduler(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     thread::spawn(move || loop {
-        match tauri::async_runtime::block_on(crate::ui::commands::run_auto_backup_tick(
+        match tauri::async_runtime::block_on(crate::ui::commands_backup::run_auto_backup_tick(
             state.clone(),
         )) {
             Ok(true) => {
@@ -176,7 +181,7 @@ pub fn run() {
                             if is_image_visible {
                                 let _ = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone, "image_clipboard");
                             }
-                            crate::ui::commands::interrupt_text_fill_flow(&state_clone);
+                            crate::ui::commands_writeback::interrupt_text_fill_flow(&state_clone);
                             show_clipboard_window(
                                 app_handle_clone.clone(),
                                 state_clone.clone(),
@@ -211,7 +216,7 @@ pub fn run() {
                             if is_text_visible {
                                 let _ = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone_image, "clipboard");
                             }
-                            crate::ui::commands::interrupt_image_fill_flow(&state_clone_image);
+                            crate::ui::commands_writeback::interrupt_image_fill_flow(&state_clone_image);
                             show_image_clipboard_window(
                                 app_handle_clone_image.clone(),
                                 state_clone_image.clone(),
@@ -238,7 +243,7 @@ pub fn run() {
                             drop(state_guard);
                             let app_handle_inner = app_handle_clone_screenshot.clone();
                             tauri::async_runtime::spawn(async move {
-                                if let Err(e) = crate::ui::commands::open_screenshot_editor(
+                                if let Err(e) = crate::ui::commands_screenshot::open_screenshot_editor(
                                     app_handle_inner,
                                     None,
                                 )
