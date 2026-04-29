@@ -186,10 +186,25 @@ const IMAGE_ITEM_UNIT = 258
 const IMAGE_PREVIEW_CACHE_MARGIN = 24
 const IMAGE_PREVIEW_CACHE_MAX_ITEMS = 300
 const ASYNC_PREVIEW_CACHE_MAX_ITEMS = 180
+const FILTER_CACHE_MAX_SIZE = 500
 const filterDataRevision = ref(0)
-const filterEntriesCache = new Map()
-const keywordTagMatchCache = new Map()
-const keywordCategoryMatchCache = new Map()
+
+const createBoundedMap = (maxSize) => {
+  const map = new Map()
+  const originalSet = map.set.bind(map)
+  map.set = (key, value) => {
+    if (map.size >= maxSize && !map.has(key)) {
+      const firstKey = map.keys().next().value
+      map.delete(firstKey)
+    }
+    return originalSet(key, value)
+  }
+  return map
+}
+
+const filterEntriesCache = createBoundedMap(FILTER_CACHE_MAX_SIZE)
+const keywordTagMatchCache = createBoundedMap(FILTER_CACHE_MAX_SIZE)
+const keywordCategoryMatchCache = createBoundedMap(FILTER_CACHE_MAX_SIZE)
 const tagSearchIndex = new Map()
 const itemTagSnapshot = new Map()
 const categorySearchIndex = new Map()

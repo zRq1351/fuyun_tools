@@ -2,7 +2,7 @@ import {computed, ref, shallowRef} from 'vue'
 import {CategoryService, ClipboardService} from '../../../services/ipc'
 
 export function useClipboardHistory() {
-        const pagedHistory = shallowRef([])
+    const pagedHistory = shallowRef([])
     const selectedItemId = ref('')
     const searchKeyword = ref('')
     const categoryFilter = ref('全部')
@@ -15,12 +15,12 @@ export function useClipboardHistory() {
     const sortBy = ref('pinnedFirst')
     const sortOrder = ref('asc')
 
-    
+
     const filterDataRevision = ref(0)
 
-    
-    const categorySearchIndex = new Map()  
-    const itemCategorySnapshot = new Map()  
+    const SEARCH_CACHE_MAX_SIZE = 300
+    const categorySearchIndex = new Map()
+    const itemCategorySnapshot = new Map()
     const keywordCategoryMatchCache = new Map()
 
     const getItemCategory = (item_id) => {
@@ -91,7 +91,7 @@ export function useClipboardHistory() {
         }
     }
 
-    
+
     const getKeywordCategoryMatchedIds = (keyword) => {
         if (!keyword) return null
         const cacheKey = `${filterDataRevision.value}|${keyword}`
@@ -105,6 +105,10 @@ export function useClipboardHistory() {
             for (const id of idSet) {
                 matchedIds.add(id)
             }
+        }
+        if (keywordCategoryMatchCache.size >= SEARCH_CACHE_MAX_SIZE) {
+            const firstKey = keywordCategoryMatchCache.keys().next().value
+            keywordCategoryMatchCache.delete(firstKey)
         }
         keywordCategoryMatchCache.set(cacheKey, matchedIds)
         return matchedIds
@@ -671,7 +675,7 @@ export function useClipboardHistory() {
 
     return {
         replaceLocalById,
-                selectedItemId,
+        selectedItemId,
         searchKeyword,
         categoryFilter,
         categoryMap,

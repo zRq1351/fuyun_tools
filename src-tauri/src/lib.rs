@@ -41,6 +41,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 static RECORDING_SHORTCUT_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 static RECORDING_SHORTCUT_LAST_TRIGGER_MS: AtomicU64 = AtomicU64::new(0);
 const RECORDING_SHORTCUT_MIN_INTERVAL_MS: u64 = 300;
+static BACKUP_SCHEDULER_STOP: AtomicBool = AtomicBool::new(false);
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
     state.lock().unwrap_or_else(|never| match never {})
@@ -51,31 +52,40 @@ fn now_unix_ms_u64() -> u64 {
 }
 
 fn start_auto_backup_scheduler(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
-    thread::spawn(move || loop {
-        match tauri::async_runtime::block_on(crate::ui::commands_backup::run_auto_backup_tick(
-            state.clone(),
-        )) {
-            Ok(true) => {
-                let _ = app_handle.emit(
-                    "backup-run-updated",
-                    serde_json::json!({
-                        "status": "success",
-                    }),
-                );
+    thread::spawn(move || {
+        while !BACKUP_SCHEDULER_STOP.load(Ordering::Relaxed) {
+            match tauri::async_runtime::block_on(crate::ui::commands_backup::run_auto_backup_tick(
+                state.clone(),
+            )) {
+                Ok(true) => {
+                    let _ = app_handle.emit(
+                        "backup-run-updated",
+                        serde_json::json!({
+                            "status": "success",
+                        }),
+                    );
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    log::warn!("自动备份执行失败: {}", error);
+                    let _ = app_handle.emit(
+                        "backup-run-updated",
+                        serde_json::json!({
+                            "status": "failed",
+                            "message": error,
+                        }),
+                    );
+                }
             }
-            Ok(false) => {}
-            Err(error) => {
-                log::warn!("自动备份执行失败: {}", error);
-                let _ = app_handle.emit(
-                    "backup-run-updated",
-                    serde_json::json!({
-                        "status": "failed",
-                        "message": error,
-                    }),
-                );
+            // 分段睡眠以便及时响应停止信号
+            for _ in 0..60 {
+                if BACKUP_SCHEDULER_STOP.load(Ordering::Relaxed) {
+                    break;
+                }
+                thread::sleep(std::time::Duration::from_secs(5));
             }
         }
-        thread::sleep(std::time::Duration::from_secs(300));
+        log::info!("自动备份调度器已停止");
     });
 }
 

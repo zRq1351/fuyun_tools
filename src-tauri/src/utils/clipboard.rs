@@ -18,6 +18,7 @@ struct PersistState {
     categories_dirty: bool,
     pinned_dirty: bool,
     clear_all: bool,
+    save_completed: bool,
 }
 
 #[derive(Clone)]
@@ -79,6 +80,7 @@ impl ClipboardManager {
                     || !initial_snapshot.category_list.is_empty(),
                 pinned_dirty: !initial_snapshot.pinned_items.is_empty(),
                 clear_all: false,
+                save_completed: false,
             }),
             ParkingCondvar::new(),
         ));
@@ -153,6 +155,11 @@ impl ClipboardManager {
                         }
                     }
                 }
+
+                // 通知等待的线程保存已完成
+                let mut state = lock.lock();
+                state.save_completed = true;
+                cvar.notify_all();
             }
         });
 
@@ -657,6 +664,15 @@ impl ClipboardManager {
         let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         pinned_items.clear();
 
+        // 重置布隆过滤器
+        let mut bloom_filter = self.bloom_filter.lock();
+        *bloom_filter = BloomFilter::with_rate(BLOOM_FILTER_ERROR_RATE, BLOOM_FILTER_CAPACITY);
+        drop(bloom_filter);
+
+        // 清空指纹缓存
+        let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
+        fingerprints.clear();
+
         self.enqueue_clear_all_persist();
 
         log::info!("历史记录已清空");
@@ -952,10 +968,18 @@ impl ClipboardManager {
             state.history_dirty = true;
             state.categories_dirty = true;
             state.pinned_dirty = true;
+            state.save_completed = false;
             cvar.notify_one();
         }
-        // 短暂等待持久化线程完成（最多 500ms）
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        // 等待持久化线程完成（最多 2 秒）
+        let (lock, cvar) = &*self.persist_state;
+        let mut state = lock.lock();
+        if !state.save_completed {
+            let result = cvar.wait_for(&mut state, std::time::Duration::from_secs(2));
+            if result.timed_out() {
+                log::warn!("等待持久化线程完成超时");
+            }
+        }
         Ok(())
     }
 

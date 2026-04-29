@@ -26,14 +26,35 @@ const marked = new Marked(
     emptyLangClass: 'hljs',
     langPrefix: 'hljs language-',
     highlight(code, lang) {
-      const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-      return hljs.highlight(code, { language }).value;
+      const language = hljs.getLanguage(lang) ? lang : 'plaintext'
+      return hljs.highlight(code, {language}).value
     }
-  })
-);
+  }),
+)
 
 const contentType = ref('text')
 const renderedHtml = ref('')
+
+const RENDER_CACHE_MAX_SIZE = 200
+const renderCache = new Map()
+
+const getCachedResult = (text) => {
+  const cached = renderCache.get(text)
+  if (cached) {
+    renderCache.delete(text)
+    renderCache.set(text, cached)
+    return cached
+  }
+  return null
+}
+
+const setCacheResult = (text, result) => {
+  if (renderCache.size >= RENDER_CACHE_MAX_SIZE) {
+    const firstKey = renderCache.keys().next().value
+    renderCache.delete(firstKey)
+  }
+  renderCache.set(text, result)
+}
 
 const detectAndProcess = (text) => {
   const trimmed = text.trim()
@@ -43,20 +64,30 @@ const detectAndProcess = (text) => {
     return
   }
 
-  // Prevent freezing on very large texts
   if (text.length > 50000) {
     contentType.value = 'text'
     renderedHtml.value = ''
     return
   }
 
+  const cached = getCachedResult(text)
+  if (cached) {
+    contentType.value = cached.type
+    renderedHtml.value = cached.html
+    return
+  }
+
   // 1. JSON
-  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || 
-      (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+  if (
+      (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))
+  ) {
     try {
       JSON.parse(trimmed)
+      const html = hljs.highlight(text, {language: 'json'}).value
       contentType.value = 'code'
-      renderedHtml.value = hljs.highlight(text, { language: 'json' }).value
+      renderedHtml.value = html
+      setCacheResult(text, {type: 'code', html})
       return
     } catch (e) {
       // not json
@@ -65,28 +96,36 @@ const detectAndProcess = (text) => {
 
   // 2. HTML
   if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
+    const html = hljs.highlight(text, {language: 'html'}).value
     contentType.value = 'code'
-    renderedHtml.value = hljs.highlight(text, { language: 'html' }).value
+    renderedHtml.value = html
+    setCacheResult(text, {type: 'code', html})
     return
   }
 
   // 3. Markdown (simplified detection)
   if (/(^|\n)(#{1,6}\s|- \[[ x]\]|[\*\-]\s|> \S|```)/.test(text)) {
-    contentType.value = 'markdown'
     const rawHtml = marked.parse(text)
-    // sanitize
-    renderedHtml.value = DOMPurify.sanitize(rawHtml)
+    const html = DOMPurify.sanitize(rawHtml)
+    contentType.value = 'markdown'
+    renderedHtml.value = html
+    setCacheResult(text, {type: 'markdown', html})
     return
   }
 
   // 4. Code heuristics
-  const codeRegex = /(function\s+\w+\(|const\s+\w+\s*=|let\s+\w+\s*=|var\s+\w+\s*=|class\s+\w+\s*\{|import\s+.*from|public\s+class|def\s+\w+\(|fn\s+\w+\()/
+  const codeRegex =
+      /(function\s+\w+\(|const\s+\w+\s*=|let\s+\w+\s*=|var\s+\w+\s*=|class\s+\w+\s*\{|import\s+.*from|public\s+class|def\s+\w+\(|fn\s+\w+\()/
   if (codeRegex.test(text)) {
-    contentType.value = 'code'
     try {
-      renderedHtml.value = hljs.highlightAuto(text).value
+      const html = hljs.highlightAuto(text).value
+      contentType.value = 'code'
+      renderedHtml.value = html
+      setCacheResult(text, {type: 'code', html})
     } catch (e) {
       contentType.value = 'text'
+      renderedHtml.value = ''
+      setCacheResult(text, {type: 'text', html: ''})
     }
     return
   }
@@ -94,6 +133,7 @@ const detectAndProcess = (text) => {
   // Default
   contentType.value = 'text'
   renderedHtml.value = ''
+  setCacheResult(text, {type: 'text', html: ''})
 }
 
 watch(() => props.content, (newVal) => {
