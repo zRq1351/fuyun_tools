@@ -25,7 +25,8 @@ pub struct VersionComparison {
 }
 
 const LCS_MAX_CHARS_EACH: usize = 1400;
-const LCS_MAX_PRODUCT: usize = 1_600_000;
+// 优化：降低 LCS 乘积阈值，更早触发快速路径，避免 O(M×N) 阻塞
+const LCS_MAX_PRODUCT: usize = 800_000;
 const FIND_BEST_CANDIDATE_BUDGET_MS: u64 = 18;
 const FIND_BEST_CANDIDATE_BUDGET_MIN_MS: u64 = 12;
 const FIND_BEST_CANDIDATE_BUDGET_MAX_MS: u64 = 30;

@@ -53,6 +53,7 @@ pub fn get_history_db_path() -> PathBuf {
     history_dir
 }
 
+/// 统一使用 utils_helpers 中的时间函数，避免重复定义
 fn now_unix_ms() -> i64 {
     crate::utils::utils_helpers::now_unix_ms_i64()
 }
@@ -175,7 +176,7 @@ async fn get_history_db_pool() -> Result<&'static SqlitePool, String> {
                 fs::create_dir_all(parent).map_err(|e| format!("创建历史数据库目录失败: {}", e))?;
             }
             let pool = SqlitePoolOptions::new()
-                .max_connections(5)
+                .max_connections(3)
                 .connect_with(db_options(&db_path))
                 .await
                 .map_err(|e| format!("打开历史数据库池失败: {}", e))?;
@@ -525,6 +526,10 @@ fn build_fts_query(keyword: &str) -> String {
     }
 }
 
+/// 生成搜索关键词的上下文摘要片段
+/// 注意：使用字节偏移进行截取（B11），对纯 ASCII 文本精确，
+/// 对多字节 UTF-8（如中文）截取位置可能不是精确的字符边界，
+/// 但 adjust_to_char_boundary 确保不会 panic。
 fn build_keyword_snippet(content: &str, keyword: &str) -> String {
     if content.is_empty() || keyword.trim().is_empty() {
         return content.to_string();
@@ -532,6 +537,7 @@ fn build_keyword_snippet(content: &str, keyword: &str) -> String {
     let content_lower = content.to_lowercase();
     let keyword_lower = keyword.to_lowercase();
     if let Some(idx) = content_lower.find(&keyword_lower) {
+        // 字节偏移截取，adjust_to_char_boundary 确保 UTF-8 安全
         let start = idx.saturating_sub(36);
         let end = (idx + keyword_lower.len() + 72).min(content.len());
         let start_adj = adjust_to_char_boundary(content, start, true);
@@ -1000,26 +1006,17 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         .map_err(|e| format!("写入置顶项失败: {}", e))?;
     }
 
-    for item_id in &desired_item_ids {
-        let rowid = sqlx::query_scalar::<_, i64>(
-            "SELECT id FROM history_items WHERE item_id = ? ORDER BY id DESC LIMIT 1",
-        )
-        .bind(item_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| format!("读取历史记录失败: {}", e))?;
-        if let Some(rowid) = rowid {
-            let _ = sqlx::query(
-                "INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content)
-                 SELECT id, COALESCE(item_id, ''), content
-                 FROM history_items
-                 WHERE id = ?",
-            )
-            .bind(rowid)
-            .execute(&mut *tx)
-            .await;
-        }
-    }
+    // 批量更新FTS索引：用一条SQL替代逐条N+1查询
+    let _ = sqlx::query(
+        "
+        INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content)
+        SELECT id, COALESCE(item_id, ''), content
+        FROM history_items
+        WHERE item_id IN (SELECT item_id FROM temp_desired_history_item_ids)
+        ",
+    )
+    .execute(&mut *tx)
+    .await;
 
     tx.commit()
         .await
@@ -1139,26 +1136,17 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
         .await;
     }
 
-    for item_id in &desired_item_ids {
-        let rowid = sqlx::query_scalar::<_, i64>(
-            "SELECT id FROM history_items WHERE item_id = ? ORDER BY id DESC LIMIT 1",
-        )
-        .bind(item_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| format!("读取历史记录失败: {}", e))?;
-        if let Some(rowid) = rowid {
-            let _ = sqlx::query(
-                "INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content)
-                 SELECT id, COALESCE(item_id, ''), content
-                 FROM history_items
-                 WHERE id = ?",
-            )
-            .bind(rowid)
-            .execute(&mut *tx)
-            .await;
-        }
-    }
+    // 批量更新FTS索引：用一条SQL替代逐条N+1查询
+    let _ = sqlx::query(
+        "
+        INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content)
+        SELECT id, COALESCE(item_id, ''), content
+        FROM history_items
+        WHERE item_id IN (SELECT item_id FROM temp_desired_history_item_ids)
+        ",
+    )
+    .execute(&mut *tx)
+    .await;
 
     tx.commit()
         .await
@@ -1167,6 +1155,7 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
 }
 
 /// 仅同步分类映射与分类列表。
+/// 优化 (P5): 使用 UPSERT 替代 DELETE + INSERT，减少 WAL 日志写入
 pub async fn save_categories_state_async(
     categories: &HashMap<String, String>,
     category_list: &[String],
@@ -1177,23 +1166,50 @@ pub async fn save_categories_state_async(
         .await
         .map_err(|e| format!("创建事务失败: {}", e))?;
 
-    sqlx::query("DELETE FROM categories")
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("清理分类失败: {}", e))?;
+    // 使用 UPSERT 替代 DELETE + INSERT
+    for chunk in categories.iter().collect::<Vec<_>>().chunks(500) {
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+            "INSERT INTO categories(category, item_id) ",
+        );
+        qb.push_values(chunk.iter(), |mut b, (item_id, category)| {
+            b.push_bind(category.as_str()).push_bind(item_id.as_str());
+        });
+        qb.push(" ON CONFLICT(item_id) DO UPDATE SET category = excluded.category");
+        qb.build()
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("批量写入分类失败: {}", e))?;
+    }
+
+    // 清理不再需要的分类映射
+    if !categories.is_empty() {
+        let category_ids: Vec<&str> = categories.keys().map(|s| s.as_str()).collect();
+        for chunk in category_ids.chunks(500) {
+            let placeholders: Vec<String> = chunk.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+            let sql = format!(
+                "DELETE FROM categories WHERE item_id NOT IN ({})",
+                placeholders.join(",")
+            );
+            let mut query = sqlx::query(&sql);
+            for id in chunk {
+                query = query.bind(*id);
+            }
+            query.execute(&mut *tx)
+                .await
+                .map_err(|e| format!("清理失效分类失败: {}", e))?;
+        }
+    } else {
+        sqlx::query("DELETE FROM categories")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("清理分类失败: {}", e))?;
+    }
+
+    // 分类列表仍使用 DELETE + INSERT（列表通常很小）
     sqlx::query("DELETE FROM category_list")
         .execute(&mut *tx)
         .await
         .map_err(|e| format!("清理分类列表失败: {}", e))?;
-
-    for (item_id, category) in categories {
-        sqlx::query("INSERT INTO categories(category, item_id) VALUES (?1, ?2)")
-            .bind(category)
-            .bind(item_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("写入分类失败: {}", e))?;
-    }
 
     for category in category_list {
         sqlx::query("INSERT INTO category_list(category) VALUES(?)")
@@ -1210,6 +1226,7 @@ pub async fn save_categories_state_async(
 }
 
 /// 仅同步置顶顺序（按 pinned_items 向量顺序重建 pinned_at）。
+/// 优化：使用批量 INSERT 替代逐条插入
 pub async fn save_pinned_items_order_async(pinned_items: &[String]) -> Result<(), String> {
     let mut conn = open_history_db_async().await?;
     let mut tx = conn
@@ -1222,15 +1239,23 @@ pub async fn save_pinned_items_order_async(pinned_items: &[String]) -> Result<()
         .await
         .map_err(|e| format!("清理置顶项失败: {}", e))?;
 
-    let base_ts = now_unix_ms();
-    for (idx, item_id) in pinned_items.iter().enumerate() {
-        let pinned_at = base_ts + (pinned_items.len().saturating_sub(idx) as i64);
-        sqlx::query("INSERT INTO pinned_items(pinned_at, item_id) VALUES (?1, ?2)")
-            .bind(pinned_at)
-            .bind(item_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("写入置顶项失败: {}", e))?;
+    if !pinned_items.is_empty() {
+        let base_ts = now_unix_ms();
+        for chunk in pinned_items.chunks(500) {
+            let mut qb: QueryBuilder<Sqlite> =
+                QueryBuilder::new("INSERT INTO pinned_items(pinned_at, item_id) ");
+            qb.push_values(
+                chunk.iter().enumerate(),
+                |mut b, (idx, item_id)| {
+                    let pinned_at = base_ts + (pinned_items.len().saturating_sub(idx) as i64);
+                    b.push_bind(pinned_at).push_bind(item_id);
+                },
+            );
+            qb.build()
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("批量写入置顶项失败: {}", e))?;
+        }
     }
 
     tx.commit()

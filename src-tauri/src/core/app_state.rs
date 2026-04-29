@@ -3,6 +3,7 @@ use crate::sync::Mutex;
 use crate::utils::clipboard::ClipboardManager;
 use crate::utils::image_clipboard::{set_image_fill_verify_mode, ImageClipboardManager};
 use crate::utils::utils_helpers::{load_settings, AppSettingsData};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 /// 托盘菜单项
@@ -51,7 +52,7 @@ pub struct AppState {
     pub last_external_foreground: Option<ForegroundTargetSnapshot>,
     pub active_overlay_window: Option<String>,
     pub last_overlay_lifecycle: Option<OverlayLifecycleRecord>,
-    pub overlay_lifecycle_history: Vec<OverlayLifecycleRecord>,
+    pub overlay_lifecycle_history: VecDeque<OverlayLifecycleRecord>,
     pub recording_runtime: Arc<Mutex<RecordingRuntime>>,
     pub tray_menu_items: Option<TrayMenuItems>,
 }
@@ -127,7 +128,7 @@ impl Default for AppState {
             last_external_foreground: None,
             active_overlay_window: None,
             last_overlay_lifecycle: None,
-            overlay_lifecycle_history: Vec::new(),
+            overlay_lifecycle_history: VecDeque::new(),
             recording_runtime: Arc::new(Mutex::new(RecordingRuntime::default())),
             tray_menu_items: None,
         }

@@ -10,7 +10,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
-    state.lock().unwrap()
+    state.lock().unwrap_or_else(|never| match never {})
 }
 
 fn clipboard_listener_stop_tx() -> &'static std::sync::Mutex<Option<Sender<()>>> {

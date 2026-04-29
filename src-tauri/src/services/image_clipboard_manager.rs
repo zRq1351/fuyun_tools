@@ -4,7 +4,7 @@ use crate::services::clipboard_wakeup::subscribe_clipboard_wake_events;
 use crate::sync::Mutex;
 use crate::utils::image_clipboard::ImageClipboardManager;
 use parking_lot::Mutex as ParkingMutex;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::OnceLock;
@@ -135,8 +135,8 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
 // 快速去重：存储最近图片的采样数据用于快速比较
 const SAMPLE_POINTS: usize = 10;
 type ImageSample = (u32, u32, [u8; SAMPLE_POINTS]);
-static RECENT_IMAGE_SAMPLES: LazyLock<ParkingMutex<Vec<ImageSample>>> =
-    LazyLock::new(|| ParkingMutex::new(Vec::new()));
+static RECENT_IMAGE_SAMPLES: LazyLock<ParkingMutex<VecDeque<ImageSample>>> =
+    LazyLock::new(|| ParkingMutex::new(VecDeque::new()));
 
 // 快速采样：从 RGBA 数据中提取 10 个采样点
 fn extract_sample_points(rgba: &[u8], width: u32, height: u32) -> [u8; SAMPLE_POINTS] {
@@ -183,10 +183,10 @@ fn matches_recent_sample(width: u32, height: u32, rgba: &[u8]) -> bool {
 fn update_recent_samples_with_sample(width: u32, height: u32, sample: [u8; SAMPLE_POINTS]) {
     let mut recent = RECENT_IMAGE_SAMPLES.lock();
 
-    recent.push((width, height, sample));
+    recent.push_back((width, height, sample));
 
-    if recent.len() > 5 {
-        recent.remove(0);
+    while recent.len() > 5 {
+        recent.pop_front();
     }
 }
 

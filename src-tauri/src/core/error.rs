@@ -80,10 +80,16 @@ fn compact_error_details(raw: &str) -> String {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join(" | ");
-    if merged.chars().count() <= 500 {
+    // 优化：使用字节长度代替 chars().count() 避免两次遍历
+    if merged.len() <= 500 {
         return merged;
     }
-    let mut shortened = merged.chars().take(500).collect::<String>();
+    let end = merged
+        .char_indices()
+        .nth(500)
+        .map(|(pos, _)| pos)
+        .unwrap_or(merged.len());
+    let mut shortened = merged[..end].to_string();
     shortened.push_str("...");
     shortened
 }
@@ -119,7 +125,9 @@ pub fn install_global_panic_hook() {
             } else {
                 "unknown panic payload".to_string()
             };
-            let bt = std::backtrace::Backtrace::force_capture();
+            let bt = std::panic::catch_unwind(|| std::backtrace::Backtrace::force_capture())
+                .map(|bt| bt.to_string())
+                .unwrap_or_else(|_| "backtrace capture failed".to_string());
             log::error!(
                 "全局未捕获panic: location={}, payload={}, backtrace={}",
                 location,

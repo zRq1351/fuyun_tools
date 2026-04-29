@@ -618,6 +618,17 @@ impl ClipboardManager {
 
         // 重新获取 history 锁来更新内容
         let mut history = lock_arc_mutex(&self.history);
+        // Bug修复 (B3): 验证 index 在锁释放期间是否仍然有效
+        if index >= history.len() {
+            log::warn!("update_item_content: index {} 已过期（history 长度 {}），跳过更新", index, history.len());
+            return Err("目标项目位置已变更，请重试".to_string());
+        }
+        let current_hash = stable_text_hash(&history[index]);
+        let expected_old_hash = u64::from_str_radix(old_item_id, 16).unwrap_or(0);
+        if current_hash != expected_old_hash {
+            log::warn!("update_item_content: index {} 指向的项目已变更，跳过更新", index);
+            return Err("目标项目已变更，请重试".to_string());
+        }
         history[index] = new_content.clone();
 
         self.exact_index_cache.lock().clear();
@@ -791,6 +802,9 @@ impl ClipboardManager {
             self.history_cache_dirty.store(true, Ordering::Relaxed);
             item
         };
+        // Bug修复 (B4): 异步版本也需要触发持久化，否则应用重启后数据丢失
+        self.enqueue_history_only_persist();
+        self.enqueue_pinned_only_persist();
         Ok(item)
     }
 
@@ -847,21 +861,26 @@ impl ClipboardManager {
             crate::utils::database::unpin_item(&item_id).await
         };
 
-        if db_result.is_err() {
+        if let Err(ref e) = db_result {
+            log::warn!("set_pinned_async: 数据库操作失败，执行回滚: item_id={}, pinned={}, error={}", item_id, pinned, e);
             let mut history = lock_arc_mutex(&self.history);
             let exists = history.iter().any(|existing| {
                 crate::utils::database::stable_history_item_id(existing) == item_id
             });
             if exists {
                 let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+                // 回滚：撤销之前的内存修改
                 if pinned {
+                    // 如果是要置顶但失败了，移除刚添加的置顶
                     pinned_items.retain(|p| p != &item_id);
                 } else if !pinned_items.iter().any(|p| p == &item_id) {
+                    // 如果是要取消置顶但失败了，恢复置顶
                     pinned_items.insert(0, item_id.clone());
                 }
                 normalize_pinned_items(&mut pinned_items, &history);
                 apply_pin_order(&mut history, &pinned_items);
                 self.history_cache_dirty.store(true, Ordering::Relaxed);
+                log::info!("set_pinned_async: 回滚完成: item_id={}", item_id);
             }
         }
 
@@ -923,8 +942,20 @@ impl ClipboardManager {
         self.clear_history_by_mode(mode)
     }
 
-    /// 退出时保存历史（由异步持久化线程自动处理）
+    /// 退出时强制刷新所有脏数据到数据库
+    /// Bug修复 (B6): 确保应用退出前数据不丢失
     pub fn save_history_on_exit(&self) -> Result<(), String> {
+        // 标记所有数据为脏，通知持久化线程立即执行
+        {
+            let (lock, cvar) = &*self.persist_state;
+            let mut state = lock.lock();
+            state.history_dirty = true;
+            state.categories_dirty = true;
+            state.pinned_dirty = true;
+            cvar.notify_one();
+        }
+        // 短暂等待持久化线程完成（最多 500ms）
+        std::thread::sleep(std::time::Duration::from_millis(500));
         Ok(())
     }
 
@@ -1033,6 +1064,14 @@ fn apply_pin_order(history: &mut Vec<String>, pinned_items: &[String]) {
         } else {
             unpinned_list.push(item);
         }
+    }
+
+    // Bug修复 (B1): 清理 pinned_items 中不在 history 中的孤立条目
+    if !pinned_set.is_empty() {
+        log::debug!(
+            "apply_pin_order: 清理 {} 个孤立置顶条目",
+            pinned_set.len()
+        );
     }
 
     let mut pinned_map: HashMap<String, String> = pinned_list

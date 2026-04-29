@@ -60,11 +60,10 @@ fn emit_overlay_window_lifecycle(app_handle: &AppHandle, label: &str, action: &s
             occurred_at: now_ms(),
         };
         guard.last_overlay_lifecycle = Some(record.clone());
-        guard.overlay_lifecycle_history.push(record);
-        if guard.overlay_lifecycle_history.len() > 6 {
-            let drain_count = guard.overlay_lifecycle_history.len().saturating_sub(6);
-            guard.overlay_lifecycle_history.drain(0..drain_count);
-        }
+    guard.overlay_lifecycle_history.push_back(record);
+    if guard.overlay_lifecycle_history.len() > 6 {
+        guard.overlay_lifecycle_history.pop_front();
+    }
     }
     let _ = app_handle.emit(
         "overlay-window-lifecycle",
@@ -145,10 +144,9 @@ pub fn bind_overlay_window_events(
                         occurred_at: now_ms(),
                     };
                     guard.last_overlay_lifecycle = Some(record.clone());
-                    guard.overlay_lifecycle_history.push(record);
+                    guard.overlay_lifecycle_history.push_back(record);
                     if guard.overlay_lifecycle_history.len() > 6 {
-                        let drain_count = guard.overlay_lifecycle_history.len().saturating_sub(6);
-                        guard.overlay_lifecycle_history.drain(0..drain_count);
+                        guard.overlay_lifecycle_history.pop_front();
                     }
                     clear
                 })

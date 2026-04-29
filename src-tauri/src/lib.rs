@@ -87,15 +87,14 @@ pub fn start_text_selection_listener(app_handle: AppHandle, state: Arc<Mutex<App
 /// 运行Tauri应用程序
 pub fn run() {
     install_global_panic_hook();
+    // Bug修复 (B15): 启动时清理上次遗留的截图临时文件
+    cleanup_stale_screenshot_boot_files();
     let initial_state = AppState::default();
     let state_arc = Arc::new(Mutex::new(initial_state));
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(core::logger::build_logger().build())
         .manage(state_arc.clone())
         .setup(move |app| {
             if let Some(settings_window) = app.get_webview_window("settings") {
@@ -132,41 +131,30 @@ pub fn run() {
             start_auto_backup_scheduler(app_handle.clone(), state_arc.clone());
             let state_clone = state_arc.clone();
             let app_handle_clone = app_handle.clone();
-            let hot_key = {
+            // 优化：一次性批量获取所有需要的设置字段，减少锁获取次数
+            let (
+                hot_key,
+                image_hot_key,
+                screenshot_hot_key,
+                recording_hot_key,
+                recording_mic_toggle_hot_key,
+                text_clipboard_enabled,
+                image_clipboard_enabled,
+                screenshot_enabled,
+                recording_enabled,
+            ) = {
                 let guard = lock_state(&state_arc);
-                guard.settings.hot_key.clone()
-            };
-            let image_hot_key = {
-                let guard = lock_state(&state_arc);
-                guard.settings.image_hot_key.clone()
-            };
-            let screenshot_hot_key = {
-                let guard = lock_state(&state_arc);
-                guard.settings.screenshot_hot_key.clone()
-            };
-            let recording_hot_key = {
-                let guard = lock_state(&state_arc);
-                guard.settings.recording_hot_key.clone()
-            };
-            let recording_mic_toggle_hot_key = {
-                let guard = lock_state(&state_arc);
-                guard.settings.recording_mic_toggle_hot_key.clone()
-            };
-            let text_clipboard_enabled = {
-                let guard = lock_state(&state_arc);
-                guard.settings.text_clipboard_enabled
-            };
-            let image_clipboard_enabled = {
-                let guard = lock_state(&state_arc);
-                guard.settings.image_clipboard_enabled
-            };
-            let screenshot_enabled = {
-                let guard = lock_state(&state_arc);
-                guard.settings.screenshot_enabled
-            };
-            let recording_enabled = {
-                let guard = lock_state(&state_arc);
-                guard.settings.recording_enabled
+                (
+                    guard.settings.hot_key.clone(),
+                    guard.settings.image_hot_key.clone(),
+                    guard.settings.screenshot_hot_key.clone(),
+                    guard.settings.recording_hot_key.clone(),
+                    guard.settings.recording_mic_toggle_hot_key.clone(),
+                    guard.settings.text_clipboard_enabled,
+                    guard.settings.image_clipboard_enabled,
+                    guard.settings.screenshot_enabled,
+                    guard.settings.recording_enabled,
+                )
             };
             let mut shortcut_conflicts: Vec<String> = Vec::new();
             if text_clipboard_enabled {
@@ -374,11 +362,6 @@ pub fn run() {
                 start_text_selection_listener(app_handle.clone(), state_arc.clone());
             }
 
-            #[cfg(desktop)]
-            app_handle
-                .plugin(tauri_plugin_updater::Builder::new().build())
-                .map_err(|e| e.to_string())?;
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -529,6 +512,37 @@ pub fn run() {
     // 仅调试模式启用日志插件；发布版不注册，避免任何日志落盘
     #[cfg(debug_assertions)]
     let builder = builder.plugin(core::logger::build_logger().build());
+
+    /// 清理启动时遗留的截图临时文件
+    /// Bug修复 (B15): 防止异常退出后临时文件累积
+    fn cleanup_stale_screenshot_boot_files() {
+        let mut dir = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        dir.pop();
+        dir.push("screenshot_boot");
+        if !dir.exists() {
+            return;
+        }
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            let mut count = 0usize;
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        if name.starts_with("screenshot_boot_") && name.ends_with(".png") {
+                            let _ = std::fs::remove_file(&path);
+                            count += 1;
+                        }
+                    }
+                }
+            }
+            if count > 0 {
+                log::info!("启动清理: 删除 {} 个遗留截图临时文件", count);
+            }
+        }
+    }
 
     let app = builder
         .plugin(tauri_plugin_clipboard_manager::init())

@@ -193,6 +193,24 @@ impl WindowsClipboardEventBackend {
                     HWND_MESSAGE, MSG, WNDCLASSW,
                 };
 
+                // Bug修复 (B10): RAII 包装器，确保 panic 时也能清理窗口资源
+                struct WindowGuard {
+                    hwnd: HWND,
+                    listener_added: bool,
+                }
+                impl Drop for WindowGuard {
+                    fn drop(&mut self) {
+                        unsafe {
+                            if self.listener_added {
+                                let _ = RemoveClipboardFormatListener(self.hwnd);
+                            }
+                            if !self.hwnd.is_null() {
+                                DestroyWindow(self.hwnd);
+                            }
+                        }
+                    }
+                }
+
                 unsafe extern "system" fn wndproc(
                     hwnd: HWND,
                     msg: UINT,
@@ -273,11 +291,13 @@ impl WindowsClipboardEventBackend {
                     let _ = ready_tx.send(false);
                     return;
                 }
+                // Bug修复 (B10): 使用 RAII 保护窗口资源
+                let mut window_guard = WindowGuard { hwnd, listener_added: false };
                 hwnd_holder_for_thread.store(hwnd as isize, Ordering::Release);
                 log::info!("剪贴板消息窗口创建成功: hwnd={}", hwnd as isize);
                 if cancelled_for_thread.load(Ordering::Acquire) {
                     let _ = ready_tx.send(false);
-                    DestroyWindow(hwnd);
+                    // window_guard Drop 会自动清理
                     return;
                 }
 
@@ -287,7 +307,7 @@ impl WindowsClipboardEventBackend {
                     } else {
                         log::error!("剪贴板消息窗口映射注册失败");
                         let _ = ready_tx.send(false);
-                        DestroyWindow(hwnd);
+                        // window_guard Drop 会自动清理
                         return;
                     }
                 }
@@ -300,9 +320,10 @@ impl WindowsClipboardEventBackend {
                             guard.remove(&(hwnd as isize));
                         }
                     }
-                    DestroyWindow(hwnd);
+                    // window_guard Drop 会自动清理
                     return;
                 }
+                window_guard.listener_added = true;
 
                 let _ = ready_tx.send(true);
 
@@ -330,8 +351,8 @@ impl WindowsClipboardEventBackend {
                     }
                 }
                 hwnd_holder_for_thread.store(0, Ordering::Release);
-                let _ = RemoveClipboardFormatListener(hwnd);
-                DestroyWindow(hwnd);
+                // window_guard Drop 会自动调用 RemoveClipboardFormatListener 和 DestroyWindow
+                drop(window_guard);
             }));
             if run_result.is_err() {
                 log::error!("剪贴板消息监听线程异常崩溃，自动降级为轮询后端");
