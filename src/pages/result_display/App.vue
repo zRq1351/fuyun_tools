@@ -443,9 +443,9 @@ const handleLanguageChange = async () => {
 
   try {
     if (mode.value === 'translation') {
-      await AIService.streamTranslate(originalText.value, '自动识别', targetLanguage.value)
+      await AIService.streamTranslate(originalText.value, '自动识别', targetLanguage.value, null, null, currentWindowLabel.value)
     } else {
-      await AIService.streamExplain(originalText.value, explanationLanguage.value)
+      await AIService.streamExplain(originalText.value, explanationLanguage.value, null, null, currentWindowLabel.value)
     }
   } catch (error) {
     isWaitingResult.value = false

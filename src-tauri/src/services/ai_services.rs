@@ -202,6 +202,8 @@ pub struct StreamTranslateRequest {
     pub scene_hint: Option<String>,
     #[serde(default)]
     pub op_id: Option<u64>,
+    #[serde(default)]
+    pub window_label: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -213,6 +215,8 @@ pub struct StreamExplainRequest {
     pub scene_hint: Option<String>,
     #[serde(default)]
     pub op_id: Option<u64>,
+    #[serde(default)]
+    pub window_label: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -224,6 +228,8 @@ pub struct StreamCustomPromptRequest {
     pub scene_hint: Option<String>,
     #[serde(default)]
     pub op_id: Option<u64>,
+    #[serde(default)]
+    pub window_label: Option<String>,
 }
 
 struct StreamExecutionRequest {
@@ -232,6 +238,7 @@ struct StreamExecutionRequest {
     target_language: String,
     scene_hint: Option<String>,
     op_id: Option<u64>,
+    window_label: Option<String>,
 }
 
 async fn execute_stream_request(
@@ -276,6 +283,7 @@ async fn execute_stream_request(
         text.clone(),
         request.target_language.clone(),
         app.clone(),
+        request.window_label.clone(),
     )
     .await
     .map_err(|e| AppError::new(ErrorCode::SystemError, e))?;
@@ -481,6 +489,7 @@ pub async fn stream_translate_text(
             target_language: request.target_language,
             scene_hint: request.scene_hint,
             op_id: request.op_id,
+            window_label: request.window_label,
         },
         app,
         state.inner().clone(),
@@ -503,6 +512,7 @@ pub async fn stream_explain_text(
             target_language: request.target_language,
             scene_hint: request.scene_hint,
             op_id: request.op_id,
+            window_label: request.window_label,
         },
         app,
         state.inner().clone(),
@@ -522,9 +532,10 @@ pub async fn stream_custom_prompt_text(
         StreamExecutionRequest {
             text: request.text,
             source_language: None,
-            target_language: "中文".to_string(), // 或者由前端传过来，目前简化处理
+            target_language: "中文".to_string(),
             scene_hint: request.scene_hint,
             op_id: request.op_id,
+            window_label: request.window_label,
         },
         app,
         state.inner().clone(),

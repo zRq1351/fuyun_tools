@@ -6,18 +6,20 @@ const buildSelectAndFillRequest = (itemId, opId) => ({
 });
 const buildSelectAndFillImageByIdRequest = (itemId, opId) => ({itemId, opId});
 
-const buildStreamTranslateRequest = (text, sourceLanguage, targetLanguage, opId, sceneHint) => ({
+const buildStreamTranslateRequest = (text, sourceLanguage, targetLanguage, opId, sceneHint, windowLabel) => ({
     text,
     sourceLanguage,
     targetLanguage,
     opId,
-    sceneHint
+    sceneHint,
+    windowLabel: windowLabel || null
 });
-const buildStreamExplainRequest = (text, targetLanguage, opId, sceneHint) => ({
+const buildStreamExplainRequest = (text, targetLanguage, opId, sceneHint, windowLabel) => ({
     text,
     targetLanguage,
     opId,
-    sceneHint
+    sceneHint,
+    windowLabel: windowLabel || null
 });
 
 /**
@@ -495,9 +497,9 @@ export const AIService = {
      * @param {string} targetLanguage
      * @returns {Promise<void>}
      */
-    streamTranslate: (text, sourceLanguage, targetLanguage, opId, sceneHint) =>
+    streamTranslate: (text, sourceLanguage, targetLanguage, opId, sceneHint, windowLabel) =>
         invoke(IPC_COMMANDS.STREAM_TRANSLATE_TEXT, {
-            request: buildStreamTranslateRequest(text, sourceLanguage, targetLanguage, opId, sceneHint)
+            request: buildStreamTranslateRequest(text, sourceLanguage, targetLanguage, opId, sceneHint, windowLabel)
         }),
 
     /**
@@ -506,9 +508,9 @@ export const AIService = {
      * @param {string} targetLanguage
      * @returns {Promise<void>}
      */
-    streamExplain: (text, targetLanguage, opId, sceneHint) =>
+    streamExplain: (text, targetLanguage, opId, sceneHint, windowLabel) =>
         invoke(IPC_COMMANDS.STREAM_EXPLAIN_TEXT, {
-            request: buildStreamExplainRequest(text, targetLanguage, opId, sceneHint)
+            request: buildStreamExplainRequest(text, targetLanguage, opId, sceneHint, windowLabel)
         }),
 
     /**

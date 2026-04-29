@@ -1072,8 +1072,36 @@ pub async fn show_result_window(
     original: String,
     target_language: String,
     app: AppHandle,
+    existing_window_label: Option<String>,
 ) -> Result<String, String> {
     remember_external_foreground_window(&app);
+
+    // 如果提供了现有窗口标签，尝试复用该窗口
+    if let Some(ref label) = existing_window_label {
+        if let Some(window) = app.get_webview_window(label) {
+            // 窗口存在，发送清理事件让它重新加载内容
+            let _ = window.emit(
+                "result-clean",
+                serde_json::json!({
+                    "type": window_type.clone(),
+                    "opId": Option::<u64>::None,
+                    "windowLabel": label.clone()
+                }),
+            );
+            // 更新初始数据
+            let payload = serde_json::json!({
+                "type": window_type.clone(),
+                "original": original.clone(),
+                "content": content.clone(),
+                "targetLanguage": target_language.clone()
+            });
+            let script = format!("window.__INITIAL_DATA__ = {}; window.dispatchEvent(new CustomEvent('init-data', {{ detail: window.__INITIAL_DATA__ }}));", payload);
+            let _ = window.eval(&script);
+            let _ = show_overlay_window(&app, label, &window, true);
+            return Ok(label.clone());
+        }
+    }
+
     // 使用时间戳生成唯一窗口标签，确保每次都创建新窗口
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
