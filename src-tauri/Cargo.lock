@@ -2034,7 +2034,7 @@ dependencies = [
 
 [[package]]
 name = "fuyun_tools"
-version = "0.6.78"
+version = "0.6.79"
 dependencies = [
  "ab_glyph",
  "async-openai",
