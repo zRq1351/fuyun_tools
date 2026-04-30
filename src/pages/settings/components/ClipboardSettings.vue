@@ -167,7 +167,7 @@
 
 <script setup>
 import {computed, onMounted, onUnmounted, ref} from 'vue'
-import {Edit, FolderOpened, Picture, VideoPause, RefreshLeft} from '@element-plus/icons-vue'
+import {Edit, FolderOpened, Picture, RefreshLeft, VideoPause} from '@element-plus/icons-vue'
 import {open} from '@tauri-apps/plugin-dialog'
 import {listen} from '@tauri-apps/api/event'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
@@ -246,36 +246,43 @@ const scheduleResetImportProgress = () => {
 const clearTextHistory = async (mode) => {
   try {
     if (mode === 'all') {
-      await ElMessageBox.confirm('将清除全部文字历史记录，且不可恢复，是否继续？', '警告', {
-        type: 'warning',
-        confirmButtonText: '继续清除',
-        cancelButtonText: '取消'
-      })
+      const msgBox = ElMessageBox.confirm(
+          '将清除全部文字历史记录，且不可恢复，是否继续？',
+          '警告',
+          {
+            type: 'warning',
+            confirmButtonText: '继续清除',
+            cancelButtonText: '取消'
+          }
+      )
+      await msgBox
     }
     const removed = await ClipboardService.clearHistory(mode)
     ElMessage.success(`已清理 ${removed} 条文字记录`)
   } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error(`清理失败: ${error}`)
-    }
+    if (error === 'cancel' || error?.action === 'cancel') return
+    ElMessage.error(`清理失败: ${String(error)}`)
   }
 }
 
 const clearImageHistory = async (mode) => {
   try {
     if (mode === 'all') {
-      await ElMessageBox.confirm('将清除全部图片历史记录，且不可恢复，是否继续？', '警告', {
-        type: 'warning',
-        confirmButtonText: '继续清除',
-        cancelButtonText: '取消'
-      })
+      await ElMessageBox.confirm(
+          '将清除全部图片历史记录，且不可恢复，是否继续？',
+          '警告',
+          {
+            type: 'warning',
+            confirmButtonText: '继续清除',
+            cancelButtonText: '取消'
+          }
+      )
     }
     const removed = await ImageClipboardService.clearHistory(mode)
     ElMessage.success(`已清理 ${removed} 条图片记录`)
   } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error(`清理失败: ${error}`)
-    }
+    if (error === 'cancel' || error?.action === 'cancel') return
+    ElMessage.error(`清理失败: ${String(error)}`)
   }
 }
 

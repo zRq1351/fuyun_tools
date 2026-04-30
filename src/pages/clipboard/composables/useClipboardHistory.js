@@ -284,9 +284,8 @@ export function useClipboardHistory() {
                     ...existing,
                     id: item.id,
                     content: item.content,
-                    
                     position: item.position ?? existing.position ?? 0,
-                    snippet: item.snippet ?? existing.snippet ?? '',
+                    snippet: keyword ? (item.snippet ?? existing.snippet ?? '') : '',
                     pinned: item.pinned ?? existing.pinned ?? false,
                     category: item.category || existing.category || '未分类'
                 })
@@ -298,7 +297,10 @@ export function useClipboardHistory() {
             const rest = []
             for (const entry of pagedHistory.value) {
                 if (!incomingIds.has(entry.id)) {
-                    rest.push(entry)
+                    rest.push({
+                        ...entry,
+                        snippet: keyword ? entry.snippet : ''
+                    })
                 }
             }
             

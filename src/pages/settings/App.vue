@@ -979,6 +979,23 @@ body {
   transition: background-color 0.3s, color 0.3s;
 }
 
+.el-overlay {
+  position: fixed !important;
+  z-index: 10000 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.el-overlay.is-message-box {
+  z-index: 10000 !important;
+}
+
+.el-message-box__wrapper {
+  position: relative !important;
+  margin: 0 !important;
+}
+
 .settings-container {
   box-sizing: border-box;
   height: 100vh;
