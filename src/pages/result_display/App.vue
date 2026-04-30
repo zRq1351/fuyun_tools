@@ -121,13 +121,13 @@
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {marked} from 'marked'
-import {listen} from '@tauri-apps/api/event'
 import {getCurrentWindow} from '@tauri-apps/api/window'
 import {ElMessage} from 'element-plus'
 import {CloseBold, CopyDocument, DocumentCopy, FullScreen, Hide, Minus, View} from '@element-plus/icons-vue'
 import {AIService, ClipboardService} from '@/services/ipc.js'
 import {handleAppError} from '@/utils/errorHandler.js'
 import {useTheme} from '../../composables/useTheme'
+import {useEventListeners} from '../../composables/useEventListeners'
 
 const mode = ref('translation')
 const originalText = ref('')
@@ -145,11 +145,9 @@ const isWaitingResult = ref(false)
 const loadingStartedAt = ref(0)
 const isWindowMaximized = ref(false)
 const currentWindowLabel = ref('')
-let unlistenResultClean = null
-let unlistenResultUpdate = null
 let initDataHandler = null
-let unlistenWindowResize = null
 const currentWindow = getCurrentWindow()
+const {listenEvent} = useEventListeners()
 
 const syncWindowMaximized = async () => {
   try {
@@ -297,7 +295,7 @@ const resultHtml = computed(() => resultHtmlRaw.value)
 
 onMounted(async () => {
   await syncWindowMaximized()
-  unlistenWindowResize = await currentWindow.onResized(async () => {
+  const unlistenResize = await currentWindow.onResized(async () => {
     await syncWindowMaximized()
   })
 
@@ -335,7 +333,7 @@ onMounted(async () => {
   window.addEventListener('init-data', initDataHandler)
 
   try {
-    unlistenResultClean = await listen('result-clean', (event) => {
+    await listenEvent('result-clean', (event) => {
       const data = event.payload
       // 验证窗口标签，只处理当前窗口的事件
       if (data && data.windowLabel && data.windowLabel !== currentWindowLabel.value) return
@@ -346,7 +344,7 @@ onMounted(async () => {
       loadingStartedAt.value = Date.now()
     })
 
-    unlistenResultUpdate = await listen('result-update', (event) => {
+    await listenEvent('result-update', (event) => {
       const data = event.payload
       // 验证窗口标签，只处理当前窗口的事件
       if (data && data.windowLabel && data.windowLabel !== currentWindowLabel.value) return
@@ -372,21 +370,12 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  if (unlistenWindowResize) {
-    unlistenWindowResize()
-    unlistenWindowResize = null
+  if (unlistenResize) {
+    unlistenResize()
   }
   if (initDataHandler) {
     window.removeEventListener('init-data', initDataHandler)
     initDataHandler = null
-  }
-  if (unlistenResultClean) {
-    unlistenResultClean()
-    unlistenResultClean = null
-  }
-  if (unlistenResultUpdate) {
-    unlistenResultUpdate()
-    unlistenResultUpdate = null
   }
 })
 

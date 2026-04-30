@@ -178,18 +178,9 @@ pub async fn open_image_preview_window_by_id(
     app: AppHandle,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    run_blocking("打开图片预览", move || {
         execute_open_image_preview_window_by_id(request.item_id, state_arc, app)
-            .map_err(to_frontend_error_string)
-    })
-        .await
-        .map_err(|e| {
-            frontend_error(
-                ErrorCode::SystemError,
-                "打开图片预览任务执行失败",
-                e.to_string(),
-            )
-        })?
+    }).await
 }
 
 pub(crate) fn is_screenshot_feature_enabled(state: &Arc<Mutex<SharedAppState>>) -> bool {
@@ -308,12 +299,104 @@ pub(crate) fn get_image_clipboard_manager_arc(
     state_guard.image_clipboard_manager.clone()
 }
 
+trait CategoryOps: Clone + Send + 'static {
+    fn set_category_async(&self, item_id: String, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send;
+    fn remove_category_async(&self, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send;
+    fn add_category_async(&self, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send;
+}
+
+impl CategoryOps for ClipboardManager {
+    fn set_category_async(&self, item_id: String, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send {
+        ClipboardManager::set_category_async(self, item_id, category)
+    }
+    fn remove_category_async(&self, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send {
+        ClipboardManager::remove_category_async(self, category)
+    }
+    fn add_category_async(&self, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send {
+        ClipboardManager::add_category_async(self, category)
+    }
+}
+
+impl CategoryOps for ImageClipboardManager {
+    fn set_category_async(&self, item_id: String, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send {
+        ImageClipboardManager::set_category_async(self, item_id, category)
+    }
+    fn remove_category_async(&self, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send {
+        ImageClipboardManager::remove_category_async(self, category)
+    }
+    fn add_category_async(&self, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send {
+        ImageClipboardManager::add_category_async(self, category)
+    }
+}
+
+async fn category_set<M: CategoryOps>(
+    manager_arc: Arc<Mutex<M>>,
+    item_id: String,
+    category: String,
+    label: &str,
+) -> Result<(), String> {
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager.set_category_async(item_id, category).await.map_err(|e| {
+        to_frontend_error_string(
+            AppError::new(ErrorCode::ClipboardError, format!("设置{}分类失败", label)).with_details(e),
+        )
+    })
+}
+
+async fn category_remove<M: CategoryOps>(
+    manager_arc: Arc<Mutex<M>>,
+    category: String,
+    label: &str,
+) -> Result<(), String> {
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager.remove_category_async(category).await.map_err(|e| {
+        to_frontend_error_string(
+            AppError::new(ErrorCode::ClipboardError, format!("删除{}分类失败", label)).with_details(e),
+        )
+    })
+}
+
+async fn category_add<M: CategoryOps>(
+    manager_arc: Arc<Mutex<M>>,
+    category: String,
+    label: &str,
+) -> Result<(), String> {
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager.add_category_async(category).await.map_err(|e| {
+        to_frontend_error_string(
+            AppError::new(ErrorCode::ClipboardError, format!("新增{}分类失败", label)).with_details(e),
+        )
+    })
+}
+
 pub(crate) fn frontend_error(
     code: ErrorCode,
     message: impl Into<String>,
     details: impl Into<String>,
 ) -> String {
     to_frontend_error_string(AppError::new(code, message).with_details(details.into()))
+}
+
+/// 通用的 spawn_blocking 包装器，统一错误映射
+pub(crate) async fn run_blocking<T, F>(label: &str, task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> AppResult<T> + Send + 'static,
+{
+    match tauri::async_runtime::spawn_blocking(task).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(app_err)) => Err(to_frontend_error_string(app_err)),
+        Err(join_err) => Err(frontend_error(ErrorCode::SystemError, format!("{}任务执行失败", label), join_err.to_string())),
+    }
 }
 
 pub(crate) fn with_updating_clipboard<T, F>(
@@ -923,19 +1006,7 @@ pub async fn set_item_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let manager_arc = get_clipboard_manager_arc(state.inner());
-    let manager = {
-        let guard = lock_arc_mutex(&manager_arc);
-        guard.clone()
-    };
-    manager
-        .set_category_async(item_id, category)
-        .await
-        .map_err(|e| {
-            to_frontend_error_string(
-                AppError::new(ErrorCode::ClipboardError, "设置文本分类失败").with_details(e),
-            )
-        })
+    category_set(get_clipboard_manager_arc(state.inner()), item_id, category, "文本").await
 }
 
 #[tauri::command]
@@ -943,16 +1014,7 @@ pub async fn remove_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let manager_arc = get_clipboard_manager_arc(state.inner());
-    let manager = {
-        let guard = lock_arc_mutex(&manager_arc);
-        guard.clone()
-    };
-    manager.remove_category_async(category).await.map_err(|e| {
-        to_frontend_error_string(
-            AppError::new(ErrorCode::ClipboardError, "删除文本分类失败").with_details(e),
-        )
-    })
+    category_remove(get_clipboard_manager_arc(state.inner()), category, "文本").await
 }
 
 #[tauri::command]
@@ -960,16 +1022,7 @@ pub async fn add_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let manager_arc = get_clipboard_manager_arc(state.inner());
-    let manager = {
-        let guard = lock_arc_mutex(&manager_arc);
-        guard.clone()
-    };
-    manager.add_category_async(category).await.map_err(|e| {
-        to_frontend_error_string(
-            AppError::new(ErrorCode::ClipboardError, "新增文本分类失败").with_details(e),
-        )
-    })
+    category_add(get_clipboard_manager_arc(state.inner()), category, "文本").await
 }
 
 #[tauri::command]
@@ -1012,18 +1065,9 @@ pub async fn warmup_image_clipboard_item_by_id(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    run_blocking("预热图片", move || {
         execute_warmup_image_clipboard_item_by_id(request.item_id, state_arc)
-            .map_err(to_frontend_error_string)
-    })
-        .await
-        .map_err(|e| {
-            frontend_error(
-                ErrorCode::SystemError,
-                "预热图片任务执行失败",
-                e.to_string(),
-            )
-        })?
+    }).await
 }
 
 /// 优化方案 5：批量预热多个图片到内存缓存，用于滚动时提前加载
@@ -1065,19 +1109,7 @@ pub async fn set_image_item_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let manager_arc = get_image_clipboard_manager_arc(state.inner());
-    let manager = {
-        let guard = lock_arc_mutex(&manager_arc);
-        guard.clone()
-    };
-    manager
-        .set_category_async(item_id, category)
-        .await
-        .map_err(|e| {
-            to_frontend_error_string(
-                AppError::new(ErrorCode::ClipboardError, "设置图片分类失败").with_details(e),
-            )
-        })
+    category_set(get_image_clipboard_manager_arc(state.inner()), item_id, category, "图片").await
 }
 
 #[tauri::command]
@@ -1085,16 +1117,7 @@ pub async fn remove_image_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let manager_arc = get_image_clipboard_manager_arc(state.inner());
-    let manager = {
-        let guard = lock_arc_mutex(&manager_arc);
-        guard.clone()
-    };
-    manager.remove_category_async(category).await.map_err(|e| {
-        to_frontend_error_string(
-            AppError::new(ErrorCode::ClipboardError, "删除图片分类失败").with_details(e),
-        )
-    })
+    category_remove(get_image_clipboard_manager_arc(state.inner()), category, "图片").await
 }
 
 #[tauri::command]
@@ -1222,18 +1245,9 @@ pub async fn promote_image_clipboard_item_by_id(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    run_blocking("置顶图片", move || {
         execute_promote_image_clipboard_item_by_id(request.item_id, state_arc)
-            .map_err(to_frontend_error_string)
-    })
-        .await
-        .map_err(|e| {
-            frontend_error(
-                ErrorCode::SystemError,
-                "置顶图片任务执行失败",
-                e.to_string(),
-            )
-        })?
+    }).await
 }
 
 #[tauri::command]
@@ -1493,16 +1507,7 @@ pub async fn add_image_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    let manager_arc = get_image_clipboard_manager_arc(state.inner());
-    let manager = {
-        let guard = lock_arc_mutex(&manager_arc);
-        guard.clone()
-    };
-    manager.add_category_async(category).await.map_err(|e| {
-        to_frontend_error_string(
-            AppError::new(ErrorCode::ClipboardError, "新增图片分类失败").with_details(e),
-        )
-    })
+    category_add(get_image_clipboard_manager_arc(state.inner()), category, "图片").await
 }
 
 #[tauri::command]
@@ -1560,17 +1565,9 @@ pub async fn select_and_fill(
     app: AppHandle,
 ) -> Result<String, String> {
     let state_arc = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        execute_select_and_fill_text(request, state_arc, app).map_err(to_frontend_error_string)
-    })
-        .await
-        .map_err(|e| {
-            frontend_error(
-                ErrorCode::SystemError,
-                "文本回填任务执行失败",
-                e.to_string(),
-            )
-        })?
+    run_blocking("文本回填", move || {
+        execute_select_and_fill_text(request, state_arc, app)
+    }).await
 }
 
 #[tauri::command]
@@ -1580,17 +1577,9 @@ pub async fn remove_clipboard_item(
     app: AppHandle,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        execute_remove_clipboard_item(item_id, state_arc, app).map_err(to_frontend_error_string)
-    })
-        .await
-        .map_err(|e| {
-            frontend_error(
-                ErrorCode::SystemError,
-                "删除文本历史任务执行失败",
-                e.to_string(),
-            )
-        })?
+    run_blocking("删除文本历史", move || {
+        execute_remove_clipboard_item(item_id, state_arc, app)
+    }).await
 }
 
 #[tauri::command]
@@ -1600,18 +1589,9 @@ pub async fn remove_image_clipboard_item_by_id(
     app: AppHandle,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    run_blocking("删除图片历史", move || {
         execute_remove_image_clipboard_item_by_id(item_id, state_arc, app)
-            .map_err(to_frontend_error_string)
-    })
-        .await
-        .map_err(|e| {
-            frontend_error(
-                ErrorCode::SystemError,
-                "删除图片历史任务执行失败",
-                e.to_string(),
-            )
-        })?
+    }).await
 }
 
 #[tauri::command]
@@ -1621,18 +1601,9 @@ pub async fn select_and_fill_image_by_id(
     app: AppHandle,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    run_blocking("图片回填", move || {
         execute_select_and_fill_image_by_id(request, state_arc, app)
-            .map_err(to_frontend_error_string)
-    })
-        .await
-        .map_err(|e| {
-            frontend_error(
-                ErrorCode::SystemError,
-                "图片回填任务执行失败",
-                e.to_string(),
-            )
-        })?
+    }).await
 }
 
 #[tauri::command]

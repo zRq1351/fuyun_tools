@@ -107,7 +107,7 @@ import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ArrowLeftBold, ArrowRightBold, Check} from '@element-plus/icons-vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {listen} from '@tauri-apps/api/event'
-import {convertFileSrc} from '@tauri-apps/api/core'
+import {buildFileUrlFromPath} from '../../utils/fileUrl'
 import {open as openDialog} from '@tauri-apps/plugin-dialog'
 import {ImageCategoryService, ImageClipboardService, WindowService} from '../../services/ipc'
 import ClipboardToolbar from '../clipboard/components/ClipboardToolbar.vue'
@@ -653,15 +653,6 @@ const cyclePageSize = async () => {
   localStorage.setItem('image_history_page_size', String(next))
   clearPrefetchedPage()
   await syncHistory()
-}
-
-const buildFileUrlFromPath = (imagePath) => {
-  if (!imagePath) return ''
-  try {
-    return convertFileSrc(imagePath)
-  } catch (_) {
-    return ''
-  }
 }
 
 const enforcePreviewCacheSize = () => {
@@ -1992,7 +1983,6 @@ watch([searchKeyword, categoryFilter], () => {
 </script>
 
 <style>
-@import "../shared/windowBase.css";
 @import "../shared/contextMenu.css";
 </style>
 

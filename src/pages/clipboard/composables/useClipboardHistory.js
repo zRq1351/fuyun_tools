@@ -1,5 +1,6 @@
 import {computed, ref, shallowRef} from 'vue'
 import {CategoryService, ClipboardService} from '../../../services/ipc'
+import {useCategorySearchIndex} from '../../shared/useCategorySearchIndex'
 
 export function useClipboardHistory() {
     const pagedHistory = shallowRef([])
@@ -15,103 +16,22 @@ export function useClipboardHistory() {
     const sortBy = ref('pinnedFirst')
     const sortOrder = ref('asc')
 
-
-    const filterDataRevision = ref(0)
-
-    const SEARCH_CACHE_MAX_SIZE = 300
-    const categorySearchIndex = new Map()
-    const itemCategorySnapshot = new Map()
-    const keywordCategoryMatchCache = new Map()
+    const {
+        filterDataRevision,
+        categorySearchIndex,
+        itemCategorySnapshot,
+        keywordCategoryMatchCache,
+        bumpFilterDataRevision,
+        removeCategoryIndexForItem,
+        applyCategoryIndexForItem,
+        setItemCategoryLocal,
+        removeItemCategoryLocal,
+        rebuildCategorySearchIndex,
+        getKeywordCategoryMatchedIds,
+    } = useCategorySearchIndex(categoryMap)
 
     const getItemCategory = (item_id) => {
         return categoryMap.value[item_id] || '未分类'
-    }
-
-    const bumpFilterDataRevision = () => {
-        filterDataRevision.value += 1
-        
-        keywordCategoryMatchCache.clear()
-    }
-
-    
-    const removeCategoryIndexForItem = (id) => {
-        const oldCategory = itemCategorySnapshot.get(id)
-        if (!oldCategory) {
-            itemCategorySnapshot.delete(id)
-            return
-        }
-        const contentSet = categorySearchIndex.get(oldCategory)
-        if (contentSet) {
-            contentSet.delete(id)
-            if (contentSet.size === 0) {
-                categorySearchIndex.delete(oldCategory)
-            }
-        }
-        itemCategorySnapshot.delete(id)
-    }
-
-    
-    const applyCategoryIndexForItem = (id, category) => {
-        removeCategoryIndexForItem(id)
-        const normalized = String(category || '未分类')
-        itemCategorySnapshot.set(id, normalized)
-        let contentSet = categorySearchIndex.get(normalized)
-        if (!contentSet) {
-            contentSet = new Set()
-            categorySearchIndex.set(normalized, contentSet)
-        }
-        contentSet.add(id)
-    }
-
-    
-    const setItemCategoryLocal = (id, category) => {
-        if (!id) return
-        const normalized = String(category || '未分类')
-        categoryMap.value[id] = normalized
-        applyCategoryIndexForItem(id, normalized)
-        keywordCategoryMatchCache.clear()
-    }
-
-    
-    const removeItemCategoryLocal = (id) => {
-        if (!id) return
-        delete categoryMap.value[id]
-        removeCategoryIndexForItem(id)
-        keywordCategoryMatchCache.clear()
-    }
-
-    
-    const rebuildCategorySearchIndex = () => {
-        categorySearchIndex.clear()
-        itemCategorySnapshot.clear()
-        keywordCategoryMatchCache.clear()
-        const currentCategoryMap = categoryMap.value || {}
-        for (const id of Object.keys(currentCategoryMap)) {
-            applyCategoryIndexForItem(id, currentCategoryMap[id] || '未分类')
-        }
-    }
-
-
-    const getKeywordCategoryMatchedIds = (keyword) => {
-        if (!keyword) return null
-        const cacheKey = `${filterDataRevision.value}|${keyword}`
-        const cached = keywordCategoryMatchCache.get(cacheKey)
-        if (cached) {
-            return cached
-        }
-        const matchedIds = new Set()
-        for (const [category, idSet] of categorySearchIndex.entries()) {
-            if (!String(category).toLowerCase().includes(keyword)) continue
-            for (const id of idSet) {
-                matchedIds.add(id)
-            }
-        }
-        if (keywordCategoryMatchCache.size >= SEARCH_CACHE_MAX_SIZE) {
-            const firstKey = keywordCategoryMatchCache.keys().next().value
-            keywordCategoryMatchCache.delete(firstKey)
-        }
-        keywordCategoryMatchCache.set(cacheKey, matchedIds)
-        return matchedIds
     }
 
     

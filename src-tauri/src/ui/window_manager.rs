@@ -448,47 +448,52 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
     }
 }
 
-/// 隐藏剪贴板窗口
-pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
+/// 隐藏剪贴板窗口（通用实现）
+fn hide_clipboard_window_impl(
+    app_handle: AppHandle,
+    state: Arc<Mutex<AppState>>,
+    label: &str,
+    is_visible_getter: impl Fn(&AppState) -> bool,
+    set_visible: impl Fn(&mut AppState, bool),
+    set_selected_index: impl Fn(&mut AppState, usize),
+) {
     let is_visible = {
         let state_guard = lock_arc_mutex(&state);
-        state_guard.is_visible
+        is_visible_getter(&state_guard)
     };
 
     if !is_visible {
         return;
     }
 
-    if let Some(window) = app_handle.get_webview_window("clipboard") {
-        hide_overlay_window(&app_handle, "clipboard", &window);
+    if let Some(window) = app_handle.get_webview_window(label) {
+        hide_overlay_window(&app_handle, label, &window);
     }
     {
         let mut state_guard = lock_arc_mutex(&state);
-        state_guard.is_visible = false;
-        state_guard.selected_index = 0;
+        set_visible(&mut state_guard, false);
+        set_selected_index(&mut state_guard, 0);
     }
     notify_window_visibility_changed();
 }
 
+/// 隐藏剪贴板窗口
+pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
+    hide_clipboard_window_impl(
+        app_handle, state, "clipboard",
+        |s| s.is_visible,
+        |s, v| s.is_visible = v,
+        |s, v| s.selected_index = v,
+    );
+}
+
 pub fn hide_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
-    let is_visible = {
-        let state_guard = lock_arc_mutex(&state);
-        state_guard.is_image_visible
-    };
-
-    if !is_visible {
-        return;
-    }
-
-    if let Some(window) = app_handle.get_webview_window("image_clipboard") {
-        hide_overlay_window(&app_handle, "image_clipboard", &window);
-    }
-    {
-        let mut state_guard = lock_arc_mutex(&state);
-        state_guard.is_image_visible = false;
-        state_guard.image_selected_index = 0;
-    }
-    notify_window_visibility_changed();
+    hide_clipboard_window_impl(
+        app_handle, state, "image_clipboard",
+        |s| s.is_image_visible,
+        |s, v| s.is_image_visible = v,
+        |s, v| s.image_selected_index = v,
+    );
 }
 
 pub fn wait_for_window_hidden(
@@ -698,6 +703,44 @@ fn get_taskbar_safe_offset() -> i32 {
 #[cfg(not(target_os = "windows"))]
 fn get_taskbar_safe_offset() -> i32 {
     CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN
+}
+
+/// 通用的 overlay 窗口创建工厂函数
+/// 如果窗口已存在则返回 (existing, false)，否则创建新窗口返回 (new, true)
+pub fn ensure_overlay_window(
+    app: &AppHandle,
+    label: &str,
+    html_file: &str,
+    title: &str,
+    inner_size: Option<(f64, f64)>,
+) -> Result<(tauri::WebviewWindow, bool), String> {
+    if let Some(existing) = app.get_webview_window(label) {
+        return Ok((existing, false));
+    }
+    let mut builder = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App(html_file.into()),
+    )
+    .title(title)
+    .visible(false)
+    .resizable(false)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true);
+
+    if let Some((w, h)) = inner_size {
+        builder = builder.inner_size(w, h);
+    }
+
+    let window = builder
+        .build()
+        .map_err(|e| format!("创建{}窗口失败: {}", title, e))?;
+
+    bind_overlay_window_events(&window, app.clone(), label);
+    Ok((window, true))
 }
 
 /// 打开划词工具栏

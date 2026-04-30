@@ -1,12 +1,9 @@
 use crate::core::app_state::AppState;
-use crate::services::clipboard_wakeup::subscribe_clipboard_wake_events;
-use crate::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Sender};
+use crate::services::clipboard_poller::ClipboardPoller;
+use crate::sync::{lock_arc_mutex, Mutex};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::thread;
-use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 fn read_clipboard_text(app_handle: &AppHandle) -> Option<String> {
@@ -25,100 +22,48 @@ fn read_clipboard_text(app_handle: &AppHandle) -> Option<String> {
     }
 }
 
-fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
-    state.lock().unwrap_or_else(|never| match never {})
-}
-
-fn clipboard_listener_stop_tx() -> &'static std::sync::Mutex<Option<Sender<()>>> {
-    static STOP_TX: OnceLock<std::sync::Mutex<Option<Sender<()>>>> = OnceLock::new();
-    STOP_TX.get_or_init(|| std::sync::Mutex::new(None))
-}
-
 static CLIPBOARD_LISTENER_RUNNING: AtomicBool = AtomicBool::new(false);
+static CLIPBOARD_STOP_TX: OnceLock<std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>> =
+    OnceLock::new();
+
+static POLLER: ClipboardPoller = ClipboardPoller::new(&CLIPBOARD_LISTENER_RUNNING, &CLIPBOARD_STOP_TX);
 
 /// 启动剪贴板监听器
 pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
-    if CLIPBOARD_LISTENER_RUNNING
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return;
-    }
-    let (stop_tx, stop_rx) = mpsc::channel::<()>();
-    if let Ok(mut guard) = clipboard_listener_stop_tx().lock() {
-        *guard = Some(stop_tx);
-    }
-    thread::spawn(move || {
-        let mut last_content = String::new();
-        let wake_rx = subscribe_clipboard_wake_events();
-        let mut missed_event = false;
+    let state_for_event = state.clone();
+    let app_for_event = app_handle.clone();
 
-        loop {
-            if stop_rx.try_recv().is_ok() {
-                break;
-            }
-            let timeout_ms = if missed_event { 50 } else { 250 };
-            let has_event = match wake_rx.recv_timeout(Duration::from_millis(timeout_ms)) {
-                Ok(_) => true,
-                Err(mpsc::RecvTimeoutError::Timeout) => false,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            };
-
-            if has_event {
-                missed_event = true;
-            }
-
-            let (is_updating, is_processing_selection) = {
-                let state_guard = lock_state(&state);
-                if !state_guard.settings.text_clipboard_enabled {
-                    last_content.clear();
-                    missed_event = false;
-                    continue;
-                }
-                (
-                    state_guard.is_updating_clipboard,
-                    state_guard.is_processing_selection,
-                )
-            };
-
-            // 如果正在更新剪贴板，跳过
-            if is_updating {
-                continue;
-            }
-
-            // 如果正在处理划词，但检测到用户手动 Ctrl+C，允许处理这次变化
-            let allow_during_selection = is_processing_selection 
-                && crate::features::text_selection::should_allow_clipboard_listener();
-
-            if is_processing_selection && !allow_during_selection {
-                continue;
-            }
-
-            missed_event = false;
-
-            let current_content = read_clipboard_text(&app_handle);
-
-            if let Some(current_content) = current_content {
-                if !current_content.is_empty() && current_content != last_content {
-                    add_to_clipboard_history(&app_handle, current_content.clone(), state.clone());
-                    last_content = current_content;
-                    log::info!("检测到剪贴板内容变化，已添加到历史记录");
+    POLLER.start(
+        move || {
+            // on_event: 检测到剪贴板唤醒事件时处理
+            let current_content = read_clipboard_text(&app_for_event);
+            if let Some(content) = current_content {
+                if !content.is_empty() {
+                    add_to_clipboard_history(&app_for_event, content, state_for_event.clone());
                 }
             }
-        }
-        CLIPBOARD_LISTENER_RUNNING.store(false, Ordering::SeqCst);
-        if let Ok(mut guard) = clipboard_listener_stop_tx().lock() {
-            *guard = None;
-        }
-    });
+        },
+        move || {
+            // on_poll: 每次轮询检查是否应该处理
+            let state_guard = lock_arc_mutex(&state);
+            if !state_guard.settings.text_clipboard_enabled {
+                return false;
+            }
+            if state_guard.is_updating_clipboard {
+                return false;
+            }
+            let is_processing_selection = state_guard.is_processing_selection;
+            if is_processing_selection {
+                let allow = crate::features::text_selection::should_allow_clipboard_listener();
+                return allow;
+            }
+            true
+        },
+    );
 }
 
 pub fn stop_clipboard_listener() {
-    if let Ok(mut guard) = clipboard_listener_stop_tx().lock() {
-        if let Some(tx) = guard.take() {
-            let _ = tx.send(());
-        }
-    }
+    POLLER.stop();
 }
 
 pub fn set_clipboard_listener_enabled(
@@ -144,7 +89,7 @@ pub fn add_to_clipboard_history(
     }
 
     let (should_skip, allow_during_selection) = {
-        let state_guard = lock_state(&state);
+        let state_guard = lock_arc_mutex(&state);
         let is_processing = state_guard.is_processing_selection;
         let allow = is_processing 
             && crate::features::text_selection::should_allow_clipboard_listener();
@@ -164,7 +109,7 @@ pub fn add_to_clipboard_history(
     }
 
     let (manager_arc, should_emit) = {
-        let state_guard = lock_state(&state);
+        let state_guard = lock_arc_mutex(&state);
         (
             state_guard.clipboard_manager.clone(),
             state_guard.is_visible,

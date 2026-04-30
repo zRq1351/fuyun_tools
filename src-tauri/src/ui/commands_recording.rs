@@ -8,7 +8,7 @@ use crate::features::recording::types::{
     RecordingSessionInfo, RecordingStopResult, SessionRequest, StartRecordingRequest,
 };
 use crate::sync::Mutex;
-use crate::ui::window_manager::{bind_overlay_window_events, show_overlay_window_by_label};
+use crate::ui::window_manager::show_overlay_window_by_label;
 use crate::utils::utils_helpers::load_settings;
 use futures_util::StreamExt;
 use serde::Deserialize;
@@ -20,7 +20,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_positioner::WindowExt;
 
 async fn run_blocking_command<T, F>(task: F) -> Result<T, String>
@@ -357,36 +357,18 @@ fn move_window_top_center(window: &tauri::WebviewWindow, target_logical_width: O
 fn ensure_recording_toolbar_window(
     app: &AppHandle,
 ) -> Result<(tauri::WebviewWindow, bool), String> {
-    let label = "recording_toolbar";
-    if let Some(existing) = app.get_webview_window(label) {
-        return Ok((existing, false));
+    let (window, is_new) = crate::ui::window_manager::ensure_overlay_window(
+        app, "recording_toolbar", "recording_toolbar.html", "", Some((530.0, 64.0)),
+    )?;
+
+    if is_new {
+        let content_protected = load_settings()
+            .map(|settings| settings.recording_toolbar_content_protected)
+            .unwrap_or(false);
+        let _ = window.set_content_protected(content_protected);
     }
-    let window = tauri::WebviewWindowBuilder::new(
-        app,
-        label,
-        WebviewUrl::App("recording_toolbar.html".into()),
-    )
-    .title("")
-    .visible(false)
-    .resizable(false)
-    .decorations(false)
-    .shadow(false)
-    .transparent(true)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .inner_size(530.0, 64.0)
-    .build()
-    .map_err(|e| format!("创建录制工具栏窗口失败: {}", e))?;
 
-    bind_overlay_window_events(&window, app.clone(), label);
-
-    // 🔧 创建窗口时立即应用 content_protected 设置
-    let content_protected = load_settings()
-        .map(|settings| settings.recording_toolbar_content_protected)
-        .unwrap_or(false);
-    let _ = window.set_content_protected(content_protected);
-
-    Ok((window, true))
+    Ok((window, is_new))
 }
 
 #[tauri::command]

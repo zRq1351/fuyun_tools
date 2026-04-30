@@ -321,7 +321,8 @@
 
 <script setup>
 import {computed, nextTick, onMounted, onUnmounted, reactive, ref, watchPostEffect} from 'vue'
-import {convertFileSrc, invoke} from '@tauri-apps/api/core'
+import {invoke} from '@tauri-apps/api/core'
+import {buildFileUrlFromPath} from '../../utils/fileUrl'
 import {emit, listen} from '@tauri-apps/api/event'
 import {Check, Circle, Pin, Square, X} from 'lucide-vue-next'
 import {
@@ -1376,15 +1377,6 @@ function getGlobalSelectionRect() {
     y,
     width,
     height,
-  }
-}
-
-function buildFileUrlFromPath(imagePath) {
-  if (!imagePath) return ''
-  try {
-    return convertFileSrc(imagePath)
-  } catch (_) {
-    return ''
   }
 }
 

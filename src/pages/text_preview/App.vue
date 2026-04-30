@@ -43,11 +43,11 @@
 </template>
 
 <script setup>
-import {computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue'
-import { GripHorizontal } from 'lucide-vue-next'
+import {nextTick, onBeforeUnmount, onMounted, ref} from 'vue'
+import {GripHorizontal} from 'lucide-vue-next'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
-import {ImageClipboardService, ClipboardService} from '../../services/ipc'
+import {ClipboardService, ImageClipboardService} from '../../services/ipc'
 import FormattedContent from '../../components/FormattedContent.vue'
 import {ElMessage} from 'element-plus'
 
@@ -114,7 +114,7 @@ const saveEdit = async () => {
     cancelEdit()
     return
   }
-  
+
   const currentScrollTop = textareaRef.value ? textareaRef.value.scrollTop : 0
 
   try {
@@ -123,7 +123,7 @@ const saveEdit = async () => {
     } else {
       await ClipboardService.copyText(editableText.value)
     }
-    
+
     textContent.value = editableText.value
     isEditing.value = false
     ElMessage.success('保存成功')
@@ -178,7 +178,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
-@import "../shared/windowBase.css";
 
 .viewer-root {
   width: 100vw;

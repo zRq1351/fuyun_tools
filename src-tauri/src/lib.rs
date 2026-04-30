@@ -12,7 +12,7 @@ use crate::services::clipboard_manager::set_clipboard_listener_enabled;
 use crate::services::image_clipboard_manager::{
     emit_image_history_payload, set_image_clipboard_listener_enabled,
 };
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands::*;
 use crate::ui::commands_backup::*;
 use crate::ui::commands_clipboard::*;
@@ -42,10 +42,6 @@ static RECORDING_SHORTCUT_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 static RECORDING_SHORTCUT_LAST_TRIGGER_MS: AtomicU64 = AtomicU64::new(0);
 const RECORDING_SHORTCUT_MIN_INTERVAL_MS: u64 = 300;
 static BACKUP_SCHEDULER_STOP: AtomicBool = AtomicBool::new(false);
-
-fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
-    state.lock().unwrap_or_else(|never| match never {})
-}
 
 fn now_unix_ms_u64() -> u64 {
     crate::utils::utils_helpers::now_unix_ms_u64()
@@ -92,7 +88,7 @@ fn start_auto_backup_scheduler(app_handle: AppHandle, state: Arc<Mutex<AppState>
 /// 启动划词选择监听器
 pub fn start_text_selection_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     let selection_enabled = {
-        let state_guard = lock_state(&state);
+        let state_guard = lock_arc_mutex(&state);
         state_guard.settings.selection_enabled
     };
 
@@ -158,7 +154,7 @@ pub fn run() {
                 screenshot_enabled,
                 recording_enabled,
             ) = {
-                let guard = lock_state(&state_arc);
+                let guard = lock_arc_mutex(&state_arc);
                 (
                     guard.settings.hot_key.clone(),
                     guard.settings.image_hot_key.clone(),
@@ -177,7 +173,7 @@ pub fn run() {
                     hot_key.as_str(),
                     move |_app, _shortcut, event| {
                         if let ShortcutState::Pressed = event.state {
-                            let state_guard = lock_state(&state_clone);
+                            let state_guard = lock_arc_mutex(&state_clone);
                             if !state_guard.settings.text_clipboard_enabled {
                                 return;
                             }
@@ -212,7 +208,7 @@ pub fn run() {
                     image_hot_key.as_str(),
                     move |_app, _shortcut, event| {
                         if let ShortcutState::Pressed = event.state {
-                            let state_guard = lock_state(&state_clone_image);
+                            let state_guard = lock_arc_mutex(&state_clone_image);
                             if !state_guard.settings.image_clipboard_enabled {
                                 return;
                             }
@@ -246,7 +242,7 @@ pub fn run() {
                     screenshot_hot_key.as_str(),
                     move |_app, _shortcut, event| {
                         if let ShortcutState::Pressed = event.state {
-                            let state_guard = lock_state(&state_clone_screenshot);
+                            let state_guard = lock_arc_mutex(&state_clone_screenshot);
                             if !state_guard.settings.screenshot_enabled {
                                 return;
                             }
@@ -371,7 +367,7 @@ pub fn run() {
 
             #[cfg(windows)]
             if {
-                let guard = lock_state(&state_arc);
+                let guard = lock_arc_mutex(&state_arc);
                 guard.settings.selection_enabled
             } {
                 start_text_selection_listener(app_handle.clone(), state_arc.clone());

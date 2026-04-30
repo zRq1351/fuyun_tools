@@ -48,7 +48,9 @@
 <script setup>
 import {onMounted, onUnmounted, ref} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
-import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
+import {useWindowDrag} from '../../composables/useWindowDrag'
+
+const {startDrag} = useWindowDrag()
 
 const imageSrc = ref('')
 const windowLabel = ref('')
@@ -108,7 +110,6 @@ function hideContextMenu() {
   contextMenu.value.show = false
 }
 
-let lastDragStartAt = 0
 let ocrTaskId = 0
 
 function applyPinnedPayload(detail) {
@@ -148,17 +149,6 @@ async function closeWindow() {
     window.close()
   } catch (error) {
     console.error('关闭固定窗口失败:', error)
-  }
-}
-
-async function startDrag() {
-  const now = Date.now()
-  if (now - lastDragStartAt < 220) return
-  lastDragStartAt = now
-  try {
-    await getCurrentWebviewWindow().startDragging()
-  } catch (error) {
-    console.error('系统拖动固定窗口失败:', error)
   }
 }
 

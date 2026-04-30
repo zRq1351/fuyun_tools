@@ -15,16 +15,16 @@
 
 <script setup>
 import {onMounted, onUnmounted, ref} from 'vue'
-import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {useTheme} from '../../composables/useTheme'
+import {useWindowDrag} from '../../composables/useWindowDrag'
 
 const text = ref('')
 const {currentTheme} = useTheme()
+const {startDrag} = useWindowDrag()
 
 let onOcrTextData = null
 let initialPayloadTimer = null
 let initialPayloadTryCount = 0
-let lastDragStartAt = 0
 
 function applyPayload(payload) {
   const value = String(payload?.text || '').trim()
@@ -65,16 +65,6 @@ async function closeWindow() {
       window.close()
     } catch (_) {
     }
-  }
-}
-
-async function startDrag() {
-  const now = Date.now()
-  if (now - lastDragStartAt < 220) return
-  lastDragStartAt = now
-  try {
-    await getCurrentWebviewWindow().startDragging()
-  } catch (_) {
   }
 }
 

@@ -7,7 +7,10 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
         onCategoryRemoved,
         bumpFilterDataRevision,
         setIsUpdatingCategory,
-        setItemCategoryLocal
+        setItemCategoryLocal,
+        removeItemCategoryLocal: customRemoveItemCategoryLocal,
+        categoryService = CategoryService,
+        categoryInputOpenedAt = null,
     } = options
     const isAddingCategory = ref(false)
     const newCategoryName = ref('')
@@ -46,7 +49,7 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
         }
 
         try {
-            await CategoryService.setItemCategory(itemId, category)
+            await categoryService.setItemCategory(itemId, category)
         } catch (error) {
             console.error('保存分类失败:', error)
             // 回滚本地状态
@@ -85,8 +88,8 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             // 保存旧值用于回滚
             const prevCategory = categoryMap.value[itemId]
 
-            if (options.removeItemCategoryLocal) {
-                options.removeItemCategoryLocal(itemId)
+            if (customRemoveItemCategoryLocal) {
+                customRemoveItemCategoryLocal(itemId)
             } else {
                 delete categoryMap.value[itemId]
             }
@@ -96,7 +99,7 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             }
 
             try {
-                await CategoryService.setItemCategory(itemId, "")
+                await categoryService.setItemCategory(itemId, "")
             } catch (error) {
                 console.error('移除分类失败:', error)
                 // 回滚本地状态
@@ -128,7 +131,11 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
         }
         Object.keys(categoryMap.value).forEach((item) => {
             if (categoryMap.value[item] === category) {
-                delete categoryMap.value[item]
+                if (customRemoveItemCategoryLocal) {
+                    customRemoveItemCategoryLocal(item)
+                } else {
+                    delete categoryMap.value[item]
+                }
             }
         })
 
@@ -137,7 +144,7 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
         }
 
         try {
-            await CategoryService.removeCategory(category)
+            await categoryService.removeCategory(category)
         } catch (error) {
             console.error('删除分类失败:', error)
         }
@@ -150,6 +157,9 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
     const startCreateCategory = () => {
         isAddingCategory.value = true
         newCategoryName.value = ''
+        if (categoryInputOpenedAt) {
+            categoryInputOpenedAt.value = Date.now()
+        }
         nextTick(() => {
             newCategoryInputRef.value?.focus()
         })
@@ -159,6 +169,9 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
         const category = newCategoryName.value.trim()
         isAddingCategory.value = false
         newCategoryName.value = ''
+        if (categoryInputOpenedAt) {
+            categoryInputOpenedAt.value = 0
+        }
         if (category && category !== '未分类' && category !== '全部') {
             if (!categories.value.includes(category)) {
                 if (onCategoryAdded) {
@@ -167,7 +180,7 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
                     categories.value = [...categories.value, category]
                 }
                 try {
-                    await CategoryService.addCategory(category)
+                    await categoryService.addCategory(category)
                 } catch (error) {
                     console.error('添加分类失败:', error)
                 }
@@ -178,6 +191,9 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
     const cancelCreateCategory = () => {
         isAddingCategory.value = false
         newCategoryName.value = ''
+        if (categoryInputOpenedAt) {
+            categoryInputOpenedAt.value = 0
+        }
     }
 
     return {

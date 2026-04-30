@@ -1,7 +1,7 @@
 use crate::core::app_state::AppState;
 use crate::features::screenshot::capture;
-use crate::services::clipboard_wakeup::subscribe_clipboard_wake_events;
-use crate::sync::Mutex;
+use crate::services::clipboard_poller::ClipboardPoller;
+use crate::sync::{lock_arc_mutex, Mutex};
 use crate::utils::image_clipboard::ImageClipboardManager;
 use parking_lot::Mutex as ParkingMutex;
 use std::collections::{HashSet, VecDeque};
@@ -10,7 +10,7 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::OnceLock;
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
 /// 待处理图片任务
@@ -54,15 +54,9 @@ static IMAGE_QUEUE_METRICS: LazyLock<ImageQueueMetrics> = LazyLock::new(|| Image
 
 static IMAGE_WORKERS_STARTED: AtomicBool = AtomicBool::new(false);
 static IMAGE_LISTENER_RUNNING: AtomicBool = AtomicBool::new(false);
+static IMAGE_STOP_TX: OnceLock<StdMutex<Option<Sender<()>>>> = OnceLock::new();
 
-fn image_listener_stop_tx() -> &'static StdMutex<Option<Sender<()>>> {
-    static STOP_TX: OnceLock<StdMutex<Option<Sender<()>>>> = OnceLock::new();
-    STOP_TX.get_or_init(|| StdMutex::new(None))
-}
-
-fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
-    state.lock().unwrap()
-}
+static IMAGE_POLLER: ClipboardPoller = ClipboardPoller::new(&IMAGE_LISTENER_RUNNING, &IMAGE_STOP_TX);
 
 fn maybe_log_queue_metrics() {
     let enqueued = IMAGE_QUEUE_METRICS.enqueued.load(Ordering::Relaxed);
@@ -102,7 +96,7 @@ fn maybe_log_queue_metrics() {
 
 pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {
     let (manager_arc, should_emit) = {
-        let mut state_guard = lock_state(&state);
+        let mut state_guard = lock_arc_mutex(&state);
         if !state_guard.is_image_visible {
             state_guard.image_history_dirty = true;
         }
@@ -127,7 +121,7 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
     });
     let _ = app_handle.emit("image-history-payload-updated", payload);
     {
-        let mut state_guard = lock_state(&state);
+        let mut state_guard = lock_arc_mutex(&state);
         state_guard.image_history_dirty = false;
     }
 }
@@ -249,7 +243,7 @@ fn process_pending_queue(
         );
 
         let manager_arc = {
-            let state_guard = lock_state(state);
+            let state_guard = lock_arc_mutex(state);
             state_guard.image_clipboard_manager.clone()
         };
 
@@ -292,7 +286,7 @@ fn process_pending_queue(
         update_recent_samples_with_sample(width, height, sample);
 
         let is_image_visible = {
-            let state_guard = lock_state(state);
+            let state_guard = lock_arc_mutex(state);
             state_guard.is_image_visible
         };
         if is_image_visible {
@@ -303,7 +297,7 @@ fn process_pending_queue(
                 emit_image_history_payload(app_handle, state.clone());
             }
         } else {
-            let mut state_guard = lock_state(state);
+            let mut state_guard = lock_arc_mutex(state);
             state_guard.image_history_dirty = true;
         }
 
@@ -329,73 +323,27 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
         }
     }
 
-    if IMAGE_LISTENER_RUNNING
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return;
-    }
-    let (stop_tx, stop_rx) = mpsc::channel::<()>();
-    if let Ok(mut guard) = image_listener_stop_tx().lock() {
-        *guard = Some(stop_tx);
-    }
+    let app_for_event = app_handle.clone();
+    let state_for_event = state.clone();
 
-    thread::spawn(move || {
-        let wake_rx = subscribe_clipboard_wake_events();
-        let mut missed_event = false;
-
-        loop {
-            if stop_rx.try_recv().is_ok() {
-                break;
-            }
-            let timeout_ms = if missed_event { 50 } else { 250 };
-            let has_event = match wake_rx.recv_timeout(Duration::from_millis(timeout_ms)) {
-                Ok(_) => true,
-                Err(mpsc::RecvTimeoutError::Timeout) => false,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            };
-
-            if has_event {
-                missed_event = true;
-            }
-
-            let should_skip = {
-                let state_guard = lock_state(&state);
-                if !state_guard.settings.image_clipboard_enabled {
-                    missed_event = false;
-                    continue;
-                }
-                state_guard.is_updating_clipboard || state_guard.is_processing_selection
-            };
-            if should_skip {
-                continue;
-            }
-            let screenshot_in_progress = capture::is_screenshot_in_progress();
-            let allow_when_screenshot = if screenshot_in_progress {
-                capture::take_allow_image_clipboard_once()
-            } else {
-                false
-            };
-            if screenshot_in_progress && !allow_when_screenshot {
-                continue;
-            }
-
-            if !missed_event {
-                continue;
-            }
-
-            missed_event = false;
-
+    IMAGE_POLLER.start(
+        move || {
+            // on_event: 检测到剪贴板唤醒事件时处理图片
             log::info!("[监听线程] 收到剪贴板变化事件");
-
-            let image = ImageClipboardManager::read_clipboard_images_rgba(&app_handle);
+            let image = ImageClipboardManager::read_clipboard_images_rgba(&app_for_event);
             match image {
                 Ok(images) => {
                     log::info!("[监听线程] 成功读取 {} 张图片", images.len());
                     let senders = IMAGE_WORKER_SENDERS.lock().unwrap();
                     if senders.is_empty() {
-                        continue;
+                        return;
                     }
+                    let screenshot_in_progress = capture::is_screenshot_in_progress();
+                    let allow_when_screenshot = if screenshot_in_progress {
+                        capture::take_allow_image_clipboard_once()
+                    } else {
+                        false
+                    };
                     for (rgba, width, height, source_blob) in images {
                         let worker_idx =
                             NEXT_WORKER_INDEX.fetch_add(1, Ordering::Relaxed) % senders.len();
@@ -438,20 +386,26 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                     log::warn!("[监听线程] 读取剪贴板图片失败: {}", e);
                 }
             }
-        }
-        IMAGE_LISTENER_RUNNING.store(false, Ordering::SeqCst);
-        if let Ok(mut guard) = image_listener_stop_tx().lock() {
-            *guard = None;
-        }
-    });
+        },
+        move || {
+            // on_poll: 每次轮询检查是否应该处理
+            let state_guard = lock_arc_mutex(&state_for_event);
+            if !state_guard.settings.image_clipboard_enabled {
+                return false;
+            }
+            if state_guard.is_updating_clipboard || state_guard.is_processing_selection {
+                return false;
+            }
+            if capture::is_screenshot_in_progress() && !capture::take_allow_image_clipboard_once() {
+                return false;
+            }
+            true
+        },
+    );
 }
 
 pub fn stop_image_clipboard_listener() {
-    if let Ok(mut guard) = image_listener_stop_tx().lock() {
-        if let Some(tx) = guard.take() {
-            let _ = tx.send(());
-        }
-    }
+    IMAGE_POLLER.stop();
 }
 
 pub fn set_image_clipboard_listener_enabled(

@@ -1,5 +1,5 @@
+use crate::services::ocr_engine::{OcrLine, OcrParagraph, clean_ocr_text};
 use ocr_rs::{OcrEngine, OcrEngineConfig};
-use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
 /// 缓存的 OCR 引擎实例（全局单例）
@@ -53,26 +53,6 @@ fn init_ocr_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {
     Ok(engine)
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct OcrLine {
-    pub text: String,
-    pub x0: f64,
-    pub y0: f64,
-    pub x1: f64,
-    pub y1: f64,
-    pub confidence: f32,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct OcrParagraph {
-    pub text: String,
-    pub x0: f64,
-    pub y0: f64,
-    pub x1: f64,
-    pub y1: f64,
-    pub lines: Vec<OcrLine>,
-}
-
 /// 使用 ocr-rs 进行 OCR 识别（使用缓存的引擎）
 pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHandle) -> Result<Vec<OcrParagraph>, String> {
     log::info!("开始 OCR 识别（使用缓存引擎）...");
@@ -108,7 +88,7 @@ pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHan
                 y0: bbox.rect.top() as f64,
                 x1: (bbox.rect.left() + bbox.rect.width() as i32) as f64,
                 y1: (bbox.rect.top() + bbox.rect.height() as i32) as f64,
-                confidence: result.confidence,
+                confidence: Some(result.confidence),
             });
         }
         
@@ -131,53 +111,6 @@ pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHan
     log::info!("ocr-rs 识别完成，检测到 {} 个段落", result.len());
     
     Ok(result)
-}
-
-/// 清理 OCR 文本中的多余空格
-fn clean_ocr_text(text: &str) -> String {
-    if text.is_empty() {
-        return text.to_string();
-    }
-
-    // 检测是否主要为中文（中文字符占比超过50%）
-    let chinese_count = text.chars().filter(|c| {
-        let cp = *c as u32;
-        (cp >= 0x4E00 && cp <= 0x9FFF) ||  // CJK统一汉字
-        (cp >= 0x3400 && cp <= 0x4DBF) ||  // CJK扩展A
-        (cp >= 0x20000 && cp <= 0x2A6DF)   // CJK扩展B
-    }).count();
-    
-    let total_chars = text.chars().filter(|c| !c.is_whitespace()).count();
-    
-    if total_chars == 0 {
-        return text.to_string();
-    }
-
-    let chinese_ratio = chinese_count as f64 / total_chars as f64;
-
-    if chinese_ratio > 0.5 {
-        // 主要是中文：移除所有空格
-        text.chars().filter(|c| !c.is_whitespace()).collect()
-    } else {
-        // 主要是英文或其他语言：规范化空格
-        let mut result = String::with_capacity(text.len());
-        let mut prev_was_space = false;
-        
-        for c in text.chars() {
-            if c.is_whitespace() {
-                if !prev_was_space && !result.is_empty() {
-                    result.push(' ');
-                    prev_was_space = true;
-                }
-            } else {
-                result.push(c);
-                prev_was_space = false;
-            }
-        }
-        
-        // 移除首尾空格
-        result.trim().to_string()
-    }
 }
 
 /// 将行合并为段落（Y 坐标相近的行合并）

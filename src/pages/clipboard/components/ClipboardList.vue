@@ -522,8 +522,8 @@ defineExpose({
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  border: 1px solid var(--fy-border-light);
-  background: var(--fy-bg-overlay);
+  border: 1px solid var(--fy-border);
+  background: var(--fy-bg-surface);
   color: var(--fy-text-secondary);
   display: inline-flex;
   align-items: center;
@@ -531,8 +531,13 @@ defineExpose({
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.2s, border-color 0.2s, color 0.2s, background-color 0.2s;
-  z-index: 12;
+  z-index: 10;
   padding: 0;
+}
+
+.pin-btn .el-icon {
+  width: 12px;
+  height: 12px;
 }
 
 .pin-btn:hover {
@@ -555,9 +560,9 @@ defineExpose({
 
 .pin-btn.active {
   opacity: 1;
-  background: var(--fy-accent-bg-hover);
+  border-color: #f7b955;
   color: var(--fy-text-primary);
-  border: 1px solid var(--fy-accent);
+  background: rgba(247, 185, 85, 0.75);
 }
 
 .open-btn:hover {

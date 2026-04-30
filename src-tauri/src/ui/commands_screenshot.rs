@@ -758,55 +758,24 @@ fn set_screenshot_window_visibility_internal(app: &AppHandle, visible: bool) -> 
 }
 
 fn ensure_longshot_toolbar_window(app: &AppHandle) -> Result<(tauri::WebviewWindow, bool), String> {
-    let label = "longshot_toolbar";
-    if let Some(existing) = app.get_webview_window(label) {
-        return Ok((existing, false));
+    let (window, is_new) = crate::ui::window_manager::ensure_overlay_window(
+        app, "longshot_toolbar", "longshot_toolbar.html", "长截图工具栏", Some((320.0, 180.0)),
+    )?;
+    if is_new {
+        let _ = window.set_content_protected(true);
     }
-    let window = tauri::WebviewWindowBuilder::new(
-        app,
-        label,
-        tauri::WebviewUrl::App("longshot_toolbar.html".into()),
-    )
-        .title("长截图工具栏")
-        .visible(false)
-        .resizable(false)
-        .decorations(false)
-        .shadow(false)
-        .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .inner_size(320.0, 180.0)
-        .build()
-        .map_err(|e| format!("创建长截图工具栏窗口失败: {}", e))?;
-    let _ = window.set_content_protected(true);
-    bind_overlay_window_events(&window, app.clone(), label);
-    Ok((window, true))
+    Ok((window, is_new))
 }
 
 fn ensure_longshot_border_window(app: &AppHandle) -> Result<(tauri::WebviewWindow, bool), String> {
-    let label = "longshot_border";
-    if let Some(existing) = app.get_webview_window(label) {
-        return Ok((existing, false));
+    let (window, is_new) = crate::ui::window_manager::ensure_overlay_window(
+        app, "longshot_border", "longshot_border.html", "长截图边框", None,
+    )?;
+    if is_new {
+        let _ = window.set_content_protected(true);
+        let _ = window.set_ignore_cursor_events(true);
     }
-    let window = tauri::WebviewWindowBuilder::new(
-        app,
-        label,
-        tauri::WebviewUrl::App("longshot_border.html".into()),
-    )
-        .title("长截图边框")
-        .visible(false)
-        .resizable(false)
-        .decorations(false)
-        .shadow(false)
-        .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .build()
-        .map_err(|e| format!("创建长截图边框窗口失败: {}", e))?;
-    let _ = window.set_content_protected(true);
-    bind_overlay_window_events(&window, app.clone(), label);
-    let _ = window.set_ignore_cursor_events(true);
-    Ok((window, true))
+    Ok((window, is_new))
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

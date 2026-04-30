@@ -2,7 +2,7 @@ use crate::core::app_state::AppState as SharedAppState;
 use crate::core::error::{AppError, AppResult, ErrorCode};
 use crate::core::perf_metrics::record_perf_metric;
 use crate::services::ai_client::{AIClient, AIConfig};
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::window_manager::{
     hide_selection_toolbar_impl, show_result_window,
 };
@@ -19,15 +19,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 static CACHED_AI_CLIENT: LazyLock<Mutex<Option<(AIConfig, AIClient)>>> =
     LazyLock::new(|| Mutex::new(None));
 
-fn lock_state<'a>(
-    state: &'a Arc<Mutex<SharedAppState>>,
-) -> crate::sync::MutexGuard<'a, SharedAppState> {
-    state.lock().unwrap_or_else(|never| match never {})
-}
-
 fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
     let (settings_snapshot, provider_key, api_url, model_name) = {
-        let state_guard = lock_state(state);
+        let state_guard = lock_arc_mutex(state);
         let settings_snapshot = state_guard.settings.clone();
 
         if settings_snapshot.ai_provider.is_empty() {
@@ -158,7 +152,7 @@ fn fill_prompt_template(
 }
 
 fn next_ai_operation_id(state: &Arc<Mutex<SharedAppState>>) -> u64 {
-    let mut state_guard = lock_state(state);
+    let mut state_guard = lock_arc_mutex(state);
     state_guard.ai_request_seq = state_guard.ai_request_seq.wrapping_add(1);
     state_guard.ai_request_seq
 }
@@ -197,7 +191,7 @@ impl AiStreamKind {
 }
 
 fn set_active_operation(state: &Arc<Mutex<SharedAppState>>, kind: &AiStreamKind, operation_id: u64) {
-    let mut state_guard = lock_state(state);
+    let mut state_guard = lock_arc_mutex(state);
     match kind {
         AiStreamKind::Translation => state_guard.active_translation_op_id = operation_id,
         AiStreamKind::Explanation => state_guard.active_explanation_op_id = operation_id,
@@ -210,7 +204,7 @@ fn is_operation_active(
     kind: &AiStreamKind,
     operation_id: u64,
 ) -> bool {
-    let state_guard = lock_state(state);
+    let state_guard = lock_arc_mutex(state);
     match kind {
         AiStreamKind::Translation => state_guard.active_translation_op_id == operation_id,
         AiStreamKind::Explanation => state_guard.active_explanation_op_id == operation_id,
@@ -285,7 +279,7 @@ async fn execute_stream_request(
     }
 
     let configured_prompt = {
-        let state_guard = lock_state(&state_arc);
+        let state_guard = lock_arc_mutex(&state_arc);
         match &kind {
             AiStreamKind::Translation => state_guard.settings.translation_prompt_template.clone(),
             AiStreamKind::Explanation => state_guard.settings.explanation_prompt_template.clone(),

@@ -353,83 +353,12 @@ export const AISettingsService = {
         invoke(IPC_COMMANDS.INSTALL_VC_RUNTIME_AND_WAIT, {installerPath}),
 
     /**
-     * 保存应用设置
-     * @param {Object} params
-     * @param {number} params.textMaxItems
-     * @param {number} params.imageMaxItems
-     * @param {number} params.imageDiskLimitMb
-     * @param {string} params.aiProvider
-     * @param {string} params.aiApiUrl
-     * @param {string} params.aiModelName
-     * @param {string} params.aiApiKey
-     * @param {string} params.hotKey
-     * @param {string} params.imageHotKey
-     * @param {string} params.screenshotHotKey
-     * @param {boolean} params.textClipboardEnabled
-     * @param {boolean} params.imageClipboardEnabled
-     * @param {boolean} params.screenshotEnabled
-     * @param {boolean} params.selectionEnabled
-     * @param {string} params.selectionModifierKey
-     * @param {Array<{name: string, prompt: string}>} params.selectionCustomPrompts
-     * @param {boolean} params.selectionWebSearchEnabled
-     * @param {string} params.selectionWebSearchEngine
-     * @param {boolean} params.groupedItemsProtectedFromLimit
-     * @param {string} params.translationPromptTemplate
-     * @param {string} params.explanationPromptTemplate
-     * @param {string} params.imageFillVerifyMode
-     * @param {number} params.recordingWindowAudioSyncAdvanceMs
+     * 保存应用设置（传入变化的字段对象即可）
+     * @param {Object} settings - 要保存的设置字段
      * @returns {Promise<void>}
      */
-    saveSettings: ({
-                       textMaxItems,
-                       imageMaxItems,
-                       imageDiskLimitMb,
-                       aiProvider,
-                       aiApiUrl,
-                       aiModelName,
-                       aiApiKey,
-                       hotKey,
-                       imageHotKey,
-                       screenshotHotKey,
-                       textClipboardEnabled,
-                       imageClipboardEnabled,
-                       screenshotEnabled,
-                       selectionEnabled,
-                       selectionModifierKey,
-                       selectionCustomPrompts,
-                       selectionWebSearchEnabled,
-                       selectionWebSearchEngine,
-                       groupedItemsProtectedFromLimit,
-                       translationPromptTemplate,
-                       explanationPromptTemplate,
-                       imageFillVerifyMode,
-                       recordingWindowAudioSyncAdvanceMs
-                   }) =>
-        invoke(IPC_COMMANDS.SAVE_APP_SETTINGS, {
-            textMaxItems,
-            imageMaxItems,
-            imageDiskLimitMb,
-            aiProvider,
-            aiApiUrl,
-            aiModelName,
-            aiApiKey,
-            hotKey,
-            imageHotKey,
-            screenshotHotKey,
-            textClipboardEnabled,
-            imageClipboardEnabled,
-            screenshotEnabled,
-            selectionEnabled,
-            selectionModifierKey,
-            selectionCustomPrompts,
-            selectionWebSearchEnabled,
-            selectionWebSearchEngine,
-            groupedItemsProtectedFromLimit,
-            translationPromptTemplate,
-            explanationPromptTemplate,
-            imageFillVerifyMode,
-            recordingWindowAudioSyncAdvanceMs
-        }),
+    saveSettings: (settings) =>
+        invoke(IPC_COMMANDS.SAVE_APP_SETTINGS, settings),
 
     /**
      * 部分保存应用设置（只保存变化的字段）

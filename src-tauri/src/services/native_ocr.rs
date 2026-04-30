@@ -1,34 +1,7 @@
-use serde::Serialize;
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeOcrLine {
-    pub text: String,
-    pub x0: f64,
-    pub y0: f64,
-    pub x1: f64,
-    pub y1: f64,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeOcrParagraph {
-    pub text: String,
-    pub x0: f64,
-    pub y0: f64,
-    pub x1: f64,
-    pub y1: f64,
-    pub lines: Vec<NativeOcrLine>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeOcrResult {
-    pub paragraphs: Vec<NativeOcrParagraph>,
-}
+use crate::services::ocr_engine::{OcrLine, OcrParagraph, OcrResult, clean_ocr_text};
 
 #[cfg(target_os = "windows")]
-pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<NativeOcrResult, String> {
+pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<OcrResult, String> {
     use image::imageops::FilterType;
     use image::{DynamicImage, ImageFormat};
     use windows::Globalization::Language;
@@ -110,7 +83,7 @@ pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<NativeOcrResult, St
     async fn run_windows_ocr(
         png_bytes: &[u8],
         language_tag: Option<&str>,
-    ) -> Result<NativeOcrResult, String> {
+    ) -> Result<OcrResult, String> {
         let stream =
             InMemoryRandomAccessStream::new().map_err(|e| format!("OCR 创建内存流失败: {}", e))?;
         let writer = DataWriter::CreateDataWriter(&stream)
@@ -199,17 +172,18 @@ pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<NativeOcrResult, St
                 max_x = (line_text.len() as f64 * 12.0).max(12.0);
                 max_y = 22.0;
             }
-            paragraph_lines.push(NativeOcrLine {
+            paragraph_lines.push(OcrLine {
                 text: line_text,
                 x0: min_x,
                 y0: min_y,
                 x1: max_x,
                 y1: max_y,
+                confidence: None,
             });
         }
 
         if paragraph_lines.is_empty() {
-            return Ok(NativeOcrResult {
+            return Ok(OcrResult {
                 paragraphs: Vec::new(),
             });
         }
@@ -227,8 +201,8 @@ pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<NativeOcrResult, St
             max_y = max_y.max(line.y1);
         }
 
-        Ok(NativeOcrResult {
-            paragraphs: vec![NativeOcrParagraph {
+        Ok(OcrResult {
+            paragraphs: vec![OcrParagraph {
                 text: text_lines.join("\n"),
                 x0: min_x,
                 y0: min_y,
@@ -240,7 +214,7 @@ pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<NativeOcrResult, St
     }
 
     /// 增强的评分函数：考虑文本质量和长度
-    fn score(result: &NativeOcrResult) -> usize {
+    fn score(result: &OcrResult) -> usize {
         result
             .paragraphs
             .iter()
@@ -262,57 +236,7 @@ pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<NativeOcrResult, St
             .sum()
     }
 
-    /// 清理OCR文本中的多余空格
-    /// - 中文文本：移除所有空格
-    /// - 英文文本：规范化空格（多个空格合并为一个）
-    /// - 中英混合：智能处理
-    fn clean_ocr_text(text: &str) -> String {
-        if text.is_empty() {
-            return text.to_string();
-        }
-
-        // 检测是否主要为中文（中文字符占比超过50%）
-        let chinese_count = text.chars().filter(|c| {
-            let cp = *c as u32;
-            (cp >= 0x4E00 && cp <= 0x9FFF) ||  // CJK统一汉字
-            (cp >= 0x3400 && cp <= 0x4DBF) ||  // CJK扩展A
-            (cp >= 0x20000 && cp <= 0x2A6DF)   // CJK扩展B
-        }).count();
-        
-        let total_chars = text.chars().filter(|c| !c.is_whitespace()).count();
-        
-        if total_chars == 0 {
-            return text.to_string();
-        }
-
-        let chinese_ratio = chinese_count as f64 / total_chars as f64;
-
-        if chinese_ratio > 0.5 {
-            // 主要是中文：移除所有空格
-            text.chars().filter(|c| !c.is_whitespace()).collect()
-        } else {
-            // 主要是英文或其他语言：规范化空格
-            let mut result = String::with_capacity(text.len());
-            let mut prev_was_space = false;
-            
-            for c in text.chars() {
-                if c.is_whitespace() {
-                    if !prev_was_space && !result.is_empty() {
-                        result.push(' ');
-                        prev_was_space = true;
-                    }
-                } else {
-                    result.push(c);
-                    prev_was_space = false;
-                }
-            }
-            
-            // 移除首尾空格
-            result.trim().to_string()
-        }
-    }
-
-    let mut best_result = NativeOcrResult {
+    let mut best_result = OcrResult {
         paragraphs: Vec::new(),
     };
     let mut best_score = 0usize;
@@ -401,6 +325,6 @@ pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<NativeOcrResult, St
 }
 
 #[cfg(not(target_os = "windows"))]
-pub async fn recognize_png_bytes(_png_bytes: &[u8]) -> Result<NativeOcrResult, String> {
+pub async fn recognize_png_bytes(_png_bytes: &[u8]) -> Result<OcrResult, String> {
     Err("当前平台暂不支持本地原生OCR".to_string())
 }

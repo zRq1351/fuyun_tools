@@ -51,7 +51,7 @@ import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import {GripHorizontal} from 'lucide-vue-next'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
-import {convertFileSrc} from '@tauri-apps/api/core'
+import {buildFileUrlFromPath} from '../../utils/fileUrl'
 import {ImageClipboardService} from '../../services/ipc'
 
 const currentWindow = getCurrentWebviewWindow()
@@ -128,15 +128,6 @@ const startWindowDrag = () => {
       console.error('拖动预览窗口失败:', fallbackError || error)
     })
   })
-}
-
-const buildFileUrlFromPath = (imagePath) => {
-  if (!imagePath) return ''
-  try {
-    return convertFileSrc(imagePath)
-  } catch (_) {
-    return ''
-  }
 }
 
 const playOpenAnimation = () => {
@@ -325,16 +316,6 @@ onBeforeUnmount(() => {
   stopDrag()
 })
 </script>
-
-<style>
-html, body, #app {
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-}
-</style>
 
 <style scoped>
 .viewer-root {

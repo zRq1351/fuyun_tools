@@ -859,7 +859,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
-@import "../shared/windowBase.css";
 @import "../shared/contextMenu.css";
 
 .clipboard-ai-select-popper {
