@@ -1,0 +1,305 @@
+/* ============================================
+   浮云工具 - 全局主题变量定义
+   支持：暗色(dark) / 亮色(light) / 护眼(eye-care)
+
+   基于 Element Plus 官方暗黑模式实现
+   ============================================ */
+
+/* ========== 暗色主题 ========== */
+/* Element Plus 暗黑模式变量 */
+html.dark {
+    --el-bg-color: #141414;
+    --el-bg-color-overlay: #1d1e1f;
+    --el-bg-color-page: #0a0a0a;
+
+    --el-text-color-primary: #e5eaf3;
+    --el-text-color-regular: #cfd3dc;
+    --el-text-color-secondary: #a3a6ad;
+    --el-text-color-placeholder: #8d9095;
+
+    --el-border-color: #4c4d4f;
+    --el-border-color-light: #414243;
+    --el-border-color-lighter: #363637;
+    --el-border-color-extra-light: #2b2b2c;
+
+    --el-fill-color: #303030;
+    --el-fill-color-light: #262727;
+    --el-fill-color-lighter: #1d1d1d;
+    --el-fill-color-extra-light: #191919;
+
+    --el-mask-color: rgba(0, 0, 0, 0.8);
+    --el-mask-color-extra-light: rgba(0, 0, 0, 0.3);
+
+    --el-disabled-bg-color: #252525;
+    --el-disabled-text-color: #8a8a8a;
+    --el-disabled-border-color: #4c4d4f;
+}
+
+/* 浮云工具自定义变量 - 暗色 */
+html.dark,
+[data-theme="dark"] {
+    /* 背景色 */
+    --fy-bg-primary: rgba(17, 22, 32, 0.92);
+    --fy-bg-secondary: rgba(20, 24, 32, 0.72);
+    --fy-bg-surface: rgba(30, 36, 50, 0.96);
+    --fy-bg-overlay: rgba(35, 43, 60, 0.92);
+    --fy-bg-hover: rgba(28, 36, 52, 0.9);
+    --fy-bg-active: rgba(64, 158, 255, 0.15);
+    --fy-bg-input: transparent;
+    --fy-bg-card: rgba(255, 255, 255, 0.02);
+
+    /* 文字色 */
+    --fy-text-primary: #e9eefc;
+    --fy-text-secondary: #cfd5e0;
+    --fy-text-muted: #909399;
+    --fy-text-inverse: #111622;
+    --fy-text-accent: #a9d7ff;
+
+    /* 边框色 */
+    --fy-border: rgba(255, 255, 255, 0.14);
+    --fy-border-light: rgba(255, 255, 255, 0.08);
+    --fy-border-hover: rgba(127, 194, 255, 0.5);
+    --fy-border-active: rgba(64, 158, 255, 0.6);
+
+    /* 强调色 */
+    --fy-accent: #409eff;
+    --fy-accent-hover: #66b1ff;
+    --fy-accent-light: #a0cfff;
+    --fy-accent-bg: rgba(64, 158, 255, 0.18);
+    --fy-accent-bg-hover: rgba(64, 158, 255, 0.26);
+
+    /* 状态色 */
+    --fy-success: #67c23a;
+    --fy-success-bg: rgba(103, 194, 58, 0.15);
+    --fy-warning: #e6a23c;
+    --fy-danger: #f56c6c;
+    --fy-danger-bg: rgba(245, 108, 108, 0.15);
+    --fy-info: #909399;
+
+    /* 毛玻璃效果 */
+    --fy-backdrop-blur: blur(22px) saturate(140%);
+    --fy-backdrop-blur-light: blur(10px);
+
+    /* 阴影 */
+    --fy-shadow: 0 10px 28px rgba(0, 0, 0, 0.26);
+    --fy-shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.35);
+    --fy-shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+
+    /* 滚动条 */
+    --fy-scrollbar-track: rgba(34, 44, 66, 0.78);
+    --fy-scrollbar-thumb: rgba(136, 164, 222, 0.6);
+    --fy-scrollbar-thumb-hover: rgba(165, 189, 236, 0.8);
+
+    /* 内容区域 */
+    --fy-content-bg: linear-gradient(150deg, rgba(29, 37, 54, 0.96), rgba(20, 27, 41, 0.94));
+    --fy-content-border: rgba(166, 189, 240, 0.18);
+
+    /* 容器背景 */
+    --fy-container-bg: linear-gradient(160deg, rgba(20, 24, 32, 0.72), rgba(12, 14, 20, 0.66));
+    --fy-container-border: rgba(255, 255, 255, 0.14);
+}
+
+/* ========== 亮色主题 ========== */
+html.light,
+[data-theme="light"] {
+    /* 背景色 */
+    --fy-bg-primary: rgba(255, 255, 255, 0.98);
+    --fy-bg-secondary: rgba(251, 252, 255, 0.96);
+    --fy-bg-surface: rgba(255, 255, 255, 0.97);
+    --fy-bg-overlay: rgba(245, 248, 255, 0.92);
+    --fy-bg-hover: rgba(240, 244, 255, 0.9);
+    --fy-bg-active: rgba(64, 158, 255, 0.1);
+    --fy-bg-input: #ffffff;
+    --fy-bg-card: rgba(255, 255, 255, 0.8);
+
+    /* 文字色 */
+    --fy-text-primary: #1f2a3d;
+    --fy-text-secondary: #4c6084;
+    --fy-text-muted: #909399;
+    --fy-text-inverse: #ffffff;
+    --fy-text-accent: #337ecc;
+
+    /* 边框色 */
+    --fy-border: rgba(134, 156, 192, 0.35);
+    --fy-border-light: rgba(134, 156, 192, 0.18);
+    --fy-border-hover: rgba(64, 158, 255, 0.5);
+    --fy-border-active: rgba(64, 158, 255, 0.6);
+
+    /* 强调色 */
+    --fy-accent: #409eff;
+    --fy-accent-hover: #337ecc;
+    --fy-accent-light: #a0cfff;
+    --fy-accent-bg: rgba(64, 158, 255, 0.12);
+    --fy-accent-bg-hover: rgba(64, 158, 255, 0.2);
+
+    /* 状态色 */
+    --fy-success: #67c23a;
+    --fy-success-bg: #f0f9eb;
+    --fy-warning: #e6a23c;
+    --fy-danger: #f56c6c;
+    --fy-danger-bg: #fef0f0;
+    --fy-info: #909399;
+
+    /* 毛玻璃效果 */
+    --fy-backdrop-blur: blur(22px) saturate(140%);
+    --fy-backdrop-blur-light: blur(10px);
+
+    /* 阴影 */
+    --fy-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
+    --fy-shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.12);
+    --fy-shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+
+    /* 滚动条 */
+    --fy-scrollbar-track: rgba(208, 220, 243, 0.72);
+    --fy-scrollbar-thumb: rgba(112, 141, 193, 0.52);
+    --fy-scrollbar-thumb-hover: rgba(97, 128, 183, 0.72);
+
+    /* 内容区域 */
+    --fy-content-bg: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+    --fy-content-border: rgba(15, 23, 42, 0.08);
+
+    /* 容器背景 */
+    --fy-container-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.95), rgba(251, 252, 255, 0.9));
+    --fy-container-border: rgba(134, 156, 192, 0.3);
+}
+
+/* ========== 护眼主题 ========== */
+html.eye-care,
+[data-theme="eye-care"] {
+    /* Element Plus 变量覆盖 - 护眼 */
+    --el-bg-color: #faf5eb;
+    --el-bg-color-overlay: #faf5eb;
+    --el-bg-color-page: #f0ebe0;
+
+    --el-text-color-primary: #3d3429;
+    --el-text-color-regular: #5c5040;
+    --el-text-color-secondary: #8a7e6e;
+    --el-text-color-placeholder: #a89880;
+
+    --el-border-color: #d8c8ac;
+    --el-border-color-light: #e0d4bc;
+    --el-border-color-lighter: #e8dcc8;
+
+    --el-fill-color: #f0e8d8;
+    --el-fill-color-light: #f5f0e6;
+    --el-fill-color-lighter: #faf5eb;
+    --el-fill-color-blank: #f5f0e6;
+
+    --el-disabled-bg-color: #f0ebe0;
+    --el-disabled-text-color: #c0b8a8;
+    --el-disabled-border-color: #e0d4bc;
+
+    /* 输入框 - 护眼色 */
+    --el-input-bg-color: #f5f0e6;
+    --el-input-border-color: #d8c8ac;
+    --el-input-hover-border-color: #c4aa8a;
+    --el-input-focus-border-color: #8b7355;
+    --el-input-text-color: #3d3429;
+    --el-input-placeholder-color: #a89880;
+    --el-input-icon-color: #8a7e6e;
+    --el-input-clear-hover-color: #5c5040;
+
+    /* 选择器 */
+    --el-select-border-color-hover: #c4aa8a;
+    --el-select-input-color: #3d3429;
+    --el-select-placeholder-color: #a89880;
+
+    /* 开关 */
+    --el-switch-off-color: #e0d4bc;
+    --el-switch-on-color: #8b7355;
+
+    /* 滚动条 - 护眼色 */
+    --el-scrollbar-bg-color: #b8a080;
+    --el-scrollbar-hover-bg-color: #8a7e6e;
+
+    /* 背景色 */
+    --fy-bg-primary: rgba(250, 245, 235, 0.98);
+    --fy-bg-secondary: rgba(245, 240, 230, 0.96);
+    --fy-bg-surface: rgba(255, 250, 240, 0.97);
+    --fy-bg-overlay: rgba(248, 243, 233, 0.92);
+    --fy-bg-hover: rgba(240, 235, 225, 0.9);
+    --fy-bg-active: rgba(139, 115, 85, 0.12);
+    --fy-bg-input: #fffcf5;
+    --fy-bg-card: rgba(255, 250, 240, 0.8);
+
+    /* 文字色 */
+    --fy-text-primary: #3d3429;
+    --fy-text-secondary: #5c5040;
+    --fy-text-muted: #8a7e6e;
+    --fy-text-inverse: #ffffff;
+    --fy-text-accent: #6d5a43;
+
+    /* 边框色 */
+    --fy-border: rgba(180, 160, 130, 0.35);
+    --fy-border-light: rgba(180, 160, 130, 0.18);
+    --fy-border-hover: rgba(139, 115, 85, 0.5);
+    --fy-border-active: rgba(139, 115, 85, 0.6);
+
+    /* 强调色 */
+    --fy-accent: #8b7355;
+    --fy-accent-hover: #6d5a43;
+    --fy-accent-light: #b8a080;
+    --fy-accent-bg: rgba(139, 115, 85, 0.12);
+    --fy-accent-bg-hover: rgba(139, 115, 85, 0.2);
+
+    /* 状态色 */
+    --fy-success: #6a9a4a;
+    --fy-success-bg: rgba(106, 154, 74, 0.15);
+    --fy-warning: #c49a3a;
+    --fy-danger: #d46a4a;
+    --fy-danger-bg: rgba(212, 106, 74, 0.15);
+    --fy-info: #8a7e6e;
+
+    /* 毛玻璃效果 */
+    --fy-backdrop-blur: blur(22px) saturate(140%);
+    --fy-backdrop-blur-light: blur(10px);
+
+    /* 阴影 */
+    --fy-shadow: 0 10px 28px rgba(100, 80, 50, 0.08);
+    --fy-shadow-lg: 0 12px 28px rgba(100, 80, 50, 0.12);
+    --fy-shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
+    /* 滚动条 */
+    --fy-scrollbar-track: rgba(220, 210, 195, 0.5);
+    --fy-scrollbar-thumb: rgba(180, 160, 130, 0.5);
+    --fy-scrollbar-thumb-hover: rgba(160, 140, 110, 0.7);
+
+    /* 内容区域 */
+    --fy-content-bg: linear-gradient(180deg, #faf5eb 0%, #f5f0e6 100%);
+    --fy-content-border: rgba(180, 160, 130, 0.15);
+
+    /* 容器背景 */
+    --fy-container-bg: linear-gradient(160deg, rgba(250, 245, 235, 0.95), rgba(245, 240, 230, 0.9));
+    --fy-container-border: rgba(180, 160, 130, 0.3);
+}
+
+/* ========== 全局滚动条样式覆盖 ========== */
+/* 浏览器原生滚动条 - 仅暗色和护眼主题 */
+html.dark ::-webkit-scrollbar,
+html.eye-care ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+html.dark ::-webkit-scrollbar-track,
+html.eye-care ::-webkit-scrollbar-track {
+    background: var(--fy-scrollbar-track);
+}
+
+html.dark ::-webkit-scrollbar-thumb,
+html.eye-care ::-webkit-scrollbar-thumb {
+    background: var(--fy-scrollbar-thumb);
+    border-radius: 4px;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover,
+html.eye-care ::-webkit-scrollbar-thumb:hover {
+    background: var(--fy-scrollbar-thumb-hover);
+}
+
+/* Firefox 滚动条 - 仅暗色和护眼主题 */
+html.dark *,
+html.eye-care * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--fy-scrollbar-thumb) var(--fy-scrollbar-track);
+}
