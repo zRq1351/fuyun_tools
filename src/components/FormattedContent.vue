@@ -84,7 +84,8 @@ const detectAndProcess = (text) => {
   ) {
     try {
       JSON.parse(trimmed)
-      const html = hljs.highlight(text, {language: 'json'}).value
+      const rawHtml = hljs.highlight(text, {language: 'json'}).value
+      const html = DOMPurify.sanitize(rawHtml)
       contentType.value = 'code'
       renderedHtml.value = html
       setCacheResult(text, {type: 'code', html})
@@ -96,7 +97,8 @@ const detectAndProcess = (text) => {
 
   // 2. HTML
   if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
-    const html = hljs.highlight(text, {language: 'html'}).value
+    const rawHtml = hljs.highlight(text, {language: 'html'}).value
+    const html = DOMPurify.sanitize(rawHtml)
     contentType.value = 'code'
     renderedHtml.value = html
     setCacheResult(text, {type: 'code', html})
@@ -124,7 +126,8 @@ const detectAndProcess = (text) => {
       /(function\s+\w+\(|const\s+\w+\s*=|let\s+\w+\s*=|var\s+\w+\s*=|class\s+\w+\s*\{|import\s+.*from|public\s+class|def\s+\w+\(|fn\s+\w+\()/
   if (codeRegex.test(text)) {
     try {
-      const html = hljs.highlightAuto(text).value
+      const rawHtml = hljs.highlightAuto(text).value
+      const html = DOMPurify.sanitize(rawHtml)
       contentType.value = 'code'
       renderedHtml.value = html
       setCacheResult(text, {type: 'code', html})

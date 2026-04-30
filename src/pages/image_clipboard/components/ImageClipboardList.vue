@@ -16,7 +16,7 @@
           selectedIndex === entry.index,
           entry.pinned,
           entry.category,
-          entry.tags.join('|'),
+          entry.tags,
           entry.item.preview_png_base64,
           entry.item.image_path
         ]"

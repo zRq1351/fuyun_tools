@@ -311,7 +311,9 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
     {
-        let mut senders = IMAGE_WORKER_SENDERS.lock().unwrap();
+        let mut senders = IMAGE_WORKER_SENDERS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         for worker_id in 0..IMAGE_QUEUE_WORKER_COUNT {
             let (tx, rx) = mpsc::sync_channel(MAX_QUEUE_SIZE);
             senders.push(tx);
@@ -334,7 +336,9 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
             match image {
                 Ok(images) => {
                     log::info!("[监听线程] 成功读取 {} 张图片", images.len());
-                    let senders = IMAGE_WORKER_SENDERS.lock().unwrap();
+                    let senders = IMAGE_WORKER_SENDERS
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
                     if senders.is_empty() {
                         return;
                     }

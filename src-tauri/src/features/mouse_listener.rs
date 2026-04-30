@@ -420,47 +420,52 @@ unsafe extern "system" fn low_level_keyboard_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    if code == HC_ACTION {
-        let keyboard = &*(lparam as *const KBDLLHOOKSTRUCT);
-        // 忽略注入的按键事件（如 Enigo 模拟的 Ctrl+C），只响应真实的物理按键
-        let is_injected = (keyboard.flags & 0x10) != 0;
-        
-        if !is_injected {
-            let event = match wparam as u32 {
-                WM_KEYDOWN | WM_SYSKEYDOWN => {
-                    if keyboard.vkCode == VK_LCONTROL as u32 {
-                        Some(HookEvent::CtrlLeftPress)
-                    } else if keyboard.vkCode == VK_RCONTROL as u32 {
-                        Some(HookEvent::CtrlRightPress)
-                    } else if keyboard.vkCode == 0x43 { // 'C' key
-                        Some(HookEvent::CPress)
-                    } else {
-                        None
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if code == HC_ACTION {
+            let keyboard = &*(lparam as *const KBDLLHOOKSTRUCT);
+            // 忽略注入的按键事件（如 Enigo 模拟的 Ctrl+C），只响应真实的物理按键
+            let is_injected = (keyboard.flags & 0x10) != 0;
+            
+            if !is_injected {
+                let event = match wparam as u32 {
+                    WM_KEYDOWN | WM_SYSKEYDOWN => {
+                        if keyboard.vkCode == VK_LCONTROL as u32 {
+                            Some(HookEvent::CtrlLeftPress)
+                        } else if keyboard.vkCode == VK_RCONTROL as u32 {
+                            Some(HookEvent::CtrlRightPress)
+                        } else if keyboard.vkCode == 0x43 { // 'C' key
+                            Some(HookEvent::CPress)
+                        } else {
+                            None
+                        }
                     }
-                }
-                WM_KEYUP | WM_SYSKEYUP => {
-                    if keyboard.vkCode == VK_LCONTROL as u32 {
-                        Some(HookEvent::CtrlLeftRelease)
-                    } else if keyboard.vkCode == VK_RCONTROL as u32 {
-                        Some(HookEvent::CtrlRightRelease)
-                    } else {
-                        None
+                    WM_KEYUP | WM_SYSKEYUP => {
+                        if keyboard.vkCode == VK_LCONTROL as u32 {
+                            Some(HookEvent::CtrlLeftRelease)
+                        } else if keyboard.vkCode == VK_RCONTROL as u32 {
+                            Some(HookEvent::CtrlRightRelease)
+                        } else {
+                            None
+                        }
                     }
-                }
-                _ => None,
-            };
-            if let Some(event) = event {
-                if let Ok(guard) = hook_event_sender().lock() {
-                    if let Some(tx) = guard.as_ref() {
-                        let _ = tx.send(event);
-                        let thread_id = HOOK_THREAD_ID.load(Ordering::SeqCst);
-                        if thread_id != 0 {
-                            PostThreadMessageW(thread_id, WM_USER, 0, 0);
+                    _ => None,
+                };
+                if let Some(event) = event {
+                    if let Ok(guard) = hook_event_sender().lock() {
+                        if let Some(tx) = guard.as_ref() {
+                            let _ = tx.send(event);
+                            let thread_id = HOOK_THREAD_ID.load(Ordering::SeqCst);
+                            if thread_id != 0 {
+                                PostThreadMessageW(thread_id, WM_USER, 0, 0);
+                            }
                         }
                     }
                 }
             }
         }
+    }));
+    if result.is_err() {
+        log::error!("low_level_keyboard_proc 中发生 panic");
     }
     CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
 }
@@ -471,32 +476,37 @@ unsafe extern "system" fn low_level_mouse_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    if code == HC_ACTION {
-        let mouse = &*(lparam as *const MSLLHOOKSTRUCT);
-        // 忽略注入的鼠标事件
-        let is_injected = (mouse.flags & 0x01) != 0;
-        
-        if !is_injected {
-            let x = mouse.pt.x;
-            let y = mouse.pt.y;
-            let event = match wparam as u32 {
-                WM_LBUTTONDOWN => Some(HookEvent::LeftButtonPress(x, y)),
-                WM_LBUTTONUP => Some(HookEvent::LeftButtonRelease(x, y)),
-                WM_MOUSEMOVE => Some(HookEvent::MouseMove(x, y)),
-                _ => None,
-            };
-            if let Some(event) = event {
-                if let Ok(guard) = hook_event_sender().lock() {
-                    if let Some(tx) = guard.as_ref() {
-                        let _ = tx.send(event);
-                        let thread_id = HOOK_THREAD_ID.load(Ordering::SeqCst);
-                        if thread_id != 0 {
-                            PostThreadMessageW(thread_id, WM_USER, 0, 0);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if code == HC_ACTION {
+            let mouse = &*(lparam as *const MSLLHOOKSTRUCT);
+            // 忽略注入的鼠标事件
+            let is_injected = (mouse.flags & 0x01) != 0;
+            
+            if !is_injected {
+                let x = mouse.pt.x;
+                let y = mouse.pt.y;
+                let event = match wparam as u32 {
+                    WM_LBUTTONDOWN => Some(HookEvent::LeftButtonPress(x, y)),
+                    WM_LBUTTONUP => Some(HookEvent::LeftButtonRelease(x, y)),
+                    WM_MOUSEMOVE => Some(HookEvent::MouseMove(x, y)),
+                    _ => None,
+                };
+                if let Some(event) = event {
+                    if let Ok(guard) = hook_event_sender().lock() {
+                        if let Some(tx) = guard.as_ref() {
+                            let _ = tx.send(event);
+                            let thread_id = HOOK_THREAD_ID.load(Ordering::SeqCst);
+                            if thread_id != 0 {
+                                PostThreadMessageW(thread_id, WM_USER, 0, 0);
+                            }
                         }
                     }
                 }
             }
         }
+    }));
+    if result.is_err() {
+        log::error!("low_level_mouse_proc 中发生 panic");
     }
     CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
 }

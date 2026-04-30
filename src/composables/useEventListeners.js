@@ -8,6 +8,7 @@ import {listen} from '@tauri-apps/api/event'
  */
 export function useEventListeners() {
     const unlisteners = []
+    let isCleanedUp = false
 
     /**
      * 注册一个事件监听器，组件卸载时自动清理
@@ -17,6 +18,10 @@ export function useEventListeners() {
      */
     async function listenEvent(eventName, handler) {
         const unlisten = await listen(eventName, handler)
+        if (isCleanedUp) {
+            unlisten()
+            return
+        }
         unlisteners.push(unlisten)
     }
 
@@ -24,6 +29,7 @@ export function useEventListeners() {
      * 手动清理所有已注册的监听器
      */
     function cleanupAll() {
+        isCleanedUp = true
         for (const unlisten of unlisteners) {
             try {
                 unlisten()

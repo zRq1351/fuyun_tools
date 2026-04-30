@@ -92,7 +92,10 @@ pub fn read_text_with_backup(path: &Path) -> Result<String, String> {
 }
 
 pub fn save_settings(settings: &AppSettingsData) -> Result<(), String> {
-    let _lock = SAVE_SETTINGS_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let _lock = SAVE_SETTINGS_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let settings_path = get_settings_file_path();
     let json =
         serde_json::to_string_pretty(settings).map_err(|e| format!("序列化设置失败: {}", e))?;

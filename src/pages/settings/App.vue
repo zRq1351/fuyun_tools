@@ -640,7 +640,7 @@ const persistSettings = async (
     }
 
 
-    await AISettingsService.savePartialSettings(changedFields)
+    await AISettingsService.saveSettings(changedFields)
 
 
     if (changedFields.aiProvider) {

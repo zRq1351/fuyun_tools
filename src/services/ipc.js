@@ -4,7 +4,6 @@ const buildSelectAndFillRequest = (itemId, opId) => ({
     itemId,
     opId
 });
-const buildSelectAndFillImageByIdRequest = (itemId, opId) => ({itemId, opId});
 
 const buildStreamTranslateRequest = (text, sourceLanguage, targetLanguage, opId, sceneHint, windowLabel) => ({
     text,
@@ -233,7 +232,7 @@ export const ImageClipboardService = {
     countImportImageFiles: (paths) => invoke(IPC_COMMANDS.COUNT_IMPORT_IMAGE_FILES, {paths}),
     selectAndFillById: (itemId, opId) =>
         invoke(IPC_COMMANDS.SELECT_AND_FILL_IMAGE_BY_ID, {
-            request: buildSelectAndFillImageByIdRequest(itemId, opId)
+            request: buildSelectAndFillRequest(itemId, opId)
         }),
     warmupItemById: (itemId) =>
         invoke(IPC_COMMANDS.WARMUP_IMAGE_CLIPBOARD_ITEM_BY_ID, {request: {itemId}}),
@@ -359,14 +358,6 @@ export const AISettingsService = {
      */
     saveSettings: (settings) =>
         invoke(IPC_COMMANDS.SAVE_APP_SETTINGS, settings),
-
-    /**
-     * 部分保存应用设置（只保存变化的字段）
-     * @param {Object} changedFields - 变化的字段对象
-     * @returns {Promise<void>}
-     */
-    savePartialSettings: (changedFields) =>
-        invoke(IPC_COMMANDS.SAVE_APP_SETTINGS, changedFields),
 
     /**
      * 测试 AI 连接

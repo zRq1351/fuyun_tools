@@ -121,6 +121,7 @@
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {marked} from 'marked'
+import DOMPurify from 'dompurify'
 import {getCurrentWindow} from '@tauri-apps/api/window'
 import {ElMessage} from 'element-plus'
 import {CloseBold, CopyDocument, DocumentCopy, FullScreen, Hide, Minus, View} from '@element-plus/icons-vue'
@@ -148,6 +149,7 @@ const currentWindowLabel = ref('')
 let initDataHandler = null
 const currentWindow = getCurrentWindow()
 const {listenEvent} = useEventListeners()
+let unlistenResize = null
 
 const syncWindowMaximized = async () => {
   try {
@@ -273,17 +275,18 @@ renderer.image = (...args) => {
 }
 
 const renderMarkdownSafely = (markdownText) =>
-    marked.parse(markdownText || '', {
+    DOMPurify.sanitize(marked.parse(markdownText || '', {
       renderer,
       gfm: true,
       breaks: true
-    })
+    }))
 
 const originalHtml = computed(() => renderMarkdownSafely(originalText.value))
 
 // 流式更新时使用requestAnimationFrame节流，避免每次chunk都重新解析markdown
 const resultHtmlRaw = ref('')
 let rafId = null
+let waitingTimeout = null
 watch(resultText, (newText) => {
   if (rafId) cancelAnimationFrame(rafId)
   rafId = requestAnimationFrame(() => {
@@ -295,7 +298,7 @@ const resultHtml = computed(() => resultHtmlRaw.value)
 
 onMounted(async () => {
   await syncWindowMaximized()
-  const unlistenResize = await currentWindow.onResized(async () => {
+  unlistenResize = await currentWindow.onResized(async () => {
     await syncWindowMaximized()
   })
 
@@ -353,8 +356,10 @@ onMounted(async () => {
         resultText.value += data.content
         const elapsed = Date.now() - loadingStartedAt.value
         if (isWaitingResult.value && elapsed < 280) {
-          window.setTimeout(() => {
+          if (waitingTimeout) clearTimeout(waitingTimeout)
+          waitingTimeout = window.setTimeout(() => {
             isWaitingResult.value = false
+            waitingTimeout = null
           }, 280 - elapsed)
         } else {
           isWaitingResult.value = false
@@ -370,6 +375,14 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (rafId) {
+    cancelAnimationFrame(rafId)
+    rafId = null
+  }
+  if (waitingTimeout) {
+    clearTimeout(waitingTimeout)
+    waitingTimeout = null
+  }
   if (unlistenResize) {
     unlistenResize()
   }

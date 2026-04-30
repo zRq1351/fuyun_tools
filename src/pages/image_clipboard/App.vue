@@ -781,29 +781,6 @@ const rgbaBase64ToPngDataUrl = (rgbaBase64, width, height) => {
   }
 }
 
-// 缓存命中率统计
-const cacheStats = {
-  hits: 0,
-  misses: 0,
-  get hitRate() {
-    const total = this.hits + this.misses
-    return total > 0 ? (this.hits / total * 100).toFixed(2) : 0
-  },
-  recordHit() {
-    this.hits++
-  },
-  recordMiss() {
-    this.misses++
-  },
-  reset() {
-    this.hits = 0
-    this.misses = 0
-  },
-  getReport() {
-    return `缓存命中率: ${this.hitRate}% (${this.hits}/${this.hits + this.misses})`
-  }
-}
-
 const getPreviewDataUrl = (item) => {
   if (previewCache.has(item.id)) {
     return previewCache.get(item.id)

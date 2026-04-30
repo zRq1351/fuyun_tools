@@ -72,6 +72,8 @@ const customPrompts = ref([])
 let unlistenSelectedText = null
 let unlistenDomText = null
 let unlistenFocus = null
+let unlistenMouseOut = null
+let unlistenMouseLeave = null
 let hoverTimeout = null
 let enterTimeout = null
 let isAnimating = false // 添加动画锁，防止重复触发
@@ -372,7 +374,7 @@ onMounted(async () => {
     })
 
     // Fallback listener for fast mouse exits from the window
-    window.addEventListener('mouseout', (e) => {
+    const onMouseOut = (e) => {
       // 检查是否真正离开了工具栏范围
       // e.relatedTarget 不存在说明移出了窗口
       // 如果存在，说明移动到了另一个元素，我们需要判断该元素是否在我们的 toolbar 内部
@@ -387,12 +389,16 @@ onMounted(async () => {
            onMouseLeave()
         }
       }
-    })
+    }
+    window.addEventListener('mouseout', onMouseOut)
+    unlistenMouseOut = () => window.removeEventListener('mouseout', onMouseOut)
 
     // 原生 mouseleave 兜底
-    document.documentElement.addEventListener('mouseleave', () => {
+    const onMouseLeaveDoc = () => {
       onMouseLeave()
-    })
+    }
+    document.documentElement.addEventListener('mouseleave', onMouseLeaveDoc)
+    unlistenMouseLeave = () => document.documentElement.removeEventListener('mouseleave', onMouseLeaveDoc)
 
     // Reset state when the window loses focus
     unlistenFocus = await appWindow.onFocusChanged(async ({ payload: focused }) => {
@@ -426,6 +432,22 @@ onBeforeUnmount(() => {
   if (unlistenFocus) {
     unlistenFocus()
     unlistenFocus = null
+  }
+  if (unlistenMouseOut) {
+    unlistenMouseOut()
+    unlistenMouseOut = null
+  }
+  if (unlistenMouseLeave) {
+    unlistenMouseLeave()
+    unlistenMouseLeave = null
+  }
+  if (hoverTimeout) {
+    clearTimeout(hoverTimeout)
+    hoverTimeout = null
+  }
+  if (enterTimeout) {
+    clearTimeout(enterTimeout)
+    enterTimeout = null
   }
 })
 

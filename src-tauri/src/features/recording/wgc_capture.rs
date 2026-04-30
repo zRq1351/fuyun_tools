@@ -431,10 +431,11 @@ pub fn start_window_capture_to_mp4(
             }
             if let Some(control) = control_opt.as_ref() {
                 if control.is_finished() {
-                    let control = control_opt.take().expect("control exists");
-                    return control
-                        .wait()
-                        .map_err(|e: CaptureControlError<String>| format!("{:?}", e));
+                    if let Some(control) = control_opt.take() {
+                        return control
+                            .wait()
+                            .map_err(|e: CaptureControlError<String>| format!("{:?}", e));
+                    }
                 }
             } else {
                 return Ok(());

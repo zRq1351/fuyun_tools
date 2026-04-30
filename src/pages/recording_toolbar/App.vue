@@ -726,7 +726,7 @@ const onSystemAudioDeviceChange = async (deviceId) => {
     }
   }
   try {
-    await AISettingsService.savePartialSettings({
+    await AISettingsService.saveSettings({
       recordingCaptureSystemAudio: captureSystemAudio.value,
     });
   } catch (e) {
@@ -771,7 +771,7 @@ const onMicrophoneDeviceChange = async (deviceId) => {
     }
   }
   try {
-    await AISettingsService.savePartialSettings({
+    await AISettingsService.saveSettings({
       recordingCaptureMicrophone: captureMicrophone.value,
       recordingMicrophoneDeviceId: microphoneDeviceId.value || "",
     });
@@ -905,7 +905,7 @@ const onToolbarSettingChange = async (key, rawValue) => {
     return;
   }
   try {
-    await AISettingsService.savePartialSettings(patch);
+    await AISettingsService.saveSettings(patch);
   } catch (e) {
     showInlineNotice(`保存录制设置失败: ${String(e)}`, "error");
   }

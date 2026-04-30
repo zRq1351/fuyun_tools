@@ -15,6 +15,7 @@
 
 <script setup>
 import {onMounted, onUnmounted, ref} from 'vue'
+import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {useTheme} from '../../composables/useTheme'
 import {useWindowDrag} from '../../composables/useWindowDrag'
 

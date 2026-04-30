@@ -2559,7 +2559,13 @@ pub fn stop_recording(
         let app_handle = app.clone();
         let session_id_clone = session_id.clone();
         let ffmpeg_path_clone = ffmpeg_path.clone();
-        let output_final_clone = output_final.clone().unwrap();
+        let output_final_clone = match output_final.clone() {
+            Some(path) => path,
+            None => {
+                log::warn!("音频合并跳过：输出路径为空");
+                return Ok(result);
+            }
+        };
 
         // ✅ 将音频片段路径 HashSet 转换为 Vec，用于合并后清理
         // audio_segment_paths 已从元组解构获得（L1580）

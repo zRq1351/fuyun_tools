@@ -187,7 +187,7 @@ const refreshRecordingDebugState = async () => {
 }
 
 const saveRecordingDebugConfig = async (val) => {
-  await AISettingsService.savePartialSettings({
+  await AISettingsService.saveSettings({
     devForceFfmpegWindowCapture: val
   })
 }
