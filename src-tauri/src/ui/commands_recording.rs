@@ -380,6 +380,12 @@ fn ensure_recording_toolbar_window(
 
     bind_overlay_window_events(&window, app.clone(), label);
 
+    // 🔧 创建窗口时立即应用 content_protected 设置
+    let content_protected = load_settings()
+        .map(|settings| settings.recording_toolbar_content_protected)
+        .unwrap_or(false);
+    let _ = window.set_content_protected(content_protected);
+
     Ok((window, true))
 }
 

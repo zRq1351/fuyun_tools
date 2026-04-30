@@ -341,6 +341,49 @@ fn concat_video_segments(
     Ok(())
 }
 
+/// 裁剪视频开头的灰色帧（gdigrab 初始化时可能产生）
+/// 使用流复制模式，无重编码，性能开销极小
+fn trim_video_initial_frames(
+    ffmpeg_path: &std::path::Path,
+    video_path: &PathBuf,
+    trim_seconds: f64,
+) -> Result<(), AppError> {
+    let trimmed_path = video_path.with_extension("trimmed.tmp.mp4");
+    let mut cmd = Command::new(ffmpeg_path);
+    suppress_console_window(&mut cmd);
+    let output = cmd
+        .arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("warning")
+        .arg("-y")
+        .arg("-ss")
+        .arg(format!("{:.3}", trim_seconds))
+        .arg("-i")
+        .arg(video_path)
+        .arg("-c")
+        .arg("copy")
+        .arg("-movflags")
+        .arg("+faststart")
+        .arg(&trimmed_path)
+        .output()
+        .map_err(|e| {
+            AppError::new(ErrorCode::SystemError, "执行视频裁剪失败").with_details(e.to_string())
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let _ = fs::remove_file(&trimmed_path);
+        return Err(AppError::new(ErrorCode::SystemError, "视频裁剪失败").with_details(stderr));
+    }
+    if video_path.exists() {
+        let _ = fs::remove_file(video_path);
+    }
+    fs::rename(&trimmed_path, video_path).map_err(|e| {
+        AppError::new(ErrorCode::IoError, "重命名裁剪文件失败").with_details(e.to_string())
+    })?;
+    log::info!("✅ 已裁剪视频开头 {:.3}s 灰色帧", trim_seconds);
+    Ok(())
+}
+
 /// P4 辅助函数：使用 FFmpeg concat demuxer 拼接多个音频片段为单个文件（流复制，无重编码）
 fn concat_audio_segments(
     ffmpeg_path: &std::path::Path,
@@ -1647,6 +1690,13 @@ fn spawn_ffmpeg_video_segment(
     output_path: &PathBuf,
 ) -> Result<(std::process::Child, std::process::ChildStderr), AppError> {
     let mut args = Vec::new();
+
+    // 🔧 全局 flags：生成正确 PTS，丢弃损坏帧，增大输入缓冲防止初始帧丢失
+    args.push("-fflags".into());
+    args.push("+genpts+discardcorrupt".into());
+    args.push("-thread_queue_size".into());
+    args.push("1024".into());
+
     match target_type {
         "window" => {
             return Err(AppError::new(
@@ -1724,8 +1774,14 @@ fn spawn_ffmpeg_video_segment(
         "veryfast".to_string(),
         "-pix_fmt".to_string(),
         "yuv420p".to_string(),
+        "-r".to_string(),
+        format!("{}", fps),           // 输出帧率
+        "-g".to_string(),
+        format!("{}", fps),           // GOP 大小 = 帧率，每秒一个关键帧
         "-b:v".to_string(),
         format!("{}k", video_bitrate),
+        "-movflags".to_string(),      // moov atom 前置，改善预览体验
+        "+faststart".to_string(),
     ]);
     args.push("-an".to_string());
     args.push(output_path.to_string_lossy().to_string());
@@ -2361,6 +2417,17 @@ pub fn stop_recording(
                 fatal_error = Some(e);
             }
         }
+
+        // 🔧 非窗口录制（gdigrab）时，裁剪视频开头的灰色帧
+        // gdigrab 初始化时前几帧可能是灰色/黑色的，裁剪掉前 0.3 秒
+        if fatal_error.is_none() && target_type != "window" {
+            log::info!("🔧 裁剪 gdigrab 初始化灰色帧...");
+            if let Err(e) = trim_video_initial_frames(&ffmpeg_path, output_tmp, 0.3) {
+                // 裁剪失败不影响主流程，只记录警告
+                log::warn!("裁剪灰色帧失败（不影响视频保存）: {}", e);
+            }
+        }
+
         if fatal_error.is_none() {
             log::info!("🔧 重命名输出文件...");
             if let Err(e) = rename_recording_output_with_retry(output_tmp, output_final) {
