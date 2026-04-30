@@ -1,5 +1,5 @@
 <template>
-  <div class="formatted-content" :class="contentType">
+  <div :class="contentType" class="formatted-content" @click="handleClick">
     <div v-if="contentType === 'markdown'" class="markdown-body" v-html="renderedHtml"></div>
     <pre v-else-if="contentType === 'code'"><code class="hljs" v-html="renderedHtml"></code></pre>
     <div v-else class="plain-text">{{ content }}</div>
@@ -12,6 +12,7 @@ import {Marked} from 'marked'
 import {markedHighlight} from 'marked-highlight'
 import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
+import {openUrl} from '@tauri-apps/plugin-opener'
 import 'highlight.js/styles/atom-one-dark.css'
 
 const props = defineProps({
@@ -20,6 +21,18 @@ const props = defineProps({
     required: true
   }
 })
+
+const handleClick = (event) => {
+  const anchor = event.target.closest('a')
+  if (!anchor) return
+  const href = anchor.getAttribute('href')
+  if (!href) return
+  event.preventDefault()
+  event.stopPropagation()
+  openUrl(href).catch(() => {
+    window.open(href, '_blank', 'noopener,noreferrer')
+  })
+}
 
 const marked = new Marked(
   markedHighlight({

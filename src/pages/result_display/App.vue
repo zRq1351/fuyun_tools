@@ -82,6 +82,7 @@
           ref="originalRef"
           class="content original-content"
           v-html="originalHtml"
+          @click="handleContentClick"
           @wheel.stop.prevent="handleContentWheel('original', $event)"
       ></div>
     </div>
@@ -104,6 +105,7 @@
           ref="resultRef"
           class="content result-content"
           @scroll="handleResultScroll"
+          @click="handleContentClick"
           @wheel.stop.prevent="handleContentWheel('result', $event)"
       >
         <div v-if="isWaitingResult && !resultText" class="loading-wrap">
@@ -123,6 +125,7 @@ import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {marked} from 'marked'
 import DOMPurify from 'dompurify'
 import {getCurrentWindow} from '@tauri-apps/api/window'
+import {openUrl} from '@tauri-apps/plugin-opener'
 import {ElMessage} from 'element-plus'
 import {CloseBold, CopyDocument, DocumentCopy, FullScreen, Hide, Minus, View} from '@element-plus/icons-vue'
 import {AIService, ClipboardService} from '@/services/ipc.js'
@@ -418,6 +421,18 @@ const handleContentWheel = (target, event) => {
     const remain = container.scrollHeight - container.scrollTop - container.clientHeight
     shouldAutoFollow.value = remain <= 24
   }
+}
+
+const handleContentClick = (event) => {
+  const anchor = event.target.closest('a')
+  if (!anchor) return
+  const href = anchor.getAttribute('href')
+  if (!href) return
+  event.preventDefault()
+  event.stopPropagation()
+  openUrl(href).catch(() => {
+    window.open(href, '_blank', 'noopener,noreferrer')
+  })
 }
 
 const handleLanguageChange = async () => {
