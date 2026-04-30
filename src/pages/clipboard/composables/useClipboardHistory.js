@@ -15,6 +15,7 @@ export function useClipboardHistory() {
     const isLoadingPage = ref(false)
     const sortBy = ref('pinnedFirst')
     const sortOrder = ref('asc')
+    const searchMatchedIds = ref(null)
 
     const {
         filterDataRevision,
@@ -36,33 +37,31 @@ export function useClipboardHistory() {
 
     
     const visibleHistory = computed(() => {
-        
-        
         filterDataRevision.value
-        
+
         const activeCategory = categoryFilter.value === '全部' ? null : categoryFilter.value
         const keyword = searchKeyword.value.trim().toLowerCase()
 
-        
         const categoryFilteredIds = activeCategory
             ? (categorySearchIndex.get(activeCategory) || new Set())
             : null
 
-        
-        const keywordMatchedIds = keyword ? getKeywordCategoryMatchedIds(keyword) : null
+        const contentMatchedIds = searchMatchedIds.value
+        const keywordCategoryIds = (!contentMatchedIds && keyword) ? getKeywordCategoryMatchedIds(keyword) : null
 
         return pagedHistory.value
             .filter((entry) => {
                 const id = entry.id
-                const content = entry.content
 
-                
                 if (categoryFilteredIds && !categoryFilteredIds.has(id)) {
                     return false
                 }
 
-                
-                if (keywordMatchedIds && !keywordMatchedIds.has(id)) {
+                if (contentMatchedIds && !contentMatchedIds.has(id)) {
+                    return false
+                }
+
+                if (keywordCategoryIds && !keywordCategoryIds.has(id)) {
                     return false
                 }
 
@@ -231,6 +230,7 @@ export function useClipboardHistory() {
         pageOffset.value = 0
         totalCount.value = 0
         hasMore.value = false
+        searchMatchedIds.value = null
         await loadHistoryPage({reset: true})
     }
 
@@ -252,6 +252,13 @@ export function useClipboardHistory() {
                 sortOrder: sortOrder.value
             })
             const items = Array.isArray(response?.items) ? response.items : []
+
+            if (keyword) {
+                const matchedIds = new Set(items.map(item => item.id).filter(Boolean))
+                searchMatchedIds.value = matchedIds
+            } else {
+                searchMatchedIds.value = null
+            }
 
             if (items.length === 0) {
                 
