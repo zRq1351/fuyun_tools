@@ -1105,8 +1105,9 @@ pub async fn show_result_window(
     .inner_size(560.0, 360.0)
     .resizable(true)
     .decorations(false)
-    .transparent(true)
-    .shadow(false)
+    .transparent(false)
+    .shadow(true)
+    .background_color(tauri::window::Color(250, 245, 235, 255))
     .always_on_top(true)
     .skip_taskbar(false)
     .on_page_load(move |window, _| {

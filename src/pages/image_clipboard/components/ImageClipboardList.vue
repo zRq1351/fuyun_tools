@@ -347,7 +347,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: rgba(166, 213, 255, 0.9);
+  color: var(--fy-text-accent);
   user-select: none;
   pointer-events: none;
 }
@@ -364,12 +364,12 @@ defineExpose({
 
 .load-more-tail-spinner {
   font-size: 16px;
-  color: rgba(220, 240, 255, 0.95);
+  color: var(--fy-text-accent);
 }
 
 .clipboard-item {
-  background: rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--fy-bg-overlay);
+  border: 1px solid var(--fy-border-light);
   border-radius: 8px;
   padding: 12px;
   cursor: pointer;
@@ -380,15 +380,15 @@ defineExpose({
   display: flex;
   flex-direction: column;
   backdrop-filter: blur(10px);
-  color: white;
+  color: var(--fy-text-primary);
   transition: all 0.3s ease;
   box-sizing: border-box;
 }
 
 .clipboard-item:hover, .clipboard-item.selected {
-  background: rgba(0, 0, 0, 0.8);
-  border-color: var(--el-color-primary, #409eff);
-  box-shadow: 0 0 15px rgba(64, 158, 255, 0.5);
+  background: var(--fy-bg-active);
+  border-color: var(--fy-accent);
+  box-shadow: 0 0 15px var(--fy-accent-bg);
 }
 
 .clipboard-item.selected {
@@ -402,7 +402,7 @@ defineExpose({
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--fy-bg-hover);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -431,9 +431,9 @@ defineExpose({
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--fy-border);
+  background: var(--fy-bg-surface);
+  color: var(--fy-text-secondary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -451,9 +451,9 @@ defineExpose({
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--fy-border);
+  background: var(--fy-bg-surface);
+  color: var(--fy-text-secondary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -471,22 +471,22 @@ defineExpose({
 }
 
 .pin-btn:hover {
-  border-color: var(--el-color-primary, #409eff);
-  color: #fff;
-  background: var(--el-color-primary, #409eff);
+  border-color: var(--fy-accent);
+  color: var(--fy-text-primary);
+  background: var(--fy-accent);
 }
 
 .pin-btn.active {
   opacity: 1;
   border-color: #f7b955;
-  color: #fff;
+  color: var(--fy-text-primary);
   background: rgba(247, 185, 85, 0.75);
 }
 
 .fullscreen-btn:hover {
-  border-color: var(--el-color-primary, #409eff);
-  color: #fff;
-  background: var(--el-color-primary, #409eff);
+  border-color: var(--fy-accent);
+  color: var(--fy-text-primary);
+  background: var(--fy-accent);
 }
 
 .download-btn {
@@ -496,9 +496,9 @@ defineExpose({
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--fy-border);
+  background: var(--fy-bg-surface);
+  color: var(--fy-text-secondary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -511,7 +511,7 @@ defineExpose({
 
 .download-btn:hover {
   border-color: #67c23a;
-  color: #fff;
+  color: var(--fy-text-primary);
   background: #67c23a;
 }
 
@@ -538,16 +538,16 @@ defineExpose({
 }
 
 .index {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--fy-bg-hover);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 12px;
-  color: #909399;
+  color: var(--fy-text-muted);
 }
 
 .clipboard-item:hover .index, .clipboard-item.selected .index {
-  background: var(--el-color-primary, #409eff);
-  color: #fff;
+  background: var(--fy-accent);
+  color: var(--fy-text-primary);
 }
 
 .category-wrap {
@@ -568,9 +568,9 @@ defineExpose({
   max-width: 100%;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.85);
+  background: var(--fy-bg-hover);
+  border: 1px solid var(--fy-border-light);
+  color: var(--fy-text-secondary);
   font-size: 12px;
   text-align: center;
   white-space: nowrap;
@@ -602,14 +602,14 @@ defineExpose({
   padding: 1px 6px;
   border-radius: 999px;
   font-size: 11px;
-  color: #d9ecff;
-  background: rgba(64, 158, 255, 0.2);
-  border: 1px solid rgba(64, 158, 255, 0.45);
+  color: var(--fy-text-accent);
+  background: var(--fy-accent-bg);
+  border: 1px solid var(--fy-accent-bg-hover);
 }
 
 .tag-chip-empty {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--fy-text-muted);
 }
 
 .item-content {
@@ -625,7 +625,7 @@ defineExpose({
   height: 100%;
   object-fit: contain;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--fy-bg-overlay);
 }
 
 .image-meta {
@@ -635,7 +635,7 @@ defineExpose({
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 12px;
-  color: #dcdfe6;
-  background: rgba(0, 0, 0, 0.45);
+  color: var(--fy-text-secondary);
+  background: var(--fy-bg-overlay);
 }
 </style>

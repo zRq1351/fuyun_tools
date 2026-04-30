@@ -177,7 +177,7 @@ const handleToggleAiSettings = () => {
   border-radius: 10px;
   background: transparent;
   border: 1px solid transparent;
-  color: rgba(255, 255, 255, 0.78);
+  color: var(--fy-text-primary);
   cursor: ns-resize;
   flex: 0 0 auto;
   user-select: none;
@@ -192,9 +192,9 @@ const handleToggleAiSettings = () => {
 }
 
 .window-offset-handle:hover {
-  border-color: rgba(255, 120, 120, 0.9);
+  border-color: var(--fy-danger);
   color: #fff;
-  background: rgba(245, 108, 108, 0.2);
+  background: var(--fy-danger-bg);
   box-shadow: 0 4px 14px rgba(245, 108, 108, 0.35);
 }
 
@@ -206,22 +206,22 @@ const handleToggleAiSettings = () => {
   justify-content: center;
   padding: 0;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--fy-border-light);
   background: transparent;
-  color: #dce8ff;
+  color: var(--fy-text-accent);
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .ai-toggle-btn:hover {
-  background: linear-gradient(135deg, rgba(28, 36, 52, 0.9), rgba(35, 45, 63, 0.84));
-  border-color: rgba(127, 194, 255, 0.5);
-  box-shadow: 0 0 0 1px rgba(127, 194, 255, 0.18);
+  background: var(--fy-bg-surface);
+  border-color: var(--fy-accent);
+  box-shadow: 0 0 0 1px var(--fy-accent-bg);
 }
 
 .ai-toggle-arrow {
   font-size: 14px;
-  color: #9cd4ff;
+  color: var(--fy-text-accent);
 }
 
 .search-input {
@@ -230,9 +230,9 @@ const handleToggleAiSettings = () => {
 }
 
 .search-input :deep(.el-input__wrapper) {
-  background: rgba(15, 15, 20, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.15);
+  background: var(--fy-bg-surface);
+  border: 1px solid var(--fy-border-light);
+  box-shadow: 0 0 0 1px var(--fy-accent-bg);
   border-radius: 10px;
   padding: 2px 10px;
   backdrop-filter: blur(12px);
@@ -240,26 +240,26 @@ const handleToggleAiSettings = () => {
 }
 
 .search-input :deep(.el-input__wrapper.is-focus) {
-  border-color: var(--el-color-primary, #409eff);
-  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.25);
+  border-color: var(--fy-accent);
+  box-shadow: 0 0 0 2px var(--fy-accent-bg-hover);
 }
 
 .search-input :deep(.el-input__inner) {
-  color: #e5e7eb;
+  color: var(--fy-text-primary);
   font-size: 13px;
   letter-spacing: 0.2px;
 }
 
 .search-input :deep(.el-input__prefix) {
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--fy-text-muted);
 }
 
 .search-input :deep(.el-input__suffix) {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--fy-text-muted);
 }
 
 .search-input :deep(.el-input__inner::placeholder) {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--fy-text-muted);
 }
 
 .category-nav {
@@ -276,9 +276,9 @@ const handleToggleAiSettings = () => {
   gap: 6px;
   padding: 6px 12px;
   border-radius: 999px;
-  background: rgba(15, 15, 20, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.75);
+  background: var(--fy-bg-surface);
+  border: 1px solid var(--fy-border-light);
+  color: var(--fy-text-secondary);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -294,32 +294,32 @@ const handleToggleAiSettings = () => {
 }
 
 .category-pill:hover {
-  border-color: rgba(64, 158, 255, 0.5);
+  border-color: var(--fy-accent);
   color: #fff;
 }
 
 .category-pill.active {
-  background: rgba(64, 158, 255, 0.2);
-  border-color: var(--el-color-primary, #409eff);
+  background: var(--fy-accent-bg);
+  border-color: var(--fy-accent);
   color: #fff;
-  box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.3);
+  box-shadow: 0 0 0 1px var(--fy-accent-bg-hover);
 }
 
 .category-pill.drag-over {
-  background: rgba(103, 194, 58, 0.18);
-  border-color: rgba(103, 194, 58, 0.8);
+  background: var(--fy-success-bg);
+  border-color: var(--fy-success);
   color: #fff;
-  box-shadow: 0 0 0 1px rgba(103, 194, 58, 0.35);
+  box-shadow: 0 0 0 1px var(--fy-success);
 }
 
 .category-pill.add-category {
   border-style: dashed;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--fy-text-muted);
 }
 
 .category-pill.add-category:hover {
   color: #fff;
-  border-color: rgba(64, 158, 255, 0.6);
+  border-color: var(--fy-accent);
 }
 
 .category-input {
@@ -327,21 +327,21 @@ const handleToggleAiSettings = () => {
 }
 
 .category-input :deep(.el-input__wrapper) {
-  background: rgba(15, 15, 20, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.12);
+  background: var(--fy-bg-surface);
+  border: 1px solid var(--fy-border-light);
+  box-shadow: 0 0 0 1px var(--fy-accent-bg);
   border-radius: 999px;
   padding: 2px 10px;
   transition: all 0.2s ease;
 }
 
 .category-input :deep(.el-input__wrapper.is-focus) {
-  border-color: var(--el-color-primary, #409eff);
-  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+  border-color: var(--fy-accent);
+  box-shadow: 0 0 0 2px var(--fy-accent-bg-hover);
 }
 
 .category-input :deep(.el-input__inner) {
-  color: #e5e7eb;
+  color: var(--fy-text-primary);
   font-size: 12px;
 }
 
@@ -352,13 +352,13 @@ const handleToggleAiSettings = () => {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.7);
+  background: var(--fy-bg-hover);
+  color: var(--fy-text-muted);
   transition: all 0.2s ease;
 }
 
 .category-pill:hover .category-remove {
-  background: rgba(245, 108, 108, 0.2);
-  color: #f56c6c;
+  background: var(--fy-danger-bg);
+  color: var(--fy-danger);
 }
 </style>

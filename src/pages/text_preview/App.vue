@@ -238,7 +238,7 @@ onBeforeUnmount(() => {
 
 .viewer-action-btn {
   background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--fy-border);
   color: white;
   padding: 6px 16px;
   border-radius: 6px;
@@ -252,17 +252,17 @@ onBeforeUnmount(() => {
 
 .viewer-action-btn:hover {
   background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--fy-border-hover);
 }
 
 .viewer-action-btn.primary {
-  background: rgba(64, 158, 255, 0.8);
-  border-color: rgba(64, 158, 255, 0.5);
+  background: var(--fy-accent);
+  border-color: var(--fy-accent-hover);
 }
 
 .viewer-action-btn.primary:hover {
-  background: rgba(64, 158, 255, 1);
-  border-color: rgba(64, 158, 255, 0.8);
+  background: var(--fy-accent-hover);
+  border-color: var(--fy-accent);
 }
 
 .edit-textarea {
@@ -271,7 +271,7 @@ onBeforeUnmount(() => {
   background: transparent;
   border: none;
   outline: none;
-  color: #dcdfe6;
+  color: var(--fy-text-primary);
   font-size: 15px;
   line-height: 1.6;
   font-family: inherit;
@@ -281,9 +281,9 @@ onBeforeUnmount(() => {
 .viewer-card {
   width: calc(100vw - 32px);
   height: calc(100vh - 32px);
-  background: linear-gradient(160deg, rgba(20, 24, 32, 0.95), rgba(12, 14, 20, 0.95));
+  background: var(--fy-container-bg);
   border-radius: 12px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  box-shadow: var(--fy-shadow-lg), 0 0 0 1px var(--fy-container-border);
   display: flex;
   flex-direction: column;
   position: relative;
@@ -313,7 +313,7 @@ onBeforeUnmount(() => {
   padding: 40px;
   padding-top: 60px;
   overflow-y: auto;
-  color: #dcdfe6;
+  color: var(--fy-text-primary);
   font-size: 15px;
   line-height: 1.6;
 }
@@ -329,11 +329,11 @@ onBeforeUnmount(() => {
 }
 
 .viewer-card ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2) !important;
+  background: var(--fy-scrollbar-thumb) !important;
   border-radius: 4px !important;
 }
 
 .viewer-card ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3) !important;
+  background: var(--fy-scrollbar-thumb-hover) !important;
 }
 </style>

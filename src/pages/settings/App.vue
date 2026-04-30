@@ -1,17 +1,41 @@
 <template>
-  <div :class="{ dark: isDark }" class="settings-container">
+  <div class="settings-container">
       <div class="header">
         <div class="header-title">
           <h1>设置中心</h1>
         </div>
         <div class="header-actions">
           <span :class="['autosave-status', `autosave-${autoSaveState}`]">{{ autoSaveText }}</span>
-          <el-button @click="toggleTheme">
-            <template #icon>
-              <component :is="isDark ? Sunny : Moon"/>
+          <el-dropdown trigger="click" @command="changeTheme">
+            <el-button>
+              <template #icon>
+                <component :is="themeIcon"/>
+              </template>
+              {{ themeLabel }}
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="dark">
+                  <el-icon>
+                    <Moon/>
+                  </el-icon>
+                  暗色
+                </el-dropdown-item>
+                <el-dropdown-item command="light">
+                  <el-icon>
+                    <Sunny/>
+                  </el-icon>
+                  亮色
+                </el-dropdown-item>
+                <el-dropdown-item command="eye-care">
+                  <el-icon>
+                    <View/>
+                  </el-icon>
+                  护眼
+                </el-dropdown-item>
+              </el-dropdown-menu>
             </template>
-            {{ isDark ? '白天' : '黑夜' }}
-          </el-button>
+          </el-dropdown>
         </div>
       </div>
 
@@ -106,8 +130,10 @@ import {
   Setting,
   Sunny,
   VideoCamera,
+  View,
   WarningFilled
 } from '@element-plus/icons-vue'
+import {useTheme} from '../../composables/useTheme'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import {listen} from '@tauri-apps/api/event'
 import {AISettingsService, RecordingService} from '../../services/ipc'
@@ -123,8 +149,36 @@ import DeveloperSettings from '@dev/DeveloperSettings'
 
 provideGlobalConfig({locale: zhCn})
 
+// 主题管理
+const {currentTheme, isDark, changeTheme} = useTheme()
+
+const themeIcon = computed(() => {
+  switch (currentTheme.value) {
+    case 'dark':
+      return Moon
+    case 'light':
+      return Sunny
+    case 'eye-care':
+      return View
+    default:
+      return Moon
+  }
+})
+
+const themeLabel = computed(() => {
+  switch (currentTheme.value) {
+    case 'dark':
+      return '暗色'
+    case 'light':
+      return '亮色'
+    case 'eye-care':
+      return '护眼'
+    default:
+      return '暗色'
+  }
+})
+
 const activeTab = ref('clipboard')
-const isDark = ref(false)
 const currentVersion = ref('0.0.0')
 const aiSettingsRef = ref(null)
 const shortcutConflictMessage = ref('')
@@ -250,18 +304,6 @@ const form = reactive({
   imageFillVerifyMode: 'fast',
   ocrEngine: 'ocr-rs'
 })
-
-const toggleTheme = () => {
-  isDark.value = !isDark.value
-  const html = document.documentElement
-  if (isDark.value) {
-    html.classList.add('dark')
-    localStorage.setItem('settings-theme', 'dark')
-  } else {
-    html.classList.remove('dark')
-    localStorage.setItem('settings-theme', 'light')
-  }
-}
 
 const autoSaveText = computed(() => {
   if (autoSaveState.value === 'pending') return '有未保存变更'
@@ -812,13 +854,6 @@ onMounted(async () => {
     window.__SHORTCUT_CONFLICT__ = null
   }
 
-  const savedTheme = localStorage.getItem('settings-theme')
-  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-  if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
-    isDark.value = true
-    document.documentElement.classList.add('dark')
-  }
-
   try {
     const settings = await AISettingsService.getSettings()
 
@@ -939,6 +974,9 @@ body {
   margin: 0;
   font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
   overflow: hidden;
+  background-color: var(--fy-bg-primary);
+  color: var(--fy-text-primary);
+  transition: background-color 0.3s, color 0.3s;
 }
 
 .settings-container {
@@ -966,11 +1004,12 @@ body {
   margin: 0;
   font-size: 24px;
   line-height: 1.2;
+  color: var(--fy-text-primary);
 }
 
 .header-title p {
   margin: 6px 0 0;
-  color: #909399;
+  color: var(--fy-text-muted);
   font-size: 13px;
 }
 
@@ -988,23 +1027,23 @@ body {
 }
 
 .autosave-idle {
-  color: #909399;
+  color: var(--fy-text-muted);
 }
 
 .autosave-pending {
-  color: #e6a23c;
+  color: var(--fy-warning);
 }
 
 .autosave-saving {
-  color: #409eff;
+  color: var(--fy-accent);
 }
 
 .autosave-saved {
-  color: #67c23a;
+  color: var(--fy-success);
 }
 
 .autosave-error {
-  color: #f56c6c;
+  color: var(--fy-danger);
 }
 
 .settings-layout {
@@ -1026,10 +1065,10 @@ body {
 
 .section-nav-item {
   width: 100%;
-  border: 1px solid var(--el-border-color);
+  border: 1px solid var(--fy-border);
   border-radius: 8px;
-  background: #fff;
-  color: #606266;
+  background: var(--fy-bg-surface);
+  color: var(--fy-text-secondary);
   padding: 10px 12px;
   display: flex;
   align-items: center;
@@ -1040,26 +1079,27 @@ body {
 }
 
 .section-nav-item:hover {
-  border-color: var(--el-color-primary-light-5);
-  color: var(--el-color-primary);
+  border-color: var(--fy-border-hover);
+  color: var(--fy-accent);
 }
 
 .section-nav-item.active {
-  border-color: var(--el-color-primary);
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
+  border-color: var(--fy-accent);
+  color: var(--fy-accent);
+  background: var(--fy-accent-bg);
 }
 
 .content {
   flex: 1;
   min-height: 0;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  background: var(--fy-content-bg);
   padding: 22px;
   border-radius: 12px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  border: 1px solid var(--fy-content-border);
+  box-shadow: var(--fy-shadow);
   overflow-y: auto;
   overscroll-behavior: contain;
+  transition: background 0.3s, border-color 0.3s;
 }
 
 .content-header {
@@ -1069,24 +1109,20 @@ body {
 .content-header h2 {
   margin: 0;
   font-size: 20px;
+  color: var(--fy-text-primary);
 }
 
 .content-header p {
   margin: 6px 0 0;
-  color: #909399;
+  color: var(--fy-text-muted);
   font-size: 13px;
 }
 
-.dark .content {
-  background: linear-gradient(180deg, #1d1e1f 0%, #18191a 100%);
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
-}
-
 .content .setting-section-card {
-  border: 1px solid var(--el-border-color-lighter);
+  border: 1px solid var(--fy-border-light);
   border-radius: 12px;
   box-shadow: none;
+  background: var(--fy-bg-card);
 }
 
 .content .setting-section-card + .setting-section-card {
@@ -1095,17 +1131,22 @@ body {
 
 .content .setting-section-card .el-card__header {
   padding: 12px 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-bottom: 1px solid var(--fy-border-light);
+  background: transparent;
+  color: var(--fy-text-primary);
 }
 
 .content .setting-section-card .el-card__body {
   padding: 14px 16px 12px;
+  background: transparent;
+  color: var(--fy-text-primary);
 }
 
 .content .section-title {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.2px;
+  color: var(--fy-text-primary);
 }
 
 .content .el-form-item {
@@ -1115,6 +1156,7 @@ body {
 .content .el-form-item__label {
   font-weight: 600;
   padding-bottom: 6px;
+  color: var(--fy-text-secondary);
 }
 
 .content .el-input,
@@ -1130,26 +1172,10 @@ body {
   margin-top: 6px;
 }
 
-.dark .content .setting-section-card {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.dark .section-nav-item {
-  background: #1d1e1f;
-  border-color: #4c4d4f;
-  color: #cfd3dc;
-}
-
-.dark .section-nav-item.active {
-  border-color: var(--el-color-primary);
-  background: rgba(64, 158, 255, 0.15);
-}
-
 .footer-links {
   margin-top: 14px;
   text-align: center;
-  color: #909399;
+  color: var(--fy-text-muted);
   font-size: 14px;
   flex-shrink: 0;
 }

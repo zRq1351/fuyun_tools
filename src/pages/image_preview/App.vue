@@ -48,7 +48,7 @@
 
 <script setup>
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
-import { GripHorizontal } from 'lucide-vue-next'
+import {GripHorizontal} from 'lucide-vue-next'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {convertFileSrc} from '@tauri-apps/api/core'

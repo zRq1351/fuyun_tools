@@ -352,8 +352,8 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   height: 2px;
-  background: #0a84ff;
-  box-shadow: 0 0 10px #0a84ff, 0 0 20px #0a84ff;
+  background: var(--fy-accent);
+  box-shadow: 0 0 10px var(--fy-accent), 0 0 20px var(--fy-accent);
   animation: scan 1.5s infinite linear;
   pointer-events: none;
   z-index: 2;
@@ -382,7 +382,7 @@ onUnmounted(() => {
   transition: opacity 0.3s;
 }
 .ocr-toast-error {
-  background: rgba(220, 38, 38, 0.85);
+  background: var(--fy-danger);
 }
 
 /* 透明实况文本层 */
@@ -409,7 +409,7 @@ onUnmounted(() => {
 }
 
 .selectable-text::selection {
-  background: rgba(10, 132, 255, 0.4);
+  background: var(--fy-accent-bg);
   color: transparent;
 }
 
@@ -417,15 +417,15 @@ onUnmounted(() => {
 .context-menu {
   position: absolute;
   z-index: 20;
-  background: #2c2c2e;
-  border: 1px solid #3a3a3c;
+  background: var(--fy-bg-surface);
+  border: 1px solid var(--fy-border);
   border-radius: 6px;
   padding: 4px 0;
   min-width: 140px;
   max-height: 100vh;
   overflow-y: auto;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  color: #fff;
+  box-shadow: var(--fy-shadow);
+  color: var(--fy-text-primary);
   font-size: 13px;
 }
 
@@ -436,12 +436,12 @@ onUnmounted(() => {
 }
 
 .menu-item:hover {
-  background: #0a84ff;
+  background: var(--fy-accent);
 }
 
 .menu-divider {
   height: 1px;
-  background: #3a3a3c;
+  background: var(--fy-border);
   margin: 4px 0;
 }
 </style>

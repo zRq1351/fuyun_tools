@@ -1,19 +1,19 @@
 .context-menu {
     position: fixed;
     z-index: 2000;
-    background: rgba(30, 30, 35, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--fy-bg-surface);
+    border: 1px solid var(--fy-border);
     border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--fy-shadow-lg);
     padding: 4px 0;
     min-width: 120px;
-    backdrop-filter: blur(10px);
-    color: #e5e7eb;
+    backdrop-filter: var(--fy-backdrop-blur-light);
+    color: var(--fy-text-primary);
     max-height: min(60vh, 360px);
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+    scrollbar-color: var(--fy-scrollbar-thumb) transparent;
 }
 
 .context-menu::-webkit-scrollbar {
@@ -24,7 +24,7 @@
 
 .context-menu::-webkit-scrollbar-thumb {
     border-radius: 4px;
-    background: rgba(255, 255, 255, 0.28);
+    background: var(--fy-scrollbar-thumb);
 }
 
 .context-menu::-webkit-scrollbar-track {
@@ -34,8 +34,8 @@
 .context-menu-header {
     padding: 4px 12px;
     font-size: 12px;
-    color: #909399;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--fy-text-muted);
+    border-bottom: 1px solid var(--fy-border-light);
     margin-bottom: 4px;
 }
 
@@ -50,14 +50,14 @@
 }
 
 .context-menu-item:hover {
-    background: var(--el-color-primary, #409eff);
+    background: var(--fy-accent);
     color: #fff;
 }
 
 .context-menu-divider {
     height: 1px;
     margin: 4px 0;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--fy-border-light);
 }
 
 .shortcut-hint {

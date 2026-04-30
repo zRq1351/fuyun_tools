@@ -261,7 +261,7 @@ const validatePrompt = (item) => {
 <style scoped>
 .form-hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--fy-text-muted);
   margin-top: 4px;
 }
 
@@ -275,7 +275,7 @@ const validatePrompt = (item) => {
 }
 
 .custom-prompt-item {
-  border: 1px solid var(--el-border-color-light);
+  border: 1px solid var(--fy-border-light);
   border-radius: 8px;
   padding: 12px;
   margin-bottom: 12px;
@@ -305,11 +305,11 @@ const validatePrompt = (item) => {
   align-items: center;
   margin-top: 6px;
   padding: 6px 10px;
-  background-color: #fdf6ec;
+  background-color: var(--fy-warning);
   border: 1px solid #f5dab1;
   border-radius: 4px;
   font-size: 12px;
-  color: #e6a23c;
+  color: var(--fy-warning);
   line-height: 1.5;
 }
 
@@ -337,18 +337,18 @@ const validatePrompt = (item) => {
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: #606266;
+  color: var(--fy-text-secondary);
 }
 
 .icon-picker-item:hover {
-  background-color: #f5f7fa;
-  color: #409EFF;
+  background-color: var(--fy-bg-surface);
+  color: var(--fy-accent);
 }
 
 .icon-picker-item.selected {
-  background-color: #ecf5ff;
-  color: #409EFF;
-  border: 1px solid #409EFF;
+  background-color: var(--fy-accent-bg);
+  color: var(--fy-accent);
+  border: 1px solid var(--fy-accent);
 }
 
 .preview-button-wrapper {
@@ -373,7 +373,7 @@ const validatePrompt = (item) => {
 .preview-button:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.1));
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.2), var(--fy-border-light));
 }
 
 .preview-button:active {

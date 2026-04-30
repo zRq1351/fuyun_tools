@@ -157,7 +157,7 @@ watch(() => props.content, (newVal) => {
 .formatted-content {
   font-size: 13px;
   line-height: 1.5;
-  color: #dcdfe6;
+  color: var(--fy-text-primary);
   width: 100%;
 }
 
@@ -192,7 +192,7 @@ watch(() => props.content, (newVal) => {
   margin-bottom: 0;
 }
 .markdown-body :deep(a) {
-  color: var(--el-color-primary, #409eff);
+  color: var(--fy-accent);
   text-decoration: none;
 }
 .markdown-body :deep(ul),
@@ -202,13 +202,13 @@ watch(() => props.content, (newVal) => {
   padding-left: 20px;
 }
 .markdown-body :deep(code) {
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: var(--fy-bg-hover);
   padding: 2px 4px;
   border-radius: 4px;
   font-family: monospace;
 }
 .markdown-body :deep(pre) {
-  background-color: rgba(0, 0, 0, 0.3);
+  background-color: var(--fy-bg-surface);
   padding: 8px;
   border-radius: 6px;
   overflow-x: auto;
@@ -222,14 +222,14 @@ watch(() => props.content, (newVal) => {
 .markdown-body :deep(blockquote) {
   margin: 0 0 8px 0;
   padding-left: 10px;
-  border-left: 3px solid rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.6);
+  border-left: 3px solid var(--fy-border-light);
+  color: var(--fy-text-muted);
 }
 
 /* Code specific styles */
 pre {
   margin: 0;
-  background-color: rgba(0, 0, 0, 0.3);
+  background-color: var(--fy-bg-surface);
   padding: 8px;
   border-radius: 6px;
   overflow-x: auto;

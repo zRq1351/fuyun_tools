@@ -182,7 +182,7 @@ onMounted(async () => {
 <style scoped>
 .form-hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--fy-text-muted);
   margin-top: 4px;
 }
 
@@ -199,16 +199,16 @@ onMounted(async () => {
 }
 
 .setting-group {
-  border: 1px solid var(--el-border-color-lighter);
+  border: 1px solid var(--fy-border-light);
   border-radius: 10px;
   padding: 12px 12px 6px;
-  background: var(--el-bg-color);
+  background: var(--fy-bg-primary);
 }
 
 .group-title {
   font-size: 13px;
   font-weight: 700;
-  color: var(--el-text-color-secondary);
+  color: var(--fy-text-muted);
   margin-bottom: 10px;
 }
 
@@ -244,7 +244,7 @@ onMounted(async () => {
 }
 
 .recording :deep(.el-input__inner) {
-  color: #f56c6c !important;
+  color: var(--fy-danger) !important;
 }
 
 @media (max-width: 900px) {

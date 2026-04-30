@@ -228,7 +228,7 @@ onUnmounted(() => {
 .overview-label,
 .item-summary,
 .checked-at {
-  color: var(--el-text-color-secondary);
+  color: var(--fy-text-muted);
 }
 
 .overview-value {

@@ -543,25 +543,25 @@ html, body, #app {
   -webkit-app-region: drag;
   width: 32px;
   height: 32px;
-  background: linear-gradient(145deg, rgba(28, 35, 48, 0.98), rgba(18, 22, 32, 0.98));
+  background: var(--fy-bg-primary);
   border-radius: 50%;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--fy-border-light) inset;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--fy-border);
   transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, background 0.2s ease;
 }
 
 .mini-icon:hover {
   transform: scale(1.1);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.15) inset;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--fy-border) inset;
 }
 
 .magic-icon {
   font-size: 18px;
-  color: #eef3ff;
+  color: var(--fy-text-primary);
   transition: transform 0.2s ease;
 }
 
@@ -579,12 +579,12 @@ html, body, #app {
 .toolbar.active {
   opacity: 1;
   pointer-events: auto;
-  background: linear-gradient(145deg, rgba(28, 35, 48, 0.95), rgba(18, 22, 32, 0.95));
-  backdrop-filter: blur(8px);
+  background: var(--fy-bg-primary);
+  backdrop-filter: var(--fy-backdrop-blur-light);
   border-radius: 12px;
   padding: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 0 1px var(--fy-border-light) inset;
+  border: 1px solid var(--fy-border-light);
   display: flex;
   flex-direction: row;
   gap: 2px;
@@ -612,7 +612,7 @@ html, body, #app {
 .toolbar-button {
   background: transparent;
   border: none;
-  color: #eef3ff;
+  color: var(--fy-text-primary);
   width: 56px;
   height: 42px;
   border-radius: 8px;
@@ -668,7 +668,7 @@ html, body, #app {
 }
 
 .translate-btn {
-  color: #7be682;
+  color: var(--fy-success);
   background: linear-gradient(145deg, rgba(82, 165, 112, 0.22), rgba(44, 96, 65, 0.2));
 }
 .translate-btn:hover {
@@ -676,7 +676,7 @@ html, body, #app {
 }
 
 .explain-btn {
-  color: #72b7ff;
+  color: var(--fy-accent);
   background: linear-gradient(145deg, rgba(84, 148, 230, 0.22), rgba(44, 83, 150, 0.2));
 }
 .explain-btn:hover {
@@ -684,7 +684,7 @@ html, body, #app {
 }
 
 .copy-btn {
-  color: #f2c06d;
+  color: var(--fy-warning);
   background: linear-gradient(145deg, rgba(209, 152, 61, 0.22), rgba(133, 89, 35, 0.2));
 }
 .copy-btn:hover {
@@ -692,7 +692,7 @@ html, body, #app {
 }
 
 .search-btn {
-  color: #a78bfa;
+  color: var(--fy-info);
   background: linear-gradient(145deg, rgba(167, 139, 250, 0.22), rgba(109, 40, 217, 0.2));
 }
 .search-btn:hover {

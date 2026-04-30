@@ -2002,11 +2002,11 @@ watch([searchKeyword, categoryFilter], () => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(160deg, rgba(20, 24, 32, 0.72), rgba(12, 14, 20, 0.66));
-  backdrop-filter: blur(22px) saturate(140%);
-  -webkit-backdrop-filter: blur(22px) saturate(140%);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 10px 28px rgba(0, 0, 0, 0.26);
+  background: var(--fy-container-bg);
+  backdrop-filter: var(--fy-backdrop-blur);
+  -webkit-backdrop-filter: var(--fy-backdrop-blur);
+  border: 1px solid var(--fy-container-border);
+  box-shadow: var(--fy-shadow-inset), var(--fy-shadow);
   overflow: hidden;
   outline: none;
 }
@@ -2020,7 +2020,7 @@ watch([searchKeyword, categoryFilter], () => {
   justify-content: center;
   align-items: center;
   height: 100%;
-  color: #fff;
+  color: var(--fy-text-primary);
 }
 
 .status-footer {
@@ -2045,7 +2045,7 @@ watch([searchKeyword, categoryFilter], () => {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: rgba(233, 244, 255, 0.92);
+  color: var(--fy-text-primary);
 }
 
 .status-label {
@@ -2062,7 +2062,7 @@ watch([searchKeyword, categoryFilter], () => {
 .status-meta {
   flex: 0 1 auto;
   min-width: 0;
-  color: rgba(166, 213, 255, 0.88);
+  color: var(--fy-text-accent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2078,9 +2078,9 @@ watch([searchKeyword, categoryFilter], () => {
 
 .nav-action-btn {
   appearance: none;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--fy-border-light);
   background: transparent;
-  color: #f1f7ff;
+  color: var(--fy-text-primary);
   border-radius: 7px;
   font-size: 12px;
   line-height: 1;
@@ -2108,14 +2108,14 @@ watch([searchKeyword, categoryFilter], () => {
 }
 
 .nav-action-btn:hover {
-  border-color: rgba(127, 194, 255, 0.5);
-  background: linear-gradient(135deg, rgba(28, 36, 52, 0.9), rgba(35, 45, 63, 0.84));
+  border-color: var(--fy-border-hover);
+  background: var(--fy-bg-hover);
   color: #ffffff;
-  box-shadow: 0 0 0 1px rgba(127, 194, 255, 0.18);
+  box-shadow: 0 0 0 1px var(--fy-border-hover);
 }
 
 .nav-action-btn:focus-visible {
-  outline: 2px solid rgba(180, 226, 255, 0.95);
+  outline: 2px solid var(--fy-accent-light);
   outline-offset: 2px;
 }
 

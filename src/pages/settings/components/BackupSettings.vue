@@ -477,7 +477,7 @@ onUnmounted(() => {
 }
 
 .metric-label {
-  color: var(--el-text-color-secondary);
+  color: var(--fy-text-muted);
   font-size: 12px;
 }
 
@@ -505,7 +505,7 @@ onUnmounted(() => {
 }
 
 .status-text {
-  color: var(--el-text-color-secondary);
+  color: var(--fy-text-muted);
   margin-top: 8px;
 }
 
@@ -535,7 +535,7 @@ onUnmounted(() => {
 
 .history-meta {
   margin-top: 6px;
-  color: var(--el-text-color-secondary);
+  color: var(--fy-text-muted);
   font-size: 12px;
 }
 

@@ -74,7 +74,7 @@ const resetScreenshotRecording = () => {
 <style scoped>
 .form-hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--fy-text-muted);
   margin-top: 4px;
 }
 
@@ -99,6 +99,6 @@ const resetScreenshotRecording = () => {
 }
 
 .recording :deep(.el-input__inner) {
-  color: #f56c6c !important;
+  color: var(--fy-danger) !important;
 }
 </style>

@@ -387,7 +387,7 @@ defineExpose({
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--fy-bg-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -398,7 +398,7 @@ defineExpose({
 }
 
 .preview-btn:hover {
-  background: var(--el-color-primary, #409eff);
+  background: var(--fy-accent-hover);
 }
 
 .preview-btn .el-icon {
@@ -430,7 +430,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: rgba(166, 213, 255, 0.9);
+  color: var(--fy-text-accent);
   user-select: none;
   pointer-events: none;
 }
@@ -447,12 +447,12 @@ defineExpose({
 
 .load-more-tail-spinner {
   font-size: 16px;
-  color: rgba(220, 240, 255, 0.95);
+  color: var(--fy-text-accent);
 }
 
 .clipboard-item {
-  background: rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--fy-bg-secondary);
+  border: 1px solid var(--fy-border);
   border-radius: 8px;
   padding: 12px;
   cursor: pointer;
@@ -463,7 +463,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
   backdrop-filter: blur(10px);
-  color: white;
+  color: var(--fy-text-primary);
   transition: all 0.3s ease;
   box-sizing: border-box;
   /* 优化：限制重排重绘范围 */
@@ -472,9 +472,9 @@ defineExpose({
 }
 
 .clipboard-item:hover, .clipboard-item.selected {
-  background: rgba(0, 0, 0, 0.8);
-  border-color: var(--el-color-primary, #409eff);
-  box-shadow: 0 0 15px rgba(64, 158, 255, 0.5);
+  background: var(--fy-bg-hover);
+  border-color: var(--fy-accent);
+  box-shadow: 0 0 15px var(--fy-accent-bg);
 }
 
 .clipboard-item.selected {
@@ -488,7 +488,7 @@ defineExpose({
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--fy-bg-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -505,7 +505,7 @@ defineExpose({
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--fy-bg-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -522,9 +522,9 @@ defineExpose({
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--fy-border-light);
+  background: var(--fy-bg-overlay);
+  color: var(--fy-text-secondary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -536,9 +536,9 @@ defineExpose({
 }
 
 .pin-btn:hover {
-  border-color: var(--el-color-primary, #409eff);
-  color: #fff;
-  background: var(--el-color-primary, #409eff);
+  border-color: var(--fy-accent);
+  color: var(--fy-text-primary);
+  background: var(--fy-accent);
 }
 
 .open-btn .el-icon {
@@ -555,13 +555,13 @@ defineExpose({
 
 .pin-btn.active {
   opacity: 1;
-  background: rgba(247, 185, 85, 0.75);
-  color: #fff6d1;
-  border: 1px solid rgba(247, 185, 85, 0.9);
+  background: var(--fy-accent-bg-hover);
+  color: var(--fy-text-primary);
+  border: 1px solid var(--fy-accent);
 }
 
 .open-btn:hover {
-  background: var(--el-color-primary, #409eff);
+  background: var(--fy-accent-hover);
 }
 
 .delete-btn .el-icon {
@@ -580,16 +580,16 @@ defineExpose({
   position: absolute;
   top: 5px;
   left: 5px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--fy-bg-overlay);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 12px;
-  color: #909399;
+  color: var(--fy-text-muted);
 }
 
 .clipboard-item:hover .index, .clipboard-item.selected .index {
-  background: var(--el-color-primary, #409eff);
-  color: #fff;
+  background: var(--fy-accent);
+  color: var(--fy-text-primary);
 }
 
 .category-wrap {
@@ -610,9 +610,9 @@ defineExpose({
   max-width: 100%;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.85);
+  background: var(--fy-bg-overlay);
+  border: 1px solid var(--fy-border-light);
+  color: var(--fy-text-secondary);
   font-size: 12px;
   text-align: center;
   white-space: nowrap;
@@ -633,7 +633,7 @@ defineExpose({
   -ms-overflow-style: none;
   font-size: 13px;
   line-height: 1.5;
-  color: #dcdfe6;
+  color: var(--fy-text-secondary);
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -645,10 +645,10 @@ defineExpose({
 .item-snippet {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.14);
+  border-top: 1px dashed var(--fy-border-light);
   font-size: 12px;
   line-height: 1.4;
-  color: rgba(166, 213, 255, 0.9);
+  color: var(--fy-text-accent);
   white-space: pre-wrap;
   word-break: break-all;
   max-height: 52px;
@@ -656,8 +656,8 @@ defineExpose({
 }
 
 .snippet-hit {
-  background: rgba(247, 185, 85, 0.35);
-  color: #fff2c2;
+  background: var(--fy-accent-bg);
+  color: var(--fy-text-primary);
   border-radius: 2px;
   padding: 0 1px;
 }

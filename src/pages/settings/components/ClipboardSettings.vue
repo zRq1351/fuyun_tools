@@ -408,7 +408,7 @@ onUnmounted(() => {
 <style scoped>
 .form-hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--fy-text-muted);
   margin-top: 4px;
 }
 
@@ -445,7 +445,7 @@ onUnmounted(() => {
 }
 
 .management-item {
-  border: 1px solid var(--el-border-color-lighter);
+  border: 1px solid var(--fy-border-light);
   border-radius: 10px;
   padding: 10px 12px;
 }
@@ -458,18 +458,20 @@ onUnmounted(() => {
   font-size: 14px;
   font-weight: 700;
   margin-bottom: 2px;
+  color: var(--fy-text-primary);
 }
 
 .section-title {
   font-size: 15px;
   font-weight: 600;
+  color: var(--fy-text-primary);
 }
 
 .setting-group {
-  border: 1px solid var(--el-border-color-lighter);
+  border: 1px solid var(--fy-border-light);
   border-radius: 10px;
   padding: 12px 12px 6px;
-  background: var(--el-bg-color);
+  background: var(--fy-bg-card);
 }
 
 .group-grid {
@@ -500,22 +502,28 @@ onUnmounted(() => {
   margin-bottom: 12px;
 }
 
+.setting-group :deep(.el-form-item__label) {
+  color: var(--fy-text-secondary);
+}
+
 .recording :deep(.el-input__inner) {
-  color: #f56c6c !important;
+  color: var(--fy-danger) !important;
 }
 
 .metrics-card {
   width: 100%;
   box-sizing: border-box;
   padding: 10px 12px;
-  border: 1px solid var(--el-border-color-light);
+  border: 1px solid var(--fy-border-light);
   border-radius: 6px;
   overflow: hidden;
+  background: var(--fy-bg-surface);
 }
 
 .metrics-line {
   font-size: 12px;
   line-height: 20px;
+  color: var(--fy-text-secondary);
 }
 
 .metrics-card :deep(.el-progress) {
@@ -525,7 +533,7 @@ onUnmounted(() => {
 
 .metrics-meta {
   margin-left: 10px;
-  color: #909399;
+  color: var(--fy-text-muted);
   font-size: 12px;
 }
 
