@@ -3,7 +3,7 @@ use crate::core::error::{to_frontend_error_string, AppError, AppResult, ErrorCod
 use crate::core::perf_metrics::record_perf_metric;
 use crate::features;
 use crate::services::image_clipboard_manager::emit_image_history_payload;
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands_screenshot::open_screenshot_editor;
 use crate::ui::commands_writeback::{
     begin_fill_sequence, interrupt_image_fill_flow, interrupt_text_fill_flow,
@@ -190,10 +190,6 @@ pub async fn open_image_preview_window_by_id(
                 e.to_string(),
             )
         })?
-}
-
-pub(crate) fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|never| match never {})
 }
 
 pub(crate) fn is_screenshot_feature_enabled(state: &Arc<Mutex<SharedAppState>>) -> bool {
@@ -862,8 +858,8 @@ pub async fn get_clipboard_history_page(
 ) -> Result<ClipboardHistoryPageData, String> {
     let started_at = std::time::Instant::now();
     let history_items = {
-        let state_guard = crate::utils::clipboard::lock_arc_mutex(&state);
-        let manager = crate::utils::clipboard::lock_arc_mutex(&state_guard.clipboard_manager);
+        let state_guard = lock_arc_mutex(&state);
+        let manager = lock_arc_mutex(&state_guard.clipboard_manager);
         manager.get_history()
     };
     if let Err(e) = crate::utils::database::save_history_items_only_async(&history_items).await {

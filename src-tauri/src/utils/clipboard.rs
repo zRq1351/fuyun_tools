@@ -1,4 +1,4 @@
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
 use bloom::{BloomFilter, ASMS};
 use lru::LruCache;
 use parking_lot::Condvar as ParkingCondvar;
@@ -41,10 +41,6 @@ const LONG_TEXT_DEDUP_SCAN_LIMIT: usize = 24;
 const EXACT_INDEX_CACHE_CAPACITY: usize = 2048;
 const BLOOM_FILTER_CAPACITY: u32 = 10000;
 const BLOOM_FILTER_ERROR_RATE: f32 = 0.01; // 1% 误判率
-
-pub fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
-    mutex.lock().unwrap()
-}
 
 fn stable_text_hash(text: &str) -> u64 {
     xxh3_64(text.as_bytes())

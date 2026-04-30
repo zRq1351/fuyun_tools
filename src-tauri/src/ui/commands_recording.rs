@@ -1,4 +1,4 @@
-use crate::core::app_state::SharedAppState;
+use crate::core::app_state::AppState as SharedAppState;
 use crate::core::error::to_frontend_error_string;
 use crate::core::perf_metrics::record_perf_metric;
 use crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path;
@@ -720,7 +720,7 @@ pub async fn resize_recording_toolbar(
             }
 
             if let Ok(hwnd) = window.hwnd() {
-                use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOP, SWP_NOZORDER, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE};
+                use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER};
                 
                 let mut flags = SWP_NOZORDER | SWP_NOACTIVATE;
                 if new_x.is_none() {
@@ -818,7 +818,7 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
     log::info!("麦克风快捷键{}（目标状态：{}）", key_state, enable);
 
     let state_arc = {
-        let app_state = app.state::<Arc<Mutex<crate::core::app_state::SharedAppState>>>();
+        let app_state = app.state::<Arc<Mutex<SharedAppState>>>();
         app_state.inner().clone()
     };
 

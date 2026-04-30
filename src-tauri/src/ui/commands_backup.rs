@@ -1,8 +1,7 @@
 use crate::core::app_state::AppState as SharedAppState;
 use crate::core::perf_metrics::record_perf_metric;
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands::{now_unix_ms, AUTO_BACKUP_IN_FLIGHT, BACKUP_JOB_MUTEX};
-use crate::ui::commands_clipboard::lock_arc_mutex;
 use crate::utils::backup_archive::{
     cleanup_dir, create_backup_temp_dir, read_manifest_from_package, write_backup_payload,
     zip_backup_dir,

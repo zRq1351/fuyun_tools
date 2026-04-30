@@ -1,5 +1,5 @@
 use crate::features::screenshot::capture;
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
 use log;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -89,10 +89,6 @@ fn hook_event_sender() -> &'static StdMutex<Option<Sender<HookEvent>>> {
 
 #[cfg(target_os = "windows")]
 static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
-
-fn lock_arc_mutex<'a, T>(mutex: &'a Arc<Mutex<T>>) -> crate::sync::MutexGuard<'a, T> {
-    mutex.lock().unwrap()
-}
 
 fn notify_detection_pending() {
     let (lock, cvar) = &*GLOBAL_STATE.detection_notify;

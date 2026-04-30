@@ -1,5 +1,5 @@
 use crate::services::clipboard_wakeup::subscribe_clipboard_wake_events;
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::window_manager::{release_ctrl_key_with_fallback, ENIGO_INSTANCE};
 use crate::utils::clipboard::ClipboardManager;
 use enigo::{Enigo, Keyboard, Settings};
@@ -48,13 +48,13 @@ const INITIAL_DELAY: Duration = Duration::from_millis(10);
 
 use crate::core::app_state::AppState as SharedAppState;
 use crate::core::config::{CTRL_KEY, C_KEY};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::image::Image;
 use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 #[cfg(target_os = "windows")]
 use winapi::um::winuser::GetClipboardSequenceNumber;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 static MANUAL_CTRL_C_TIME: AtomicU64 = AtomicU64::new(0);
 static ALLOW_CLIPBOARD_LISTENER_DURING_SELECTION: AtomicBool = AtomicBool::new(false);
@@ -72,10 +72,6 @@ pub fn should_allow_clipboard_listener() -> bool {
 
 pub fn clear_manual_copy_flag() {
     ALLOW_CLIPBOARD_LISTENER_DURING_SELECTION.store(false, Ordering::SeqCst);
-}
-
-fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap()
 }
 
 struct SelectionProcessingGuard {

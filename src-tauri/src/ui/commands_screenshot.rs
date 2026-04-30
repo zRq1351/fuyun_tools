@@ -2,7 +2,7 @@ use crate::core::app_state::AppState as SharedAppState;
 use crate::core::error::ErrorCode;
 use crate::core::perf_metrics::{record_perf_metric, timed_sync};
 use crate::features;
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands::{
     bind_screenshot_window_lifecycle,
     cleanup_all_screenshot_boot_images,
@@ -10,7 +10,7 @@ use crate::ui::commands::{
     ManualLongshotSessionRequest, NEXT_PINNED_IMAGE_WINDOW_ID,
     NEXT_SCREENSHOT_SESSION_ID, SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW,
 };
-use crate::ui::commands_clipboard::{frontend_error, get_image_clipboard_manager_arc, is_screenshot_feature_enabled, lock_arc_mutex};
+use crate::ui::commands_clipboard::{frontend_error, get_image_clipboard_manager_arc, is_screenshot_feature_enabled};
 use crate::ui::commands_screenshot_render::{export_screenshot_image, render_screenshot_image, ScreenshotExportRequest};
 use crate::ui::window_manager::{
     bind_overlay_window_events, focus_overlay_window_by_label, hide_overlay_window_by_label,

@@ -1,6 +1,6 @@
 use crate::core::app_state::{AppState, ForegroundTargetSnapshot, OverlayLifecycleRecord};
 use crate::core::config::{CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN, CTRL_KEY};
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
 use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex};
 use std::thread;
 use std::time::Duration;
@@ -24,10 +24,6 @@ pub static ENIGO_INSTANCE: LazyLock<Arc<Mutex<Option<enigo::Enigo>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
 static WINDOW_VISIBILITY_NOTIFY: LazyLock<Arc<(StdMutex<u64>, Condvar)>> =
     LazyLock::new(|| Arc::new((StdMutex::new(0), Condvar::new())));
-
-fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap()
-}
 
 fn notify_window_visibility_changed() {
     let (lock, cvar) = &**WINDOW_VISIBILITY_NOTIFY;
@@ -218,16 +214,6 @@ pub fn show_standard_window_by_label(app_handle: &AppHandle, label: &str) -> Res
     window
         .set_focus()
         .map_err(|e| format!("设置窗口焦点失败 {}: {}", label, e))?;
-    Ok(())
-}
-
-pub fn hide_standard_window_by_label(app_handle: &AppHandle, label: &str) -> Result<(), String> {
-    let window = app_handle
-        .get_webview_window(label)
-        .ok_or_else(|| format!("窗口不存在: {}", label))?;
-    window
-        .hide()
-        .map_err(|e| format!("隐藏窗口失败 {}: {}", label, e))?;
     Ok(())
 }
 
@@ -1199,26 +1185,4 @@ fn position_result_window_near_toolbar(window: &tauri::WebviewWindow, app: &AppH
     x = x.clamp(min_x, max_x.max(min_x));
     let clamped_y = y.clamp(min_y, max_y.max(min_y));
     let _ = window.set_position(tauri::PhysicalPosition::new(x, clamped_y));
-}
-
-/// 更新结果窗口
-pub async fn update_result_window(
-    content: String,
-    window_type: String,
-    app: AppHandle,
-) -> Result<(), String> {
-    let window_label = format!("result_{}", window_type);
-    if let Some(window) = app.get_webview_window(&window_label) {
-        let payload = serde_json::json!({
-            "type": window_type,
-            "content": content
-        });
-        match window.emit("result-update", payload) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(format!("发送数据失败: {}", e)),
-        }
-    } else {
-        log::error!("{}窗口不存在", &window_type);
-        Err("窗口不存在".to_string())
-    }
 }

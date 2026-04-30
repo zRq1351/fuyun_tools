@@ -1,4 +1,4 @@
-use crate::core::app_state::SharedAppState;
+use crate::core::app_state::AppState as SharedAppState;
 use crate::core::error::{AppError, ErrorCode};
 use crate::core::perf_metrics::record_perf_metric;
 use crate::features::recording::audio_device::list_microphones;
@@ -26,7 +26,7 @@ use crate::features::recording::wgc_capture::{
     is_force_default_dirty_region_enabled, is_item_convert_failed, start_window_capture_to_mp4,
     validate_window_capture_target,
 };
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
 use crate::utils::system_utils::save_settings;
 use std::collections::HashSet;
 use std::fs;
@@ -50,10 +50,6 @@ use winapi::um::winuser::{
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 static LAST_OPEN_FOLDER_MS: AtomicU64 = AtomicU64::new(0);
 const VIDEO_IO_RETRY_DELAYS_MS: [u64; 5] = [60, 120, 240, 480, 800];
-
-fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap()
-}
 
 fn suppress_console_window(command: &mut Command) -> &mut Command {
     #[cfg(target_os = "windows")]

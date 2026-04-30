@@ -4,7 +4,6 @@ pub mod backup_restore;
 pub mod clipboard;
 pub mod database;
 pub mod image_clipboard;
-pub mod image_process;
 pub mod image_store;
 pub mod settings_model;
 pub mod system_utils;

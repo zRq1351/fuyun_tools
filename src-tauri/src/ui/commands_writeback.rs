@@ -1,12 +1,12 @@
 use crate::core::app_state::AppState as SharedAppState;
 use crate::core::perf_metrics::record_perf_metric;
-use crate::sync::Mutex;
-use crate::ui::commands_clipboard::{lock_arc_mutex, recompute_selection_related_flags};
+use crate::sync::{lock_arc_mutex, Mutex};
+use crate::ui::commands_clipboard::recompute_selection_related_flags;
 use crate::utils::image_clipboard::is_fast_fill_verify_mode_enabled;
 use serde::Serialize;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, OnceLock};
 use std::sync::Mutex as StdMutex;
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};

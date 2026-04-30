@@ -5,10 +5,13 @@ use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
 use crate::services::clipboard_manager::set_clipboard_listener_enabled;
 use crate::services::image_clipboard_manager::set_image_clipboard_listener_enabled;
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
+use crate::ui::commands_clipboard::*;
 use crate::ui::commands_recording::{
     toggle_microphone_from_shortcut, toggle_recording_from_shortcut,
 };
+use crate::ui::commands_screenshot::close_screenshot_window;
+use crate::ui::commands_writeback::{emit_writeback_phase, emit_writeback_result, record_writeback_stage_metric, simulate_paste_with_retry, WriteBackExecutionResult};
 use crate::ui::tray_menu::open_settings;
 use crate::ui::window_manager::{
     bind_overlay_window_events, hide_overlay_window_by_label, show_overlay_window_by_label,
@@ -24,17 +27,14 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::OnceLock;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use xxhash_rust::xxh3::xxh3_64;
-use crate::ui::commands_screenshot::close_screenshot_window;
-use crate::ui::commands_clipboard::*;
-use crate::ui::commands_writeback::{WriteBackExecutionResult, simulate_paste_with_retry, emit_writeback_phase, record_writeback_stage_metric, emit_writeback_result};
 
 pub(crate) static NEXT_SCREENSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 pub(crate) static NEXT_PINNED_IMAGE_WINDOW_ID: AtomicU64 = AtomicU64::new(1);

@@ -1,5 +1,5 @@
 use crate::core::app_state::{AppState, TrayMenuItems};
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::window_manager::{cleanup_enigo_instance, show_standard_window_by_label};
 #[cfg(debug_assertions)]
 use crate::utils::utils_helpers::get_logs_dir_path;
@@ -12,10 +12,6 @@ use tauri::{menu::CheckMenuItemBuilder, AppHandle};
 use tauri_plugin_autostart::ManagerExt;
 #[cfg(debug_assertions)]
 use tauri_plugin_opener::OpenerExt;
-
-fn lock_arc_mutex<T>(mutex: &Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap()
-}
 
 /// 重建托盘菜单
 pub fn rebuild_tray_menu(app_handle: &AppHandle, state: Arc<Mutex<AppState>>) {

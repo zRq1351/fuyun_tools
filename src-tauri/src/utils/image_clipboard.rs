@@ -1,4 +1,4 @@
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
 use crate::utils::image_store;
 use crate::utils::utils_helpers::atomic_write_with_backup;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -68,10 +68,6 @@ pub type ClipboardImagePayload = (Vec<u8>, u32, u32, Option<(Vec<u8>, String)>);
 static IMAGE_PERSIST_QUEUE_FULL_COUNT: AtomicU64 = AtomicU64::new(0);
 static IMAGE_PERSIST_QUEUE_TIMEOUT_DROP_COUNT: AtomicU64 = AtomicU64::new(0);
 static IMAGE_PERSIST_QUEUE_WAIT_MS_TOTAL: AtomicU64 = AtomicU64::new(0);
-
-fn lock_arc_mutex<T>(mutex: &'_ Arc<Mutex<T>>) -> crate::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap()
-}
 
 fn push_persist_task_with_timeout(
     persist_tx: &SyncSender<PersistTask>,

@@ -134,6 +134,3 @@ impl Default for AppState {
         }
     }
 }
-
-/// 共享应用程序状态别名
-pub type SharedAppState = AppState;
