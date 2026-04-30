@@ -3381,9 +3381,9 @@ function handleKeyDown(event) {
 .region-icon-btn {
   width: 32px;
   height: 32px;
-  border: 1px solid rgba(255, 255, 255, 0.24);
-  background: rgba(22, 26, 36, 0.76);
-  color: #edf2ff;
+  border: 1px solid var(--fy-border);
+  background: var(--fy-bg-surface);
+  color: var(--fy-text-primary);
   border-radius: 8px;
   display: flex;
   align-items: center;
@@ -3394,18 +3394,18 @@ function handleKeyDown(event) {
 }
 
 .region-icon-btn:hover {
-  background: rgba(46, 54, 72, 0.88);
+  background: var(--fy-bg-hover);
 }
 
 .region-icon-btn.primary {
-  background: rgba(64, 158, 255, 0.22);
-  border-color: rgba(64, 158, 255, 0.72);
-  color: #fff;
+  background: var(--fy-accent-bg);
+  border-color: var(--fy-accent);
+  color: var(--fy-text-inverse);
 }
 
 .region-icon-btn.danger {
-  background: rgba(245, 108, 108, 0.15);
-  border-color: rgba(245, 108, 108, 0.52);
+  background: var(--fy-danger-bg);
+  border-color: var(--fy-danger);
 }
 
 .manual-longshot-hint {
@@ -3413,14 +3413,14 @@ function handleKeyDown(event) {
   left: 16px;
   bottom: 16px;
   z-index: 2101;
-  background: rgba(18, 24, 35, 0.86);
-  border: 1px solid rgba(100, 163, 255, 0.45);
-  color: #e5efff;
+  background: var(--fy-bg-overlay);
+  border: 1px solid var(--fy-border);
+  color: var(--fy-text-primary);
   font-size: 12px;
   line-height: 1.4;
   border-radius: 8px;
   padding: 8px 10px;
-  backdrop-filter: blur(3px);
+  backdrop-filter: var(--fy-backdrop-blur-light);
   max-width: min(620px, calc(100vw - 32px));
 }
 
@@ -3528,7 +3528,7 @@ function handleKeyDown(event) {
 }
 
 .cutout-border.is-active {
-  border: 2px solid #00aaff;
+  border: 2px solid var(--fy-accent);
 }
 
 .cutout.longshot-running .cutout-border {
@@ -3540,8 +3540,8 @@ function handleKeyDown(event) {
   position: absolute;
   top: -25px;
   left: 0;
-  background: rgba(0, 0, 0, 0.8);
-  color: white;
+  background: var(--fy-bg-overlay);
+  color: var(--fy-text-primary);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 12px;
@@ -3553,8 +3553,8 @@ function handleKeyDown(event) {
   position: absolute;
   width: 10px;
   height: 10px;
-  background: #00aaff;
-  border: 1px solid white;
+  background: var(--fy-accent);
+  border: 1px solid var(--fy-text-inverse);
   border-radius: 50%;
   transform: translate(-50%, -50%);
   z-index: 10;
@@ -3620,8 +3620,8 @@ function handleKeyDown(event) {
   left: 0;
   right: 0;
   bottom: 0;
-  border: 2px solid #00aaff;
-  background: rgba(0, 170, 255, 0.1);
+  border: 2px solid var(--fy-accent);
+  background: var(--fy-accent-bg);
 }
 
 .window-label {
@@ -3642,15 +3642,15 @@ function handleKeyDown(event) {
 /* 工具栏 */
 .floating-toolbar {
   position: absolute;
-  background: #2d2d2d;
-  border: 1px solid #404040;
+  background: var(--fy-bg-surface);
+  border: 1px solid var(--fy-border);
   border-radius: 6px;
   padding: 4px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   z-index: 1000;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--fy-shadow);
 }
 
 .tools-row {
@@ -3664,7 +3664,7 @@ function handleKeyDown(event) {
   height: 30px;
   border: none;
   background: transparent;
-  color: #ccc;
+  color: var(--fy-text-secondary);
   border-radius: 4px;
   cursor: pointer;
   display: flex;
@@ -3675,13 +3675,13 @@ function handleKeyDown(event) {
 }
 
 .tool-btn:hover {
-  background: #404040;
-  color: white;
+  background: var(--fy-bg-hover);
+  color: var(--fy-text-primary);
 }
 
 .tool-btn.active {
-  background: #0066cc;
-  color: white;
+  background: var(--fy-accent-bg);
+  color: var(--fy-accent);
 }
 
 .tool-btn:disabled {
@@ -3709,13 +3709,13 @@ function handleKeyDown(event) {
 .divider {
   width: 1px;
   height: 20px;
-  background: #555;
+  background: var(--fy-border);
   margin: 0 4px;
 }
 
 .secondary-tools {
   padding-top: 4px;
-  border-top: 1px solid #404040;
+  border-top: 1px solid var(--fy-border);
   justify-content: space-between;
   padding-left: 4px;
   padding-right: 4px;
@@ -3737,10 +3737,10 @@ function handleKeyDown(event) {
 
 .text-style-select {
   height: 26px;
-  border: 1px solid #4b5563;
+  border: 1px solid var(--fy-border);
   border-radius: 4px;
-  background: #1f2937;
-  color: #f3f4f6;
+  background: var(--fy-bg-input);
+  color: var(--fy-text-primary);
   padding: 0 6px;
 }
 
@@ -3751,11 +3751,11 @@ function handleKeyDown(event) {
 
 .color-picker-info {
   position: absolute;
-  background: rgba(17, 24, 39, 0.95);
-  color: #e5e7eb;
+  background: var(--fy-bg-overlay);
+  color: var(--fy-text-primary);
   padding: 8px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--fy-border);
   font-size: 12px;
   z-index: 1000;
   pointer-events: none;
@@ -3794,7 +3794,7 @@ function handleKeyDown(event) {
 
 .picker-hint {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--fy-text-muted);
 }
 
 .shape-overlay-item {
@@ -3831,8 +3831,8 @@ function handleKeyDown(event) {
   position: absolute;
   width: 10px;
   height: 10px;
-  background: #00aaff;
-  border: 1px solid #ffffff;
+  background: var(--fy-accent);
+  border: 1px solid var(--fy-text-inverse);
   border-radius: 50%;
   transform: translate(-50%, -50%);
   z-index: 5;
@@ -3890,8 +3890,8 @@ function handleKeyDown(event) {
   position: absolute;
   width: 12px;
   height: 12px;
-  background: #00aaff;
-  border: 1px solid #ffffff;
+  background: var(--fy-accent);
+  border: 1px solid var(--fy-text-inverse);
   border-radius: 50%;
   transform: translate(-50%, -50%);
   z-index: 6;

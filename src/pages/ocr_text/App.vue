@@ -1,5 +1,5 @@
 <template>
-  <div :class="['ocr-text-root', `theme-${themeMode}`]" @dblclick.left.stop.prevent="closeWindow">
+  <div :class="['ocr-text-root', `theme-${currentTheme}`]" @dblclick.left.stop.prevent="closeWindow">
     <div class="drag-handle-wrap">
       <div class="drag-handle" @mousedown.left.stop.prevent="startDrag"></div>
     </div>
@@ -16,30 +16,15 @@
 <script setup>
 import {onMounted, onUnmounted, ref} from 'vue'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
+import {useTheme} from '../../composables/useTheme'
 
 const text = ref('')
-const themeMode = ref('dark')
+const {currentTheme} = useTheme()
 
 let onOcrTextData = null
-let onStorageThemeChange = null
 let initialPayloadTimer = null
 let initialPayloadTryCount = 0
 let lastDragStartAt = 0
-
-function getCurrentTheme() {
-  const saved = localStorage.getItem('settings-theme')
-  if (saved === 'dark' || saved === 'light') return saved
-  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-function applyTheme(value) {
-  const next = value === 'light' ? 'light' : 'dark'
-  themeMode.value = next
-  document.documentElement.classList.toggle('theme-light', next === 'light')
-  document.documentElement.classList.toggle('theme-dark', next === 'dark')
-  document.body.classList.toggle('theme-light', next === 'light')
-  document.body.classList.toggle('theme-dark', next === 'dark')
-}
 
 function applyPayload(payload) {
   const value = String(payload?.text || '').trim()
@@ -94,14 +79,6 @@ async function startDrag() {
 }
 
 onMounted(() => {
-  applyTheme(getCurrentTheme())
-  onStorageThemeChange = (event) => {
-    if (!event || event.key === 'settings-theme') {
-      applyTheme(getCurrentTheme())
-    }
-  }
-  window.addEventListener('storage', onStorageThemeChange)
-
   onOcrTextData = (event) => {
     applyPayload(event?.detail)
   }
@@ -113,10 +90,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopInitialPayloadTimer()
-  if (onStorageThemeChange) {
-    window.removeEventListener('storage', onStorageThemeChange)
-    onStorageThemeChange = null
-  }
   if (onOcrTextData) {
     window.removeEventListener('ocr-text-data', onOcrTextData)
     onOcrTextData = null
@@ -130,8 +103,8 @@ onUnmounted(() => {
   position: fixed;
   inset: 0;
   overflow: hidden;
-  background: rgba(13, 20, 30, 0.96);
-  color: #dce8ff;
+  background: var(--fy-bg-primary);
+  color: var(--fy-text-primary);
   display: flex;
   flex-direction: column;
 }
@@ -149,7 +122,7 @@ onUnmounted(() => {
   width: 96px;
   height: 5px;
   border-radius: 999px;
-  background: rgba(220, 232, 255, 0.35);
+  background: var(--fy-border);
   cursor: move;
 }
 
@@ -162,7 +135,7 @@ onUnmounted(() => {
   outline: none;
   resize: none;
   background: transparent;
-  color: #dce8ff;
+  color: var(--fy-text-primary);
   padding: 8px 12px 12px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -181,18 +154,5 @@ onUnmounted(() => {
   width: 0;
   height: 0;
   display: none;
-}
-
-.ocr-text-root.theme-light {
-  background: rgba(247, 251, 255, 0.98);
-  color: #294268;
-}
-
-.ocr-text-root.theme-light .drag-handle {
-  background: rgba(64, 99, 158, 0.3);
-}
-
-.ocr-text-root.theme-light .ocr-editor {
-  color: #2d466d;
 }
 </style>

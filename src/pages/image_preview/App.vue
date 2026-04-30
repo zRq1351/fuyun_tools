@@ -344,8 +344,8 @@ html, body, #app {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at top, rgba(35, 35, 40, 0.92), rgba(10, 10, 12, 0.96));
-  backdrop-filter: blur(10px);
+  background: var(--fy-bg-primary);
+  backdrop-filter: var(--fy-backdrop-blur-light);
 }
 
 .viewer-topbar {
@@ -375,32 +375,32 @@ html, body, #app {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(0, 0, 0, 0.6);
-  color: rgba(255, 255, 255, 0.86);
+  border: 1px solid var(--fy-border);
+  background: var(--fy-bg-overlay);
+  color: var(--fy-text-primary);
   border-radius: 8px;
   box-sizing: border-box;
   cursor: move;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--fy-shadow);
   transition: background-color 0.2s, color 0.2s;
 }
 
 .viewer-drag-icon:hover {
-  background: rgba(0, 0, 0, 0.8);
-  color: rgba(255, 255, 255, 1);
+  background: var(--fy-bg-hover);
+  color: var(--fy-text-primary);
 }
 
 .viewer-zoom {
   min-width: 56px;
   text-align: center;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(0, 0, 0, 0.6);
-  color: #e7f2ff;
+  border: 1px solid var(--fy-border);
+  background: var(--fy-bg-overlay);
+  color: var(--fy-text-primary);
   border-radius: 8px;
   padding: 6px 10px;
   font-size: 12px;
   font-weight: 600;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--fy-shadow);
   cursor: move;
 }
 
@@ -454,15 +454,15 @@ html, body, #app {
 }
 
 .viewer-close {
-  border: 1px solid rgba(255, 255, 255, 0.26);
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
+  border: 1px solid var(--fy-border);
+  background: var(--fy-bg-overlay);
+  color: var(--fy-text-primary);
   border-radius: 8px;
   padding: 6px 12px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--fy-shadow);
 }
 
 .viewer-loading {
@@ -470,7 +470,7 @@ html, body, #app {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  color: rgba(255, 255, 255, 0.86);
+  color: var(--fy-text-primary);
   font-size: 14px;
 }
 
@@ -486,8 +486,8 @@ html, body, #app {
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  border: 3px solid rgba(255, 255, 255, 0.25);
-  border-top-color: rgba(255, 255, 255, 0.92);
+  border: 3px solid var(--fy-border);
+  border-top-color: var(--fy-accent);
   animation: viewer-spin 700ms linear infinite;
 }
 
@@ -500,9 +500,9 @@ html, body, #app {
   max-width: min(720px, 78vw);
   padding: 10px 14px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 120, 120, 0.5);
-  background: rgba(60, 10, 10, 0.65);
-  color: rgba(255, 230, 230, 0.96);
+  border: 1px solid var(--fy-danger);
+  background: var(--fy-danger-bg);
+  color: var(--fy-text-primary);
   text-align: center;
 }
 

@@ -176,13 +176,13 @@ const viewportStyle = computed(() => {
 .panel {
   width: 100%;
   height: 100%;
-  background: rgba(17, 22, 32, 0.94);
+  background: var(--fy-bg-primary);
   border: none;
   border-radius: 10px;
   box-sizing: border-box;
   padding: 8px;
-  color: #e9eefc;
-  backdrop-filter: blur(4px);
+  color: var(--fy-text-primary);
+  backdrop-filter: var(--fy-backdrop-blur-light);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -206,15 +206,23 @@ const viewportStyle = computed(() => {
   flex: 1;
   height: 24px;
   border-radius: 6px;
-  border: 1px solid rgba(255,255,255,0.24);
-  background: rgba(255,255,255,0.08);
-  color: #ecf2ff;
+  border: 1px solid var(--fy-border);
+  background: var(--fy-bg-hover);
+  color: var(--fy-text-primary);
   cursor: pointer;
   padding: 0 4px;
   font-size: 12px;
 }
-.btn.primary { background: rgba(73, 151, 255, 0.35); border-color: rgba(114,183,255,0.8); }
-.btn.danger { background: rgba(245,108,108,0.18); border-color: rgba(245,108,108,0.55); }
+
+.btn.primary {
+  background: var(--fy-accent-bg);
+  border-color: var(--fy-accent);
+}
+
+.btn.danger {
+  background: var(--fy-danger-bg);
+  border-color: var(--fy-danger);
+}
 .preview-wrap {
   position: relative;
   flex: 1;
@@ -222,7 +230,7 @@ const viewportStyle = computed(() => {
   min-height: 0;
   border-radius: 6px;
   overflow: hidden;
-  background: rgba(7, 10, 16, 0.95);
+  background: var(--fy-bg-surface);
   border: none;
   display: flex;
   align-items: center;
@@ -239,10 +247,10 @@ const viewportStyle = computed(() => {
   left: 2px;
   right: 2px;
   min-height: 10px;
-  border: 2px solid rgba(92, 201, 255, 0.95);
+  border: 2px solid var(--fy-accent);
   border-radius: 4px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
-  background: rgba(92, 201, 255, 0.08);
+  box-shadow: 0 0 0 1px var(--fy-border);
+  background: var(--fy-accent-bg);
   pointer-events: none;
 }
 .preview-empty { font-size: 12px; opacity: 0.75; }

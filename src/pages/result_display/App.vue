@@ -1,5 +1,5 @@
 <template>
-  <div :class="['container', `theme-${themeMode}`]" @mousedown.left="handleContainerMouseDown">
+  <div :class="['container', `theme-${currentTheme}`]" @mousedown.left="handleContainerMouseDown">
     <div class="window-titlebar">
       <div class="window-title">{{ mode === 'translation' ? '翻译结果' : '解释结果' }}</div>
       <div class="window-controls">
@@ -127,12 +127,13 @@ import {ElMessage} from 'element-plus'
 import {CloseBold, CopyDocument, DocumentCopy, FullScreen, Hide, Minus, View} from '@element-plus/icons-vue'
 import {AIService, ClipboardService} from '@/services/ipc.js'
 import {handleAppError} from '@/utils/errorHandler.js'
+import {useTheme} from '../../composables/useTheme'
 
 const mode = ref('translation')
 const originalText = ref('')
 const resultText = ref('')
 const showOriginal = ref(false)
-const themeMode = ref('dark')
+const {currentTheme} = useTheme()
 
 const explanationLanguage = ref('中文')
 const targetLanguage = ref('简体中文')
@@ -147,26 +148,8 @@ const currentWindowLabel = ref('')
 let unlistenResultClean = null
 let unlistenResultUpdate = null
 let initDataHandler = null
-let onStorageThemeChange = null
 let unlistenWindowResize = null
 const currentWindow = getCurrentWindow()
-
-const getCurrentTheme = () => {
-  const saved = localStorage.getItem('settings-theme')
-  if (saved === 'dark' || saved === 'light') {
-    return saved
-  }
-  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-const applyTheme = (value) => {
-  const next = value === 'light' ? 'light' : 'dark'
-  themeMode.value = next
-  document.documentElement.classList.toggle('theme-light', next === 'light')
-  document.documentElement.classList.toggle('theme-dark', next === 'dark')
-  document.body.classList.toggle('theme-light', next === 'light')
-  document.body.classList.toggle('theme-dark', next === 'dark')
-}
 
 const syncWindowMaximized = async () => {
   try {
@@ -313,13 +296,6 @@ watch(resultText, (newText) => {
 const resultHtml = computed(() => resultHtmlRaw.value)
 
 onMounted(async () => {
-  applyTheme(getCurrentTheme())
-  onStorageThemeChange = (event) => {
-    if (!event || event.key === 'settings-theme') {
-      applyTheme(getCurrentTheme())
-    }
-  }
-  window.addEventListener('storage', onStorageThemeChange)
   await syncWindowMaximized()
   unlistenWindowResize = await currentWindow.onResized(async () => {
     await syncWindowMaximized()
@@ -399,10 +375,6 @@ onBeforeUnmount(() => {
   if (unlistenWindowResize) {
     unlistenWindowResize()
     unlistenWindowResize = null
-  }
-  if (onStorageThemeChange) {
-    window.removeEventListener('storage', onStorageThemeChange)
-    onStorageThemeChange = null
   }
   if (initDataHandler) {
     window.removeEventListener('init-data', initDataHandler)
@@ -568,138 +540,13 @@ body {
 }
 
 .window-btn:hover {
-  color: #fff;
+  color: var(--fy-text-inverse);
   background: var(--fy-bg-hover);
 }
 
 .window-btn-close:hover {
   background: var(--fy-danger);
   color: #fff;
-}
-
-.container.theme-light .header {
-  background: var(--fy-bg-overlay);
-  border: 1px solid var(--fy-border);
-  box-shadow: var(--fy-shadow);
-}
-
-.container.theme-light .window-titlebar {
-  background: var(--fy-bg-overlay);
-  border-color: var(--fy-border);
-}
-
-.container.theme-light .window-title {
-  color: var(--fy-text-primary);
-}
-
-.container.theme-light .window-btn {
-  color: var(--fy-text-secondary);
-}
-
-.container.theme-light .window-btn:hover {
-  background: var(--fy-bg-hover);
-  color: var(--fy-text-primary);
-}
-
-.container.theme-light .window-btn-close:hover {
-  background: var(--fy-danger);
-  color: #fff;
-}
-
-.container.theme-light .label {
-  color: var(--fy-text-primary);
-}
-
-.container.theme-light .arrow {
-  color: var(--fy-text-muted);
-}
-
-.container.theme-light .auto-source-tag {
-  color: var(--fy-text-accent);
-  background: var(--fy-accent-bg);
-  border-color: var(--fy-border-active);
-}
-
-.container.theme-light .right-controls {
-  border-left: 1px solid var(--fy-border);
-}
-
-.container.theme-light .icon-btn {
-  color: var(--fy-text-secondary);
-}
-
-.container.theme-light .icon-btn:hover {
-  background: var(--fy-bg-hover);
-  color: var(--fy-text-primary);
-}
-
-.container.theme-light .content {
-  background: var(--fy-content-bg);
-  border: 1px solid var(--fy-content-border);
-  box-shadow: var(--fy-shadow-inset);
-  color: var(--fy-text-primary);
-}
-
-.container.theme-light .original-content {
-  background: linear-gradient(150deg, rgba(236, 249, 241, 0.95), rgba(226, 243, 233, 0.95));
-  border-left-color: var(--fy-success);
-  color: var(--fy-text-primary);
-}
-
-.container.theme-light .result-content {
-  border-left-color: var(--fy-accent);
-}
-
-.container.theme-light .loading-wrap {
-  color: var(--fy-text-muted);
-  background: var(--fy-bg-primary);
-}
-
-.lang-select {
-  width: 100px;
-}
-
-.container.theme-light .loading-dot {
-  background: var(--fy-accent);
-}
-
-.container.theme-light .content::-webkit-scrollbar-track {
-  background: var(--fy-scrollbar-track);
-}
-
-.container.theme-light .content::-webkit-scrollbar-thumb {
-  background: var(--fy-scrollbar-thumb);
-}
-
-.container.theme-light .content::-webkit-scrollbar-thumb:hover {
-  background: var(--fy-scrollbar-thumb-hover);
-}
-
-.container.theme-light :deep(.content h1),
-.container.theme-light :deep(.content h2),
-.container.theme-light :deep(.content h3) {
-  color: var(--fy-text-primary);
-}
-
-.container.theme-light :deep(.content p) {
-  color: var(--fy-text-primary);
-}
-
-.container.theme-light :deep(.content code) {
-  background-color: var(--fy-bg-hover);
-}
-
-.container.theme-light :deep(.content pre) {
-  background-color: var(--fy-bg-primary);
-}
-
-.container.theme-light :deep(.content a) {
-  color: var(--fy-accent);
-}
-
-.container.theme-light :deep(.content blockquote) {
-  border-left-color: var(--fy-border);
-  color: var(--fy-text-muted);
 }
 
 .header {
@@ -762,7 +609,7 @@ body {
 
 .icon-btn:hover {
   background: var(--fy-bg-hover);
-  color: #fff;
+  color: var(--fy-text-inverse);
 }
 
 .toggle-btn:hover {
@@ -804,16 +651,6 @@ body {
 .content-actions .action-btn:hover {
   background: var(--fy-bg-hover);
   border-color: var(--fy-border);
-}
-
-.container.theme-light .content-actions .action-btn {
-  background: var(--fy-bg-overlay);
-  border: 1px solid var(--fy-border);
-}
-
-.container.theme-light .content-actions .action-btn:hover {
-  background: var(--fy-bg-hover);
-  border-color: var(--fy-border-hover);
 }
 
 .content {
