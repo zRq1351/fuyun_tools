@@ -1,6 +1,8 @@
 use crate::core::app_state::AppState as SharedAppState;
 use crate::core::config::{AIProvider, ProviderConfig};
-use crate::core::error::{to_frontend_error_string, AppError, ErrorCode};
+use crate::core::error::ErrorCode;
+#[cfg(debug_assertions)]
+use crate::core::error::{to_frontend_error_string, AppError};
 use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
 use crate::services::clipboard_manager::set_clipboard_listener_enabled;
@@ -16,6 +18,7 @@ use crate::ui::tray_menu::open_settings;
 use crate::ui::window_manager::{
     bind_overlay_window_events, hide_overlay_window_by_label, show_overlay_window_by_label,
 };
+#[cfg(debug_assertions)]
 use crate::utils::image_clipboard::get_image_persist_queue_metrics_snapshot;
 use crate::utils::image_clipboard::set_image_fill_verify_mode;
 #[cfg(debug_assertions)]

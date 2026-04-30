@@ -3,10 +3,12 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+#[cfg(debug_assertions)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
 
+#[cfg(debug_assertions)]
 static VC_RUNTIME_FORCE_MISSING: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
