@@ -1,6 +1,7 @@
+use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::sync::{Mutex as StdMutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::Instant;
 
 #[derive(Clone, Debug, Serialize)]
@@ -70,10 +71,10 @@ impl PerfMetricAggregate {
     }
 }
 
-static PERF_METRICS: OnceLock<StdMutex<BTreeMap<String, PerfMetricAggregate>>> = OnceLock::new();
+static PERF_METRICS: OnceLock<Mutex<BTreeMap<String, PerfMetricAggregate>>> = OnceLock::new();
 
-fn metrics_store() -> &'static StdMutex<BTreeMap<String, PerfMetricAggregate>> {
-    PERF_METRICS.get_or_init(|| StdMutex::new(BTreeMap::new()))
+fn metrics_store() -> &'static Mutex<BTreeMap<String, PerfMetricAggregate>> {
+    PERF_METRICS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
 fn now_unix_ms() -> u64 {
@@ -87,9 +88,7 @@ pub fn record_perf_metric(
     success: bool,
     error: Option<String>,
 ) {
-    let mut guard = metrics_store()
-        .lock()
-        .unwrap();
+    let mut guard = metrics_store().lock();
     let metric = guard
         .entry(key.to_string())
         .or_insert_with(|| PerfMetricAggregate::new(label));
@@ -111,9 +110,7 @@ pub fn record_perf_metric(
 }
 
 pub fn get_perf_metrics_snapshot() -> Vec<PerfMetricSnapshot> {
-    let guard = metrics_store()
-        .lock()
-        .unwrap();
+    let guard = metrics_store().lock();
     guard
         .iter()
         .map(|(key, value)| value.snapshot(key))
@@ -121,9 +118,7 @@ pub fn get_perf_metrics_snapshot() -> Vec<PerfMetricSnapshot> {
 }
 
 pub fn reset_perf_metrics() {
-    let mut guard = metrics_store()
-        .lock()
-        .unwrap();
+    let mut guard = metrics_store().lock();
     guard.clear();
 }
 

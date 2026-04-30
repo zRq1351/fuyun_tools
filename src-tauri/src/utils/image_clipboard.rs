@@ -39,6 +39,17 @@ const IMAGE_PNG_BASE64_CACHE_CAPACITY: usize = 64;
 const IMAGE_FILL_VERIFY_MODE_STRICT: u8 = 0;
 const IMAGE_FILL_VERIFY_MODE_FAST: u8 = 1;
 
+/// 计算基于系统可用内存的初始预算
+fn calculate_initial_memory_budget() -> usize {
+    use sysinfo::System;
+    let mut sys = System::new();
+    sys.refresh_memory();
+    let available_bytes = sys.available_memory() as usize;
+    // 使用可用内存的 10%，但限制在 128MB-512MB 范围内
+    let budget = available_bytes / 10;
+    budget.clamp(DYNAMIC_MEMORY_BUDGET_MIN, DYNAMIC_MEMORY_BUDGET_MAX)
+}
+
 // 内存管理优化常量
 const IMAGE_CHUNK_SIZE: usize = 1024 * 1024; // 1MB 分块大小
 const MEMORY_MONITOR_INTERVAL_MS: u64 = 5000; // 内存监控间隔
@@ -423,7 +434,7 @@ impl ImageClipboardManager {
 
             current_memory_usage: Arc::new(AtomicU64::new(0)),
             dynamic_memory_budget: Arc::new(AtomicU64::new(
-                IMAGE_FULL_RES_MEMORY_BUDGET_BYTES as u64,
+                calculate_initial_memory_budget() as u64,
             )),
             last_memory_check: Arc::new(AtomicU64::new(0)),
         };

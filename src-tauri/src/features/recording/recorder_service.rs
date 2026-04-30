@@ -1375,6 +1375,19 @@ fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
                 continue;
             }
 
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let is_stale_pattern = file_name.ends_with(".tmp.mp4")
+                || file_name.contains(".sys.")
+                || file_name.contains(".mic.");
+            if !is_stale_pattern {
+                continue;
+            }
+
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+            if ext != "mp4" && ext != "wav" && ext != "aac" {
+                continue;
+            }
+
             if let Ok(metadata) = entry.metadata() {
                 if let Ok(modified) = metadata.modified() {
                     if modified > threshold {
@@ -1383,15 +1396,10 @@ fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
                 }
             }
 
-            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if file_name.ends_with(".tmp.mp4")
-                || file_name.contains(".sys.")
-                || file_name.contains(".mic.")
-            {
-                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-                if ext == "mp4" || ext == "wav" || ext == "aac" {
-                    let _ = fs::remove_file(path);
-                }
+            if let Err(e) = fs::remove_file(&path) {
+                log::warn!("清理过期临时文件失败: {:?} - {}", path, e);
+            } else {
+                log::info!("已清理过期临时文件: {:?}", path);
             }
         }
     }

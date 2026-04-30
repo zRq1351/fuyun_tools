@@ -215,6 +215,14 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
             let target_h = self.flags.height as usize;
             let resized = &mut self.resized_cache;
 
+            // 安全检查：确保源缓冲区足够大
+            let required_src_size = stride.saturating_mul(frame_h);
+            if raw_pixels.len() < required_src_size || frame_w == 0 || frame_h == 0 {
+                log::warn!("WGC 帧缓冲区大小不足，跳过本帧: raw={} required={} {}x{}", 
+                    raw_pixels.len(), required_src_size, frame_w, frame_h);
+                return Ok(());
+            }
+
             // 高性能路径：合并 nopadding + flip 为单次 unsafe 遍历
             // 消除 as_nopadding_buffer 的额外全量复制 + bounds checking
             if frame_w == target_w && frame_h == target_h {

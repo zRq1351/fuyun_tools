@@ -20,12 +20,8 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             return
         }
 
-        console.log('[设置分类] 开始, itemId:', itemId, 'category:', category)
-
-        
         if (setIsUpdatingCategory) {
             setIsUpdatingCategory(true)
-            console.log('[设置分类] 标志位已设置为 true')
         }
 
         
@@ -47,19 +43,16 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
         
         if (bumpFilterDataRevision) {
             bumpFilterDataRevision()
-            console.log('[设置分类] 已调用 bumpFilterDataRevision')
         }
 
         try {
             await CategoryService.setItemCategory(itemId, category)
-            console.log('[设置分类] 后端保存成功')
         } catch (error) {
             console.error('保存分类失败:', error)
         } finally {
             
             
             setTimeout(() => {
-                console.log('[分类更新完成] 清除标志位, itemId:', itemId, 'category:', category)
                 if (setIsUpdatingCategory) {
                     setIsUpdatingCategory(false)
                 }
@@ -94,7 +87,6 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             } finally {
                 
                 setTimeout(() => {
-                    console.log('[分类移除完成] 清除标志位, itemId:', itemId)
                     if (setIsUpdatingCategory) {
                         setIsUpdatingCategory(false)
                     }

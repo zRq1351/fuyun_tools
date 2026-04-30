@@ -103,7 +103,7 @@
 </template>
 
 <script setup>
-import {computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue'
+import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ArrowLeftBold, ArrowRightBold, Check} from '@element-plus/icons-vue'
 import {ElMessage} from 'element-plus'
 import {listen} from '@tauri-apps/api/event'
@@ -769,22 +769,25 @@ const pruneAsyncPreviewCache = (keepIds) => {
 
 const rgbaBase64ToPngDataUrl = (rgbaBase64, width, height) => {
   if (!rgbaBase64 || width <= 0 || height <= 0) return ''
-  const binary = window.atob(rgbaBase64)
-  const bytes = new Uint8ClampedArray(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i)
-  }
-  if (bytes.length !== width * height * 4) {
+  const expectedLen = width * height * 4
+  try {
+    const binaryString = window.atob(rgbaBase64)
+    if (binaryString.length !== expectedLen) return ''
+    const bytes = new Uint8ClampedArray(expectedLen)
+    for (let i = 0; i < expectedLen; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return ''
+    const imageData = new ImageData(bytes, width, height)
+    ctx.putImageData(imageData, 0, 0)
+    return canvas.toDataURL('image/png')
+  } catch {
     return ''
   }
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return ''
-  const imageData = new ImageData(bytes, width, height)
-  ctx.putImageData(imageData, 0, 0)
-  return canvas.toDataURL('image/png')
 }
 
 // 缓存命中率统计

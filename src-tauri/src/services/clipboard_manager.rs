@@ -9,6 +9,22 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
+fn read_clipboard_text(app_handle: &AppHandle) -> Option<String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    match crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
+        app_handle.clipboard().read_text()
+    }) {
+        Ok(content) => Some(content),
+        Err(e) => {
+            let msg = e.to_string();
+            if !msg.contains("Clipboard") && !msg.contains("empty") {
+                log::debug!("获取剪贴板内容失败: {}", msg);
+            }
+            None
+        }
+    }
+}
+
 fn lock_state<'a>(state: &'a Arc<Mutex<AppState>>) -> crate::sync::MutexGuard<'a, AppState> {
     state.lock().unwrap_or_else(|never| match never {})
 }
@@ -52,7 +68,7 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
                 missed_event = true;
             }
 
-            let (is_updating, is_processing_selection, manager_arc) = {
+            let (is_updating, is_processing_selection) = {
                 let state_guard = lock_state(&state);
                 if !state_guard.settings.text_clipboard_enabled {
                     last_content.clear();
@@ -62,7 +78,6 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
                 (
                     state_guard.is_updating_clipboard,
                     state_guard.is_processing_selection,
-                    state_guard.clipboard_manager.clone(),
                 )
             };
 
@@ -81,10 +96,7 @@ pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState
 
             missed_event = false;
 
-            let current_content = {
-                let manager = manager_arc.lock().unwrap();
-                manager.get_content(&app_handle)
-            };
+            let current_content = read_clipboard_text(&app_handle);
 
             if let Some(current_content) = current_content {
                 if !current_content.is_empty() && current_content != last_content {

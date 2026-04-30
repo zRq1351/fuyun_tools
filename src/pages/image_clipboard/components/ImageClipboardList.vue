@@ -83,7 +83,7 @@
 </template>
 
 <script setup>
-import {computed, onUnmounted, ref} from 'vue'
+import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {Close, Download, FullScreen, Loading} from '@element-plus/icons-vue'
 import {Pin} from 'lucide-vue-next'
 
@@ -269,8 +269,10 @@ const handleVisibilityChange = () => {
   }
 }
 
-window.addEventListener('blur', stopDragging)
-document.addEventListener('visibilitychange', handleVisibilityChange)
+onMounted(() => {
+  window.addEventListener('blur', stopDragging)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+})
 
 onUnmounted(() => {
   stopDragging()

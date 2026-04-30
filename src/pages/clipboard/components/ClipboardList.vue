@@ -69,7 +69,7 @@
 </template>
 
 <script setup>
-import {computed, onUnmounted, ref} from 'vue'
+import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {Close, Link, Loading, View} from '@element-plus/icons-vue'
 import {Pin} from 'lucide-vue-next'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
@@ -211,6 +211,11 @@ const stopDragging = () => {
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
+onMounted(() => {
+  window.addEventListener('blur', stopDragging)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+})
+
 onUnmounted(() => {
   stopDragging()
   window.removeEventListener('blur', stopDragging)
@@ -329,9 +334,6 @@ const handleVisibilityChange = () => {
     stopDragging()
   }
 }
-
-window.addEventListener('blur', stopDragging)
-document.addEventListener('visibilitychange', handleVisibilityChange)
 
 const handleWheel = (e) => {
   if (!contentRef.value) return
