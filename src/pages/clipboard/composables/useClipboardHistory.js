@@ -465,7 +465,9 @@ export function useClipboardHistory() {
         let removedEntry = null
         if (localIndex >= 0) {
             removedEntry = pagedHistory.value[localIndex]
-            pagedHistory.value.splice(localIndex, 1)
+            const newArr = [...pagedHistory.value]
+            newArr.splice(localIndex, 1)
+            pagedHistory.value = newArr
             const {pinned, unpinned} = buildSortedGroups()
             applyGroupedEntries(pinned, unpinned)
             totalCount.value = Math.max(0, (Number.isFinite(totalCount.value) ? totalCount.value : getActiveCategoryCount() + 1) - 1)
@@ -660,12 +662,14 @@ export function useClipboardHistory() {
             const oldCategory = categoryMap.value[oldId] || itemCategorySnapshot.get(oldId) || '未分类'
             removeItemCategoryLocal(oldId)
             setItemCategoryLocal(newId, oldCategory)
-            
-            pagedHistory.value.splice(index, 1, {
+
+            const newArr = [...pagedHistory.value]
+            newArr.splice(index, 1, {
                 ...item,
                 id: newId,
                 content: newContent
             })
+            pagedHistory.value = newArr
             if (selectedItemId.value === oldId) {
                 selectedItemId.value = newId
             }

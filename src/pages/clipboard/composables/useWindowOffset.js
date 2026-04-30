@@ -1,4 +1,4 @@
-import {ref} from 'vue'
+import {onUnmounted, ref} from 'vue'
 import {WindowService} from '../../../services/ipc'
 
 export function useWindowOffset() {
@@ -74,6 +74,15 @@ export function useWindowOffset() {
         window.addEventListener('mousemove', handleWindowOffsetDrag)
         window.addEventListener('mouseup', endWindowOffsetDrag)
     }
+
+    // 组件卸载时清理事件监听器
+    onUnmounted(() => {
+        if (isWindowOffsetDragging) {
+            window.removeEventListener('mousemove', handleWindowOffsetDrag)
+            window.removeEventListener('mouseup', endWindowOffsetDrag)
+            isWindowOffsetDragging = false
+        }
+    })
 
     return {
         bottomOffset,

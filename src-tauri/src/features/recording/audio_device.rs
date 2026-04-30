@@ -14,15 +14,18 @@ pub fn list_microphones(_ffmpeg_path: &Path) -> Result<Vec<AudioInputDevice>, St
         let devices = host
             .input_devices()
             .map_err(|e| format!("枚举输入设备失败: {}", e))?;
-        for d in devices {
+        for (i, d) in devices.enumerate() {
             let desc = d
                 .description()
                 .map(|x| x.to_string())
                 .unwrap_or_else(|_| "Unknown Input".to_string());
+            // 使用描述+索引作为唯一ID，避免相同硬件无法区分
+            let unique_id = format!("{}_{}", desc, i);
+            let is_default = default_desc.as_deref() == Some(desc.as_str());
             out.push(AudioInputDevice {
-                id: desc.clone(),
-                name: desc.clone(),
-                is_default: default_desc.as_deref() == Some(desc.as_str()),
+                id: unique_id,
+                name: desc,
+                is_default,
             });
         }
         Ok(out)

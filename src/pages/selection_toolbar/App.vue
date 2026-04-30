@@ -159,11 +159,6 @@ const onMouseEnter = async () => {
     if (settings) {
       webSearchEngine.value = settings.selection_web_search_engine || 'bing'
       customPrompts.value = Array.isArray(settings.selection_custom_prompts) ? settings.selection_custom_prompts : []
-      console.log('[Toolbar] Loaded settings on expand, engine:', webSearchEngine.value)
-      console.log('[Toolbar] Custom prompts:', customPrompts.value)
-      console.log('[Toolbar] Full settings object:', settings)
-    } else {
-      console.log('[Toolbar] Failed to load settings on expand')
     }
 
     const factor = await appWindow.scaleFactor()
@@ -465,10 +460,6 @@ const handleWebSearch = async () => {
     const settings = await AISettingsService.getSettings().catch(() => null)
     if (settings) {
       webSearchEngine.value = settings.selection_web_search_engine || 'bing'
-      console.log('[Search] Loaded settings, engine:', webSearchEngine.value)
-      console.log('[Search] Full settings object:', settings)
-    } else {
-      console.log('[Search] Failed to load settings, using default: bing')
     }
 
     const query = encodeURIComponent(text)
@@ -488,7 +479,6 @@ const handleWebSearch = async () => {
         url = `https://www.bing.com/search?q=${query}`
         break
     }
-    console.log('[Search] Opening URL:', url, 'with engine:', webSearchEngine.value)
     await openUrl(url)
     await WindowService.selectionToolbarBlur()
   }, '搜索失败')

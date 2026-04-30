@@ -26,6 +26,7 @@ use tauri::State;
 
 pub(crate) fn detect_video_hw_accel_encoder(ffmpeg_path: &std::path::Path) -> Option<String> {
     use std::process::Command;
+    use std::time::{Duration, Instant};
 
     // 硬件编码器优先级：NVIDIA > Intel > AMD
     let encoders = ["h264_nvenc", "h264_qsv", "h264_amf"];
@@ -41,8 +42,32 @@ pub(crate) fn detect_video_hw_accel_encoder(ffmpeg_path: &std::path::Path) -> Op
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let output = cmd.output().ok()?;
+    // 启动子进程并设置超时（10秒）
+    let mut child = cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
 
+    let start = Instant::now();
+    let timeout = Duration::from_secs(10);
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => break,
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    log::warn!("FFmpeg -encoders 查询超时（10秒）");
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => return None,
+        }
+    }
+
+    let output = child.wait_with_output().ok()?;
     let encoder_list = String::from_utf8_lossy(&output.stdout);
 
     for encoder in &encoders {

@@ -8,7 +8,7 @@
          @load="handleImageLoaded"/>
 
     <!-- 透明实况文本层 -->
-    <div class="ocr-text-overlay" v-if="!isRecognizing && ocrLines.length > 0">
+    <div v-if="!isRecognizing && ocrLines.length > 0 && sourceWidth > 0 && sourceHeight > 0" class="ocr-text-overlay">
       <span 
         v-for="item in ocrLines" 
         :key="item.id"
@@ -49,7 +49,6 @@
 import {onMounted, onUnmounted, ref} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
-import {PhysicalSize} from '@tauri-apps/api/window'
 
 const imageSrc = ref('')
 const windowLabel = ref('')

@@ -24,11 +24,12 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             setIsUpdatingCategory(true)
         }
 
-        
+        // 保存旧值用于回滚
+        const prevCategory = categoryMap.value[itemId]
+
         if (setItemCategoryLocal) {
             setItemCategoryLocal(itemId, category)
         } else {
-            
             categoryMap.value[itemId] = category
         }
 
@@ -40,7 +41,6 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             }
         }
 
-        
         if (bumpFilterDataRevision) {
             bumpFilterDataRevision()
         }
@@ -49,33 +49,48 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             await CategoryService.setItemCategory(itemId, category)
         } catch (error) {
             console.error('保存分类失败:', error)
+            // 回滚本地状态
+            if (prevCategory) {
+                if (setItemCategoryLocal) {
+                    setItemCategoryLocal(itemId, prevCategory)
+                } else {
+                    categoryMap.value[itemId] = prevCategory
+                }
+            } else {
+                if (options.removeItemCategoryLocal) {
+                    options.removeItemCategoryLocal(itemId)
+                } else {
+                    delete categoryMap.value[itemId]
+                }
+            }
+            if (bumpFilterDataRevision) {
+                bumpFilterDataRevision()
+            }
         } finally {
-            
-            
             setTimeout(() => {
                 if (setIsUpdatingCategory) {
                     setIsUpdatingCategory(false)
                 }
-            }, 800)  
+            }, 800)
         }
     }
 
     const removeItemCategory = async (itemId) => {
         if (!itemId) return
         if (categoryMap.value[itemId]) {
-            
             if (setIsUpdatingCategory) {
                 setIsUpdatingCategory(true)
             }
 
-            
+            // 保存旧值用于回滚
+            const prevCategory = categoryMap.value[itemId]
+
             if (options.removeItemCategoryLocal) {
                 options.removeItemCategoryLocal(itemId)
             } else {
                 delete categoryMap.value[itemId]
             }
 
-            
             if (bumpFilterDataRevision) {
                 bumpFilterDataRevision()
             }
@@ -84,13 +99,21 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
                 await CategoryService.setItemCategory(itemId, "")
             } catch (error) {
                 console.error('移除分类失败:', error)
+                // 回滚本地状态
+                if (setItemCategoryLocal) {
+                    setItemCategoryLocal(itemId, prevCategory)
+                } else {
+                    categoryMap.value[itemId] = prevCategory
+                }
+                if (bumpFilterDataRevision) {
+                    bumpFilterDataRevision()
+                }
             } finally {
-                
                 setTimeout(() => {
                     if (setIsUpdatingCategory) {
                         setIsUpdatingCategory(false)
                     }
-                }, 800)  
+                }, 800)
             }
         }
     }

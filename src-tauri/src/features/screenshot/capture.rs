@@ -4,6 +4,30 @@ use std::sync::atomic::{AtomicBool, Ordering};
 static SCREENSHOT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 static SCREENSHOT_ALLOW_IMAGE_CLIPBOARD_ONCE: AtomicBool = AtomicBool::new(false);
 
+/// RAII守卫：获取时设置标志为true，Drop时自动重置为false
+/// 防止panic导致标志永远卡在true状态
+struct ScreenshotGuard;
+
+impl ScreenshotGuard {
+    fn try_acquire() -> Option<Self> {
+        if SCREENSHOT_IN_PROGRESS
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            Some(Self)
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for ScreenshotGuard {
+    fn drop(&mut self) {
+        SCREENSHOT_IN_PROGRESS.store(false, Ordering::SeqCst);
+        SCREENSHOT_ALLOW_IMAGE_CLIPBOARD_ONCE.store(false, Ordering::SeqCst);
+    }
+}
+
 /// 检查是否正在截图
 pub fn is_screenshot_in_progress() -> bool {
     SCREENSHOT_IN_PROGRESS.load(Ordering::SeqCst)
@@ -72,20 +96,11 @@ pub fn capture_screen_region(
     width: u32,
     height: u32,
 ) -> Result<(Vec<u8>, u32, u32), String> {
-    let owns_screenshot_state = SCREENSHOT_IN_PROGRESS
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_ok();
+    let _guard = ScreenshotGuard::try_acquire()
+        .ok_or_else(|| "截图功能正在进行中，无法并发启动".to_string())?;
 
-    if !owns_screenshot_state {
-        return Err("截图功能正在进行中，无法并发启动".to_string());
-    }
-
-    let result = capture_screen_region_internal(x, y, width, height);
-
-    if owns_screenshot_state {
-        set_screenshot_in_progress(false);
-    }
-    result
+    capture_screen_region_internal(x, y, width, height)
+    // _guard 在此处自动drop，重置标志
 }
 
 /// 内部实现：捕获屏幕区域

@@ -7,9 +7,9 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
-import { Marked } from 'marked'
-import { markedHighlight } from 'marked-highlight'
+import {ref, watch} from 'vue'
+import {Marked} from 'marked'
+import {markedHighlight} from 'marked-highlight'
 import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/atom-one-dark.css'
@@ -105,11 +105,17 @@ const detectAndProcess = (text) => {
 
   // 3. Markdown (simplified detection)
   if (/(^|\n)(#{1,6}\s|- \[[ x]\]|[\*\-]\s|> \S|```)/.test(text)) {
-    const rawHtml = marked.parse(text)
-    const html = DOMPurify.sanitize(rawHtml)
-    contentType.value = 'markdown'
-    renderedHtml.value = html
-    setCacheResult(text, {type: 'markdown', html})
+    try {
+      const rawHtml = marked.parse(text)
+      const html = DOMPurify.sanitize(rawHtml)
+      contentType.value = 'markdown'
+      renderedHtml.value = html
+      setCacheResult(text, {type: 'markdown', html})
+    } catch (e) {
+      contentType.value = 'text'
+      renderedHtml.value = text
+      setCacheResult(text, {type: 'text', html: text})
+    }
     return
   }
 
@@ -137,7 +143,12 @@ const detectAndProcess = (text) => {
 }
 
 watch(() => props.content, (newVal) => {
-  detectAndProcess(newVal || '')
+  // 使用requestAnimationFrame延迟处理，避免阻塞UI
+  if (detectAndProcess._rafId) cancelAnimationFrame(detectAndProcess._rafId)
+  detectAndProcess._rafId = requestAnimationFrame(() => {
+    detectAndProcess(newVal || '')
+    detectAndProcess._rafId = null
+  })
 }, { immediate: true })
 
 </script>

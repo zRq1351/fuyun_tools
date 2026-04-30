@@ -109,6 +109,7 @@
 
 <script setup>
 import {onMounted, onUnmounted, ref} from 'vue'
+import {ElMessage} from 'element-plus'
 import {AISettingsService} from '@/services/ipc.js'
 
 const imageStorageMetrics = ref({})

@@ -58,7 +58,24 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+        .unwrap_or_else(|e| {
+            log::warn!("SystemTime before UNIX_EPOCH: {}", e);
+            0
+        })
+}
+
+/// 全局音频写入错误计数器（每个录音会话重置）
+static AUDIO_WRITE_ERR_COUNT: AtomicBool = AtomicBool::new(false);
+
+/// 写入音频采样，失败时记录日志（避免日志洪水，仅记录前几次错误）
+macro_rules! write_sample_or_log {
+    ($writer:expr, $sample:expr, $context:expr) => {
+        if let Err(e) = $writer.write_sample($sample) {
+            if !AUDIO_WRITE_ERR_COUNT.swap(true, Ordering::Relaxed) {
+                log::error!("音频写入失败({}): {}", $context, e);
+            }
+        }
+    };
 }
 
 impl WasapiCaptureHandle {
@@ -78,6 +95,7 @@ fn capture_process_loopback_to_wav(
     recording_pause_flag: Arc<AtomicBool>,
     startup_tx: Option<mpsc::Sender<(u32, Result<(), String>)>>,
 ) -> Result<(), String> {
+    AUDIO_WRITE_ERR_COUNT.store(false, Ordering::Relaxed);
     let run = || -> Result<(), String> {
         let _ = initialize_mta();
         let desired_format = WaveFormat::new(32, 32, &SampleType::Float, 48000, 2, None);
@@ -180,7 +198,7 @@ fn capture_process_loopback_to_wav(
                     } else {
                         0
                     };
-                    let _ = writer.write_sample(out);
+                    write_sample_or_log!(writer, out, "进程音频");
                     actual_total_samples += 1;
                 }
             }
@@ -194,7 +212,7 @@ fn capture_process_loopback_to_wav(
 
                     if padding_needed > 4800 {
                         for _ in 0..padding_needed {
-                            let _ = writer.write_sample(0i16);
+                            write_sample_or_log!(writer, 0i16, "进程音频静音填充");
                         }
                         actual_total_samples += padding_needed;
                     }
@@ -491,6 +509,7 @@ pub fn start_system_loopback_wav_with_device(
     enabled_flag: Arc<AtomicBool>,
     recording_pause_flag: Arc<AtomicBool>,
 ) -> Result<WasapiCaptureHandle, String> {
+    AUDIO_WRITE_ERR_COUNT.store(false, Ordering::Relaxed);
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
     let thread_output = output_path.clone();
@@ -605,7 +624,7 @@ pub fn start_system_loopback_wav_with_device(
                                         } else {
                                             0
                                         };
-                                        let _ = writer.write_sample(s);
+                                        write_sample_or_log!(writer, s, "音频采样");
                                     }
                                 }
                             }
@@ -627,8 +646,7 @@ pub fn start_system_loopback_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let _ =
-                                                writer.write_sample(if enabled { v } else { 0 });
+                                            write_sample_or_log!(writer, if enabled { v } else { 0i16 }, "麦克风I16");
                                         }
                                     }
                                 }
@@ -653,7 +671,7 @@ pub fn start_system_loopback_wav_with_device(
                                         for &v in data {
                                             let s: i16 =
                                                 if enabled { v.to_sample::<i16>() } else { 0 };
-                                            let _ = writer.write_sample(s);
+                                            write_sample_or_log!(writer, s, "音频采样");
                                         }
                                     }
                                 }
@@ -678,7 +696,7 @@ pub fn start_system_loopback_wav_with_device(
                                         for &v in data {
                                             let s: i16 =
                                                 if enabled { v.to_sample::<i16>() } else { 0 };
-                                            let _ = writer.write_sample(s);
+                                            write_sample_or_log!(writer, s, "音频采样");
                                         }
                                     }
                                 }
@@ -703,7 +721,7 @@ pub fn start_system_loopback_wav_with_device(
                                         for &v in data {
                                             let s: i16 =
                                                 if enabled { v.to_sample::<i16>() } else { 0 };
-                                            let _ = writer.write_sample(s);
+                                            write_sample_or_log!(writer, s, "音频采样");
                                         }
                                     }
                                 }
@@ -728,7 +746,7 @@ pub fn start_system_loopback_wav_with_device(
                                         for &v in data {
                                             let s: i16 =
                                                 if enabled { v.to_sample::<i16>() } else { 0 };
-                                            let _ = writer.write_sample(s);
+                                            write_sample_or_log!(writer, s, "音频采样");
                                         }
                                     }
                                 }
@@ -753,7 +771,7 @@ pub fn start_system_loopback_wav_with_device(
                                         for &v in data {
                                             let s: i16 =
                                                 if enabled { v.to_sample::<i16>() } else { 0 };
-                                            let _ = writer.write_sample(s);
+                                            write_sample_or_log!(writer, s, "音频采样");
                                         }
                                     }
                                 }
@@ -778,7 +796,7 @@ pub fn start_system_loopback_wav_with_device(
                                         for &v in data {
                                             let s: i16 =
                                                 if enabled { v.to_sample::<i16>() } else { 0 };
-                                            let _ = writer.write_sample(s);
+                                            write_sample_or_log!(writer, s, "音频采样");
                                         }
                                     }
                                 }
@@ -866,6 +884,7 @@ pub fn start_microphone_wav_with_device(
     enabled_flag: Arc<AtomicBool>,
     recording_pause_flag: Arc<AtomicBool>,
 ) -> Result<WasapiCaptureHandle, String> {
+    AUDIO_WRITE_ERR_COUNT.store(false, Ordering::Relaxed);
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
     let thread_output = output_path.clone();
@@ -980,7 +999,7 @@ pub fn start_microphone_wav_with_device(
                                         } else {
                                             0
                                         };
-                                        let _ = writer.write_sample(s);
+                                        write_sample_or_log!(writer, s, "音频采样");
                                     }
                                 }
                             }
@@ -1002,8 +1021,7 @@ pub fn start_microphone_wav_with_device(
                                         let enabled = enabled_cb.load(Ordering::SeqCst)
                                             && !pause_cb.load(Ordering::SeqCst);
                                         for &v in data {
-                                            let _ =
-                                                writer.write_sample(if enabled { v } else { 0 });
+                                            write_sample_or_log!(writer, if enabled { v } else { 0i16 }, "麦克风I16");
                                         }
                                     }
                                 }
@@ -1028,7 +1046,7 @@ pub fn start_microphone_wav_with_device(
                                         for &v in data {
                                             let s: i16 =
                                                 if enabled { v.to_sample::<i16>() } else { 0 };
-                                            let _ = writer.write_sample(s);
+                                            write_sample_or_log!(writer, s, "音频采样");
                                         }
                                     }
                                 }
@@ -1053,7 +1071,7 @@ pub fn start_microphone_wav_with_device(
                                         for &v in data {
                                             let s: i16 =
                                                 if enabled { v.to_sample::<i16>() } else { 0 };
-                                            let _ = writer.write_sample(s);
+                                            write_sample_or_log!(writer, s, "音频采样");
                                         }
                                     }
                                 }
@@ -1078,7 +1096,7 @@ pub fn start_microphone_wav_with_device(
                                         for &v in data {
                                             let s: i16 =
                                                 if enabled { v.to_sample::<i16>() } else { 0 };
-                                            let _ = writer.write_sample(s);
+                                            write_sample_or_log!(writer, s, "音频采样");
                                         }
                                     }
                                 }
@@ -1103,7 +1121,7 @@ pub fn start_microphone_wav_with_device(
                                         for &v in data {
                                             let s: i16 =
                                                 if enabled { v.to_sample::<i16>() } else { 0 };
-                                            let _ = writer.write_sample(s);
+                                            write_sample_or_log!(writer, s, "音频采样");
                                         }
                                     }
                                 }
@@ -1128,7 +1146,7 @@ pub fn start_microphone_wav_with_device(
                                         for &v in data {
                                             let s: i16 =
                                                 if enabled { v.to_sample::<i16>() } else { 0 };
-                                            let _ = writer.write_sample(s);
+                                            write_sample_or_log!(writer, s, "音频采样");
                                         }
                                     }
                                 }
@@ -1153,7 +1171,7 @@ pub fn start_microphone_wav_with_device(
                                         for &v in data {
                                             let s: i16 =
                                                 if enabled { v.to_sample::<i16>() } else { 0 };
-                                            let _ = writer.write_sample(s);
+                                            write_sample_or_log!(writer, s, "音频采样");
                                         }
                                     }
                                 }
@@ -1227,6 +1245,7 @@ pub fn start_system_loopback_aac_with_device(
     enabled_flag: Arc<AtomicBool>,
     recording_pause_flag: Arc<AtomicBool>,
 ) -> Result<WasapiFfmpegHandle, String> {
+    AUDIO_WRITE_ERR_COUNT.store(false, Ordering::Relaxed);
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
     let thread_output = output_path.clone();

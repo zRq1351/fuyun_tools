@@ -2,11 +2,12 @@ use crate::core::app_state::AppState as SharedAppState;
 use crate::core::error::{to_frontend_error_string, AppError, AppResult, ErrorCode};
 use crate::core::perf_metrics::record_perf_metric;
 use crate::features;
+use crate::services::image_clipboard_manager::emit_image_history_payload;
 use crate::sync::Mutex;
 use crate::ui::commands_screenshot::open_screenshot_editor;
 use crate::ui::commands_writeback::{
-    begin_fill_sequence, spawn_fill_task, interrupt_text_fill_flow,
-    interrupt_image_fill_flow, schedule_image_promote_to_top,
+    begin_fill_sequence, interrupt_image_fill_flow, interrupt_text_fill_flow,
+    schedule_image_promote_to_top, spawn_fill_task,
     FillKind,
 };
 use crate::ui::window_manager::{
@@ -15,7 +16,6 @@ use crate::ui::window_manager::{
     show_image_preview_loading_window, show_image_preview_window,
 };
 use crate::utils::clipboard::ClipboardManager;
-use crate::services::image_clipboard_manager::emit_image_history_payload;
 use crate::utils::image_clipboard::{
     is_fast_fill_verify_mode_enabled,
     ImageClipboardManager, ImageHistoryPageData, ImageHistoryPreviewItem,
@@ -1446,13 +1446,28 @@ pub(crate) fn collect_import_image_paths(entries: Vec<String>) -> Result<Vec<Str
 }
 
 pub(crate) fn collect_images_from_dir(dir: &Path, out: &mut Vec<String>) -> Result<(), String> {
+    collect_images_from_dir_inner(dir, out, 0)
+}
+
+const MAX_IMPORT_DIR_DEPTH: u32 = 10;
+
+fn collect_images_from_dir_inner(dir: &Path, out: &mut Vec<String>, depth: u32) -> Result<(), String> {
+    if depth >= MAX_IMPORT_DIR_DEPTH {
+        return Ok(());
+    }
     let entries = fs::read_dir(dir).map_err(|e| format!("读取目录失败: {}", e))?;
     for entry in entries {
         let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
         let path = entry.path();
-        if path.is_dir() {
-            collect_images_from_dir(&path, out)?;
-        } else if path.is_file() && is_importable_image_file(&path) {
+        // 使用symlink_metadata避免跟随符号链接，防止无限递归
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|e| format!("读取文件元数据失败: {}", e))?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
+            collect_images_from_dir_inner(&path, out, depth + 1)?;
+        } else if metadata.is_file() && is_importable_image_file(&path) {
             out.push(path.to_string_lossy().to_string());
         }
     }

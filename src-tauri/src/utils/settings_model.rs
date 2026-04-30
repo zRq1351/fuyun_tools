@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
 
+/// 旧版XOR加密密钥（仅用于迁移旧配置到OS keyring，新密钥不再使用XOR加密）
+#[deprecated(note = "仅用于 migrate_legacy_api_keys 迁移，新代码请使用 OS keyring")]
 const LEGACY_ENCRYPTION_KEY: &[u8] = b"fuyun_tools_encryption_key_2025!";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -500,6 +502,10 @@ impl AppSettingsData {
         Err(format!("获取API密钥失败: {}", last_error))
     }
 
+    /// 迁移旧版XOR加密的API密钥到OS keyring
+    /// 此函数仅在应用启动时调用一次，用于兼容旧版本的配置文件
+    /// 迁移成功后，旧的 encrypted_api_key 字段会被清空
+    #[allow(deprecated)]
     pub fn migrate_legacy_api_keys(&mut self) -> bool {
         let mut migrated = false;
         let provider_keys: Vec<String> = self.provider_configs.keys().cloned().collect();

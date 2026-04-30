@@ -23,12 +23,17 @@ fn global_job_object() -> winapi::um::winnt::HANDLE {
         if !job.is_null() {
             let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
             info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            SetInformationJobObject(
+            let result = SetInformationJobObject(
                 job,
                 JobObjectExtendedLimitInformation,
                 &mut info as *mut _ as *mut _,
                 std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
             );
+            if result == 0 {
+                log::error!("SetInformationJobObject 失败: {}", std::io::Error::last_os_error());
+                winapi::um::handleapi::CloseHandle(job);
+                return std::ptr::null_mut();
+            }
         }
         job
     };
@@ -56,7 +61,14 @@ pub fn assign_to_global_job_object(child: &std::process::Child) {
     unsafe {
         let job = global_job_object();
         if !job.is_null() {
-            AssignProcessToJobObject(job, child.as_raw_handle() as *mut _);
+            let result = AssignProcessToJobObject(job, child.as_raw_handle() as *mut _);
+            if result == 0 {
+                log::warn!(
+                    "AssignProcessToJobObject 失败(pid={}): {}",
+                    child.id(),
+                    std::io::Error::last_os_error()
+                );
+            }
         }
     }
 }

@@ -1063,44 +1063,41 @@ fn is_error_text(text: &str) -> bool {
     false
 }
 
-/// 检查是否为电话号码
-fn is_phone_number(text: &str) -> bool {
-    let phone_patterns = [
+/// 预编译的电话号码正则表达式
+static PHONE_REGEXES: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
+    let patterns = [
         r"^\+?[\d\s\-\(\)]{10,}$",
         r"^\d{3}-\d{3}-\d{4}$",
         r"^\d{3}\.\d{3}\.\d{4}$",
         r"^\(\d{3}\)\s*\d{3}-\d{4}$",
         r"^\+1\s*\d{3}\s*\d{3}\s*\d{4}$",
     ];
+    patterns.iter()
+        .filter_map(|p| regex::Regex::new(p).ok())
+        .collect()
+});
 
-    for pattern in &phone_patterns {
-        if let Ok(regex) = regex::Regex::new(pattern) {
-            if regex.is_match(text) {
-                return true;
-            }
-        }
-    }
-    false
+/// 预编译的邮箱正则表达式
+static EMAIL_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap()
+});
+
+/// 预编译的URL正则表达式
+static URL_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"^https?://[^\s/$.?#].\S*$|^www\.\S+$").unwrap()
+});
+
+/// 检查是否为电话号码
+fn is_phone_number(text: &str) -> bool {
+    PHONE_REGEXES.iter().any(|regex| regex.is_match(text))
 }
 
 /// 检查是否为邮箱地址
 fn is_email_address(text: &str) -> bool {
-    let email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$";
-
-    if let Ok(regex) = regex::Regex::new(email_pattern) {
-        regex.is_match(text)
-    } else {
-        false
-    }
+    EMAIL_REGEX.is_match(text)
 }
 
 /// 检查是否为URL
 fn is_url(text: &str) -> bool {
-    let url_pattern = r"^https?://[^\s/$.?#].\S*$|^www\.\S+$";
-
-    if let Ok(regex) = regex::Regex::new(url_pattern) {
-        regex.is_match(text)
-    } else {
-        false
-    }
+    URL_REGEX.is_match(text)
 }

@@ -11,9 +11,13 @@ use crate::utils::utils_helpers::{
 };
 use serde::Deserialize;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+/// 缓存的AI客户端（当配置不变时复用）
+static CACHED_AI_CLIENT: LazyLock<Mutex<Option<(AIConfig, AIClient)>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 fn lock_state<'a>(
     state: &'a Arc<Mutex<SharedAppState>>,
@@ -110,12 +114,34 @@ fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
     })
 }
 
-/// 获取或创建AI客户端
+/// 获取或创建AI客户端（配置不变时复用缓存的客户端）
 pub async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> AppResult<AIClient> {
     let current_config = build_ai_config(&state)?;
-    let client = AIClient::new(current_config).map_err(|e| {
+
+    // 检查缓存的客户端是否仍然有效
+    {
+        let cache = CACHED_AI_CLIENT.lock().unwrap_or_else(|never| match never {});
+        if let Some((cached_config, cached_client)) = cache.as_ref() {
+            if cached_config.api_key == current_config.api_key
+                && cached_config.base_url == current_config.base_url
+                && cached_config.model == current_config.model
+            {
+                return Ok(cached_client.clone());
+            }
+        }
+    }
+
+    // 配置已变更，创建新客户端
+    let client = AIClient::new(current_config.clone()).map_err(|e| {
         AppError::new(ErrorCode::SystemError, "客户端初始化失败").with_details(e.to_string())
     })?;
+
+    // 更新缓存
+    {
+        let mut cache = CACHED_AI_CLIENT.lock().unwrap_or_else(|never| match never {});
+        *cache = Some((current_config, client.clone()));
+    }
+
     Ok(client)
 }
 

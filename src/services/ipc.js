@@ -54,6 +54,8 @@ export const IPC_COMMANDS = {
     COPY_IMAGE_CLIPBOARD_ITEM_TO_DIRECTORY: 'copy_image_clipboard_item_to_directory',
     COPY_TEXT: 'copy_text',
     COPY_AND_PASTE_TEXT: 'copy_and_paste_text',
+    GET_CLIPBOARD_FULL_SNAPSHOT: 'get_clipboard_full_snapshot',
+    UPDATE_TEXT_ITEM: 'update_text_item',
 
     // 异步预览
     GET_IMAGE_PREVIEW_BY_ID: 'get_image_preview_by_id',
@@ -167,7 +169,7 @@ export const ClipboardService = {
      *   imagePinnedItems: string[]
      * }>}
      */
-    getFullSnapshot: () => invoke('get_clipboard_full_snapshot'),
+    getFullSnapshot: () => invoke(IPC_COMMANDS.GET_CLIPBOARD_FULL_SNAPSHOT),
     getHistoryPage: ({
                          offset = 0,
                          limit = 50,
@@ -247,7 +249,7 @@ export const ImageClipboardService = {
     closeTextPreviewWindow: () => invoke(IPC_COMMANDS.CLOSE_TEXT_PREVIEW_WINDOW),
     startTextPreviewWindowDrag: () => invoke(IPC_COMMANDS.START_TEXT_PREVIEW_WINDOW_DRAG),
     updateTextItem: (itemId, newContent) =>
-        invoke('update_text_item', {itemId, newContent}),
+        invoke(IPC_COMMANDS.UPDATE_TEXT_ITEM, {itemId, newContent}),
 
     copyItemToDirectory: (itemId, targetDirectory) =>
         invoke(IPC_COMMANDS.COPY_IMAGE_CLIPBOARD_ITEM_TO_DIRECTORY, {itemId, targetDirectory}),

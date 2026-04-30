@@ -768,7 +768,6 @@ watch([searchKeyword, categoryFilter], (newVals, oldVals) => {
 
 
   if (isUpdatingCategory.value) {
-    console.log('[分类更新中] 跳过重新加载')
     return
   }
 

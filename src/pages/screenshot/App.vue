@@ -1432,13 +1432,6 @@ function loadImageFromPath(imagePath) {
     return
   }
 
-  console.log('🔍 开始加载截图:', {
-    imagePath,
-    fileUrl: Array.from(fileUrl).slice(0, 100).join('') + '...',
-    timestamp: new Date().toISOString()
-  })
-
-  
   revokeScreenshotObjectUrl()
   loadImageFromSrc(fileUrl)
 }

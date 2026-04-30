@@ -1,5 +1,57 @@
 use ocr_rs::{OcrEngine, OcrEngineConfig};
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
+
+/// 缓存的 OCR 引擎实例（全局单例）
+static CACHED_OCR_ENGINE: OnceLock<Option<OcrEngine>> = OnceLock::new();
+
+/// 获取或初始化缓存的 OCR 引擎
+fn get_or_init_engine(app_handle: &tauri::AppHandle) -> Result<&'static OcrEngine, String> {
+    let engine_opt = CACHED_OCR_ENGINE.get_or_init(|| {
+        match init_ocr_engine(app_handle) {
+            Ok(engine) => Some(engine),
+            Err(e) => {
+                log::error!("OCR 引擎初始化失败: {}", e);
+                None
+            }
+        }
+    });
+    engine_opt.as_ref().ok_or_else(|| "OCR 引擎未初始化".to_string())
+}
+
+fn init_ocr_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {
+    use tauri::Manager;
+    let resource_dir = app_handle.path().resource_dir()
+        .map_err(|e| format!("获取资源目录失败: {}", e))?;
+
+    let det_model = resource_dir.join("models").join("PP-OCRv5_mobile_det.mnn");
+    let rec_model = resource_dir.join("models").join("PP-OCRv5_mobile_rec.mnn");
+    let charset = resource_dir.join("models").join("ppocr_keys_v5.txt");
+
+    if !det_model.exists() {
+        return Err(format!("检测模型不存在: {:?}", det_model));
+    }
+    if !rec_model.exists() {
+        return Err(format!("识别模型不存在: {:?}", rec_model));
+    }
+    if !charset.exists() {
+        return Err(format!("字符集文件不存在: {:?}", charset));
+    }
+
+    let config = OcrEngineConfig::fast()
+        .with_min_result_confidence(0.5);
+
+    let engine = OcrEngine::new(
+        det_model.to_str().ok_or("检测模型路径无效")?,
+        rec_model.to_str().ok_or("识别模型路径无效")?,
+        charset.to_str().ok_or("字符集路径无效")?,
+        Some(config),
+    )
+        .map_err(|e| format!("初始化 OCR 引擎失败: {}", e))?;
+
+    log::info!("OCR 引擎初始化完成（已缓存）");
+    Ok(engine)
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct OcrLine {
@@ -21,53 +73,19 @@ pub struct OcrParagraph {
     pub lines: Vec<OcrLine>,
 }
 
-/// 使用 ocr-rs 进行 OCR 识别
+/// 使用 ocr-rs 进行 OCR 识别（使用缓存的引擎）
 pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHandle) -> Result<Vec<OcrParagraph>, String> {
-    use tauri::Manager;
-    
-    log::info!("初始化 ocr-rs 引擎...");
-    
+    log::info!("开始 OCR 识别（使用缓存引擎）...");
+
     // 加载图片
     let img = image::load_from_memory(image_data)
         .map_err(|e| format!("图片加载失败: {}", e))?;
-    
-    log::info!("开始 OCR 识别...");
-    
-    let resource_dir = app_handle.path().resource_dir().map_err(|e| format!("获取资源目录失败: {}", e))?;
+
+    // 获取缓存的引擎
+    let engine = get_or_init_engine(app_handle)?;
 
     // 执行 OCR（在阻塞线程中运行）
-    let result = tokio::task::spawn_blocking(move || {
-        // 获取模型路径（从资源目录）
-        let base_dir = resource_dir;
-
-        let det_model = base_dir.join("models").join("PP-OCRv5_mobile_det.mnn");
-        let rec_model = base_dir.join("models").join("PP-OCRv5_mobile_rec.mnn");
-        let charset = base_dir.join("models").join("ppocr_keys_v5.txt");
-
-        // 检查模型文件是否存在
-        if !det_model.exists() {
-            return Err(format!("检测模型不存在: {:?}", det_model));
-        }
-        if !rec_model.exists() {
-            return Err(format!("识别模型不存在: {:?}", rec_model));
-        }
-        if !charset.exists() {
-            return Err(format!("字符集文件不存在: {:?}", charset));
-        }
-        
-        // 创建 OCR 配置（使用快速模式）
-        let config = OcrEngineConfig::fast()
-            .with_min_result_confidence(0.5);  // 最低置信度阈值
-        
-        // 创建 OCR 引擎
-        let engine = OcrEngine::new(
-            det_model.to_str().unwrap(),
-            rec_model.to_str().unwrap(),
-            charset.to_str().unwrap(),
-            Some(config),
-        )
-        .map_err(|e| format!("初始化 OCR 引擎失败: {}", e))?;
-        
+    let result = tokio::task::spawn_blocking(move || -> Result<Vec<OcrParagraph>, String> {
         // 执行识别
         let ocr_results = engine.recognize(&img)
             .map_err(|e| format!("OCR识别失败: {}", e))?;

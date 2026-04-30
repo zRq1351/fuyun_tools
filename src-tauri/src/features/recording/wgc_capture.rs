@@ -228,6 +228,19 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
             if frame_w == target_w && frame_h == target_h {
                 // 尺寸匹配：单次遍历完成 nopadding + 垂直翻转
                 let row_bytes = target_w * 4;
+                // 额外安全检查：确保目标缓冲区足够大
+                debug_assert!(
+                    resized.len() >= target_w * target_h * 4,
+                    "resized缓冲区太小: {} < {}",
+                    resized.len(),
+                    target_w * target_h * 4
+                );
+                debug_assert!(
+                    raw_pixels.len() >= stride * frame_h,
+                    "源缓冲区太小: {} < {}",
+                    raw_pixels.len(),
+                    stride * frame_h
+                );
                 // SAFETY: resized 已预分配为 target_w * target_h * 4，
                 // raw_pixels 来自 WGC 帧缓冲区，保证至少有 stride * frame_h 字节
                 unsafe {

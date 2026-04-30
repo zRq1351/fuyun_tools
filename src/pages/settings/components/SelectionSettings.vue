@@ -139,7 +139,6 @@
 </template>
 
 <script setup>
-import {ref} from 'vue'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {Warning} from '@element-plus/icons-vue'
 
@@ -244,8 +243,6 @@ const addCustomPrompt = () => {
     enabled: true
   }
   props.form.selectionCustomPrompts.push(newPrompt)
-  console.log('[Settings] Added custom prompt, total:', props.form.selectionCustomPrompts.length)
-  console.log('[Settings] Current prompts:', props.form.selectionCustomPrompts)
 }
 
 const removeCustomPrompt = (index) => {

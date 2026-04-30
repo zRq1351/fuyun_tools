@@ -13,7 +13,9 @@ pub fn emit_recording_state_changed(
         "state": state,
         "elapsedMs": elapsed_ms
     });
-    let _ = app.emit("recording-state-changed", payload);
+    if let Err(e) = app.emit("recording-state-changed", payload) {
+        log::warn!("emit_recording_state_changed 失败: {}", e);
+    }
 }
 
 pub fn emit_recording_error(app: &AppHandle, session_id: Option<&str>, code: &str, message: &str) {
@@ -23,7 +25,9 @@ pub fn emit_recording_error(app: &AppHandle, session_id: Option<&str>, code: &st
         "message": message,
         "recoverable": false
     });
-    let _ = app.emit("recording-error", payload);
+    if let Err(e) = app.emit("recording-error", payload) {
+        log::warn!("emit_recording_error 失败: {}", e);
+    }
 }
 
 pub fn emit_recording_finished(app: &AppHandle, result: &RecordingStopResult) {
@@ -33,14 +37,18 @@ pub fn emit_recording_finished(app: &AppHandle, result: &RecordingStopResult) {
         "durationMs": result.duration_ms,
         "fileSizeBytes": result.file_size_bytes
     });
-    let _ = app.emit("recording-finished", payload);
+    if let Err(e) = app.emit("recording-finished", payload) {
+        log::warn!("emit_recording_finished 失败: {}", e);
+    }
 }
 
 pub fn emit_recording_device_list(app: &AppHandle, microphones: Vec<AudioInputDevice>) {
     let payload = json!({
         "microphones": microphones
     });
-    let _ = app.emit("recording-device-list-updated", payload);
+    if let Err(e) = app.emit("recording-device-list-updated", payload) {
+        log::warn!("emit_recording_device_list 失败: {}", e);
+    }
 }
 
 pub fn emit_recording_stats_updated(
@@ -60,7 +68,9 @@ pub fn emit_recording_stats_updated(
         "droppedVideoFrames": dropped_video_frames,
         "audioBufferLevelMs": audio_buffer_level_ms
     });
-    let _ = app.emit("recording-stats-updated", payload);
+    if let Err(e) = app.emit("recording-stats-updated", payload) {
+        log::warn!("emit_recording_stats_updated 失败: {}", e);
+    }
 }
 
 /// 发送音频合并进度事件
@@ -77,5 +87,7 @@ pub fn emit_recording_audio_merging(
         "progress": progress,
         "message": message
     });
-    let _ = app.emit("recording-audio-merging", payload);
+    if let Err(e) = app.emit("recording-audio-merging", payload) {
+        log::warn!("emit_recording_audio_merging 失败: {}", e);
+    }
 }

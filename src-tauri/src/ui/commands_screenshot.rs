@@ -7,11 +7,11 @@ use crate::ui::commands::{
     bind_screenshot_window_lifecycle,
     cleanup_all_screenshot_boot_images,
     now_unix_ms, replace_screenshot_boot_image_path, write_screenshot_boot_image,
-    NEXT_SCREENSHOT_SESSION_ID, NEXT_PINNED_IMAGE_WINDOW_ID,
-    SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW, ManualLongshotSessionRequest,
+    ManualLongshotSessionRequest, NEXT_PINNED_IMAGE_WINDOW_ID,
+    NEXT_SCREENSHOT_SESSION_ID, SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW,
 };
 use crate::ui::commands_clipboard::{frontend_error, get_image_clipboard_manager_arc, is_screenshot_feature_enabled, lock_arc_mutex};
-use crate::ui::commands_screenshot_render::{ScreenshotExportRequest, export_screenshot_image, render_screenshot_image};
+use crate::ui::commands_screenshot_render::{export_screenshot_image, render_screenshot_image, ScreenshotExportRequest};
 use crate::ui::window_manager::{
     bind_overlay_window_events, focus_overlay_window_by_label, hide_overlay_window_by_label,
     show_overlay_window_by_label,
@@ -397,7 +397,9 @@ pub async fn choose_screenshot_save_path(app: AppHandle) -> Result<serde_json::V
             let _ = tx.send(result);
         });
 
-    let selected_path_result = tauri::async_runtime::spawn_blocking(move || rx.recv()).await;
+    let selected_path_result = tauri::async_runtime::spawn_blocking(move || {
+        rx.recv_timeout(Duration::from_secs(30))
+    }).await;
 
     if let Some(window) = screenshot_window.as_ref() {
         let _ = window.set_always_on_top(true);
@@ -556,7 +558,9 @@ pub async fn save_screenshot(
             let _ = tx.send(result);
         });
 
-    let selected_path = tauri::async_runtime::spawn_blocking(move || rx.recv())
+    let selected_path = tauri::async_runtime::spawn_blocking(move || {
+        rx.recv_timeout(Duration::from_secs(30))
+    })
         .await
         .map_err(|e| format!("等待保存对话框结果失败: {}", e))?
         .map_err(|e| format!("接收保存对话框结果失败: {}", e))??;

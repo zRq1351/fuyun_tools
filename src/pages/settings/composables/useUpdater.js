@@ -2,6 +2,7 @@ import {h, ref} from 'vue'
 import {check} from '@tauri-apps/plugin-updater'
 import {relaunch} from '@tauri-apps/plugin-process'
 import {marked} from 'marked'
+import {ElMessageBox} from 'element-plus'
 
 marked.setOptions({
     breaks: false,

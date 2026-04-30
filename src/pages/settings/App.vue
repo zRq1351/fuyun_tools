@@ -94,7 +94,7 @@
 
 <script setup>
 import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from 'vue'
-import {provideGlobalConfig} from 'element-plus'
+import {ElMessage, ElMessageBox, provideGlobalConfig} from 'element-plus'
 import zhCn from 'element-plus/dist/locale/zh-cn'
 import {
   Camera,
@@ -450,13 +450,7 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
     changedFields.selectionModifierKey = source.selectionModifierKey
   }
   if (JSON.stringify(source.selectionCustomPrompts) !== JSON.stringify(initial.selectionCustomPrompts)) {
-    console.log('[Settings] Detecting change in selectionCustomPrompts')
-    console.log('[Settings] Current:', JSON.stringify(source.selectionCustomPrompts))
-    console.log('[Settings] Initial:', JSON.stringify(initial.selectionCustomPrompts))
     changedFields.selectionCustomPrompts = source.selectionCustomPrompts
-    console.log('[Settings] selectionCustomPrompts changed:', source.selectionCustomPrompts)
-  } else {
-    console.log('[Settings] No change in selectionCustomPrompts')
   }
   if (source.selectionWebSearchEnabled !== initial.selectionWebSearchEnabled) {
     changedFields.selectionWebSearchEnabled = source.selectionWebSearchEnabled

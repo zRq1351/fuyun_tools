@@ -119,10 +119,11 @@
 </template>
 
 <script setup>
-import {computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue'
+import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {marked} from 'marked'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWindow} from '@tauri-apps/api/window'
+import {ElMessage} from 'element-plus'
 import {CloseBold, CopyDocument, DocumentCopy, FullScreen, Hide, Minus, View} from '@element-plus/icons-vue'
 import {AIService, ClipboardService} from '@/services/ipc.js'
 import {handleAppError} from '@/utils/errorHandler.js'
@@ -298,7 +299,18 @@ const renderMarkdownSafely = (markdownText) =>
     })
 
 const originalHtml = computed(() => renderMarkdownSafely(originalText.value))
-const resultHtml = computed(() => renderMarkdownSafely(resultText.value))
+
+// 流式更新时使用requestAnimationFrame节流，避免每次chunk都重新解析markdown
+const resultHtmlRaw = ref('')
+let rafId = null
+watch(resultText, (newText) => {
+  if (rafId) cancelAnimationFrame(rafId)
+  rafId = requestAnimationFrame(() => {
+    resultHtmlRaw.value = renderMarkdownSafely(newText)
+    rafId = null
+  })
+}, {immediate: true})
+const resultHtml = computed(() => resultHtmlRaw.value)
 
 onMounted(async () => {
   applyTheme(getCurrentTheme())

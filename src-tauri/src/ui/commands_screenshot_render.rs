@@ -5,11 +5,11 @@ use imageproc::drawing::{
 use imageproc::rect::Rect;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::sync::OnceLock;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -240,11 +240,6 @@ fn apply_mosaic_at_image_point(
     let src_h = source.height() as i32;
     let dst_w = target.width() as i32;
     let dst_h = target.height() as i32;
-    for local_y in 0..size {
-        for local_x in 0..size {
-            let _ = (local_x, local_y);
-        }
-    }
     for block_y in (0..size).step_by(block_size as usize) {
         for block_x in (0..size).step_by(block_size as usize) {
             let src_x = clamp_i32(center_x - half + block_x, 0, src_w.saturating_sub(1));
