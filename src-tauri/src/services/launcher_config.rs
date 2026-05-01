@@ -100,3 +100,31 @@ pub fn set_view_mode(mode: String) -> Result<LauncherConfig, String> {
     save_launcher_config(&config)?;
     Ok(config)
 }
+
+pub fn reorder_categories(category_ids: Vec<String>) -> Result<LauncherConfig, String> {
+    let mut config = load_launcher_config();
+
+    // 根据提供的ID顺序重新排列分类
+    let mut new_categories = Vec::new();
+    for id in &category_ids {
+        if let Some(pos) = config.categories.iter().position(|c| c.id == *id) {
+            new_categories.push(config.categories.remove(pos));
+        }
+    }
+
+    // 添加未被重排序的分类（如果有的话）
+    new_categories.append(&mut config.categories);
+
+    config.categories = new_categories;
+    save_launcher_config(&config)?;
+    Ok(config)
+}
+
+pub fn update_category_icon(category_id: String, icon: String) -> Result<LauncherConfig, String> {
+    let mut config = load_launcher_config();
+    if let Some(category) = config.categories.iter_mut().find(|c| c.id == category_id) {
+        category.icon = icon;
+    }
+    save_launcher_config(&config)?;
+    Ok(config)
+}

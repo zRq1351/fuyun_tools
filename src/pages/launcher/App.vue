@@ -341,7 +341,7 @@ const handleReorderApps = async (reorderedApps) => {
 const handleReorderCategories = async (fromIndex, toIndex) => {
   if (!launcherConfig.value) return
   const categories = [...launcherConfig.value.categories]
-  if (fromIndex < 0 || fromIndex >= categories.length || toIndex < 0 || toIndex >= categories.length) return
+  if (fromIndex < 0 || fromIndex >= categories.length || toIndex < 0 || toIndex > categories.length) return
   const [moved] = categories.splice(fromIndex, 1)
   categories.splice(toIndex, 0, moved)
   launcherConfig.value.categories = categories

@@ -371,3 +371,15 @@ pub async fn set_app_category(app_id: String, category_id: String) -> Result<lau
 pub async fn set_launcher_view_mode(mode: String) -> Result<launcher_config::LauncherConfig, String> {
     launcher_config::set_view_mode(mode)
 }
+
+/// 重新排序分类
+#[tauri::command]
+pub async fn reorder_categories(category_ids: Vec<String>) -> Result<launcher_config::LauncherConfig, String> {
+    launcher_config::reorder_categories(category_ids)
+}
+
+/// 更新分类图标
+#[tauri::command]
+pub async fn update_category_icon(category_id: String, icon: String) -> Result<launcher_config::LauncherConfig, String> {
+    launcher_config::update_category_icon(category_id, icon)
+}

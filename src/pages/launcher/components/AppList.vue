@@ -64,18 +64,20 @@
       </div>
       <div class="menu-divider"></div>
       <div class="menu-title">添加到分类</div>
-      <div
-          v-for="cat in customCategories"
-          :key="cat.id"
-          class="menu-item"
-          @click="assignToCategory(contextMenu.app, cat.id)"
-      >
-        <el-icon :size="14">
-          <component :is="getIcon(cat.icon)"/>
-        </el-icon>
-        <span>{{ cat.name }}</span>
+      <div class="menu-category-list">
+        <div
+            v-for="cat in customCategories.slice(0, 5)"
+            :key="cat.id"
+            class="menu-item"
+            @click="assignToCategory(contextMenu.app, cat.id)"
+        >
+          <el-icon :size="14">
+            <component :is="getIcon(cat.icon)"/>
+          </el-icon>
+          <span>{{ cat.name }}</span>
+        </div>
       </div>
-      <div v-if="customCategories.length > 0" class="menu-divider"></div>
+      <div v-if="customCategories.length > 5" class="menu-divider"></div>
       <div class="menu-item" @click="removeFromCategory(contextMenu.app)">
         <el-icon :size="14">
           <Close/>
@@ -87,7 +89,7 @@
 </template>
 
 <script setup>
-import {ref, computed, onMounted, onBeforeUnmount} from 'vue'
+import {ref, computed, onMounted, onBeforeUnmount, watch} from 'vue'
 import {Monitor, Close, Grid} from '@element-plus/icons-vue'
 import {invoke} from '@tauri-apps/api/core'
 
@@ -98,7 +100,7 @@ const props = defineProps({
   }
 })
 
-defineEmits(['select'])
+const emit = defineEmits(['select'])
 
 const customCategories = ref([])
 const contextMenu = ref({visible: false, x: 0, y: 0, app: null})
@@ -127,14 +129,23 @@ const openApp = (app) => {
 }
 
 const showContextMenu = (event, app) => {
-  const container = event.currentTarget.closest('.app-list-container')
-  const rect = container.getBoundingClientRect()
-  const scrollTop = container.scrollTop
+  // 使用固定定位，相对于视口
+  let x = event.clientX
+  let y = event.clientY
 
-  let x = event.clientX - rect.left
-  let y = event.clientY - rect.top + scrollTop
+  // 获取菜单的大致尺寸（预设值）
+  const menuWidth = 160
+  const menuHeight = 200
 
-  contextMenu.value = {visible: true, x: Math.max(0, x), y: Math.max(0, y), app}
+  // 边界检测，确保菜单不超出视口
+  if (x + menuWidth > window.innerWidth) {
+    x = window.innerWidth - menuWidth - 10
+  }
+  if (y + menuHeight > window.innerHeight) {
+    y = window.innerHeight - menuHeight - 10
+  }
+
+  contextMenu.value = {visible: true, x: Math.max(10, x), y: Math.max(10, y), app}
 }
 
 const hideContextMenu = () => {
@@ -165,6 +176,11 @@ onMounted(() => {
   loadCategories()
   document.addEventListener('click', hideContextMenu)
 })
+
+// 监听应用列表变化，重新加载分类
+watch(() => props.apps, () => {
+  loadCategories()
+}, {deep: true})
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', hideContextMenu)
@@ -222,7 +238,9 @@ onBeforeUnmount(() => {
 }
 
 .app-item:hover {
-  background: var(--fy-bg-hover);
+  background: var(--fy-accent-bg);
+  padding-left: 20px;
+  border-left: 3px solid var(--fy-accent);
 }
 
 .app-icon {
@@ -262,14 +280,17 @@ onBeforeUnmount(() => {
 }
 
 .context-menu {
-  position: absolute;
+  position: fixed;
   background: var(--fy-bg-surface);
   border: 1px solid var(--fy-border);
   border-radius: 8px;
   padding: 4px 0;
   min-width: 160px;
+  max-height: 400px;
   box-shadow: var(--fy-shadow);
-  z-index: 100;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
 }
 
 .menu-title {
@@ -280,6 +301,33 @@ onBeforeUnmount(() => {
   margin-bottom: 4px;
 }
 
+.menu-category-list {
+  max-height: 150px;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fy-border) transparent;
+  touch-action: pan-y;
+  flex-shrink: 1;
+}
+
+.menu-category-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.menu-category-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.menu-category-list::-webkit-scrollbar-thumb {
+  background: var(--fy-border);
+  border-radius: 2px;
+}
+
+.menu-category-list::-webkit-scrollbar-thumb:hover {
+  background: var(--fy-text-muted);
+}
+
 .menu-item {
   display: flex;
   align-items: center;
@@ -288,11 +336,16 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--fy-text-primary);
   cursor: pointer;
-  transition: background 0.1s;
+  transition: background 0.15s, padding-left 0.15s;
+  user-select: none;
+  /* 确保菜单项有最小高度 */
+  min-height: 28px;
+  flex-shrink: 0;
 }
 
 .menu-item:hover {
-  background: var(--fy-bg-hover);
+  background: var(--fy-accent-bg);
+  padding-left: 16px;
 }
 
 .menu-divider {

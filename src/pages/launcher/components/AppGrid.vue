@@ -1,61 +1,25 @@
 <template>
   <div class="app-grid-container" @contextmenu.prevent>
+    <!-- Categories Grid with Sortable -->
     <div ref="categoriesContainer" class="categories-grid">
-      <template v-for="(category, catIndex) in categories" :key="category.name">
-        <div v-if="catDropIndex === catIndex && catDragging" class="cat-drop-indicator"></div>
-        <div
-            :class="{
-              'cat-dragging': catDragging && catDragIndex === catIndex,
-              'cat-drop-target': catDragging && catDropIndex === catIndex && catDragIndex !== catIndex
-            }"
-            class="category-box"
-            @mousedown.prevent="onCatMouseDown($event, catIndex)"
-        >
-          <div class="category-header" @click="expandCategory(category)">
-            <span class="category-name">{{ category.name }}</span>
-            <span class="category-count">{{ category.apps.length }}</span>
-          </div>
-          <div class="category-apps">
-            <div
-                v-for="app in category.apps.slice(0, 4)"
-                :key="app.id"
-                class="app-item"
-                @dblclick="$emit('select', app)"
-                @contextmenu.prevent="showContextMenu($event, app)"
-            >
-              <div class="app-icon">
-                <img v-if="app.icon_base64" :src="app.icon_base64" class="icon-img"/>
-                <el-icon v-else :size="24">
-                  <Monitor/>
-                </el-icon>
-              </div>
-              <div class="app-name">{{ app.title }}</div>
-            </div>
-          </div>
+      <div
+          v-for="(category, catIndex) in categories"
+          :key="category.name"
+          :data-index="catIndex"
+          class="category-box"
+          @click="expandCategory(category)"
+      >
+        <div class="category-header">
+          <span class="category-name">{{ category.name }}</span>
+          <span class="category-count">{{ category.apps.length }}</span>
         </div>
-      </template>
-      <div v-if="catDropIndex >= categories.length && catDragging" class="cat-drop-indicator"></div>
-    </div>
-
-    <div v-if="expandedCategory" class="expand-overlay" @click.self="closeExpanded">
-      <div class="expand-popup">
-        <div class="expand-header">
-          <span class="expand-title">{{ expandedCategory.name }}</span>
-          <button class="expand-close" @click="closeExpanded">
-            <el-icon :size="14">
-              <Close/>
-            </el-icon>
-          </button>
-        </div>
-        <div ref="appsContainer" class="expand-apps">
+        <div class="category-apps">
           <div
-              v-for="(app, index) in expandedCategory.apps"
+              v-for="app in category.apps.slice(0, 4)"
               :key="app.id"
-              :class="{ 'app-drag-ready': appDragging && appDragIndex === index }"
               class="app-item"
-              @dblclick="$emit('select', app)"
-              @contextmenu.prevent="showContextMenu($event, app)"
-              @mousedown.prevent="onAppMouseDown($event, index, app)"
+              @dblclick.stop="$emit('select', app)"
+              @contextmenu.prevent.stop="showContextMenu($event, app)"
           >
             <div class="app-icon">
               <img v-if="app.icon_base64" :src="app.icon_base64" class="icon-img"/>
@@ -69,31 +33,39 @@
       </div>
     </div>
 
-    <div v-if="appGhost.show" :style="{ left: appGhost.x + 'px', top: appGhost.y + 'px' }" class="drag-ghost app-ghost">
-      <div class="app-icon">
-        <img v-if="appGhost.app?.icon_base64" :src="appGhost.app.icon_base64" class="icon-img"/>
-        <el-icon v-else :size="24">
-          <Monitor/>
-        </el-icon>
-      </div>
-      <div class="app-name">{{ appGhost.app?.title }}</div>
-    </div>
-
-    <div v-if="catGhost.show" :style="{ left: catGhost.x + 'px', top: catGhost.y + 'px' }" class="drag-ghost cat-ghost">
-      <div class="ghost-cat-header">
-        <span class="ghost-cat-name">{{ catGhost.name }}</span>
-        <span class="ghost-cat-count">{{ catGhost.count }}</span>
-      </div>
-      <div class="ghost-cat-apps">
-        <div v-for="app in catGhost.apps" :key="app.id" class="ghost-app-icon">
-          <img v-if="app.icon_base64" :src="app.icon_base64" class="icon-img"/>
-          <el-icon v-else :size="16">
-            <Monitor/>
-          </el-icon>
+    <!-- Expanded Category Popup -->
+    <div v-if="expandedCategory" class="expand-overlay" @click.self="closeExpanded">
+      <div class="expand-popup">
+        <div class="expand-header">
+          <span class="expand-title">{{ expandedCategory.name }}</span>
+          <button class="expand-close" @click="closeExpanded">
+            <el-icon :size="14">
+              <Close/>
+            </el-icon>
+          </button>
+        </div>
+        <div ref="appsContainer" class="expand-apps">
+          <div
+              v-for="app in expandedCategory.apps"
+              :key="app.id"
+              :data-app-id="app.id"
+              class="app-item sortable-app"
+              @dblclick.stop="$emit('select', app)"
+              @contextmenu.prevent.stop="showContextMenu($event, app)"
+          >
+            <div class="app-icon">
+              <img v-if="app.icon_base64" :src="app.icon_base64" class="icon-img"/>
+              <el-icon v-else :size="24">
+                <Monitor/>
+              </el-icon>
+            </div>
+            <div class="app-name">{{ app.title }}</div>
+          </div>
         </div>
       </div>
     </div>
 
+    <!-- Context Menu -->
     <div
         v-if="contextMenu.visible"
         :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
@@ -107,6 +79,20 @@
         <span>打开</span>
       </div>
       <div class="menu-divider"></div>
+      <div class="menu-category-list">
+        <div
+            v-for="cat in customCategories.slice(0, 5)"
+            :key="cat.id"
+            class="menu-item"
+            @click="assignToCategory(contextMenu.app, cat.id)"
+        >
+          <el-icon :size="14">
+            <component :is="getIcon(cat.icon)"/>
+          </el-icon>
+          <span>{{ cat.name }}</span>
+        </div>
+      </div>
+      <div v-if="customCategories.length > 5" class="menu-divider"></div>
       <div class="menu-item" @click="removeFromCategory(contextMenu.app)">
         <el-icon :size="14">
           <Close/>
@@ -118,8 +104,9 @@
 </template>
 
 <script setup>
-import {onBeforeUnmount, onMounted, reactive, ref} from 'vue'
-import {Close, Monitor} from '@element-plus/icons-vue'
+import {nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
+import {Close, Monitor, Grid} from '@element-plus/icons-vue'
+import Sortable from 'sortablejs'
 import {invoke} from '@tauri-apps/api/core'
 
 const props = defineProps({
@@ -128,226 +115,164 @@ const props = defineProps({
 
 const emit = defineEmits(['select', 'reorder-apps', 'reorder-categories'])
 
+const customCategories = ref([])
 const contextMenu = ref({visible: false, x: 0, y: 0, app: null})
 const expandedCategory = ref(null)
 const appsContainer = ref(null)
 const categoriesContainer = ref(null)
 
-// App drag state
-const appDragging = ref(false)
-const appDragIndex = ref(-1)
-const appGhost = reactive({show: false, x: 0, y: 0, app: null})
-let appLongPressTimer = null
-let appStartX = 0
-let appStartY = 0
-let lastAppTargetIndex = -1
+const iconMap = {Monitor, Grid}
 
-// Category drag state
-const catDragging = ref(false)
-const catDragIndex = ref(-1)
-const catDropIndex = ref(-1)
-const catGhost = reactive({show: false, x: 0, y: 0, name: '', count: 0, apps: []})
-let catLongPressTimer = null
-let catStartX = 0
-let catStartY = 0
-let lastCatTargetIndex = -1
+const getIcon = (iconName) => {
+  return iconMap[iconName] || Grid
+}
+
+// 加载分类列表
+const loadCategories = async () => {
+  try {
+    const config = await invoke('get_launcher_config')
+    customCategories.value = config.categories || []
+  } catch (error) {
+    console.error('Load categories error:', error)
+  }
+}
+
+let categoriesSortable = null
+let appsSortable = null
+let appFallbackElement = null  // 跟踪fallback元素
+let catFallbackElement = null  // 跟踪分类fallback元素
 
 // Category functions
 const expandCategory = (category) => {
-  if (category.apps.length > 4 && !catDragging.value) {
+  if (category.apps.length > 4) {
     expandedCategory.value = category
+    // Initialize sortable for expanded apps after DOM update
+    nextTick(() => {
+      initAppsSortable()
+    })
   }
 }
 
 const closeExpanded = () => {
   expandedCategory.value = null
-  cancelAppDrag()
+  destroyAppsSortable()
 }
 
-const onCatMouseDown = (event, catIndex) => {
-  if (event.button !== 0) return
+// Initialize Sortable for categories
+const initCategoriesSortable = () => {
+  if (!categoriesContainer.value) return
 
-  catStartX = event.clientX
-  catStartY = event.clientY
-  catDragIndex.value = catIndex
+  categoriesSortable = Sortable.create(categoriesContainer.value, {
+    animation: 200,
+    ghostClass: 'category-ghost',
+    dragClass: 'category-drag',
+    chosenClass: 'category-chosen',
+    delay: 600,
+    delayOnTouchOnly: true,
+    forceFallback: true,
+    fallbackClass: 'category-fallback',
+    fallbackTolerance: 3,
+    fallbackOnBody: true,
+    swapThreshold: 0.65,
+    onStart: (evt) => {
+      // 拖动开始时关闭展开的分类
+      if (expandedCategory.value) {
+        closeExpanded()
+      }
+      // 获取fallback元素并添加鼠标跟踪
+      setTimeout(() => {
+        catFallbackElement = document.querySelector('.category-fallback')
+        if (catFallbackElement) {
+          const moveHandler = (e) => {
+            if (catFallbackElement) {
+              catFallbackElement.style.left = (e.clientX - catFallbackElement.offsetWidth / 2) + 'px'
+              catFallbackElement.style.top = (e.clientY - catFallbackElement.offsetHeight / 2) + 'px'
+            }
+          }
+          document.addEventListener('mousemove', moveHandler)
 
-  catLongPressTimer = setTimeout(() => {
-    catDragging.value = true
-    catGhost.show = true
-    catGhost.x = catStartX - 100
-    catGhost.y = catStartY - 30
-    catGhost.name = props.categories[catIndex].name
-    catGhost.count = props.categories[catIndex].apps.length
-    catGhost.apps = props.categories[catIndex].apps.slice(0, 4)
-    lastCatTargetIndex = catIndex
-  }, 600)
-
-  document.addEventListener('mousemove', onCatMouseMove)
-  document.addEventListener('mouseup', onCatMouseUp)
-}
-
-const onCatMouseMove = (event) => {
-  if (catLongPressTimer && !catDragging.value) {
-    const dx = Math.abs(event.clientX - catStartX)
-    const dy = Math.abs(event.clientY - catStartY)
-    if (dx > 5 || dy > 5) {
-      clearTimeout(catLongPressTimer)
-      catLongPressTimer = null
-      document.removeEventListener('mousemove', onCatMouseMove)
-      document.removeEventListener('mouseup', onCatMouseUp)
-    }
-    return
-  }
-
-  if (catDragging.value) {
-    event.preventDefault()
-    catGhost.x = event.clientX - 100
-    catGhost.y = event.clientY - 30
-
-    const container = categoriesContainer.value
-    if (!container) return
-
-    const items = container.querySelectorAll('.category-box')
-    if (!items.length) return
-
-    let targetIndex = items.length
-    for (let i = 0; i < items.length; i++) {
-      if (i === catDragIndex.value) continue
-      const rect = items[i].getBoundingClientRect()
-      const midX = rect.left + rect.width / 2
-      if (event.clientX < midX) {
-        targetIndex = i
-        break
+          // 拖动结束时移除监听
+          const removeHandler = () => {
+            document.removeEventListener('mousemove', moveHandler)
+            document.removeEventListener('mouseup', removeHandler)
+            catFallbackElement = null
+          }
+          document.addEventListener('mouseup', removeHandler)
+        }
+      }, 50)
+    },
+    onEnd: (evt) => {
+      const {oldIndex, newIndex} = evt
+      if (oldIndex !== newIndex && oldIndex !== undefined && newIndex !== undefined) {
+        emit('reorder-categories', oldIndex, newIndex)
       }
     }
-
-    if (targetIndex !== lastCatTargetIndex) {
-      lastCatTargetIndex = targetIndex
-      catDropIndex.value = targetIndex
-    }
-  }
+  })
 }
 
-const onCatMouseUp = () => {
-  if (catLongPressTimer) {
-    clearTimeout(catLongPressTimer)
-    catLongPressTimer = null
-  }
+// Initialize Sortable for expanded apps
+const initAppsSortable = () => {
+  if (!appsContainer.value) return
 
-  if (catDragging.value && catDropIndex.value >= 0 && catDropIndex.value !== catDragIndex.value) {
-    emit('reorder-categories', catDragIndex.value, catDropIndex.value > catDragIndex.value ? catDropIndex.value - 1 : catDropIndex.value)
-  }
+  appsSortable = Sortable.create(appsContainer.value, {
+    animation: 200,
+    ghostClass: 'app-ghost',
+    dragClass: 'app-drag',
+    chosenClass: 'app-chosen',
+    delay: 300,
+    delayOnTouchOnly: false,
+    forceFallback: true,
+    fallbackClass: 'app-fallback',
+    fallbackTolerance: 3,
+    fallbackOnBody: true,
+    swapThreshold: 0.65,
+    invertSwap: false,
+    direction: 'vertical',
+    scroll: false,
+    onMove: (evt) => {
+      return true
+    },
+    onStart: (evt) => {
+      // 获取fallback元素并添加鼠标跟踪
+      setTimeout(() => {
+        appFallbackElement = document.querySelector('.app-fallback')
+        if (appFallbackElement) {
+          const moveHandler = (e) => {
+            if (appFallbackElement) {
+              appFallbackElement.style.left = (e.clientX - appFallbackElement.offsetWidth / 2) + 'px'
+              appFallbackElement.style.top = (e.clientY - appFallbackElement.offsetHeight / 2) + 'px'
+            }
+          }
+          document.addEventListener('mousemove', moveHandler)
 
-  catDragging.value = false
-  catGhost.show = false
-  catDragIndex.value = -1
-  catDropIndex.value = -1
-  lastCatTargetIndex = -1
-
-  document.removeEventListener('mousemove', onCatMouseMove)
-  document.removeEventListener('mouseup', onCatMouseUp)
-}
-
-// App functions
-const onAppMouseDown = (event, index, app) => {
-  if (event.button !== 0) return
-
-  appStartX = event.clientX
-  appStartY = event.clientY
-  appDragIndex.value = index
-
-  appLongPressTimer = setTimeout(() => {
-    appDragging.value = true
-    appGhost.show = true
-    appGhost.x = appStartX - 30
-    appGhost.y = appStartY - 30
-    appGhost.app = app
-    lastAppTargetIndex = appDragIndex.value
-  }, 600)
-
-  document.addEventListener('mousemove', onAppMouseMove)
-  document.addEventListener('mouseup', onAppMouseUp)
-}
-
-const onAppMouseMove = (event) => {
-  if (appLongPressTimer && !appDragging.value) {
-    const dx = Math.abs(event.clientX - appStartX)
-    const dy = Math.abs(event.clientY - appStartY)
-    if (dx > 5 || dy > 5) {
-      clearTimeout(appLongPressTimer)
-      appLongPressTimer = null
-      document.removeEventListener('mousemove', onAppMouseMove)
-      document.removeEventListener('mouseup', onAppMouseUp)
-    }
-    return
-  }
-
-  if (appDragging.value) {
-    event.preventDefault()
-    appGhost.x = event.clientX - 30
-    appGhost.y = event.clientY - 30
-
-    const container = appsContainer.value
-    if (!container) return
-
-    const items = container.querySelectorAll('.app-item')
-    if (!items.length) return
-
-    let targetIndex = -1
-    for (let i = 0; i < items.length; i++) {
-      const rect = items[i].getBoundingClientRect()
-      const midY = rect.top + rect.height / 2
-      if (event.clientY < midY) {
-        targetIndex = i
-        break
-      }
-    }
-    if (targetIndex === -1) targetIndex = items.length
-
-    if (targetIndex !== lastAppTargetIndex) {
-      lastAppTargetIndex = targetIndex
-
-      const currentIndex = appDragIndex.value
-      if (targetIndex !== currentIndex && targetIndex !== currentIndex + 1) {
+          // 拖动结束时移除监听
+          const removeHandler = () => {
+            document.removeEventListener('mousemove', moveHandler)
+            document.removeEventListener('mouseup', removeHandler)
+            appFallbackElement = null
+          }
+          document.addEventListener('mouseup', removeHandler)
+        }
+      }, 50)
+    },
+    onEnd: (evt) => {
+      const {oldIndex, newIndex} = evt
+      if (oldIndex !== newIndex && oldIndex !== undefined && newIndex !== undefined && expandedCategory.value) {
         const apps = [...expandedCategory.value.apps]
-        const [moved] = apps.splice(currentIndex, 1)
-        const insertIndex = targetIndex > currentIndex ? targetIndex - 1 : targetIndex
-        apps.splice(insertIndex, 0, moved)
+        const [moved] = apps.splice(oldIndex, 1)
+        apps.splice(newIndex, 0, moved)
         expandedCategory.value.apps = apps
-        appDragIndex.value = insertIndex
+        emit('reorder-apps', apps)
       }
     }
-  }
+  })
 }
 
-const onAppMouseUp = () => {
-  if (appLongPressTimer) {
-    clearTimeout(appLongPressTimer)
-    appLongPressTimer = null
+const destroyAppsSortable = () => {
+  if (appsSortable) {
+    appsSortable.destroy()
+    appsSortable = null
   }
-
-  if (appDragging.value) {
-    appDragging.value = false
-    appGhost.show = false
-    appDragIndex.value = -1
-    appGhost.app = null
-    lastAppTargetIndex = -1
-    emit('reorder-apps', expandedCategory.value.apps)
-  }
-
-  document.removeEventListener('mousemove', onAppMouseMove)
-  document.removeEventListener('mouseup', onAppMouseUp)
-}
-
-const cancelAppDrag = () => {
-  if (appLongPressTimer) {
-    clearTimeout(appLongPressTimer)
-    appLongPressTimer = null
-  }
-  appDragging.value = false
-  appGhost.show = false
-  appDragIndex.value = -1
-  appGhost.app = null
 }
 
 // Context menu
@@ -357,12 +282,23 @@ const openApp = (app) => {
 }
 
 const showContextMenu = (event, app) => {
-  const container = event.currentTarget.closest('.app-grid-container')
-  const rect = container.getBoundingClientRect()
-  const scrollTop = container.scrollTop
-  let x = event.clientX - rect.left
-  let y = event.clientY - rect.top + scrollTop
-  contextMenu.value = {visible: true, x: Math.max(0, x), y: Math.max(0, y), app}
+  // 使用固定定位，相对于视口
+  let x = event.clientX
+  let y = event.clientY
+
+  // 获取菜单的大致尺寸（预设值）
+  const menuWidth = 120
+  const menuHeight = 150
+
+  // 边界检测，确保菜单不超出视口
+  if (x + menuWidth > window.innerWidth) {
+    x = window.innerWidth - menuWidth - 10
+  }
+  if (y + menuHeight > window.innerHeight) {
+    y = window.innerHeight - menuHeight - 10
+  }
+
+  contextMenu.value = {visible: true, x: Math.max(10, x), y: Math.max(10, y), app}
 }
 
 const hideContextMenu = () => {
@@ -372,6 +308,7 @@ const hideContextMenu = () => {
 const removeFromCategory = async (app) => {
   if (!app || !app.id) return
   try {
+    const {invoke} = await import('@tauri-apps/api/core')
     await invoke('set_app_category', {appId: app.id, categoryId: ''})
     hideContextMenu()
   } catch (error) {
@@ -379,17 +316,33 @@ const removeFromCategory = async (app) => {
   }
 }
 
+const assignToCategory = async (app, categoryId) => {
+  if (!app || !app.id) return
+  try {
+    await invoke('set_app_category', {appId: app.id, categoryId})
+    hideContextMenu()
+  } catch (error) {
+    console.error('Assign category error:', error)
+  }
+}
+
 onMounted(() => {
   document.addEventListener('click', hideContextMenu)
+  initCategoriesSortable()
+  loadCategories()
 })
+
+// 监听分类变化，重新加载
+watch(() => props.categories, () => {
+  loadCategories()
+}, {deep: true})
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', hideContextMenu)
-  document.removeEventListener('mousemove', onCatMouseMove)
-  document.removeEventListener('mouseup', onCatMouseUp)
-  document.removeEventListener('mousemove', onAppMouseMove)
-  document.removeEventListener('mouseup', onAppMouseUp)
-  cancelAppDrag()
+  if (categoriesSortable) {
+    categoriesSortable.destroy()
+  }
+  destroyAppsSortable()
 })
 </script>
 
@@ -415,25 +368,43 @@ onBeforeUnmount(() => {
   overflow: hidden;
   cursor: pointer;
   user-select: none;
-  transition: opacity 0.2s, border-color 0.2s;
+  transition: opacity 0.2s, border-color 0.2s, transform 0.2s;
 }
 
-.category-box.cat-dragging {
+.category-box:hover {
+  border-color: var(--fy-accent);
+}
+
+/* Sortable chosen 状态 - 长按后准备拖动 */
+.category-box.category-chosen {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+  border-color: var(--fy-accent);
+}
+
+.category-box.category-ghost {
   opacity: 0.4;
+  background: var(--fy-accent-bg);
   border: 2px dashed var(--fy-accent);
 }
 
-.category-box.cat-drop-target {
-  border: 2px solid var(--fy-accent);
-  background: var(--fy-accent-bg);
+.category-box.category-drag {
+  opacity: 0.3;
+  transform: scale(0.95);
 }
 
-.cat-drop-indicator {
-  width: 3px;
-  height: 100%;
-  min-height: 100px;
-  background: var(--fy-accent);
-  border-radius: 2px;
+.category-fallback {
+  opacity: 0.95;
+  background: var(--fy-bg-card);
+  border: 2px solid var(--fy-accent);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  z-index: 9999;
+  cursor: grabbing !important;
+  pointer-events: none;
+  position: fixed !important;
 }
 
 .category-header {
@@ -477,19 +448,63 @@ onBeforeUnmount(() => {
   gap: 4px;
   padding: 8px 4px;
   border-radius: 6px;
-  cursor: pointer;
   transition: all 0.15s;
   user-select: none;
 }
 
-.app-item:hover {
-  background: var(--fy-bg-hover);
+.app-item:not(.sortable-app) {
+  cursor: pointer;
 }
 
-.app-item.app-drag-ready {
-  opacity: 0.4;
-  border: 2px dashed var(--fy-accent);
+.app-item:hover {
   background: var(--fy-accent-bg);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.app-item.sortable-app {
+  cursor: grab;
+  transition: transform 0.2s ease;
+}
+
+.app-item.sortable-app:active {
+  cursor: grabbing;
+}
+
+/* Sortable chosen 状态 - 长按后准备拖动 */
+.app-item.app-chosen {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+}
+
+.app-item.app-ghost {
+  opacity: 0.4;
+  background: var(--fy-accent-bg);
+  border: 2px dashed var(--fy-accent);
+  transform: scale(1.05);
+}
+
+.app-item.app-drag {
+  opacity: 0.3;
+}
+
+.app-fallback {
+  opacity: 0.95;
+  background: var(--fy-bg-surface);
+  border: 2px solid var(--fy-accent);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  z-index: 9999;
+  cursor: grabbing !important;
+  pointer-events: none;
+  transform-origin: center center;
+  position: fixed !important; /* 强制使用fixed定位 */
 }
 
 .app-icon {
@@ -517,83 +532,6 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.2;
-}
-
-.drag-ghost {
-  position: fixed;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px;
-  background: var(--fy-bg-surface);
-  border: 2px solid var(--fy-accent);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-  opacity: 0.9;
-  pointer-events: none;
-  z-index: 9999;
-}
-
-.app-ghost .app-icon {
-  width: 36px;
-  height: 36px;
-}
-
-.app-ghost .app-name {
-  font-size: 11px;
-  max-width: 60px;
-}
-
-.cat-ghost {
-  min-width: 180px;
-  padding: 10px 12px;
-  background: var(--fy-bg-card);
-}
-
-.ghost-cat-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--fy-border-light);
-}
-
-.ghost-cat-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--fy-text-primary);
-}
-
-.ghost-cat-count {
-  font-size: 11px;
-  color: var(--fy-text-muted);
-  background: var(--fy-bg-hover);
-  padding: 1px 6px;
-  border-radius: 10px;
-}
-
-.ghost-cat-apps {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
-  padding-top: 8px;
-}
-
-.ghost-app-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--fy-bg-hover);
-}
-
-.ghost-app-icon .icon-img {
-  width: 24px;
-  height: 24px;
 }
 
 .expand-overlay {
@@ -677,14 +615,14 @@ onBeforeUnmount(() => {
 }
 
 .context-menu {
-  position: absolute;
+  position: fixed;
   background: var(--fy-bg-surface);
   border: 1px solid var(--fy-border);
   border-radius: 8px;
   padding: 4px 0;
   min-width: 120px;
   box-shadow: var(--fy-shadow);
-  z-index: 100;
+  z-index: 10000;
 }
 
 .menu-item {
@@ -695,16 +633,44 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--fy-text-primary);
   cursor: pointer;
-  transition: background 0.1s;
+  transition: all 0.15s;
 }
 
 .menu-item:hover {
-  background: var(--fy-bg-hover);
+  background: var(--fy-accent-bg);
+  padding-left: 16px;
 }
 
 .menu-divider {
   height: 1px;
   background: var(--fy-border-light);
   margin: 4px 0;
+}
+
+.menu-category-list {
+  max-height: 150px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fy-border) transparent;
+  touch-action: pan-y;
+  height: auto;
+}
+
+.menu-category-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.menu-category-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.menu-category-list::-webkit-scrollbar-thumb {
+  background: var(--fy-border);
+  border-radius: 2px;
+}
+
+.menu-category-list::-webkit-scrollbar-thumb:hover {
+  background: var(--fy-text-muted);
 }
 </style>
