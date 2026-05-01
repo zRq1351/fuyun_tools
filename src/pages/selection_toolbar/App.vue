@@ -567,7 +567,7 @@ html, body, #app {
   height: 32px;
   background: var(--fy-bg-primary);
   border-radius: 50%;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--fy-border-light) inset;
+  box-shadow: var(--fy-shadow);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -578,7 +578,7 @@ html, body, #app {
 
 .mini-icon:hover {
   transform: scale(1.1);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--fy-border) inset;
+  box-shadow: var(--fy-shadow-lg);
 }
 
 .magic-icon {
@@ -605,7 +605,7 @@ html, body, #app {
   backdrop-filter: var(--fy-backdrop-blur-light);
   border-radius: 12px;
   padding: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 0 1px var(--fy-border-light) inset;
+  box-shadow: var(--fy-shadow);
   border: 1px solid var(--fy-border-light);
   display: flex;
   flex-direction: row;
@@ -651,7 +651,7 @@ html, body, #app {
 
 .toolbar-button:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--fy-shadow);
 }
 
 .toolbar-button:active {
@@ -726,6 +726,88 @@ html, body, #app {
 }
 .custom-btn:hover {
   filter: brightness(1.2);
+}
+
+/* 亮色主题按钮样式适配 */
+html.light .translate-btn,
+[data-theme="light"] .translate-btn {
+  background: linear-gradient(145deg, rgba(82, 165, 112, 0.15), rgba(44, 96, 65, 0.1));
+}
+
+html.light .translate-btn:hover,
+[data-theme="light"] .translate-btn:hover {
+  background: linear-gradient(145deg, rgba(82, 165, 112, 0.25), rgba(44, 96, 65, 0.18));
+}
+
+html.light .explain-btn,
+[data-theme="light"] .explain-btn {
+  background: linear-gradient(145deg, rgba(84, 148, 230, 0.15), rgba(44, 83, 150, 0.1));
+}
+
+html.light .explain-btn:hover,
+[data-theme="light"] .explain-btn:hover {
+  background: linear-gradient(145deg, rgba(84, 148, 230, 0.25), rgba(44, 83, 150, 0.18));
+}
+
+html.light .copy-btn,
+[data-theme="light"] .copy-btn {
+  background: linear-gradient(145deg, rgba(209, 152, 61, 0.15), rgba(133, 89, 35, 0.1));
+}
+
+html.light .copy-btn:hover,
+[data-theme="light"] .copy-btn:hover {
+  background: linear-gradient(145deg, rgba(209, 152, 61, 0.25), rgba(133, 89, 35, 0.18));
+}
+
+html.light .search-btn,
+[data-theme="light"] .search-btn {
+  background: linear-gradient(145deg, rgba(167, 139, 250, 0.15), rgba(109, 40, 217, 0.1));
+}
+
+html.light .search-btn:hover,
+[data-theme="light"] .search-btn:hover {
+  background: linear-gradient(145deg, rgba(167, 139, 250, 0.25), rgba(109, 40, 217, 0.18));
+}
+
+/* 护眼主题按钮样式适配 */
+html.eye-care .translate-btn,
+[data-theme="eye-care"] .translate-btn {
+  background: linear-gradient(145deg, rgba(106, 154, 74, 0.18), rgba(74, 112, 52, 0.12));
+}
+
+html.eye-care .translate-btn:hover,
+[data-theme="eye-care"] .translate-btn:hover {
+  background: linear-gradient(145deg, rgba(106, 154, 74, 0.28), rgba(74, 112, 52, 0.2));
+}
+
+html.eye-care .explain-btn,
+[data-theme="eye-care"] .explain-btn {
+  background: linear-gradient(145deg, rgba(139, 115, 85, 0.18), rgba(109, 85, 55, 0.12));
+}
+
+html.eye-care .explain-btn:hover,
+[data-theme="eye-care"] .explain-btn:hover {
+  background: linear-gradient(145deg, rgba(139, 115, 85, 0.28), rgba(109, 85, 55, 0.2));
+}
+
+html.eye-care .copy-btn,
+[data-theme="eye-care"] .copy-btn {
+  background: linear-gradient(145deg, rgba(196, 154, 58, 0.18), rgba(156, 118, 38, 0.12));
+}
+
+html.eye-care .copy-btn:hover,
+[data-theme="eye-care"] .copy-btn:hover {
+  background: linear-gradient(145deg, rgba(196, 154, 58, 0.28), rgba(156, 118, 38, 0.2));
+}
+
+html.eye-care .search-btn,
+[data-theme="eye-care"] .search-btn {
+  background: linear-gradient(145deg, rgba(139, 115, 85, 0.18), rgba(109, 85, 55, 0.12));
+}
+
+html.eye-care .search-btn:hover,
+[data-theme="eye-care"] .search-btn:hover {
+  background: linear-gradient(145deg, rgba(139, 115, 85, 0.28), rgba(109, 85, 55, 0.2));
 }
 
 </style>

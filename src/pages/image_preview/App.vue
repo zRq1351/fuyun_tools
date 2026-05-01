@@ -416,7 +416,7 @@ onBeforeUnmount(() => {
   max-height: 100%;
   object-fit: contain;
   border-radius: 10px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--fy-shadow-lg);
   transform-origin: center center;
   transition: transform 80ms linear;
   user-select: none;

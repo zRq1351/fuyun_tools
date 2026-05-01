@@ -220,8 +220,8 @@ onBeforeUnmount(() => {
   justify-content: center;
   padding: 4px 6px;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.4);
-  color: rgba(255, 255, 255, 0.8);
+  background: var(--fy-bg-overlay);
+  color: var(--fy-text-primary);
   cursor: grab;
   transition: background-color 0.2s, color 0.2s;
 }
@@ -231,14 +231,14 @@ onBeforeUnmount(() => {
 }
 
 .viewer-drag-icon:hover {
-  background: rgba(0, 0, 0, 0.6);
-  color: rgba(255, 255, 255, 1);
+  background: var(--fy-bg-hover);
+  color: var(--fy-text-primary);
 }
 
 .viewer-action-btn {
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--fy-bg-overlay);
   border: 1px solid var(--fy-border);
-  color: white;
+  color: var(--fy-text-primary);
   padding: 6px 16px;
   border-radius: 6px;
   cursor: pointer;
@@ -250,7 +250,7 @@ onBeforeUnmount(() => {
 }
 
 .viewer-action-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--fy-bg-hover);
   border-color: var(--fy-border-hover);
 }
 

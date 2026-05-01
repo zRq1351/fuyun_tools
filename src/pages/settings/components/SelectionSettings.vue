@@ -372,7 +372,7 @@ const validatePrompt = (item) => {
 
 .preview-button:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--fy-shadow);
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.2), var(--fy-border-light));
 }
 
