@@ -1,7 +1,6 @@
 import {invoke} from '@tauri-apps/api/core'
 
 export function useLauncherSearch() {
-    // 命令映射
     const commands = [
         {prefix: ':settings', title: '打开设置', icon: 'setting', action: 'open_settings', type: '命令'},
         {prefix: ':clipboard', title: '打开剪贴板', icon: 'clipboard', action: 'open_clipboard', type: '命令'},
@@ -10,47 +9,39 @@ export function useLauncherSearch() {
         {prefix: ':calc', title: '计算器', icon: 'calculator', action: 'calculator', type: '命令'}
     ]
 
-    // 检查是否是数学表达式
     const isMathExpression = (text) => {
         const mathPattern = /^[\d\s+\-*/().%^]+$/
         return mathPattern.test(text) && /[+\-*/^%]/.test(text)
     }
 
-    // 检查是否是命令
     const findCommand = (text) => {
         const lowerText = text.toLowerCase()
         return commands.filter(cmd => cmd.prefix.startsWith(lowerText) || lowerText.startsWith(cmd.prefix))
     }
 
-    // 搜索应用和文件
     const searchAppsAndFiles = async (query) => {
         try {
-            const results = await invoke('search_launcher_items', {query, limit: 10})
-            return results
+            return await invoke('search_launcher_items', {query, limit: 10})
         } catch (error) {
             console.error('Search error:', error)
             return []
         }
     }
 
-    // 计算数学表达式
     const calculateExpression = async (expr) => {
         try {
-            const result = await invoke('calculate_expression', {expr})
-            return result
+            return await invoke('calculate_expression', {expr})
         } catch (error) {
             console.error('Calculation error:', error)
             return null
         }
     }
 
-    // 主搜索函数
     const search = async (query) => {
         if (!query.trim()) return []
 
         const results = []
 
-        // 1. 检查是否是命令
         const matchedCommands = findCommand(query)
         if (matchedCommands.length > 0) {
             results.push(...matchedCommands.map(cmd => ({
@@ -63,7 +54,6 @@ export function useLauncherSearch() {
             })))
         }
 
-        // 2. 检查是否是数学表达式
         if (isMathExpression(query)) {
             const calcResult = await calculateExpression(query)
             if (calcResult !== null) {
@@ -79,16 +69,15 @@ export function useLauncherSearch() {
             }
         }
 
-        // 3. 搜索应用和文件
         const appResults = await searchAppsAndFiles(query)
         results.push(...appResults)
 
         return results
     }
 
-    // 执行操作
     const executeAction = async (item) => {
-        switch (item.action) {
+        const action = item.action || 'launch_app'
+        switch (action) {
             case 'open_settings':
                 await invoke('show_standard_window_by_label', {label: 'settings'})
                 break
@@ -102,11 +91,6 @@ export function useLauncherSearch() {
                 await invoke('toggle_recording')
                 break
             case 'calculator':
-                // 复制计算结果
-                if (item.result) {
-                    await invoke('copy_to_clipboard', {text: item.result})
-                }
-                break
             case 'copy_result':
                 if (item.result) {
                     await invoke('copy_to_clipboard', {text: item.result})
@@ -114,7 +98,7 @@ export function useLauncherSearch() {
                 break
             case 'launch_app':
                 if (item.path) {
-                    await invoke('launch_app', {path: item.path})
+                    await invoke('launch_app', {appId: item.id, path: item.path})
                 }
                 break
             case 'open_file':
@@ -123,13 +107,11 @@ export function useLauncherSearch() {
                 }
                 break
             default:
-                console.warn('Unknown action:', item.action)
+                if (item.path) {
+                    await invoke('launch_app', {appId: item.id, path: item.path})
+                }
         }
     }
 
-    return {
-        search,
-        executeAction,
-        commands
-    }
+    return {search, executeAction, commands}
 }

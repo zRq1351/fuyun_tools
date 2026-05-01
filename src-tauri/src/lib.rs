@@ -21,8 +21,11 @@ use crate::ui::commands_diagnostic::*;
 use crate::ui::commands_screenshot::*;
 use crate::ui::commands_vc_runtime::*;
 use crate::ui::commands_launcher::{
-    batch_extract_icons, calculate_expression, get_all_apps, hide_launcher, launch_app, open_file,
-    search_launcher_items, show_launcher, toggle_launcher,
+    add_launcher_category, batch_extract_icons, calculate_expression, get_all_apps,
+    get_launcher_config, hide_launcher, launch_app, open_file, remove_app_record,
+    remove_launcher_category, rename_launcher_category, save_launcher_config,
+    scan_and_save_apps, search_launcher_items, set_app_category, set_launcher_view_mode,
+    show_launcher, toggle_launcher, update_app_sort_orders,
 };
 use crate::ui::commands_recording::{
     cancel_recording, check_recording_ffmpeg, download_recording_ffmpeg, get_recording_output_dir,
@@ -546,7 +549,17 @@ pub fn run() {
             // 启动器命令
             search_launcher_items,
             get_all_apps,
+            scan_and_save_apps,
             batch_extract_icons,
+            get_launcher_config,
+            save_launcher_config,
+            add_launcher_category,
+            remove_launcher_category,
+            rename_launcher_category,
+            set_app_category,
+            set_launcher_view_mode,
+            remove_app_record,
+            update_app_sort_orders,
             calculate_expression,
             launch_app,
             open_file,

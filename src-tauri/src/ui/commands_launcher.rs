@@ -1,7 +1,9 @@
-use tauri::{AppHandle, Emitter, Manager};
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager};
 
-use crate::services::app_scanner::{self, AppCategory};
+use crate::services::app_scanner;
+use crate::services::app_store;
+use crate::services::launcher_config;
 use crate::ui::window_manager::show_overlay_window_by_label;
 
 const WINDOW_WIDTH: f64 = 620.0;
@@ -207,22 +209,56 @@ impl Parser {
     }
 }
 
-/// 获取所有已安装的应用程序（按分类）
+/// 获取所有已安装的应用程序（从存储加载）
 #[tauri::command]
-pub async fn get_all_apps() -> Result<Vec<AppCategory>, String> {
-    Ok(app_scanner::scan_apps_by_category())
+pub async fn get_all_apps() -> Result<Vec<app_store::StoredApp>, String> {
+    let store = app_store::load_app_store();
+    if store.apps.is_empty() {
+        return Err("NEED_SCAN".to_string());
+    }
+    Ok(store.apps)
+}
+
+/// 扫描并保存应用（首次或刷新）
+#[tauri::command]
+pub async fn scan_and_save_apps() -> Result<Vec<app_store::StoredApp>, String> {
+    let store = app_store::scan_and_save_apps()?;
+    Ok(store.apps)
 }
 
 /// 批量提取应用图标
 #[tauri::command]
 pub async fn batch_extract_icons(paths: Vec<String>) -> Result<std::collections::HashMap<String, String>, String> {
-    Ok(app_scanner::batch_extract_icons(&paths))
+    let icons = app_scanner::batch_extract_icons(&paths);
+    app_store::batch_update_icons(&icons);
+    Ok(icons)
 }
 
-/// 启动应用程序
+/// 启动应用程序（带存在性检测）
 #[tauri::command]
-pub async fn launch_app(path: String) -> Result<(), String> {
+pub async fn launch_app(_app_id: String, path: String) -> Result<(), String> {
+    if !std::path::Path::new(&path).exists() {
+        return Err("APP_NOT_FOUND".to_string());
+    }
     app_scanner::launch_app(&path)
+}
+
+/// 删除应用记录
+#[tauri::command]
+pub async fn remove_app_record(app_id: String) -> Result<(), String> {
+    app_store::remove_app_from_store(&app_id)
+}
+
+/// 更新应用排序
+#[tauri::command]
+pub async fn update_app_sort_orders(orders: Vec<(String, i32)>) -> Result<(), String> {
+    app_store::update_app_sort_orders(orders)
+}
+
+/// 保存启动器配置
+#[tauri::command]
+pub async fn save_launcher_config(config: launcher_config::LauncherConfig) -> Result<(), String> {
+    launcher_config::save_launcher_config(&config)
 }
 
 /// 打开文件
@@ -298,4 +334,40 @@ pub async fn toggle_launcher(app: AppHandle) -> Result<(), String> {
         app.emit("show-launcher", ()).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// 获取启动器配置
+#[tauri::command]
+pub async fn get_launcher_config() -> Result<launcher_config::LauncherConfig, String> {
+    Ok(launcher_config::load_launcher_config())
+}
+
+/// 添加自定义分类
+#[tauri::command]
+pub async fn add_launcher_category(name: String, icon: String) -> Result<launcher_config::LauncherConfig, String> {
+    launcher_config::add_category(name, icon)
+}
+
+/// 删除自定义分类
+#[tauri::command]
+pub async fn remove_launcher_category(category_id: String) -> Result<launcher_config::LauncherConfig, String> {
+    launcher_config::remove_category(category_id)
+}
+
+/// 重命名分类
+#[tauri::command]
+pub async fn rename_launcher_category(category_id: String, new_name: String) -> Result<launcher_config::LauncherConfig, String> {
+    launcher_config::rename_category(category_id, new_name)
+}
+
+/// 设置应用分类
+#[tauri::command]
+pub async fn set_app_category(app_id: String, category_id: String) -> Result<launcher_config::LauncherConfig, String> {
+    launcher_config::set_app_category(app_id, category_id)
+}
+
+/// 设置视图模式
+#[tauri::command]
+pub async fn set_launcher_view_mode(mode: String) -> Result<launcher_config::LauncherConfig, String> {
+    launcher_config::set_view_mode(mode)
 }
