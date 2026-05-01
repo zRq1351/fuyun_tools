@@ -1,6 +1,6 @@
 use crate::core::config::{
-    ProviderConfig, DEFAULT_IMAGE_TOGGLE_SHORTCUT, DEFAULT_RECORDING_SHORTCUT,
-    DEFAULT_SCREENSHOT_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT,
+    ProviderConfig, DEFAULT_IMAGE_TOGGLE_SHORTCUT,
+    DEFAULT_RECORDING_SHORTCUT, DEFAULT_SCREENSHOT_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT,
 };
 use crate::utils::system_utils::get_default_app_version;
 use keyring::Entry;
@@ -70,6 +70,10 @@ pub struct AppSettingsData {
     pub recording_mic_toggle_hot_key: String,
     #[serde(default = "default_recording_enabled")]
     pub recording_enabled: bool,
+    #[serde(default = "default_launcher_hot_key")]
+    pub launcher_hot_key: Option<String>,
+    #[serde(default = "default_launcher_enabled")]
+    pub launcher_enabled: bool,
     #[serde(default = "default_recording_default_fps")]
     pub recording_default_fps: u32,
     #[serde(default = "default_recording_default_video_bitrate_kbps")]
@@ -161,6 +165,8 @@ impl Default for AppSettingsData {
             recording_hot_key: default_recording_hot_key(),
             recording_mic_toggle_hot_key: default_recording_mic_toggle_hot_key(),
             recording_enabled: default_recording_enabled(),
+            launcher_hot_key: default_launcher_hot_key(),
+            launcher_enabled: default_launcher_enabled(),
             recording_default_fps: default_recording_default_fps(),
             recording_default_video_bitrate_kbps: default_recording_default_video_bitrate_kbps(),
             recording_default_audio_bitrate_kbps: default_recording_default_audio_bitrate_kbps(),
@@ -237,6 +243,14 @@ fn default_screenshot_enabled() -> bool {
 
 fn default_recording_enabled() -> bool {
     false
+}
+
+fn default_launcher_hot_key() -> Option<String> {
+    Some("Ctrl+K".to_string())
+}
+
+fn default_launcher_enabled() -> bool {
+    true
 }
 
 fn default_text_max_items() -> usize {

@@ -6,6 +6,7 @@ pub mod ui;
 pub mod utils;
 
 use crate::core::app_state::AppState;
+use crate::core::config::DEFAULT_LAUNCHER_SHORTCUT;
 use crate::core::error::install_global_panic_hook;
 use crate::services::ai_services::{stream_custom_prompt_text, stream_explain_text, stream_translate_text};
 use crate::services::clipboard_manager::set_clipboard_listener_enabled;
@@ -19,6 +20,10 @@ use crate::ui::commands_clipboard::*;
 use crate::ui::commands_diagnostic::*;
 use crate::ui::commands_screenshot::*;
 use crate::ui::commands_vc_runtime::*;
+use crate::ui::commands_launcher::{
+    batch_extract_icons, calculate_expression, get_all_apps, hide_launcher, launch_app, open_file,
+    search_launcher_items, show_launcher, toggle_launcher,
+};
 use crate::ui::commands_recording::{
     cancel_recording, check_recording_ffmpeg, download_recording_ffmpeg, get_recording_output_dir,
     get_recording_state, list_recording_audio_devices, list_recording_audio_processes,
@@ -135,6 +140,9 @@ pub fn run() {
             }
             if let Some(window) = app.get_webview_window("screenshot") {
                 bind_overlay_window_events(&window, app.handle().clone(), "screenshot");
+            }
+            if let Some(window) = app.get_webview_window("launcher") {
+                bind_overlay_window_events(&window, app.handle().clone(), "launcher");
             }
 
             let app_handle = app.handle();
@@ -332,9 +340,28 @@ pub fn run() {
                 }
             }
 
-
-
-            if !shortcut_conflicts.is_empty() {
+            // 注册启动器快捷键
+            let app_handle_clone_launcher = app_handle.clone();
+            let launcher_hot_key = {
+                let guard = lock_arc_mutex(&state_arc);
+                guard.settings.launcher_hot_key.clone().unwrap_or_else(|| DEFAULT_LAUNCHER_SHORTCUT.to_string())
+            };
+            if let Err(e) = app.global_shortcut().on_shortcut(
+                launcher_hot_key.as_str(),
+                move |_app, _shortcut, event| {
+                    if let ShortcutState::Pressed = event.state {
+                        let app_handle_inner = app_handle_clone_launcher.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = toggle_launcher(app_handle_inner).await {
+                                log::error!("切换启动器失败: {}", e);
+                            }
+                        });
+                    }
+                },
+            ) {
+                log::warn!("启动器快捷键 '{}' 注册失败: {}", launcher_hot_key, e);
+                shortcut_conflicts.push(format!("启动器：{}", launcher_hot_key));
+            }            if !shortcut_conflicts.is_empty() {
                 let payload = serde_json::json!({
                     "conflicts": shortcut_conflicts.clone()
                 });
@@ -516,6 +543,16 @@ pub fn run() {
             resize_recording_toolbar,
             check_recording_ffmpeg,
             download_recording_ffmpeg,
+            // 启动器命令
+            search_launcher_items,
+            get_all_apps,
+            batch_extract_icons,
+            calculate_expression,
+            launch_app,
+            open_file,
+            show_launcher,
+            hide_launcher,
+            toggle_launcher,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());

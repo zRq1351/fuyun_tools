@@ -23,7 +23,8 @@
     "result_translation_*",
     "result_custom_prompt",
     "result_custom_prompt_*",
-    "settings"
+    "settings",
+    "launcher"
   ],
   "permissions": [
     "core:path:default",

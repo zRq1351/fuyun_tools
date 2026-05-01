@@ -73,6 +73,7 @@ export default defineConfig(({mode}) => {
                     recording_toolbar: resolve(__dirname, 'recording_toolbar.html'),
                     pinned_image: resolve(__dirname, 'pinned_image.html'),
                     ocr_text: resolve(__dirname, 'ocr_text.html'),
+                    launcher: resolve(__dirname, 'launcher.html'),
                 },
                 output: {
                     manualChunks(id) {

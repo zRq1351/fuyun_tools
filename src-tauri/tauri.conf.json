@@ -58,6 +58,30 @@
         "center": true
       },
       {
+        "label": "launcher",
+        "title": "",
+        "url": "launcher.html",
+        "visible": false,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "backgroundColor": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": true,
+        "center": false,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "width": 620,
+        "height": 480
+      },
+      {
         "label": "image_clipboard",
         "title": "",
         "url": "image_clipboard.html",

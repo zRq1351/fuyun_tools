@@ -25,6 +25,11 @@ pub const DEFAULT_RECORDING_SHORTCUT: &str = if cfg!(target_os = "macos") {
 } else {
     "Alt+R"
 };
+pub const DEFAULT_LAUNCHER_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "Cmd+K"
+} else {
+    "Ctrl+K"
+};
 /// Ctrl+C操作中的控制键（根据操作系统自动适配）
 pub const CTRL_KEY: Key = if cfg!(target_os = "macos") {
     Key::Meta

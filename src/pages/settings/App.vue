@@ -79,6 +79,10 @@
             <SelectionSettings :form="form"/>
           </div>
 
+          <div v-else-if="activeTab === 'launcher'">
+            <LauncherSettings :form="form"/>
+          </div>
+
           <div v-else-if="activeTab === 'ai'">
             <AISettings ref="aiSettingsRef" :form="form"/>
           </div>
@@ -127,6 +131,7 @@ import {
   FolderOpened,
   InfoFilled,
   Moon,
+  Operation,
   Setting,
   Sunny,
   VideoCamera,
@@ -141,6 +146,7 @@ import ClipboardSettings from './components/ClipboardSettings.vue'
 import ScreenshotSettings from './components/ScreenshotSettings.vue'
 import RecordingSettings from './components/RecordingSettings.vue'
 import SelectionSettings from './components/SelectionSettings.vue'
+import LauncherSettings from './components/LauncherSettings.vue'
 import AISettings from './components/AISettings.vue'
 import BackupSettings from './components/BackupSettings.vue'
 import DiagnosticSettings from './components/DiagnosticSettings.vue'
@@ -226,6 +232,12 @@ const sections = computed(() => {
       icon: Setting
     },
     {
+      key: 'launcher',
+      label: '启动器',
+      description: '管理快捷启动器功能与快捷键',
+      icon: Operation
+    },
+    {
       key: 'ai',
       label: 'AI',
       description: '配置服务提供商、模型参数与提示词模板',
@@ -302,7 +314,9 @@ const form = reactive({
   translationPromptTemplate: '',
   explanationPromptTemplate: '',
   imageFillVerifyMode: 'fast',
-  ocrEngine: 'ocr-rs'
+  ocrEngine: 'ocr-rs',
+  launcherEnabled: true,
+  launcherHotKey: 'Ctrl+K'
 })
 
 const autoSaveText = computed(() => {
@@ -362,7 +376,9 @@ const buildFormSnapshot = () => ({
     translationPromptTemplate: form.translationPromptTemplate,
     explanationPromptTemplate: form.explanationPromptTemplate,
   imageFillVerifyMode: form.imageFillVerifyMode,
-  ocrEngine: form.ocrEngine
+  ocrEngine: form.ocrEngine,
+  launcherEnabled: form.launcherEnabled,
+  launcherHotKey: form.launcherHotKey
 })
 
 // 保存初始状态快照
@@ -511,6 +527,12 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
   }
   if (source.ocrEngine !== initial.ocrEngine) {
     changedFields.ocrEngine = source.ocrEngine
+  }
+  if (source.launcherEnabled !== initial.launcherEnabled) {
+    changedFields.launcherEnabled = source.launcherEnabled
+  }
+  if (source.launcherHotKey !== initial.launcherHotKey) {
+    changedFields.launcherHotKey = source.launcherHotKey
   }
 
   return Object.keys(changedFields).length > 0 ? changedFields : null
@@ -894,6 +916,8 @@ onMounted(async () => {
     form.explanationPromptTemplate = settings.explanation_prompt_template || ''
     form.imageFillVerifyMode = settings.image_fill_verify_mode === 'strict' ? 'strict' : 'fast'
     form.ocrEngine = settings.ocr_engine || 'ocr-rs'
+    form.launcherEnabled = settings.launcher_enabled !== false
+    form.launcherHotKey = settings.launcher_hot_key || 'Ctrl+K'
 
     if (aiSettingsRef.value) {
       aiSettingsRef.value.applyCurrentProviderConfig(settings)
