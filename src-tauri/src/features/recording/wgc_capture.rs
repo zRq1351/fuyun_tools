@@ -5,9 +5,9 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 #[cfg(target_os = "windows")]
-use winapi::shared::windef::RECT;
+use windows::Win32::Foundation::RECT;
 #[cfg(target_os = "windows")]
-use winapi::um::winuser::{GetWindowRect, IsIconic, IsWindow, IsWindowVisible};
+use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, IsIconic, IsWindow, IsWindowVisible};
 use windows_capture::capture::{CaptureControlError, Context, GraphicsCaptureApiHandler};
 use windows_capture::encoder::{
     AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
@@ -53,19 +53,20 @@ fn parse_hwnd_value(raw: &str) -> Option<usize> {
 
 #[cfg(target_os = "windows")]
 fn validate_hwnd_target(hwnd: usize) -> Result<(), String> {
-    let hwnd = hwnd as winapi::shared::windef::HWND;
+    use windows::core::BOOL;
+    let hwnd = windows::Win32::Foundation::HWND(hwnd as *mut core::ffi::c_void);
     unsafe {
-        if IsWindow(hwnd) == 0 {
+        if IsWindow(Some(hwnd)) == BOOL(0) {
             return Err("目标窗口句柄已失效或窗口已关闭".to_string());
         }
-        if IsWindowVisible(hwnd) == 0 {
+        if IsWindowVisible(hwnd) == BOOL(0) {
             return Err("目标窗口当前不可见，请将窗口切回前台后重试".to_string());
         }
-        if IsIconic(hwnd) != 0 {
+        if IsIconic(hwnd) != BOOL(0) {
             return Err("目标窗口已最小化，请恢复窗口后再开始录制".to_string());
         }
         let mut rect: RECT = std::mem::zeroed();
-        if GetWindowRect(hwnd, &mut rect) == 0 {
+        if GetWindowRect(hwnd, &mut rect).is_err() {
             return Err("读取目标窗口尺寸失败，请重新选择窗口后重试".to_string());
         }
         let width = (rect.right - rect.left).max(0);

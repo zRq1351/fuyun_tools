@@ -40,12 +40,12 @@ pub async fn resize_selection_toolbar(
     if let Some(window) = app.get_webview_window("selection_toolbar") {
         #[cfg(target_os = "windows")]
         {
-            use winapi::um::winuser::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
+            use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
             if let Ok(hwnd) = window.hwnd() {
                 unsafe {
-                    SetWindowPos(
-                        hwnd.0 as winapi::shared::windef::HWND,
-                        std::ptr::null_mut(),
+                    let _ = SetWindowPos(
+                        windows::Win32::Foundation::HWND(hwnd.0 as *mut core::ffi::c_void),
+                        None,
                         x,
                         y,
                         width as i32,

@@ -42,7 +42,7 @@ use std::time::{Duration, Instant, SystemTime};
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 #[cfg(target_os = "windows")]
-use winapi::um::winuser::{
+use windows::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
 };
 

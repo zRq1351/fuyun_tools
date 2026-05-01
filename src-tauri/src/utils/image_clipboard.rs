@@ -19,13 +19,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::image::Image;
 use tauri::Emitter;
 #[cfg(target_os = "windows")]
-use winapi::shared::minwindef::UINT;
+use windows::Win32::UI::Shell::DragQueryFileW;
 #[cfg(target_os = "windows")]
-use winapi::um::shellapi::DragQueryFileW;
-#[cfg(target_os = "windows")]
-use winapi::um::winuser::{
-    CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard, CF_HDROP,
-};
+const CF_HDROP: u32 = 15;
 
 const MAX_UI_HISTORY_ITEMS: usize = 30;
 const IMAGE_FULL_RES_MEMORY_BUDGET_BYTES: usize = 256 * 1024 * 1024;
@@ -2914,32 +2910,32 @@ fn hex_val(c: u8) -> Option<u8> {
 #[cfg(target_os = "windows")]
 fn read_images_from_windows_file_clipboard() -> Vec<ClipboardImagePayload> {
     unsafe {
-        if IsClipboardFormatAvailable(CF_HDROP as UINT) == 0 {
+        if winapi::um::winuser::IsClipboardFormatAvailable(CF_HDROP) == 0 {
             return Vec::new();
         }
-        if OpenClipboard(std::ptr::null_mut()) == 0 {
+        if winapi::um::winuser::OpenClipboard(std::ptr::null_mut()) == 0 {
             return Vec::new();
         }
 
         scopeguard::defer! {
-            CloseClipboard();
+            winapi::um::winuser::CloseClipboard();
         }
 
-        let handle = GetClipboardData(CF_HDROP as UINT);
+        let handle = winapi::um::winuser::GetClipboardData(CF_HDROP);
         if handle.is_null() {
             return Vec::new();
         }
-        let count = DragQueryFileW(handle as *mut _, 0xFFFFFFFF, std::ptr::null_mut(), 0);
+        let count = DragQueryFileW(windows::Win32::UI::Shell::HDROP(handle as *mut _), 0xFFFFFFFF, None);
         if count == 0 {
             return Vec::new();
         }
         let mut result: Vec<ClipboardImagePayload> = Vec::new();
         let mut index = 0;
         while index < count {
-            let len = DragQueryFileW(handle as *mut _, index, std::ptr::null_mut(), 0);
+            let len = DragQueryFileW(windows::Win32::UI::Shell::HDROP(handle as *mut _), index, None);
             if len > 0 {
                 let mut buf = vec![0u16; (len + 1) as usize];
-                let written = DragQueryFileW(handle as *mut _, index, buf.as_mut_ptr(), len + 1);
+                let written = DragQueryFileW(windows::Win32::UI::Shell::HDROP(handle as *mut _), index, Some(&mut buf));
                 if written > 0 {
                     let path = String::from_utf16_lossy(&buf[..written as usize]);
                     if looks_like_image_file_path(&path) {

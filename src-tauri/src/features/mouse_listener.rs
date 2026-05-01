@@ -15,22 +15,21 @@ use crate::ui::window_manager::{
 };
 use crate::utils::clipboard::ClipboardManager;
 #[cfg(target_os = "windows")]
-use winapi::shared::minwindef::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 #[cfg(target_os = "windows")]
-use winapi::um::libloaderapi::GetModuleHandleW;
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 #[cfg(target_os = "windows")]
-use winapi::um::winuser::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
-    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_USER,
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, VK_LCONTROL, VK_LMENU, VK_RCONTROL, VK_RMENU,
 };
 #[cfg(target_os = "windows")]
-use winapi::um::winuser::{GetAsyncKeyState, VK_LCONTROL, VK_LMENU, VK_RCONTROL, VK_RMENU};
-#[cfg(target_os = "windows")]
-use winapi::um::winuser::{GetCursorInfo, CURSORINFO};
-#[cfg(target_os = "windows")]
-use winapi::um::winuser::{LoadCursorW, IDC_IBEAM};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CallNextHookEx, DispatchMessageW, GetCursorInfo, GetMessageW, LoadCursorW,
+    PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, CURSORINFO,
+    HC_ACTION, IDC_IBEAM, KBDLLHOOKSTRUCT, KBDLLHOOKSTRUCT_FLAGS, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL,
+    WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_QUIT,
+    WM_SYSKEYDOWN, WM_SYSKEYUP, WM_USER,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 enum MouseActionState {
@@ -421,17 +420,17 @@ unsafe extern "system" fn low_level_keyboard_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if code == HC_ACTION {
-            let keyboard = &*(lparam as *const KBDLLHOOKSTRUCT);
+        if code == HC_ACTION as i32 {
+            let keyboard = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
             // 忽略注入的按键事件（如 Enigo 模拟的 Ctrl+C），只响应真实的物理按键
-            let is_injected = (keyboard.flags & 0x10) != 0;
+            let is_injected = (keyboard.flags & KBDLLHOOKSTRUCT_FLAGS(0x10)) != KBDLLHOOKSTRUCT_FLAGS(0);
             
             if !is_injected {
-                let event = match wparam as u32 {
+                let event = match wparam.0 as u32 {
                     WM_KEYDOWN | WM_SYSKEYDOWN => {
-                        if keyboard.vkCode == VK_LCONTROL as u32 {
+                        if keyboard.vkCode == VK_LCONTROL.0 as u32 {
                             Some(HookEvent::CtrlLeftPress)
-                        } else if keyboard.vkCode == VK_RCONTROL as u32 {
+                        } else if keyboard.vkCode == VK_RCONTROL.0 as u32 {
                             Some(HookEvent::CtrlRightPress)
                         } else if keyboard.vkCode == 0x43 { // 'C' key
                             Some(HookEvent::CPress)
@@ -440,9 +439,9 @@ unsafe extern "system" fn low_level_keyboard_proc(
                         }
                     }
                     WM_KEYUP | WM_SYSKEYUP => {
-                        if keyboard.vkCode == VK_LCONTROL as u32 {
+                        if keyboard.vkCode == VK_LCONTROL.0 as u32 {
                             Some(HookEvent::CtrlLeftRelease)
-                        } else if keyboard.vkCode == VK_RCONTROL as u32 {
+                        } else if keyboard.vkCode == VK_RCONTROL.0 as u32 {
                             Some(HookEvent::CtrlRightRelease)
                         } else {
                             None
@@ -456,7 +455,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
                             let _ = tx.send(event);
                             let thread_id = HOOK_THREAD_ID.load(Ordering::SeqCst);
                             if thread_id != 0 {
-                                PostThreadMessageW(thread_id, WM_USER, 0, 0);
+                                let _ = PostThreadMessageW(thread_id, WM_USER, WPARAM(0), LPARAM(0));
                             }
                         }
                     }
@@ -467,7 +466,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
     if result.is_err() {
         log::error!("low_level_keyboard_proc 中发生 panic");
     }
-    CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+    CallNextHookEx(None, code, wparam, lparam)
 }
 
 #[cfg(target_os = "windows")]
@@ -477,15 +476,15 @@ unsafe extern "system" fn low_level_mouse_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if code == HC_ACTION {
-            let mouse = &*(lparam as *const MSLLHOOKSTRUCT);
+        if code == HC_ACTION as i32 {
+            let mouse = &*(lparam.0 as *const MSLLHOOKSTRUCT);
             // 忽略注入的鼠标事件
             let is_injected = (mouse.flags & 0x01) != 0;
             
             if !is_injected {
                 let x = mouse.pt.x;
                 let y = mouse.pt.y;
-                let event = match wparam as u32 {
+                let event = match wparam.0 as u32 {
                     WM_LBUTTONDOWN => Some(HookEvent::LeftButtonPress(x, y)),
                     WM_LBUTTONUP => Some(HookEvent::LeftButtonRelease(x, y)),
                     WM_MOUSEMOVE => Some(HookEvent::MouseMove(x, y)),
@@ -497,7 +496,7 @@ unsafe extern "system" fn low_level_mouse_proc(
                             let _ = tx.send(event);
                             let thread_id = HOOK_THREAD_ID.load(Ordering::SeqCst);
                             if thread_id != 0 {
-                                PostThreadMessageW(thread_id, WM_USER, 0, 0);
+                                let _ = PostThreadMessageW(thread_id, WM_USER, WPARAM(0), LPARAM(0));
                             }
                         }
                     }
@@ -508,7 +507,7 @@ unsafe extern "system" fn low_level_mouse_proc(
     if result.is_err() {
         log::error!("low_level_mouse_proc 中发生 panic");
     }
-    CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+    CallNextHookEx(None, code, wparam, lparam)
 }
 
 #[cfg(target_os = "windows")]
@@ -521,24 +520,25 @@ fn start_windows_hook_listener(app_handle: AppHandle, state: Arc<Mutex<SharedApp
     }
 
     thread::spawn(move || unsafe {
-        let thread_id = winapi::um::processthreadsapi::GetCurrentThreadId();
+        use windows::Win32::System::Threading::GetCurrentThreadId;
+        let thread_id = GetCurrentThreadId();
         HOOK_THREAD_ID.store(thread_id, Ordering::SeqCst);
         let (tx, rx): (Sender<HookEvent>, Receiver<HookEvent>) = mpsc::channel();
         if let Ok(mut guard) = hook_event_sender().lock() {
             *guard = Some(tx);
         }
 
-        let module = GetModuleHandleW(std::ptr::null());
+        let module = GetModuleHandleW(None).unwrap_or_default();
         let keyboard_hook =
-            SetWindowsHookExW(WH_KEYBOARD_LL, Some(low_level_keyboard_proc), module, 0);
-        let mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), module, 0);
+            SetWindowsHookExW(WH_KEYBOARD_LL, Some(low_level_keyboard_proc), Some(module.into()), 0);
+        let mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), Some(module.into()), 0);
 
-        if keyboard_hook.is_null() || mouse_hook.is_null() {
-            if !keyboard_hook.is_null() {
-                let _ = UnhookWindowsHookEx(keyboard_hook);
+        if keyboard_hook.is_err() || mouse_hook.is_err() {
+            if let Ok(hook) = keyboard_hook {
+                let _ = UnhookWindowsHookEx(hook);
             }
-            if !mouse_hook.is_null() {
-                let _ = UnhookWindowsHookEx(mouse_hook);
+            if let Ok(hook) = mouse_hook {
+                let _ = UnhookWindowsHookEx(hook);
             }
             if let Ok(mut guard) = hook_event_sender().lock() {
                 *guard = None;
@@ -548,18 +548,20 @@ fn start_windows_hook_listener(app_handle: AppHandle, state: Arc<Mutex<SharedApp
             log::error!("安装划词低级键鼠 Hook 失败");
             return;
         }
+        let keyboard_hook = keyboard_hook.unwrap();
+        let mouse_hook = mouse_hook.unwrap();
 
         log::info!("划词低级键鼠 Hook 已启动");
         let mut msg: MSG = std::mem::zeroed();
         loop {
-            let ret = GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0);
-            if ret == 0 || ret == -1 {
+            let ret = GetMessageW(&mut msg, None, 0, 0);
+            if ret.0 == 0 || ret.0 == -1 {
                 break;
             }
             if msg.message == WM_QUIT {
                 break;
             }
-            TranslateMessage(&msg);
+            let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
 
             while let Ok(event) = rx.try_recv() {
@@ -583,7 +585,7 @@ fn stop_windows_hook_listener() {
     let thread_id = HOOK_THREAD_ID.load(Ordering::SeqCst);
     if thread_id != 0 {
         unsafe {
-            let _ = PostThreadMessageW(thread_id, WM_QUIT, 0, 0);
+            let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
         }
     }
 }
@@ -613,8 +615,8 @@ fn is_any_ctrl_pressed() -> bool {
 #[cfg(target_os = "windows")]
 fn is_ctrl_pressed_by_os() -> bool {
     unsafe {
-        (GetAsyncKeyState(VK_LCONTROL) as u16 & 0x8000) != 0
-            || (GetAsyncKeyState(VK_RCONTROL) as u16 & 0x8000) != 0
+        (GetAsyncKeyState(VK_LCONTROL.0 as i32) as u16 & 0x8000) != 0
+            || (GetAsyncKeyState(VK_RCONTROL.0 as i32) as u16 & 0x8000) != 0
     }
 }
 
@@ -626,8 +628,8 @@ fn is_ctrl_pressed_by_os() -> bool {
 #[cfg(target_os = "windows")]
 fn is_alt_pressed_by_os() -> bool {
     unsafe {
-        (GetAsyncKeyState(VK_LMENU) as u16 & 0x8000) != 0
-            || (GetAsyncKeyState(VK_RMENU) as u16 & 0x8000) != 0
+        (GetAsyncKeyState(VK_LMENU.0 as i32) as u16 & 0x8000) != 0
+            || (GetAsyncKeyState(VK_RMENU.0 as i32) as u16 & 0x8000) != 0
     }
 }
 
@@ -642,18 +644,19 @@ fn is_cursor_ibeam() -> bool {
     unsafe {
         let mut cursor_info: CURSORINFO = std::mem::zeroed();
         cursor_info.cbSize = std::mem::size_of::<CURSORINFO>() as u32;
-        
-        if GetCursorInfo(&mut cursor_info) == 0 {
+
+        if GetCursorInfo(&mut cursor_info).is_err() {
             log::warn!("GetCursorInfo 调用失败");
             return false;
         }
         
         // 获取系统标准的 IBEAM 光标句柄
-        let ibeam_cursor = LoadCursorW(std::ptr::null_mut(), IDC_IBEAM);
-        if ibeam_cursor.is_null() {
+        let ibeam_cursor = LoadCursorW(None, IDC_IBEAM);
+        if ibeam_cursor.is_err() {
             log::warn!("LoadCursorW(IDC_IBEAM) 调用失败");
             return false;
         }
+        let ibeam_cursor = ibeam_cursor.unwrap();
         
         // 比较当前光标与 IBEAM 光标
         let is_ibeam = cursor_info.hCursor == ibeam_cursor;
@@ -898,52 +901,26 @@ pub fn is_foreground_window_console() -> bool {
     {
         #[cfg(target_os = "windows")]
         unsafe {
-            use winapi::um::winuser::{GetClassNameW, GetForegroundWindow, GetWindowTextW};
+            use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow, GetWindowTextW};
 
             let hwnd = GetForegroundWindow();
-            if hwnd.is_null() {
+            if hwnd.0.is_null() {
                 return false;
             }
 
             let mut title_buffer = [0u16; 512];
             let title_len =
-                GetWindowTextW(hwnd, title_buffer.as_mut_ptr(), title_buffer.len() as i32);
+                GetWindowTextW(hwnd, &mut title_buffer);
             if title_len == 0 {
-                let mut class_buffer = [0u16; 256];
-                let class_len =
-                    GetClassNameW(hwnd, class_buffer.as_mut_ptr(), class_buffer.len() as i32);
-                if class_len == 0 {
-                    return false;
-                }
-
-                let class = String::from_utf16_lossy(&class_buffer[..class_len as usize]);
-                let lower_class = class.to_lowercase();
-
-                let console_classes = [
-                    "consolewindowclass",
-                    "cascadiacornerwindow",
-                    "terminal",
-                    "windowsapplicationframehost",
-                    "mintty",
-                    "sunawtframe",
-                    "jbterminal",
-                    "windowsterminal",
-                    "cmd",
-                    "powershell",
-                ];
-
-                for class_indicator in console_classes.iter() {
-                    if lower_class.contains(class_indicator) {
-                        log::warn!("检测到命令行/终端窗口类: {}", lower_class);
-                        return true;
-                    }
-                }
-
                 return false;
             }
 
             let mut class_buffer = [0u16; 256];
-            GetClassNameW(hwnd, class_buffer.as_mut_ptr(), class_buffer.len() as i32);
+            let class_len =
+                GetClassNameW(hwnd, &mut class_buffer);
+            if class_len == 0 {
+                return false;
+            }
 
             let title =
                 String::from_utf16_lossy(&title_buffer[..title_len as usize]).to_lowercase();

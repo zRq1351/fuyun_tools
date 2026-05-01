@@ -7,17 +7,20 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_positioner::{Position, WindowExt};
 #[cfg(target_os = "windows")]
-use winapi::shared::minwindef::DWORD;
+use windows::core::BOOL;
 #[cfg(target_os = "windows")]
-use winapi::shared::windef::RECT;
+use windows::Win32::Foundation::{HWND, RECT};
 #[cfg(target_os = "windows")]
-use winapi::um::processthreadsapi::GetCurrentProcessId;
+use windows::Win32::System::Threading::GetCurrentProcessId;
 #[cfg(target_os = "windows")]
-use winapi::um::winuser::{
-    keybd_event, BringWindowToTop, GetForegroundWindow, GetSystemMetrics, GetWindowTextW,
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    keybd_event, KEYEVENTF_KEYUP, VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
+};
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::WindowsAndMessaging::{
+    BringWindowToTop, GetForegroundWindow, GetSystemMetrics, GetWindowTextW,
     GetWindowThreadProcessId, IsIconic, IsWindow, SetForegroundWindow, ShowWindow,
-    SystemParametersInfoW, KEYEVENTF_KEYUP, SM_CYSCREEN, SPI_GETWORKAREA, SW_RESTORE, VK_CONTROL,
-    VK_LCONTROL, VK_RCONTROL,
+    SystemParametersInfoW, SM_CYSCREEN, SPI_GETWORKAREA, SW_RESTORE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
 };
 
 pub static ENIGO_INSTANCE: LazyLock<Arc<Mutex<Option<enigo::Enigo>>>> =
@@ -227,9 +230,9 @@ pub fn cleanup_enigo_instance() {
 #[cfg(target_os = "windows")]
 fn release_ctrl_key_winapi() {
     unsafe {
-        keybd_event(VK_CONTROL as u8, 0, KEYEVENTF_KEYUP, 0);
-        keybd_event(VK_LCONTROL as u8, 0, KEYEVENTF_KEYUP, 0);
-        keybd_event(VK_RCONTROL as u8, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_CONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_LCONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_RCONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
     }
 }
 
@@ -691,7 +694,7 @@ pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
 fn get_taskbar_safe_offset() -> i32 {
     unsafe {
         let mut work_area: RECT = std::mem::zeroed();
-        if SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut work_area as *mut _ as *mut _, 0) != 0 {
+        if SystemParametersInfoW(SPI_GETWORKAREA, 0, Some(&mut work_area as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)).is_ok() {
             let screen_height = GetSystemMetrics(SM_CYSCREEN);
             return (screen_height - work_area.bottom).max(0);
         }
@@ -1029,7 +1032,7 @@ fn wait_for_foreground_ready_for_paste(
 fn foreground_window_info() -> (bool, ForegroundWindowInfo) {
     unsafe {
         let hwnd = GetForegroundWindow();
-        if hwnd.is_null() {
+        if hwnd.0.is_null() {
             return (
                 false,
                 ForegroundWindowInfo {
@@ -1039,10 +1042,10 @@ fn foreground_window_info() -> (bool, ForegroundWindowInfo) {
                 },
             );
         }
-        let mut pid: DWORD = 0;
-        GetWindowThreadProcessId(hwnd, &mut pid);
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
         let mut title_buffer = [0u16; 512];
-        let title_len = GetWindowTextW(hwnd, title_buffer.as_mut_ptr(), title_buffer.len() as i32);
+        let title_len = GetWindowTextW(hwnd, &mut title_buffer);
         let title = if title_len > 0 {
             String::from_utf16_lossy(&title_buffer[..title_len as usize])
         } else {
@@ -1053,7 +1056,7 @@ fn foreground_window_info() -> (bool, ForegroundWindowInfo) {
             ForegroundWindowInfo {
                 title,
                 pid,
-                hwnd: hwnd as isize,
+                hwnd: hwnd.0 as isize,
             },
         )
     }
@@ -1074,17 +1077,17 @@ fn foreground_window_info() -> (bool, ForegroundWindowInfo) {
 #[cfg(target_os = "windows")]
 fn try_restore_foreground_target(target: &ForegroundTargetSnapshot) -> bool {
     unsafe {
-        let hwnd = target.hwnd as winapi::shared::windef::HWND;
-        if hwnd.is_null() || IsWindow(hwnd) == 0 {
+        let hwnd = HWND(target.hwnd as *mut core::ffi::c_void);
+        if hwnd.0.is_null() || IsWindow(Some(hwnd)) == BOOL(0) {
             return false;
         }
-        if IsIconic(hwnd) != 0 {
-            ShowWindow(hwnd, SW_RESTORE);
+        if IsIconic(hwnd) != BOOL(0) {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
         } else {
-            ShowWindow(hwnd, SW_RESTORE);
+            let _ = ShowWindow(hwnd, SW_RESTORE);
         }
         let _ = BringWindowToTop(hwnd);
-        SetForegroundWindow(hwnd) != 0
+        SetForegroundWindow(hwnd) != BOOL(0)
     }
 }
 

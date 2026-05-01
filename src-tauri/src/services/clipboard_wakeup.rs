@@ -174,6 +174,16 @@ impl WindowsClipboardEventBackend {
             atomic::{AtomicBool, AtomicIsize, Ordering},
             Arc,
         };
+        use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+        use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DefWindowProcW, DestroyWindow,
+            DispatchMessageW, GetMessageW, PostMessageW, PostQuitMessage, RegisterClassW,
+            TranslateMessage, MSG, WM_CLIPBOARDUPDATE,
+            WM_CLOSE, WM_DESTROY, WM_NCDESTROY, WNDCLASSW,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::HWND_MESSAGE;
+
         let (event_tx, event_rx) = mpsc::channel::<()>();
         let (ready_tx, ready_rx) = mpsc::channel::<bool>();
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -184,14 +194,6 @@ impl WindowsClipboardEventBackend {
             let run_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
                 use std::mem;
                 use std::ptr;
-                use winapi::shared::minwindef::{LPARAM, LRESULT, UINT, WPARAM};
-                use winapi::shared::windef::HWND;
-                use winapi::um::libloaderapi::GetModuleHandleW;
-                use winapi::um::winuser::{
-                    AddClipboardFormatListener, CreateWindowExW, DestroyWindow, DispatchMessageW,
-                    GetMessageW, RegisterClassW, RemoveClipboardFormatListener, TranslateMessage,
-                    HWND_MESSAGE, MSG, WNDCLASSW,
-                };
 
                 // Bug修复 (B10): RAII 包装器，确保 panic 时也能清理窗口资源
                 struct WindowGuard {
@@ -202,10 +204,10 @@ impl WindowsClipboardEventBackend {
                     fn drop(&mut self) {
                         unsafe {
                             if self.listener_added {
-                                let _ = RemoveClipboardFormatListener(self.hwnd);
+                                let _ = winapi::um::winuser::RemoveClipboardFormatListener(self.hwnd.0 as *mut winapi::shared::windef::HWND__);
                             }
-                            if !self.hwnd.is_null() {
-                                DestroyWindow(self.hwnd);
+                            if !self.hwnd.0.is_null() {
+                                let _ = DestroyWindow(self.hwnd);
                             }
                         }
                     }
@@ -213,14 +215,10 @@ impl WindowsClipboardEventBackend {
 
                 unsafe extern "system" fn wndproc(
                     hwnd: HWND,
-                    msg: UINT,
+                    msg: u32,
                     wparam: WPARAM,
                     lparam: LPARAM,
                 ) -> LRESULT {
-                    use winapi::um::winuser::{
-                        DefWindowProcW, PostQuitMessage, WM_CLIPBOARDUPDATE, WM_DESTROY,
-                        WM_NCDESTROY,
-                    };
                     if msg == WM_CLIPBOARDUPDATE {
                         let count = CLIPBOARD_WAKE_EVENT_COUNT
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -228,7 +226,7 @@ impl WindowsClipboardEventBackend {
 
                         log::debug!("剪贴板消息监听事件计数: {}", count);
 
-                        let key = hwnd as isize;
+                        let key = hwnd.0 as isize;
                         let sender = {
                             if let Ok(guard) = wake_window_senders().lock() {
                                 guard.get(&key).cloned()
@@ -239,10 +237,10 @@ impl WindowsClipboardEventBackend {
                         if let Some(sender) = sender {
                             let _ = sender.send(());
                         }
-                        return 0;
+                        return LRESULT(0);
                     }
                     if msg == WM_NCDESTROY {
-                        let key = hwnd as isize;
+                        let key = hwnd.0 as isize;
                         if let Ok(mut guard) = wake_window_senders().lock() {
                             guard.remove(&key);
                         }
@@ -250,51 +248,52 @@ impl WindowsClipboardEventBackend {
                     }
                     if msg == WM_DESTROY {
                         PostQuitMessage(0);
-                        return 0;
+                        return LRESULT(0);
                     }
                     DefWindowProcW(hwnd, msg, wparam, lparam)
                 }
 
                 let class_name: Vec<u16> = "FuyunClipboardWakeWindow\0".encode_utf16().collect();
-                let hinstance = GetModuleHandleW(ptr::null());
+                let hinstance = GetModuleHandleW(None).unwrap_or_default();
                 let wnd_class = WNDCLASSW {
-                    style: 0,
+                    style: Default::default(),
                     lpfnWndProc: Some(wndproc),
                     cbClsExtra: 0,
                     cbWndExtra: 0,
-                    hInstance: hinstance,
-                    hIcon: ptr::null_mut(),
-                    hCursor: ptr::null_mut(),
-                    hbrBackground: ptr::null_mut(),
-                    lpszMenuName: ptr::null(),
-                    lpszClassName: class_name.as_ptr(),
+                    hInstance: hinstance.into(),
+                    hIcon: Default::default(),
+                    hCursor: Default::default(),
+                    hbrBackground: Default::default(),
+                    lpszMenuName: windows::core::PCWSTR(ptr::null()),
+                    lpszClassName: windows::core::PCWSTR(class_name.as_ptr()),
                 };
 
                 let _ = RegisterClassW(&wnd_class);
                 let hwnd = CreateWindowExW(
-                    0,
-                    class_name.as_ptr(),
-                    class_name.as_ptr(),
-                    0,
-                    0,
-                    0,
+                    Default::default(),
+                    windows::core::PCWSTR(class_name.as_ptr()),
+                    windows::core::PCWSTR(class_name.as_ptr()),
+                    Default::default(),
                     0,
                     0,
-                    HWND_MESSAGE,
-                    ptr::null_mut(),
-                    hinstance,
-                    ptr::null_mut(),
+                    0,
+                    0,
+                    Some(HWND_MESSAGE),
+                    None,
+                    Some(hinstance.into()),
+                    None,
                 );
 
-                if hwnd.is_null() {
+                if hwnd.is_err() {
                     log::error!("创建剪贴板消息窗口失败");
                     let _ = ready_tx.send(false);
                     return;
                 }
+                let hwnd = hwnd.unwrap();
                 // Bug修复 (B10): 使用 RAII 保护窗口资源
                 let mut window_guard = WindowGuard { hwnd, listener_added: false };
-                hwnd_holder_for_thread.store(hwnd as isize, Ordering::Release);
-                log::info!("剪贴板消息窗口创建成功: hwnd={}", hwnd as isize);
+                hwnd_holder_for_thread.store(hwnd.0 as isize, Ordering::Release);
+                log::info!("剪贴板消息窗口创建成功: hwnd={}", hwnd.0 as isize);
                 if cancelled_for_thread.load(Ordering::Acquire) {
                     let _ = ready_tx.send(false);
                     // window_guard Drop 会自动清理
@@ -303,7 +302,7 @@ impl WindowsClipboardEventBackend {
 
                 {
                     if let Ok(mut guard) = wake_window_senders().lock() {
-                        guard.insert(hwnd as isize, event_tx);
+                        guard.insert(hwnd.0 as isize, event_tx);
                     } else {
                         log::error!("剪贴板消息窗口映射注册失败");
                         let _ = ready_tx.send(false);
@@ -312,12 +311,12 @@ impl WindowsClipboardEventBackend {
                     }
                 }
 
-                if AddClipboardFormatListener(hwnd) == 0 {
+                if winapi::um::winuser::AddClipboardFormatListener(hwnd.0 as *mut winapi::shared::windef::HWND__) == 0 {
                     log::error!("AddClipboardFormatListener 注册失败");
                     let _ = ready_tx.send(false);
                     {
                         if let Ok(mut guard) = wake_window_senders().lock() {
-                            guard.remove(&(hwnd as isize));
+                            guard.remove(&(hwnd.0 as isize));
                         }
                     }
                     // window_guard Drop 会自动清理
@@ -332,13 +331,13 @@ impl WindowsClipboardEventBackend {
                     if cancelled_for_thread.load(Ordering::Acquire) {
                         break;
                     }
-                    let code = GetMessageW(&mut msg as *mut MSG, ptr::null_mut(), 0, 0);
-                    if code > 0 {
-                        TranslateMessage(&msg);
+                    let code = GetMessageW(&mut msg, None, 0, 0);
+                    if code.0 > 0 {
+                        let _ = TranslateMessage(&msg);
                         DispatchMessageW(&msg);
                         continue;
                     }
-                    if code == 0 {
+                    if code.0 == 0 {
                         break;
                     }
                     log::error!("GetMessageW 返回错误，剪贴板监听线程退出");
@@ -347,7 +346,7 @@ impl WindowsClipboardEventBackend {
 
                 {
                     if let Ok(mut guard) = wake_window_senders().lock() {
-                        guard.remove(&(hwnd as isize));
+                        guard.remove(&(hwnd.0 as isize));
                     }
                 }
                 hwnd_holder_for_thread.store(0, Ordering::Release);
@@ -368,8 +367,7 @@ impl WindowsClipboardEventBackend {
                 let hwnd = hwnd_holder.load(Ordering::Acquire);
                 if hwnd != 0 {
                     unsafe {
-                        use winapi::um::winuser::{PostMessageW, WM_CLOSE};
-                        let _ = PostMessageW(hwnd as _, WM_CLOSE, 0, 0);
+                        let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_CLOSE, WPARAM(0), LPARAM(0));
                     }
                 }
                 None

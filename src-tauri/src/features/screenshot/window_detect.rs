@@ -32,20 +32,20 @@ pub fn get_window_list() -> Result<Vec<WindowInfo>, String> {
 }
 
 #[cfg(target_os = "windows")]
-fn is_cloaked(hwnd: winapi::shared::windef::HWND) -> bool {
-    use winapi::shared::minwindef::DWORD;
-    use winapi::um::dwmapi::{DwmGetWindowAttribute, DWMWA_CLOAKED};
-    let mut cloaked: DWORD = 0;
+fn is_cloaked(hwnd: windows::Win32::Foundation::HWND) -> bool {
+    use windows::core::BOOL;
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+    let mut cloaked: BOOL = BOOL(0);
     let res = unsafe {
         DwmGetWindowAttribute(
             hwnd,
             DWMWA_CLOAKED,
             &mut cloaked as *mut _ as _,
-            std::mem::size_of::<DWORD>() as u32,
+            std::mem::size_of::<BOOL>() as u32,
         )
     };
-    if res == winapi::shared::winerror::S_OK {
-        cloaked != 0
+    if res.is_ok() {
+        cloaked.as_bool()
     } else {
         false
     }
@@ -88,35 +88,34 @@ fn is_system_or_invalid_process(process_name: &str) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn get_window_process_name(hwnd: winapi::shared::windef::HWND) -> Option<String> {
+fn get_window_process_name(hwnd: windows::Win32::Foundation::HWND) -> Option<String> {
     use std::path::Path;
-    use winapi::shared::minwindef::DWORD;
-    use winapi::um::handleapi::CloseHandle;
-    use winapi::um::processthreadsapi::OpenProcess;
-    use winapi::um::winbase::QueryFullProcessImageNameW;
-    use winapi::um::winnt::PROCESS_QUERY_LIMITED_INFORMATION;
-    use winapi::um::winuser::GetWindowThreadProcessId;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+    use windows::core::PWSTR;
 
-    let mut pid: DWORD = 0;
+    let mut pid: u32 = 0;
     unsafe {
-        GetWindowThreadProcessId(hwnd, &mut pid);
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
     }
     if pid == 0 {
         return None;
     }
 
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-    if handle.is_null() {
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) };
+    if handle.is_err() {
         return None;
     }
+    let handle = handle.unwrap();
 
     let mut buffer = vec![0u16; 1024];
     let mut size = buffer.len() as u32;
-    let ok = unsafe { QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size) };
+    let ok = unsafe { QueryFullProcessImageNameW(handle, PROCESS_NAME_FORMAT(0), PWSTR(buffer.as_mut_ptr()), &mut size) };
     unsafe {
         let _ = CloseHandle(handle);
     }
-    if ok == 0 || size == 0 {
+    if ok.is_err() || size == 0 {
         return None;
     }
 
@@ -139,8 +138,9 @@ fn get_window_process_name(hwnd: winapi::shared::windef::HWND) -> Option<String>
 #[cfg(target_os = "windows")]
 fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
     use std::ptr::NonNull;
-    use winapi::shared::windef::RECT;
-    use winapi::um::winuser::{
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
         IsWindowVisible, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
     };
@@ -148,61 +148,61 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
     let mut windows = Vec::new();
 
     unsafe extern "system" fn enum_callback(
-        hwnd: winapi::shared::windef::HWND,
-        lparam: winapi::shared::minwindef::LPARAM,
-    ) -> i32 {
-        let Some(mut windows_ptr) = NonNull::new(lparam as *mut Vec<WindowInfo>) else {
-            return 0;
+        hwnd: HWND,
+        lparam: LPARAM,
+    ) -> BOOL {
+        let Some(mut windows_ptr) = NonNull::new(lparam.0 as *mut Vec<WindowInfo>) else {
+            return BOOL(0);
         };
         let windows = windows_ptr.as_mut();
 
-        if IsWindowVisible(hwnd) == 0 {
-            return 1;
+        if IsWindowVisible(hwnd).as_bool() == false {
+            return BOOL(1);
         }
 
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-        if (ex_style & WS_EX_TOOLWINDOW as i32) != 0 {
-            return 1;
+        if (ex_style & WS_EX_TOOLWINDOW.0 as i32) != 0 {
+            return BOOL(1);
         }
 
         let title_len = GetWindowTextLengthW(hwnd);
         if title_len == 0 {
-            return 1;
+            return BOOL(1);
         }
 
         let mut title_buf = vec![0u16; (title_len + 1) as usize];
-        let copied = GetWindowTextW(hwnd, title_buf.as_mut_ptr(), title_len + 1);
+        let copied = GetWindowTextW(hwnd, &mut title_buf);
         if copied == 0 {
-            return 1;
+            return BOOL(1);
         }
 
         let title = String::from_utf16_lossy(&title_buf[..copied as usize]);
         if title == "固定截图" || title == "截图选择" || title == "fuyun_tools" {
-            return 1;
+            return BOOL(1);
         }
         let process_name = get_window_process_name(hwnd).unwrap_or_default();
         if is_system_or_invalid_process(&process_name) {
-            return 1;
+            return BOOL(1);
         }
 
         if is_cloaked(hwnd) {
-            return 1;
+            return BOOL(1);
         }
 
         let mut rect: RECT = std::mem::zeroed();
-        if GetWindowRect(hwnd, &mut rect) == 0 {
-            return 1;
+        if GetWindowRect(hwnd, &mut rect).is_err() {
+            return BOOL(1);
         }
 
         let width = (rect.right - rect.left) as u32;
         let height = (rect.bottom - rect.top) as u32;
 
         if width < 50 || height < 50 {
-            return 1;
+            return BOOL(1);
         }
 
         windows.push(WindowInfo {
-            hwnd: format!("0x{:X}", hwnd as usize),
+            hwnd: format!("0x{:X}", hwnd.0 as usize),
             title,
             process_name,
             x: rect.left,
@@ -211,11 +211,11 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
             height,
         });
 
-        1
+        BOOL(1)
     }
 
     unsafe {
-        EnumWindows(Some(enum_callback), &mut windows as *mut _ as _);
+        let _ = EnumWindows(Some(enum_callback), LPARAM(&mut windows as *mut _ as _));
     }
 
     Ok(windows)

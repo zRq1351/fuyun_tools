@@ -18,7 +18,7 @@ use wasapi::{
     WaveFormat,
 };
 #[cfg(target_os = "windows")]
-use winapi::um::winuser::GetWindowThreadProcessId;
+use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 
 pub struct WasapiCaptureHandle {
     pub stop_flag: Arc<AtomicBool>,
@@ -484,10 +484,10 @@ fn visible_window_process_titles() -> HashMap<u32, String> {
         for w in windows {
             let hwnd_str = w.hwnd.trim_start_matches("0x");
             if let Ok(hwnd_val) = usize::from_str_radix(hwnd_str, 16) {
-                let hwnd = hwnd_val as winapi::shared::windef::HWND;
+                let hwnd = windows::Win32::Foundation::HWND(hwnd_val as *mut core::ffi::c_void);
                 let mut pid: u32 = 0;
                 unsafe {
-                    GetWindowThreadProcessId(hwnd, &mut pid);
+                    GetWindowThreadProcessId(hwnd, Some(&mut pid));
                 }
                 if pid > 0 && !w.title.is_empty() {
                     map.entry(pid).or_insert(w.title);

@@ -33,7 +33,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -76,10 +75,7 @@ pub(crate) fn calc_text_hash(text: &str) -> u64 {
 }
 
 pub(crate) fn now_unix_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    crate::utils::utils_helpers::now_unix_ms_u64()
 }
 
 pub(crate) fn screenshot_boot_image_slot() -> &'static StdMutex<Option<PathBuf>> {
