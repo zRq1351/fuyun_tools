@@ -4,7 +4,7 @@ import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
 import '../pages/shared/theme-variables.css'
 import '../pages/shared/windowBase.css'
-import {initTheme} from './themeManager'
+import {initTheme, watchThemeStorage, watchSystemTheme} from './themeManager'
 
 /**
  * 创建标准页面应用的工厂函数
@@ -15,6 +15,16 @@ import {initTheme} from './themeManager'
  */
 export function createPageApp(rootComponent, options = {}) {
     initTheme()
+
+    // 监听跨窗口主题变化，确保所有窗口同步更新
+    watchThemeStorage((theme) => {
+        // themeManager 内部已经调用了 applyTheme，无需额外操作
+    })
+
+    // 监听系统主题变化
+    watchSystemTheme((theme) => {
+        // themeManager 内部已经调用了 applyTheme，无需额外操作
+    })
 
     const app = createApp(rootComponent)
 
