@@ -70,6 +70,7 @@
           <AppList
               v-else
               :apps="allApps"
+              :categories="launcherConfig?.categories || []"
               @reorder="handleReorder"
               @select="handleSelect"
           />

@@ -71,7 +71,7 @@ pub struct AppSettingsData {
     #[serde(default = "default_recording_enabled")]
     pub recording_enabled: bool,
     #[serde(default = "default_launcher_hot_key")]
-    pub launcher_hot_key: Option<String>,
+    pub launcher_hot_key: String,
     #[serde(default = "default_launcher_enabled")]
     pub launcher_enabled: bool,
     #[serde(default = "default_recording_default_fps")]
@@ -245,8 +245,8 @@ fn default_recording_enabled() -> bool {
     false
 }
 
-fn default_launcher_hot_key() -> Option<String> {
-    Some("Ctrl+K".to_string())
+fn default_launcher_hot_key() -> String {
+    "Alt+Q".to_string()
 }
 
 fn default_launcher_enabled() -> bool {

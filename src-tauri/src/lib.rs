@@ -6,7 +6,6 @@ pub mod ui;
 pub mod utils;
 
 use crate::core::app_state::AppState;
-use crate::core::config::DEFAULT_LAUNCHER_SHORTCUT;
 use crate::core::error::install_global_panic_hook;
 use crate::services::ai_services::{stream_custom_prompt_text, stream_explain_text, stream_translate_text};
 use crate::services::clipboard_manager::set_clipboard_listener_enabled;
@@ -18,8 +17,6 @@ use crate::ui::commands::*;
 use crate::ui::commands_backup::*;
 use crate::ui::commands_clipboard::*;
 use crate::ui::commands_diagnostic::*;
-use crate::ui::commands_screenshot::*;
-use crate::ui::commands_vc_runtime::*;
 use crate::ui::commands_launcher::{
     add_launcher_category, batch_extract_icons, calculate_expression, get_all_apps,
     get_launcher_config, hide_launcher, launch_app, open_file, remove_app_record,
@@ -35,6 +32,8 @@ use crate::ui::commands_recording::{
     start_recording, stop_recording, toggle_microphone_from_shortcut,
     toggle_recording_from_shortcut, update_recording_audio_capture,
 };
+use crate::ui::commands_screenshot::*;
+use crate::ui::commands_vc_runtime::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{
     bind_overlay_window_events, bind_standard_window_close_to_hide, hide_overlay_window_by_label,
@@ -164,6 +163,7 @@ pub fn run() {
                 image_clipboard_enabled,
                 screenshot_enabled,
                 recording_enabled,
+                launcher_enabled,
             ) = {
                 let guard = lock_arc_mutex(&state_arc);
                 (
@@ -176,6 +176,7 @@ pub fn run() {
                     guard.settings.image_clipboard_enabled,
                     guard.settings.screenshot_enabled,
                     guard.settings.recording_enabled,
+                    guard.settings.launcher_enabled,
                 )
             };
             let mut shortcut_conflicts: Vec<String> = Vec::new();
@@ -344,26 +345,28 @@ pub fn run() {
             }
 
             // 注册启动器快捷键
-            let app_handle_clone_launcher = app_handle.clone();
-            let launcher_hot_key = {
-                let guard = lock_arc_mutex(&state_arc);
-                guard.settings.launcher_hot_key.clone().unwrap_or_else(|| DEFAULT_LAUNCHER_SHORTCUT.to_string())
-            };
-            if let Err(e) = app.global_shortcut().on_shortcut(
-                launcher_hot_key.as_str(),
-                move |_app, _shortcut, event| {
-                    if let ShortcutState::Pressed = event.state {
-                        let app_handle_inner = app_handle_clone_launcher.clone();
-                        tauri::async_runtime::spawn(async move {
-                            if let Err(e) = toggle_launcher(app_handle_inner).await {
-                                log::error!("切换启动器失败: {}", e);
-                            }
-                        });
-                    }
-                },
-            ) {
-                log::warn!("启动器快捷键 '{}' 注册失败: {}", launcher_hot_key, e);
-                shortcut_conflicts.push(format!("启动器：{}", launcher_hot_key));
+            if launcher_enabled {
+                let app_handle_clone_launcher = app_handle.clone();
+                let launcher_hot_key = {
+                    let guard = lock_arc_mutex(&state_arc);
+                    guard.settings.launcher_hot_key.clone()
+                };
+                if let Err(e) = app.global_shortcut().on_shortcut(
+                    launcher_hot_key.as_str(),
+                    move |_app, _shortcut, event| {
+                        if let ShortcutState::Pressed = event.state {
+                            let app_handle_inner = app_handle_clone_launcher.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(e) = toggle_launcher(app_handle_inner).await {
+                                    log::error!("切换启动器失败: {}", e);
+                                }
+                            });
+                        }
+                    },
+                ) {
+                    log::warn!("启动器快捷键 '{}' 注册失败: {}", launcher_hot_key, e);
+                    shortcut_conflicts.push(format!("启动器：{}", launcher_hot_key));
+                }
             }            if !shortcut_conflicts.is_empty() {
                 let payload = serde_json::json!({
                     "conflicts": shortcut_conflicts.clone()

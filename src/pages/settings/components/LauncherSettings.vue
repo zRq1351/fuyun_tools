@@ -1,6 +1,6 @@
 <template>
   <el-form :model="form" label-position="top">
-    <el-card class="setting-section-card" shadow="never">
+    <el-card class="setting-section-card compact-card" shadow="never">
       <template #header>
         <div class="section-title">快捷启动器</div>
       </template>
@@ -10,16 +10,28 @@
       </el-form-item>
 
       <el-form-item label="启动器快捷键">
-        <div class="shortcut-input-wrapper">
-          <el-input
-              v-model="form.launcherHotKey"
-              placeholder="点击录制快捷键"
-              readonly
-              @keydown="handleShortcutKeydown"
-          />
-          <el-button size="small" @click="resetShortcut">重置</el-button>
-        </div>
-        <div class="form-hint">按下组合键设置快捷键，例如 Ctrl+Space</div>
+        <el-input
+            :class="{ recording: isLauncherRecording }"
+            :model-value="launcherDisplayValue"
+            placeholder="例如: Alt+Q"
+            readonly
+        >
+          <template #append>
+            <el-button-group>
+              <el-button :type="isLauncherRecording ? 'danger' : 'primary'" title="修改快捷键"
+                         @click="toggleLauncherRecording">
+                <el-icon>
+                  <component :is="isLauncherRecording ? VideoPause : Edit"/>
+                </el-icon>
+              </el-button>
+              <el-button title="恢复默认快捷键" @click="resetLauncherShortcut">
+                <el-icon>
+                  <RefreshLeft/>
+                </el-icon>
+              </el-button>
+            </el-button-group>
+          </template>
+        </el-input>
       </el-form-item>
     </el-card>
 
@@ -70,7 +82,9 @@
 </template>
 
 <script setup>
-import {DataLine, Operation, Search} from '@element-plus/icons-vue'
+import {DataLine, Edit, Operation, RefreshLeft, Search, VideoPause} from '@element-plus/icons-vue'
+import {ElMessage} from 'element-plus'
+import {useShortcutRecorder} from '../composables/useShortcutRecorder'
 
 const props = defineProps({
   form: {
@@ -79,32 +93,18 @@ const props = defineProps({
   }
 })
 
-const DEFAULT_LAUNCHER_SHORTCUT = 'Ctrl+K'
+const {
+  isRecording: isLauncherRecording,
+  currentDisplayValue: launcherDisplayValue,
+  toggleRecording: toggleLauncherRecording,
+  stopRecording: stopLauncherRecording
+} = useShortcutRecorder(props.form, 'launcherHotKey')
 
-const handleShortcutKeydown = (event) => {
-  event.preventDefault()
-
-  const modifiers = []
-  if (event.ctrlKey) modifiers.push('Ctrl')
-  if (event.altKey) modifiers.push('Alt')
-  if (event.shiftKey) modifiers.push('Shift')
-  if (event.metaKey) modifiers.push('Meta')
-
-  // 忽略单独的修饰键
-  if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) {
-    return
-  }
-
-  const key = event.key.length === 1 ? event.key.toUpperCase() : event.key
-  const shortcut = [...modifiers, key].join('+')
-
-  if (modifiers.length > 0) {
-    props.form.launcherHotKey = shortcut
-  }
-}
-
-const resetShortcut = () => {
-  props.form.launcherHotKey = DEFAULT_LAUNCHER_SHORTCUT
+const resetLauncherShortcut = () => {
+  stopLauncherRecording()
+  const isMac = navigator.userAgent.toLowerCase().includes('mac')
+  props.form.launcherHotKey = isMac ? 'Cmd+Q' : 'Alt+Q'
+  ElMessage.success(`已恢复启动器快捷键默认值: ${props.form.launcherHotKey}`)
 }
 </script>
 
@@ -120,14 +120,19 @@ const resetShortcut = () => {
   font-weight: 600;
 }
 
-.shortcut-input-wrapper {
-  display: flex;
-  gap: 8px;
-  width: 100%;
+.recording :deep(.el-input__inner) {
+  color: var(--fy-danger) !important;
 }
 
-.shortcut-input-wrapper .el-input {
-  flex: 1;
+.compact-card :deep(.el-input-group__append) {
+  display: flex;
+  flex-wrap: nowrap;
+  width: auto;
+}
+
+.compact-card :deep(.el-button-group) {
+  display: flex;
+  flex-wrap: nowrap;
 }
 
 .feature-list {

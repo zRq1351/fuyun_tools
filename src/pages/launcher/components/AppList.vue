@@ -66,7 +66,7 @@
       <div class="menu-title">添加到分类</div>
       <div class="menu-category-list">
         <div
-            v-for="cat in customCategories.slice(0, 5)"
+            v-for="cat in getCategories().slice(0, 5)"
             :key="cat.id"
             class="menu-item"
             @click="assignToCategory(contextMenu.app, cat.id)"
@@ -77,7 +77,7 @@
           <span>{{ cat.name }}</span>
         </div>
       </div>
-      <div v-if="customCategories.length > 5" class="menu-divider"></div>
+      <div v-if="getCategories().length > 5" class="menu-divider"></div>
       <div class="menu-item" @click="removeFromCategory(contextMenu.app)">
         <el-icon :size="14">
           <Close/>
@@ -89,14 +89,18 @@
 </template>
 
 <script setup>
-import {ref, computed, onMounted, onBeforeUnmount, watch} from 'vue'
-import {Monitor, Close, Grid} from '@element-plus/icons-vue'
+import {computed, onBeforeUnmount, onMounted, ref, watch} from 'vue'
+import {Close, Grid, Monitor} from '@element-plus/icons-vue'
 import {invoke} from '@tauri-apps/api/core'
 
 const props = defineProps({
   apps: {
     type: Array,
     required: true
+  },
+  categories: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -104,6 +108,14 @@ const emit = defineEmits(['select'])
 
 const customCategories = ref([])
 const contextMenu = ref({visible: false, x: 0, y: 0, app: null})
+
+// 使用传入的 categories prop，如果没有则从后端加载
+const getCategories = () => {
+  if (props.categories && props.categories.length > 0) {
+    return props.categories
+  }
+  return customCategories.value
+}
 
 const iconMap = {Monitor, Grid}
 
@@ -172,8 +184,8 @@ const removeFromCategory = async (app) => {
   }
 }
 
-onMounted(() => {
-  loadCategories()
+onMounted(async () => {
+  await loadCategories()
   document.addEventListener('click', hideContextMenu)
 })
 
@@ -182,8 +194,15 @@ watch(() => props.apps, () => {
   loadCategories()
 }, {deep: true})
 
+// 监听窗口焦点事件，当启动器显示时重新加载分类
+const handleFocus = () => {
+  loadCategories()
+}
+window.addEventListener('focus', handleFocus)
+
 onBeforeUnmount(() => {
   document.removeEventListener('click', hideContextMenu)
+  window.removeEventListener('focus', handleFocus)
 })
 </script>
 

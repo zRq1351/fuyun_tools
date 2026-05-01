@@ -316,7 +316,7 @@ const form = reactive({
   imageFillVerifyMode: 'fast',
   ocrEngine: 'ocr-rs',
   launcherEnabled: true,
-  launcherHotKey: 'Ctrl+K'
+  launcherHotKey: 'Alt+Q'
 })
 
 const autoSaveText = computed(() => {
@@ -917,7 +917,7 @@ onMounted(async () => {
     form.imageFillVerifyMode = settings.image_fill_verify_mode === 'strict' ? 'strict' : 'fast'
     form.ocrEngine = settings.ocr_engine || 'ocr-rs'
     form.launcherEnabled = settings.launcher_enabled !== false
-    form.launcherHotKey = settings.launcher_hot_key || 'Ctrl+K'
+    form.launcherHotKey = settings.launcher_hot_key || 'Alt+Q'
 
     if (aiSettingsRef.value) {
       aiSettingsRef.value.applyCurrentProviderConfig(settings)

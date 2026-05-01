@@ -28,10 +28,11 @@ impl Default for LauncherConfig {
 }
 
 fn get_config_path() -> PathBuf {
-    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("fuyun_tools");
+    let mut path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    path.pop();
+    path.push("launcher");
     std::fs::create_dir_all(&path).ok();
-    path.push("launcher_config.json");
+    path.push("config.json");
     path
 }
 

@@ -585,10 +585,12 @@ pub async fn save_app_settings(
     screenshot_hot_key: Option<String>,
     recording_hot_key: Option<String>,
     recording_mic_toggle_hot_key: Option<String>,
+    launcher_hot_key: Option<String>,
     text_clipboard_enabled: Option<bool>,
     image_clipboard_enabled: Option<bool>,
     screenshot_enabled: Option<bool>,
     recording_enabled: Option<bool>,
+    launcher_enabled: Option<bool>,
     selection_enabled: Option<bool>,
     selection_modifier_key: Option<String>,
     selection_custom_prompts: Option<Vec<crate::utils::settings_model::CustomPrompt>>,
@@ -646,6 +648,9 @@ pub async fn save_app_settings(
     }
     if let Some(val) = recording_enabled {
         settings.recording_enabled = val;
+    }
+    if let Some(val) = launcher_enabled {
+        settings.launcher_enabled = val;
     }
     if let Some(val) = selection_enabled {
         settings.selection_enabled = val;
@@ -1034,6 +1039,99 @@ pub async fn save_app_settings(
         }
     }
 
+    if let Some(ref launcher_hot_key_val) = launcher_hot_key {
+        if launcher_hot_key_val.is_empty() {
+            return Err(frontend_error(
+                ErrorCode::ValidationError,
+                "启动器快捷键不能为空",
+                "launcher_hot_key is empty",
+            ));
+        }
+
+        if launcher_hot_key_val != &settings.launcher_hot_key {
+            let effective_hot_key = hot_key.clone().unwrap_or_else(|| settings.hot_key.clone());
+            let effective_image_hot_key = image_hot_key
+                .clone()
+                .unwrap_or_else(|| settings.image_hot_key.clone());
+            let effective_screenshot_hot_key = screenshot_hot_key
+                .clone()
+                .unwrap_or_else(|| settings.screenshot_hot_key.clone());
+            let effective_recording_hot_key = recording_hot_key
+                .clone()
+                .unwrap_or_else(|| settings.recording_hot_key.clone());
+            let effective_mic_toggle_hot_key = recording_mic_toggle_hot_key
+                .clone()
+                .unwrap_or_else(|| settings.recording_mic_toggle_hot_key.clone());
+
+            if launcher_hot_key_val == &effective_hot_key
+                || launcher_hot_key_val == &effective_image_hot_key
+                || launcher_hot_key_val == &effective_screenshot_hot_key
+                || launcher_hot_key_val == &effective_recording_hot_key
+                || launcher_hot_key_val == &effective_mic_toggle_hot_key
+            {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    "启动器快捷键不能与其他快捷键相同",
+                    format!(
+                        "hot_key={}, image_hot_key={}, screenshot_hot_key={}, recording_hot_key={}, mic_toggle_hot_key={}, launcher_hot_key={}",
+                        effective_hot_key,
+                        effective_image_hot_key,
+                        effective_screenshot_hot_key,
+                        effective_recording_hot_key,
+                        effective_mic_toggle_hot_key,
+                        launcher_hot_key_val
+                    ),
+                ));
+            }
+
+            if app
+                .global_shortcut()
+                .is_registered(launcher_hot_key_val.as_str())
+            {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    format!("启动器快捷键被占用：{}", launcher_hot_key_val),
+                    "launcher global shortcut already registered",
+                ));
+            }
+
+            let old_launcher_hot_key = settings.launcher_hot_key.clone();
+            if let Err(e) = app
+                .global_shortcut()
+                .unregister(old_launcher_hot_key.as_str())
+            {
+                log::warn!(
+                    "注销旧启动器快捷键 '{}' 失败 (可能从未注册成功): {}",
+                    old_launcher_hot_key,
+                    e
+                );
+            }
+            if settings.launcher_enabled {
+                let app_handle_for_launcher = app.clone();
+                if let Err(e) = app.global_shortcut().on_shortcut(
+                    launcher_hot_key_val.as_str(),
+                    move |_app, _shortcut, event| {
+                        if let ShortcutState::Pressed = event.state {
+                            let _ = crate::ui::commands_launcher::show_launcher(app_handle_for_launcher.clone());
+                        }
+                    },
+                ) {
+                    log::warn!(
+                        "注册启动器快捷键 '{}' 失败: {}",
+                        launcher_hot_key_val,
+                        e
+                    );
+                    return Err(frontend_error(
+                        ErrorCode::ValidationError,
+                        format!("启动器快捷键被占用或注册失败：{}", launcher_hot_key_val),
+                        e.to_string(),
+                    ));
+                }
+            }
+            settings.launcher_hot_key = launcher_hot_key_val.clone();
+        }
+    }
+
     if let Some(enabled) = text_clipboard_enabled {
         if enabled {
             if !app
@@ -1106,6 +1204,40 @@ pub async fn save_app_settings(
             log::warn!(
                 "注销录屏快捷键 '{}' 失败: {}",
                 settings.recording_hot_key,
+                e
+            );
+        }
+    }
+
+    if let Some(enabled) = launcher_enabled {
+        if enabled {
+            if !app
+                .global_shortcut()
+                .is_registered(settings.launcher_hot_key.as_str())
+            {
+                let app_handle_for_launcher = app.clone();
+                if let Err(e) = app.global_shortcut().on_shortcut(
+                    settings.launcher_hot_key.as_str(),
+                    move |_app, _shortcut, event| {
+                        if let ShortcutState::Pressed = event.state {
+                            let _ = crate::ui::commands_launcher::show_launcher(app_handle_for_launcher.clone());
+                        }
+                    },
+                ) {
+                    log::warn!(
+                        "注册启动器快捷键 '{}' 失败: {}",
+                        settings.launcher_hot_key.as_str(),
+                        e
+                    );
+                }
+            }
+        } else if let Err(e) = app
+            .global_shortcut()
+            .unregister(settings.launcher_hot_key.as_str())
+        {
+            log::warn!(
+                "注册启动器快捷键 '{}' 失败: {}",
+                settings.launcher_hot_key,
                 e
             );
         }

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredApp {
@@ -27,10 +27,11 @@ pub struct AppStore {
 }
 
 fn get_store_path() -> PathBuf {
-    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("fuyun_tools");
+    let mut path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    path.pop();
+    path.push("launcher");
     std::fs::create_dir_all(&path).ok();
-    path.push("launcher_apps.json");
+    path.push("apps.json");
     path
 }
 
