@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::services::app_scanner;
 use crate::services::app_store;
@@ -43,163 +44,6 @@ pub async fn search_launcher_items(query: String, limit: usize) -> Result<Vec<Se
     }
 
     Ok(results)
-}
-
-/// 计算数学表达式
-#[tauri::command]
-pub async fn calculate_expression(expr: String) -> Result<String, String> {
-    let result = safe_eval(&expr).map_err(|e| format!("计算错误: {}", e))?;
-
-    let formatted = if result.fract() == 0.0 {
-        format!("{}", result as i64)
-    } else {
-        format!("{:.10}", result).trim_end_matches('0').trim_end_matches('.').to_string()
-    };
-
-    Ok(formatted)
-}
-
-/// 安全的数学表达式求值
-fn safe_eval(expr: &str) -> Result<f64, String> {
-    let sanitized = expr
-        .replace('^', "**")
-        .replace('×', "*")
-        .replace('÷', "/");
-
-    if !sanitized.chars().all(|c| c.is_ascii_digit() || "+-*/.()eE ".contains(c)) {
-        return Err("无效的数学表达式".to_string());
-    }
-
-    let mut parser = Parser::new(&sanitized);
-    parser.parse_expression().map_err(|e| e.to_string())
-}
-
-/// 简单的数学表达式解析器
-struct Parser {
-    chars: Vec<char>,
-    pos: usize,
-}
-
-impl Parser {
-    fn new(input: &str) -> Self {
-        Self {
-            chars: input.chars().collect(),
-            pos: 0,
-        }
-    }
-
-    fn parse_expression(&mut self) -> Result<f64, String> {
-        let mut result = self.parse_term()?;
-
-        while self.pos < self.chars.len() {
-            match self.current_char() {
-                '+' => {
-                    self.advance();
-                    result += self.parse_term()?;
-                }
-                '-' => {
-                    self.advance();
-                    result -= self.parse_term()?;
-                }
-                _ => break,
-            }
-        }
-
-        Ok(result)
-    }
-
-    fn parse_term(&mut self) -> Result<f64, String> {
-        let mut result = self.parse_factor()?;
-
-        while self.pos < self.chars.len() {
-            match self.current_char() {
-                '*' => {
-                    self.advance();
-                    if self.current_char() == '*' {
-                        self.advance();
-                        let exp = self.parse_factor()?;
-                        result = result.powf(exp);
-                    } else {
-                        result *= self.parse_factor()?;
-                    }
-                }
-                '/' => {
-                    self.advance();
-                    let divisor = self.parse_factor()?;
-                    if divisor == 0.0 {
-                        return Err("除以零".to_string());
-                    }
-                    result /= divisor;
-                }
-                _ => break,
-            }
-        }
-
-        Ok(result)
-    }
-
-    fn parse_factor(&mut self) -> Result<f64, String> {
-        self.skip_whitespace();
-
-        if self.pos >= self.chars.len() {
-            return Err("意外的表达式结束".to_string());
-        }
-
-        match self.current_char() {
-            '(' => {
-                self.advance();
-                let result = self.parse_expression()?;
-                if self.current_char() != ')' {
-                    return Err("缺少右括号".to_string());
-                }
-                self.advance();
-                Ok(result)
-            }
-            '-' => {
-                self.advance();
-                Ok(-self.parse_factor()?)
-            }
-            '+' => {
-                self.advance();
-                self.parse_factor()
-            }
-            _ => self.parse_number(),
-        }
-    }
-
-    fn parse_number(&mut self) -> Result<f64, String> {
-        self.skip_whitespace();
-
-        let start = self.pos;
-        while self.pos < self.chars.len() && (self.current_char().is_ascii_digit() || self.current_char() == '.') {
-            self.advance();
-        }
-
-        if start == self.pos {
-            return Err("期望数字".to_string());
-        }
-
-        let num_str: String = self.chars[start..self.pos].iter().collect();
-        num_str.parse::<f64>().map_err(|_| "无效的数字".to_string())
-    }
-
-    fn current_char(&self) -> char {
-        if self.pos < self.chars.len() {
-            self.chars[self.pos]
-        } else {
-            '\0'
-        }
-    }
-
-    fn advance(&mut self) {
-        self.pos += 1;
-    }
-
-    fn skip_whitespace(&mut self) {
-        while self.pos < self.chars.len() && self.chars[self.pos].is_whitespace() {
-            self.pos += 1;
-        }
-    }
 }
 
 /// 获取所有已安装的应用程序（从存储加载）
@@ -418,4 +262,48 @@ pub async fn toggle_launcher(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn open_file(path: String) -> Result<(), String> {
     app_scanner::open_file(&path)
+}
+
+/// 打开应用所在目录（解析 .lnk 快捷方式的目标路径）
+#[tauri::command]
+pub async fn open_app_directory(app: AppHandle, path: String) -> Result<(), String> {
+    if !std::path::Path::new(&path).exists() {
+        return Err("快捷方式不存在".to_string());
+    }
+
+    let target_dir = if path.to_lowercase().ends_with(".lnk") {
+        let output = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "$wsh = New-Object -ComObject WScript.Shell; $lnk = $wsh.CreateShortcut('{}'); Write-Output $lnk.TargetPath",
+                    path.replace('\'', "''")
+                ),
+            ])
+            .output()
+            .map_err(|e| format!("解析快捷方式失败: {}", e))?;
+
+        let target = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if target.is_empty() {
+            return Err("无法解析快捷方式目标".to_string());
+        }
+        std::path::Path::new(&target)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default()
+    } else {
+        std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default()
+    };
+
+    if target_dir.is_empty() {
+        return Err("无法获取应用目录".to_string());
+    }
+
+    app.opener()
+        .open_path(target_dir, None::<&str>)
+        .map_err(|e| format!("打开目录失败: {}", e))
 }

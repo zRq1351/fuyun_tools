@@ -6,7 +6,8 @@
       @mouseenter="$emit('mouseenter')"
   >
     <div class="item-icon">
-      <el-icon :size="20">
+      <img v-if="isBase64Icon" :src="item.icon" class="icon-img"/>
+      <el-icon v-else :size="20">
         <component :is="iconComponent"/>
       </el-icon>
     </div>
@@ -25,17 +26,7 @@
 
 <script setup>
 import {computed} from 'vue'
-import {
-  CopyDocument,
-  DataLine,
-  Document,
-  Files,
-  Folder,
-  Monitor,
-  Operation,
-  Search,
-  Setting
-} from '@element-plus/icons-vue'
+import {CopyDocument, Document, Files, Folder, Monitor, Operation, Search, Setting} from '@element-plus/icons-vue'
 
 const props = defineProps({
   item: {
@@ -56,13 +47,17 @@ const iconMap = {
   clipboard: CopyDocument,
   setting: Setting,
   command: Operation,
-  calculator: DataLine,
   folder: Folder,
   search: Search,
   default: Files
 }
 
+const isBase64Icon = computed(() => {
+  return props.item.icon && typeof props.item.icon === 'string' && props.item.icon.startsWith('data:')
+})
+
 const iconComponent = computed(() => {
+  if (isBase64Icon.value) return null
   return iconMap[props.item.icon] || iconMap[props.item.type] || iconMap.default
 })
 </script>
@@ -117,6 +112,12 @@ const iconComponent = computed(() => {
 
 .item-shortcut {
   margin-left: 12px;
+}
+
+.icon-img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
 }
 
 .shortcut-key {

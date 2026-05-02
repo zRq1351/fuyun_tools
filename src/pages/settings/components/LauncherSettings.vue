@@ -60,16 +60,7 @@
         </div>
         <div class="feature-item">
           <el-icon>
-            <DataLine/>
-          </el-icon>
-          <div class="feature-content">
-            <div class="feature-title">计算器</div>
-            <div class="feature-desc">直接输入数学表达式进行计算</div>
-          </div>
-        </div>
-        <div class="feature-item">
-          <el-icon>
-            <Keyboard/>
+            <Key/>
           </el-icon>
           <div class="feature-content">
             <div class="feature-title">键盘导航</div>
@@ -82,7 +73,7 @@
 </template>
 
 <script setup>
-import {DataLine, Edit, Operation, RefreshLeft, Search, VideoPause} from '@element-plus/icons-vue'
+import {Edit, Key, Operation, RefreshLeft, Search, VideoPause} from '@element-plus/icons-vue'
 import {ElMessage} from 'element-plus'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
 

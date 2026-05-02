@@ -18,8 +18,9 @@ use crate::ui::commands_backup::*;
 use crate::ui::commands_clipboard::*;
 use crate::ui::commands_diagnostic::*;
 use crate::ui::commands_launcher::{
-    add_custom_command, add_launcher_category, batch_extract_icons, calculate_expression,
-    get_all_apps, get_launcher_config, hide_launcher, launch_app, launch_app_with_args, open_file, remove_app_record,
+    add_custom_command, add_launcher_category, batch_extract_icons,
+    get_all_apps, get_launcher_config, hide_launcher, launch_app, launch_app_with_args,
+    open_app_directory, open_file, remove_app_record,
     remove_custom_command, remove_launcher_category, rename_launcher_category, reorder_categories,
     scan_and_save_apps, search_launcher_items, set_app_category,
     set_launcher_view_mode, show_launcher, toggle_custom_command, toggle_launcher,
@@ -567,7 +568,6 @@ pub fn run() {
             update_app_sort_orders,
             reorder_categories,
             update_category_icon,
-            calculate_expression,
             // 自定义命令管理
             add_custom_command,
             remove_custom_command,
@@ -576,6 +576,7 @@ pub fn run() {
             launch_app,
             launch_app_with_args,
             open_file,
+            open_app_directory,
             show_launcher,
             hide_launcher,
             toggle_launcher,

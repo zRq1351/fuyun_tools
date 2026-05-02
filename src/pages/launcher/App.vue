@@ -55,36 +55,35 @@
       </div>
 
       <div v-else class="content-area">
-        <ResultList
-            v-if="results.length > 0"
-            :active-index="activeIndex"
-            :results="results"
-            @hover="activeIndex = $event"
+        <AppGrid
+            v-if="viewMode === 'category' && hasCategorizedApps && !searchQuery"
+            :categories="categorizedApps"
             @select="handleSelect"
+            @reorder-apps="handleReorderApps"
+            @reorder-categories="handleReorderCategories"
+            @category-changed="handleCategoryChanged"
         />
-        <div v-else-if="searchQuery && !isSearching" class="no-results">
-          <el-icon>
-            <Search/>
-          </el-icon>
-          <span>未找到匹配项</span>
-        </div>
-        <div v-else-if="!searchQuery" class="app-content">
-          <AppGrid
-              v-if="viewMode === 'category' && hasCategorizedApps"
-              :categories="categorizedApps"
-              @select="handleSelect"
-              @reorder-apps="handleReorderApps"
-              @reorder-categories="handleReorderCategories"
-              @category-changed="handleCategoryChanged"
-          />
-          <AppList
-              v-else
-              :apps="allApps"
-              :categories="launcherConfig?.categories || []"
-              @reorder="handleReorder"
-              @select="handleSelect"
-              @category-changed="handleCategoryChanged"
-          />
+        <AppList
+            v-else
+            :apps="displayApps"
+            :categories="launcherConfig?.categories || []"
+            @reorder="handleReorder"
+            @select="handleSelect"
+            @category-changed="handleCategoryChanged"
+        />
+        <div v-if="commandResults.length > 0" class="command-section">
+          <div class="command-header">命令</div>
+          <div
+              v-for="(item, index) in commandResults"
+              :key="item.id"
+              :class="{ 'is-active': index === activeIndex }"
+              class="command-item"
+              @click="handleSelect(item)"
+              @mouseenter="activeIndex = index"
+          >
+            <div class="command-prefix">{{ item.shortcut }}</div>
+            <div class="command-title">{{ item.title }}</div>
+          </div>
         </div>
         <CategoryManager
             :app-category-map="launcherConfig?.app_category_map || {}"
@@ -107,12 +106,11 @@
 <script setup>
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import {ElConfigProvider, ElMessage, ElMessageBox} from 'element-plus'
-import {Close, Grid, List, Loading, Refresh, Search, Setting, Tools} from '@element-plus/icons-vue'
+import {Close, Grid, List, Loading, Refresh, Setting, Tools} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {invoke} from '@tauri-apps/api/core'
 import SearchBox from './components/SearchBox.vue'
-import ResultList from './components/ResultList.vue'
 import AppGrid from './components/AppGrid.vue'
 import AppList from './components/AppList.vue'
 import CategoryManager from './components/CategoryManager.vue'
@@ -120,7 +118,7 @@ import CommandManager from './components/CommandManager.vue'
 import {useLauncherSearch} from './composables/useLauncherSearch'
 
 const searchQuery = ref('')
-const results = ref([])
+const commandResults = ref([])
 const allApps = ref([])
 const activeIndex = ref(0)
 const isFocused = ref(false)
@@ -185,6 +183,8 @@ const handleRefresh = async () => {
     launcherConfig.value = await invoke('get_launcher_config')
     await loadIcons()
     ElMessage.success('应用列表已刷新')
+    commandResults.value = []
+    activeIndex.value = 0
   } catch (error) {
     console.error('Refresh error:', error)
     ElMessage.error('刷新失败')
@@ -219,12 +219,13 @@ const categorizedApps = computed(() => {
   if (!launcherConfig.value) return []
   const config = launcherConfig.value
   const result = []
+  const apps = displayApps.value
   for (const category of config.categories) {
-    const apps = allApps.value
+    const catApps = apps
         .filter(app => config.app_category_map[app.id] === category.id)
         .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-    if (apps.length > 0) {
-      result.push({name: category.name, apps})
+    if (catApps.length > 0) {
+      result.push({name: category.name, apps: catApps})
     }
   }
   return result
@@ -241,48 +242,57 @@ const toggleViewMode = async () => {
   }
 }
 
+const displayApps = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  if (!query || query.startsWith(':')) return allApps.value
+  return allApps.value.filter(a => a.title.toLowerCase().includes(query))
+})
+
 const handleSearch = async () => {
-  if (!searchQuery.value.trim()) {
-    results.value = []
+  const query = searchQuery.value.trim()
+  if (!query) {
+    commandResults.value = []
+    activeIndex.value = 0
     return
   }
   isSearching.value = true
   try {
-    results.value = await search(searchQuery.value)
+    commandResults.value = (await search(query, allApps.value))
+        .filter(item => item.action !== 'launch_app')
     activeIndex.value = 0
   } catch (error) {
-    console.error('Search error:', error)
-    results.value = []
+    console.error('Command search error:', error)
+    commandResults.value = []
   } finally {
     isSearching.value = false
   }
 }
 
 const handleClear = () => {
-  // 直接清空搜索结果
   searchQuery.value = ''
-  results.value = []
+  commandResults.value = []
   activeIndex.value = 0
 }
 
 const handleKeydown = (event) => {
+  const items = commandResults.value.length > 0 ? commandResults.value : displayApps.value
   switch (event.key) {
     case 'ArrowDown':
       event.preventDefault()
-      if (results.value.length > 0) {
-        activeIndex.value = (activeIndex.value + 1) % results.value.length
+      if (items.length > 0) {
+        activeIndex.value = (activeIndex.value + 1) % items.length
       }
       break
     case 'ArrowUp':
       event.preventDefault()
-      if (results.value.length > 0) {
-        activeIndex.value = (activeIndex.value - 1 + results.value.length) % results.value.length
+      if (items.length > 0) {
+        activeIndex.value = (activeIndex.value - 1 + items.length) % items.length
       }
       break
     case 'Enter':
       event.preventDefault()
-      if (results.value.length > 0 && activeIndex.value < results.value.length) {
-        handleSelect(results.value[activeIndex.value])
+      if (items.length > 0 && activeIndex.value < items.length) {
+        handleSelect(items[activeIndex.value])
       }
       break
     case 'Escape':
@@ -352,8 +362,9 @@ const handleCategoryUpdated = async () => {
 }
 
 const handleCategoryChanged = async () => {
-  // 当分类发生变化时，重新加载配置
+  // 当分类发生变化时，重新加载配置和自定义命令
   launcherConfig.value = await invoke('get_launcher_config')
+  await loadCustomCommands()
 }
 
 const handleCommandUpdated = async () => {
@@ -422,7 +433,7 @@ const handleReorder = async (orders) => {
 onMounted(async () => {
   unlistenShow = await listen('show-launcher', async () => {
     searchQuery.value = ''
-    results.value = []
+    commandResults.value = []
     activeIndex.value = 0
     await loadAllApps()
     // 窗口显示后，让搜索框自动获取焦点
@@ -572,18 +583,41 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-.app-content {
-  height: 100%;
+.command-section {
+  border-top: 1px solid var(--fy-border-light);
+  padding: 4px 0;
 }
 
-.no-results {
+.command-header {
+  padding: 4px 16px;
+  font-size: 11px;
+  color: var(--fy-text-muted);
+}
+
+.command-item {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 24px;
-  color: var(--fy-text-muted);
-  font-size: 14px;
+  gap: 12px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.command-item:hover,
+.command-item.is-active {
+  background: var(--fy-bg-hover);
+}
+
+.command-prefix {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--fy-accent);
+  min-width: 80px;
+}
+
+.command-title {
+  font-size: 13px;
+  color: var(--fy-text-primary);
 }
 
 .launcher-hints {

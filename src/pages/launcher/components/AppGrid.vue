@@ -90,6 +90,12 @@
         </el-icon>
         <span>打开</span>
       </div>
+      <div class="menu-item" @click="openAppDirectory(contextMenu.app)">
+        <el-icon :size="14">
+          <FolderOpened/>
+        </el-icon>
+        <span>打开应用目录</span>
+      </div>
       <div class="menu-divider"></div>
       <div class="menu-item" @click="removeFromCategory(contextMenu.app)">
         <el-icon :size="14">
@@ -139,7 +145,7 @@
 <script setup>
 import {nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
-import {Close, Grid, Monitor, Star} from '@element-plus/icons-vue'
+import {Close, FolderOpened, Grid, Monitor, Star} from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import {invoke} from '@tauri-apps/api/core'
 
@@ -320,6 +326,16 @@ const openApp = (app) => {
   contextMenu.value.visible = false
 }
 
+const openAppDirectory = async (app) => {
+  if (!app || !app.path) return
+  try {
+    await invoke('open_app_directory', {path: app.path})
+    hideContextMenu()
+  } catch (error) {
+    console.error('打开应用目录失败:', error)
+  }
+}
+
 // 启动分类下的所有应用
 const launchAllApps = async (category) => {
   if (!category || !category.apps || category.apps.length === 0) return
@@ -481,7 +497,7 @@ const confirmAddCommand = async () => {
       prefix: finalPrefix,
       title: app.title,
       description: `启动 ${app.title}`,
-      icon: 'Monitor',  // 使用默认图标，实际显示时会使用应用图标
+      icon: app.icon_base64 || 'Monitor',
       commandType: commandType
     })
 
