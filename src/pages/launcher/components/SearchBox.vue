@@ -27,7 +27,7 @@
 </template>
 
 <script setup>
-import {onMounted, ref, watch} from 'vue'
+import {nextTick, onMounted, ref, watch} from 'vue'
 import {Close, Search} from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -37,14 +37,21 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'input', 'keydown', 'focus', 'blur'])
+const emit = defineEmits(['update:modelValue', 'input', 'keydown', 'focus', 'blur', 'clear'])
 
 const inputRef = ref(null)
 
 const handleClear = () => {
+  // 先清空值
   emit('update:modelValue', '')
+  // 触发 clear 事件，让父组件直接处理清理逻辑
+  emit('clear')
+  // 立即触发 input 事件作为备用
   emit('input', {target: {value: ''}})
-  inputRef.value?.focus()
+  // 延迟聚焦，确保 DOM 更新完成
+  nextTick(() => {
+    inputRef.value?.focus()
+  })
 }
 
 onMounted(() => {

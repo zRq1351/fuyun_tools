@@ -1,6 +1,6 @@
 <template>
   <div class="result-list-container">
-    <el-scrollbar max-height="260px">
+    <el-scrollbar max-height="340px">
       <div class="result-list">
         <ResultItem
             v-for="(item, index) in results"

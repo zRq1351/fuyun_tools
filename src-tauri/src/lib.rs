@@ -367,7 +367,9 @@ pub fn run() {
                     log::warn!("启动器快捷键 '{}' 注册失败: {}", launcher_hot_key, e);
                     shortcut_conflicts.push(format!("启动器：{}", launcher_hot_key));
                 }
-            }            if !shortcut_conflicts.is_empty() {
+            }
+
+            if !shortcut_conflicts.is_empty() {
                 let payload = serde_json::json!({
                     "conflicts": shortcut_conflicts.clone()
                 });
@@ -571,6 +573,10 @@ pub fn run() {
             show_launcher,
             hide_launcher,
             toggle_launcher,
+            show_standard_window_command,
+            show_clipboard_window_command,
+            start_screenshot_command,
+            toggle_recording_command,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());

@@ -17,6 +17,7 @@ use crate::ui::commands_writeback::{emit_writeback_phase, emit_writeback_result,
 use crate::ui::tray_menu::open_settings;
 use crate::ui::window_manager::{
     bind_overlay_window_events, hide_overlay_window_by_label, show_overlay_window_by_label,
+    show_standard_window_by_label,
 };
 #[cfg(debug_assertions)]
 use crate::utils::image_clipboard::get_image_persist_queue_metrics_snapshot;
@@ -1211,10 +1212,65 @@ pub async fn save_app_settings(
 
     if let Some(enabled) = launcher_enabled {
         if enabled {
-            if !app
+            // 检查是否有快捷键变更
+            if let Some(ref launcher_hot_key_val) = launcher_hot_key {
+                if launcher_hot_key_val != &settings.launcher_hot_key {
+                    // 快捷键发生变更，先注销旧的
+                    if let Err(e) = app
+                        .global_shortcut()
+                        .unregister(settings.launcher_hot_key.as_str())
+                    {
+                        log::warn!(
+                            "注销旧启动器快捷键 '{}' 失败 (可能从未注册成功): {}",
+                            settings.launcher_hot_key,
+                            e
+                        );
+                    }
+
+                    // 注册新的快捷键
+                    let app_handle_for_launcher = app.clone();
+                    let new_hot_key = launcher_hot_key_val.clone();
+                    if let Err(e) = app.global_shortcut().on_shortcut(
+                        launcher_hot_key_val.as_str(),
+                        move |_app, _shortcut, event| {
+                            if let ShortcutState::Pressed = event.state {
+                                let _ = crate::ui::commands_launcher::show_launcher(app_handle_for_launcher.clone());
+                            }
+                        },
+                    ) {
+                        log::warn!(
+                            "注册启动器快捷键 '{}' 失败: {}",
+                            new_hot_key,
+                            e
+                        );
+                    }
+                    settings.launcher_hot_key = launcher_hot_key_val.clone();
+                } else if !app
+                    .global_shortcut()
+                    .is_registered(settings.launcher_hot_key.as_str())
+                {
+                    // 快捷键未变更但未注册，重新注册
+                    let app_handle_for_launcher = app.clone();
+                    if let Err(e) = app.global_shortcut().on_shortcut(
+                        settings.launcher_hot_key.as_str(),
+                        move |_app, _shortcut, event| {
+                            if let ShortcutState::Pressed = event.state {
+                                let _ = crate::ui::commands_launcher::show_launcher(app_handle_for_launcher.clone());
+                            }
+                        },
+                    ) {
+                        log::warn!(
+                            "注册启动器快捷键 '{}' 失败: {}",
+                            settings.launcher_hot_key.as_str(),
+                            e
+                        );
+                    }
+                }
+            } else if !app
                 .global_shortcut()
                 .is_registered(settings.launcher_hot_key.as_str())
             {
+                // 没有传入新快捷键，但需要确保已注册
                 let app_handle_for_launcher = app.clone();
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     settings.launcher_hot_key.as_str(),
@@ -1236,7 +1292,7 @@ pub async fn save_app_settings(
             .unregister(settings.launcher_hot_key.as_str())
         {
             log::warn!(
-                "注册启动器快捷键 '{}' 失败: {}",
+                "注销启动器快捷键 '{}' 失败: {}",
                 settings.launcher_hot_key,
                 e
             );
@@ -1736,4 +1792,34 @@ pub async fn check_previews_ready(
 #[serde(rename_all = "camelCase")]
 pub struct ManualLongshotSessionRequest {
     pub session_id: u64,
+}
+
+/// 显示标准窗口（设置、启动器等）
+#[tauri::command]
+pub async fn show_standard_window_command(app: AppHandle, label: String) -> Result<(), String> {
+    show_standard_window_by_label(&app, &label)
+}
+
+/// 显示剪贴板窗口
+#[tauri::command]
+pub async fn show_clipboard_window_command(app: AppHandle, state: State<'_, Arc<Mutex<SharedAppState>>>) -> Result<(), String> {
+    let state_arc = state.inner().clone();
+    crate::ui::window_manager::show_clipboard_window(app, state_arc);
+    Ok(())
+}
+
+/// 开始截图
+#[tauri::command]
+pub async fn start_screenshot_command(state: State<'_, Arc<Mutex<SharedAppState>>>) -> Result<(), String> {
+    let _ = crate::ui::commands_screenshot::start_screenshot(state).await;
+    Ok(())
+}
+
+/// 切换录屏状态
+#[tauri::command]
+pub async fn toggle_recording_command(app: AppHandle, state: State<'_, Arc<Mutex<SharedAppState>>>) -> Result<(), String> {
+    use crate::ui::commands_recording::toggle_recording_from_shortcut;
+    let state_arc = state.inner().clone();
+    toggle_recording_from_shortcut(app, state_arc).await;
+    Ok(())
 }

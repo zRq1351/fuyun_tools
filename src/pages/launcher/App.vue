@@ -5,6 +5,7 @@
         <SearchBox
             v-model="searchQuery"
             @blur="isFocused = false"
+            @clear="handleClear"
             @focus="isFocused = true"
             @input="handleSearch"
             @keydown="handleKeydown"
@@ -245,6 +246,13 @@ const handleSearch = async () => {
   } finally {
     isSearching.value = false
   }
+}
+
+const handleClear = () => {
+  // 直接清空搜索结果
+  searchQuery.value = ''
+  results.value = []
+  activeIndex.value = 0
 }
 
 const handleKeydown = (event) => {

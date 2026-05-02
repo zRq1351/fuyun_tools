@@ -66,7 +66,7 @@
       <div class="menu-title">添加到分类</div>
       <div class="menu-category-list">
         <div
-            v-for="cat in getCategories().slice(0, 5)"
+            v-for="cat in getCategories()"
             :key="cat.id"
             class="menu-item"
             @click="assignToCategory(contextMenu.app, cat.id)"
@@ -321,8 +321,8 @@ onBeforeUnmount(() => {
 }
 
 .menu-category-list {
-  max-height: 150px;
-  overflow-y: auto !important;
+  max-height: calc(32px * 5); /* 每条菜单项约32px，最多显示5条 */
+  overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--fy-border) transparent;
@@ -351,14 +351,13 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 4px 12px; /* 缩短上下间距从6px到4px */
   font-size: 12px;
   color: var(--fy-text-primary);
   cursor: pointer;
   transition: background 0.15s, padding-left 0.15s;
   user-select: none;
-  /* 确保菜单项有最小高度 */
-  min-height: 28px;
+  min-height: 24px; /* 相应调整最小高度 */
   flex-shrink: 0;
 }
 

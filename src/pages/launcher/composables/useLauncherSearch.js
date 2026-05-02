@@ -79,7 +79,7 @@ export function useLauncherSearch() {
         const action = item.action || 'launch_app'
         switch (action) {
             case 'open_settings':
-                await invoke('show_standard_window_by_label', {label: 'settings'})
+                await invoke('show_standard_window_command', {label: 'settings'})
                 break
             case 'open_clipboard':
                 await invoke('show_clipboard_window_command')
@@ -88,7 +88,7 @@ export function useLauncherSearch() {
                 await invoke('start_screenshot_command')
                 break
             case 'start_recording':
-                await invoke('toggle_recording')
+                await invoke('toggle_recording_command')
                 break
             case 'calculator':
             case 'copy_result':

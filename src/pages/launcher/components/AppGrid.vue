@@ -81,7 +81,7 @@
       <div class="menu-divider"></div>
       <div class="menu-category-list">
         <div
-            v-for="cat in customCategories.slice(0, 5)"
+            v-for="cat in customCategories"
             :key="cat.id"
             class="menu-item"
             @click="assignToCategory(contextMenu.app, cat.id)"
@@ -105,7 +105,7 @@
 
 <script setup>
 import {nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
-import {Close, Monitor, Grid} from '@element-plus/icons-vue'
+import {Close, Grid, Monitor} from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import {invoke} from '@tauri-apps/api/core'
 
@@ -629,7 +629,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 4px 12px; /* 缩短上下间距从6px到4px */
   font-size: 12px;
   color: var(--fy-text-primary);
   cursor: pointer;
@@ -648,7 +648,7 @@ onBeforeUnmount(() => {
 }
 
 .menu-category-list {
-  max-height: 150px;
+  max-height: calc(32px * 5); /* 每条菜单项约32px，最多显示5条 */
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
