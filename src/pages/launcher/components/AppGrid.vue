@@ -79,20 +79,6 @@
         <span>打开</span>
       </div>
       <div class="menu-divider"></div>
-      <div class="menu-category-list">
-        <div
-            v-for="cat in customCategories"
-            :key="cat.id"
-            class="menu-item"
-            @click="assignToCategory(contextMenu.app, cat.id)"
-        >
-          <el-icon :size="14">
-            <component :is="getIcon(cat.icon)"/>
-          </el-icon>
-          <span>{{ cat.name }}</span>
-        </div>
-      </div>
-      <div v-if="customCategories.length > 5" class="menu-divider"></div>
       <div class="menu-item" @click="removeFromCategory(contextMenu.app)">
         <el-icon :size="14">
           <Close/>
@@ -184,7 +170,7 @@ let catFallbackElement = null  // 跟踪分类fallback元素
 
 // Category functions
 const expandCategory = (category) => {
-  if (category.apps.length > 4) {
+  if (category.apps.length >= 2) {
     expandedCategory.value = category
     // Initialize sortable for expanded apps after DOM update
     nextTick(() => {
