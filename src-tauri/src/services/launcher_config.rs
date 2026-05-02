@@ -10,11 +10,38 @@ pub struct LauncherCategory {
     pub app_ids: Vec<String>,
 }
 
+/// 自定义命令类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CustomCommandType {
+    /// 打开窗口（设置、剪贴板等）
+    OpenWindow { label: String },
+    /// 执行操作（截图、录屏等）
+    ExecuteAction { action: String },
+    /// 复制文本到剪贴板
+    CopyText { text: String },
+    /// 运行外部程序
+    RunProgram { path: String, args: Option<String> },
+}
+
+/// 自定义命令
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomCommand {
+    pub id: String,
+    pub prefix: String,          // 命令前缀，如 ":mycmd"
+    pub title: String,           // 显示标题
+    pub description: Option<String>, // 描述
+    pub icon: String,            // 图标名称
+    pub command_type: CustomCommandType, // 命令类型
+    pub enabled: bool,           // 是否启用
+    pub created_at: i64,         // 创建时间戳
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LauncherConfig {
     pub view_mode: String,
     pub categories: Vec<LauncherCategory>,
     pub app_category_map: HashMap<String, String>,
+    pub custom_commands: Vec<CustomCommand>,  // 自定义命令列表
 }
 
 impl Default for LauncherConfig {
@@ -23,6 +50,7 @@ impl Default for LauncherConfig {
             view_mode: "list".to_string(),
             categories: Vec::new(),
             app_category_map: HashMap::new(),
+            custom_commands: Vec::new(),
         }
     }
 }
@@ -126,6 +154,108 @@ pub fn update_category_icon(category_id: String, icon: String) -> Result<Launche
     if let Some(category) = config.categories.iter_mut().find(|c| c.id == category_id) {
         category.icon = icon;
     }
+    save_launcher_config(&config)?;
+    Ok(config)
+}
+
+/// 添加自定义命令
+pub fn add_custom_command(
+    prefix: String,
+    title: String,
+    description: Option<String>,
+    icon: String,
+    command_type: CustomCommandType,
+) -> Result<LauncherConfig, String> {
+    let mut config = load_launcher_config();
+
+    // 检查前缀是否已存在
+    if config.custom_commands.iter().any(|c| c.prefix == prefix) {
+        return Err(format!("命令前缀 '{}' 已存在", prefix));
+    }
+
+    let id = format!("cmd_{}", chrono::Local::now().timestamp_millis());
+    let created_at = chrono::Local::now().timestamp();
+
+    config.custom_commands.push(CustomCommand {
+        id,
+        prefix,
+        title,
+        description,
+        icon,
+        command_type,
+        enabled: true,
+        created_at,
+    });
+
+    save_launcher_config(&config)?;
+    Ok(config)
+}
+
+/// 删除自定义命令
+pub fn remove_custom_command(command_id: String) -> Result<LauncherConfig, String> {
+    let mut config = load_launcher_config();
+    config.custom_commands.retain(|c| c.id != command_id);
+    save_launcher_config(&config)?;
+    Ok(config)
+}
+
+/// 更新自定义命令
+pub fn update_custom_command(
+    command_id: String,
+    prefix: Option<String>,
+    title: Option<String>,
+    description: Option<String>,
+    icon: Option<String>,
+    command_type: Option<CustomCommandType>,
+    enabled: Option<bool>,
+) -> Result<LauncherConfig, String> {
+    let mut config = load_launcher_config();
+
+    // 先检查前缀是否冲突
+    if let Some(ref p) = prefix {
+        if config.custom_commands.iter().any(|c| c.id != command_id && c.prefix == *p) {
+            return Err(format!("命令前缀 '{}' 已存在", p));
+        }
+    }
+
+    // 然后更新命令
+    if let Some(command) = config.custom_commands.iter_mut().find(|c| c.id == command_id) {
+        if let Some(p) = prefix {
+            command.prefix = p;
+        }
+        if let Some(t) = title {
+            command.title = t;
+        }
+        if let Some(d) = description {
+            command.description = Some(d);
+        }
+        if let Some(i) = icon {
+            command.icon = i;
+        }
+        if let Some(ct) = command_type {
+            command.command_type = ct;
+        }
+        if let Some(e) = enabled {
+            command.enabled = e;
+        }
+    } else {
+        return Err("命令不存在".to_string());
+    }
+
+    save_launcher_config(&config)?;
+    Ok(config)
+}
+
+/// 切换命令启用状态
+pub fn toggle_custom_command(command_id: String) -> Result<LauncherConfig, String> {
+    let mut config = load_launcher_config();
+
+    if let Some(command) = config.custom_commands.iter_mut().find(|c| c.id == command_id) {
+        command.enabled = !command.enabled;
+    } else {
+        return Err("命令不存在".to_string());
+    }
+
     save_launcher_config(&config)?;
     Ok(config)
 }

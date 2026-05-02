@@ -18,11 +18,12 @@ use crate::ui::commands_backup::*;
 use crate::ui::commands_clipboard::*;
 use crate::ui::commands_diagnostic::*;
 use crate::ui::commands_launcher::{
-    add_launcher_category, batch_extract_icons, calculate_expression, get_all_apps,
-    get_launcher_config, hide_launcher, launch_app, open_file, remove_app_record,
-    remove_launcher_category, rename_launcher_category, reorder_categories, save_launcher_config,
-    scan_and_save_apps, search_launcher_items, set_app_category, set_launcher_view_mode,
-    show_launcher, toggle_launcher, update_app_sort_orders, update_category_icon,
+    add_custom_command, add_launcher_category, batch_extract_icons, calculate_expression,
+    get_all_apps, get_launcher_config, hide_launcher, launch_app, open_file, remove_app_record,
+    remove_custom_command, remove_launcher_category, rename_launcher_category, reorder_categories,
+    save_launcher_config, scan_and_save_apps, search_launcher_items, set_app_category,
+    set_launcher_view_mode, show_launcher, toggle_custom_command, toggle_launcher,
+    update_app_sort_orders, update_category_icon, update_custom_command,
 };
 use crate::ui::commands_recording::{
     cancel_recording, check_recording_ffmpeg, download_recording_ffmpeg, get_recording_output_dir,
@@ -568,6 +569,11 @@ pub fn run() {
             reorder_categories,
             update_category_icon,
             calculate_expression,
+            // 自定义命令管理
+            add_custom_command,
+            remove_custom_command,
+            update_custom_command,
+            toggle_custom_command,
             launch_app,
             open_file,
             show_launcher,

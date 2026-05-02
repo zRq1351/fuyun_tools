@@ -11,7 +11,7 @@
             @keydown="handleKeydown"
         />
         <div class="header-actions">
-          <button v-if="hasCategorizedApps() && !searchQuery" :title="viewMode === 'category' ? '列表视图' : '分类视图'"
+          <button v-if="hasCategorizedApps && !searchQuery" :title="viewMode === 'category' ? '列表视图' : '分类视图'"
                   class="mode-button"
                   @click="toggleViewMode"
                   @mousedown.stop>
@@ -29,6 +29,11 @@
           <button class="mode-button" title="管理分类" @click="showCategoryManager = true" @mousedown.stop>
             <el-icon :size="14">
               <Setting/>
+            </el-icon>
+          </button>
+          <button class="mode-button" title="管理命令" @click="showCommandManager = true" @mousedown.stop>
+            <el-icon :size="14">
+              <Tools/>
             </el-icon>
           </button>
           <button class="close-button" @click="hideLauncher" @mousedown.stop>
@@ -62,11 +67,12 @@
         </div>
         <div v-else-if="!searchQuery" class="app-content">
           <AppGrid
-              v-if="viewMode === 'category' && getCategorizedApps().length > 0"
-              :categories="getCategorizedApps()"
+              v-if="viewMode === 'category' && hasCategorizedApps"
+              :categories="categorizedApps"
               @select="handleSelect"
               @reorder-apps="handleReorderApps"
               @reorder-categories="handleReorderCategories"
+              @category-changed="handleCategoryChanged"
           />
           <AppList
               v-else
@@ -74,6 +80,7 @@
               :categories="launcherConfig?.categories || []"
               @reorder="handleReorder"
               @select="handleSelect"
+              @category-changed="handleCategoryChanged"
           />
         </div>
         <CategoryManager
@@ -82,6 +89,11 @@
             :visible="showCategoryManager"
             @close="showCategoryManager = false"
             @updated="handleCategoryUpdated"
+        />
+        <CommandManager
+            :visible="showCommandManager"
+            @close="showCommandManager = false"
+            @updated="handleCommandUpdated"
         />
       </div>
 
@@ -104,9 +116,9 @@
 </template>
 
 <script setup>
-import {onBeforeUnmount, onMounted, ref} from 'vue'
+import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
-import {Close, Grid, List, Loading, Refresh, Search, Setting} from '@element-plus/icons-vue'
+import {Close, Grid, List, Loading, Refresh, Search, Setting, Tools} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {invoke} from '@tauri-apps/api/core'
@@ -115,6 +127,7 @@ import ResultList from './components/ResultList.vue'
 import AppGrid from './components/AppGrid.vue'
 import AppList from './components/AppList.vue'
 import CategoryManager from './components/CategoryManager.vue'
+import CommandManager from './components/CommandManager.vue'
 import {useLauncherSearch} from './composables/useLauncherSearch'
 
 const searchQuery = ref('')
@@ -128,9 +141,10 @@ const isRefreshing = ref(false)
 const launcherBoxRef = ref(null)
 const viewMode = ref('list')
 const showCategoryManager = ref(false)
+const showCommandManager = ref(false)
 const launcherConfig = ref(null)
 
-const {search, executeAction} = useLauncherSearch()
+const {search, executeAction, loadCustomCommands} = useLauncherSearch()
 
 let unlistenShow = null
 
@@ -141,6 +155,8 @@ const loadAllApps = async () => {
     launcherConfig.value = await invoke('get_launcher_config')
     viewMode.value = launcherConfig.value.view_mode || 'list'
     loadIcons()
+    // 加载自定义命令
+    await loadCustomCommands()
   } catch (error) {
     if (error === 'NEED_SCAN') {
       await handleFirstScan()
@@ -158,6 +174,8 @@ const handleFirstScan = async () => {
     launcherConfig.value = await invoke('get_launcher_config')
     viewMode.value = launcherConfig.value.view_mode || 'list'
     await loadIcons()
+    // 加载自定义命令
+    await loadCustomCommands()
   } catch (error) {
     console.error('Scan error:', error)
     ElMessage.error('扫描应用失败')
@@ -199,13 +217,13 @@ const loadIcons = async () => {
   }
 }
 
-const hasCategorizedApps = () => {
+const hasCategorizedApps = computed(() => {
   if (!launcherConfig.value || !launcherConfig.value.categories) return false
   return launcherConfig.value.categories.length > 0 &&
       Object.keys(launcherConfig.value.app_category_map || {}).length > 0
-}
+})
 
-const getCategorizedApps = () => {
+const categorizedApps = computed(() => {
   if (!launcherConfig.value) return []
   const config = launcherConfig.value
   const result = []
@@ -218,10 +236,10 @@ const getCategorizedApps = () => {
     }
   }
   return result
-}
+})
 
 const toggleViewMode = async () => {
-  if (!hasCategorizedApps()) return
+  if (!hasCategorizedApps.value) return
   const newMode = viewMode.value === 'category' ? 'list' : 'category'
   try {
     await invoke('set_launcher_view_mode', {mode: newMode})
@@ -330,6 +348,19 @@ const startDrag = async (event) => {
 
 const handleCategoryUpdated = async () => {
   launcherConfig.value = await invoke('get_launcher_config')
+  // 重新加载自定义命令
+  await loadCustomCommands()
+}
+
+const handleCategoryChanged = async () => {
+  // 当分类发生变化时，重新加载配置
+  launcherConfig.value = await invoke('get_launcher_config')
+}
+
+const handleCommandUpdated = async () => {
+  // 当命令发生变化时，重新加载配置和自定义命令
+  launcherConfig.value = await invoke('get_launcher_config')
+  await loadCustomCommands()
 }
 
 const handleReorderApps = async (reorderedApps) => {

@@ -383,3 +383,41 @@ pub async fn reorder_categories(category_ids: Vec<String>) -> Result<launcher_co
 pub async fn update_category_icon(category_id: String, icon: String) -> Result<launcher_config::LauncherConfig, String> {
     launcher_config::update_category_icon(category_id, icon)
 }
+
+/// 添加自定义命令
+#[tauri::command]
+pub async fn add_custom_command(
+    prefix: String,
+    title: String,
+    description: Option<String>,
+    icon: String,
+    command_type: launcher_config::CustomCommandType,
+) -> Result<launcher_config::LauncherConfig, String> {
+    launcher_config::add_custom_command(prefix, title, description, icon, command_type)
+}
+
+/// 删除自定义命令
+#[tauri::command]
+pub async fn remove_custom_command(command_id: String) -> Result<launcher_config::LauncherConfig, String> {
+    launcher_config::remove_custom_command(command_id)
+}
+
+/// 更新自定义命令
+#[tauri::command]
+pub async fn update_custom_command(
+    command_id: String,
+    prefix: Option<String>,
+    title: Option<String>,
+    description: Option<String>,
+    icon: Option<String>,
+    command_type: Option<launcher_config::CustomCommandType>,
+    enabled: Option<bool>,
+) -> Result<launcher_config::LauncherConfig, String> {
+    launcher_config::update_custom_command(command_id, prefix, title, description, icon, command_type, enabled)
+}
+
+/// 切换自定义命令启用状态
+#[tauri::command]
+pub async fn toggle_custom_command(command_id: String) -> Result<launcher_config::LauncherConfig, String> {
+    launcher_config::toggle_custom_command(command_id)
+}

@@ -99,13 +99,55 @@
         </el-icon>
         <span>移出分类</span>
       </div>
+      <div class="menu-divider"></div>
+      <div class="menu-item" @click="showAddCommandDialog">
+        <el-icon :size="14">
+          <Star/>
+        </el-icon>
+        <span>添加启动命令</span>
+      </div>
+    </div>
+
+    <!-- 添加命令对话框 -->
+    <div v-if="showCommandDialog" class="dialog-overlay" @click.self="closeCommandDialog">
+      <div class="command-dialog">
+        <div class="dialog-title">为应用添加启动命令</div>
+        <div class="app-info-preview">
+          <img v-if="contextMenu.app?.icon_base64" :src="contextMenu.app.icon_base64" class="preview-icon"/>
+          <span class="preview-name">{{ contextMenu.app?.title }}</span>
+        </div>
+
+        <div class="form-group">
+          <label>命令前缀</label>
+          <input
+              v-model="commandForm.prefix"
+              class="form-input"
+              placeholder=":myapp"
+          />
+          <span class="form-hint">输入 : 开头的前缀，用于快速搜索</span>
+        </div>
+
+        <div class="form-group">
+          <label>图标（可选）</label>
+          <select v-model="commandForm.icon" class="form-select">
+            <option v-for="iconName in iconOptions" :key="iconName" :value="iconName">
+              {{ iconName }}
+            </option>
+          </select>
+        </div>
+
+        <div class="dialog-actions">
+          <button class="dialog-btn cancel" @click="closeCommandDialog">取消</button>
+          <button class="dialog-btn confirm" @click="confirmAddCommand">确定</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
 import {nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
-import {Close, Grid, Monitor} from '@element-plus/icons-vue'
+import {Close, Grid, Monitor, Star} from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import {invoke} from '@tauri-apps/api/core'
 
@@ -113,13 +155,23 @@ const props = defineProps({
   categories: {type: Array, required: true}
 })
 
-const emit = defineEmits(['select', 'reorder-apps', 'reorder-categories'])
+const emit = defineEmits(['select', 'reorder-apps', 'reorder-categories', 'category-changed'])
 
 const customCategories = ref([])
 const contextMenu = ref({visible: false, x: 0, y: 0, app: null})
 const expandedCategory = ref(null)
 const appsContainer = ref(null)
 const categoriesContainer = ref(null)
+const showCommandDialog = ref(false)
+const commandForm = ref({
+  prefix: '',
+  icon: 'Star'
+})
+
+const iconOptions = [
+  'Star', 'Monitor', 'Setting', 'Document', 'VideoCamera',
+  'Search', 'Folder', 'Link', 'Tools', 'Collection'
+]
 
 const iconMap = {Monitor, Grid}
 
@@ -311,6 +363,8 @@ const removeFromCategory = async (app) => {
     const {invoke} = await import('@tauri-apps/api/core')
     await invoke('set_app_category', {appId: app.id, categoryId: ''})
     hideContextMenu()
+    // 通知父组件重新加载配置
+    emit('category-changed')
   } catch (error) {
     console.error('Remove category error:', error)
   }
@@ -321,8 +375,62 @@ const assignToCategory = async (app, categoryId) => {
   try {
     await invoke('set_app_category', {appId: app.id, categoryId})
     hideContextMenu()
+    // 通知父组件重新加载配置
+    emit('category-changed')
   } catch (error) {
     console.error('Assign category error:', error)
+  }
+}
+
+// 显示添加命令对话框
+const showAddCommandDialog = () => {
+  const app = contextMenu.value.app
+  if (!app) return
+
+  // 自动生成前缀：使用应用名称的小写形式
+  const prefix = ':' + app.title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 10)
+
+  commandForm.value = {
+    prefix,
+    icon: 'Star'
+  }
+  showCommandDialog.value = true
+}
+
+// 关闭命令对话框
+const closeCommandDialog = () => {
+  showCommandDialog.value = false
+  hideContextMenu()
+}
+
+// 确认添加命令
+const confirmAddCommand = async () => {
+  const app = contextMenu.value.app
+  if (!app || !commandForm.value.prefix.trim()) return
+
+  try {
+    // 构建命令类型 - 运行程序
+    const commandType = {
+      RunProgram: {
+        path: app.path,
+        args: null
+      }
+    }
+
+    await invoke('add_custom_command', {
+      prefix: commandForm.value.prefix,
+      title: app.title,
+      description: `启动 ${app.title}`,
+      icon: commandForm.value.icon,
+      commandType: commandType
+    })
+
+    closeCommandDialog()
+    // 通知父组件重新加载自定义命令
+    emit('category-changed')
+  } catch (error) {
+    console.error('添加命令失败:', error)
+    alert(error)
   }
 }
 
@@ -672,5 +780,124 @@ onBeforeUnmount(() => {
 
 .menu-category-list::-webkit-scrollbar-thumb:hover {
   background: var(--fy-text-muted);
+}
+
+/* Dialog styles */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10001;
+}
+
+.command-dialog {
+  width: 400px;
+  background: var(--fy-bg-surface);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fy-text-primary);
+  margin-bottom: 16px;
+}
+
+.app-info-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--fy-bg-card);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.preview-icon {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
+.preview-name {
+  font-size: 14px;
+  color: var(--fy-text-primary);
+  font-weight: 500;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 12px;
+  color: var(--fy-text-muted);
+  margin-bottom: 6px;
+}
+
+.form-input, .form-select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--fy-border);
+  border-radius: 6px;
+  background: var(--fy-bg-card);
+  color: var(--fy-text-primary);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.form-input:focus, .form-select:focus {
+  border-color: var(--fy-accent);
+}
+
+.form-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--fy-text-muted);
+  margin-top: 4px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.dialog-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.dialog-btn.cancel {
+  background: var(--fy-bg-hover);
+  color: var(--fy-text-primary);
+}
+
+.dialog-btn.cancel:hover {
+  background: var(--fy-border);
+}
+
+.dialog-btn.confirm {
+  background: var(--fy-accent);
+  color: white;
+}
+
+.dialog-btn.confirm:hover {
+  background: var(--fy-accent-hover);
 }
 </style>
