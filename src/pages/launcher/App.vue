@@ -137,6 +137,7 @@ const launcherConfig = ref(null)
 const {search, executeAction, loadCustomCommands} = useLauncherSearch()
 
 let unlistenShow = null
+let unlistenBlur = null
 
 const loadAllApps = async () => {
   try {
@@ -409,10 +410,22 @@ onMounted(async () => {
       searchBoxRef.value.focus()
     }
   })
+
+  // 监听窗口失去焦点事件
+  const window = getCurrentWebviewWindow()
+  unlistenBlur = await window.listen('tauri://blur', async () => {
+    // 延迟一小段时间，避免点击内部元素时误触发
+    await new Promise(resolve => setTimeout(resolve, 100))
+    // 检查是否有对话框打开，如果有则不关闭
+    if (!showCategoryManager.value && !showCommandManager.value) {
+      await hideLauncher()
+    }
+  })
 })
 
 onBeforeUnmount(() => {
   if (unlistenShow) unlistenShow()
+  if (unlistenBlur) unlistenBlur()
 })
 </script>
 
@@ -543,6 +556,39 @@ onBeforeUnmount(() => {
   padding: 24px;
   color: var(--fy-text-muted);
   font-size: 14px;
+}
+
+.launcher-hints {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--fy-border-light);
+  cursor: move;
+  flex-shrink: 0;
+}
+
+.hint-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fy-text-muted);
+}
+
+.hint-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--fy-bg-hover);
+  border: 1px solid var(--fy-border-light);
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--fy-text-secondary);
 }
 </style>
 
