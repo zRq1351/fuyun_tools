@@ -21,7 +21,7 @@ use crate::ui::commands_launcher::{
     add_custom_command, add_launcher_category, batch_extract_icons, calculate_expression,
     get_all_apps, get_launcher_config, hide_launcher, launch_app, launch_app_with_args, open_file, remove_app_record,
     remove_custom_command, remove_launcher_category, rename_launcher_category, reorder_categories,
-    save_launcher_config, scan_and_save_apps, search_launcher_items, set_app_category,
+    scan_and_save_apps, search_launcher_items, set_app_category,
     set_launcher_view_mode, show_launcher, toggle_custom_command, toggle_launcher,
     update_app_sort_orders, update_category_icon, update_custom_command,
 };
@@ -558,7 +558,6 @@ pub fn run() {
             scan_and_save_apps,
             batch_extract_icons,
             get_launcher_config,
-            save_launcher_config,
             add_launcher_category,
             remove_launcher_category,
             rename_launcher_category,

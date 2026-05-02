@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+
+use crate::services::launcher_db;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredApp {
@@ -26,31 +27,51 @@ pub struct AppStore {
     pub last_scan: i64,
 }
 
-fn get_store_path() -> PathBuf {
-    let mut path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-    path.pop();
-    path.push("launcher");
-    std::fs::create_dir_all(&path).ok();
-    path.push("apps.json");
-    path
-}
+pub async fn load_app_store() -> AppStore {
+    let apps = launcher_db::load_all_apps().await.unwrap_or_default();
+    let last_scan = launcher_db::get_meta("last_scan")
+        .await
+        .unwrap_or(None)
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
 
-pub fn load_app_store() -> AppStore {
-    let path = get_store_path();
-    if path.exists() {
-        match std::fs::read_to_string(&path) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or(AppStore { apps: Vec::new(), last_scan: 0 }),
-            Err(_) => AppStore { apps: Vec::new(), last_scan: 0 },
-        }
-    } else {
-        AppStore { apps: Vec::new(), last_scan: 0 }
+    AppStore {
+        apps: apps
+            .into_iter()
+            .map(|r| StoredApp {
+                id: r.id,
+                title: r.title,
+                path: r.path,
+                category: r.category,
+                app_type: r.app_type,
+                icon_base64: r.icon_base64,
+                action: r.action,
+                sort_order: r.sort_order,
+            })
+            .collect(),
+        last_scan,
     }
 }
 
-pub fn save_app_store(store: &AppStore) -> Result<(), String> {
-    let path = get_store_path();
-    let json = serde_json::to_string_pretty(store).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
+pub async fn save_app_store(store: &AppStore) -> Result<(), String> {
+    let app_rows: Vec<launcher_db::AppRow> = store
+        .apps
+        .iter()
+        .map(|a| launcher_db::AppRow {
+            id: a.id.clone(),
+            title: a.title.clone(),
+            path: a.path.clone(),
+            category: a.category.clone(),
+            app_type: a.app_type.clone(),
+            icon_base64: a.icon_base64.clone(),
+            action: a.action.clone(),
+            sort_order: a.sort_order,
+        })
+        .collect();
+
+    launcher_db::upsert_apps(&app_rows).await?;
+    launcher_db::set_meta("last_scan", &store.last_scan.to_string()).await?;
+    Ok(())
 }
 
 fn is_system_app(title: &str, path: &str) -> bool {
@@ -100,7 +121,7 @@ fn is_system_app(title: &str, path: &str) -> bool {
     system_path_patterns.iter().any(|p| path_lower.contains(p))
 }
 
-pub fn scan_and_save_apps() -> Result<AppStore, String> {
+pub async fn scan_and_save_apps() -> Result<AppStore, String> {
     let categories = crate::services::app_scanner::scan_apps_by_category();
     let mut apps = Vec::new();
 
@@ -139,44 +160,27 @@ pub fn scan_and_save_apps() -> Result<AppStore, String> {
         last_scan: chrono::Utc::now().timestamp(),
     };
 
-    save_app_store(&store)?;
+    save_app_store(&store).await?;
     Ok(store)
 }
 
-pub fn remove_app_from_store(app_id: &str) -> Result<(), String> {
-    let mut store = load_app_store();
-    store.apps.retain(|a| a.id != app_id);
-    save_app_store(&store)
+pub async fn remove_app_from_store(app_id: &str) -> Result<(), String> {
+    launcher_db::delete_app(app_id).await
 }
 
-pub fn update_app_icon(app_id: &str, icon_base64: &str) {
-    let mut store = load_app_store();
-    if let Some(app) = store.apps.iter_mut().find(|a| a.id == app_id) {
-        app.icon_base64 = Some(icon_base64.to_string());
-        let _ = save_app_store(&store);
-    }
+pub async fn update_app_icon(app_id: &str, icon_base64: &str) {
+    let _ = launcher_db::update_app_icon(app_id, icon_base64).await;
 }
 
-pub fn batch_update_icons(icons: &HashMap<String, String>) {
-    let mut store = load_app_store();
-    let mut changed = false;
+pub async fn batch_update_icons(icons: &HashMap<String, String>) {
     for (path, icon) in icons {
-        if let Some(app) = store.apps.iter_mut().find(|a| &a.path == path) {
-            app.icon_base64 = Some(icon.clone());
-            changed = true;
-        }
-    }
-    if changed {
-        let _ = save_app_store(&store);
+        let _ = launcher_db::update_app_icon_by_path(path, icon).await;
     }
 }
 
-pub fn update_app_sort_orders(orders: Vec<(String, i32)>) -> Result<(), String> {
-    let mut store = load_app_store();
+pub async fn update_app_sort_orders(orders: Vec<(String, i32)>) -> Result<(), String> {
     for (app_id, sort_order) in orders {
-        if let Some(app) = store.apps.iter_mut().find(|a| a.id == app_id) {
-            app.sort_order = sort_order;
-        }
+        launcher_db::update_app_sort_order(&app_id, sort_order).await?;
     }
-    save_app_store(&store)
+    Ok(())
 }
