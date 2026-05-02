@@ -99,21 +99,6 @@
             @updated="handleCommandUpdated"
         />
       </div>
-
-      <div class="launcher-hints" @mousedown="startDrag">
-        <div class="hint-item">
-          <span class="hint-key">↑↓</span>
-          <span class="hint-text">导航</span>
-        </div>
-        <div class="hint-item">
-          <span class="hint-key">Enter</span>
-          <span class="hint-text">执行</span>
-        </div>
-        <div class="hint-item">
-          <span class="hint-key">Esc</span>
-          <span class="hint-text">关闭</span>
-        </div>
-      </div>
     </div>
     </el-config-provider>
   </div>
@@ -558,39 +543,6 @@ onBeforeUnmount(() => {
   padding: 24px;
   color: var(--fy-text-muted);
   font-size: 14px;
-}
-
-.launcher-hints {
-  display: flex;
-  justify-content: center;
-  gap: 16px;
-  padding: 10px 16px;
-  border-top: 1px solid var(--fy-border-light);
-  cursor: move;
-  flex-shrink: 0;
-}
-
-.hint-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--fy-text-muted);
-}
-
-.hint-key {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 24px;
-  height: 20px;
-  padding: 0 6px;
-  background: var(--fy-bg-hover);
-  border: 1px solid var(--fy-border-light);
-  border-radius: 4px;
-  font-size: 11px;
-  font-family: monospace;
-  color: var(--fy-text-secondary);
 }
 </style>
 
