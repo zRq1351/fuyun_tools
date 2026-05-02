@@ -1,6 +1,6 @@
-use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 use crate::utils::icon_extractor;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LauncherItem {
@@ -156,14 +156,101 @@ pub fn search_apps(query: &str, limit: usize) -> Vec<LauncherItem> {
 }
 
 pub fn launch_app(path: &str) -> Result<(), String> {
-    if !PathBuf::from(path).exists() {
+    log::info!("[launch_app] 尝试启动程序: {}", path);
+    let path_buf = PathBuf::from(path);
+    if !path_buf.exists() {
+        log::error!("[launch_app] 文件不存在: {}", path);
         return Err(format!("文件不存在: {}", path));
     }
-    std::process::Command::new("cmd")
-        .args(["/C", "start", "", path])
-        .spawn()
-        .map_err(|e| format!("启动失败: {}", e))?;
-    Ok(())
+
+    // 检查是否是快捷方式 (.lnk)
+    let is_shortcut = path.to_lowercase().ends_with(".lnk");
+
+    if is_shortcut {
+        log::info!("[launch_app] 检测到快捷方式，使用 cmd start 启动");
+        // 快捷方式使用 cmd /C start 启动
+        match std::process::Command::new("cmd")
+            .args(["/C", "start", "", path])
+            .spawn()
+        {
+            Ok(_) => {
+                log::info!("[launch_app] 快捷方式启动成功");
+                Ok(())
+            }
+            Err(e) => {
+                log::error!("[launch_app] 快捷方式启动失败: {}", e);
+                Err(format!("启动失败: {}", e))
+            }
+        }
+    } else {
+        log::info!("[launch_app] 文件存在，开始启动...");
+        // 直接使用 std::process::Command 启动程序，模拟双击行为
+        match std::process::Command::new(path).spawn() {
+            Ok(child) => {
+                log::info!("[launch_app] 启动成功, PID: {:?}", child.id());
+                Ok(())
+            }
+            Err(e) => {
+                log::error!("[launch_app] 启动失败: {}", e);
+                Err(format!("启动失败: {}", e))
+            }
+        }
+    }
+}
+
+pub fn launch_app_with_args(path: &str, args: Option<&str>) -> Result<(), String> {
+    log::info!("[launch_app_with_args] 尝试启动程序: {}, args: {:?}", path, args);
+    let path_buf = PathBuf::from(path);
+    if !path_buf.exists() {
+        log::error!("[launch_app_with_args] 文件不存在: {}", path);
+        return Err(format!("文件不存在: {}", path));
+    }
+
+    // 检查是否是快捷方式 (.lnk)
+    let is_shortcut = path.to_lowercase().ends_with(".lnk");
+
+    if is_shortcut {
+        log::info!("[launch_app_with_args] 检测到快捷方式，使用 cmd start 启动");
+        // 快捷方式使用 cmd /C start 启动
+        let mut command = std::process::Command::new("cmd");
+        if let Some(arguments) = args {
+            let full_command = format!("\"{}\" {}", path, arguments);
+            command.args(["/C", "start", "", &full_command]);
+        } else {
+            command.args(["/C", "start", "", path]);
+        }
+
+        match command.spawn() {
+            Ok(_) => {
+                log::info!("[launch_app_with_args] 快捷方式启动成功");
+                Ok(())
+            }
+            Err(e) => {
+                log::error!("[launch_app_with_args] 快捷方式启动失败: {}", e);
+                Err(format!("启动失败: {}", e))
+            }
+        }
+    } else {
+        let mut command = std::process::Command::new(path);
+
+        if let Some(arguments) = args {
+            // 解析参数并添加
+            for arg in arguments.split_whitespace() {
+                command.arg(arg);
+            }
+        }
+
+        match command.spawn() {
+            Ok(child) => {
+                log::info!("[launch_app_with_args] 启动成功, PID: {:?}", child.id());
+                Ok(())
+            }
+            Err(e) => {
+                log::error!("[launch_app_with_args] 启动失败: {}", e);
+                Err(format!("启动失败: {}", e))
+            }
+        }
+    }
 }
 
 pub fn open_file(path: &str) -> Result<(), String> {

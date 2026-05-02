@@ -237,10 +237,21 @@ pub async fn batch_extract_icons(paths: Vec<String>) -> Result<std::collections:
 /// 启动应用程序（带存在性检测）
 #[tauri::command]
 pub async fn launch_app(_app_id: String, path: String) -> Result<(), String> {
+    log::info!("[launch_app command] 收到请求, app_id: {}, path: {}", _app_id, path);
     if !std::path::Path::new(&path).exists() {
+        log::error!("[launch_app command] APP_NOT_FOUND: {}", path);
         return Err("APP_NOT_FOUND".to_string());
     }
     app_scanner::launch_app(&path)
+}
+
+/// 启动应用程序并传递参数
+#[tauri::command]
+pub async fn launch_app_with_args(_app_id: String, path: String, args: Option<String>) -> Result<(), String> {
+    if !std::path::Path::new(&path).exists() {
+        return Err("APP_NOT_FOUND".to_string());
+    }
+    app_scanner::launch_app_with_args(&path, args.as_deref())
 }
 
 /// 删除应用记录

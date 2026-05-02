@@ -81,7 +81,8 @@ export function useLauncherSearch() {
                 icon: cmd.icon,
                 type: cmd.type,
                 action: cmd.action,
-                shortcut: cmd.prefix
+                shortcut: cmd.prefix,
+                commandType: cmd.commandType  // 保留 commandType 字段
             })))
         }
 
@@ -151,7 +152,10 @@ export function useLauncherSearch() {
     // 执行自定义命令
     const executeCustomCommand = async (item) => {
         const cmdType = item.commandType
-        if (!cmdType) return
+        if (!cmdType) {
+            console.error('[自定义命令] commandType 为空')
+            return
+        }
 
         try {
             if (cmdType.OpenWindow) {
@@ -175,13 +179,48 @@ export function useLauncherSearch() {
                 await invoke('copy_to_clipboard', {text: cmdType.CopyText.text})
             } else if (cmdType.RunProgram) {
                 // 运行程序
-                await invoke('launch_app', {
-                    appId: item.id || 'custom_command',
-                    path: cmdType.RunProgram.path
+                console.log('[自定义命令] RunProgram 完整信息:', {
+                    path: cmdType.RunProgram.path,
+                    args: cmdType.RunProgram.args,
+                    pathType: typeof cmdType.RunProgram.path,
+                    pathLength: cmdType.RunProgram.path?.length
                 })
+
+                if (!cmdType.RunProgram.path) {
+                    throw new Error('程序路径为空')
+                }
+
+                const hasArgs = cmdType.RunProgram.args && cmdType.RunProgram.args.trim() !== ''
+                if (hasArgs) {
+                    // 有参数时使用新命令
+                    console.log('[自定义命令] 使用 launch_app_with_args')
+                    await invoke('launch_app_with_args', {
+                        appId: item.id || 'custom_command',
+                        path: cmdType.RunProgram.path,
+                        args: cmdType.RunProgram.args
+                    })
+                } else {
+                    // 无参数时使用原有命令（更简单）
+                    console.log('[自定义命令] 使用 launch_app, path:', cmdType.RunProgram.path)
+                    await invoke('launch_app', {
+                        appId: item.id || 'custom_command',
+                        path: cmdType.RunProgram.path
+                    })
+                }
+            } else {
+                console.error('[自定义命令] 未知的命令类型:', cmdType)
+                throw new Error('未知的命令类型')
             }
         } catch (error) {
-            console.error('执行自定义命令失败:', error)
+            console.error('[自定义命令] 执行失败:', error)
+            // 显示错误提示
+            if (typeof ElMessage !== 'undefined') {
+                ElMessage({
+                    message: `启动失败: ${error.message || error}`,
+                    type: 'error',
+                    duration: 5000
+                })
+            }
             throw error
         }
     }
