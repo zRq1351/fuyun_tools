@@ -11,7 +11,18 @@
       >
         <div class="category-header">
           <span class="category-name">{{ category.name }}</span>
-          <span class="category-count">{{ category.apps.length }}</span>
+          <div class="category-actions">
+            <button
+                class="launch-all-btn"
+                title="启动所有应用"
+                @click.stop="launchAllApps(category)"
+            >
+              <el-icon :size="14">
+                <Monitor/>
+              </el-icon>
+            </button>
+            <span class="category-count">{{ category.apps.length }}</span>
+          </div>
         </div>
         <div class="category-apps">
           <div
@@ -307,6 +318,24 @@ const openApp = (app) => {
   contextMenu.value.visible = false
 }
 
+// 启动分类下的所有应用
+const launchAllApps = async (category) => {
+  if (!category || !category.apps || category.apps.length === 0) return
+
+  try {
+    // 依次启动所有应用
+    for (const app of category.apps) {
+      emit('select', app)
+      // 添加短暂延迟，避免同时启动过多应用
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    ElMessage.success(`已启动 ${category.apps.length} 个应用`)
+  } catch (error) {
+    console.error('Launch all apps error:', error)
+    ElMessage.error('启动应用失败')
+  }
+}
+
 const showContextMenu = (event, app) => {
   // 使用固定定位，相对于视口
   let x = event.clientX
@@ -545,6 +574,41 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 600;
   color: var(--fy-text-primary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.launch-all-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--fy-text-muted);
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.launch-all-btn:hover {
+  background: var(--fy-accent-bg);
+  color: var(--fy-accent);
+}
+
+.launch-all-btn:active {
+  transform: scale(0.95);
 }
 
 .category-count {
