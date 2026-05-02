@@ -340,7 +340,8 @@ const hideLauncher = async () => {
 const startDrag = async (event) => {
   if (event.target.tagName === 'INPUT' ||
       event.target.closest('.close-button') ||
-      event.target.closest('.mode-button')) {
+      event.target.closest('.mode-button') ||
+      event.target.closest('.clear-button')) {
     return
   }
   try {
