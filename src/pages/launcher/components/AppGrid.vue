@@ -109,7 +109,7 @@
     </div>
 
     <!-- 添加命令对话框 -->
-    <div v-if="showCommandDialog" class="dialog-overlay" @click.self="closeCommandDialog">
+    <div v-if="showCommandDialog" class="dialog-overlay">
       <div class="command-dialog">
         <div class="dialog-title">为应用添加启动命令</div>
         <div class="app-info-preview">
@@ -119,21 +119,14 @@
 
         <div class="form-group">
           <label>命令前缀</label>
-          <input
-              v-model="commandForm.prefix"
-              class="form-input"
-              placeholder=":myapp"
-          />
-          <span class="form-hint">输入 : 开头的前缀，用于快速搜索</span>
-        </div>
-
-        <div class="form-group">
-          <label>图标（可选）</label>
-          <select v-model="commandForm.icon" class="form-select">
-            <option v-for="iconName in iconOptions" :key="iconName" :value="iconName">
-              {{ iconName }}
-            </option>
-          </select>
+          <div class="prefix-input-wrapper">
+            <span class="prefix-symbol">:</span>
+            <input
+                v-model="commandForm.prefix"
+                class="prefix-input"
+            />
+          </div>
+          <span class="form-hint">输入前缀，用于快速搜索（自动添加 : 前缀）</span>
         </div>
 
         <div class="dialog-actions">
@@ -147,6 +140,7 @@
 
 <script setup>
 import {nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
+import {ElMessage} from 'element-plus'
 import {Close, Grid, Monitor, Star} from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import {invoke} from '@tauri-apps/api/core'
@@ -164,14 +158,8 @@ const appsContainer = ref(null)
 const categoriesContainer = ref(null)
 const showCommandDialog = ref(false)
 const commandForm = ref({
-  prefix: '',
-  icon: 'Star'
+  prefix: ''
 })
-
-const iconOptions = [
-  'Star', 'Monitor', 'Setting', 'Document', 'VideoCamera',
-  'Search', 'Folder', 'Link', 'Tools', 'Collection'
-]
 
 const iconMap = {Monitor, Grid}
 
@@ -387,12 +375,11 @@ const showAddCommandDialog = () => {
   const app = contextMenu.value.app
   if (!app) return
 
-  // 自动生成前缀：使用应用名称的小写形式
-  const prefix = ':' + app.title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 10)
+  // 自动生成前缀：使用应用名称的小写形式（不包含 :）
+  const prefix = app.title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 10)
 
   commandForm.value = {
-    prefix,
-    icon: 'Star'
+    prefix
   }
   showCommandDialog.value = true
 }
@@ -409,6 +396,41 @@ const confirmAddCommand = async () => {
   if (!app || !commandForm.value.prefix.trim()) return
 
   try {
+    // 加载配置检查该应用是否已有命令
+    const config = await invoke('get_launcher_config')
+    const existingCommands = config.custom_commands || []
+
+    // 检查该应用是否已有命令（通过 path 判断）
+    const existingCommand = existingCommands.find(cmd => {
+      if (cmd.command_type.RunProgram) {
+        return cmd.command_type.RunProgram.path === app.path
+      }
+      return false
+    })
+
+    if (existingCommand) {
+      ElMessage({
+        message: `该应用已有命令 "${existingCommand.prefix}"，请勿重复添加`,
+        type: 'warning',
+        duration: 3000,
+        offset: 60
+      })
+      return
+    }
+
+    // 检查前缀是否已存在
+    const finalPrefix = ':' + commandForm.value.prefix.trim()
+    const prefixExists = existingCommands.some(cmd => cmd.prefix === finalPrefix)
+    if (prefixExists) {
+      ElMessage({
+        message: `命令前缀 "${finalPrefix}" 已被使用，请使用其他前缀`,
+        type: 'warning',
+        duration: 3000,
+        offset: 60
+      })
+      return
+    }
+
     // 构建命令类型 - 运行程序
     const commandType = {
       RunProgram: {
@@ -418,10 +440,10 @@ const confirmAddCommand = async () => {
     }
 
     await invoke('add_custom_command', {
-      prefix: commandForm.value.prefix,
+      prefix: finalPrefix,
       title: app.title,
       description: `启动 ${app.title}`,
-      icon: commandForm.value.icon,
+      icon: 'Monitor',  // 使用默认图标，实际显示时会使用应用图标
       commandType: commandType
     })
 
@@ -430,7 +452,12 @@ const confirmAddCommand = async () => {
     emit('category-changed')
   } catch (error) {
     console.error('添加命令失败:', error)
-    alert(error)
+    ElMessage({
+      message: error,
+      type: 'error',
+      duration: 3000,
+      offset: 60
+    })
   }
 }
 
@@ -844,6 +871,45 @@ onBeforeUnmount(() => {
   margin-bottom: 6px;
 }
 
+.prefix-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--fy-border);
+  border-radius: 6px;
+  background: var(--fy-bg-card);
+  transition: border-color 0.2s;
+  padding-left: 12px;
+}
+
+.prefix-input-wrapper:focus-within {
+  border-color: var(--fy-accent);
+}
+
+.prefix-symbol {
+  font-size: 14px;
+  color: var(--fy-text-muted);
+  user-select: none;
+  pointer-events: none;
+  line-height: 1;
+  margin-right: 4px;
+  transform: translateY(-1px);
+}
+
+.prefix-input {
+  flex: 1;
+  padding: 8px 12px 8px 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fy-text-primary);
+  font-size: 14px;
+}
+
+.prefix-input::placeholder {
+  padding-left: 0;
+}
+
 .form-input, .form-select {
   width: 100%;
   padding: 8px 12px;
@@ -854,6 +920,7 @@ onBeforeUnmount(() => {
   font-size: 14px;
   outline: none;
   transition: border-color 0.2s;
+  box-sizing: border-box;
 }
 
 .form-input:focus, .form-select:focus {

@@ -54,6 +54,15 @@ const handleClear = () => {
   })
 }
 
+// 暴露聚焦方法供父组件调用
+const focus = () => {
+  nextTick(() => {
+    inputRef.value?.focus()
+  })
+}
+
+defineExpose({focus})
+
 onMounted(() => {
   inputRef.value?.focus()
 })

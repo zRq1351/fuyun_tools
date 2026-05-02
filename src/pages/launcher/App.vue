@@ -1,8 +1,11 @@
 <template>
   <div class="launcher-container">
-    <div ref="launcherBoxRef" class="launcher-box">
+    <!-- Element Plus 消息容器 -->
+    <el-config-provider>
+      <div ref="launcherBoxRef" class="launcher-box">
       <div class="search-wrapper" @mousedown="startDrag">
         <SearchBox
+            ref="searchBoxRef"
             v-model="searchQuery"
             @blur="isFocused = false"
             @clear="handleClear"
@@ -112,12 +115,13 @@
         </div>
       </div>
     </div>
+    </el-config-provider>
   </div>
 </template>
 
 <script setup>
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
-import {ElMessage, ElMessageBox} from 'element-plus'
+import {ElConfigProvider, ElMessage, ElMessageBox} from 'element-plus'
 import {Close, Grid, List, Loading, Refresh, Search, Setting, Tools} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
@@ -139,6 +143,7 @@ const isSearching = ref(false)
 const isLoading = ref(false)
 const isRefreshing = ref(false)
 const launcherBoxRef = ref(null)
+const searchBoxRef = ref(null)
 const viewMode = ref('list')
 const showCategoryManager = ref(false)
 const showCommandManager = ref(false)
@@ -413,6 +418,10 @@ onMounted(async () => {
     results.value = []
     activeIndex.value = 0
     await loadAllApps()
+    // 窗口显示后，让搜索框自动获取焦点
+    if (searchBoxRef.value) {
+      searchBoxRef.value.focus()
+    }
   })
 })
 
@@ -581,5 +590,16 @@ onBeforeUnmount(() => {
   font-size: 11px;
   font-family: monospace;
   color: var(--fy-text-secondary);
+}
+</style>
+
+<style>
+/* 全局样式 - Element Plus 消息提示 */
+.el-message {
+  z-index: 99999 !important;
+}
+
+.el-message-box {
+  z-index: 99999 !important;
 }
 </style>

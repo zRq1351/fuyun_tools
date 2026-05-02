@@ -176,9 +176,8 @@ export function useLauncherSearch() {
             } else if (cmdType.RunProgram) {
                 // 运行程序
                 await invoke('launch_app', {
-                    appId: item.id,
-                    path: cmdType.RunProgram.path,
-                    args: cmdType.RunProgram.args
+                    appId: item.id || 'custom_command',
+                    path: cmdType.RunProgram.path
                 })
             }
         } catch (error) {
