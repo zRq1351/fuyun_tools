@@ -79,6 +79,7 @@
     <!-- Context Menu -->
     <div
         v-if="contextMenu.visible"
+        ref="contextMenuRef"
         :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
         class="context-menu"
         @click.stop
@@ -353,24 +354,29 @@ const launchAllApps = async (category) => {
   }
 }
 
-const showContextMenu = (event, app) => {
-  // 使用固定定位，相对于视口
+const contextMenuRef = ref(null)
+
+const showContextMenu = async (event, app) => {
   let x = event.clientX
   let y = event.clientY
 
-  // 获取菜单的大致尺寸（预设值）
   const menuWidth = 120
-  const menuHeight = 150
-
-  // 边界检测，确保菜单不超出视口
   if (x + menuWidth > window.innerWidth) {
     x = window.innerWidth - menuWidth - 10
   }
-  if (y + menuHeight > window.innerHeight) {
-    y = window.innerHeight - menuHeight - 10
-  }
+  x = Math.max(10, x)
 
-  contextMenu.value = {visible: true, x: Math.max(10, x), y: Math.max(10, y), app}
+  contextMenu.value = {visible: true, x, y, app}
+
+  await nextTick()
+  const menuEl = contextMenuRef.value
+  if (menuEl) {
+    const actualHeight = menuEl.offsetHeight
+    if (y + actualHeight > window.innerHeight) {
+      y = Math.max(10, event.clientY - actualHeight - 4)
+    }
+    contextMenu.value = {visible: true, x, y, app}
+  }
 }
 
 const hideContextMenu = () => {
@@ -823,8 +829,23 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   padding: 4px 0;
   min-width: 120px;
+  max-height: calc(100vh - 20px);
+  overflow-y: auto;
   box-shadow: var(--fy-shadow);
   z-index: 10000;
+}
+
+.context-menu::-webkit-scrollbar {
+  width: 4px;
+}
+
+.context-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.context-menu::-webkit-scrollbar-thumb {
+  background: var(--fy-border);
+  border-radius: 2px;
 }
 
 .menu-item {
