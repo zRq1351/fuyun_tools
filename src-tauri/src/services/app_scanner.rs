@@ -169,30 +169,73 @@ pub fn launch_app(path: &str) -> Result<(), String> {
     if is_shortcut {
         log::info!("[launch_app] 检测到快捷方式，使用 cmd start 启动");
         // 快捷方式使用 cmd /C start 启动
-        match std::process::Command::new("cmd")
-            .args(["/C", "start", "", path])
-            .spawn()
+        #[cfg(target_os = "windows")]
         {
-            Ok(_) => {
-                log::info!("[launch_app] 快捷方式启动成功");
-                Ok(())
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            match std::process::Command::new("cmd")
+                .args(["/C", "start", "", path])
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+            {
+                Ok(_) => {
+                    log::info!("[launch_app] 快捷方式启动成功");
+                    Ok(())
+                }
+                Err(e) => {
+                    log::error!("[launch_app] 快捷方式启动失败: {}", e);
+                    Err(format!("启动失败: {}", e))
+                }
             }
-            Err(e) => {
-                log::error!("[launch_app] 快捷方式启动失败: {}", e);
-                Err(format!("启动失败: {}", e))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            match std::process::Command::new("cmd")
+                .args(["/C", "start", "", path])
+                .spawn()
+            {
+                Ok(_) => {
+                    log::info!("[launch_app] 快捷方式启动成功");
+                    Ok(())
+                }
+                Err(e) => {
+                    log::error!("[launch_app] 快捷方式启动失败: {}", e);
+                    Err(format!("启动失败: {}", e))
+                }
             }
         }
     } else {
         log::info!("[launch_app] 文件存在，开始启动...");
         // 直接使用 std::process::Command 启动程序，模拟双击行为
-        match std::process::Command::new(path).spawn() {
-            Ok(child) => {
-                log::info!("[launch_app] 启动成功, PID: {:?}", child.id());
-                Ok(())
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            match std::process::Command::new(path)
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+            {
+                Ok(child) => {
+                    log::info!("[launch_app] 启动成功, PID: {:?}", child.id());
+                    Ok(())
+                }
+                Err(e) => {
+                    log::error!("[launch_app] 启动失败: {}", e);
+                    Err(format!("启动失败: {}", e))
+                }
             }
-            Err(e) => {
-                log::error!("[launch_app] 启动失败: {}", e);
-                Err(format!("启动失败: {}", e))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            match std::process::Command::new(path).spawn() {
+                Ok(child) => {
+                    log::info!("[launch_app] 启动成功, PID: {:?}", child.id());
+                    Ok(())
+                }
+                Err(e) => {
+                    log::error!("[launch_app] 启动失败: {}", e);
+                    Err(format!("启动失败: {}", e))
+                }
             }
         }
     }
@@ -212,42 +255,96 @@ pub fn launch_app_with_args(path: &str, args: Option<&str>) -> Result<(), String
     if is_shortcut {
         log::info!("[launch_app_with_args] 检测到快捷方式，使用 cmd start 启动");
         // 快捷方式使用 cmd /C start 启动
-        let mut command = std::process::Command::new("cmd");
-        if let Some(arguments) = args {
-            let full_command = format!("\"{}\" {}", path, arguments);
-            command.args(["/C", "start", "", &full_command]);
-        } else {
-            command.args(["/C", "start", "", path]);
-        }
-
-        match command.spawn() {
-            Ok(_) => {
-                log::info!("[launch_app_with_args] 快捷方式启动成功");
-                Ok(())
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            let mut command = std::process::Command::new("cmd");
+            if let Some(arguments) = args {
+                let full_command = format!("\"{}\" {}", path, arguments);
+                command.args(["/C", "start", "", &full_command]);
+            } else {
+                command.args(["/C", "start", "", path]);
             }
-            Err(e) => {
-                log::error!("[launch_app_with_args] 快捷方式启动失败: {}", e);
-                Err(format!("启动失败: {}", e))
+
+            match command.creation_flags(CREATE_NO_WINDOW).spawn() {
+                Ok(_) => {
+                    log::info!("[launch_app_with_args] 快捷方式启动成功");
+                    Ok(())
+                }
+                Err(e) => {
+                    log::error!("[launch_app_with_args] 快捷方式启动失败: {}", e);
+                    Err(format!("启动失败: {}", e))
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let mut command = std::process::Command::new("cmd");
+            if let Some(arguments) = args {
+                let full_command = format!("\"{}\" {}", path, arguments);
+                command.args(["/C", "start", "", &full_command]);
+            } else {
+                command.args(["/C", "start", "", path]);
+            }
+
+            match command.spawn() {
+                Ok(_) => {
+                    log::info!("[launch_app_with_args] 快捷方式启动成功");
+                    Ok(())
+                }
+                Err(e) => {
+                    log::error!("[launch_app_with_args] 快捷方式启动失败: {}", e);
+                    Err(format!("启动失败: {}", e))
+                }
             }
         }
     } else {
-        let mut command = std::process::Command::new(path);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            let mut command = std::process::Command::new(path);
+            command.creation_flags(CREATE_NO_WINDOW);
 
-        if let Some(arguments) = args {
-            // 解析参数并添加
-            for arg in arguments.split_whitespace() {
-                command.arg(arg);
+            if let Some(arguments) = args {
+                // 解析参数并添加
+                for arg in arguments.split_whitespace() {
+                    command.arg(arg);
+                }
+            }
+
+            match command.spawn() {
+                Ok(child) => {
+                    log::info!("[launch_app_with_args] 启动成功, PID: {:?}", child.id());
+                    Ok(())
+                }
+                Err(e) => {
+                    log::error!("[launch_app_with_args] 启动失败: {}", e);
+                    Err(format!("启动失败: {}", e))
+                }
             }
         }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let mut command = std::process::Command::new(path);
 
-        match command.spawn() {
-            Ok(child) => {
-                log::info!("[launch_app_with_args] 启动成功, PID: {:?}", child.id());
-                Ok(())
+            if let Some(arguments) = args {
+                // 解析参数并添加
+                for arg in arguments.split_whitespace() {
+                    command.arg(arg);
+                }
             }
-            Err(e) => {
-                log::error!("[launch_app_with_args] 启动失败: {}", e);
-                Err(format!("启动失败: {}", e))
+
+            match command.spawn() {
+                Ok(child) => {
+                    log::info!("[launch_app_with_args] 启动成功, PID: {:?}", child.id());
+                    Ok(())
+                }
+                Err(e) => {
+                    log::error!("[launch_app_with_args] 启动失败: {}", e);
+                    Err(format!("启动失败: {}", e))
+                }
             }
         }
     }

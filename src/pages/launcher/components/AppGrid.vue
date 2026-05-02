@@ -137,7 +137,7 @@
 
 <script setup>
 import {nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
-import {ElMessage} from 'element-plus'
+import {ElMessage, ElMessageBox} from 'element-plus'
 import {Close, Grid, Monitor, Star} from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import {invoke} from '@tauri-apps/api/core'
@@ -240,6 +240,7 @@ const initCategoriesSortable = () => {
     },
     onEnd: (evt) => {
       const {oldIndex, newIndex} = evt
+      console.log('Categories sortable onEnd:', {oldIndex, newIndex})
       if (oldIndex !== newIndex && oldIndex !== undefined && newIndex !== undefined) {
         emit('reorder-categories', oldIndex, newIndex)
       }
@@ -323,6 +324,18 @@ const launchAllApps = async (category) => {
   if (!category || !category.apps || category.apps.length === 0) return
 
   try {
+    // 二次确认对话框
+    await ElMessageBox.confirm(
+        `确定要启动「${category.name}」分类下的 ${category.apps.length} 个应用吗？`,
+        '批量启动应用',
+        {
+          confirmButtonText: '确定启动',
+          cancelButtonText: '取消',
+          type: 'warning',
+          distinguishCancelAndClose: true
+        }
+    )
+
     // 依次启动所有应用
     for (const app of category.apps) {
       emit('select', app)
@@ -331,6 +344,10 @@ const launchAllApps = async (category) => {
     }
     ElMessage.success(`已启动 ${category.apps.length} 个应用`)
   } catch (error) {
+    // 用户取消或关闭对话框
+    if (error === 'cancel' || error === 'close') {
+      return
+    }
     console.error('Launch all apps error:', error)
     ElMessage.error('启动应用失败')
   }

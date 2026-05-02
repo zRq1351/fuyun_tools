@@ -79,7 +79,8 @@
         "maximizable": false,
         "minimizable": false,
         "width": 620,
-        "height": 480
+        "height": 480,
+        "hiddenTitle": true
       },
       {
         "label": "image_clipboard",

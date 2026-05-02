@@ -136,13 +136,17 @@ pub fn reorder_categories(category_ids: Vec<String>) -> Result<LauncherConfig, S
     // 根据提供的ID顺序重新排列分类
     let mut new_categories = Vec::new();
     for id in &category_ids {
-        if let Some(pos) = config.categories.iter().position(|c| c.id == *id) {
-            new_categories.push(config.categories.remove(pos));
+        if let Some(category) = config.categories.iter().find(|c| c.id == *id).cloned() {
+            new_categories.push(category);
         }
     }
 
     // 添加未被重排序的分类（如果有的话）
-    new_categories.append(&mut config.categories);
+    for category in &config.categories {
+        if !new_categories.iter().any(|c| c.id == category.id) {
+            new_categories.push(category.clone());
+        }
+    }
 
     config.categories = new_categories;
     save_launcher_config(&config)?;

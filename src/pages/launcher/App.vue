@@ -127,6 +127,7 @@ const isFocused = ref(false)
 const isSearching = ref(false)
 const isLoading = ref(false)
 const isRefreshing = ref(false)
+const isDragging = ref(false)
 const launcherBoxRef = ref(null)
 const searchBoxRef = ref(null)
 const viewMode = ref('list')
@@ -331,10 +332,16 @@ const startDrag = async (event) => {
     return
   }
   try {
+    isDragging.value = true
     const window = getCurrentWebviewWindow()
     await window.startDragging()
+    // 拖动结束后延迟重置标志
+    setTimeout(() => {
+      isDragging.value = false
+    }, 200)
   } catch (error) {
     console.error('Start drag error:', error)
+    isDragging.value = false
   }
 }
 
@@ -371,14 +378,27 @@ const handleReorderApps = async (reorderedApps) => {
 }
 
 const handleReorderCategories = async (fromIndex, toIndex) => {
-  if (!launcherConfig.value) return
+  console.log('handleReorderCategories called:', {fromIndex, toIndex})
+  if (!launcherConfig.value) {
+    console.error('launcherConfig is null')
+    return
+  }
   const categories = [...launcherConfig.value.categories]
-  if (fromIndex < 0 || fromIndex >= categories.length || toIndex < 0 || toIndex > categories.length) return
+  console.log('Categories before reorder:', categories.map(c => ({id: c.id, name: c.name})))
+  if (fromIndex < 0 || fromIndex >= categories.length || toIndex < 0 || toIndex > categories.length) {
+    console.error('Invalid indices')
+    return
+  }
   const [moved] = categories.splice(fromIndex, 1)
   categories.splice(toIndex, 0, moved)
+  console.log('Categories after reorder:', categories.map(c => ({id: c.id, name: c.name})))
   launcherConfig.value.categories = categories
   try {
-    await invoke('save_launcher_config', {config: launcherConfig.value})
+    // 提取分类ID列表并按新顺序排列
+    const categoryIds = categories.map(cat => cat.id)
+    console.log('Calling reorder_categories with IDs:', categoryIds)
+    const result = await invoke('reorder_categories', {categoryIds})
+    console.log('reorder_categories result:', result)
   } catch (error) {
     console.error('Reorder categories error:', error)
   }
@@ -414,6 +434,10 @@ onMounted(async () => {
   // 监听窗口失去焦点事件
   const window = getCurrentWebviewWindow()
   unlistenBlur = await window.listen('tauri://blur', async () => {
+    // 如果正在拖动，不关闭窗口
+    if (isDragging.value) {
+      return
+    }
     // 延迟一小段时间，避免点击内部元素时误触发
     await new Promise(resolve => setTimeout(resolve, 100))
     // 检查是否有对话框打开，如果有则不关闭
@@ -440,7 +464,8 @@ onBeforeUnmount(() => {
   justify-content: center;
   align-items: center;
   background: transparent;
-  z-index: 9999;
+  z-index: 1000;
+  pointer-events: none;
 }
 
 .launcher-box {
@@ -454,6 +479,9 @@ onBeforeUnmount(() => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  pointer-events: auto;
+  /* 使用 clip-path 确保圆角外完全透明 */
+  clip-path: inset(0 round 12px);
 }
 
 .search-wrapper {
@@ -595,10 +623,26 @@ onBeforeUnmount(() => {
 <style>
 /* 全局样式 - Element Plus 消息提示 */
 .el-message {
-  z-index: 99999 !important;
+  z-index: 10010 !important;
 }
 
 .el-message-box {
-  z-index: 99999 !important;
+  z-index: 10010 !important;
+}
+
+.el-overlay {
+  z-index: 10009 !important;
+}
+
+/* 确保页面背景透明，避免圆角外显示灰色 */
+html, body {
+  background: transparent !important;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#app {
+  background: transparent !important;
 }
 </style>
