@@ -424,8 +424,9 @@ unsafe extern "system" fn low_level_keyboard_proc(
             let keyboard = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
             // 忽略注入的按键事件（如 Enigo 模拟的 Ctrl+C），只响应真实的物理按键
             let is_injected = (keyboard.flags & KBDLLHOOKSTRUCT_FLAGS(0x10)) != KBDLLHOOKSTRUCT_FLAGS(0);
-            
-            if !is_injected {
+            let is_our_keyup = keyboard.dwExtraInfo == 0x46555955;
+
+            if !is_injected && !is_our_keyup {
                 let event = match wparam.0 as u32 {
                     WM_KEYDOWN | WM_SYSKEYDOWN => {
                         if keyboard.vkCode == VK_LCONTROL.0 as u32 {

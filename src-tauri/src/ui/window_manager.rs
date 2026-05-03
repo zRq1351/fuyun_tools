@@ -229,10 +229,11 @@ pub fn cleanup_enigo_instance() {
 
 #[cfg(target_os = "windows")]
 fn release_ctrl_key_winapi() {
+    const FUYUN_MARKER: usize = 0x46555955;
     unsafe {
-        keybd_event(VK_CONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
-        keybd_event(VK_LCONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
-        keybd_event(VK_RCONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_CONTROL.0 as u8, 0, KEYEVENTF_KEYUP, FUYUN_MARKER);
+        keybd_event(VK_LCONTROL.0 as u8, 0, KEYEVENTF_KEYUP, FUYUN_MARKER);
+        keybd_event(VK_RCONTROL.0 as u8, 0, KEYEVENTF_KEYUP, FUYUN_MARKER);
     }
 }
 
