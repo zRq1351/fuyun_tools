@@ -16,8 +16,8 @@ use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands::*;
 use crate::ui::commands_backup::*;
 use crate::ui::commands_clipboard::*;
-use crate::ui::commands_document::*;
 use crate::ui::commands_diagnostic::*;
+use crate::ui::commands_document::*;
 use crate::ui::commands_launcher::{
     add_custom_command, add_launcher_category, add_manual_app, batch_extract_icons,
     get_all_apps, get_launcher_config, hide_launcher, launch_app, launch_app_with_args,
@@ -640,6 +640,7 @@ pub fn run() {
             get_import_history,
             undo_import,
             get_import_files,
+            detect_orphan_files,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());

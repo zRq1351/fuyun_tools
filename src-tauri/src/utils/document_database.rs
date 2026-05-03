@@ -304,6 +304,34 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
         .ok();
     }
 
+    ensure_category_directories(conn).await?;
+
+    Ok(())
+}
+
+async fn ensure_category_directories(conn: &mut SqliteConnection) -> Result<(), String> {
+    let roots = sqlx::query("SELECT id, name, root_path, created_at FROM document_roots")
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|e| format!("查询根目录失败: {}", e))?;
+
+    if roots.is_empty() {
+        return Ok(());
+    }
+
+    let cats = sqlx::query("SELECT id, name FROM document_categories ORDER BY position")
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|e| format!("查询分类失败: {}", e))?;
+
+    for row in &roots {
+        let root_path: String = row.try_get(2).unwrap_or_default();
+        for crow in &cats {
+            let cat_name: String = crow.try_get(1).unwrap_or_default();
+            let _ = fs::create_dir_all(Path::new(&root_path).join(&cat_name));
+        }
+    }
+
     Ok(())
 }
 
@@ -777,6 +805,18 @@ pub async fn get_doc_root_by_id(id: i64) -> Result<Option<DocRoot>, String> {
         root_path: r.try_get::<String, _>(2).unwrap_or_default(),
         created_at: r.try_get::<i64, _>(3).unwrap_or(0),
     }))
+}
+
+pub async fn get_managed_paths_for_root(root_id: i64) -> Result<std::collections::HashSet<String>, String> {
+    let mut conn = open_docs_db().await?;
+    let rows = sqlx::query_scalar::<_, String>(
+        "SELECT managed_path FROM document_files WHERE root_id = ?1",
+    )
+        .bind(root_id)
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|e| format!("查询管理路径失败: {}", e))?;
+    Ok(rows.into_iter().collect())
 }
 
 pub async fn get_doc_file_by_id(id: i64) -> Result<Option<DocFile>, String> {

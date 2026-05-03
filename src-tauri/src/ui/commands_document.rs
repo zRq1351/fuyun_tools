@@ -13,7 +13,13 @@ pub async fn add_doc_root(name: String, root_path: String) -> Result<document_da
     if !path.is_dir() {
         return Err("路径不是一个目录".to_string());
     }
-    document_database::add_doc_root(&name, &root_path).await
+    let root = document_database::add_doc_root(&name, &root_path).await?;
+    if let Ok(categories) = document_database::get_doc_categories().await {
+        for cat in &categories {
+            let _ = fs::create_dir_all(Path::new(&root_path).join(&cat.name));
+        }
+    }
+    Ok(root)
 }
 
 #[tauri::command]
@@ -32,11 +38,17 @@ pub async fn add_doc_category(name: String, icon: Option<String>, color: Option<
     if name_trim.is_empty() {
         return Err("分类名称不能为空".to_string());
     }
-    document_database::add_doc_category(
+    let cat = document_database::add_doc_category(
         name_trim,
         &icon.unwrap_or_else(|| "folder".to_string()),
         &color.unwrap_or_else(|| "#409EFF".to_string()),
-    ).await
+    ).await?;
+    if let Ok(roots) = document_database::get_doc_roots().await {
+        for root in &roots {
+            let _ = fs::create_dir_all(Path::new(&root.root_path).join(name_trim));
+        }
+    }
+    Ok(cat)
 }
 
 #[tauri::command]
@@ -390,6 +402,8 @@ pub struct ScannedFile {
     pub ext: String,
     pub size: i64,
     pub modified: i64,
+    pub category_id: Option<i64>,
+    pub category_name: Option<String>,
 }
 
 #[tauri::command]
@@ -457,6 +471,8 @@ fn scan_dir(
                     ext,
                     size,
                     modified,
+                    category_id: None,
+                    category_name: None,
                 });
             }
         } else if path.is_dir() && recursive {
@@ -464,4 +480,74 @@ fn scan_dir(
         }
     }
     Ok(())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrphanFilesResult {
+    pub files: Vec<ScannedFile>,
+    pub root_id: i64,
+    pub root_name: String,
+}
+
+#[tauri::command]
+pub async fn detect_orphan_files(root_id: Option<i64>) -> Result<Vec<OrphanFilesResult>, String> {
+    let roots = if let Some(rid) = root_id {
+        vec![document_database::get_doc_root_by_id(rid)
+            .await?
+            .ok_or("根目录不存在".to_string())?]
+    } else {
+        document_database::get_doc_roots().await?
+    };
+
+    let categories = document_database::get_doc_categories().await?;
+
+    let text_exts = [
+        "txt", "md", "csv", "log", "json", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf",
+        "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt",
+        "py", "js", "ts", "jsx", "tsx", "java", "go", "rs", "c", "cpp", "h", "hpp", "cs",
+        "php", "rb", "swift", "kt", "scala", "sql", "sh", "bat", "ps1", "lua",
+        "html", "htm", "css", "scss", "less", "vue", "svelte", "r", "zig",
+        "png", "jpg", "jpeg", "gif", "bmp", "webp", "svg",
+    ];
+    let allowed: std::collections::HashSet<&str> = text_exts.iter().copied().collect();
+
+    let mut results = Vec::new();
+
+    for root in roots {
+        let existing = document_database::get_managed_paths_for_root(root.id).await?;
+
+        let mut all_files = Vec::new();
+        let root_path = Path::new(&root.root_path);
+        if root_path.is_dir() {
+            scan_dir(root_path, &mut all_files, &allowed, true)?;
+        }
+
+        let mut orphans: Vec<ScannedFile> = all_files
+            .into_iter()
+            .filter(|f| !existing.contains(&f.path))
+            .collect();
+
+        for f in &mut orphans {
+            if let Ok(rel) = Path::new(&f.path).strip_prefix(&root.root_path) {
+                if let Some(first) = rel.components().next() {
+                    let dir_name = first.as_os_str().to_string_lossy().to_string();
+                    if let Some(cat) = categories.iter().find(|c| c.name == dir_name) {
+                        f.category_id = Some(cat.id);
+                        f.category_name = Some(cat.name.clone());
+                    }
+                }
+            }
+        }
+
+        if !orphans.is_empty() {
+            results.push(OrphanFilesResult {
+                files: orphans,
+                root_id: root.id,
+                root_name: root.name.clone(),
+            });
+        }
+    }
+
+    Ok(results)
 }

@@ -14,6 +14,19 @@
             <span class="dm-stat-label">总大小</span>
           </div>
         </div>
+        <div v-if="orphanCount > 0" class="dm-orphan-banner" @click="showOrphanDialog = true">
+          <span class="dm-orphan-badge">{{ orphanCount }}</span>
+          <span>个未管理文件</span>
+          <el-icon :size="12">
+            <ArrowRight/>
+          </el-icon>
+        </div>
+        <div v-else-if="!orphanChecked" class="dm-orphan-banner dm-orphan-banner--hint" @click="detectOrphans">
+          <el-icon :size="14">
+            <Search/>
+          </el-icon>
+          <span>检测未管理文件</span>
+        </div>
         <div class="dm-sidebar-section">
           <div class="dm-section-title">根目录</div>
           <div class="dm-root-list">
@@ -448,18 +461,70 @@
       <el-button type="primary" @click="dismissGuide">开始使用</el-button>
     </template>
   </el-dialog>
+
+  <el-dialog v-model="showOrphanDialog" title="未管理文件" width="560px">
+    <div v-if="orphanLoading" style="text-align:center;padding:20px">
+      <el-icon :size="32" class="is-loading">
+        <Loading/>
+      </el-icon>
+      <p>正在扫描...</p>
+    </div>
+    <div v-else-if="orphanResults.length === 0" style="text-align:center;padding:20px">
+      <el-empty description="未发现未管理文件"/>
+    </div>
+    <div v-else class="dm-orphan-list">
+      <div v-for="result in orphanResults" :key="result.rootId" class="dm-orphan-group">
+        <div class="dm-orphan-group-title">{{ result.rootName }}</div>
+        <div v-for="f in result.files" :key="f.path" :class="{ checked: orphanSelected.has(f.path) }"
+             class="dm-scan-file-item" @click="toggleOrphan(f.path)">
+          <el-icon v-if="orphanSelected.has(f.path)"><Select/></el-icon>
+          <el-icon v-else>
+            <Document/>
+          </el-icon>
+          <span>{{ f.name }}</span>
+          <span v-if="f.categoryName" class="dm-orphan-cat">{{ f.categoryName }}</span>
+          <span class="dm-scan-size">{{ formatFileSize(f.size) }}</span>
+        </div>
+      </div>
+    </div>
+    <template #footer>
+      <el-button @click="showOrphanDialog = false">关闭</el-button>
+      <el-button v-if="orphanResults.length > 0" @click="toggleOrphanSelectAll">
+        {{ orphanSelected.size === totalOrphanCount ? '取消全选' : '全选' }}
+      </el-button>
+      <el-button :disabled="orphanSelected.size === 0" type="primary" @click="importOrphans">
+        导入选中 ({{ orphanSelected.size }})
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
-import {ref, reactive, computed, watch, onMounted} from 'vue'
+import {computed, onMounted, reactive, ref, watch} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {DocumentService} from '@/services/ipc.js'
 import {open as openDialog} from '@tauri-apps/plugin-dialog'
 import {
-  Document, Folder, Plus, Search, Setting, Monitor,
-  Picture, Notebook, Tickets, Connection, MagicStick,
-  Coffee, MoreFilled, Close, Warning,
-  UploadFilled, Select, Loading, List,
+  ArrowRight,
+  Close,
+  Coffee,
+  Connection,
+  Document,
+  Folder,
+  List,
+  Loading,
+  MagicStick,
+  Monitor,
+  MoreFilled,
+  Notebook,
+  Picture,
+  Plus,
+  Search,
+  Select,
+  Setting,
+  Tickets,
+  UploadFilled,
+  Warning,
 } from '@element-plus/icons-vue'
 import ContextMenu from '../../components/ContextMenu.vue'
 
@@ -556,6 +621,13 @@ const moveDoc = ref(null)
 const moveTargetCategoryId = ref(null)
 const moveTargetRootId = ref(null)
 
+const orphanCount = ref(0)
+const orphanChecked = ref(false)
+const orphanLoading = ref(false)
+const showOrphanDialog = ref(false)
+const orphanResults = ref([])
+const orphanSelected = reactive(new Set())
+
 const selectedDoc = computed(() => {
   if (selectedId.value === null) return null
   return items.value.find(i => i.id === selectedId.value) || null
@@ -565,6 +637,12 @@ const hasMoveChange = computed(() => {
   if (!moveDoc.value) return false
   return moveTargetCategoryId.value !== (moveDoc.value.categoryId ?? null)
       || (moveTargetRootId.value && moveTargetRootId.value !== moveDoc.value.rootId)
+})
+
+const totalOrphanCount = computed(() => {
+  let n = 0
+  for (const r of orphanResults.value) n += r.files?.length || 0
+  return n
 })
 
 watch(selectedDoc, (doc) => {
@@ -854,6 +932,73 @@ async function importScanned() {
   }
 }
 
+async function detectOrphans() {
+  orphanLoading.value = true
+  orphanChecked.value = true
+  try {
+    const r = await DocumentService.detectOrphanFiles(rootFilter.value || null)
+    orphanResults.value = r || []
+    let count = 0
+    for (const g of orphanResults.value) count += g.files?.length || 0
+    orphanCount.value = count
+    orphanSelected.clear()
+  } catch (e) {
+    ElMessage.error('检测失败: ' + e)
+  } finally {
+    orphanLoading.value = false
+  }
+}
+
+function toggleOrphan(path) {
+  orphanSelected.has(path) ? orphanSelected.delete(path) : orphanSelected.add(path)
+}
+
+function toggleOrphanSelectAll() {
+  if (orphanSelected.size === totalOrphanCount.value) {
+    orphanSelected.clear()
+  } else {
+    for (const r of orphanResults.value) {
+      for (const f of r.files) orphanSelected.add(f.path)
+    }
+  }
+}
+
+async function importOrphans() {
+  if (orphanSelected.size === 0) return
+  try {
+    let total = 0
+    for (const result of orphanResults.value) {
+      const selected = result.files.filter(f => orphanSelected.has(f.path))
+      if (selected.length === 0) continue
+      const groups = new Map()
+      for (const f of selected) {
+        const key = `${result.rootId}:${f.categoryId ?? ''}`
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key).push(f)
+      }
+      for (const [, files] of groups) {
+        const r = await DocumentService.importFiles({
+          paths: files.map(f => f.path),
+          rootId: result.rootId,
+          categoryId: files[0].categoryId || null,
+          storageMode: 'index',
+          sourceDir: ''
+        })
+        total += r.success?.length || 0
+      }
+    }
+    ElMessage.success(`成功导入 ${total} 个文件`)
+    showOrphanDialog.value = false
+    orphanSelected.clear()
+    orphanCount.value = 0
+    orphanResults.value = []
+    await loadData()
+    loadFiles()
+  } catch (e) {
+    ElMessage.error('导入失败: ' + e)
+  }
+}
+
 async function handleDrop(event) {
   dragover.value = false;
   const files = event.dataTransfer?.files;
@@ -1010,7 +1155,8 @@ async function saveNotes() {
 onMounted(async () => {
   await loadData();
   await loadFiles();
-  loadImportHistory()
+  loadImportHistory();
+  detectOrphans()
 })
 
 </script>
@@ -1075,6 +1221,74 @@ onMounted(async () => {
 .dm-stat-label {
   font-size: 12px;
   color: var(--el-text-color-secondary)
+}
+
+.dm-orphan-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  margin: 4px 12px;
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--el-color-warning-dark-2);
+  background: var(--el-color-warning-light-9);
+  transition: background .15s
+}
+
+.dm-orphan-banner:hover {
+  background: var(--el-color-warning-light-7)
+}
+
+.dm-orphan-banner--hint {
+  color: var(--el-text-color-secondary);
+  background: transparent;
+  font-size: 12px
+}
+
+.dm-orphan-banner--hint:hover {
+  background: var(--el-fill-color-light)
+}
+
+.dm-orphan-badge {
+  background: var(--el-color-danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: 10px;
+  line-height: 18px;
+  min-width: 20px;
+  text-align: center
+}
+
+.dm-orphan-list {
+  max-height: 380px;
+  overflow-y: auto
+}
+
+.dm-orphan-group-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  padding: 8px 4px 4px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  margin-bottom: 4px
+}
+
+.dm-orphan-group-title:first-child {
+  padding-top: 0
+}
+
+.dm-orphan-cat {
+  font-size: 11px;
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  padding: 0 6px;
+  border-radius: 3px;
+  margin-left: auto;
+  margin-right: 8px
 }
 
 .dm-sidebar-section {
