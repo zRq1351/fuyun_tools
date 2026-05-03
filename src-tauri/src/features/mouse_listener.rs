@@ -76,6 +76,7 @@ enum HookEvent {
     CtrlLeftRelease,
     CtrlRightRelease,
     CPress,
+    InsertPress,
     LeftButtonPress(i32, i32),
     LeftButtonRelease(i32, i32),
     MouseMove(i32, i32),
@@ -128,10 +129,10 @@ fn handle_hook_event(
                 .store(false, Ordering::SeqCst);
             log::debug!("检测到右Ctrl键释放");
         }
-        HookEvent::CPress => {
+        HookEvent::CPress | HookEvent::InsertPress => {
             if is_any_ctrl_pressed() {
                 crate::features::text_selection::mark_manual_ctrl_c();
-                log::debug!("检测到手动 Ctrl+C");
+                log::debug!("检测到手动 Ctrl+C/Insert");
             }
         }
         HookEvent::LeftButtonPress(last_x, last_y) => {
@@ -435,6 +436,8 @@ unsafe extern "system" fn low_level_keyboard_proc(
                             Some(HookEvent::CtrlRightPress)
                         } else if keyboard.vkCode == 0x43 { // 'C' key
                             Some(HookEvent::CPress)
+                        } else if keyboard.vkCode == 0x2D { // Insert key
+                            Some(HookEvent::InsertPress)
                         } else {
                             None
                         }
@@ -608,13 +611,13 @@ pub fn set_selection_listener_enabled(
 }
 
 /// 检查是否有Ctrl键被按下
-fn is_any_ctrl_pressed() -> bool {
+pub fn is_any_ctrl_pressed() -> bool {
     GLOBAL_STATE.ctrl_left_pressed.load(Ordering::SeqCst)
         || GLOBAL_STATE.ctrl_right_pressed.load(Ordering::SeqCst)
 }
 
 #[cfg(target_os = "windows")]
-fn is_ctrl_pressed_by_os() -> bool {
+pub fn is_ctrl_pressed_by_os() -> bool {
     unsafe {
         (GetAsyncKeyState(VK_LCONTROL.0 as i32) as u16 & 0x8000) != 0
             || (GetAsyncKeyState(VK_RCONTROL.0 as i32) as u16 & 0x8000) != 0
@@ -622,7 +625,7 @@ fn is_ctrl_pressed_by_os() -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn is_ctrl_pressed_by_os() -> bool {
+pub fn is_ctrl_pressed_by_os() -> bool {
     false
 }
 

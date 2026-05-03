@@ -1,42 +1,100 @@
 use crate::services::clipboard_wakeup::subscribe_clipboard_wake_events;
 use crate::sync::{lock_arc_mutex, Mutex};
-use crate::ui::window_manager::{release_ctrl_key_with_fallback, ENIGO_INSTANCE};
 use crate::utils::clipboard::ClipboardManager;
-use enigo::{Enigo, Keyboard, Settings};
 use log;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
 
-fn execute_ctrl_c_with_safety(enigo: &mut Enigo) -> Result<(), String> {
-    let is_console = crate::features::mouse_listener::is_foreground_window_console();
+#[cfg(target_os = "windows")]
+fn send_safe_ctrl_c() -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+    };
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_CONTROL;
 
-    match enigo.key(CTRL_KEY, enigo::Direction::Press) {
-        Ok(_) => {}
-        Err(e) => return Err(format!("按下 Ctrl 键失败: {:?}", e)),
-    }
+    unsafe {
+        let ctrl_was_pressed = crate::features::mouse_listener::is_ctrl_pressed_by_os();
+        let mut inputs = std::mem::zeroed::<[INPUT; 4]>();
+        let mut count = 0;
 
-    thread::sleep(Duration::from_millis(100));
-
-    fn release_ctrl(enigo: &mut Enigo) -> Result<(), String> {
-        release_ctrl_key_with_fallback(enigo).map_err(|e| format!("释放 Ctrl 键失败: {}", e))
-    }
-
-    match enigo.key(C_KEY, enigo::Direction::Click) {
-        Ok(_) => {}
-        Err(e) => {
-            let _ = release_ctrl(enigo);
-            return Err(format!("按下 C/Insert 键失败: {:?}", e));
+        if !ctrl_was_pressed {
+            inputs[count] = INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VK_CONTROL,
+                        wScan: 0,
+                        dwFlags: KEYBD_EVENT_FLAGS(0),
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            };
+            count += 1;
         }
+
+        let vk_insert = windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(0x2D);
+        inputs[count] = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk_insert,
+                    wScan: 0,
+                    dwFlags: KEYBD_EVENT_FLAGS(0),
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        count += 1;
+        inputs[count] = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk_insert,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        count += 1;
+
+        if !ctrl_was_pressed {
+            inputs[count] = INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VK_CONTROL,
+                        wScan: 0,
+                        dwFlags: KEYEVENTF_KEYUP,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            };
+            count += 1;
+        }
+
+        let result = SendInput(&inputs[..count], std::mem::size_of::<INPUT>() as i32);
+        if result == 0 {
+            log::error!("SendInput 失败");
+            return false;
+        }
+
+        // If the user is physically holding Ctrl but we didn't press it,
+        // the copy might not have worked. But we don't corrupt their state.
+        log::info!("已通过 SendInput 发送 Ctrl+C (ctrl_was_pressed: {})", ctrl_was_pressed);
+        true
     }
+}
 
-    thread::sleep(Duration::from_millis(100));
-
-    release_ctrl(enigo)?;
-
-    log::info!("已发送复制模拟按键 (is_console: {})", is_console);
-    Ok(())
+#[cfg(not(target_os = "windows"))]
+fn send_safe_ctrl_c() -> bool {
+    false
 }
 
 /// 划词捕获最大重试时长
@@ -47,7 +105,6 @@ const CAPTURE_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 const INITIAL_DELAY: Duration = Duration::from_millis(10);
 
 use crate::core::app_state::AppState as SharedAppState;
-use crate::core::config::{CTRL_KEY, C_KEY};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::image::Image;
@@ -148,28 +205,23 @@ fn get_selected_text_windows(
     };
     let sequence_before_copy = get_clipboard_sequence_number();
 
-    // 3. 模拟 Ctrl+C
-    {
-        let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);
-        if enigo_guard.is_none() {
-            match Enigo::new(&Settings::default()) {
-                Ok(enigo) => {
-                    *enigo_guard = Some(enigo);
-                }
-                Err(e) => {
-                    log::error!("未能初始化enigo: {}", e);
-                    let mut state = lock_arc_mutex(state_manager.inner());
-                    state.is_updating_clipboard = false;
-                    return None;
-                }
-            }
+    // 2. 短暂等待用户发起手动 Ctrl+C，避免后续模拟干扰用户按键
+    let deadline = std::time::Instant::now() + Duration::from_millis(200);
+    let mut user_copying = false;
+    while std::time::Instant::now() < deadline {
+        if crate::features::mouse_listener::is_ctrl_pressed_by_os()
+            || crate::features::mouse_listener::is_any_ctrl_pressed() {
+            user_copying = true;
+            break;
         }
-        if let Some(ref mut enigo) = *enigo_guard {
-            if let Err(e) = execute_ctrl_c_with_safety(enigo) {
-                log::error!("执行 Ctrl+C 失败: {}", e);
-                crate::features::mouse_listener::reset_ctrl_key_state();
-            }
-        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    // 3. 发送 Ctrl+C（如果用户正在按 Ctrl 则跳过，避免干扰用户按键）
+    if user_copying {
+        log::info!("检测到用户正在按 Ctrl 键，跳过模拟 Ctrl+C，等待用户手动复制");
+    } else {
+        send_safe_ctrl_c();
     }
 
     thread::sleep(INITIAL_DELAY);
