@@ -1,64 +1,78 @@
 <template>
   <div class="app-list-container">
-    <div v-if="thirdPartyApps.length > 0" class="app-group">
-      <div class="group-header sticky-header">
-        <span class="group-title">第三方应用</span>
+    <div v-if="thirdPartyApps.length > 0" :class="{ collapsed: thirdPartyCollapsed }" class="app-group">
+      <div class="group-header sticky-header" @click="thirdPartyCollapsed = !thirdPartyCollapsed">
+        <span class="group-title">
+          <el-icon :class="{ collapsed: thirdPartyCollapsed }" :size="14" class="collapse-icon">
+            <ArrowDown/>
+          </el-icon>
+          第三方应用
+        </span>
         <span class="group-count">{{ thirdPartyApps.length }}</span>
       </div>
-      <div
-          v-for="app in thirdPartyApps"
-          :key="app.id"
-          class="app-item"
-          @dblclick="$emit('select', app)"
-          @contextmenu.prevent="showContextMenu($event, app)"
-      >
-        <div class="app-icon">
-          <img v-if="app.icon_base64" :src="app.icon_base64" class="icon-img"/>
-          <el-icon v-else :size="20">
-            <Monitor/>
-          </el-icon>
+      <div :class="{ collapsed: thirdPartyCollapsed }" class="section-content">
+        <div
+            v-for="app in thirdPartyApps"
+            :key="app.id"
+            class="app-item"
+            @dblclick="$emit('select', app)"
+            @contextmenu.prevent="showContextMenu($event, app)"
+        >
+          <div class="app-icon">
+            <img v-if="app.icon_base64" :src="app.icon_base64" class="icon-img"/>
+            <el-icon v-else :size="20">
+              <Monitor/>
+            </el-icon>
+          </div>
+          <div class="app-info">
+            <div class="app-name">{{ app.title }}</div>
+            <div v-if="app.category" class="app-category">{{ app.category }}</div>
+          </div>
+          <span v-if="getAppCategoryName(app.id)" class="app-tag category-tag">{{ getAppCategoryName(app.id) }}</span>
+          <span v-if="getAppCommandPrefix(app.path)" class="app-tag command-tag">{{
+              getAppCommandPrefix(app.path)
+            }}</span>
+          <span :class="app.source === 'manual' ? 'manual' : 'scan'"
+                class="app-source-badge">{{ app.source === 'manual' ? '手动' : '扫描' }}</span>
         </div>
-        <div class="app-info">
-          <div class="app-name">{{ app.title }}</div>
-          <div v-if="app.category" class="app-category">{{ app.category }}</div>
-        </div>
-        <span v-if="getAppCategoryName(app.id)" class="app-tag category-tag">{{ getAppCategoryName(app.id) }}</span>
-        <span v-if="getAppCommandPrefix(app.path)" class="app-tag command-tag">{{
-            getAppCommandPrefix(app.path)
-          }}</span>
-        <span :class="app.source === 'manual' ? 'manual' : 'scan'"
-              class="app-source-badge">{{ app.source === 'manual' ? '手动' : '扫描' }}</span>
       </div>
     </div>
 
-    <div v-if="systemApps.length > 0" class="app-group">
-      <div class="group-header sticky-header">
-        <span class="group-title">系统应用</span>
+    <div v-if="systemApps.length > 0" :class="{ collapsed: systemCollapsed }" class="app-group">
+      <div class="group-header sticky-header" @click="systemCollapsed = !systemCollapsed">
+        <span class="group-title">
+          <el-icon :class="{ collapsed: systemCollapsed }" :size="14" class="collapse-icon">
+            <ArrowDown/>
+          </el-icon>
+          系统应用
+        </span>
         <span class="group-count">{{ systemApps.length }}</span>
       </div>
-      <div
-          v-for="app in systemApps"
-          :key="app.id"
-          class="app-item"
-          @dblclick="$emit('select', app)"
-          @contextmenu.prevent="showContextMenu($event, app)"
-      >
-        <div class="app-icon">
-          <img v-if="app.icon_base64" :src="app.icon_base64" class="icon-img"/>
-          <el-icon v-else :size="20">
-            <Monitor/>
-          </el-icon>
+      <div :class="{ collapsed: systemCollapsed }" class="section-content">
+        <div
+            v-for="app in systemApps"
+            :key="app.id"
+            class="app-item"
+            @dblclick="$emit('select', app)"
+            @contextmenu.prevent="showContextMenu($event, app)"
+        >
+          <div class="app-icon">
+            <img v-if="app.icon_base64" :src="app.icon_base64" class="icon-img"/>
+            <el-icon v-else :size="20">
+              <Monitor/>
+            </el-icon>
+          </div>
+          <div class="app-info">
+            <div class="app-name">{{ app.title }}</div>
+            <div v-if="app.category" class="app-category">{{ app.category }}</div>
+          </div>
+          <span v-if="getAppCategoryName(app.id)" class="app-tag category-tag">{{ getAppCategoryName(app.id) }}</span>
+          <span v-if="getAppCommandPrefix(app.path)" class="app-tag command-tag">{{
+              getAppCommandPrefix(app.path)
+            }}</span>
+          <span :class="app.source === 'manual' ? 'manual' : 'scan'"
+                class="app-source-badge">{{ app.source === 'manual' ? '手动' : '扫描' }}</span>
         </div>
-        <div class="app-info">
-          <div class="app-name">{{ app.title }}</div>
-          <div v-if="app.category" class="app-category">{{ app.category }}</div>
-        </div>
-        <span v-if="getAppCategoryName(app.id)" class="app-tag category-tag">{{ getAppCategoryName(app.id) }}</span>
-        <span v-if="getAppCommandPrefix(app.path)" class="app-tag command-tag">{{
-            getAppCommandPrefix(app.path)
-          }}</span>
-        <span :class="app.source === 'manual' ? 'manual' : 'scan'"
-              class="app-source-badge">{{ app.source === 'manual' ? '手动' : '扫描' }}</span>
       </div>
     </div>
 
@@ -152,7 +166,7 @@
 import {computed, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ElMessage} from 'element-plus'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
-import {Close, Delete, FolderOpened, Monitor, Star} from '@element-plus/icons-vue'
+import {ArrowDown, Close, Delete, FolderOpened, Monitor, Star} from '@element-plus/icons-vue'
 import {invoke} from '@tauri-apps/api/core'
 
 const props = defineProps({
@@ -192,6 +206,8 @@ const getAppCommandPrefix = (appPath) => {
 }
 
 const customCategories = ref([])
+const thirdPartyCollapsed = ref(false)
+const systemCollapsed = ref(false)
 const contextMenu = ref({visible: false, x: 0, y: 0, app: null})
 const showCommandDialog = ref(false)
 const commandForm = ref({
@@ -422,7 +438,15 @@ onBeforeUnmount(() => {
 }
 
 .app-group {
+  overflow: hidden;
+  max-height: 2000px;
   margin-bottom: 4px;
+  transition: max-height 0.3s ease, margin-bottom 0.3s ease;
+}
+
+.app-group.collapsed {
+  max-height: 36px;
+  margin-bottom: 0;
 }
 
 .group-header {
@@ -432,6 +456,8 @@ onBeforeUnmount(() => {
   padding: 8px 16px;
   background: var(--fy-bg-surface);
   border-bottom: 1px solid var(--fy-border-light);
+  cursor: pointer;
+  user-select: none;
 }
 
 .sticky-header {
@@ -444,6 +470,27 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 600;
   color: var(--fy-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.collapse-icon {
+  transition: transform 0.2s ease;
+}
+
+.collapse-icon.collapsed {
+  transform: rotate(-90deg);
+}
+
+.section-content {
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+.section-content.collapsed {
+  opacity: 0;
 }
 
 .group-count {
