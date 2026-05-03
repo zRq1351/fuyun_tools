@@ -93,6 +93,10 @@
                   </el-icon>
                 </template>
               </el-input>
+              <el-select v-model="fileExtFilter" clearable placeholder="全部类型" size="small"
+                         style="width:100px;margin-left:8px" @change="searchFiles">
+                <el-option v-for="ext in commonExts" :key="ext.value" :label="ext.label" :value="ext.value"/>
+              </el-select>
             </div>
             <div class="dm-toolbar-actions">
               <el-button type="primary" @click="showImportDialog = true">
@@ -337,7 +341,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="目标分类">
-          <el-select v-model="importCategoryId" clearable placeholder="未分类" style="width:100%">
+          <el-select v-model="scanCategoryId" clearable placeholder="未分类" style="width:100%">
             <el-option v-for="c in categories" :key="c.id" :label="c.name" :value="c.id"/>
           </el-select>
         </el-form-item>
@@ -479,12 +483,35 @@ const fileColorMap = {
   png: '#9B59B6', jpg: '#9B59B6', svg: '#E67E22',
 }
 
+const commonExts = [
+  {label: 'PDF', value: 'pdf'},
+  {label: 'Word', value: 'docx'},
+  {label: 'Excel', value: 'xlsx'},
+  {label: 'PPT', value: 'pptx'},
+  {label: 'Markdown', value: 'md'},
+  {label: 'Text', value: 'txt'},
+  {label: 'JSON', value: 'json'},
+  {label: 'Python', value: 'py'},
+  {label: 'JS/TS', value: 'js'},
+  {label: '图片', value: 'png'},
+  {label: 'HTML', value: 'html'},
+  {label: 'CSS', value: 'css'},
+  {label: 'CSV', value: 'csv'},
+  {label: 'SQL', value: 'sql'},
+  {label: 'XML', value: 'xml'},
+  {label: 'YAML', value: 'yaml'},
+  {label: 'Go', value: 'go'},
+  {label: 'Rust', value: 'rs'},
+  {label: 'Java', value: 'java'},
+]
+
 const categories = ref([])
 const roots = ref([])
 const items = ref([])
 const stats = ref(null)
 const loading = ref(false)
 const searchKeyword = ref('')
+const fileExtFilter = ref(null)
 const categoryFilter = ref(null)
 const rootFilter = ref(null)
 const currentPage = ref(1)
@@ -511,6 +538,7 @@ const importMode = ref('index')
 const showScanDialog = ref(false)
 const scanPath = ref('')
 const scanImportRootId = ref(null)
+const scanCategoryId = ref(null)
 const scanning = ref(false)
 const scannedFiles = ref([])
 const scanSelected = reactive(new Set())
@@ -556,9 +584,10 @@ function getFileName(f) {
 }
 
 function formatFileSize(bytes) {
-  if (!bytes) return '0 B'
+  const n = Number(bytes)
+  if (!Number.isFinite(n)) return '0 B'
   const u = ['B', 'KB', 'MB', 'GB']
-  let i = 0, s = Number(bytes)
+  let i = 0, s = n
   while (s >= 1024 && i < 3) {
     s /= 1024;
     i++
@@ -609,6 +638,7 @@ async function loadFiles() {
       offset: (currentPage.value - 1) * pageLimit, limit: pageLimit,
       categoryId: categoryFilter.value, rootId: rootFilter.value,
       keyword: searchKeyword.value || null,
+      fileExt: fileExtFilter.value || null,
     })
     items.value = r.items || []
     total.value = Number(r.total) || 0
@@ -717,7 +747,7 @@ async function removeCategoryFn(id) {
     await loadData();
     loadFiles()
   } catch (e) {
-    if (e) {
+    if (e && e !== 'cancel' && e !== 'close') {
       ElMessage.error(typeof e === 'string' ? e : e.message || '删除失败')
     }
   }
@@ -809,7 +839,7 @@ async function importScanned() {
     const r = await DocumentService.importFiles({
       paths: Array.from(scanSelected),
       rootId: scanImportRootId.value,
-      categoryId: importCategoryId.value || null,
+      categoryId: scanCategoryId.value || null,
       storageMode: importMode.value,
       sourceDir: scanPath.value
     })
@@ -1166,7 +1196,9 @@ onMounted(async () => {
 
 .dm-search {
   flex: 1;
-  max-width: 360px
+  max-width: 500px;
+  display: flex;
+  align-items: center
 }
 
 .dm-toolbar-actions {

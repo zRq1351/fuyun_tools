@@ -148,6 +148,13 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
 
         let file_hash = document_database::compute_file_hash(src).unwrap_or_default();
 
+        if !file_hash.is_empty() {
+            if let Ok(true) = document_database::doc_exists_by_hash(&file_hash, request.root_id).await {
+                errors.push(format!("文件已存在（重复）: {}", file_path_str));
+                continue;
+            }
+        }
+
         let src_path = file_path_str.clone();
 
         let (resolved_name, managed_path_val, need_move, dest_dir_clone) = if is_repo {
@@ -173,8 +180,7 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
             Ok(id) => {
                 if need_move {
                     let dest = dest_dir_clone.as_ref().unwrap();
-                    let options = fs_extra::file::CopyOptions::new().overwrite(true);
-                    if let Err(e) = fs_extra::file::move_file(src, dest, &options) {
+                    if let Err(e) = document_database::safe_move_file(src, dest) {
                         document_database::delete_doc_file(id).await.ok();
                         errors.push(format!("移动文件失败 {}: {}", file_name, e));
                         continue;
@@ -318,6 +324,12 @@ pub async fn open_doc(_app_handle: AppHandle, id: i64) -> Result<(), String> {
         .await?
         .ok_or("文档不存在".to_string())?;
 
+    let path = Path::new(&doc.managed_path);
+    if !path.exists() {
+        let _ = document_database::mark_doc_missing(id).await;
+        return Err(format!("文件不存在: {}", doc.managed_path));
+    }
+
     document_database::increment_visit_count(id).await.ok();
 
     let _ = tauri_plugin_opener::open_path(&doc.managed_path, None::<&str>);
@@ -335,6 +347,10 @@ pub async fn open_doc_folder(_app_handle: AppHandle, id: i64) -> Result<(), Stri
         .parent()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or(doc.managed_path.clone());
+
+    if !Path::new(&parent).exists() {
+        return Err(format!("目录不存在: {}", parent));
+    }
 
     let _ = tauri_plugin_opener::open_path(&parent, None::<&str>);
 

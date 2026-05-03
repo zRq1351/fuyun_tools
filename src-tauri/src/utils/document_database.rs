@@ -4,6 +4,7 @@ use sqlx::sqlite::{
 };
 use sqlx::{Acquire, Row, Sqlite, SqliteConnection};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::OnceCell;
@@ -237,8 +238,7 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
 
     sqlx::query(
         "
-        DROP TABLE IF EXISTS document_files_fts;
-        CREATE VIRTUAL TABLE document_files_fts USING fts5(
+        CREATE VIRTUAL TABLE IF NOT EXISTS document_files_fts USING fts5(
             title,
             content_text,
             tags,
@@ -718,8 +718,7 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
             let new_path = resolve_unused_filename(&target_dir, file_name, &doc.file_ext);
             let dest = target_dir.join(&new_path);
 
-            let options = fs_extra::file::CopyOptions::new().overwrite(true);
-            fs_extra::file::move_file(old_path, &dest, &options)
+            safe_move_file(old_path, &dest)
                 .map_err(|e| format!("移动文件失败: {}", e))?;
 
             let new_managed_path = dest.to_string_lossy().to_string();
@@ -792,6 +791,29 @@ pub async fn increment_visit_count(id: i64) -> Result<(), String> {
         .await
         .map_err(|e| format!("更新访问计数失败: {}", e))?;
     Ok(())
+}
+
+pub async fn mark_doc_missing(id: i64) -> Result<(), String> {
+    let mut conn = open_docs_db().await?;
+    sqlx::query("UPDATE document_files SET is_missing = 1 WHERE id = ?1")
+        .bind(id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| format!("标记文件缺失失败: {}", e))?;
+    Ok(())
+}
+
+pub async fn doc_exists_by_hash(file_hash: &str, root_id: i64) -> Result<bool, String> {
+    let mut conn = open_docs_db().await?;
+    let count: i64 = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM document_files WHERE file_hash = ?1 AND root_id = ?2 AND is_missing = 0",
+    )
+    .bind(file_hash)
+    .bind(root_id)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(|e| format!("查询文件重复失败: {}", e))?;
+    Ok(count > 0)
 }
 
 fn row_to_doc_file(row: &sqlx::sqlite::SqliteRow) -> DocFile {
@@ -1055,9 +1077,26 @@ fn build_fts_query(keyword: &str) -> String {
 }
 
 pub fn compute_file_hash(path: &std::path::Path) -> Result<String, String> {
-    let data = fs::read(path).map_err(|e| format!("读取文件失败: {}", e))?;
-    let hash = xxhash_rust::xxh3::xxh3_64(&data);
+    let mut file = fs::File::open(path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| format!("读取文件失败: {}", e))?;
+        if n == 0 { break; }
+        hasher.update(&buf[..n]);
+    }
+    let hash = hasher.digest();
     Ok(format!("{:016x}", hash))
+}
+
+pub fn safe_move_file(src: &Path, dest: &Path) -> Result<(), String> {
+    if std::fs::rename(src, dest).is_ok() {
+        return Ok(());
+    }
+    let options = fs_extra::file::CopyOptions::new().overwrite(true);
+    fs_extra::file::move_file(src, dest, &options)
+        .map(|_| ())
+        .map_err(|e| format!("移动文件失败: {}", e))
 }
 
 pub fn resolve_unused_filename(dir: &std::path::Path, base_name: &str, ext: &str) -> String {
@@ -1065,7 +1104,7 @@ pub fn resolve_unused_filename(dir: &std::path::Path, base_name: &str, ext: &str
     if !dir.join(&name).exists() {
         return name;
     }
-    for i in 1..10000 {
+    for i in 1..100 {
         let name = format!("{} ({}).{}", base_name, i, ext);
         if !dir.join(&name).exists() {
             return name;
@@ -1149,6 +1188,11 @@ pub async fn get_import_history(limit: i64) -> Result<Vec<ImportHistory>, String
 
 pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
     let mut conn = open_docs_db().await?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("创建事务失败: {}", e))?;
+
     let items = sqlx::query::<Sqlite>(
         "SELECT dii.doc_file_id, dii.source_path, dii.managed_path, di.storage_mode
          FROM document_import_items dii
@@ -1156,7 +1200,7 @@ pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
          WHERE dii.import_id = ?1",
     )
     .bind(import_id)
-    .fetch_all(&mut *conn)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|e| format!("查询导入项失败: {}", e))?;
 
@@ -1170,40 +1214,43 @@ pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
         if mode == "repo" && !managed.is_empty() {
             let managed_path = std::path::Path::new(&managed);
             let source_path = std::path::Path::new(&source);
-                if managed_path.exists() {
-                    if let Some(parent) = source_path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let options = fs_extra::file::CopyOptions::new().overwrite(true);
-                    if let Err(e) = fs_extra::file::move_file(&managed, &source, &options) {
-                        errors.push(format!("回退失败 {}: {}", doc_id, e));
-                        continue;
-                    }
+            if managed_path.exists() {
+                if let Some(parent) = source_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
                 }
+                if let Err(e) = safe_move_file(managed_path, source_path) {
+                    errors.push(format!("回退失败 {}: {}", doc_id, e));
+                    continue;
+                }
+            }
         }
 
         sqlx::query::<Sqlite>("DELETE FROM document_files WHERE id = ?1")
             .bind(doc_id)
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await
             .ok();
         sqlx::query::<Sqlite>("DELETE FROM document_files_fts WHERE rowid = ?1")
             .bind(doc_id)
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await
             .ok();
     }
 
     sqlx::query::<Sqlite>("DELETE FROM document_import_items WHERE import_id = ?1")
         .bind(import_id)
-        .execute(&mut *conn)
+        .execute(&mut *tx)
         .await
         .ok();
     sqlx::query::<Sqlite>("DELETE FROM document_imports WHERE id = ?1")
         .bind(import_id)
-        .execute(&mut *conn)
+        .execute(&mut *tx)
         .await
         .ok();
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
 
     Ok(errors)
 }
@@ -1211,11 +1258,11 @@ pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
 pub async fn get_import_files(import_id: i64) -> Result<Vec<ImportFileItem>, String> {
     let mut conn = open_docs_db().await?;
     let rows = sqlx::query::<Sqlite>(
-        "SELECT df.file_name, dii.source_path, dii.managed_path
+        "SELECT COALESCE(df.file_name, dii.managed_path) as file_name, dii.source_path, dii.managed_path
          FROM document_import_items dii
-         JOIN document_files df ON df.id = dii.doc_file_id
+         LEFT JOIN document_files df ON df.id = dii.doc_file_id
          WHERE dii.import_id = ?1
-         ORDER BY df.id",
+         ORDER BY dii.doc_file_id",
     )
     .bind(import_id)
     .fetch_all(&mut *conn)
