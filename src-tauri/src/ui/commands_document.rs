@@ -296,16 +296,27 @@ pub struct DeleteDocRequest {
 
 #[tauri::command]
 pub async fn delete_doc(request: DeleteDocRequest) -> Result<(), String> {
-    let managed_path = document_database::delete_doc_file(request.id).await?;
+    let doc = document_database::get_doc_file_by_id(request.id)
+        .await?
+        .ok_or("文档不存在".to_string())?;
+
     if request.delete_file.unwrap_or(false) {
-        if let Some(path) = managed_path {
-            let p = Path::new(&path);
-            if p.exists() {
-                let _ = fs::remove_file(p);
+        let p = Path::new(&doc.managed_path);
+        if p.exists() {
+            let _ = fs::remove_file(p);
+        }
+    } else if doc.storage_mode == "repo" && !doc.source_path.is_empty() {
+        let managed = Path::new(&doc.managed_path);
+        let source = Path::new(&doc.source_path);
+        if managed.exists() && managed != source {
+            if let Some(parent) = source.parent() {
+                let _ = fs::create_dir_all(parent);
             }
+            document_database::safe_move_file(managed, source)?;
         }
     }
-    Ok(())
+
+    document_database::delete_doc_record(request.id).await
 }
 
 #[tauri::command]

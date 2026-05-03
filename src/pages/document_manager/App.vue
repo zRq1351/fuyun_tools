@@ -891,7 +891,10 @@ async function openFolder(doc) {
 
 async function confirmDelete(doc) {
   try {
-    await ElMessageBox.confirm(`确定删除「${doc.title || doc.fileName}」？文件保留在磁盘上。`, '确认删除', {type: 'warning'});
+    const repoMsg = doc.storageMode === 'repo'
+        ? `文件将搬回原位置: ${doc.sourcePath}`
+        : `文件保留在磁盘上`
+    await ElMessageBox.confirm(`确定删除「${doc.title || doc.fileName}」？${repoMsg}。`, '确认删除', {type: 'warning'});
     await DocumentService.deleteDoc(doc.id, false);
     ElMessage.success('已删除');
     selectedId.value = null;

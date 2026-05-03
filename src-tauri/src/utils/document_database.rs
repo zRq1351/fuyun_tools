@@ -602,6 +602,20 @@ pub async fn delete_doc_file(id: i64) -> Result<Option<String>, String> {
     Ok(managed_path)
 }
 
+pub async fn delete_doc_record(id: i64) -> Result<(), String> {
+    let mut conn = open_docs_db().await?;
+    sqlx::query("DELETE FROM document_files WHERE id = ?1")
+        .bind(id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| format!("删除文件记录失败: {}", e))?;
+    let _ = sqlx::query("DELETE FROM document_files_fts WHERE rowid = ?1")
+        .bind(id)
+        .execute(&mut *conn)
+        .await;
+    Ok(())
+}
+
 pub async fn update_doc_file_meta(
     id: i64,
     title: Option<&str>,
