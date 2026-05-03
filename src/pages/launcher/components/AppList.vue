@@ -90,21 +90,21 @@
         <span>打开应用目录</span>
       </div>
       <div class="context-menu-divider"></div>
-      <div class="context-menu-header">添加到分类</div>
-      <div class="menu-category-list">
-        <div
-            v-for="cat in getCategories()"
-            :key="cat.id"
-            class="context-menu-item"
-            @click="assignToCategory(ctxApp, cat.id)"
-        >
-          <el-icon :size="14">
-            <component :is="getIcon(cat.icon)"/>
-          </el-icon>
-          <span>{{ cat.name }}</span>
+      <ContextSubMenu label="添加到分类">
+        <div class="menu-category-list">
+          <div
+              v-for="cat in getCategories()"
+              :key="cat.id"
+              class="context-menu-item"
+              @click="assignToCategory(ctxApp, cat.id)"
+          >
+            <el-icon :size="14">
+              <component :is="getIcon(cat.icon)"/>
+            </el-icon>
+            <span>{{ cat.name }}</span>
+          </div>
         </div>
-      </div>
-      <div v-if="getCategories().length > 5" class="context-menu-divider"></div>
+      </ContextSubMenu>
       <div v-if="ctxApp?.source === 'manual'" class="context-menu-item" @click="removeApp(ctxApp)">
         <el-icon :size="14">
           <Delete/>
@@ -163,6 +163,7 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {ArrowDown, Close, Delete, FolderOpened, Monitor, Star} from '@element-plus/icons-vue'
 import {invoke} from '@tauri-apps/api/core'
 import ContextMenu from '../../../components/ContextMenu.vue'
+import ContextSubMenu from '../../../components/ContextSubMenu.vue'
 
 const props = defineProps({
   apps: {

@@ -6,6 +6,7 @@
         :style="menuStyle"
         class="context-menu"
         @click.stop
+        @mouseover="activateItemOnHover"
     >
       <slot/>
     </div>
@@ -13,7 +14,7 @@
 </template>
 
 <script setup>
-import {ref, watch, computed, onBeforeUnmount, nextTick} from 'vue'
+import {computed, nextTick, onBeforeUnmount, ref, watch} from 'vue'
 
 const props = defineProps({
   show: Boolean,
@@ -27,6 +28,7 @@ const emit = defineEmits(['close'])
 const menuRef = ref(null)
 const adjustedX = ref(0)
 const adjustedY = ref(0)
+const activeIndex = ref(-1)
 
 const menuStyle = computed(() => ({
   left: adjustedX.value + 'px',
@@ -36,6 +38,7 @@ const menuStyle = computed(() => ({
 
 watch(() => props.show, async (visible) => {
   if (visible) {
+    activeIndex.value = -1
     adjustedX.value = props.x
     adjustedY.value = props.y
     await nextTick()
@@ -47,8 +50,24 @@ watch(() => props.show, async (visible) => {
   } else {
     document.removeEventListener('click', onDocClick)
     document.removeEventListener('keydown', onKeydown)
+    activeIndex.value = -1
   }
 })
+
+function getItems() {
+  return menuRef.value?.querySelectorAll(
+      '.context-menu-item:not([disabled]):not(.context-menu-item-disabled)'
+  ) || []
+}
+
+function highlightItem(idx) {
+  const items = getItems()
+  items.forEach(i => i.classList.remove('context-menu-item-active'))
+  if (idx >= 0 && idx < items.length) {
+    items[idx].classList.add('context-menu-item-active')
+    items[idx].scrollIntoView({block: 'nearest'})
+  }
+}
 
 function adjustPosition() {
   const el = menuRef.value
@@ -72,8 +91,56 @@ function onDocClick(e) {
 }
 
 function onKeydown(e) {
-  if (e.key === 'Escape') {
+  const items = getItems()
+  if (!items.length) return
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    activeIndex.value = Math.min(activeIndex.value + 1, items.length - 1)
+    highlightItem(activeIndex.value)
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    activeIndex.value = Math.max(activeIndex.value - 1, 0)
+    highlightItem(activeIndex.value)
+  } else if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    if (activeIndex.value >= 0 && activeIndex.value < items.length) {
+      const item = items[activeIndex.value]
+      if (item) {
+        const sub = item.querySelector('.context-submenu')
+        if (sub) {
+          sub.dispatchEvent(new MouseEvent('mouseenter', {bubbles: false}))
+        } else {
+          item.click()
+        }
+      }
+    }
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    if (activeIndex.value >= 0) {
+      const item = items[activeIndex.value]
+      const sub = item?.querySelector('.context-submenu')
+      if (sub) {
+        sub.dispatchEvent(new MouseEvent('mouseenter', {bubbles: false}))
+      }
+    }
+  } else if (e.key === 'ArrowLeft') {
+    e.preventDefault()
     emit('close')
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    emit('close')
+  }
+}
+
+function activateItemOnHover(e) {
+  const items = getItems()
+  const target = e.target.closest('.context-menu-item')
+  if (!target) return
+  const idx = Array.from(items).indexOf(target)
+  if (idx >= 0) {
+    activeIndex.value = idx
+    highlightItem(idx)
   }
 }
 
@@ -81,6 +148,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick)
   document.removeEventListener('keydown', onKeydown)
 })
+
+defineExpose({menuRef})
 </script>
 
 <style>

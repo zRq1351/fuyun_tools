@@ -72,6 +72,29 @@
     background: var(--el-color-danger-light-9);
 }
 
+.context-menu-item-active {
+    background: var(--fy-accent-bg);
+}
+
+.context-menu-item-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.context-menu-item-sub {
+    justify-content: space-between;
+}
+
+.context-menu-item-arrow {
+    font-size: 9px;
+    margin-left: 16px;
+    opacity: 0.5;
+}
+
+.context-submenu {
+    position: relative;
+}
+
 .context-menu-divider {
     height: 1px;
     margin: 4px 0;
