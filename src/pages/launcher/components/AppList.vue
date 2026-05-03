@@ -14,6 +14,7 @@
         <div
             v-for="app in thirdPartyApps"
             :key="app.id"
+            :class="{ 'ctx-anchor': ctxAnchorId === app.id }"
             class="app-item"
             @dblclick="$emit('select', app)"
             @contextmenu.prevent="showContextMenu($event, app)"
@@ -52,6 +53,7 @@
         <div
             v-for="app in systemApps"
             :key="app.id"
+            :class="{ 'ctx-anchor': ctxAnchorId === app.id }"
             class="app-item"
             @dblclick="$emit('select', app)"
             @contextmenu.prevent="showContextMenu($event, app)"
@@ -208,6 +210,7 @@ const ctxVisible = ref(false)
 const ctxX = ref(0)
 const ctxY = ref(0)
 const ctxApp = ref(null)
+const ctxAnchorId = ref(null)
 const showCommandDialog = ref(false)
 const commandForm = ref({
   prefix: ''
@@ -262,10 +265,12 @@ const showContextMenu = (event, app) => {
   ctxX.value = event.clientX
   ctxY.value = event.clientY
   ctxVisible.value = true
+  ctxAnchorId.value = app.id
 }
 
 const closeCtxMenu = () => {
   ctxVisible.value = false
+  ctxAnchorId.value = null
 }
 
 const assignToCategory = async (app, categoryId) => {
@@ -487,7 +492,8 @@ onBeforeUnmount(() => {
   user-select: none;
 }
 
-.app-item:hover {
+.app-item:hover,
+.app-item.ctx-anchor {
   background: var(--fy-accent-bg);
   padding-left: 20px;
   border-left: 3px solid var(--fy-accent);

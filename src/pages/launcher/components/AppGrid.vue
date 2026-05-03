@@ -35,6 +35,7 @@
           <div
               v-for="app in category.apps.slice(0, 4)"
               :key="app.id"
+              :class="{ 'ctx-anchor': ctxAnchorId === app.id }"
               class="app-item"
               @dblclick.stop="$emit('select', app)"
               @contextmenu.prevent.stop="showContextMenu($event, app)"
@@ -70,6 +71,7 @@
               v-for="app in expandedCategory.apps"
               :key="app.id"
               :data-app-id="app.id"
+              :class="{ 'ctx-anchor': ctxAnchorId === app.id }"
               class="app-item sortable-app"
               @dblclick.stop="$emit('select', app)"
               @contextmenu.prevent.stop="showContextMenu($event, app)"
@@ -176,6 +178,7 @@ const ctxVisible = ref(false)
 const ctxX = ref(0)
 const ctxY = ref(0)
 const ctxApp = ref(null)
+const ctxAnchorId = ref(null)
 const expandedCategory = ref(null)
 const appsContainer = ref(null)
 const categoriesContainer = ref(null)
@@ -358,10 +361,12 @@ const showContextMenu = (event, app) => {
   ctxX.value = event.clientX
   ctxY.value = event.clientY
   ctxVisible.value = true
+  ctxAnchorId.value = app.id
 }
 
 const closeCtxMenu = () => {
   ctxVisible.value = false
+  ctxAnchorId.value = null
 }
 
 // 启动分类下的所有应用
@@ -718,6 +723,10 @@ onBeforeUnmount(() => {
   background: var(--fy-accent-bg);
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.app-item.ctx-anchor {
+  background: var(--fy-accent-bg);
 }
 
 .app-item.sortable-app {

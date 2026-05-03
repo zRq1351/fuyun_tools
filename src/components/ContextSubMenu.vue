@@ -3,7 +3,7 @@
       ref="itemRef"
       class="context-menu-item context-menu-item-sub"
       @mouseenter="openSub"
-      @mouseleave="scheduleClose"
+      @mouseleave="onLeave"
   >
     <span class="context-menu-item-label">{{ label }}</span>
     <span class="context-menu-item-arrow">▶</span>
@@ -45,17 +45,24 @@ async function openSub() {
   subOpen.value = true
 }
 
-function scheduleClose() {
+function onLeave() {
+  tryClose()
+}
+
+function tryClose() {
   closeTimer = setTimeout(() => {
     subOpen.value = false
   }, 150)
 }
 
 function onDocMouseOver(e) {
-  // Access the submenu's root div (the context-menu element inside Teleport)
   const subEl = subMenuRef.value?.menuRef
-  if (subEl && subEl.contains(e.target)) {
+  const inSub = subEl && subEl.contains(e.target)
+  const inParent = itemRef.value && itemRef.value.contains(e.target)
+  if (inSub || inParent) {
     clearTimeout(closeTimer)
+  } else {
+    tryClose()
   }
 }
 
@@ -69,6 +76,7 @@ watch(subOpen, (open) => {
 
 onBeforeUnmount(() => {
   clearTimeout(closeTimer)
+  subOpen.value = false
   document.removeEventListener('mouseover', onDocMouseOver)
 })
 </script>

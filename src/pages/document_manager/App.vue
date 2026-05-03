@@ -123,7 +123,9 @@
             <p style="margin-top:12px;color:var(--el-text-color-secondary)">加载中...</p>
           </div>
           <div v-else class="dm-file-grid">
-            <div v-for="item in items" :key="item.id" :class="{ selected: selectedId === item.id }" class="dm-file-card"
+            <div v-for="item in items" :key="item.id"
+                 :class="{ selected: selectedId === item.id, 'ctx-anchor': ctxAnchorId === item.id }"
+                 class="dm-file-card"
                  @click="selectedId = item.id" @dblclick="openDocument(item)"
                  @contextmenu.prevent="showContextMenu($event, item)">
               <div class="dm-file-icon">
@@ -500,6 +502,7 @@ const ctxMenuVisible = ref(false)
 const ctxMenuX = ref(0)
 const ctxMenuY = ref(0)
 const ctxMenuDoc = ref(null)
+const ctxAnchorId = ref(null)
 const showMoveDialog = ref(false)
 const moveDoc = ref(null)
 const moveTargetCategoryId = ref(null)
@@ -843,10 +846,12 @@ function showContextMenu(event, doc) {
   ctxMenuX.value = event.clientX
   ctxMenuY.value = event.clientY
   ctxMenuVisible.value = true
+  ctxAnchorId.value = doc.id
 }
 
 function closeCtxMenu() {
   ctxMenuVisible.value = false
+  ctxAnchorId.value = null
 }
 
 function startMove(doc) {
@@ -1122,6 +1127,11 @@ onMounted(async () => {
 
 .dm-file-card.selected {
   border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9)
+}
+
+.dm-file-card.ctx-anchor {
+  border-color: var(--el-color-primary-light-5);
   background: var(--el-color-primary-light-9)
 }
 

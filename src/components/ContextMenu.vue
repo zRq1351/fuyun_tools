@@ -29,6 +29,7 @@ const menuRef = ref(null)
 const adjustedX = ref(0)
 const adjustedY = ref(0)
 const activeIndex = ref(-1)
+let hasListeners = false
 
 const menuStyle = computed(() => ({
   left: adjustedX.value + 'px',
@@ -43,14 +44,28 @@ watch(() => props.show, async (visible) => {
     adjustedY.value = props.y
     await nextTick()
     adjustPosition()
-    setTimeout(() => {
-      document.addEventListener('click', onDocClick)
-      document.addEventListener('keydown', onKeydown)
-    }, 0)
+    if (!hasListeners) {
+      hasListeners = true
+      setTimeout(() => {
+        document.addEventListener('mousedown', onDocMouseDown)
+        document.addEventListener('keydown', onKeydown)
+      }, 0)
+    }
   } else {
-    document.removeEventListener('click', onDocClick)
+    document.removeEventListener('mousedown', onDocMouseDown)
     document.removeEventListener('keydown', onKeydown)
     activeIndex.value = -1
+    hasListeners = false
+  }
+})
+
+watch([() => props.x, () => props.y], async () => {
+  if (props.show) {
+    activeIndex.value = -1
+    adjustedX.value = props.x
+    adjustedY.value = props.y
+    await nextTick()
+    adjustPosition()
   }
 })
 
@@ -84,8 +99,11 @@ function adjustPosition() {
   adjustedY.value = y
 }
 
-function onDocClick(e) {
+function onDocMouseDown(e) {
+  if (e.button !== 0) return
   if (menuRef.value && !menuRef.value.contains(e.target)) {
+    // don't close if clicking inside another context-menu (e.g. submenu)
+    if (e.target.closest('.context-menu')) return
     emit('close')
   }
 }
@@ -145,7 +163,7 @@ function activateItemOnHover(e) {
 }
 
 onBeforeUnmount(() => {
-  document.removeEventListener('click', onDocClick)
+  document.removeEventListener('mousedown', onDocMouseDown)
   document.removeEventListener('keydown', onKeydown)
 })
 
