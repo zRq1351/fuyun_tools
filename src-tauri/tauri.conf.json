@@ -1,6 +1,6 @@
 {
   "productName": "fuyun_tools",
-  "version": "0.6.80",
+  "version": "0.6.9",
   "identifier": "com.fuyun.tools",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,7 +12,7 @@
     "windows": [
       {
         "label": "clipboard",
-        "title": "",
+        "title": "文本剪切板",
         "url": "clipboard.html",
         "visible": false,
         "decorations": false,
@@ -29,7 +29,7 @@
       },
       {
         "label": "selection_toolbar",
-        "title": "",
+        "title": "划词",
         "url": "selection_toolbar.html",
         "visible": false,
         "resizable": false,
@@ -59,7 +59,7 @@
       },
       {
         "label": "launcher",
-        "title": "",
+        "title": "启动器",
         "url": "launcher.html",
         "visible": false,
         "decorations": false,
@@ -74,19 +74,19 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "focus": true,
-        "center": false,
+        "center": true,
         "resizable": true,
         "maximizable": false,
         "minimizable": false,
-        "width": 620,
-        "height": 480,
-        "minWidth": 420,
-        "minHeight": 300,
+        "width": 800,
+        "height": 600,
+        "minWidth": 620,
+        "minHeight": 480,
         "hiddenTitle": true
       },
       {
         "label": "image_clipboard",
-        "title": "",
+        "title": "图片剪切板",
         "url": "image_clipboard.html",
         "visible": false,
         "decorations": false,
@@ -103,7 +103,7 @@
       },
       {
         "label": "image_preview",
-        "title": "",
+        "title": "图片预览",
         "url": "image_preview.html",
         "visible": false,
         "decorations": false,
@@ -120,7 +120,7 @@
       },
       {
         "label": "text_preview",
-        "title": "",
+        "title": "文本预览",
         "url": "text_preview.html",
         "visible": false,
         "decorations": false,
@@ -137,7 +137,7 @@
       },
       {
         "label": "screenshot",
-        "title": "",
+        "title": "截图",
         "url": "screenshot.html",
         "visible": false,
         "decorations": false,

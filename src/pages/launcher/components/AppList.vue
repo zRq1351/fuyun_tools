@@ -22,9 +22,12 @@
           <div class="app-name">{{ app.title }}</div>
           <div v-if="app.category" class="app-category">{{ app.category }}</div>
         </div>
-        <span :class="app.source === 'manual' ? 'manual' : 'scan'" class="app-source-badge">{{
-            app.source === 'manual' ? '手动' : '扫描'
+        <span v-if="getAppCategoryName(app.id)" class="app-tag category-tag">{{ getAppCategoryName(app.id) }}</span>
+        <span v-if="getAppCommandPrefix(app.path)" class="app-tag command-tag">{{
+            getAppCommandPrefix(app.path)
           }}</span>
+        <span :class="app.source === 'manual' ? 'manual' : 'scan'"
+              class="app-source-badge">{{ app.source === 'manual' ? '手动' : '扫描' }}</span>
       </div>
     </div>
 
@@ -50,9 +53,12 @@
           <div class="app-name">{{ app.title }}</div>
           <div v-if="app.category" class="app-category">{{ app.category }}</div>
         </div>
-        <span :class="app.source === 'manual' ? 'manual' : 'scan'" class="app-source-badge">{{
-            app.source === 'manual' ? '手动' : '扫描'
+        <span v-if="getAppCategoryName(app.id)" class="app-tag category-tag">{{ getAppCategoryName(app.id) }}</span>
+        <span v-if="getAppCommandPrefix(app.path)" class="app-tag command-tag">{{
+            getAppCommandPrefix(app.path)
           }}</span>
+        <span :class="app.source === 'manual' ? 'manual' : 'scan'"
+              class="app-source-badge">{{ app.source === 'manual' ? '手动' : '扫描' }}</span>
       </div>
     </div>
 
@@ -157,10 +163,33 @@ const props = defineProps({
   categories: {
     type: Array,
     default: () => []
+  },
+  appCategoryMap: {
+    type: Object,
+    default: () => ({})
+  },
+  customCommands: {
+    type: Array,
+    default: () => []
   }
 })
 
 const emit = defineEmits(['select', 'category-changed'])
+
+const getAppCategoryName = (appId) => {
+  const catId = props.appCategoryMap[appId]
+  if (!catId) return null
+  const cat = props.categories.find(c => c.id === catId)
+  return cat ? cat.name : null
+}
+
+const getAppCommandPrefix = (appPath) => {
+  if (!appPath) return null
+  const cmd = props.customCommands.find(c => {
+    return c.enabled && c.command_type?.RunProgram?.path === appPath
+  })
+  return cmd ? cmd.prefix : null
+}
 
 const customCategories = ref([])
 const contextMenu = ref({visible: false, x: 0, y: 0, app: null})
@@ -493,6 +522,29 @@ onBeforeUnmount(() => {
 .app-source-badge.manual {
   background: var(--fy-accent-bg);
   color: var(--fy-accent);
+}
+
+.app-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  margin-left: 4px;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-tag {
+  background: var(--fy-bg-hover);
+  color: var(--fy-text-secondary);
+}
+
+.command-tag {
+  background: var(--fy-accent-bg);
+  color: var(--fy-accent);
+  font-family: monospace;
 }
 
 .context-menu {

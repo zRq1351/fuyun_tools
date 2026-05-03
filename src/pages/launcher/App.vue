@@ -73,6 +73,8 @@
             v-else
             :apps="displayApps"
             :categories="launcherConfig?.categories || []"
+            :app-category-map="launcherConfig?.app_category_map || {}"
+            :custom-commands="launcherConfig?.custom_commands || []"
             @reorder="handleReorder"
             @select="handleSelect"
             @category-changed="handleCategoryChanged"
