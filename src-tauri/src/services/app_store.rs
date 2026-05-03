@@ -3,6 +3,15 @@ use std::collections::HashMap;
 
 use crate::services::launcher_db;
 
+#[cfg(target_os = "windows")]
+use windows::{
+    core::{Interface, PCWSTR},
+    Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER, STGM},
+    Win32::UI::Shell::{IShellLinkW, ShellLink},
+};
+#[cfg(target_os = "windows")]
+use std::os::windows::ffi::OsStrExt;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredApp {
     pub id: String,
@@ -111,6 +120,55 @@ fn is_system_app(title: &str, path: &str) -> bool {
         "系统工具",
         "辅助功能",
         "维护",
+        "注册表编辑器",
+        "设备管理器",
+        "事件查看器",
+        "磁盘管理",
+        "dx",
+        "directx",
+        "windows 安全",
+        "microsoft edge",
+        "xbox",
+        "cortana",
+        "onedrive",
+        "microsoft store",
+        "windows terminal",
+        "终端",
+        "windows 备份",
+        "windows 更新",
+        "windows 迁移",
+        "windows 工具",
+        "凭据管理器",
+        "防火墙",
+        "服务",
+        "组策略",
+        "本地安全策略",
+        "打印机",
+        "默认程序",
+        "语音识别",
+        "放大镜",
+        "讲述人",
+        "屏幕键盘",
+        "camera",
+        "相机",
+        "日历",
+        "时钟",
+        "天气",
+        "地图",
+        "照片",
+        "视频编辑器",
+        "录音机",
+        "便签",
+        "截图与草图",
+        "获取帮助",
+        "快速助手",
+        "wordpad",
+        "写字板",
+        "snipping tool",
+        "powershell ise",
+        "subsystem",
+        "恶意软件",
+        "windows 管理",
     ];
 
     if system_titles.iter().any(|k| title_lower.contains(k)) {
@@ -124,9 +182,75 @@ fn is_system_app(title: &str, path: &str) -> bool {
         "\\start menu\\programs\\system tools",
         "\\start menu\\programs\\windows powershell",
         "\\start menu\\programs\\启动",
+        "\\start menu\\programs\\windows 系统",
+        "\\start menu\\programs\\windows system",
+        "\\start menu\\programs\\windows 附件",
+        "\\start menu\\programs\\windows accessories",
+        "\\start menu\\programs\\windows 辅助功能",
+        "\\start menu\\programs\\windows accessibility",
+        "\\start menu\\programs\\windows 轻松使用",
+        "\\start menu\\programs\\windows ease of access",
+        "\\start menu\\programs\\windows 管理工具",
+        "\\start menu\\programs\\windows administrative tools",
+        "\\start menu\\programs\\入门",
+        "\\start menu\\programs\\维护",
+        "\\start menu\\programs\\附件",
+        "\\start menu\\programs\\管理工具",
+        "\\start menu\\programs\\系统工具",
     ];
 
-    system_path_patterns.iter().any(|p| path_lower.contains(p))
+    if system_path_patterns.iter().any(|p| path_lower.contains(p)) {
+        return true;
+    }
+
+    resolve_lnk_target(path).is_some_and(|target| is_windows_system_path(&target))
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
+    unsafe {
+        let shell_link: IShellLinkW =
+            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+        let persist_file: windows::Win32::System::Com::IPersistFile = shell_link.cast().ok()?;
+
+        let wide_path: Vec<u16> = std::ffi::OsStr::new(lnk_path)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        persist_file
+            .Load(PCWSTR(wide_path.as_ptr()), STGM(0))
+            .ok()?;
+
+        let mut buffer = vec![0u16; 260];
+        shell_link.GetPath(&mut buffer, std::ptr::null_mut(), 0).ok()?;
+
+        let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+        if len == 0 {
+            return None;
+        }
+        Some(String::from_utf16_lossy(&buffer[..len]))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn resolve_lnk_target(_lnk_path: &str) -> Option<String> {
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn is_windows_system_path(target: &str) -> bool {
+    let target_lower = target.to_lowercase();
+    let windir = std::env::var("WINDIR")
+        .unwrap_or_else(|_| "C:\\Windows".to_string())
+        .to_lowercase();
+
+    target_lower.starts_with(&windir)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_windows_system_path(_target: &str) -> bool {
+    false
 }
 
 pub async fn scan_and_save_apps() -> Result<AppStore, String> {
