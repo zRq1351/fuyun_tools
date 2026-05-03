@@ -592,6 +592,8 @@ pub async fn save_app_settings(
     screenshot_enabled: Option<bool>,
     recording_enabled: Option<bool>,
     launcher_enabled: Option<bool>,
+    doc_manager_hot_key: Option<String>,
+    doc_manager_enabled: Option<bool>,
     selection_enabled: Option<bool>,
     selection_modifier_key: Option<String>,
     selection_custom_prompts: Option<Vec<crate::utils::settings_model::CustomPrompt>>,
@@ -652,6 +654,61 @@ pub async fn save_app_settings(
     }
     if let Some(val) = launcher_enabled {
         settings.launcher_enabled = val;
+    }
+    if let Some(val) = doc_manager_enabled {
+        settings.doc_manager_enabled = val;
+    }
+
+    let doc_manager_enabled_effective = doc_manager_enabled.unwrap_or(settings.doc_manager_enabled);
+    if let Some(_enabled_val) = doc_manager_enabled {
+        if doc_manager_enabled_effective {
+            if let Some(ref doc_hk) = doc_manager_hot_key {
+                if doc_hk != &settings.doc_manager_hot_key {
+                    if let Err(e) = app.global_shortcut().unregister(settings.doc_manager_hot_key.as_str()) {
+                        log::warn!("注销旧文档管理快捷键 '{}' 失败: {}", settings.doc_manager_hot_key, e);
+                    }
+                    let app_handle_for_doc = app.clone();
+                    let new_hk = doc_hk.clone();
+                    if let Err(e) = app.global_shortcut().on_shortcut(
+                        doc_hk.as_str(),
+                        move |_app, _shortcut, event| {
+                            if let ShortcutState::Pressed = event.state {
+                                let _ = crate::ui::window_manager::show_standard_window_by_label(&app_handle_for_doc, "document_manager");
+                            }
+                        },
+                    ) {
+                        log::warn!("注册文档管理快捷键 '{}' 失败: {}", new_hk, e);
+                    }
+                    settings.doc_manager_hot_key = doc_hk.clone();
+                } else if !app.global_shortcut().is_registered(settings.doc_manager_hot_key.as_str()) {
+                    let app_handle_for_doc = app.clone();
+                    if let Err(e) = app.global_shortcut().on_shortcut(
+                        settings.doc_manager_hot_key.as_str(),
+                        move |_app, _shortcut, event| {
+                            if let ShortcutState::Pressed = event.state {
+                                let _ = crate::ui::window_manager::show_standard_window_by_label(&app_handle_for_doc, "document_manager");
+                            }
+                        },
+                    ) {
+                        log::warn!("注册文档管理快捷键 '{}' 失败: {}", settings.doc_manager_hot_key, e);
+                    }
+                }
+            } else if !app.global_shortcut().is_registered(settings.doc_manager_hot_key.as_str()) {
+                let app_handle_for_doc = app.clone();
+                if let Err(e) = app.global_shortcut().on_shortcut(
+                    settings.doc_manager_hot_key.as_str(),
+                    move |_app, _shortcut, event| {
+                        if let ShortcutState::Pressed = event.state {
+                            let _ = crate::ui::window_manager::show_standard_window_by_label(&app_handle_for_doc, "document_manager");
+                        }
+                    },
+                ) {
+                    log::warn!("注册文档管理快捷键 '{}' 失败: {}", settings.doc_manager_hot_key, e);
+                }
+            }
+        } else if let Err(e) = app.global_shortcut().unregister(settings.doc_manager_hot_key.as_str()) {
+            log::warn!("注销文档管理快捷键 '{}' 失败: {}", settings.doc_manager_hot_key, e);
+        }
     }
     if let Some(val) = selection_enabled {
         settings.selection_enabled = val;
@@ -1133,6 +1190,71 @@ pub async fn save_app_settings(
                 }
             }
             settings.launcher_hot_key = launcher_hot_key_val.clone();
+        }
+    }
+
+    if let Some(ref doc_manager_hot_key_val) = doc_manager_hot_key {
+        if doc_manager_hot_key_val.is_empty() {
+            return Err(frontend_error(
+                ErrorCode::ValidationError,
+                "文档管理快捷键不能为空",
+                "doc_manager_hot_key is empty",
+            ));
+        }
+
+        if doc_manager_hot_key_val != &settings.doc_manager_hot_key {
+            let effective_hot_key = hot_key.clone().unwrap_or_else(|| settings.hot_key.clone());
+            let effective_image_hot_key = image_hot_key.clone().unwrap_or_else(|| settings.image_hot_key.clone());
+            let effective_screenshot_hot_key = screenshot_hot_key.clone().unwrap_or_else(|| settings.screenshot_hot_key.clone());
+            let effective_recording_hot_key = recording_hot_key.clone().unwrap_or_else(|| settings.recording_hot_key.clone());
+            let effective_mic_toggle_hot_key = recording_mic_toggle_hot_key.clone().unwrap_or_else(|| settings.recording_mic_toggle_hot_key.clone());
+            let effective_launcher_hot_key = launcher_hot_key.clone().unwrap_or_else(|| settings.launcher_hot_key.clone());
+
+            if doc_manager_hot_key_val == &effective_hot_key
+                || doc_manager_hot_key_val == &effective_image_hot_key
+                || doc_manager_hot_key_val == &effective_screenshot_hot_key
+                || doc_manager_hot_key_val == &effective_recording_hot_key
+                || doc_manager_hot_key_val == &effective_mic_toggle_hot_key
+                || doc_manager_hot_key_val == &effective_launcher_hot_key
+            {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    "文档管理快捷键不能与其他快捷键相同",
+                    format!("doc_manager_hot_key={} conflicts with existing shortcut", doc_manager_hot_key_val),
+                ));
+            }
+
+            if app.global_shortcut().is_registered(doc_manager_hot_key_val.as_str()) {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    format!("文档管理快捷键被占用：{}", doc_manager_hot_key_val),
+                    "doc_manager global shortcut already registered",
+                ));
+            }
+
+            let old_doc_manager_hot_key = settings.doc_manager_hot_key.clone();
+            if let Err(e) = app.global_shortcut().unregister(old_doc_manager_hot_key.as_str()) {
+                log::warn!("注销旧文档管理快捷键 '{}' 失败: {}", old_doc_manager_hot_key, e);
+            }
+            if settings.doc_manager_enabled {
+                let app_handle_for_doc = app.clone();
+                if let Err(e) = app.global_shortcut().on_shortcut(
+                    doc_manager_hot_key_val.as_str(),
+                    move |_app, _shortcut, event| {
+                        if let ShortcutState::Pressed = event.state {
+                            let _ = crate::ui::window_manager::show_standard_window_by_label(&app_handle_for_doc, "document_manager");
+                        }
+                    },
+                ) {
+                    log::warn!("注册文档管理快捷键 '{}' 失败: {}", doc_manager_hot_key_val, e);
+                    return Err(frontend_error(
+                        ErrorCode::ValidationError,
+                        format!("文档管理快捷键被占用或注册失败：{}", doc_manager_hot_key_val),
+                        e.to_string(),
+                    ));
+                }
+            }
+            settings.doc_manager_hot_key = doc_manager_hot_key_val.clone();
         }
     }
 

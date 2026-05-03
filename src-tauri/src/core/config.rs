@@ -30,6 +30,11 @@ pub const DEFAULT_LAUNCHER_SHORTCUT: &str = if cfg!(target_os = "macos") {
 } else {
     "Ctrl+K"
 };
+pub const DEFAULT_DOC_MANAGER_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "Cmd+Shift+D"
+} else {
+    "Ctrl+Shift+D"
+};
 /// Ctrl+C操作中的控制键（根据操作系统自动适配）
 pub const CTRL_KEY: Key = if cfg!(target_os = "macos") {
     Key::Meta

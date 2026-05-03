@@ -1,5 +1,5 @@
 use crate::core::config::{
-    ProviderConfig, DEFAULT_IMAGE_TOGGLE_SHORTCUT,
+    ProviderConfig, DEFAULT_DOC_MANAGER_SHORTCUT, DEFAULT_IMAGE_TOGGLE_SHORTCUT,
     DEFAULT_RECORDING_SHORTCUT, DEFAULT_SCREENSHOT_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT,
 };
 use crate::utils::system_utils::get_default_app_version;
@@ -74,6 +74,10 @@ pub struct AppSettingsData {
     pub launcher_hot_key: String,
     #[serde(default = "default_launcher_enabled")]
     pub launcher_enabled: bool,
+    #[serde(default = "default_doc_manager_hot_key")]
+    pub doc_manager_hot_key: String,
+    #[serde(default = "default_doc_manager_enabled")]
+    pub doc_manager_enabled: bool,
     #[serde(default = "default_recording_default_fps")]
     pub recording_default_fps: u32,
     #[serde(default = "default_recording_default_video_bitrate_kbps")]
@@ -167,6 +171,8 @@ impl Default for AppSettingsData {
             recording_enabled: default_recording_enabled(),
             launcher_hot_key: default_launcher_hot_key(),
             launcher_enabled: default_launcher_enabled(),
+            doc_manager_hot_key: default_doc_manager_hot_key(),
+            doc_manager_enabled: default_doc_manager_enabled(),
             recording_default_fps: default_recording_default_fps(),
             recording_default_video_bitrate_kbps: default_recording_default_video_bitrate_kbps(),
             recording_default_audio_bitrate_kbps: default_recording_default_audio_bitrate_kbps(),
@@ -251,6 +257,14 @@ fn default_launcher_hot_key() -> String {
 
 fn default_launcher_enabled() -> bool {
     true
+}
+
+fn default_doc_manager_hot_key() -> String {
+    DEFAULT_DOC_MANAGER_SHORTCUT.to_string()
+}
+
+fn default_doc_manager_enabled() -> bool {
+    false
 }
 
 fn default_text_max_items() -> usize {

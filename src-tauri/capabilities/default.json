@@ -24,7 +24,8 @@
     "result_custom_prompt",
     "result_custom_prompt_*",
     "settings",
-    "launcher"
+    "launcher",
+    "document_manager"
   ],
   "permissions": [
     "core:path:default",

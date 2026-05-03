@@ -16,6 +16,7 @@ use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands::*;
 use crate::ui::commands_backup::*;
 use crate::ui::commands_clipboard::*;
+use crate::ui::commands_document::*;
 use crate::ui::commands_diagnostic::*;
 use crate::ui::commands_launcher::{
     add_custom_command, add_launcher_category, add_manual_app, batch_extract_icons,
@@ -120,6 +121,9 @@ pub fn run() {
             if let Some(settings_window) = app.get_webview_window("settings") {
                 bind_standard_window_close_to_hide(&settings_window);
             }
+            if let Some(document_manager_window) = app.get_webview_window("document_manager") {
+                bind_standard_window_close_to_hide(&document_manager_window);
+            }
             if let Some(recording_window) = app.get_webview_window("recording_toolbar") {
                 bind_overlay_window_events(
                     &recording_window,
@@ -172,6 +176,7 @@ pub fn run() {
                 screenshot_enabled,
                 recording_enabled,
                 launcher_enabled,
+                doc_manager_enabled,
             ) = {
                 let guard = lock_arc_mutex(&state_arc);
                 (
@@ -185,6 +190,7 @@ pub fn run() {
                     guard.settings.screenshot_enabled,
                     guard.settings.recording_enabled,
                     guard.settings.launcher_enabled,
+                    guard.settings.doc_manager_enabled,
                 )
             };
             let mut shortcut_conflicts: Vec<String> = Vec::new();
@@ -374,6 +380,28 @@ pub fn run() {
                 ) {
                     log::warn!("启动器快捷键 '{}' 注册失败: {}", launcher_hot_key, e);
                     shortcut_conflicts.push(format!("启动器：{}", launcher_hot_key));
+                }
+            }
+
+            if doc_manager_enabled {
+                let app_handle_clone_doc = app_handle.clone();
+                let doc_manager_hot_key_str = {
+                    let guard = lock_arc_mutex(&state_arc);
+                    guard.settings.doc_manager_hot_key.clone()
+                };
+                if let Err(e) = app.global_shortcut().on_shortcut(
+                    doc_manager_hot_key_str.as_str(),
+                    move |_app, _shortcut, event| {
+                        if let ShortcutState::Pressed = event.state {
+                            let _ = crate::ui::window_manager::show_standard_window_by_label(
+                                &app_handle_clone_doc,
+                                "document_manager",
+                            );
+                        }
+                    },
+                ) {
+                    log::warn!("文档管理快捷键 '{}' 注册失败: {}", doc_manager_hot_key_str, e);
+                    shortcut_conflicts.push(format!("文档管理：{}", doc_manager_hot_key_str));
                 }
             }
 
@@ -591,6 +619,26 @@ pub fn run() {
             show_clipboard_window_command,
             start_screenshot_command,
             toggle_recording_command,
+            add_doc_root,
+            get_doc_roots,
+            remove_doc_root,
+            add_doc_category,
+            get_doc_categories,
+            remove_doc_category,
+            rename_doc_category,
+            reorder_doc_categories,
+            import_files,
+            get_doc_page,
+            update_doc_meta,
+            delete_doc,
+            get_doc_stats,
+            open_doc,
+            open_doc_folder,
+            get_doc_detail,
+            scan_folder,
+            get_import_history,
+            undo_import,
+            get_import_files,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());

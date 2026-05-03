@@ -2,6 +2,7 @@ pub mod commands;
 pub mod commands_backup;
 pub mod commands_clipboard;
 pub mod commands_diagnostic;
+pub mod commands_document;
 pub mod commands_launcher;
 pub mod commands_recording;
 pub mod commands_screenshot;

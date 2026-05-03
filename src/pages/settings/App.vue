@@ -83,6 +83,10 @@
             <LauncherSettings :form="form"/>
           </div>
 
+          <div v-else-if="activeTab === 'doc_manager'">
+            <DocumentManagerSettings :form="form"/>
+          </div>
+
           <div v-else-if="activeTab === 'ai'">
             <AISettings ref="aiSettingsRef" :form="form"/>
           </div>
@@ -128,6 +132,7 @@ import {
   Camera,
   Cpu,
   DocumentCopy,
+  Folder,
   FolderOpened,
   InfoFilled,
   Moon,
@@ -147,6 +152,7 @@ import ScreenshotSettings from './components/ScreenshotSettings.vue'
 import RecordingSettings from './components/RecordingSettings.vue'
 import SelectionSettings from './components/SelectionSettings.vue'
 import LauncherSettings from './components/LauncherSettings.vue'
+import DocumentManagerSettings from './components/DocumentManagerSettings.vue'
 import AISettings from './components/AISettings.vue'
 import BackupSettings from './components/BackupSettings.vue'
 import DiagnosticSettings from './components/DiagnosticSettings.vue'
@@ -238,6 +244,12 @@ const sections = computed(() => {
       icon: Operation
     },
     {
+      key: 'doc_manager',
+      label: '文档管理',
+      description: '文档文件管理与快捷键配置',
+      icon: Folder
+    },
+    {
       key: 'ai',
       label: 'AI',
       description: '配置服务提供商、模型参数与提示词模板',
@@ -316,7 +328,9 @@ const form = reactive({
   imageFillVerifyMode: 'fast',
   ocrEngine: 'ocr-rs',
   launcherEnabled: true,
-  launcherHotKey: 'Alt+Q'
+  launcherHotKey: 'Alt+Q',
+  docManagerEnabled: false,
+  docManagerHotKey: 'Ctrl+Shift+D'
 })
 
 const autoSaveText = computed(() => {
@@ -378,7 +392,9 @@ const buildFormSnapshot = () => ({
   imageFillVerifyMode: form.imageFillVerifyMode,
   ocrEngine: form.ocrEngine,
   launcherEnabled: form.launcherEnabled,
-  launcherHotKey: form.launcherHotKey
+  launcherHotKey: form.launcherHotKey,
+  docManagerEnabled: form.docManagerEnabled,
+  docManagerHotKey: form.docManagerHotKey
 })
 
 // 保存初始状态快照
@@ -533,6 +549,12 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
   }
   if (source.launcherHotKey !== initial.launcherHotKey) {
     changedFields.launcherHotKey = source.launcherHotKey
+  }
+  if (source.docManagerEnabled !== initial.docManagerEnabled) {
+    changedFields.docManagerEnabled = source.docManagerEnabled
+  }
+  if (source.docManagerHotKey !== initial.docManagerHotKey) {
+    changedFields.docManagerHotKey = source.docManagerHotKey
   }
 
   return Object.keys(changedFields).length > 0 ? changedFields : null
@@ -918,6 +940,8 @@ onMounted(async () => {
     form.ocrEngine = settings.ocr_engine || 'ocr-rs'
     form.launcherEnabled = settings.launcher_enabled !== false
     form.launcherHotKey = settings.launcher_hot_key || 'Alt+Q'
+    form.docManagerEnabled = settings.doc_manager_enabled === true
+    form.docManagerHotKey = settings.doc_manager_hot_key || 'Ctrl+Shift+D'
 
     if (aiSettingsRef.value) {
       aiSettingsRef.value.applyCurrentProviderConfig(settings)

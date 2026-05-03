@@ -514,3 +514,29 @@ export const DiagnosticService = {
     getItems: () => invoke(IPC_COMMANDS.GET_DIAGNOSTIC_ITEMS),
     runAction: (actionKey) => invoke(IPC_COMMANDS.RUN_DIAGNOSTIC_ACTION, {request: {actionKey}}),
 };
+
+export const DocumentService = {
+    addRoot: (name, rootPath) => invoke('add_doc_root', {name, rootPath}),
+    getRoots: () => invoke('get_doc_roots'),
+    removeRoot: (id) => invoke('remove_doc_root', {id}),
+
+    addCategory: (name, icon, color) => invoke('add_doc_category', {name, icon, color}),
+    getCategories: () => invoke('get_doc_categories'),
+    removeCategory: (id) => invoke('remove_doc_category', {id}),
+    renameCategory: (id, name) => invoke('rename_doc_category', {id, name}),
+    reorderCategories: (ids) => invoke('reorder_doc_categories', {ids}),
+
+    importFiles: (request) => invoke('import_files', {request}),
+    getPage: (request) => invoke('get_doc_page', {request}),
+    updateMeta: (request) => invoke('update_doc_meta', {request}),
+    deleteDoc: (id, deleteFile) => invoke('delete_doc', {request: {id, deleteFile}}),
+    getStats: (rootId) => invoke('get_doc_stats', {rootId}),
+    openDoc: (id) => invoke('open_doc', {id}),
+    openFolder: (id) => invoke('open_doc_folder', {id}),
+    getDetail: (id) => invoke('get_doc_detail', {id}),
+    scanFolder: (path, recursive) => invoke('scan_folder', {path, recursive}),
+
+    getImportHistory: (limit) => invoke('get_import_history', {limit}),
+    undoImport: (importId) => invoke('undo_import', {importId}),
+    getImportFiles: (importId) => invoke('get_import_files', {importId}),
+};

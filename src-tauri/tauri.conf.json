@@ -58,6 +58,21 @@
         "center": true
       },
       {
+        "label": "document_manager",
+        "title": "文档管理",
+        "url": "document_manager.html",
+        "visible": false,
+        "resizable": true,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "focus": true,
+        "width": 1200,
+        "height": 780,
+        "center": true
+      },
+      {
         "label": "launcher",
         "title": "启动器",
         "url": "launcher.html",

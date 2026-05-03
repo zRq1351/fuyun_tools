@@ -74,6 +74,7 @@ export default defineConfig(({mode}) => {
                     pinned_image: resolve(__dirname, 'pinned_image.html'),
                     ocr_text: resolve(__dirname, 'ocr_text.html'),
                     launcher: resolve(__dirname, 'launcher.html'),
+                    document_manager: resolve(__dirname, 'document_manager.html'),
                 },
                 output: {
                     manualChunks(id) {
