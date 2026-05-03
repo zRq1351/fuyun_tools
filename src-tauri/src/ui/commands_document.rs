@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 use tauri::AppHandle;
+use tokio::task;
 
 #[tauri::command]
 pub async fn add_doc_root(name: String, root_path: String) -> Result<document_database::DocRoot, String> {
@@ -158,7 +159,11 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
             (src.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string(), src_path.clone(), false, None)
         };
 
-        let content_text = document_text_extract::extract_file_content(src, &file_ext);
+        let src_for_extract = src_path.clone();
+        let ext_for_extract = file_ext.clone();
+        let content_text = task::spawn_blocking(move || {
+            document_text_extract::extract_file_content(Path::new(&src_for_extract), &ext_for_extract)
+        }).await.unwrap_or_default();
 
         match document_database::insert_doc_file(
             request.root_id, &resolved_name, &file_ext, file_size, &file_hash,
