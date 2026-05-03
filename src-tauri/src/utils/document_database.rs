@@ -534,13 +534,14 @@ pub async fn insert_doc_file(
     managed_path: &str,
     storage_mode: &str,
     file_modified: i64,
+    content_text: &str,
 ) -> Result<i64, String> {
     let mut conn = open_docs_db().await?;
     let now = now_unix_ms();
 
     sqlx::query(
-        "INSERT INTO document_files (root_id, title, file_name, file_ext, file_size, file_hash, category_id, tags, source_path, managed_path, storage_mode, added_at, file_modified)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        "INSERT INTO document_files (root_id, title, file_name, file_ext, file_size, file_hash, category_id, tags, source_path, managed_path, storage_mode, added_at, file_modified, content_text)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
     )
     .bind(root_id)
     .bind(file_name)
@@ -555,6 +556,7 @@ pub async fn insert_doc_file(
     .bind(storage_mode)
     .bind(now)
     .bind(file_modified)
+    .bind(content_text)
     .execute(&mut *conn)
     .await
     .map_err(|e| format!("插入文件记录失败: {}", e))?;
@@ -565,10 +567,11 @@ pub async fn insert_doc_file(
         .map_err(|e| format!("获取ID失败: {}", e))?;
 
     let _ = sqlx::query(
-        "INSERT INTO document_files_fts(rowid, title, content_text, tags, notes) VALUES (?1, ?2, '', '', '')",
+        "INSERT INTO document_files_fts(rowid, title, content_text, tags, notes) VALUES (?1, ?2, ?3, '', '')",
     )
     .bind(id)
     .bind(file_name)
+    .bind(content_text)
     .execute(&mut *conn)
     .await;
 

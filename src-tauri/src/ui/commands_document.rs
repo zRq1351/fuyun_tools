@@ -1,4 +1,5 @@
 use crate::utils::document_database;
+use crate::utils::document_text_extract;
 use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -157,10 +158,12 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
             (src.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string(), src_path.clone(), false, None)
         };
 
+        let content_text = document_text_extract::extract_file_content(src, &file_ext);
+
         match document_database::insert_doc_file(
             request.root_id, &resolved_name, &file_ext, file_size, &file_hash,
             request.category_id, &tags, &src_path, &managed_path_val,
-            &request.storage_mode, file_modified,
+            &request.storage_mode, file_modified, &content_text,
         ).await {
             Ok(id) => {
                 if need_move {
