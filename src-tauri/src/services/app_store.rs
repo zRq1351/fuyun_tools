@@ -10,6 +10,10 @@ use windows::{
     Win32::UI::Shell::{IShellLinkW, ShellLink},
 };
 #[cfg(target_os = "windows")]
+use windows::Win32::Storage::FileSystem::{
+    GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+};
+#[cfg(target_os = "windows")]
 use std::os::windows::ffi::OsStrExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,7 +207,24 @@ fn is_system_app(title: &str, path: &str) -> bool {
         return true;
     }
 
-    resolve_lnk_target(path).is_some_and(|target| is_windows_system_path(&target))
+    resolve_lnk_target(path).is_some_and(|target| is_microsoft_app(&target))
+}
+
+#[cfg(target_os = "windows")]
+fn is_microsoft_app(target: &str) -> bool {
+    if is_windows_system_path(target) {
+        return true;
+    }
+    if is_microsoft_signed_exe(target) {
+        return true;
+    }
+    is_microsoft_related_target(target)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_microsoft_app(_target: &str) -> bool {
+    false
+
 }
 
 #[cfg(target_os = "windows")]
@@ -246,6 +267,107 @@ fn is_windows_system_path(target: &str) -> bool {
         .to_lowercase();
 
     target_lower.starts_with(&windir)
+}
+
+#[cfg(target_os = "windows")]
+fn is_microsoft_related_target(target: &str) -> bool {
+    let target_lower = target.to_lowercase();
+    let ms_indicators = [
+        "microsoft.com",
+        "visual studio",
+        "\\microsoft ",
+        "\\microsoft\\",
+        "windows kits",
+        "microsoft sdk",
+        "microsoft visual",
+        "microsoft.net",
+        "msbuild",
+        "msdn",
+        "docs.microsoft",
+        "learn.microsoft",
+        "technet.microsoft",
+    ];
+    ms_indicators.iter().any(|k| target_lower.contains(k))
+}
+
+fn is_microsoft_signed_exe(target: &str) -> bool {
+    unsafe {
+        let wide_target: Vec<u16> = std::ffi::OsStr::new(target)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let size = GetFileVersionInfoSizeW(PCWSTR(wide_target.as_ptr()), None);
+        if size == 0 {
+            return false;
+        }
+
+        let mut buffer: Vec<u8> = vec![0; size as usize];
+        if GetFileVersionInfoW(
+            PCWSTR(wide_target.as_ptr()),
+            None,
+            size,
+            buffer.as_mut_ptr() as *mut _,
+        )
+        .is_err()
+        {
+            return false;
+        }
+
+        let translation_query: Vec<u16> = "\\VarFileInfo\\Translation"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut translation_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+        let mut translation_len: u32 = 0;
+
+        let b = VerQueryValueW(
+            buffer.as_ptr() as *const _,
+            PCWSTR(translation_query.as_ptr()),
+            &mut translation_ptr,
+            &mut translation_len,
+        );
+        if !b.as_bool() {
+            return false;
+        }
+
+        if translation_len < 4 || translation_ptr.is_null() {
+            return false;
+        }
+
+        let lang_id = *(translation_ptr as *const u16);
+        let codepage = *(translation_ptr as *const u16).add(1);
+
+        let query = format!(
+            "\\StringFileInfo\\{:04x}{:04x}\\CompanyName",
+            lang_id, codepage
+        );
+        let wide_query: Vec<u16> = query.encode_utf16().chain(std::iter::once(0)).collect();
+
+        let mut value_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+        let mut value_len: u32 = 0;
+
+        let b = VerQueryValueW(
+            buffer.as_ptr() as *const _,
+            PCWSTR(wide_query.as_ptr()),
+            &mut value_ptr,
+            &mut value_len,
+        );
+        if !b.as_bool() {
+            return false;
+        }
+
+        if value_ptr.is_null() || value_len == 0 {
+            return false;
+        }
+
+        let company_name =
+            String::from_utf16_lossy(std::slice::from_raw_parts(
+                value_ptr as *const u16,
+                value_len.saturating_sub(1) as usize,
+            ));
+        company_name.to_lowercase().contains("microsoft")
+    }
 }
 
 #[cfg(not(target_os = "windows"))]

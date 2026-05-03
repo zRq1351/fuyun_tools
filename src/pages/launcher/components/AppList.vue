@@ -10,7 +10,7 @@
         </span>
         <span class="group-count">{{ thirdPartyApps.length }}</span>
       </div>
-      <div :class="{ collapsed: thirdPartyCollapsed }" class="section-content">
+      <div :style="{ maxHeight: thirdPartyCollapsed ? '0' : thirdPartyContentHeight }" class="section-content">
         <div
             v-for="app in thirdPartyApps"
             :key="app.id"
@@ -48,7 +48,7 @@
         </span>
         <span class="group-count">{{ systemApps.length }}</span>
       </div>
-      <div :class="{ collapsed: systemCollapsed }" class="section-content">
+      <div :style="{ maxHeight: systemCollapsed ? '0' : systemContentHeight }" class="section-content">
         <div
             v-for="app in systemApps"
             :key="app.id"
@@ -226,8 +226,13 @@ const getIcon = (iconName) => {
   return ElementPlusIconsVue[iconName] || Monitor
 }
 
+const ITEM_HEIGHT = 52
+
 const thirdPartyApps = computed(() => props.apps.filter(a => a.app_type !== 'system'))
 const systemApps = computed(() => props.apps.filter(a => a.app_type === 'system'))
+
+const thirdPartyContentHeight = computed(() => (thirdPartyApps.value.length * ITEM_HEIGHT) + 'px')
+const systemContentHeight = computed(() => (systemApps.value.length * ITEM_HEIGHT) + 'px')
 
 const loadCategories = async () => {
   try {
@@ -438,14 +443,11 @@ onBeforeUnmount(() => {
 }
 
 .app-group {
-  overflow: hidden;
-  max-height: 2000px;
   margin-bottom: 4px;
-  transition: max-height 0.3s ease, margin-bottom 0.3s ease;
+  transition: margin-bottom 0.3s ease;
 }
 
 .app-group.collapsed {
-  max-height: 36px;
   margin-bottom: 0;
 }
 
@@ -485,12 +487,7 @@ onBeforeUnmount(() => {
 
 .section-content {
   overflow: hidden;
-  opacity: 1;
-  transition: opacity 0.2s ease;
-}
-
-.section-content.collapsed {
-  opacity: 0;
+  transition: max-height 0.3s ease;
 }
 
 .group-count {
