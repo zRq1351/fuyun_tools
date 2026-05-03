@@ -145,7 +145,8 @@
 <script setup>
 import {computed, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ElMessage} from 'element-plus'
-import {Close, Delete, FolderOpened, Grid, Monitor, Star} from '@element-plus/icons-vue'
+import * as ElementPlusIconsVue from '@element-plus/icons-vue'
+import {Close, Delete, FolderOpened, Monitor, Star} from '@element-plus/icons-vue'
 import {invoke} from '@tauri-apps/api/core'
 
 const props = defineProps({
@@ -176,10 +177,8 @@ const getCategories = () => {
   return customCategories.value
 }
 
-const iconMap = {Monitor, Grid}
-
 const getIcon = (iconName) => {
-  return iconMap[iconName] || Grid
+  return ElementPlusIconsVue[iconName] || Monitor
 }
 
 const thirdPartyApps = computed(() => props.apps.filter(a => a.app_type !== 'system'))

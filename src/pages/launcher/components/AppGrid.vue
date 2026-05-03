@@ -164,6 +164,7 @@
 <script setup>
 import {nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
+import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {Close, Delete, FolderAdd, FolderOpened, Grid, Monitor, Star} from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import {invoke} from '@tauri-apps/api/core'
@@ -185,10 +186,8 @@ const commandForm = ref({
   prefix: ''
 })
 
-const iconMap = {Monitor, Grid}
-
 const getIcon = (iconName) => {
-  return iconMap[iconName] || Grid
+  return ElementPlusIconsVue[iconName] || Grid
 }
 
 // 加载分类列表
