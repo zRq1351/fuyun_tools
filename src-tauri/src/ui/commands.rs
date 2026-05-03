@@ -1113,7 +1113,10 @@ pub async fn save_app_settings(
                     launcher_hot_key_val.as_str(),
                     move |_app, _shortcut, event| {
                         if let ShortcutState::Pressed = event.state {
-                            let _ = crate::ui::commands_launcher::show_launcher(app_handle_for_launcher.clone());
+                            let app_handle = app_handle_for_launcher.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let _ = crate::ui::commands_launcher::show_launcher(app_handle).await;
+                            });
                         }
                     },
                 ) {
@@ -1234,7 +1237,10 @@ pub async fn save_app_settings(
                         launcher_hot_key_val.as_str(),
                         move |_app, _shortcut, event| {
                             if let ShortcutState::Pressed = event.state {
-                                let _ = crate::ui::commands_launcher::show_launcher(app_handle_for_launcher.clone());
+                                let app_handle = app_handle_for_launcher.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    let _ = crate::ui::commands_launcher::show_launcher(app_handle).await;
+                                });
                             }
                         },
                     ) {
@@ -1255,7 +1261,10 @@ pub async fn save_app_settings(
                         settings.launcher_hot_key.as_str(),
                         move |_app, _shortcut, event| {
                             if let ShortcutState::Pressed = event.state {
-                                let _ = crate::ui::commands_launcher::show_launcher(app_handle_for_launcher.clone());
+                                let app_handle = app_handle_for_launcher.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    let _ = crate::ui::commands_launcher::show_launcher(app_handle).await;
+                                });
                             }
                         },
                     ) {
@@ -1276,7 +1285,10 @@ pub async fn save_app_settings(
                     settings.launcher_hot_key.as_str(),
                     move |_app, _shortcut, event| {
                         if let ShortcutState::Pressed = event.state {
-                            let _ = crate::ui::commands_launcher::show_launcher(app_handle_for_launcher.clone());
+                            let app_handle = app_handle_for_launcher.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let _ = crate::ui::commands_launcher::show_launcher(app_handle).await;
+                            });
                         }
                     },
                 ) {

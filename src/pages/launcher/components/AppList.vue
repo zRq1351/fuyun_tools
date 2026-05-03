@@ -22,6 +22,9 @@
           <div class="app-name">{{ app.title }}</div>
           <div v-if="app.category" class="app-category">{{ app.category }}</div>
         </div>
+        <span :class="app.source === 'manual' ? 'manual' : 'scan'" class="app-source-badge">{{
+            app.source === 'manual' ? '手动' : '扫描'
+          }}</span>
       </div>
     </div>
 
@@ -47,6 +50,9 @@
           <div class="app-name">{{ app.title }}</div>
           <div v-if="app.category" class="app-category">{{ app.category }}</div>
         </div>
+        <span :class="app.source === 'manual' ? 'manual' : 'scan'" class="app-source-badge">{{
+            app.source === 'manual' ? '手动' : '扫描'
+          }}</span>
       </div>
     </div>
 
@@ -85,7 +91,13 @@
         </div>
       </div>
       <div v-if="getCategories().length > 5" class="menu-divider"></div>
-      <div class="menu-item" @click="removeFromCategory(contextMenu.app)">
+      <div v-if="contextMenu.app?.source === 'manual'" class="menu-item" @click="removeApp(contextMenu.app)">
+        <el-icon :size="14">
+          <Delete/>
+        </el-icon>
+        <span>移除应用</span>
+      </div>
+      <div v-else class="menu-item" @click="removeFromCategory(contextMenu.app)">
         <el-icon :size="14">
           <Close/>
         </el-icon>
@@ -133,7 +145,7 @@
 <script setup>
 import {computed, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ElMessage} from 'element-plus'
-import {Close, FolderOpened, Grid, Monitor, Star} from '@element-plus/icons-vue'
+import {Close, Delete, FolderOpened, Grid, Monitor, Star} from '@element-plus/icons-vue'
 import {invoke} from '@tauri-apps/api/core'
 
 const props = defineProps({
@@ -247,6 +259,17 @@ const removeFromCategory = async (app) => {
     emit('category-changed')
   } catch (error) {
     console.error('Remove category error:', error)
+  }
+}
+
+const removeApp = async (app) => {
+  if (!app || !app.id) return
+  try {
+    await invoke('remove_app_record', {appId: app.id})
+    hideContextMenu()
+    emit('category-changed')
+  } catch (error) {
+    console.error('Remove app error:', error)
   }
 }
 
@@ -453,6 +476,24 @@ onBeforeUnmount(() => {
   font-size: 11px;
   color: var(--fy-text-muted);
   margin-top: 2px;
+}
+
+.app-source-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.app-source-badge.scan {
+  background: var(--fy-bg-hover);
+  color: var(--fy-text-muted);
+}
+
+.app-source-badge.manual {
+  background: var(--fy-accent-bg);
+  color: var(--fy-accent);
 }
 
 .context-menu {

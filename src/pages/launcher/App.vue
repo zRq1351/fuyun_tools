@@ -39,6 +39,11 @@
               <Tools/>
             </el-icon>
           </button>
+          <button class="mode-button" title="手动添加应用" @click="showAddManualDialog = true" @mousedown.stop>
+            <el-icon :size="14">
+              <Plus/>
+            </el-icon>
+          </button>
           <button class="close-button" @click="hideLauncher" @mousedown.stop>
             <el-icon :size="16">
               <Close/>
@@ -56,8 +61,9 @@
 
       <div v-else class="content-area">
         <AppGrid
-            v-if="viewMode === 'category' && hasCategorizedApps && !searchQuery"
+            v-if="viewMode === 'category' && hasCategorizedApps"
             :categories="categorizedApps"
+            :total-apps="totalCategorizedApps"
             @select="handleSelect"
             @reorder-apps="handleReorderApps"
             @reorder-categories="handleReorderCategories"
@@ -97,6 +103,30 @@
             @close="showCommandManager = false"
             @updated="handleCommandUpdated"
         />
+
+        <!-- 手动添加应用对话框 -->
+        <div v-if="showAddManualDialog" class="dialog-overlay" @click.self="cancelAddManual">
+          <div class="manual-dialog">
+            <div class="dialog-title">手动添加应用</div>
+            <div class="form-group">
+              <label>应用名称</label>
+              <input v-model="manualForm.name" class="form-input" placeholder="输入应用名称"/>
+            </div>
+            <div class="form-group">
+              <label>应用程序</label>
+              <div class="file-input-row">
+                <input v-model="manualForm.path" class="form-input" placeholder="选择 .exe 或 .lnk 文件" readonly/>
+                <button class="dialog-btn browse" @click="browseManualFile">浏览</button>
+              </div>
+            </div>
+            <div class="dialog-actions">
+              <button class="dialog-btn cancel" @click="cancelAddManual">取消</button>
+              <button :disabled="!manualForm.name || !manualForm.path" class="dialog-btn confirm"
+                      @click="confirmAddManual">确定
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     </el-config-provider>
@@ -106,7 +136,7 @@
 <script setup>
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import {ElConfigProvider, ElMessage, ElMessageBox} from 'element-plus'
-import {Close, Grid, List, Loading, Refresh, Setting, Tools} from '@element-plus/icons-vue'
+import {Close, Grid, List, Loading, Plus, Refresh, Setting, Tools} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {invoke} from '@tauri-apps/api/core'
@@ -126,17 +156,22 @@ const isSearching = ref(false)
 const isLoading = ref(false)
 const isRefreshing = ref(false)
 const isDragging = ref(false)
+const isResizing = ref(false)
+let resizeTimer = null
 const launcherBoxRef = ref(null)
 const searchBoxRef = ref(null)
 const viewMode = ref('list')
 const showCategoryManager = ref(false)
 const showCommandManager = ref(false)
+const showAddManualDialog = ref(false)
+const manualForm = ref({name: '', path: ''})
 const launcherConfig = ref(null)
 
 const {search, executeAction, loadCustomCommands} = useLauncherSearch()
 
 let unlistenShow = null
 let unlistenBlur = null
+let unlistenResize = null
 
 const loadAllApps = async () => {
   try {
@@ -211,8 +246,7 @@ const loadIcons = async () => {
 
 const hasCategorizedApps = computed(() => {
   if (!launcherConfig.value || !launcherConfig.value.categories) return false
-  return launcherConfig.value.categories.length > 0 &&
-      Object.keys(launcherConfig.value.app_category_map || {}).length > 0
+  return launcherConfig.value.categories.length > 0
 })
 
 const categorizedApps = computed(() => {
@@ -224,11 +258,13 @@ const categorizedApps = computed(() => {
     const catApps = apps
         .filter(app => config.app_category_map[app.id] === category.id)
         .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-    if (catApps.length > 0) {
-      result.push({name: category.name, apps: catApps})
-    }
+    result.push({name: category.name, apps: catApps})
   }
   return result
+})
+
+const totalCategorizedApps = computed(() => {
+  return categorizedApps.value.reduce((sum, cat) => sum + cat.apps.length, 0)
 })
 
 const toggleViewMode = async () => {
@@ -362,8 +398,8 @@ const handleCategoryUpdated = async () => {
 }
 
 const handleCategoryChanged = async () => {
-  // 当分类发生变化时，重新加载配置和自定义命令
   launcherConfig.value = await invoke('get_launcher_config')
+  allApps.value = await invoke('get_all_apps')
   await loadCustomCommands()
 }
 
@@ -386,6 +422,44 @@ const handleReorderApps = async (reorderedApps) => {
   } catch (error) {
     console.error('Reorder apps error:', error)
   }
+}
+
+const browseManualFile = async () => {
+  try {
+    const {open} = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({
+      filters: [{name: '可执行文件', extensions: ['exe', 'lnk']}],
+      multiple: false
+    })
+    if (selected && typeof selected === 'string') {
+      manualForm.value.path = selected
+      if (!manualForm.value.name) {
+        const fileName = selected.split('\\').pop().split('/').pop().replace(/\.(exe|lnk)$/i, '')
+        manualForm.value.name = fileName
+      }
+    }
+  } catch (error) {
+    console.error('选择文件失败:', error)
+  }
+}
+
+const confirmAddManual = async () => {
+  if (!manualForm.value.name.trim() || !manualForm.value.path) return
+  try {
+    await invoke('add_manual_app', {title: manualForm.value.name.trim(), path: manualForm.value.path})
+    allApps.value = await invoke('get_all_apps')
+    manualForm.value = {name: '', path: ''}
+    showAddManualDialog.value = false
+    ElMessage.success('应用已添加')
+  } catch (error) {
+    console.error('添加应用失败:', error)
+    ElMessage.error('添加失败')
+  }
+}
+
+const cancelAddManual = () => {
+  manualForm.value = {name: '', path: ''}
+  showAddManualDialog.value = false
 }
 
 const handleReorderCategories = async (fromIndex, toIndex) => {
@@ -442,25 +516,32 @@ onMounted(async () => {
     }
   })
 
-  // 监听窗口失去焦点事件
+  // 窗口失去焦点时延迟关闭
   const window = getCurrentWebviewWindow()
   unlistenBlur = await window.listen('tauri://blur', async () => {
-    // 如果正在拖动，不关闭窗口
-    if (isDragging.value) {
-      return
-    }
-    // 延迟一小段时间，避免点击内部元素时误触发
-    await new Promise(resolve => setTimeout(resolve, 100))
-    // 检查是否有对话框打开，如果有则不关闭
-    if (!showCategoryManager.value && !showCommandManager.value) {
+    if (isDragging.value || isResizing.value) return
+    await new Promise(resolve => setTimeout(resolve, 200))
+    if (isDragging.value || isResizing.value) return
+    if (!showCategoryManager.value && !showCommandManager.value && !showAddManualDialog.value) {
       await hideLauncher()
     }
+  })
+
+  // 监听窗口大小变化（拖动边框缩放时抑制失焦关闭）
+  unlistenResize = await listen('launcher-resizing', () => {
+    isResizing.value = true
+    clearTimeout(resizeTimer)
+    resizeTimer = setTimeout(() => {
+      isResizing.value = false
+    }, 1000)
   })
 })
 
 onBeforeUnmount(() => {
   if (unlistenShow) unlistenShow()
   if (unlistenBlur) unlistenBlur()
+  if (unlistenResize) unlistenResize()
+  clearTimeout(resizeTimer)
 })
 </script>
 
@@ -480,8 +561,8 @@ onBeforeUnmount(() => {
 }
 
 .launcher-box {
-  width: 620px;
-  height: 480px;
+  width: 100%;
+  height: 100%;
   background: var(--fy-bg-surface);
   border: 1px solid var(--fy-border);
   border-radius: 12px;
@@ -618,6 +699,107 @@ onBeforeUnmount(() => {
 .command-title {
   font-size: 13px;
   color: var(--fy-text-primary);
+}
+
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10001;
+}
+
+.manual-dialog {
+  width: 420px;
+  background: var(--fy-bg-surface);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fy-text-primary);
+  margin-bottom: 20px;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 13px;
+  color: var(--fy-text-secondary);
+  margin-bottom: 6px;
+}
+
+.form-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--fy-border);
+  border-radius: 6px;
+  background: var(--fy-bg-card);
+  color: var(--fy-text-primary);
+  font-size: 14px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.form-input:focus {
+  border-color: var(--fy-accent);
+}
+
+.file-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.file-input-row .form-input {
+  flex: 1;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.dialog-btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dialog-btn.cancel {
+  background: var(--fy-bg-hover);
+  color: var(--fy-text-secondary);
+}
+
+.dialog-btn.browse {
+  background: var(--fy-bg-hover);
+  color: var(--fy-accent);
+  white-space: nowrap;
+}
+
+.dialog-btn.confirm {
+  background: var(--fy-accent);
+  color: #fff;
+}
+
+.dialog-btn.confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .launcher-hints {

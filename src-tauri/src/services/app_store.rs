@@ -15,6 +15,12 @@ pub struct StoredApp {
     pub action: String,
     #[serde(default)]
     pub sort_order: i32,
+    #[serde(default = "default_source")]
+    pub source: String,
+}
+
+fn default_source() -> String {
+    "scan".to_string()
 }
 
 fn default_action() -> String {
@@ -47,6 +53,7 @@ pub async fn load_app_store() -> AppStore {
                 icon_base64: r.icon_base64,
                 action: r.action,
                 sort_order: r.sort_order,
+                source: r.source,
             })
             .collect(),
         last_scan,
@@ -66,10 +73,11 @@ pub async fn save_app_store(store: &AppStore) -> Result<(), String> {
             icon_base64: a.icon_base64.clone(),
             action: a.action.clone(),
             sort_order: a.sort_order,
+            source: a.source.clone(),
         })
         .collect();
 
-    launcher_db::upsert_apps(&app_rows).await?;
+    launcher_db::replace_scan_apps(&app_rows).await?;
     launcher_db::set_meta("last_scan", &store.last_scan.to_string()).await?;
     Ok(())
 }
@@ -142,6 +150,7 @@ pub async fn scan_and_save_apps() -> Result<AppStore, String> {
                     icon_base64: None,
                     action: "launch_app".to_string(),
                     sort_order: 0,
+                    source: "scan".to_string(),
                 });
             }
         }
@@ -183,4 +192,27 @@ pub async fn update_app_sort_orders(orders: Vec<(String, i32)>) -> Result<(), St
         launcher_db::update_app_sort_order(&app_id, sort_order).await?;
     }
     Ok(())
+}
+
+pub async fn add_manual_app(id: &str, title: &str, path: &str) -> Result<StoredApp, String> {
+    launcher_db::insert_manual_app(id, title, path).await?;
+
+    let icons = crate::services::app_scanner::batch_extract_icons(&[path.to_string()]);
+    let icon_base64 = icons.get(path).cloned();
+
+    if let Some(ref icon) = icon_base64 {
+        let _ = launcher_db::update_app_icon(id, icon).await;
+    }
+
+    Ok(StoredApp {
+        id: id.to_string(),
+        title: title.to_string(),
+        path: path.to_string(),
+        category: String::new(),
+        app_type: "third_party".to_string(),
+        icon_base64,
+        action: "launch_app".to_string(),
+        sort_order: 0,
+        source: "manual".to_string(),
+    })
 }

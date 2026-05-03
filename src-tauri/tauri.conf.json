@@ -75,11 +75,13 @@
         "skipTaskbar": true,
         "focus": true,
         "center": false,
-        "resizable": false,
+        "resizable": true,
         "maximizable": false,
         "minimizable": false,
         "width": 620,
         "height": 480,
+        "minWidth": 420,
+        "minHeight": 300,
         "hiddenTitle": true
       },
       {

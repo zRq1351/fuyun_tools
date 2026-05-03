@@ -59,8 +59,8 @@ pub async fn get_all_apps() -> Result<Vec<app_store::StoredApp>, String> {
 /// 扫描并保存应用（首次或刷新）
 #[tauri::command]
 pub async fn scan_and_save_apps() -> Result<Vec<app_store::StoredApp>, String> {
-    let store = app_store::scan_and_save_apps().await?;
-    Ok(store.apps)
+    app_store::scan_and_save_apps().await?;
+    Ok(app_store::load_app_store().await.apps)
 }
 
 /// 批量提取应用图标
@@ -272,17 +272,22 @@ pub async fn open_app_directory(app: AppHandle, path: String) -> Result<(), Stri
     }
 
     let target_dir = if path.to_lowercase().ends_with(".lnk") {
-        let output = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                &format!(
-                    "$wsh = New-Object -ComObject WScript.Shell; $lnk = $wsh.CreateShortcut('{}'); Write-Output $lnk.TargetPath",
-                    path.replace('\'', "''")
-                ),
-            ])
-            .output()
-            .map_err(|e| format!("解析快捷方式失败: {}", e))?;
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args([
+            "-NoProfile",
+            "-Command",
+            &format!(
+                "$wsh = New-Object -ComObject WScript.Shell; $lnk = $wsh.CreateShortcut('{}'); Write-Output $lnk.TargetPath",
+                path.replace('\'', "''")
+            ),
+        ]);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let output = cmd.output().map_err(|e| format!("解析快捷方式失败: {}", e))?;
 
         let target = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if target.is_empty() {
@@ -306,4 +311,12 @@ pub async fn open_app_directory(app: AppHandle, path: String) -> Result<(), Stri
     app.opener()
         .open_path(target_dir, None::<&str>)
         .map_err(|e| format!("打开目录失败: {}", e))
+}
+
+/// 手动添加应用
+#[tauri::command]
+pub async fn add_manual_app(title: String, path: String) -> Result<app_store::StoredApp, String> {
+    let id = format!("manual_{}", title.to_lowercase().replace([' ', '.', '\\', '/'], "_"));
+
+    app_store::add_manual_app(&id, &title, &path).await
 }

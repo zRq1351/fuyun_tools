@@ -97,7 +97,8 @@ async fn ensure_launcher_db_schema(conn: &mut SqliteConnection) -> Result<(), St
             app_type TEXT NOT NULL DEFAULT '',
             icon_base64 TEXT,
             action TEXT NOT NULL DEFAULT 'launch_app',
-            sort_order INTEGER NOT NULL DEFAULT 0
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT 'scan'
         );
 
         CREATE TABLE IF NOT EXISTS launcher_meta (
@@ -110,6 +111,10 @@ async fn ensure_launcher_db_schema(conn: &mut SqliteConnection) -> Result<(), St
     .await
     .map_err(|e| format!("初始化启动器数据库失败: {}", e))?;
 
+    let _ = sqlx::query("ALTER TABLE launcher_apps ADD COLUMN source TEXT NOT NULL DEFAULT 'scan'")
+        .execute(&mut *conn)
+        .await;
+
     Ok(())
 }
 
@@ -118,6 +123,20 @@ pub async fn open_launcher_db_conn() -> Result<sqlx::pool::PoolConnection<sqlx::
     pool.acquire()
         .await
         .map_err(|e| format!("获取启动器数据库连接失败: {}", e))
+}
+
+// ─── Migration check ───
+
+pub async fn is_db_empty() -> Result<bool, String> {
+    let mut conn = open_launcher_db_conn().await?;
+    let row = sqlx::query(
+        "SELECT (SELECT COUNT(*) FROM launcher_config) + (SELECT COUNT(*) FROM launcher_categories) + (SELECT COUNT(*) FROM launcher_custom_commands) AS total"
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(|e| format!("检查数据库状态失败: {}", e))?;
+    let total: i64 = row.get("total");
+    Ok(total == 0)
 }
 
 // ─── Config key-value operations ───
@@ -456,7 +475,7 @@ pub async fn check_prefix_exists(prefix: &str, exclude_id: Option<&str>) -> Resu
 pub async fn load_all_apps() -> Result<Vec<AppRow>, String> {
     let mut conn = open_launcher_db_conn().await?;
     let rows = sqlx::query(
-        "SELECT id, title, path, category, app_type, icon_base64, action, sort_order FROM launcher_apps ORDER BY app_type ASC, title ASC"
+        "SELECT id, title, path, category, app_type, icon_base64, action, sort_order, source FROM launcher_apps ORDER BY app_type ASC, title ASC"
     )
     .fetch_all(&mut *conn)
     .await
@@ -472,18 +491,21 @@ pub async fn load_all_apps() -> Result<Vec<AppRow>, String> {
             icon_base64: r.get("icon_base64"),
             action: r.get("action"),
             sort_order: r.get::<i64, _>("sort_order") as i32,
+            source: r.get("source"),
         })
         .collect())
 }
 
-pub async fn upsert_apps(apps: &[AppRow]) -> Result<(), String> {
-    if apps.is_empty() {
-        return Ok(());
-    }
+pub async fn replace_scan_apps(apps: &[AppRow]) -> Result<(), String> {
     let mut conn = open_launcher_db_conn().await?;
+    sqlx::query("DELETE FROM launcher_apps WHERE source = 'scan'")
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| format!("清理扫描应用失败: {}", e))?;
+
     for app in apps {
         sqlx::query(
-            "INSERT OR REPLACE INTO launcher_apps (id, title, path, category, app_type, icon_base64, action, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT OR REPLACE INTO launcher_apps (id, title, path, category, app_type, icon_base64, action, sort_order, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scan')"
         )
         .bind(&app.id)
         .bind(&app.title)
@@ -497,6 +519,20 @@ pub async fn upsert_apps(apps: &[AppRow]) -> Result<(), String> {
         .await
         .map_err(|e| format!("保存应用失败: {}", e))?;
     }
+    Ok(())
+}
+
+pub async fn insert_manual_app(id: &str, title: &str, path: &str) -> Result<(), String> {
+    let mut conn = open_launcher_db_conn().await?;
+    sqlx::query(
+        "INSERT OR REPLACE INTO launcher_apps (id, title, path, category, app_type, icon_base64, action, sort_order, source) VALUES (?, ?, ?, '', 'third_party', NULL, 'launch_app', 0, 'manual')"
+    )
+    .bind(id)
+    .bind(title)
+    .bind(path)
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| format!("添加手动应用失败: {}", e))?;
     Ok(())
 }
 
@@ -607,4 +643,5 @@ pub struct AppRow {
     pub icon_base64: Option<String>,
     pub action: String,
     pub sort_order: i32,
+    pub source: String,
 }

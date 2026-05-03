@@ -60,7 +60,88 @@ impl Default for LauncherConfig {
     }
 }
 
+/// 首次启动时从旧 JSON 文件迁移数据到 SQLite
+async fn try_migrate_old_data() {
+    let Ok(is_empty) = launcher_db::is_db_empty().await else { return };
+    if !is_empty { return }
+
+    let exe_dir = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let launcher_dir = exe_dir.parent().unwrap_or(&exe_dir).join("launcher");
+
+    let config_path = launcher_dir.join("config.json");
+    if let Ok(content) = std::fs::read_to_string(&config_path) {
+        if let Ok(config) = serde_json::from_str::<LauncherConfig>(&content) {
+            let _ = launcher_db::set_config_value("view_mode", &config.view_mode).await;
+            for (i, cat) in config.categories.iter().enumerate() {
+                let _ = launcher_db::upsert_category(&cat.id, &cat.name, &cat.icon, i as i32).await;
+                let _ = launcher_db::sync_category_apps(&cat.id, &cat.app_ids).await;
+            }
+            for (app_id, cat_id) in &config.app_category_map {
+                let _ = launcher_db::set_app_category_map(app_id, cat_id).await;
+            }
+            for cmd in &config.custom_commands {
+                let _ = launcher_db::insert_custom_command(&launcher_db::CustomCommandRow {
+                    id: cmd.id.clone(),
+                    prefix: cmd.prefix.clone(),
+                    title: cmd.title.clone(),
+                    description: cmd.description.clone(),
+                    icon: cmd.icon.clone(),
+                    command_type: CustomCommandType::to_json(&cmd.command_type),
+                    enabled: cmd.enabled,
+                    created_at: cmd.created_at,
+                }).await;
+            }
+            // 迁移成功后删除旧文件
+            let _ = std::fs::remove_file(&config_path);
+        }
+    }
+
+    let apps_path = launcher_dir.join("apps.json");
+    if let Ok(content) = std::fs::read_to_string(&apps_path) {
+        #[derive(serde::Deserialize)]
+        struct OldAppStore { apps: Vec<OldApp>, last_scan: i64 }
+        #[derive(serde::Deserialize)]
+        struct OldApp {
+            id: String, title: String, path: String, category: String,
+            app_type: String, icon_base64: Option<String>, action: String, sort_order: i32,
+        }
+        if let Ok(store) = serde_json::from_str::<OldAppStore>(&content) {
+            let app_rows: Vec<launcher_db::AppRow> = store.apps.iter().map(|a| launcher_db::AppRow {
+                id: a.id.clone(), title: a.title.clone(), path: a.path.clone(),
+                category: a.category.clone(), app_type: a.app_type.clone(),
+                icon_base64: a.icon_base64.clone(), action: a.action.clone(),
+                sort_order: a.sort_order,
+                source: "scan".to_string(),
+            }).collect();
+            let _ = launcher_db::replace_scan_apps(&app_rows).await;
+            if store.last_scan > 0 {
+                let _ = launcher_db::set_meta("last_scan", &store.last_scan.to_string()).await;
+            }
+            let _ = std::fs::remove_file(&apps_path);
+        }
+    }
+}
+
+async fn ensure_default_categories() {
+    let Ok(cats) = launcher_db::load_categories().await else { return };
+    if !cats.is_empty() { return }
+
+    let defaults = [
+        ("default_media", "影音娱乐", "VideoCamera"),
+        ("default_office", "办公学习", "Reading"),
+        ("default_chat", "聊天", "ChatDotSquare"),
+        ("default_tools", "工具", "Tools"),
+        ("default_other", "其他", "Folder"),
+    ];
+
+    for (i, (id, name, icon)) in defaults.iter().enumerate() {
+        let _ = launcher_db::upsert_category(id, name, icon, i as i32).await;
+    }
+}
+
 pub async fn load_launcher_config() -> LauncherConfig {
+    try_migrate_old_data().await;
+    ensure_default_categories().await;
     let view_mode = launcher_db::get_config_value("view_mode")
         .await
         .unwrap_or(None)

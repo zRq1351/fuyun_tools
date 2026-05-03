@@ -93,12 +93,19 @@ watch(() => props.modelValue, (newVal) => {
 .search-input {
   flex: 1;
   height: 32px;
-  border: none;
+  border: 1px solid var(--fy-border);
+  border-radius: 6px;
   outline: none;
-  background: transparent;
-  font-size: 16px;
+  background: var(--fy-bg-card);
+  font-size: 14px;
   color: var(--fy-text-primary);
   caret-color: var(--fy-accent);
+  padding: 0 8px;
+  transition: border-color 0.15s;
+}
+
+.search-input:focus {
+  border-color: var(--fy-accent);
 }
 
 .search-input::placeholder {

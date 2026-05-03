@@ -18,7 +18,7 @@ use crate::ui::commands_backup::*;
 use crate::ui::commands_clipboard::*;
 use crate::ui::commands_diagnostic::*;
 use crate::ui::commands_launcher::{
-    add_custom_command, add_launcher_category, batch_extract_icons,
+    add_custom_command, add_launcher_category, add_manual_app, batch_extract_icons,
     get_all_apps, get_launcher_config, hide_launcher, launch_app, launch_app_with_args,
     open_app_directory, open_file, remove_app_record,
     remove_custom_command, remove_launcher_category, rename_launcher_category, reorder_categories,
@@ -147,6 +147,12 @@ pub fn run() {
             }
             if let Some(window) = app.get_webview_window("launcher") {
                 bind_overlay_window_events(&window, app.handle().clone(), "launcher");
+                let app_handle_for_resize = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Resized(_) = event {
+                        let _ = app_handle_for_resize.emit("launcher-resizing", ());
+                    }
+                });
             }
 
             let app_handle = app.handle();
@@ -577,6 +583,7 @@ pub fn run() {
             launch_app_with_args,
             open_file,
             open_app_directory,
+            add_manual_app,
             show_launcher,
             hide_launcher,
             toggle_launcher,

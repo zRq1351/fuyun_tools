@@ -1,5 +1,12 @@
 <template>
   <div class="app-grid-container" @contextmenu.prevent>
+    <div v-if="totalApps === 0" class="empty-category-hint">
+      <el-icon :size="40" class="hint-icon">
+        <FolderAdd/>
+      </el-icon>
+      <p>还没有为应用设置分类</p>
+      <p class="hint-sub">切换回列表视图，右键应用选择「添加到分类」即可归类</p>
+    </div>
     <!-- Categories Grid with Sortable -->
     <div ref="categoriesContainer" class="categories-grid">
       <div
@@ -39,6 +46,9 @@
               </el-icon>
             </div>
             <div class="app-name">{{ app.title }}</div>
+            <span :class="app.source === 'manual' ? 'manual' : 'scan'" class="app-source-badge">{{
+                app.source === 'manual' ? '手动' : '扫描'
+              }}</span>
           </div>
         </div>
       </div>
@@ -71,6 +81,9 @@
               </el-icon>
             </div>
             <div class="app-name">{{ app.title }}</div>
+            <span :class="app.source === 'manual' ? 'manual' : 'scan'" class="app-source-badge">{{
+                app.source === 'manual' ? '手动' : '扫描'
+              }}</span>
           </div>
         </div>
       </div>
@@ -97,7 +110,13 @@
         <span>打开应用目录</span>
       </div>
       <div class="menu-divider"></div>
-      <div class="menu-item" @click="removeFromCategory(contextMenu.app)">
+      <div v-if="contextMenu.app?.source === 'manual'" class="menu-item" @click="removeApp(contextMenu.app)">
+        <el-icon :size="14">
+          <Delete/>
+        </el-icon>
+        <span>移除应用</span>
+      </div>
+      <div v-else class="menu-item" @click="removeFromCategory(contextMenu.app)">
         <el-icon :size="14">
           <Close/>
         </el-icon>
@@ -145,12 +164,13 @@
 <script setup>
 import {nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
-import {Close, FolderOpened, Grid, Monitor, Star} from '@element-plus/icons-vue'
+import {Close, Delete, FolderAdd, FolderOpened, Grid, Monitor, Star} from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import {invoke} from '@tauri-apps/api/core'
 
 const props = defineProps({
-  categories: {type: Array, required: true}
+  categories: {type: Array, required: true},
+  totalApps: {type: Number, default: 0}
 })
 
 const emit = defineEmits(['select', 'reorder-apps', 'reorder-categories', 'category-changed'])
@@ -405,10 +425,21 @@ const removeFromCategory = async (app) => {
     const {invoke} = await import('@tauri-apps/api/core')
     await invoke('set_app_category', {appId: app.id, categoryId: ''})
     hideContextMenu()
-    // 通知父组件重新加载配置
     emit('category-changed')
   } catch (error) {
     console.error('Remove category error:', error)
+  }
+}
+
+const removeApp = async (app) => {
+  if (!app || !app.id) return
+  try {
+    const {invoke} = await import('@tauri-apps/api/core')
+    await invoke('remove_app_record', {appId: app.id})
+    hideContextMenu()
+    emit('category-changed')
+  } catch (error) {
+    console.error('Remove app error:', error)
   }
 }
 
@@ -541,6 +572,32 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   padding: 12px;
   position: relative;
+}
+
+.empty-category-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--fy-text-muted);
+  font-size: 14px;
+  gap: 8px;
+}
+
+.empty-category-hint p {
+  margin: 0;
+}
+
+.hint-icon {
+  opacity: 0.4;
+  margin-bottom: 8px;
+}
+
+.hint-sub {
+  font-size: 12px;
+  color: var(--fy-text-secondary);
 }
 
 .categories-grid {
@@ -756,6 +813,24 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.2;
+}
+
+.app-source-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.app-source-badge.scan {
+  background: var(--fy-bg-hover);
+  color: var(--fy-text-muted);
+}
+
+.app-source-badge.manual {
+  background: var(--fy-accent-bg);
+  color: var(--fy-accent);
 }
 
 .expand-overlay {

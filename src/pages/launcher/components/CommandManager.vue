@@ -10,6 +10,9 @@
         </button>
       </div>
 
+      <div class="manager-hint">输入 <code>:+命令</code> 例如 <code>:vscode</code> 回车即可快速启动，右键应用可添加命令
+      </div>
+
       <div class="command-list">
         <div v-if="commands.length === 0" class="empty-state">
           <el-icon :size="48" color="var(--fy-text-muted)">
@@ -281,6 +284,20 @@ const confirmEdit = async () => {
 .close-btn:hover {
   background: var(--fy-danger-bg);
   color: var(--fy-danger);
+}
+
+.manager-hint {
+  padding: 8px 20px;
+  font-size: 12px;
+  color: var(--fy-text-muted);
+  border-bottom: 1px solid var(--fy-border-light);
+}
+
+.manager-hint code {
+  background: var(--fy-bg-hover);
+  padding: 0 4px;
+  border-radius: 3px;
+  color: var(--fy-accent);
 }
 
 .command-list {
