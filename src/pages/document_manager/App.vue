@@ -86,8 +86,7 @@
           </div>
           <template v-if="activeTab === 'files'">
             <div class="dm-search">
-              <el-input v-model="searchKeyword" clearable placeholder="搜索文件名..." @clear="searchFiles"
-                        @keyup.enter="searchFiles">
+              <el-input v-model="searchKeyword" clearable placeholder="搜索文件名、标签、内容..." @clear="searchFiles">
                 <template #prefix>
                   <el-icon>
                     <Search/>
@@ -122,7 +121,7 @@
             </el-icon>
             <p style="margin-top:12px;color:var(--el-text-color-secondary)">加载中...</p>
           </div>
-          <div v-else class="dm-file-grid">
+          <div v-else class="dm-file-grid" @click.self="selectedId = null">
             <div v-for="item in items" :key="item.id"
                  :class="{ selected: selectedId === item.id, 'ctx-anchor': ctxAnchorId === item.id }"
                  class="dm-file-card"
@@ -424,6 +423,27 @@
       <el-button :disabled="!hasMoveChange" type="primary" @click="confirmMove">确定</el-button>
     </template>
   </el-dialog>
+
+  <el-dialog v-model="showGuide" title="欢迎使用文档管理" width="560px">
+    <div class="dm-guide-body">
+      <p class="dm-guide-desc">文档管理帮助你集中管理电脑中的各类文件，支持分类、搜索、搬迁或索引两种方式。</p>
+      <div class="dm-guide-steps">
+        <div v-for="(step, idx) in guideSteps" :key="idx" class="dm-guide-step">
+          <div class="dm-guide-step-num">{{ idx + 1 }}</div>
+          <div class="dm-guide-step-content">
+            <div class="dm-guide-step-title">{{ step.title }}</div>
+            <div class="dm-guide-step-desc">{{ step.desc }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="dm-guide-footer">
+        <el-checkbox v-model="guideNoMore">不再显示</el-checkbox>
+      </div>
+    </div>
+    <template #footer>
+      <el-button type="primary" @click="dismissGuide">开始使用</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
@@ -647,6 +667,16 @@ watch(rootFilter, () => {
   currentPage.value = 1;
   loadData();
   loadFiles()
+})
+
+let searchTimer = null
+watch(searchKeyword, (val, old) => {
+  if (val === old) return
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    currentPage.value = 1
+    loadFiles()
+  }, 250)
 })
 
 async function confirmAddRoot() {
@@ -884,6 +914,63 @@ async function confirmMove() {
     await loadData()
   } catch (e) {
     ElMessage.error(typeof e === 'string' ? e : e?.message || '移动失败')
+  }
+}
+
+const GUIDE_KEY = 'dm_guide_dismissed'
+
+const guideSteps = [
+  {
+    title: '添加根目录',
+    desc: '点击左侧「添加目录」，选择一个本地文件夹作为文档仓库。可添加多个根目录，支持搬迁和索引两种模式。'
+  },
+  {title: '创建分类', desc: '点击分类栏的 + 按钮创建分类（如"工作""学习"），用于归类文档。支持自定义图标颜色、拖曳排序。'},
+  {
+    title: '导入文档',
+    desc: '点击「添加文档」选择文件，或「扫描文件夹」批量导入。搬迁模式会将文件复制到仓库，索引模式仅记录位置。'
+  },
+  {
+    title: '管理文档',
+    desc: '单击文件查看详细信息和编辑标签，双击直接打开，右键可移动文件到其他分类/目录或删除。支持文件名和内容全文搜索。'
+  },
+]
+
+const showGuide = ref(localStorage.getItem(GUIDE_KEY) !== '1')
+const guideNoMore = ref(false)
+
+function dismissGuide() {
+  if (guideNoMore.value) {
+    localStorage.setItem(GUIDE_KEY, '1')
+  }
+  showGuide.value = false
+}
+
+async function saveCategory() {
+  if (!selectedDoc.value) return;
+  try {
+    await DocumentService.updateMeta({id: selectedDoc.value.id, categoryId: editCategoryId.value})
+    selectedDoc.value.categoryId = editCategoryId.value
+  } catch {
+  }
+  ;loadData()
+}
+
+async function saveTags() {
+  if (!selectedDoc.value) return
+  try {
+    const tagsJson = JSON.stringify(editTags.value.split(/[,，]/).map(t => t.trim()).filter(Boolean))
+    await DocumentService.updateMeta({id: selectedDoc.value.id, tags: tagsJson})
+    selectedDoc.value.tags = tagsJson
+  } catch {
+  }
+}
+
+async function saveNotes() {
+  if (!selectedDoc.value) return;
+  try {
+    await DocumentService.updateMeta({id: selectedDoc.value.id, notes: editNotes.value})
+    selectedDoc.value.notes = editNotes.value
+  } catch {
   }
 }
 
@@ -1200,7 +1287,19 @@ onMounted(async () => {
   justify-content: space-between;
   padding: 12px 16px;
   border-bottom: 1px solid var(--el-border-color-lighter);
-  font-weight: 500
+  font-weight: 500;
+  gap: 8px;
+}
+
+.dm-detail-header > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.dm-detail-header .el-button {
+  flex-shrink: 0;
 }
 
 .dm-detail-body {
@@ -1232,8 +1331,6 @@ onMounted(async () => {
   font-size: 11px !important;
   color: var(--el-text-color-secondary);
   word-break: break-all;
-  max-height: 40px;
-  overflow: hidden
 }
 
 .dm-detail-actions {
@@ -1425,5 +1522,64 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--el-color-warning);
   margin-top: 4px;
+}
+
+.dm-guide-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.dm-guide-desc {
+  font-size: 14px;
+  color: var(--el-text-color-regular);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.dm-guide-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.dm-guide-step {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.dm-guide-step-num {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.dm-guide-step-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 4px;
+}
+
+.dm-guide-step-desc {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
+}
+
+.dm-guide-footer {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: 4px;
 }
 </style>

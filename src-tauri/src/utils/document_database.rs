@@ -237,9 +237,12 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
 
     sqlx::query(
         "
-        CREATE VIRTUAL TABLE IF NOT EXISTS document_files_fts USING fts5(
+        DROP TABLE IF EXISTS document_files_fts;
+        CREATE VIRTUAL TABLE document_files_fts USING fts5(
             title,
             content_text,
+            tags,
+            notes,
             tokenize = 'unicode61'
         );
         ",
@@ -268,8 +271,8 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     if fts_count != doc_count {
         let _ = sqlx::query(
             "
-            INSERT OR REPLACE INTO document_files_fts(rowid, title, content_text)
-            SELECT id, COALESCE(title, ''), content_text FROM document_files
+            INSERT OR REPLACE INTO document_files_fts(rowid, title, content_text, tags, notes)
+            SELECT id, COALESCE(title, ''), content_text, COALESCE(tags, ''), COALESCE(notes, '') FROM document_files
             ",
         )
         .execute(&mut *conn)
@@ -562,7 +565,7 @@ pub async fn insert_doc_file(
         .map_err(|e| format!("获取ID失败: {}", e))?;
 
     let _ = sqlx::query(
-        "INSERT INTO document_files_fts(rowid, title, content_text) VALUES (?1, ?2, '')",
+        "INSERT INTO document_files_fts(rowid, title, content_text, tags, notes) VALUES (?1, ?2, '', '', '')",
     )
     .bind(id)
     .bind(file_name)
@@ -636,6 +639,12 @@ pub async fn update_doc_file_meta(
             .execute(&mut *conn)
             .await
             .map_err(|e| format!("更新标签失败: {}", e))?;
+
+        let _ = sqlx::query("UPDATE document_files_fts SET tags = ?1 WHERE rowid = ?2")
+            .bind(tg)
+            .bind(id)
+            .execute(&mut *conn)
+            .await;
     }
 
     if let Some(n) = notes {
@@ -645,6 +654,12 @@ pub async fn update_doc_file_meta(
             .execute(&mut *conn)
             .await
             .map_err(|e| format!("更新备注失败: {}", e))?;
+
+        let _ = sqlx::query("UPDATE document_files_fts SET notes = ?1 WHERE rowid = ?2")
+            .bind(n)
+            .bind(id)
+            .execute(&mut *conn)
+            .await;
     }
 
     Ok(())
@@ -873,7 +888,7 @@ pub async fn get_doc_page(
              WHERE (?1 IS NULL OR df.category_id = ?1)
                AND (?2 IS NULL OR df.root_id = ?2)
                AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
-               AND (df.file_name LIKE '%' || ?4 || '%' OR df.title LIKE '%' || ?4 || '%')",
+               AND (df.file_name LIKE '%' || ?4 || '%' OR df.title LIKE '%' || ?4 || '%' OR df.tags LIKE '%' || ?4 || '%' OR df.notes LIKE '%' || ?4 || '%')",
         )
         .bind(category_id)
         .bind(root_id)
@@ -892,7 +907,7 @@ pub async fn get_doc_page(
              WHERE (?1 IS NULL OR df.category_id = ?1)
                AND (?2 IS NULL OR df.root_id = ?2)
                AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
-               AND (df.file_name LIKE '%' || ?4 || '%' OR df.title LIKE '%' || ?4 || '%')
+               AND (df.file_name LIKE '%' || ?4 || '%' OR df.title LIKE '%' || ?4 || '%' OR df.tags LIKE '%' || ?4 || '%' OR df.notes LIKE '%' || ?4 || '%')
              ORDER BY df.added_at DESC
              LIMIT ?5 OFFSET ?6",
         )
