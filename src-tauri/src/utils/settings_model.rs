@@ -3,7 +3,6 @@ use crate::core::config::{
     DEFAULT_RECORDING_SHORTCUT, DEFAULT_SCREENSHOT_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT,
 };
 use crate::utils::system_utils::get_default_app_version;
-use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::thread;
@@ -451,82 +450,63 @@ impl AppSettingsData {
         }
         let service_name = "fuyun_tools";
         let user_name = format!("api_key_{}", provider_key);
+        let store = keyring_core::get_default_store()
+            .ok_or_else(|| "获取凭据存储失败".to_string())?;
+        let entry = store.build(service_name, &user_name, None)
+            .map_err(|e| format!("创建凭据入口失败: {}", e))?;
         if api_key.is_empty() {
-            if let Ok(entry) = Entry::new(service_name, &user_name) {
-                let _ = entry.delete_credential();
-            }
+            let _ = entry.delete_credential();
             log::info!("API key cleared for provider: {}", provider_key);
             return Ok(());
         }
-        match Entry::new(service_name, &user_name) {
-            Ok(entry) => {
-                let mut last_error = String::new();
-                for i in 0..3 {
-                    match entry.set_password(api_key) {
-                        Ok(_) => {
-                            log::info!(
-                                "API key saved for provider: {} (attempt {})",
-                                provider_key,
-                                i + 1
-                            );
-                            return Ok(());
-                        }
-                        Err(e) => {
-                            let _ = entry.delete_credential();
-                            log::warn!("Failed to save API key (attempt {}): {}", i + 1, e);
-                            last_error = e.to_string();
-                            thread::sleep(Duration::from_millis(100));
-                        }
-                    }
+        let mut last_error = String::new();
+        for i in 0..3 {
+            match entry.set_password(api_key) {
+                Ok(_) => {
+                    log::info!("API key saved for provider: {} (attempt {})", provider_key, i + 1);
+                    return Ok(());
                 }
-                Err(format!("保存API密钥失败(重试3次后): {}", last_error))
+                Err(e) => {
+                    let _ = entry.delete_credential();
+                    log::warn!("Failed to save API key (attempt {}): {}", i + 1, e);
+                    last_error = e.to_string();
+                    thread::sleep(Duration::from_millis(100));
+                }
             }
-            Err(e) => Err(format!("创建密钥入口失败: {}", e)),
         }
+        Err(format!("保存API密钥失败(重试3次后): {}", last_error))
     }
 
     pub fn get_provider_api_key(&self, provider_key: &str) -> Result<String, String> {
         let service_name = "fuyun_tools";
         let user_name = format!("api_key_{}", provider_key);
-        let entry =
-            Entry::new(service_name, &user_name).map_err(|e| format!("创建密钥入口失败: {}", e))?;
+        let store = keyring_core::get_default_store()
+            .ok_or_else(|| "获取凭据存储失败".to_string())?;
+        let entry = store.build(service_name, &user_name, None)
+            .map_err(|e| format!("创建凭据入口失败: {}", e))?;
         let mut last_error = String::new();
         for i in 0..3 {
             match entry.get_password() {
                 Ok(password) => {
-                    log::info!(
-                        "Successfully retrieved API key for provider: {} (attempt {})",
-                        provider_key,
-                        i + 1
-                    );
+                    log::info!("Successfully retrieved API key for provider: {} (attempt {})", provider_key, i + 1);
                     return Ok(password);
                 }
-                Err(keyring::Error::NoEntry) => {
+                Err(keyring_core::Error::NoEntry) => {
                     log::info!("No API key found in keyring for provider: {}", provider_key);
                     return Ok(String::new());
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
-                    if error_msg.contains("Element not found") || error_msg.contains("找不到元素")
-                    {
+                    if error_msg.contains("Element not found") || error_msg.contains("找不到元素") {
                         return Ok(String::new());
                     }
-                    log::warn!(
-                        "Failed to retrieve API key for provider {} (attempt {}): {}",
-                        provider_key,
-                        i + 1,
-                        e
-                    );
+                    log::warn!("Failed to retrieve API key for provider {} (attempt {}): {}", provider_key, i + 1, e);
                     last_error = error_msg;
                     thread::sleep(Duration::from_millis(100));
                 }
             }
         }
-        log::error!(
-            "Failed to retrieve API key after retries for provider {}: {}",
-            provider_key,
-            last_error
-        );
+        log::error!("Failed to retrieve API key after retries for provider {}: {}", provider_key, last_error);
         Err(format!("获取API密钥失败: {}", last_error))
     }
 
@@ -557,15 +537,15 @@ impl AppSettingsData {
                             String::from_utf8(decrypted).ok()
                         });
                     if let Some(api_key) = decrypted_result {
-                        if let Ok(entry) =
-                            Entry::new("fuyun_tools", &format!("api_key_{}", provider_key))
-                        {
-                            if let Err(e) = entry.set_password(&api_key) {
-                                log::error!("迁移密钥失败: {}", e);
-                            } else {
-                                log::info!("密钥迁移成功");
-                                migrated = true;
-                                config.encrypted_api_key.clear();
+                        if let Some(store) = keyring_core::get_default_store() {
+                            if let Ok(entry) = store.build("fuyun_tools", &format!("api_key_{}", provider_key), None) {
+                                if let Err(e) = entry.set_password(&api_key) {
+                                    log::error!("迁移密钥失败: {}", e);
+                                } else {
+                                    log::info!("密钥迁移成功");
+                                    migrated = true;
+                                    config.encrypted_api_key.clear();
+                                }
                             }
                         }
                     }

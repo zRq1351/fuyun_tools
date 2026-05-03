@@ -76,33 +76,27 @@
       </div>
     </div>
 
-    <div
-        v-if="contextMenu.visible"
-        ref="contextMenuRef"
-        class="context-menu"
-        :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
-        @click.stop
-    >
-      <div class="menu-item" @click="openApp(contextMenu.app)">
+    <ContextMenu :show="ctxVisible" :x="ctxX" :y="ctxY" @close="closeCtxMenu">
+      <div class="context-menu-item" @click="openApp(ctxApp)">
         <el-icon :size="14">
           <Monitor/>
         </el-icon>
         <span>打开</span>
       </div>
-      <div class="menu-item" @click="openAppDirectory(contextMenu.app)">
+      <div class="context-menu-item" @click="openAppDirectory(ctxApp)">
         <el-icon :size="14">
           <FolderOpened/>
         </el-icon>
         <span>打开应用目录</span>
       </div>
-      <div class="menu-divider"></div>
-      <div class="menu-title">添加到分类</div>
+      <div class="context-menu-divider"></div>
+      <div class="context-menu-header">添加到分类</div>
       <div class="menu-category-list">
         <div
             v-for="cat in getCategories()"
             :key="cat.id"
-            class="menu-item"
-            @click="assignToCategory(contextMenu.app, cat.id)"
+            class="context-menu-item"
+            @click="assignToCategory(ctxApp, cat.id)"
         >
           <el-icon :size="14">
             <component :is="getIcon(cat.icon)"/>
@@ -110,35 +104,35 @@
           <span>{{ cat.name }}</span>
         </div>
       </div>
-      <div v-if="getCategories().length > 5" class="menu-divider"></div>
-      <div v-if="contextMenu.app?.source === 'manual'" class="menu-item" @click="removeApp(contextMenu.app)">
+      <div v-if="getCategories().length > 5" class="context-menu-divider"></div>
+      <div v-if="ctxApp?.source === 'manual'" class="context-menu-item" @click="removeApp(ctxApp)">
         <el-icon :size="14">
           <Delete/>
         </el-icon>
         <span>移除应用</span>
       </div>
-      <div v-else class="menu-item" @click="removeFromCategory(contextMenu.app)">
+      <div v-else class="context-menu-item" @click="removeFromCategory(ctxApp)">
         <el-icon :size="14">
           <Close/>
         </el-icon>
         <span>移出分类</span>
       </div>
-      <div class="menu-divider"></div>
-      <div class="menu-item" @click="showAddCommandDialog">
+      <div class="context-menu-divider"></div>
+      <div class="context-menu-item" @click="showAddCommandDialog">
         <el-icon :size="14">
           <Star/>
         </el-icon>
         <span>添加启动命令</span>
       </div>
-    </div>
+    </ContextMenu>
 
     <!-- 添加命令对话框 -->
     <div v-if="showCommandDialog" class="dialog-overlay">
       <div class="command-dialog">
         <div class="dialog-title">为应用添加启动命令</div>
         <div class="app-info-preview">
-          <img v-if="contextMenu.app?.icon_base64" :src="contextMenu.app.icon_base64" class="preview-icon"/>
-          <span class="preview-name">{{ contextMenu.app?.title }}</span>
+          <img v-if="ctxApp?.icon_base64" :src="ctxApp.icon_base64" class="preview-icon"/>
+          <span class="preview-name">{{ ctxApp?.title }}</span>
         </div>
 
         <div class="form-group">
@@ -168,6 +162,7 @@ import {ElMessage} from 'element-plus'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {ArrowDown, Close, Delete, FolderOpened, Monitor, Star} from '@element-plus/icons-vue'
 import {invoke} from '@tauri-apps/api/core'
+import ContextMenu from '../../../components/ContextMenu.vue'
 
 const props = defineProps({
   apps: {
@@ -208,7 +203,10 @@ const getAppCommandPrefix = (appPath) => {
 const customCategories = ref([])
 const thirdPartyCollapsed = ref(false)
 const systemCollapsed = ref(false)
-const contextMenu = ref({visible: false, x: 0, y: 0, app: null})
+const ctxVisible = ref(false)
+const ctxX = ref(0)
+const ctxY = ref(0)
+const ctxApp = ref(null)
 const showCommandDialog = ref(false)
 const commandForm = ref({
   prefix: ''
@@ -245,53 +243,35 @@ const loadCategories = async () => {
 
 const openApp = (app) => {
   emit('select', app)
-  contextMenu.value.visible = false
+  closeCtxMenu()
 }
 
 const openAppDirectory = async (app) => {
   if (!app || !app.path) return
   try {
     await invoke('open_app_directory', {path: app.path})
-    hideContextMenu()
+    closeCtxMenu()
   } catch (error) {
     console.error('打开应用目录失败:', error)
   }
 }
 
-const contextMenuRef = ref(null)
-
-const showContextMenu = async (event, app) => {
-  let x = event.clientX
-  let y = event.clientY
-
-  const menuWidth = 160
-  if (x + menuWidth > window.innerWidth) {
-    x = window.innerWidth - menuWidth - 10
-  }
-  x = Math.max(10, x)
-
-  contextMenu.value = {visible: true, x, y, app}
-
-  await nextTick()
-  const menuEl = contextMenuRef.value
-  if (menuEl) {
-    const actualHeight = menuEl.offsetHeight
-    if (y + actualHeight > window.innerHeight) {
-      y = Math.max(10, event.clientY - actualHeight - 4)
-    }
-    contextMenu.value = {visible: true, x, y, app}
-  }
+const showContextMenu = (event, app) => {
+  ctxApp.value = app
+  ctxX.value = event.clientX
+  ctxY.value = event.clientY
+  ctxVisible.value = true
 }
 
-const hideContextMenu = () => {
-  contextMenu.value.visible = false
+const closeCtxMenu = () => {
+  ctxVisible.value = false
 }
 
 const assignToCategory = async (app, categoryId) => {
   if (!app || !app.id) return
   try {
     await invoke('set_app_category', {appId: app.id, categoryId})
-    hideContextMenu()
+    closeCtxMenu()
     // 通知父组件重新加载配置
     emit('category-changed')
   } catch (error) {
@@ -303,7 +283,7 @@ const removeFromCategory = async (app) => {
   if (!app || !app.id) return
   try {
     await invoke('set_app_category', {appId: app.id, categoryId: ''})
-    hideContextMenu()
+    closeCtxMenu()
     // 通知父组件重新加载配置
     emit('category-changed')
   } catch (error) {
@@ -315,7 +295,7 @@ const removeApp = async (app) => {
   if (!app || !app.id) return
   try {
     await invoke('remove_app_record', {appId: app.id})
-    hideContextMenu()
+    closeCtxMenu()
     emit('category-changed')
   } catch (error) {
     console.error('Remove app error:', error)
@@ -324,7 +304,7 @@ const removeApp = async (app) => {
 
 // 显示添加命令对话框
 const showAddCommandDialog = () => {
-  const app = contextMenu.value.app
+  const app = ctxApp.value
   if (!app) return
 
   // 自动生成前缀：使用应用名称的小写形式（不包含 :）
@@ -339,12 +319,12 @@ const showAddCommandDialog = () => {
 // 关闭命令对话框
 const closeCommandDialog = () => {
   showCommandDialog.value = false
-  hideContextMenu()
+  closeCtxMenu()
 }
 
 // 确认添加命令
 const confirmAddCommand = async () => {
-  const app = contextMenu.value.app
+  const app = ctxApp.value
   if (!app || !commandForm.value.prefix.trim()) return
 
   try {
@@ -415,7 +395,6 @@ const confirmAddCommand = async () => {
 
 onMounted(async () => {
   await loadCategories()
-  document.addEventListener('click', hideContextMenu)
 })
 
 // 监听应用列表变化，重新加载分类
@@ -430,7 +409,6 @@ const handleFocus = () => {
 window.addEventListener('focus', handleFocus)
 
 onBeforeUnmount(() => {
-  document.removeEventListener('click', hideContextMenu)
   window.removeEventListener('focus', handleFocus)
 })
 </script>
@@ -591,31 +569,8 @@ onBeforeUnmount(() => {
   font-family: monospace;
 }
 
-.context-menu {
-  position: fixed;
-  background: var(--fy-bg-surface);
-  border: 1px solid var(--fy-border);
-  border-radius: 8px;
-  padding: 4px 0;
-  min-width: 160px;
-  max-height: calc(100vh - 20px);
-  overflow-y: auto;
-  box-shadow: var(--fy-shadow);
-  z-index: 10000;
-  display: flex;
-  flex-direction: column;
-}
-
-.menu-title {
-  padding: 6px 12px;
-  font-size: 11px;
-  color: var(--fy-text-muted);
-  border-bottom: 1px solid var(--fy-border-light);
-  margin-bottom: 4px;
-}
-
 .menu-category-list {
-  max-height: calc(32px * 5); /* 每条菜单项约32px，最多显示5条 */
+  max-height: calc(32px * 5);
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
@@ -639,44 +594,6 @@ onBeforeUnmount(() => {
 
 .menu-category-list::-webkit-scrollbar-thumb:hover {
   background: var(--fy-text-muted);
-}
-
-.context-menu::-webkit-scrollbar {
-  width: 4px;
-}
-
-.context-menu::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.context-menu::-webkit-scrollbar-thumb {
-  background: var(--fy-border);
-  border-radius: 2px;
-}
-
-.menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 12px; /* 缩短上下间距从6px到4px */
-  font-size: 12px;
-  color: var(--fy-text-primary);
-  cursor: pointer;
-  transition: background 0.15s, padding-left 0.15s;
-  user-select: none;
-  min-height: 24px; /* 相应调整最小高度 */
-  flex-shrink: 0;
-}
-
-.menu-item:hover {
-  background: var(--fy-accent-bg);
-  padding-left: 16px;
-}
-
-.menu-divider {
-  height: 1px;
-  background: var(--fy-border-light);
-  margin: 4px 0;
 }
 
 /* Dialog styles */

@@ -124,7 +124,8 @@
           </div>
           <div v-else class="dm-file-grid">
             <div v-for="item in items" :key="item.id" :class="{ selected: selectedId === item.id }" class="dm-file-card"
-                 @click="selectedId = item.id" @dblclick="openDocument(item)">
+                 @click="selectedId = item.id" @dblclick="openDocument(item)"
+                 @contextmenu.prevent="showContextMenu($event, item)">
               <div class="dm-file-icon">
                 <el-icon :color="getFileColor(item.fileExt)" :size="32">
                   <component :is="getFileIcon(item.fileExt)"/>
@@ -383,12 +384,50 @@
       <p>释放文件以添加</p>
     </div>
   </div>
+
+  <ContextMenu :show="ctxMenuVisible" :x="ctxMenuX" :y="ctxMenuY" @close="closeCtxMenu">
+    <div class="context-menu-item" @click="startMove(ctxMenuDoc)">
+      <el-icon :size="14">
+        <Folder/>
+      </el-icon>
+      <span>移动</span>
+    </div>
+    <div class="context-menu-divider"></div>
+    <div class="context-menu-item context-menu-item-danger" @click="contextDelete(ctxMenuDoc)">
+      <el-icon :size="14">
+        <Close/>
+      </el-icon>
+      <span>删除</span>
+    </div>
+  </ContextMenu>
+
+  <el-dialog v-model="showMoveDialog" title="移动文件" width="420px" @closed="closeCtxMenu">
+    <div class="dm-move-body">
+      <div class="dm-move-section">
+        <div class="dm-move-section-title">移动到分类</div>
+        <el-select v-model="moveTargetCategoryId" clearable placeholder="未分类" style="width:100%">
+          <el-option v-for="cat in categories" :key="cat.id" :label="cat.name" :value="cat.id"/>
+        </el-select>
+      </div>
+      <div class="dm-move-section">
+        <div class="dm-move-section-title">移动到根目录</div>
+        <el-select v-model="moveTargetRootId" clearable placeholder="不更改根目录" style="width:100%">
+          <el-option v-for="root in roots" :key="root.id" :label="root.name" :value="root.id"/>
+        </el-select>
+        <div v-if="moveDoc.storageMode === 'repo'" class="dm-move-hint">搬迁模式文件将被物理移动到目标目录</div>
+      </div>
+    </div>
+    <template #footer>
+      <el-button @click="showMoveDialog = false">取消</el-button>
+      <el-button :disabled="!hasMoveChange" type="primary" @click="confirmMove">确定</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
 import {ref, reactive, computed, watch, onMounted} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
-import {DocumentService} from '../../services/ipc'
+import {DocumentService} from '@/services/ipc.js'
 import {open as openDialog} from '@tauri-apps/plugin-dialog'
 import {
   Document, Folder, Plus, Search, Setting, Monitor,
@@ -396,6 +435,7 @@ import {
   Coffee, MoreFilled, Close, Warning,
   UploadFilled, Select, Loading, List,
 } from '@element-plus/icons-vue'
+import ContextMenu from '../../components/ContextMenu.vue'
 
 const iconMap = {
   pdf: Document, docx: Document, doc: Document,
@@ -456,9 +496,24 @@ const editCategoryId = ref(null)
 const editTags = ref('')
 const editNotes = ref('')
 
+const ctxMenuVisible = ref(false)
+const ctxMenuX = ref(0)
+const ctxMenuY = ref(0)
+const ctxMenuDoc = ref(null)
+const showMoveDialog = ref(false)
+const moveDoc = ref(null)
+const moveTargetCategoryId = ref(null)
+const moveTargetRootId = ref(null)
+
 const selectedDoc = computed(() => {
   if (selectedId.value === null) return null
   return items.value.find(i => i.id === selectedId.value) || null
+})
+
+const hasMoveChange = computed(() => {
+  if (!moveDoc.value) return false
+  return moveTargetCategoryId.value !== (moveDoc.value.categoryId ?? null)
+      || (moveTargetRootId.value && moveTargetRootId.value !== moveDoc.value.rootId)
 })
 
 watch(selectedDoc, (doc) => {
@@ -623,12 +678,15 @@ async function confirmAddCategory() {
 
 async function removeCategoryFn(id) {
   try {
-    await ElMessageBox.confirm('删除分类后该分类下的文件将变为"未分类"', '确认删除');
+    await ElMessageBox.confirm('确认删除该分类？', '确认删除');
     await DocumentService.removeCategory(id);
     ElMessage.success('已删除');
     await loadData();
     loadFiles()
-  } catch {
+  } catch (e) {
+    if (e) {
+      ElMessage.error(typeof e === 'string' ? e : e.message || '删除失败')
+    }
   }
 }
 
@@ -780,31 +838,47 @@ async function confirmDelete(doc) {
   }
 }
 
-async function saveCategory() {
-  if (!selectedDoc.value) return;
-  try {
-    await DocumentService.updateMeta({id: selectedDoc.value.id, categoryId: editCategoryId.value})
-  } catch {
-  }
-  ;loadData()
+function showContextMenu(event, doc) {
+  ctxMenuDoc.value = doc
+  ctxMenuX.value = event.clientX
+  ctxMenuY.value = event.clientY
+  ctxMenuVisible.value = true
 }
 
-async function saveTags() {
-  if (!selectedDoc.value) return
-  try {
-    await DocumentService.updateMeta({
-      id: selectedDoc.value.id,
-      tags: JSON.stringify(editTags.value.split(/[,，]/).map(t => t.trim()).filter(Boolean))
-    })
-  } catch {
-  }
+function closeCtxMenu() {
+  ctxMenuVisible.value = false
 }
 
-async function saveNotes() {
-  if (!selectedDoc.value) return;
+function startMove(doc) {
+  closeCtxMenu()
+  moveDoc.value = doc
+  moveTargetCategoryId.value = doc.categoryId ?? null
+  moveTargetRootId.value = null
+  showMoveDialog.value = true
+}
+
+async function contextDelete(doc) {
+  closeCtxMenu()
+  await confirmDelete(doc)
+}
+
+async function confirmMove() {
+  if (!moveDoc.value || !hasMoveChange.value) return
+  const doc = moveDoc.value
+
   try {
-    await DocumentService.updateMeta({id: selectedDoc.value.id, notes: editNotes.value})
-  } catch {
+    if (moveTargetCategoryId.value !== (doc.categoryId ?? null)) {
+      await DocumentService.updateMeta({id: doc.id, categoryId: moveTargetCategoryId.value ?? null})
+    }
+    if (moveTargetRootId.value && moveTargetRootId.value !== doc.rootId) {
+      await DocumentService.moveDoc(doc.id, moveTargetRootId.value)
+    }
+    ElMessage.success('移动成功')
+    showMoveDialog.value = false
+    await loadFiles()
+    await loadData()
+  } catch (e) {
+    ElMessage.error(typeof e === 'string' ? e : e?.message || '移动失败')
   }
 }
 
@@ -813,9 +887,12 @@ onMounted(async () => {
   await loadFiles();
   loadImportHistory()
 })
+
 </script>
 
 <style scoped>
+@import "../shared/contextMenu.css";
+
 .doc-manager {
   height: 100vh;
   display: flex;
@@ -1320,5 +1397,23 @@ onMounted(async () => {
   padding: 3px 0;
   font-size: 12px;
   color: var(--el-text-color-secondary)
+}
+
+.dm-move-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.dm-move-section-title {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 6px;
+}
+
+.dm-move-hint {
+  font-size: 12px;
+  color: var(--el-color-warning);
+  margin-top: 4px;
 }
 </style>

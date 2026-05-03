@@ -1,30 +1,36 @@
 .context-menu {
     position: fixed;
-    z-index: 2000;
+    z-index: 10000;
     background: var(--fy-bg-surface);
     border: 1px solid var(--fy-border);
     border-radius: 8px;
-    box-shadow: var(--fy-shadow-lg);
+    box-shadow: var(--fy-shadow);
     padding: 4px 0;
     min-width: 120px;
     backdrop-filter: var(--fy-backdrop-blur-light);
     color: var(--fy-text-primary);
-    max-height: min(60vh, 360px);
+    max-height: calc(100vh - 20px);
     overflow-y: auto;
     overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
     scrollbar-width: thin;
-    scrollbar-color: var(--fy-scrollbar-thumb) transparent;
+    scrollbar-color: var(--fy-border) transparent;
 }
 
 .context-menu::-webkit-scrollbar {
     display: block !important;
-    width: 6px !important;
-    height: 6px !important;
+    width: 4px !important;
+    height: 4px !important;
 }
 
 .context-menu::-webkit-scrollbar-thumb {
-    border-radius: 4px;
-    background: var(--fy-scrollbar-thumb);
+    border-radius: 2px;
+    background: var(--fy-border);
+}
+
+.context-menu::-webkit-scrollbar-thumb:hover {
+    background: var(--fy-text-muted);
 }
 
 .context-menu::-webkit-scrollbar-track {
@@ -33,25 +39,37 @@
 
 .context-menu-header {
     padding: 4px 12px;
-    font-size: 12px;
+    font-size: 11px;
     color: var(--fy-text-muted);
     border-bottom: 1px solid var(--fy-border-light);
     margin-bottom: 4px;
 }
 
 .context-menu-item {
-    padding: 6px 12px;
-    font-size: 13px;
-    cursor: pointer;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    transition: background 0.2s;
+    gap: 8px;
+    padding: 4px 12px;
+    font-size: 12px;
+    color: var(--fy-text-primary);
+    cursor: pointer;
+    transition: background 0.15s, padding-left 0.15s;
+    user-select: none;
+    min-height: 24px;
+    flex-shrink: 0;
 }
 
 .context-menu-item:hover {
-    background: var(--fy-accent);
-    color: #fff;
+    background: var(--fy-accent-bg);
+    padding-left: 16px;
+}
+
+.context-menu-item-danger {
+    color: var(--el-color-danger);
+}
+
+.context-menu-item-danger:hover {
+    background: var(--el-color-danger-light-9);
 }
 
 .context-menu-divider {
@@ -63,8 +81,10 @@
 .shortcut-hint {
     font-size: 11px;
     opacity: 0.75;
+    margin-left: auto;
 }
 
 .check-icon {
     font-size: 12px;
+    margin-left: auto;
 }

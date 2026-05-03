@@ -631,6 +631,7 @@ pub fn run() {
             get_doc_page,
             update_doc_meta,
             delete_doc,
+            move_doc,
             get_doc_stats,
             open_doc,
             open_doc_folder,

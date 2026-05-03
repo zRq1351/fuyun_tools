@@ -3,7 +3,7 @@
        @mousedown.left="handleRootMouseDown"
        @dblclick.left.stop.prevent="closeWindow"
        @contextmenu.prevent="handleContextMenu"
-       @click="hideContextMenu">
+       @click="closeCtxMenu">
     <img v-if="imageSrc" ref="imageRef" :src="imageSrc" alt="" class="pinned-image" draggable="false"
          @load="handleImageLoaded"/>
 
@@ -35,13 +35,12 @@
       {{ toastMessage }}
     </div>
 
-    <!-- 自定义右键菜单 -->
-    <div v-if="contextMenu.show" class="context-menu" :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }" @mousedown.stop>
-      <div class="menu-item" @click="copyAllText">复制全部文字</div>
-      <div class="menu-item" @click="openTextWindow">在独立窗口查看</div>
-      <div class="menu-divider"></div>
-      <div class="menu-item" @click="closeWindow">关闭贴图</div>
-    </div>
+    <ContextMenu :show="ctxMenuShow" :x="ctxMenuX" :y="ctxMenuY" @close="closeCtxMenu">
+      <div class="context-menu-item" @click="copyAllText">复制全部文字</div>
+      <div class="context-menu-item" @click="openTextWindow">在独立窗口查看</div>
+      <div class="context-menu-divider"></div>
+      <div class="context-menu-item" @click="closeWindow">关闭贴图</div>
+    </ContextMenu>
   </div>
 </template>
 
@@ -49,6 +48,7 @@
 import {onMounted, onUnmounted, ref} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
 import {useWindowDrag} from '../../composables/useWindowDrag'
+import ContextMenu from '../../components/ContextMenu.vue'
 
 const {startDrag} = useWindowDrag()
 
@@ -82,32 +82,18 @@ function showToast(msg, isError = false) {
 }
 
 // Context Menu
-const contextMenu = ref({ show: false, x: 0, y: 0 })
+const ctxMenuShow = ref(false)
+const ctxMenuX = ref(0)
+const ctxMenuY = ref(0)
 
 function handleContextMenu(event) {
-  let x = event.clientX
-  let y = event.clientY
-  
-  // 菜单实际高度约为 160px，宽度约为 140px
-  const menuWidth = 140
-  const menuHeight = 160
-  
-  if (x + menuWidth > window.innerWidth) {
-    x = Math.max(0, window.innerWidth - menuWidth)
-  }
-  if (y + menuHeight > window.innerHeight) {
-    y = Math.max(0, window.innerHeight - menuHeight)
-  }
-  
-  contextMenu.value = {
-    show: true,
-    x,
-    y
-  }
+  ctxMenuX.value = event.clientX
+  ctxMenuY.value = event.clientY
+  ctxMenuShow.value = true
 }
 
-function hideContextMenu() {
-  contextMenu.value.show = false
+function closeCtxMenu() {
+  ctxMenuShow.value = false
 }
 
 let ocrTaskId = 0
@@ -140,7 +126,7 @@ function handlePinnedImageData(event) {
 }
 
 async function closeWindow() {
-  hideContextMenu()
+  closeCtxMenu()
   try {
     if (windowLabel.value) {
       await invoke('close_pinned_image_window', {label: windowLabel.value})
@@ -153,12 +139,12 @@ async function closeWindow() {
 }
 
 function handleRootMouseDown(event) {
-  hideContextMenu()
+  closeCtxMenu()
   startDrag()
 }
 
 async function copyAllText() {
-  hideContextMenu()
+  closeCtxMenu()
   if (isRecognizing.value) {
     showToast('正在识别中，请稍候...', false)
     return
@@ -179,7 +165,7 @@ async function copyAllText() {
 }
 
 async function openTextWindow() {
-  hideContextMenu()
+  closeCtxMenu()
   if (isRecognizing.value) {
     showToast('正在识别中，请稍候...', false)
     return
@@ -403,35 +389,4 @@ onUnmounted(() => {
   color: transparent;
 }
 
-/* 自定义右键菜单 */
-.context-menu {
-  position: absolute;
-  z-index: 20;
-  background: var(--fy-bg-surface);
-  border: 1px solid var(--fy-border);
-  border-radius: 6px;
-  padding: 4px 0;
-  min-width: 140px;
-  max-height: 100vh;
-  overflow-y: auto;
-  box-shadow: var(--fy-shadow);
-  color: var(--fy-text-primary);
-  font-size: 13px;
-}
-
-.menu-item {
-  padding: 8px 12px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.menu-item:hover {
-  background: var(--fy-accent);
-}
-
-.menu-divider {
-  height: 1px;
-  background: var(--fy-border);
-  margin: 4px 0;
-}
 </style>

@@ -90,54 +90,48 @@
     </div>
 
     <!-- Context Menu -->
-    <div
-        v-if="contextMenu.visible"
-        ref="contextMenuRef"
-        :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
-        class="context-menu"
-        @click.stop
-    >
-      <div class="menu-item" @click="openApp(contextMenu.app)">
+    <ContextMenu :show="ctxVisible" :x="ctxX" :y="ctxY" @close="closeCtxMenu">
+      <div class="context-menu-item" @click="openApp(ctxApp)">
         <el-icon :size="14">
           <Monitor/>
         </el-icon>
         <span>打开</span>
       </div>
-      <div class="menu-item" @click="openAppDirectory(contextMenu.app)">
+      <div class="context-menu-item" @click="openAppDirectory(ctxApp)">
         <el-icon :size="14">
           <FolderOpened/>
         </el-icon>
         <span>打开应用目录</span>
       </div>
-      <div class="menu-divider"></div>
-      <div v-if="contextMenu.app?.source === 'manual'" class="menu-item" @click="removeApp(contextMenu.app)">
+      <div class="context-menu-divider"></div>
+      <div v-if="ctxApp?.source === 'manual'" class="context-menu-item" @click="removeApp(ctxApp)">
         <el-icon :size="14">
           <Delete/>
         </el-icon>
         <span>移除应用</span>
       </div>
-      <div v-else class="menu-item" @click="removeFromCategory(contextMenu.app)">
+      <div v-else class="context-menu-item" @click="removeFromCategory(ctxApp)">
         <el-icon :size="14">
           <Close/>
         </el-icon>
         <span>移出分类</span>
       </div>
-      <div class="menu-divider"></div>
-      <div class="menu-item" @click="showAddCommandDialog">
+      <div class="context-menu-divider"></div>
+      <div class="context-menu-item" @click="showAddCommandDialog">
         <el-icon :size="14">
           <Star/>
         </el-icon>
         <span>添加启动命令</span>
       </div>
-    </div>
+    </ContextMenu>
 
     <!-- 添加命令对话框 -->
     <div v-if="showCommandDialog" class="dialog-overlay">
       <div class="command-dialog">
         <div class="dialog-title">为应用添加启动命令</div>
         <div class="app-info-preview">
-          <img v-if="contextMenu.app?.icon_base64" :src="contextMenu.app.icon_base64" class="preview-icon"/>
-          <span class="preview-name">{{ contextMenu.app?.title }}</span>
+          <img v-if="ctxApp?.icon_base64" :src="ctxApp.icon_base64" class="preview-icon"/>
+          <span class="preview-name">{{ ctxApp?.title }}</span>
         </div>
 
         <div class="form-group">
@@ -168,6 +162,7 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {Close, Delete, FolderAdd, FolderOpened, Grid, Monitor, Star} from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import {invoke} from '@tauri-apps/api/core'
+import ContextMenu from '../../../components/ContextMenu.vue'
 
 const props = defineProps({
   categories: {type: Array, required: true},
@@ -177,7 +172,10 @@ const props = defineProps({
 const emit = defineEmits(['select', 'reorder-apps', 'reorder-categories', 'category-changed'])
 
 const customCategories = ref([])
-const contextMenu = ref({visible: false, x: 0, y: 0, app: null})
+const ctxVisible = ref(false)
+const ctxX = ref(0)
+const ctxY = ref(0)
+const ctxApp = ref(null)
 const expandedCategory = ref(null)
 const appsContainer = ref(null)
 const categoriesContainer = ref(null)
@@ -342,17 +340,28 @@ const destroyAppsSortable = () => {
 // Context menu
 const openApp = (app) => {
   emit('select', app)
-  contextMenu.value.visible = false
+  closeCtxMenu()
 }
 
 const openAppDirectory = async (app) => {
   if (!app || !app.path) return
   try {
     await invoke('open_app_directory', {path: app.path})
-    hideContextMenu()
+    closeCtxMenu()
   } catch (error) {
     console.error('打开应用目录失败:', error)
   }
+}
+
+const showContextMenu = (event, app) => {
+  ctxApp.value = app
+  ctxX.value = event.clientX
+  ctxY.value = event.clientY
+  ctxVisible.value = true
+}
+
+const closeCtxMenu = () => {
+  ctxVisible.value = false
 }
 
 // 启动分类下的所有应用
@@ -389,41 +398,12 @@ const launchAllApps = async (category) => {
   }
 }
 
-const contextMenuRef = ref(null)
-
-const showContextMenu = async (event, app) => {
-  let x = event.clientX
-  let y = event.clientY
-
-  const menuWidth = 120
-  if (x + menuWidth > window.innerWidth) {
-    x = window.innerWidth - menuWidth - 10
-  }
-  x = Math.max(10, x)
-
-  contextMenu.value = {visible: true, x, y, app}
-
-  await nextTick()
-  const menuEl = contextMenuRef.value
-  if (menuEl) {
-    const actualHeight = menuEl.offsetHeight
-    if (y + actualHeight > window.innerHeight) {
-      y = Math.max(10, event.clientY - actualHeight - 4)
-    }
-    contextMenu.value = {visible: true, x, y, app}
-  }
-}
-
-const hideContextMenu = () => {
-  contextMenu.value.visible = false
-}
-
 const removeFromCategory = async (app) => {
   if (!app || !app.id) return
   try {
     const {invoke} = await import('@tauri-apps/api/core')
     await invoke('set_app_category', {appId: app.id, categoryId: ''})
-    hideContextMenu()
+    closeCtxMenu()
     emit('category-changed')
   } catch (error) {
     console.error('Remove category error:', error)
@@ -435,7 +415,7 @@ const removeApp = async (app) => {
   try {
     const {invoke} = await import('@tauri-apps/api/core')
     await invoke('remove_app_record', {appId: app.id})
-    hideContextMenu()
+    closeCtxMenu()
     emit('category-changed')
   } catch (error) {
     console.error('Remove app error:', error)
@@ -446,7 +426,7 @@ const assignToCategory = async (app, categoryId) => {
   if (!app || !app.id) return
   try {
     await invoke('set_app_category', {appId: app.id, categoryId})
-    hideContextMenu()
+    closeCtxMenu()
     // 通知父组件重新加载配置
     emit('category-changed')
   } catch (error) {
@@ -456,7 +436,7 @@ const assignToCategory = async (app, categoryId) => {
 
 // 显示添加命令对话框
 const showAddCommandDialog = () => {
-  const app = contextMenu.value.app
+  const app = ctxApp.value
   if (!app) return
 
   // 自动生成前缀：使用应用名称的小写形式（不包含 :）
@@ -471,12 +451,12 @@ const showAddCommandDialog = () => {
 // 关闭命令对话框
 const closeCommandDialog = () => {
   showCommandDialog.value = false
-  hideContextMenu()
+  closeCtxMenu()
 }
 
 // 确认添加命令
 const confirmAddCommand = async () => {
-  const app = contextMenu.value.app
+  const app = ctxApp.value
   if (!app || !commandForm.value.prefix.trim()) return
 
   try {
@@ -546,7 +526,6 @@ const confirmAddCommand = async () => {
 }
 
 onMounted(() => {
-  document.addEventListener('click', hideContextMenu)
   initCategoriesSortable()
   loadCategories()
 })
@@ -557,7 +536,6 @@ watch(() => props.categories, () => {
 }, {deep: true})
 
 onBeforeUnmount(() => {
-  document.removeEventListener('click', hideContextMenu)
   if (categoriesSortable) {
     categoriesSortable.destroy()
   }
@@ -910,81 +888,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.context-menu {
-  position: fixed;
-  background: var(--fy-bg-surface);
-  border: 1px solid var(--fy-border);
-  border-radius: 8px;
-  padding: 4px 0;
-  min-width: 120px;
-  max-height: calc(100vh - 20px);
-  overflow-y: auto;
-  box-shadow: var(--fy-shadow);
-  z-index: 10000;
-}
-
-.context-menu::-webkit-scrollbar {
-  width: 4px;
-}
-
-.context-menu::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.context-menu::-webkit-scrollbar-thumb {
-  background: var(--fy-border);
-  border-radius: 2px;
-}
-
-.menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 12px; /* 缩短上下间距从6px到4px */
-  font-size: 12px;
-  color: var(--fy-text-primary);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.menu-item:hover {
-  background: var(--fy-accent-bg);
-  padding-left: 16px;
-}
-
-.menu-divider {
-  height: 1px;
-  background: var(--fy-border-light);
-  margin: 4px 0;
-}
-
-.menu-category-list {
-  max-height: calc(32px * 5); /* 每条菜单项约32px，最多显示5条 */
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--fy-border) transparent;
-  touch-action: pan-y;
-  height: auto;
-}
-
-.menu-category-list::-webkit-scrollbar {
-  width: 4px;
-}
-
-.menu-category-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.menu-category-list::-webkit-scrollbar-thumb {
-  background: var(--fy-border);
-  border-radius: 2px;
-}
-
-.menu-category-list::-webkit-scrollbar-thumb:hover {
-  background: var(--fy-text-muted);
 }
 
 /* Dialog styles */

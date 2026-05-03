@@ -4,7 +4,7 @@ use sqlx::sqlite::{
 };
 use sqlx::{Acquire, Row, Sqlite, SqliteConnection};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::OnceCell;
 
@@ -464,11 +464,17 @@ pub async fn get_doc_categories() -> Result<Vec<DocCategory>, String> {
 pub async fn remove_doc_category(id: i64) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
 
-    sqlx::query("UPDATE document_files SET category_id = NULL WHERE category_id = ?1")
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM document_files WHERE category_id = ?1"
+    )
         .bind(id)
-        .execute(&mut *conn)
+        .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("更新文件分类失败: {}", e))?;
+        .map_err(|e| format!("查询分类下文件失败: {}", e))?;
+
+    if count.0 > 0 {
+        return Err("该分类下存在文件，请先将文件移至其他分类或取消分类后再删除".to_string());
+    }
 
     sqlx::query("DELETE FROM document_categories WHERE id = ?1")
         .bind(id)
@@ -653,6 +659,93 @@ pub async fn update_doc_managed_path(id: i64, managed_path: &str) -> Result<(), 
         .await
         .map_err(|e| format!("更新文件路径失败: {}", e))?;
     Ok(())
+}
+
+pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
+    let doc = get_doc_file_by_id(id)
+        .await?
+        .ok_or("文件不存在".to_string())?;
+
+    if doc.root_id == new_root_id {
+        return Ok(());
+    }
+
+    let new_root = get_doc_root_by_id(new_root_id)
+        .await?
+        .ok_or("目标根目录不存在".to_string())?;
+
+    let mut conn = open_docs_db().await?;
+
+    if doc.storage_mode == "repo" {
+        let old_path = Path::new(&doc.managed_path);
+        if old_path.exists() {
+            let file_name = old_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&doc.file_name);
+
+            let target_dir = if let Some(ref cat_name) = doc.category_name {
+                if cat_name == "未分类" {
+                    Path::new(&new_root.root_path).to_path_buf()
+                } else {
+                    Path::new(&new_root.root_path).join(cat_name)
+                }
+            } else {
+                Path::new(&new_root.root_path).to_path_buf()
+            };
+
+            fs::create_dir_all(&target_dir)
+                .map_err(|e| format!("创建目标目录失败: {}", e))?;
+
+            let new_path = resolve_unused_filename(&target_dir, file_name, &doc.file_ext);
+            let dest = target_dir.join(&new_path);
+
+            let options = fs_extra::file::CopyOptions::new().overwrite(true);
+            fs_extra::file::move_file(old_path, &dest, &options)
+                .map_err(|e| format!("移动文件失败: {}", e))?;
+
+            let new_managed_path = dest.to_string_lossy().to_string();
+            sqlx::query("UPDATE document_files SET managed_path = ?1, root_id = ?2 WHERE id = ?3")
+                .bind(&new_managed_path)
+                .bind(new_root_id)
+                .bind(id)
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| format!("更新文件记录失败: {}", e))?;
+        } else {
+            sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
+                .bind(new_root_id)
+                .bind(id)
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| format!("更新文件记录失败: {}", e))?;
+        }
+    } else {
+        sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
+            .bind(new_root_id)
+            .bind(id)
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| format!("更新文件记录失败: {}", e))?;
+    }
+
+    Ok(())
+}
+
+pub async fn get_doc_root_by_id(id: i64) -> Result<Option<DocRoot>, String> {
+    let mut conn = open_docs_db().await?;
+    let row = sqlx::query("SELECT id, name, root_path, created_at FROM document_roots WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(|e| format!("查询根目录失败: {}", e))?;
+
+    Ok(row.map(|r| DocRoot {
+        id: r.try_get::<i64, _>(0).unwrap_or(0),
+        name: r.try_get::<String, _>(1).unwrap_or_default(),
+        root_path: r.try_get::<String, _>(2).unwrap_or_default(),
+        created_at: r.try_get::<i64, _>(3).unwrap_or(0),
+    }))
 }
 
 pub async fn get_doc_file_by_id(id: i64) -> Result<Option<DocFile>, String> {

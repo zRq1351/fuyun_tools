@@ -295,6 +295,11 @@ pub async fn delete_doc(request: DeleteDocRequest) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn move_doc(id: i64, new_root_id: i64) -> Result<(), String> {
+    document_database::move_doc_file(id, new_root_id).await
+}
+
+#[tauri::command]
 pub async fn get_doc_stats(root_id: Option<i64>) -> Result<document_database::DocStats, String> {
     document_database::get_doc_stats(root_id).await
 }
