@@ -274,30 +274,35 @@ html.eye-care,
 }
 
 /* ========== 全局滚动条样式覆盖 ========== */
-/* 浏览器原生滚动条 - 仅暗色和护眼主题 */
+/* 浏览器原生滚动条 */
+html.light ::-webkit-scrollbar,
 html.dark ::-webkit-scrollbar,
 html.eye-care ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
 }
 
+html.light ::-webkit-scrollbar-track,
 html.dark ::-webkit-scrollbar-track,
 html.eye-care ::-webkit-scrollbar-track {
     background: var(--fy-scrollbar-track);
 }
 
+html.light ::-webkit-scrollbar-thumb,
 html.dark ::-webkit-scrollbar-thumb,
 html.eye-care ::-webkit-scrollbar-thumb {
     background: var(--fy-scrollbar-thumb);
     border-radius: 4px;
 }
 
+html.light ::-webkit-scrollbar-thumb:hover,
 html.dark ::-webkit-scrollbar-thumb:hover,
 html.eye-care ::-webkit-scrollbar-thumb:hover {
     background: var(--fy-scrollbar-thumb-hover);
 }
 
-/* Firefox 滚动条 - 仅暗色和护眼主题 */
+/* Firefox 滚动条 */
+html.light *,
 html.dark *,
 html.eye-care * {
     scrollbar-width: thin;
