@@ -1059,15 +1059,16 @@ pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
         if mode == "repo" && !managed.is_empty() {
             let managed_path = std::path::Path::new(&managed);
             let source_path = std::path::Path::new(&source);
-            if managed_path.exists() {
-                if let Some(parent) = source_path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
+                if managed_path.exists() {
+                    if let Some(parent) = source_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let options = fs_extra::file::CopyOptions::new().overwrite(true);
+                    if let Err(e) = fs_extra::file::move_file(&managed, &source, &options) {
+                        errors.push(format!("回退失败 {}: {}", doc_id, e));
+                        continue;
+                    }
                 }
-                if let Err(e) = std::fs::rename(&managed, &source) {
-                    errors.push(format!("回退失败 {}: {}", doc_id, e));
-                    continue;
-                }
-            }
         }
 
         sqlx::query::<Sqlite>("DELETE FROM document_files WHERE id = ?1")

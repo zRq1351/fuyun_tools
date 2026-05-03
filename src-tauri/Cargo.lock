@@ -1921,6 +1921,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs_extra"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
+
+[[package]]
 name = "funty"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2067,12 +2073,12 @@ dependencies = [
  "cpal",
  "dirs 5.0.1",
  "enigo",
+    "fs_extra",
  "futures-util",
  "hound",
  "image 0.25.10",
  "imageproc",
  "keyring",
- "lazy_static",
  "log",
  "lru",
  "ocr-rs",

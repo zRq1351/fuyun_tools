@@ -164,7 +164,9 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
         ).await {
             Ok(id) => {
                 if need_move {
-                    if let Err(e) = fs::rename(src, dest_dir_clone.as_ref().unwrap()) {
+                    let dest = dest_dir_clone.as_ref().unwrap();
+                    let options = fs_extra::file::CopyOptions::new().overwrite(true);
+                    if let Err(e) = fs_extra::file::move_file(src, dest, &options) {
                         document_database::delete_doc_file(id).await.ok();
                         errors.push(format!("移动文件失败 {}: {}", file_name, e));
                         continue;
