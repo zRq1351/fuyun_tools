@@ -75,6 +75,16 @@ pub async fn reorder_doc_categories(ids: Vec<i64>) -> Result<(), String> {
     document_database::reorder_doc_categories(ids).await
 }
 
+#[tauri::command]
+pub async fn reorder_doc_roots(ids: Vec<i64>) -> Result<(), String> {
+    document_database::reorder_doc_roots(ids).await
+}
+
+#[tauri::command]
+pub async fn reorder_doc_files(ids: Vec<i64>) -> Result<(), String> {
+    document_database::reorder_doc_files(ids).await
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportFilesRequest {

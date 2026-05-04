@@ -627,6 +627,8 @@ pub fn run() {
             remove_doc_category,
             rename_doc_category,
             reorder_doc_categories,
+            reorder_doc_roots,
+            reorder_doc_files,
             import_files,
             get_doc_page,
             update_doc_meta,

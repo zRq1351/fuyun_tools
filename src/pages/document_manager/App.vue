@@ -29,13 +29,25 @@
         </div>
         <div class="dm-sidebar-section">
           <div class="dm-section-title">根目录</div>
-          <div class="dm-root-list">
-            <div v-for="root in roots" :key="root.id" :class="{ active: rootFilter === root.id }" class="dm-root-item"
+          <div ref="rootListRef" class="dm-root-list">
+            <div v-for="root in roots" :key="root.id" :class="{ active: rootFilter === root.id }"
+                 :data-root-id="root.id" class="dm-root-item sortable-root"
                  @click="rootFilter = rootFilter === root.id ? null : root.id">
               <el-icon>
                 <Folder/>
               </el-icon>
               <span class="dm-root-name">{{ root.name }}</span>
+              <el-dropdown trigger="click" @click.stop>
+                <el-icon class="dm-cat-more">
+                  <MoreFilled/>
+                </el-icon>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item style="color: var(--el-color-danger)" @click="removeRootFn(root.id)">删除
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
             <div class="dm-root-item dm-root-add" @click="showAddRoot = true">
               <el-icon>
@@ -54,15 +66,17 @@
               </el-icon>
             </el-button>
           </div>
-          <div class="dm-category-list">
-            <div :class="{ active: categoryFilter === null }" class="dm-category-item" @click="categoryFilter = null">
+          <div ref="catListRef" class="dm-category-list">
+            <div :class="{ active: categoryFilter === null }" class="dm-category-item dm-cat-all"
+                 @click="categoryFilter = null">
               <el-icon>
                 <Document/>
               </el-icon>
               <span>全部</span>
             </div>
             <div v-for="cat in categories" :key="cat.id" :class="{ active: categoryFilter === cat.id }"
-                 class="dm-category-item"
+                 :data-cat-id="cat.id"
+                 class="dm-category-item sortable-category"
                  @click="categoryFilter = categoryFilter === cat.id ? null : cat.id">
               <el-icon :style="{ color: cat.color }">
                 <Folder/>
@@ -138,10 +152,10 @@
             </el-icon>
             <p style="margin-top:12px;color:var(--el-text-color-secondary)">加载中...</p>
           </div>
-          <div v-else class="dm-file-grid" @click.self="selectedId = null">
-            <div v-for="item in items" :key="item.id"
+          <div v-else ref="fileGridRef" class="dm-file-grid" @click.self="selectedId = null">
+            <div v-for="item in items" :key="item.id" :data-file-id="item.id"
                  :class="{ selected: selectedId === item.id, 'ctx-anchor': ctxAnchorId === item.id }"
-                 class="dm-file-card"
+                 class="dm-file-card sortable-file"
                  @click="selectedId = item.id" @dblclick="openDocument(item)"
                  @contextmenu.prevent="showContextMenu($event, item)">
               <div class="dm-file-icon">
@@ -500,7 +514,7 @@
 </template>
 
 <script setup>
-import {computed, onMounted, reactive, ref, watch} from 'vue'
+import {computed, nextTick, onMounted, reactive, ref, watch} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {DocumentService} from '@/services/ipc.js'
 import {open as openDialog} from '@tauri-apps/plugin-dialog'
@@ -527,6 +541,7 @@ import {
   Warning,
 } from '@element-plus/icons-vue'
 import ContextMenu from '../../components/ContextMenu.vue'
+import Sortable from 'sortablejs'
 
 const iconMap = {
   pdf: Document, docx: Document, doc: Document,
@@ -586,6 +601,13 @@ const selectedId = ref(null)
 const dragover = ref(false)
 const activeTab = ref('files')
 const importHistory = ref([])
+
+const rootListRef = ref(null)
+const catListRef = ref(null)
+const fileGridRef = ref(null)
+let rootSortable = null
+let catSortable = null
+let fileSortable = null
 
 const showAddRoot = ref(false)
 const newRootName = ref('')
@@ -707,6 +729,10 @@ async function loadData() {
   } catch (e) {
     ElMessage.error('加载数据失败: ' + e)
   }
+  nextTick(() => {
+    initRootSortable();
+    initCatSortable()
+  })
 }
 
 async function loadFiles() {
@@ -726,6 +752,8 @@ async function loadFiles() {
   } finally {
     loading.value = false
   }
+  await nextTick()
+  initFileSortable()
 }
 
 async function loadImportHistory() {
@@ -822,6 +850,21 @@ async function removeCategoryFn(id) {
     await ElMessageBox.confirm('确认删除该分类？', '确认删除');
     await DocumentService.removeCategory(id);
     ElMessage.success('已删除');
+    await loadData();
+    loadFiles()
+  } catch (e) {
+    if (e && e !== 'cancel' && e !== 'close') {
+      ElMessage.error(typeof e === 'string' ? e : e.message || '删除失败')
+    }
+  }
+}
+
+async function removeRootFn(id) {
+  try {
+    await ElMessageBox.confirm('确认删除该管理目录？', '确认删除');
+    await DocumentService.removeRoot(id);
+    ElMessage.success('已删除');
+    rootFilter.value = null;
     await loadData();
     loadFiles()
   } catch (e) {
@@ -930,6 +973,115 @@ async function importScanned() {
   } catch (e) {
     ElMessage.error('导入失败: ' + e)
   }
+}
+
+function initRootSortable() {
+  if (!rootListRef.value) return
+  if (rootSortable) rootSortable.destroy()
+  rootSortable = Sortable.create(rootListRef.value, {
+    animation: 200,
+    ghostClass: 'dm-sort-ghost',
+    dragClass: 'dm-sort-drag',
+    chosenClass: 'dm-sort-chosen',
+    forceFallback: true,
+    delay: 500,
+    fallbackClass: 'dm-sort-fallback',
+    fallbackTolerance: 3,
+    fallbackOnBody: true,
+    swapThreshold: 0.65,
+    filter: '.dm-cat-more, .dm-root-add',
+    preventOnFilter: false,
+    onEnd: async (evt) => {
+      const {oldIndex, newIndex} = evt
+      if (oldIndex !== newIndex && oldIndex !== undefined && newIndex !== undefined) {
+        const reordered = [...roots.value]
+        const [moved] = reordered.splice(oldIndex, 1)
+        reordered.splice(newIndex, 0, moved)
+        roots.value = reordered
+        const ids = roots.value.map(r => r.id)
+        await DocumentService.reorderRoots(ids)
+      }
+    }
+  })
+}
+
+function initCatSortable() {
+  if (!catListRef.value) return
+  if (catSortable) catSortable.destroy()
+  const el = catListRef.value
+  catSortable = Sortable.create(el, {
+    animation: 200,
+    ghostClass: 'dm-sort-ghost',
+    dragClass: 'dm-sort-drag',
+    chosenClass: 'dm-sort-chosen',
+    forceFallback: true,
+    delay: 500,
+    fallbackClass: 'dm-sort-fallback',
+    fallbackTolerance: 3,
+    fallbackOnBody: true,
+    swapThreshold: 0.65,
+    filter: '.dm-cat-more, .dm-cat-empty, .dm-cat-all',
+    preventOnFilter: false,
+    onEnd: async (evt) => {
+      const offset = 1
+      const oldIndex = evt.oldIndex - offset
+      const newIndex = evt.newIndex - offset
+      if (oldIndex !== newIndex && oldIndex >= 0 && newIndex >= 0 && oldIndex < categories.value.length && newIndex < categories.value.length) {
+        const reordered = [...categories.value]
+        const [moved] = reordered.splice(oldIndex, 1)
+        reordered.splice(newIndex, 0, moved)
+        categories.value = reordered
+        const ids = categories.value.map(c => c.id)
+        await DocumentService.reorderCategories(ids)
+      }
+    }
+  })
+}
+
+function initFileSortable() {
+  if (fileSortable) {
+    fileSortable.destroy();
+    fileSortable = null
+  }
+  if (!fileGridRef.value || items.value.length === 0) return
+  fileSortable = Sortable.create(fileGridRef.value, {
+    animation: 200,
+    ghostClass: 'dm-sort-ghost',
+    dragClass: 'dm-sort-drag',
+    chosenClass: 'dm-sort-chosen',
+    forceFallback: true,
+    delay: 500,
+    fallbackClass: 'dm-sort-fallback',
+    fallbackTolerance: 3,
+    fallbackOnBody: true,
+    swapThreshold: 0.65,
+    onStart: () => {
+      setTimeout(() => {
+        const el = document.querySelector('.dm-sort-fallback')
+        if (!el) return
+        const move = (e) => {
+          el.style.left = (e.clientX - el.offsetWidth / 2) + 'px';
+          el.style.top = (e.clientY - el.offsetHeight / 2) + 'px'
+        }
+        document.addEventListener('mousemove', move)
+        document.addEventListener('mouseup', function up() {
+          document.removeEventListener('mousemove', move);
+          document.removeEventListener('mouseup', up)
+        })
+      }, 50)
+    },
+    onEnd: async (evt) => {
+      const {oldIndex, newIndex} = evt
+      if (oldIndex !== newIndex && oldIndex !== undefined && newIndex !== undefined) {
+        const reordered = [...items.value]
+        const [moved] = reordered.splice(oldIndex, 1)
+        reordered.splice(newIndex, 0, moved)
+        items.value = reordered
+        const ids = items.value.map(f => f.id)
+        await DocumentService.reorderFiles(ids)
+      }
+    }
+  })
 }
 
 async function detectOrphans() {
@@ -1223,72 +1375,35 @@ onMounted(async () => {
   color: var(--el-text-color-secondary)
 }
 
-.dm-orphan-banner {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  margin: 4px 12px;
-  cursor: pointer;
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--el-color-warning-dark-2);
-  background: var(--el-color-warning-light-9);
-  transition: background .15s
+.dm-sort-ghost {
+  opacity: 0.4;
+  background: var(--el-color-primary-light-9) !important;
+  border: 2px dashed var(--el-color-primary) !important
 }
 
-.dm-orphan-banner:hover {
-  background: var(--el-color-warning-light-7)
+.dm-sort-drag {
+  opacity: 0.3
 }
 
-.dm-orphan-banner--hint {
-  color: var(--el-text-color-secondary);
-  background: transparent;
-  font-size: 12px
+.dm-sort-chosen {
+  opacity: 1 !important;
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+  border-color: var(--el-color-primary) !important
 }
 
-.dm-orphan-banner--hint:hover {
-  background: var(--el-fill-color-light)
-}
-
-.dm-orphan-badge {
-  background: var(--el-color-danger);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 0 6px;
-  border-radius: 10px;
-  line-height: 18px;
-  min-width: 20px;
-  text-align: center
-}
-
-.dm-orphan-list {
-  max-height: 380px;
-  overflow-y: auto
-}
-
-.dm-orphan-group-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--el-text-color-primary);
-  padding: 8px 4px 4px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  margin-bottom: 4px
-}
-
-.dm-orphan-group-title:first-child {
-  padding-top: 0
-}
-
-.dm-orphan-cat {
-  font-size: 11px;
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-  padding: 0 6px;
-  border-radius: 3px;
-  margin-left: auto;
-  margin-right: 8px
+.dm-sort-fallback {
+  opacity: 0.95 !important;
+  background: var(--el-bg-color) !important;
+  border: 2px solid var(--el-color-primary) !important;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  cursor: grabbing !important;
+  pointer-events: none;
+  position: fixed !important;
+  z-index: 9999 !important;
+  overflow: hidden
 }
 
 .dm-sidebar-section {
@@ -1321,6 +1436,17 @@ onMounted(async () => {
   transition: background .15s
 }
 
+.dm-root-item.sortable-root,
+.dm-category-item.sortable-category {
+  cursor: grab;
+  user-select: none
+}
+
+.dm-root-item.sortable-root:active,
+.dm-category-item.sortable-category:active {
+  cursor: grabbing
+}
+
 .dm-root-item:hover, .dm-category-item:hover {
   background: var(--el-fill-color-light)
 }
@@ -1351,6 +1477,10 @@ onMounted(async () => {
 }
 
 .dm-category-item:hover .dm-cat-more {
+  opacity: 1
+}
+
+.dm-root-item:hover .dm-cat-more {
   opacity: 1
 }
 
@@ -1437,8 +1567,8 @@ onMounted(async () => {
   flex-wrap: wrap;
   align-content: flex-start;
   gap: 8px;
-  padding: 12px 16px;
   overflow-y: auto;
+  padding: 12px 16px;
   padding-bottom: 200px
 }
 
@@ -1454,6 +1584,15 @@ onMounted(async () => {
   gap: 8px;
   transition: all .15s;
   background: var(--el-bg-color)
+}
+
+.dm-file-card.sortable-file {
+  cursor: grab;
+  user-select: none
+}
+
+.dm-file-card.sortable-file:active {
+  cursor: grabbing
 }
 
 .dm-file-card:hover {

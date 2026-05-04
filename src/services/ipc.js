@@ -525,6 +525,8 @@ export const DocumentService = {
     removeCategory: (id) => invoke('remove_doc_category', {id}),
     renameCategory: (id, name) => invoke('rename_doc_category', {id, name}),
     reorderCategories: (ids) => invoke('reorder_doc_categories', {ids}),
+    reorderRoots: (ids) => invoke('reorder_doc_roots', {ids}),
+    reorderFiles: (ids) => invoke('reorder_doc_files', {ids}),
 
     importFiles: (request) => invoke('import_files', {request}),
     getPage: (request) => invoke('get_doc_page', {request}),

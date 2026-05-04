@@ -236,6 +236,14 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
         .execute(&mut *conn)
         .await;
 
+    let _ = sqlx::query::<Sqlite>("ALTER TABLE document_roots ADD COLUMN position INTEGER DEFAULT 0")
+        .execute(&mut *conn)
+        .await;
+
+    let _ = sqlx::query::<Sqlite>("ALTER TABLE document_files ADD COLUMN sort_order INTEGER DEFAULT 0")
+        .execute(&mut *conn)
+        .await;
+
     sqlx::query(
         "
         CREATE VIRTUAL TABLE IF NOT EXISTS document_files_fts USING fts5(
@@ -339,10 +347,16 @@ pub async fn add_doc_root(name: &str, root_path: &str) -> Result<DocRoot, String
     let mut conn = open_docs_db().await?;
     let now = now_unix_ms();
 
-    sqlx::query("INSERT INTO document_roots (name, root_path, created_at) VALUES (?1, ?2, ?3)")
+    let max_pos: i64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(position), -1) FROM document_roots")
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap_or(-1);
+
+    sqlx::query("INSERT INTO document_roots (name, root_path, created_at, position) VALUES (?1, ?2, ?3, ?4)")
         .bind(name)
         .bind(root_path)
         .bind(now)
+        .bind(max_pos + 1)
         .execute(&mut *conn)
         .await
         .map_err(|e| format!("添加根目录失败: {}", e))?;
@@ -363,7 +377,7 @@ pub async fn add_doc_root(name: &str, root_path: &str) -> Result<DocRoot, String
 pub async fn get_doc_roots() -> Result<Vec<DocRoot>, String> {
     let mut conn = open_docs_db().await?;
     let rows = sqlx::query(
-        "SELECT id, name, root_path, created_at FROM document_roots ORDER BY created_at DESC",
+        "SELECT id, name, root_path, created_at FROM document_roots ORDER BY position ASC, id ASC",
     )
     .fetch_all(&mut *conn)
     .await
@@ -382,56 +396,40 @@ pub async fn get_doc_roots() -> Result<Vec<DocRoot>, String> {
     Ok(roots)
 }
 
+pub async fn reorder_doc_roots(ids: Vec<i64>) -> Result<(), String> {
+    let mut conn = open_docs_db().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+    for (idx, id) in ids.iter().enumerate() {
+        sqlx::query::<Sqlite>("UPDATE document_roots SET position = ?1 WHERE id = ?2")
+            .bind(idx as i64)
+            .bind(*id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("更新根目录顺序失败: {}", e))?;
+    }
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))
+}
+
 pub async fn remove_doc_root(id: i64) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
-    let mut tx = conn
-        .begin()
-        .await
-        .map_err(|e| format!("创建事务失败: {}", e))?;
 
-    let file_ids: Vec<i64> = sqlx::query_scalar::<_, i64>("SELECT id FROM document_files WHERE root_id = ?1")
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM document_files WHERE root_id = ?1"
+    )
         .bind(id)
-        .fetch_all(&mut *tx)
+        .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("查询文件失败: {}", e))?;
+        .map_err(|e| format!("查询根目录下文件失败: {}", e))?;
 
-    if !file_ids.is_empty() {
-        for chunk in file_ids.chunks(500) {
-            let placeholders: Vec<String> = chunk
-                .iter()
-                .enumerate()
-                .map(|(i, _)| format!("?{}", i + 1))
-                .collect();
-            let sql = format!(
-                "DELETE FROM document_files_fts WHERE rowid IN ({})",
-                placeholders.join(",")
-            );
-            let mut query = sqlx::query::<Sqlite>(&sql);
-            for fid in chunk {
-                query = query.bind(*fid);
-            }
-            query
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("清理FTS索引失败: {}", e))?;
-        }
+    if count.0 > 0 {
+        return Err("该目录下存在文件，请先将文件删除或移至其他目录后再删除".to_string());
     }
 
-    sqlx::query::<Sqlite>("DELETE FROM document_files WHERE root_id = ?1")
+    sqlx::query("DELETE FROM document_roots WHERE id = ?1")
         .bind(id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("删除文件记录失败: {}", e))?;
-
-    sqlx::query::<Sqlite>("DELETE FROM document_roots WHERE id = ?1")
-        .bind(id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|e| format!("删除根目录失败: {}", e))?;
-
-    tx.commit()
-        .await
-        .map_err(|e| format!("提交事务失败: {}", e))?;
 
     Ok(())
 }
@@ -791,6 +789,20 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
     Ok(())
 }
 
+pub async fn reorder_doc_files(ids: Vec<i64>) -> Result<(), String> {
+    let mut conn = open_docs_db().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+    for (idx, id) in ids.iter().enumerate() {
+        sqlx::query::<Sqlite>("UPDATE document_files SET sort_order = ?1 WHERE id = ?2")
+            .bind(idx as i64)
+            .bind(*id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("更新文件顺序失败: {}", e))?;
+    }
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))
+}
+
 pub async fn get_doc_root_by_id(id: i64) -> Result<Option<DocRoot>, String> {
     let mut conn = open_docs_db().await?;
     let row = sqlx::query("SELECT id, name, root_path, created_at FROM document_roots WHERE id = ?1")
@@ -909,6 +921,8 @@ pub async fn get_doc_page(
         .map(|k| k.trim().to_string())
         .filter(|k| !k.is_empty());
 
+    let order_clause = "ORDER BY df.sort_order ASC, df.added_at DESC";
+
     let fts_query = keyword_val.as_ref().map(|k| build_fts_query(k)).filter(|q| !q.is_empty());
     let fts_enabled = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'document_files_fts'",
@@ -936,7 +950,7 @@ pub async fn get_doc_page(
         .await
         .map_err(|e| format!("查询总数失败: {}", e))?;
 
-        let rows = sqlx::query(
+        let sql = format!(
             "SELECT df.id, df.root_id, df.title, df.file_name, df.file_ext, df.file_size, df.file_hash,
                     df.category_id, c.name as category_name, df.tags, df.notes, df.content_text,
                     df.source_path, df.managed_path, df.storage_mode, df.is_missing, df.added_at, df.file_modified, df.visit_count
@@ -946,9 +960,11 @@ pub async fn get_doc_page(
                AND (?2 IS NULL OR df.root_id = ?2)
                AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
                AND EXISTS (SELECT 1 FROM document_files_fts WHERE document_files_fts.rowid = df.id AND document_files_fts MATCH ?4)
-             ORDER BY df.added_at DESC
+             {}
              LIMIT ?5 OFFSET ?6",
-        )
+            order_clause
+        );
+        let rows = sqlx::query::<Sqlite>(&sql)
         .bind(category_id)
         .bind(root_id)
         .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
@@ -977,7 +993,7 @@ pub async fn get_doc_page(
         .await
         .map_err(|e| format!("查询总数失败: {}", e))?;
 
-        let rows = sqlx::query(
+        let sql = format!(
             "SELECT df.id, df.root_id, df.title, df.file_name, df.file_ext, df.file_size, df.file_hash,
                     df.category_id, c.name as category_name, df.tags, df.notes, df.content_text,
                     df.source_path, df.managed_path, df.storage_mode, df.is_missing, df.added_at, df.file_modified, df.visit_count
@@ -987,9 +1003,11 @@ pub async fn get_doc_page(
                AND (?2 IS NULL OR df.root_id = ?2)
                AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
                AND (df.file_name LIKE '%' || ?4 || '%' OR df.title LIKE '%' || ?4 || '%' OR df.tags LIKE '%' || ?4 || '%' OR df.notes LIKE '%' || ?4 || '%')
-             ORDER BY df.added_at DESC
+             {}
              LIMIT ?5 OFFSET ?6",
-        )
+            order_clause
+        );
+        let rows = sqlx::query::<Sqlite>(&sql)
         .bind(category_id)
         .bind(root_id)
         .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
@@ -1015,7 +1033,7 @@ pub async fn get_doc_page(
         .await
         .map_err(|e| format!("查询总数失败: {}", e))?;
 
-        let rows = sqlx::query(
+        let sql = format!(
             "SELECT df.id, df.root_id, df.title, df.file_name, df.file_ext, df.file_size, df.file_hash,
                     df.category_id, c.name as category_name, df.tags, df.notes, df.content_text,
                     df.source_path, df.managed_path, df.storage_mode, df.is_missing, df.added_at, df.file_modified, df.visit_count
@@ -1024,9 +1042,11 @@ pub async fn get_doc_page(
              WHERE (?1 IS NULL OR df.category_id = ?1)
                AND (?2 IS NULL OR df.root_id = ?2)
                AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
-             ORDER BY df.added_at DESC
+             {}
              LIMIT ?4 OFFSET ?5",
-        )
+            order_clause
+        );
+        let rows = sqlx::query::<Sqlite>(&sql)
         .bind(category_id)
         .bind(root_id)
         .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
