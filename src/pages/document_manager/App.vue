@@ -476,17 +476,17 @@
   <el-dialog v-model="showMoveDialog" title="移动文件" width="420px" @closed="closeCtxMenu">
     <div class="dm-move-body">
       <div class="dm-move-section">
-        <div class="dm-move-section-title">移动到分类</div>
-        <el-select v-model="moveTargetCategoryId" clearable placeholder="未分类" style="width:100%">
-          <el-option v-for="cat in categories" :key="cat.id" :label="cat.name" :value="cat.id"/>
-        </el-select>
-      </div>
-      <div class="dm-move-section">
         <div class="dm-move-section-title">移动到根目录</div>
-        <el-select v-model="moveTargetRootId" clearable placeholder="不更改根目录" style="width:100%">
+        <el-select v-model="moveTargetRootId" placeholder="选择根目录" style="width:100%" @change="onMoveRootChange">
           <el-option v-for="root in roots" :key="root.id" :label="root.name" :value="root.id"/>
         </el-select>
         <div v-if="moveDoc.storageMode === 'repo'" class="dm-move-hint">搬迁模式文件将被物理移动到目标目录</div>
+      </div>
+      <div class="dm-move-section">
+        <div class="dm-move-section-title">移动到分类</div>
+        <el-select v-model="moveTargetCategoryId" clearable placeholder="未分类" style="width:100%">
+          <el-option v-for="cat in moveCategories" :key="cat.id" :label="cat.name" :value="cat.id"/>
+        </el-select>
       </div>
     </div>
     <template #footer>
@@ -707,6 +707,7 @@ const showMoveDialog = ref(false)
 const moveDoc = ref(null)
 const moveTargetCategoryId = ref(null)
 const moveTargetRootId = ref(null)
+const moveCategories = ref([])
 
 const orphanCount = ref(0)
 const orphanChecked = ref(false)
@@ -1355,12 +1356,18 @@ function closeCtxMenu() {
   ctxAnchorId.value = null
 }
 
-function startMove(doc) {
+async function startMove(doc) {
   closeCtxMenu()
   moveDoc.value = doc
   moveTargetCategoryId.value = doc.categoryId ?? null
-  moveTargetRootId.value = null
+  moveTargetRootId.value = doc.rootId
+  moveCategories.value = doc.rootId ? (await DocumentService.getCategories(doc.rootId) || []) : []
   showMoveDialog.value = true
+}
+
+async function onMoveRootChange(rootId) {
+  moveTargetCategoryId.value = null
+  moveCategories.value = rootId ? (await DocumentService.getCategories(rootId) || []) : []
 }
 
 async function contextDelete(doc) {
