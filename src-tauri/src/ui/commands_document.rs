@@ -186,7 +186,7 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
         let file_hash = document_database::compute_file_hash(src).unwrap_or_default();
 
         if !file_hash.is_empty() {
-            if let Ok(true) = document_database::doc_exists_by_hash(&file_hash, request.root_id).await {
+            if let Ok(true) = document_database::doc_exists_by_hash(&file_hash, request.root_id, request.category_id).await {
                 errors.push(format!("文件已存在（重复）: {}", file_path_str));
                 continue;
             }

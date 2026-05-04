@@ -1162,13 +1162,14 @@ pub async fn mark_doc_missing(id: i64) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn doc_exists_by_hash(file_hash: &str, root_id: i64) -> Result<bool, String> {
+pub async fn doc_exists_by_hash(file_hash: &str, root_id: i64, category_id: Option<i64>) -> Result<bool, String> {
     let mut conn = open_docs_db().await?;
     let count: i64 = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM document_files WHERE file_hash = ?1 AND root_id = ?2 AND is_missing = 0",
+        "SELECT COUNT(*) FROM document_files WHERE file_hash = ?1 AND root_id = ?2 AND (?3 IS NULL AND category_id IS NULL OR category_id = ?3) AND is_missing = 0",
     )
     .bind(file_hash)
     .bind(root_id)
+    .bind(category_id)
     .fetch_one(&mut *conn)
     .await
     .map_err(|e| format!("查询文件重复失败: {}", e))?;

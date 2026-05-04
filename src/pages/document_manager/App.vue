@@ -38,15 +38,17 @@
           <div ref="rootListRef" class="dm-root-list">
             <div v-for="root in roots" :key="root.id" :class="{ active: rootFilter === root.id }"
                  :data-root-id="root.id" class="dm-root-item sortable-root"
-                 @click="rootFilter = root.id">
+                 @click="selectRoot(root, $event)">
               <el-icon>
                 <Folder/>
               </el-icon>
               <span class="dm-root-name">{{ root.name }}</span>
-              <el-dropdown class="dm-cat-more" trigger="click" @click.stop>
-                <el-icon>
-                  <MoreFilled/>
-                </el-icon>
+              <el-dropdown trigger="click">
+                <span class="dm-cat-more">
+                  <el-icon>
+                    <MoreFilled/>
+                  </el-icon>
+                </span>
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item style="color: var(--el-color-danger)" @click="removeRootFn(root.id)">删除
@@ -83,16 +85,18 @@
               <div v-for="cat in visibleCategories" :key="cat.id" :class="{ active: categoryFilter === cat.id }"
                    :data-cat-id="cat.id"
                    class="dm-category-item sortable-category"
-                   @click="categoryFilter = categoryFilter === cat.id ? null : cat.id">
+                   @click="selectCategory(cat, $event)">
                 <el-icon :style="{ color: cat.color }">
                   <component :is="getCatIcon(cat.icon)"/>
                 </el-icon>
                 <span class="dm-root-name">{{ cat.name }}</span>
                 <span v-if="getCatCount(cat.id) > 0" class="dm-cat-count">{{ getCatCount(cat.id) }}</span>
-                <el-dropdown class="dm-cat-more" trigger="click" @click.stop>
-                  <el-icon>
-                    <MoreFilled/>
-                  </el-icon>
+                <el-dropdown trigger="click">
+                  <span class="dm-cat-more">
+                    <el-icon>
+                      <MoreFilled/>
+                    </el-icon>
+                  </span>
                   <template #dropdown>
                     <el-dropdown-menu>
                       <el-dropdown-item @click="startRenameCat(cat)">重命名</el-dropdown-item>
@@ -781,6 +785,16 @@ function formatTime(ms) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
+function selectRoot(root, event) {
+  if (event.target.closest('.dm-cat-more')) return
+  rootFilter.value = root.id
+}
+
+function selectCategory(cat, event) {
+  if (event.target.closest('.dm-cat-more')) return
+  categoryFilter.value = categoryFilter.value === cat.id ? null : cat.id
+}
+
 function getFileIcon(ext) {
   return iconMap[ext] || Document
 }
@@ -1061,8 +1075,14 @@ async function confirmImport() {
       storageMode: importMode.value,
       sourceDir: ''
     })
-    if (r.errors && r.errors.length > 0) ElMessage.warning(`导入完成，${r.success.length} 个成功，${r.errors.length} 个失败`)
-    else ElMessage.success(`成功导入 ${r.success.length} 个文件`)
+    if (r.errors && r.errors.length > 0) {
+      const detail = r.errors.slice(0, 5).join('\n')
+      const more = r.errors.length > 5 ? `\n...等共 ${r.errors.length} 个错误` : ''
+      ElMessage.warning({message: `导入完成，${r.success.length} 个成功，${r.errors.length} 个失败`, duration: 3000})
+      ElMessage({message: detail + more, type: 'warning', duration: 6000, showClose: true})
+    } else {
+      ElMessage.success(`成功导入 ${r.success.length} 个文件`)
+    }
     showImportDialog.value = false;
     importFiles.value = [];
     await loadData();
@@ -1113,7 +1133,14 @@ async function importScanned() {
       storageMode: importMode.value,
       sourceDir: scanPath.value
     })
-    ElMessage.success(`成功导入 ${r.success.length} 个文件`);
+    if (r.errors && r.errors.length > 0) {
+      const detail = r.errors.slice(0, 5).join('\n')
+      const more = r.errors.length > 5 ? `\n...等共 ${r.errors.length} 个错误` : ''
+      ElMessage.warning({message: `导入完成，${r.success.length} 个成功，${r.errors.length} 个失败`, duration: 3000})
+      ElMessage({message: detail + more, type: 'warning', duration: 6000, showClose: true})
+    } else {
+      ElMessage.success(`成功导入 ${r.success.length} 个文件`);
+    }
     scanSelected.clear();
     scannedFiles.value = [];
     await loadData();
@@ -1278,6 +1305,7 @@ async function importOrphans() {
   if (orphanSelected.size === 0) return
   try {
     let total = 0
+    let allErrors = []
     for (const result of orphanResults.value) {
       const selected = result.files.filter(f => orphanSelected.has(f.path))
       if (selected.length === 0) continue
@@ -1296,9 +1324,17 @@ async function importOrphans() {
           sourceDir: ''
         })
         total += r.success?.length || 0
+        if (r.errors?.length) allErrors.push(...r.errors)
       }
     }
-    ElMessage.success(`成功导入 ${total} 个文件`)
+    if (allErrors.length > 0) {
+      const detail = allErrors.slice(0, 5).join('\n')
+      const more = allErrors.length > 5 ? `\n...等共 ${allErrors.length} 个错误` : ''
+      ElMessage.warning({message: `导入完成，${total} 个成功，${allErrors.length} 个失败`, duration: 3000})
+      ElMessage({message: detail + more, type: 'warning', duration: 6000, showClose: true})
+    } else {
+      ElMessage.success(`成功导入 ${total} 个文件`)
+    }
     showOrphanDialog.value = false
     orphanSelected.clear()
     orphanCount.value = 0
@@ -1671,17 +1707,26 @@ onMounted(async () => {
 }
 
 .dm-cat-more {
-  opacity: 0;
-  transition: opacity .15s;
-  margin-left: auto
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  opacity: 0.6;
+  transition: opacity .15s, background .15s;
+  margin-left: auto;
+  flex-shrink: 0
 }
 
-.dm-category-item:hover .dm-cat-more {
-  opacity: 1
-}
-
+.dm-category-item:hover .dm-cat-more,
 .dm-root-item:hover .dm-cat-more {
-  opacity: 1
+  opacity: 1;
+  background: var(--el-fill-color)
+}
+
+.dm-cat-more:active {
+  background: var(--el-fill-color-dark)
 }
 
 .dm-dots-spacer {
