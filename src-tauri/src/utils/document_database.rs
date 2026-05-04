@@ -28,6 +28,7 @@ pub struct DocCategory {
     pub icon: String,
     pub color: String,
     pub position: i64,
+    pub root_id: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -245,6 +246,10 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
         .execute(&mut *conn)
         .await;
 
+    let _ = sqlx::query::<Sqlite>("ALTER TABLE document_categories ADD COLUMN root_id INTEGER DEFAULT 0")
+        .execute(&mut *conn)
+        .await;
+
     sqlx::query(
         "
         CREATE VIRTUAL TABLE IF NOT EXISTS document_files_fts USING fts5(
@@ -294,32 +299,13 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
         .await;
     }
 
-    let default_categories = [
-        ("合同", "folder", "#E74C3C"),
-        ("报表", "folder", "#27AE60"),
-        ("资料", "folder", "#3498DB"),
-        ("其他", "folder", "#7F8C8D"),
-    ];
-    for (i, (name, icon, color)) in default_categories.iter().enumerate() {
-        sqlx::query::<Sqlite>(
-            "INSERT OR IGNORE INTO document_categories (name, icon, color, position) VALUES (?1, ?2, ?3, ?4)",
-        )
-        .bind(name)
-        .bind(icon)
-        .bind(color)
-        .bind(i as i64)
-        .execute(&mut *conn)
-        .await
-        .ok();
-    }
-
     ensure_category_directories(conn).await?;
 
     Ok(())
 }
 
 async fn ensure_category_directories(conn: &mut SqliteConnection) -> Result<(), String> {
-    let roots = sqlx::query("SELECT id, name, root_path, created_at FROM document_roots")
+    let roots = sqlx::query("SELECT id, name, root_path FROM document_roots")
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| format!("查询根目录失败: {}", e))?;
@@ -328,16 +314,20 @@ async fn ensure_category_directories(conn: &mut SqliteConnection) -> Result<(), 
         return Ok(());
     }
 
-    let cats = sqlx::query("SELECT id, name FROM document_categories ORDER BY position")
+    let cats = sqlx::query("SELECT id, name, COALESCE(root_id, 0) FROM document_categories ORDER BY position")
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| format!("查询分类失败: {}", e))?;
 
     for row in &roots {
+        let rid: i64 = row.try_get(0).unwrap_or(0);
         let root_path: String = row.try_get(2).unwrap_or_default();
         for crow in &cats {
+            let cat_root_id: i64 = crow.try_get(2).unwrap_or(0);
             let cat_name: String = crow.try_get(1).unwrap_or_default();
-            let _ = fs::create_dir_all(Path::new(&root_path).join(&cat_name));
+            if cat_root_id == 0 || cat_root_id == rid {
+                let _ = fs::create_dir_all(Path::new(&root_path).join(&cat_name));
+            }
         }
     }
 
@@ -435,21 +425,23 @@ pub async fn remove_doc_root(id: i64) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn add_doc_category(name: &str, icon: &str, color: &str) -> Result<DocCategory, String> {
+pub async fn add_doc_category(name: &str, icon: &str, color: &str, root_id: i64) -> Result<DocCategory, String> {
     let mut conn = open_docs_db().await?;
 
-    let max_pos: i64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(position), -1) FROM document_categories")
+    let max_pos: i64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(position), -1) FROM document_categories WHERE root_id = ?1")
+        .bind(root_id)
         .fetch_one(&mut *conn)
         .await
         .unwrap_or(-1);
 
     sqlx::query(
-        "INSERT INTO document_categories (name, icon, color, position) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO document_categories (name, icon, color, position, root_id) VALUES (?1, ?2, ?3, ?4, ?5)",
     )
     .bind(name)
     .bind(icon)
     .bind(color)
     .bind(max_pos + 1)
+    .bind(root_id)
     .execute(&mut *conn)
     .await
     .map_err(|e| format!("添加分类失败: {}", e))?;
@@ -465,14 +457,16 @@ pub async fn add_doc_category(name: &str, icon: &str, color: &str) -> Result<Doc
         icon: icon.to_string(),
         color: color.to_string(),
         position: max_pos + 1,
+        root_id,
     })
 }
 
-pub async fn get_doc_categories() -> Result<Vec<DocCategory>, String> {
+pub async fn get_doc_categories(root_id: Option<i64>) -> Result<Vec<DocCategory>, String> {
     let mut conn = open_docs_db().await?;
     let rows = sqlx::query(
-        "SELECT id, name, icon, color, position FROM document_categories ORDER BY position ASC, id ASC",
+        "SELECT id, name, icon, color, position, COALESCE(root_id, 0) FROM document_categories WHERE (?1 IS NULL OR root_id = ?1) ORDER BY position ASC, id ASC",
     )
+    .bind(root_id)
     .fetch_all(&mut *conn)
     .await
     .map_err(|e| format!("获取分类列表失败: {}", e))?;
@@ -485,6 +479,7 @@ pub async fn get_doc_categories() -> Result<Vec<DocCategory>, String> {
             icon: row.try_get::<String, _>(2).unwrap_or_default(),
             color: row.try_get::<String, _>(3).unwrap_or_default(),
             position: row.try_get::<i64, _>(4).unwrap_or(0),
+            root_id: row.try_get::<i64, _>(5).unwrap_or(0),
         })
         .collect();
 
@@ -515,15 +510,39 @@ pub async fn remove_doc_category(id: i64) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn rename_doc_category(id: i64, name: &str) -> Result<(), String> {
+pub async fn update_managed_path_prefix(old_prefix: &str, new_prefix: &str, root_id: i64, category_id: i64) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
+    sqlx::query(
+        "UPDATE document_files SET managed_path = REPLACE(managed_path, ?1, ?2) WHERE root_id = ?3 AND category_id = ?4 AND storage_mode = 'repo'"
+    )
+    .bind(old_prefix)
+    .bind(new_prefix)
+    .bind(root_id)
+    .bind(category_id)
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| format!("更新文件路径失败: {}", e))?;
+    Ok(())
+}
+
+pub async fn rename_doc_category(id: i64, name: &str) -> Result<String, String> {
+    let mut conn = open_docs_db().await?;
+    let old_name: String = sqlx::query_scalar::<_, String>("SELECT name FROM document_categories WHERE id = ?1")
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|e| format!("查询分类失败: {}", e))?;
+
     sqlx::query("UPDATE document_categories SET name = ?1 WHERE id = ?2")
         .bind(name)
         .bind(id)
         .execute(&mut *conn)
         .await
         .map_err(|e| format!("重命名分类失败: {}", e))?;
-    Ok(())
+
+    println!("Old name: {}, New name: {}", old_name, name);
+
+    Ok(old_name)
 }
 
 pub async fn reorder_doc_categories(ids: Vec<i64>) -> Result<(), String> {
@@ -1339,9 +1358,10 @@ pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
         .map_err(|e| format!("创建事务失败: {}", e))?;
 
     let items = sqlx::query::<Sqlite>(
-        "SELECT dii.doc_file_id, dii.source_path, dii.managed_path, di.storage_mode
+        "SELECT dii.doc_file_id, dii.source_path, COALESCE(df.managed_path, dii.managed_path) as managed_path, di.storage_mode
          FROM document_import_items dii
          JOIN document_imports di ON di.id = dii.import_id
+         LEFT JOIN document_files df ON df.id = dii.doc_file_id
          WHERE dii.import_id = ?1",
     )
     .bind(import_id)
@@ -1405,9 +1425,10 @@ pub async fn undo_import_item(import_id: i64, doc_file_id: i64) -> Result<(), St
     let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
 
     let item = sqlx::query::<Sqlite>(
-        "SELECT dii.source_path, dii.managed_path, di.storage_mode
+        "SELECT dii.source_path, COALESCE(df.managed_path, dii.managed_path) as managed_path, di.storage_mode
          FROM document_import_items dii
          JOIN document_imports di ON di.id = dii.import_id
+         LEFT JOIN document_files df ON df.id = dii.doc_file_id
          WHERE dii.import_id = ?1 AND dii.doc_file_id = ?2",
     )
     .bind(import_id)

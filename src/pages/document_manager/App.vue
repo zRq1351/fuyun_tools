@@ -60,14 +60,15 @@
         <div class="dm-sidebar-section">
           <div class="dm-section-title">
             <span>分类</span>
-            <el-button size="small" text @click="showAddCategory = true">
+            <el-button :disabled="rootFilter === null" size="small" text @click="showAddCategory = true">
               <el-icon>
                 <Plus/>
               </el-icon>
             </el-button>
           </div>
           <div class="dm-category-list">
-            <div :class="{ active: categoryFilter === null }" class="dm-category-item dm-cat-all"
+            <div v-if="rootFilter !== null" :class="{ active: categoryFilter === null }"
+                 class="dm-category-item dm-cat-all"
                  @click="categoryFilter = null">
               <el-icon>
                 <Document/>
@@ -79,12 +80,12 @@
               </el-icon>
             </div>
             <div ref="catListRef" class="dm-sort-list">
-              <div v-for="cat in categories" :key="cat.id" :class="{ active: categoryFilter === cat.id }"
+              <div v-for="cat in visibleCategories" :key="cat.id" :class="{ active: categoryFilter === cat.id }"
                    :data-cat-id="cat.id"
                    class="dm-category-item sortable-category"
                    @click="categoryFilter = categoryFilter === cat.id ? null : cat.id">
                 <el-icon :style="{ color: cat.color }">
-                  <Folder/>
+                  <component :is="getCatIcon(cat.icon)"/>
                 </el-icon>
                 <span class="dm-root-name">{{ cat.name }}</span>
                 <span v-if="getCatCount(cat.id) > 0" class="dm-cat-count">{{ getCatCount(cat.id) }}</span>
@@ -102,7 +103,8 @@
                 </el-dropdown>
               </div>
             </div>
-            <div v-if="categories && categories.length > 0" :class="{ active: categoryFilter === -1 }"
+            <div v-if="rootFilter !== null && categories && categories.length > 0"
+                 :class="{ active: categoryFilter === -1 }"
                  class="dm-category-item dm-cat-uncat" @click="categoryFilter = categoryFilter === -1 ? null : -1">
               <el-icon>
                 <Folder/>
@@ -113,8 +115,8 @@
                 <MoreFilled/>
               </el-icon>
             </div>
-            <div v-if="!categories || categories.length === 0" class="dm-category-item dm-cat-empty">
-              <span>暂无分类</span>
+            <div v-if="!visibleCategories || visibleCategories.length === 0" class="dm-category-item dm-cat-empty">
+              <span>{{ rootFilter === null ? '请选择根目录' : '暂无分类' }}</span>
             </div>
           </div>
         </div>
@@ -143,13 +145,13 @@
               </el-select>
             </div>
             <div class="dm-toolbar-actions">
-              <el-button type="primary" @click="showImportDialog = true">
+              <el-button type="primary" @click="openImportDialog">
                 <el-icon>
                   <Plus/>
                 </el-icon>
                 添加文档
               </el-button>
-              <el-button @click="showScanDialog = true">
+              <el-button @click="openScanDialog">
                 <el-icon>
                   <Search/>
                 </el-icon>
@@ -311,10 +313,27 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showAddCategory" title="新建分类" width="400px">
+    <el-dialog v-model="showAddCategory" title="新建分类" width="420px">
       <el-form label-width="80px">
         <el-form-item label="分类名称">
           <el-input v-model="newCategoryName" placeholder="如：合同、报表"/>
+        </el-form-item>
+        <el-form-item label="图标">
+          <div class="dm-icon-picker">
+            <span v-for="ic in catIcons" :key="ic.value"
+                  :class="{ active: newCategoryIcon === ic.value }"
+                  class="dm-icon-option" @click="newCategoryIcon = ic.value">
+              <el-icon :size="18"><component :is="ic.component"/></el-icon>
+            </span>
+          </div>
+        </el-form-item>
+        <el-form-item label="颜色">
+          <div class="dm-color-picker">
+            <span v-for="c in catColors" :key="c"
+                  :class="{ active: newCategoryColor === c }"
+                  :style="{ background: c }"
+                  class="dm-color-option" @click="newCategoryColor = c"/>
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -344,7 +363,7 @@
         </el-form-item>
         <el-form-item label="目标分类">
           <el-select v-model="importCategoryId" clearable placeholder="未分类" style="width:100%">
-            <el-option v-for="c in categories" :key="c.id" :label="c.name" :value="c.id"/>
+            <el-option v-for="c in importCategories" :key="c.id" :label="c.name" :value="c.id"/>
           </el-select>
         </el-form-item>
         <el-form-item label="导入方式">
@@ -390,7 +409,7 @@
         </el-form-item>
         <el-form-item label="目标分类">
           <el-select v-model="scanCategoryId" clearable placeholder="未分类" style="width:100%">
-            <el-option v-for="c in categories" :key="c.id" :label="c.name" :value="c.id"/>
+            <el-option v-for="c in scanCategories" :key="c.id" :label="c.name" :value="c.id"/>
           </el-select>
         </el-form-item>
         <el-form-item label="导入方式">
@@ -635,6 +654,29 @@ const newRootName = ref('')
 const newRootPath = ref('')
 const showAddCategory = ref(false)
 const newCategoryName = ref('')
+const newCategoryIcon = ref('folder')
+const newCategoryColor = ref('#409EFF')
+
+const catIcons = [
+  {value: 'folder', component: Folder},
+  {value: 'document', component: Document},
+  {value: 'notebook', component: Notebook},
+  {value: 'tickets', component: Tickets},
+  {value: 'setting', component: Setting},
+  {value: 'connection', component: Connection},
+  {value: 'magicstick', component: MagicStick},
+  {value: 'monitor', component: Monitor},
+  {value: 'picture', component: Picture},
+  {value: 'coffee', component: Coffee},
+  {value: 'search', component: Search},
+  {value: 'list', component: List},
+]
+
+const catColors = [
+  '#409EFF', '#E74C3C', '#27AE60', '#E67E22', '#8E44AD',
+  '#3498DB', '#1ABC9C', '#F39C12', '#E91E63', '#7F8C8D',
+  '#00BCD4', '#795548', '#607D8B', '#FF5722', '#9B59B6',
+]
 const showRenameCatDialog = ref(false)
 const renameCatId = ref(null)
 const renameCatName = ref('')
@@ -643,6 +685,7 @@ const importRootId = ref(null)
 const importCategoryId = ref(null)
 const importFiles = ref([])
 const importMode = ref('index')
+const importCategories = ref([])
 const showScanDialog = ref(false)
 const scanPath = ref('')
 const scanImportRootId = ref(null)
@@ -650,6 +693,7 @@ const scanCategoryId = ref(null)
 const scanning = ref(false)
 const scannedFiles = ref([])
 const scanSelected = reactive(new Set())
+const scanCategories = ref([])
 const editCategoryId = ref(null)
 const editTags = ref('')
 const editNotes = ref('')
@@ -731,6 +775,11 @@ function getFileColor(ext) {
   return fileColorMap[ext] || '#7F8C8D'
 }
 
+function getCatIcon(name) {
+  const ic = catIcons.find(i => i.value === name)
+  return ic?.component || Folder
+}
+
 function getCatCount(catId) {
   if (!stats.value?.categoryCounts) return 0
   const e = stats.value.categoryCounts.find(c => c.categoryId === catId)
@@ -743,10 +792,15 @@ const uncatCount = computed(() => {
   return e?.count || 0
 })
 
+const visibleCategories = computed(() => {
+  if (rootFilter.value === null) return []
+  return categories.value
+})
+
 async function loadData() {
   try {
     const [cats, rts, st] = await Promise.all([
-      DocumentService.getCategories(),
+      DocumentService.getCategories(rootFilter.value),
       DocumentService.getRoots(),
       DocumentService.getStats(rootFilter.value),
     ])
@@ -846,8 +900,19 @@ watch(categoryFilter, () => {
 })
 watch(rootFilter, () => {
   currentPage.value = 1;
+  categories.value = [];
   loadData();
   loadFiles()
+})
+
+watch(importRootId, async (rid) => {
+  importCategoryId.value = null
+  importCategories.value = rid ? (await DocumentService.getCategories(rid) || []) : []
+})
+
+watch(scanImportRootId, async (rid) => {
+  scanCategoryId.value = null
+  scanCategories.value = rid ? (await DocumentService.getCategories(rid) || []) : []
 })
 
 let searchTimer = null
@@ -880,10 +945,12 @@ async function browseRootPath() {
 
 async function confirmAddCategory() {
   try {
-    await DocumentService.addCategory(newCategoryName.value.trim());
+    await DocumentService.addCategory(newCategoryName.value.trim(), newCategoryIcon.value, newCategoryColor.value, rootFilter.value);
     ElMessage.success('已添加');
     showAddCategory.value = false;
     newCategoryName.value = '';
+    newCategoryIcon.value = 'folder';
+    newCategoryColor.value = '#409EFF';
     await loadData()
   } catch (e) {
     ElMessage.error('添加失败: ' + e)
@@ -930,7 +997,8 @@ async function confirmRenameCat() {
     await DocumentService.renameCategory(renameCatId.value, renameCatName.value.trim());
     ElMessage.success('已重命名');
     showRenameCatDialog.value = false;
-    await loadData()
+    await loadData();
+    loadFiles()
   } catch (e) {
     ElMessage.error('重命名失败: ' + e)
   }
@@ -946,6 +1014,24 @@ function getImportTargetPath() {
   if (!r) return ''
   const c = categories.value.find(c => c.id === importCategoryId.value)
   return r.rootPath.replace(/\\/g, '/') + '/' + (c ? c.name : '未分类') + '/'
+}
+
+async function openImportDialog() {
+  importRootId.value = rootFilter.value || roots.value[0]?.id || null
+  importCategoryId.value = null
+  importFiles.value = []
+  showImportDialog.value = true
+  importCategories.value = importRootId.value ? (await DocumentService.getCategories(importRootId.value) || []) : []
+}
+
+async function openScanDialog() {
+  scanImportRootId.value = rootFilter.value || roots.value[0]?.id || null
+  scanCategoryId.value = null
+  scanPath.value = ''
+  scannedFiles.value = []
+  scanSelected.clear()
+  showScanDialog.value = true
+  scanCategories.value = scanImportRootId.value ? (await DocumentService.getCategories(scanImportRootId.value) || []) : []
 }
 
 async function confirmImport() {
@@ -1021,7 +1107,13 @@ async function importScanned() {
 }
 
 function initRootSortable() {
-  if (!rootListRef.value) return
+  if (!rootListRef.value || rootFilter.value !== null) {
+    if (rootSortable) {
+      rootSortable.destroy();
+      rootSortable = null
+    }
+    return
+  }
   if (rootSortable) rootSortable.destroy()
   rootSortable = Sortable.create(rootListRef.value, {
     animation: 200,
@@ -1051,7 +1143,13 @@ function initRootSortable() {
 }
 
 function initCatSortable() {
-  if (!catListRef.value) return
+  if (!catListRef.value || rootFilter.value !== null) {
+    if (catSortable) {
+      catSortable.destroy();
+      catSortable = null
+    }
+    return
+  }
   if (catSortable) catSortable.destroy()
   const el = catListRef.value
   catSortable = Sortable.create(el, {
@@ -1542,6 +1640,60 @@ onMounted(async () => {
   cursor: default;
   font-size: 12px;
   padding-left: 16px
+}
+
+.dm-icon-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px
+}
+
+.dm-icon-option {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all .15s;
+  color: var(--el-text-color-secondary)
+}
+
+.dm-icon-option:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-color-primary)
+}
+
+.dm-icon-option.active {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9)
+}
+
+.dm-color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px
+}
+
+.dm-color-option {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all .15s
+}
+
+.dm-color-option:hover {
+  transform: scale(1.15)
+}
+
+.dm-color-option.active {
+  border-color: var(--el-text-color-primary);
+  box-shadow: 0 0 0 2px var(--el-bg-color), 0 0 0 4px currentColor
 }
 
 .dm-root-name {

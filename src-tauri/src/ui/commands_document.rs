@@ -13,13 +13,7 @@ pub async fn add_doc_root(name: String, root_path: String) -> Result<document_da
     if !path.is_dir() {
         return Err("路径不是一个目录".to_string());
     }
-    let root = document_database::add_doc_root(&name, &root_path).await?;
-    if let Ok(categories) = document_database::get_doc_categories().await {
-        for cat in &categories {
-            let _ = fs::create_dir_all(Path::new(&root_path).join(&cat.name));
-        }
-    }
-    Ok(root)
+    document_database::add_doc_root(&name, &root_path).await
 }
 
 #[tauri::command]
@@ -33,7 +27,7 @@ pub async fn remove_doc_root(id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn add_doc_category(name: String, icon: Option<String>, color: Option<String>) -> Result<document_database::DocCategory, String> {
+pub async fn add_doc_category(name: String, icon: Option<String>, color: Option<String>, root_id: i64) -> Result<document_database::DocCategory, String> {
     let name_trim = name.trim();
     if name_trim.is_empty() {
         return Err("分类名称不能为空".to_string());
@@ -42,18 +36,16 @@ pub async fn add_doc_category(name: String, icon: Option<String>, color: Option<
         name_trim,
         &icon.unwrap_or_else(|| "folder".to_string()),
         &color.unwrap_or_else(|| "#409EFF".to_string()),
+        root_id,
     ).await?;
-    if let Ok(roots) = document_database::get_doc_roots().await {
-        for root in &roots {
-            let _ = fs::create_dir_all(Path::new(&root.root_path).join(name_trim));
-        }
-    }
+    let root = document_database::get_doc_root_by_id(root_id).await?.ok_or("根目录不存在".to_string())?;
+    let _ = fs::create_dir_all(Path::new(&root.root_path).join(name_trim));
     Ok(cat)
 }
 
 #[tauri::command]
-pub async fn get_doc_categories() -> Result<Vec<document_database::DocCategory>, String> {
-    document_database::get_doc_categories().await
+pub async fn get_doc_categories(root_id: Option<i64>) -> Result<Vec<document_database::DocCategory>, String> {
+    document_database::get_doc_categories(root_id).await
 }
 
 #[tauri::command]
@@ -67,7 +59,18 @@ pub async fn rename_doc_category(id: i64, name: String) -> Result<(), String> {
     if name_trim.is_empty() {
         return Err("分类名称不能为空".to_string());
     }
-    document_database::rename_doc_category(id, name_trim).await
+    let cat = document_database::get_doc_categories(None).await?.into_iter().find(|c| c.id == id).ok_or("分类不存在".to_string())?;
+    let old_name = document_database::rename_doc_category(id, name_trim).await?;
+    let root = document_database::get_doc_root_by_id(cat.root_id).await?.ok_or("根目录不存在".to_string())?;
+    let old_dir = Path::new(&root.root_path).join(&old_name);
+    let new_dir = Path::new(&root.root_path).join(name_trim);
+    if old_dir.exists() && old_dir != new_dir {
+        std::fs::rename(&old_dir, &new_dir).map_err(|e| format!("重命名目录失败: {}", e))?;
+    }
+    let old_prefix = old_dir.to_string_lossy().to_string();
+    let new_prefix = new_dir.to_string_lossy().to_string();
+    document_database::update_managed_path_prefix(&old_prefix, &new_prefix, root.id, id).await?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -118,7 +121,7 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
         .ok_or("指定的根目录不存在".to_string())?;
 
     let category_name = if let Some(cid) = request.category_id {
-        let cats = document_database::get_doc_categories().await?;
+        let cats = document_database::get_doc_categories(None).await?;
         cats.iter().find(|c| c.id == cid).map(|c| c.name.clone()).unwrap_or_else(|| "未分类".to_string())
     } else {
         "未分类".to_string()
@@ -515,7 +518,7 @@ pub async fn detect_orphan_files(root_id: Option<i64>) -> Result<Vec<OrphanFiles
         document_database::get_doc_roots().await?
     };
 
-    let categories = document_database::get_doc_categories().await?;
+    let categories = document_database::get_doc_categories(None).await?;
 
     let text_exts = [
         "txt", "md", "csv", "log", "json", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf",

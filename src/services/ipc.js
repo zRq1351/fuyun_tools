@@ -520,8 +520,8 @@ export const DocumentService = {
     getRoots: () => invoke('get_doc_roots'),
     removeRoot: (id) => invoke('remove_doc_root', {id}),
 
-    addCategory: (name, icon, color) => invoke('add_doc_category', {name, icon, color}),
-    getCategories: () => invoke('get_doc_categories'),
+    addCategory: (name, icon, color, rootId) => invoke('add_doc_category', {name, icon, color, rootId}),
+    getCategories: (rootId) => invoke('get_doc_categories', {rootId}),
     removeCategory: (id) => invoke('remove_doc_category', {id}),
     renameCategory: (id, name) => invoke('rename_doc_category', {id, name}),
     reorderCategories: (ids) => invoke('reorder_doc_categories', {ids}),
