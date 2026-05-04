@@ -645,11 +645,52 @@ pub async fn delete_doc_record(id: i64) -> Result<(), String> {
 pub async fn update_doc_file_meta(
     id: i64,
     title: Option<&str>,
-    category_id: Option<Option<i64>>,
+    category_id: Option<i64>,
     tags: Option<&str>,
     notes: Option<&str>,
 ) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
+
+    let cat_change = category_id.is_some();
+    let mut needs_move = false;
+    let mut old_managed = String::new();
+    let mut root_path = String::new();
+    let mut new_cat_name = String::new();
+
+    if cat_change {
+        let row = sqlx::query(
+            "SELECT df.storage_mode, df.managed_path, dr.root_path, df.category_id
+             FROM document_files df
+             JOIN document_roots dr ON df.root_id = dr.id
+             WHERE df.id = ?1"
+        )
+        .bind(id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(|e| format!("查询文件信息失败: {}", e))?;
+
+        if let Some(row) = row {
+            let storage_mode: String = row.try_get(0).unwrap_or_default();
+            old_managed = row.try_get(1).unwrap_or_default();
+            root_path = row.try_get(2).unwrap_or_default();
+            let old_cat_id: Option<i64> = row.try_get(3).unwrap_or(None);
+            let new_cid = category_id.unwrap();
+
+            if storage_mode == "repo" && !old_managed.is_empty() && old_cat_id != Some(new_cid) {
+                new_cat_name = if new_cid == -1 {
+                    String::new()
+                } else {
+                    sqlx::query_scalar::<_, String>("SELECT name FROM document_categories WHERE id = ?1")
+                        .bind(new_cid)
+                        .fetch_optional(&mut *conn)
+                        .await
+                        .map_err(|e| format!("查询分类失败: {}", e))?
+                        .unwrap_or_default()
+                };
+                needs_move = true;
+            }
+        }
+    }
 
     if let Some(t) = title {
         sqlx::query("UPDATE document_files SET title = ?1 WHERE id = ?2")
@@ -667,12 +708,20 @@ pub async fn update_doc_file_meta(
     }
 
     if let Some(cid) = category_id {
-        sqlx::query("UPDATE document_files SET category_id = ?1 WHERE id = ?2")
-            .bind(cid)
-            .bind(id)
-            .execute(&mut *conn)
-            .await
-            .map_err(|e| format!("更新分类失败: {}", e))?;
+        if cid == -1 {
+            sqlx::query("UPDATE document_files SET category_id = NULL WHERE id = ?1")
+                .bind(id)
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| format!("更新分类失败: {}", e))?;
+        } else {
+            sqlx::query("UPDATE document_files SET category_id = ?1 WHERE id = ?2")
+                .bind(cid)
+                .bind(id)
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| format!("更新分类失败: {}", e))?;
+        }
     }
 
     if let Some(tg) = tags {
@@ -703,6 +752,27 @@ pub async fn update_doc_file_meta(
             .bind(id)
             .execute(&mut *conn)
             .await;
+    }
+
+    if needs_move {
+        let old_path = Path::new(&old_managed);
+        if old_path.exists() {
+            let file_name = old_path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            let target_dir = if new_cat_name.is_empty() {
+                Path::new(&root_path).to_path_buf()
+            } else {
+                Path::new(&root_path).join(&new_cat_name)
+            };
+            fs::create_dir_all(&target_dir).map_err(|e| format!("创建目标目录失败: {}", e))?;
+            let new_name = resolve_unused_filename(&target_dir,
+                Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name),
+                Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or(""));
+            let dest = target_dir.join(&new_name);
+            safe_move_file(old_path, &dest)?;
+            let new_managed = dest.to_string_lossy().to_string();
+            drop(conn);
+            update_doc_managed_path(id, &new_managed).await?;
+        }
     }
 
     Ok(())
@@ -937,7 +1007,7 @@ pub async fn get_doc_page(
         let fts = fts_query.unwrap();
         let total = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM document_files df
-             WHERE (?1 IS NULL OR df.category_id = ?1)
+             WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
                AND (?2 IS NULL OR df.root_id = ?2)
                AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
                AND EXISTS (SELECT 1 FROM document_files_fts WHERE document_files_fts.rowid = df.id AND document_files_fts MATCH ?4)",
@@ -956,7 +1026,7 @@ pub async fn get_doc_page(
                     df.source_path, df.managed_path, df.storage_mode, df.is_missing, df.added_at, df.file_modified, df.visit_count
              FROM document_files df
              LEFT JOIN document_categories c ON df.category_id = c.id
-             WHERE (?1 IS NULL OR df.category_id = ?1)
+             WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
                AND (?2 IS NULL OR df.root_id = ?2)
                AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
                AND EXISTS (SELECT 1 FROM document_files_fts WHERE document_files_fts.rowid = df.id AND document_files_fts MATCH ?4)
@@ -980,7 +1050,7 @@ pub async fn get_doc_page(
         let kw = keyword_val.as_deref().unwrap();
         let total = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM document_files df
-             WHERE (?1 IS NULL OR df.category_id = ?1)
+             WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
                AND (?2 IS NULL OR df.root_id = ?2)
                AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
                AND (df.file_name LIKE '%' || ?4 || '%' OR df.title LIKE '%' || ?4 || '%' OR df.tags LIKE '%' || ?4 || '%' OR df.notes LIKE '%' || ?4 || '%')",
@@ -999,7 +1069,7 @@ pub async fn get_doc_page(
                     df.source_path, df.managed_path, df.storage_mode, df.is_missing, df.added_at, df.file_modified, df.visit_count
              FROM document_files df
              LEFT JOIN document_categories c ON df.category_id = c.id
-             WHERE (?1 IS NULL OR df.category_id = ?1)
+             WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
                AND (?2 IS NULL OR df.root_id = ?2)
                AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
                AND (df.file_name LIKE '%' || ?4 || '%' OR df.title LIKE '%' || ?4 || '%' OR df.tags LIKE '%' || ?4 || '%' OR df.notes LIKE '%' || ?4 || '%')
@@ -1022,7 +1092,7 @@ pub async fn get_doc_page(
     } else {
         let total = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM document_files df
-             WHERE (?1 IS NULL OR df.category_id = ?1)
+             WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
                AND (?2 IS NULL OR df.root_id = ?2)
                AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)",
         )
@@ -1039,7 +1109,7 @@ pub async fn get_doc_page(
                     df.source_path, df.managed_path, df.storage_mode, df.is_missing, df.added_at, df.file_modified, df.visit_count
              FROM document_files df
              LEFT JOIN document_categories c ON df.category_id = c.id
-             WHERE (?1 IS NULL OR df.category_id = ?1)
+             WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
                AND (?2 IS NULL OR df.root_id = ?2)
                AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
              {}

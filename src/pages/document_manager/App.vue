@@ -3,7 +3,6 @@
        @drop.prevent="handleDrop">
     <div class="dm-layout">
       <div class="dm-sidebar">
-        <div class="dm-sidebar-header"><h3>文档管理</h3></div>
         <div class="dm-sidebar-stats">
           <div class="dm-stat">
             <span class="dm-stat-value">{{ stats?.totalFiles ?? 0 }}</span>
@@ -28,7 +27,14 @@
           <span>检测未管理文件</span>
         </div>
         <div class="dm-sidebar-section">
-          <div class="dm-section-title">根目录</div>
+          <div class="dm-section-title">
+            <span>根目录</span>
+            <el-button size="small" text @click="showAddRoot = true">
+              <el-icon>
+                <Plus/>
+              </el-icon>
+            </el-button>
+          </div>
           <div ref="rootListRef" class="dm-root-list">
             <div v-for="root in roots" :key="root.id" :class="{ active: rootFilter === root.id }"
                  :data-root-id="root.id" class="dm-root-item sortable-root"
@@ -37,8 +43,8 @@
                 <Folder/>
               </el-icon>
               <span class="dm-root-name">{{ root.name }}</span>
-              <el-dropdown trigger="click" @click.stop>
-                <el-icon class="dm-cat-more">
+              <el-dropdown class="dm-cat-more" trigger="click" @click.stop>
+                <el-icon>
                   <MoreFilled/>
                 </el-icon>
                 <template #dropdown>
@@ -48,12 +54,6 @@
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
-            </div>
-            <div class="dm-root-item dm-root-add" @click="showAddRoot = true">
-              <el-icon>
-                <Plus/>
-              </el-icon>
-              <span>添加目录</span>
             </div>
           </div>
         </div>
@@ -66,35 +66,52 @@
               </el-icon>
             </el-button>
           </div>
-          <div ref="catListRef" class="dm-category-list">
+          <div class="dm-category-list">
             <div :class="{ active: categoryFilter === null }" class="dm-category-item dm-cat-all"
                  @click="categoryFilter = null">
               <el-icon>
                 <Document/>
               </el-icon>
-              <span>全部</span>
+              <span class="dm-root-name">全部</span>
+              <span v-if="stats?.totalFiles" class="dm-cat-count">{{ stats.totalFiles }}</span>
+              <el-icon class="dm-dots-spacer">
+                <MoreFilled/>
+              </el-icon>
             </div>
-            <div v-for="cat in categories" :key="cat.id" :class="{ active: categoryFilter === cat.id }"
-                 :data-cat-id="cat.id"
-                 class="dm-category-item sortable-category"
-                 @click="categoryFilter = categoryFilter === cat.id ? null : cat.id">
-              <el-icon :style="{ color: cat.color }">
+            <div ref="catListRef" class="dm-sort-list">
+              <div v-for="cat in categories" :key="cat.id" :class="{ active: categoryFilter === cat.id }"
+                   :data-cat-id="cat.id"
+                   class="dm-category-item sortable-category"
+                   @click="categoryFilter = categoryFilter === cat.id ? null : cat.id">
+                <el-icon :style="{ color: cat.color }">
+                  <Folder/>
+                </el-icon>
+                <span class="dm-root-name">{{ cat.name }}</span>
+                <span v-if="getCatCount(cat.id) > 0" class="dm-cat-count">{{ getCatCount(cat.id) }}</span>
+                <el-dropdown class="dm-cat-more" trigger="click" @click.stop>
+                  <el-icon>
+                    <MoreFilled/>
+                  </el-icon>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item @click="startRenameCat(cat)">重命名</el-dropdown-item>
+                      <el-dropdown-item style="color: var(--el-color-danger)" @click="removeCategoryFn(cat.id)">删除
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
+            </div>
+            <div v-if="categories && categories.length > 0" :class="{ active: categoryFilter === -1 }"
+                 class="dm-category-item dm-cat-uncat" @click="categoryFilter = categoryFilter === -1 ? null : -1">
+              <el-icon>
                 <Folder/>
               </el-icon>
-              <span>{{ cat.name }}</span>
-              <span v-if="getCatCount(cat.id) > 0" class="dm-cat-count">{{ getCatCount(cat.id) }}</span>
-              <el-dropdown trigger="click" @click.stop>
-                <el-icon class="dm-cat-more">
-                  <MoreFilled/>
-                </el-icon>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item @click="startRenameCat(cat)">重命名</el-dropdown-item>
-                    <el-dropdown-item style="color: var(--el-color-danger)" @click="removeCategoryFn(cat.id)">删除
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+              <span class="dm-root-name">未分类</span>
+              <span v-if="uncatCount > 0" class="dm-cat-count">{{ uncatCount }}</span>
+              <el-icon class="dm-dots-spacer">
+                <MoreFilled/>
+              </el-icon>
             </div>
             <div v-if="!categories || categories.length === 0" class="dm-category-item dm-cat-empty">
               <span>暂无分类</span>
@@ -158,6 +175,8 @@
                  class="dm-file-card sortable-file"
                  @click="selectedId = item.id" @dblclick="openDocument(item)"
                  @contextmenu.prevent="showContextMenu($event, item)">
+              <span v-if="item.storageMode === 'repo'" class="dm-mode-badge repo">搬迁</span>
+              <span v-else class="dm-mode-badge index">索引</span>
               <div class="dm-file-icon">
                 <el-icon :color="getFileColor(item.fileExt)" :size="32">
                   <component :is="getFileIcon(item.fileExt)"/>
@@ -716,6 +735,12 @@ function getCatCount(catId) {
   return e?.count || 0
 }
 
+const uncatCount = computed(() => {
+  if (!stats.value?.categoryCounts) return 0
+  const e = stats.value.categoryCounts.find(c => c.categoryId === null)
+  return e?.count || 0
+})
+
 async function loadData() {
   try {
     const [cats, rts, st] = await Promise.all([
@@ -740,7 +765,7 @@ async function loadFiles() {
   try {
     const r = await DocumentService.getPage({
       offset: (currentPage.value - 1) * pageLimit, limit: pageLimit,
-      categoryId: categoryFilter.value, rootId: rootFilter.value,
+      categoryId: categoryFilter.value === -1 ? -1 : categoryFilter.value, rootId: rootFilter.value,
       keyword: searchKeyword.value || null,
       fileExt: fileExtFilter.value || null,
     })
@@ -989,7 +1014,7 @@ function initRootSortable() {
     fallbackTolerance: 3,
     fallbackOnBody: true,
     swapThreshold: 0.65,
-    filter: '.dm-cat-more, .dm-root-add',
+    filter: '.dm-cat-more',
     preventOnFilter: false,
     onEnd: async (evt) => {
       const {oldIndex, newIndex} = evt
@@ -1020,13 +1045,11 @@ function initCatSortable() {
     fallbackTolerance: 3,
     fallbackOnBody: true,
     swapThreshold: 0.65,
-    filter: '.dm-cat-more, .dm-cat-empty, .dm-cat-all',
+    filter: '.dm-cat-more, .dm-cat-empty',
     preventOnFilter: false,
     onEnd: async (evt) => {
-      const offset = 1
-      const oldIndex = evt.oldIndex - offset
-      const newIndex = evt.newIndex - offset
-      if (oldIndex !== newIndex && oldIndex >= 0 && newIndex >= 0 && oldIndex < categories.value.length && newIndex < categories.value.length) {
+      const {oldIndex, newIndex} = evt
+      if (oldIndex !== newIndex && oldIndex !== undefined && newIndex !== undefined) {
         const reordered = [...categories.value]
         const [moved] = reordered.splice(oldIndex, 1)
         reordered.splice(newIndex, 0, moved)
@@ -1233,7 +1256,7 @@ async function confirmMove() {
 
   try {
     if (moveTargetCategoryId.value !== (doc.categoryId ?? null)) {
-      await DocumentService.updateMeta({id: doc.id, categoryId: moveTargetCategoryId.value ?? null})
+      await DocumentService.updateMeta({id: doc.id, categoryId: moveTargetCategoryId.value ?? -1})
     }
     if (moveTargetRootId.value && moveTargetRootId.value !== doc.rootId) {
       await DocumentService.moveDoc(doc.id, moveTargetRootId.value)
@@ -1278,7 +1301,7 @@ function dismissGuide() {
 async function saveCategory() {
   if (!selectedDoc.value) return;
   try {
-    await DocumentService.updateMeta({id: selectedDoc.value.id, categoryId: editCategoryId.value})
+    await DocumentService.updateMeta({id: selectedDoc.value.id, categoryId: editCategoryId.value ?? -1})
     selectedDoc.value.categoryId = editCategoryId.value
   } catch {
   }
@@ -1425,6 +1448,12 @@ onMounted(async () => {
   gap: 2px
 }
 
+.dm-sort-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px
+}
+
 .dm-root-item, .dm-category-item {
   display: flex;
   align-items: center;
@@ -1462,7 +1491,6 @@ onMounted(async () => {
 }
 
 .dm-cat-count {
-  margin-left: auto;
   font-size: 11px;
   color: var(--el-text-color-secondary);
   background: var(--el-fill-color);
@@ -1473,7 +1501,7 @@ onMounted(async () => {
 .dm-cat-more {
   opacity: 0;
   transition: opacity .15s;
-  margin-left: 4px
+  margin-left: auto
 }
 
 .dm-category-item:hover .dm-cat-more {
@@ -1482,6 +1510,11 @@ onMounted(async () => {
 
 .dm-root-item:hover .dm-cat-more {
   opacity: 1
+}
+
+.dm-dots-spacer {
+  visibility: hidden;
+  flex-shrink: 0
 }
 
 .dm-cat-empty {
@@ -1583,7 +1616,29 @@ onMounted(async () => {
   align-items: center;
   gap: 8px;
   transition: all .15s;
-  background: var(--el-bg-color)
+  background: var(--el-bg-color);
+  position: relative
+}
+
+.dm-mode-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 3px;
+  line-height: 16px;
+  pointer-events: none
+}
+
+.dm-mode-badge.repo {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9)
+}
+
+.dm-mode-badge.index {
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light)
 }
 
 .dm-file-card.sortable-file {

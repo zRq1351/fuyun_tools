@@ -217,7 +217,7 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
         }
     }
 
-    if !success_ids.is_empty() {
+    if !success_ids.is_empty() && is_repo {
         let source_dir = if !request.source_dir.is_empty() {
             request.source_dir.clone()
         } else {
@@ -293,7 +293,7 @@ pub async fn get_doc_page(request: DocPageRequest) -> Result<document_database::
 pub struct UpdateDocMetaRequest {
     pub id: i64,
     pub title: Option<String>,
-    pub category_id: Option<Option<i64>>,
+    pub category_id: Option<i64>,
     pub tags: Option<String>,
     pub notes: Option<String>,
 }
