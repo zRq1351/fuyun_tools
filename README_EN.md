@@ -1,386 +1,474 @@
-# 🚀 fuyun_tools
+<div align="center">
 
-[中文](README.md) | [English](README_EN.md)
+<img src="src-tauri/icons/icon.png" alt="fuyun_tools" width="96" />
 
-![Version](https://img.shields.io/badge/version-0.6.78-blue)
-![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
-![License](https://img.shields.io/badge/license-GPL--2.0-green)
+# fuyun_tools
 
-fuyun_tools is a desktop productivity tool running in the system tray, focused on four things:
+**One Shortcut Away from Everything**
 
-- **Clipboard Management**: Efficiently record and manage text and image clipboard history
-- **AI Text Selection Assistant**: Smart translation and explanation on Windows
-- **Screenshot & OCR**: Quick screenshot capture with text extraction from images
-- **Screen Recording**: Professional recording with system audio and microphone capture
+![Version](https://img.shields.io/badge/version-0.7.1-blue?style=flat-square)
+![Platform](https://img.shields.io/badge/platform-Windows_10/11-0078D6?style=flat-square&logo=windows)
+![License](https://img.shields.io/badge/license-GPL--2.0-green?style=flat-square)
+![Rust](https://img.shields.io/badge/Tauri-2.x-FFC131?style=flat-square&logo=tauri)
+![Vue](https://img.shields.io/badge/Vue-3.x-4FC08D?style=flat-square&logo=vue.js)
 
-Core positioning:
+[中文](README.md)
 
-- One hotkey workflow to manage both text and image clipboard history
-- One selection workflow to translate, explain, and copy in-place
-- One screenshot + OCR workflow from capture to text extraction
-- One recording workflow with capsule controls, audio capture, and recording parameter configuration
-- One configurable strategy set to balance history limits and key item retention
-
-In addition, this project itself follows an AI full-process development workflow: AI deeply participates in requirement breakdown, solution design, coding implementation, and documentation maintenance.
+</div>
 
 ---
 
-## ✨ Feature Overview
+**fuyun_tools** is a Windows system-tray productivity suite that unifies clipboard management, AI text selection,
+screenshot OCR, screen recording, app launching, and document management into a keyboard-driven workflow.
 
-### 📋 Clipboard Management
+<div align="center">
 
-- **Auto Capture**: Real-time clipboard change detection with quick paste-back to any application
-- **Smart Search**: Keyword search to quickly locate historical records
-- **Category Management**: Custom category tags for organizing important content by scenario
-- **Pin Protection**: Important items can be pinned,不受 capacity limits
-- **Dual Input Methods**: Supports both keyboard (arrow keys, enter) and mouse (wheel, click) operations
-- **AI Integration**: Direct AI usage within the window (`T` translate / `E` explain)
-- **Right-Click Menu**: One-click "translate/explain" for the selected item
-- **Language Configuration**: Customize translation target language and explanation language
-- **Unified Identifier**: Text and image clipboards use item_id at the底层 level for smoother switching
+| <kbd>Ctrl+Shift+Z</kbd><br>📋 Text Clipboard | <kbd>Ctrl+Shift+X</kbd><br>🖼️ Image Clipboard | <kbd>Ctrl+Shift+S</kbd><br>✂️ Screenshot OCR | <kbd>Alt+R</kbd><br>🎥 Recording | <kbd>Alt+Q</kbd><br>🔍 App Launcher | <kbd>Ctrl+Shift+D</kbd><br>📁 Document Manager |
+|----------------------------------------------|------------------------------------------------|----------------------------------------------|----------------------------------|-------------------------------------|------------------------------------------------|
 
-### 🖼️ Image Clipboard Management
-
-- **Auto Detection**: Detects images in clipboard and automatically generates thumbnail lists
-- **Smart Search**: Search image history by category and keywords
-- **Quick Paste**: Double-click thumbnails to paste directly at cursor position
-- **Large Preview**: Full-screen image viewing with zoom and pan support
-- **Persistent Storage**: Image history and categories saved locally, available after restart
-- **Disk Management**: Configurable image storage limit (default 2GB) with automatic cleanup of old images
-- **Performance Optimization**: Async preview generation, fixed long-list scrolling lag issues
-
-### 🔎 Image OCR (Windows)
-
-- **Pinned Window OCR**: Right-click in pinned image window to trigger OCR recognition
-- **Dedicated Result Display**: Recognition results shown in a separate text window for copying
-- **Windows Native**: Based on Windows Media OCR API, no internet required
-- **Platform Support**: Currently supports Windows 10/11 only
-
-### 🎥 Screen Recording (Windows)
-
-- **Floating Capsule**: Lightweight recording control bar with hotkey activation
-- **One-Click Control**: Start, pause, resume, stop - simple and intuitive operation
-- **Audio Capture**:
-    - System audio output (based on native WASAPI capture pipeline)
-    - Microphone device selection with multi-device switching support
-    - Real-time microphone toggle during recording (hotkey `Ctrl+Space`)
-- **Parameter Configuration**:
-    - Frame Rate: 1-120 FPS (default 30)
-    - Video Bitrate: 500-50000 kbps (default 6000)
-    - Audio Bitrate: 32-512 kbps (default 160)
-    - Cursor Capture: Optional mouse pointer capture
-    - Toolbar Protection: Option to hide recording capsule in video
-- **Region Selection**: Supports full-screen or specific window recording
-- **ffmpeg Management**: Auto-detection and on-demand download on first enable with real-time progress
-- **State Protection**: Capsule shows disabled state when feature is turned off to prevent accidental triggers
-- **Audio Optimization**: Fixed system audio disappearance issue when recording microphone, improved stop logic
-- **Audio Merge Enhancement**: FFmpeg audio file pre-validation, AAC stream copy auto-fallback to re-encoding, smart
-  filtering of corrupted audio files, ensuring recorded videos are preserved
-
-### 🔤 AI Text Selection Assistant (Windows)
-
-- **Multi-Scenario Selection**: Supports drag, double-click, triple-click, and other text selection methods
-- **Smart Popup**: Selection toolbar automatically appears after text selection
-- **Core Functions**:
-    - Translate: Translate selected text to target language
-    - Explain: Explain professional content in plain language
-    - Copy: Quickly copy selected text
-    - Custom Prompts: Support for personalized AI instructions
-- **Streaming Output**: Result window displays AI-generated content in real-time
-- **One-Click Write-Back**: Copy and auto-paste back to original position
-- **Web Search**: Optional Bing search engine for quick related content lookup
-
-### 🤖 AI Service Configuration
-
-- **Built-in Providers**:
-    - DeepSeek: High-performance conversation model
-    - Qwen (`qwen`): Alibaba's large language model
-    - Xiaomi Mimo (`xiaomimimo`): Xiaomi's self-developed model
-- **Custom Extension**: Support for adding any OpenAI-compatible custom provider
-- **Easy Management**: Delete custom providers directly from dropdown options
-- **Secure Storage**: API keys stored in system credential manager (keyring) with encryption
-- **Connection Test**: Immediate connectivity validation after configuration
-- **Prompt Templates**: Customize system prompts for translation and explanation
-
-### ⚙️ System Integration
-
-- Runs in the system tray and supports auto-start
-- Global hotkeys for text clipboard / image clipboard / screenshot
-- Light/Dark theme switching
-- Built-in app update support
-
-### 🧠 AI Full-Process Development
-
-- Requirement analysis and task breakdown are AI-assisted
-- Implementation, refactoring, and bug fixing are iteratively driven by AI
-- Chinese and English documentation is maintained in sync by AI
-
----
-
-> Current versions support Windows only; Linux/macOS are not yet supported and are under development.
-
----
-
-## 📥 Download & Install
-
-> GitHub Release is recommended.
-
-| Channel | Link                                                              | Notes                 |
-|---------|-------------------------------------------------------------------|-----------------------|
-| GitHub  | [Latest Release](https://github.com/zRq1351/fuyun_tools/releases) | Recommended           |
-| Gitee   | [China Mirror](https://gitee.com/zrq1351/fuyun_tools/releases)    | May lag behind GitHub |
-
-Installation steps:
-
-1. Download the installer for your platform
-2. On Windows, run and install the `.exe` package
-3. Configuration files are created automatically on first launch
+</div>
 
 ---
 
 ## 🚀 Quick Start
 
-1. **Launch App**: Run fuyun_tools; the icon appears in the system tray
-2. **Use Global Hotkeys**:
-    - Text clipboard: Windows `Ctrl+Shift+Z`
-    - Image clipboard: Windows `Ctrl+Shift+X`
-    - Screenshot: Windows `Ctrl+Shift+S`
-3. **Configure AI Service**: Go to 「Settings → AI Settings」
-    - Choose built-in provider (DeepSeek/Qwen/Mimo) or add custom OpenAI-compatible endpoint
-    - Enter API URL, model name, and key
-    - Click "Test Connection" to validate configuration
-4. **Try Text Selection**: Select text in any Windows application
-    - The 「Selection Toolbar」automatically pops up
-    - Click [Translate] or [Explain]
-    - View streaming results in the 「Result Window」with one-click write-back
-5. **Try Screen Recording**: Go to 「Settings → Recording」, enable recording, then use the recording capsule
-    - On first enable, ffmpeg is auto-checked and downloaded on demand if missing
-    - You can choose system/microphone audio devices and adjust recording parameters in capsule settings
+### System Requirements
+
+| Item | Requirement            |
+|------|------------------------|
+| OS   | Windows 10/11 (64-bit) |
+| RAM  | 4GB+ recommended       |
+| Disk | 500MB+ free space      |
+
+### Installation
+
+1. Download the `.exe` installer from [GitHub Release](https://github.com/zRq1351/fuyun_tools/releases)
+2. Run the installer and follow the prompts
+3. On first launch, the tray icon appears and config files are created automatically
+
+### Get Started in 3 Steps
+
+**Step 1: Configure AI**
+
+Go to Settings → AI Settings, choose a provider (DeepSeek / Qwen / Xiaomi Mimo / custom OpenAI-compatible), enter the
+API URL, model name, and key, then click "Test Connection".
+
+**Step 2: Try AI Selection**
+
+Select text in any application — the floating toolbar appears automatically. Click "Translate" or "Explain" to see
+streaming AI output.
+
+**Step 3: Explore More**
+
+| Action               | Shortcut       |
+|----------------------|----------------|
+| Open Text Clipboard  | `Ctrl+Shift+Z` |
+| Open Image Clipboard | `Ctrl+Shift+X` |
+| Screenshot & OCR     | `Ctrl+Shift+S` |
+| Screen Recording     | `Alt+R`        |
+| App Launcher         | `Alt+Q`        |
+| Document Manager     | `Ctrl+Shift+D` |
 
 ---
 
-## 🧭 Usage Guide
+## 📋 Clipboard Management
 
-### Clipboard Window
+> Automatically monitors clipboard changes, providing independent history and paste-back for text and images.
 
-- **Navigation**: `← / →` to switch items, `Enter` to fill
-- **Scroll Control**: Use mouse wheel to navigate through history
-- **AI Actions**: Press `T` to translate or `E` to explain the selected item
-- **UI Interaction**: Drag the "Raise" handle to adjust window's vertical position
-- **Advanced Feature**: Click the blank area between the "Raise" handle and search box to expand/collapse the AI
-  language settings panel
+### Text Clipboard
 
-### Image Clipboard Window
+| Feature             | Implementation                                                                                 |
+|---------------------|------------------------------------------------------------------------------------------------|
+| Multi-layer Dedup   | Bloom filter → XXH3 hash index → fuzzy version detection                                       |
+| Smart Replacement   | Copies fragment then full text → auto-replaces with complete version                           |
+| Categories & Pin    | Custom labels, drag-and-drop; pinned items survive capacity eviction                           |
+| Keyboard Ops        | `←` `→` navigate, `Enter` paste, `Ctrl+1~9` quick select                                       |
+| AI Integration      | Press `T` to translate, `E` to explain selected item                                           |
+| Capacity Protection | With "Limit Ungrouped Items Only" enabled, categorized and pinned items are immune to eviction |
 
-- **Select Image**: Click a thumbnail card to select
-- **Quick Paste**: Double-click a card to paste directly at cursor position
-- **View Large Image**: Click the top-right "Fullscreen" button for large-image preview
-- **Manage History**: Click the top-right "Delete" icon to remove record
-- **Bulk Operations**: Use `← / →` to browse images, `Enter` to paste current item
+### Image Clipboard
 
-### Pinned Image OCR (Windows)
+| Feature          | Implementation                          |
+|------------------|-----------------------------------------|
+| Async Thumbnails | Background generation, smooth scrolling |
+| Disk Quota       | Default 2GB cap, automatic cleanup      |
+| Full Preview     | Zoom and pan                            |
+| Batch Import     | Drag-and-drop or file picker            |
 
-- **How to Trigger**: Right-click in the pinned image window and choose OCR
-- **Result Output**: Recognition text opens in a dedicated OCR text window
-- **Platform Scope**: Currently supported on Windows only
+---
 
-### Limit Strategy (Text + Image)
+## 🔤 AI Text Selection
 
-- **Access Path**: Settings → Clipboard → Limit Strategy
-- **Smart Protection**: When "Limit Ungrouped Items Only" is enabled, all categorized/pinned items are protected from
-  capacity limits
-- **Full Cleanup**: When disabled, the history limit applies to all records (including important items)
+> Select text in any app and a floating toolbar appears — no window switching.
 
-### Selection Toolbar (Windows)
+```
+Select text → Toolbar pops up → Translate / Explain / Custom Prompt → Streaming result → Write back
+```
 
-- **Trigger Condition**: Automatically appears upon completing text selection in any application
-- **Core Actions**: Provides three primary buttons: [Translate], [Explain], [Copy]
-- **Instant Feedback**: Clicking an action immediately displays streaming AI output in the "Result Window"
-- **UI Control**: Click outside the toolbar or press ESC to dismiss
+### Detection
 
-### Recording Capsule (Windows)
+Uses `WH_MOUSE_LL` + `WH_KEYBOARD_LL` global hooks with multi-factor heuristics — **linearity** (R² > 0.9), **horizontal
+bias**, **movement speed** — to accurately distinguish text selection from casual clicking/dragging and suppress false
+triggers.
 
-- **Trigger**: Open via recording hotkey or from settings after enabling recording
-- **Core Controls**: Start, pause, resume, and stop recording directly from the capsule
-- **Audio Routing**: Select system output and microphone devices in capsule settings
-- **First-Run Dependency Check**: Automatically checks `ffmpeg.exe`; if missing, prompts download with real-time
-  progress
-- **Disabled State**: When recording is disabled, the capsule shows a disabled state and prevents accidental actions
-- **Audio Merge Reliability**: Audio files are pre-validated with FFmpeg before merge; corrupted/empty files are
-  filtered out;
-  AAC stream copy failures auto-fallback to re-encoding; video files are preserved even if audio merge fails
+### Toolbar Buttons
 
-### AI Configuration Tips
+|              | Translate | Explain | Copy |             Custom             |
+|--------------|:---------:|:-------:|:----:|:------------------------------:|
+| **Default**  |     ✓     |    ✓    |  ✓   |               —                |
+| **Extended** |     —     |    —    |  —   | User-defined AI prompt buttons |
 
-- **Secure Storage**: API keys are encrypted and stored in the system credential manager (keyring), never saved as plain
-  text
-- **Connection Validation**: Always click "Test Connection" to verify configuration validity before saving
-- **Custom Extension**: Supports adding any OpenAI-compatible interface, enabling flexible integration with private
-  model deployments
-- **Prompt Templates**: Modify translation/explanation system prompts in settings to achieve personalized output
+### AI Providers
+
+- **Built-in**: DeepSeek · Qwen (Tongyi) · Xiaomi Mimo
+- **Extensible**: Any OpenAI-compatible endpoint
+- **Secure**: API key stored in Windows Credential Manager, never in plaintext
+- **Streaming**: SSE real-time delivery, Markdown rendering
+
+---
+
+## ✂️ Screenshot & OCR
+
+> A single shortcut powers the full pipeline: region capture → annotation → long screenshot → OCR → pin.
+
+### Screenshot
+
+| Feature         | Details                                                                                                |
+|-----------------|--------------------------------------------------------------------------------------------------------|
+| Region Select   | Drag to select, or click to auto-detect window bounds                                                  |
+| Long Screenshot | Scroll capture + OpenCV template matching / phase correlation (max 20000px)                            |
+| Annotations     | Rectangle · Circle · Arrow · Text · Freehand · Mosaic · Color Picker                                   |
+| Undo / Redo     | `Ctrl+Z` / `Ctrl+Y`, up to 50 steps                                                                    |
+| Pin to Screen   | Float always-on-top, right-click to OCR, double-click to close                                         |
+| Color Picker    | 11×11px region at 12× zoom, pixel-level color sampling; `Shift` toggles HEX/RGB, `Ctrl+C` copies value |
+
+### OCR Engines
+
+<table>
+<tr>
+<th></th>
+<th>Windows Native OCR</th>
+<th>PaddleOCR (MNN)</th>
+</tr>
+<tr>
+<td><b>Speed</b></td>
+<td>~500ms</td>
+<td>~1000ms</td>
+</tr>
+<tr>
+<td><b>Accuracy</b></td>
+<td>80-85%</td>
+<td>95-98% ✨</td>
+</tr>
+<tr>
+<td><b>Network</b></td>
+<td>Offline</td>
+<td>Offline</td>
+</tr>
+<tr>
+<td><b>Handwriting</b></td>
+<td>—</td>
+<td>✓</td>
+</tr>
+<tr>
+<td><b>Preprocessing</b></td>
+<td>Lanczos3 + adaptive binarization</td>
+<td>MNN inference</td>
+</tr>
+</table>
+
+---
+
+## 🎥 Screen Recording
+
+> WASAPI native audio capture + WGC hardware acceleration + FFmpeg encoding, all controlled from a floating capsule.
+
+### Capture Matrix
+
+| Target               | Technology                                          |
+|----------------------|-----------------------------------------------------|
+| Window               | **WGC** (Windows Graphics Capture) → hardware H.264 |
+| Full screen / Region | **FFmpeg gdigrab** → `libx264 veryfast`             |
+| System Audio         | **WASAPI** loopback → AAC 128kbps                   |
+| Microphone           | **WASAPI** input → WAV                              |
+| Per-process Audio    | Application-level loopback capture                  |
+
+### Floating Capsule
+
+```
+┌──────────────────────────────────────┐
+│ 🔴 00:12:35  ┃  ⏸  ⏹  ┃  ⚙  🎤  ✕  │
+└──────────────────────────────────────┘
+```
+
+- **Collapsed** — 38px rounded pill, red pulsing dot during recording
+- **Expanded** — Full panel: target selection, audio devices, FPS/bitrate settings
+- **Mic Push-to-Talk** — Hold `Ctrl+Space` during recording to unmute, release to mute — ideal for live commentary
+
+### Reliability
+
+| Mechanism            | Purpose                                            |
+|----------------------|----------------------------------------------------|
+| Black-frame Watchdog | Auto-stop after 4s with no video frames            |
+| Job Object           | Guaranteed FFmpeg subprocess cleanup               |
+| Audio Pre-validation | FFmpeg decode check before muxing                  |
+| AAC Fallback         | Auto retry with re-encoding on stream copy failure |
+
+---
+
+## 🔍 App Launcher
+
+> `Alt+Q` to summon, fuzzy search, Enter to launch.
+
+- Scans **Start Menu** for all `.lnk` shortcuts, auto-categorizes by folder
+- **PE signature verification** to distinguish system vs. third-party apps
+- Built-in commands: `:settings` `:clipboard` `:screenshot` `:record`
+- Custom commands: run programs · open windows · copy text
+- Category grid view with **SortableJS drag-and-drop**
+- Launch all apps in a category at once
+
+---
+
+## 📁 Document Manager
+
+> Index / Repository dual-mode, FTS5 full-text search, tags and categories.
+
+| Feature          | Description                                             |
+|------------------|---------------------------------------------------------|
+| Index Mode       | Reference paths only, files stay in place               |
+| Repository Mode  | Physically move files to managed directory              |
+| Full-text Search | SQLite FTS5 across titles / content / tags / notes      |
+| Drag-and-drop    | Drop files or folders to import                         |
+| Import History   | Rollback support by batch                               |
+| Orphan Detection | Auto-discover unregistered files in managed directories |
+
+---
+
+## ⚙️ System Integration
+
+<div align="center">
+
+| 🖥️ System Tray  | 🚀 Auto-start | ⌨️ Global Shortcuts |      🎨 Themes      |  🔄 Auto-update  |
+|:----------------:|:-------------:|:-------------------:|:-------------------:|:----------------:|
+| Right-click menu |   Optional    |  All customizable   | Light/Dark/Eye-care | Built-in checker |
+
+</div>
 
 ---
 
 ## 🧰 Tray Menu
 
-Available in production:
+Right-click the system tray icon:
 
-- Auto Start
-- Clear History
-- Settings
-- Exit
+| Menu Item     | Description                     |
+|---------------|---------------------------------|
+| Auto Start    | Toggle launch on system startup |
+| Clear History | Clear clipboard history         |
+| Settings      | Open settings window            |
+| Exit          | Quit application                |
 
-Extra entries in development builds:
-
-- Clear Logs
-- Open Log Directory
-
----
-
-## 🔒 Data & Security
-
-- API keys are stored in the system credential manager (keyring), not written as plain text in config files
-- History and settings are saved locally in app files
-- Production builds do not write log files by default (log file features are for development/debugging)
+> Dev builds additionally provide "Clear Logs" and "Open Log Directory".
 
 ---
 
-## 📄 Third-Party Licenses and Compliance
+## ⚙️ Settings
 
-- The recording pipeline invokes `ffmpeg.exe` as an external process.
-- The currently distributed FFmpeg build includes GPL components (for example, `libx264`), and that binary is
-  distributed under GPL/LGPL obligations.
-- The installer does not bundle `ffmpeg.exe` by default; it is downloaded on demand into local `bin` directory when
-  recording is enabled.
-- OCR functionality uses PaddleOCR PP-OCRv5 model (Apache 2.0 License) and MNN inference engine (Apache 2.0 License).
-- Corresponding source and license disclosure for FFmpeg, PaddleOCR, MNN are documented in
-  `docs/THIRD_PARTY_NOTICES.md`.
-- License texts should be shipped with releases: `docs/GPLv2`, `docs/LGPLv2.1`, `docs/Apache-2.0` (and
-  `docs/OpenCV_LICENSE` when
-  OpenCV-related build is distributed).
+The settings window has 10 tabs in the left sidebar, with auto-save on the right (450ms debounce):
+
+| Tab              | Configuration                                       |
+|------------------|-----------------------------------------------------|
+| Clipboard        | Shortcuts, item limit, capacity protection strategy |
+| Screenshot       | Screenshot hotkey, OCR engine selection             |
+| Recording        | Recording hotkey, audio devices, FFmpeg management  |
+| Selection        | Trigger method, custom prompts, search engine       |
+| Launcher         | Launcher hotkey, view mode                          |
+| Doc Manager      | Document manager hotkey, feature toggle             |
+| AI Settings      | AI provider, API key, model, connection test        |
+| Backup & Restore | Manual backup, auto-backup schedule, restore        |
+| Diagnostics      | System health checks, one-click repair              |
+| About            | Version info, update check, project links           |
 
 ---
 
-## 🛠️ Local Development
+## 💾 Backup & Restore
 
-### Tech Stack
+|            | Backup                                                    | Restore                                |
+|------------|-----------------------------------------------------------|----------------------------------------|
+| **Method** | Manual export / Scheduled auto (daily/weekly/monthly)     | Choose backup package                  |
+| **Format** | `.fytbk.zip` + SHA-256 checksum                           | Merge (add new) or Overwrite           |
+| **Safety** | —                                                         | Auto rollback point, revert on failure |
+| **Scope**  | Clipboard history · Image history · Categories · Settings | Same                                   |
 
-- Frontend: Vue 3 + Element Plus
-- Desktop framework: Tauri 2 + Rust
-- AI SDK: async-openai (OpenAI-compatible APIs)
+---
 
-### Common Commands
+## 🏗️ Tech Stack
 
-Frontend build:
+| Layer             | Technology                            |
+|:------------------|:--------------------------------------|
+| Desktop Framework | **Tauri 2.x**                         |
+| Frontend          | Vue 3 · Element Plus · Vite           |
+| Backend           | Rust                                  |
+| Database          | SQLite · WAL · FTS5                   |
+| AI                | async-openai (OpenAI-compatible)      |
+| Imaging           | image · imageproc · OpenCV (optional) |
+| Audio             | WASAPI (cpal / wasapi)                |
+| Capture           | WGC · DXGI · FFmpeg                   |
+| OCR               | Windows Media OCR · PaddleOCR / MNN   |
+| Security          | Windows Credential Manager            |
 
 ```bash
-cd src
-npm run build
-```
-
-Tauri check:
-
-```bash
-cd src-tauri
-cargo check
+fuyun_tools/
+├── src/                     # Vue 3 frontend (16 independent webview windows)
+│   ├── pages/
+│   │   ├── clipboard/       # Text clipboard
+│   │   ├── image_clipboard/ # Image clipboard
+│   │   ├── selection_toolbar/  # AI selection toolbar
+│   │   ├── result_display/  # AI result display
+│   │   ├── screenshot/      # Screenshot editor
+│   │   ├── longshot_toolbar/   # Long screenshot control
+│   │   ├── recording_toolbar/  # Recording capsule
+│   │   ├── launcher/        # App launcher
+│   │   ├── document_manager/   # Document manager
+│   │   ├── settings/        # Settings
+│   │   └── ...
+│   └── services/            # IPC communication layer
+├── src-tauri/               # Rust backend
+│   └── src/
+│       ├── core/            # App state · Config · Error handling
+│       ├── features/        # System-level (hooks · recording · screenshot · selection)
+│       ├── services/        # Business logic (clipboard · AI · OCR · launcher)
+│       ├── ui/              # Command routing · Window management · Tray menu
+│       └── utils/           # Database · Backup · Settings model
+└── docs/                    # Licenses & third-party notices
 ```
 
 ---
 
 ## ❓ FAQ
 
-### 1) Why is AI text selection unavailable on Linux/macOS?
+<details>
+<summary><b>Why isn't AI text selection available on Linux/macOS?</b></summary>
 
-Current versions implement the text-selection pipeline only on Windows; Linux/macOS are not yet supported and are under
-development.
+The text selection pipeline currently relies on Windows global hooks (`WH_MOUSE_LL` / `WH_KEYBOARD_LL`) and is not yet
+ported to other platforms.
 
-### 2) How do I delete a custom provider?
+</details>
 
-In AI provider dropdown options, click the `X` button on the right side of the custom provider.
+<details>
+<summary><b>How do I delete a custom AI provider?</b></summary>
 
-### 3) Why does closing settings sometimes feel delayed after saving?
+Click the `✕` next to the custom provider in the dropdown. Built-in providers cannot be deleted.
 
-The close flow has been optimized for responsiveness. Please update to the latest version.
+</details>
 
-### 4) Why am I prompted to download ffmpeg when enabling recording?
+<details>
+<summary><b>Why am I prompted to download FFmpeg when enabling recording?</b></summary>
 
-On first enable, the app checks whether `ffmpeg.exe` exists in the expected `bin` path. If missing, it guides an
-on-demand download.
+FFmpeg is not bundled to keep the installer small. On first enable, the app checks for `ffmpeg.exe` and downloads it on
+demand if missing (from GitHub / Gitee; the download URL is configurable).
 
-### 5) How to quickly switch microphone during recording?
+</details>
 
-Use either of these methods:
+<details>
+<summary><b>How do I quickly toggle the microphone during recording?</b></summary>
 
-- **Click icon**: Click the microphone icon on the recording capsule
-- **Hotkey**: Use `Ctrl+Space` (customizable in settings)
+Two ways: ① Click the mic icon on the recording capsule; ② Use `Ctrl+Space` (hold to talk, release to mute). The
+shortcut can be customized in settings.
 
-Press to enable, release to disable — perfect for impromptu commentary.
+</details>
 
-### 6) Recording shows "audio merge failed" — what should I do?
+<details>
+<summary><b>Will my clipboard history be lost?</b></summary>
 
-v0.6.78 has significantly improved audio merge reliability. If this still occurs:
+No. Both text and image history are persisted to local SQLite databases and survive restarts. For important items, pin
+or categorize them — with capacity protection enabled, they are permanently retained. Scheduled auto-backup is also
+available.
 
-- **Video is preserved**: Even if audio merge fails, the video file itself is not lost
-- **Check system audio**: Ensure the system audio device was working during recording
-- **Disable system audio**: If system audio is not needed, turn it off in the recording capsule
-- **Update version**: Ensure you are using the latest version, which automatically handles corrupted audio files
+</details>
 
----
+<details>
+<summary><b>Is my API key secure?</b></summary>
 
-## 📦 Latest Release (v0.6.78)
+Yes. API keys are encrypted and stored in Windows Credential Manager (keyring), never written as plaintext in any config
+file. The UI only shows masked characters.
 
-### 🔊 Recording Audio Merge Enhancement
+</details>
 
-- **FFmpeg Audio Pre-validation**: Audio files are validated with FFmpeg actual decoding before merge, filtering
-  corrupted/empty files
-- **AAC Stream Copy Auto-Fallback**: When AAC stream copy fails, automatically switches to re-encoding mode
-- **Smart Corrupted File Filtering**: Raised AAC file validity check threshold to prevent false positives
-- **Graceful Degradation**: Audio merge failure preserves the video-only file instead of causing total recording failure
-- **Enhanced Diagnostics**: FFmpeg AAC encoding output file size is automatically checked with diagnostic logging
+<details>
+<summary><b>What if shortcuts conflict with other apps?</b></summary>
 
----
+All global shortcuts can be customized in Settings. If a shortcut registration fails at startup, the settings window
+opens automatically with a conflict warning.
 
-## 📦 Previous Release (v0.6.77)
+</details>
 
-### 🎥 Recording Enhancement
+<details>
+<summary><b>How do I migrate data to a new computer?</b></summary>
 
-- **Real-time Microphone Switch**: New real-time microphone switching with dedicated hotkey support (default
-  `Ctrl+Space`)
-- **Flexible Control**: More flexible device switching during recording, ideal for impromptu commentary
-- **Press-to-Talk**: Hotkey uses press-to-enable, release-to-disable interaction
+On the old computer, use Settings → Backup & Restore → Export Now to create a `.fytbk.zip` file. On the new computer,
+import it via the Restore function.
 
-### 🔊 Audio Optimization
-
-- **Fix System Audio Disappearance**: Fixed occasional system audio disappearance when recording microphone
-- **Improved Stop Logic**: Enhanced audio stop logic for more stable recording completion
-- **WASAPI Pipeline**: Based on native WASAPI capture pipeline for better audio quality
-
-### 📋 Smoother Clipboard
-
-- **Unified Identifier**: Text and image clipboard logic switched to `item_id`
-- **Better Switching Experience**: Significantly improved switching fluency between text and image clipboards
-- **Seamless Transition**: Switching between the two windows feels more natural
-
-### 🛠️ History Fixes
-
-- **Fix Scrolling Lag**: Completely fixed clipboard history scrolling lag issues
-- **Fix Data Anomalies**: Resolved image data anomaly issues
-- **Long List Optimization**: Long lists are more reliable with significant performance improvements
-
-### ✨ Cleaner Interaction
-
-- **Remove Popup Alerts**: Removed auto-fill success popup notifications
-- **Less Distraction**: Provides a purer, non-intrusive experience
-- **Stay Focused**: Keeps users focused on their current task
-
-### ⚡ Performance Boost
-
-- **Code Refactoring**: Comprehensive deep analysis and refactoring of codebase
-- **Clean Redundancy**: Removed redundant tests and dependencies
-- **Smoother System**: Overall smoother operation and faster response
+</details>
 
 ---
 
-## Demo
+## 🛠️ Local Development
 
-[Watch Demo Video](https://www.bilibili.com/video/BV1bwBSBUE8k)
+<details>
+<summary><b>Prerequisites</b></summary>
+
+- **Node.js** 18+
+- **Rust** toolchain (`rustup`)
+- **Windows 10/11 SDK**
+- (Optional) **OpenCV** — for long-screenshot compile feature
+
+</details>
+
+```bash
+# Install frontend dependencies
+cd src && npm install
+
+# Tauri dev mode (hot reload)
+npm run tauri:dev
+
+# Production build
+npm run tauri:build
+
+# Rust code check only
+cd src-tauri && cargo check
+```
+
+---
+
+## 🔒 Security & Privacy
+
+| Aspect     | Policy                                                |
+|------------|-------------------------------------------------------|
+| 🔑 API Key | Encrypted in Windows Credential Manager, masked in UI |
+| 📷 OCR     | Fully offline, no image upload                        |
+| 💾 Data    | Entirely local storage, zero data collection          |
+| 📖 Source  | GPL open source, auditable                            |
+
+---
+
+## 📄 Third-Party Licenses
+
+- **FFmpeg** — External process (GPL/LGPL), downloaded on demand when recording is first enabled
+- **PaddleOCR** — PP-OCRv5 model (Apache 2.0)
+- **MNN** — Inference engine (Apache 2.0)
+- **OpenCV** — Optional compile feature (Apache 2.0)
+
+See [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md)
+
+---
+
+<div align="center">
+
+## 📥 Download
+
+| [![GitHub](https://img.shields.io/badge/GitHub-Release-blue?style=for-the-badge&logo=github)](https://github.com/zRq1351/fuyun_tools/releases) | [![Gitee](https://img.shields.io/badge/Gitee-Mirror-C71D23?style=for-the-badge)](https://gitee.com/zrq1351/fuyun_tools) |
+|------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
+
+**GPL-2.0** · [Demo Video](https://www.bilibili.com/video/BV1bwBSBUE8k)
+
+</div>
