@@ -666,6 +666,15 @@ pub async fn delete_doc_file(id: i64) -> Result<Option<String>, String> {
 
 pub async fn delete_doc_record(id: i64) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
+
+    let affected_imports: Vec<i64> = sqlx::query_scalar(
+        "SELECT import_id FROM document_import_items WHERE doc_file_id = ?1"
+    )
+    .bind(id)
+    .fetch_all(&mut *conn)
+    .await
+    .unwrap_or_default();
+
     sqlx::query("DELETE FROM document_files WHERE id = ?1")
         .bind(id)
         .execute(&mut *conn)
@@ -675,6 +684,39 @@ pub async fn delete_doc_record(id: i64) -> Result<(), String> {
         .bind(id)
         .execute(&mut *conn)
         .await;
+
+    for import_id in &affected_imports {
+        sqlx::query("DELETE FROM document_import_items WHERE import_id = ?1 AND doc_file_id = ?2")
+            .bind(import_id)
+            .bind(id)
+            .execute(&mut *conn)
+            .await
+            .ok();
+
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM document_import_items WHERE import_id = ?1"
+        )
+        .bind(import_id)
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap_or(0);
+
+        if remaining == 0 {
+            sqlx::query("DELETE FROM document_imports WHERE id = ?1")
+                .bind(import_id)
+                .execute(&mut *conn)
+                .await
+                .ok();
+        } else {
+            sqlx::query("UPDATE document_imports SET file_count = ?1 WHERE id = ?2")
+                .bind(remaining)
+                .bind(import_id)
+                .execute(&mut *conn)
+                .await
+                .ok();
+        }
+    }
+
     Ok(())
 }
 

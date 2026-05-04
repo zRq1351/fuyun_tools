@@ -358,7 +358,9 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showImportDialog" title="添加文档" width="500px">
+    <el-dialog v-model="showImportDialog" :close-on-click-modal="!importing" :close-on-press-escape="!importing"
+               :show-close="!importing" title="添加文档"
+               width="500px">
       <el-form label-width="80px">
         <el-form-item label="目标目录">
           <el-select v-model="importRootId" placeholder="选择管理目录" style="width:100%">
@@ -391,33 +393,36 @@
         </el-icon>
         <span>文件将被移动到：{{ getImportTargetPath() }}</span></div>
       <template #footer>
-        <el-button @click="showImportDialog = false">取消</el-button>
-        <el-button :disabled="!importRootId || importFiles.length === 0" type="primary" @click="confirmImport">
-          确认导入
+        <el-button :disabled="importing" @click="showImportDialog = false">取消</el-button>
+        <el-button :disabled="!importRootId || importFiles.length === 0 || importing" :loading="importing"
+                   type="primary" @click="confirmImport">
+          {{ importing ? `正在导入 ${importFiles.length} 个文件...` : '确认导入' }}
         </el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showScanDialog" title="扫描文件夹" width="500px">
+    <el-dialog v-model="showScanDialog" :close-on-click-modal="!scanImporting" :close-on-press-escape="!scanImporting" :show-close="!scanImporting"
+               title="扫描文件夹" width="500px">
       <el-form label-width="80px">
         <el-form-item label="扫描路径">
           <div style="display:flex;gap:8px;width:100%">
-            <el-input v-model="scanPath" placeholder="如：C:\Users\...\Desktop"/>
-            <el-button @click="browseScanPath">浏览</el-button>
+            <el-input v-model="scanPath" :disabled="scanImporting" placeholder="如：C:\Users\...\Desktop"/>
+            <el-button :disabled="scanImporting" @click="browseScanPath">浏览</el-button>
           </div>
         </el-form-item>
         <el-form-item label="目标目录">
-          <el-select v-model="scanImportRootId" placeholder="选择管理目录" style="width:100%">
+          <el-select v-model="scanImportRootId" :disabled="scanImporting" placeholder="选择管理目录" style="width:100%">
             <el-option v-for="r in roots" :key="r.id" :label="r.name" :value="r.id"/>
           </el-select>
         </el-form-item>
         <el-form-item label="目标分类">
-          <el-select v-model="scanCategoryId" clearable placeholder="未分类" style="width:100%">
+          <el-select v-model="scanCategoryId" :disabled="scanImporting" clearable placeholder="未分类"
+                     style="width:100%">
             <el-option v-for="c in scanCategories" :key="c.id" :label="c.name" :value="c.id"/>
           </el-select>
         </el-form-item>
         <el-form-item label="导入方式">
-          <el-radio-group v-model="importMode">
+          <el-radio-group v-model="importMode" :disabled="scanImporting">
             <el-radio value="index">索引</el-radio>
             <el-radio value="repo">搬迁</el-radio>
           </el-radio-group>
@@ -443,12 +448,13 @@
         </div>
       </div>
       <template #footer>
-        <el-button @click="showScanDialog = false">取消</el-button>
-        <el-button :disabled="scannedFiles.length === 0" @click="toggleScanSelectAll">
+        <el-button :disabled="scanImporting" @click="showScanDialog = false">取消</el-button>
+        <el-button :disabled="scannedFiles.length === 0 || scanImporting" @click="toggleScanSelectAll">
           {{ scanSelected.size === scannedFiles.length ? '取消全选' : '全选' }}
         </el-button>
-        <el-button :disabled="scanSelected.size === 0 || !scanImportRootId" type="primary" @click="importScanned">导入选中
-          ({{ scanSelected.size }})
+        <el-button :disabled="scanSelected.size === 0 || !scanImportRootId || scanImporting"
+                   :loading="scanImporting" type="primary" @click="importScanned">
+          {{ scanImporting ? `正在导入 ${scanSelected.size} 个文件...` : `导入选中 (${scanSelected.size})` }}
         </el-button>
       </template>
     </el-dialog>
@@ -701,6 +707,7 @@ const importCategoryId = ref(null)
 const importFiles = ref([])
 const importMode = ref('index')
 const importCategories = ref([])
+const importing = ref(false)
 const showScanDialog = ref(false)
 const scanPath = ref('')
 const scanImportRootId = ref(null)
@@ -709,6 +716,7 @@ const scanning = ref(false)
 const scannedFiles = ref([])
 const scanSelected = reactive(new Set())
 const scanCategories = ref([])
+const scanImporting = ref(false)
 const editCategoryId = ref(null)
 const editTags = ref('')
 const editNotes = ref('')
@@ -1048,6 +1056,7 @@ function getImportTargetPath() {
 }
 
 async function openImportDialog() {
+  if (importing.value) return
   importRootId.value = rootFilter.value || roots.value[0]?.id || null
   importCategoryId.value = null
   importFiles.value = []
@@ -1056,6 +1065,7 @@ async function openImportDialog() {
 }
 
 async function openScanDialog() {
+  if (scanImporting.value) return
   scanImportRootId.value = rootFilter.value || roots.value[0]?.id || null
   scanCategoryId.value = null
   scanPath.value = ''
@@ -1067,6 +1077,7 @@ async function openScanDialog() {
 
 async function confirmImport() {
   if (!importRootId.value || importFiles.value.length === 0) return
+  importing.value = true
   try {
     const r = await DocumentService.importFiles({
       paths: importFiles.value,
@@ -1090,6 +1101,8 @@ async function confirmImport() {
     loadImportHistory()
   } catch (e) {
     ElMessage.error('导入失败: ' + e)
+  } finally {
+    importing.value = false
   }
 }
 
@@ -1125,6 +1138,7 @@ function toggleScanSelectAll() {
 
 async function importScanned() {
   if (scanSelected.size === 0 || !scanImportRootId.value) return
+  scanImporting.value = true
   try {
     const r = await DocumentService.importFiles({
       paths: Array.from(scanSelected),
@@ -1148,6 +1162,8 @@ async function importScanned() {
     loadImportHistory()
   } catch (e) {
     ElMessage.error('导入失败: ' + e)
+  } finally {
+    scanImporting.value = false
   }
 }
 
