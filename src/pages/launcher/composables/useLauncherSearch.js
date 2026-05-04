@@ -1,4 +1,5 @@
 import {invoke} from '@tauri-apps/api/core'
+import {ElMessage} from 'element-plus'
 
 export function useLauncherSearch() {
     const builtinCommands = [
@@ -165,13 +166,11 @@ export function useLauncherSearch() {
             }
         } catch (error) {
             console.error('[自定义命令] 执行失败:', error)
-            if (typeof ElMessage !== 'undefined') {
-                ElMessage({
-                    message: `启动失败: ${error.message || error}`,
-                    type: 'error',
-                    duration: 5000
-                })
-            }
+            ElMessage({
+                message: `启动失败: ${error.message || error}`,
+                type: 'error',
+                duration: 5000
+            })
             throw error
         }
     }

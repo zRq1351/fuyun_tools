@@ -533,6 +533,7 @@ export const DocumentService = {
     updateMeta: (request) => invoke('update_doc_meta', {request}),
     deleteDoc: (id, deleteFile) => invoke('delete_doc', {request: {id, deleteFile}}),
     moveDoc: (id, newRootId) => invoke('move_doc', {id, newRootId}),
+    atomicMoveDoc: (request) => invoke('atomic_move_doc', {request}),
     getStats: (rootId) => invoke('get_doc_stats', {rootId}),
     openDoc: (id) => invoke('open_doc', {id}),
     openFolder: (id) => invoke('open_doc_folder', {id}),

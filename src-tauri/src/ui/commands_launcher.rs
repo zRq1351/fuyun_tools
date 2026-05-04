@@ -66,7 +66,9 @@ pub async fn scan_and_save_apps() -> Result<Vec<app_store::StoredApp>, String> {
 /// 批量提取应用图标
 #[tauri::command]
 pub async fn batch_extract_icons(paths: Vec<String>) -> Result<std::collections::HashMap<String, String>, String> {
-    let icons = app_scanner::batch_extract_icons(&paths);
+    let icons = tokio::task::spawn_blocking(move || app_scanner::batch_extract_icons(&paths))
+        .await
+        .map_err(|e| format!("图标提取任务失败: {}", e))?;
     app_store::batch_update_icons(&icons).await;
     Ok(icons)
 }
@@ -272,24 +274,8 @@ pub async fn open_app_directory(app: AppHandle, path: String) -> Result<(), Stri
     }
 
     let target_dir = if path.to_lowercase().ends_with(".lnk") {
-        let mut cmd = std::process::Command::new("powershell");
-        cmd.args([
-            "-NoProfile",
-            "-Command",
-            &format!(
-                "$wsh = New-Object -ComObject WScript.Shell; $lnk = $wsh.CreateShortcut('{}'); Write-Output $lnk.TargetPath",
-                path.replace('\'', "''")
-            ),
-        ]);
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-        let output = cmd.output().map_err(|e| format!("解析快捷方式失败: {}", e))?;
-
-        let target = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let target = app_store::resolve_lnk_target(&path)
+            .unwrap_or_default();
         if target.is_empty() {
             return Err("无法解析快捷方式目标".to_string());
         }

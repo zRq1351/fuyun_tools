@@ -1,7 +1,7 @@
 use crate::utils::document_database;
 use crate::utils::document_text_extract;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use tauri::AppHandle;
 use tokio::task;
@@ -26,21 +26,35 @@ pub async fn remove_doc_root(id: i64) -> Result<(), String> {
     document_database::remove_doc_root(id).await
 }
 
+fn validate_category_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("分类名称不能为空".to_string());
+    }
+    for ch in name.chars() {
+        match ch {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => {
+                return Err(format!("分类名称不能包含字符: {}", ch));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn add_doc_category(name: String, icon: Option<String>, color: Option<String>, root_id: i64) -> Result<document_database::DocCategory, String> {
     let name_trim = name.trim();
-    if name_trim.is_empty() {
-        return Err("分类名称不能为空".to_string());
-    }
-    let cat = document_database::add_doc_category(
+    validate_category_name(name_trim)?;
+    let root = document_database::get_doc_root_by_id(root_id).await?.ok_or("根目录不存在".to_string())?;
+    let result = document_database::add_doc_category(
         name_trim,
         &icon.unwrap_or_else(|| "folder".to_string()),
         &color.unwrap_or_else(|| "#409EFF".to_string()),
         root_id,
     ).await?;
-    let root = document_database::get_doc_root_by_id(root_id).await?.ok_or("根目录不存在".to_string())?;
-    let _ = fs::create_dir_all(Path::new(&root.root_path).join(name_trim));
-    Ok(cat)
+    fs::create_dir_all(Path::new(&root.root_path).join(name_trim))
+        .map_err(|e| format!("创建分类目录失败: {}", e))?;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -56,17 +70,15 @@ pub async fn remove_doc_category(id: i64) -> Result<(), String> {
 #[tauri::command]
 pub async fn rename_doc_category(id: i64, name: String) -> Result<(), String> {
     let name_trim = name.trim();
-    if name_trim.is_empty() {
-        return Err("分类名称不能为空".to_string());
-    }
+    validate_category_name(name_trim)?;
     let cat = document_database::get_doc_categories(None).await?.into_iter().find(|c| c.id == id).ok_or("分类不存在".to_string())?;
-    let old_name = document_database::rename_doc_category(id, name_trim).await?;
     let root = document_database::get_doc_root_by_id(cat.root_id).await?.ok_or("根目录不存在".to_string())?;
-    let old_dir = Path::new(&root.root_path).join(&old_name);
+    let old_dir = Path::new(&root.root_path).join(&cat.name);
     let new_dir = Path::new(&root.root_path).join(name_trim);
     if old_dir.exists() && old_dir != new_dir {
-        std::fs::rename(&old_dir, &new_dir).map_err(|e| format!("重命名目录失败: {}", e))?;
+        document_database::safe_move_file(&old_dir, &new_dir).map_err(|e| format!("重命名目录失败: {}", e))?;
     }
+    let _old_name = document_database::rename_doc_category(id, name_trim).await?;
     let old_prefix = old_dir.to_string_lossy().to_string();
     let new_prefix = new_dir.to_string_lossy().to_string();
     document_database::update_managed_path_prefix(&old_prefix, &new_prefix, root.id, id).await?;
@@ -220,7 +232,7 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
         }
     }
 
-    if !success_ids.is_empty() && is_repo {
+    if !success_ids.is_empty() {
         let source_dir = if !request.source_dir.is_empty() {
             request.source_dir.clone()
         } else {
@@ -333,7 +345,7 @@ pub async fn delete_doc(request: DeleteDocRequest) -> Result<(), String> {
     if request.delete_file.unwrap_or(false) {
         let p = Path::new(&doc.managed_path);
         if p.exists() {
-            let _ = fs::remove_file(p);
+            fs::remove_file(p).map_err(|e| format!("删除文件失败: {}", e))?;
         }
     } else if doc.storage_mode == "repo" && !doc.source_path.is_empty() {
         let managed = Path::new(&doc.managed_path);
@@ -342,16 +354,36 @@ pub async fn delete_doc(request: DeleteDocRequest) -> Result<(), String> {
             if let Some(parent) = source.parent() {
                 let _ = fs::create_dir_all(parent);
             }
-            document_database::safe_move_file(managed, source)?;
+            document_database::safe_move_file(managed, source)
+                .map_err(|e| format!("回搬文件失败: {}", e))?;
         }
     }
 
-    document_database::delete_doc_record(request.id).await
+    document_database::delete_doc_record(request.id).await?;
+
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn move_doc(id: i64, new_root_id: i64) -> Result<(), String> {
     document_database::move_doc_file(id, new_root_id).await
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AtomicMoveRequest {
+    pub id: i64,
+    pub new_root_id: Option<i64>,
+    pub new_category_id: Option<i64>,
+}
+
+#[tauri::command]
+pub async fn atomic_move_doc(request: AtomicMoveRequest) -> Result<(), String> {
+    document_database::atomic_move_doc(
+        request.id,
+        request.new_root_id,
+        request.new_category_id,
+    ).await
 }
 
 #[tauri::command]
@@ -426,12 +458,11 @@ pub struct ScannedFile {
 
 #[tauri::command]
 pub async fn scan_folder(path: String, recursive: Option<bool>) -> Result<ScanResult, String> {
-    let dir = Path::new(&path);
+    let dir = PathBuf::from(&path);
     if !dir.is_dir() {
         return Err("路径不是一个目录".to_string());
     }
 
-    let mut files = Vec::new();
     let recursive = recursive.unwrap_or(true);
 
     let text_exts = [
@@ -445,12 +476,16 @@ pub async fn scan_folder(path: String, recursive: Option<bool>) -> Result<ScanRe
 
     let allowed: std::collections::HashSet<&str> = text_exts.iter().copied().collect();
 
-    scan_dir(dir, &mut files, &allowed, recursive)?;
-
-    Ok(ScanResult {
-        directory: path,
-        files,
+    task::spawn_blocking(move || -> Result<ScanResult, String> {
+        let mut files = Vec::new();
+        scan_dir(&dir, &mut files, &allowed, recursive)?;
+        Ok(ScanResult {
+            directory: path,
+            files,
+        })
     })
+    .await
+    .map_err(|e| format!("扫描任务失败: {}", e))?
 }
 
 fn scan_dir(
@@ -534,19 +569,30 @@ pub async fn detect_orphan_files(root_id: Option<i64>) -> Result<Vec<OrphanFiles
 
     for root in roots {
         let existing = document_database::get_managed_paths_for_root(root.id).await?;
+        let root_path_for_closure = root.root_path.clone();
+        let allowed_clone = allowed.clone();
+        let root_name_clone = root.name.clone();
 
-        let mut all_files = Vec::new();
-        let root_path = Path::new(&root.root_path);
-        if root_path.is_dir() {
-            scan_dir(root_path, &mut all_files, &allowed, true)?;
-        }
+        let orphans_future = task::spawn_blocking(move || -> Result<Vec<ScannedFile>, String> {
+            let mut all_files = Vec::new();
+            let root_path = Path::new(&root_path_for_closure);
+            if root_path.is_dir() {
+                scan_dir(root_path, &mut all_files, &allowed_clone, true)?;
+            }
+            let orphans: Vec<ScannedFile> = all_files
+                .into_iter()
+                .filter(|f| !existing.contains(&f.path))
+                .collect();
+            Ok(orphans)
+        });
 
-        let mut orphans: Vec<ScannedFile> = all_files
-            .into_iter()
-            .filter(|f| !existing.contains(&f.path))
-            .collect();
+        let orphans = orphans_future
+            .await
+            .map_err(|e| format!("扫描任务失败: {}", e))??;
 
-        for f in &mut orphans {
+        let mut tagged = orphans;
+
+        for f in &mut tagged {
             if let Ok(rel) = Path::new(&f.path).strip_prefix(&root.root_path) {
                 if let Some(first) = rel.components().next() {
                     let dir_name = first.as_os_str().to_string_lossy().to_string();
@@ -558,11 +604,11 @@ pub async fn detect_orphan_files(root_id: Option<i64>) -> Result<Vec<OrphanFiles
             }
         }
 
-        if !orphans.is_empty() {
+        if !tagged.is_empty() {
             results.push(OrphanFilesResult {
-                files: orphans,
+                files: tagged,
                 root_id: root.id,
-                root_name: root.name.clone(),
+                root_name: root_name_clone,
             });
         }
     }

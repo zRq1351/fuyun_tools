@@ -114,13 +114,28 @@ fn parse_shortcut(path: &PathBuf, category: &str) -> Option<LauncherItem> {
     let file_name = path.file_stem()?.to_str()?;
     let path_str = path.to_str()?;
 
+    let parent_dir = path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_lowercase()
+        .replace(' ', "_");
+
     let hidden = ["卸载", "Uninstall", "帮助", "Help", "readme", "说明"];
     if hidden.iter().any(|p| file_name.to_lowercase().contains(&p.to_lowercase())) {
         return None;
     }
 
+    let stem = file_name.to_lowercase().replace(' ', "_");
+    let id = if parent_dir.is_empty() {
+        format!("app_{}", stem)
+    } else {
+        format!("app_{}_{}", parent_dir, stem)
+    };
+
     Some(LauncherItem {
-        id: format!("app_{}", file_name.to_lowercase().replace(' ', "_")),
+        id,
         title: file_name.to_string(),
         description: Some(path_str.to_string()),
         icon: "app".to_string(),
@@ -168,13 +183,14 @@ pub fn launch_app(path: &str) -> Result<(), String> {
 
     if is_shortcut {
         log::info!("[launch_app] 检测到快捷方式，使用 cmd start 启动");
-        // 快捷方式使用 cmd /C start 启动
+        // 快捷方式使用 cmd /C start 启动，路径必须加引号处理空格
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
+            let quoted = format!("\"{}\"", path);
             match std::process::Command::new("cmd")
-                .args(["/C", "start", "", path])
+                .args(["/C", "start", "", &quoted])
                 .creation_flags(CREATE_NO_WINDOW)
                 .spawn()
             {
@@ -190,8 +206,9 @@ pub fn launch_app(path: &str) -> Result<(), String> {
         }
         #[cfg(not(target_os = "windows"))]
         {
+            let quoted = format!("\"{}\"", path);
             match std::process::Command::new("cmd")
-                .args(["/C", "start", "", path])
+                .args(["/C", "start", "", &quoted])
                 .spawn()
             {
                 Ok(_) => {
@@ -260,11 +277,12 @@ pub fn launch_app_with_args(path: &str, args: Option<&str>) -> Result<(), String
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
             let mut command = std::process::Command::new("cmd");
+            let quoted = format!("\"{}\"", path);
+            command.arg("/C").arg("start").arg("").arg(&quoted);
             if let Some(arguments) = args {
-                let full_command = format!("\"{}\" {}", path, arguments);
-                command.args(["/C", "start", "", &full_command]);
-            } else {
-                command.args(["/C", "start", "", path]);
+                for arg in arguments.split_whitespace() {
+                    command.arg(arg);
+                }
             }
 
             match command.creation_flags(CREATE_NO_WINDOW).spawn() {
@@ -281,11 +299,12 @@ pub fn launch_app_with_args(path: &str, args: Option<&str>) -> Result<(), String
         #[cfg(not(target_os = "windows"))]
         {
             let mut command = std::process::Command::new("cmd");
+            let quoted = format!("\"{}\"", path);
+            command.arg("/C").arg("start").arg("").arg(&quoted);
             if let Some(arguments) = args {
-                let full_command = format!("\"{}\" {}", path, arguments);
-                command.args(["/C", "start", "", &full_command]);
-            } else {
-                command.args(["/C", "start", "", path]);
+                for arg in arguments.split_whitespace() {
+                    command.arg(arg);
+                }
             }
 
             match command.spawn() {
@@ -354,8 +373,9 @@ pub fn open_file(path: &str) -> Result<(), String> {
     if !PathBuf::from(path).exists() {
         return Err(format!("文件不存在: {}", path));
     }
+    let quoted = format!("\"{}\"", path);
     std::process::Command::new("cmd")
-        .args(["/C", "start", "", path])
+        .args(["/C", "start", "", &quoted])
         .spawn()
         .map_err(|e| format!("打开失败: {}", e))?;
     Ok(())

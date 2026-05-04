@@ -1,7 +1,7 @@
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
-use sqlx::{Row, SqliteConnection};
+use sqlx::{Acquire, Row, Sqlite, SqliteConnection};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -498,13 +498,17 @@ pub async fn load_all_apps() -> Result<Vec<AppRow>, String> {
 
 pub async fn replace_scan_apps(apps: &[AppRow]) -> Result<(), String> {
     let mut conn = open_launcher_db_conn().await?;
-    sqlx::query("DELETE FROM launcher_apps WHERE source = 'scan'")
-        .execute(&mut *conn)
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("创建事务失败: {}", e))?;
+    sqlx::query::<Sqlite>("DELETE FROM launcher_apps WHERE source = 'scan'")
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("清理扫描应用失败: {}", e))?;
 
     for app in apps {
-        sqlx::query(
+        sqlx::query::<Sqlite>(
             "INSERT OR REPLACE INTO launcher_apps (id, title, path, category, app_type, icon_base64, action, sort_order, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scan')"
         )
         .bind(&app.id)
@@ -515,10 +519,13 @@ pub async fn replace_scan_apps(apps: &[AppRow]) -> Result<(), String> {
         .bind(&app.icon_base64)
         .bind(&app.action)
         .bind(app.sort_order)
-        .execute(&mut *conn)
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("保存应用失败: {}", e))?;
     }
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 
@@ -576,6 +583,26 @@ pub async fn update_app_sort_order(app_id: &str, sort_order: i32) -> Result<(), 
         .execute(&mut *conn)
         .await
         .map_err(|e| format!("更新应用排序失败: {}", e))?;
+    Ok(())
+}
+
+pub async fn batch_update_app_sort_orders(orders: &[(String, i32)]) -> Result<(), String> {
+    let mut conn = open_launcher_db_conn().await?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("创建事务失败: {}", e))?;
+    for (app_id, sort_order) in orders {
+        sqlx::query::<sqlx::Sqlite>("UPDATE launcher_apps SET sort_order = ? WHERE id = ?")
+            .bind(*sort_order)
+            .bind(app_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("批量更新应用排序失败: {}", e))?;
+    }
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 

@@ -159,23 +159,35 @@ async fn open_docs_db() -> Result<sqlx::pool::PoolConnection<Sqlite>, String> {
 
 async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String> {
     sqlx::query(
-        "
-        CREATE TABLE IF NOT EXISTS document_roots (
+        "CREATE TABLE IF NOT EXISTS document_roots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             root_path TEXT NOT NULL UNIQUE,
+            position INTEGER DEFAULT 0,
             created_at INTEGER NOT NULL DEFAULT 0
-        );
+        )",
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| format!("初始化文档数据库失败: {}", e))?;
 
-        CREATE TABLE IF NOT EXISTS document_categories (
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS document_categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
             icon TEXT DEFAULT 'folder',
             color TEXT DEFAULT '#409EFF',
-            position INTEGER DEFAULT 0
-        );
+            position INTEGER DEFAULT 0,
+            root_id INTEGER DEFAULT 0,
+            UNIQUE(name, root_id)
+        )",
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| format!("初始化文档数据库失败: {}", e))?;
 
-        CREATE TABLE IF NOT EXISTS document_files (
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS document_files (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             root_id INTEGER NOT NULL,
             title TEXT DEFAULT '',
@@ -191,25 +203,30 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
             managed_path TEXT NOT NULL DEFAULT '',
             storage_mode TEXT NOT NULL DEFAULT 'index',
             is_missing INTEGER DEFAULT 0,
+            sort_order INTEGER DEFAULT 0,
             added_at INTEGER NOT NULL DEFAULT 0,
             file_modified INTEGER NOT NULL DEFAULT 0,
             visit_count INTEGER DEFAULT 0,
             FOREIGN KEY (root_id) REFERENCES document_roots(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_doc_files_root_id ON document_files(root_id);
-        CREATE INDEX IF NOT EXISTS idx_doc_files_category_id ON document_files(category_id);
-        CREATE INDEX IF NOT EXISTS idx_doc_files_added_at ON document_files(added_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_doc_files_file_ext ON document_files(file_ext);
-        ",
+        )",
     )
     .execute(&mut *conn)
     .await
     .map_err(|e| format!("初始化文档数据库失败: {}", e))?;
 
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_doc_files_root_id ON document_files(root_id)")
+        .execute(&mut *conn).await.ok();
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_doc_files_category_id ON document_files(category_id)")
+        .execute(&mut *conn).await.ok();
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_doc_files_added_at ON document_files(added_at DESC)")
+        .execute(&mut *conn).await.ok();
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_doc_files_file_ext ON document_files(file_ext)")
+        .execute(&mut *conn).await.ok();
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_doc_files_file_hash ON document_files(file_hash, root_id)")
+        .execute(&mut *conn).await.ok();
+
     sqlx::query(
-        "
-        CREATE TABLE IF NOT EXISTS document_imports (
+        "CREATE TABLE IF NOT EXISTS document_imports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             root_id INTEGER NOT NULL,
             category_id INTEGER,
@@ -218,86 +235,41 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
             target_dir TEXT DEFAULT '',
             file_count INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS document_import_items (
+        )",
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| format!("初始化文档数据库失败: {}", e))?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS document_import_items (
             import_id INTEGER NOT NULL,
             doc_file_id INTEGER NOT NULL,
             source_path TEXT DEFAULT '',
             managed_path TEXT DEFAULT '',
             PRIMARY KEY (import_id, doc_file_id),
             FOREIGN KEY (import_id) REFERENCES document_imports(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_import_items_import_id ON document_import_items(import_id);
-        ",
+        )",
     )
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("初始化历史记录表失败: {}", e))?;
+    .map_err(|e| format!("初始化文档数据库失败: {}", e))?;
 
-    let _ = sqlx::query::<Sqlite>("ALTER TABLE document_files ADD COLUMN storage_mode TEXT NOT NULL DEFAULT 'index'")
-        .execute(&mut *conn)
-        .await;
-
-    let _ = sqlx::query::<Sqlite>("ALTER TABLE document_roots ADD COLUMN position INTEGER DEFAULT 0")
-        .execute(&mut *conn)
-        .await;
-
-    let _ = sqlx::query::<Sqlite>("ALTER TABLE document_files ADD COLUMN sort_order INTEGER DEFAULT 0")
-        .execute(&mut *conn)
-        .await;
-
-    let _ = sqlx::query::<Sqlite>("ALTER TABLE document_categories ADD COLUMN root_id INTEGER DEFAULT 0")
-        .execute(&mut *conn)
-        .await;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_import_items_import_id ON document_import_items(import_id)")
+        .execute(&mut *conn).await.ok();
 
     sqlx::query(
-        "
-        CREATE VIRTUAL TABLE IF NOT EXISTS document_files_fts USING fts5(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS document_files_fts USING fts5(
             title,
             content_text,
             tags,
             notes,
             tokenize = 'unicode61'
-        );
-        ",
+        )",
     )
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("创建FTS索引失败: {}", e))?;
-
-    let _ = sqlx::query::<Sqlite>("ALTER TABLE document_imports ADD COLUMN source_dir TEXT DEFAULT ''")
-        .execute(&mut *conn)
-        .await;
-    let _ = sqlx::query::<Sqlite>("ALTER TABLE document_imports ADD COLUMN target_dir TEXT DEFAULT ''")
-        .execute(&mut *conn)
-        .await;
-
-    let fts_count: i64 = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM document_files_fts")
-        .fetch_one(&mut *conn)
-        .await
-        .unwrap_or(0);
-
-    let doc_count: i64 = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM document_files")
-        .fetch_one(&mut *conn)
-        .await
-        .unwrap_or(0);
-
-    if fts_count != doc_count {
-        let _ = sqlx::query(
-            "
-            INSERT OR REPLACE INTO document_files_fts(rowid, title, content_text, tags, notes)
-            SELECT id, COALESCE(title, ''), content_text, COALESCE(tags, ''), COALESCE(notes, '') FROM document_files
-            ",
-        )
-        .execute(&mut *conn)
-        .await;
-
-        let _ = sqlx::query(
-            "DELETE FROM document_files_fts WHERE rowid NOT IN (SELECT id FROM document_files)",
-        )
-        .execute(&mut *conn)
-        .await;
-    }
+    .map_err(|e| format!("初始化文档数据库失败: {}", e))?;
 
     ensure_category_directories(conn).await?;
 
@@ -305,7 +277,7 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
 }
 
 async fn ensure_category_directories(conn: &mut SqliteConnection) -> Result<(), String> {
-    let roots = sqlx::query("SELECT id, name, root_path FROM document_roots")
+    let roots = sqlx::query("SELECT id, root_path FROM document_roots")
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| format!("查询根目录失败: {}", e))?;
@@ -314,16 +286,16 @@ async fn ensure_category_directories(conn: &mut SqliteConnection) -> Result<(), 
         return Ok(());
     }
 
-    let cats = sqlx::query("SELECT id, name, COALESCE(root_id, 0) FROM document_categories ORDER BY position")
+    let cats = sqlx::query("SELECT root_id, name FROM document_categories ORDER BY position")
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| format!("查询分类失败: {}", e))?;
 
     for row in &roots {
         let rid: i64 = row.try_get(0).unwrap_or(0);
-        let root_path: String = row.try_get(2).unwrap_or_default();
+        let root_path: String = row.try_get(1).unwrap_or_default();
         for crow in &cats {
-            let cat_root_id: i64 = crow.try_get(2).unwrap_or(0);
+            let cat_root_id: i64 = crow.try_get(0).unwrap_or(0);
             let cat_name: String = crow.try_get(1).unwrap_or_default();
             if cat_root_id == 0 || cat_root_id == rid {
                 let _ = fs::create_dir_all(Path::new(&root_path).join(&cat_name));
@@ -416,6 +388,34 @@ pub async fn remove_doc_root(id: i64) -> Result<(), String> {
         return Err("该目录下存在文件，请先将文件删除或移至其他目录后再删除".to_string());
     }
 
+    let root = sqlx::query("SELECT name, root_path FROM document_roots WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(|e| format!("查询根目录失败: {}", e))?;
+
+    if let Some(row) = root {
+        let root_path: String = row.try_get(1).unwrap_or_default();
+        let cat_rows = sqlx::query("SELECT name FROM document_categories WHERE root_id = ?1")
+            .bind(id)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| format!("查询分类失败: {}", e))?;
+        for crow in &cat_rows {
+            let cat_name: String = crow.try_get(0).unwrap_or_default();
+            let dir = Path::new(&root_path).join(&cat_name);
+            if dir.exists() {
+                let _ = fs::remove_dir(&dir);
+            }
+        }
+    }
+
+    sqlx::query("DELETE FROM document_categories WHERE root_id = ?1")
+        .bind(id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| format!("删除关联分类失败: {}", e))?;
+
     sqlx::query("DELETE FROM document_roots WHERE id = ?1")
         .bind(id)
         .execute(&mut *conn)
@@ -464,7 +464,7 @@ pub async fn add_doc_category(name: &str, icon: &str, color: &str, root_id: i64)
 pub async fn get_doc_categories(root_id: Option<i64>) -> Result<Vec<DocCategory>, String> {
     let mut conn = open_docs_db().await?;
     let rows = sqlx::query(
-        "SELECT id, name, icon, color, position, COALESCE(root_id, 0) FROM document_categories WHERE (?1 IS NULL OR root_id = ?1) ORDER BY position ASC, id ASC",
+        "SELECT id, name, icon, color, position, root_id FROM document_categories WHERE (?1 IS NULL OR root_id = ?1) ORDER BY position ASC, id ASC",
     )
     .bind(root_id)
     .fetch_all(&mut *conn)
@@ -501,11 +501,28 @@ pub async fn remove_doc_category(id: i64) -> Result<(), String> {
         return Err("该分类下存在文件，请先将文件移至其他分类或取消分类后再删除".to_string());
     }
 
+    let cat_info = sqlx::query(
+        "SELECT c.name, r.root_path FROM document_categories c JOIN document_roots r ON c.root_id = r.id WHERE c.id = ?1"
+    )
+        .bind(id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(|e| format!("查询分类信息失败: {}", e))?;
+
     sqlx::query("DELETE FROM document_categories WHERE id = ?1")
         .bind(id)
         .execute(&mut *conn)
         .await
         .map_err(|e| format!("删除分类失败: {}", e))?;
+
+    if let Some(row) = cat_info {
+        let cat_name: String = row.try_get(0).unwrap_or_default();
+        let root_path: String = row.try_get(1).unwrap_or_default();
+        let dir = std::path::Path::new(&root_path).join(&cat_name);
+        if dir.exists() {
+            let _ = std::fs::remove_dir(&dir);
+        }
+    }
 
     Ok(())
 }
@@ -513,7 +530,7 @@ pub async fn remove_doc_category(id: i64) -> Result<(), String> {
 pub async fn update_managed_path_prefix(old_prefix: &str, new_prefix: &str, root_id: i64, category_id: i64) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
     sqlx::query(
-        "UPDATE document_files SET managed_path = REPLACE(managed_path, ?1, ?2) WHERE root_id = ?3 AND category_id = ?4 AND storage_mode = 'repo'"
+        "UPDATE document_files SET managed_path = ?2 || SUBSTR(managed_path, LENGTH(?1) + 1) WHERE root_id = ?3 AND category_id = ?4 AND storage_mode = 'repo' AND managed_path LIKE (?1 || '%')"
     )
     .bind(old_prefix)
     .bind(new_prefix)
@@ -539,8 +556,6 @@ pub async fn rename_doc_category(id: i64, name: &str) -> Result<String, String> 
         .execute(&mut *conn)
         .await
         .map_err(|e| format!("重命名分类失败: {}", e))?;
-
-    println!("Old name: {}, New name: {}", old_name, name);
 
     Ok(old_name)
 }
@@ -613,11 +628,12 @@ pub async fn insert_doc_file(
         .map_err(|e| format!("获取ID失败: {}", e))?;
 
     let _ = sqlx::query(
-        "INSERT INTO document_files_fts(rowid, title, content_text, tags, notes) VALUES (?1, ?2, ?3, '', '')",
+        "INSERT INTO document_files_fts(rowid, title, content_text, tags, notes) VALUES (?1, ?2, ?3, ?4, '')",
     )
     .bind(id)
     .bind(file_name)
     .bind(content_text)
+    .bind(tags)
     .execute(&mut *conn)
     .await;
 
@@ -790,8 +806,12 @@ pub async fn update_doc_file_meta(
             let dest = target_dir.join(&new_name);
             safe_move_file(old_path, &dest)?;
             let new_managed = dest.to_string_lossy().to_string();
-            drop(conn);
-            update_doc_managed_path(id, &new_managed).await?;
+            sqlx::query("UPDATE document_files SET managed_path = ?1 WHERE id = ?2")
+                .bind(&new_managed)
+                .bind(id)
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| format!("更新文件路径失败: {}", e))?;
         }
     }
 
@@ -832,11 +852,11 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
                 .and_then(|s| s.to_str())
                 .unwrap_or(&doc.file_name);
 
-            let target_dir = if let Some(ref cat_name) = doc.category_name {
-                if cat_name == "未分类" {
-                    Path::new(&new_root.root_path).to_path_buf()
-                } else {
+            let target_dir = if doc.category_id.is_some() {
+                if let Some(ref cat_name) = doc.category_name {
                     Path::new(&new_root.root_path).join(cat_name)
+                } else {
+                    Path::new(&new_root.root_path).to_path_buf()
                 }
             } else {
                 Path::new(&new_root.root_path).to_path_buf()
@@ -877,6 +897,189 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+pub async fn atomic_move_doc(
+    id: i64,
+    new_root_id: Option<i64>,
+    new_category_id: Option<i64>,
+) -> Result<(), String> {
+    let mut conn = open_docs_db().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+
+    let doc = get_doc_file_in_tx(&mut tx, id)
+        .await?
+        .ok_or("文件不存在".to_string())?;
+
+    let effective_root_id = new_root_id.unwrap_or(doc.root_id);
+    if effective_root_id != doc.root_id {
+        let new_root = get_doc_root_by_id_in_tx(&mut tx, effective_root_id)
+            .await?
+            .ok_or("目标根目录不存在".to_string())?;
+
+        if doc.storage_mode == "repo" {
+            let old_path = Path::new(&doc.managed_path);
+            if old_path.exists() {
+                let file_name = old_path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(&doc.file_name);
+                let target_cat_name = if let Some(cid) = new_category_id.or(doc.category_id) {
+                    if cid == -1 {
+                        String::new()
+                    } else {
+                        sqlx::query_scalar::<_, String>("SELECT name FROM document_categories WHERE id = ?1")
+                            .bind(cid)
+                            .fetch_optional(&mut *tx)
+                            .await
+                            .map_err(|e| format!("查询分类失败: {}", e))?
+                            .unwrap_or_default()
+                    }
+                } else {
+                    String::new()
+                };
+                let target_dir = if target_cat_name.is_empty() {
+                    Path::new(&new_root.root_path).to_path_buf()
+                } else {
+                    Path::new(&new_root.root_path).join(&target_cat_name)
+                };
+                fs::create_dir_all(&target_dir).map_err(|e| format!("创建目标目录失败: {}", e))?;
+                let new_name = resolve_unused_filename(
+                    &target_dir,
+                    Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name),
+                    Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or(""),
+                );
+                let dest = target_dir.join(&new_name);
+                safe_move_file(old_path, &dest).map_err(|e| format!("移动文件失败: {}", e))?;
+                let new_managed = dest.to_string_lossy().to_string();
+                sqlx::query("UPDATE document_files SET root_id = ?1, managed_path = ?2 WHERE id = ?3")
+                    .bind(effective_root_id)
+                    .bind(&new_managed)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("更新文件记录失败: {}", e))?;
+            } else {
+                sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
+                    .bind(effective_root_id)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("更新文件记录失败: {}", e))?;
+            }
+        } else {
+            sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
+                .bind(effective_root_id)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("更新文件记录失败: {}", e))?;
+        }
+    }
+
+    if let Some(cid) = new_category_id {
+        if cid != doc.category_id.unwrap_or(-1) {
+            if effective_root_id != doc.root_id || doc.storage_mode == "repo" {
+                let row = sqlx::query(
+                    "SELECT df.storage_mode, df.managed_path, dr.root_path
+                     FROM document_files df JOIN document_roots dr ON df.root_id = dr.id
+                     WHERE df.id = ?1"
+                )
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| format!("查询文件信息失败: {}", e))?;
+
+                if let Some(row) = row {
+                    let storage_mode: String = row.try_get(0).unwrap_or_default();
+                    let old_managed: String = row.try_get(1).unwrap_or_default();
+                    let root_path: String = row.try_get(2).unwrap_or_default();
+
+                    if storage_mode == "repo" && !old_managed.is_empty() {
+                        let new_cat_name = if cid == -1 {
+                            String::new()
+                        } else {
+                            sqlx::query_scalar::<_, String>("SELECT name FROM document_categories WHERE id = ?1")
+                                .bind(cid)
+                                .fetch_optional(&mut *tx)
+                                .await
+                                .map_err(|e| format!("查询分类失败: {}", e))?
+                                .unwrap_or_default()
+                        };
+                        let old_path = Path::new(&old_managed);
+                        if old_path.exists() {
+                            let file_name = old_path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                            let target_dir = if new_cat_name.is_empty() {
+                                Path::new(&root_path).to_path_buf()
+                            } else {
+                                Path::new(&root_path).join(&new_cat_name)
+                            };
+                            fs::create_dir_all(&target_dir).map_err(|e| format!("创建目标目录失败: {}", e))?;
+                            let new_name = resolve_unused_filename(
+                                &target_dir,
+                                Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name),
+                                Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or(""),
+                            );
+                            let dest = target_dir.join(&new_name);
+                            safe_move_file(old_path, &dest)?;
+                            sqlx::query("UPDATE document_files SET managed_path = ?1 WHERE id = ?2")
+                                .bind(dest.to_string_lossy().to_string())
+                                .bind(id)
+                                .execute(&mut *tx)
+                                .await
+                                .map_err(|e| format!("更新文件路径失败: {}", e))?;
+                        }
+                    }
+                }
+            }
+            if cid == -1 {
+                sqlx::query("UPDATE document_files SET category_id = NULL WHERE id = ?1")
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("更新分类失败: {}", e))?;
+            } else {
+                sqlx::query("UPDATE document_files SET category_id = ?1 WHERE id = ?2")
+                    .bind(cid)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("更新分类失败: {}", e))?;
+            }
+        }
+    }
+
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))
+}
+
+async fn get_doc_file_in_tx(tx: &mut sqlx::Transaction<'_, Sqlite>, id: i64) -> Result<Option<DocFile>, String> {
+    let row = sqlx::query(
+        "SELECT df.id, df.root_id, df.title, df.file_name, df.file_ext, df.file_size, df.file_hash,
+                df.category_id, c.name as category_name, df.tags, df.notes, df.content_text,
+                df.source_path, df.managed_path, df.storage_mode, df.is_missing, df.added_at, df.file_modified, df.visit_count
+         FROM document_files df
+         LEFT JOIN document_categories c ON df.category_id = c.id
+         WHERE df.id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|e| format!("查询文件失败: {}", e))?;
+    Ok(row.as_ref().map(|r| row_to_doc_file(r)))
+}
+
+async fn get_doc_root_by_id_in_tx(tx: &mut sqlx::Transaction<'_, Sqlite>, id: i64) -> Result<Option<DocRoot>, String> {
+    let row = sqlx::query("SELECT id, name, root_path, created_at FROM document_roots WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|e| format!("查询根目录失败: {}", e))?;
+    Ok(row.map(|r| DocRoot {
+        id: r.try_get::<i64, _>(0).unwrap_or(0),
+        name: r.try_get::<String, _>(1).unwrap_or_default(),
+        root_path: r.try_get::<String, _>(2).unwrap_or_default(),
+        created_at: r.try_get::<i64, _>(3).unwrap_or(0),
+    }))
 }
 
 pub async fn reorder_doc_files(ids: Vec<i64>) -> Result<(), String> {
@@ -1011,8 +1214,6 @@ pub async fn get_doc_page(
         .map(|k| k.trim().to_string())
         .filter(|k| !k.is_empty());
 
-    let order_clause = "ORDER BY df.sort_order ASC, df.added_at DESC";
-
     let fts_query = keyword_val.as_ref().map(|k| build_fts_query(k)).filter(|q| !q.is_empty());
     let fts_enabled = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'document_files_fts'",
@@ -1022,131 +1223,88 @@ pub async fn get_doc_page(
     .unwrap_or(0) > 0;
 
     let use_fts = fts_enabled && fts_query.is_some();
+    let fallback_search = !use_fts && keyword_val.is_some();
 
-    let (total, rows) = if use_fts {
-        let fts = fts_query.unwrap();
-        let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM document_files df
-             WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
-               AND (?2 IS NULL OR df.root_id = ?2)
-               AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
-               AND EXISTS (SELECT 1 FROM document_files_fts WHERE document_files_fts.rowid = df.id AND document_files_fts MATCH ?4)",
-        )
-        .bind(category_id)
-        .bind(root_id)
-        .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
-        .bind(&fts)
-        .fetch_one(&mut *conn)
-        .await
-        .map_err(|e| format!("查询总数失败: {}", e))?;
+    let base_fields =
+        "df.id, df.root_id, df.title, df.file_name, df.file_ext, df.file_size, df.file_hash,
+         df.category_id, c.name as category_name, df.tags, df.notes, df.content_text,
+         df.source_path, df.managed_path, df.storage_mode, df.is_missing, df.added_at, df.file_modified, df.visit_count";
 
-        let sql = format!(
-            "SELECT df.id, df.root_id, df.title, df.file_name, df.file_ext, df.file_size, df.file_hash,
-                    df.category_id, c.name as category_name, df.tags, df.notes, df.content_text,
-                    df.source_path, df.managed_path, df.storage_mode, df.is_missing, df.added_at, df.file_modified, df.visit_count
-             FROM document_files df
-             LEFT JOIN document_categories c ON df.category_id = c.id
-             WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
-               AND (?2 IS NULL OR df.root_id = ?2)
-               AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
-               AND EXISTS (SELECT 1 FROM document_files_fts WHERE document_files_fts.rowid = df.id AND document_files_fts MATCH ?4)
-             {}
-             LIMIT ?5 OFFSET ?6",
-            order_clause
-        );
-        let rows = sqlx::query::<Sqlite>(&sql)
-        .bind(category_id)
-        .bind(root_id)
-        .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
-        .bind(&fts)
-        .bind(effective_limit)
-        .bind(offset)
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(|e| format!("查询文件列表失败: {}", e))?;
+    let base_filter = "WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
+         AND (?2 IS NULL OR df.root_id = ?2)
+         AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)";
 
-        (total, rows)
-    } else if keyword_val.is_some() {
-        let kw = keyword_val.as_deref().unwrap();
-        let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM document_files df
-             WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
-               AND (?2 IS NULL OR df.root_id = ?2)
-               AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
-               AND (df.file_name LIKE '%' || ?4 || '%' OR df.title LIKE '%' || ?4 || '%' OR df.tags LIKE '%' || ?4 || '%' OR df.notes LIKE '%' || ?4 || '%')",
-        )
-        .bind(category_id)
-        .bind(root_id)
-        .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
-        .bind(kw)
-        .fetch_one(&mut *conn)
-        .await
-        .map_err(|e| format!("查询总数失败: {}", e))?;
-
-        let sql = format!(
-            "SELECT df.id, df.root_id, df.title, df.file_name, df.file_ext, df.file_size, df.file_hash,
-                    df.category_id, c.name as category_name, df.tags, df.notes, df.content_text,
-                    df.source_path, df.managed_path, df.storage_mode, df.is_missing, df.added_at, df.file_modified, df.visit_count
-             FROM document_files df
-             LEFT JOIN document_categories c ON df.category_id = c.id
-             WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
-               AND (?2 IS NULL OR df.root_id = ?2)
-               AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
-               AND (df.file_name LIKE '%' || ?4 || '%' OR df.title LIKE '%' || ?4 || '%' OR df.tags LIKE '%' || ?4 || '%' OR df.notes LIKE '%' || ?4 || '%')
-             {}
-             LIMIT ?5 OFFSET ?6",
-            order_clause
-        );
-        let rows = sqlx::query::<Sqlite>(&sql)
-        .bind(category_id)
-        .bind(root_id)
-        .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
-        .bind(kw)
-        .bind(effective_limit)
-        .bind(offset)
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(|e| format!("查询文件列表失败: {}", e))?;
-
-        (total, rows)
+    let extra_filter = if use_fts {
+        " AND EXISTS (SELECT 1 FROM document_files_fts WHERE document_files_fts.rowid = df.id AND document_files_fts MATCH ?4)"
+    } else if fallback_search {
+        " AND (df.file_name LIKE '%' || ?4 || '%' OR df.title LIKE '%' || ?4 || '%' OR df.tags LIKE '%' || ?4 || '%' OR df.notes LIKE '%' || ?4 || '%' OR df.content_text LIKE '%' || ?4 || '%')"
     } else {
-        let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM document_files df
-             WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
-               AND (?2 IS NULL OR df.root_id = ?2)
-               AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)",
-        )
-        .bind(category_id)
-        .bind(root_id)
-        .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
-        .fetch_one(&mut *conn)
-        .await
-        .map_err(|e| format!("查询总数失败: {}", e))?;
+        ""
+    };
 
-        let sql = format!(
-            "SELECT df.id, df.root_id, df.title, df.file_name, df.file_ext, df.file_size, df.file_hash,
-                    df.category_id, c.name as category_name, df.tags, df.notes, df.content_text,
-                    df.source_path, df.managed_path, df.storage_mode, df.is_missing, df.added_at, df.file_modified, df.visit_count
-             FROM document_files df
-             LEFT JOIN document_categories c ON df.category_id = c.id
-             WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
-               AND (?2 IS NULL OR df.root_id = ?2)
-               AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)
-             {}
-             LIMIT ?4 OFFSET ?5",
-            order_clause
-        );
-        let rows = sqlx::query::<Sqlite>(&sql)
-        .bind(category_id)
-        .bind(root_id)
-        .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
-        .bind(effective_limit)
-        .bind(offset)
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(|e| format!("查询文件列表失败: {}", e))?;
+    let has_extra = use_fts || fallback_search;
+    let extra_param = if use_fts {
+        fts_query.as_ref().unwrap().clone()
+    } else if fallback_search {
+        keyword_val.as_deref().unwrap().to_string()
+    } else {
+        String::new()
+    };
 
-        (total, rows)
+    let order_clause = "ORDER BY df.sort_order ASC, df.added_at DESC";
+
+    let limit_idx = if has_extra { "?5" } else { "?4" };
+    let offset_idx = if has_extra { "?6" } else { "?5" };
+
+    let count_sql = format!(
+        "SELECT COUNT(*) FROM document_files df LEFT JOIN document_categories c ON df.category_id = c.id {} {}",
+        base_filter, extra_filter
+    );
+    let list_sql = format!(
+        "SELECT {} FROM document_files df LEFT JOIN document_categories c ON df.category_id = c.id {} {} {} LIMIT {} OFFSET {}",
+        base_fields, base_filter, extra_filter, order_clause, limit_idx, offset_idx
+    );
+
+    let total = if has_extra {
+        sqlx::query_scalar::<_, i64>(&count_sql)
+            .bind(category_id)
+            .bind(root_id)
+            .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
+            .bind(&extra_param)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|e| format!("查询总数失败: {}", e))?
+    } else {
+        sqlx::query_scalar::<_, i64>(&count_sql)
+            .bind(category_id)
+            .bind(root_id)
+            .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|e| format!("查询总数失败: {}", e))?
+    };
+
+    let rows = if has_extra {
+        sqlx::query::<Sqlite>(&list_sql)
+            .bind(category_id)
+            .bind(root_id)
+            .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
+            .bind(&extra_param)
+            .bind(effective_limit)
+            .bind(offset)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| format!("查询文件列表失败: {}", e))?
+    } else {
+        sqlx::query::<Sqlite>(&list_sql)
+            .bind(category_id)
+            .bind(root_id)
+            .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
+            .bind(effective_limit)
+            .bind(offset)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| format!("查询文件列表失败: {}", e))?
     };
 
     let items: Vec<DocFile> = rows.iter().map(|r| row_to_doc_file(r)).collect();
@@ -1221,34 +1379,58 @@ fn build_fts_query(keyword: &str) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
+    fn escape_fts_token(token: &str) -> String {
+        let mut s = String::with_capacity(token.len());
+        for ch in token.chars() {
+            match ch {
+                '\\' => s.push_str("\\\\"),
+                '"' => s.push_str("\"\""),
+                _ => s.push(ch),
+            }
+        }
+        s
+    }
     let tokens: Vec<String> = trimmed
         .split_whitespace()
         .map(|token| {
-            let escaped = token.replace('\\', "\\\\").replace('"', "");
-            format!("\"{}\"*", escaped)
+            let escaped = escape_fts_token(token);
+            if !escaped.is_empty() {
+                format!("\"{}\"*", escaped)
+            } else {
+                String::new()
+            }
         })
-        .filter(|t| !t.is_empty() && t.len() > 3)
+        .filter(|t| !t.is_empty())
         .collect();
     if tokens.is_empty() {
-        let escaped = trimmed.replace('\\', "\\\\").replace('"', "");
+        let escaped = escape_fts_token(trimmed);
         if escaped.is_empty() {
             return String::new();
         }
         format!("\"{}\"*", escaped)
     } else {
-        tokens.join(" AND ")
+        tokens.join(" ")
     }
 }
 
 pub fn compute_file_hash(path: &std::path::Path) -> Result<String, String> {
+    let meta = fs::metadata(path).map_err(|e| format!("读取文件信息失败: {}", e))?;
+    let file_size = meta.len();
     let mut file = fs::File::open(path).map_err(|e| format!("读取文件失败: {}", e))?;
     let mut hasher = xxhash_rust::xxh3::Xxh3::new();
-    let mut buf = [0u8; 8192];
+    let mut buf = [0u8; 65536];
+    let max_hash_bytes: u64 = 10 * 1024 * 1024;
+    let mut read_total: u64 = 0;
     loop {
         let n = file.read(&mut buf).map_err(|e| format!("读取文件失败: {}", e))?;
         if n == 0 { break; }
         hasher.update(&buf[..n]);
+        read_total += n as u64;
+        if read_total >= max_hash_bytes && file_size > max_hash_bytes {
+            break;
+        }
     }
+    hasher.update(&file_size.to_le_bytes());
     let hash = hasher.digest();
     Ok(format!("{:016x}", hash))
 }

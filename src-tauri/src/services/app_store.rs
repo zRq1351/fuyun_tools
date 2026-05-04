@@ -228,7 +228,7 @@ fn is_microsoft_app(_target: &str) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
+pub fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
     unsafe {
         let shell_link: IShellLinkW =
             CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
@@ -255,7 +255,7 @@ fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn resolve_lnk_target(_lnk_path: &str) -> Option<String> {
+pub fn resolve_lnk_target(_lnk_path: &str) -> Option<String> {
     None
 }
 
@@ -434,10 +434,7 @@ pub async fn batch_update_icons(icons: &HashMap<String, String>) {
 }
 
 pub async fn update_app_sort_orders(orders: Vec<(String, i32)>) -> Result<(), String> {
-    for (app_id, sort_order) in orders {
-        launcher_db::update_app_sort_order(&app_id, sort_order).await?;
-    }
-    Ok(())
+    launcher_db::batch_update_app_sort_orders(&orders).await
 }
 
 pub async fn add_manual_app(id: &str, title: &str, path: &str) -> Result<StoredApp, String> {

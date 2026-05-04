@@ -38,7 +38,7 @@
           <div ref="rootListRef" class="dm-root-list">
             <div v-for="root in roots" :key="root.id" :class="{ active: rootFilter === root.id }"
                  :data-root-id="root.id" class="dm-root-item sortable-root"
-                 @click="rootFilter = rootFilter === root.id ? null : root.id">
+                 @click="rootFilter = root.id">
               <el-icon>
                 <Folder/>
               </el-icon>
@@ -229,7 +229,7 @@
               </div>
               <div class="dm-detail-row">
                 <span class="dm-detail-label">标签</span>
-                <el-input v-model="editTags" placeholder="逗号分隔" size="small" @blur="saveTags"
+                <el-input v-model="editTags" placeholder="分号分隔，如：工作; 学习" size="small" @blur="saveTags"
                           @keyup.enter="saveTags"/>
               </div>
               <div class="dm-detail-row">
@@ -306,7 +306,7 @@
         <el-icon>
           <Warning/>
         </el-icon>
-        <span>导入文档时，文件将被移动到该目录下，按分类组织为子目录</span></div>
+        <span>导入文档时，搬迁模式下文件将被移动到该目录下，按分类组织为子目录</span></div>
       <template #footer>
         <el-button @click="showAddRoot = false">取消</el-button>
         <el-button :disabled="!newRootName || !newRootPath" type="primary" @click="confirmAddRoot">确认</el-button>
@@ -587,20 +587,31 @@ const iconMap = {
   pdf: Document, docx: Document, doc: Document,
   xlsx: List, xls: List, pptx: Notebook, ppt: Notebook,
   txt: Tickets, md: Notebook, csv: List, log: Tickets,
-  json: Setting, xml: Document, yaml: Setting, yml: Setting,
-  py: Monitor, js: Monitor, ts: Monitor, java: Coffee, go: Monitor,
-  rs: Monitor, c: Monitor, cpp: Monitor, php: Monitor,
-  html: Connection, css: MagicStick, vue: Monitor,
+  json: Setting, xml: Document, yaml: Setting, yml: Setting, toml: Setting,
+  py: Monitor, js: Monitor, ts: Monitor, jsx: Monitor, tsx: Monitor,
+  java: Coffee, go: Monitor, rs: Monitor, c: Monitor, cpp: Monitor, cs: Monitor,
+  php: Monitor, rb: Monitor, swift: Monitor, kt: Monitor, scala: Monitor,
+  lua: Monitor, r: Monitor, zig: Monitor,
+  html: Connection, htm: Connection, css: MagicStick, scss: MagicStick, less: MagicStick,
+  vue: Monitor, svelte: Monitor,
   png: Picture, jpg: Picture, jpeg: Picture, gif: Picture, bmp: Picture, webp: Picture, svg: Picture,
   sh: Monitor, bat: Monitor, ps1: Monitor, sql: List,
+  ini: Setting, cfg: Setting, conf: Setting,
 }
 const fileColorMap = {
   pdf: '#E74C3C', docx: '#2980B9', doc: '#2980B9',
-  xlsx: '#27AE60', xls: '#27AE60', pptx: '#E67E22',
-  md: '#8E44AD', txt: '#7F8C8D',
-  py: '#3498DB', js: '#F1C40F', ts: '#3178C6', java: '#E76F00', go: '#00ADD8',
-  rs: '#DEA584', html: '#E34F26', css: '#1572B6',
-  png: '#9B59B6', jpg: '#9B59B6', svg: '#E67E22',
+  xlsx: '#27AE60', xls: '#27AE60', pptx: '#E67E22', ppt: '#E67E22',
+  txt: '#7F8C8D', md: '#8E44AD', csv: '#27AE60', log: '#7F8C8D',
+  json: '#E67E22', xml: '#E67E22', yaml: '#E67E22', yml: '#E67E22', toml: '#E67E22',
+  py: '#3498DB', js: '#F1C40F', ts: '#3178C6', jsx: '#F1C40F', tsx: '#3178C6',
+  java: '#E76F00', go: '#00ADD8', rs: '#DEA584', c: '#555', cpp: '#649AD2', cs: '#68217A',
+  php: '#777BB3', rb: '#CC342D', swift: '#F05138', kt: '#7F52FF', scala: '#DC322F',
+  lua: '#000080', r: '#276DC3', zig: '#F7A41D',
+  html: '#E34F26', htm: '#E34F26', css: '#1572B6', scss: '#CD6799', less: '#1D365D',
+  vue: '#42B883', svelte: '#FF3E00',
+  png: '#9B59B6', jpg: '#9B59B6', jpeg: '#9B59B6', gif: '#3498DB', bmp: '#7F8C8D', webp: '#9B59B6', svg: '#E67E22',
+  sh: '#4EAA25', bat: '#555', ps1: '#012456', sql: '#E38C00',
+  ini: '#7F8C8D', cfg: '#7F8C8D', conf: '#7F8C8D',
 }
 
 const commonExts = [
@@ -736,11 +747,13 @@ const totalOrphanCount = computed(() => {
 watch(selectedDoc, (doc) => {
   if (!doc) return
   editCategoryId.value = doc.categoryId ?? null
-  try {
-    editTags.value = JSON.parse(doc.tags || '[]').join(', ')
-  } catch {
-    editTags.value = doc.tags || ''
-  }
+  editTags.value = (() => {
+    try {
+      return JSON.parse(doc.tags || '[]').join('; ')
+    } catch {
+      return doc.tags || ''
+    }
+  })()
   editNotes.value = doc.notes || ''
 })
 
@@ -817,7 +830,7 @@ async function loadData() {
   })
 }
 
-async function loadFiles() {
+async function loadFiles(preserveSelection) {
   loading.value = true
   try {
     const r = await DocumentService.getPage({
@@ -828,7 +841,9 @@ async function loadFiles() {
     })
     items.value = r.items || []
     total.value = Number(r.total) || 0
-    selectedId.value = null
+    if (!preserveSelection || !items.value.find(i => i.id === selectedId.value)) {
+      selectedId.value = null
+    }
   } catch (e) {
     ElMessage.error('加载文件列表失败')
   } finally {
@@ -877,9 +892,10 @@ async function undoImportItemFn(importId, docFileId, historyItem) {
     await DocumentService.undoImportItem(importId, docFileId)
     ElMessage.success('已撤销')
     if (historyItem._files) {
-      historyItem._files = historyItem._files.filter(f => f.docFileId !== docFileId)
+      const updated = await DocumentService.getImportFiles(importId)
+      historyItem._files = updated || []
+      historyItem.fileCount = historyItem._files.length
     }
-    historyItem.fileCount = Math.max(0, (historyItem.fileCount || 1) - 1)
     if (historyItem.fileCount === 0) {
       importHistory.value = importHistory.value.filter(h => h.id !== importId)
     }
@@ -1042,7 +1058,8 @@ async function confirmImport() {
       paths: importFiles.value,
       rootId: importRootId.value,
       categoryId: importCategoryId.value || null,
-      storageMode: importMode.value
+      storageMode: importMode.value,
+      sourceDir: ''
     })
     if (r.errors && r.errors.length > 0) ElMessage.warning(`导入完成，${r.success.length} 个成功，${r.errors.length} 个失败`)
     else ElMessage.success(`成功导入 ${r.success.length} 个文件`)
@@ -1108,7 +1125,7 @@ async function importScanned() {
 }
 
 function initRootSortable() {
-  if (!rootListRef.value || rootFilter.value !== null) {
+  if (!rootListRef.value) {
     if (rootSortable) {
       rootSortable.destroy();
       rootSortable = null
@@ -1144,7 +1161,7 @@ function initRootSortable() {
 }
 
 function initCatSortable() {
-  if (!catListRef.value || rootFilter.value !== null) {
+  if (!catListRef.value) {
     if (catSortable) {
       catSortable.destroy();
       catSortable = null
@@ -1228,9 +1245,9 @@ function initFileSortable() {
 
 async function detectOrphans() {
   orphanLoading.value = true
-  orphanChecked.value = true
   try {
     const r = await DocumentService.detectOrphanFiles(rootFilter.value || null)
+    orphanChecked.value = true
     orphanResults.value = r || []
     let count = 0
     for (const g of orphanResults.value) count += g.files?.length || 0
@@ -1306,9 +1323,10 @@ async function handleDrop(event) {
     if (files[i].path) paths.push(files[i].path)
   }
   if (paths.length === 0) return
-  importRootId.value = roots.value[0].id;
-  importCategoryId.value = null;
+  importRootId.value = rootFilter.value || roots.value[0].id;
+  importCategoryId.value = categoryFilter.value === -1 ? null : categoryFilter.value;
   importFiles.value = paths;
+  importMode.value = 'index';
   showImportDialog.value = true
 }
 
@@ -1339,7 +1357,10 @@ async function confirmDelete(doc) {
     selectedId.value = null;
     await loadFiles();
     await loadData()
-  } catch {
+  } catch (e) {
+    if (e && e !== 'cancel' && e !== 'close') {
+      ElMessage.error('删除失败')
+    }
   }
 }
 
@@ -1378,17 +1399,17 @@ async function contextDelete(doc) {
 async function confirmMove() {
   if (!moveDoc.value || !hasMoveChange.value) return
   const doc = moveDoc.value
+  await savePendingEdits()
 
   try {
-    if (moveTargetCategoryId.value !== (doc.categoryId ?? null)) {
-      await DocumentService.updateMeta({id: doc.id, categoryId: moveTargetCategoryId.value ?? -1})
-    }
-    if (moveTargetRootId.value && moveTargetRootId.value !== doc.rootId) {
-      await DocumentService.moveDoc(doc.id, moveTargetRootId.value)
-    }
+    await DocumentService.atomicMoveDoc({
+      id: doc.id,
+      newRootId: moveTargetRootId.value !== doc.rootId ? moveTargetRootId.value : null,
+      newCategoryId: moveTargetCategoryId.value ?? null,
+    })
     ElMessage.success('移动成功')
     showMoveDialog.value = false
-    await loadFiles()
+    await loadFiles(true)
     await loadData()
   } catch (e) {
     ElMessage.error(typeof e === 'string' ? e : e?.message || '移动失败')
@@ -1423,23 +1444,44 @@ function dismissGuide() {
   showGuide.value = false
 }
 
+async function savePendingEdits() {
+  if (!selectedDoc.value) return
+  const doc = selectedDoc.value
+  const currentTags = JSON.stringify(editTags.value.split(/[,，;；]/).map(t => t.trim()).filter(Boolean))
+  const currentNotes = editNotes.value
+  if (currentTags !== (doc.tags || '[]')) {
+    await DocumentService.updateMeta({id: doc.id, tags: currentTags}).catch(() => {
+    })
+  }
+  if (currentNotes !== (doc.notes || '')) {
+    await DocumentService.updateMeta({id: doc.id, notes: currentNotes}).catch(() => {
+    })
+  }
+  doc.tags = currentTags
+  doc.notes = currentNotes
+}
+
 async function saveCategory() {
   if (!selectedDoc.value) return;
+  await savePendingEdits()
   try {
     await DocumentService.updateMeta({id: selectedDoc.value.id, categoryId: editCategoryId.value ?? -1})
     selectedDoc.value.categoryId = editCategoryId.value
-  } catch {
+  } catch (e) {
+    ElMessage.error('保存分类失败')
   }
-  ;loadData()
+  await loadData()
+  await loadFiles(true)
 }
 
 async function saveTags() {
   if (!selectedDoc.value) return
   try {
-    const tagsJson = JSON.stringify(editTags.value.split(/[,，]/).map(t => t.trim()).filter(Boolean))
+    const tagsJson = JSON.stringify(editTags.value.split(/[,，;；]/).map(t => t.trim()).filter(Boolean))
     await DocumentService.updateMeta({id: selectedDoc.value.id, tags: tagsJson})
     selectedDoc.value.tags = tagsJson
-  } catch {
+  } catch (e) {
+    ElMessage.error('保存标签失败')
   }
 }
 
@@ -1448,13 +1490,18 @@ async function saveNotes() {
   try {
     await DocumentService.updateMeta({id: selectedDoc.value.id, notes: editNotes.value})
     selectedDoc.value.notes = editNotes.value
-  } catch {
+  } catch (e) {
+    ElMessage.error('保存备注失败')
   }
 }
 
 onMounted(async () => {
   await loadData();
-  await loadFiles();
+  if (roots.value.length > 0) {
+    rootFilter.value = roots.value[0].id;
+  } else {
+    await loadFiles();
+  }
   loadImportHistory();
   detectOrphans()
 })

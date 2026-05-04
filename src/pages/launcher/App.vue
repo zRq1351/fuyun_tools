@@ -329,8 +329,9 @@ const handleKeydown = (event) => {
       break
     case 'Enter':
       event.preventDefault()
-      if (items.length > 0 && activeIndex.value < items.length) {
-        handleSelect(items[activeIndex.value])
+      if (items.length > 0) {
+        const idx = Math.min(activeIndex.value, items.length - 1)
+        handleSelect(items[idx])
       }
       break
     case 'Escape':
@@ -421,6 +422,7 @@ const handleReorderApps = async (reorderedApps) => {
         app.sort_order = sortOrder
       }
     }
+    allApps.value = [...allApps.value].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
   } catch (error) {
     console.error('Reorder apps error:', error)
   }

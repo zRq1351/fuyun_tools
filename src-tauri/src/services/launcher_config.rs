@@ -176,29 +176,34 @@ pub async fn load_launcher_config() -> LauncherConfig {
 }
 pub async fn add_category(name: String, icon: String) -> Result<LauncherConfig, String> {
     let id = format!("custom_{}", chrono::Local::now().timestamp_millis());
-    let config = load_launcher_config().await;
-    let mut new_categories = config.categories.clone();
-    new_categories.push(LauncherCategory {
+    let mut config = load_launcher_config().await;
+    config.categories.push(LauncherCategory {
         id: id.clone(),
         name: name.clone(),
         icon: icon.clone(),
         app_ids: Vec::new(),
     });
-    launcher_db::upsert_category(&id, &name, &icon, (new_categories.len() - 1) as i32).await?;
-    Ok(load_launcher_config().await)
+    launcher_db::upsert_category(&id, &name, &icon, (config.categories.len() - 1) as i32).await?;
+    Ok(config)
 }
 
 pub async fn remove_category(category_id: String) -> Result<LauncherConfig, String> {
-    let config = load_launcher_config().await;
+    let mut config = load_launcher_config().await;
     config.categories.iter().find(|c| c.id == category_id).ok_or("分类不存在".to_string())?;
+    config.categories.retain(|c| c.id != category_id);
+    config.app_category_map.retain(|_, v| v != &category_id);
     launcher_db::delete_category(&category_id).await?;
     launcher_db::clear_category_app_map_by_category(&category_id).await?;
-    Ok(load_launcher_config().await)
+    Ok(config)
 }
 
 pub async fn rename_category(category_id: String, new_name: String) -> Result<LauncherConfig, String> {
     launcher_db::update_category_name(&category_id, &new_name).await?;
-    Ok(load_launcher_config().await)
+    let mut config = load_launcher_config().await;
+    if let Some(cat) = config.categories.iter_mut().find(|c| c.id == category_id) {
+        cat.name = new_name;
+    }
+    Ok(config)
 }
 
 pub async fn set_app_category(app_id: String, category_id: String) -> Result<LauncherConfig, String> {
@@ -207,22 +212,42 @@ pub async fn set_app_category(app_id: String, category_id: String) -> Result<Lau
     } else {
         launcher_db::set_app_category_map(&app_id, &category_id).await?;
     }
-    Ok(load_launcher_config().await)
+    let mut config = load_launcher_config().await;
+    if category_id.is_empty() {
+        config.app_category_map.remove(&app_id);
+    } else {
+        config.app_category_map.insert(app_id, category_id);
+    }
+    Ok(config)
 }
 
 pub async fn set_view_mode(mode: String) -> Result<LauncherConfig, String> {
     launcher_db::set_config_value("view_mode", &mode).await?;
-    Ok(load_launcher_config().await)
+    let mut config = load_launcher_config().await;
+    config.view_mode = mode;
+    Ok(config)
 }
 
 pub async fn reorder_categories(category_ids: Vec<String>) -> Result<LauncherConfig, String> {
     launcher_db::sync_category_positions(&category_ids).await?;
-    Ok(load_launcher_config().await)
+    let mut config = load_launcher_config().await;
+    let mut ordered = Vec::new();
+    for id in &category_ids {
+        if let Some(pos) = config.categories.iter().position(|c| &c.id == id) {
+            ordered.push(config.categories.remove(pos));
+        }
+    }
+    config.categories = ordered;
+    Ok(config)
 }
 
 pub async fn update_category_icon(category_id: String, icon: String) -> Result<LauncherConfig, String> {
     launcher_db::update_category_icon(&category_id, &icon).await?;
-    Ok(load_launcher_config().await)
+    let mut config = load_launcher_config().await;
+    if let Some(cat) = config.categories.iter_mut().find(|c| c.id == category_id) {
+        cat.icon = icon;
+    }
+    Ok(config)
 }
 
 pub async fn add_custom_command(
@@ -242,20 +267,33 @@ pub async fn add_custom_command(
     launcher_db::insert_custom_command(&launcher_db::CustomCommandRow {
         id: id.clone(),
         prefix: prefix.clone(),
-        title,
-        description,
-        icon,
+        title: title.clone(),
+        description: description.clone(),
+        icon: icon.clone(),
         command_type: command_type.to_json(),
         enabled: true,
         created_at,
     }).await?;
 
-    Ok(load_launcher_config().await)
+    let mut config = load_launcher_config().await;
+    config.custom_commands.push(CustomCommand {
+        id,
+        prefix,
+        title,
+        description,
+        icon,
+        command_type,
+        enabled: true,
+        created_at,
+    });
+    Ok(config)
 }
 
 pub async fn remove_custom_command(command_id: String) -> Result<LauncherConfig, String> {
     launcher_db::delete_custom_command(&command_id).await?;
-    Ok(load_launcher_config().await)
+    let mut config = load_launcher_config().await;
+    config.custom_commands.retain(|c| c.id != command_id);
+    Ok(config)
 }
 
 pub async fn update_custom_command(
@@ -267,8 +305,8 @@ pub async fn update_custom_command(
     command_type: Option<CustomCommandType>,
     enabled: Option<bool>,
 ) -> Result<LauncherConfig, String> {
-    let commands = load_custom_commands_from_db().await;
-    if !commands.iter().any(|c| c.id == command_id) {
+    let mut config = load_launcher_config().await;
+    if !config.custom_commands.iter().any(|c| c.id == command_id) {
         return Err("命令不存在".to_string());
     }
 
@@ -278,7 +316,7 @@ pub async fn update_custom_command(
         }
     }
 
-    let ct_json = command_type.map(|ct| ct.to_json());
+    let ct_json = command_type.as_ref().map(|ct| ct.to_json());
 
     launcher_db::update_custom_command_fields(
         &command_id,
@@ -290,16 +328,28 @@ pub async fn update_custom_command(
         enabled,
     ).await?;
 
-    Ok(load_launcher_config().await)
+    if let Some(cmd) = config.custom_commands.iter_mut().find(|c| c.id == command_id) {
+        if let Some(ref p) = prefix { cmd.prefix = p.clone(); }
+        if let Some(ref t) = title { cmd.title = t.clone(); }
+        if let Some(ref d) = description { cmd.description = Some(d.clone()); }
+        if let Some(ref i) = icon { cmd.icon = i.clone(); }
+        if let Some(ct) = command_type { cmd.command_type = ct; }
+        if let Some(e) = enabled { cmd.enabled = e; }
+    }
+
+    Ok(config)
 }
 
 pub async fn toggle_custom_command(command_id: String) -> Result<LauncherConfig, String> {
-    let commands = load_custom_commands_from_db().await;
-    if !commands.iter().any(|c| c.id == command_id) {
+    let mut config = load_launcher_config().await;
+    if !config.custom_commands.iter().any(|c| c.id == command_id) {
         return Err("命令不存在".to_string());
     }
     launcher_db::toggle_custom_command_enabled(&command_id).await?;
-    Ok(load_launcher_config().await)
+    if let Some(cmd) = config.custom_commands.iter_mut().find(|c| c.id == command_id) {
+        cmd.enabled = !cmd.enabled;
+    }
+    Ok(config)
 }
 
 async fn load_custom_commands_from_db() -> Vec<CustomCommand> {
