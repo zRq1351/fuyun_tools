@@ -278,6 +278,8 @@
                     <Document/>
                   </el-icon>
                   <span>{{ f.fileName }}</span>
+                  <el-button size="small" text type="danger" @click="undoImportItemFn(h.id, f.docFileId, h)">撤销
+                  </el-button>
                 </div>
               </div>
             </div>
@@ -810,6 +812,24 @@ async function undoImportFn(importId) {
     await loadData();
     await loadFiles();
     loadImportHistory()
+  } catch (e) {
+    ElMessage.error('撤销失败: ' + e)
+  }
+}
+
+async function undoImportItemFn(importId, docFileId, historyItem) {
+  try {
+    await DocumentService.undoImportItem(importId, docFileId)
+    ElMessage.success('已撤销')
+    if (historyItem._files) {
+      historyItem._files = historyItem._files.filter(f => f.docFileId !== docFileId)
+    }
+    historyItem.fileCount = Math.max(0, (historyItem.fileCount || 1) - 1)
+    if (historyItem.fileCount === 0) {
+      importHistory.value = importHistory.value.filter(h => h.id !== importId)
+    }
+    await loadData();
+    await loadFiles()
   } catch (e) {
     ElMessage.error('撤销失败: ' + e)
   }

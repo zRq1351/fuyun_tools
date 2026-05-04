@@ -541,6 +541,7 @@ export const DocumentService = {
 
     getImportHistory: (limit) => invoke('get_import_history', {limit}),
     undoImport: (importId) => invoke('undo_import', {importId}),
+    undoImportItem: (importId, docFileId) => invoke('undo_import_item', {importId, docFileId}),
     getImportFiles: (importId) => invoke('get_import_files', {importId}),
     detectOrphanFiles: (rootId) => invoke('detect_orphan_files', {rootId}),
 };

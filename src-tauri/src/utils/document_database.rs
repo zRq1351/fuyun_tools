@@ -97,6 +97,7 @@ pub struct ImportHistory {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportFileItem {
+    pub doc_file_id: i64,
     pub file_name: String,
     pub source_path: String,
     pub managed_path: String,
@@ -1399,10 +1400,65 @@ pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
     Ok(errors)
 }
 
+pub async fn undo_import_item(import_id: i64, doc_file_id: i64) -> Result<(), String> {
+    let mut conn = open_docs_db().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+
+    let item = sqlx::query::<Sqlite>(
+        "SELECT dii.source_path, dii.managed_path, di.storage_mode
+         FROM document_import_items dii
+         JOIN document_imports di ON di.id = dii.import_id
+         WHERE dii.import_id = ?1 AND dii.doc_file_id = ?2",
+    )
+    .bind(import_id)
+    .bind(doc_file_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| format!("查询导入项失败: {}", e))?
+    .ok_or("导入项不存在".to_string())?;
+
+    let source: String = item.try_get(0).unwrap_or_default();
+    let managed: String = item.try_get(1).unwrap_or_default();
+    let mode: String = item.try_get(2).unwrap_or_default();
+
+    if mode == "repo" && !managed.is_empty() {
+        let managed_path = std::path::Path::new(&managed);
+        let source_path = std::path::Path::new(&source);
+        if managed_path.exists() {
+            if let Some(parent) = source_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            safe_move_file(managed_path, source_path)
+                .map_err(|e| format!("回退失败: {}", e))?;
+        }
+    }
+
+    sqlx::query::<Sqlite>("DELETE FROM document_files WHERE id = ?1")
+        .bind(doc_file_id).execute(&mut *tx).await.ok();
+    sqlx::query::<Sqlite>("DELETE FROM document_files_fts WHERE rowid = ?1")
+        .bind(doc_file_id).execute(&mut *tx).await.ok();
+    sqlx::query::<Sqlite>("DELETE FROM document_import_items WHERE import_id = ?1 AND doc_file_id = ?2")
+        .bind(import_id).bind(doc_file_id).execute(&mut *tx).await.ok();
+
+    let remaining: i64 = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM document_import_items WHERE import_id = ?1"
+    ).bind(import_id).fetch_one(&mut *tx).await.unwrap_or(0);
+
+    if remaining == 0 {
+        sqlx::query::<Sqlite>("DELETE FROM document_imports WHERE id = ?1")
+            .bind(import_id).execute(&mut *tx).await.ok();
+    } else {
+        sqlx::query::<Sqlite>("UPDATE document_imports SET file_count = ?1 WHERE id = ?2")
+            .bind(remaining).bind(import_id).execute(&mut *tx).await.ok();
+    }
+
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))
+}
+
 pub async fn get_import_files(import_id: i64) -> Result<Vec<ImportFileItem>, String> {
     let mut conn = open_docs_db().await?;
     let rows = sqlx::query::<Sqlite>(
-        "SELECT COALESCE(df.file_name, dii.managed_path) as file_name, dii.source_path, dii.managed_path
+        "SELECT dii.doc_file_id, COALESCE(df.file_name, dii.managed_path) as file_name, dii.source_path, dii.managed_path
          FROM document_import_items dii
          LEFT JOIN document_files df ON df.id = dii.doc_file_id
          WHERE dii.import_id = ?1
@@ -1413,8 +1469,9 @@ pub async fn get_import_files(import_id: i64) -> Result<Vec<ImportFileItem>, Str
     .await
     .map_err(|e| format!("查询导入文件列表失败: {}", e))?;
     Ok(rows.iter().map(|r| ImportFileItem {
-        file_name: r.try_get::<String, _>(0).unwrap_or_default(),
-        source_path: r.try_get::<String, _>(1).unwrap_or_default(),
-        managed_path: r.try_get::<String, _>(2).unwrap_or_default(),
+        doc_file_id: r.try_get::<i64, _>(0).unwrap_or(0),
+        file_name: r.try_get::<String, _>(1).unwrap_or_default(),
+        source_path: r.try_get::<String, _>(2).unwrap_or_default(),
+        managed_path: r.try_get::<String, _>(3).unwrap_or_default(),
     }).collect())
 }

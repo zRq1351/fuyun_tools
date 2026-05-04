@@ -255,6 +255,11 @@ pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+pub async fn undo_import_item(import_id: i64, doc_file_id: i64) -> Result<(), String> {
+    document_database::undo_import_item(import_id, doc_file_id).await
+}
+
+#[tauri::command]
 pub async fn get_import_files(import_id: i64) -> Result<Vec<document_database::ImportFileItem>, String> {
     document_database::get_import_files(import_id).await
 }

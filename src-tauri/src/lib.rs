@@ -641,6 +641,7 @@ pub fn run() {
             scan_folder,
             get_import_history,
             undo_import,
+            undo_import_item,
             get_import_files,
             detect_orphan_files,
         ])
