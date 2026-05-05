@@ -604,7 +604,13 @@ pub fn show_image_preview_window(
     });
     let _ = window.set_always_on_top(false);
     let _ = show_overlay_window(&app_handle, "image_preview", &window, true);
-    let _ = app_handle.emit("show-image-preview", payload);
+    let _ = app_handle.emit("show-image-preview", payload.clone());
+    if let Ok(payload_str) = serde_json::to_string(&payload) {
+        let script = format!(
+            "window.__IMAGE_PREVIEW_PAYLOAD__ = {payload_str};"
+        );
+        let _ = window.eval(&script);
+    }
     Ok(())
 }
 
@@ -645,7 +651,13 @@ pub fn show_text_preview_window(
     });
     let _ = window.set_always_on_top(false);
     let _ = show_overlay_window(&app_handle, "text_preview", &window, true);
-    let _ = app_handle.emit("show-text-preview", payload);
+    let _ = app_handle.emit("show-text-preview", payload.clone());
+    if let Ok(payload_str) = serde_json::to_string(&payload) {
+        let script = format!(
+            "window.__TEXT_PREVIEW_PAYLOAD__ = {payload_str};"
+        );
+        let _ = window.eval(&script);
+    }
     Ok(())
 }
 
@@ -1035,9 +1047,15 @@ fn show_selection_toolbar_internal(
     let _ = toolbar_window.set_always_on_top(false);
     let _ = toolbar_window.set_always_on_top(true);
     if show_overlay_window(&app_handle, "selection_toolbar", &toolbar_window, false) {
-        if let Err(e) = app_handle.emit("selected-text", selected_text) {
+        if let Err(e) = app_handle.emit("selected-text", selected_text.clone()) {
             log::error!("未能发送选择文本到前端:{}", e);
         }
+    }
+    if let Ok(payload) = serde_json::to_string(&selected_text) {
+        let script = format!(
+            "window.__SELECTION_TOOLBAR_TEXT__ = {payload}; window.dispatchEvent(new CustomEvent('selection-toolbar-text', {{ detail: {payload} }}));"
+        );
+        let _ = toolbar_window.eval(&script);
     }
 }
 

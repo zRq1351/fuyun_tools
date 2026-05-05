@@ -155,8 +155,7 @@ const handleKeydown = (e) => {
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
 
-  unlisten = await listen('show-text-preview', (event) => {
-    const payload = event.payload || {}
+  const processPayload = (payload) => {
     if (payload.text) {
       textContent.value = payload.text
     }
@@ -168,6 +167,15 @@ onMounted(async () => {
     setTimeout(() => {
       animationState.value = 'entered'
     }, 50)
+  }
+
+  const cachedPayload = window.__TEXT_PREVIEW_PAYLOAD__
+  if (cachedPayload) {
+    processPayload(cachedPayload)
+  }
+
+  unlisten = await listen('show-text-preview', (event) => {
+    processPayload(event.payload || {})
   })
 })
 

@@ -293,7 +293,9 @@ async fn execute_stream_request(
         .op_id
         .unwrap_or_else(|| next_ai_operation_id(&state_arc));
     set_active_operation(&state_arc, &kind, operation_id);
+    log::info!("[AI流式] 开始获取AI客户端...");
     let client: AIClient = get_or_create_ai_client(state_arc.clone()).await?;
+    log::info!("[AI流式] AI客户端就绪，开始创建结果窗口...");
 
     // 显示结果窗口并获取窗口标签
     let window_label = show_result_window(

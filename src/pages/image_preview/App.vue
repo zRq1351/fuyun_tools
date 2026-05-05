@@ -214,13 +214,15 @@ const schedulePayloadWatchdog = () => {
 }
 
 onMounted(async () => {
-  unlistenShowPreview = await listen('show-image-preview', (event) => {
-    const payload = event.payload || {}
+  const processPayload = (payload) => {
     const payloadRequestId = String(payload.request_id || '')
     if (payload.loading) {
       activeRequestId.value = payloadRequestId
-    } else if (payloadRequestId && payloadRequestId !== activeRequestId.value) {
+    } else if (payloadRequestId && activeRequestId.value && payloadRequestId !== activeRequestId.value) {
       return
+    }
+    if (!activeRequestId.value) {
+      activeRequestId.value = payloadRequestId
     }
     if (revealTimer) {
       window.clearTimeout(revealTimer)
@@ -265,6 +267,15 @@ onMounted(async () => {
       })
     })
     playOpenAnimation()
+  }
+
+  const cachedPayload = window.__IMAGE_PREVIEW_PAYLOAD__
+  if (cachedPayload) {
+    processPayload(cachedPayload)
+  }
+
+  unlistenShowPreview = await listen('show-image-preview', (event) => {
+    processPayload(event.payload || {})
   })
   schedulePayloadWatchdog()
 
