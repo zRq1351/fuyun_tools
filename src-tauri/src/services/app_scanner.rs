@@ -170,6 +170,57 @@ pub fn search_apps(query: &str, limit: usize) -> Vec<LauncherItem> {
     results
 }
 
+/// 使用 ShellExecuteExW 打开文件/快捷方式（不显示 Windows 错误弹窗）
+#[cfg(target_os = "windows")]
+fn shell_execute_open(path: &str, args: Option<&str>) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_FLAG_NO_UI};
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
+    use windows::Win32::Foundation::{HWND, HINSTANCE};
+    use windows::core::PCWSTR;
+
+    let wide_path: Vec<u16> = std::ffi::OsStr::new(path)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let wide_verb: Vec<u16> = "open\0".encode_utf16().collect();
+
+    let args_vec: Option<Vec<u16>> = args.map(|a| {
+        std::ffi::OsStr::new(a)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    });
+
+    let args_ptr = args_vec.as_ref()
+        .map_or(PCWSTR::null(), |v| PCWSTR(v.as_ptr()));
+
+    let mut sei = SHELLEXECUTEINFOW::default();
+    sei.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+    sei.fMask = SEE_MASK_FLAG_NO_UI;
+    sei.hwnd = HWND::default();
+    sei.lpVerb = PCWSTR(wide_verb.as_ptr());
+    sei.lpFile = PCWSTR(wide_path.as_ptr());
+    sei.lpParameters = args_ptr;
+    sei.lpDirectory = PCWSTR::null();
+    sei.nShow = SW_SHOW.0;
+    sei.hInstApp = HINSTANCE::default();
+
+    let result = unsafe { ShellExecuteExW(&mut sei) };
+    if result.is_ok() {
+        Ok(())
+    } else {
+        let err = std::io::Error::last_os_error();
+        Err(format!("启动失败: {}", err))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn shell_execute_open(_path: &str, _args: Option<&str>) -> Result<(), String> {
+    Err("非 Windows 平台不支持 ShellExecute".to_string())
+}
+
 pub fn launch_app(path: &str) -> Result<(), String> {
     log::info!("[launch_app] 尝试启动程序: {}", path);
     let path_buf = PathBuf::from(path);
@@ -182,43 +233,15 @@ pub fn launch_app(path: &str) -> Result<(), String> {
     let is_shortcut = path.to_lowercase().ends_with(".lnk");
 
     if is_shortcut {
-        log::info!("[launch_app] 检测到快捷方式，使用 cmd start 启动");
-        // 快捷方式使用 cmd /C start 启动，路径必须加引号处理空格
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            let quoted = format!("\"{}\"", path);
-            match std::process::Command::new("cmd")
-                .args(["/C", "start", "", &quoted])
-                .creation_flags(CREATE_NO_WINDOW)
-                .spawn()
-            {
-                Ok(_) => {
-                    log::info!("[launch_app] 快捷方式启动成功");
-                    Ok(())
-                }
-                Err(e) => {
-                    log::error!("[launch_app] 快捷方式启动失败: {}", e);
-                    Err(format!("启动失败: {}", e))
-                }
+        log::info!("[launch_app] 检测到快捷方式，使用 ShellExecute 启动");
+        match shell_execute_open(path, None) {
+            Ok(()) => {
+                log::info!("[launch_app] 快捷方式启动成功");
+                Ok(())
             }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let quoted = format!("\"{}\"", path);
-            match std::process::Command::new("cmd")
-                .args(["/C", "start", "", &quoted])
-                .spawn()
-            {
-                Ok(_) => {
-                    log::info!("[launch_app] 快捷方式启动成功");
-                    Ok(())
-                }
-                Err(e) => {
-                    log::error!("[launch_app] 快捷方式启动失败: {}", e);
-                    Err(format!("启动失败: {}", e))
-                }
+            Err(e) => {
+                log::error!("[launch_app] 快捷方式启动失败: {}", e);
+                Err(e)
             }
         }
     } else {
@@ -270,52 +293,15 @@ pub fn launch_app_with_args(path: &str, args: Option<&str>) -> Result<(), String
     let is_shortcut = path.to_lowercase().ends_with(".lnk");
 
     if is_shortcut {
-        log::info!("[launch_app_with_args] 检测到快捷方式，使用 cmd start 启动");
-        // 快捷方式使用 cmd /C start 启动
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            let mut command = std::process::Command::new("cmd");
-            let quoted = format!("\"{}\"", path);
-            command.arg("/C").arg("start").arg("").arg(&quoted);
-            if let Some(arguments) = args {
-                for arg in arguments.split_whitespace() {
-                    command.arg(arg);
-                }
+        log::info!("[launch_app_with_args] 检测到快捷方式，使用 ShellExecute 启动");
+        match shell_execute_open(path, args) {
+            Ok(()) => {
+                log::info!("[launch_app_with_args] 快捷方式启动成功");
+                Ok(())
             }
-
-            match command.creation_flags(CREATE_NO_WINDOW).spawn() {
-                Ok(_) => {
-                    log::info!("[launch_app_with_args] 快捷方式启动成功");
-                    Ok(())
-                }
-                Err(e) => {
-                    log::error!("[launch_app_with_args] 快捷方式启动失败: {}", e);
-                    Err(format!("启动失败: {}", e))
-                }
-            }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let mut command = std::process::Command::new("cmd");
-            let quoted = format!("\"{}\"", path);
-            command.arg("/C").arg("start").arg("").arg(&quoted);
-            if let Some(arguments) = args {
-                for arg in arguments.split_whitespace() {
-                    command.arg(arg);
-                }
-            }
-
-            match command.spawn() {
-                Ok(_) => {
-                    log::info!("[launch_app_with_args] 快捷方式启动成功");
-                    Ok(())
-                }
-                Err(e) => {
-                    log::error!("[launch_app_with_args] 快捷方式启动失败: {}", e);
-                    Err(format!("启动失败: {}", e))
-                }
+            Err(e) => {
+                log::error!("[launch_app_with_args] 快捷方式启动失败: {}", e);
+                Err(e)
             }
         }
     } else {
@@ -373,12 +359,7 @@ pub fn open_file(path: &str) -> Result<(), String> {
     if !PathBuf::from(path).exists() {
         return Err(format!("文件不存在: {}", path));
     }
-    let quoted = format!("\"{}\"", path);
-    std::process::Command::new("cmd")
-        .args(["/C", "start", "", &quoted])
-        .spawn()
-        .map_err(|e| format!("打开失败: {}", e))?;
-    Ok(())
+    shell_execute_open(path, None)
 }
 
 pub fn batch_extract_icons(paths: &[String]) -> std::collections::HashMap<String, String> {

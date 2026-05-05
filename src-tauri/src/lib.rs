@@ -361,14 +361,17 @@ pub fn run() {
                 };
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     doc_manager_hot_key_str.as_str(),
-                    move |_app, _shortcut, event| {
-                        if let ShortcutState::Pressed = event.state {
+                move |_app, _shortcut, event| {
+                    if let ShortcutState::Pressed = event.state {
+                        let app_handle_inner = app_handle_clone_doc.clone();
+                        tauri::async_runtime::spawn(async move {
                             let _ = crate::ui::window_manager::show_standard_window_by_label(
-                                &app_handle_clone_doc,
+                                &app_handle_inner,
                                 "document_manager",
                             );
-                        }
-                    },
+                        });
+                    }
+                },
                 ) {
                     log::warn!("文档管理快捷键 '{}' 注册失败: {}", doc_manager_hot_key_str, e);
                     shortcut_conflicts.push(format!("文档管理：{}", doc_manager_hot_key_str));
