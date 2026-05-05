@@ -7,7 +7,13 @@
       <div class="setting-group">
         <div class="group-title">基础控制</div>
         <el-form-item label="录屏功能">
-          <el-switch v-model="form.recordingEnabled" active-text="启用" inactive-text="停用"/>
+          <el-switch
+              :active-text="pendingToggles.recording === 'disabling' ? '正在禁用...' : '启用'"
+              :inactive-text="pendingToggles.recording === 'enabling' ? '正在启用...' : '停用'"
+              :loading="!!pendingToggles.recording"
+              :model-value="form.recordingEnabled"
+              @update:model-value="(val) => toggleFeature('recordingEnabled', val)"
+          />
           <div class="form-hint">停用后后端不再注册录屏快捷键，也不会响应录制命令</div>
         </el-form-item>
         <el-form-item label="录屏快捷键">
@@ -110,8 +116,25 @@ const props = defineProps({
   form: {
     type: Object,
     required: true
+  },
+  onFeatureToggle: {
+    type: Function,
+    default: null
   }
 })
+
+const pendingToggles = ref({})
+
+const toggleFeature = async (fieldName, value) => {
+  if (pendingToggles.value[fieldName]) return
+  if (!props.onFeatureToggle) {
+    props.form[fieldName] = value
+    return
+  }
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: value ? 'enabling' : 'disabling'}
+  const ok = await props.onFeatureToggle(fieldName, value)
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: undefined}
+}
 
 const {
   isRecording: isRecordingHotkeyRecording,

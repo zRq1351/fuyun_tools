@@ -450,9 +450,7 @@ impl AppSettingsData {
         }
         let service_name = "fuyun_tools";
         let user_name = format!("api_key_{}", provider_key);
-        let store = keyring_core::get_default_store()
-            .ok_or_else(|| "获取凭据存储失败".to_string())?;
-        let entry = store.build(service_name, &user_name, None)
+        let entry = keyring::Entry::new(service_name, &user_name)
             .map_err(|e| format!("创建凭据入口失败: {}", e))?;
         if api_key.is_empty() {
             let _ = entry.delete_credential();
@@ -480,9 +478,7 @@ impl AppSettingsData {
     pub fn get_provider_api_key(&self, provider_key: &str) -> Result<String, String> {
         let service_name = "fuyun_tools";
         let user_name = format!("api_key_{}", provider_key);
-        let store = keyring_core::get_default_store()
-            .ok_or_else(|| "获取凭据存储失败".to_string())?;
-        let entry = store.build(service_name, &user_name, None)
+        let entry = keyring::Entry::new(service_name, &user_name)
             .map_err(|e| format!("创建凭据入口失败: {}", e))?;
         let mut last_error = String::new();
         for i in 0..3 {
@@ -491,7 +487,7 @@ impl AppSettingsData {
                     log::info!("Successfully retrieved API key for provider: {} (attempt {})", provider_key, i + 1);
                     return Ok(password);
                 }
-                Err(keyring_core::Error::NoEntry) => {
+                Err(keyring::Error::NoEntry) => {
                     log::info!("No API key found in keyring for provider: {}", provider_key);
                     return Ok(String::new());
                 }
@@ -537,15 +533,13 @@ impl AppSettingsData {
                             String::from_utf8(decrypted).ok()
                         });
                     if let Some(api_key) = decrypted_result {
-                        if let Some(store) = keyring_core::get_default_store() {
-                            if let Ok(entry) = store.build("fuyun_tools", &format!("api_key_{}", provider_key), None) {
-                                if let Err(e) = entry.set_password(&api_key) {
-                                    log::error!("迁移密钥失败: {}", e);
-                                } else {
-                                    log::info!("密钥迁移成功");
-                                    migrated = true;
-                                    config.encrypted_api_key.clear();
-                                }
+                        if let Ok(entry) = keyring::Entry::new("fuyun_tools", &format!("api_key_{}", provider_key)) {
+                            if let Err(e) = entry.set_password(&api_key) {
+                                log::error!("迁移密钥失败: {}", e);
+                            } else {
+                                log::info!("密钥迁移成功");
+                                migrated = true;
+                                config.encrypted_api_key.clear();
                             }
                         }
                     }

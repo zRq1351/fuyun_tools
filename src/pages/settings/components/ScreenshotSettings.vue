@@ -5,7 +5,13 @@
         <div class="section-title">截图设置</div>
       </template>
       <el-form-item label="截图功能">
-        <el-switch v-model="form.screenshotEnabled" active-text="启用" inactive-text="停用"/>
+        <el-switch
+            :active-text="pendingToggles.screenshot === 'disabling' ? '正在禁用...' : '启用'"
+            :inactive-text="pendingToggles.screenshot === 'enabling' ? '正在启用...' : '停用'"
+            :loading="!!pendingToggles.screenshot"
+            :model-value="form.screenshotEnabled"
+            @update:model-value="(val) => toggleFeature('screenshotEnabled', val)"
+        />
         <div class="form-hint">停用后后端不再注册截图快捷键，也不会执行截图命令</div>
       </el-form-item>
       <el-form-item label="打开截图窗口快捷键">
@@ -45,6 +51,7 @@
 </template>
 
 <script setup>
+import {ref} from 'vue'
 import {Edit, RefreshLeft, VideoPause} from '@element-plus/icons-vue'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
 import {ElMessage} from 'element-plus'
@@ -53,8 +60,25 @@ const props = defineProps({
   form: {
     type: Object,
     required: true
+  },
+  onFeatureToggle: {
+    type: Function,
+    default: null
   }
 })
+
+const pendingToggles = ref({})
+
+const toggleFeature = async (fieldName, value) => {
+  if (pendingToggles.value[fieldName]) return
+  if (!props.onFeatureToggle) {
+    props.form[fieldName] = value
+    return
+  }
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: value ? 'enabling' : 'disabling'}
+  const ok = await props.onFeatureToggle(fieldName, value)
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: undefined}
+}
 
 const {
   isRecording: isScreenshotRecording,

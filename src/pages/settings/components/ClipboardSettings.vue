@@ -7,11 +7,23 @@
       <div class="setting-group">
         <div class="group-grid cols-2">
           <el-form-item label="文字剪贴板功能">
-            <el-switch v-model="form.textClipboardEnabled" active-text="启用" inactive-text="停用"/>
+            <el-switch
+                :active-text="pendingToggles.textClipboard === 'disabling' ? '正在禁用...' : '启用'"
+                :inactive-text="pendingToggles.textClipboard === 'enabling' ? '正在启用...' : '停用'"
+                :loading="!!pendingToggles.textClipboard"
+                :model-value="form.textClipboardEnabled"
+                @update:model-value="(val) => toggleFeature('textClipboardEnabled', val)"
+            />
             <div class="form-hint">停用后不再监听文字剪贴板与快捷键</div>
           </el-form-item>
           <el-form-item label="图片剪贴板功能">
-            <el-switch v-model="form.imageClipboardEnabled" active-text="启用" inactive-text="停用"/>
+            <el-switch
+                :active-text="pendingToggles.imageClipboard === 'disabling' ? '正在禁用...' : '启用'"
+                :inactive-text="pendingToggles.imageClipboard === 'enabling' ? '正在启用...' : '停用'"
+                :loading="!!pendingToggles.imageClipboard"
+                :model-value="form.imageClipboardEnabled"
+                @update:model-value="(val) => toggleFeature('imageClipboardEnabled', val)"
+            />
             <div class="form-hint">停用后不再监听图片剪贴板与快捷键</div>
           </el-form-item>
         </div>
@@ -178,8 +190,26 @@ const props = defineProps({
   form: {
     type: Object,
     required: true
+  },
+  onFeatureToggle: {
+    type: Function,
+    default: null
   }
 })
+
+const pendingToggles = ref({})
+
+const toggleFeature = async (fieldName, value) => {
+  if (pendingToggles.value[fieldName]) return
+  if (!props.onFeatureToggle) {
+    props.form[fieldName] = value
+    return
+  }
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: value ? 'enabling' : 'disabling'}
+  const ok = await props.onFeatureToggle(fieldName, value)
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: undefined}
+  if (!ok) return
+}
 
 const {
   isRecording: isTextRecording,

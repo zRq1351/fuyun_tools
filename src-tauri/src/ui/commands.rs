@@ -16,8 +16,8 @@ use crate::ui::commands_screenshot::close_screenshot_window;
 use crate::ui::commands_writeback::{emit_writeback_phase, emit_writeback_result, record_writeback_stage_metric, simulate_paste_with_retry, WriteBackExecutionResult};
 use crate::ui::tray_menu::open_settings;
 use crate::ui::window_manager::{
-    bind_overlay_window_events, hide_overlay_window_by_label, show_overlay_window_by_label,
-    show_standard_window_by_label,
+    bind_overlay_window_events, destroy_window_by_label, ensure_window_for_label,
+    hide_overlay_window_by_label, show_overlay_window_by_label, show_standard_window_by_label,
 };
 #[cfg(debug_assertions)]
 use crate::utils::image_clipboard::get_image_persist_queue_metrics_snapshot;
@@ -313,26 +313,7 @@ pub async fn show_selection_toolbar_with_text(
         x,
         y
     );
-    if app.get_webview_window("selection_toolbar").is_none() {
-        let toolbar_window = tauri::WebviewWindowBuilder::new(
-            &app,
-            "selection_toolbar",
-            tauri::WebviewUrl::App("selection_toolbar.html".into()),
-        )
-        .title("fuyun_tools")
-        .visible(false)
-        .resizable(false)
-        .decorations(false)
-        .shadow(false)
-        .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .accept_first_mouse(true)
-        .build()
-        .map_err(|e| format!("创建划词工具栏窗口失败: {}", e))?;
-        bind_overlay_window_events(&toolbar_window, app.clone(), "selection_toolbar");
-        log::info!("show_selection_toolbar_with_text: 已创建selection_toolbar窗口");
-    }
+    let _ = ensure_window_for_label(&app, "selection_toolbar");
     crate::ui::window_manager::show_selection_toolbar_force_impl(
         app.clone(),
         content.clone(),
@@ -1509,6 +1490,8 @@ pub async fn save_app_settings(
     let image_clipboard_feature_enabled = settings.image_clipboard_enabled;
     let screenshot_feature_enabled = settings.screenshot_enabled;
     let recording_feature_enabled = settings.recording_enabled;
+    let launcher_feature_enabled = settings.launcher_enabled;
+    let doc_manager_feature_enabled = settings.doc_manager_enabled;
     let (clipboard_manager_arc, image_manager_arc) = {
         let mut state_guard = lock_arc_mutex(state.inner());
         state_guard.settings = settings.clone();
@@ -1554,15 +1537,56 @@ pub async fn save_app_settings(
         state.inner().clone(),
         image_clipboard_feature_enabled,
     );
-    if !screenshot_feature_enabled {
+    if screenshot_feature_enabled {
+        let _ = ensure_window_for_label(&app, "screenshot");
+        let _ = ensure_window_for_label(&app, "longshot_toolbar");
+        let _ = ensure_window_for_label(&app, "longshot_border");
+    } else {
         let _ = close_screenshot_window(app.clone()).await;
+        destroy_window_by_label(&app, "screenshot");
+        destroy_window_by_label(&app, "longshot_toolbar");
+        destroy_window_by_label(&app, "longshot_border");
     }
-    if !recording_feature_enabled {
+    if recording_feature_enabled {
+        let _ = ensure_window_for_label(&app, "recording_toolbar");
+    } else {
         let _ = crate::features::recording::recorder_service::cancel_recording(
             &app,
             state.inner().clone(),
             crate::features::recording::types::SessionRequest { session_id: None },
         );
+        destroy_window_by_label(&app, "recording_toolbar");
+    }
+    if text_clipboard_feature_enabled {
+        let _ = ensure_window_for_label(&app, "clipboard");
+        let _ = ensure_window_for_label(&app, "text_preview");
+    } else {
+        log::info!("[设置] 文本剪切板已禁用，开始销毁窗口");
+        destroy_window_by_label(&app, "clipboard");
+        destroy_window_by_label(&app, "text_preview");
+    }
+    if image_clipboard_feature_enabled {
+        let _ = ensure_window_for_label(&app, "image_clipboard");
+        let _ = ensure_window_for_label(&app, "image_preview");
+    } else {
+        log::info!("[设置] 图片剪切板已禁用，开始销毁窗口");
+        destroy_window_by_label(&app, "image_clipboard");
+        destroy_window_by_label(&app, "image_preview");
+    }
+    if selection_enabled {
+        let _ = ensure_window_for_label(&app, "selection_toolbar");
+    } else {
+        destroy_window_by_label(&app, "selection_toolbar");
+    }
+    if launcher_feature_enabled {
+        let _ = ensure_window_for_label(&app, "launcher");
+    } else {
+        destroy_window_by_label(&app, "launcher");
+    }
+    if doc_manager_feature_enabled {
+        let _ = ensure_window_for_label(&app, "document_manager");
+    } else {
+        destroy_window_by_label(&app, "document_manager");
     }
     if let Some(content_protected) = recording_toolbar_content_protected {
         if let Some(window) = app.get_webview_window("recording_toolbar") {
@@ -1707,9 +1731,6 @@ pub async fn copy_and_paste_text(
         true,
         None,
     );
-
-    let _ = hide_overlay_window_by_label(&app, "result_translation");
-    let _ = hide_overlay_window_by_label(&app, "result_explanation");
 
     emit_writeback_phase(&app, "结果窗", "clipboard_written", None, None);
     emit_writeback_phase(&app, "结果窗", "pasting", None, None);

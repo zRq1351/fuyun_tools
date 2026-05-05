@@ -5,7 +5,13 @@
         <div class="section-title">划词能力</div>
       </template>
       <el-form-item label="划词功能">
-        <el-switch v-model="form.selectionEnabled" active-text="启用" inactive-text="关闭"/>
+        <el-switch
+            :active-text="pendingToggles.selection === 'disabling' ? '正在禁用...' : '启用'"
+            :inactive-text="pendingToggles.selection === 'enabling' ? '正在启用...' : '关闭'"
+            :loading="!!pendingToggles.selection"
+            :model-value="form.selectionEnabled"
+            @update:model-value="(val) => toggleFeature('selectionEnabled', val)"
+        />
         <div class="form-hint">关闭后不再触发划词工具栏与AI功能</div>
       </el-form-item>
 
@@ -139,6 +145,7 @@
 </template>
 
 <script setup>
+import {ref} from 'vue'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {Warning} from '@element-plus/icons-vue'
 
@@ -146,8 +153,25 @@ const props = defineProps({
   form: {
     type: Object,
     required: true
+  },
+  onFeatureToggle: {
+    type: Function,
+    default: null
   }
 })
+
+const pendingToggles = ref({})
+
+const toggleFeature = async (fieldName, value) => {
+  if (pendingToggles.value[fieldName]) return
+  if (!props.onFeatureToggle) {
+    props.form[fieldName] = value
+    return
+  }
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: value ? 'enabling' : 'disabling'}
+  const ok = await props.onFeatureToggle(fieldName, value)
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: undefined}
+}
 
 // 动态获取图标组件（仅支持 Element Plus）
 const getIconComponent = (iconName) => {

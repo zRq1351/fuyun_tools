@@ -5,7 +5,13 @@
         <div class="section-title">文档管理</div>
       </template>
       <el-form-item label="文档管理功能">
-        <el-switch v-model="form.docManagerEnabled" active-text="启用" inactive-text="关闭"/>
+        <el-switch
+            :active-text="pendingToggles.docManager === 'disabling' ? '正在禁用...' : '启用'"
+            :inactive-text="pendingToggles.docManager === 'enabling' ? '正在启用...' : '关闭'"
+            :loading="!!pendingToggles.docManager"
+            :model-value="form.docManagerEnabled"
+            @update:model-value="(val) => toggleFeature('docManagerEnabled', val)"
+        />
         <div class="form-hint">关闭后快捷键将不可用，但可通过托盘菜单打开</div>
       </el-form-item>
 
@@ -73,7 +79,8 @@
 </template>
 
 <script setup>
-import {Edit, FolderAdd, Collection, RefreshLeft, Search, VideoPause} from '@element-plus/icons-vue'
+import {ref} from 'vue'
+import {Collection, Edit, FolderAdd, RefreshLeft, Search, VideoPause} from '@element-plus/icons-vue'
 import {ElMessage} from 'element-plus'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
 
@@ -81,8 +88,25 @@ const props = defineProps({
   form: {
     type: Object,
     required: true
+  },
+  onFeatureToggle: {
+    type: Function,
+    default: null
   }
 })
+
+const pendingToggles = ref({})
+
+const toggleFeature = async (fieldName, value) => {
+  if (pendingToggles.value[fieldName]) return
+  if (!props.onFeatureToggle) {
+    props.form[fieldName] = value
+    return
+  }
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: value ? 'enabling' : 'disabling'}
+  const ok = await props.onFeatureToggle(fieldName, value)
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: undefined}
+}
 
 const {
   isRecording: isDocManagerRecording,

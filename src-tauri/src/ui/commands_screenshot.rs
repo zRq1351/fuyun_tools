@@ -13,8 +13,8 @@ use crate::ui::commands::{
 use crate::ui::commands_clipboard::{frontend_error, get_image_clipboard_manager_arc, is_screenshot_feature_enabled};
 use crate::ui::commands_screenshot_render::{export_screenshot_image, render_screenshot_image, ScreenshotExportRequest};
 use crate::ui::window_manager::{
-    bind_overlay_window_events, focus_overlay_window_by_label, hide_overlay_window_by_label,
-    show_overlay_window_by_label,
+    bind_overlay_window_events, ensure_window_for_label, focus_overlay_window_by_label,
+    hide_overlay_window_by_label, show_overlay_window_by_label,
 };
 use crate::utils::image_clipboard::ImageClipboardManager;
 use crate::utils::utils_helpers::load_settings;
@@ -1175,6 +1175,7 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
         })?;
 
     let selection_mode = selection_mode;
+    ensure_window_for_label(&app, "screenshot")?;
     if let Some(window) = app.get_webview_window("screenshot") {
         if SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)

@@ -486,6 +486,7 @@ const pickRecordingRegion = async () => {
   isPickingRegion = true;
 
   // 先隐藏录制工具栏窗口，避免遮挡截图编辑器的遮罩层
+  wasHiddenForRegionPick = true
   try {
     await getCurrentWindow().hide();
   } catch (_e) {
@@ -503,6 +504,7 @@ const pickRecordingRegion = async () => {
   } catch (e) {
     showInlineNotice(`打开区域框选失败: ${String(e)}`, "error");
     // 失败时重新显示工具栏
+    wasHiddenForRegionPick = false
     try {
       await getCurrentWindow().show();
     } catch (_e) {
@@ -1016,13 +1018,16 @@ onMounted(async () => {
     }
   });
 
-  // 监听截图窗口关闭事件，确保工具栏重新显示
+  // 监听截图窗口关闭事件，确保工具栏重新显示（仅当被录屏区域框选流程隐藏时）
+  let wasHiddenForRegionPick = false
   unlistenScreenshotReset = await listen("screenshot-reset", () => {
-    // 截图窗口关闭时（无论是完成还是取消），重新显示工具栏
-    try {
-      getCurrentWindow().show().catch(() => {
-      });
-    } catch (_e) {
+    if (wasHiddenForRegionPick) {
+      wasHiddenForRegionPick = false
+      try {
+        getCurrentWindow().show().catch(() => {
+        });
+      } catch (_e) {
+      }
     }
   });
 

@@ -30,8 +30,7 @@ regex = "1.11.1"
 async-openai = { version = "0.36.1", default-features = false, features = ["chat-completion", "rustls"] }
 futures-util = "0.3.31"
 base64 = "0.22.1"
-keyring = "4.0.0"
-keyring-core = "1.0"
+keyring = { version = "3.6.3", features = ["windows-native"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp"] }
 imageproc = { version = "0.26.2", default-features = false, features = ["text"] }
 ab_glyph = "0.2.29"

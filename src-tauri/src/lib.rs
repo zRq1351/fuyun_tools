@@ -39,7 +39,7 @@ use crate::ui::commands_screenshot::*;
 use crate::ui::commands_vc_runtime::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{
-    bind_overlay_window_events, bind_standard_window_close_to_hide, hide_overlay_window_by_label,
+    bind_overlay_window_events, bind_standard_window_close_to_hide,
     show_clipboard_window, show_image_clipboard_window, show_standard_window_by_label,
 };
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -121,42 +121,12 @@ pub fn run() {
             if let Some(settings_window) = app.get_webview_window("settings") {
                 bind_standard_window_close_to_hide(&settings_window);
             }
-            if let Some(document_manager_window) = app.get_webview_window("document_manager") {
-                bind_standard_window_close_to_hide(&document_manager_window);
-            }
             if let Some(recording_window) = app.get_webview_window("recording_toolbar") {
                 bind_overlay_window_events(
                     &recording_window,
                     app.handle().clone(),
                     "recording_toolbar",
                 );
-            }
-            if app.get_webview_window("image_clipboard").is_some() {
-                let _ = hide_overlay_window_by_label(&app.handle().clone(), "image_clipboard");
-            }
-            if let Some(window) = app.get_webview_window("clipboard") {
-                bind_overlay_window_events(&window, app.handle().clone(), "clipboard");
-            }
-            if let Some(window) = app.get_webview_window("image_clipboard") {
-                bind_overlay_window_events(&window, app.handle().clone(), "image_clipboard");
-            }
-            if let Some(window) = app.get_webview_window("selection_toolbar") {
-                bind_overlay_window_events(&window, app.handle().clone(), "selection_toolbar");
-            }
-            if let Some(window) = app.get_webview_window("image_preview") {
-                bind_overlay_window_events(&window, app.handle().clone(), "image_preview");
-            }
-            if let Some(window) = app.get_webview_window("screenshot") {
-                bind_overlay_window_events(&window, app.handle().clone(), "screenshot");
-            }
-            if let Some(window) = app.get_webview_window("launcher") {
-                bind_overlay_window_events(&window, app.handle().clone(), "launcher");
-                let app_handle_for_resize = app.handle().clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::Resized(_) = event {
-                        let _ = app_handle_for_resize.emit("launcher-resizing", ());
-                    }
-                });
             }
 
             let app_handle = app.handle();
@@ -442,6 +412,29 @@ pub fn run() {
                 guard.settings.selection_enabled
             } {
                 start_text_selection_listener(app_handle.clone(), state_arc.clone());
+            }
+
+            if text_clipboard_enabled {
+                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "clipboard");
+                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "text_preview");
+            }
+            if image_clipboard_enabled {
+                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "image_clipboard");
+                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "image_preview");
+            }
+            if screenshot_enabled {
+                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "screenshot");
+                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "longshot_toolbar");
+                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "longshot_border");
+            }
+            if recording_enabled {
+                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "recording_toolbar");
+            }
+            if launcher_enabled {
+                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "launcher");
+            }
+            if doc_manager_enabled {
+                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "document_manager");
             }
 
             Ok(())

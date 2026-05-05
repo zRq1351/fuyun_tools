@@ -13,7 +13,7 @@ use crate::ui::commands_writeback::{
 use crate::ui::window_manager::{
     hide_clipboard_window, hide_image_clipboard_window, hide_image_preview_window,
     set_window_position, show_clipboard_window, show_image_clipboard_window,
-    show_image_preview_loading_window, show_image_preview_window,
+    show_image_preview_window,
 };
 use crate::utils::clipboard::ClipboardManager;
 use crate::utils::image_clipboard::{
@@ -27,7 +27,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -537,67 +536,21 @@ pub(crate) fn execute_open_image_preview_window_by_id(
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
 ) -> AppResult<()> {
-    let started_at = std::time::Instant::now();
     let request_id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis()
         .to_string();
-    show_image_preview_loading_window(app.clone(), request_id.clone()).map_err(|e| {
-        AppError::new(ErrorCode::SystemError, "打开预览加载窗口失败").with_details(e)
-    })?;
-    let state_clone = state;
-    let app_clone = app;
-    let request_id_clone = request_id;
-    thread::spawn(move || {
-        let result: Result<(), String> = (|| {
-            let prepare_started_at = std::time::Instant::now();
-            let manager_arc = get_image_clipboard_manager_arc(&state_clone);
-            let image_path = {
-                let manager = lock_arc_mutex(&manager_arc);
-                manager.get_preview_image_path_by_id(&item_id)?
-            };
-            let preview_path = ensure_preview_image_path_for_asset(&item_id, &image_path)?;
-            record_perf_metric(
-                "image.preview_prepare",
-                "图片预览资源准备耗时",
-                prepare_started_at.elapsed().as_millis() as u64,
-                true,
-                None,
-            );
-            show_image_preview_window(app_clone.clone(), request_id_clone.clone(), preview_path)
-        })();
-        match result {
-            Ok(()) => {
-                record_perf_metric(
-                    "image.preview_open",
-                    "图片预览打开耗时",
-                    started_at.elapsed().as_millis() as u64,
-                    true,
-                    None,
-                );
-            }
-            Err(e) => {
-                record_perf_metric(
-                    "image.preview_open",
-                    "图片预览打开耗时",
-                    started_at.elapsed().as_millis() as u64,
-                    false,
-                    Some(e.clone()),
-                );
-                log::error!("加载预览图片失败: {}", e);
-                let _ = app_clone.emit(
-                    "show-image-preview",
-                    serde_json::json!({
-                        "request_id": request_id_clone,
-                        "error_message": e,
-                        "is_final": true
-                    }),
-                );
-            }
-        }
-    });
-    Ok(())
+    let manager_arc = get_image_clipboard_manager_arc(&state);
+    let image_path = {
+        let manager = lock_arc_mutex(&manager_arc);
+        manager.get_preview_image_path_by_id(&item_id)
+            .map_err(|e| AppError::new(ErrorCode::SystemError, "获取预览图片路径失败").with_details(e))?
+    };
+    let preview_path = ensure_preview_image_path_for_asset(&item_id, &image_path)
+        .map_err(|e| AppError::new(ErrorCode::SystemError, "准备预览图片资源失败").with_details(e))?;
+    show_image_preview_window(app, request_id, preview_path)
+        .map_err(|e| AppError::new(ErrorCode::SystemError, "显示图片预览失败").with_details(e))
 }
 
 pub(crate) fn ensure_preview_image_path_for_asset(item_id: &str, image_path: &str) -> Result<String, String> {

@@ -125,6 +125,7 @@ import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {marked} from 'marked'
 import DOMPurify from 'dompurify'
 import {getCurrentWindow} from '@tauri-apps/api/window'
+import {invoke} from '@tauri-apps/api/core'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import {ElMessage} from 'element-plus'
 import {CloseBold, CopyDocument, DocumentCopy, FullScreen, Hide, Minus, View} from '@element-plus/icons-vue'
@@ -372,6 +373,14 @@ onMounted(async () => {
         }
       }
     })
+
+    if (currentWindowLabel.value) {
+      try {
+        await invoke('notify_result_window_ready', {windowLabel: currentWindowLabel.value})
+      } catch (e) {
+        console.error('Failed to notify window ready:', e)
+      }
+    }
   } catch (error) {
     console.error('Failed to setup listeners:', error)
   }

@@ -5,7 +5,13 @@
         <div class="section-title">快捷启动器</div>
       </template>
       <el-form-item label="启动器功能">
-        <el-switch v-model="form.launcherEnabled" active-text="启用" inactive-text="关闭"/>
+        <el-switch
+            :active-text="pendingToggles.launcher === 'disabling' ? '正在禁用...' : '启用'"
+            :inactive-text="pendingToggles.launcher === 'enabling' ? '正在启用...' : '关闭'"
+            :loading="!!pendingToggles.launcher"
+            :model-value="form.launcherEnabled"
+            @update:model-value="(val) => toggleFeature('launcherEnabled', val)"
+        />
         <div class="form-hint">关闭后将无法使用快捷键唤起启动器</div>
       </el-form-item>
 
@@ -73,6 +79,7 @@
 </template>
 
 <script setup>
+import {ref} from 'vue'
 import {Edit, Key, Operation, RefreshLeft, Search, VideoPause} from '@element-plus/icons-vue'
 import {ElMessage} from 'element-plus'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
@@ -81,8 +88,25 @@ const props = defineProps({
   form: {
     type: Object,
     required: true
+  },
+  onFeatureToggle: {
+    type: Function,
+    default: null
   }
 })
+
+const pendingToggles = ref({})
+
+const toggleFeature = async (fieldName, value) => {
+  if (pendingToggles.value[fieldName]) return
+  if (!props.onFeatureToggle) {
+    props.form[fieldName] = value
+    return
+  }
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: value ? 'enabling' : 'disabling'}
+  const ok = await props.onFeatureToggle(fieldName, value)
+  pendingToggles.value = {...pendingToggles.value, [fieldName]: undefined}
+}
 
 const {
   isRecording: isLauncherRecording,

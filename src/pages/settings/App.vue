@@ -66,25 +66,25 @@
             <p>{{ currentSection.description }}</p>
           </div>
           <div v-if="activeTab === 'clipboard'">
-            <ClipboardSettings :form="form"/>
+            <ClipboardSettings :form="form" :on-feature-toggle="handleFeatureToggle"/>
           </div>
           <div v-else-if="activeTab === 'screenshot'">
-            <ScreenshotSettings :form="form"/>
+            <ScreenshotSettings :form="form" :on-feature-toggle="handleFeatureToggle"/>
           </div>
           <div v-else-if="activeTab === 'recording'">
-            <RecordingSettings :form="form"/>
+            <RecordingSettings :form="form" :on-feature-toggle="handleFeatureToggle"/>
           </div>
 
           <div v-else-if="activeTab === 'selection'">
-            <SelectionSettings :form="form"/>
+            <SelectionSettings :form="form" :on-feature-toggle="handleFeatureToggle"/>
           </div>
 
           <div v-else-if="activeTab === 'launcher'">
-            <LauncherSettings :form="form"/>
+            <LauncherSettings :form="form" :on-feature-toggle="handleFeatureToggle"/>
           </div>
 
           <div v-else-if="activeTab === 'doc_manager'">
-            <DocumentManagerSettings :form="form"/>
+            <DocumentManagerSettings :form="form" :on-feature-toggle="handleFeatureToggle"/>
           </div>
 
           <div v-else-if="activeTab === 'ai'">
@@ -967,6 +967,101 @@ onMounted(async () => {
     isInitializing.value = false
   }
 })
+
+const featureLabels = {
+  textClipboardEnabled: '文字剪贴板',
+  imageClipboardEnabled: '图片剪贴板',
+  screenshotEnabled: '截图',
+  recordingEnabled: '录屏',
+  selectionEnabled: '划词',
+  launcherEnabled: '启动器',
+  docManagerEnabled: '文档管理',
+}
+
+const handleFeatureToggle = async (fieldName, newValue) => {
+  const label = featureLabels[fieldName] || fieldName
+  const action = newValue ? '启用' : '禁用'
+  const loading = ElLoading.service({
+    lock: true,
+    text: `正在${action}${label}...`,
+    background: isDark.value ? 'rgba(0, 0, 0, 0.55)' : 'rgba(255, 255, 255, 0.55)'
+  })
+  const minUntil = Date.now() + 1000
+  const payload = {}
+  payload[fieldName] = newValue
+  try {
+    if (fieldName === 'screenshotEnabled' && newValue) {
+      const runtimeStatus = await AISettingsService.checkVcRuntimeDependencies()
+      const missing = Array.isArray(runtimeStatus?.missing) ? runtimeStatus.missing : []
+      if (missing.length > 0) {
+        loading.close()
+        await showVcRuntimeMissingWarning(runtimeStatus)
+        return false
+      }
+    }
+    if (fieldName === 'recordingEnabled' && newValue) {
+      const ffmpegStatus = await RecordingService.checkFfmpeg()
+      if (!ffmpegStatus?.exists) {
+        loading.close()
+        try {
+          await ElMessageBox.confirm(
+              `检测到首次启用录屏，未找到 ffmpeg.exe。\n将下载到：${ffmpegStatus.ffmpegPath}`,
+              '需要下载 ffmpeg',
+              {
+                confirmButtonText: '确认下载',
+                cancelButtonText: '取消',
+                type: 'warning',
+                closeOnClickModal: false,
+                closeOnPressEscape: true
+              }
+          )
+        } catch {
+          ElMessage.info('已取消启用录屏')
+          return false
+        }
+        const dl = ElLoading.service({
+          lock: true,
+          text: '正在下载 ffmpeg... 0%',
+          background: isDark.value ? 'rgba(0, 0, 0, 0.55)' : 'rgba(255, 255, 255, 0.55)'
+        })
+        let unlistenProgress = null
+        try {
+          unlistenProgress = await listen('recording-ffmpeg-download-progress', (event) => {
+            const p = event?.payload || {}
+            const percent = typeof p.progressPercent === 'number' ? p.progressPercent : null
+            if (percent !== null) {
+              dl.setText(`正在下载 ffmpeg... ${percent}%`);
+              return
+            }
+            const downloaded = Number(p.downloadedBytes || 0)
+            const total = Number(p.totalBytes || 0)
+            if (total > 0) dl.setText(`正在下载 ffmpeg... ${Math.min(100, Math.floor(downloaded * 100 / total))}%`)
+          })
+          await RecordingService.downloadFfmpeg(ffmpegStatus.downloadUrl || null)
+        } finally {
+          if (unlistenProgress) unlistenProgress()
+          dl.close()
+        }
+        ElMessage.success('ffmpeg 下载完成，已启用录屏')
+      }
+    }
+    loading.setText(`正在${action}${label}...`)
+    await AISettingsService.saveSettings(payload)
+    suppressNextAutoSave.value = true
+    form[fieldName] = newValue
+    saveInitialFormState(buildFormSnapshot())
+    return true
+  } catch (error) {
+    ElMessage.error(`操作失败: ${String(error)}`)
+    return false
+  } finally {
+    const remaining = minUntil - Date.now()
+    if (remaining > 0) {
+      await new Promise(resolve => setTimeout(resolve, remaining))
+    }
+    loading.close()
+  }
+}
 
 watch(form, () => {
   if (isInitializing.value) return

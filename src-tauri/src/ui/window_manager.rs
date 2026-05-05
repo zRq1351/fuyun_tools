@@ -28,6 +28,26 @@ pub static ENIGO_INSTANCE: LazyLock<Arc<Mutex<Option<enigo::Enigo>>>> =
 static WINDOW_VISIBILITY_NOTIFY: LazyLock<Arc<(StdMutex<u64>, Condvar)>> =
     LazyLock::new(|| Arc::new((StdMutex::new(0), Condvar::new())));
 
+pub fn destroy_window_by_label(app: &AppHandle, label: &str) {
+    if let Some(window) = app.get_webview_window(label) {
+        log::info!("[窗口销毁] 强制销毁: {}", label);
+        let _ = window.destroy();
+        if let Some(state) = app.try_state::<Arc<Mutex<AppState>>>() {
+            let mut guard = lock_arc_mutex(state.inner());
+            if guard.active_overlay_window.as_deref() == Some(label) {
+                guard.active_overlay_window = None;
+            }
+            match label {
+                "clipboard" => guard.is_visible = false,
+                "image_clipboard" => guard.is_image_visible = false,
+                _ => {}
+            }
+        }
+    } else {
+        log::warn!("[窗口销毁] 未找到窗口: {}", label);
+    }
+}
+
 fn notify_window_visibility_changed() {
     let (lock, cvar) = &**WINDOW_VISIBILITY_NOTIFY;
     let mut seq = lock.lock().unwrap_or_else(|poisoned| {
@@ -117,15 +137,13 @@ pub fn bind_overlay_window_events(
     
     window.on_window_event(move |event| match event {
         tauri::WindowEvent::CloseRequested { api, .. } => {
-            // 结果窗口允许真正关闭，其他窗口隐藏
             if !is_result_window {
                 api.prevent_close();
                 hide_overlay_window(&app_handle, &label, &window_clone);
             }
-            // 如果是结果窗口，不拦截，允许正常关闭
         }
         tauri::WindowEvent::Destroyed => {
-            let should_clear = app_handle
+            let (should_clear, visibility_cleared) = app_handle
                 .try_state::<Arc<Mutex<AppState>>>()
                 .map(|state| {
                     let mut guard = lock_arc_mutex(state.inner());
@@ -133,6 +151,11 @@ pub fn bind_overlay_window_events(
                     if clear {
                         guard.active_overlay_window = None;
                     }
+                    let cleared = match label.as_str() {
+                        "clipboard" => { guard.is_visible = false; true }
+                        "image_clipboard" => { guard.is_image_visible = false; true }
+                        _ => false,
+                    };
                     let record = OverlayLifecycleRecord {
                         label: label.clone(),
                         action: "destroyed".to_string(),
@@ -144,9 +167,12 @@ pub fn bind_overlay_window_events(
                     if guard.overlay_lifecycle_history.len() > 6 {
                         guard.overlay_lifecycle_history.pop_front();
                     }
-                    clear
+                    (clear, cleared)
                 })
-                .unwrap_or(false);
+                .unwrap_or((false, false));
+            if visibility_cleared {
+                notify_window_visibility_changed();
+            }
             if should_clear {
                 let _ = app_handle.emit(
                     "overlay-window-lifecycle",
@@ -167,6 +193,7 @@ pub fn show_overlay_window_by_label(
     label: &str,
     focus: bool,
 ) -> Result<(), String> {
+    ensure_window_for_label(app_handle, label)?;
     let window = app_handle
         .get_webview_window(label)
         .ok_or_else(|| format!("窗口不存在: {}", label))?;
@@ -178,10 +205,9 @@ pub fn show_overlay_window_by_label(
 }
 
 pub fn hide_overlay_window_by_label(app_handle: &AppHandle, label: &str) -> Result<(), String> {
-    let window = app_handle
-        .get_webview_window(label)
-        .ok_or_else(|| format!("窗口不存在: {}", label))?;
-    hide_overlay_window(app_handle, label, &window);
+    if let Some(window) = app_handle.get_webview_window(label) {
+        hide_overlay_window(app_handle, label, &window);
+    }
     Ok(())
 }
 
@@ -208,6 +234,7 @@ pub fn bind_standard_window_close_to_hide(window: &tauri::WebviewWindow) {
 }
 
 pub fn show_standard_window_by_label(app_handle: &AppHandle, label: &str) -> Result<(), String> {
+    ensure_window_for_label(app_handle, label)?;
     let window = app_handle
         .get_webview_window(label)
         .ok_or_else(|| format!("窗口不存在: {}", label))?;
@@ -326,6 +353,9 @@ fn now_ms() -> i64 {
 /// 显示剪贴板窗口
 pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     remember_external_foreground_window(&app_handle);
+    if ensure_clipboard_window(&app_handle).is_err() {
+        return;
+    }
     let (selected_index, bottom_offset, manager_arc) = {
         let mut state_guard = lock_arc_mutex(&state);
         if state_guard.is_visible {
@@ -360,33 +390,34 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
         )
     };
 
-    if let Some(_window) = app_handle.get_webview_window("clipboard") {
-        let app_handle_clone = app_handle.clone();
-        let history_clone = history_items.clone();
-        let categories_clone = categories.clone();
-        let category_list_clone = category_list.clone();
-        let pinned_items_clone = pinned_items.clone();
-        thread::spawn(move || {
-            if let Some(window) = app_handle_clone.get_webview_window("clipboard") {
-                set_window_position(&window, bottom_offset);
-                if show_overlay_window(&app_handle_clone, "clipboard", &window, true) {
-                    let payload = serde_json::json!({
-                        "history": history_clone,
-                        "categories": categories_clone,
-                        "category_list": category_list_clone,
-                        "pinned_items": pinned_items_clone,
-                        "bottomOffset": bottom_offset,
-                        "selectedIndex": selected_index
-                    });
-                    let _ = app_handle_clone.emit("show-window", payload);
-                }
+    let app_handle_clone = app_handle.clone();
+    let history_clone = history_items.clone();
+    let categories_clone = categories.clone();
+    let category_list_clone = category_list.clone();
+    let pinned_items_clone = pinned_items.clone();
+    thread::spawn(move || {
+        if let Some(window) = app_handle_clone.get_webview_window("clipboard") {
+            set_window_position(&window, bottom_offset);
+            if show_overlay_window(&app_handle_clone, "clipboard", &window, true) {
+                let payload = serde_json::json!({
+                    "history": history_clone,
+                    "categories": categories_clone,
+                    "category_list": category_list_clone,
+                    "pinned_items": pinned_items_clone,
+                    "bottomOffset": bottom_offset,
+                    "selectedIndex": selected_index
+                });
+                let _ = app_handle_clone.emit("show-window", payload);
             }
-        });
-    }
+        }
+    });
 }
 
 pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     remember_external_foreground_window(&app_handle);
+    if ensure_image_clipboard_window(&app_handle).is_err() {
+        return;
+    }
     let (already_visible, selected_index, bottom_offset, manager_arc, should_sync_history) = {
         let mut state_guard = lock_arc_mutex(&state);
         let already_visible = state_guard.is_image_visible;
@@ -420,36 +451,34 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
         None
     };
 
-    if let Some(_window) = app_handle.get_webview_window("image_clipboard") {
-        let app_handle_clone = app_handle.clone();
-        let snapshot_payload_clone = snapshot_payload.clone();
-        thread::spawn(move || {
-            if let Some(window) = app_handle_clone.get_webview_window("image_clipboard") {
-                set_window_position(&window, bottom_offset);
-                if already_visible
-                    || show_overlay_window(&app_handle_clone, "image_clipboard", &window, true)
-                {
-                    if !already_visible {
-                        set_active_overlay_window(&app_handle_clone, Some("image_clipboard"));
-                    }
-                    let mut payload = serde_json::json!({
-                        "bottomOffset": bottom_offset,
-                        "selectedIndex": selected_index
-                    });
-                    if let Some(snapshot) = snapshot_payload_clone {
-                        if let Some(payload_obj) = payload.as_object_mut() {
-                            if let Some(snapshot_obj) = snapshot.as_object() {
-                                for (key, value) in snapshot_obj {
-                                    payload_obj.insert(key.clone(), value.clone());
-                                }
+    let app_handle_clone = app_handle.clone();
+    let snapshot_payload_clone = snapshot_payload.clone();
+    thread::spawn(move || {
+        if let Some(window) = app_handle_clone.get_webview_window("image_clipboard") {
+            set_window_position(&window, bottom_offset);
+            if already_visible
+                || show_overlay_window(&app_handle_clone, "image_clipboard", &window, true)
+            {
+                if !already_visible {
+                    set_active_overlay_window(&app_handle_clone, Some("image_clipboard"));
+                }
+                let mut payload = serde_json::json!({
+                    "bottomOffset": bottom_offset,
+                    "selectedIndex": selected_index
+                });
+                if let Some(snapshot) = snapshot_payload_clone {
+                    if let Some(payload_obj) = payload.as_object_mut() {
+                        if let Some(snapshot_obj) = snapshot.as_object() {
+                            for (key, value) in snapshot_obj {
+                                payload_obj.insert(key.clone(), value.clone());
                             }
                         }
                     }
-                    let _ = app_handle_clone.emit("show-image-window", payload);
                 }
+                let _ = app_handle_clone.emit("show-image-window", payload);
             }
-        });
-    }
+        }
+    });
 }
 
 /// 隐藏剪贴板窗口（通用实现）
@@ -565,9 +594,7 @@ pub fn show_image_preview_window(
     request_id: String,
     image_path: String,
 ) -> Result<(), String> {
-    let window = app_handle
-        .get_webview_window("image_preview")
-        .ok_or_else(|| "图片预览窗口不存在".to_string())?;
+    let window = ensure_image_preview_window(&app_handle)?;
     prepare_image_preview_window(&window)?;
 
     let payload = serde_json::json!({
@@ -577,44 +604,6 @@ pub fn show_image_preview_window(
     });
     let _ = window.set_always_on_top(false);
     let _ = show_overlay_window(&app_handle, "image_preview", &window, true);
-    let _ = app_handle.emit("show-image-preview", payload);
-    Ok(())
-}
-
-pub fn show_image_preview_lowres_window(
-    app_handle: AppHandle,
-    request_id: String,
-    image_png_base64: String,
-) -> Result<(), String> {
-    let window = app_handle
-        .get_webview_window("image_preview")
-        .ok_or_else(|| "图片预览窗口不存在".to_string())?;
-    prepare_image_preview_window(&window)?;
-    let payload = serde_json::json!({
-        "request_id": request_id,
-        "image_png_base64": image_png_base64,
-        "is_final": false
-    });
-    let _ = window.set_always_on_top(false);
-    let _ = show_overlay_window(&app_handle, "image_preview", &window, true);
-    let _ = app_handle.emit("show-image-preview", payload);
-    Ok(())
-}
-
-pub fn show_image_preview_loading_window(
-    app_handle: AppHandle,
-    request_id: String,
-) -> Result<(), String> {
-    let window = app_handle
-        .get_webview_window("image_preview")
-        .ok_or_else(|| "图片预览窗口不存在".to_string())?;
-    prepare_image_preview_window(&window)?;
-    let _ = window.set_always_on_top(false);
-    let _ = show_overlay_window(&app_handle, "image_preview", &window, true);
-    let payload = serde_json::json!({
-        "request_id": request_id,
-        "loading": true
-    });
     let _ = app_handle.emit("show-image-preview", payload);
     Ok(())
 }
@@ -646,11 +635,8 @@ pub fn show_text_preview_window(
     text: String,
     item_id: Option<String>,
 ) -> Result<(), String> {
-    let window = app_handle
-        .get_webview_window("text_preview")
-        .ok_or_else(|| "文本预览窗口不存在".to_string())?;
+    let window = ensure_text_preview_window(&app_handle)?;
     
-    // 复用图片预览窗口的大小和位置逻辑
     prepare_image_preview_window(&window)?;
 
     let payload = serde_json::json!({
@@ -753,6 +739,9 @@ fn ensure_selection_toolbar_window(app: &AppHandle) -> Result<tauri::WebviewWind
     if let Some(existing) = app.get_webview_window(label) {
         return Ok(existing);
     }
+    if !is_window_feature_enabled(app, label) {
+        return Err("划词功能已禁用".to_string());
+    }
     let window = tauri::WebviewWindowBuilder::new(
         app,
         label,
@@ -772,6 +761,248 @@ fn ensure_selection_toolbar_window(app: &AppHandle) -> Result<tauri::WebviewWind
 
     bind_overlay_window_events(&window, app.clone(), label);
     Ok(window)
+}
+
+fn ensure_clipboard_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    let label = "clipboard";
+    if let Some(existing) = app.get_webview_window(label) {
+        return Ok(existing);
+    }
+    if !is_window_feature_enabled(app, label) {
+        return Err("剪贴板功能已禁用".to_string());
+    }
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App("clipboard.html".into()),
+    )
+    .visible(false)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(true)
+    .maximizable(false)
+    .minimizable(false)
+    .build()
+    .map_err(|e| format!("创建剪贴板窗口失败: {}", e))?;
+    bind_overlay_window_events(&window, app.clone(), label);
+    Ok(window)
+}
+
+fn ensure_image_clipboard_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    let label = "image_clipboard";
+    if let Some(existing) = app.get_webview_window(label) {
+        return Ok(existing);
+    }
+    if !is_window_feature_enabled(app, label) {
+        return Err("图片剪贴板功能已禁用".to_string());
+    }
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App("image_clipboard.html".into()),
+    )
+    .visible(false)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(true)
+    .maximizable(false)
+    .minimizable(false)
+    .build()
+    .map_err(|e| format!("创建图片剪贴板窗口失败: {}", e))?;
+    bind_overlay_window_events(&window, app.clone(), label);
+    Ok(window)
+}
+
+fn ensure_launcher_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    let label = "launcher";
+    if let Some(existing) = app.get_webview_window(label) {
+        return Ok(existing);
+    }
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App("launcher.html".into()),
+    )
+    .title("启动器")
+    .visible(false)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(true)
+    .maximizable(false)
+    .minimizable(false)
+    .center()
+    .min_inner_size(620.0, 480.0)
+    .inner_size(800.0, 600.0)
+    .build()
+    .map_err(|e| format!("创建启动器窗口失败: {}", e))?;
+    bind_overlay_window_events(&window, app.clone(), label);
+    let app_handle_for_resize = app.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::Resized(_) = event {
+            let _ = app_handle_for_resize.emit("launcher-resizing", ());
+        }
+    });
+    Ok(window)
+}
+
+fn ensure_screenshot_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    let label = "screenshot";
+    if let Some(existing) = app.get_webview_window(label) {
+        return Ok(existing);
+    }
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App("screenshot.html".into()),
+    )
+    .visible(false)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(true)
+    .maximizable(false)
+    .minimizable(false)
+    .build()
+    .map_err(|e| format!("创建截图窗口失败: {}", e))?;
+    bind_overlay_window_events(&window, app.clone(), label);
+    Ok(window)
+}
+
+fn ensure_image_preview_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    let label = "image_preview";
+    if let Some(existing) = app.get_webview_window(label) {
+        return Ok(existing);
+    }
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App("image_preview.html".into()),
+    )
+    .visible(false)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .resizable(false)
+    .closable(true)
+    .build()
+    .map_err(|e| format!("创建图片预览窗口失败: {}", e))?;
+    bind_overlay_window_events(&window, app.clone(), label);
+    Ok(window)
+}
+
+fn ensure_text_preview_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    let label = "text_preview";
+    if let Some(existing) = app.get_webview_window(label) {
+        return Ok(existing);
+    }
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App("text_preview.html".into()),
+    )
+    .visible(false)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .resizable(false)
+    .closable(true)
+    .build()
+    .map_err(|e| format!("创建文本预览窗口失败: {}", e))?;
+    bind_overlay_window_events(&window, app.clone(), label);
+    Ok(window)
+}
+
+fn ensure_document_manager_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    let label = "document_manager";
+    if let Some(existing) = app.get_webview_window(label) {
+        return Ok(existing);
+    }
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App("document_manager.html".into()),
+    )
+    .title("文档管理")
+    .visible(false)
+    .resizable(true)
+    .decorations(true)
+    .inner_size(1200.0, 780.0)
+    .center()
+    .build()
+    .map_err(|e| format!("创建文档管理窗口失败: {}", e))?;
+    bind_standard_window_close_to_hide(&window);
+    Ok(window)
+}
+
+fn is_window_feature_enabled(app: &AppHandle, label: &str) -> bool {
+    let Some(state) = app.try_state::<Arc<Mutex<AppState>>>() else {
+        return true;
+    };
+    let guard = lock_arc_mutex(state.inner());
+    let enabled = match label {
+        "clipboard" | "text_preview" => guard.settings.text_clipboard_enabled,
+        "image_clipboard" | "image_preview" => guard.settings.image_clipboard_enabled,
+        "screenshot" | "longshot_toolbar" | "longshot_border" => guard.settings.screenshot_enabled,
+        "recording_toolbar" => guard.settings.recording_enabled,
+        "launcher" => guard.settings.launcher_enabled,
+        "document_manager" => guard.settings.doc_manager_enabled,
+        "selection_toolbar" => guard.settings.selection_enabled,
+        "settings" => true,
+        _ => true,
+    };
+    if !enabled {
+        log::warn!("[窗口创建被拦截] 功能已禁用: {}", label);
+    }
+    enabled
+}
+
+pub fn ensure_window_for_label(app: &AppHandle, label: &str) -> Result<(), String> {
+    if app.get_webview_window(label).is_some() {
+        return Ok(());
+    }
+    if !is_window_feature_enabled(app, label) {
+        return Ok(());
+    }
+    match label {
+        "clipboard" => { ensure_clipboard_window(app)?; }
+        "image_clipboard" => { ensure_image_clipboard_window(app)?; }
+        "launcher" => { ensure_launcher_window(app)?; }
+        "screenshot" => { ensure_screenshot_window(app)?; }
+        "image_preview" => { ensure_image_preview_window(app)?; }
+        "text_preview" => { ensure_text_preview_window(app)?; }
+        "document_manager" => { ensure_document_manager_window(app)?; }
+        "selection_toolbar" => { ensure_selection_toolbar_window(app)?; }
+        "recording_toolbar" => {
+            if app.get_webview_window(label).is_none() {
+                let (_, _) = ensure_overlay_window(app, label, "recording_toolbar.html", "录屏工具栏", Some((530.0, 64.0)))?;
+            }
+        }
+        "longshot_toolbar" => {
+            if app.get_webview_window(label).is_none() {
+                let (window, _) = ensure_overlay_window(app, label, "longshot_toolbar.html", "长截图工具栏", Some((320.0, 180.0)))?;
+                let _ = window.set_content_protected(true);
+            }
+        }
+        "longshot_border" => {
+            if app.get_webview_window(label).is_none() {
+                let (window, _) = ensure_overlay_window(app, label, "longshot_border.html", "长截图边框", None)?;
+                let _ = window.set_content_protected(true);
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn show_selection_toolbar_internal(
