@@ -481,6 +481,8 @@ const showBackendErrorInSettings = async (message) => {
   }
 };
 
+let wasHiddenForRegionPick = false
+
 const pickRecordingRegion = async () => {
   if (isPickingRegion) return;
   isPickingRegion = true;
@@ -1019,7 +1021,6 @@ onMounted(async () => {
   });
 
   // 监听截图窗口关闭事件，确保工具栏重新显示（仅当被录屏区域框选流程隐藏时）
-  let wasHiddenForRegionPick = false
   unlistenScreenshotReset = await listen("screenshot-reset", () => {
     if (wasHiddenForRegionPick) {
       wasHiddenForRegionPick = false
