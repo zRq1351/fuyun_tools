@@ -1,3 +1,4 @@
+import {invoke} from '@tauri-apps/api/core'
 import {createPageApp} from '../../utils/createPageApp'
 import App from './App.vue'
 
@@ -14,6 +15,13 @@ if (typeof screenshotBoot.pendingMode !== 'string') {
 }
 window.__SCREENSHOT_BOOT__ = screenshotBoot
 window.__SCREENSHOT_BOOT_READY__ = true
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !window.__SCREENSHOT_KEYDOWN_HANDLER_READY__) {
+        invoke('close_screenshot_window').catch(() => {
+        })
+    }
+})
 
 window.addEventListener('screenshot-data', (event) => {
     screenshotBoot.pendingData = event.detail || null

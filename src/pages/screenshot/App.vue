@@ -69,13 +69,13 @@
         class="recording-region-confirm"
         @mousedown.stop
     >
-      <button class="region-icon-btn primary" title="确定区域 (Enter)" @click.stop="commitRecordingRegionSelection">
+      <button class="region-icon-btn primary" title="确定区域" @click.stop="commitRecordingRegionSelection">
         <Check class="tool-icon-wrap"/>
       </button>
       <button class="region-icon-btn" title="重选区域" @click.stop="cancelSelection">
         <RefreshLeft class="tool-icon-wrap"/>
       </button>
-      <button class="region-icon-btn danger" title="取消 (Esc)" @click.stop="close">
+      <button class="region-icon-btn danger" title="取消" @click.stop="close">
         <X class="tool-icon-wrap"/>
       </button>
     </div>
@@ -115,6 +115,10 @@
         class="manual-longshot-hint"
     >
       {{ manualLongshotHint }}
+    </div>
+
+    <div v-if="captureReadyError" class="capture-ready-error-toast" @mousedown.stop>
+      {{ captureReadyError }}
     </div>
 
     <div
@@ -162,22 +166,22 @@
         <button :disabled="historyIndex <= 0" class="tool-btn" title="撤销 (Ctrl+Z)" @click="undo">
           <RefreshLeft class="tool-icon-wrap"/>
         </button>
-        <button :disabled="historyIndex >= history.length - 1" class="tool-btn" title="重做 (Ctrl+Y)" @click="redo">
+        <button :disabled="historyIndex >= history.length - 1" class="tool-btn" title="重做" @click="redo">
           <RefreshRight class="tool-icon-wrap"/>
         </button>
 
         <div class="divider"></div>
 
-        <button :disabled="!canExport" class="tool-btn" title="复制到剪贴板 (Ctrl+C)" @click="copyToClipboardLinked">
+        <button :disabled="!canExport" class="tool-btn" title="复制到剪贴板" @click="copyToClipboardLinked">
           <DocumentCopy class="tool-icon-wrap"/>
         </button>
-        <button :disabled="!canExport" class="tool-btn" title="保存文件 (Ctrl+S)" @click="saveAndClose">
+        <button :disabled="!canExport" class="tool-btn" title="保存文件" @click="saveAndClose">
           <Download class="tool-icon-wrap"/>
         </button>
         <button :disabled="!canExport" class="tool-btn" title="固定到屏幕" @click="pinToScreenAndClose">
           <Pin class="tool-icon-wrap"/>
         </button>
-        <button class="tool-btn" title="取消选区 (Esc)" @click="cancelSelection">
+        <button class="tool-btn" title="取消选区" @click="cancelSelection">
           <X class="tool-icon-wrap"/>
         </button>
         <button :disabled="!canExport" class="tool-btn" title="完成并复制" @click="completeAndCopyUnlinked">
@@ -352,6 +356,19 @@ const pickerInfoRef = ref(null)
 const pickerMagnifierCanvasRef = ref(null)
 const isDrawing = ref(false)
 const isCaptureReady = ref(false)
+const captureReadyError = ref('')
+let captureReadyErrorTimer = null
+
+function showCaptureError(msg) {
+  captureReadyError.value = msg
+  if (captureReadyErrorTimer) {
+    clearTimeout(captureReadyErrorTimer)
+  }
+  captureReadyErrorTimer = setTimeout(() => {
+    captureReadyError.value = ''
+    captureReadyErrorTimer = null
+  }, 3000)
+}
 
 // 选区数据
 const rect = reactive({x: 0, y: 0, width: 0, height: 0})
@@ -409,6 +426,7 @@ const activeSessionId = ref(0)
 const payloadSessionId = ref(0)
 const regionSelectMode = ref('screenshot')
 const screenshotRequestInFlight = ref(false)
+let screenshotRequestPromise = null
 const fallbackRequestedSessionIds = new Set()
 let fallbackRequestedWithoutSession = false
 let screenshotFallbackTimer = null
@@ -517,7 +535,7 @@ const selectionInfoText = computed(() => {
 })
 const recordingConfirmStyle = computed(() => {
   const margin = 8
-  const panelWidth = 112
+  const panelWidth = 168
   const panelHeight = 32
   const defaultX = regionConfirmAnchor.ready
       ? Math.round(regionConfirmAnchor.x)
@@ -804,6 +822,7 @@ watchPostEffect(() => {
 
 // 初始化与通信
 onMounted(async () => {
+  window.__SCREENSHOT_KEYDOWN_HANDLER_READY__ = true
   await refreshManualLongshotAvailability()
   window.addEventListener('screenshot-data', handleScreenshotData)
   window.addEventListener('start-region-select', handleStartRegionSelect)
@@ -885,6 +904,11 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  delete window.__SCREENSHOT_KEYDOWN_HANDLER_READY__
+  if (captureReadyErrorTimer) {
+    clearTimeout(captureReadyErrorTimer)
+    captureReadyErrorTimer = null
+  }
   revokeScreenshotObjectUrl()
   cancelManualLongshotCapture(false, false)
   window.removeEventListener('screenshot-data', handleScreenshotData)
@@ -956,6 +980,7 @@ function handleScreenshotReset() {
   screenshotPixelCanvas = null
   screenshotPixelCtx = null
   screenshotRequestInFlight.value = false
+  screenshotRequestPromise = null
   fallbackRequestedSessionIds.clear()
   fallbackRequestedWithoutSession = false
   manualLongshotSessionId.value = 0
@@ -1063,37 +1088,41 @@ function normalizeWindowRectToViewport(w) {
 }
 
 async function requestScreenshot() {
-  if (screenshotRequestInFlight.value) {
-    return false
+  if (screenshotRequestPromise) {
+    return await screenshotRequestPromise
   }
   screenshotRequestInFlight.value = true
-  try {
-    const result = await invoke('start_screenshot')
-    if (result.success && (result.image_path || result.png_base64)) {
-      longshotResultActive.value = false
-      longshotRawPngBase64.value = ''
-      longshotViewScale.value = 1
-      longshotViewOffset.x = 0
-      longshotViewOffset.y = 0
-      sourceImagePath.value = String(result.image_path || '')
-      hasScreenshotPayload.value = true
-      captureOriginX.value = Number(result.origin_x) || 0
-      captureOriginY.value = Number(result.origin_y) || 0
-      await fetchWindows()
-      if (result.image_path) {
-        loadImageFromPath(result.image_path)
-      } else {
-        loadImageFromBase64(result.png_base64)
+  screenshotRequestPromise = (async () => {
+    try {
+      const result = await invoke('start_screenshot')
+      if (result.success && (result.image_path || result.png_base64)) {
+        longshotResultActive.value = false
+        longshotRawPngBase64.value = ''
+        longshotViewScale.value = 1
+        longshotViewOffset.x = 0
+        longshotViewOffset.y = 0
+        sourceImagePath.value = String(result.image_path || '')
+        hasScreenshotPayload.value = true
+        captureOriginX.value = Number(result.origin_x) || 0
+        captureOriginY.value = Number(result.origin_y) || 0
+        await fetchWindows()
+        if (result.image_path) {
+          loadImageFromPath(result.image_path)
+        } else {
+          loadImageFromBase64(result.png_base64)
+        }
+        return true
       }
-      return true
+      return false
+    } catch (error) {
+      console.error('请求截图失败:', error)
+      return false
+    } finally {
+      screenshotRequestInFlight.value = false
+      screenshotRequestPromise = null
     }
-    return false
-  } catch (error) {
-    console.error('请求截图失败:', error)
-    return false
-  } finally {
-    screenshotRequestInFlight.value = false
-  }
+  })()
+  return await screenshotRequestPromise
 }
 
 function handleScreenshotData(event) {
@@ -1391,8 +1420,8 @@ function loadImageFromSrc(src) {
   isCaptureReady.value = false
   screenshotSrc.value = src
   const img = new Image()
+  img.crossOrigin = 'anonymous'
   img.onload = () => {
-    resetAnnotationStateForNewImage()
     screenshotImg.value = img
     screenshotPixelCanvas = document.createElement('canvas')
     screenshotPixelCanvas.width = img.width
@@ -1401,12 +1430,18 @@ function loadImageFromSrc(src) {
     if (screenshotPixelCtx) {
       screenshotPixelCtx.drawImage(img, 0, 0)
     }
+    try {
+      resetAnnotationStateForNewImage()
+    } catch (e) {
+      console.error('重置标注状态失败:', e)
+    }
     nextTick(() => {
       initCanvas()
       isCaptureReady.value = Boolean(canvas.value && canvas.value.width > 0 && canvas.value.height > 0)
     })
   }
   img.onerror = () => {
+    console.error('截图源图加载失败, src:', (src || '').substring(0, 100))
     isCaptureReady.value = false
   }
   img.src = src
@@ -1480,7 +1515,8 @@ async function ensureCaptureReady() {
       img.src = screenshotSrc.value
     }).then(() => {
       screenshotImg.value = img
-    }).catch(() => {
+    }).catch((err) => {
+      console.error('加载截图源图失败:', err)
     })
   }
   await nextTick()
@@ -3120,7 +3156,7 @@ function drawShapeItemToContext(ctx, item, cropLeft, cropTop) {
 async function writeClipboardImage(linked, closeAfterCopy) {
   try {
     if (!(await ensureCaptureReady())) {
-      alert('截图源尚未就绪，请稍后重试')
+      showCaptureError('截图源尚未就绪，请稍后重试')
       return
     }
     await invoke('set_screenshot_clipboard_link_once', {linked})
@@ -3141,7 +3177,7 @@ async function writeClipboardImage(linked, closeAfterCopy) {
     }
   } catch (error) {
     console.error('复制失败:', error)
-    alert('复制失败')
+    showCaptureError('复制失败')
   }
 }
 
@@ -3156,7 +3192,7 @@ async function completeAndCopyUnlinked() {
 async function pinToScreenAndClose() {
   try {
     if (!(await ensureCaptureReady())) {
-      alert('截图源尚未就绪，请稍后重试')
+      showCaptureError('截图源尚未就绪，请稍后重试')
       return
     }
     let base64 = ''
@@ -3211,14 +3247,14 @@ async function pinToScreenAndClose() {
         || (typeof error === 'string' ? error : JSON.stringify(error))
         || '未知错误'
     console.error('固定图片失败:', error)
-    alert(`固定图片失败：${reason}`)
+    showCaptureError(`固定图片失败：${reason}`)
   }
 }
 
 async function saveAndClose() {
   try {
     if (!(await ensureCaptureReady())) {
-      alert('截图源尚未就绪，请稍后重试')
+      showCaptureError('截图源尚未就绪，请稍后重试')
       return
     }
 
@@ -3227,13 +3263,13 @@ async function saveAndClose() {
       if (pathResult?.cancelled) {
         return
       }
-      alert(pathResult?.error || pathResult?.message || '选择保存路径失败')
+      showCaptureError(pathResult?.error || pathResult?.message || '选择保存路径失败')
       return
     }
 
     
     
-    
+
     const shouldSaveRenderedImageDirectly = !sourceImagePath.value
 
     if (shouldSaveRenderedImageDirectly) {
@@ -3246,7 +3282,7 @@ async function saveAndClose() {
         close()
         return
       }
-      alert(result?.error || result?.message || '保存失败')
+      showCaptureError(result?.error || result?.message || '保存失败')
       return
     }
 
@@ -3258,7 +3294,7 @@ async function saveAndClose() {
         close()
         return
       }
-      alert(exportResult?.error || exportResult?.message || '保存失败')
+      showCaptureError(exportResult?.error || exportResult?.message || '保存失败')
       return
     }
   } catch (error) {
@@ -3266,7 +3302,7 @@ async function saveAndClose() {
         || (typeof error === 'string' ? error : JSON.stringify(error))
         || '未知错误'
     console.error('保存失败:', error)
-    alert(`保存失败：${reason}`)
+    showCaptureError(`保存失败：${reason}`)
   }
 }
 
@@ -3282,54 +3318,39 @@ async function close() {
 
 // 快捷键
 function handleKeyDown(event) {
-  if (regionSelectMode.value === 'recording_region' && event.key === 'Enter') {
-    event.preventDefault()
-    if (hasSelection.value && state.value === 'selected') {
-      commitRecordingRegionSelection()
-    }
-    return
-  }
-  if (regionSelectMode.value === 'manual_longshot' && event.key === 'Enter') {
-    event.preventDefault()
-    finishManualLongshotCapture()
-    return
-  }
-  if (editingTextId.value !== null) {
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      cancelInlineEdit()
-    }
-    return
-  }
-  if (event.key === 'Escape') {
-    if (regionSelectMode.value === 'manual_longshot' && manualLongshotSessionId.value > 0) {
-      event.preventDefault()
-      cancelManualLongshotCapture(true)
-      return
-    }
-    if (state.value === 'selected' || state.value === 'selecting') {
-      cancelSelection()
-    } else {
-      close()
-    }
-  } else if (currentTool.value === 'picker' && event.key === 'Shift' && !event.repeat) {
-    event.preventDefault()
-    pickerDisplayMode.value = pickerDisplayMode.value === 'hex' ? 'rgb' : 'hex'
-  } else if (currentTool.value === 'picker' && event.key === 'Control' && !event.repeat) {
-    event.preventDefault()
-    copyPickedColor()
-  } else if (event.ctrlKey && event.key === 'z') {
+  if (event.ctrlKey && event.key === 'z') {
     event.preventDefault()
     undo()
-  } else if (event.ctrlKey && event.key === 'y') {
+    return
+  }
+  if (currentTool.value === 'picker') {
+    if (event.key === 'Shift' && !event.repeat) {
+      event.preventDefault()
+      pickerDisplayMode.value = pickerDisplayMode.value === 'hex' ? 'rgb' : 'hex'
+      return
+    }
+    if (event.key === 'Control' && !event.repeat) {
+      event.preventDefault()
+      copyPickedColor()
+      return
+    }
+  }
+  if (event.key !== 'Escape') return
+
+  if (editingTextId.value !== null) {
     event.preventDefault()
-    redo()
-  } else if (event.ctrlKey && event.key === 'c') {
+    cancelInlineEdit()
+    return
+  }
+  if (regionSelectMode.value === 'manual_longshot' && manualLongshotSessionId.value > 0) {
     event.preventDefault()
-    if (hasSelection.value) copyToClipboardLinked()
-  } else if (event.ctrlKey && event.key === 's') {
-    event.preventDefault()
-    if (hasSelection.value) saveAndClose()
+    cancelManualLongshotCapture(true)
+    return
+  }
+  if (state.value === 'selected' || state.value === 'selecting') {
+    cancelSelection()
+  } else {
+    close()
   }
 }
 
@@ -3414,6 +3435,24 @@ function handleKeyDown(event) {
   padding: 8px 10px;
   backdrop-filter: var(--fy-backdrop-blur-light);
   max-width: min(620px, calc(100vw - 32px));
+}
+
+.capture-ready-error-toast {
+  position: fixed;
+  left: 50%;
+  top: 24px;
+  transform: translateX(-50%);
+  z-index: 2200;
+  background: var(--fy-bg-danger, rgba(220, 40, 40, 0.9));
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.4;
+  border-radius: 8px;
+  padding: 10px 20px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32);
+  white-space: nowrap;
+  pointer-events: auto;
 }
 
 .export-route-indicator {
