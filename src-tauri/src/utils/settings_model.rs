@@ -601,6 +601,36 @@ impl AppSettingsData {
         self.provider_configs.get(&self.ai_provider)
     }
 
+    fn is_valid_css_color(value: &str) -> bool {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return true;
+        }
+        // hex: #RGB, #RRGGBB, #RRGGBBAA
+        if trimmed.starts_with('#') {
+            let hex = &trimmed[1..];
+            return (hex.len() == 3 || hex.len() == 6 || hex.len() == 8)
+                && hex.chars().all(|c| c.is_ascii_hexdigit());
+        }
+        // rgb() / rgba()
+        let lower = trimmed.to_lowercase();
+        if lower.starts_with("rgb") {
+            let start = lower.find('(').unwrap_or(usize::MAX);
+            let end = lower.rfind(')').unwrap_or(usize::MAX);
+            if start == usize::MAX || end == usize::MAX || start >= end {
+                return false;
+            }
+            let inner = &lower[start + 1..end];
+            return inner
+                .split(&[',', ' ', '\t'][..])
+                .filter(|s| !s.is_empty())
+                .all(|s| {
+                    s.chars().all(|c| c.is_ascii_digit() || c == '.')
+                });
+        }
+        false
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.max_items == 0 || self.max_items > 1000 {
             return Err("max_items必须在1-1000之间".to_string());
@@ -700,6 +730,21 @@ impl AppSettingsData {
                 .contains("{target_language}")
         {
             return Err("解释提示模板必须包含{text}和{target_language}占位符".to_string());
+        }
+
+        for prompt in &self.selection_custom_prompts {
+            if !Self::is_valid_css_color(&prompt.color) {
+                return Err(format!(
+                    "自定义按钮 \"{}\" 的颜色格式无效，仅支持 #RGB / #RRGGBB / rgb() / rgba()",
+                    prompt.name
+                ));
+            }
+            if !Self::is_valid_css_color(&prompt.bg_color) {
+                return Err(format!(
+                    "自定义按钮 \"{}\" 的背景色格式无效，仅支持 #RGB / #RRGGBB / rgb() / rgba()",
+                    prompt.name
+                ));
+            }
         }
 
         Ok(())
