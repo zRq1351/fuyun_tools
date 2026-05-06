@@ -195,7 +195,7 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
         let src_path = file_path_str.clone();
 
         let (resolved_name, managed_path_val, need_move, dest_dir_clone) = if is_repo {
-            let dir = target_dir_opt.as_ref().unwrap();
+            let dir = target_dir_opt.as_ref().expect("target_dir must be set when is_repo is true");
             let name = document_database::resolve_unused_filename(dir, file_name, &file_ext);
             let dest = dir.join(&name);
             (name, dest.to_string_lossy().to_string(), true, Some(dest))
@@ -216,7 +216,7 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
         ).await {
             Ok(id) => {
                 if need_move {
-                    let dest = dest_dir_clone.as_ref().unwrap();
+                    let dest = dest_dir_clone.as_ref().expect("dest_dir must be set when need_move is true");
                     if let Err(e) = document_database::safe_move_file(src, dest) {
                         document_database::delete_doc_file(id).await.ok();
                         errors.push(format!("移动文件失败 {}: {}", file_name, e));

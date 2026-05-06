@@ -84,10 +84,7 @@ export default defineConfig(({mode}) => {
                         if (id.includes('/node_modules/element-plus/') || id.includes('/node_modules/@element-plus/')) {
                             return 'vendor-element-plus'
                         }
-                        // pinia、lodash 等其他大型共享依赖也单独分包
-                        if (id.includes('/node_modules/pinia/')) {
-                            return 'vendor-pinia'
-                        }
+
                     }
                 }
             },

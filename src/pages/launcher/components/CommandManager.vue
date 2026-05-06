@@ -164,7 +164,7 @@ const toggleCommand = async (cmd) => {
 
 // 删除命令
 const deleteCommand = async (cmd) => {
-  console.log('删除命令:', cmd.title, cmd.id)
+  if (__DEV_PANEL__) console.log('删除命令:', cmd.title, cmd.id)
 
   try {
     await invoke('remove_custom_command', {commandId: cmd.id})

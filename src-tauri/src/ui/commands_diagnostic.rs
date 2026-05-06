@@ -919,7 +919,10 @@ pub async fn run_diagnostic_action(
             COPY_PASTE_DEDUP_TEXT_HASH_HIT_COUNT.store(0, Ordering::Relaxed);
             COPY_PASTE_DEDUP_LOG_COUNT.store(0, Ordering::Relaxed);
             if let Some(lock) = COPY_PASTE_DEDUP_WINDOW_STATS.get() {
-                let mut stats = lock.lock().unwrap();
+                let mut stats = lock.lock().unwrap_or_else(|poisoned| {
+                    log::warn!("复制粘贴去重窗口统计锁中毒，尝试恢复");
+                    poisoned.into_inner()
+                });
                 stats.window_start_ms = now_unix_ms();
                 stats.requests = 0;
                 stats.hits = 0;

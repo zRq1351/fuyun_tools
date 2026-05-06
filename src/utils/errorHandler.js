@@ -1,6 +1,8 @@
 /**
  * 错误代码常量，与 Rust 端保持一致
  */
+import {ElMessage} from 'element-plus'
+
 export const ErrorCode = {
     CONFIG_ERROR: 'CONFIG_ERROR',
     NETWORK_ERROR: 'NETWORK_ERROR',
@@ -22,22 +24,22 @@ export function handleAppError(error, context = '操作失败') {
     let code = null
     let details = null
 
-    
+
     if (typeof error === 'object' && error !== null) {
-        
+
         if (error.code && error.message) {
             code = error.code
             message = error.message
             details = error.details
         } else if (error.toString) {
-            
+
             message = error.toString()
         }
     } else {
         message = String(error)
     }
 
-    
+
     switch (code) {
         case ErrorCode.CONFIG_ERROR:
             ElMessage.error({
@@ -61,7 +63,7 @@ export function handleAppError(error, context = '操作失败') {
             })
             break
         default:
-            
+
             if (message.includes('未配置AI提供商')) {
                 ElMessage.error('未配置 AI 提供商，请在设置中填写 API Key 与 Endpoint 后重试。')
             } else if (message.includes('API地址不能为空')) {

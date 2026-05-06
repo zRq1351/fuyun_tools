@@ -33,8 +33,6 @@ export function useTheme(options = {}) {
     const themes = getAvailableThemes()
 
     const isDark = computed(() => currentTheme.value === 'dark')
-    const isLight = computed(() => currentTheme.value === 'light')
-    const isEyeCare = computed(() => currentTheme.value === 'eye-care')
 
     let cleanupFunctions = []
 
@@ -87,8 +85,6 @@ export function useTheme(options = {}) {
     return {
         currentTheme,
         isDark,
-        isLight,
-        isEyeCare,
         themes,
         changeTheme,
         resetTheme,
@@ -116,9 +112,7 @@ export function useThemeState() {
 
     return {
         currentTheme,
-        isDark: computed(() => currentTheme.value === 'dark'),
-        isLight: computed(() => currentTheme.value === 'light'),
-        isEyeCare: computed(() => currentTheme.value === 'eye-care')
+        isDark: computed(() => currentTheme.value === 'dark')
     }
 }
 

@@ -467,27 +467,36 @@ const cancelAddManual = () => {
 }
 
 const handleReorderCategories = async (fromIndex, toIndex) => {
-  console.log('handleReorderCategories called:', {fromIndex, toIndex})
+  if (__DEV_PANEL__) {
+    console.log('handleReorderCategories called:', {fromIndex, toIndex})
+  }
   if (!launcherConfig.value) {
     console.error('launcherConfig is null')
     return
   }
   const categories = [...launcherConfig.value.categories]
-  console.log('Categories before reorder:', categories.map(c => ({id: c.id, name: c.name})))
+  if (__DEV_PANEL__) {
+    console.log('Categories before reorder:', categories.map(c => ({id: c.id, name: c.name})))
+  }
   if (fromIndex < 0 || fromIndex >= categories.length || toIndex < 0 || toIndex > categories.length) {
     console.error('Invalid indices')
     return
   }
   const [moved] = categories.splice(fromIndex, 1)
   categories.splice(toIndex, 0, moved)
-  console.log('Categories after reorder:', categories.map(c => ({id: c.id, name: c.name})))
+  if (__DEV_PANEL__) {
+    console.log('Categories after reorder:', categories.map(c => ({id: c.id, name: c.name})))
+  }
   launcherConfig.value.categories = categories
   try {
-    // 提取分类ID列表并按新顺序排列
     const categoryIds = categories.map(cat => cat.id)
-    console.log('Calling reorder_categories with IDs:', categoryIds)
+    if (__DEV_PANEL__) {
+      console.log('Calling reorder_categories with IDs:', categoryIds)
+    }
     const result = await invoke('reorder_categories', {categoryIds})
-    console.log('reorder_categories result:', result)
+    if (__DEV_PANEL__) {
+      console.log('reorder_categories result:', result)
+    }
   } catch (error) {
     console.error('Reorder categories error:', error)
   }

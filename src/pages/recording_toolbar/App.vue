@@ -446,7 +446,11 @@ const showInlineNotice = (message, type = "error") => {
     clearTimeout(inlineNoticeTimer);
     inlineNoticeTimer = null;
   }
-
+  if (type === "warning") {
+    inlineNoticeTimer = setTimeout(clearInlineNotice, 5000);
+  } else if (type === "success") {
+    inlineNoticeTimer = setTimeout(clearInlineNotice, 3000);
+  }
 };
 
 const clearInlineNotice = () => {

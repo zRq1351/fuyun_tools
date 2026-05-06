@@ -160,8 +160,7 @@
 <script setup>
 import {nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
-import {Close, Delete, FolderAdd, FolderOpened, Grid, Monitor, Star} from '@element-plus/icons-vue'
+import {Close, Delete, FolderAdd, FolderOpened, Monitor, Star} from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import {invoke} from '@tauri-apps/api/core'
 import ContextMenu from '../../../components/ContextMenu.vue'
@@ -186,10 +185,6 @@ const showCommandDialog = ref(false)
 const commandForm = ref({
   prefix: ''
 })
-
-const getIcon = (iconName) => {
-  return ElementPlusIconsVue[iconName] || Grid
-}
 
 // 加载分类列表
 const loadCategories = async () => {
@@ -267,7 +262,7 @@ const initCategoriesSortable = () => {
     },
     onEnd: (evt) => {
       const {oldIndex, newIndex} = evt
-      console.log('Categories sortable onEnd:', {oldIndex, newIndex})
+      if (__DEV_PANEL__) console.log('Categories sortable onEnd:', {oldIndex, newIndex})
       if (oldIndex !== newIndex && oldIndex !== undefined && newIndex !== undefined) {
         emit('reorder-categories', oldIndex, newIndex)
       }
