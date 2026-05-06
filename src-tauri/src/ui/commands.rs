@@ -553,6 +553,13 @@ pub async fn set_copy_paste_dedup_debug_config(
     Ok(get_copy_paste_dedup_debug_state_value())
 }
 
+fn effective_key(new: &Option<String>, fallback: &str) -> String {
+    match new {
+        Some(val) => val.clone(),
+        None => fallback.to_string(),
+    }
+}
+
 #[tauri::command]
 pub async fn save_app_settings(
     text_max_items: Option<usize>,
@@ -640,55 +647,40 @@ pub async fn save_app_settings(
         settings.doc_manager_enabled = val;
     }
 
-    let doc_manager_enabled_effective = doc_manager_enabled.unwrap_or(settings.doc_manager_enabled);
-    if let Some(_enabled_val) = doc_manager_enabled {
-        if doc_manager_enabled_effective {
-            if let Some(ref doc_hk) = doc_manager_hot_key {
-                if doc_hk != &settings.doc_manager_hot_key {
-                    if let Err(e) = app.global_shortcut().unregister(settings.doc_manager_hot_key.as_str()) {
-                        log::warn!("注销旧文档管理快捷键 '{}' 失败: {}", settings.doc_manager_hot_key, e);
-                    }
-                    let app_handle_for_doc = app.clone();
-                    let new_hk = doc_hk.clone();
-                    if let Err(e) = app.global_shortcut().on_shortcut(
-                        doc_hk.as_str(),
-                        move |_app, _shortcut, event| {
-                            if let ShortcutState::Pressed = event.state {
-                                let _ = crate::ui::window_manager::show_standard_window_by_label(&app_handle_for_doc, "document_manager");
-                            }
-                        },
-                    ) {
-                        log::warn!("注册文档管理快捷键 '{}' 失败: {}", new_hk, e);
-                    }
-                    settings.doc_manager_hot_key = doc_hk.clone();
-                } else if !app.global_shortcut().is_registered(settings.doc_manager_hot_key.as_str()) {
-                    let app_handle_for_doc = app.clone();
-                    if let Err(e) = app.global_shortcut().on_shortcut(
-                        settings.doc_manager_hot_key.as_str(),
-                        move |_app, _shortcut, event| {
-                            if let ShortcutState::Pressed = event.state {
-                                let _ = crate::ui::window_manager::show_standard_window_by_label(&app_handle_for_doc, "document_manager");
-                            }
-                        },
-                    ) {
-                        log::warn!("注册文档管理快捷键 '{}' 失败: {}", settings.doc_manager_hot_key, e);
-                    }
-                }
-            } else if !app.global_shortcut().is_registered(settings.doc_manager_hot_key.as_str()) {
+    if let Some(enabled) = doc_manager_enabled {
+        if enabled {
+            if !app
+                .global_shortcut()
+                .is_registered(settings.doc_manager_hot_key.as_str())
+            {
                 let app_handle_for_doc = app.clone();
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     settings.doc_manager_hot_key.as_str(),
                     move |_app, _shortcut, event| {
                         if let ShortcutState::Pressed = event.state {
-                            let _ = crate::ui::window_manager::show_standard_window_by_label(&app_handle_for_doc, "document_manager");
+                            let _ = crate::ui::window_manager::show_standard_window_by_label(
+                                &app_handle_for_doc,
+                                "document_manager",
+                            );
                         }
                     },
                 ) {
-                    log::warn!("注册文档管理快捷键 '{}' 失败: {}", settings.doc_manager_hot_key, e);
+                    log::warn!(
+                        "注册文档管理快捷键 '{}' 失败: {}",
+                        settings.doc_manager_hot_key,
+                        e
+                    );
                 }
             }
-        } else if let Err(e) = app.global_shortcut().unregister(settings.doc_manager_hot_key.as_str()) {
-            log::warn!("注销文档管理快捷键 '{}' 失败: {}", settings.doc_manager_hot_key, e);
+        } else if let Err(e) = app
+            .global_shortcut()
+            .unregister(settings.doc_manager_hot_key.as_str())
+        {
+            log::warn!(
+                "注销文档管理快捷键 '{}' 失败: {}",
+                settings.doc_manager_hot_key,
+                e
+            );
         }
     }
     if let Some(val) = selection_enabled {
@@ -798,16 +790,25 @@ pub async fn save_app_settings(
         }
 
         if hot_key_val != &settings.hot_key {
-            let old_hot_key = settings.hot_key.clone();
-            if settings.text_clipboard_enabled {
-                register_text_shortcut(&app, state.inner().clone(), hot_key_val.as_str())?;
+            if settings.text_clipboard_enabled
+                && app.global_shortcut().is_registered(hot_key_val.as_str())
+            {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    format!("快捷键被占用：{}", hot_key_val),
+                    "hot_key global shortcut already registered",
+                ));
             }
+            let old_hot_key = settings.hot_key.clone();
             if let Err(e) = app.global_shortcut().unregister(old_hot_key.as_str()) {
                 log::warn!(
-                    "注销旧快捷键 '{}' 失败 (可能从未注册成功): {}",
+                    "注销旧文字窗口快捷键 '{}' 失败 (可能从未注册成功): {}",
                     old_hot_key,
                     e
                 );
+            }
+            if settings.text_clipboard_enabled {
+                register_text_shortcut(&app, state.inner().clone(), hot_key_val.as_str())?;
             }
             settings.hot_key = hot_key_val.clone();
         }
@@ -845,16 +846,25 @@ pub async fn save_app_settings(
                 ));
             }
 
-            let old_image_hot_key = settings.image_hot_key.clone();
-            if settings.image_clipboard_enabled {
-                register_image_shortcut(&app, state.inner().clone(), image_hot_key_val.as_str())?;
+            if settings.image_clipboard_enabled
+                && app.global_shortcut().is_registered(image_hot_key_val.as_str())
+            {
+                return Err(frontend_error(
+                    ErrorCode::ValidationError,
+                    format!("图片窗口快捷键被占用：{}", image_hot_key_val),
+                    "image_hot_key global shortcut already registered",
+                ));
             }
+            let old_image_hot_key = settings.image_hot_key.clone();
             if let Err(e) = app.global_shortcut().unregister(old_image_hot_key.as_str()) {
                 log::warn!(
-                    "注销旧图片快捷键 '{}' 失败 (可能从未注册成功): {}",
+                    "注销旧图片窗口快捷键 '{}' 失败 (可能从未注册成功): {}",
                     old_image_hot_key,
                     e
                 );
+            }
+            if settings.image_clipboard_enabled {
+                register_image_shortcut(&app, state.inner().clone(), image_hot_key_val.as_str())?;
             }
             settings.image_hot_key = image_hot_key_val.clone();
         }
@@ -870,10 +880,8 @@ pub async fn save_app_settings(
         }
 
         if screenshot_hot_key_val != &settings.screenshot_hot_key {
-            let effective_hot_key = hot_key.clone().unwrap_or_else(|| settings.hot_key.clone());
-            let effective_image_hot_key = image_hot_key
-                .clone()
-                .unwrap_or_else(|| settings.image_hot_key.clone());
+            let effective_hot_key = effective_key(&hot_key, &settings.hot_key);
+            let effective_image_hot_key = effective_key(&image_hot_key, &settings.image_hot_key);
             if screenshot_hot_key_val == &effective_hot_key
                 || screenshot_hot_key_val == &effective_image_hot_key
             {
@@ -924,13 +932,9 @@ pub async fn save_app_settings(
             ));
         }
         if recording_hot_key_val != &settings.recording_hot_key {
-            let effective_hot_key = hot_key.clone().unwrap_or_else(|| settings.hot_key.clone());
-            let effective_image_hot_key = image_hot_key
-                .clone()
-                .unwrap_or_else(|| settings.image_hot_key.clone());
-            let effective_screenshot_hot_key = screenshot_hot_key
-                .clone()
-                .unwrap_or_else(|| settings.screenshot_hot_key.clone());
+            let effective_hot_key = effective_key(&hot_key, &settings.hot_key);
+            let effective_image_hot_key = effective_key(&image_hot_key, &settings.image_hot_key);
+            let effective_screenshot_hot_key = effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
             if recording_hot_key_val == &effective_hot_key
                 || recording_hot_key_val == &effective_image_hot_key
                 || recording_hot_key_val == &effective_screenshot_hot_key
@@ -989,16 +993,10 @@ pub async fn save_app_settings(
             ));
         }
         if mic_toggle_hot_key_val != &settings.recording_mic_toggle_hot_key {
-            let effective_hot_key = hot_key.clone().unwrap_or_else(|| settings.hot_key.clone());
-            let effective_image_hot_key = image_hot_key
-                .clone()
-                .unwrap_or_else(|| settings.image_hot_key.clone());
-            let effective_screenshot_hot_key = screenshot_hot_key
-                .clone()
-                .unwrap_or_else(|| settings.screenshot_hot_key.clone());
-            let effective_recording_hot_key = recording_hot_key
-                .clone()
-                .unwrap_or_else(|| settings.recording_hot_key.clone());
+            let effective_hot_key = effective_key(&hot_key, &settings.hot_key);
+            let effective_image_hot_key = effective_key(&image_hot_key, &settings.image_hot_key);
+            let effective_screenshot_hot_key = effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
+            let effective_recording_hot_key = effective_key(&recording_hot_key, &settings.recording_hot_key);
 
             if mic_toggle_hot_key_val == &effective_hot_key
                 || mic_toggle_hot_key_val == &effective_image_hot_key
@@ -1088,19 +1086,11 @@ pub async fn save_app_settings(
         }
 
         if launcher_hot_key_val != &settings.launcher_hot_key {
-            let effective_hot_key = hot_key.clone().unwrap_or_else(|| settings.hot_key.clone());
-            let effective_image_hot_key = image_hot_key
-                .clone()
-                .unwrap_or_else(|| settings.image_hot_key.clone());
-            let effective_screenshot_hot_key = screenshot_hot_key
-                .clone()
-                .unwrap_or_else(|| settings.screenshot_hot_key.clone());
-            let effective_recording_hot_key = recording_hot_key
-                .clone()
-                .unwrap_or_else(|| settings.recording_hot_key.clone());
-            let effective_mic_toggle_hot_key = recording_mic_toggle_hot_key
-                .clone()
-                .unwrap_or_else(|| settings.recording_mic_toggle_hot_key.clone());
+            let effective_hot_key = effective_key(&hot_key, &settings.hot_key);
+            let effective_image_hot_key = effective_key(&image_hot_key, &settings.image_hot_key);
+            let effective_screenshot_hot_key = effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
+            let effective_recording_hot_key = effective_key(&recording_hot_key, &settings.recording_hot_key);
+            let effective_mic_toggle_hot_key = effective_key(&recording_mic_toggle_hot_key, &settings.recording_mic_toggle_hot_key);
 
             if launcher_hot_key_val == &effective_hot_key
                 || launcher_hot_key_val == &effective_image_hot_key
@@ -1184,12 +1174,12 @@ pub async fn save_app_settings(
         }
 
         if doc_manager_hot_key_val != &settings.doc_manager_hot_key {
-            let effective_hot_key = hot_key.clone().unwrap_or_else(|| settings.hot_key.clone());
-            let effective_image_hot_key = image_hot_key.clone().unwrap_or_else(|| settings.image_hot_key.clone());
-            let effective_screenshot_hot_key = screenshot_hot_key.clone().unwrap_or_else(|| settings.screenshot_hot_key.clone());
-            let effective_recording_hot_key = recording_hot_key.clone().unwrap_or_else(|| settings.recording_hot_key.clone());
-            let effective_mic_toggle_hot_key = recording_mic_toggle_hot_key.clone().unwrap_or_else(|| settings.recording_mic_toggle_hot_key.clone());
-            let effective_launcher_hot_key = launcher_hot_key.clone().unwrap_or_else(|| settings.launcher_hot_key.clone());
+            let effective_hot_key = effective_key(&hot_key, &settings.hot_key);
+            let effective_image_hot_key = effective_key(&image_hot_key, &settings.image_hot_key);
+            let effective_screenshot_hot_key = effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
+            let effective_recording_hot_key = effective_key(&recording_hot_key, &settings.recording_hot_key);
+            let effective_mic_toggle_hot_key = effective_key(&recording_mic_toggle_hot_key, &settings.recording_mic_toggle_hot_key);
+            let effective_launcher_hot_key = effective_key(&launcher_hot_key, &settings.launcher_hot_key);
 
             if doc_manager_hot_key_val == &effective_hot_key
                 || doc_manager_hot_key_val == &effective_image_hot_key
