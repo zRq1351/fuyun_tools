@@ -52,7 +52,9 @@ export function useTheme(options = {}) {
     }
 
     function cycleTheme() {
-        const order = ['dark', 'light', 'eye-care']
+        const available = getAvailableThemes()
+        const order = available.map(t => t.value)
+        if (order.length === 0) return
         const currentIndex = order.indexOf(currentTheme.value)
         const nextIndex = (currentIndex + 1) % order.length
         changeTheme(order[nextIndex])

@@ -77,10 +77,14 @@ fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
         (settings_snapshot, provider_key, api_url, model_name)
     };
 
-    if !api_url.starts_with("https://") {
+    let is_secure = api_url.starts_with("https://");
+    let is_localhost = api_url.starts_with("http://localhost")
+        || api_url.starts_with("http://127.0.0.1")
+        || api_url.starts_with("http://[::1]");
+    if !is_secure && !is_localhost {
         return Err(AppError::new(
             ErrorCode::ConfigError,
-            "API地址格式不正确，请确保以 https:// 开头",
+            "API地址格式不正确，请使用 https:// 或本地地址 (http://localhost)",
         ));
     }
 
@@ -148,7 +152,8 @@ fn fill_prompt_template(
     let mut prompt = template.replace("{text}", text);
     let source = source_language.unwrap_or("自动识别");
     prompt = prompt.replace("{source_language}", source);
-    prompt.replace("{target_language}", target_language)
+    prompt = prompt.replace("{target_language}", target_language);
+    prompt
 }
 
 fn next_ai_operation_id(state: &Arc<Mutex<SharedAppState>>) -> u64 {

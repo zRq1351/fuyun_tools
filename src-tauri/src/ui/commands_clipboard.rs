@@ -685,8 +685,11 @@ pub(crate) fn ensure_preview_image_path_for_asset(item_id: &str, image_path: &st
     Ok(target_path.to_string_lossy().to_string())
 }
 
+const MAX_ITEM_ID_LEN: usize = 100;
+
 pub(crate) fn sanitize_image_item_id(raw: &str) -> String {
-    let sanitized: String = raw
+    let truncated: String = raw.chars().take(MAX_ITEM_ID_LEN).collect();
+    let sanitized: String = truncated
         .chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
@@ -1023,7 +1026,10 @@ pub async fn warmup_image_clipboard_item_by_id(
     }).await
 }
 
-/// 优化方案 5：批量预热多个图片到内存缓存，用于滚动时提前加载
+const WARMUP_BATCH_MAX: usize = 20;
+
+/// 批量预热多个图片到内存缓存，用于滚动时提前加载
+/// 使用 HashMap 建立 item_id → index 映射，将查找复杂度从 O(n*m) 降至 O(n+m)
 #[tauri::command]
 pub async fn warmup_multiple_images(
     item_ids: Vec<String>,
@@ -1033,15 +1039,15 @@ pub async fn warmup_multiple_images(
     tauri::async_runtime::spawn_blocking(move || {
         let manager_arc = get_image_clipboard_manager_arc(&state_arc);
         let manager = lock_arc_mutex(&manager_arc);
-        for item_id in item_ids {
-            if let Some(index) = manager
-                .get_history()
-                .iter()
-                .position(|item| item.id == item_id)
-            {
-                if index < 6 {
-                    let _ = manager.warmup_image_by_id(&item_id);
-                }
+        let history = manager.get_history();
+        let id_to_index: std::collections::HashMap<&str, usize> = history
+            .iter()
+            .enumerate()
+            .map(|(i, item)| (item.id.as_str(), i))
+            .collect();
+        for item_id in item_ids.iter().take(WARMUP_BATCH_MAX) {
+            if id_to_index.contains_key(item_id.as_str()) {
+                let _ = manager.warmup_image_by_id(item_id);
             }
         }
     })

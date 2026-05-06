@@ -42,12 +42,6 @@ pub const CTRL_KEY: Key = if cfg!(target_os = "macos") {
     Key::Control
 };
 
-pub const C_KEY: Key = if cfg!(target_os = "macos") {
-    Key::Unicode('c')
-} else {
-    Key::Insert
-};
-
 /// AI服务提供商枚举
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum AIProvider {
