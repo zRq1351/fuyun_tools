@@ -746,12 +746,14 @@ fn set_screenshot_window_passthrough_internal(
 }
 
 fn set_screenshot_window_visibility_internal(app: &AppHandle, visible: bool) -> Result<(), String> {
-    if app.get_webview_window("screenshot").is_none() {
+    let Some(window) = app.get_webview_window("screenshot") else {
         return Ok(());
-    }
+    };
     if visible {
+        let _ = window.set_ignore_cursor_events(false);
         show_overlay_window_by_label(app, "screenshot", true)?;
     } else {
+        let _ = window.set_ignore_cursor_events(true);
         hide_overlay_window_by_label(app, "screenshot")?;
     }
     Ok(())
@@ -797,52 +799,59 @@ fn place_longshot_toolbar_near_anchor(
         return;
     };
     let (toolbar_w, toolbar_h) = (260i32, 430i32);
-    let anchor_w = anchor.width as i32;
-    let anchor_h = anchor.height as i32;
-    let margin = 12i32;
-    let default_x = anchor.x + anchor_w + margin;
-    let default_y = anchor.y + (anchor_h / 2) - (toolbar_h / 2);
     let Some(screen_window) = app.get_webview_window("screenshot") else {
         let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
-            default_x, default_y,
+            anchor.x + anchor.width as i32 + 12,
+            anchor.y + (anchor.height as i32 / 2) - (toolbar_h / 2),
         )));
         return;
     };
     let Ok(Some(monitor)) = screen_window.current_monitor() else {
         let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
-            default_x, default_y,
+            anchor.x + anchor.width as i32 + 12,
+            anchor.y + (anchor.height as i32 / 2) - (toolbar_h / 2),
         )));
         return;
     };
+    let dpi = monitor.scale_factor().max(1.0);
+    let phys_w = (toolbar_w as f64 * dpi) as i32;
+    let phys_h = (toolbar_h as f64 * dpi) as i32;
+    let anchor_x = (anchor.x as f64 * dpi) as i32;
+    let anchor_y = (anchor.y as f64 * dpi) as i32;
+    let anchor_w = (anchor.width as f64 * dpi) as i32;
+    let anchor_h = (anchor.height as f64 * dpi) as i32;
+    let margin = (12f64 * dpi) as i32;
+    let default_x = anchor_x + anchor_w + margin;
+    let default_y = anchor_y + (anchor_h / 2) - (phys_h / 2);
     let mon_pos = monitor.position();
     let mon_size = monitor.size();
     let min_x = mon_pos.x + 8;
-    let max_x = mon_pos.x + mon_size.width as i32 - toolbar_w - 8;
+    let max_x = mon_pos.x + mon_size.width as i32 - phys_w - 8;
     let min_y = mon_pos.y + 8;
-    let max_y = mon_pos.y + mon_size.height as i32 - toolbar_h - 8;
-    let anchor_left = anchor.x;
-    let anchor_top = anchor.y;
-    let anchor_right = anchor.x + anchor_w;
-    let anchor_bottom = anchor.y + anchor_h;
+    let max_y = mon_pos.y + mon_size.height as i32 - phys_h - 8;
+    let anchor_left = anchor_x;
+    let anchor_top = anchor_y;
+    let anchor_right = anchor_x + anchor_w;
+    let anchor_bottom = anchor_y + anchor_h;
 
     let clamp_candidate =
         |x: i32, y: i32| -> (i32, i32) { (x.clamp(min_x, max_x), y.clamp(min_y, max_y)) };
     let intersects_anchor = |x: i32, y: i32| -> bool {
-        let right = x + toolbar_w;
-        let bottom = y + toolbar_h;
+        let right = x + phys_w;
+        let bottom = y + phys_h;
         x < anchor_right && right > anchor_left && y < anchor_bottom && bottom > anchor_top
     };
 
     let mut candidates = vec![
-        clamp_candidate(anchor_right + margin, default_y),
-        clamp_candidate(anchor_left - toolbar_w - margin, default_y),
+        clamp_candidate(default_x, default_y),
+        clamp_candidate(anchor_left - phys_w - margin, default_y),
         clamp_candidate(
-            anchor_left + (anchor_w - toolbar_w) / 2,
+            anchor_left + (anchor_w - phys_w) / 2,
             anchor_bottom + margin,
         ),
         clamp_candidate(
-            anchor_left + (anchor_w - toolbar_w) / 2,
-            anchor_top - toolbar_h - margin,
+            anchor_left + (anchor_w - phys_w) / 2,
+            anchor_top - phys_h - margin,
         ),
         (max_x, min_y),
     ];
@@ -898,6 +907,7 @@ pub async fn show_longshot_border(
 ) -> Result<(), String> {
     let (window, _created) = ensure_longshot_border_window(&app)?;
     let _ = window.set_content_protected(true);
+    let _ = window.set_ignore_cursor_events(true);
     // 边框窗外扩，确保边框不进入实际采集区域
     const BORDER_OUTSET: i32 = 2;
     let width = (anchor.width as i32 + BORDER_OUTSET * 2).max(2) as u32;
@@ -1173,6 +1183,8 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
             );
             e
         })?;
+    let png_base64 = capture::rgba_to_base64_png(&rgba, width, height)
+        .unwrap_or_default();
 
     let selection_mode = selection_mode;
     ensure_window_for_label(&app, "screenshot")?;
@@ -1184,6 +1196,7 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
             bind_screenshot_window_lifecycle(&window, &app);
         }
         let payload = serde_json::json!({
+            "png_base64": png_base64,
             "image_path": image_path,
             "width": width,
             "height": height,
@@ -1243,6 +1256,7 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
         });
     } else {
         let payload = serde_json::json!({
+            "png_base64": png_base64,
             "image_path": image_path,
             "width": width,
             "height": height,

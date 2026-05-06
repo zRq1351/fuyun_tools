@@ -1106,10 +1106,10 @@ async function requestScreenshot() {
         captureOriginX.value = Number(result.origin_x) || 0
         captureOriginY.value = Number(result.origin_y) || 0
         await fetchWindows()
-        if (result.image_path) {
-          loadImageFromPath(result.image_path)
-        } else {
+        if (result.png_base64) {
           loadImageFromBase64(result.png_base64)
+        } else if (result.image_path) {
+          loadImageFromPath(result.image_path)
         }
         return true
       }
@@ -1148,10 +1148,10 @@ function handleScreenshotData(event) {
     captureOriginX.value = Number(event.detail.origin_x) || 0
     captureOriginY.value = Number(event.detail.origin_y) || 0
     fetchWindows()
-    if (event.detail.image_path) {
-      loadImageFromPath(event.detail.image_path)
-    } else {
+    if (event.detail.png_base64) {
       loadImageFromBase64(event.detail.png_base64)
+    } else if (event.detail.image_path) {
+      loadImageFromPath(event.detail.image_path)
     }
   }
 }
@@ -1274,10 +1274,10 @@ function applyManualLongshotResult(result) {
   if (!base64 && !imagePath) {
     throw new Error('未获取到长截图结果')
   }
-  if (imagePath) {
-    loadImageFromPath(imagePath)
-  } else {
+  if (base64) {
     loadImageFromBase64(base64)
+  } else if (imagePath) {
+    loadImageFromPath(imagePath)
   }
   longshotResultActive.value = true
   longshotRawPngBase64.value = base64
@@ -1420,7 +1420,6 @@ function loadImageFromSrc(src) {
   isCaptureReady.value = false
   screenshotSrc.value = src
   const img = new Image()
-  img.crossOrigin = 'anonymous'
   img.onload = () => {
     screenshotImg.value = img
     screenshotPixelCanvas = document.createElement('canvas')
