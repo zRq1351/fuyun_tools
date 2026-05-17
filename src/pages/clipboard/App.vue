@@ -23,57 +23,58 @@
         :toggle-ai-settings="toggleAiSettings"
         :translation-target-language="translationTargetLanguage"
         :explanation-target-language="explanationTargetLanguage"
-        search-placeholder="搜索剪切板历史"
+        :create-category-text="$t('clipboard.createCategory')"
+        :search-placeholder="$t('clipboard.search')"
     />
     <div v-show="!isAiSettingsCollapsed" class="ai-quick-panel-wrap" @click.stop @mousedown.stop>
       <div class="ai-quick-panel">
         <div class="ai-quick-top">
         <div class="ai-control-item ai-select-item">
-          <span class="ai-control-label">翻译目标</span>
+          <span class="ai-control-label">{{ $t('clipboard.translationTarget') }}</span>
           <el-select
               v-model="translationTargetLanguage"
               class="ai-select"
               size="small"
               popper-class="clipboard-ai-select-popper"
           >
-            <el-option label="简体中文" value="简体中文"/>
-            <el-option label="繁体中文" value="繁体中文"/>
-            <el-option label="英语" value="英语"/>
-            <el-option label="日语" value="日语"/>
-            <el-option label="韩语" value="韩语"/>
-            <el-option label="法语" value="法语"/>
-            <el-option label="德语" value="德语"/>
+            <el-option :label="$t('language.zhCN')" value="简体中文"/>
+            <el-option :label="$t('language.traditionalChinese')" value="繁体中文"/>
+            <el-option :label="$t('language.english')" value="英语"/>
+            <el-option :label="$t('language.japanese')" value="日语"/>
+            <el-option :label="$t('language.korean')" value="韩语"/>
+            <el-option :label="$t('language.french')" value="法语"/>
+            <el-option :label="$t('language.german')" value="德语"/>
           </el-select>
         </div>
         <div class="ai-control-item ai-select-item">
-          <span class="ai-control-label">解释语言</span>
+          <span class="ai-control-label">{{ $t('clipboard.explanationLang') }}</span>
           <el-select
               v-model="explanationTargetLanguage"
               class="ai-select"
               size="small"
               popper-class="clipboard-ai-select-popper"
           >
-            <el-option label="中文" value="中文"/>
-            <el-option label="英文" value="英文"/>
-            <el-option label="日文" value="日文"/>
-            <el-option label="韩文" value="韩文"/>
+            <el-option :label="$t('language.chinese')" value="中文"/>
+            <el-option :label="$t('language.englishDesc')" value="英文"/>
+            <el-option :label="$t('language.japaneseDesc')" value="日文"/>
+            <el-option :label="$t('language.koreanDesc')" value="韩文"/>
           </el-select>
         </div>
-        <div class="ai-shortcut-tip">选中记录后按：T 翻译 / E 解释</div>
+          <div class="ai-shortcut-tip">{{ $t('clipboard.shortcutTip') }}</div>
       </div>
       </div>
     </div>
 
     <div v-if="visibleHistory.length === 0" class="empty-state">
-      <el-empty v-if="!isLoadingPage" :image-size="100" description="暂无剪切板记录">
+      <el-empty v-if="!isLoadingPage" :description="$t('clipboard.noRecords')" :image-size="100">
         <template #description>
-          <p>暂无剪切板记录</p>
-          <p class="hint">复制内容后会自动添加</p>
+          <p>{{ $t('clipboard.noRecords') }}</p>
+          <p class="hint">{{ $t('clipboard.autoAddHint') }}</p>
         </template>
       </el-empty>
       <div v-else class="loading-state">
         <el-icon class="is-loading" :size="40"><Loading /></el-icon>
-        <p>正在加载...</p>
+        <p>{{ $t('common.loading') }}</p>
       </div>
     </div>
 
@@ -105,7 +106,9 @@
       <div class="status-text">
         <span class="status-label">{{ selectedStatusText }}</span>
         <span class="status-meta">{{ loadStatusText }}</span>
-        <span v-if="searchKeyword.trim()" class="status-meta">命中 {{ keywordHitCount }} 条</span>
+        <span v-if="searchKeyword.trim()" class="status-meta">{{
+            $t('clipboard.hitCount', {count: keywordHitCount})
+          }}</span>
         <div class="status-actions">
           <button
               :title="`切换分页大小（当前每页 ${pageSize} 条）`"
@@ -113,16 +116,18 @@
               type="button"
               @click="cyclePageSize"
           >
-            每页{{ pageSize }}
+            {{ $t('clipboard.perPage', {size: pageSize}) }}
           </button>
 
-          <button aria-label="回到开头" class="nav-action-btn icon-btn" title="回到开头" type="button"
+          <button :aria-label="$t('clipboard.backToStart')" :title="$t('clipboard.backToStart')"
+                  class="nav-action-btn icon-btn" type="button"
                   @click="scrollToStart">
             <el-icon>
               <ArrowLeftBold/>
             </el-icon>
           </button>
-          <button aria-label="滑动到最后" class="nav-action-btn icon-btn" title="滑动到最后" type="button"
+          <button :aria-label="$t('clipboard.scrollToEnd')" :title="$t('clipboard.scrollToEnd')"
+                  class="nav-action-btn icon-btn" type="button"
                   @click="scrollToEnd">
             <el-icon>
               <ArrowRightBold/>
@@ -141,17 +146,17 @@
         @click.stop
         @mousedown.stop
     >
-      <div class="context-menu-header">AI 快捷处理</div>
+      <div class="context-menu-header">{{ $t('clipboard.aiShortcut') }}</div>
       <div class="context-menu-item" @click="triggerAiFromContextMenu('translate')">
-        翻译
+        {{ $t('selectionToolbar.translate') }}
         <span class="shortcut-hint">T</span>
       </div>
       <div class="context-menu-item" @click="triggerAiFromContextMenu('explain')">
-        解释
+        {{ $t('selectionToolbar.explain') }}
         <span class="shortcut-hint">E</span>
       </div>
       <div class="context-menu-divider"></div>
-      <div class="context-menu-header">添加到分类</div>
+      <div class="context-menu-header">{{ $t('clipboard.addToCategory') }}</div>
       <div
           v-for="category in categories"
           :key="category"
@@ -169,6 +174,7 @@
 
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {ArrowLeftBold, ArrowRightBold, Check, Loading} from '@element-plus/icons-vue'
 import {ElMessage} from 'element-plus'
 import {listen} from '@tauri-apps/api/event'
@@ -181,6 +187,8 @@ import {useCategoryManager} from './composables/useCategoryManager'
 import {useWindowOffset} from './composables/useWindowOffset'
 import {useContextMenuState} from '../shared/useContextMenuState'
 import {runCategoryAssignment} from '../shared/categoryActions'
+
+const {t} = useI18n()
 
 const containerRef = ref(null)
 const clipboardListRef = ref(null)
@@ -304,7 +312,7 @@ const promoteItem = async (id) => {
     }
     setLocalPinnedById(id, !shouldPin)
     console.error('置顶失败:', error)
-    handleAppError(error, '置顶失败')
+    handleAppError(error, t('clipboard.pinFailed'))
   }
 }
 
@@ -319,16 +327,19 @@ const hideClipboardWindow = () => {
 
 const selectedStatusText = computed(() => {
   const total = totalCount.value || visibleHistory.value.length
-  if (total === 0) return '当前无选中项'
+  if (total === 0) return t('clipboard.noSelection')
   const current = visibleHistory.value.findIndex((entry) => entry.id === selectedItemId.value)
   const display = current >= 0 ? current + 1 : 1
-  return `当前选中：第 ${display} / ${total} 条`
+  return t('clipboard.selected', {display, total})
 })
 
 const loadStatusText = computed(() => {
-  if (isLoadingPage.value) return '正在加载...'
-  if (hasMore.value) return `已加载 ${visibleHistory.value.length} / ${totalCount.value || visibleHistory.value.length}`
-  return `已全部加载 ${visibleHistory.value.length} 条`
+  if (isLoadingPage.value) return t('common.loading')
+  if (hasMore.value) return t('clipboard.loaded', {
+    loaded: visibleHistory.value.length,
+    total: totalCount.value || visibleHistory.value.length
+  })
+  return t('clipboard.allLoaded', {total: visibleHistory.value.length})
 })
 
 const keywordHitCount = computed(() => {
@@ -417,7 +428,7 @@ const init = async () => {
 
       if (!payload.success) {
         writebackErrorMsg = ElMessage.error({
-          message: `文本回填失败：${payload.detail || '未知错误'}`,
+          message: t('clipboard.pasteFailed', {error: payload.detail || t('common.unknownError')}),
           duration: 0,
           showClose: true
         })
@@ -505,7 +516,7 @@ const selectAndFillDirect = async (itemId) => {
   } catch (error) {
     console.error('填充内容失败:', error)
     writebackErrorMsg = ElMessage.error({
-      message: `填充内容失败: ${String(error)}`,
+      message: t('clipboard.fillFailed', {error: String(error)}),
       duration: 0,
       showClose: true
     })
@@ -593,7 +604,7 @@ const triggerAiFlow = async (rawText, mode) => {
     if (mode === 'translate') {
       await AIService.streamTranslate(
           text,
-          '自动识别',
+          t('clipboard.autoDetect'),
           translationTargetLanguage.value,
           opId
       )
@@ -605,7 +616,7 @@ const triggerAiFlow = async (rawText, mode) => {
       )
     }
   } catch (error) {
-    handleAppError(error, mode === 'translate' ? '剪贴板翻译失败' : '剪贴板解释失败')
+    handleAppError(error, mode === 'translate' ? t('clipboard.translateFailed') : t('clipboard.explainFailed'))
   } finally {
     aiActionLoading.value = false
   }

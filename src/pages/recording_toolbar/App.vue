@@ -10,7 +10,7 @@
           class="collapsed-shell"
       >
         <div class="collapsed-shell-row">
-          <div class="drag-handle" @mousedown.stop.prevent="startWindowDrag" title="拖动工具栏">
+          <div :title="t('recordingToolbar.dragToolbar')" class="drag-handle" @mousedown.stop.prevent="startWindowDrag">
             <el-icon><GripVertical :size="13" :stroke-width="2.2"/></el-icon>
           </div>
           <button
@@ -72,12 +72,12 @@
         <div class="capsule-settings-panel-wrapper" :class="{ 'is-open': capsuleSettingsVisible }">
           <div class="capsule-settings-panel no-drag">
             <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
-                 title="点击关闭提示" @click="clearInlineNotice">
+                 :title="t('recordingToolbar.clickToDismiss')" @click="clearInlineNotice">
               {{ inlineNotice }}
               <span class="inline-notice-close">×</span>
             </div>
           <div class="toolbar-settings-title-row">
-            <div class="toolbar-settings-title">录制设置</div>
+            <div class="toolbar-settings-title">{{ t('recordingToolbar.recordingSettings') }}</div>
             <span v-if="recordTargetType === 'region'" class="target-region-meta">
               {{ regionCoordinateText }}
             </span>
@@ -89,31 +89,31 @@
                   :disabled="!canEditRecordingConfig"
                   @click="onTargetModeClick('screen')"
               >
-                全屏
+                {{ t('recordingToolbar.fullscreen') }}
               </button>
               <button
                   :class="['target-mode-btn', { active: recordTargetType === 'window' }]"
                   :disabled="!canEditRecordingConfig"
                   @click="onTargetModeClick('window')"
               >
-                窗口
+                {{ t('recordingToolbar.window') }}
               </button>
               <button
                   :class="['target-mode-btn', { active: recordTargetType === 'region' }]"
                   :disabled="!canEditRecordingConfig"
                   @click="onTargetModeClick('region')"
               >
-                区域
+                {{ t('recordingToolbar.region') }}
               </button>
             </div>
           </div>
           <div v-if="recordTargetType === 'window'" class="toolbar-settings-row">
-            <span class="toolbar-settings-label">目标窗口</span>
+            <span class="toolbar-settings-label">{{ t('recordingToolbar.targetWindow') }}</span>
             <el-select
                 v-model="recordTargetWindowId"
                 :disabled="!canEditRecordingConfig"
                 filterable
-                placeholder="选择窗口"
+                :placeholder="t('recordingToolbar.selectWindow')"
                 popper-class="recording-toolbar-select-popper"
                 size="small"
                 @visible-change="onTargetWindowDropdownVisibleChange"
@@ -127,17 +127,17 @@
             </el-select>
           </div>
           <div class="toolbar-settings-row">
-            <span class="toolbar-settings-label">系统音频</span>
+            <span class="toolbar-settings-label">{{ t('recordingToolbar.systemAudio') }}</span>
             <el-select
                 :model-value="captureSystemAudio ? systemOutputId : ''"
-                placeholder="选择系统音频设备"
+                :placeholder="t('recordingToolbar.selectSystemAudio')"
                 popper-class="recording-toolbar-select-popper"
                 size="small"
                 :disabled="!canEditAudioConfig"
                 @visible-change="onSystemAudioDropdownVisibleChange"
                 @change="onSystemAudioDeviceChange"
             >
-              <el-option label="不捕获系统音频" value=""/>
+              <el-option :label="t('recordingToolbar.noSystemAudio')" value=""/>
               <el-option
                   v-for="item in systemOutputs"
                   :key="item.id"
@@ -147,7 +147,7 @@
             </el-select>
           </div>
           <div v-if="captureSystemAudio" class="toolbar-settings-row">
-            <span class="toolbar-settings-label">应用音频</span>
+            <span class="toolbar-settings-label">{{ t('recordingToolbar.appAudio') }}</span>
             <el-select
                 v-model="systemAudioProcessIds"
                 :disabled="!canEditRecordingConfig"
@@ -155,7 +155,7 @@
                 collapse-tags-tooltip
                 filterable
                 multiple
-                placeholder="可选：按应用录音（多选）"
+                :placeholder="t('recordingToolbar.appAudioPlaceholder')"
                 popper-class="recording-toolbar-select-popper recording-toolbar-audio-process-popper"
                 size="small"
                 @visible-change="onAudioProcessDropdownVisibleChange"
@@ -169,17 +169,17 @@
             </el-select>
           </div>
           <div class="toolbar-settings-row">
-            <span class="toolbar-settings-label">麦克风</span>
+            <span class="toolbar-settings-label">{{ t('recordingToolbar.microphone') }}</span>
             <el-select
                 :model-value="captureMicrophone ? microphoneDeviceId : ''"
-                placeholder="选择麦克风设备"
+                :placeholder="t('recordingToolbar.selectMicrophone')"
                 popper-class="recording-toolbar-select-popper"
                 size="small"
                 :disabled="!canEditAudioConfig"
                 @visible-change="onMicrophoneDropdownVisibleChange"
                 @change="onMicrophoneDeviceChange"
             >
-              <el-option label="不捕获麦克风" value=""/>
+              <el-option :label="t('recordingToolbar.noMicrophone')" value=""/>
               <el-option
                   v-for="item in microphones"
                   :key="item.id"
@@ -194,24 +194,24 @@
               :disabled="isOpeningFolder"
               @click="openRecordingFolder"
           >
-            打开录制保存文件夹
+            {{ t('recordingToolbar.openSaveFolder') }}
           </button>
           <div class="toolbar-settings-switch-row">
             <el-switch
                 v-model="captureCursor"
-                active-text="捕获鼠标"
+                :active-text="t('recordingToolbar.captureCursor')"
                 :disabled="!canEditRecordingConfig"
                 @change="onToolbarSettingChange('recordingCaptureCursor', $event)"
             />
               <el-switch
                   v-model="captureToolbar"
-                  active-text="捕获工具栏"
+                  :active-text="t('recordingToolbar.captureToolbar')"
                   :disabled="!canEditRecordingConfig"
                   @change="onToolbarSettingChange('recordingToolbarContentProtected', $event)"
               />
           </div>
           <div class="toolbar-settings-row">
-            <span class="toolbar-settings-label">默认帧率</span>
+            <span class="toolbar-settings-label">{{ t('recordingToolbar.defaultFps') }}</span>
             <el-input-number
                 :controls="false"
                 :max="120"
@@ -224,7 +224,7 @@
             />
           </div>
           <div class="toolbar-settings-row">
-            <span class="toolbar-settings-label">视频码率 (kbps)</span>
+            <span class="toolbar-settings-label">{{ t('recordingToolbar.videoBitrate') }}</span>
             <el-input-number
                 :controls="false"
                 :max="50000"
@@ -237,7 +237,7 @@
             />
           </div>
           <div class="toolbar-settings-row">
-            <span class="toolbar-settings-label">音频码率 (kbps)</span>
+            <span class="toolbar-settings-label">{{ t('recordingToolbar.audioBitrate') }}</span>
             <el-input-number
                 :controls="false"
                 :max="512"
@@ -257,6 +257,7 @@
 
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch} from "vue";
+import {useI18n} from "vue-i18n";
 import {provideGlobalConfig} from "element-plus";
 import zhCn from "element-plus/dist/locale/zh-cn";
 import {listen} from "@tauri-apps/api/event";
@@ -264,6 +265,8 @@ import {invoke} from "@tauri-apps/api/core";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import {AISettingsService, RecordingService} from "@/services/ipc.js";
 import {GripVertical, Mic, MicOff, Settings} from "lucide-vue-next";
+
+const {t} = useI18n()
 
 provideGlobalConfig({locale: zhCn});
 
@@ -340,12 +343,12 @@ const currentRecordingState = computed(() => {
   return state.sessionId ? "recording" : "idle";
 });
 const recordingHintText = computed(() => {
-  if (!recordingFeatureEnabled.value) return "录屏已停用";
-  if (rawRecordingState.value === "recording") return "正在录屏";
-  if (rawRecordingState.value === "paused") return "录屏已暂停";
-  if (rawRecordingState.value === "starting") return "录屏启动中";
-  if (rawRecordingState.value === "stopping") return "录屏停止中";
-  return "开始录制";
+  if (!recordingFeatureEnabled.value) return t('recordingToolbar.recordingDisabled');
+  if (rawRecordingState.value === "recording") return t('recordingToolbar.recording');
+  if (rawRecordingState.value === "paused") return t('recordingToolbar.recordingPaused');
+  if (rawRecordingState.value === "starting") return t('recordingToolbar.starting');
+  if (rawRecordingState.value === "stopping") return t('recordingToolbar.stopping');
+  return t('recordingToolbar.startRecording');
 });
 const collapsedDisplayText = computed(() => {
   if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
@@ -354,10 +357,10 @@ const collapsedDisplayText = computed(() => {
   return recordingHintText.value;
 });
 const capsuleTooltipContent = computed(() => {
-  if (!recordingFeatureEnabled.value) return "录屏功能已停用";
-  if (rawRecordingState.value === "recording") return "正在录制，点击暂停";
-  if (rawRecordingState.value === "paused") return "已暂停，点击恢复录制";
-  if (rawRecordingState.value === "idle") return "开始录制，点击开始";
+  if (!recordingFeatureEnabled.value) return t('recordingToolbar.disabledTooltip');
+  if (rawRecordingState.value === "recording") return t('recordingToolbar.recordingTooltip');
+  if (rawRecordingState.value === "paused") return t('recordingToolbar.pausedTooltip');
+  if (rawRecordingState.value === "idle") return t('recordingToolbar.startTooltip');
   return recordingHintText.value;
 });
 const isBusy = computed(() => loadingAction.value !== null);
@@ -376,9 +379,9 @@ const canToggleMic = computed(() => {
   return microphoneDeviceId.value && (s === "recording" || s === "paused");
 });
 const micToggleTooltip = computed(() => {
-  if (!microphoneDeviceId.value) return "请先在设置中选择麦克风设备";
-  if (!canToggleMic.value) return "录制过程中才能切换麦克风状态";
-  return isMicMuted.value ? "点击开启麦克风（Ctrl+Space）" : "点击关闭麦克风（Ctrl+Space）";
+  if (!microphoneDeviceId.value) return t('recordingToolbar.selectMicFirst');
+  if (!canToggleMic.value) return t('recordingToolbar.micDuringRecording');
+  return isMicMuted.value ? t('recordingToolbar.clickEnableMic') : t('recordingToolbar.clickDisableMic');
 });
 
 const measureCapsuleContentHeight = () => {
@@ -462,7 +465,7 @@ const clearInlineNotice = () => {
 };
 
 const showBackendErrorInSettings = async (message) => {
-  const text = String(message || "录屏异常");
+  const text = String(message || t('recordingToolbar.recordingError'));
   keepSettingsOpenUntilTs = Date.now() + 3000;
   capsuleSettingsVisible.value = true;
 
@@ -498,7 +501,7 @@ const pickRecordingRegion = async () => {
   } catch (_e) {
     // 忽略隐藏失败
   }
-  
+
   // 自动收起设置面板（注意：由于前面已经 hide，这里的 DOM 变化不会立刻显示在屏幕上，但能保证截图结束后再次 show 时面板是收起状态）
   capsuleSettingsVisible.value = false;
 
@@ -508,7 +511,7 @@ const pickRecordingRegion = async () => {
   try {
     await invoke("open_screenshot_editor", {mode: "recording_region"});
   } catch (e) {
-    showInlineNotice(`打开区域框选失败: ${String(e)}`, "error");
+    showInlineNotice(t('recordingToolbar.openRegionFailed', {error: String(e)}), "error");
     // 失败时重新显示工具栏
     wasHiddenForRegionPick = false
     try {
@@ -537,19 +540,19 @@ const onTargetModeClick = (mode) => {
 };
 
 const regionCoordinateText = computed(() => {
-  if (!regionSelectionReady.value) return "未选择";
+  if (!regionSelectionReady.value) return t('recordingToolbar.notSelected');
   const x1 = Math.round(recordRegionX.value);
   const y1 = Math.round(recordRegionY.value);
   const x2 = Math.round(recordRegionX.value + recordRegionWidth.value);
   const y2 = Math.round(recordRegionY.value + recordRegionHeight.value);
-  return `左上(${x1}, ${y1}) 右下(${x2}, ${y2})`;
+  return t('recordingToolbar.regionCoordinate', {x1, y1, x2, y2});
 });
 
 const formatTargetWindowLabel = (item) => {
   const title = String(item?.title || "").trim();
   const processNameRaw = String(item?.processName || item?.process_name || "").trim();
   const processName = processNameRaw.replace(/\.exe$/i, "");
-  if (!title) return processName || "未知窗口";
+  if (!title) return processName || t('recordingToolbar.unknownWindow');
   if (!processName) return title;
   return `${processName} - ${title}`;
 };
@@ -570,11 +573,11 @@ const toggleRecordingState = async () => {
       loadingAction.value = "start";
       autoCollapseAfterStartPending = true;
       if (recordTargetType.value === "window" && !recordTargetWindowId.value) {
-        showInlineNotice("请先选择录制窗口", "warning");
+        showInlineNotice(t('recordingToolbar.selectWindowFirst'), "warning");
         return;
       }
       if (recordTargetType.value === "region" && (recordRegionWidth.value <= 0 || recordRegionHeight.value <= 0)) {
-        showInlineNotice("录制区域宽高必须大于 0", "warning");
+        showInlineNotice(t('recordingToolbar.regionSizeInvalid'), "warning");
         return;
       }
       const targetId = recordTargetType.value === "window"
@@ -666,9 +669,9 @@ const toggleMicState = async () => {
       microphoneDeviceId: microphoneDeviceId.value || "",
     });
     isMicMuted.value = newMutedState;
-    showInlineNotice(newMutedState ? "麦克风已临时关闭" : "麦克风已重新开启", "warning");
+    showInlineNotice(newMutedState ? t('recordingToolbar.micTemporarilyOff') : t('recordingToolbar.micReenabled'), "warning");
   } catch (e) {
-    showBackendErrorInSettings(`切换麦克风状态失败: ${String(e)}`);
+    showBackendErrorInSettings(t('recordingToolbar.toggleMicFailed', {error: String(e)}));
   }
 };
 
@@ -691,7 +694,7 @@ const openRecordingFolder = async () => {
   try {
     await RecordingService.openFolder();
   } catch (e) {
-    showInlineNotice(`打开录制保存文件夹失败: ${String(e)}`, "error");
+    showInlineNotice(t('recordingToolbar.openSaveFolderFailed', {error: String(e)}), "error");
   } finally {
     window.setTimeout(() => {
       isOpeningFolder.value = false;
@@ -738,7 +741,7 @@ const onSystemAudioDeviceChange = async (deviceId) => {
       recordingCaptureSystemAudio: captureSystemAudio.value,
     });
   } catch (e) {
-    showInlineNotice(`保存系统音频设置失败: ${String(e)}`, "error");
+    showInlineNotice(t('recordingToolbar.saveAudioSettingsFailed', {error: String(e)}), "error");
   }
 };
 
@@ -784,7 +787,7 @@ const onMicrophoneDeviceChange = async (deviceId) => {
       recordingMicrophoneDeviceId: microphoneDeviceId.value || "",
     });
   } catch (e) {
-    showInlineNotice(`保存麦克风设置失败: ${String(e)}`, "error");
+    showInlineNotice(t('recordingToolbar.saveMicSettingsFailed', {error: String(e)}), "error");
   }
 };
 
@@ -915,7 +918,7 @@ const onToolbarSettingChange = async (key, rawValue) => {
   try {
     await AISettingsService.saveSettings(patch);
   } catch (e) {
-    showInlineNotice(`保存录制设置失败: ${String(e)}`, "error");
+    showInlineNotice(t('recordingToolbar.saveRecordingSettingsFailed', {error: String(e)}), "error");
   }
 };
 
@@ -971,7 +974,7 @@ onMounted(async () => {
   });
   unlistenRecordingError = await listen("recording-error", (event) => {
     const payload = event.payload || {};
-    const message = String(payload.message || "录屏异常");
+    const message = String(payload.message || t('recordingToolbar.recordingError'));
     const code = String(payload.code || "");
     state.state = "idle";
     state.sessionId = null;
@@ -1045,13 +1048,13 @@ onMounted(async () => {
 
     if (status === "started") {
 
-      showInlineNotice(message || "正在后台合并音频...", "warning");
+      showInlineNotice(message || t('recordingToolbar.mergingAudioInBackground'), "warning");
     } else if (status === "completed") {
 
       clearInlineNotice();
     } else if (status === "failed") {
 
-      showInlineNotice(message || "音频合并失败，视频文件已保存", "error");
+      showInlineNotice(message || t('recordingToolbar.audioMergeFailed'), "error");
     }
   });
 
@@ -1059,8 +1062,8 @@ onMounted(async () => {
   unlistenMicToggled = await listen("recording-mic-toggled", (event) => {
     const payload = event.payload || {};
     isMicMuted.value = !payload.enabled;
-    const action = payload.enabled ? "开启" : "关闭";
-    showInlineNotice(`麦克风已${action}（快捷键）`, "warning");
+    const action = payload.enabled ? t('recordingToolbar.micActionEnable') : t('recordingToolbar.micActionDisable');
+    showInlineNotice(t('recordingToolbar.micToggledByShortcut', {action}), "warning");
   });
 
 

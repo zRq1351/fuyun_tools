@@ -1,7 +1,9 @@
 <template>
   <div :class="['container', `theme-${currentTheme}`]" @mousedown.left="handleContainerMouseDown">
     <div class="window-titlebar">
-      <div class="window-title">{{ mode === 'translation' ? '翻译结果' : '解释结果' }}</div>
+      <div class="window-title">
+        {{ mode === 'translation' ? t('resultDisplay.translationResult') : t('resultDisplay.explanationResult') }}
+      </div>
       <div class="window-controls">
         <button class="window-btn" @click.stop="minimizeWindow" @mousedown.stop>
           <el-icon>
@@ -23,34 +25,34 @@
     </div>
     <div class="header">
       <div v-if="mode === 'explanation'" class="control-group">
-        <span class="label">解释语言：</span>
+        <span class="label">{{ t('resultDisplay.explainLang') }}</span>
         <el-select v-model="explanationLanguage" class="lang-select" size="small" @change="handleLanguageChange">
-          <el-option label="中文" value="中文"/>
-          <el-option label="英文" value="英文"/>
-          <el-option label="日文" value="日文"/>
-          <el-option label="韩文" value="韩文"/>
+          <el-option :label="t('resultDisplay.chinese')" value="中文"/>
+          <el-option :label="t('resultDisplay.englishLang')" value="英文"/>
+          <el-option :label="t('resultDisplay.japaneseLang')" value="日文"/>
+          <el-option :label="t('resultDisplay.koreanLang')" value="韩文"/>
         </el-select>
       </div>
 
       <div v-if="mode === 'translation'" class="control-group">
-        <span class="label">原文：</span>
-        <span class="auto-source-tag">自动识别</span>
+        <span class="label">{{ t('resultDisplay.sourceText') }}</span>
+        <span class="auto-source-tag">{{ t('resultDisplay.autoDetect') }}</span>
         <span class="arrow">→</span>
         <el-select v-model="targetLanguage" class="lang-select" size="small" @change="handleLanguageChange">
-          <el-option label="简体中文" value="简体中文"/>
-          <el-option label="繁体中文" value="繁体中文"/>
-          <el-option label="英语" value="英语"/>
-          <el-option label="日语" value="日语"/>
-          <el-option label="韩语" value="韩语"/>
-          <el-option label="法语" value="法语"/>
-          <el-option label="德语" value="德语"/>
-          <el-option label="西班牙语" value="西班牙语"/>
+          <el-option :label="t('resultDisplay.simplifiedChinese')" value="简体中文"/>
+          <el-option :label="t('resultDisplay.traditionalChinese')" value="繁体中文"/>
+          <el-option :label="t('resultDisplay.english')" value="英语"/>
+          <el-option :label="t('resultDisplay.japanese')" value="日语"/>
+          <el-option :label="t('resultDisplay.korean')" value="韩语"/>
+          <el-option :label="t('resultDisplay.french')" value="法语"/>
+          <el-option :label="t('resultDisplay.german')" value="德语"/>
+          <el-option :label="t('resultDisplay.spanish')" value="西班牙语"/>
         </el-select>
       </div>
 
       <div class="right-controls">
         <el-tooltip
-            :content="showOriginal ? '隐藏原文' : '显示原文'"
+            :content="showOriginal ? t('resultDisplay.hideSource') : t('resultDisplay.showSource')"
             :show-after="500"
             placement="bottom"
         >
@@ -68,7 +70,7 @@
       <div class="content-actions">
         <el-tooltip
             :show-after="500"
-            content="复制原文"
+            :content="t('resultDisplay.copySource')"
             placement="bottom"
         >
           <div class="icon-btn action-btn copy-btn" @click="copyOriginalText">
@@ -91,7 +93,7 @@
       <div class="content-actions">
         <el-tooltip
             :show-after="500"
-            content="复制结果"
+            :content="t('resultDisplay.copyResult')"
             placement="bottom"
         >
           <div class="icon-btn action-btn copy-btn" @click="copyResultText">
@@ -112,7 +114,7 @@
           <span class="loading-dot"></span>
           <span class="loading-dot"></span>
           <span class="loading-dot"></span>
-          <span class="loading-text">正在生成结果</span>
+          <span class="loading-text">{{ t('resultDisplay.generating') }}</span>
         </div>
         <div v-html="resultHtml"></div>
       </div>
@@ -129,11 +131,13 @@ import {invoke} from '@tauri-apps/api/core'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import {ElMessage} from 'element-plus'
 import {CloseBold, CopyDocument, DocumentCopy, FullScreen, Hide, Minus, View} from '@element-plus/icons-vue'
+import {useI18n} from 'vue-i18n'
 import {AIService, ClipboardService} from '@/services/ipc.js'
 import {handleAppError} from '@/utils/errorHandler.js'
 import {useTheme} from '../../composables/useTheme'
 import {useEventListeners} from '../../composables/useEventListeners'
 
+const {t} = useI18n()
 const mode = ref('translation')
 const originalText = ref('')
 const resultText = ref('')
@@ -190,7 +194,7 @@ const minimizeWindow = async () => {
   try {
     await currentWindow.minimize()
   } catch (error) {
-    handleAppError(error, '最小化窗口失败')
+    handleAppError(error, t('resultDisplay.minimizeFailed'))
   }
 }
 
@@ -204,7 +208,7 @@ const toggleWindowMaximize = async () => {
     }
     isWindowMaximized.value = !fullscreen
   } catch (error) {
-    handleAppError(error, '切换窗口放大状态失败')
+    handleAppError(error, t('resultDisplay.toggleSizeFailed'))
   }
 }
 
@@ -459,7 +463,7 @@ const handleLanguageChange = async () => {
     }
   } catch (error) {
     isWaitingResult.value = false
-    handleAppError(error, '请求失败')
+    handleAppError(error, t('resultDisplay.requestFailed'))
     resultText.value = `Error: ${error.message || error}`
   }
 }
@@ -469,9 +473,9 @@ const copyOriginalText = async () => {
   if (!text) return
   try {
     await ClipboardService.copyText(text)
-    ElMessage.success('已复制原文')
+    ElMessage.success(t('resultDisplay.sourceCopied'))
   } catch (error) {
-    handleAppError(error, '复制原文失败')
+    handleAppError(error, t('resultDisplay.copySourceFailed'))
   }
 }
 
@@ -480,9 +484,9 @@ const copyResultText = async () => {
   if (!text) return
   try {
     await ClipboardService.copyText(text)
-    ElMessage.success('已复制结果')
+    ElMessage.success(t('resultDisplay.resultCopied'))
   } catch (error) {
-    handleAppError(error, '复制结果失败')
+    handleAppError(error, t('resultDisplay.copyResultFailed'))
   }
 }
 

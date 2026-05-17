@@ -2,50 +2,67 @@
   <el-form label-position="top">
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">剪贴板存储占用</div>
+        <div class="section-title">{{ $t('settings.developer.clipboardStorage') }}</div>
       </template>
       <el-form-item>
-        <el-button size="small" @click="refreshImageStorageMetrics">刷新占用</el-button>
+        <el-button size="small" @click="refreshImageStorageMetrics">{{
+            $t('settings.developer.refreshUsage')
+          }}
+        </el-button>
       </el-form-item>
       <el-form-item>
         <div class="metrics-card">
-          <div class="metrics-line">内存缓存 {{ formatBytes(imageStorageMetrics.memory_bytes) }} /
+          <div class="metrics-line">{{ $t('settings.developer.memoryCache') }}
+            {{ formatBytes(imageStorageMetrics.memory_bytes) }} /
             {{ formatBytes(imageStorageMetrics.memory_budget_bytes) }}
           </div>
-          <div class="metrics-line">磁盘占用 {{ formatBytes(imageStorageMetrics.disk_bytes) }} /
+          <div class="metrics-line">{{ $t('settings.developer.diskUsage') }}
+            {{ formatBytes(imageStorageMetrics.disk_bytes) }} /
             {{ formatBytes(imageStorageMetrics.disk_limit_bytes) }}
           </div>
-          <div class="metrics-line">图片条目 {{ Number(imageStorageMetrics.item_count || 0) }}（置顶
-            {{ Number(imageStorageMetrics.pinned_count || 0) }}）
+          <div class="metrics-line">{{ $t('settings.developer.imageEntries') }}
+            {{ Number(imageStorageMetrics.item_count || 0) }} {{ $t('settings.developer.pinned') }}
+            {{ Number(imageStorageMetrics.pinned_count || 0) }}
           </div>
         </div>
       </el-form-item>
     </el-card>
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">VC Runtime 调试</div>
+        <div class="section-title">{{ $t('settings.developer.vcRuntimeDebug') }}</div>
       </template>
-      <el-form-item label="强制模拟缺失（仅开发模式）">
+      <el-form-item :label="$t('settings.developer.forceMissing')">
         <el-switch v-model="vcRuntimeDebug.forceMissing"/>
       </el-form-item>
       <el-form-item>
-        <el-button size="small" type="primary" @click="saveVcRuntimeDebugConfig">保存配置</el-button>
-        <el-button size="small" @click="refreshVcRuntimeDebugState">刷新状态</el-button>
+        <el-button size="small" type="primary" @click="saveVcRuntimeDebugConfig">{{
+            $t('settings.developer.saveConfig')
+          }}
+        </el-button>
+        <el-button size="small" @click="refreshVcRuntimeDebugState">{{
+            $t('settings.developer.refreshStatus')
+          }}
+        </el-button>
       </el-form-item>
       <el-form-item>
         <div class="metrics-card">
-          <div class="metrics-line">当前状态：{{ vcRuntimeDebug.forceMissing ? '强制缺失' : '真实检测' }}</div>
+          <div class="metrics-line">{{
+              $t('settings.developer.currentStatus')
+            }}{{
+              vcRuntimeDebug.forceMissing ? $t('settings.developer.forceMissingStatus') : $t('settings.developer.realDetection')
+            }}
+          </div>
         </div>
       </el-form-item>
     </el-card>
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">回写去重调优</div>
+        <div class="section-title">{{ $t('settings.developer.writebackDedup') }}</div>
       </template>
-      <el-form-item label="去重开关">
+      <el-form-item :label="$t('settings.developer.dedupToggle')">
         <el-switch v-model="dedupConfig.enabled"/>
       </el-form-item>
-      <el-form-item label="去重窗口（毫秒）">
+      <el-form-item :label="$t('settings.developer.dedupWindow')">
         <el-input-number
             v-model="dedupConfig.windowMs"
             :max="10000"
@@ -54,54 +71,78 @@
             controls-position="right"
         />
       </el-form-item>
-      <el-form-item label="日志开关">
+      <el-form-item :label="$t('settings.developer.logToggle')">
         <el-switch v-model="dedupConfig.logEnabled"/>
       </el-form-item>
       <el-form-item>
-        <el-button size="small" type="primary" @click="saveDedupConfig">保存配置</el-button>
-        <el-button size="small" @click="refreshDedupState">刷新状态</el-button>
-        <el-button size="small" @click="resetDedupMetrics">清零计数</el-button>
+        <el-button size="small" type="primary" @click="saveDedupConfig">{{
+            $t('settings.developer.saveConfig')
+          }}
+        </el-button>
+        <el-button size="small" @click="refreshDedupState">{{ $t('settings.developer.refreshStatus') }}</el-button>
+        <el-button size="small" @click="resetDedupMetrics">{{ $t('settings.developer.resetCount') }}</el-button>
       </el-form-item>
       <el-form-item>
         <div class="metrics-card">
-          <div class="metrics-line">总请求 {{ dedupMetrics.totalRequests }}</div>
-          <div class="metrics-line">命中总数 {{ dedupMetrics.dedupHits }}</div>
-          <div class="metrics-line">请求ID命中 {{ dedupMetrics.requestIdHits }}</div>
-          <div class="metrics-line">文本哈希命中 {{ dedupMetrics.textHashHits }}</div>
-          <div class="metrics-line">时间窗口请求 {{ dedupMetrics.windowRequests }}</div>
-          <div class="metrics-line">时间窗口命中 {{ dedupMetrics.windowHits }}</div>
-          <div class="metrics-line">时间窗口命中率 {{ dedupMetrics.windowHitRate }}</div>
-          <div class="metrics-line">最近一次命中时间 {{ dedupMetrics.lastHitAt }}</div>
-          <div class="metrics-line">日志计数 {{ dedupMetrics.logCount }}</div>
+          <div class="metrics-line">{{ $t('settings.developer.totalRequests') }} {{ dedupMetrics.totalRequests }}</div>
+          <div class="metrics-line">{{ $t('settings.developer.totalHits') }} {{ dedupMetrics.dedupHits }}</div>
+          <div class="metrics-line">{{ $t('settings.developer.requestIdHits') }} {{ dedupMetrics.requestIdHits }}</div>
+          <div class="metrics-line">{{ $t('settings.developer.textHashHits') }} {{ dedupMetrics.textHashHits }}</div>
+          <div class="metrics-line">{{ $t('settings.developer.windowRequests') }} {{
+              dedupMetrics.windowRequests
+            }}
+          </div>
+          <div class="metrics-line">{{ $t('settings.developer.windowHits') }} {{ dedupMetrics.windowHits }}</div>
+          <div class="metrics-line">{{ $t('settings.developer.windowHitRate') }} {{ dedupMetrics.windowHitRate }}</div>
+          <div class="metrics-line">{{ $t('settings.developer.lastHitTime') }} {{ dedupMetrics.lastHitAt }}</div>
+          <div class="metrics-line">{{ $t('settings.developer.logCount') }} {{ dedupMetrics.logCount }}</div>
         </div>
       </el-form-item>
     </el-card>
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">图片持久化队列</div>
+        <div class="section-title">{{ $t('settings.developer.imageQueue') }}</div>
       </template>
       <el-form-item>
-        <el-button size="small" @click="refreshImagePersistQueueMetrics">刷新队列指标</el-button>
+        <el-button size="small" @click="refreshImagePersistQueueMetrics">{{
+            $t('settings.developer.refreshQueueMetrics')
+          }}
+        </el-button>
       </el-form-item>
       <el-form-item>
         <div class="metrics-card">
-          <div class="metrics-line">队列容量 {{ Number(imagePersistQueueMetrics.queueSize || 0) }}</div>
-          <div class="metrics-line">发送超时 {{ Number(imagePersistQueueMetrics.sendTimeoutMs || 0) }}ms</div>
-          <div class="metrics-line">重试间隔 {{ Number(imagePersistQueueMetrics.retryIntervalMs || 0) }}ms</div>
-          <div class="metrics-line">满队次数 {{ Number(imagePersistQueueMetrics.fullCount || 0) }}</div>
-          <div class="metrics-line">超时丢弃 {{ Number(imagePersistQueueMetrics.timeoutDropCount || 0) }}</div>
-          <div class="metrics-line">累计等待 {{ Number(imagePersistQueueMetrics.waitMsTotal || 0) }}ms</div>
-          <div class="metrics-line">平均等待 {{ imagePersistQueueMetrics.avgWaitMs }}</div>
+          <div class="metrics-line">{{ $t('settings.developer.queueCapacity') }}
+            {{ Number(imagePersistQueueMetrics.queueSize || 0) }}
+          </div>
+          <div class="metrics-line">{{ $t('settings.developer.sendTimeout') }}
+            {{ Number(imagePersistQueueMetrics.sendTimeoutMs || 0) }}ms
+          </div>
+          <div class="metrics-line">{{ $t('settings.developer.retryInterval') }}
+            {{ Number(imagePersistQueueMetrics.retryIntervalMs || 0) }}ms
+          </div>
+          <div class="metrics-line">{{ $t('settings.developer.fullQueueCount') }}
+            {{ Number(imagePersistQueueMetrics.fullCount || 0) }}
+          </div>
+          <div class="metrics-line">{{ $t('settings.developer.timeoutDrop') }}
+            {{ Number(imagePersistQueueMetrics.timeoutDropCount || 0) }}
+          </div>
+          <div class="metrics-line">{{ $t('settings.developer.totalWait') }}
+            {{ Number(imagePersistQueueMetrics.waitMsTotal || 0) }}ms
+          </div>
+          <div class="metrics-line">{{ $t('settings.developer.avgWait') }} {{
+              imagePersistQueueMetrics.avgWaitMs
+            }}
+          </div>
         </div>
       </el-form-item>
     </el-card>
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">录制调试</div>
+        <div class="section-title">{{ $t('settings.developer.recordingDebug') }}</div>
       </template>
-      <el-form-item label="强制模拟 WGC 失败（一键降级为 FFmpeg 窗口模式）">
+      <el-form-item :label="$t('settings.developer.forceWgcFail')">
         <el-switch v-model="recordingDebug.forceFfmpegFallback" @change="saveRecordingDebugConfig"/>
-        <div class="form-hint">开启后，窗口录制将直接使用 FFmpeg gdigrab 模式，跳过原生 WGC 捕获。</div>
+        <div class="form-hint">{{ $t('settings.developer.forceWgcFailHint') }}</div>
       </el-form-item>
     </el-card>
   </el-form>
@@ -109,8 +150,11 @@
 
 <script setup>
 import {onMounted, onUnmounted, ref} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {ElMessage} from 'element-plus'
 import {AISettingsService} from '@/services/ipc.js'
+
+const {t} = useI18n()
 
 const imageStorageMetrics = ref({})
 const vcRuntimeDebug = ref({
@@ -132,7 +176,7 @@ const dedupMetrics = ref({
   windowRequests: 0,
   windowHits: 0,
   windowHitRate: '0.00%',
-  lastHitAt: '未命中',
+  lastHitAt: t('settings.developer.noHit'),
   logCount: 0
 })
 const imagePersistQueueMetrics = ref({
@@ -178,7 +222,7 @@ const saveVcRuntimeDebugConfig = async () => {
   vcRuntimeDebug.value = {
     forceMissing: !!state?.forceMissing
   }
-  ElMessage.success('VC Runtime 调试配置已保存')
+  ElMessage.success(t('settings.developer.vcDebugSaved'))
 }
 
 const refreshRecordingDebugState = async () => {
@@ -217,9 +261,9 @@ const applyDedupState = (state) => {
 }
 
 const formatTimestamp = (timestampMs) => {
-  if (!timestampMs) return '未命中'
+  if (!timestampMs) return t('settings.developer.noHit')
   const date = new Date(timestampMs)
-  if (Number.isNaN(date.getTime())) return '未命中'
+  if (Number.isNaN(date.getTime())) return t('settings.developer.noHit')
   return date.toLocaleString()
 }
 
@@ -235,13 +279,13 @@ const saveDedupConfig = async () => {
     logEnabled: dedupConfig.value.logEnabled
   })
   applyDedupState(state || {})
-  ElMessage.success('回写去重配置已保存')
+  ElMessage.success(t('settings.developer.dedupSaved'))
 }
 
 const resetDedupMetrics = async () => {
   const state = await AISettingsService.setCopyPasteDedupDebugConfig({resetMetrics: true})
   applyDedupState(state || {})
-  ElMessage.success('回写去重计数已清零')
+  ElMessage.success(t('settings.developer.dedupCleared'))
 }
 
 const formatBytes = (bytes) => {

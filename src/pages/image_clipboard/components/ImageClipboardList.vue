@@ -35,17 +35,19 @@
           <Close/>
         </el-icon>
       </div>
-      <button class="download-btn" title="下载到目录" @click.stop="downloadItem(entry.item.id)">
+      <button :title="$t('imageClipboard.downloadToDir')" class="download-btn"
+              @click.stop="downloadItem(entry.item.id)">
         <el-icon>
           <Download/>
         </el-icon>
       </button>
-      <button class="fullscreen-btn" title="全屏预览" @click.stop="openFullscreen(entry.item.id)">
+      <button :title="$t('imageClipboard.fullscreenPreview')" class="fullscreen-btn"
+              @click.stop="openFullscreen(entry.item.id)">
         <el-icon>
           <FullScreen/>
         </el-icon>
       </button>
-      <button :class="{ active: entry.pinned }" class="pin-btn" title="置顶"
+      <button :class="{ active: entry.pinned }" :title="$t('imageClipboard.pin')" class="pin-btn"
               @click.stop="promoteItem(entry.item.id)">
         <Pin class="pin-lucide"/>
       </button>
@@ -61,7 +63,7 @@
               tag
             }}</span>
         </div>
-        <div v-else class="tag-chip-empty">无标签</div>
+        <div v-else class="tag-chip-empty">{{ $t('imageClipboard.noTags') }}</div>
       </div>
       <div class="item-content">
         <img :src="getPreviewDataUrl(entry.item)" alt="" class="image-preview" decoding="async" draggable="false"
@@ -75,7 +77,7 @@
       </el-icon>
       <div class="load-more-tail-text">
         <span>左滑</span>
-        <span>{{ isLoadingMore ? '加载中' : '加载更多' }}</span>
+        <span>{{ isLoadingMore ? $t('imageClipboard.loading') : $t('imageClipboard.loadMore') }}</span>
       </div>
     </div>
     <div aria-hidden="true" class="spacer"></div>

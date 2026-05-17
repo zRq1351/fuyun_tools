@@ -14,7 +14,8 @@
             @keydown="handleKeydown"
         />
         <div class="header-actions">
-          <button v-if="hasCategorizedApps && !searchQuery" :title="viewMode === 'category' ? '列表视图' : '分类视图'"
+          <button v-if="hasCategorizedApps && !searchQuery"
+                  :title="viewMode === 'category' ? t('launcher.listView') : t('launcher.categoryView')"
                   class="mode-button"
                   @click="toggleViewMode"
                   @mousedown.stop>
@@ -23,23 +24,26 @@
               <List v-else/>
             </el-icon>
           </button>
-          <button :class="{ spinning: isRefreshing }" class="mode-button" title="刷新应用列表" @click="handleRefresh"
+          <button :class="{ spinning: isRefreshing }" :title="t('launcher.refreshApps')" class="mode-button"
+                  @click="handleRefresh"
                   @mousedown.stop>
             <el-icon :size="14">
               <Refresh/>
             </el-icon>
           </button>
-          <button class="mode-button" title="管理分类" @click="showCategoryManager = true" @mousedown.stop>
+          <button :title="t('launcher.manageCategories')" class="mode-button" @click="showCategoryManager = true"
+                  @mousedown.stop>
             <el-icon :size="14">
               <Setting/>
             </el-icon>
           </button>
-          <button class="mode-button" title="管理命令" @click="showCommandManager = true" @mousedown.stop>
+          <button :title="t('launcher.manageCommands')" class="mode-button" @click="showCommandManager = true"
+                  @mousedown.stop>
             <el-icon :size="14">
               <Tools/>
             </el-icon>
           </button>
-          <button class="mode-button" title="手动添加应用" @click="showAddManualDialog = true" @mousedown.stop>
+          <button :title="t('launcher.addApp')" class="mode-button" @click="showAddManualDialog = true" @mousedown.stop>
             <el-icon :size="14">
               <Plus/>
             </el-icon>
@@ -56,7 +60,7 @@
         <el-icon :size="24" class="loading-icon">
           <Loading/>
         </el-icon>
-        <span>正在扫描应用，请稍候...</span>
+        <span>{{ t('launcher.scanning') }}</span>
       </div>
 
       <div v-else class="content-area">
@@ -80,7 +84,7 @@
             @category-changed="handleCategoryChanged"
         />
         <div v-if="commandResults.length > 0" class="command-section">
-          <div class="command-header">命令</div>
+          <div class="command-header">{{ t('launcher.commands') }}</div>
           <div
               v-for="(item, index) in commandResults"
               :key="item.id"
@@ -109,22 +113,23 @@
         <!-- 手动添加应用对话框 -->
         <div v-if="showAddManualDialog" class="dialog-overlay" @click.self="cancelAddManual">
           <div class="manual-dialog">
-            <div class="dialog-title">手动添加应用</div>
+            <div class="dialog-title">{{ t('launcher.addAppTitle') }}</div>
             <div class="form-group">
-              <label>应用名称</label>
-              <input v-model="manualForm.name" class="form-input" placeholder="输入应用名称"/>
+              <label>{{ t('launcher.appName') }}</label>
+              <input v-model="manualForm.name" :placeholder="t('launcher.appNamePlaceholder')" class="form-input"/>
             </div>
             <div class="form-group">
-              <label>应用程序</label>
+              <label>{{ t('launcher.appPath') }}</label>
               <div class="file-input-row">
-                <input v-model="manualForm.path" class="form-input" placeholder="选择 .exe 或 .lnk 文件" readonly/>
-                <button class="dialog-btn browse" @click="browseManualFile">浏览</button>
+                <input v-model="manualForm.path" :placeholder="t('launcher.appPathPlaceholder')" class="form-input"
+                       readonly/>
+                <button class="dialog-btn browse" @click="browseManualFile">{{ t('common.browse') }}</button>
               </div>
             </div>
             <div class="dialog-actions">
-              <button class="dialog-btn cancel" @click="cancelAddManual">取消</button>
+              <button class="dialog-btn cancel" @click="cancelAddManual">{{ t('common.cancel') }}</button>
               <button :disabled="!manualForm.name || !manualForm.path" class="dialog-btn confirm"
-                      @click="confirmAddManual">确定
+                      @click="confirmAddManual">{{ t('common.ok') }}
               </button>
             </div>
           </div>
@@ -142,12 +147,15 @@ import {Close, Grid, List, Loading, Plus, Refresh, Setting, Tools} from '@elemen
 import {listen} from '@tauri-apps/api/event'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {invoke} from '@tauri-apps/api/core'
+import {useI18n} from 'vue-i18n'
 import SearchBox from './components/SearchBox.vue'
 import AppGrid from './components/AppGrid.vue'
 import AppList from './components/AppList.vue'
 import CategoryManager from './components/CategoryManager.vue'
 import CommandManager from './components/CommandManager.vue'
 import {useLauncherSearch} from './composables/useLauncherSearch'
+
+const {t} = useI18n()
 
 const searchQuery = ref('')
 const commandResults = ref([])
@@ -205,7 +213,7 @@ const handleFirstScan = async () => {
     await loadCustomCommands()
   } catch (error) {
     console.error('Scan error:', error)
-    ElMessage.error('扫描应用失败')
+    ElMessage.error(t('launcher.scanFailed'))
   } finally {
     isLoading.value = false
   }
@@ -219,12 +227,12 @@ const handleRefresh = async () => {
     allApps.value = apps
     launcherConfig.value = await invoke('get_launcher_config')
     await loadIcons()
-    ElMessage.success('应用列表已刷新')
+    ElMessage.success(t('launcher.refreshed'))
     commandResults.value = []
     activeIndex.value = 0
   } catch (error) {
     console.error('Refresh error:', error)
-    ElMessage.error('刷新失败')
+    ElMessage.error(t('launcher.refreshFailed'))
   } finally {
     isRefreshing.value = false
   }
@@ -349,13 +357,13 @@ const handleSelect = async (item) => {
     if (error === 'APP_NOT_FOUND') {
       try {
         await ElMessageBox.confirm(
-            '该应用已被卸载或移动位置，是否从列表中移除？',
-            '应用不存在',
-            {confirmButtonText: '移除', cancelButtonText: '取消', type: 'warning'}
+            t('launcher.appNotFound'),
+            t('launcher.appNotFoundTitle'),
+            {confirmButtonText: t('common.remove'), cancelButtonText: t('common.cancel'), type: 'warning'}
         )
         await invoke('remove_app_record', {appId: item.id})
         allApps.value = allApps.value.filter(a => a.id !== item.id)
-        ElMessage.success('已移除')
+        ElMessage.success(t('launcher.appRemoved'))
       } catch {
       }
     } else {
@@ -432,7 +440,7 @@ const browseManualFile = async () => {
   try {
     const {open} = await import('@tauri-apps/plugin-dialog')
     const selected = await open({
-      filters: [{name: '可执行文件', extensions: ['exe', 'lnk']}],
+      filters: [{name: t('launcher.executableFile'), extensions: ['exe', 'lnk']}],
       multiple: false
     })
     if (selected && typeof selected === 'string') {
@@ -454,10 +462,10 @@ const confirmAddManual = async () => {
     allApps.value = await invoke('get_all_apps')
     manualForm.value = {name: '', path: ''}
     showAddManualDialog.value = false
-    ElMessage.success('应用已添加')
+    ElMessage.success(t('launcher.appAdded'))
   } catch (error) {
     console.error('添加应用失败:', error)
-    ElMessage.error('添加失败')
+    ElMessage.error(t('launcher.addFailed'))
   }
 }
 

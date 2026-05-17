@@ -2,68 +2,70 @@
   <el-form :model="form" label-position="top">
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">快捷键</div>
+        <div class="section-title">{{ $t('settings.clipboard.shortcut') }}</div>
       </template>
       <div class="setting-group">
         <div class="group-grid cols-2">
-          <el-form-item label="文字剪贴板功能">
+          <el-form-item :label="$t('settings.clipboard.textEnabled')">
             <el-switch
-                :active-text="pendingToggles.textClipboard === 'disabling' ? '正在禁用...' : '启用'"
-                :inactive-text="pendingToggles.textClipboard === 'enabling' ? '正在启用...' : '停用'"
+                :active-text="pendingToggles.textClipboard === 'disabling' ? $t('common.disabling') : $t('common.enable')"
+                :inactive-text="pendingToggles.textClipboard === 'enabling' ? $t('common.enabling') : $t('common.disable')"
                 :loading="!!pendingToggles.textClipboard"
                 :model-value="form.textClipboardEnabled"
                 @update:model-value="(val) => toggleFeature('textClipboardEnabled', val)"
             />
-            <div class="form-hint">停用后不再监听文字剪贴板与快捷键</div>
+            <div class="form-hint">{{ $t('settings.clipboard.textDisabledHint') }}</div>
           </el-form-item>
-          <el-form-item label="图片剪贴板功能">
+          <el-form-item :label="$t('settings.clipboard.imageEnabled')">
             <el-switch
-                :active-text="pendingToggles.imageClipboard === 'disabling' ? '正在禁用...' : '启用'"
-                :inactive-text="pendingToggles.imageClipboard === 'enabling' ? '正在启用...' : '停用'"
+                :active-text="pendingToggles.imageClipboard === 'disabling' ? $t('common.disabling') : $t('common.enable')"
+                :inactive-text="pendingToggles.imageClipboard === 'enabling' ? $t('common.enabling') : $t('common.disable')"
                 :loading="!!pendingToggles.imageClipboard"
                 :model-value="form.imageClipboardEnabled"
                 @update:model-value="(val) => toggleFeature('imageClipboardEnabled', val)"
             />
-            <div class="form-hint">停用后不再监听图片剪贴板与快捷键</div>
+            <div class="form-hint">{{ $t('settings.clipboard.imageDisabledHint') }}</div>
           </el-form-item>
         </div>
         <div class="group-grid cols-2">
-          <el-form-item label="打开剪贴板窗口快捷键">
+          <el-form-item :label="$t('settings.clipboard.openTextWindow')">
             <el-input
                 :model-value="textDisplayValue"
                 :class="{ recording: isTextRecording }"
-                placeholder="例如: Ctrl+Shift+K"
+                :placeholder="$t('settings.clipboard.shortcutExample')"
                 readonly
             >
               <template #append>
                 <el-button-group>
-                  <el-button :type="isTextRecording ? 'danger' : 'primary'" @click="toggleTextRecording" title="修改快捷键">
+                  <el-button :title="$t('settings.clipboard.modifyShortcut')" :type="isTextRecording ? 'danger' : 'primary'"
+                             @click="toggleTextRecording">
                     <el-icon>
                       <component :is="isTextRecording ? VideoPause : Edit"/>
                     </el-icon>
                   </el-button>
-                  <el-button @click="resetTextRecording" title="恢复默认快捷键">
+                  <el-button :title="$t('settings.clipboard.resetShortcut')" @click="resetTextRecording">
                     <el-icon><RefreshLeft /></el-icon>
                   </el-button>
                 </el-button-group>
               </template>
             </el-input>
           </el-form-item>
-          <el-form-item label="打开图片剪贴板窗口快捷键">
+          <el-form-item :label="$t('settings.clipboard.openImageWindow')">
             <el-input
                 :model-value="imageDisplayValue"
                 :class="{ recording: isImageRecording }"
-                placeholder="例如: Ctrl+Shift+X"
+                :placeholder="$t('settings.clipboard.shortcutExample')"
                 readonly
             >
               <template #append>
                 <el-button-group>
-                  <el-button :type="isImageRecording ? 'danger' : 'primary'" @click="toggleImageRecording" title="修改快捷键">
+                  <el-button :title="$t('settings.clipboard.modifyShortcut')" :type="isImageRecording ? 'danger' : 'primary'"
+                             @click="toggleImageRecording">
                     <el-icon>
                       <component :is="isImageRecording ? VideoPause : Edit"/>
                     </el-icon>
                   </el-button>
-                  <el-button @click="resetImageRecording" title="恢复默认快捷键">
+                  <el-button :title="$t('settings.clipboard.resetShortcut')" @click="resetImageRecording">
                     <el-icon><RefreshLeft /></el-icon>
                   </el-button>
                 </el-button-group>
@@ -76,38 +78,38 @@
 
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">容量与写入策略</div>
+        <div class="section-title">{{ $t('settings.clipboard.capacity') }}</div>
       </template>
       <div class="setting-group">
         <div class="group-grid cols-3">
-          <el-form-item label="文字历史记录上限">
+          <el-form-item :label="$t('settings.clipboard.textMaxItems')">
             <el-input-number v-model="form.textMaxItems" :max="1000" :min="1"/>
-            <div class="form-hint">最大保存数量 1-1000</div>
+            <div class="form-hint">{{ $t('settings.clipboard.textMaxHint') }}</div>
           </el-form-item>
-          <el-form-item label="图片历史记录上限">
+          <el-form-item :label="$t('settings.clipboard.imageMaxItems')">
             <el-input-number v-model="form.imageMaxItems" :max="1000" :min="1"/>
-            <div class="form-hint">最大保存数量 1-1000</div>
+            <div class="form-hint">{{ $t('settings.clipboard.textMaxHint') }}</div>
           </el-form-item>
-          <el-form-item label="图片历史磁盘上限（MB）">
+          <el-form-item :label="$t('settings.clipboard.imageDiskLimit')">
             <el-input-number v-model="form.imageDiskLimitMb" :max="102400" :min="100"/>
-            <div class="form-hint">建议 2048MB</div>
+            <div class="form-hint">{{ $t('settings.clipboard.diskLimitHint') }}</div>
           </el-form-item>
         </div>
         <div class="group-grid cols-2">
-          <el-form-item label="图片回填模式">
+          <el-form-item :label="$t('settings.clipboard.imageFillMode')">
             <el-select v-model="form.imageFillVerifyMode">
-              <el-option label="严格模式（写后校验）" value="strict"/>
-              <el-option label="极速模式（完全不校验）" value="fast"/>
+              <el-option :label="$t('settings.clipboard.fillStrict')" value="strict"/>
+              <el-option :label="$t('settings.clipboard.fillFast')" value="fast"/>
             </el-select>
-            <div class="form-hint">极速模式更快，但成功率更依赖目标应用</div>
+            <div class="form-hint">{{ $t('settings.clipboard.fillModeHint') }}</div>
           </el-form-item>
-          <el-form-item label="上限策略">
+          <el-form-item :label="$t('settings.clipboard.limitPolicy')">
             <el-switch
                 v-model="form.groupedItemsProtectedFromLimit"
-                active-text="仅限制未分组项"
-                inactive-text="限制全部项"
+                :active-text="$t('settings.clipboard.limitUngrouped')"
+                :inactive-text="$t('settings.clipboard.limitAll')"
             />
-            <div class="form-hint">开启后，已分组内容不因上限被自动删除</div>
+            <div class="form-hint">{{ $t('settings.clipboard.limitPolicyHint') }}</div>
           </el-form-item>
         </div>
       </div>
@@ -115,49 +117,58 @@
 
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">数据管理</div>
+        <div class="section-title">{{ $t('settings.clipboard.dataManagement') }}</div>
       </template>
       <div class="management-list">
         <div class="management-item">
           <div class="management-meta">
-            <div class="management-title">文字记录</div>
-            <div class="form-hint">按条件清理仅影响未分类且未置顶项；“清除全部”为危险操作</div>
+            <div class="management-title">{{ $t('settings.clipboard.textRecords') }}</div>
+            <div class="form-hint">{{ $t('settings.clipboard.textCleanHint') }}</div>
           </div>
           <div class="action-row">
-            <el-button class="action-button" plain type="primary" @click="clearTextHistory('unclassified_unpinned')">按条件清理</el-button>
-            <el-button class="action-button" plain type="danger" @click="clearTextHistory('all')">清除全部</el-button>
+            <el-button class="action-button" plain type="primary" @click="clearTextHistory('unclassified_unpinned')">
+              {{ $t('settings.clipboard.conditionalClean') }}
+            </el-button>
+            <el-button class="action-button" plain type="danger" @click="clearTextHistory('all')">
+              {{ $t('settings.clipboard.clearAll') }}
+            </el-button>
           </div>
         </div>
         <div class="management-item">
           <div class="management-meta">
-            <div class="management-title">图片记录</div>
-            <div class="form-hint">按条件清理仅影响未分类、未置顶且无标签项；“清除全部”为危险操作</div>
+            <div class="management-title">{{ $t('settings.clipboard.imageRecords') }}</div>
+            <div class="form-hint">{{ $t('settings.clipboard.imageCleanHint') }}</div>
           </div>
           <div class="action-row">
-            <el-button class="action-button" plain type="primary" @click="clearImageHistory('untagged_unclassified_unpinned')">按条件清理</el-button>
-            <el-button class="action-button" plain type="danger" @click="clearImageHistory('all')">清除全部</el-button>
+            <el-button class="action-button" plain type="primary"
+                       @click="clearImageHistory('untagged_unclassified_unpinned')">
+              {{ $t('settings.clipboard.conditionalClean') }}
+            </el-button>
+            <el-button class="action-button" plain type="danger" @click="clearImageHistory('all')">
+              {{ $t('settings.clipboard.clearAll') }}
+            </el-button>
           </div>
         </div>
         <div class="management-item">
           <div class="management-meta">
-            <div class="management-title">导入图片</div>
-            <div class="form-hint">支持导入图片文件或文件夹中的图片</div>
+            <div class="management-title">{{ $t('settings.clipboard.importImage') }}</div>
+            <div class="form-hint">{{ $t('settings.clipboard.importImageHint') }}</div>
           </div>
           <el-input
               :model-value="importSourceDisplay"
               class="import-source-input"
-              placeholder="未选择导入来源"
+              :placeholder="$t('settings.clipboard.noImportSource')"
               readonly
           >
             <template #prepend>
-              <el-tooltip content="导入图片" placement="top">
+              <el-tooltip :content="$t('settings.clipboard.importFromFile')" placement="top">
                 <el-button :loading="importingImages" class="import-icon-btn" @click="importImageFiles">
                   <el-icon><Picture/></el-icon>
                 </el-button>
               </el-tooltip>
             </template>
             <template #append>
-              <el-tooltip content="导入目录" placement="top">
+              <el-tooltip :content="$t('settings.clipboard.importFromDir')" placement="top">
                 <el-button :loading="importingImages" class="import-icon-btn" @click="importImageFolders">
                   <el-icon><FolderOpened/></el-icon>
                 </el-button>
@@ -165,13 +176,17 @@
             </template>
           </el-input>
           <div v-if="showImportProgressCard" class="metrics-card">
-            <div class="metrics-line">导入进度 {{ importProcessed }} / {{ importTotal }}</div>
-            <div class="metrics-line">成功 {{ importImported }}，失败 {{ importFailed }}</div>
+            <div class="metrics-line">{{ $t('settings.clipboard.importProgress') }} {{ importProcessed }} /
+              {{ importTotal }}
+            </div>
+            <div class="metrics-line">{{ $t('common.success') }} {{ importImported }}，{{ $t('common.failed') }}
+              {{ importFailed }}
+            </div>
             <el-progress :percentage="importProgressPercent" :stroke-width="12" status="success"/>
           </div>
         </div>
       </div>
-      <div class="form-hint">“清除全部”会删除对应类型的全部历史记录，请谨慎操作。</div>
+      <div class="form-hint">{{ $t('settings.clipboard.clearAllWarning') }}</div>
     </el-card>
 
   </el-form>
@@ -179,12 +194,15 @@
 
 <script setup>
 import {computed, onMounted, onUnmounted, ref} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {Edit, FolderOpened, Picture, RefreshLeft, VideoPause} from '@element-plus/icons-vue'
 import {open} from '@tauri-apps/plugin-dialog'
 import {listen} from '@tauri-apps/api/event'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
 import {ClipboardService, ImageClipboardService} from '../../../services/ipc'
 import {ElMessage, ElMessageBox} from 'element-plus'
+
+const {t} = useI18n()
 
 const props = defineProps({
   form: {
@@ -229,14 +247,14 @@ const resetTextRecording = () => {
   stopTextRecording()
   const isMac = navigator.userAgent.toLowerCase().includes('mac')
   props.form.toggleShortcut = isMac ? 'Cmd+Shift+z' : 'Ctrl+Shift+z'
-  ElMessage.success(`已恢复打开剪贴板窗口快捷键默认值: ${props.form.toggleShortcut}`)
+  ElMessage.success(t('settings.clipboard.shortcutResetText', {shortcut: props.form.toggleShortcut}))
 }
 
 const resetImageRecording = () => {
   stopImageRecording()
   const isMac = navigator.userAgent.toLowerCase().includes('mac')
   props.form.imageToggleShortcut = isMac ? 'Cmd+Shift+x' : 'Ctrl+Shift+x'
-  ElMessage.success(`已恢复打开图片剪贴板窗口快捷键默认值: ${props.form.imageToggleShortcut}`)
+  ElMessage.success(t('settings.clipboard.shortcutResetImage', {shortcut: props.form.imageToggleShortcut}))
 }
 
 let unlistenImportProgress = null
@@ -277,21 +295,21 @@ const clearTextHistory = async (mode) => {
   try {
     if (mode === 'all') {
       const msgBox = ElMessageBox.confirm(
-          '将清除全部文字历史记录，且不可恢复，是否继续？',
-          '警告',
+          t('settings.clipboard.clearTextConfirm'),
+          t('common.warning'),
           {
             type: 'warning',
-            confirmButtonText: '继续清除',
-            cancelButtonText: '取消'
+            confirmButtonText: t('settings.clipboard.continueClear'),
+            cancelButtonText: t('common.cancel')
           }
       )
       await msgBox
     }
     const removed = await ClipboardService.clearHistory(mode)
-    ElMessage.success(`已清理 ${removed} 条文字记录`)
+    ElMessage.success(t('settings.clipboard.textCleaned', {count: removed}))
   } catch (error) {
     if (error === 'cancel' || error?.action === 'cancel') return
-    ElMessage.error(`清理失败: ${String(error)}`)
+    ElMessage.error(t('settings.clipboard.cleanFailed', {error: String(error)}))
   }
 }
 
@@ -299,20 +317,20 @@ const clearImageHistory = async (mode) => {
   try {
     if (mode === 'all') {
       await ElMessageBox.confirm(
-          '将清除全部图片历史记录，且不可恢复，是否继续？',
-          '警告',
+          t('settings.clipboard.clearImageConfirm'),
+          t('common.warning'),
           {
             type: 'warning',
-            confirmButtonText: '继续清除',
-            cancelButtonText: '取消'
+            confirmButtonText: t('settings.clipboard.continueClear'),
+            cancelButtonText: t('common.cancel')
           }
       )
     }
     const removed = await ImageClipboardService.clearHistory(mode)
-    ElMessage.success(`已清理 ${removed} 条图片记录`)
+    ElMessage.success(t('settings.clipboard.imageCleaned', {count: removed}))
   } catch (error) {
     if (error === 'cancel' || error?.action === 'cancel') return
-    ElMessage.error(`清理失败: ${String(error)}`)
+    ElMessage.error(t('settings.clipboard.cleanFailed', {error: String(error)}))
   }
 }
 
@@ -329,10 +347,10 @@ const runImageImport = async (paths) => {
   resetImportProgress()
   try {
     const imported = await ImageClipboardService.importImageFiles(paths)
-    ElMessage.success(`已导入 ${imported} 张图片`)
+    ElMessage.success(t('settings.clipboard.imagesImported', {count: imported}))
     return true
   } catch (error) {
-    ElMessage.error(`导入失败: ${error}`)
+    ElMessage.error(t('settings.clipboard.importFailed', {error}))
     return false
   } finally {
     importingImages.value = false
@@ -348,12 +366,12 @@ const confirmImport = async (kind, paths) => {
     total = 0
   }
   const summary = kind === 'folder'
-      ? `已选择目录：\n${String(paths[0] || '')}\n\n预计导入 ${total} 张图片，确认开始导入吗？`
-      : `已选择 ${paths.length} 个文件，预计导入 ${total} 张图片，确认开始导入吗？`
+      ? t('settings.clipboard.importDirConfirm', {path: String(paths[0] || ''), total})
+      : t('settings.clipboard.importFileConfirm', {count: paths.length, total})
   try {
-    await ElMessageBox.confirm(summary, '确认导入', {
-      confirmButtonText: '确认导入',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(summary, t('common.confirmImport'), {
+      confirmButtonText: t('common.confirmImport'),
+      cancelButtonText: t('common.cancel'),
       type: 'info'
     })
     return true
@@ -376,7 +394,10 @@ const importImageFiles = async () => {
     const parts = path.split(/[\\/]/).filter(Boolean)
     return parts[parts.length - 1] || path
   })
-  importSourceDisplay.value = names.length > 1 ? `${names[0]} 等 ${names.length} 个文件` : (names[0] || '')
+  importSourceDisplay.value = names.length > 1 ? t('settings.clipboard.selectedFiles', {
+    first: names[0],
+    count: names.length
+  }) : (names[0] || '')
   const confirmed = await confirmImport('file', paths)
   if (!confirmed) return
   const ok = await runImageImport(paths)

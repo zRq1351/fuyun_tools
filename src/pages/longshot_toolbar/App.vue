@@ -4,25 +4,26 @@
       <div class="title" data-tauri-drag-region>{{ titleText }}</div>
       <div class="actions no-drag">
         <button :disabled="phase === 'finishing' || phase === 'canceling' || phase === 'failed'" class="btn"
-                @click="togglePause">{{ paused ? '继续' : '暂停' }}
+                @click="togglePause">{{ paused ? t('longshot.continue') : t('longshot.pause') }}
         </button>
         <button :disabled="phase === 'finishing' || phase === 'canceling' || phase === 'failed'" class="btn primary"
-                @click="finish">完成
+                @click="finish">{{ t('longshot.finish') }}
         </button>
-        <button :disabled="phase === 'canceling'" class="btn danger" @click="cancel">取消</button>
+        <button :disabled="phase === 'canceling'" class="btn danger" @click="cancel">{{ t('longshot.cancel') }}</button>
       </div>
     </div>
 
     <div class="preview-wrap" data-tauri-drag-region>
       <img v-if="previewSrc" :src="previewSrc" alt="longshot preview" class="preview" data-tauri-drag-region
            draggable="false"/>
-      <div v-else class="preview-empty" data-tauri-drag-region>等待预览...</div>
+      <div v-else class="preview-empty" data-tauri-drag-region>{{ t('longshot.waitPreview') }}</div>
       <div v-if="previewSrc && viewportStyle" class="viewport-marker" :style="viewportStyle"></div>
     </div>
 
     <div class="meta" data-tauri-drag-region>
-      状态 {{ phaseText }} ·
-      高度 {{ stitchedHeight }} px · 帧 {{ frameCount }} · 丢帧 {{ droppedFrames }} · 置信度
+      {{ t('longshot.status') }} {{ phaseText }} ·
+      {{ t('longshot.height') }} {{ stitchedHeight }} px · {{ t('longshot.frame') }} {{ frameCount }} ·
+      {{ t('longshot.dropped') }} {{ droppedFrames }} · {{ t('longshot.confidence') }}
       {{ Number(lastConfidence || 0).toFixed(2) }}
     </div>
   </div>
@@ -32,7 +33,9 @@
 import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
 import {listen} from '@tauri-apps/api/event'
+import {useI18n} from 'vue-i18n'
 
+const {t} = useI18n()
 const paused = ref(false)
 const phase = ref('starting')
 const previewSrc = ref('')
@@ -61,24 +64,24 @@ const cancel = async () => {
 }
 
 const phaseText = computed(() => {
-  if (phase.value === 'starting') return '准备中'
-  if (phase.value === 'running') return '进行中'
-  if (phase.value === 'paused') return '已暂停'
-  if (phase.value === 'finishing') return '收尾中'
-  if (phase.value === 'canceling') return '取消中'
-  if (phase.value === 'failed') return '失败'
-  if (phase.value === 'done') return '已完成'
-  return '未知'
+  if (phase.value === 'starting') return t('longshot.phasePreparing')
+  if (phase.value === 'running') return t('longshot.phaseInProgress')
+  if (phase.value === 'paused') return t('longshot.phasePaused')
+  if (phase.value === 'finishing') return t('longshot.phaseFinishing')
+  if (phase.value === 'canceling') return t('longshot.phaseCancelling')
+  if (phase.value === 'failed') return t('longshot.phaseFailed')
+  if (phase.value === 'done') return t('longshot.phaseCompleted')
+  return t('longshot.phaseUnknown')
 })
 
 const titleText = computed(() => {
-  if (phase.value === 'paused') return '长截图已暂停'
-  if (phase.value === 'finishing') return '长截图收尾中'
-  if (phase.value === 'canceling') return '长截图取消中'
-  if (phase.value === 'failed') return '长截图失败'
-  if (phase.value === 'done') return '长截图已完成'
-  if (phase.value === 'starting') return '长截图准备中'
-  return '长截图进行中'
+  if (phase.value === 'paused') return t('longshot.titlePaused')
+  if (phase.value === 'finishing') return t('longshot.titleFinishing')
+  if (phase.value === 'canceling') return t('longshot.titleCancelling')
+  if (phase.value === 'failed') return t('longshot.titleFailed')
+  if (phase.value === 'done') return t('longshot.titleCompleted')
+  if (phase.value === 'starting') return t('longshot.titlePreparing')
+  return t('longshot.titleInProgress')
 })
 
 onMounted(async () => {

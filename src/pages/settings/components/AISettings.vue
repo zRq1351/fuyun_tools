@@ -2,10 +2,10 @@
   <el-form :model="form" label-position="top">
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">服务连接</div>
+        <div class="section-title">{{ $t('settings.ai.serviceConnection') }}</div>
       </template>
-      <el-form-item label="AI服务提供商">
-        <el-select v-model="form.aiProvider" class="provider-select" placeholder="请选择提供商"
+      <el-form-item :label="$t('settings.ai.provider')">
+        <el-select v-model="form.aiProvider" :placeholder="$t('settings.ai.selectProvider')" class="provider-select"
                    @change="handleProviderChange">
           <el-option
               v-for="provider in providers"
@@ -28,16 +28,16 @@
               </el-button>
             </div>
           </el-option>
-          <el-option label="自定义" value="custom"/>
+          <el-option :label="$t('settings.ai.custom')" value="custom"/>
         </el-select>
       </el-form-item>
 
-      <el-form-item v-if="form.aiProvider === 'custom'" label="自定义提供商名称">
-        <el-input v-model="form.customProviderName" placeholder="请输入自定义提供商名称，如：OpenAI"/>
+      <el-form-item v-if="form.aiProvider === 'custom'" :label="$t('settings.ai.customProviderName')">
+        <el-input v-model="form.customProviderName" :placeholder="$t('settings.ai.customNamePlaceholder')"/>
       </el-form-item>
 
-      <el-form-item label="AI服务地址">
-        <el-input v-model="form.apiUrl" placeholder="例如: https://api.openai.com/v1">
+      <el-form-item :label="$t('settings.ai.apiUrl')">
+        <el-input v-model="form.apiUrl" :placeholder="$t('settings.ai.apiUrlPlaceholder')">
           <template #append>
             <el-button :loading="testingConnection" @click="testConnection">
               <el-icon>
@@ -48,14 +48,14 @@
         </el-input>
       </el-form-item>
 
-      <el-form-item label="AI模型名称">
-        <el-input v-model="form.modelName" placeholder="例如: gpt-3.5-turbo"/>
+      <el-form-item :label="$t('settings.ai.modelName')">
+        <el-input v-model="form.modelName" :placeholder="$t('settings.ai.modelNamePlaceholder')"/>
       </el-form-item>
 
-      <el-form-item label="API密钥">
+      <el-form-item :label="$t('settings.ai.apiKey')">
         <el-input
             v-model="form.apiKey"
-            placeholder="请输入您的API密钥"
+            :placeholder="$t('settings.ai.apiKeyPlaceholder')"
             show-password
             type="password"
         />

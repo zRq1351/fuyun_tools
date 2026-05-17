@@ -5,28 +5,54 @@ import 'element-plus/theme-chalk/dark/css-vars.css'
 import '../pages/shared/theme-variables.css'
 import '../pages/shared/windowBase.css'
 import {initTheme, watchThemeStorage, watchSystemTheme} from './themeManager'
+import {createI18nInstance, getLocale, getI18nInstance} from './localeManager'
+import zhCN from '../locales/zh-CN.json'
+import enUS from '../locales/en-US.json'
+
+const i18n = createI18nInstance({
+    'zh-CN': zhCN,
+    'en-US': enUS
+})
+
+function initLocaleListeners() {
+    const handler = () => {
+        const inst = getI18nInstance()
+        if (inst && inst.global) {
+            inst.global.locale.value = getLocale()
+        }
+        document.documentElement.setAttribute('lang', getLocale())
+    }
+    window.addEventListener('locale-change', handler)
+    window.addEventListener('storage', (e) => {
+        if (e.key === 'fuyun-locale') {
+            handler()
+        }
+    })
+}
 
 /**
- * 创建标准页面应用的工厂函数
- * @param {Object} rootComponent - Vue 根组件
- * @param {Object} [options] - 可选配置
- * @param {Function} [options.setup] - 应用创建后的额外设置回调，接收 app 实例
- * @returns {Object} Vue 应用实例
+ * Create a standard page application factory function
+ * @param {Object} rootComponent - Vue root component
+ * @param {Object} [options] - Optional config
+ * @param {Function} [options.setup] - Extra setup callback after app creation, receives app instance
+ * @returns {Object} Vue application instance
  */
 export function createPageApp(rootComponent, options = {}) {
     initTheme()
 
-    // 监听跨窗口主题变化，确保所有窗口同步更新
     watchThemeStorage((theme) => {
-        // themeManager 内部已经调用了 applyTheme，无需额外操作
+        // themeManager already calls applyTheme internally
     })
 
-    // 监听系统主题变化
     watchSystemTheme((theme) => {
-        // themeManager 内部已经调用了 applyTheme，无需额外操作
+        // themeManager already calls applyTheme internally
     })
+
+    initLocaleListeners()
 
     const app = createApp(rootComponent)
+
+    app.use(i18n)
 
     if (options.setup) {
         options.setup(app)

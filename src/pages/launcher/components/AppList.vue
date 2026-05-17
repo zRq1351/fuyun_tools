@@ -83,7 +83,7 @@
         <el-icon :size="14">
           <Monitor/>
         </el-icon>
-        <span>打开</span>
+        <span>{{ t('common.open') }}</span>
       </div>
       <div class="context-menu-item" @click="openAppDirectory(ctxApp)">
         <el-icon :size="14">
@@ -111,7 +111,7 @@
         <el-icon :size="14">
           <Delete/>
         </el-icon>
-        <span>移除应用</span>
+        <span>{{ t('common.remove') }}应用</span>
       </div>
       <div v-else class="context-menu-item" @click="removeFromCategory(ctxApp)">
         <el-icon :size="14">
@@ -150,8 +150,8 @@
         </div>
 
         <div class="dialog-actions">
-          <button class="dialog-btn cancel" @click="closeCommandDialog">取消</button>
-          <button class="dialog-btn confirm" @click="confirmAddCommand">确定</button>
+          <button class="dialog-btn cancel" @click="closeCommandDialog">{{ t('common.cancel') }}</button>
+          <button class="dialog-btn confirm" @click="confirmAddCommand">{{ t('common.ok') }}</button>
         </div>
       </div>
     </div>
@@ -160,12 +160,15 @@
 
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {ElMessage} from 'element-plus'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {ArrowDown, Close, Delete, FolderOpened, Monitor, Star} from '@element-plus/icons-vue'
 import {invoke} from '@tauri-apps/api/core'
 import ContextMenu from '../../../components/ContextMenu.vue'
 import ContextSubMenu from '../../../components/ContextSubMenu.vue'
+
+const {t} = useI18n()
 
 const props = defineProps({
   apps: {

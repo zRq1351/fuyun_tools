@@ -1,11 +1,32 @@
 <template>
+  <el-config-provider :locale="elLocale">
   <div class="settings-container">
       <div class="header">
         <div class="header-title">
-          <h1>设置中心</h1>
+          <h1>{{ $t('settings.title') }}</h1>
         </div>
         <div class="header-actions">
           <span :class="['autosave-status', `autosave-${autoSaveState}`]">{{ autoSaveText }}</span>
+          <el-dropdown trigger="click" @command="changeLocale">
+            <el-button>
+              <template #icon>
+                <el-icon>
+                  <icon-menu/>
+                </el-icon>
+              </template>
+              {{ currentLocale === 'zh-CN' ? '中文' : 'EN' }}
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="zh-CN">
+                  <span>中文</span>
+                </el-dropdown-item>
+                <el-dropdown-item command="en-US">
+                  <span>English</span>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
           <el-dropdown trigger="click" @command="changeTheme">
             <el-button>
               <template #icon>
@@ -19,19 +40,19 @@
                   <el-icon>
                     <Moon/>
                   </el-icon>
-                  暗色
+                  {{ $t('theme.dark') }}
                 </el-dropdown-item>
                 <el-dropdown-item command="light">
                   <el-icon>
                     <Sunny/>
                   </el-icon>
-                  亮色
+                  {{ $t('theme.light') }}
                 </el-dropdown-item>
                 <el-dropdown-item command="eye-care">
                   <el-icon>
                     <View/>
                   </el-icon>
-                  护眼
+                  {{ $t('theme.eyeCare') }}
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -113,21 +134,25 @@
 
       <div class="footer-links">
         <p>
-          需要帮助？
-          <el-link type="primary" @click="openExternal('https://github.com/zRq1351/fuyun_tools')">查看文档</el-link>
+          {{ $t('settings.needHelp') }}
+          <el-link type="primary" @click="openExternal('https://github.com/zRq1351/fuyun_tools')">
+            {{ $t('settings.viewDocs') }}
+          </el-link>
           |
-          <el-link type="primary" @click="openExternal('https://github.com/zRq1351/fuyun_tools/issues')">报告问题
+          <el-link type="primary" @click="openExternal('https://github.com/zRq1351/fuyun_tools/issues')">
+            {{ $t('settings.reportIssue') }}
           </el-link>
         </p>
-        <p>版本 {{ currentVersion }} | © {{ new Date().getFullYear() }} fuyun_tools</p>
+        <p>{{ $t('settings.version') }} {{ currentVersion }} | &copy; {{ new Date().getFullYear() }} fuyun_tools</p>
       </div>
   </div>
+  </el-config-provider>
 </template>
 
 <script setup>
 import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from 'vue'
-import {ElMessage, ElMessageBox, provideGlobalConfig} from 'element-plus'
-import zhCn from 'element-plus/dist/locale/zh-cn'
+import {ElMessage, ElMessageBox, ElLoading} from 'element-plus'
+import {useI18n} from 'vue-i18n'
 import {
   Camera,
   Cpu,
@@ -135,6 +160,7 @@ import {
   Folder,
   FolderOpened,
   InfoFilled,
+  Menu as IconMenu,
   Moon,
   Operation,
   Setting,
@@ -144,6 +170,7 @@ import {
   WarningFilled
 } from '@element-plus/icons-vue'
 import {useTheme} from '../../composables/useTheme'
+import {useLocale} from '../../composables/useLocale'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import {listen} from '@tauri-apps/api/event'
 import {AISettingsService, RecordingService} from '../../services/ipc'
@@ -159,7 +186,10 @@ import DiagnosticSettings from './components/DiagnosticSettings.vue'
 import AboutSettings from './components/AboutSettings.vue'
 import DeveloperSettings from '@dev/DeveloperSettings'
 
-provideGlobalConfig({locale: zhCn})
+const {t} = useI18n()
+
+// 语言管理
+const {currentLocale, elLocale, changeLocale} = useLocale()
 
 // 主题管理
 const {currentTheme, isDark, changeTheme} = useTheme()
@@ -178,16 +208,12 @@ const themeIcon = computed(() => {
 })
 
 const themeLabel = computed(() => {
-  switch (currentTheme.value) {
-    case 'dark':
-      return '暗色'
-    case 'light':
-      return '亮色'
-    case 'eye-care':
-      return '护眼'
-    default:
-      return '暗色'
+  const labels = {
+    dark: t('theme.dark'),
+    light: t('theme.light'),
+    'eye-care': t('theme.eyeCare')
   }
+  return labels[currentTheme.value] || t('theme.dark')
 })
 
 const activeTab = ref('clipboard')
@@ -215,71 +241,71 @@ const sections = computed(() => {
   const baseSections = [
     {
       key: 'clipboard',
-      label: '剪贴板',
-      description: '管理历史记录、快捷键与导入',
+      label: t('settings.nav.clipboard'),
+      description: t('settings.nav.clipboardDesc'),
       icon: DocumentCopy
     },
     {
       key: 'screenshot',
-      label: '截图',
-      description: '管理截图功能相关的快捷键设置',
+      label: t('settings.nav.screenshot'),
+      description: t('settings.nav.screenshotDesc'),
       icon: Camera
     },
     {
       key: 'recording',
-      label: '录屏',
-      description: '管理录屏录音参数与录制快捷键',
+      label: t('settings.nav.recording'),
+      description: t('settings.nav.recordingDesc'),
       icon: VideoCamera
     },
     {
       key: 'selection',
-      label: '划词',
-      description: '管理划词开关与翻译解释提示词模板',
+      label: t('settings.nav.selection'),
+      description: t('settings.nav.selectionDesc'),
       icon: Setting
     },
     {
       key: 'launcher',
-      label: '启动器',
-      description: '管理快捷启动器功能与快捷键',
+      label: t('settings.nav.launcher'),
+      description: t('settings.nav.launcherDesc'),
       icon: Operation
     },
     {
       key: 'doc_manager',
-      label: '文档管理',
-      description: '文档文件管理与快捷键配置',
+      label: t('settings.nav.docManager'),
+      description: t('settings.nav.docManagerDesc'),
       icon: Folder
     },
     {
       key: 'ai',
-      label: 'AI',
-      description: '配置服务提供商、模型参数与提示词模板',
+      label: t('settings.nav.ai'),
+      description: t('settings.nav.aiDesc'),
       icon: Cpu
     },
     {
       key: 'backup',
-      label: '数据备份',
-      description: '导出备份包、恢复预览与自动备份配置',
+      label: t('settings.nav.backup'),
+      description: t('settings.nav.backupDesc'),
       icon: FolderOpened
     },
     {
       key: 'diagnostic',
-      label: '诊断与修复',
-      description: '查看核心健康状态并执行诊断动作',
+      label: t('settings.nav.diagnostic'),
+      description: t('settings.nav.diagnosticDesc'),
       icon: WarningFilled
     }
   ]
   if (isDevMode) {
     baseSections.push({
       key: 'developer',
-      label: '开发者',
-      description: '开发调试信息与存储占用监控',
+      label: t('settings.nav.developer'),
+      description: t('settings.nav.developerDesc'),
       icon: Setting
     })
   }
   baseSections.push({
     key: 'about',
-    label: '关于',
-    description: '查看版本信息与使用说明',
+    label: t('settings.nav.about'),
+    description: t('settings.nav.aboutDesc'),
     icon: InfoFilled
   })
   return baseSections
@@ -334,11 +360,14 @@ const form = reactive({
 })
 
 const autoSaveText = computed(() => {
-  if (autoSaveState.value === 'pending') return '有未保存变更'
-  if (autoSaveState.value === 'saving') return '自动保存中...'
-  if (autoSaveState.value === 'saved') return '已自动保存'
-  if (autoSaveState.value === 'error') return '自动保存失败'
-  return '已同步'
+  const states = {
+    idle: t('settings.autoSave.idle'),
+    pending: t('settings.autoSave.pending'),
+    saving: t('settings.autoSave.saving'),
+    saved: t('settings.autoSave.saved'),
+    error: t('settings.autoSave.error')
+  }
+  return states[autoSaveState.value] || t('settings.autoSave.idle')
 })
 
 const currentSection = computed(() => sections.value.find((section) => section.key === activeTab.value) || sections.value[0])
@@ -632,11 +661,11 @@ const persistSettings = async (
         changedFields.recordingEnabled = false
         try {
           await ElMessageBox.confirm(
-              `检测到首次启用录屏，未找到 ffmpeg.exe。\n将下载到：${ffmpegStatus.ffmpegPath}`,
-              '需要下载 ffmpeg',
+              t('settings.recording.ffmpegNotFound', {path: ffmpegStatus.ffmpegPath}),
+              t('settings.recording.needDownloadFfmpeg'),
               {
-                confirmButtonText: '确认下载',
-                cancelButtonText: '取消',
+                confirmButtonText: t('settings.recording.confirmDownload'),
+                cancelButtonText: t('common.cancel'),
                 type: 'warning',
                 closeOnClickModal: false,
                 closeOnPressEscape: true
@@ -644,12 +673,12 @@ const persistSettings = async (
           )
         } catch {
           autoSaveState.value = 'idle'
-          ElMessage.info('已取消启用录屏')
+          ElMessage.info(t('settings.recording.cancelEnableRecording'))
           return
         }
         const downloading = ElLoading.service({
           lock: true,
-          text: '正在下载 ffmpeg... 0%',
+          text: t('settings.recording.downloadingFfmpeg', {percent: '0'}),
           background: 'rgba(0, 0, 0, 0.35)'
         })
         let unlistenProgress = null
@@ -658,14 +687,14 @@ const persistSettings = async (
             const payload = event?.payload || {}
             const percent = typeof payload.progressPercent === 'number' ? payload.progressPercent : null
             if (percent !== null) {
-              downloading.setText(`正在下载 ffmpeg... ${percent}%`)
+              downloading.setText(t('settings.recording.downloadingFfmpeg', {percent: `${percent}`}))
               return
             }
             const downloaded = Number(payload.downloadedBytes || 0)
             const total = Number(payload.totalBytes || 0)
             if (total > 0) {
               const computed = Math.min(100, Math.floor(downloaded * 100 / total))
-              downloading.setText(`正在下载 ffmpeg... ${computed}%`)
+              downloading.setText(t('settings.recording.downloadingFfmpeg', {percent: `${computed}`}))
             }
           })
           await RecordingService.downloadFfmpeg(ffmpegStatus.downloadUrl || null)
@@ -679,7 +708,7 @@ const persistSettings = async (
         form.recordingEnabled = true
         snapshot.recordingEnabled = true
         changedFields.recordingEnabled = true
-        ElMessage.success('ffmpeg 下载完成，已启用录屏')
+        ElMessage.success(t('settings.recording.ffmpegDownloaded'))
       }
     }
 
@@ -704,7 +733,7 @@ const persistSettings = async (
 
     shortcutConflictMessage.value = ''
     if (!silent) {
-      ElMessage.success('已自动保存')
+      ElMessage.success(t('settings.autoSaved'))
     }
     autoSaveState.value = 'saved'
 
@@ -731,7 +760,7 @@ const persistSettings = async (
         }
       } catch (e) {}
 
-      if (raw.includes('快捷键被占用')) {
+    if (raw.includes('快捷键被占用') || raw.includes('shortcut') || raw.includes('hotkey')) {
         shortcutConflictMessage.value = raw.replace(/^Error:\s*/i, '')
         if (raw.includes('录屏') || raw.includes('麦克风')) {
           activeTab.value = 'recording'
@@ -741,7 +770,7 @@ const persistSettings = async (
           activeTab.value = 'clipboard'
         }
       }
-      ElMessage.error(`保存失败: ${raw}`)
+    ElMessage.error(t('settings.saveFailed', {error: raw}))
       autoSaveState.value = 'error'
     } finally {
     isAutoSaving.value = false
@@ -789,7 +818,7 @@ const showShortcutConflictWarning = (payload) => {
   const conflicts = normalizeShortcutConflicts(payload)
   if (conflicts.length === 0) return
   activeTab.value = 'clipboard'
-  shortcutConflictMessage.value = `快捷键被占用：${conflicts.join('；')}`
+  shortcutConflictMessage.value = t('settings.shortcutConflict', {conflicts: conflicts.join('；')})
 }
 
 const showVcRuntimeMissingWarning = async (payload) => {
@@ -798,11 +827,11 @@ const showVcRuntimeMissingWarning = async (payload) => {
   const detail = missing.join('、')
   try {
     await ElMessageBox.confirm(
-        `检测到系统缺少 VC 运行库组件：${detail}。\n安装后可避免录屏/长截图相关功能在部分机器上异常。\n是否现在下载安装 Microsoft VC++ Redistributable (x64)？`,
-        '检测到依赖缺失',
+        t('settings.screenshot.vcRuntimeMissing', {detail}),
+        t('settings.screenshot.vcRuntimeMissingTitle'),
         {
-          confirmButtonText: '下载安装',
-          cancelButtonText: '稍后处理',
+          confirmButtonText: t('settings.screenshot.downloadInstall'),
+          cancelButtonText: t('settings.screenshot.laterHandle'),
           type: 'warning',
           closeOnClickModal: false,
           closeOnPressEscape: true
@@ -810,7 +839,7 @@ const showVcRuntimeMissingWarning = async (payload) => {
     )
     const downloading = ElLoading.service({
       lock: true,
-      text: '正在下载 VC Runtime... 0%',
+      text: t('settings.screenshot.downloadingVc', {percent: '0'}),
       background: 'rgba(0, 0, 0, 0.35)'
     })
     let unlistenProgress = null
@@ -820,14 +849,14 @@ const showVcRuntimeMissingWarning = async (payload) => {
         const progress = event?.payload || {}
         const percent = typeof progress.progressPercent === 'number' ? progress.progressPercent : null
         if (percent !== null) {
-          downloading.setText(`正在下载 VC Runtime... ${percent}%`)
+          downloading.setText(t('settings.screenshot.downloadingVc', {percent: `${percent}`}))
           return
         }
         const done = Number(progress.downloadedBytes || 0)
         const total = Number(progress.totalBytes || 0)
         if (total > 0) {
           const computed = Math.min(100, Math.floor(done * 100 / total))
-          downloading.setText(`正在下载 VC Runtime... ${computed}%`)
+          downloading.setText(t('settings.screenshot.downloadingVc', {percent: `${computed}`}))
         }
       })
       downloaded = await AISettingsService.downloadVcRuntimeInstaller(installUrl)
@@ -839,12 +868,12 @@ const showVcRuntimeMissingWarning = async (payload) => {
     }
     const installerPath = typeof downloaded?.installerPath === 'string' ? downloaded.installerPath : ''
     if (!installerPath) {
-      ElMessage.error('VC Runtime 安装包下载成功，但未获取安装文件路径')
+      ElMessage.error(t('settings.screenshot.vcDownloadSuccessNoPath'))
       return
     }
     const installing = ElLoading.service({
       lock: true,
-      text: '正在安装 VC Runtime，请按安装向导完成...',
+      text: t('settings.screenshot.installingVc'),
       background: 'rgba(0, 0, 0, 0.35)'
     })
     let installResult = null
@@ -858,18 +887,18 @@ const showVcRuntimeMissingWarning = async (payload) => {
     const rebootRequired = installResult?.rebootRequired === true
     const exitCode = Number.isInteger(installResult?.exitCode) ? installResult.exitCode : null
     if (cancelled) {
-      ElMessage.warning('已取消安装，请安装 VC Runtime 后重新启用截图功能')
+      ElMessage.warning(t('settings.screenshot.vcInstallCancelled'))
       return
     }
     if (!success) {
-      ElMessage.error(`VC Runtime 安装失败（exitCode=${exitCode ?? 'unknown'}），请手动安装后重新启用截图`)
+      ElMessage.error(t('settings.screenshot.vcInstallFailed', {code: exitCode ?? 'unknown'}))
       return
     }
     if (rebootRequired) {
-      ElMessage.warning('VC Runtime 安装完成，系统提示需要重启。请重启后重新启用截图功能')
+      ElMessage.warning(t('settings.screenshot.vcRebootRequired'))
       return
     }
-    ElMessage.success('VC Runtime 安装完成，请重新启用截图功能')
+    ElMessage.success(t('settings.screenshot.vcInstallSuccess'))
   } catch {
 
   }
@@ -881,7 +910,7 @@ const handleNavigateSettings = (payload) => {
     activeTab.value = tab
   }
   if (payload?.reason === 'selection_ai_not_configured') {
-    ElMessage.warning('划词翻译/解释需要先配置 AI。请先在当前页面完成提供商、地址、模型和 API 密钥配置。')
+    ElMessage.warning(t('settings.selection.aiNotConfigured'))
   }
 }
 
@@ -957,7 +986,7 @@ onMounted(async () => {
       }
     }
   } catch (error) {
-    ElMessage.error(`加载设置失败: ${error}`)
+    ElMessage.error(t('settings.loadSettingsFailed', {error}))
     autoSaveState.value = 'error'
   } finally {
 
@@ -969,21 +998,22 @@ onMounted(async () => {
 })
 
 const featureLabels = {
-  textClipboardEnabled: '文字剪贴板',
-  imageClipboardEnabled: '图片剪贴板',
-  screenshotEnabled: '截图',
-  recordingEnabled: '录屏',
-  selectionEnabled: '划词',
-  launcherEnabled: '启动器',
-  docManagerEnabled: '文档管理',
+  textClipboardEnabled: t('settings.featureLabels.textClipboardEnabled'),
+  imageClipboardEnabled: t('settings.featureLabels.imageClipboardEnabled'),
+  screenshotEnabled: t('settings.featureLabels.screenshotEnabled'),
+  recordingEnabled: t('settings.featureLabels.recordingEnabled'),
+  selectionEnabled: t('settings.featureLabels.selectionEnabled'),
+  launcherEnabled: t('settings.featureLabels.launcherEnabled'),
+  docManagerEnabled: t('settings.featureLabels.docManagerEnabled'),
 }
 
 const handleFeatureToggle = async (fieldName, newValue) => {
   const label = featureLabels[fieldName] || fieldName
-  const action = newValue ? '启用' : '禁用'
+  const action = newValue ? t('common.enable') : t('common.disable')
+  const actionVerb = newValue ? t('common.enabling') : t('common.disabling')
   const loading = ElLoading.service({
     lock: true,
-    text: `正在${action}${label}...`,
+    text: t('settings.enablingFeature', {action: actionVerb, feature: label}),
     background: isDark.value ? 'rgba(0, 0, 0, 0.55)' : 'rgba(255, 255, 255, 0.55)'
   })
   const minUntil = Date.now() + 1000
@@ -1005,23 +1035,23 @@ const handleFeatureToggle = async (fieldName, newValue) => {
         loading.close()
         try {
           await ElMessageBox.confirm(
-              `检测到首次启用录屏，未找到 ffmpeg.exe。\n将下载到：${ffmpegStatus.ffmpegPath}`,
-              '需要下载 ffmpeg',
+              t('settings.recording.ffmpegNotFound', {path: ffmpegStatus.ffmpegPath}),
+              t('settings.recording.needDownloadFfmpeg'),
               {
-                confirmButtonText: '确认下载',
-                cancelButtonText: '取消',
+                confirmButtonText: t('settings.recording.confirmDownload'),
+                cancelButtonText: t('common.cancel'),
                 type: 'warning',
                 closeOnClickModal: false,
                 closeOnPressEscape: true
               }
           )
         } catch {
-          ElMessage.info('已取消启用录屏')
+          ElMessage.info(t('settings.recording.cancelEnableRecording'))
           return false
         }
         const dl = ElLoading.service({
           lock: true,
-          text: '正在下载 ffmpeg... 0%',
+          text: t('settings.recording.downloadingFfmpeg', {percent: '0'}),
           background: isDark.value ? 'rgba(0, 0, 0, 0.55)' : 'rgba(255, 255, 255, 0.55)'
         })
         let unlistenProgress = null
@@ -1030,29 +1060,29 @@ const handleFeatureToggle = async (fieldName, newValue) => {
             const p = event?.payload || {}
             const percent = typeof p.progressPercent === 'number' ? p.progressPercent : null
             if (percent !== null) {
-              dl.setText(`正在下载 ffmpeg... ${percent}%`);
+              dl.setText(t('settings.recording.downloadingFfmpeg', {percent: `${percent}`}));
               return
             }
             const downloaded = Number(p.downloadedBytes || 0)
             const total = Number(p.totalBytes || 0)
-            if (total > 0) dl.setText(`正在下载 ffmpeg... ${Math.min(100, Math.floor(downloaded * 100 / total))}%`)
+            if (total > 0) dl.setText(t('settings.recording.downloadingFfmpeg', {percent: `${Math.min(100, Math.floor(downloaded * 100 / total))}`}))
           })
           await RecordingService.downloadFfmpeg(ffmpegStatus.downloadUrl || null)
         } finally {
           if (unlistenProgress) unlistenProgress()
           dl.close()
         }
-        ElMessage.success('ffmpeg 下载完成，已启用录屏')
+        ElMessage.success(t('settings.recording.ffmpegDownloaded'))
       }
     }
-    loading.setText(`正在${action}${label}...`)
+    loading.setText(t('settings.enablingFeature', {action: actionVerb, feature: label}))
     await AISettingsService.saveSettings(payload)
     suppressNextAutoSave.value = true
     form[fieldName] = newValue
     saveInitialFormState(buildFormSnapshot())
     return true
   } catch (error) {
-    ElMessage.error(`操作失败: ${String(error)}`)
+    ElMessage.error(t('common.operationFailed', {error: String(error)}))
     return false
   } finally {
     const remaining = minUntil - Date.now()

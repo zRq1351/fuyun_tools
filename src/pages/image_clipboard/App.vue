@@ -13,14 +13,14 @@
         :is-adding-category="isAddingCategory"
         :new-category-input-ref="newCategoryInputRef"
         :remove-category="removeCategory"
-        create-category-text="新增分类"
-        search-placeholder="搜索分类/标签"
+        :create-category-text="$t('imageClipboard.createCategory')"
+        :search-placeholder="$t('imageClipboard.search')"
         :start-create-category="startCreateCategory"
         :start-window-offset-drag="startWindowOffsetDrag"
         :show-ai-toggle="false"
     />
     <div v-if="filteredHistory.length === 0" class="empty-state">
-      <el-empty :image-size="100" description="暂无图片剪切板记录"/>
+      <el-empty :description="$t('imageClipboard.noRecords')" :image-size="100"/>
     </div>
 
     <ImageClipboardList
@@ -57,15 +57,17 @@
               type="button"
               @click="cyclePageSize"
           >
-            每页{{ pageSize }}
+            {{ $t('imageClipboard.perPage', {size: pageSize}) }}
           </button>
-          <button aria-label="回到开头" class="nav-action-btn icon-btn" title="回到开头" type="button"
+          <button :aria-label="$t('imageClipboard.backToStart')" :title="$t('imageClipboard.backToStart')"
+                  class="nav-action-btn icon-btn" type="button"
                   @click="scrollToStart">
             <el-icon>
               <ArrowLeftBold/>
             </el-icon>
           </button>
-          <button aria-label="滑动到最后" class="nav-action-btn icon-btn" title="滑动到最后" type="button"
+          <button :aria-label="$t('imageClipboard.scrollToEnd')" :title="$t('imageClipboard.scrollToEnd')"
+                  class="nav-action-btn icon-btn" type="button"
                   @click="scrollToEnd">
             <el-icon>
               <ArrowRightBold/>
@@ -82,10 +84,10 @@
         @click.stop
     >
       <div class="context-menu-item" @click="editItemTags">
-        编辑标签
+        {{ $t('imageClipboard.editTags') }}
       </div>
       <div class="context-menu-divider"></div>
-      <div class="context-menu-header">添加到分类</div>
+      <div class="context-menu-header">{{ $t('imageClipboard.addToCategory') }}</div>
       <div
           v-for="category in categories"
           :key="category"
@@ -104,6 +106,7 @@
 
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {ArrowLeftBold, ArrowRightBold, Check} from '@element-plus/icons-vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {listen} from '@tauri-apps/api/event'
@@ -115,6 +118,8 @@ import ImageClipboardList from './components/ImageClipboardList.vue'
 import {useWindowOffset} from '../clipboard/composables/useWindowOffset'
 import {useContextMenuState} from '../shared/useContextMenuState'
 import {runCategoryAssignment} from '../shared/categoryActions'
+
+const {t} = useI18n()
 
 const containerRef = ref(null)
 const imageListRef = ref(null)
@@ -628,15 +633,17 @@ const previewCacheKeepIds = computed(() => {
 
 const selectedStatusText = computed(() => {
   const total = totalCount.value || filteredHistoryState.value.total
-  if (total === 0) return '当前无选中项'
+  if (total === 0) return t('imageClipboard.noSelection')
   const display = filteredHistoryState.value.selectedDisplay
-  return `当前选中：第 ${display} / ${total} 条`
+  return t('imageClipboard.selected', {display, total})
 })
 
 const loadStatusText = computed(() => {
-  if (isLoadingPage.value) return '正在加载...'
-  if (hasMore.value) return `已加载 ${filteredHistoryState.value.total} / ${totalCount.value || filteredHistoryState.value.total}`
-  return `已全部加载 ${filteredHistoryState.value.total} 条`
+  if (isLoadingPage.value) return t('common.loading')
+  const loaded = filteredHistoryState.value.total
+  const total = totalCount.value || loaded
+  if (hasMore.value) return t('imageClipboard.loaded', {loaded, total})
+  return t('imageClipboard.allLoaded', {total: loaded})
 })
 
 const IMAGE_PAGE_SIZE_OPTIONS = [10, 30, 50]
@@ -786,7 +793,7 @@ const getPreviewDataUrl = (item) => {
     return previewCache.get(item.id)
   }
   try {
-    
+
     const previewBase64 = typeof item.preview_png_base64 === 'string' ? item.preview_png_base64.trim() : ''
     if (previewBase64) {
       const previewUrl = `data:image/png;base64,${previewBase64}`
@@ -795,7 +802,7 @@ const getPreviewDataUrl = (item) => {
       return previewUrl
     }
 
-    
+
     if (asyncPreviewCache.has(item.id)) {
       const previewUrl = asyncPreviewCache.get(item.id)
       asyncPreviewCache.delete(item.id)
@@ -806,7 +813,7 @@ const getPreviewDataUrl = (item) => {
       return previewUrl
     }
 
-    
+
     const previewUrl = buildFileUrlFromPath(item.image_path)
     previewCache.set(item.id, previewUrl)
     enforcePreviewCacheSize()
@@ -929,7 +936,7 @@ const fillById = async (itemId) => {
   } catch (error) {
     console.error('回填图片失败:', error)
     writebackErrorMsg = ElMessage.error({
-      message: `回填图片失败: ${String(error)}`,
+      message: t('imageClipboard.pasteFailed', {error: String(error)}),
       duration: 0,
       showClose: true
     })
@@ -946,7 +953,7 @@ const openFullscreen = async (itemId) => {
     await ImageClipboardService.openPreviewWindowById(itemId)
   } catch (error) {
     console.error('打开预览窗口失败:', error)
-    ElMessage.error(`打开预览窗口失败: ${String(error)}`)
+    ElMessage.error(t('imageClipboard.previewFailed', {error: String(error)}))
   }
 }
 
@@ -956,19 +963,19 @@ const downloadItem = async (itemId) => {
     const selected = await openDialog({
       directory: true,
       multiple: false,
-      title: '选择图片下载目录'
+      title: t('imageClipboard.downloadDir')
     })
     const targetDirectory = Array.isArray(selected) ? selected[0] : selected
     if (!targetDirectory) return
     const result = await ImageClipboardService.copyItemToDirectory(itemId, targetDirectory)
     const savedPath = String(result?.savedPath || '')
     if (savedPath) {
-      ElMessage.success(`下载成功：${savedPath}`)
+      ElMessage.success(t('imageClipboard.downloadSuccess', {path: savedPath}))
     } else {
-      ElMessage.success('下载成功')
+      ElMessage.success(t('imageClipboard.downloadSucceeded'))
     }
   } catch (error) {
-    ElMessage.error(`下载失败: ${String(error)}`)
+    ElMessage.error(t('imageClipboard.downloadFailed', {error: String(error)}))
   }
 }
 
@@ -977,25 +984,25 @@ const promoteImageItem = async (itemId) => {
     const shouldPin = !isPinned(itemId)
     await ImageClipboardService.setItemPinned(itemId, shouldPin)
 
-    
+
     if (shouldPin) {
-      
+
       pinnedItems.value = [itemId, ...pinnedItems.value.filter(id => id !== itemId)]
       promoteLocalItemToTop(itemId)
     } else {
-      
+
       pinnedItems.value = pinnedItems.value.filter(id => id !== itemId)
       demoteLocalItemFromTop(itemId)
     }
 
-    
+
     const {emit} = await import('@tauri-apps/api/event')
     await emit('image-item-pinned', {itemId, pinned: shouldPin})
 
   } catch (error) {
     console.error('置顶图片失败:', error)
-    ElMessage.error(`置顶图片失败: ${String(error)}`)
-    
+    ElMessage.error(t('imageClipboard.pinFailed', {error: String(error)}))
+
     await syncHistory()
   }
 }
@@ -1011,18 +1018,18 @@ const demoteLocalItemFromTop = (itemId) => {
   const [moved] = history.value.splice(currentIndex, 1)
   if (!moved) return
 
-  
+
   const pinnedSet = new Set(pinnedItems.value)
   let insertIndex = history.value.findIndex((item) => !pinnedSet.has(item.id))
 
-  
+
   if (insertIndex < 0) {
     insertIndex = history.value.length
   }
 
   history.value.splice(insertIndex, 0, moved)
 
-  
+
   if (selectedId) {
     const nextSelectedIndex = history.value.findIndex((item) => item?.id === selectedId)
     selectedIndex.value = nextSelectedIndex >= 0 ? nextSelectedIndex : 0
@@ -1110,10 +1117,10 @@ const editItemTags = async () => {
   if (!itemId) return
   const current = getItemTags(itemId).join(', ')
   try {
-    const {value} = await ElMessageBox.prompt('请输入标签（多个标签用英文逗号分隔）', '编辑标签', {
+    const {value} = await ElMessageBox.prompt(t('imageClipboard.tagInputPrompt'), t('imageClipboard.editTagsTitle'), {
       inputValue: current,
-      confirmButtonText: '保存',
-      cancelButtonText: '取消'
+      confirmButtonText: t('common.save'),
+      cancelButtonText: t('common.cancel')
     })
     const tags = String(value || '')
         .split(/[,，]/)
@@ -1123,10 +1130,10 @@ const editItemTags = async () => {
     bumpFilterDataRevision()
     await ImageClipboardService.setItemTags(itemId, tags)
     closeContextMenu()
-    ElMessage.success('标签已更新')
+    ElMessage.success(t('imageClipboard.tagsUpdated'))
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error(`更新标签失败: ${error}`)
+      ElMessage.error(t('imageClipboard.updateTagsFailed', {error}))
     }
   }
 }
@@ -1221,7 +1228,7 @@ const applyPayload = (data, options = {}) => {
   history.value = Array.isArray(data.history) ? data.history : []
   totalCount.value = getLoadedHistoryCount()
   pageOffset.value = totalCount.value
-  
+
   hasMore.value = totalCount.value > 0
   warmedIndices.clear()
   warmingIndices.clear()
@@ -1258,17 +1265,17 @@ const mergeShowWindowPayload = (data) => {
   clearPrefetchedPage()
   const incoming = Array.isArray(data?.history) ? data.history.filter((item) => item?.id) : []
 
-  
+
   const hasHistoryField = Object.prototype.hasOwnProperty.call(data, 'history') && Array.isArray(data.history)
   const isFullSnapshot = hasHistoryField && (incoming.length === 0 || (incoming.length > 0 && incoming[0]?.image_path !== undefined))
 
   if (isFullSnapshot) {
-    
+
     if (incoming.length === 0) {
-      
+
       history.value = []
     } else {
-      
+
       const front = []
       for (const item of incoming) {
         if (!item?.id) continue
@@ -1287,7 +1294,7 @@ const mergeShowWindowPayload = (data) => {
     totalCount.value = loadedCount
     pageOffset.value = loadedCount
   } else if (incoming.length > 0) {
-    
+
     const {loadedItems, existingById} = getLoadedHistorySnapshot()
     const incomingIds = new Set()
 
@@ -1369,8 +1376,8 @@ const mergeImagePageIntoState = (data, reset = false) => {
   const baseOffset = Number.isFinite(data?.offset) ? Math.max(0, Number(data.offset)) : (reset ? 0 : pageOffset.value)
   if (reset) {
     clearPrefetchedPage()
-    
-    
+
+
     if (getLoadedHistoryCount() === 0) {
       history.value = []
       categoryMap.value = {}
@@ -1403,7 +1410,7 @@ const mergeImagePageIntoState = (data, reset = false) => {
     setItemTagsLocal(item.id, item.tags)
   }
 
-  
+
   const seenIds = new Set()
   const compactedHistory = []
   for (let i = 0; i < history.value.length; i++) {
@@ -1422,7 +1429,7 @@ const mergeImagePageIntoState = (data, reset = false) => {
       pinnedSet.add(row.id)
     }
   })
-  const loadedItems = history.value 
+  const loadedItems = history.value
   pinnedItems.value = loadedItems
       .filter((item) => pinnedSet.has(item.id))
       .map((item) => item.id)
@@ -1431,9 +1438,9 @@ const mergeImagePageIntoState = (data, reset = false) => {
   totalCount.value = Math.max(Number(totalCount.value) || 0, incomingTotal, loadedItems.length)
 
   const nextOffset = baseOffset + items.length
-  pageOffset.value = loadedItems.length 
+  pageOffset.value = loadedItems.length
 
-  
+
   if (Number.isFinite(data?.total)) {
     hasMore.value = data.total > loadedItems.length
   } else {
@@ -1452,7 +1459,7 @@ const mergeIncrementalPageIntoState = (data) => {
   if (items.length === 0) {
     if (Number.isFinite(data?.total)) {
       const loadedCount = getLoadedHistoryCount()
-      
+
       totalCount.value = Math.max(Number(data.total), loadedCount, Number(totalCount.value) || 0)
       pageOffset.value = loadedCount
       hasMore.value = pageOffset.value < totalCount.value
@@ -1490,7 +1497,7 @@ const mergeIncrementalPageIntoState = (data) => {
       rest.push(item)
     }
   }
-  
+
   const nextHistory = [...front, ...rest]
   history.value = nextHistory
 
@@ -1762,7 +1769,7 @@ onMounted(async () => {
       return
     }
     if (Object.prototype.hasOwnProperty.call(payload, 'history') && Array.isArray(payload.history)) {
-      
+
       mergeShowWindowPayload(payload)
       loadMoreIntent.value = false
       ensureInitialPageLoaded(true)
@@ -1795,10 +1802,10 @@ onMounted(async () => {
     if (isAddingCategory.value) return
     const payload = event.payload || {}
 
-    
+
     const hasHistoryArray = Array.isArray(payload.history)
 
-    
+
     if (hasHistoryArray) {
       applyImagePayloadMeta(payload)
       clearPrefetchedPage()
@@ -1810,7 +1817,7 @@ onMounted(async () => {
       return
     }
 
-    
+
     if (shouldDeferHeavyPayloadApply(payload)) {
       scheduleHistorySync(0)
       return
@@ -1834,7 +1841,7 @@ onMounted(async () => {
   unlistenWritebackResult = await listen('writeback-result', (event) => {
     const payload = event.payload || {}
     if (payload.source !== '图片') return
-    
+
     if (writebackErrorMsg) {
       writebackErrorMsg.close()
       writebackErrorMsg = null
@@ -1842,29 +1849,29 @@ onMounted(async () => {
 
     if (!payload.success) {
       writebackErrorMsg = ElMessage.error({
-        message: `图片回填失败：${String(payload.detail || '未知错误')}`,
+        message: t('imageClipboard.pasteFailed', {error: String(payload.detail || t('common.unknownError'))}),
         duration: 0,
         showClose: true
       })
     }
   })
 
-  
+
   unlistenPreviewReady = await listen('preview-ready', (event) => {
     const {itemId, previewUrl} = event.payload || {}
     if (itemId && previewUrl) {
-      
+
       asyncPreviewCache.set(itemId, previewUrl)
       enforceAsyncPreviewCacheSize()
       previewCache.set(itemId, previewUrl)
       enforcePreviewCacheSize()
 
-      
+
       const itemIndex = history.value.findIndex(item => item?.id === itemId)
       if (itemIndex >= 0) {
-        
+
         const base64 = previewUrl.replace('data:image/png;base64,', '')
-        
+
         history.value[itemIndex].preview_png_base64 = base64
       }
 
@@ -1875,7 +1882,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   flushPendingHistorySync()
   previewCache.clear()
-  asyncPreviewCache.clear() 
+  asyncPreviewCache.clear()
   if (filterDebounceTimer) {
     clearTimeout(filterDebounceTimer)
     filterDebounceTimer = null

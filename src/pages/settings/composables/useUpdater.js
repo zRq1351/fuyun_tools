@@ -1,4 +1,5 @@
 import {h, ref} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {check} from '@tauri-apps/plugin-updater'
 import {relaunch} from '@tauri-apps/plugin-process'
 import {marked} from 'marked'
@@ -95,23 +96,27 @@ const renderBlockToken = (token, index) => {
     return h('p', {key: `x-${index}`}, safeText(token.raw || token.text))
 }
 
-const buildUpdateMessageNode = (version, body) => {
+const buildUpdateMessageNode = (version, body, t) => {
     const raw = safeText(body).trim()
-    const tokens = raw ? marked.lexer(raw) : [{type: 'paragraph', tokens: [{type: 'text', text: '暂无更新说明'}]}]
+    const tokens = raw ? marked.lexer(raw) : [{
+        type: 'paragraph',
+        tokens: [{type: 'text', text: t('updater.noUpdateInfo')}]
+    }]
     const renderedBlocks = tokens
         .map((token, index) => renderBlockToken(token, index))
         .filter(Boolean)
     return h('div', {class: 'update-dialog'}, [
         h('div', {class: 'update-dialog__hero'}, [
-            h('div', {class: 'update-dialog__tag'}, '新版本可用'),
+            h('div', {class: 'update-dialog__tag'}, t('updater.newVersion')),
             h('h3', {class: 'update-dialog__title'}, `v${version}`)
         ]),
         h('div', {class: 'update-body-content'}, renderedBlocks),
-        h('p', {class: 'update-dialog__hint'}, '是否立即更新？')
+        h('p', {class: 'update-dialog__hint'}, t('updater.updateNow'))
     ])
 }
 
 export function useUpdater(currentVersion) {
+    const {t} = useI18n()
     const checkingUpdate = ref(false)
     const updateStatus = ref(null)
     const updateProgress = ref(0)
@@ -119,7 +124,7 @@ export function useUpdater(currentVersion) {
 
     const checkUpdate = async () => {
         checkingUpdate.value = true
-        updateStatus.value = {message: '正在检查更新...', type: 'info'}
+        updateStatus.value = {message: t('updater.status.checking'), type: 'info'}
         showUpdateProgress.value = false
         updateProgress.value = 0
 
@@ -129,21 +134,21 @@ export function useUpdater(currentVersion) {
                 updateStatus.value = null
 
                 try {
-                    const messageNode = buildUpdateMessageNode(update.version, update.body)
+                    const messageNode = buildUpdateMessageNode(update.version, update.body, t)
 
                     await ElMessageBox.confirm(
                         messageNode,
-                        '发现更新',
+                        t('updater.foundUpdate'),
                         {
-                            confirmButtonText: '立即更新',
-                            cancelButtonText: '稍后提醒',
+                            confirmButtonText: t('updater.updateImmediately'),
+                            cancelButtonText: t('updater.remindLater'),
                             type: 'primary',
                             customClass: 'update-message-box'
                         }
                     )
 
                     showUpdateProgress.value = true
-                    updateStatus.value = {message: '正在下载更新...', type: 'info'}
+                    updateStatus.value = {message: t('updater.status.downloading'), type: 'info'}
 
                     let contentLength = 0
                     let downloaded = 0
@@ -163,14 +168,14 @@ export function useUpdater(currentVersion) {
                         }
                     })
 
-                    updateStatus.value = {message: '更新下载完成', type: 'success'}
+                    updateStatus.value = {message: t('updater.status.downloadComplete'), type: 'success'}
 
                     await ElMessageBox.confirm(
-                        '更新已下载完成，是否立即重启应用以应用更新？',
-                        '更新完成',
+                        t('updater.restartPrompt'),
+                        t('updater.updateComplete'),
                         {
-                            confirmButtonText: '立即重启',
-                            cancelButtonText: '稍后重启',
+                            confirmButtonText: t('updater.restartNow'),
+                            cancelButtonText: t('updater.restartLater'),
                             type: 'success',
                         }
                     )
@@ -179,15 +184,15 @@ export function useUpdater(currentVersion) {
 
                 } catch (action) {
                     if (action === 'cancel') {
-                        updateStatus.value = {message: '已取消更新', type: 'info'}
+                        updateStatus.value = {message: t('updater.status.cancelled'), type: 'info'}
                     }
                 }
             } else {
-                updateStatus.value = {message: '已是最新版本', type: 'success'}
+                updateStatus.value = {message: t('updater.status.alreadyLatest'), type: 'success'}
             }
         } catch (error) {
             if (error !== 'cancel') {
-                updateStatus.value = {message: '网络连接失败，请检查您的网络设置后重试', type: 'error'}
+                updateStatus.value = {message: t('updater.status.networkError'), type: 'error'}
             }
         } finally {
             checkingUpdate.value = false

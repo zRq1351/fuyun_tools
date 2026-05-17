@@ -1,4 +1,3 @@
-/
 <template>
   <div class="container">
     <div class="interactive-area" @mouseleave="onMouseLeave">
@@ -15,28 +14,28 @@
           <el-icon class="btn-icon">
             <collection/>
           </el-icon>
-          <span class="btn-text">翻译</span>
+          <span class="btn-text">{{ t('selectionToolbar.translate') }}</span>
         </div>
 
         <div :class="{ disabled: actionLoading }" class="toolbar-button explain-btn" @click="handleExplain">
           <el-icon class="btn-icon">
             <chat-line-round/>
           </el-icon>
-          <span class="btn-text">解释</span>
+          <span class="btn-text">{{ t('selectionToolbar.explain') }}</span>
         </div>
 
         <div :class="{ disabled: actionLoading }" class="toolbar-button copy-btn" @click="handleCopy">
           <el-icon class="btn-icon">
             <document-copy/>
           </el-icon>
-          <span class="btn-text">复制</span>
+          <span class="btn-text">{{ t('selectionToolbar.copy') }}</span>
         </div>
 
         <div :class="{ disabled: actionLoading }" class="toolbar-button search-btn" @click="handleWebSearch">
           <el-icon class="btn-icon">
             <search/>
           </el-icon>
-          <span class="btn-text">搜索</span>
+          <span class="btn-text">{{ t('selectionToolbar.search') }}</span>
         </div>
 
         <div v-for="prompt in enabledCustomPrompts" :key="prompt.name"
@@ -56,6 +55,7 @@
 
 <script setup>
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
+import {useI18n} from 'vue-i18n'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {ChatLineRound, Collection, DocumentCopy, MagicStick, Search} from '@element-plus/icons-vue'
 import {listen} from '@tauri-apps/api/event'
@@ -63,6 +63,8 @@ import {currentMonitor, getCurrentWindow} from '@tauri-apps/api/window'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import {AIService, AISettingsService, ClipboardService, WindowService} from '../../services/ipc'
 import {handleAppError} from '@/utils/errorHandler.js'
+
+const {t} = useI18n()
 
 const selectedText = ref('')
 const actionLoading = ref(false)
@@ -306,7 +308,7 @@ const ensureSelectionAiConfigured = async () => {
     await WindowService.openSettingsWindow('ai', 'selection_ai_not_configured')
     return false
   } catch (error) {
-    handleAppError(error, '读取AI设置失败')
+    handleAppError(error, t('selectionToolbar.readAISettingsFailed'))
     return false
   }
 }
@@ -456,8 +458,8 @@ const handleTranslate = async () => {
     const ready = await ensureSelectionAiConfigured()
     if (!ready) return
     await WindowService.selectionToolbarBlur()
-    await AIService.streamTranslate(text, '自动识别', '简体中文')
-  }, '翻译请求失败')
+    await AIService.streamTranslate(text, t('selectionToolbar.autoDetect'), t('selectionToolbar.simplifiedChinese'))
+  }, t('selectionToolbar.translateFailed'))
 }
 
 const handleExplain = async () => {
@@ -465,15 +467,15 @@ const handleExplain = async () => {
     const ready = await ensureSelectionAiConfigured()
     if (!ready) return
     await WindowService.selectionToolbarBlur()
-    await AIService.streamExplain(text, '中文')
-  }, '解释请求失败')
+    await AIService.streamExplain(text, t('selectionToolbar.chinese'))
+  }, t('selectionToolbar.explainFailed'))
 }
 
 const handleCopy = async () => {
   await runAction(async (text) => {
     await ClipboardService.copyText(text)
     await WindowService.selectionToolbarBlur()
-  }, '复制失败')
+  }, t('selectionToolbar.copyFailed'))
 }
 
 const handleWebSearch = async () => {
@@ -503,7 +505,7 @@ const handleWebSearch = async () => {
     }
     await openUrl(url)
     await WindowService.selectionToolbarBlur()
-  }, '搜索失败')
+  }, t('selectionToolbar.searchFailed'))
 }
 
 const handleCustomPrompt = async (promptName) => {
@@ -512,7 +514,7 @@ const handleCustomPrompt = async (promptName) => {
     if (!ready) return
     await WindowService.selectionToolbarBlur()
     await AIService.streamCustomPrompt(text, promptName)
-  }, '执行自定义 Prompt 失败')
+  }, t('selectionToolbar.customPromptFailed'))
 }
 </script>
 

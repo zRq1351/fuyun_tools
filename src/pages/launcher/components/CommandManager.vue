@@ -2,8 +2,8 @@
   <div v-if="visible" class="command-manager-overlay" @click.self="$emit('close')">
     <div class="command-manager">
       <div class="manager-header">
-        <span class="title">自定义命令管理</span>
-        <button class="close-btn" title="关闭" @click="$emit('close')">
+        <span class="title">{{ t('launcher.manageCommands') }}</span>
+        <button :title="t('common.close')" class="close-btn" @click="$emit('close')">
           <el-icon :size="14">
             <Close/>
           </el-icon>
@@ -38,12 +38,12 @@
               />
               <span class="slider"></span>
             </label>
-            <button class="action-btn edit" title="编辑" @click="editCommand(cmd)">
+            <button :title="t('common.edit')" class="action-btn edit" @click="editCommand(cmd)">
               <el-icon :size="14">
                 <Edit/>
               </el-icon>
             </button>
-            <button class="action-btn delete" title="删除" @click="deleteCommand(cmd)">
+            <button :title="t('common.delete')" class="action-btn delete" @click="deleteCommand(cmd)">
               <el-icon :size="14">
                 <Delete/>
               </el-icon>
@@ -95,8 +95,8 @@
         </div>
 
         <div class="dialog-actions">
-          <button class="dialog-btn cancel" @click="closeEditDialog">取消</button>
-          <button class="dialog-btn confirm" @click="confirmEdit">保存</button>
+          <button class="dialog-btn cancel" @click="closeEditDialog">{{ t('common.cancel') }}</button>
+          <button class="dialog-btn confirm" @click="confirmEdit">{{ t('common.save') }}</button>
         </div>
       </div>
     </div>
@@ -105,9 +105,12 @@
 
 <script setup>
 import {ref, watch} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {ElMessage} from 'element-plus'
 import {Close, Delete, Document, Edit} from '@element-plus/icons-vue'
 import {invoke} from '@tauri-apps/api/core'
+
+const {t} = useI18n()
 
 const props = defineProps({
   visible: Boolean
@@ -144,11 +147,11 @@ watch(() => props.visible, (newVal) => {
 
 // 获取命令类型标签
 const getCommandTypeLabel = (type) => {
-  if (type.RunProgram) return `运行程序`
-  if (type.OpenWindow) return `打开窗口: ${type.OpenWindow.label}`
-  if (type.ExecuteAction) return `执行操作: ${type.ExecuteAction.action}`
-  if (type.CopyText) return '复制文本'
-  return '未知类型'
+  if (type.RunProgram) return t('common.open') + '程序'
+  if (type.OpenWindow) return `${t('common.open')}窗口: ${type.OpenWindow.label}`
+  if (type.ExecuteAction) return `${t('common.open')}操作: ${type.ExecuteAction.action}`
+  if (type.CopyText) return t('common.copy') + '文本'
+  return t('common.unknown')
 }
 
 // 切换启用状态
@@ -170,10 +173,10 @@ const deleteCommand = async (cmd) => {
     await invoke('remove_custom_command', {commandId: cmd.id})
     await loadCommands()
     emit('updated')
-    ElMessage.success('删除成功')
+    ElMessage.success(t('launcher.appRemoved'))
   } catch (error) {
     console.error('删除失败:', error)
-    ElMessage.error('删除失败: ' + error)
+    ElMessage.error(t('common.operationFailed') + ': ' + error)
   }
 }
 
@@ -220,7 +223,7 @@ const confirmEdit = async () => {
     closeEditDialog()
     await loadCommands()
     emit('updated')
-    ElMessage.success('编辑成功')
+    ElMessage.success(t('common.success'))
   } catch (error) {
     console.error('编辑失败:', error)
     ElMessage.error(error)

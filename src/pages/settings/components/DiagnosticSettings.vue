@@ -3,26 +3,29 @@
     <el-card class="overview-card" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>健康总览</span>
-          <el-button :loading="loading" @click="loadDiagnostics">刷新诊断</el-button>
+          <span>{{ $t('settings.diagnostic.healthOverview') }}</span>
+          <el-button :loading="loading" @click="loadDiagnostics">{{
+              $t('settings.diagnostic.refreshDiagnosis')
+            }}
+          </el-button>
         </div>
       </template>
 
       <div class="overview-grid">
         <div class="overview-item">
-          <div class="overview-label">整体状态</div>
+          <div class="overview-label">{{ $t('settings.diagnostic.overallStatus') }}</div>
           <el-tag :type="statusType(overview.overallStatus)">{{ statusText(overview.overallStatus) }}</el-tag>
         </div>
         <div class="overview-item">
-          <div class="overview-label">错误项</div>
+          <div class="overview-label">{{ $t('settings.diagnostic.errorItems') }}</div>
           <div class="overview-value error">{{ overview.errorCount }}</div>
         </div>
         <div class="overview-item">
-          <div class="overview-label">警告项</div>
+          <div class="overview-label">{{ $t('settings.diagnostic.warningItems') }}</div>
           <div class="overview-value warning">{{ overview.warningCount }}</div>
         </div>
         <div class="overview-item">
-          <div class="overview-label">最近检查</div>
+          <div class="overview-label">{{ $t('settings.diagnostic.lastCheck') }}</div>
           <div class="overview-value small">{{ formatTimestamp(overview.checkedAt) }}</div>
         </div>
       </div>
@@ -59,12 +62,12 @@
         </el-button>
       </div>
 
-      <div class="checked-at">最近刷新：{{ formatTimestamp(item.lastCheckedAt) }}</div>
+      <div class="checked-at">{{ $t('settings.diagnostic.lastRefresh') }}{{ formatTimestamp(item.lastCheckedAt) }}</div>
     </el-card>
 
     <el-card v-if="lastActionMessage" class="result-card" shadow="never">
       <template #header>
-        <span>最近一次动作结果</span>
+        <span>{{ $t('settings.diagnostic.lastActionResult') }}</span>
       </template>
       <div>{{ lastActionMessage }}</div>
     </el-card>
@@ -73,10 +76,13 @@
 
 <script setup>
 import {onMounted, onUnmounted, reactive, ref} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {ElMessage} from 'element-plus'
 import {listen} from '@tauri-apps/api/event'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import {DiagnosticService} from '../../../services/ipc'
+
+const {t} = useI18n()
 
 const emit = defineEmits(['navigate'])
 
@@ -102,14 +108,14 @@ const statusType = (status) => {
 }
 
 const statusText = (status) => {
-  if (status === 'healthy') return '正常'
-  if (status === 'warning') return '警告'
-  if (status === 'error') return '错误'
-  return '未知'
+  if (status === 'healthy') return t('settings.diagnostic.statusNormal')
+  if (status === 'warning') return t('settings.diagnostic.statusWarning')
+  if (status === 'error') return t('settings.diagnostic.statusError')
+  return t('settings.diagnostic.statusUnknown')
 }
 
 const formatTimestamp = (timestamp) => {
-  if (!timestamp) return '未检查'
+  if (!timestamp) return t('settings.diagnostic.notChecked')
   return new Date(Number(timestamp)).toLocaleString()
 }
 
@@ -149,7 +155,7 @@ const scheduleRefresh = (reason = '') => {
 const handleAction = async (action) => {
   try {
     const result = await DiagnosticService.runAction(action.key)
-    lastActionMessage.value = result.message || '动作已执行'
+    lastActionMessage.value = result.message || t('settings.diagnostic.actionExecuted')
     if (result.externalUrl) {
       await openUrl(result.externalUrl)
     }
@@ -159,7 +165,7 @@ const handleAction = async (action) => {
     if (result.needsRefresh) {
       await loadDiagnostics()
     }
-    ElMessage.success(result.message || '动作执行成功')
+    ElMessage.success(result.message || t('settings.diagnostic.actionSuccess'))
   } catch (error) {
     ElMessage.error(String(error))
   }
@@ -169,11 +175,11 @@ onMounted(async () => {
   await loadDiagnostics()
   unlistenOverlayLifecycle = await listen('overlay-window-lifecycle', (event) => {
     const payload = event.payload || {}
-    scheduleRefresh(`覆盖层生命周期更新：${String(payload.label || 'unknown')} / ${String(payload.action || 'unknown')}`)
+    scheduleRefresh(t('settings.diagnostic.overlayLifecycle', {reason: `${String(payload.label || 'unknown')} / ${String(payload.action || 'unknown')}`}))
   })
   unlistenWritebackResult = await listen('writeback-result', (event) => {
     const payload = event.payload || {}
-    scheduleRefresh(`回写链路更新：${String(payload.source || 'unknown')} / ${payload.success ? 'success' : 'failed'}`)
+    scheduleRefresh(t('settings.diagnostic.writebackLink', {reason: `${String(payload.source || 'unknown')} / ${payload.success ? 'success' : 'failed'}`}))
   })
 })
 

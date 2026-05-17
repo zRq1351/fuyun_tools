@@ -69,13 +69,14 @@
         class="recording-region-confirm"
         @mousedown.stop
     >
-      <button class="region-icon-btn primary" title="确定区域" @click.stop="commitRecordingRegionSelection">
+      <button :title="t('screenshot.confirmRegion')" class="region-icon-btn primary"
+              @click.stop="commitRecordingRegionSelection">
         <Check class="tool-icon-wrap"/>
       </button>
-      <button class="region-icon-btn" title="重选区域" @click.stop="cancelSelection">
+      <button :title="t('screenshot.reselect')" class="region-icon-btn" @click.stop="cancelSelection">
         <RefreshLeft class="tool-icon-wrap"/>
       </button>
-      <button class="region-icon-btn danger" title="取消" @click.stop="close">
+      <button :title="t('screenshot.cancel')" class="region-icon-btn danger" @click.stop="close">
         <X class="tool-icon-wrap"/>
       </button>
     </div>
@@ -88,7 +89,7 @@
     >
       <button
           class="region-icon-btn primary"
-          :title="manualLongshotRunning ? '暂停长截图' : '开始长截图'"
+          :title="manualLongshotRunning ? t('screenshot.pauseLongshot') : t('screenshot.startLongshot')"
           @click.stop="toggleManualLongshotRunning"
       >
         <span v-if="manualLongshotRunning" style="font-size: 12px;">||</span>
@@ -96,16 +97,17 @@
       </button>
       <button
           class="region-icon-btn"
-          title="完成长截图"
+          :title="t('screenshot.finishLongshot')"
           :disabled="!manualLongshotSessionId"
           @click.stop="finishManualLongshotCapture"
       >
         <Check class="tool-icon-wrap"/>
       </button>
-      <button class="region-icon-btn" title="重选区域" @click.stop="cancelSelection">
+      <button :title="t('screenshot.reselect')" class="region-icon-btn" @click.stop="cancelSelection">
         <RefreshLeft class="tool-icon-wrap"/>
       </button>
-      <button class="region-icon-btn danger" title="取消长截图" @click.stop="cancelManualLongshotCapture(true)">
+      <button :title="t('screenshot.cancelLongshot')" class="region-icon-btn danger"
+              @click.stop="cancelManualLongshotCapture(true)">
         <X class="tool-icon-wrap"/>
       </button>
     </div>
@@ -126,7 +128,7 @@
         :class="['export-route-indicator', exportRouteIndicator.kind]"
         @mousedown.stop
     >
-      <div class="export-route-title">当前链路状态</div>
+      <div class="export-route-title">{{ t('screenshot.currentLinkStatus') }}</div>
       <div v-for="item in exportRouteIndicator.items" :key="item.key" class="export-route-detail">
         {{ item.label }}：{{ item.value }}
       </div>
@@ -140,7 +142,7 @@
 
       <div class="tools-row primary-tools">
         <button v-for="tool in drawingTools" :key="tool.id"
-                :class="{ active: currentTool === tool.id }" :title="tool.name"
+                :class="{ active: currentTool === tool.id }" :title="t(tool.name)"
                 class="tool-btn" @click="setTool(tool.id)">
           <component :is="tool.icon" class="tool-icon-wrap"/>
         </button>
@@ -163,49 +165,59 @@
 
         <div class="divider"></div>
 
-        <button :disabled="historyIndex <= 0" class="tool-btn" title="撤销 (Ctrl+Z)" @click="undo">
+        <button :disabled="historyIndex <= 0" :title="t('screenshot.undo')" class="tool-btn" @click="undo">
           <RefreshLeft class="tool-icon-wrap"/>
         </button>
-        <button :disabled="historyIndex >= history.length - 1" class="tool-btn" title="重做" @click="redo">
+        <button :disabled="historyIndex >= history.length - 1" :title="t('screenshot.redo')" class="tool-btn"
+                @click="redo">
           <RefreshRight class="tool-icon-wrap"/>
         </button>
 
         <div class="divider"></div>
 
-        <button :disabled="!canExport" class="tool-btn" title="复制到剪贴板" @click="copyToClipboardLinked">
+        <button :disabled="!canExport" :title="t('screenshot.copyToClipboard')" class="tool-btn"
+                @click="copyToClipboardLinked">
           <DocumentCopy class="tool-icon-wrap"/>
         </button>
-        <button :disabled="!canExport" class="tool-btn" title="保存文件" @click="saveAndClose">
+        <button :disabled="!canExport" :title="t('screenshot.saveFile')" class="tool-btn" @click="saveAndClose">
           <Download class="tool-icon-wrap"/>
         </button>
-        <button :disabled="!canExport" class="tool-btn" title="固定到屏幕" @click="pinToScreenAndClose">
+        <button :disabled="!canExport" :title="t('screenshot.pinToScreen')" class="tool-btn"
+                @click="pinToScreenAndClose">
           <Pin class="tool-icon-wrap"/>
         </button>
-        <button class="tool-btn" title="取消选区" @click="cancelSelection">
+        <button :title="t('screenshot.cancelSelection')" class="tool-btn" @click="cancelSelection">
           <X class="tool-icon-wrap"/>
         </button>
-        <button :disabled="!canExport" class="tool-btn" title="完成并复制" @click="completeAndCopyUnlinked">
+        <button :disabled="!canExport" :title="t('screenshot.finishAndCopy')" class="tool-btn"
+                @click="completeAndCopyUnlinked">
           <Check class="tool-icon-wrap"/>
         </button>
       </div>
 
       <!-- 二级属性栏 -->
       <div v-if="currentTool !== 'select' && currentTool !== 'picker'" class="tools-row secondary-tools">
-        <input v-model="currentColor" class="color-picker" title="文字颜色" type="color" @input="syncEditingTextStyle"/>
-        <input v-model="lineWidth" class="line-slider" max="20" min="1" title="线宽/字号" type="range"
+        <input v-model="currentColor" :title="t('screenshot.textColor')" class="color-picker" type="color"
+               @input="syncEditingTextStyle"/>
+        <input v-model="lineWidth" :title="t('screenshot.lineWidth')" class="line-slider" max="20" min="1" type="range"
                @input="syncEditingTextStyle"/>
         <template v-if="currentTool === 'text'">
-          <select v-model="textStyle.fontFamily" class="text-style-select" title="字体" @change="syncEditingTextStyle">
+          <select v-model="textStyle.fontFamily" :title="t('screenshot.font')" class="text-style-select"
+                  @change="syncEditingTextStyle">
             <option v-for="font in fontFamilies" :key="font" :value="font">{{ font }}</option>
           </select>
-          <button :class="{ active: textStyle.bold }" class="tool-btn mini" title="加粗" @click="toggleTextBold">B
+          <button :class="{ active: textStyle.bold }" :title="t('screenshot.bold')" class="tool-btn mini"
+                  @click="toggleTextBold">B
           </button>
-          <button :class="{ active: textStyle.stroke }" class="tool-btn mini" title="描边" @click="toggleTextStroke">
+          <button :class="{ active: textStyle.stroke }" :title="t('screenshot.stroke')" class="tool-btn mini"
+                  @click="toggleTextStroke">
             描
           </button>
-          <input v-if="textStyle.stroke" v-model="textStyle.strokeColor" class="color-picker mini-picker" title="描边颜色"
+          <input v-if="textStyle.stroke" v-model="textStyle.strokeColor" :title="t('screenshot.strokeColor')"
+                 class="color-picker mini-picker"
                  type="color" @input="syncEditingTextStyle"/>
-          <button :class="{ active: textStyle.shadow }" class="tool-btn mini" title="阴影" @click="toggleTextShadow">
+          <button :class="{ active: textStyle.shadow }" :title="t('screenshot.shadow')" class="tool-btn mini"
+                  @click="toggleTextShadow">
             影
           </button>
         </template>
@@ -342,7 +354,10 @@ import {
   RefreshRight,
   TopRight
 } from '@element-plus/icons-vue'
+import {useI18n} from 'vue-i18n'
 import {ScreenshotService} from '@/services/ipc.js'
+
+const {t} = useI18n()
 
 // 核心状态
 const state = ref('idle') // idle, selecting, selected, moving, resizing, drawing
@@ -385,7 +400,7 @@ const lineWidth = ref(3)
 const pickColor = ref('')
 const pickColorRgb = ref('')
 const pickerDisplayMode = ref('hex')
-const pickerCopyHint = ref('Shift切换 RGB/# · Ctrl复制')
+const pickerCopyHint = ref(t('screenshot.pickerHint'))
 const textItems = ref([])
 const shapeItems = ref([])
 let textItemIdSeed = 1
@@ -464,15 +479,15 @@ const dpr = window.devicePixelRatio || 1
 
 // 定义工具
 const drawingTools = [
-  {id: 'select', name: '框选/移动', icon: Pointer},
-  {id: 'pen', name: '画笔', icon: EditPen},
-  {id: 'line', name: '直线', icon: Minus},
-  {id: 'arrow', name: '箭头', icon: TopRight},
-  {id: 'rect', name: '矩形', icon: Square},
-  {id: 'circle', name: '圆形', icon: Circle},
-  {id: 'text', name: '文字', icon: Edit},
-  {id: 'mosaic', name: '马赛克', icon: Grid},
-  {id: 'picker', name: '取色', icon: Brush}
+  {id: 'select', name: 'screenshot.selectMove', icon: Pointer},
+  {id: 'pen', name: 'screenshot.brush', icon: EditPen},
+  {id: 'line', name: 'screenshot.line', icon: Minus},
+  {id: 'arrow', name: 'screenshot.arrow', icon: TopRight},
+  {id: 'rect', name: 'screenshot.rectangle', icon: Square},
+  {id: 'circle', name: 'screenshot.circle', icon: Circle},
+  {id: 'text', name: 'screenshot.text', icon: Edit},
+  {id: 'mosaic', name: 'screenshot.mosaic', icon: Grid},
+  {id: 'picker', name: 'screenshot.colorPicker', icon: Brush}
 ]
 const isDevMode = import.meta.env.DEV
 
@@ -501,29 +516,29 @@ const exportRouteIndicator = computed(() => {
     return {
       kind: 'backend',
       items: [
-        {key: 'display', label: '截图源', value: displaySource},
-        {key: 'save', label: '保存', value: saveRoute},
-        {key: 'copy', label: '复制', value: copyRoute},
-        {key: 'pin', label: '固定', value: pinRoute},
-        {key: 'path', label: '当前路径', value: sourcePath}
+        {key: 'display', label: t('screenshot.source'), value: displaySource},
+        {key: 'save', label: t('screenshot.linkSave'), value: saveRoute},
+        {key: 'copy', label: t('screenshot.linkCopy'), value: copyRoute},
+        {key: 'pin', label: t('screenshot.linkPin'), value: pinRoute},
+        {key: 'path', label: t('screenshot.linkCurrentPath'), value: sourcePath}
       ]
     }
   }
   return {
     kind: 'fallback',
     items: [
-      {key: 'display', label: '截图源', value: displaySource},
-      {key: 'save', label: '保存', value: saveRoute},
-      {key: 'copy', label: '复制', value: copyRoute},
-      {key: 'pin', label: '固定', value: pinRoute},
-      {key: 'path', label: '当前路径', value: '前端内存链路（无 imagePath）'}
+      {key: 'display', label: t('screenshot.source'), value: displaySource},
+      {key: 'save', label: t('screenshot.linkSave'), value: saveRoute},
+      {key: 'copy', label: t('screenshot.linkCopy'), value: copyRoute},
+      {key: 'pin', label: t('screenshot.linkPin'), value: pinRoute},
+      {key: 'path', label: t('screenshot.linkCurrentPath'), value: t('screenshot.linkMemoryFallback')}
     ]
   }
 })
 const manualLongshotButtonTitle = computed(() => {
-  if (manualLongshotAvailability.status === 'available') return '长截图'
-  if (manualLongshotAvailability.status === 'busy') return '已有长截图会话正在运行'
-  return manualLongshotAvailability.summary || '长截图当前不可用'
+  if (manualLongshotAvailability.status === 'available') return t('screenshot.longshot')
+  if (manualLongshotAvailability.status === 'busy') return t('screenshot.longshotRunning')
+  return manualLongshotAvailability.summary || t('screenshot.longshotUnavailable')
 })
 const selectionInfoText = computed(() => {
   const width = Math.max(0, Math.round(rect.width * dpr))
@@ -598,7 +613,7 @@ async function refreshManualLongshotAvailability() {
   } catch (error) {
     manualLongshotAvailability.status = 'unknown'
     manualLongshotAvailability.phase = 'idle'
-    manualLongshotAvailability.summary = String(error || '长截图状态获取失败')
+    manualLongshotAvailability.summary = String(error || t('screenshot.longshotStatusFailed'))
     manualLongshotAvailability.details = []
     manualLongshotAvailability.sessionId = null
     manualLongshotPhase.value = 'idle'
@@ -742,25 +757,25 @@ const toolbarStyle = computed(() => {
   let top = rect.y + rect.height + 10
   let right = window.innerWidth - (rect.x + rect.width)
 
-  
+
   if (top + 100 > window.innerHeight) {
     top = rect.y - 60
     if (currentTool.value !== 'select' && currentTool.value !== 'picker') {
-      top -= 40 
+      top -= 40
     }
   }
-  
+
   if (top < 0) {
     top = Math.max(10, rect.y + rect.height - 60 - 10)
   }
-  
+
   const estimatedToolbarHeight = 80
   if (top + estimatedToolbarHeight > window.innerHeight) {
     top = Math.max(10, window.innerHeight - estimatedToolbarHeight)
   }
 
   if (right < 10) right = 10
-  const estimatedToolbarWidth = 650 
+  const estimatedToolbarWidth = 650
   if (right + estimatedToolbarWidth > window.innerWidth) {
     right = Math.max(10, window.innerWidth - estimatedToolbarWidth)
   }
@@ -837,7 +852,12 @@ onMounted(async () => {
     const frameCount = Number(payload.frameCount || 0)
     const dropped = Number(payload.droppedFrames || 0)
     const confidence = Number(payload.lastConfidence || 0)
-    manualLongshotHint.value = `长截图进行中：高度 ${stitchedHeight}px，帧 ${frameCount}，丢帧 ${dropped}，置信度 ${confidence.toFixed(2)}`
+    manualLongshotHint.value = t('screenshot.longshotProgress', {
+      height: stitchedHeight,
+      frame: frameCount,
+      dropped,
+      confidence: confidence.toFixed(2)
+    })
     if (!longshotBorderShown.value && frameCount >= 1 && pendingLongshotBorderAnchor.value) {
       invoke('show_longshot_border', {anchor: pendingLongshotBorderAnchor.value}).catch(() => {
       })
@@ -863,16 +883,16 @@ onMounted(async () => {
     applyManualLongshotPhase(payload)
     if (stateName === 'started' || stateName === 'resumed') {
       if (!manualLongshotHint.value) {
-        manualLongshotHint.value = '请在选区内手动滚动，完成后点击勾号'
+        manualLongshotHint.value = t('screenshot.longshotManualScroll')
       }
     } else if (stateName === 'canceled') {
       manualLongshotPhase.value = 'canceling'
       cleanupManualLongshotUi(true)
-      manualLongshotHint.value = '长截图已取消'
+      manualLongshotHint.value = t('screenshot.longshotCancelled')
     } else if (stateName === 'failed' || stateName === 'error') {
       manualLongshotPhase.value = 'failed'
       cleanupManualLongshotUi(true)
-      manualLongshotHint.value = String(payload.userMessage || `长截图失败：${String(payload.message || '未知错误')}`)
+      manualLongshotHint.value = String(payload.userMessage || t('screenshot.longshotFailed', {error: String(payload.message || '')}))
     } else if (stateName === 'ended') {
       scheduleManualLongshotAvailabilityRefresh()
     }
@@ -882,23 +902,23 @@ onMounted(async () => {
     try {
       applyManualLongshotResult(payload)
     } catch (error) {
-      manualLongshotHint.value = `完成长截图失败：${String(error)}`
+      manualLongshotHint.value = t('screenshot.longshotFinishFailed', {error: String(error)})
     }
   })
   unlistenManualLongshotShortcutCanceled = await listen('manual-longshot-shortcut-canceled', () => {
     manualLongshotPhase.value = 'canceling'
     cleanupManualLongshotUi(true)
-    manualLongshotHint.value = '长截图已取消'
+    manualLongshotHint.value = t('screenshot.longshotCancelled')
   })
   unlistenManualLongshotShortcutPaused = await listen('manual-longshot-shortcut-paused', () => {
     manualLongshotPhase.value = 'paused'
     manualLongshotRunning.value = false
-    manualLongshotHint.value = '已暂停（可点击按钮操作）。继续: Ctrl+Alt+P，完成: Ctrl+Alt+Enter，取消: Ctrl+Alt+Backspace'
+    manualLongshotHint.value = t('screenshot.longshotPausedHint')
   })
   unlistenManualLongshotShortcutResumed = await listen('manual-longshot-shortcut-resumed', () => {
     manualLongshotPhase.value = 'running'
     manualLongshotRunning.value = true
-    manualLongshotHint.value = '已恢复滚动采样。暂停/恢复: Ctrl+Alt+P，完成: Ctrl+Alt+Enter，取消: Ctrl+Alt+Backspace'
+    manualLongshotHint.value = t('screenshot.longshotResumeHint')
   })
   consumeBootPayload()
 })
@@ -976,7 +996,7 @@ function handleScreenshotReset() {
   }
   pickColor.value = ''
   pickColorRgb.value = ''
-  pickerCopyHint.value = 'Shift切换 RGB/# · Ctrl复制'
+  pickerCopyHint.value = t('screenshot.pickerHint')
   screenshotPixelCanvas = null
   screenshotPixelCtx = null
   screenshotRequestInFlight.value = false
@@ -1179,7 +1199,7 @@ function handleStartRegionSelect(event) {
   longshotResultActive.value = false
   longshotRawPngBase64.value = ''
   manualLongshotHint.value = regionSelectMode.value === 'manual_longshot'
-      ? '先框选滚动区域，再点击播放开始采样'
+      ? t('screenshot.longshotManualHint')
       : ''
 }
 
@@ -1191,7 +1211,7 @@ async function toggleManualLongshotRunning() {
       pendingLongshotBorderAnchor.value = region
       longshotBorderShown.value = false
       await invoke('set_screenshot_window_visible', {visible: false})
-      
+
       await new Promise(resolve => setTimeout(resolve, 80))
       const result = await ScreenshotService.startManualLongshot({
         region,
@@ -1206,7 +1226,7 @@ async function toggleManualLongshotRunning() {
         manualLongshotRunning.value = true
         manualLongshotPhase.value = 'starting'
         await invoke('show_longshot_toolbar', {anchor: region})
-        manualLongshotHint.value = '长截图已开始，可直接看到目标窗口滚动'
+        manualLongshotHint.value = t('screenshot.longshotStarted')
       } else {
         await invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
         })
@@ -1219,18 +1239,18 @@ async function toggleManualLongshotRunning() {
       await ScreenshotService.pauseManualLongshot(manualLongshotSessionId.value)
       manualLongshotRunning.value = false
       manualLongshotPhase.value = 'paused'
-      manualLongshotHint.value = '长截图已暂停，点击播放继续'
+      manualLongshotHint.value = t('screenshot.longshotPaused')
     } else {
       await ScreenshotService.resumeManualLongshot(manualLongshotSessionId.value)
       manualLongshotRunning.value = true
       manualLongshotPhase.value = 'running'
-      manualLongshotHint.value = '继续滚动中，已切到悬浮预览窗'
+      manualLongshotHint.value = t('screenshot.longshotResumed')
     }
   } catch (error) {
     await invoke('set_screenshot_window_visible', {visible: true}).catch(() => {})
     cleanupManualLongshotUi(false)
     manualLongshotPhase.value = 'failed'
-    manualLongshotHint.value = `长截图操作失败：${String(error)}`
+    manualLongshotHint.value = t('screenshot.longshotOpFailed', {error: String(error)})
   }
 }
 
@@ -1264,7 +1284,7 @@ function cancelManualLongshotCapture(updateHint = true, restoreVisibility = true
     })
   }
   if (updateHint) {
-    manualLongshotHint.value = '长截图已取消'
+    manualLongshotHint.value = t('screenshot.longshotCancelled')
   }
 }
 
@@ -1272,7 +1292,7 @@ function applyManualLongshotResult(result) {
   const base64 = String(result?.pngBase64 || result?.png_base64 || '')
   const imagePath = String(result?.imagePath || result?.image_path || '')
   if (!base64 && !imagePath) {
-    throw new Error('未获取到长截图结果')
+    throw new Error(t('screenshot.longshotNoResult'))
   }
   if (base64) {
     loadImageFromBase64(base64)
@@ -1314,7 +1334,7 @@ function base64ToBlob(base64, mime = 'image/png') {
 
 function resolveExportBase64() {
   if (longshotResultActive.value && longshotRawPngBase64.value && !hasOverlayForLongshotExport()) {
-    
+
     return longshotRawPngBase64.value
   }
   const cropCanvas = getCroppedCanvas()
@@ -1491,10 +1511,10 @@ function initCanvas() {
 
   const ctx = canvas.value.getContext('2d')
   if (!ctx) return
-  
+
   ctx.scale(dpr, dpr)
 
-  
+
   saveToHistory()
   isCaptureReady.value = true
 }
@@ -1571,7 +1591,7 @@ function onMouseDown(e) {
         startPoint.y = p.y
         Object.assign(startRect, rect)
       } else {
-        
+
         state.value = 'selecting'
         startPoint.x = p.x
         startPoint.y = p.y
@@ -1579,16 +1599,16 @@ function onMouseDown(e) {
         rect.y = p.y
         rect.width = 0
         rect.height = 0
-        
+
         if (history.value.length > 0) {
           historyIndex.value = 0
           restoreFromHistory()
         }
       }
     } else {
-      
+
       if (!isInside(p.x, p.y, rect) && currentTool.value !== 'picker') {
-        
+
         state.value = 'selecting'
         startPoint.x = p.x
         startPoint.y = p.y
@@ -1597,7 +1617,7 @@ function onMouseDown(e) {
         rect.width = 0
         rect.height = 0
         currentTool.value = 'select'
-        
+
         if (history.value.length > 0) {
           historyIndex.value = 0
           restoreFromHistory()
@@ -1618,7 +1638,7 @@ function onMouseMove(e) {
   if (state.value === 'idle') {
     highlightedWindow.value = detectWindowAt(p.x, p.y)
   } else if (state.value === 'selecting') {
-    
+
     const x = Math.min(startPoint.x, p.x)
     const y = Math.min(startPoint.y, p.y)
     const width = Math.abs(p.x - startPoint.x)
@@ -1753,7 +1773,7 @@ function cancelSelection() {
   rect.height = 0
   regionConfirmAnchor.ready = false
   currentTool.value = 'select'
-  
+
   if (history.value.length > 0) {
     historyIndex.value = 0
     restoreFromHistory()
@@ -1804,7 +1824,7 @@ function handleResize(e) {
     height += dy;
   }
 
-  
+
   if (width < 0) {
     x += width;
     width = -width;
@@ -1832,17 +1852,17 @@ function setTool(toolId) {
   currentTool.value = toolId
   selectedShapeId.value = null
   if (toolId !== 'picker') {
-    pickerCopyHint.value = 'Shift切换 RGB/# · Ctrl复制'
+    pickerCopyHint.value = t('screenshot.pickerHint')
   }
 }
 
 function enterManualLongshotMode() {
   if (manualLongshotAvailability.status !== 'available' && manualLongshotAvailability.status !== 'busy') {
-    manualLongshotHint.value = manualLongshotAvailability.summary || '长截图当前不可用'
+    manualLongshotHint.value = manualLongshotAvailability.summary || t('screenshot.longshotUnavailable')
     return
   }
   if (manualLongshotAvailability.status === 'busy' && !manualLongshotSessionId.value) {
-    manualLongshotHint.value = '已有长截图会话正在运行，请先完成或取消'
+    manualLongshotHint.value = t('screenshot.longshotRunning')
     return
   }
   cancelManualLongshotCapture(false)
@@ -1855,13 +1875,13 @@ function enterManualLongshotMode() {
   selectedShapeId.value = null
   const keepCurrentSelection = hasSelection.value && state.value === 'selected'
   if (keepCurrentSelection) {
-    
-    manualLongshotHint.value = '已切换长截图，点击播放开始采样'
+
+    manualLongshotHint.value = t('screenshot.longshotStarted')
     state.value = 'selected'
     return
   }
-  
-  manualLongshotHint.value = '先框选滚动区域，再点击播放开始采样'
+
+  manualLongshotHint.value = t('screenshot.longshotManualHint')
   state.value = 'idle'
   textItems.value = []
   shapeItems.value = []
@@ -1909,7 +1929,7 @@ function handleCanvasMouseDown(event) {
       points: [{x: drawStart.x, y: drawStart.y}]
     }
   } else if (['line', 'arrow', 'rect', 'circle'].includes(currentTool.value)) {
-    
+
     currentDrawingSnapshot = ctx.getImageData(0, 0, canvas.value.width, canvas.value.height)
   }
 }
@@ -1940,7 +1960,7 @@ function handleCanvasMouseMove(event) {
     applyMosaicAtScenePoint(ctx, x, y, Number(lineWidth.value) || 1)
     activeRasterCommand?.points?.push({x, y})
   } else if (['line', 'arrow', 'rect', 'circle'].includes(currentTool.value)) {
-    
+
     const oldTransform = ctx.getTransform()
     ctx.resetTransform()
     ctx.putImageData(currentDrawingSnapshot, 0, 0)
@@ -2571,7 +2591,7 @@ async function copyPickedColor() {
     pickerCopyHint.value = `已复制：${value}`
     window.setTimeout(() => {
       if (currentTool.value === 'picker') {
-        pickerCopyHint.value = 'Shift切换 RGB/# · Ctrl复制'
+        pickerCopyHint.value = t('screenshot.pickerHint')
       }
     }, 1000)
   } catch (error) {
@@ -2889,14 +2909,14 @@ function getCroppedCanvas() {
     throw new Error('裁剪画布上下文创建失败')
   }
 
-  
+
   ctx.drawImage(
       screenshotImg.value,
       sourceX, sourceY, sourceWidth, sourceHeight,
       0, 0, sourceWidth, sourceHeight
   )
 
-  
+
   const drawCtx = canvas.value.getContext('2d')
   if (!drawCtx) {
     throw new Error('绘制画布上下文获取失败')
@@ -2906,7 +2926,7 @@ function getCroppedCanvas() {
   const overlayData = drawCtx.getImageData(sourceX, sourceY, sourceWidth, sourceHeight)
   drawCtx.setTransform(oldTransform)
 
-  
+
   const tempCanvas = document.createElement('canvas')
   tempCanvas.width = sourceWidth
   tempCanvas.height = sourceHeight
@@ -2935,7 +2955,7 @@ function getLongshotFullCanvas() {
   }
   ctx.drawImage(screenshotImg.value, 0, 0, imageW, imageH)
 
-  
+
   const view = getLongshotImageViewportRect(imageW, imageH)
   if (canvas.value) {
     ctx.drawImage(
@@ -3216,9 +3236,9 @@ async function pinToScreenAndClose() {
           ? Math.max(1, Number(screenshotImg.value?.height) || Math.round(rect.height))
           : Math.max(1, Math.round(rect.height))
     }
-    
+
     const region = getGlobalSelectionRect()
-    
+
     const payload = {
       request: {
         pngBase64: base64,
@@ -3266,8 +3286,8 @@ async function saveAndClose() {
       return
     }
 
-    
-    
+
+
 
     const shouldSaveRenderedImageDirectly = !sourceImagePath.value
 
@@ -3307,7 +3327,7 @@ async function saveAndClose() {
 
 async function close() {
   try {
-    
+
     cancelManualLongshotCapture(false, false)
     await invoke('close_screenshot_window')
   } catch (error) {

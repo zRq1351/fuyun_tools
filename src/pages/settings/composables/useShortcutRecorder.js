@@ -1,14 +1,16 @@
 import {computed, onUnmounted, ref} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {ElMessage} from 'element-plus'
 
 export function useShortcutRecorder(form, fieldKey = 'toggleShortcut') {
+    const {t} = useI18n()
     const isRecording = ref(false)
     const recordedShortcut = ref('')
     const displayValue = ref('')
 
     const currentDisplayValue = computed(() => {
         if (isRecording.value) {
-            return displayValue.value || '请按下快捷键...'
+            return displayValue.value || t('shortcut.pressKeys')
         }
         return form[fieldKey] || ''
     })
@@ -65,16 +67,16 @@ export function useShortcutRecorder(form, fieldKey = 'toggleShortcut') {
             recordedShortcut.value = [...modifiers, key].join('+')
             form[fieldKey] = recordedShortcut.value
             stopRecording()
-            ElMessage.success(`已录制快捷键: ${recordedShortcut.value}`)
+            ElMessage.success(t('shortcut.recorded', {shortcut: recordedShortcut.value}))
         }
     }
 
     const startRecording = () => {
         isRecording.value = true
         recordedShortcut.value = ''
-        displayValue.value = '请按下快捷键...'
+        displayValue.value = t('shortcut.pressKeys')
         document.addEventListener('keydown', handleKeyDown, true)
-        ElMessage.info('开始录制快捷键，请按下组合键')
+        ElMessage.info(t('shortcut.startRecording'))
     }
 
     const toggleRecording = () => {

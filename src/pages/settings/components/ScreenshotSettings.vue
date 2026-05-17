@@ -2,48 +2,50 @@
   <el-form :model="form" label-position="top">
     <el-card class="setting-section-card compact-card" shadow="never">
       <template #header>
-        <div class="section-title">截图设置</div>
+        <div class="section-title">{{ $t('settings.screenshot.title') }}</div>
       </template>
-      <el-form-item label="截图功能">
+      <el-form-item :label="$t('settings.screenshot.enabled')">
         <el-switch
-            :active-text="pendingToggles.screenshot === 'disabling' ? '正在禁用...' : '启用'"
-            :inactive-text="pendingToggles.screenshot === 'enabling' ? '正在启用...' : '停用'"
+            :active-text="pendingToggles.screenshot === 'disabling' ? $t('common.disabling') : $t('common.enable')"
+            :inactive-text="pendingToggles.screenshot === 'enabling' ? $t('common.enabling') : $t('common.disable')"
             :loading="!!pendingToggles.screenshot"
             :model-value="form.screenshotEnabled"
             @update:model-value="(val) => toggleFeature('screenshotEnabled', val)"
         />
-        <div class="form-hint">停用后后端不再注册截图快捷键，也不会执行截图命令</div>
+        <div class="form-hint">{{ $t('settings.screenshot.disabledHint') }}</div>
       </el-form-item>
-      <el-form-item label="打开截图窗口快捷键">
+      <el-form-item :label="$t('settings.screenshot.openWindowHotkey')">
         <el-input
             :class="{ recording: isScreenshotRecording }"
             :model-value="screenshotDisplayValue"
-            placeholder="例如: Ctrl+Shift+A"
+            :placeholder="$t('settings.clipboard.shortcutExample')"
             readonly
         >
           <template #append>
             <el-button-group>
-              <el-button :type="isScreenshotRecording ? 'danger' : 'primary'" @click="toggleScreenshotRecording" title="修改快捷键">
+              <el-button :title="$t('settings.clipboard.modifyShortcut')" :type="isScreenshotRecording ? 'danger' : 'primary'"
+                         @click="toggleScreenshotRecording">
                 <el-icon>
                   <component :is="isScreenshotRecording ? VideoPause : Edit"/>
                 </el-icon>
               </el-button>
-              <el-button @click="resetScreenshotRecording" title="恢复默认快捷键">
+              <el-button :title="$t('settings.clipboard.resetShortcut')" @click="resetScreenshotRecording">
                 <el-icon><RefreshLeft /></el-icon>
               </el-button>
             </el-button-group>
           </template>
         </el-input>
-        <div class="form-hint">点击编辑按钮来自定义打开截图窗口的快捷键</div>
+        <div class="form-hint">{{ $t('settings.screenshot.hotkeyHint') }}</div>
       </el-form-item>
-      <el-form-item label="OCR 识别引擎">
-        <el-select v-model="form.ocrEngine" placeholder="选择 OCR 引擎" style="width: 100%">
-          <el-option label="Windows 原生 OCR（快速）" value="windows-native"/>
-          <el-option label="ocr-rs（高精度，支持手写体）" value="ocr-rs"/>
+      <el-form-item :label="$t('settings.screenshot.ocrEngine')">
+        <el-select v-model="form.ocrEngine" :placeholder="$t('settings.screenshot.ocrSelectPlaceholder')"
+                   style="width: 100%">
+          <el-option :label="$t('settings.screenshot.ocrNative')" value="windows-native"/>
+          <el-option :label="$t('settings.screenshot.ocrRs')" value="ocr-rs"/>
         </el-select>
         <div class="form-hint">
-          <div>• Windows 原生 OCR：速度快（~500ms），准确率 80-85%，适合简单场景</div>
-          <div>• ocr-rs：精度高（95-98%），支持手写体和复杂场景，速度稍慢（~1000ms）</div>
+          <div>{{ $t('settings.screenshot.ocrNativeHint') }}</div>
+          <div>{{ $t('settings.screenshot.ocrRsHint') }}</div>
         </div>
       </el-form-item>
     </el-card>
@@ -52,9 +54,12 @@
 
 <script setup>
 import {ref} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {Edit, RefreshLeft, VideoPause} from '@element-plus/icons-vue'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
 import {ElMessage} from 'element-plus'
+
+const {t} = useI18n()
 
 const props = defineProps({
   form: {
@@ -91,7 +96,7 @@ const resetScreenshotRecording = () => {
   stopScreenshotRecording()
   const isMac = navigator.userAgent.toLowerCase().includes('mac')
   props.form.screenshotToggleShortcut = isMac ? 'Cmd+Shift+s' : 'Ctrl+Shift+s'
-  ElMessage.success(`已恢复打开截图窗口快捷键默认值: ${props.form.screenshotToggleShortcut}`)
+  ElMessage.success(t('settings.screenshot.shortcutReset', {shortcut: props.form.screenshotToggleShortcut}))
 }
 </script>
 

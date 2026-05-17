@@ -2,84 +2,86 @@
   <el-form :model="form" label-position="top">
     <el-card class="setting-section-card compact-card" shadow="never">
       <template #header>
-        <div class="section-title">录屏设置</div>
+        <div class="section-title">{{ $t('settings.recording.title') }}</div>
       </template>
       <div class="setting-group">
-        <div class="group-title">基础控制</div>
-        <el-form-item label="录屏功能">
+        <div class="group-title">{{ $t('settings.recording.basicControl') }}</div>
+        <el-form-item :label="$t('settings.recording.enabled')">
           <el-switch
-              :active-text="pendingToggles.recording === 'disabling' ? '正在禁用...' : '启用'"
-              :inactive-text="pendingToggles.recording === 'enabling' ? '正在启用...' : '停用'"
+              :active-text="pendingToggles.recording === 'disabling' ? $t('common.disabling') : $t('common.enable')"
+              :inactive-text="pendingToggles.recording === 'enabling' ? $t('common.enabling') : $t('common.disable')"
               :loading="!!pendingToggles.recording"
               :model-value="form.recordingEnabled"
               @update:model-value="(val) => toggleFeature('recordingEnabled', val)"
           />
-          <div class="form-hint">停用后后端不再注册录屏快捷键，也不会响应录制命令</div>
+          <div class="form-hint">{{ $t('settings.recording.disabledHint') }}</div>
         </el-form-item>
-        <el-form-item label="录屏快捷键">
+        <el-form-item :label="$t('settings.recording.recordingHotkey')">
           <el-input
               :class="{ recording: isRecordingHotkeyRecording }"
               :model-value="recordingDisplayValue"
-              placeholder="例如: Alt+R"
+              :placeholder="$t('settings.clipboard.shortcutExample')"
               readonly
           >
             <template #append>
               <el-button-group>
-                <el-button :type="isRecordingHotkeyRecording ? 'danger' : 'primary'" @click="toggleRecordingHotkey" title="修改快捷键">
+                <el-button :title="$t('settings.clipboard.modifyShortcut')" :type="isRecordingHotkeyRecording ? 'danger' : 'primary'"
+                           @click="toggleRecordingHotkey">
                   <el-icon>
                     <component :is="isRecordingHotkeyRecording ? VideoPause : Edit"/>
                   </el-icon>
                 </el-button>
-                <el-button @click="resetRecordingHotkey" title="恢复默认快捷键">
+                <el-button :title="$t('settings.clipboard.resetShortcut')" @click="resetRecordingHotkey">
                   <el-icon><RefreshLeft /></el-icon>
                 </el-button>
               </el-button-group>
             </template>
           </el-input>
         </el-form-item>
-        <el-form-item label="麦克风启用/关闭快捷键">
+        <el-form-item :label="$t('settings.recording.micToggleHotkey')">
           <el-input
               :class="{ recording: isMicToggleHotkeyRecording }"
               :model-value="micToggleDisplayValue"
-              placeholder="例如: Ctrl+Space"
+              :placeholder="$t('settings.clipboard.shortcutExample')"
               readonly
           >
             <template #append>
               <el-button-group>
-                <el-button :type="isMicToggleHotkeyRecording ? 'danger' : 'primary'" @click="toggleMicToggleHotkey" title="修改快捷键">
+                <el-button :title="$t('settings.clipboard.modifyShortcut')" :type="isMicToggleHotkeyRecording ? 'danger' : 'primary'"
+                           @click="toggleMicToggleHotkey">
                   <el-icon>
                     <component :is="isMicToggleHotkeyRecording ? VideoPause : Edit"/>
                   </el-icon>
                 </el-button>
-                <el-button @click="resetMicToggleHotkey" title="恢复默认快捷键">
+                <el-button :title="$t('settings.clipboard.resetShortcut')" @click="resetMicToggleHotkey">
                   <el-icon><RefreshLeft /></el-icon>
                 </el-button>
               </el-button-group>
             </template>
           </el-input>
-          <div class="form-hint">录制过程中使用该快捷键快速开启/关闭麦克风</div>
+          <div class="form-hint">{{ $t('settings.recording.micToggleHint') }}</div>
         </el-form-item>
       </div>
 
       <div class="setting-group">
-        <div class="group-title">录制校准</div>
+        <div class="group-title">{{ $t('settings.recording.calibration') }}</div>
         <div class="group-grid quality-grid">
-          <el-form-item label="窗口录制音频同步补偿 (ms)">
+          <el-form-item :label="$t('settings.recording.audioSync')">
             <el-input-number v-model="form.recordingWindowAudioSyncAdvanceMs" :max="500" :min="0" :step="5"/>
-            <div class="form-hint">仅窗口录制（WGC）生效；值越大表示音频越向前对齐。</div>
+            <div class="form-hint">{{ $t('settings.recording.audioSyncHint') }}</div>
           </el-form-item>
-          <el-form-item label="最长录制时长 (分钟)">
+          <el-form-item :label="$t('settings.recording.maxDuration')">
             <el-input-number v-model="form.recordingMaxDurationMinutes" :max="1440" :min="1"/>
           </el-form-item>
         </div>
       </div>
 
       <div class="setting-group">
-        <div class="group-title">输出与保护</div>
-        <el-form-item label="输出目录">
+        <div class="group-title">{{ $t('settings.recording.output') }}</div>
+        <el-form-item :label="$t('settings.recording.outputDir')">
           <el-input v-model="effectiveOutputDirDisplay" readonly>
             <template #append>
-              <el-tooltip content="选择目录" placement="top">
+              <el-tooltip :content="$t('common.selectDir')" placement="top">
                 <el-button @click="selectOutputDir">
                   <el-icon>
                     <FolderOpened/>
@@ -89,13 +91,14 @@
             </template>
           </el-input>
           <div class="form-hint">
-            选择目录会覆盖默认输出目录；留空时使用程序目录下 recordings。
-            <el-link type="primary" @click="openOutputDir">打开当前目录</el-link>
+            {{ $t('settings.recording.outputDirHint') }}
+            <el-link type="primary" @click="openOutputDir">{{ $t('settings.recording.openDir') }}</el-link>
           </div>
         </el-form-item>
         <div class="switch-row">
-          <el-form-item label="录制完成自动打开目录">
-            <el-switch v-model="form.recordingAutoOpenFolder" active-text="开启" inactive-text="关闭"/>
+          <el-form-item :label="$t('settings.recording.autoOpenDir')">
+            <el-switch v-model="form.recordingAutoOpenFolder" :active-text="$t('common.open')"
+                       :inactive-text="$t('common.close')"/>
           </el-form-item>
         </div>
       </div>
@@ -106,11 +109,14 @@
 
 <script setup>
 import {computed, onMounted, ref} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {Edit, FolderOpened, RefreshLeft, VideoPause} from '@element-plus/icons-vue'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
 import {RecordingService} from '../../../services/ipc'
 import {open} from '@tauri-apps/plugin-dialog'
 import {ElMessage} from 'element-plus'
+
+const {t} = useI18n()
 
 const props = defineProps({
   form: {
@@ -153,13 +159,13 @@ const {
 const resetRecordingHotkey = () => {
   stopRecordingHotkeyRecording()
   props.form.recordingToggleShortcut = 'Alt+R'
-  ElMessage.success('已恢复录屏快捷键默认值: Alt+R')
+  ElMessage.success(t('settings.recording.shortcutResetRecording'))
 }
 
 const resetMicToggleHotkey = () => {
   stopMicToggleHotkeyRecording()
   props.form.recordingMicToggleShortcut = 'Ctrl+Space'
-  ElMessage.success('已恢复麦克风切换快捷键默认值: Ctrl+Space')
+  ElMessage.success(t('settings.recording.shortcutResetMic'))
 }
 
 const effectiveOutputDir = ref('')
@@ -175,7 +181,7 @@ const openOutputDir = async () => {
   try {
     await RecordingService.openFolder()
   } catch (e) {
-    ElMessage.error(`打开输出目录失败: ${String(e)}`)
+    ElMessage.error(t('settings.recording.openDirFailed', {error: String(e)}))
   }
 }
 
@@ -188,7 +194,7 @@ const selectOutputDir = async () => {
     if (!selected) return
     props.form.recordingOutputDir = String(selected)
   } catch (e) {
-    ElMessage.error(`选择输出目录失败: ${String(e)}`)
+    ElMessage.error(t('settings.recording.selectDirFailed', {error: String(e)}))
   }
 }
 
@@ -197,7 +203,7 @@ onMounted(async () => {
     effectiveOutputDir.value = await RecordingService.getOutputDir()
   } catch (e) {
     effectiveOutputDir.value = ''
-    ElMessage.error(`加载输出目录失败: ${String(e)}`)
+    ElMessage.error(t('settings.recording.loadDirFailed', {error: String(e)}))
   }
 })
 </script>

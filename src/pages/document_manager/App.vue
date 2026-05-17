@@ -6,11 +6,11 @@
         <div class="dm-sidebar-stats">
           <div class="dm-stat">
             <span class="dm-stat-value">{{ stats?.totalFiles ?? 0 }}</span>
-            <span class="dm-stat-label">全部文档</span>
+            <span class="dm-stat-label">{{ t('documentManager.allDocs') }}</span>
           </div>
           <div class="dm-stat">
             <span class="dm-stat-value">{{ stats?.totalSize ? formatFileSize(stats.totalSize) : '0 B' }}</span>
-            <span class="dm-stat-label">总大小</span>
+            <span class="dm-stat-label">{{ t('documentManager.totalSize') }}</span>
           </div>
         </div>
         <div v-if="orphanCount > 0" class="dm-orphan-banner" @click="showOrphanDialog = true">
@@ -24,11 +24,11 @@
           <el-icon :size="14">
             <Search/>
           </el-icon>
-          <span>检测未管理文件</span>
+          <span>{{ t('documentManager.detectOrphan') }}</span>
         </div>
         <div class="dm-sidebar-section">
           <div class="dm-section-title">
-            <span>根目录</span>
+            <span>{{ t('documentManager.rootDir') }}</span>
             <el-button size="small" text @click="showAddRoot = true">
               <el-icon>
                 <Plus/>
@@ -51,7 +51,8 @@
                 </span>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item style="color: var(--el-color-danger)" @click="removeRootFn(root.id)">删除
+                    <el-dropdown-item style="color: var(--el-color-danger)" @click="removeRootFn(root.id)">
+                      {{ t('common.delete') }}
                     </el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
@@ -61,7 +62,7 @@
         </div>
         <div class="dm-sidebar-section">
           <div class="dm-section-title">
-            <span>分类</span>
+            <span>{{ t('documentManager.categories') }}</span>
             <el-button :disabled="rootFilter === null" size="small" text @click="showAddCategory = true">
               <el-icon>
                 <Plus/>
@@ -75,7 +76,7 @@
               <el-icon>
                 <Document/>
               </el-icon>
-              <span class="dm-root-name">全部</span>
+              <span class="dm-root-name">{{ t('documentManager.all') }}</span>
               <span v-if="stats?.totalFiles" class="dm-cat-count">{{ stats.totalFiles }}</span>
               <el-icon class="dm-dots-spacer">
                 <MoreFilled/>
@@ -99,8 +100,12 @@
                   </span>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item @click="startRenameCat(cat)">重命名</el-dropdown-item>
-                      <el-dropdown-item style="color: var(--el-color-danger)" @click="removeCategoryFn(cat.id)">删除
+                      <el-dropdown-item @click="startRenameCat(cat)">{{
+                          t('documentManager.rename')
+                        }}
+                      </el-dropdown-item>
+                      <el-dropdown-item style="color: var(--el-color-danger)" @click="removeCategoryFn(cat.id)">
+                        {{ t('common.delete') }}
                       </el-dropdown-item>
                     </el-dropdown-menu>
                   </template>
@@ -113,14 +118,16 @@
               <el-icon>
                 <Folder/>
               </el-icon>
-              <span class="dm-root-name">未分类</span>
+              <span class="dm-root-name">{{ t('documentManager.uncategorized') }}</span>
               <span v-if="uncatCount > 0" class="dm-cat-count">{{ uncatCount }}</span>
               <el-icon class="dm-dots-spacer">
                 <MoreFilled/>
               </el-icon>
             </div>
             <div v-if="!visibleCategories || visibleCategories.length === 0" class="dm-category-item dm-cat-empty">
-              <span>{{ rootFilter === null ? '请选择根目录' : '暂无分类' }}</span>
+              <span>{{
+                  rootFilter === null ? t('documentManager.selectRootDir') : t('documentManager.noCategories')
+                }}</span>
             </div>
           </div>
         </div>
@@ -129,21 +136,24 @@
       <div class="dm-main">
         <div class="dm-toolbar">
           <div class="dm-tabs">
-            <button :class="['dm-tab', { active: activeTab === 'files' }]" @click="activeTab = 'files'">文档</button>
+            <button :class="['dm-tab', { active: activeTab === 'files' }]" @click="activeTab = 'files'">
+              {{ t('documentManager.documents') }}
+            </button>
             <button :class="['dm-tab', { active: activeTab === 'history' }]"
-                    @click="activeTab = 'history'; loadImportHistory()">历史记录
+                    @click="activeTab = 'history'; loadImportHistory()">{{ t('documentManager.history') }}
             </button>
           </div>
           <template v-if="activeTab === 'files'">
             <div class="dm-search">
-              <el-input v-model="searchKeyword" clearable placeholder="搜索文件名、标签、内容..." @clear="searchFiles">
+              <el-input v-model="searchKeyword" :placeholder="t('documentManager.searchPlaceholder')" clearable
+                        @clear="searchFiles">
                 <template #prefix>
                   <el-icon>
                     <Search/>
                   </el-icon>
                 </template>
               </el-input>
-              <el-select v-model="fileExtFilter" clearable placeholder="全部类型" size="small"
+              <el-select v-model="fileExtFilter" :placeholder="t('documentManager.allTypes')" clearable size="small"
                          style="width:100px;margin-left:8px" @change="searchFiles">
                 <el-option v-for="ext in commonExts" :key="ext.value" :label="ext.label" :value="ext.value"/>
               </el-select>
@@ -153,13 +163,13 @@
                 <el-icon>
                   <Plus/>
                 </el-icon>
-                添加文档
+                {{ t('documentManager.addDocument') }}
               </el-button>
               <el-button @click="openScanDialog">
                 <el-icon>
                   <Search/>
                 </el-icon>
-                扫描文件夹
+                {{ t('documentManager.scanFolder') }}
               </el-button>
             </div>
           </template>
@@ -167,13 +177,13 @@
 
         <template v-if="activeTab === 'files'">
           <div v-if="items.length === 0 && !loading" class="dm-empty">
-            <el-empty description="暂无文档"/>
+            <el-empty :description="t('documentManager.noDocs')"/>
           </div>
           <div v-else-if="loading" class="dm-empty">
             <el-icon :size="32" class="is-loading">
               <Loading/>
             </el-icon>
-            <p style="margin-top:12px;color:var(--el-text-color-secondary)">加载中...</p>
+            <p style="margin-top:12px;color:var(--el-text-color-secondary)">{{ t('documentManager.loading') }}</p>
           </div>
           <div v-else ref="fileGridRef" class="dm-file-grid" @click.self="selectedId = null">
             <div v-for="item in items" :key="item.id" :data-file-id="item.id"
@@ -181,8 +191,10 @@
                  class="dm-file-card sortable-file"
                  @click="selectedId = item.id" @dblclick="openDocument(item)"
                  @contextmenu.prevent="showContextMenu($event, item)">
-              <span v-if="item.storageMode === 'repo'" class="dm-mode-badge repo">搬迁</span>
-              <span v-else class="dm-mode-badge index">索引</span>
+              <span v-if="item.storageMode === 'repo'" class="dm-mode-badge repo">{{
+                  t('documentManager.migrate')
+                }}</span>
+              <span v-else class="dm-mode-badge index">{{ t('documentManager.index') }}</span>
               <div class="dm-file-icon">
                 <el-icon :color="getFileColor(item.fileExt)" :size="32">
                   <component :is="getFileIcon(item.fileExt)"/>
@@ -211,70 +223,88 @@
               </el-button>
             </div>
             <div class="dm-detail-body">
-              <div class="dm-detail-row"><span class="dm-detail-label">文件名</span><span>{{
+              <div class="dm-detail-row"><span class="dm-detail-label">{{ t('documentManager.fileName') }}</span><span>{{
                   selectedDoc.fileName
                 }}</span></div>
               <div class="dm-detail-row"><span
-                  class="dm-detail-label">大小</span><span>{{ formatFileSize(selectedDoc.fileSize) }}</span></div>
+                  class="dm-detail-label">{{
+                  t('documentManager.size')
+                }}</span><span>{{ formatFileSize(selectedDoc.fileSize) }}</span></div>
               <div class="dm-detail-row"><span
-                  class="dm-detail-label">类型</span><span>{{ selectedDoc.fileExt.toUpperCase() }}</span></div>
-              <div class="dm-detail-row"><span class="dm-detail-label">路径</span><span :title="selectedDoc.managedPath"
+                  class="dm-detail-label">{{
+                  t('documentManager.type')
+                }}</span><span>{{ selectedDoc.fileExt.toUpperCase() }}</span></div>
+              <div class="dm-detail-row"><span class="dm-detail-label">{{ t('documentManager.path') }}</span><span
+                  :title="selectedDoc.managedPath"
                                                                                         class="dm-detail-path">{{
                   selectedDoc.managedPath
                 }}</span></div>
-              <div class="dm-detail-row"><span class="dm-detail-label">模式</span><span>{{
-                  selectedDoc.storageMode === 'repo' ? '搬迁' : '索引'
+              <div class="dm-detail-row"><span class="dm-detail-label">{{ t('documentManager.mode') }}</span><span>{{
+                  selectedDoc.storageMode === 'repo' ? t('documentManager.migrate') : t('documentManager.index')
                 }}</span></div>
               <div class="dm-detail-row">
-                <span class="dm-detail-label">分类</span>
-                <el-select v-model="editCategoryId" clearable placeholder="未分类" size="small" @change="saveCategory">
+                <span class="dm-detail-label">{{ t('documentManager.category') }}</span>
+                <el-select v-model="editCategoryId" :placeholder="t('documentManager.uncategorized')" clearable
+                           size="small" @change="saveCategory">
                   <el-option v-for="cat in categories" :key="cat.id" :label="cat.name" :value="cat.id"/>
                 </el-select>
               </div>
               <div class="dm-detail-row">
-                <span class="dm-detail-label">标签</span>
-                <el-input v-model="editTags" placeholder="分号分隔，如：工作; 学习" size="small" @blur="saveTags"
+                <span class="dm-detail-label">{{ t('documentManager.tags') }}</span>
+                <el-input v-model="editTags" :placeholder="t('documentManager.tagsHint')" size="small" @blur="saveTags"
                           @keyup.enter="saveTags"/>
               </div>
               <div class="dm-detail-row">
-                <span class="dm-detail-label">备注</span>
-                <el-input v-model="editNotes" :rows="2" placeholder="添加备注..." size="small" type="textarea"
+                <span class="dm-detail-label">{{ t('documentManager.notes') }}</span>
+                <el-input v-model="editNotes" :placeholder="t('documentManager.notesPlaceholder')" :rows="2"
+                          size="small" type="textarea"
                           @blur="saveNotes"/>
               </div>
             </div>
             <div class="dm-detail-actions">
-              <el-button size="small" @click="openDocument(selectedDoc)">打开</el-button>
-              <el-button size="small" @click="openFolder(selectedDoc)">定位</el-button>
-              <el-button size="small" type="danger" @click="confirmDelete(selectedDoc)">删除</el-button>
+              <el-button size="small" @click="openDocument(selectedDoc)">{{ t('documentManager.open') }}</el-button>
+              <el-button size="small" @click="openFolder(selectedDoc)">{{ t('documentManager.locate') }}</el-button>
+              <el-button size="small" type="danger" @click="confirmDelete(selectedDoc)">{{
+                  t('common.delete')
+                }}
+              </el-button>
             </div>
           </div>
         </template>
 
         <template v-if="activeTab === 'history'">
           <div v-if="importHistory.length === 0" class="dm-empty">
-            <el-empty description="暂无历史记录"/>
+            <el-empty :description="t('documentManager.noHistory')"/>
           </div>
           <div v-else class="dm-history-page">
             <div v-for="h in importHistory" :key="h.id" class="dm-history-card">
               <div class="dm-history-card-hd">
-                <span class="dm-history-badge">{{ h.storageMode === 'repo' ? '搬迁' : '索引' }}</span>
-                <span class="dm-history-fc">{{ h.fileCount }} 个文件</span>
+                <span class="dm-history-badge">{{
+                    h.storageMode === 'repo' ? t('documentManager.migrate') : t('documentManager.index')
+                  }}</span>
+                <span class="dm-history-fc">{{ h.fileCount }} {{ t('documentManager.fileCount') }}</span>
                 <span class="dm-history-time">{{ formatTime(h.createdAt) }}</span>
               </div>
               <div class="dm-history-card-body">
-                <div class="dm-history-row"><span class="dm-history-label">源目录</span><span
+                <div class="dm-history-row"><span class="dm-history-label">{{
+                    t('documentManager.sourceDir')
+                  }}</span><span
                     class="dm-history-val">{{ h.sourceDir }}</span></div>
-                <div class="dm-history-row"><span class="dm-history-label">目标目录</span><span class="dm-history-val">{{
+                <div class="dm-history-row"><span class="dm-history-label">{{
+                    t('documentManager.targetDir')
+                  }}</span><span class="dm-history-val">{{
                     h.targetDir
                   }}</span></div>
               </div>
               <div class="dm-history-card-ft">
                 <el-button size="small" text @click="toggleHistoryFiles(h.id)">
-                  {{ h._files ? '收起' : '展开' }} ({{ h.fileCount }}个文件)
+                  {{ h._files ? t('documentManager.collapse') : t('documentManager.expand') }} ({{
+                    h.fileCount
+                  }}{{ t('documentManager.fileCount') }})
                 </el-button>
-                <el-popconfirm title="确定撤销这次导入吗？搬迁的文件将回退到原位置" @confirm="undoImportFn(h.id)">
+                <el-popconfirm :title="t('documentManager.undoConfirm')" @confirm="undoImportFn(h.id)">
                   <template #reference>
-                    <el-button plain size="small" type="danger">撤销</el-button>
+                    <el-button plain size="small" type="danger">{{ t('documentManager.undo') }}</el-button>
                   </template>
                 </el-popconfirm>
               </div>
@@ -284,7 +314,8 @@
                     <Document/>
                   </el-icon>
                   <span>{{ f.fileName }}</span>
-                  <el-button size="small" text type="danger" @click="undoImportItemFn(h.id, f.docFileId, h)">撤销
+                  <el-button size="small" text type="danger" @click="undoImportItemFn(h.id, f.docFileId, h)">
+                    {{ t('documentManager.undo') }}
                   </el-button>
                 </div>
               </div>
@@ -294,15 +325,15 @@
       </div>
     </div>
 
-    <el-dialog v-model="showAddRoot" title="添加管理目录" width="480px">
+    <el-dialog v-model="showAddRoot" :title="t('documentManager.addRootDir')" width="480px">
       <el-form label-width="80px">
-        <el-form-item label="目录别名">
-          <el-input v-model="newRootName" placeholder="如：工作资料"/>
+        <el-form-item :label="t('documentManager.dirAlias')">
+          <el-input v-model="newRootName" :placeholder="t('documentManager.dirAliasPlaceholder')"/>
         </el-form-item>
-        <el-form-item label="目录路径">
+        <el-form-item :label="t('documentManager.dirPath')">
           <div style="display:flex;gap:8px;width:100%">
-            <el-input v-model="newRootPath" placeholder="如：D:\工作资料"/>
-            <el-button @click="browseRootPath">浏览</el-button>
+            <el-input v-model="newRootPath" :placeholder="t('documentManager.dirPathPlaceholder')"/>
+            <el-button @click="browseRootPath">{{ t('common.browse') }}</el-button>
           </div>
         </el-form-item>
       </el-form>
@@ -310,19 +341,21 @@
         <el-icon>
           <Warning/>
         </el-icon>
-        <span>导入文档时，搬迁模式下文件将被移动到该目录下，按分类组织为子目录</span></div>
+        <span>{{ t('documentManager.dirPathHint') }}</span></div>
       <template #footer>
-        <el-button @click="showAddRoot = false">取消</el-button>
-        <el-button :disabled="!newRootName || !newRootPath" type="primary" @click="confirmAddRoot">确认</el-button>
+        <el-button @click="showAddRoot = false">{{ t('common.cancel') }}</el-button>
+        <el-button :disabled="!newRootName || !newRootPath" type="primary" @click="confirmAddRoot">
+          {{ t('common.confirm') }}
+        </el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showAddCategory" title="新建分类" width="420px">
+    <el-dialog v-model="showAddCategory" :title="t('documentManager.newCategory')" width="420px">
       <el-form label-width="80px">
-        <el-form-item label="分类名称">
-          <el-input v-model="newCategoryName" placeholder="如：合同、报表"/>
+        <el-form-item :label="t('documentManager.categoryName')">
+          <el-input v-model="newCategoryName" :placeholder="t('documentManager.categoryNameHint')"/>
         </el-form-item>
-        <el-form-item label="图标">
+        <el-form-item :label="t('documentManager.icon')">
           <div class="dm-icon-picker">
             <span v-for="ic in catIcons" :key="ic.value"
                   :class="{ active: newCategoryIcon === ic.value }"
@@ -331,7 +364,7 @@
             </span>
           </div>
         </el-form-item>
-        <el-form-item label="颜色">
+        <el-form-item :label="t('documentManager.color')">
           <div class="dm-color-picker">
             <span v-for="c in catColors" :key="c"
                   :class="{ active: newCategoryColor === c }"
@@ -341,45 +374,49 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showAddCategory = false">取消</el-button>
-        <el-button :disabled="!newCategoryName.trim()" type="primary" @click="confirmAddCategory">确认</el-button>
+        <el-button @click="showAddCategory = false">{{ t('common.cancel') }}</el-button>
+        <el-button :disabled="!newCategoryName.trim()" type="primary" @click="confirmAddCategory">{{
+            t('common.confirm')
+          }}
+        </el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showRenameCatDialog" title="重命名分类" width="400px">
+    <el-dialog v-model="showRenameCatDialog" :title="t('documentManager.renameCategory')" width="400px">
       <el-form label-width="80px">
-        <el-form-item label="新名称">
-          <el-input v-model="renameCatName" placeholder="输入新名称"/>
+        <el-form-item :label="t('documentManager.newName')">
+          <el-input v-model="renameCatName" :placeholder="t('documentManager.newNamePlaceholder')"/>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showRenameCatDialog = false">取消</el-button>
-        <el-button type="primary" @click="confirmRenameCat">确认</el-button>
+        <el-button @click="showRenameCatDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="confirmRenameCat">{{ t('common.confirm') }}</el-button>
       </template>
     </el-dialog>
 
     <el-dialog v-model="showImportDialog" :close-on-click-modal="!importing" :close-on-press-escape="!importing"
-               :show-close="!importing" title="添加文档"
+               :show-close="!importing" :title="t('documentManager.addDoc')"
                width="500px">
       <el-form label-width="80px">
-        <el-form-item label="目标目录">
-          <el-select v-model="importRootId" placeholder="选择管理目录" style="width:100%">
+        <el-form-item :label="t('documentManager.targetDir')">
+          <el-select v-model="importRootId" :placeholder="t('documentManager.selectRoot')" style="width:100%">
             <el-option v-for="r in roots" :key="r.id" :label="r.name" :value="r.id"/>
           </el-select>
         </el-form-item>
-        <el-form-item label="目标分类">
-          <el-select v-model="importCategoryId" clearable placeholder="未分类" style="width:100%">
+        <el-form-item :label="t('documentManager.targetCategory')">
+          <el-select v-model="importCategoryId" :placeholder="t('documentManager.uncategorized')" clearable
+                     style="width:100%">
             <el-option v-for="c in importCategories" :key="c.id" :label="c.name" :value="c.id"/>
           </el-select>
         </el-form-item>
-        <el-form-item label="导入方式">
+        <el-form-item :label="t('documentManager.importMode')">
           <el-radio-group v-model="importMode">
-            <el-radio value="index">索引（文件不动，只记录位置）</el-radio>
-            <el-radio value="repo">搬迁（移动到管理目录）</el-radio>
+            <el-radio value="index">{{ t('documentManager.modeIndex') }}</el-radio>
+            <el-radio value="repo">{{ t('documentManager.modeMigrate') }}</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="选择文件">
-          <el-button @click="browseImportFiles">选择文件</el-button>
+        <el-form-item :label="t('documentManager.selectFiles')">
+          <el-button @click="browseImportFiles">{{ t('documentManager.selectFiles') }}</el-button>
           <div v-if="importFiles.length > 0" class="dm-import-files">
             <el-tag v-for="(f,i) in importFiles" :key="i" closable style="margin:2px" @close="importFiles.splice(i,1)">
               {{ getFileName(f) }}
@@ -391,40 +428,45 @@
         <el-icon>
           <Warning/>
         </el-icon>
-        <span>文件将被移动到：{{ getImportTargetPath() }}</span></div>
+        <span>{{ t('documentManager.fileMoveHint', {path: getImportTargetPath()}) }}</span></div>
       <template #footer>
-        <el-button :disabled="importing" @click="showImportDialog = false">取消</el-button>
+        <el-button :disabled="importing" @click="showImportDialog = false">{{ t('common.cancel') }}</el-button>
         <el-button :disabled="!importRootId || importFiles.length === 0 || importing" :loading="importing"
                    type="primary" @click="confirmImport">
-          {{ importing ? `正在导入 ${importFiles.length} 个文件...` : '确认导入' }}
+          {{
+            importing ? t('documentManager.importing', {count: importFiles.length}) : t('documentManager.confirmImportBtn')
+          }}
         </el-button>
       </template>
     </el-dialog>
 
     <el-dialog v-model="showScanDialog" :close-on-click-modal="!scanImporting" :close-on-press-escape="!scanImporting" :show-close="!scanImporting"
-               title="扫描文件夹" width="500px">
+               :title="t('documentManager.scanFolder')" width="500px">
       <el-form label-width="80px">
-        <el-form-item label="扫描路径">
+        <el-form-item :label="t('documentManager.scanPath')">
           <div style="display:flex;gap:8px;width:100%">
-            <el-input v-model="scanPath" :disabled="scanImporting" placeholder="如：C:\Users\...\Desktop"/>
-            <el-button :disabled="scanImporting" @click="browseScanPath">浏览</el-button>
+            <el-input v-model="scanPath" :disabled="scanImporting"
+                      :placeholder="t('documentManager.scanPathPlaceholder')"/>
+            <el-button :disabled="scanImporting" @click="browseScanPath">{{ t('common.browse') }}</el-button>
           </div>
         </el-form-item>
-        <el-form-item label="目标目录">
-          <el-select v-model="scanImportRootId" :disabled="scanImporting" placeholder="选择管理目录" style="width:100%">
+        <el-form-item :label="t('documentManager.targetDir')">
+          <el-select v-model="scanImportRootId" :disabled="scanImporting" :placeholder="t('documentManager.selectRoot')"
+                     style="width:100%">
             <el-option v-for="r in roots" :key="r.id" :label="r.name" :value="r.id"/>
           </el-select>
         </el-form-item>
-        <el-form-item label="目标分类">
-          <el-select v-model="scanCategoryId" :disabled="scanImporting" clearable placeholder="未分类"
+        <el-form-item :label="t('documentManager.targetCategory')">
+          <el-select v-model="scanCategoryId" :disabled="scanImporting" :placeholder="t('documentManager.uncategorized')"
+                     clearable
                      style="width:100%">
             <el-option v-for="c in scanCategories" :key="c.id" :label="c.name" :value="c.id"/>
           </el-select>
         </el-form-item>
-        <el-form-item label="导入方式">
+        <el-form-item :label="t('documentManager.importMode')">
           <el-radio-group v-model="importMode" :disabled="scanImporting">
-            <el-radio value="index">索引</el-radio>
-            <el-radio value="repo">搬迁</el-radio>
+            <el-radio value="index">{{ t('documentManager.index') }}</el-radio>
+            <el-radio value="repo">{{ t('documentManager.migrate') }}</el-radio>
           </el-radio-group>
         </el-form-item>
       </el-form>
@@ -432,9 +474,9 @@
         <el-icon :size="32" class="is-loading">
           <Loading/>
         </el-icon>
-        <p>正在扫描...</p></div>
+        <p>{{ t('documentManager.scanning') }}</p></div>
       <div v-else-if="scannedFiles.length > 0" class="dm-scan-list">
-        <p>找到 {{ scannedFiles.length }} 个文件</p>
+        <p>{{ t('documentManager.foundFiles', {count: scannedFiles.length}) }}</p>
         <div class="dm-scan-files">
           <div v-for="f in scannedFiles" :key="f.path" :class="{ checked: scanSelected.has(f.path) }"
                class="dm-scan-file-item" @click="toggleScanSelect(f.path)">
@@ -448,13 +490,17 @@
         </div>
       </div>
       <template #footer>
-        <el-button :disabled="scanImporting" @click="showScanDialog = false">取消</el-button>
+        <el-button :disabled="scanImporting" @click="showScanDialog = false">{{ t('common.cancel') }}</el-button>
         <el-button :disabled="scannedFiles.length === 0 || scanImporting" @click="toggleScanSelectAll">
-          {{ scanSelected.size === scannedFiles.length ? '取消全选' : '全选' }}
+          {{
+            scanSelected.size === scannedFiles.length ? t('documentManager.deselectAll') : t('documentManager.selectAll')
+          }}
         </el-button>
         <el-button :disabled="scanSelected.size === 0 || !scanImportRootId || scanImporting"
                    :loading="scanImporting" type="primary" @click="importScanned">
-          {{ scanImporting ? `正在导入 ${scanSelected.size} 个文件...` : `导入选中 (${scanSelected.size})` }}
+          {{
+            scanImporting ? t('documentManager.importing', {count: scanSelected.size}) : t('documentManager.importSelected', {count: scanSelected.size})
+          }}
         </el-button>
       </template>
     </el-dialog>
@@ -463,7 +509,7 @@
       <el-icon :size="48">
         <UploadFilled/>
       </el-icon>
-      <p>释放文件以添加</p>
+      <p>{{ t('documentManager.dropToAdd') }}</p>
     </div>
   </div>
 
@@ -472,42 +518,44 @@
       <el-icon :size="14">
         <Folder/>
       </el-icon>
-      <span>移动</span>
+      <span>{{ t('common.move') }}</span>
     </div>
     <div class="context-menu-divider"></div>
     <div class="context-menu-item context-menu-item-danger" @click="contextDelete(ctxMenuDoc)">
       <el-icon :size="14">
         <Close/>
       </el-icon>
-      <span>删除</span>
+      <span>{{ t('common.delete') }}</span>
     </div>
   </ContextMenu>
 
-  <el-dialog v-model="showMoveDialog" title="移动文件" width="420px" @closed="closeCtxMenu">
+  <el-dialog v-model="showMoveDialog" :title="t('documentManager.moveFile')" width="420px" @closed="closeCtxMenu">
     <div class="dm-move-body">
       <div class="dm-move-section">
-        <div class="dm-move-section-title">移动到根目录</div>
-        <el-select v-model="moveTargetRootId" placeholder="选择根目录" style="width:100%" @change="onMoveRootChange">
+        <div class="dm-move-section-title">{{ t('documentManager.moveToRoot') }}</div>
+        <el-select v-model="moveTargetRootId" :placeholder="t('documentManager.selectRoot')" style="width:100%"
+                   @change="onMoveRootChange">
           <el-option v-for="root in roots" :key="root.id" :label="root.name" :value="root.id"/>
         </el-select>
-        <div v-if="moveDoc.storageMode === 'repo'" class="dm-move-hint">搬迁模式文件将被物理移动到目标目录</div>
+        <div v-if="moveDoc.storageMode === 'repo'" class="dm-move-hint">{{ t('documentManager.migrateHint') }}</div>
       </div>
       <div class="dm-move-section">
-        <div class="dm-move-section-title">移动到分类</div>
-        <el-select v-model="moveTargetCategoryId" clearable placeholder="未分类" style="width:100%">
+        <div class="dm-move-section-title">{{ t('documentManager.moveToCategory') }}</div>
+        <el-select v-model="moveTargetCategoryId" :placeholder="t('documentManager.uncategorized')" clearable
+                   style="width:100%">
           <el-option v-for="cat in moveCategories" :key="cat.id" :label="cat.name" :value="cat.id"/>
         </el-select>
       </div>
     </div>
     <template #footer>
-      <el-button @click="showMoveDialog = false">取消</el-button>
-      <el-button :disabled="!hasMoveChange" type="primary" @click="confirmMove">确定</el-button>
+      <el-button @click="showMoveDialog = false">{{ t('common.cancel') }}</el-button>
+      <el-button :disabled="!hasMoveChange" type="primary" @click="confirmMove">{{ t('common.ok') }}</el-button>
     </template>
   </el-dialog>
 
-  <el-dialog v-model="showGuide" title="欢迎使用文档管理" width="560px">
+  <el-dialog v-model="showGuide" :title="t('documentManager.welcome')" width="560px">
     <div class="dm-guide-body">
-      <p class="dm-guide-desc">文档管理帮助你集中管理电脑中的各类文件，支持分类、搜索、搬迁或索引两种方式。</p>
+      <p class="dm-guide-desc">{{ t('documentManager.welcomeDesc') }}</p>
       <div class="dm-guide-steps">
         <div v-for="(step, idx) in guideSteps" :key="idx" class="dm-guide-step">
           <div class="dm-guide-step-num">{{ idx + 1 }}</div>
@@ -518,23 +566,23 @@
         </div>
       </div>
       <div class="dm-guide-footer">
-        <el-checkbox v-model="guideNoMore">不再显示</el-checkbox>
+        <el-checkbox v-model="guideNoMore">{{ t('documentManager.dontShowAgain') }}</el-checkbox>
       </div>
     </div>
     <template #footer>
-      <el-button type="primary" @click="dismissGuide">开始使用</el-button>
+      <el-button type="primary" @click="dismissGuide">{{ t('documentManager.startUsing') }}</el-button>
     </template>
   </el-dialog>
 
-  <el-dialog v-model="showOrphanDialog" title="未管理文件" width="560px">
+  <el-dialog v-model="showOrphanDialog" :title="t('documentManager.orphanFilesTitle')" width="560px">
     <div v-if="orphanLoading" style="text-align:center;padding:20px">
       <el-icon :size="32" class="is-loading">
         <Loading/>
       </el-icon>
-      <p>正在扫描...</p>
+      <p>{{ t('documentManager.scanning') }}</p>
     </div>
     <div v-else-if="orphanResults.length === 0" style="text-align:center;padding:20px">
-      <el-empty description="未发现未管理文件"/>
+      <el-empty :description="t('documentManager.noOrphanFiles')"/>
     </div>
     <div v-else class="dm-orphan-list">
       <div v-for="result in orphanResults" :key="result.rootId" class="dm-orphan-group">
@@ -552,12 +600,14 @@
       </div>
     </div>
     <template #footer>
-      <el-button @click="showOrphanDialog = false">关闭</el-button>
+      <el-button @click="showOrphanDialog = false">{{ t('documentManager.close') }}</el-button>
       <el-button v-if="orphanResults.length > 0" @click="toggleOrphanSelectAll">
-        {{ orphanSelected.size === totalOrphanCount ? '取消全选' : '全选' }}
+        {{
+          orphanSelected.size === totalOrphanCount ? t('documentManager.deselectAll') : t('documentManager.selectAll')
+        }}
       </el-button>
       <el-button :disabled="orphanSelected.size === 0" type="primary" @click="importOrphans">
-        导入选中 ({{ orphanSelected.size }})
+        {{ t('documentManager.importSelected', {count: orphanSelected.size}) }}
       </el-button>
     </template>
   </el-dialog>
@@ -592,6 +642,9 @@ import {
 } from '@element-plus/icons-vue'
 import ContextMenu from '../../components/ContextMenu.vue'
 import Sortable from 'sortablejs'
+import {useI18n} from 'vue-i18n'
+
+const {t} = useI18n()
 
 const iconMap = {
   pdf: Document, docx: Document, doc: Document,
@@ -844,7 +897,7 @@ async function loadData() {
     roots.value = rts || []
     stats.value = st
   } catch (e) {
-    ElMessage.error('加载数据失败: ' + e)
+    ElMessage.error(t('documentManager.loadFailed', {error: e}))
   }
   nextTick(() => {
     initRootSortable();
@@ -867,7 +920,7 @@ async function loadFiles(preserveSelection) {
       selectedId.value = null
     }
   } catch (e) {
-    ElMessage.error('加载文件列表失败')
+    ElMessage.error(t('documentManager.loadFileListFailed'))
   } finally {
     loading.value = false
   }
@@ -892,15 +945,15 @@ async function toggleHistoryFiles(importId) {
   try {
     h._files = await DocumentService.getImportFiles(importId)
   } catch (e) {
-    ElMessage.error('加载文件列表失败')
+    ElMessage.error(t('documentManager.loadFileListFailed'))
   }
 }
 
 async function undoImportFn(importId) {
   try {
     const errors = await DocumentService.undoImport(importId)
-    if (errors && errors.length > 0) ElMessage.warning('部分撤销失败')
-    else ElMessage.success('已撤销')
+    if (errors && errors.length > 0) ElMessage.warning(t('documentManager.partialUndoFailed'))
+    else ElMessage.success(t('documentManager.undone'))
     await loadData();
     await loadFiles();
     loadImportHistory()
@@ -912,7 +965,7 @@ async function undoImportFn(importId) {
 async function undoImportItemFn(importId, docFileId, historyItem) {
   try {
     await DocumentService.undoImportItem(importId, docFileId)
-    ElMessage.success('已撤销')
+    ElMessage.success(t('documentManager.undone'))
     if (historyItem._files) {
       const updated = await DocumentService.getImportFiles(importId)
       historyItem._files = updated || []
@@ -924,7 +977,7 @@ async function undoImportItemFn(importId, docFileId, historyItem) {
     await loadData();
     await loadFiles()
   } catch (e) {
-    ElMessage.error('撤销失败: ' + e)
+    ElMessage.error(t('documentManager.undoFailed', {error: e}))
   }
 }
 
@@ -967,13 +1020,13 @@ watch(searchKeyword, (val, old) => {
 async function confirmAddRoot() {
   try {
     await DocumentService.addRoot(newRootName.value.trim(), newRootPath.value.trim());
-    ElMessage.success('已添加');
+    ElMessage.success(t('documentManager.added'));
     showAddRoot.value = false;
     newRootName.value = '';
     newRootPath.value = '';
     await loadData()
   } catch (e) {
-    ElMessage.error('添加失败: ' + e)
+    ElMessage.error(t('documentManager.addFailed', {error: e}))
   }
 }
 
@@ -985,7 +1038,7 @@ async function browseRootPath() {
 async function confirmAddCategory() {
   try {
     await DocumentService.addCategory(newCategoryName.value.trim(), newCategoryIcon.value, newCategoryColor.value, rootFilter.value);
-    ElMessage.success('已添加');
+    ElMessage.success(t('documentManager.added'));
     showAddCategory.value = false;
     newCategoryName.value = '';
     newCategoryIcon.value = 'folder';
@@ -998,29 +1051,29 @@ async function confirmAddCategory() {
 
 async function removeCategoryFn(id) {
   try {
-    await ElMessageBox.confirm('确认删除该分类？', '确认删除');
+    await ElMessageBox.confirm(t('documentManager.deleteCategoryConfirm'), t('common.confirmDelete'));
     await DocumentService.removeCategory(id);
-    ElMessage.success('已删除');
+    ElMessage.success(t('documentManager.deleted'));
     await loadData();
     loadFiles()
   } catch (e) {
     if (e && e !== 'cancel' && e !== 'close') {
-      ElMessage.error(typeof e === 'string' ? e : e.message || '删除失败')
+      ElMessage.error(typeof e === 'string' ? e : e.message || t('documentManager.deleteFailed'))
     }
   }
 }
 
 async function removeRootFn(id) {
   try {
-    await ElMessageBox.confirm('确认删除该管理目录？', '确认删除');
+    await ElMessageBox.confirm(t('documentManager.deleteDirConfirm'), t('common.confirmDelete'));
     await DocumentService.removeRoot(id);
-    ElMessage.success('已删除');
+    ElMessage.success(t('documentManager.deleted'));
     rootFilter.value = null;
     await loadData();
     loadFiles()
   } catch (e) {
     if (e && e !== 'cancel' && e !== 'close') {
-      ElMessage.error(typeof e === 'string' ? e : e.message || '删除失败')
+      ElMessage.error(typeof e === 'string' ? e : e.message || t('documentManager.deleteFailed'))
     }
   }
 }
@@ -1034,12 +1087,12 @@ function startRenameCat(cat) {
 async function confirmRenameCat() {
   try {
     await DocumentService.renameCategory(renameCatId.value, renameCatName.value.trim());
-    ElMessage.success('已重命名');
+    ElMessage.success(t('documentManager.renamed'));
     showRenameCatDialog.value = false;
     await loadData();
     loadFiles()
   } catch (e) {
-    ElMessage.error('重命名失败: ' + e)
+    ElMessage.error(t('documentManager.renameFailed', {error: e}))
   }
 }
 
@@ -1089,10 +1142,15 @@ async function confirmImport() {
     if (r.errors && r.errors.length > 0) {
       const detail = r.errors.slice(0, 5).join('\n')
       const more = r.errors.length > 5 ? `\n...等共 ${r.errors.length} 个错误` : ''
-      ElMessage.warning({message: `导入完成，${r.success.length} 个成功，${r.errors.length} 个失败`, duration: 3000})
+      ElMessage.warning({
+        message: t('documentManager.importPartial', {
+          success: r.success.length,
+          errors: r.errors.length
+        }), duration: 3000
+      })
       ElMessage({message: detail + more, type: 'warning', duration: 6000, showClose: true})
     } else {
-      ElMessage.success(`成功导入 ${r.success.length} 个文件`)
+      ElMessage.success(t('documentManager.importSuccess', {count: r.success.length}))
     }
     showImportDialog.value = false;
     importFiles.value = [];
@@ -1100,7 +1158,7 @@ async function confirmImport() {
     loadFiles();
     loadImportHistory()
   } catch (e) {
-    ElMessage.error('导入失败: ' + e)
+    ElMessage.error(t('documentManager.importFailed', {error: e}))
   } finally {
     importing.value = false
   }
@@ -1121,7 +1179,7 @@ async function runScan() {
     scannedFiles.value = r.files || [];
     scanSelected.clear()
   } catch (e) {
-    ElMessage.error('扫描失败: ' + e)
+    ElMessage.error(t('documentManager.scanFailed', {error: e}))
   } finally {
     scanning.value = false
   }
@@ -1150,10 +1208,15 @@ async function importScanned() {
     if (r.errors && r.errors.length > 0) {
       const detail = r.errors.slice(0, 5).join('\n')
       const more = r.errors.length > 5 ? `\n...等共 ${r.errors.length} 个错误` : ''
-      ElMessage.warning({message: `导入完成，${r.success.length} 个成功，${r.errors.length} 个失败`, duration: 3000})
+      ElMessage.warning({
+        message: t('documentManager.importPartial', {
+          success: r.success.length,
+          errors: r.errors.length
+        }), duration: 3000
+      })
       ElMessage({message: detail + more, type: 'warning', duration: 6000, showClose: true})
     } else {
-      ElMessage.success(`成功导入 ${r.success.length} 个文件`);
+      ElMessage.success(t('documentManager.importSuccess', {count: r.success.length}));
     }
     scanSelected.clear();
     scannedFiles.value = [];
@@ -1161,7 +1224,7 @@ async function importScanned() {
     loadFiles();
     loadImportHistory()
   } catch (e) {
-    ElMessage.error('导入失败: ' + e)
+    ElMessage.error(t('documentManager.importFailed', {error: e}))
   } finally {
     scanImporting.value = false
   }
@@ -1297,7 +1360,7 @@ async function detectOrphans() {
     orphanCount.value = count
     orphanSelected.clear()
   } catch (e) {
-    ElMessage.error('检测失败: ' + e)
+    ElMessage.error(t('documentManager.detectFailed', {error: e}))
   } finally {
     orphanLoading.value = false
   }
@@ -1367,7 +1430,7 @@ async function handleDrop(event) {
   const files = event.dataTransfer?.files;
   if (!files || files.length === 0) return
   if (!roots.value || roots.value.length === 0) {
-    ElMessage.warning('请先添加管理目录');
+    ElMessage.warning(t('documentManager.addDirFirst'));
     return
   }
   const paths = [];
@@ -1386,7 +1449,7 @@ async function openDocument(doc) {
   try {
     await DocumentService.openDoc(doc.id)
   } catch (e) {
-    ElMessage.error('打开失败: ' + e)
+    ElMessage.error(t('documentManager.openFailed', {error: e}))
   }
 }
 
@@ -1394,24 +1457,27 @@ async function openFolder(doc) {
   try {
     await DocumentService.openFolder(doc.id)
   } catch (e) {
-    ElMessage.error('打开失败: ' + e)
+    ElMessage.error(t('documentManager.openFailed', {error: e}))
   }
 }
 
 async function confirmDelete(doc) {
   try {
     const repoMsg = doc.storageMode === 'repo'
-        ? `文件将搬回原位置: ${doc.sourcePath}`
-        : `文件保留在磁盘上`
-    await ElMessageBox.confirm(`确定删除「${doc.title || doc.fileName}」？${repoMsg}。`, '确认删除', {type: 'warning'});
+        ? t('documentManager.fileWillRestore', {path: doc.sourcePath})
+        : t('documentManager.fileRemainOnDisk')
+    await ElMessageBox.confirm(t('documentManager.deleteFileConfirm', {
+      name: doc.title || doc.fileName,
+      extra: repoMsg
+    }), t('common.confirmDelete'), {type: 'warning'});
     await DocumentService.deleteDoc(doc.id, false);
-    ElMessage.success('已删除');
+    ElMessage.success(t('documentManager.deleted'));
     selectedId.value = null;
     await loadFiles();
     await loadData()
   } catch (e) {
     if (e && e !== 'cancel' && e !== 'close') {
-      ElMessage.error('删除失败')
+      ElMessage.error(t('documentManager.deleteFailed'))
     }
   }
 }
@@ -1459,12 +1525,12 @@ async function confirmMove() {
       newRootId: moveTargetRootId.value !== doc.rootId ? moveTargetRootId.value : null,
       newCategoryId: moveTargetCategoryId.value ?? null,
     })
-    ElMessage.success('移动成功')
+    ElMessage.success(t('documentManager.moveSuccess'))
     showMoveDialog.value = false
     await loadFiles(true)
     await loadData()
   } catch (e) {
-    ElMessage.error(typeof e === 'string' ? e : e?.message || '移动失败')
+    ElMessage.error(typeof e === 'string' ? e : e?.message || t('documentManager.moveFailed'))
   }
 }
 
@@ -1472,17 +1538,17 @@ const GUIDE_KEY = 'dm_guide_dismissed'
 
 const guideSteps = [
   {
-    title: '添加根目录',
-    desc: '点击左侧「添加目录」，选择一个本地文件夹作为文档仓库。可添加多个根目录，支持搬迁和索引两种模式。'
+    title: t('documentManager.guideAddDir'),
+    desc: t('documentManager.guideAddDirDesc')
   },
-  {title: '创建分类', desc: '点击分类栏的 + 按钮创建分类（如"工作""学习"），用于归类文档。支持自定义图标颜色、拖曳排序。'},
+  {title: t('documentManager.guideCreateCat'), desc: t('documentManager.guideCreateCatDesc')},
   {
-    title: '导入文档',
-    desc: '点击「添加文档」选择文件，或「扫描文件夹」批量导入。搬迁模式会将文件复制到仓库，索引模式仅记录位置。'
+    title: t('documentManager.guideImport'),
+    desc: t('documentManager.guideImportDesc')
   },
   {
-    title: '管理文档',
-    desc: '单击文件查看详细信息和编辑标签，双击直接打开，右键可移动文件到其他分类/目录或删除。支持文件名和内容全文搜索。'
+    title: t('documentManager.guideManage'),
+    desc: t('documentManager.guideManageDesc')
   },
 ]
 
@@ -1520,7 +1586,7 @@ async function saveCategory() {
     await DocumentService.updateMeta({id: selectedDoc.value.id, categoryId: editCategoryId.value ?? -1})
     selectedDoc.value.categoryId = editCategoryId.value
   } catch (e) {
-    ElMessage.error('保存分类失败')
+    ElMessage.error(t('documentManager.saveCategoryFailed'))
   }
   await loadData()
   await loadFiles(true)
@@ -1533,7 +1599,7 @@ async function saveTags() {
     await DocumentService.updateMeta({id: selectedDoc.value.id, tags: tagsJson})
     selectedDoc.value.tags = tagsJson
   } catch (e) {
-    ElMessage.error('保存标签失败')
+    ElMessage.error(t('documentManager.saveTagsFailed'))
   }
 }
 
@@ -1543,7 +1609,7 @@ async function saveNotes() {
     await DocumentService.updateMeta({id: selectedDoc.value.id, notes: editNotes.value})
     selectedDoc.value.notes = editNotes.value
   } catch (e) {
-    ElMessage.error('保存备注失败')
+    ElMessage.error(t('documentManager.saveNotesFailed'))
   }
 }
 

@@ -1,7 +1,8 @@
 /**
- * 错误代码常量，与 Rust 端保持一致
+ * Error code constants, matching Rust backend
  */
 import {ElMessage} from 'element-plus'
+import {getI18nInstance} from './localeManager'
 
 export const ErrorCode = {
     CONFIG_ERROR: 'CONFIG_ERROR',
@@ -13,69 +14,69 @@ export const ErrorCode = {
 }
 
 /**
- * 解析并处理错误
- * @param {any} error - 捕获的错误对象
- * @param {string} context - 错误发生的上下文（例如 "翻译失败"）
+ * Parse and handle errors
+ * @param {any} error - The caught error object
+ * @param {string} context - Context where error occurred
  */
-export function handleAppError(error, context = '操作失败') {
+export function handleAppError(error, context = 'Operation failed') {
     console.error(`[${context}]`, error)
+
+    const i18n = getI18nInstance()
+    const t = i18n && i18n.global ? i18n.global.t.bind(i18n.global) : (key, params) => key
 
     let message = ''
     let code = null
     let details = null
 
-
     if (typeof error === 'object' && error !== null) {
-
         if (error.code && error.message) {
             code = error.code
             message = error.message
             details = error.details
         } else if (error.toString) {
-
             message = error.toString()
         }
     } else {
         message = String(error)
     }
 
-
     switch (code) {
         case ErrorCode.CONFIG_ERROR:
             ElMessage.error({
-                message: `${context}: 配置错误 - ${message}`,
+                message: t('errorHandler.configError', {context, message}),
                 duration: 5000,
                 showClose: true
             })
             break
         case ErrorCode.NETWORK_ERROR:
             ElMessage.error({
-                message: `${context}: 网络连接失败，请检查网络设置`,
+                message: t('errorHandler.networkError', {context}),
                 duration: 5000,
                 showClose: true
             })
             break
         case ErrorCode.VALIDATION_ERROR:
             ElMessage.warning({
-                message: `${context}: ${message}`,
+                message: t('errorHandler.warning', {context, message}),
                 duration: 3000,
                 showClose: true
             })
             break
-        default:
-
-            if (message.includes('未配置AI提供商')) {
-                ElMessage.error('未配置 AI 提供商，请在设置中填写 API Key 与 Endpoint 后重试。')
-            } else if (message.includes('API地址不能为空')) {
-                ElMessage.error('API地址未配置，请在设置中填写正确的API地址。')
-            } else if (message.includes('API密钥未配置')) {
-                ElMessage.error('API密钥未配置，请在设置中填写正确的API密钥。')
+        default: {
+            const lowerMsg = message.toLowerCase()
+            if (lowerMsg.includes('未配置ai') || lowerMsg.includes('提供商') || lowerMsg.includes('no ai provider')) {
+                ElMessage.error(t('errorHandler.noAIProvider'))
+            } else if (lowerMsg.includes('api地址') || lowerMsg.includes('api地址不能为空') || lowerMsg.includes('no api url') || lowerMsg.includes('endpoint')) {
+                ElMessage.error(t('errorHandler.noApiUrl'))
+            } else if (lowerMsg.includes('api密钥') || lowerMsg.includes('api key') || lowerMsg.includes('no api key') || lowerMsg.includes('secret')) {
+                ElMessage.error(t('errorHandler.noApiKey'))
             } else {
                 ElMessage.error({
-                    message: `${context}: ${message}`,
+                    message: t('errorHandler.error', {context, message}),
                     duration: 5000,
                     showClose: true
                 })
             }
+        }
     }
 }

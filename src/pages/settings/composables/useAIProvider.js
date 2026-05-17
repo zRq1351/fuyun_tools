@@ -1,9 +1,11 @@
 import {ref} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {AISettingsService} from '../../../services/ipc'
 import {handleAppError} from '../../../utils/errorHandler'
 
 export function useAIProvider(form) {
+    const {t} = useI18n()
     const providers = ref([])
     const testingConnection = ref(false)
 
@@ -17,7 +19,7 @@ export function useAIProvider(form) {
                 providers.value = result.map(([value, label]) => ({value, label}))
             }
         } catch (error) {
-            handleAppError(error, '加载AI提供商失败')
+            handleAppError(error, t('settings.ai.loadProviderFailed'))
         }
     }
 
@@ -49,7 +51,7 @@ export function useAIProvider(form) {
                 }
             }
         } catch (error) {
-            handleAppError(error, '加载提供商配置失败')
+            handleAppError(error, t('settings.ai.loadConfigFailed'))
         }
     }
 
@@ -78,11 +80,11 @@ export function useAIProvider(form) {
 
         try {
             await ElMessageBox.confirm(
-                `确定删除自定义提供商 "${provider}" 吗？`,
-                '删除提供商',
+                t('settings.ai.deleteProviderConfirm', {provider}),
+                t('settings.ai.deleteProviderTitle'),
                 {
-                    confirmButtonText: '删除',
-                    cancelButtonText: '取消',
+                    confirmButtonText: t('common.delete'),
+                    cancelButtonText: t('common.cancel'),
                     type: 'warning',
                 }
             )
@@ -91,17 +93,17 @@ export function useAIProvider(form) {
             await loadAiProviders()
             const settings = await AISettingsService.getSettings()
             applyCurrentProviderConfig(settings)
-            ElMessage.success(`已删除提供商 "${provider}"`)
+            ElMessage.success(t('settings.ai.providerDeleted', {provider}))
         } catch (error) {
             if (error !== 'cancel') {
-                handleAppError(error, '删除失败')
+                handleAppError(error, t('settings.ai.deleteFailed'))
             }
         }
     }
 
     const testConnection = async () => {
         if (!form.apiUrl || !form.modelName || !form.apiKey) {
-            ElMessage.warning('请填写完整信息后再测试')
+            ElMessage.warning(t('settings.ai.fillAllInfo'))
             return
         }
         testingConnection.value = true
@@ -118,7 +120,7 @@ export function useAIProvider(form) {
             })
             ElMessage.success(result)
         } catch (error) {
-            handleAppError(error, '连接测试失败')
+            handleAppError(error, t('settings.ai.testFailed'))
         } finally {
             testingConnection.value = false
         }

@@ -36,10 +36,10 @@
     </div>
 
     <ContextMenu :show="ctxMenuShow" :x="ctxMenuX" :y="ctxMenuY" @close="closeCtxMenu">
-      <div class="context-menu-item" @click="copyAllText">复制全部文字</div>
-      <div class="context-menu-item" @click="openTextWindow">在独立窗口查看</div>
+      <div class="context-menu-item" @click="copyAllText">{{ t('pinnedImage.copyAllText') }}</div>
+      <div class="context-menu-item" @click="openTextWindow">{{ t('pinnedImage.viewInWindow') }}</div>
       <div class="context-menu-divider"></div>
-      <div class="context-menu-item" @click="closeWindow">关闭贴图</div>
+      <div class="context-menu-item" @click="closeWindow">{{ t('pinnedImage.closePinned') }}</div>
     </ContextMenu>
   </div>
 </template>
@@ -47,9 +47,11 @@
 <script setup>
 import {onMounted, onUnmounted, ref} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
+import {useI18n} from 'vue-i18n'
 import {useWindowDrag} from '../../composables/useWindowDrag'
 import ContextMenu from '../../components/ContextMenu.vue'
 
+const {t} = useI18n()
 const {startDrag} = useWindowDrag()
 
 const imageSrc = ref('')
@@ -146,32 +148,32 @@ function handleRootMouseDown(event) {
 async function copyAllText() {
   closeCtxMenu()
   if (isRecognizing.value) {
-    showToast('正在识别中，请稍候...', false)
+    showToast(t('pinnedImage.recognizing'), false)
     return
   }
   if (!ocrLines.value.length) {
-    showToast('未识别到文字', true)
+    showToast(t('pinnedImage.noTextRecognized'), true)
     return
   }
   const text = ocrLines.value.map(line => (line?.text || '').trim()).filter(Boolean).join('\n').trim()
   if (!text) return
   try {
     await navigator.clipboard.writeText(text)
-    showToast('文字已复制', false)
+    showToast(t('pinnedImage.textCopied'), false)
   } catch (e) {
     console.error('复制失败', e)
-    showToast('复制失败', true)
+    showToast(t('pinnedImage.copyFailed'), true)
   }
 }
 
 async function openTextWindow() {
   closeCtxMenu()
   if (isRecognizing.value) {
-    showToast('正在识别中，请稍候...', false)
+    showToast(t('pinnedImage.recognizing'), false)
     return
   }
   if (!ocrLines.value.length) {
-    showToast('未识别到文字', true)
+    showToast(t('pinnedImage.noTextRecognized'), true)
     return
   }
   const text = ocrLines.value.map(line => (line?.text || '').trim()).filter(Boolean).join('\n').trim()
@@ -234,12 +236,12 @@ async function runOcr(base64, width, height, engine = null) {
     const result = await invoke('recognize_image_ocr', payload)
     if (taskId !== ocrTaskId) return []
     if (!result?.success) {
-      showToast(result?.error || '本地OCR识别失败', true)
+      showToast(result?.error || t('pinnedImage.ocrFailed'), true)
       return []
     }
     const lines = normalizeNativeOcrParagraphs(result?.paragraphs, taskId)
     if (!lines.length) {
-      showToast('未识别到文字', true)
+      showToast(t('pinnedImage.noTextRecognized'), true)
     }
     if (width > 0 && height > 0) {
       sourceWidth.value = width
@@ -249,7 +251,7 @@ async function runOcr(base64, width, height, engine = null) {
     return lines
   } catch (error) {
     if (taskId !== ocrTaskId) return []
-    showToast('OCR 初始化失败', true)
+    showToast(t('pinnedImage.ocrInitFailed'), true)
     console.error('固定窗口OCR识别失败:', error)
     return []
   } finally {

@@ -6,7 +6,7 @@
     <textarea
         v-model="text"
         class="ocr-editor"
-        placeholder="暂无识别结果"
+        :placeholder="t('ocrText.noResult')"
         spellcheck="false"
         @dblclick.left.stop.prevent="closeWindow"
     />
@@ -16,9 +16,11 @@
 <script setup>
 import {onMounted, onUnmounted, ref} from 'vue'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
+import {useI18n} from 'vue-i18n'
 import {useTheme} from '../../composables/useTheme'
 import {useWindowDrag} from '../../composables/useWindowDrag'
 
+const {t} = useI18n()
 const text = ref('')
 const {currentTheme} = useTheme()
 const {startDrag} = useWindowDrag()

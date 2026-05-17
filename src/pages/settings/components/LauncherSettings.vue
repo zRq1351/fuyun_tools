@@ -2,35 +2,36 @@
   <el-form :model="form" label-position="top">
     <el-card class="setting-section-card compact-card" shadow="never">
       <template #header>
-        <div class="section-title">快捷启动器</div>
+        <div class="section-title">{{ $t('settings.launcher.title') }}</div>
       </template>
-      <el-form-item label="启动器功能">
+      <el-form-item :label="$t('settings.launcher.enabled')">
         <el-switch
-            :active-text="pendingToggles.launcher === 'disabling' ? '正在禁用...' : '启用'"
-            :inactive-text="pendingToggles.launcher === 'enabling' ? '正在启用...' : '关闭'"
+            :active-text="pendingToggles.launcher === 'disabling' ? $t('common.disabling') : $t('common.enable')"
+            :inactive-text="pendingToggles.launcher === 'enabling' ? $t('common.enabling') : $t('common.close')"
             :loading="!!pendingToggles.launcher"
             :model-value="form.launcherEnabled"
             @update:model-value="(val) => toggleFeature('launcherEnabled', val)"
         />
-        <div class="form-hint">关闭后将无法使用快捷键唤起启动器</div>
+        <div class="form-hint">{{ $t('settings.launcher.disabledHint') }}</div>
       </el-form-item>
 
-      <el-form-item label="启动器快捷键">
+      <el-form-item :label="$t('settings.launcher.launcherHotkey')">
         <el-input
             :class="{ recording: isLauncherRecording }"
             :model-value="launcherDisplayValue"
-            placeholder="例如: Alt+Q"
+            :placeholder="$t('settings.clipboard.shortcutExample')"
             readonly
         >
           <template #append>
             <el-button-group>
-              <el-button :type="isLauncherRecording ? 'danger' : 'primary'" title="修改快捷键"
+              <el-button :title="$t('settings.clipboard.modifyShortcut')"
+                         :type="isLauncherRecording ? 'danger' : 'primary'"
                          @click="toggleLauncherRecording">
                 <el-icon>
                   <component :is="isLauncherRecording ? VideoPause : Edit"/>
                 </el-icon>
               </el-button>
-              <el-button title="恢复默认快捷键" @click="resetLauncherShortcut">
+              <el-button :title="$t('settings.clipboard.resetShortcut')" @click="resetLauncherShortcut">
                 <el-icon>
                   <RefreshLeft/>
                 </el-icon>
@@ -43,7 +44,7 @@
 
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">启动器功能说明</div>
+        <div class="section-title">{{ $t('settings.launcher.featureDesc') }}</div>
       </template>
       <div class="feature-list">
         <div class="feature-item">
@@ -51,8 +52,8 @@
             <Search/>
           </el-icon>
           <div class="feature-content">
-            <div class="feature-title">快速搜索</div>
-            <div class="feature-desc">搜索已安装的应用程序和常用文件</div>
+            <div class="feature-title">{{ $t('settings.launcher.quickSearch') }}</div>
+            <div class="feature-desc">{{ $t('settings.launcher.quickSearchDesc') }}</div>
           </div>
         </div>
         <div class="feature-item">
@@ -60,8 +61,8 @@
             <Operation/>
           </el-icon>
           <div class="feature-content">
-            <div class="feature-title">快捷命令</div>
-            <div class="feature-desc">输入 :settings、:clipboard 等命令快速执行操作</div>
+            <div class="feature-title">{{ $t('settings.launcher.quickCommands') }}</div>
+            <div class="feature-desc">{{ $t('settings.launcher.quickCommandsDesc') }}</div>
           </div>
         </div>
         <div class="feature-item">
@@ -69,8 +70,8 @@
             <Key/>
           </el-icon>
           <div class="feature-content">
-            <div class="feature-title">键盘导航</div>
-            <div class="feature-desc">使用方向键选择，回车执行，Esc 关闭</div>
+            <div class="feature-title">{{ $t('settings.launcher.keyboardNav') }}</div>
+            <div class="feature-desc">{{ $t('settings.launcher.keyboardNavDesc') }}</div>
           </div>
         </div>
       </div>
@@ -80,9 +81,12 @@
 
 <script setup>
 import {ref} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {Edit, Key, Operation, RefreshLeft, Search, VideoPause} from '@element-plus/icons-vue'
 import {ElMessage} from 'element-plus'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
+
+const {t} = useI18n()
 
 const props = defineProps({
   form: {
@@ -119,7 +123,7 @@ const resetLauncherShortcut = () => {
   stopLauncherRecording()
   const isMac = navigator.userAgent.toLowerCase().includes('mac')
   props.form.launcherHotKey = isMac ? 'Cmd+Q' : 'Alt+Q'
-  ElMessage.success(`已恢复启动器快捷键默认值: ${props.form.launcherHotKey}`)
+  ElMessage.success(t('settings.launcher.shortcutReset', {shortcut: props.form.launcherHotKey}))
 }
 </script>
 

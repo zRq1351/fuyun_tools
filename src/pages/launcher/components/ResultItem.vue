@@ -1,9 +1,8 @@
 <template>
-  <div
-      :class="{ 'is-active': isActive }"
-      class="result-item"
-      @click="$emit('click', item)"
-      @mouseenter="$emit('mouseenter')"
+  <div :class="{ 'is-active': isActive }"
+       class="result-item"
+       @click="$emit('click', item)"
+       @mouseenter="$emit('mouseenter')"
   >
     <div class="item-icon">
       <img v-if="isBase64Icon" :src="item.icon" class="icon-img"/>

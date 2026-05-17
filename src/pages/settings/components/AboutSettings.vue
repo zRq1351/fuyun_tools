@@ -4,18 +4,18 @@
       <el-icon>
         <Refresh/>
       </el-icon>
-      检查更新
+      {{ $t('settings.about.checkUpdate') }}
     </h3>
-    <p>当前版本：<strong>{{ currentVersion }}</strong></p>
+    <p>{{ $t('settings.about.currentVersion') }}<strong>{{ currentVersion }}</strong></p>
     <el-button :loading="checkingUpdate" type="warning" @click="checkUpdate">
-      检查更新
+      {{ $t('settings.about.checkUpdateBtn') }}
     </el-button>
     <div v-if="updateStatus" :class="updateStatus.type" class="update-status">
       {{ updateStatus.message }}
     </div>
     <div v-if="showUpdateProgress" class="update-progress">
       <el-progress :percentage="updateProgress" :status="updateProgress === 100 ? 'success' : ''"/>
-      <div class="progress-text">正在更新... {{ updateProgress }}%</div>
+      <div class="progress-text">{{ $t('settings.about.updatingProgress', {progress: updateProgress}) }}</div>
     </div>
   </div>
 
@@ -24,11 +24,10 @@
       <el-icon>
         <InfoFilled/>
       </el-icon>
-      软件介绍
+      {{ $t('settings.about.softwareIntro') }}
     </h3>
     <p class="intro-text">
-      fuyun_tools 是一款常驻系统托盘的效率工具，聚焦“文字剪贴板 + 图片剪贴板 + Windows 划词 AI + Windows 截图与 OCR”
-      四条高频工作流，目标是在不打断当前工作的前提下，完成快速回填、大图预览、截图提取、翻译解释与配置管理。
+      {{ $t('settings.about.softwareIntroText') }}
     </p>
   </div>
 
@@ -37,44 +36,14 @@
       <el-icon>
         <Star/>
       </el-icon>
-      软件功能
+      {{ $t('settings.about.features') }}
     </h3>
     <ul class="feature-list">
-      <li>
+      <li v-for="key in featureKeys" :key="key">
         <el-icon>
-          <CircleCheck/>
+          <component :is="featureIcons[key]"/>
         </el-icon>
-        <strong>文字剪贴板</strong> - 自动记录历史，支持搜索、分类、快捷键回填
-      </li>
-      <li>
-        <el-icon>
-          <Picture/>
-        </el-icon>
-        <strong>图片剪贴板</strong> - 支持缩略图列表、双击回填与大图预览
-      </li>
-      <li>
-        <el-icon>
-          <FolderOpened/>
-        </el-icon>
-        <strong>历史上限策略</strong> - 可配置“仅限制未分组项”，保护已分组内容不被上限淘汰
-      </li>
-      <li>
-        <el-icon>
-          <Pointer/>
-        </el-icon>
-        <strong>划词助手</strong> - Windows 下选中文本后，直接翻译/解释/复制
-      </li>
-      <li>
-        <el-icon>
-          <Picture/>
-        </el-icon>
-        <strong>截图与 OCR</strong> - Windows 下支持快捷截图，并可在固定图片窗口进行 OCR 识别
-      </li>
-      <li>
-        <el-icon>
-          <Cpu/>
-        </el-icon>
-        <strong>AI 配置</strong> - 支持 OpenAI 兼容服务，自定义提供商与本地加密密钥存储
+        <span v-html="renderFeatureItem(key)"></span>
       </li>
     </ul>
   </div>
@@ -84,18 +53,17 @@
       <el-icon>
         <Reading/>
       </el-icon>
-      使用方法
+      {{ $t('settings.about.usage') }}
     </h3>
     <ol class="usage-list">
-      <li><strong>文字剪贴板</strong>：按 <code>{{ toggleShortcut || 'Ctrl+Shift+Z' }}</code> 打开文字历史窗口
-      </li>
-      <li><strong>图片剪贴板</strong>：按 <code>{{ imageToggleShortcut || 'Ctrl+Shift+X' }}</code> 打开图片历史窗口</li>
-      <li><strong>截图工具</strong>：按 <code>{{ screenshotToggleShortcut || 'Ctrl+Shift+S' }}</code> 打开截图窗口</li>
-      <li><strong>图片 OCR</strong>：在固定图片窗口右键，选择 OCR 识别并查看文本结果</li>
-      <li><strong>图片回填</strong>：在图片窗口双击目标项，自动写入剪贴板并粘贴到当前焦点应用</li>
-      <li><strong>划词功能</strong>：Windows 下选中文本后自动显示工具栏</li>
-      <li><strong>上限策略</strong>：可在“设置 → 剪贴板”开启“仅限制未分组项”</li>
-      <li><strong>系统托盘</strong>：右键托盘图标可进入设置、开机自启切换、日志操作（调试模式）和退出</li>
+      <li v-html="renderUsageItem('settings.about.usage1', toggleShortcut, 'Ctrl+Shift+Z')"></li>
+      <li v-html="renderUsageItem('settings.about.usage2', imageToggleShortcut, 'Ctrl+Shift+X')"></li>
+      <li v-html="renderUsageItem('settings.about.usage3', screenshotToggleShortcut, 'Ctrl+Shift+S')"></li>
+      <li v-html="renderUsageItem('settings.about.usage4')"></li>
+      <li v-html="renderUsageItem('settings.about.usage5')"></li>
+      <li v-html="renderUsageItem('settings.about.usage6')"></li>
+      <li v-html="renderUsageItem('settings.about.usage7')"></li>
+      <li v-html="renderUsageItem('settings.about.usage8')"></li>
     </ol>
   </div>
 
@@ -104,39 +72,45 @@
       <el-icon>
         <Reading/>
       </el-icon>
-      开源版权声明
+      {{ $t('settings.about.license') }}
     </h3>
     <ul class="feature-list">
       <li>
         <strong>FFmpeg</strong> - Copyright (c) FFmpeg developers。
       </li>
       <li>
-        <strong>使用说明</strong> - 本软件通过外部进程调用 ffmpeg.exe，录屏功能启用时按需下载，不随安装包默认内置。
+        <strong>{{ $t('settings.about.usageGuide') }}</strong> - 本软件通过外部进程调用
+        ffmpeg.exe，录屏功能启用时按需下载，不随安装包默认内置。
       </li>
       <li>
-        <strong>分发策略</strong> - ffmpeg.exe 下载到本地 bin 目录，下载地址可由 settings.json 中
+        <strong>{{ $t('settings.about.distribution') }}</strong> - ffmpeg.exe 下载到本地 bin 目录，下载地址可由
+        settings.json 中
         recording_ffmpeg_download_url 配置。
       </li>
       <li>
-        <strong>授权说明</strong> - 当前使用的 FFmpeg 构建包含 GPL 组件（如 libx264），对应 ffmpeg.exe 按 GPL/LGPL 要求分发。
+        <strong>{{ $t('settings.about.licenseNote') }}</strong> - 当前使用的 FFmpeg 构建包含 GPL 组件（如 libx264），对应
+        ffmpeg.exe 按 GPL/LGPL 要求分发。
       </li>
       <li>
-        <strong>对应源码</strong> - FFmpeg 8.0.1 源码可从 https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz 获取。
+        <strong>{{ $t('settings.about.correspondingSource') }}</strong> - FFmpeg 8.0.1 源码可从
+        https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz 获取。
       </li>
       <li>
-        <strong>上游仓库</strong> - https://git.ffmpeg.org/ffmpeg.git
+        <strong>{{ $t('settings.about.upstreamRepo') }}</strong> - https://git.ffmpeg.org/ffmpeg.git
       </li>
       <li>
-        <strong>构建参考</strong> - https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.0.1-essentials_build.7z
+        <strong>{{ $t('settings.about.buildRef') }}</strong> -
+        https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.0.1-essentials_build.7z
       </li>
       <li>
-        <strong>完整声明</strong> - 详见 docs/THIRD_PARTY_NOTICES.md（含许可证文件与源码可获取信息）。
+        <strong>{{ $t('settings.about.fullStatement') }}</strong> - 详见 docs/THIRD_PARTY_NOTICES.md（含许可证文件与源码可获取信息）。
       </li>
     </ul>
   </div>
 </template>
 
 <script setup>
+import {useI18n} from 'vue-i18n'
 import {
   CircleCheck,
   Cpu,
@@ -149,6 +123,8 @@ import {
   Star
 } from '@element-plus/icons-vue'
 import {useUpdater} from '../composables/useUpdater'
+
+const {t} = useI18n()
 
 const props = defineProps({
   currentVersion: {
@@ -176,6 +152,41 @@ const {
   showUpdateProgress,
   checkUpdate
 } = useUpdater(props.currentVersion)
+
+const featureKeys = ['settings.about.feature1', 'settings.about.feature2', 'settings.about.feature3', 'settings.about.feature4', 'settings.about.feature5', 'settings.about.feature6']
+const featureIcons = {
+  'settings.about.feature1': CircleCheck,
+  'settings.about.feature2': Picture,
+  'settings.about.feature3': FolderOpened,
+  'settings.about.feature4': Pointer,
+  'settings.about.feature5': Picture,
+  'settings.about.feature6': Cpu
+}
+
+const renderFeatureItem = (key) => {
+  const text = t(key)
+  const idx = text.indexOf(' - ')
+  if (idx === -1) return text
+  return `<strong>${text.slice(0, idx)}</strong> - ${text.slice(idx + 3)}`
+}
+
+const renderUsageItem = (key, shortcut, defaultShortcut) => {
+  let text = t(key)
+  const idx = text.indexOf('\uFF1A')
+  let title = ''
+  let body = text
+  if (idx !== -1) {
+    title = text.slice(0, idx)
+    body = text.slice(idx + 1)
+  }
+  if (defaultShortcut && shortcut !== undefined) {
+    body = body.replace(defaultShortcut, `<code>${shortcut || defaultShortcut}</code>`)
+  }
+  if (title) {
+    return `<strong>${title}</strong>\uFF1A${body}`
+  }
+  return body
+}
 </script>
 
 <style scoped>

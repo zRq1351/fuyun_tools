@@ -1,11 +1,11 @@
 <template>
   <div class="toolbar">
-    <div class="window-offset-handle" title="按住拖动上下调整窗口位置"
+    <div :title="$t('clipboard.dragHint')" class="window-offset-handle"
          @mousedown.stop.prevent="startWindowOffsetDrag">
       <el-icon>
         <Rank/>
       </el-icon>
-      <span class="window-offset-label">调高</span>
+      <span class="window-offset-label">{{ $t('clipboard.offsetUp') }}</span>
     </div>
     <button v-if="showAiToggle" class="ai-toggle-btn" type="button" @click.stop
             @mousedown.stop="handleToggleAiSettings">
@@ -18,7 +18,7 @@
         v-model="searchKeyword"
         class="search-input"
         clearable
-        :placeholder="searchPlaceholder"
+        :placeholder="searchPlaceholder || $t('clipboard.searchHistory')"
         size="small"
     >
       <template #prefix>
@@ -33,7 +33,7 @@
           class="category-pill"
           @click="updateCategoryFilter('全部')"
       >
-        全部
+        {{ $t('common.all') }}
       </div>
       <div
           v-for="category in categories"
@@ -61,14 +61,14 @@
         <el-icon>
           <Plus/>
         </el-icon>
-        <span>{{ createCategoryText }}</span>
+        <span>{{ createCategoryText || $t('clipboard.createCategory') }}</span>
       </div>
       <el-input
           v-else
           ref="newCategoryInputRef"
           v-model="newCategoryName"
           class="category-input"
-          placeholder="输入分类名"
+          :placeholder="$t('clipboard.inputCategoryName')"
           size="small"
           @blur="confirmCreateCategory"
           @keydown.enter.prevent="confirmCreateCategory"
@@ -81,6 +81,9 @@
 <script setup>
 import {ArrowDown, ArrowRight, Close, Plus, Rank, Search} from '@element-plus/icons-vue'
 import {computed} from 'vue'
+import {useI18n} from 'vue-i18n'
+
+const {t} = useI18n()
 
 const props = defineProps({
   searchKeyword: String,
@@ -107,11 +110,11 @@ const props = defineProps({
   ,
   searchPlaceholder: {
     type: String,
-    default: '搜索历史/标签'
+    default: ''
   },
   createCategoryText: {
     type: String,
-    default: '新增分类'
+    default: ''
   }
 })
 

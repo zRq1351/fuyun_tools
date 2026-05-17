@@ -2,35 +2,36 @@
   <el-form :model="form" label-position="top">
     <el-card class="setting-section-card compact-card" shadow="never">
       <template #header>
-        <div class="section-title">文档管理</div>
+        <div class="section-title">{{ $t('settings.docManager.title') }}</div>
       </template>
-      <el-form-item label="文档管理功能">
+      <el-form-item :label="$t('settings.docManager.enabled')">
         <el-switch
-            :active-text="pendingToggles.docManager === 'disabling' ? '正在禁用...' : '启用'"
-            :inactive-text="pendingToggles.docManager === 'enabling' ? '正在启用...' : '关闭'"
+            :active-text="pendingToggles.docManager === 'disabling' ? $t('common.disabling') : $t('common.enable')"
+            :inactive-text="pendingToggles.docManager === 'enabling' ? $t('common.enabling') : $t('common.close')"
             :loading="!!pendingToggles.docManager"
             :model-value="form.docManagerEnabled"
             @update:model-value="(val) => toggleFeature('docManagerEnabled', val)"
         />
-        <div class="form-hint">关闭后快捷键将不可用，但可通过托盘菜单打开</div>
+        <div class="form-hint">{{ $t('settings.docManager.disabledHint') }}</div>
       </el-form-item>
 
-      <el-form-item label="文档管理快捷键">
+      <el-form-item :label="$t('settings.docManager.hotkey')">
         <el-input
             :class="{ recording: isDocManagerRecording }"
             :model-value="docManagerDisplayValue"
-            placeholder="例如: Ctrl+Shift+D"
+            :placeholder="$t('settings.clipboard.shortcutExample')"
             readonly
         >
           <template #append>
             <el-button-group>
-              <el-button :type="isDocManagerRecording ? 'danger' : 'primary'" title="修改快捷键"
+              <el-button :title="$t('settings.clipboard.modifyShortcut')"
+                         :type="isDocManagerRecording ? 'danger' : 'primary'"
                          @click="toggleDocManagerRecording">
                 <el-icon>
                   <component :is="isDocManagerRecording ? VideoPause : Edit"/>
                 </el-icon>
               </el-button>
-              <el-button title="恢复默认快捷键" @click="resetDocManagerShortcut">
+              <el-button :title="$t('settings.clipboard.resetShortcut')" @click="resetDocManagerShortcut">
                 <el-icon>
                   <RefreshLeft/>
                 </el-icon>
@@ -43,7 +44,7 @@
 
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">功能说明</div>
+        <div class="section-title">{{ $t('settings.docManager.featureDesc') }}</div>
       </template>
       <div class="feature-list">
         <div class="feature-item">
@@ -51,8 +52,8 @@
             <FolderAdd/>
           </el-icon>
           <div class="feature-content">
-            <div class="feature-title">文件搬迁收纳</div>
-            <div class="feature-desc">将桌面及任意文件夹中的文档移动到统一管理目录，按分类自动组织为子目录</div>
+            <div class="feature-title">{{ $t('settings.docManager.organize') }}</div>
+            <div class="feature-desc">{{ $t('settings.docManager.organizeDesc') }}</div>
           </div>
         </div>
         <div class="feature-item">
@@ -60,8 +61,8 @@
             <Search/>
           </el-icon>
           <div class="feature-content">
-            <div class="feature-title">全文搜索</div>
-            <div class="feature-desc">支持按文件名、文本内容全文搜索 PDF/Word/代码等所有文本文件</div>
+            <div class="feature-title">{{ $t('settings.docManager.fulltextSearch') }}</div>
+            <div class="feature-desc">{{ $t('settings.docManager.fulltextSearchDesc') }}</div>
           </div>
         </div>
         <div class="feature-item">
@@ -69,8 +70,8 @@
             <Collection/>
           </el-icon>
           <div class="feature-content">
-            <div class="feature-title">分类与标签</div>
-            <div class="feature-desc">自定义分类目录和标签，双击打开文件，一键在资源管理器中定位</div>
+            <div class="feature-title">{{ $t('settings.docManager.categoryTag') }}</div>
+            <div class="feature-desc">{{ $t('settings.docManager.categoryTagDesc') }}</div>
           </div>
         </div>
       </div>
@@ -80,9 +81,12 @@
 
 <script setup>
 import {ref} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {Collection, Edit, FolderAdd, RefreshLeft, Search, VideoPause} from '@element-plus/icons-vue'
 import {ElMessage} from 'element-plus'
 import {useShortcutRecorder} from '../composables/useShortcutRecorder'
+
+const {t} = useI18n()
 
 const props = defineProps({
   form: {
@@ -118,7 +122,7 @@ const {
 const resetDocManagerShortcut = () => {
   stopDocManagerRecording()
   props.form.docManagerHotKey = 'Ctrl+Shift+D'
-  ElMessage.success(`已恢复文档管理快捷键默认值: ${props.form.docManagerHotKey}`)
+  ElMessage.success(t('settings.docManager.shortcutReset', {shortcut: props.form.docManagerHotKey}))
 }
 </script>
 

@@ -61,7 +61,7 @@
       </el-icon>
       <div class="load-more-tail-text">
         <span>左滑</span>
-        <span>{{ isLoadingMore ? '加载中' : '加载更多' }}</span>
+        <span>{{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}</span>
       </div>
     </div>
     <div class="spacer"></div>
@@ -276,9 +276,6 @@ const handleMouseDown = (e) => {
     dragTargetScrollLeft = scrollLeftVal
   }
 
-  
-  
-  
 
   window.addEventListener('mousemove', handleGlobalMouseMove)
   window.addEventListener('mouseup', handleGlobalMouseUp, true)
@@ -302,18 +299,18 @@ const handleGlobalMouseMove = (e) => {
     contentRef.value.style.cursor = 'grabbing'
     contentRef.value.classList.add('is-dragging')
     document.body.style.userSelect = 'none'
-    
-    
+
+
     if (window.getSelection) {
       window.getSelection().removeAllRanges();
     }
   }
 
   if (!isDragging) return
-  
-  
+
+
   e.preventDefault();
-  
+
   dragTargetScrollLeft = scrollLeftVal - walk
   const maxScrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
   if (dragTargetScrollLeft > maxScrollLeft + 36) {

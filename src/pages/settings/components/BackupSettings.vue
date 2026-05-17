@@ -3,26 +3,29 @@
     <el-card class="section-card" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>手动备份与恢复</span>
-          <el-button :loading="loadingPreview" @click="loadExportPreview">刷新导出预览</el-button>
+          <span>{{ $t('settings.backup.manualBackup') }}</span>
+          <el-button :loading="loadingPreview" @click="loadExportPreview">{{
+              $t('settings.backup.refreshPreview')
+            }}
+          </el-button>
         </div>
       </template>
 
       <div v-if="preview" class="preview-grid">
         <div class="metric-item">
-          <div class="metric-label">文字历史</div>
+          <div class="metric-label">{{ $t('settings.backup.textHistory') }}</div>
           <div class="metric-value">{{ preview.stats.textItemCount }}</div>
         </div>
         <div class="metric-item">
-          <div class="metric-label">图片历史</div>
+          <div class="metric-label">{{ $t('settings.backup.imageHistory') }}</div>
           <div class="metric-value">{{ preview.stats.imageItemCount }}</div>
         </div>
         <div class="metric-item">
-          <div class="metric-label">图片文件</div>
+          <div class="metric-label">{{ $t('settings.backup.imageFiles') }}</div>
           <div class="metric-value">{{ preview.stats.imageBlobCount }}</div>
         </div>
         <div class="metric-item">
-          <div class="metric-label">预计体积</div>
+          <div class="metric-label">{{ $t('settings.backup.estimatedSize') }}</div>
           <div class="metric-value">{{ formatBytes(preview.estimatedBytes) }}</div>
         </div>
       </div>
@@ -37,9 +40,17 @@
       />
 
       <div class="action-row">
-        <el-button :loading="exporting" type="primary" @click="exportBackup">导出备份</el-button>
-        <el-button :loading="manualBackupLoading" @click="runManualBackup">按自动备份配置立即执行一次</el-button>
-        <el-button :loading="previewingPackage" @click="selectBackupPackage">选择备份包并预览</el-button>
+        <el-button :loading="exporting" type="primary" @click="exportBackup">{{
+            $t('settings.backup.exportBackup')
+          }}
+        </el-button>
+        <el-button :loading="manualBackupLoading" @click="runManualBackup">{{
+            $t('settings.backup.runAutoBackup')
+          }}
+        </el-button>
+        <el-button :loading="previewingPackage" @click="selectBackupPackage">
+          {{ $t('settings.backup.selectBackupPreview') }}
+        </el-button>
       </div>
 
       <el-alert
@@ -54,66 +65,69 @@
     <el-card class="section-card" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>自动备份</span>
-          <el-button :loading="savingSettings" type="primary" @click="saveSettings">保存自动备份配置</el-button>
+          <span>{{ $t('settings.backup.autoBackup') }}</span>
+          <el-button :loading="savingSettings" type="primary" @click="saveSettings">
+            {{ $t('settings.backup.saveAutoBackup') }}
+          </el-button>
         </div>
       </template>
 
       <el-form label-position="top">
-        <el-form-item label="启用自动备份">
+        <el-form-item :label="$t('settings.backup.autoBackupEnabled')">
           <el-switch v-model="settings.enabled"/>
         </el-form-item>
-        <el-form-item label="备份频率">
+        <el-form-item :label="$t('settings.backup.backupFrequency')">
           <el-select v-model="settings.frequency">
-            <el-option label="每天" value="daily"/>
-            <el-option label="每周" value="weekly"/>
-            <el-option label="仅手动触发" value="manual"/>
+            <el-option :label="$t('settings.backup.daily')" value="daily"/>
+            <el-option :label="$t('settings.backup.weekly')" value="weekly"/>
+            <el-option :label="$t('settings.backup.manualOnly')" value="manual"/>
           </el-select>
         </el-form-item>
-        <el-form-item label="目标目录">
+        <el-form-item :label="$t('settings.backup.targetDir')">
           <div class="inline-row">
-            <el-input v-model="settings.targetDir" placeholder="请选择备份目录"/>
-            <el-button @click="selectBackupDirectory">选择目录</el-button>
+            <el-input v-model="settings.targetDir" :placeholder="$t('settings.backup.selectBackupDir')"/>
+            <el-button @click="selectBackupDirectory">{{ $t('common.selectDir') }}</el-button>
           </div>
         </el-form-item>
-        <el-form-item label="保留份数">
+        <el-form-item :label="$t('settings.backup.retentionCount')">
           <el-input-number v-model="settings.maxBackupCount" :max="50" :min="1"/>
         </el-form-item>
       </el-form>
 
       <div class="status-text">
-        最近执行时间：{{ formatTimestamp(settings.lastRunAt) }}
+        {{ $t('settings.backup.lastRunTime') }}{{ formatTimestamp(settings.lastRunAt) }}
       </div>
       <div class="status-text">
-        最近执行状态：{{ settings.lastRunStatus || 'idle' }}
+        {{ $t('settings.backup.lastRunStatus') }}{{ settings.lastRunStatus || 'idle' }}
       </div>
     </el-card>
 
     <el-card class="section-card" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>备份包预览与恢复</span>
-          <el-button :disabled="!packagePreview" :loading="restoring" type="danger" @click="restoreBackup">执行恢复
+          <span>{{ $t('settings.backup.backupPreview') }}</span>
+          <el-button :disabled="!packagePreview" :loading="restoring" type="danger" @click="restoreBackup">
+            {{ $t('settings.backup.executeRestore') }}
           </el-button>
         </div>
       </template>
 
-      <div v-if="packagePath" class="status-text">当前备份包：{{ packagePath }}</div>
+      <div v-if="packagePath" class="status-text">{{ $t('settings.backup.currentBackup') }}{{ packagePath }}</div>
       <div v-if="packagePreview" class="preview-grid">
         <div class="metric-item">
-          <div class="metric-label">备份时间</div>
+          <div class="metric-label">{{ $t('settings.backup.backupTime') }}</div>
           <div class="metric-value small">{{ formatTimestamp(packagePreview.manifest.createdAt) }}</div>
         </div>
         <div class="metric-item">
-          <div class="metric-label">应用版本</div>
+          <div class="metric-label">{{ $t('settings.backup.appVersion') }}</div>
           <div class="metric-value">{{ packagePreview.manifest.appVersion }}</div>
         </div>
         <div class="metric-item">
-          <div class="metric-label">文字历史</div>
+          <div class="metric-label">{{ $t('settings.backup.textHistory') }}</div>
           <div class="metric-value">{{ packagePreview.stats.textItemCount }}</div>
         </div>
         <div class="metric-item">
-          <div class="metric-label">图片历史</div>
+          <div class="metric-label">{{ $t('settings.backup.imageHistory') }}</div>
           <div class="metric-value">{{ packagePreview.stats.imageItemCount }}</div>
         </div>
       </div>
@@ -129,33 +143,35 @@
 
       <div v-if="packagePreview" class="restore-options">
         <el-radio-group v-model="restoreMode">
-          <el-radio-button label="full">全量恢复</el-radio-button>
-          <el-radio-button label="partial">选择性恢复</el-radio-button>
+          <el-radio-button label="full">{{ $t('settings.backup.fullRestore') }}</el-radio-button>
+          <el-radio-button label="partial">{{ $t('settings.backup.selectiveRestore') }}</el-radio-button>
         </el-radio-group>
 
         <div v-if="restoreMode === 'partial'" class="checkbox-group">
           <el-checkbox v-model="restoreSettings" :disabled="!packagePreview.restoreOptions.canRestoreSettings">
-            恢复设置
+            {{ $t('settings.backup.restoreSettings') }}
           </el-checkbox>
           <el-checkbox v-model="restoreTextHistory" :disabled="!packagePreview.restoreOptions.canRestoreTextHistory">
-            恢复文字历史
+            {{ $t('settings.backup.restoreTextHistory') }}
           </el-checkbox>
           <el-checkbox v-model="restoreImageHistory" :disabled="!packagePreview.restoreOptions.canRestoreImageHistory">
-            恢复图片历史
+            {{ $t('settings.backup.restoreImageHistory') }}
           </el-checkbox>
         </div>
 
         <div class="checkbox-group" style="margin-top: 12px;">
-          <span style="color: var(--el-text-color-regular); font-size: 14px;">恢复策略：</span>
+          <span style="color: var(--el-text-color-regular); font-size: 14px;">{{
+              $t('settings.backup.restoreStrategy')
+            }}</span>
           <el-radio-group v-model="restoreStrategy">
             <el-radio-button label="merge">
-              <el-tooltip content="保留现有记录，只添加备份中不存在的新记录" placement="top">
-                <span>合并模式</span>
+              <el-tooltip :content="$t('settings.backup.mergeModeTooltip')" placement="top">
+                <span>{{ $t('settings.backup.mergeMode') }}</span>
               </el-tooltip>
             </el-radio-button>
             <el-radio-button label="overwrite">
-              <el-tooltip content="完全覆盖现有数据，谨慎使用" placement="top">
-                <span>覆盖模式</span>
+              <el-tooltip :content="$t('settings.backup.overwriteModeTooltip')" placement="top">
+                <span>{{ $t('settings.backup.overwriteMode') }}</span>
               </el-tooltip>
             </el-radio-button>
           </el-radio-group>
@@ -166,12 +182,12 @@
     <el-card class="section-card" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>最近备份</span>
-          <el-button :loading="historyLoading" @click="loadHistory">刷新列表</el-button>
+          <span>{{ $t('settings.backup.recentBackups') }}</span>
+          <el-button :loading="historyLoading" @click="loadHistory">{{ $t('settings.backup.refreshList') }}</el-button>
         </div>
       </template>
 
-      <el-empty v-if="!history.length" description="当前还没有备份记录"/>
+      <el-empty v-if="!history.length" :description="$t('settings.backup.noBackupRecords')"/>
       <div v-else class="history-list">
         <div v-for="item in history" :key="item.filePath" class="history-item">
           <div class="history-main">
@@ -182,8 +198,11 @@
             </div>
           </div>
           <div class="history-actions">
-            <el-button size="small" @click="previewHistoryItem(item.filePath)">预览</el-button>
-            <el-button size="small" type="danger" @click="removeHistoryItem(item.filePath)">删除</el-button>
+            <el-button size="small" @click="previewHistoryItem(item.filePath)">{{ $t('common.preview') }}</el-button>
+            <el-button size="small" type="danger" @click="removeHistoryItem(item.filePath)">{{
+                $t('common.delete')
+              }}
+            </el-button>
           </div>
         </div>
       </div>
@@ -193,10 +212,13 @@
 
 <script setup>
 import {onMounted, onUnmounted, reactive, ref} from 'vue'
+import {useI18n} from 'vue-i18n'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {open, save} from '@tauri-apps/plugin-dialog'
 import {listen} from '@tauri-apps/api/event'
 import {BackupService} from '../../../services/ipc'
+
+const {t} = useI18n()
 
 const settings = reactive({
   enabled: false,
@@ -240,7 +262,7 @@ const formatBytes = (bytes = 0) => {
 }
 
 const formatTimestamp = (timestamp) => {
-  if (!timestamp) return '未执行'
+  if (!timestamp) return t('settings.backup.notExecuted')
   return new Date(Number(timestamp)).toLocaleString()
 }
 
@@ -291,7 +313,7 @@ const saveSettings = async () => {
       maxBackupCount: settings.maxBackupCount
     })
     syncBackupSettings(payload)
-    ElMessage.success('自动备份配置已保存')
+    ElMessage.success(t('settings.backup.autoBackupSaved'))
     await loadHistory()
   } catch (error) {
     ElMessage.error(String(error))
@@ -304,7 +326,7 @@ const selectBackupDirectory = async () => {
   const path = await open({
     directory: true,
     multiple: false,
-    title: '选择自动备份目录'
+    title: t('settings.backup.selectAutoBackupDir')
   })
   if (typeof path === 'string') {
     settings.targetDir = path
@@ -315,14 +337,14 @@ const exportBackup = async () => {
   exporting.value = true
   try {
     const targetPath = await save({
-      title: '导出备份',
+      title: t('settings.backup.exportBackupTitle'),
       defaultPath: defaultExportName(),
       filters: [{name: 'Fuyun Backup', extensions: ['zip']}]
     })
     if (!targetPath) return
     const response = await BackupService.exportToPath(targetPath)
-    lastResult.value = `导出成功：${response.data.filePath}`
-    ElMessage.success('备份导出成功')
+    lastResult.value = t('settings.backup.exportSuccess', {path: response.data.filePath})
+    ElMessage.success(t('settings.backup.backupExportSuccess'))
     await Promise.all([loadExportPreview(), loadSettings(), loadHistory()])
   } catch (error) {
     ElMessage.error(String(error))
@@ -335,8 +357,8 @@ const runManualBackup = async () => {
   manualBackupLoading.value = true
   try {
     const response = await BackupService.runManualBackup()
-    lastResult.value = `手动备份成功：${response.data.filePath}`
-    ElMessage.success('手动备份完成')
+    lastResult.value = t('settings.backup.manualBackupSuccess', {path: response.data.filePath})
+    ElMessage.success(t('settings.backup.manualBackupCompleted'))
     await Promise.all([loadSettings(), loadHistory()])
   } catch (error) {
     ElMessage.error(String(error))
@@ -365,7 +387,7 @@ const selectBackupPackage = async () => {
   const path = await open({
     directory: false,
     multiple: false,
-    title: '选择备份包',
+    title: t('settings.backup.selectBackupPackage'),
     filters: [{name: 'Fuyun Backup', extensions: ['zip']}]
   })
   if (typeof path === 'string') {
@@ -376,14 +398,14 @@ const selectBackupPackage = async () => {
 const restoreBackup = async () => {
   if (!packagePath.value || !packagePreview.value) return
   if (restoreMode.value === 'partial' && !restoreSettings.value && !restoreTextHistory.value && !restoreImageHistory.value) {
-    ElMessage.warning('请选择至少一个恢复模块')
+    ElMessage.warning(t('settings.backup.selectRestoreModule'))
     return
   }
 
-  const strategyText = restoreStrategy.value === 'merge' ? '合并模式（保留现有记录）' : '覆盖模式（完全替换数据）'
+  const strategyText = restoreStrategy.value === 'merge' ? t('documentManager.mergeModeLabel') : t('documentManager.overwriteModeLabel')
   await ElMessageBox.confirm(
-      `恢复策略：${strategyText}\n\n恢复会覆盖所选模块，并自动创建本地回滚点。API Key 不会自动恢复。`,
-      '确认恢复',
+      t('settings.backup.restoreConfirm', {strategy: strategyText}),
+      t('common.confirmRestore'),
       {type: restoreStrategy.value === 'overwrite' ? 'error' : 'warning'}
   )
   restoring.value = true
@@ -397,8 +419,8 @@ const restoreBackup = async () => {
       createRollbackPoint: true,
       restoreStrategy: restoreStrategy.value
     })
-    lastResult.value = `恢复完成：${response.message}`
-    ElMessage.success('备份恢复完成')
+    lastResult.value = t('settings.backup.restoreCompleted', {result: response.message})
+    ElMessage.success(t('settings.backup.backupRestoreCompleted'))
     await Promise.all([loadExportPreview(), loadSettings(), loadHistory()])
   } catch (error) {
     ElMessage.error(String(error))
@@ -408,10 +430,10 @@ const restoreBackup = async () => {
 }
 
 const removeHistoryItem = async (filePath) => {
-  await ElMessageBox.confirm('删除后无法恢复，确定继续吗？', '删除备份', {type: 'warning'})
+  await ElMessageBox.confirm(t('settings.backup.deleteBackupConfirm'), t('settings.backup.deleteBackupTitle'), {type: 'warning'})
   try {
     await BackupService.deleteHistoryItem(filePath)
-    ElMessage.success('备份文件已删除')
+    ElMessage.success(t('settings.backup.backupDeleted'))
     await loadHistory()
     if (packagePath.value === filePath) {
       packagePath.value = ''
@@ -429,9 +451,9 @@ onMounted(async () => {
   unlistenBackupRunUpdated = await listen('backup-run-updated', async (event) => {
     const payload = event.payload || {}
     if (payload.status === 'success') {
-      lastResult.value = '自动备份已执行完成'
+      lastResult.value = t('settings.backup.autoBackupCompleted')
     } else if (payload.status === 'failed') {
-      lastResult.value = `自动备份失败：${String(payload.message || '未知错误')}`
+      lastResult.value = t('settings.backup.autoBackupFailed', {error: String(payload.message || '')})
     }
     await Promise.all([loadSettings(), loadExportPreview(), loadHistory()])
   })

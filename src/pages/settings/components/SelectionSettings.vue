@@ -2,80 +2,82 @@
   <el-form :model="form" label-position="top">
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">划词能力</div>
+        <div class="section-title">{{ $t('settings.selection.title') }}</div>
       </template>
-      <el-form-item label="划词功能">
+      <el-form-item :label="$t('settings.selection.enabled')">
         <el-switch
-            :active-text="pendingToggles.selection === 'disabling' ? '正在禁用...' : '启用'"
-            :inactive-text="pendingToggles.selection === 'enabling' ? '正在启用...' : '关闭'"
+            :active-text="pendingToggles.selection === 'disabling' ? $t('common.disabling') : $t('common.enable')"
+            :inactive-text="pendingToggles.selection === 'enabling' ? $t('common.enabling') : $t('common.close')"
             :loading="!!pendingToggles.selection"
             :model-value="form.selectionEnabled"
             @update:model-value="(val) => toggleFeature('selectionEnabled', val)"
         />
-        <div class="form-hint">关闭后不再触发划词工具栏与AI功能</div>
+        <div class="form-hint">{{ $t('settings.selection.disabledHint') }}</div>
       </el-form-item>
 
-      <el-form-item label="划词触发辅助键">
-        <el-select v-model="form.selectionModifierKey" placeholder="请选择">
-          <el-option label="无 (禁用 Ctrl 键触发)" value="" />
-          <el-option label="Ctrl 键" value="Ctrl" />
+      <el-form-item :label="$t('settings.selection.modifierKey')">
+        <el-select v-model="form.selectionModifierKey" :placeholder="$t('settings.selection.selectModifier')">
+          <el-option :label="$t('settings.selection.modifierNone')" value=""/>
+          <el-option :label="$t('settings.selection.modifierCtrl')" value="Ctrl"/>
         </el-select>
-        <div class="form-hint">设置必须按下特定辅助键并划词才触发，防止误触</div>
+        <div class="form-hint">{{ $t('settings.selection.modifierHint') }}</div>
       </el-form-item>
 
-      <el-form-item label="翻译提示词模板">
+      <el-form-item :label="$t('settings.selection.translationTemplate')">
         <el-input
             v-model="form.translationPromptTemplate"
             :rows="4"
-            placeholder="可使用变量：{text}、{source_language}、{target_language}"
+            :placeholder="$t('settings.selection.translationTemplatePlaceholder')"
             type="textarea"
         />
         <div class="form-actions">
-          <el-button size="small" @click="resetTranslationPromptTemplate">默认</el-button>
+          <el-button size="small" @click="resetTranslationPromptTemplate">{{ $t('common.reset') }}</el-button>
         </div>
-        <div class="form-hint">用于划词翻译，可通过变量控制提示词格式</div>
+        <div class="form-hint">{{ $t('settings.selection.translationTemplateHint') }}</div>
       </el-form-item>
 
-      <el-form-item label="解释提示词模板">
+      <el-form-item :label="$t('settings.selection.explanationTemplate')">
         <el-input
             v-model="form.explanationPromptTemplate"
             :rows="4"
-            placeholder="可使用变量：{text}、{target_language}"
+            :placeholder="$t('settings.selection.explanationTemplatePlaceholder')"
             type="textarea"
         />
         <div class="form-actions">
-          <el-button size="small" @click="resetExplanationPromptTemplate">默认</el-button>
+          <el-button size="small" @click="resetExplanationPromptTemplate">{{ $t('common.reset') }}</el-button>
         </div>
-        <div class="form-hint">用于划词解释，可通过变量控制输出风格</div>
+        <div class="form-hint">{{ $t('settings.selection.explanationTemplateHint') }}</div>
       </el-form-item>
     </el-card>
 
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">网页搜索入口</div>
+        <div class="section-title">{{ $t('settings.selection.webSearch') }}</div>
       </template>
-      <el-form-item label="默认搜索引擎">
-        <el-select v-model="form.selectionWebSearchEngine" placeholder="请选择搜索引擎">
+      <el-form-item :label="$t('settings.selection.searchEngine')">
+        <el-select v-model="form.selectionWebSearchEngine"
+                   :placeholder="$t('settings.selection.searchEnginePlaceholder')">
           <el-option label="Bing" value="bing" />
           <el-option label="Google" value="google" />
           <el-option label="Baidu" value="baidu" />
           <el-option label="DuckDuckGo" value="duckduckgo" />
         </el-select>
-        <div class="form-hint">在划词工具栏中提供搜索引擎的快捷按钮（始终启用）</div>
+        <div class="form-hint">{{ $t('settings.selection.searchEngineHint') }}</div>
       </el-form-item>
     </el-card>
 
     <el-card class="setting-section-card" shadow="never">
       <template #header>
-        <div class="section-title">自定义 AI 按钮</div>
+        <div class="section-title">{{ $t('settings.selection.customAIButtons') }}</div>
       </template>
-      <div class="form-hint" style="margin-bottom: 12px;">在工具栏上增加额外的功能按钮，如“总结”、“查文档”等。</div>
+      <div class="form-hint" style="margin-bottom: 12px;">{{ $t('settings.selection.customAIHint') }}</div>
 
       <div v-for="(item, index) in form.selectionCustomPrompts" :key="index"
            :class="{ disabled: !item.enabled }"
            class="custom-prompt-item">
         <div class="prompt-header">
-          <el-input v-model="item.name" :disabled="!item.enabled" placeholder="按钮名称（例如：总结）"
+          <el-input v-model="item.name" :disabled="!item.enabled"
+                    :placeholder="$t('settings.selection.buttonNamePlaceholder')"
                     style="width: 200px;"/>
           <div class="prompt-style-controls">
             <el-popover :disabled="!item.enabled" :width="320" placement="bottom" trigger="click">
@@ -102,9 +104,9 @@
               </div>
             </el-popover>
             <el-color-picker v-model="item.color" :disabled="!item.enabled" :predefine="colorPresets" show-alpha size="small"
-                             title="文字颜色"/>
+                             :title="$t('settings.selection.textColor')"/>
             <el-color-picker v-model="item.bg_color" :disabled="!item.enabled" :predefine="bgColorPresets" show-alpha
-                             size="small" title="背景颜色"/>
+                             :title="$t('settings.selection.bgColor')" size="small"/>
 
             <!-- 实时预览 -->
             <div class="preview-button-wrapper">
@@ -113,19 +115,22 @@
                 <el-icon class="btn-icon">
                   <component :is="getIconComponent(item.icon || 'Star')"/>
                 </el-icon>
-                <span class="btn-text">{{ item.name || '按钮' }}</span>
+                <span class="btn-text">{{ item.name || $t('settings.selection.button') }}</span>
               </div>
             </div>
           </div>
           <div class="prompt-actions">
             <el-switch v-model="item.enabled" style="margin-right: 8px;"/>
-            <el-button link type="danger" @click="removeCustomPrompt(index)">删除</el-button>
+            <el-button link type="danger" @click="removeCustomPrompt(index)">{{
+                $t('settings.selection.deleteButton')
+              }}
+            </el-button>
           </div>
         </div>
         <el-input
             v-model="item.prompt"
             :rows="3"
-            placeholder="提示词模板，必须包含 {text} 变量"
+            :placeholder="$t('settings.selection.promptTemplatePlaceholder')"
             type="textarea"
             style="margin-top: 8px;"
             :disabled="!item.enabled"
@@ -135,19 +140,24 @@
           <el-icon style="color: #E6A23C; margin-right: 4px;">
             <Warning/>
           </el-icon>
-          <span>提示：提示词中必须包含 {text} 占位符，否则无法正确处理选中的文本</span>
+          <span>{{ $t('settings.selection.promptWarning') }}</span>
         </div>
       </div>
 
-      <el-button type="primary" plain @click="addCustomPrompt" style="margin-top: 12px;">+ 添加自定义按钮</el-button>
+      <el-button plain style="margin-top: 12px;" type="primary" @click="addCustomPrompt">
+        {{ $t('settings.selection.addCustomButton') }}
+      </el-button>
     </el-card>
   </el-form>
 </template>
 
 <script setup>
 import {ref} from 'vue'
+import {useI18n} from 'vue-i18n'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {Warning} from '@element-plus/icons-vue'
+
+const {t} = useI18n()
 
 const props = defineProps({
   form: {
@@ -243,7 +253,7 @@ const adjustOpacity = (color, opacityFactor) => {
   return color
 }
 
-const DEFAULT_TRANSLATION_PROMPT_TEMPLATE = '你是专业翻译助手。任务：将用户文本翻译为{target_language}。\n要求：\n1) 自动识别源语言（如已提供{source_language}且不是“自动识别”，按其处理）。\n2) 忠实原意，不遗漏、不杜撰。\n3) 保留专有名词、代码、变量、URL、邮箱、数字与单位。\n4) 保持原文段落与换行结构。\n5) 只输出译文，不要任何说明。\n\n待翻译文本：\n{text}'
+const DEFAULT_TRANSLATION_PROMPT_TEMPLATE = '你是专业翻译助手。任务：将用户文本翻译为{target_language}。\n要求：\n1) 自动识别源语言（如已提供{source_language}且不是"自动识别"，按其处理）。\n2) 忠实原意，不遗漏、不杜撰。\n3) 保留专有名词、代码、变量、URL、邮箱、数字与单位。\n4) 保持原文段落与换行结构。\n5) 只输出译文，不要任何说明。\n\n待翻译文本：\n{text}'
 const DEFAULT_EXPLANATION_PROMPT_TEMPLATE = '你是清晰易懂的讲解助手。请使用{target_language}解释下列内容。\n要求：\n1) 先给一句话总结，再分点说明关键点。\n2) 面向普通用户，术语给简短释义。\n3) 保持准确，不编造；不确定时直接说明。\n4) 控制在180字以内。\n5) 仅输出解释内容。\n\n待解释文本：\n{text}'
 
 const resetTranslationPromptTemplate = () => {
