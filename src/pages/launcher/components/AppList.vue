@@ -10,7 +10,7 @@
         </span>
         <span class="group-count">{{ thirdPartyApps.length }}</span>
       </div>
-      <div :style="{ maxHeight: thirdPartyCollapsed ? '0' : thirdPartyContentHeight }" class="section-content">
+      <div ref="thirdPartySectionRef" :style="thirdPartyContentStyle" class="section-content">
         <div
             v-for="app in thirdPartyApps"
             :key="app.id"
@@ -49,7 +49,7 @@
         </span>
         <span class="group-count">{{ systemApps.length }}</span>
       </div>
-      <div :style="{ maxHeight: systemCollapsed ? '0' : systemContentHeight }" class="section-content">
+      <div ref="systemSectionRef" :style="systemContentStyle" class="section-content">
         <div
             v-for="app in systemApps"
             :key="app.id"
@@ -159,7 +159,7 @@
 </template>
 
 <script setup>
-import {computed, onBeforeUnmount, onMounted, ref, watch} from 'vue'
+import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ElMessage} from 'element-plus'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {ArrowDown, Close, Delete, FolderOpened, Monitor, Star} from '@element-plus/icons-vue'
@@ -228,13 +228,31 @@ const getIcon = (iconName) => {
   return ElementPlusIconsVue[iconName] || Monitor
 }
 
-const ITEM_HEIGHT = 52
+const thirdPartySectionRef = ref(null)
+const systemSectionRef = ref(null)
+const thirdPartyActualHeight = ref('0px')
+const systemActualHeight = ref('0px')
 
 const thirdPartyApps = computed(() => props.apps.filter(a => a.app_type !== 'system'))
 const systemApps = computed(() => props.apps.filter(a => a.app_type === 'system'))
 
-const thirdPartyContentHeight = computed(() => (thirdPartyApps.value.length * ITEM_HEIGHT) + 'px')
-const systemContentHeight = computed(() => (systemApps.value.length * ITEM_HEIGHT) + 'px')
+const thirdPartyContentStyle = computed(() => ({
+  maxHeight: thirdPartyCollapsed.value ? '0' : thirdPartyActualHeight.value,
+}))
+
+const systemContentStyle = computed(() => ({
+  maxHeight: systemCollapsed.value ? '0' : systemActualHeight.value,
+}))
+
+const updateSectionHeights = async () => {
+  await nextTick()
+  if (thirdPartySectionRef.value && !thirdPartyCollapsed.value) {
+    thirdPartyActualHeight.value = thirdPartySectionRef.value.scrollHeight + 'px'
+  }
+  if (systemSectionRef.value && !systemCollapsed.value) {
+    systemActualHeight.value = systemSectionRef.value.scrollHeight + 'px'
+  }
+}
 
 const loadCategories = async () => {
   try {
@@ -401,11 +419,33 @@ const confirmAddCommand = async () => {
 
 onMounted(async () => {
   await loadCategories()
+  await nextTick()
+  await updateSectionHeights()
+})
+
+watch(thirdPartyCollapsed, async (collapsed) => {
+  if (!collapsed) {
+    await nextTick()
+    if (thirdPartySectionRef.value) {
+      thirdPartyActualHeight.value = thirdPartySectionRef.value.scrollHeight + 'px'
+    }
+  }
+})
+
+watch(systemCollapsed, async (collapsed) => {
+  if (!collapsed) {
+    await nextTick()
+    if (systemSectionRef.value) {
+      systemActualHeight.value = systemSectionRef.value.scrollHeight + 'px'
+    }
+  }
 })
 
 // 监听应用列表变化，重新加载分类
-watch(() => props.apps, () => {
-  loadCategories()
+watch(() => props.apps, async () => {
+  await loadCategories()
+  await nextTick()
+  await updateSectionHeights()
 }, {deep: true})
 
 // 监听窗口焦点事件，当启动器显示时重新加载分类
@@ -421,9 +461,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .app-list-container {
-  padding: 4px 0;
-  position: relative;
-  height: 100%;
+  padding: 4px 0 8px 0;
+  min-height: 100%;
 }
 
 .app-group {
@@ -523,6 +562,7 @@ onBeforeUnmount(() => {
 
 .app-name {
   font-size: 13px;
+  line-height: 1.2;
   color: var(--fy-text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -531,6 +571,7 @@ onBeforeUnmount(() => {
 
 .app-category {
   font-size: 11px;
+  line-height: 1.2;
   color: var(--fy-text-muted);
   margin-top: 2px;
 }

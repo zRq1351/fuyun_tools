@@ -675,6 +675,7 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   min-height: 0;
   position: relative;
+  padding-bottom: 8px;
 }
 
 .command-section {
