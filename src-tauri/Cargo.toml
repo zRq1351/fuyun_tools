@@ -42,7 +42,7 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 screenshots = "0.8.10"
 reqwest = { version = "0.13.3", default-features = false, features = ["rustls", "stream"] }
 sha2 = "0.11.0"
-windows-capture = "2.0.0-alpha.7"
+windows-capture = "2.0.0"
 opencv = { version = "0.98.2", optional = true, default-features = false, features = ["clang-runtime", "imgproc"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 pdf-extract = "0.10.0"
