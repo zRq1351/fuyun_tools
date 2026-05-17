@@ -1,3 +1,4 @@
+use crate::core::error_codes::AppErrorKind;
 use crate::sync::{lock_arc_mutex, Mutex};
 use crate::utils::image_store;
 use crate::utils::utils_helpers::atomic_write_with_backup;
@@ -835,7 +836,7 @@ impl ImageClipboardManager {
             history.iter().any(|item| item.id == item_id)
         };
         if !exists {
-            return Err("目标图片不存在".to_string());
+            return Err(AppErrorKind::SystemImageDataEmpty.to_frontend_json());
         }
         let normalized = normalize_tags(tags);
         {
@@ -862,7 +863,7 @@ impl ImageClipboardManager {
             history.iter().any(|item| item.id == item_id)
         };
         if !exists {
-            return Err("目标图片不存在".to_string());
+            return Err(AppErrorKind::SystemImageDataEmpty.to_frontend_json());
         }
         let normalized = normalize_tags(tags);
         {
@@ -1110,7 +1111,7 @@ impl ImageClipboardManager {
         }
         if imported == 0 {
             if last_error.is_empty() {
-                Err("未导入任何图片".to_string())
+                Err(AppErrorKind::ClipboardNoImagesImported.to_frontend_json())
             } else {
                 Err(last_error)
             }
@@ -1126,14 +1127,14 @@ impl ImageClipboardManager {
         let manager = self.clone();
         tauri::async_runtime::spawn_blocking(move || manager.import_local_image_paths(paths))
             .await
-            .map_err(|e| format!("导入图片任务执行失败: {}", e))?
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
     }
 
     pub fn remove_from_history(&self, index: usize) -> Result<(String, String, String), String> {
         let (removed_id, removed_path, removed_signature, item_ids_after_remove) = {
             let mut history = lock_arc_mutex(&self.history);
             if index >= history.len() {
-                return Err("索引超出范围".to_string());
+                return Err(AppErrorKind::SystemIndexOutOfRange.to_frontend_json());
             }
             let removed = history.remove(index);
             self.signature_index_dirty.store(true, Ordering::SeqCst);
@@ -1188,7 +1189,7 @@ impl ImageClipboardManager {
             history
                 .iter()
                 .position(|item| item.id == item_id)
-                .ok_or_else(|| "目标图片不存在".to_string())?
+                .ok_or_else(|| AppErrorKind::SystemImageDataEmpty.to_frontend_json())?
         };
         self.remove_from_history(index)
     }
@@ -1196,7 +1197,7 @@ impl ImageClipboardManager {
     pub fn promote_to_top(&self, index: usize) -> Result<(), String> {
         let mut history = lock_arc_mutex(&self.history);
         if index >= history.len() {
-            return Err("索引超出范围".to_string());
+            return Err(AppErrorKind::SystemIndexOutOfRange.to_frontend_json());
         }
         if index == 0 {
             return Ok(());
@@ -1221,7 +1222,7 @@ impl ImageClipboardManager {
             history
                 .iter()
                 .position(|item| item.id == item_id)
-                .ok_or_else(|| "目标图片不存在".to_string())?
+                .ok_or_else(|| AppErrorKind::SystemImageDataEmpty.to_frontend_json())?
         };
         self.promote_to_top(index)
     }
@@ -1243,7 +1244,7 @@ impl ImageClipboardManager {
         let index = history
             .iter()
             .position(|item| item.id == item_id)
-            .ok_or_else(|| "目标图片不存在".to_string())?;
+            .ok_or_else(|| AppErrorKind::SystemImageDataEmpty.to_frontend_json())?;
         if index == 0 {
             return Ok(());
         }
@@ -1256,7 +1257,7 @@ impl ImageClipboardManager {
     pub fn set_pinned(&self, item_id: String, pinned: bool) -> Result<(), String> {
         let mut history = lock_arc_mutex(&self.history);
         if !history.iter().any(|item| item.id == item_id) {
-            return Err("目标图片不存在".to_string());
+            return Err(AppErrorKind::SystemImageDataEmpty.to_frontend_json());
         }
 
         let old_position = history.iter().position(|item| item.id == item_id);
@@ -1309,7 +1310,7 @@ impl ImageClipboardManager {
         let (item_ids, pinned_snapshot) = {
             let mut history = lock_arc_mutex(&self.history);
             if !history.iter().any(|item| item.id == item_id) {
-                return Err("目标图片不存在".to_string());
+                return Err(AppErrorKind::SystemImageDataEmpty.to_frontend_json());
             }
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             if pinned {
@@ -1375,7 +1376,7 @@ impl ImageClipboardManager {
                     }
                     (paths, ids, false)
                 }
-                _ => return Err("不支持的清理模式".to_string()),
+                _ => return Err(AppErrorKind::SystemUnsupportedCleanMode.to_frontend_json()),
             }
         };
 
@@ -1447,7 +1448,7 @@ impl ImageClipboardManager {
             let mut history = lock_arc_mutex(&self.history);
             let item = history
                 .get_mut(index)
-                .ok_or_else(|| format!("索引 {} 超出范围", index))?;
+                .ok_or_else(|| AppErrorKind::SystemIndexOutOfRange.to_frontend_json_with_details(format!("{}", index)))?;
             if item.rgba_bytes.is_empty() {
                 item.rgba_bytes = self.read_item_rgba(item)?;
             }
@@ -1466,7 +1467,7 @@ impl ImageClipboardManager {
             let mut history = lock_arc_mutex(&self.history);
             let item = history
                 .get_mut(index)
-                .ok_or_else(|| format!("索引 {} 超出范围", index))?;
+                .ok_or_else(|| AppErrorKind::SystemIndexOutOfRange.to_frontend_json_with_details(format!("{}", index)))?;
             if item.rgba_bytes.is_empty() {
                 item.rgba_bytes = self.read_item_rgba(item)?;
             }
@@ -1486,7 +1487,7 @@ impl ImageClipboardManager {
             history
                 .iter()
                 .position(|item| item.id == item_id)
-                .ok_or_else(|| "目标图片不存在".to_string())?
+                .ok_or_else(|| AppErrorKind::SystemImageDataEmpty.to_frontend_json())?
         };
         self.get_image_by_index_for_fill(index)
     }
@@ -1495,7 +1496,7 @@ impl ImageClipboardManager {
         let mut history = lock_arc_mutex(&self.history);
         let item = history
             .get_mut(index)
-            .ok_or_else(|| format!("索引 {} 超出范围", index))?;
+            .ok_or_else(|| AppErrorKind::SystemIndexOutOfRange.to_frontend_json_with_details(format!("{}", index)))?;
         if item.rgba_bytes.is_empty() {
             item.rgba_bytes = self.read_item_rgba(item)?;
         }
@@ -1510,7 +1511,7 @@ impl ImageClipboardManager {
             history
                 .iter()
                 .position(|item| item.id == item_id)
-                .ok_or_else(|| "目标图片不存在".to_string())?
+                .ok_or_else(|| AppErrorKind::SystemImageDataEmpty.to_frontend_json())?
         };
         self.warmup_image_by_index(index)
     }
@@ -1519,7 +1520,7 @@ impl ImageClipboardManager {
         let mut history = lock_arc_mutex(&self.history);
         let item = history
             .get_mut(index)
-            .ok_or_else(|| format!("索引 {} 超出范围", index))?;
+            .ok_or_else(|| AppErrorKind::SystemIndexOutOfRange.to_frontend_json_with_details(format!("{}", index)))?;
         let payload = self.read_item_png_base64(item)?;
         self.enforce_full_res_cache_budget_lru(&mut history);
         Ok(payload)
@@ -1529,7 +1530,7 @@ impl ImageClipboardManager {
         let history = lock_arc_mutex(&self.history);
         let item = history
             .get(index)
-            .ok_or_else(|| format!("索引 {} 超出范围", index))?;
+            .ok_or_else(|| AppErrorKind::SystemIndexOutOfRange.to_frontend_json_with_details(format!("{}", index)))?;
         Ok(item.image_path.clone())
     }
 
@@ -1538,7 +1539,7 @@ impl ImageClipboardManager {
         let item = history
             .iter()
             .find(|item| item.id == item_id)
-            .ok_or_else(|| "目标图片不存在".to_string())?;
+            .ok_or_else(|| AppErrorKind::SystemImageDataEmpty.to_frontend_json())?;
         Ok(item.image_path.clone())
     }
 
@@ -1550,7 +1551,7 @@ impl ImageClipboardManager {
         }
 
         // 预览还未生成，返回空
-        Err("预览正在生成中".to_string())
+        Err(AppErrorKind::SystemPreviewGenerating.to_frontend_json())
     }
 
     /// 检查图片预览是否已就绪
@@ -1602,7 +1603,7 @@ impl ImageClipboardManager {
                 }
             }
             if text_contains_remote_image_url(&text) {
-                return Err("检测到网页图片链接，但剪贴板中没有位图数据。请在网页中使用“复制图片”而不是“复制图片地址”".to_string());
+                return Err(AppErrorKind::SystemWebImageNoData.to_frontend_json());
             }
         }
         #[cfg(target_os = "windows")]
@@ -1615,7 +1616,7 @@ impl ImageClipboardManager {
                 return Ok(images);
             }
         }
-        Err("当前剪贴板不是位图格式，可能是文件对象/路径/网页元素".to_string())
+        Err(AppErrorKind::SystemClipboardNotBitmap.to_frontend_json())
     }
 
     pub fn write_clipboard_image(
@@ -1660,7 +1661,7 @@ impl ImageClipboardManager {
                 std::thread::sleep(Duration::from_millis(*delay_ms));
             }
         }
-        Err(format!("写入剪贴板图片失败: {}", last_error))
+        Err(AppErrorKind::SystemWriteClipboardFailed.to_frontend_json_with_details(format!("{}", last_error)))
     }
 
     pub fn save_history_on_exit(&self) -> Result<(), String> {
@@ -2262,7 +2263,7 @@ fn start_image_persist_worker(
         while let Ok(task) = persist_rx.recv() {
             let persist_result = if let Some(encoded_bytes) = task.encoded_bytes.as_ref() {
                 atomic_write_with_backup(Path::new(&task.image_path), encoded_bytes)
-                    .map_err(|e| format!("写入图片数据失败: {}", e))
+                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
             } else {
                 persist_generated_image_to_path(
                     &task.image_path,
@@ -2287,7 +2288,7 @@ fn persist_generated_image_to_path(
     height: u32,
 ) -> Result<(), String> {
     let dir = get_image_blobs_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建图片存储目录失败: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let ext = Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
@@ -2299,14 +2300,14 @@ fn persist_generated_image_to_path(
         rgba_to_png_bytes_for_storage(rgba, width, height)?
     };
     atomic_write_with_backup(Path::new(path), &encoded)
-        .map_err(|e| format!("写入图片数据失败: {}", e))
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 fn rgba_to_lossless_webp_bytes(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
     let mut encoded = Vec::new();
     image::codecs::webp::WebPEncoder::new_lossless(&mut encoded)
         .write_image(rgba, width, height, image::ColorType::Rgba8.into())
-        .map_err(|e| format!("编码存储WebP失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(encoded)
 }
 
@@ -2318,7 +2319,7 @@ fn rgba_to_png_bytes_for_storage(rgba: &[u8], width: u32, height: u32) -> Result
         image::codecs::png::FilterType::Adaptive,
     )
     .write_image(rgba, width, height, image::ColorType::Rgba8.into())
-    .map_err(|e| format!("编码存储PNG失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(encoded)
 }
 
@@ -2330,7 +2331,7 @@ fn rgba_to_png_bytes(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, St
         image::codecs::png::FilterType::NoFilter,
     )
     .write_image(rgba, width, height, image::ColorType::Rgba8.into())
-    .map_err(|e| format!("编码PNG失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(encoded)
 }
 
@@ -2351,11 +2352,11 @@ fn read_image_blob(path: &str, width: u32, height: u32) -> Result<Vec<u8>, Strin
         return read_large_image_blob_chunked(path, width, height);
     }
 
-    let bytes = std::fs::read(path).map_err(|e| format!("读取图片二进制失败: {}", e))?;
+    let bytes = std::fs::read(path).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     if bytes.is_empty() {
-        return Err("图片数据为空".to_string());
+        return Err(AppErrorKind::SystemImageDataEmpty.to_frontend_json());
     }
-    let decoded = image::load_from_memory(&bytes).map_err(|e| format!("解码图片失败: {}", e))?;
+    let decoded = image::load_from_memory(&bytes).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let rgba = decoded.to_rgba8();
     if rgba.width() != width || rgba.height() != height {
         return Err(format!(
@@ -2373,7 +2374,7 @@ fn read_image_blob(path: &str, width: u32, height: u32) -> Result<Vec<u8>, Strin
 fn read_large_image_blob_chunked(path: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
     use std::io::Read;
 
-    let file = std::fs::File::open(path).map_err(|e| format!("打开图片文件失败: {}", e))?;
+    let file = std::fs::File::open(path).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let mut reader = std::io::BufReader::new(file);
 
     let mut bytes = Vec::new();
@@ -2382,7 +2383,7 @@ fn read_large_image_blob_chunked(path: &str, width: u32, height: u32) -> Result<
     loop {
         let bytes_read = reader
             .read(&mut chunk)
-            .map_err(|e| format!("读取图片数据块失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         if bytes_read == 0 {
             break;
         }
@@ -2397,10 +2398,10 @@ fn read_large_image_blob_chunked(path: &str, width: u32, height: u32) -> Result<
     }
 
     if bytes.is_empty() {
-        return Err("图片数据为空".to_string());
+        return Err(AppErrorKind::SystemImageDataEmpty.to_frontend_json());
     }
 
-    let decoded = image::load_from_memory(&bytes).map_err(|e| format!("解码大图片失败: {}", e))?;
+    let decoded = image::load_from_memory(&bytes).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let rgba = decoded.to_rgba8();
 
     if rgba.width() != width || rgba.height() != height {
@@ -2424,9 +2425,9 @@ fn read_image_png_base64(path: &str) -> Result<String, String> {
             return Ok(cached_payload);
         }
     }
-    let bytes = std::fs::read(path).map_err(|e| format!("读取图片二进制失败: {}", e))?;
+    let bytes = std::fs::read(path).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     if bytes.is_empty() {
-        return Err("图片数据为空".to_string());
+        return Err(AppErrorKind::SystemImageDataEmpty.to_frontend_json());
     }
     let payload = BASE64_STANDARD.encode(&bytes);
     IMAGE_PNG_BASE64_CACHE
@@ -2761,14 +2762,14 @@ fn looks_like_image_file_path(path: &str) -> bool {
 }
 
 fn read_local_image_for_import(path: &str) -> Result<(Vec<u8>, u32, u32, Vec<u8>, String), String> {
-    let source_bytes = std::fs::read(path).map_err(|e| format!("读取本地图片文件失败: {}", e))?;
+    let source_bytes = std::fs::read(path).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let dyn_img =
-        image::load_from_memory(&source_bytes).map_err(|e| format!("读取本地图片失败: {}", e))?;
+        image::load_from_memory(&source_bytes).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let rgba8 = dyn_img.to_rgba8();
     let (width, height) = rgba8.dimensions();
     let rgba = rgba8.into_raw();
     if rgba.is_empty() || width == 0 || height == 0 {
-        return Err("本地图片为空".to_string());
+        return Err(AppErrorKind::SystemLocalImageEmpty.to_frontend_json());
     }
     let ext = Path::new(path)
         .extension()

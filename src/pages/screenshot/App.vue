@@ -356,6 +356,7 @@ import {
 } from '@element-plus/icons-vue'
 import {useI18n} from 'vue-i18n'
 import {ScreenshotService} from '@/services/ipc.js'
+import {parseErrorMessage} from '@/utils/errorHandler.js'
 
 const {t} = useI18n()
 
@@ -892,7 +893,8 @@ onMounted(async () => {
     } else if (stateName === 'failed' || stateName === 'error') {
       manualLongshotPhase.value = 'failed'
       cleanupManualLongshotUi(true)
-      manualLongshotHint.value = String(payload.userMessage || t('screenshot.longshotFailed', {error: String(payload.message || '')}))
+      const errMsg = parseErrorMessage(payload.userMessage || payload.message || '')
+      manualLongshotHint.value = String(errMsg || t('screenshot.longshotFailed', {error: String(payload.message || '')}))
     } else if (stateName === 'ended') {
       scheduleManualLongshotAvailabilityRefresh()
     }
@@ -1250,7 +1252,7 @@ async function toggleManualLongshotRunning() {
     await invoke('set_screenshot_window_visible', {visible: true}).catch(() => {})
     cleanupManualLongshotUi(false)
     manualLongshotPhase.value = 'failed'
-    manualLongshotHint.value = t('screenshot.longshotOpFailed', {error: String(error)})
+    manualLongshotHint.value = t('screenshot.longshotOpFailed', {error: parseErrorMessage(String(error)) || String(error)})
   }
 }
 
@@ -1264,7 +1266,7 @@ async function finishManualLongshotCapture() {
     applyManualLongshotResult(result || {})
   } catch (error) {
     cleanupManualLongshotUi(true)
-    manualLongshotHint.value = `完成长截图失败：${String(error)}`
+    manualLongshotHint.value = t('screenshot.longshotFinishFailed', {error: parseErrorMessage(String(error)) || String(error)})
   }
 }
 

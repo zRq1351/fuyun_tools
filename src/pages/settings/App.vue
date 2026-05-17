@@ -151,7 +151,7 @@
 
 <script setup>
 import {computed, onBeforeUnmount, onMounted, reactive, ref, watch} from 'vue'
-import {ElMessage, ElMessageBox, ElLoading} from 'element-plus'
+import {ElLoading, ElMessage, ElMessageBox} from 'element-plus'
 import {useI18n} from 'vue-i18n'
 import {
   Camera,
@@ -748,6 +748,8 @@ const persistSettings = async (
     }, 1500)
   } catch (error) {
       let raw = ''
+    let errorCode = null
+    let errorParams = null
       if (typeof error === 'object' && error !== null) {
         raw = error.message || JSON.stringify(error)
       } else {
@@ -755,12 +757,27 @@ const persistSettings = async (
       }
       try {
         const parsed = JSON.parse(raw)
-        if (parsed && parsed.message) {
+        if (parsed && typeof parsed.code === 'string' && parsed.code.startsWith('E_')) {
+          errorCode = parsed.code
+          errorParams = parsed.params || null
+          const i18nKey = `errorCodes.${errorCode}`
+          const translated = t(i18nKey, errorParams || {})
+          raw = translated === i18nKey ? (parsed.message || raw) : translated
+        } else if (parsed && parsed.message) {
           raw = parsed.message
         }
       } catch (e) {}
 
-    if (raw.includes('快捷键被占用') || raw.includes('shortcut') || raw.includes('hotkey')) {
+    if (errorCode && (errorCode.includes('HOTKEY_CONFLICT') || errorCode.includes('HOTKEY_REGISTER'))) {
+      shortcutConflictMessage.value = raw
+      if (errorCode.includes('RECORDING') || raw.includes('麦克风')) {
+        activeTab.value = 'recording'
+      } else if (errorCode.includes('SCREENSHOT') || raw.includes('截图')) {
+        activeTab.value = 'screenshot'
+      } else {
+        activeTab.value = 'clipboard'
+      }
+    } else if (!errorCode && (raw.includes('快捷键被占用') || raw.includes('shortcut') || raw.includes('hotkey'))) {
         shortcutConflictMessage.value = raw.replace(/^Error:\s*/i, '')
         if (raw.includes('录屏') || raw.includes('麦克风')) {
           activeTab.value = 'recording'
@@ -770,7 +787,11 @@ const persistSettings = async (
           activeTab.value = 'clipboard'
         }
       }
-    ElMessage.error(t('settings.saveFailed', {error: raw}))
+    if (errorCode) {
+      ElMessage.error(raw)
+    } else {
+      ElMessage.error(t('settings.saveFailed', {error: raw}))
+    }
       autoSaveState.value = 'error'
     } finally {
     isAutoSaving.value = false

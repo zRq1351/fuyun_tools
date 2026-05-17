@@ -3,6 +3,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use crate::core::error_codes::AppErrorKind;
 #[cfg(debug_assertions)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
@@ -84,11 +85,11 @@ fn normalize_sha256_hex(raw: &str) -> Option<String> {
 fn split_download_url_and_sha256(raw: &str) -> Result<(String, Option<String>), String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err("下载地址不能为空".to_string());
+        return Err(AppErrorKind::VcRuntimeDownloadUrlEmpty.to_frontend_json());
     }
     if let Some((url, fragment)) = trimmed.split_once("#sha256=") {
         let expected = normalize_sha256_hex(fragment)
-            .ok_or_else(|| "下载地址中的 sha256 参数格式无效（应为64位十六进制）".to_string())?;
+            .ok_or_else(|| AppErrorKind::VcRuntimeDownloadUrlSha256Invalid.to_frontend_json())?;
         return Ok((url.trim().to_string(), Some(expected)));
     }
     Ok((trimmed.to_string(), None))

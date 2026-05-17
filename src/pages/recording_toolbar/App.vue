@@ -264,6 +264,7 @@ import {listen} from "@tauri-apps/api/event";
 import {invoke} from "@tauri-apps/api/core";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import {AISettingsService, RecordingService} from "@/services/ipc.js";
+import {parseErrorMessage} from "@/utils/errorHandler.js";
 import {GripVertical, Mic, MicOff, Settings} from "lucide-vue-next";
 
 const {t} = useI18n()
@@ -465,7 +466,8 @@ const clearInlineNotice = () => {
 };
 
 const showBackendErrorInSettings = async (message) => {
-  const text = String(message || t('recordingToolbar.recordingError'));
+  const parsed = parseErrorMessage(message)
+  const text = String(parsed || t('recordingToolbar.recordingError'));
   keepSettingsOpenUntilTs = Date.now() + 3000;
   capsuleSettingsVisible.value = true;
 
@@ -974,7 +976,8 @@ onMounted(async () => {
   });
   unlistenRecordingError = await listen("recording-error", (event) => {
     const payload = event.payload || {};
-    const message = String(payload.message || t('recordingToolbar.recordingError'));
+    const rawMsg = String(payload.message || '');
+    const message = parseErrorMessage(rawMsg) || t('recordingToolbar.recordingError');
     const code = String(payload.code || "");
     state.state = "idle";
     state.sessionId = null;

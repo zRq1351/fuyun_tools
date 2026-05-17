@@ -1,5 +1,6 @@
 use crate::core::app_state::{AppState, ForegroundTargetSnapshot, OverlayLifecycleRecord};
 use crate::core::config::{CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN, CTRL_KEY};
+use crate::core::error_codes::AppErrorKind;
 use crate::sync::{lock_arc_mutex, Mutex};
 use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex};
 use std::thread;
@@ -271,7 +272,7 @@ pub fn release_ctrl_key_with_fallback(enigo: &mut enigo::Enigo) -> Result<(), St
     use enigo::{Direction, Keyboard};
     let enigo_result = enigo
         .key(CTRL_KEY, Direction::Release)
-        .map_err(|e| format!("释放 Ctrl 键失败: {}", e));
+        .map_err(|e| AppErrorKind::SelectionCtrlReleaseFailed.to_frontend_json_with_details(format!("{}", e)));
     // Windows 下额外补发通用/左右 Ctrl 的 keyup，尽量消除偶发“Ctrl 卡住”。
     release_ctrl_key_winapi();
     enigo_result
@@ -340,7 +341,7 @@ pub fn force_release_ctrl_key() -> Result<(), String> {
             }
         }
     }
-    Err(last_error.unwrap_or_else(|| "释放 Ctrl 键失败".to_string()))
+    Err(last_error.unwrap_or_else(|| AppErrorKind::SelectionCtrlReleaseFailed.to_frontend_json()))
 }
 
 fn now_ms() -> i64 {
@@ -572,7 +573,7 @@ pub fn wait_for_window_hidden(
         }
         let elapsed = start.elapsed();
         if elapsed >= timeout {
-            return Err(format!("等待窗口隐藏超时: {}", window_label));
+            return Err(AppErrorKind::SelectionWaitHideTimeout.to_frontend_json_with_details(window_label.to_string()));
         }
         let remain = timeout.saturating_sub(elapsed);
         let wait_dur = std::cmp::min(remain, Duration::from_millis(80));
@@ -752,7 +753,7 @@ fn ensure_selection_toolbar_window(app: &AppHandle) -> Result<tauri::WebviewWind
         return Ok(existing);
     }
     if !is_window_feature_enabled(app, label) {
-        return Err("划词功能已禁用".to_string());
+        return Err(AppErrorKind::SelectionFeatureDisabled.to_frontend_json());
     }
     let window = tauri::WebviewWindowBuilder::new(
         app,
@@ -781,7 +782,7 @@ fn ensure_clipboard_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Stri
         return Ok(existing);
     }
     if !is_window_feature_enabled(app, label) {
-        return Err("剪贴板功能已禁用".to_string());
+        return Err(AppErrorKind::SelectionClipboardDisabled.to_frontend_json());
     }
     let window = tauri::WebviewWindowBuilder::new(
         app,
@@ -809,7 +810,7 @@ fn ensure_image_clipboard_window(app: &AppHandle) -> Result<tauri::WebviewWindow
         return Ok(existing);
     }
     if !is_window_feature_enabled(app, label) {
-        return Err("图片剪贴板功能已禁用".to_string());
+        return Err(AppErrorKind::SelectionImageClipboardDisabled.to_frontend_json());
     }
     let window = tauri::WebviewWindowBuilder::new(
         app,

@@ -1,3 +1,4 @@
+use crate::core::error_codes::AppErrorKind;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -57,22 +58,22 @@ fn validate_hwnd_target(hwnd: usize) -> Result<(), String> {
     let hwnd = windows::Win32::Foundation::HWND(hwnd as *mut core::ffi::c_void);
     unsafe {
         if IsWindow(Some(hwnd)) == BOOL(0) {
-            return Err("目标窗口句柄已失效或窗口已关闭".to_string());
+            return Err(AppErrorKind::RecordingWindowInvalid.to_frontend_json());
         }
         if IsWindowVisible(hwnd) == BOOL(0) {
-            return Err("目标窗口当前不可见，请将窗口切回前台后重试".to_string());
+            return Err(AppErrorKind::RecordingWindowInvisible.to_frontend_json());
         }
         if IsIconic(hwnd) != BOOL(0) {
-            return Err("目标窗口已最小化，请恢复窗口后再开始录制".to_string());
+            return Err(AppErrorKind::RecordingWindowMinimized.to_frontend_json());
         }
         let mut rect: RECT = std::mem::zeroed();
         if GetWindowRect(hwnd, &mut rect).is_err() {
-            return Err("读取目标窗口尺寸失败，请重新选择窗口后重试".to_string());
+            return Err(AppErrorKind::InternalError.to_frontend_json());
         }
         let width = (rect.right - rect.left).max(0);
         let height = (rect.bottom - rect.top).max(0);
         if width < 2 || height < 2 {
-            return Err("目标窗口尺寸异常，当前无法进行窗口录制".to_string());
+            return Err(AppErrorKind::InternalError.to_frontend_json());
         }
     }
     Ok(())
@@ -82,7 +83,7 @@ pub fn get_window_rect_from_target(target_id: &str) -> Result<(i32, i32, u32, u3
     let window = parse_window_target(target_id)?;
     let rect = window
         .rect()
-        .map_err(|e| format!("读取窗口尺寸失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let width = (rect.right - rect.left).max(1) as u32;
     let height = (rect.bottom - rect.top).max(1) as u32;
     Ok((rect.left, rect.top, width, height))
@@ -92,7 +93,7 @@ pub fn get_window_title_from_target(target_id: &str) -> Result<String, String> {
     let window = parse_window_target(target_id)?;
     window
         .title()
-        .map_err(|e| format!("读取窗口标题失败: {}", e))
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 pub fn validate_window_capture_target(target_id: &str) -> Result<(), String> {
@@ -324,7 +325,7 @@ fn parse_window_target(target_id: &str) -> Result<Window, String> {
     }
     Window::from_name(&raw)
         .or_else(|_| Window::from_contains_name(&raw))
-        .map_err(|e| format!("定位录制窗口失败: {}", e))
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 pub fn start_window_capture_to_mp4(
@@ -339,7 +340,7 @@ pub fn start_window_capture_to_mp4(
     let window = parse_window_target(target_id)?;
     let rect = window
         .rect()
-        .map_err(|e| format!("读取窗口尺寸失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let width = (rect.right - rect.left).max(1) as u32;
     let height = (rect.bottom - rect.top).max(1) as u32;
     let target_id = target_id.trim().to_string();

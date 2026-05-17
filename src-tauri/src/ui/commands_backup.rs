@@ -1,9 +1,9 @@
 use crate::core::app_state::AppState as SharedAppState;
-use crate::core::error::ErrorCode;
+use crate::core::error_codes::AppErrorKind;
 use crate::core::perf_metrics::record_perf_metric;
 use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands::{now_unix_ms, AUTO_BACKUP_IN_FLIGHT, BACKUP_JOB_MUTEX};
-use crate::ui::commands_clipboard::frontend_error;
+use crate::ui::commands_clipboard::frontend_error_kind;
 use crate::utils::backup_archive::{
     cleanup_dir, create_backup_temp_dir, read_manifest_from_package, write_backup_payload,
     zip_backup_dir,
@@ -571,7 +571,7 @@ pub async fn delete_backup_history_item(
 ) -> Result<(), String> {
     let settings = current_backup_settings()?;
     if settings.target_dir.trim().is_empty() {
-        return Err(frontend_error(ErrorCode::ValidationError, "未配置备份目录", "backup target dir is empty"));
+        return Err(frontend_error_kind(AppErrorKind::BackupDirNotConfigured, "backup target dir is empty"));
     }
     let path = PathBuf::from(request.file_path);
     if !path
@@ -580,7 +580,7 @@ pub async fn delete_backup_history_item(
         .map(|name| name.ends_with(".fytbk.zip"))
         .unwrap_or(false)
     {
-        return Err(frontend_error(ErrorCode::ValidationError, "仅允许删除 .fytbk.zip 备份文件", "invalid file extension"));
+        return Err(frontend_error_kind(AppErrorKind::BackupInvalidFile, "invalid file extension"));
     }
     let target_dir = PathBuf::from(settings.target_dir);
     let canonical_target_dir = target_dir
@@ -593,7 +593,7 @@ pub async fn delete_backup_history_item(
         .canonicalize()
         .map_err(|e| format!("读取备份文件路径失败: {}", e))?;
     if !canonical_path.starts_with(&canonical_target_dir) {
-        return Err(frontend_error(ErrorCode::ValidationError, "禁止删除备份目录之外的文件", "path outside backup dir"));
+        return Err(frontend_error_kind(AppErrorKind::BackupDeleteOutsideDir, "path outside backup dir"));
     }
     fs::remove_file(&canonical_path).map_err(|e| format!("删除备份文件失败: {}", e))?;
     Ok(())
@@ -610,7 +610,7 @@ pub async fn run_manual_backup(
         .await;
     let settings = current_backup_settings()?;
     if settings.target_dir.trim().is_empty() {
-        return Err(frontend_error(ErrorCode::ConfigError, "请先配置自动备份目录", "backup target dir not configured"));
+        return Err(frontend_error_kind(AppErrorKind::BackupDirNotSet, "backup target dir not configured"));
     }
     let target_path = Path::new(&settings.target_dir).join(default_backup_file_name());
     let response = match export_backup_internal(&target_path, state.inner()).await {
@@ -667,7 +667,7 @@ pub async fn run_auto_backup_tick(state: Arc<Mutex<SharedAppState>>) -> Result<b
         raw_settings.backup_last_run_at = now_unix_ms() as i64;
         raw_settings.backup_last_run_status = "misconfigured".to_string();
         save_settings(&raw_settings)?;
-        return Err(frontend_error(ErrorCode::ConfigError, "自动备份目录未配置", "auto backup target dir not configured"));
+        return Err(frontend_error_kind(AppErrorKind::BackupDirNotConfigured, "auto backup target dir not configured"));
     }
 
     let now_ms = now_unix_ms() as i64;

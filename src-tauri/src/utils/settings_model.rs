@@ -2,6 +2,7 @@ use crate::core::config::{
     ProviderConfig, DEFAULT_DOC_MANAGER_SHORTCUT, DEFAULT_IMAGE_TOGGLE_SHORTCUT,
     DEFAULT_RECORDING_SHORTCUT, DEFAULT_SCREENSHOT_SHORTCUT, DEFAULT_TOGGLE_SHORTCUT,
 };
+use crate::core::error_codes::AppErrorKind;
 use crate::utils::system_utils::get_default_app_version;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -451,7 +452,7 @@ impl AppSettingsData {
         let service_name = "fuyun_tools";
         let user_name = format!("api_key_{}", provider_key);
         let entry = keyring::Entry::new(service_name, &user_name)
-            .map_err(|e| format!("创建凭据入口失败: {}", e))?;
+            .map_err(|e| AppErrorKind::SettingsCredentialCreateFailed.to_frontend_json_with_details(format!("{}", e)))?;
         if api_key.is_empty() {
             let _ = entry.delete_credential();
             log::info!("API key cleared for provider: {}", provider_key);
@@ -472,14 +473,14 @@ impl AppSettingsData {
                 }
             }
         }
-        Err(format!("保存API密钥失败(重试3次后): {}", last_error))
+        Err(AppErrorKind::SettingsApiKeySaveFailed.to_frontend_json_with_details(last_error))
     }
 
     pub fn get_provider_api_key(&self, provider_key: &str) -> Result<String, String> {
         let service_name = "fuyun_tools";
         let user_name = format!("api_key_{}", provider_key);
         let entry = keyring::Entry::new(service_name, &user_name)
-            .map_err(|e| format!("创建凭据入口失败: {}", e))?;
+            .map_err(|e| AppErrorKind::SettingsCredentialCreateFailed.to_frontend_json_with_details(format!("{}", e)))?;
         let mut last_error = String::new();
         for i in 0..3 {
             match entry.get_password() {
@@ -502,8 +503,7 @@ impl AppSettingsData {
                 }
             }
         }
-        log::error!("Failed to retrieve API key after retries for provider {}: {}", provider_key, last_error);
-        Err(format!("获取API密钥失败: {}", last_error))
+        Err(AppErrorKind::SettingsApiKeyGetFailed.to_frontend_json_with_details(last_error))
     }
 
     /// 迁移旧版XOR加密的API密钥到OS keyring
@@ -633,88 +633,85 @@ impl AppSettingsData {
 
     pub fn validate(&self) -> Result<(), String> {
         if self.max_items == 0 || self.max_items > 1000 {
-            return Err("max_items必须在1-1000之间".to_string());
+            return Err(AppErrorKind::SettingsMaxItemsRange.to_frontend_json());
         }
         if self.text_max_items == 0 || self.text_max_items > 1000 {
-            return Err("text_max_items必须在1-1000之间".to_string());
+            return Err(AppErrorKind::SettingsTextMaxItemsRange.to_frontend_json());
         }
         if self.image_max_items == 0 || self.image_max_items > 1000 {
-            return Err("image_max_items必须在1-1000之间".to_string());
+            return Err(AppErrorKind::SettingsImageMaxItemsRange.to_frontend_json());
         }
 
         if self.image_disk_limit_mb < 100 || self.image_disk_limit_mb > 102400 {
-            return Err("image_disk_limit_mb必须在100-102400之间".to_string());
+            return Err(AppErrorKind::SettingsImageDiskLimitRange.to_frontend_json());
         }
 
         if self.image_fill_verify_mode != "strict" && self.image_fill_verify_mode != "fast" {
-            return Err("image_fill_verify_mode必须是strict或fast".to_string());
+            return Err(AppErrorKind::SettingsImageFillVerifyModeInvalid.to_frontend_json());
         }
 
         if !self.hot_key.is_empty() && !self.hot_key.contains('+') {
-            return Err("快捷键格式无效，必须包含修饰键（如Ctrl+Alt+C）".to_string());
+            return Err(AppErrorKind::SettingsHotkeyFormatInvalid.to_frontend_json());
         }
         if !self.image_hot_key.is_empty() && !self.image_hot_key.contains('+') {
-            return Err("图片快捷键格式无效，必须包含修饰键（如Ctrl+Alt+X）".to_string());
+            return Err(AppErrorKind::SettingsHotkeyFormatInvalid.to_frontend_json());
         }
         if !self.screenshot_hot_key.is_empty() && !self.screenshot_hot_key.contains('+') {
-            return Err("截图快捷键格式无效，必须包含修饰键（如Ctrl+Alt+A）".to_string());
+            return Err(AppErrorKind::SettingsHotkeyFormatInvalid.to_frontend_json());
         }
         if !self.recording_hot_key.is_empty() && !self.recording_hot_key.contains('+') {
-            return Err("录屏快捷键格式无效，必须包含修饰键（如Ctrl+Alt+R）".to_string());
+            return Err(AppErrorKind::SettingsHotkeyFormatInvalid.to_frontend_json());
         }
         if !self.recording_mic_toggle_hot_key.is_empty()
             && !self.recording_mic_toggle_hot_key.contains('+')
         {
-            return Err("麦克风切换快捷键格式无效，必须包含修饰键（如Ctrl+Space）".to_string());
+            return Err(AppErrorKind::SettingsHotkeyFormatInvalid.to_frontend_json());
         }
 
         if self.recording_default_fps == 0 || self.recording_default_fps > 120 {
-            return Err("recording_default_fps必须在1-120之间".to_string());
+            return Err(AppErrorKind::SettingsRecordingFpsRange.to_frontend_json());
         }
         if self.recording_default_video_bitrate_kbps < 500
             || self.recording_default_video_bitrate_kbps > 50000
         {
-            return Err("recording_default_video_bitrate_kbps必须在500-50000之间".to_string());
+            return Err(AppErrorKind::SettingsRecordingVideoBitrateRange.to_frontend_json());
         }
         if self.recording_default_audio_bitrate_kbps < 32
             || self.recording_default_audio_bitrate_kbps > 512
         {
-            return Err("recording_default_audio_bitrate_kbps必须在32-512之间".to_string());
+            return Err(AppErrorKind::SettingsRecordingAudioBitrateRange.to_frontend_json());
         }
         if self.recording_max_duration_minutes == 0 || self.recording_max_duration_minutes > 1440 {
-            return Err("recording_max_duration_minutes必须在1-1440之间".to_string());
+            return Err(AppErrorKind::SettingsRecordingMaxDurationRange.to_frontend_json());
         }
         if self.recording_file_name_template.trim().is_empty() {
-            return Err("recording_file_name_template不能为空".to_string());
+            return Err(AppErrorKind::SettingsRecordingFileNameEmpty.to_frontend_json());
         }
         if self.recording_ffmpeg_download_url.trim().is_empty() {
-            return Err("recording_ffmpeg_download_url不能为空".to_string());
+            return Err(AppErrorKind::SettingsRecordingFfmpegUrlEmpty.to_frontend_json());
         }
         if !self.recording_ffmpeg_download_url.starts_with("https://") {
-            return Err("recording_ffmpeg_download_url必须以https://开头".to_string());
+            return Err(AppErrorKind::SettingsRecordingFfmpegUrlNotHttps.to_frontend_json());
         }
         if self.recording_window_audio_sync_advance_ms > 500 {
-            return Err("recording_window_audio_sync_advance_ms必须在0-500之间".to_string());
+            return Err(AppErrorKind::SettingsRecordingAudioSyncRange.to_frontend_json());
         }
 
-        for (provider_name, config) in &self.provider_configs {
+        for (_provider_name, config) in &self.provider_configs {
             if !config.api_url.is_empty() && !config.api_url.starts_with("https://") {
-                return Err(format!(
-                    "提供商 {} 的API URL格式无效，必须以https://开头",
-                    provider_name
-                ));
+                return Err(AppErrorKind::AiApiUrlInvalid.to_frontend_json());
             }
         }
 
         if self.clipboard_bottom_offset < 0 || self.clipboard_bottom_offset > 400 {
-            return Err("clipboard_bottom_offset必须在0-400之间".to_string());
+            return Err(AppErrorKind::SettingsClipboardBottomOffsetRange.to_frontend_json());
         }
 
         if self.translation_prompt_template.trim().is_empty() {
-            return Err("翻译提示模板不能为空".to_string());
+            return Err(AppErrorKind::SettingsTranslationPromptEmpty.to_frontend_json());
         }
         if self.explanation_prompt_template.trim().is_empty() {
-            return Err("解释提示模板不能为空".to_string());
+            return Err(AppErrorKind::SettingsExplanationPromptEmpty.to_frontend_json());
         }
 
         if !self.translation_prompt_template.contains("{text}")
@@ -722,28 +719,22 @@ impl AppSettingsData {
                 .translation_prompt_template
                 .contains("{target_language}")
         {
-            return Err("翻译提示模板必须包含{text}和{target_language}占位符".to_string());
+            return Err(AppErrorKind::SettingsTranslationPromptMissingPlaceholder.to_frontend_json());
         }
         if !self.explanation_prompt_template.contains("{text}")
             || !self
                 .explanation_prompt_template
                 .contains("{target_language}")
         {
-            return Err("解释提示模板必须包含{text}和{target_language}占位符".to_string());
+            return Err(AppErrorKind::SettingsExplanationPromptMissingPlaceholder.to_frontend_json());
         }
 
         for prompt in &self.selection_custom_prompts {
             if !Self::is_valid_css_color(&prompt.color) {
-                return Err(format!(
-                    "自定义按钮 \"{}\" 的颜色格式无效，仅支持 #RGB / #RRGGBB / rgb() / rgba()",
-                    prompt.name
-                ));
+                return Err(AppErrorKind::SettingsValidationFailed.to_frontend_json());
             }
             if !Self::is_valid_css_color(&prompt.bg_color) {
-                return Err(format!(
-                    "自定义按钮 \"{}\" 的背景色格式无效，仅支持 #RGB / #RRGGBB / rgb() / rgba()",
-                    prompt.name
-                ));
+                return Err(AppErrorKind::SettingsValidationFailed.to_frontend_json());
             }
         }
 

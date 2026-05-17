@@ -1,5 +1,6 @@
 use crate::utils::document_database;
 use crate::utils::document_text_extract;
+use crate::core::error_codes::AppErrorKind;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -11,7 +12,7 @@ pub async fn add_doc_root(name: String, root_path: String) -> Result<document_da
     let path = Path::new(&root_path);
     fs::create_dir_all(path).map_err(|e| format!("创建目录失败: {}", e))?;
     if !path.is_dir() {
-        return Err("路径不是一个目录".to_string());
+        return Err(AppErrorKind::DocumentPathNotDir.to_frontend_json());
     }
     document_database::add_doc_root(&name, &root_path).await
 }
@@ -28,12 +29,12 @@ pub async fn remove_doc_root(id: i64) -> Result<(), String> {
 
 fn validate_category_name(name: &str) -> Result<(), String> {
     if name.is_empty() {
-        return Err("分类名称不能为空".to_string());
+        return Err(AppErrorKind::DocumentCategoryNameEmpty.to_frontend_json());
     }
     for ch in name.chars() {
         match ch {
             '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => {
-                return Err(format!("分类名称不能包含字符: {}", ch));
+                return Err(AppErrorKind::DocumentCategoryNameInvalidChar.to_frontend_json_with_details(format!("{}", ch)));
             }
             _ => {}
         }
@@ -157,7 +158,7 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
     for file_path_str in &request.paths {
         let src = Path::new(file_path_str);
         if !src.exists() {
-            errors.push(format!("文件不存在: {}", file_path_str));
+            errors.push(AppErrorKind::DocumentFileNotFound.to_frontend_json_with_details(format!("{}", file_path_str)));
             continue;
         }
         if !src.is_file() {
@@ -400,7 +401,7 @@ pub async fn open_doc(_app_handle: AppHandle, id: i64) -> Result<(), String> {
     let path = Path::new(&doc.managed_path);
     if !path.exists() {
         let _ = document_database::mark_doc_missing(id).await;
-        return Err(format!("文件不存在: {}", doc.managed_path));
+        return Err(AppErrorKind::DocumentFileNotFound.to_frontend_json_with_details(format!("{}", doc.managed_path)));
     }
 
     document_database::increment_visit_count(id).await.ok();
@@ -460,7 +461,7 @@ pub struct ScannedFile {
 pub async fn scan_folder(path: String, recursive: Option<bool>) -> Result<ScanResult, String> {
     let dir = PathBuf::from(&path);
     if !dir.is_dir() {
-        return Err("路径不是一个目录".to_string());
+        return Err(AppErrorKind::DocumentPathNotDir.to_frontend_json());
     }
 
     let recursive = recursive.unwrap_or(true);

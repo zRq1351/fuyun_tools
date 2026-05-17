@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::core::error_codes::AppErrorKind;
 use crate::services::launcher_db;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,7 +262,7 @@ pub async fn add_custom_command(
     let created_at = chrono::Local::now().timestamp();
 
     if launcher_db::check_prefix_exists(&prefix, None).await? {
-        return Err(format!("命令前缀 '{}' 已存在", prefix));
+        return Err(AppErrorKind::LauncherCommandPrefixExists.to_frontend_json_with_details(format!("{}", prefix)));
     }
 
     launcher_db::insert_custom_command(&launcher_db::CustomCommandRow {
@@ -307,12 +308,12 @@ pub async fn update_custom_command(
 ) -> Result<LauncherConfig, String> {
     let mut config = load_launcher_config().await;
     if !config.custom_commands.iter().any(|c| c.id == command_id) {
-        return Err("命令不存在".to_string());
+        return Err(AppErrorKind::LauncherCommandNotFound.to_frontend_json());
     }
 
     if let Some(ref p) = prefix {
         if launcher_db::check_prefix_exists(p, Some(&command_id)).await? {
-            return Err(format!("命令前缀 '{}' 已存在", p));
+            return Err(AppErrorKind::LauncherCommandPrefixExists.to_frontend_json_with_details(format!("{}", p)));
         }
     }
 
@@ -343,7 +344,7 @@ pub async fn update_custom_command(
 pub async fn toggle_custom_command(command_id: String) -> Result<LauncherConfig, String> {
     let mut config = load_launcher_config().await;
     if !config.custom_commands.iter().any(|c| c.id == command_id) {
-        return Err("命令不存在".to_string());
+        return Err(AppErrorKind::LauncherCommandNotFound.to_frontend_json());
     }
     launcher_db::toggle_custom_command_enabled(&command_id).await?;
     if let Some(cmd) = config.custom_commands.iter_mut().find(|c| c.id == command_id) {

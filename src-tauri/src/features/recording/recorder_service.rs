@@ -1,5 +1,6 @@
-use crate::core::app_state::AppState as SharedAppState;
+﻿use crate::core::app_state::AppState as SharedAppState;
 use crate::core::error::{AppError, ErrorCode};
+use crate::core::error_codes::AppErrorKind;
 use crate::core::perf_metrics::record_perf_metric;
 use crate::features::recording::audio_device::list_microphones;
 use crate::features::recording::error_codes::{
@@ -275,7 +276,7 @@ fn resolve_output_dir(
         return Ok(PathBuf::from(state.settings.recording_output_dir.trim()));
     }
     let mut base = std::env::current_exe()
-        .map_err(|e| AppError::new(ErrorCode::IoError, format!("读取程序路径失败: {}", e)))?;
+        .map_err(|e| AppError::new(ErrorCode::IoError, AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))))?;
     let _ = base.pop();
     Ok(base.join("recordings"))
 }
@@ -390,7 +391,7 @@ fn concat_audio_segments(
     segments: &[crate::features::recording::state::AudioSegment],
 ) -> Result<PathBuf, String> {
     if segments.is_empty() {
-        return Err("没有可拼接的音频片段".to_string());
+        return Err(AppErrorKind::InternalError.to_frontend_json());
     }
     if segments.len() == 1 {
         return Ok(segments[0].path.clone());
@@ -404,13 +405,13 @@ fn concat_audio_segments(
 
     let list_path = output_dir.join("concat_audio_list.txt");
     let mut list_file = fs::File::create(&list_path)
-        .map_err(|e| format!("创建音频拼接列表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     for seg in segments {
         let seg_path = seg.path.to_string_lossy().replace('\'', "'\\''");
         let line = format!("file '{}'\n", seg_path);
         list_file
             .write_all(line.as_bytes())
-            .map_err(|e| format!("写入音频拼接列表失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     let mut cmd = Command::new(ffmpeg_path);
@@ -430,7 +431,7 @@ fn concat_audio_segments(
         .arg("copy")
         .arg(&concat_path)
         .output()
-        .map_err(|e| format!("执行音频拼接失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let _ = fs::remove_file(&list_path);
 
@@ -1293,7 +1294,7 @@ fn ensure_system_audio_capture_started(
                         .system_audio_segments
                         .push(crate::features::recording::state::AudioSegment { path, start_ms, trim_start_ms: 0 });
             } else {
-                return Err("系统音频路径未设置".to_string());
+                return Err(AppErrorKind::InternalError.to_frontend_json());
             }
             Ok(())
         }
@@ -1364,7 +1365,7 @@ fn ensure_mic_capture_started(
                     .mic_audio_segments
                     .push(crate::features::recording::state::AudioSegment { path, start_ms, trim_start_ms: 0 });
             } else {
-                return Err("麦克风音频路径未设置".to_string());
+                return Err(AppErrorKind::InternalError.to_frontend_json());
             }
             Ok(())
         }
@@ -3345,14 +3346,14 @@ pub fn update_audio_capture(
     if should_enable_sys && runtime.system_audio_thread.is_none() {
         ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, true)
             .map_err(|e| {
-                AppError::new(ErrorCode::SystemError, format!("开启系统音频失败: {}", e))
+                AppError::new(ErrorCode::SystemError, AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
                     .with_details(e)
             })?;
     }
     if should_enable_mic && runtime.mic_audio_thread.is_none() {
         ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true).map_err(
             |e| {
-                AppError::new(ErrorCode::SystemError, format!("开启麦克风失败: {}", e))
+                AppError::new(ErrorCode::SystemError, AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
                     .with_details(e)
             },
         )?;

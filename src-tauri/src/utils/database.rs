@@ -1,3 +1,4 @@
+﻿use crate::core::error_codes::AppErrorKind;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
@@ -74,13 +75,13 @@ async fn reset_temp_text_table(
     sqlx::query(&create_sql)
         .execute(&mut **tx)
         .await
-        .map_err(|e| format!("创建临时表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let clear_sql = format!("DELETE FROM {}", table_name);
     sqlx::query(&clear_sql)
         .execute(&mut **tx)
         .await
-        .map_err(|e| format!("清空临时表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(())
 }
@@ -106,7 +107,7 @@ async fn fill_temp_text_table(
         query
             .execute(&mut **tx)
             .await
-            .map_err(|e| format!("写入临时表失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
     Ok(())
 }
@@ -134,7 +135,7 @@ async fn bulk_upsert_history_items(
         qb.build()
             .execute(&mut **tx)
             .await
-            .map_err(|e| format!("写入临时记录失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     sqlx::query("
@@ -143,7 +144,7 @@ async fn bulk_upsert_history_items(
             created_at = (SELECT ts FROM temp_upsert_history t WHERE t.item_id = history_items.item_id),
             updated_at = (SELECT ts FROM temp_upsert_history t WHERE t.item_id = history_items.item_id)
         WHERE item_id IN (SELECT item_id FROM temp_upsert_history)
-    ").execute(&mut **tx).await.map_err(|e| format!("批量更新历史记录失败: {}", e))?;
+    ").execute(&mut **tx).await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query(
         "
@@ -154,7 +155,7 @@ async fn bulk_upsert_history_items(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| format!("批量插入历史记录失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(())
 }
@@ -173,18 +174,18 @@ async fn get_history_db_pool() -> Result<&'static SqlitePool, String> {
         .get_or_try_init(|| async {
             let db_path = get_history_db_path();
             if let Some(parent) = db_path.parent() {
-                fs::create_dir_all(parent).map_err(|e| format!("创建历史数据库目录失败: {}", e))?;
+                fs::create_dir_all(parent).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             }
             let pool = SqlitePoolOptions::new()
                 .max_connections(3)
                 .connect_with(db_options(&db_path))
                 .await
-                .map_err(|e| format!("打开历史数据库池失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
             let mut conn = pool
                 .acquire()
                 .await
-                .map_err(|e| format!("获取数据库连接失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             ensure_history_db_schema_async(&mut conn).await?;
 
             Ok(pool)
@@ -196,7 +197,7 @@ async fn open_history_db_async() -> Result<sqlx::pool::PoolConnection<sqlx::Sqli
     let pool = get_history_db_pool().await?;
     pool.acquire()
         .await
-        .map_err(|e| format!("获取数据库连接失败: {}", e))
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(), String> {
@@ -229,7 +230,7 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
     )
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let _ = sqlx::query("DROP INDEX IF EXISTS idx_history_items_content_hash")
         .execute(&mut *conn)
@@ -245,7 +246,7 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
     )
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query(
         "UPDATE history_items
@@ -254,7 +255,7 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
     )
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("初始化历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let categories_info: Vec<sqlx::sqlite::SqliteRow> =
         sqlx::query("PRAGMA table_info(categories)")
@@ -387,7 +388,7 @@ async fn history_fts_enabled_conn_async(conn: &mut SqliteConnection) -> Result<b
     )
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let count = row.try_get::<i64, _>("count").unwrap_or(0);
     Ok(count > 0)
 }
@@ -402,19 +403,19 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
     let history_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM history_items")
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let categories_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM categories")
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let category_list_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM category_list")
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let pinned_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM pinned_items")
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     if history_count + categories_count + category_list_count + pinned_count == 0 {
         return Ok(None);
@@ -425,7 +426,7 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
     )
     .fetch_all(&mut *conn)
     .await
-    .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let items = item_rows
         .into_iter()
         .filter_map(|row| row.try_get::<String, _>(0).ok())
@@ -436,22 +437,22 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
     )
     .fetch_all(&mut *conn)
     .await
-    .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let mut categories = HashMap::new();
     for row in category_rows {
         let item_id: String = row
             .try_get(0)
-            .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         let category: String = row
             .try_get(1)
-            .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         categories.insert(item_id, category);
     }
 
     let category_rows = sqlx::query("SELECT category FROM category_list ORDER BY id ASC")
         .fetch_all(&mut *conn)
         .await
-        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let category_list = category_rows
         .into_iter()
         .filter_map(|row| row.try_get::<String, _>(0).ok())
@@ -460,7 +461,7 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
     let pinned_rows = sqlx::query("SELECT item_id FROM pinned_items WHERE item_id IS NOT NULL AND item_id != '' ORDER BY pinned_at DESC")
         .fetch_all(&mut *conn)
         .await
-        .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let pinned_items = pinned_rows
         .into_iter()
         .filter_map(|row| row.try_get::<String, _>(0).ok())
@@ -664,7 +665,7 @@ pub async fn load_history_page_data_async(
             .bind(fts_keyword.as_deref())
             .fetch_one(&mut *conn)
             .await
-            .map_err(|e| format!("读取历史总数失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
         let data_query_sql = format!(
             "
@@ -702,7 +703,7 @@ pub async fn load_history_page_data_async(
             .bind(offset_i64)
             .fetch_all(&mut *conn)
             .await
-            .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         let items = rows
             .into_iter()
             .map(|row| {
@@ -742,7 +743,7 @@ pub async fn load_history_page_data_async(
             .bind(keyword_filter.as_deref())
             .fetch_one(&mut *conn)
             .await
-            .map_err(|e| format!("读取历史总数失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
         let data_query_sql = format!(
             "
@@ -773,7 +774,7 @@ pub async fn load_history_page_data_async(
             .bind(offset_i64)
             .fetch_all(&mut *conn)
             .await
-            .map_err(|e| format!("读取历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         let items = rows
             .into_iter()
             .map(|row| {
@@ -820,32 +821,32 @@ pub async fn clear_all_history() -> Result<(), String> {
     let mut tx = conn
         .begin()
         .await
-        .map_err(|e| format!("创建事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query("DELETE FROM history_items")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清空历史记录失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query("DELETE FROM history_items_fts")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清空 FTS 索引失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query("DELETE FROM categories")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清空分类失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query("DELETE FROM category_list")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清空分类列表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query("DELETE FROM pinned_items")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清空置顶项失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -854,7 +855,7 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
     let mut tx = conn
         .begin()
         .await
-        .map_err(|e| format!("创建事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let now_ms = now_unix_ms();
     let mut seen_item_ids = HashSet::new();
     let mut history_entries: Vec<(String, String, i64)> = Vec::new();
@@ -878,18 +879,18 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         sqlx::query("DELETE FROM history_items")
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("清理历史记录失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         let _ = sqlx::query("DELETE FROM history_items_fts")
             .execute(&mut *tx)
             .await;
         sqlx::query("DELETE FROM categories")
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("清理分类失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         sqlx::query("DELETE FROM pinned_items")
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("清理置顶项失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     } else {
         reset_temp_text_table(&mut tx, "temp_desired_history_item_ids", "item_id").await?;
         fill_temp_text_table(
@@ -914,7 +915,7 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清理历史记录失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         sqlx::query(
             "
             DELETE FROM categories
@@ -929,7 +930,7 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清理分类失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         sqlx::query(
             "
             DELETE FROM pinned_items
@@ -944,7 +945,7 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清理置顶项失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         let _ = sqlx::query(
             "
             DELETE FROM history_items_fts
@@ -974,19 +975,19 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         .bind(item_id_str)
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("写入分类失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     sqlx::query("DELETE FROM category_list")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("重建分类列表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     for category in &data.category_list {
         sqlx::query("INSERT INTO category_list(category) VALUES(?)")
             .bind(category)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("写入分类列表失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     for (idx, item_id) in data.pinned_items.iter().enumerate() {
@@ -1003,7 +1004,7 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         .bind(item_id_str)
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("写入置顶项失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     // 批量更新FTS索引：用一条SQL替代逐条N+1查询
@@ -1020,7 +1021,7 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -1030,7 +1031,7 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
     let mut tx = conn
         .begin()
         .await
-        .map_err(|e| format!("创建事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let now_ms = now_unix_ms();
     let mut seen_item_ids = HashSet::new();
     let mut history_entries: Vec<(String, String, i64)> = Vec::new();
@@ -1053,18 +1054,18 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
         sqlx::query("DELETE FROM history_items")
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("清理历史记录失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         let _ = sqlx::query("DELETE FROM history_items_fts")
             .execute(&mut *tx)
             .await;
         sqlx::query("DELETE FROM categories")
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("清理分类失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         sqlx::query("DELETE FROM pinned_items")
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("清理置顶项失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     } else {
         reset_temp_text_table(&mut tx, "temp_desired_history_item_ids", "item_id").await?;
         fill_temp_text_table(
@@ -1089,7 +1090,7 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清理历史记录失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         sqlx::query(
             "
             DELETE FROM categories
@@ -1104,7 +1105,7 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清理分类失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         sqlx::query(
             "
             DELETE FROM pinned_items
@@ -1119,7 +1120,7 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清理置顶项失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         let _ = sqlx::query(
             "
             DELETE FROM history_items_fts
@@ -1150,7 +1151,7 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -1164,7 +1165,7 @@ pub async fn save_categories_state_async(
     let mut tx = conn
         .begin()
         .await
-        .map_err(|e| format!("创建事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     // 使用 UPSERT 替代 DELETE + INSERT
     for chunk in categories.iter().collect::<Vec<_>>().chunks(500) {
@@ -1178,7 +1179,7 @@ pub async fn save_categories_state_async(
         qb.build()
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("批量写入分类失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     // 清理不再需要的分类映射
@@ -1196,32 +1197,32 @@ pub async fn save_categories_state_async(
             }
             query.execute(&mut *tx)
                 .await
-                .map_err(|e| format!("清理失效分类失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
     } else {
         sqlx::query("DELETE FROM categories")
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("清理分类失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     // 分类列表仍使用 DELETE + INSERT（列表通常很小）
     sqlx::query("DELETE FROM category_list")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清理分类列表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     for category in category_list {
         sqlx::query("INSERT INTO category_list(category) VALUES(?)")
             .bind(category)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("写入分类列表失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -1232,12 +1233,12 @@ pub async fn save_pinned_items_order_async(pinned_items: &[String]) -> Result<()
     let mut tx = conn
         .begin()
         .await
-        .map_err(|e| format!("创建事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query("DELETE FROM pinned_items")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清理置顶项失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     if !pinned_items.is_empty() {
         let base_ts = now_unix_ms();
@@ -1254,13 +1255,13 @@ pub async fn save_pinned_items_order_async(pinned_items: &[String]) -> Result<()
             qb.build()
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| format!("批量写入置顶项失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
     }
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -1274,10 +1275,10 @@ pub async fn pin_item(item_id: &str) -> Result<(), String> {
             .bind(item_id)
             .fetch_one(&mut *conn)
             .await
-            .map_err(|e| format!("查找记录内容失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     if !exists {
-        return Err("目标记录不存在".to_string());
+        return Err(AppErrorKind::DatabaseTargetNotFound.to_frontend_json());
     }
 
     sqlx::query(
@@ -1288,7 +1289,7 @@ pub async fn pin_item(item_id: &str) -> Result<(), String> {
     .bind(item_id)
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("置顶失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(())
 }
@@ -1301,7 +1302,7 @@ pub async fn unpin_item(item_id: &str) -> Result<(), String> {
         .bind(item_id)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("取消置顶失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(())
 }
@@ -1315,7 +1316,7 @@ pub async fn set_item_category(item_id: &str, category: &str) -> Result<(), Stri
             .bind(item_id)
             .fetch_one(&mut *conn)
             .await
-            .map_err(|e| format!("检查记录是否存在失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     if exists {
         sqlx::query(
@@ -1326,9 +1327,9 @@ pub async fn set_item_category(item_id: &str, category: &str) -> Result<(), Stri
         .bind(item_id)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("设置分类失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     } else {
-        return Err("目标记录不存在".to_string());
+        return Err(AppErrorKind::DatabaseTargetNotFound.to_frontend_json());
     }
 
     Ok(())
@@ -1342,7 +1343,7 @@ pub async fn remove_item_category(item_id: &str) -> Result<(), String> {
         .bind(item_id)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("删除分类失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(())
 }
@@ -1356,14 +1357,14 @@ pub async fn add_category_to_list(category: &str) -> Result<(), String> {
             .bind(category)
             .fetch_one(&mut *conn)
             .await
-            .map_err(|e| format!("检查分类是否存在失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     if !exists {
         sqlx::query("INSERT INTO category_list(category) VALUES(?)")
             .bind(category)
             .execute(&mut *conn)
             .await
-            .map_err(|e| format!("添加分类失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     Ok(())
@@ -1377,7 +1378,7 @@ pub async fn remove_category_from_list(category: &str) -> Result<(), String> {
         .bind(category)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("删除分类失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(())
 }
@@ -1388,23 +1389,23 @@ pub async fn remove_category_everywhere(category: &str) -> Result<(), String> {
     let mut tx = conn
         .begin()
         .await
-        .map_err(|e| format!("开启事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query("DELETE FROM categories WHERE category = ?")
         .bind(category)
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("删除分类映射失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query("DELETE FROM category_list WHERE category = ?")
         .bind(category)
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("删除分类失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -1414,7 +1415,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
     let mut tx = conn
         .begin()
         .await
-        .map_err(|e| format!("创建事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let now_ms = now_unix_ms();
 
     let existing_ids: HashSet<String> = sqlx::query_scalar::<_, String>(
@@ -1422,7 +1423,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
     )
     .fetch_all(&mut *tx)
     .await
-    .map_err(|e| format!("读取现有记录失败: {}", e))?
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
     .into_iter()
     .collect();
 
@@ -1447,7 +1448,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
         qb.build()
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("写入新历史记录失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     log::info!("合并文本历史: 新增 {} 条记录", new_count);
@@ -1462,14 +1463,14 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
             .bind(item_id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("更新分类失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         } else {
             sqlx::query("INSERT OR IGNORE INTO categories(category, item_id) VALUES(?1, ?2)")
                 .bind(category)
                 .bind(item_id)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| format!("写入分类失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
     }
 
@@ -1477,7 +1478,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
         sqlx::query_scalar::<_, String>("SELECT category FROM category_list")
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| format!("读取分类列表失败: {}", e))?
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
             .into_iter()
             .collect();
 
@@ -1487,7 +1488,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
                 .bind(category)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| format!("写入分类列表失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
     }
 
@@ -1496,7 +1497,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
     )
     .fetch_all(&mut *tx)
     .await
-    .map_err(|e| format!("读取置顶项失败: {}", e))?
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
     .into_iter()
     .collect();
 
@@ -1511,7 +1512,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
             sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM pinned_items")
                 .fetch_one(&mut *tx)
                 .await
-                .map_err(|e| format!("读取最大位置失败: {}", e))?
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 .unwrap_or(-1);
 
         let mut position = current_max_position + 1;
@@ -1530,7 +1531,7 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
             .bind(position)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("写入置顶项失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             position += 1;
         }
     } else {
@@ -1545,12 +1546,12 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
                 .bind(item_id)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| format!("写入置顶项失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
     }
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }

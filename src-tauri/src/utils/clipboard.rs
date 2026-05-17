@@ -1,3 +1,4 @@
+use crate::core::error_codes::AppErrorKind;
 use crate::sync::{lock_arc_mutex, Mutex};
 use bloom::{BloomFilter, ASMS};
 use lru::LruCache;
@@ -245,7 +246,7 @@ impl ClipboardManager {
                 Ok(())
             }
             Err(e) => {
-                let error_msg = format!("设置剪贴板内容失败: {}", e);
+                let error_msg = AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e));
                 log::error!("{}", error_msg);
                 Err(error_msg)
             }
@@ -575,7 +576,7 @@ impl ClipboardManager {
             let history = lock_arc_mutex(&self.history);
             let index = self
                 .find_index_by_id_with_lock(&history, old_item_id)
-                .ok_or_else(|| "找不到目标项目".to_string())?;
+                .ok_or_else(|| AppErrorKind::ClipboardItemNotFound.to_frontend_json())?;
 
             let old_content = history[index].clone();
             if old_content == new_content {
@@ -624,13 +625,13 @@ impl ClipboardManager {
         // Bug修复 (B3): 验证 index 在锁释放期间是否仍然有效
         if index >= history.len() {
             log::warn!("update_item_content: index {} 已过期（history 长度 {}），跳过更新", index, history.len());
-            return Err("目标项目位置已变更，请重试".to_string());
+            return Err(AppErrorKind::InternalError.to_frontend_json());
         }
         let current_hash = stable_text_hash(&history[index]);
         let expected_old_hash = u64::from_str_radix(old_item_id, 16).unwrap_or(0);
         if current_hash != expected_old_hash {
             log::warn!("update_item_content: index {} 指向的项目已变更，跳过更新", index);
-            return Err("目标项目已变更，请重试".to_string());
+            return Err(AppErrorKind::InternalError.to_frontend_json());
         }
         history[index] = new_content.clone();
 
@@ -725,7 +726,7 @@ impl ClipboardManager {
         let mut history = lock_arc_mutex(&self.history);
         let index = self
             .find_index_by_id_with_lock(&history, item_id)
-            .ok_or_else(|| "找不到目标项目".to_string())?;
+            .ok_or_else(|| AppErrorKind::ClipboardItemNotFound.to_frontend_json())?;
 
         if index < history.len() {
             let item = history.remove(index);
@@ -741,7 +742,7 @@ impl ClipboardManager {
             self.enqueue_history_only_persist();
             Ok(item)
         } else {
-            Err("索引超出范围".to_string())
+            Err(AppErrorKind::SystemIndexOutOfRange.to_frontend_json())
         }
     }
 
@@ -750,10 +751,10 @@ impl ClipboardManager {
             let mut history = lock_arc_mutex(&self.history);
             let index = self
                 .find_index_by_id_with_lock(&history, item_id)
-                .ok_or_else(|| "找不到目标项目".to_string())?;
+                .ok_or_else(|| AppErrorKind::ClipboardItemNotFound.to_frontend_json())?;
 
             if index >= history.len() {
-                return Err("索引超出范围".to_string());
+                return Err(AppErrorKind::SystemIndexOutOfRange.to_frontend_json());
             }
             if index == 0 {
                 let item = history[0].clone();
@@ -789,10 +790,10 @@ impl ClipboardManager {
             let mut history = lock_arc_mutex(&self.history);
             let index = self
                 .find_index_by_id_with_lock(&history, item_id)
-                .ok_or_else(|| "找不到目标项目".to_string())?;
+                .ok_or_else(|| AppErrorKind::ClipboardItemNotFound.to_frontend_json())?;
 
             if index >= history.len() {
-                return Err("索引超出范围".to_string());
+                return Err(AppErrorKind::SystemIndexOutOfRange.to_frontend_json());
             }
             if index == 0 {
                 return Ok(history[0].clone());
@@ -826,7 +827,7 @@ impl ClipboardManager {
             .iter()
             .any(|existing| crate::utils::database::stable_history_item_id(existing) == item_id);
         if !exists {
-            return Err("目标条目不存在".to_string());
+            return Err(AppErrorKind::InternalError.to_frontend_json());
         }
         let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         if pinned {
@@ -852,7 +853,7 @@ impl ClipboardManager {
                 crate::utils::database::stable_history_item_id(existing) == item_id
             });
             if !exists {
-                return Err("目标条目不存在".to_string());
+                return Err(AppErrorKind::InternalError.to_frontend_json());
             }
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
             if pinned {
@@ -938,7 +939,7 @@ impl ClipboardManager {
                 normalize_pinned_items(&mut pinned_items, &history);
                 apply_pin_order(&mut history, &pinned_items);
             }
-            _ => return Err("不支持的清理模式".to_string()),
+            _ => return Err(AppErrorKind::SystemUnsupportedCleanMode.to_frontend_json()),
         }
 
         self.history_cache_dirty.store(true, Ordering::Relaxed);

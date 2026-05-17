@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 
+use crate::core::error_codes::AppErrorKind;
 use crate::services::app_scanner;
 use crate::services::app_store;
 use crate::services::launcher_config;
@@ -270,14 +271,14 @@ pub async fn open_file(path: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn open_app_directory(app: AppHandle, path: String) -> Result<(), String> {
     if !std::path::Path::new(&path).exists() {
-        return Err("快捷方式不存在".to_string());
+        return Err(AppErrorKind::LauncherShortcutNotFound.to_frontend_json());
     }
 
     let target_dir = if path.to_lowercase().ends_with(".lnk") {
         let target = app_store::resolve_lnk_target(&path)
             .unwrap_or_default();
         if target.is_empty() {
-            return Err("无法解析快捷方式目标".to_string());
+            return Err(AppErrorKind::LauncherShortcutResolveFailed.to_frontend_json());
         }
         std::path::Path::new(&target)
             .parent()
@@ -291,7 +292,7 @@ pub async fn open_app_directory(app: AppHandle, path: String) -> Result<(), Stri
     };
 
     if target_dir.is_empty() {
-        return Err("无法获取应用目录".to_string());
+        return Err(AppErrorKind::LauncherAppDirFailed.to_frontend_json());
     }
 
     app.opener()

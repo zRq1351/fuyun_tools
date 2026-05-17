@@ -1,3 +1,4 @@
+﻿use crate::core::error_codes::AppErrorKind;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat as CpalSampleFormat, StreamConfig};
 use hound::SampleFormat;
@@ -285,7 +286,7 @@ pub fn start_process_loopback_wavs(
     recording_pause_flag: Arc<AtomicBool>,
 ) -> Result<WasapiCaptureHandle, String> {
     if process_ids.is_empty() || process_ids.len() != output_paths.len() {
-        return Err("进程音频录制参数无效".to_string());
+        return Err(AppErrorKind::InternalError.to_frontend_json());
     }
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop = stop_flag.clone();
@@ -519,7 +520,7 @@ pub fn start_system_loopback_wav_with_device(
     let handle = std::thread::spawn(move || {
         let run = || -> Result<(), String> {
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
-                .map_err(|e| format!("WASAPI 主机不可用: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
             let device = if let Some(key) = thread_device_key.as_ref() {
                 if let Ok(devs) = host.output_devices() {
@@ -579,10 +580,10 @@ pub fn start_system_loopback_wav_with_device(
             };
 
             let file = std::fs::File::create(&thread_output)
-                .map_err(|e| format!("创建 wav 文件失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let buf_writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
             let writer = hound::WavWriter::new(buf_writer, spec)
-                .map_err(|e| format!("初始化 WAV 写入器失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let writer = Arc::new(Mutex::new(Some(writer)));
             let writer_cb = writer.clone();
             let enabled_cb = enabled_flag.clone();
@@ -632,7 +633,7 @@ pub fn start_system_loopback_wav_with_device(
                         err_fn,
                         Some(Duration::from_millis(10)),
                     )
-                    .map_err(|e| format!("创建输入流失败: {}", e))?,
+                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
                 CpalSampleFormat::I16 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
@@ -654,7 +655,7 @@ pub fn start_system_loopback_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
                 CpalSampleFormat::U16 => {
                     let writer_cb = writer.clone();
@@ -679,7 +680,7 @@ pub fn start_system_loopback_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
                 CpalSampleFormat::I8 => {
                     let writer_cb = writer.clone();
@@ -704,7 +705,7 @@ pub fn start_system_loopback_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
                 CpalSampleFormat::U8 => {
                     let writer_cb = writer.clone();
@@ -729,7 +730,7 @@ pub fn start_system_loopback_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
                 CpalSampleFormat::I32 => {
                     let writer_cb = writer.clone();
@@ -754,7 +755,7 @@ pub fn start_system_loopback_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
                 CpalSampleFormat::U32 => {
                     let writer_cb = writer.clone();
@@ -779,7 +780,7 @@ pub fn start_system_loopback_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
                 CpalSampleFormat::F64 => {
                     let writer_cb = writer.clone();
@@ -804,13 +805,13 @@ pub fn start_system_loopback_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
-                _ => return Err("不支持的采样格式".to_string()),
+                _ => return Err(AppErrorKind::InternalError.to_frontend_json()),
             };
             stream
                 .play()
-                .map_err(|e| format!("启动输入流失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let _ = tx.send(Ok(()));
 
             while !thread_stop_flag.load(Ordering::SeqCst) {
@@ -894,7 +895,7 @@ pub fn start_microphone_wav_with_device(
     let handle = std::thread::spawn(move || {
         let run = || -> Result<(), String> {
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
-                .map_err(|e| format!("WASAPI 主机不可用: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let device = if let Some(key) = thread_device_key.as_ref() {
                 if let Ok(devs) = host.input_devices() {
                     let mut picked = None;
@@ -954,10 +955,10 @@ pub fn start_microphone_wav_with_device(
             };
 
             let file = std::fs::File::create(&thread_output)
-                .map_err(|e| format!("创建麦克风 wav 文件失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let buf_writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
             let writer = hound::WavWriter::new(buf_writer, spec)
-                .map_err(|e| format!("初始化麦克风 WAV 写入器失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let writer = Arc::new(Mutex::new(Some(writer)));
             let writer_cb = writer.clone();
             let enabled_cb = enabled_flag.clone();
@@ -1007,7 +1008,7 @@ pub fn start_microphone_wav_with_device(
                         err_fn,
                         Some(Duration::from_millis(10)),
                     )
-                    .map_err(|e| format!("创建麦克风输入流失败: {}", e))?,
+                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
                 CpalSampleFormat::I16 => {
                     let writer_cb = writer.clone();
                     let enabled_cb = enabled_flag.clone();
@@ -1029,7 +1030,7 @@ pub fn start_microphone_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
                 CpalSampleFormat::U16 => {
                     let writer_cb = writer.clone();
@@ -1054,7 +1055,7 @@ pub fn start_microphone_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
                 CpalSampleFormat::I8 => {
                     let writer_cb = writer.clone();
@@ -1079,7 +1080,7 @@ pub fn start_microphone_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
                 CpalSampleFormat::U8 => {
                     let writer_cb = writer.clone();
@@ -1104,7 +1105,7 @@ pub fn start_microphone_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
                 CpalSampleFormat::I32 => {
                     let writer_cb = writer.clone();
@@ -1129,7 +1130,7 @@ pub fn start_microphone_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
                 CpalSampleFormat::U32 => {
                     let writer_cb = writer.clone();
@@ -1154,7 +1155,7 @@ pub fn start_microphone_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
                 CpalSampleFormat::F64 => {
                     let writer_cb = writer.clone();
@@ -1179,13 +1180,13 @@ pub fn start_microphone_wav_with_device(
                             err_fn,
                             Some(Duration::from_millis(10)),
                         )
-                        .map_err(|e| format!("创建麦克风输入流失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                 }
-                _ => return Err("不支持的采样格式".to_string()),
+                _ => return Err(AppErrorKind::InternalError.to_frontend_json()),
             };
             stream
                 .play()
-                .map_err(|e| format!("启动麦克风输入流失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let _ = tx.send(Ok(()));
 
             while !thread_stop_flag.load(Ordering::SeqCst) {
@@ -1257,7 +1258,7 @@ pub fn start_system_loopback_aac_with_device(
     let handle = std::thread::spawn(move || {
         let run = || -> Result<(), String> {
             let ffmpeg_path = crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path()
-                .map_err(|e| format!("解析 FFmpeg 路径失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
             let mut ffmpeg_cmd = Command::new(&ffmpeg_path);
             #[cfg(target_os = "windows")]
@@ -1292,7 +1293,7 @@ pub fn start_system_loopback_aac_with_device(
 
             let mut child = ffmpeg_cmd
                 .spawn()
-                .map_err(|e| format!("启动 FFmpeg 失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
             let stdin = child.stdin.take().ok_or("无法获取 FFmpeg stdin")?;
 
@@ -1308,7 +1309,7 @@ pub fn start_system_loopback_aac_with_device(
             );
 
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
-                .map_err(|e| format!("WASAPI 主机不可用: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
             let device = if let Some(key) = thread_device_key.as_ref() {
                 if let Ok(devs) = host.output_devices() {
@@ -1396,11 +1397,11 @@ pub fn start_system_loopback_aac_with_device(
                     err_fn,
                     Some(Duration::from_millis(10)),
                 )
-                .map_err(|e| format!("创建输入流失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
             stream
                 .play()
-                .map_err(|e| format!("启动输入流失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let _ = tx.send(Ok(()));
 
             while !thread_stop_flag.load(Ordering::SeqCst) {

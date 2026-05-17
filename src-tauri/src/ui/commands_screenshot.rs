@@ -1,5 +1,6 @@
 use crate::core::app_state::AppState as SharedAppState;
 use crate::core::error::ErrorCode;
+use crate::core::error_codes::AppErrorKind;
 use crate::core::perf_metrics::{record_perf_metric, timed_sync};
 use crate::features;
 use crate::sync::{lock_arc_mutex, Mutex};
@@ -10,7 +11,7 @@ use crate::ui::commands::{
     ManualLongshotSessionRequest, NEXT_PINNED_IMAGE_WINDOW_ID,
     NEXT_SCREENSHOT_SESSION_ID, SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW,
 };
-use crate::ui::commands_clipboard::{frontend_error, get_image_clipboard_manager_arc, is_screenshot_feature_enabled};
+use crate::ui::commands_clipboard::{frontend_error, frontend_error_kind, frontend_error_kind_params, get_image_clipboard_manager_arc, is_screenshot_feature_enabled};
 use crate::ui::commands_screenshot_render::{export_screenshot_image, render_screenshot_image, ScreenshotExportRequest};
 use crate::ui::window_manager::{
     bind_overlay_window_events, ensure_window_for_label, focus_overlay_window_by_label,
@@ -79,7 +80,7 @@ pub async fn copy_image_clipboard_item_to_directory(
 
         let source = PathBuf::from(&source_path);
         if !source.exists() {
-            return Err("源图片文件不存在".to_string());
+            return Err(frontend_error_kind(AppErrorKind::ScreenshotSourceFileNotFound, source_path));
         }
         let file_name = source
             .file_name()
@@ -90,7 +91,7 @@ pub async fn copy_image_clipboard_item_to_directory(
 
         let target_dir = PathBuf::from(target_directory.trim());
         if target_dir.as_os_str().is_empty() {
-            return Err("目标目录不能为空".to_string());
+            return Err(frontend_error_kind(AppErrorKind::ScreenshotTargetDirEmpty, ""));
         }
         fs::create_dir_all(&target_dir).map_err(|e| format!("创建目标目录失败: {}", e))?;
 
@@ -151,7 +152,7 @@ pub async fn start_screenshot(
         Ok((rgba, width, height, origin_x, origin_y)) => {
             let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
             let image_path = write_screenshot_boot_image(&rgba, width, height, session_id)
-                .map_err(|e| format!("写入截图源图失败: {}", e))?;
+                .map_err(|e| frontend_error_kind_params(AppErrorKind::ScreenshotWriteSourceFailed, serde_json::json!({"error": e}), e))?;
             let png_base64 = capture::rgba_to_base64_png(&rgba, width, height)
                 .map_err(|e| format!("转换PNG失败: {}", e))?;
 
@@ -182,9 +183,8 @@ pub async fn start_manual_longshot(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<serde_json::Value, String> {
     if !is_screenshot_feature_enabled(state.inner()) {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "截图功能已停用",
+        return Err(frontend_error_kind(
+            AppErrorKind::ScreenshotFeatureDisabled,
             "screenshot feature disabled",
         ));
     }
@@ -332,9 +332,8 @@ pub async fn capture_region(
 ) -> Result<serde_json::Value, String> {
     use crate::features::screenshot::capture;
     if !is_screenshot_feature_enabled(state.inner()) {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "截图功能已停用",
+        return Err(frontend_error_kind(
+            AppErrorKind::ScreenshotFeatureDisabled,
             "screenshot feature disabled",
         ));
     }
@@ -434,7 +433,7 @@ pub async fn save_screenshot_to_path(
     use base64::Engine;
 
     if output_path.trim().is_empty() {
-        return Err("保存路径为空".to_string());
+        return Err(frontend_error_kind(AppErrorKind::ScreenshotSavePathEmpty, ""));
     }
 
     let target_path = PathBuf::from(&output_path);
@@ -1035,7 +1034,7 @@ pub async fn longshot_toolbar_action(action: String, app: AppHandle) -> Result<(
             let _ = set_screenshot_window_visibility_internal(&app, true);
             return Ok(());
         }
-        _ => return Err("不支持的长截图操作".to_string()),
+        _ => return Err(frontend_error_kind(AppErrorKind::ScreenshotUnsupportedOperation, action)),
     }
     Ok(())
 }
@@ -1140,9 +1139,8 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
         .unwrap_or_else(|| "screenshot".to_string());
     if let Ok(settings) = load_settings() {
         if !settings.screenshot_enabled && selection_mode != "recording_region" {
-            return Err(frontend_error(
-                ErrorCode::ValidationError,
-                "截图功能已停用",
+            return Err(frontend_error_kind(
+                AppErrorKind::ScreenshotFeatureDisabled,
                 "screenshot feature disabled",
             ));
         }
@@ -1166,7 +1164,7 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
                 false,
                 Some(e.to_string()),
             );
-            return Err(format!("截图失败: {}", e));
+            return Err(frontend_error_kind_params(AppErrorKind::ScreenshotFailed, serde_json::json!({"error": e.to_string()}), e.to_string()));
         }
     };
 
@@ -1302,7 +1300,7 @@ window.__SCREENSHOT_BOOT__.pendingMode = '{}';",
                     false,
                     Some(e.to_string()),
                 );
-                format!("创建截图窗口失败: {}", e)
+                frontend_error_kind_params(AppErrorKind::ScreenshotCreateWindowFailed, serde_json::json!({"error": e.to_string()}), e.to_string())
             })?;
         bind_screenshot_window_lifecycle(&window, &app);
         let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));

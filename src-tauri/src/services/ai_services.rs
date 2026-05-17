@@ -1,5 +1,6 @@
 use crate::core::app_state::AppState as SharedAppState;
-use crate::core::error::{AppError, AppResult, ErrorCode};
+use crate::core::error::{AppError, AppResult};
+use crate::core::error_codes::AppErrorKind;
 use crate::core::perf_metrics::record_perf_metric;
 use crate::services::ai_client::{AIClient, AIConfig};
 use crate::sync::{lock_arc_mutex, Mutex};
@@ -25,50 +26,27 @@ fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
         let settings_snapshot = state_guard.settings.clone();
 
         if settings_snapshot.ai_provider.is_empty() {
-            return Err(AppError::new(
-                ErrorCode::ConfigError,
-                "未配置AI提供商，请在设置中选择提供商",
-            ));
+            return Err(AppErrorKind::AiNotConfigured.to_app_error());
         }
 
         if !settings_snapshot
             .provider_configs
             .contains_key(&settings_snapshot.ai_provider)
         {
-            return Err(AppError::new(
-                ErrorCode::ConfigError,
-                format!(
-                    "未找到提供商 '{}' 的配置，请在设置中配置API信息",
-                    settings_snapshot.ai_provider
-                ),
-            ));
+            return Err(AppErrorKind::AiProviderNotFound.to_app_error());
         }
 
         let provider_key = settings_snapshot.ai_provider.clone();
         let provider_config = settings_snapshot
             .get_current_provider_config()
-            .ok_or_else(|| {
-                AppError::new(
-                    ErrorCode::ConfigError,
-                    format!(
-                        "未找到提供商 '{}' 的配置，请在设置中配置API信息",
-                        provider_key
-                    ),
-                )
-            })?;
+            .ok_or_else(|| AppErrorKind::AiProviderNotFound.to_app_error())?;
 
         if provider_config.api_url.is_empty() {
-            return Err(AppError::new(
-                ErrorCode::ConfigError,
-                "API地址不能为空，请在设置中填写正确的API地址",
-            ));
+            return Err(AppErrorKind::AiApiUrlEmpty.to_app_error());
         }
 
         if provider_config.model_name.is_empty() {
-            return Err(AppError::new(
-                ErrorCode::ConfigError,
-                "模型名称不能为空，请在设置中填写正确的模型名称",
-            ));
+            return Err(AppErrorKind::AiModelNameEmpty.to_app_error());
         }
 
         let api_url = provider_config.api_url.clone();
@@ -82,10 +60,7 @@ fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
         || api_url.starts_with("http://127.0.0.1")
         || api_url.starts_with("http://[::1]");
     if !is_secure && !is_localhost {
-        return Err(AppError::new(
-            ErrorCode::ConfigError,
-            "API地址格式不正确，请使用 https:// 或本地地址 (http://localhost)",
-        ));
+        return Err(AppErrorKind::AiApiUrlInvalid.to_app_error());
     }
 
     log::info!("正在验证提供商 {} 的配置", provider_key);
@@ -93,15 +68,12 @@ fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
         .get_provider_api_key(&provider_key)
         .map_err(|e| {
             log::error!("读取密钥库失败: {}", e);
-            AppError::new(ErrorCode::SystemError, format!("读取密钥库失败: {}", e))
+            AppErrorKind::AiKeychainReadFailed.to_app_error_with_details(format!("{}", e))
         })?;
 
     if api_key.is_empty() {
         log::warn!("提供商 {} 的API密钥为空", provider_key);
-        return Err(AppError::new(
-            ErrorCode::ConfigError,
-            "API密钥未配置或无效，请在设置中填写正确的API密钥",
-        ));
+        return Err(AppErrorKind::AiApiKeyNotConfigured.to_app_error());
     }
     log::info!("提供商 {} 配置验证通过", provider_key);
 
@@ -131,7 +103,7 @@ pub async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> AppRe
 
     // 配置已变更，创建新客户端
     let client = AIClient::new(current_config.clone()).map_err(|e| {
-        AppError::new(ErrorCode::SystemError, "客户端初始化失败").with_details(e.to_string())
+        AppErrorKind::AiClientInitFailed.to_app_error_with_details(e.to_string())
     })?;
 
     // 更新缓存
@@ -275,12 +247,7 @@ async fn execute_stream_request(
     let started_at = Instant::now();
     let text = request.text.trim().to_string();
     if text.is_empty() {
-        let msg = match kind {
-            AiStreamKind::Translation => "文本为空，无法翻译",
-            AiStreamKind::Explanation => "文本为空，无法解释",
-            AiStreamKind::CustomPrompt(_) => "文本为空，无法执行",
-        };
-        return Err(AppError::new(ErrorCode::ValidationError, msg));
+        return Err(AppErrorKind::AiTextEmpty.to_app_error());
     }
 
     let configured_prompt = {
@@ -313,7 +280,7 @@ async fn execute_stream_request(
         request.window_label.clone(),
     )
     .await
-    .map_err(|e| AppError::new(ErrorCode::SystemError, e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_app_error_with_details(e))?;
 
     hide_selection_toolbar_impl(app.clone());
 

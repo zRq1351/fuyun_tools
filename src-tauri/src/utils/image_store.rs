@@ -1,3 +1,4 @@
+use crate::core::error_codes::AppErrorKind;
 use crate::utils::image_clipboard::{
     ImageHistoryData, ImageHistoryItem, ImageHistoryPageData, ImageHistoryPageItem,
 };
@@ -39,7 +40,7 @@ async fn load_category_list_cached(conn: &mut SqliteConnection) -> Result<Vec<St
         sqlx::query("SELECT category FROM image_category_list ORDER BY position ASC")
             .fetch_all(&mut *conn)
             .await
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
     let category_list = category_rows
         .into_iter()
         .filter_map(|row| row.try_get::<String, _>(0).ok())
@@ -70,7 +71,7 @@ async fn exec(conn: &mut SqliteConnection, sql: &str) -> Result<(), String> {
     sqlx::query(sql)
         .execute(conn)
         .await
-        .map_err(|e| format!("初始化图片历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::ImageStoreInitFailed.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -86,13 +87,13 @@ async fn reset_temp_text_table(
     sqlx::query(&create_sql)
         .execute(&mut **tx)
         .await
-        .map_err(|e| format!("创建图片临时表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let clear_sql = format!("DELETE FROM {}", table_name);
     sqlx::query(&clear_sql)
         .execute(&mut **tx)
         .await
-        .map_err(|e| format!("清空图片临时表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(())
 }
@@ -118,7 +119,7 @@ async fn fill_temp_text_table(
         query
             .execute(&mut **tx)
             .await
-            .map_err(|e| format!("写入图片临时表失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
     Ok(())
 }
@@ -135,13 +136,13 @@ async fn reset_temp_position_table(
     sqlx::query(&create_sql)
         .execute(&mut **tx)
         .await
-        .map_err(|e| format!("创建图片顺序临时表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let clear_sql = format!("DELETE FROM {}", table_name);
     sqlx::query(&clear_sql)
         .execute(&mut **tx)
         .await
-        .map_err(|e| format!("清空图片顺序临时表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(())
 }
@@ -169,7 +170,7 @@ async fn fill_temp_position_table(
         query
             .execute(&mut **tx)
             .await
-            .map_err(|e| format!("写入图片顺序临时表失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
     Ok(())
 }
@@ -299,12 +300,12 @@ async fn get_pool() -> Result<Arc<SqlitePool>, String> {
 
     let db_path = get_image_store_db_path();
     if let Some(parent) = db_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建图片历史数据库目录失败: {}", e))?;
+        fs::create_dir_all(parent).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     let pool = SqlitePool::connect_with(image_store_options(&db_path))
         .await
-        .map_err(|e| format!("创建数据库连接池失败: {}", e))?;
+        .map_err(|e| AppErrorKind::ImageStorePoolFailed.to_frontend_json_with_details(format!("{}", e)))?;
 
     let pool_arc = Arc::new(pool);
 
@@ -312,7 +313,7 @@ async fn get_pool() -> Result<Arc<SqlitePool>, String> {
     let mut conn = pool_arc
         .acquire()
         .await
-        .map_err(|e| format!("获取连接失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     init_image_store_schema_async(&mut conn).await?;
 
     match DB_POOL.set(pool_arc.clone()) {
@@ -320,7 +321,7 @@ async fn get_pool() -> Result<Arc<SqlitePool>, String> {
         Err(_) => DB_POOL
             .get()
             .cloned()
-            .ok_or_else(|| "连接池并发初始化后读取失败".to_string()),
+            .ok_or_else(|| AppErrorKind::ImageStoreReadFailed.to_frontend_json()),
     }
 }
 
@@ -358,7 +359,7 @@ pub async fn upsert_item_async(item: &ImageHistoryItem, position: usize) -> Resu
     .bind(&item.image_path)
     .execute(pool.as_ref())
     .await
-    .map_err(|e| format!("写入图片历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::ImageStoreWriteFailed.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -369,7 +370,7 @@ pub async fn item_exists_async(item_id: &str) -> Result<bool, String> {
             .bind(item_id)
             .fetch_optional(pool.as_ref())
             .await
-            .map_err(|e| format!("查询图片历史数据库失败: {}", e))?
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
             .is_some();
     Ok(exists)
 }
@@ -384,7 +385,7 @@ pub async fn delete_item_async(item_id: &str) -> Result<(), String> {
         .bind(item_id)
         .execute(pool.as_ref())
         .await
-        .map_err(|e| format!("删除图片历史数据库条目失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     // 同时删除异步预览
     delete_async_preview_async(item_id).await?;
@@ -401,7 +402,7 @@ pub async fn delete_items_bulk_async(item_ids: &[String]) -> Result<(), String> 
     let mut tx = pool
         .begin()
         .await
-        .map_err(|e| format!("开启批量删除事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     reset_temp_text_table(&mut tx, "temp_delete_image_item_ids", "item_id").await?;
     fill_temp_text_table(&mut tx, "temp_delete_image_item_ids", "item_id", item_ids).await?;
@@ -418,7 +419,7 @@ pub async fn delete_items_bulk_async(item_ids: &[String]) -> Result<(), String> 
     )
     .execute(&mut *tx)
     .await
-    .map_err(|e| format!("批量删除图片项失败: {}", e))?;
+        .map_err(|e| AppErrorKind::ImageStoreBatchDeleteFailed.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query(
         "
         DELETE FROM image_categories
@@ -431,7 +432,7 @@ pub async fn delete_items_bulk_async(item_ids: &[String]) -> Result<(), String> 
     )
     .execute(&mut *tx)
     .await
-    .map_err(|e| format!("批量删除图片分类失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query(
         "
         DELETE FROM image_tags
@@ -444,7 +445,7 @@ pub async fn delete_items_bulk_async(item_ids: &[String]) -> Result<(), String> 
     )
     .execute(&mut *tx)
     .await
-    .map_err(|e| format!("批量删除图片标签失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query(
         "
         DELETE FROM image_pinned
@@ -457,7 +458,7 @@ pub async fn delete_items_bulk_async(item_ids: &[String]) -> Result<(), String> 
     )
     .execute(&mut *tx)
     .await
-    .map_err(|e| format!("批量删除图片置顶失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query(
         "
         DELETE FROM image_async_previews
@@ -470,11 +471,11 @@ pub async fn delete_items_bulk_async(item_ids: &[String]) -> Result<(), String> 
     )
     .execute(&mut *tx)
     .await
-    .map_err(|e| format!("批量删除图片预览失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交批量删除事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -484,36 +485,36 @@ pub async fn clear_all_history_async() -> Result<(), String> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|e| format!("创建清空图片历史事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query("DELETE FROM image_items")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清空图片项失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query("DELETE FROM image_categories")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清空图片分类失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query("DELETE FROM image_category_list")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清空图片分类列表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query("DELETE FROM image_tags")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清空图片标签失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query("DELETE FROM image_pinned")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清空图片置顶失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query("DELETE FROM image_async_previews")
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清空图片预览失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交清空图片历史事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     invalidate_category_list_cache();
     Ok(())
 }
@@ -527,7 +528,7 @@ pub async fn sync_item_positions_async(item_ids: &[String]) -> Result<(), String
     let mut tx = pool
         .begin()
         .await
-        .map_err(|e| format!("创建图片位置事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     reset_temp_position_table(&mut tx, "temp_target_image_items_position", "item_id").await?;
     fill_temp_position_table(
@@ -556,11 +557,11 @@ pub async fn sync_item_positions_async(item_ids: &[String]) -> Result<(), String
     )
     .execute(&mut *tx)
     .await
-    .map_err(|e| format!("批量更新图片位置失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交图片位置事务失败: {}", e))
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 /// 增量更新图片位置 - 只更新受影响的图片
@@ -590,14 +591,14 @@ pub async fn sync_item_positions_incremental_async(
     let mut tx = pool
         .begin()
         .await
-        .map_err(|e| format!("创建增量更新事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     // 先把移动项挪到事务内哨兵位置，避免后续区间更新再次命中自身。
     sqlx::query("UPDATE image_items SET position = -1 WHERE item_id = ?1")
         .bind(item_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("暂存移动图片位置失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     // 更新其他受影响图片的位置
     if old_position < new_position {
@@ -609,7 +610,7 @@ pub async fn sync_item_positions_incremental_async(
         .bind(new_position as i64)
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("更新受影响图片位置失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     } else if old_position > new_position {
         // 图片向前移动，后面的图片位置加1
         sqlx::query(
@@ -619,7 +620,7 @@ pub async fn sync_item_positions_incremental_async(
         .bind(old_position as i64)
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("更新受影响图片位置失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     // 最后把目标项写回最终位置。
@@ -628,11 +629,11 @@ pub async fn sync_item_positions_incremental_async(
         .bind(item_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("写回移动图片位置失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交增量更新事务失败: {}", e))
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 pub fn upsert_category(item_id: &str, category: &str) -> Result<(), String> {
@@ -652,7 +653,7 @@ pub async fn upsert_category_async(item_id: &str, category: &str) -> Result<(), 
     .bind(category)
     .execute(pool.as_ref())
     .await
-    .map_err(|e| format!("写入图片分类数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -666,7 +667,7 @@ pub async fn delete_category_async(item_id: &str) -> Result<(), String> {
         .bind(item_id)
         .execute(pool.as_ref())
         .await
-        .map_err(|e| format!("删除图片分类数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -679,12 +680,12 @@ pub async fn sync_tags_for_item_async(item_id: &str, tags: &[String]) -> Result<
     let mut tx = pool
         .begin()
         .await
-        .map_err(|e| format!("创建图片标签事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query("DELETE FROM image_tags WHERE item_id = ?1")
         .bind(item_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清理图片标签失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     for (position, tag) in tags.iter().enumerate() {
         sqlx::query("INSERT INTO image_tags (item_id, tag, position) VALUES (?1, ?2, ?3)")
             .bind(item_id)
@@ -692,11 +693,11 @@ pub async fn sync_tags_for_item_async(item_id: &str, tags: &[String]) -> Result<
             .bind(position as i64)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("写入图片标签失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
     tx.commit()
         .await
-        .map_err(|e| format!("提交图片标签事务失败: {}", e))
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 pub fn delete_tags_for_item(item_id: &str) -> Result<(), String> {
@@ -709,7 +710,7 @@ pub async fn delete_tags_for_item_async(item_id: &str) -> Result<(), String> {
         .bind(item_id)
         .execute(pool.as_ref())
         .await
-        .map_err(|e| format!("删除图片标签失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -723,7 +724,7 @@ pub async fn sync_category_list_order_async(categories: &[String]) -> Result<(),
         let mut tx = pool
             .begin()
             .await
-            .map_err(|e| format!("创建分类列表事务失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         reset_temp_position_table(&mut tx, "temp_target_image_category_list", "category").await?;
         fill_temp_position_table(
             &mut tx,
@@ -745,7 +746,7 @@ pub async fn sync_category_list_order_async(categories: &[String]) -> Result<(),
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("清理分类列表失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
         sqlx::query(
             "
@@ -765,7 +766,7 @@ pub async fn sync_category_list_order_async(categories: &[String]) -> Result<(),
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("更新分类列表失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
         sqlx::query(
             "
@@ -781,10 +782,10 @@ pub async fn sync_category_list_order_async(categories: &[String]) -> Result<(),
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("写入分类列表失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         tx.commit()
             .await
-            .map_err(|e| format!("提交分类列表事务失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         invalidate_category_list_cache();
         Ok(())
     }
@@ -799,7 +800,7 @@ pub async fn sync_pinned_order_async(pinned_items: &[String]) -> Result<(), Stri
     let mut tx = pool
         .begin()
         .await
-        .map_err(|e| format!("创建置顶事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     // 检测 position 列是否存在
     let has_position =
@@ -832,7 +833,7 @@ pub async fn sync_pinned_order_async(pinned_items: &[String]) -> Result<(), Stri
     )
     .execute(&mut *tx)
     .await
-    .map_err(|e| format!("清理置顶失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     if has_position {
         // 有 position 列,使用完整逻辑
@@ -854,7 +855,7 @@ pub async fn sync_pinned_order_async(pinned_items: &[String]) -> Result<(), Stri
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("更新置顶失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
         sqlx::query(
             "
@@ -870,7 +871,7 @@ pub async fn sync_pinned_order_async(pinned_items: &[String]) -> Result<(), Stri
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("写入置顶失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     } else {
         // 没有 position 列,只插入 item_id
         log::info!("使用兼容模式插入置顶项,共 {} 个", pinned_items.len());
@@ -883,12 +884,12 @@ pub async fn sync_pinned_order_async(pinned_items: &[String]) -> Result<(), Stri
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("写入置顶失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交置顶事务失败: {}", e))
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 pub fn delete_categories_by_category(category: &str) -> Result<(), String> {
@@ -901,7 +902,7 @@ pub async fn delete_categories_by_category_async(category: &str) -> Result<(), S
         .bind(category)
         .execute(pool.as_ref())
         .await
-        .map_err(|e| format!("按分类删除条目失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -914,7 +915,7 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
     let mut conn = pool
         .acquire()
         .await
-        .map_err(|e| format!("获取连接失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     log::info!("开始加载图片历史数据...");
 
@@ -949,7 +950,7 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
         )
         .fetch_all(conn.as_mut())
         .await
-        .map_err(|e| format!("读取图片历史数据库失败: {}", e))?
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?
     } else {
         sqlx::query(
             "
@@ -964,22 +965,22 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
         )
         .fetch_all(conn.as_mut())
         .await
-        .map_err(|e| format!("读取图片历史数据库失败: {}", e))?
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?
     };
     let mut items = Vec::new();
     for row in item_rows {
         let id: String = row
             .try_get(0)
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
         let width: i64 = row
             .try_get(1)
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
         let height: i64 = row
             .try_get(2)
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
         let image_path: String = row
             .try_get(3)
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
         items.push(ImageHistoryItem {
             id: id.clone(),
             width: width.max(0) as u32,
@@ -996,14 +997,14 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
     let category_rows = sqlx::query("SELECT item_id, category FROM image_categories")
         .fetch_all(conn.as_mut())
         .await
-        .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
     for row in category_rows {
         let item_id: String = row
             .try_get(0)
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
         let category: String = row
             .try_get(1)
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
         categories.insert(item_id, category);
     }
 
@@ -1029,20 +1030,20 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
         sqlx::query("SELECT item_id, tag FROM image_tags ORDER BY item_id, position ASC")
             .fetch_all(conn.as_mut())
             .await
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?
     } else {
         sqlx::query("SELECT item_id, tag FROM image_tags")
             .fetch_all(conn.as_mut())
             .await
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?
     };
     for row in tag_rows {
         let item_id: String = row
             .try_get(0)
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
         let tag: String = row
             .try_get(1)
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
         image_tags.entry(item_id).or_default().push(tag);
     }
 
@@ -1069,13 +1070,13 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
         sqlx::query("SELECT item_id FROM image_pinned ORDER BY position ASC")
             .fetch_all(conn.as_mut())
             .await
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?
     } else {
         // 没有 position 列,不排序
         sqlx::query("SELECT item_id FROM image_pinned")
             .fetch_all(conn.as_mut())
             .await
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?
     };
     let pinned_items = pinned_rows
         .into_iter()
@@ -1124,7 +1125,7 @@ pub async fn load_history_page_async(
     let mut conn = pool
         .acquire()
         .await
-        .map_err(|e| format!("获取连接失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let category_filter = category
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty() && v != "全部");
@@ -1179,7 +1180,7 @@ pub async fn load_history_page_async(
     .bind(keyword_like.as_deref())
     .fetch_one(conn.as_mut())
     .await
-    .map_err(|e| format!("读取图片历史总数失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let query_sql = format!(
         "
         SELECT
@@ -1233,7 +1234,7 @@ pub async fn load_history_page_async(
         .bind(offset as i64)
         .fetch_all(conn.as_mut())
         .await
-        .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
     let items = rows
         .into_iter()
         .take(effective_limit)
@@ -1281,7 +1282,7 @@ pub fn has_any_data() -> Result<bool, String> {
         let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM image_items")
             .fetch_one(pool.as_ref())
             .await
-            .map_err(|e| format!("读取图片历史数据库失败: {}", e))?;
+            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
         Ok(total > 0)
     })
 }
@@ -1332,7 +1333,7 @@ pub async fn save_async_preview_async(
         .bind(created_at)
         .execute(pool.as_ref())
         .await
-        .map_err(|e| format!("保存异步预览失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -1350,19 +1351,19 @@ pub async fn load_async_preview_async(item_id: &str) -> Result<Option<(u32, u32,
         .bind(item_id)
         .fetch_optional(pool.as_ref())
         .await
-        .map_err(|e| format!("加载异步预览失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     match row {
         Some(row) => {
             let preview_width: i64 = row
                 .try_get(0)
-                .map_err(|e| format!("读取预览宽度失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let preview_height: i64 = row
                 .try_get(1)
-                .map_err(|e| format!("读取预览高度失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let preview_base64: String = row
                 .try_get(2)
-                .map_err(|e| format!("读取预览数据失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             Ok(Some((
                 preview_width.max(0) as u32,
                 preview_height.max(0) as u32,
@@ -1385,7 +1386,7 @@ pub async fn delete_async_preview_async(item_id: &str) -> Result<(), String> {
         .bind(item_id)
         .execute(pool.as_ref())
         .await
-        .map_err(|e| format!("删除异步预览失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -1403,7 +1404,7 @@ pub async fn delete_async_previews_bulk_async(item_ids: &[String]) -> Result<(),
     let mut tx = pool
         .begin()
         .await
-        .map_err(|e| format!("开启批量删除预览事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     reset_temp_text_table(&mut tx, "temp_delete_image_item_ids", "item_id").await?;
     fill_temp_text_table(&mut tx, "temp_delete_image_item_ids", "item_id", item_ids).await?;
     sqlx::query(
@@ -1418,10 +1419,10 @@ pub async fn delete_async_previews_bulk_async(item_ids: &[String]) -> Result<(),
     )
     .execute(&mut *tx)
     .await
-    .map_err(|e| format!("批量删除异步预览失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     tx.commit()
         .await
-        .map_err(|e| format!("提交批量删除预览事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -1432,7 +1433,7 @@ pub async fn add_category_if_not_exists_async(category: &str) -> Result<(), Stri
         .bind(category)
         .execute(pool.as_ref())
         .await
-        .map_err(|e| format!("添加分类失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     invalidate_category_list_cache();
     Ok(())
 }
@@ -1447,7 +1448,7 @@ pub async fn merge_pinned_items_async(item_ids: &[String]) -> Result<(), String>
     let mut conn = pool
         .acquire()
         .await
-        .map_err(|e| format!("获取连接失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     // 获取当前已置顶的 item_id 集合
     let existing_pinned: HashSet<String> = sqlx::query_scalar::<_, String>(
@@ -1455,7 +1456,7 @@ pub async fn merge_pinned_items_async(item_ids: &[String]) -> Result<(), String>
     )
     .fetch_all(conn.as_mut())
     .await
-    .map_err(|e| format!("读取已置顶项失败: {}", e))?
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
     .into_iter()
     .collect();
 
@@ -1491,7 +1492,7 @@ pub async fn merge_pinned_items_async(item_ids: &[String]) -> Result<(), String>
             .bind(position)
             .execute(conn.as_mut())
             .await
-            .map_err(|e| format!("插入置顶项失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             position += 1;
         }
     } else {
@@ -1505,7 +1506,7 @@ pub async fn merge_pinned_items_async(item_ids: &[String]) -> Result<(), String>
                 .bind(item_id)
                 .execute(conn.as_mut())
                 .await
-                .map_err(|e| format!("插入置顶项失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
     }
 

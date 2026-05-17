@@ -1,8 +1,8 @@
 use crate::core::app_state::AppState as SharedAppState;
 use crate::core::config::{AIProvider, ProviderConfig};
-use crate::core::error::ErrorCode;
 #[cfg(debug_assertions)]
-use crate::core::error::{to_frontend_error_string, AppError};
+use crate::core::error::to_frontend_error_string;
+use crate::core::error_codes::AppErrorKind;
 use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
 use crate::services::clipboard_manager::set_clipboard_listener_enabled;
@@ -290,7 +290,7 @@ pub(crate) fn register_recording_shortcut(
                 });
             }
         })
-        .map_err(|e| frontend_error(ErrorCode::ValidationError, format!("录屏快捷键被占用或注册失败：{}", hot_key), e.to_string()))?;
+        .map_err(|e| frontend_error_kind_params(AppErrorKind::ClipboardHotkeyRegisterFailed, serde_json::json!({"key": hot_key}), e.to_string()))?;
     Ok(())
 }
 
@@ -425,7 +425,7 @@ pub async fn get_ai_settings(state: State<'_, Arc<Mutex<SharedAppState>>>) -> Re
     tauri::async_runtime::spawn_blocking(move || {
         // 直接将整个 settings 序列化为 JSON Value
         let mut settings_json = serde_json::to_value(&settings)
-            .map_err(|e| frontend_error(ErrorCode::SystemError, "序列化设置失败", e.to_string()))?;
+            .map_err(|e| frontend_error_kind(AppErrorKind::JsonError, e.to_string()))?;
 
         // 脱敏处理 provider_configs 中的 API 密钥
         if let Some(settings_obj) = settings_json.as_object_mut() {
@@ -455,9 +455,8 @@ pub async fn get_ai_settings(state: State<'_, Arc<Mutex<SharedAppState>>>) -> Re
     })
     .await
     .map_err(|e| {
-        frontend_error(
-            ErrorCode::SystemError,
-            "读取AI设置任务执行失败",
+        frontend_error_kind(
+            AppErrorKind::TaskExecutionFailed,
             e.to_string(),
         )
     })?
@@ -467,7 +466,7 @@ pub async fn get_ai_settings(state: State<'_, Arc<Mutex<SharedAppState>>>) -> Re
 #[tauri::command]
 pub async fn get_text_dedup_metrics() -> Result<serde_json::Value, String> {
     serde_json::to_value(get_dedup_scan_metrics())
-        .map_err(|e| frontend_error(ErrorCode::SystemError, "序列化去重指标失败", e.to_string()))
+        .map_err(|e| frontend_error_kind(AppErrorKind::InternalError, e.to_string()))
 }
 
 #[cfg(debug_assertions)]
@@ -483,7 +482,7 @@ pub async fn get_image_storage_metrics(
     let metrics = manager.get_storage_metrics();
     serde_json::to_value(metrics).map_err(|e| {
         to_frontend_error_string(
-            AppError::new(ErrorCode::SystemError, "序列化图片存储指标失败")
+            AppErrorKind::InternalError.to_app_error()
                 .with_details(e.to_string()),
         )
     })
@@ -500,7 +499,7 @@ pub async fn get_copy_paste_dedup_debug_state() -> Result<serde_json::Value, Str
 pub async fn get_image_persist_queue_metrics() -> Result<serde_json::Value, String> {
     serde_json::to_value(get_image_persist_queue_metrics_snapshot()).map_err(|e| {
         to_frontend_error_string(
-            AppError::new(ErrorCode::SystemError, "序列化图片持久化队列指标失败")
+            AppErrorKind::InternalError.to_app_error()
                 .with_details(e.to_string()),
         )
     })
@@ -782,9 +781,8 @@ pub async fn save_app_settings(
 
     if let Some(ref hot_key_val) = hot_key {
         if hot_key_val.is_empty() {
-            return Err(frontend_error(
-                ErrorCode::ValidationError,
-                "快捷键不能为空",
+            return Err(frontend_error_kind(
+                AppErrorKind::SettingsHotkeyEmpty,
                 "hot_key is empty",
             ));
         }
@@ -793,9 +791,9 @@ pub async fn save_app_settings(
             if settings.text_clipboard_enabled
                 && app.global_shortcut().is_registered(hot_key_val.as_str())
             {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    format!("快捷键被占用：{}", hot_key_val),
+                return Err(frontend_error_kind_params(
+                    AppErrorKind::SettingsHotkeyConflict,
+                    serde_json::json!({"key": hot_key_val}),
                     "hot_key global shortcut already registered",
                 ));
             }
@@ -816,9 +814,8 @@ pub async fn save_app_settings(
 
     if let Some(ref image_hot_key_val) = image_hot_key {
         if image_hot_key_val.is_empty() {
-            return Err(frontend_error(
-                ErrorCode::ValidationError,
-                "图片窗口快捷键不能为空",
+            return Err(frontend_error_kind(
+                AppErrorKind::SettingsHotkeyEmpty,
                 "image_hot_key is empty",
             ));
         }
@@ -826,9 +823,8 @@ pub async fn save_app_settings(
         if image_hot_key_val != &settings.image_hot_key {
             if let Some(ref hot_key_val) = hot_key {
                 if image_hot_key_val == hot_key_val {
-                    return Err(frontend_error(
-                        ErrorCode::ValidationError,
-                        "文字与图片窗口快捷键不能相同",
+                    return Err(frontend_error_kind(
+                        AppErrorKind::SettingsHotkeysIdentical,
                         format!(
                             "hot_key={}, image_hot_key={}",
                             hot_key_val, image_hot_key_val
@@ -836,9 +832,8 @@ pub async fn save_app_settings(
                     ));
                 }
             } else if image_hot_key_val == &settings.hot_key {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    "文字与图片窗口快捷键不能相同",
+                return Err(frontend_error_kind(
+                    AppErrorKind::SettingsHotkeysIdentical,
                     format!(
                         "hot_key={}, image_hot_key={}",
                         settings.hot_key, image_hot_key_val
@@ -849,9 +844,9 @@ pub async fn save_app_settings(
             if settings.image_clipboard_enabled
                 && app.global_shortcut().is_registered(image_hot_key_val.as_str())
             {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    format!("图片窗口快捷键被占用：{}", image_hot_key_val),
+                return Err(frontend_error_kind_params(
+                    AppErrorKind::SettingsHotkeyConflict,
+                    serde_json::json!({"key": image_hot_key_val}),
                     "image_hot_key global shortcut already registered",
                 ));
             }
@@ -872,9 +867,8 @@ pub async fn save_app_settings(
 
     if let Some(ref screenshot_hot_key_val) = screenshot_hot_key {
         if screenshot_hot_key_val.is_empty() {
-            return Err(frontend_error(
-                ErrorCode::ValidationError,
-                "截图快捷键不能为空",
+            return Err(frontend_error_kind(
+                AppErrorKind::SettingsHotkeyEmpty,
                 "screenshot_hot_key is empty",
             ));
         }
@@ -885,9 +879,8 @@ pub async fn save_app_settings(
             if screenshot_hot_key_val == &effective_hot_key
                 || screenshot_hot_key_val == &effective_image_hot_key
             {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    "截图快捷键不能与文字或图片窗口快捷键相同",
+                return Err(frontend_error_kind(
+                    AppErrorKind::SettingsHotkeysIdentical,
                     format!(
                         "hot_key={}, image_hot_key={}, screenshot_hot_key={}",
                         effective_hot_key, effective_image_hot_key, screenshot_hot_key_val
@@ -899,9 +892,9 @@ pub async fn save_app_settings(
                 .global_shortcut()
                 .is_registered(screenshot_hot_key_val.as_str())
             {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    format!("截图快捷键被占用：{}", screenshot_hot_key_val),
+                return Err(frontend_error_kind_params(
+                    AppErrorKind::SettingsHotkeyConflict,
+                    serde_json::json!({"key": screenshot_hot_key_val}),
                     "screenshot global shortcut already registered",
                 ));
             }
@@ -925,9 +918,8 @@ pub async fn save_app_settings(
 
     if let Some(ref recording_hot_key_val) = recording_hot_key {
         if recording_hot_key_val.is_empty() {
-            return Err(frontend_error(
-                ErrorCode::ValidationError,
-                "录屏快捷键不能为空",
+            return Err(frontend_error_kind(
+                AppErrorKind::SettingsHotkeyEmpty,
                 "recording_hot_key is empty",
             ));
         }
@@ -939,9 +931,8 @@ pub async fn save_app_settings(
                 || recording_hot_key_val == &effective_image_hot_key
                 || recording_hot_key_val == &effective_screenshot_hot_key
             {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    "录屏快捷键不能与文字、图片或截图快捷键相同",
+                return Err(frontend_error_kind(
+                    AppErrorKind::SettingsHotkeysIdentical,
                     format!(
                         "hot_key={}, image_hot_key={}, screenshot_hot_key={}, recording_hot_key={}",
                         effective_hot_key,
@@ -956,9 +947,9 @@ pub async fn save_app_settings(
                 .global_shortcut()
                 .is_registered(recording_hot_key_val.as_str())
             {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    format!("录屏快捷键被占用：{}", recording_hot_key_val),
+                return Err(frontend_error_kind_params(
+                    AppErrorKind::SettingsHotkeyConflict,
+                    serde_json::json!({"key": recording_hot_key_val}),
                     "recording global shortcut already registered",
                 ));
             }
@@ -986,9 +977,8 @@ pub async fn save_app_settings(
 
     if let Some(ref mic_toggle_hot_key_val) = recording_mic_toggle_hot_key {
         if mic_toggle_hot_key_val.is_empty() {
-            return Err(frontend_error(
-                ErrorCode::ValidationError,
-                "麦克风切换快捷键不能为空",
+            return Err(frontend_error_kind(
+                AppErrorKind::SettingsHotkeyEmpty,
                 "recording_mic_toggle_hot_key is empty",
             ));
         }
@@ -1003,9 +993,8 @@ pub async fn save_app_settings(
                 || mic_toggle_hot_key_val == &effective_screenshot_hot_key
                 || mic_toggle_hot_key_val == &effective_recording_hot_key
             {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    "麦克风切换快捷键不能与其他快捷键相同",
+                return Err(frontend_error_kind(
+                    AppErrorKind::SettingsHotkeysIdentical,
                     format!(
                         "hot_key={}, image_hot_key={}, screenshot_hot_key={}, recording_hot_key={}, mic_toggle_hot_key={}",
                         effective_hot_key,
@@ -1021,9 +1010,9 @@ pub async fn save_app_settings(
                 .global_shortcut()
                 .is_registered(mic_toggle_hot_key_val.as_str())
             {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    format!("麦克风切换快捷键被占用：{}", mic_toggle_hot_key_val),
+                return Err(frontend_error_kind_params(
+                    AppErrorKind::SettingsHotkeyConflict,
+                    serde_json::json!({"key": mic_toggle_hot_key_val}),
                     "mic toggle global shortcut already registered",
                 ));
             }
@@ -1064,9 +1053,9 @@ pub async fn save_app_settings(
                         mic_toggle_hot_key_val,
                         e
                     );
-                    return Err(frontend_error(
-                        ErrorCode::ValidationError,
-                        format!("麦克风切换快捷键被占用或注册失败：{}", mic_toggle_hot_key_val),
+                    return Err(frontend_error_kind_params(
+                        AppErrorKind::ClipboardHotkeyRegisterFailed,
+                        serde_json::json!({"key": mic_toggle_hot_key_val}),
                         e.to_string(),
                     ));
                 }
@@ -1078,9 +1067,8 @@ pub async fn save_app_settings(
 
     if let Some(ref launcher_hot_key_val) = launcher_hot_key {
         if launcher_hot_key_val.is_empty() {
-            return Err(frontend_error(
-                ErrorCode::ValidationError,
-                "启动器快捷键不能为空",
+            return Err(frontend_error_kind(
+                AppErrorKind::SettingsHotkeyEmpty,
                 "launcher_hot_key is empty",
             ));
         }
@@ -1098,9 +1086,8 @@ pub async fn save_app_settings(
                 || launcher_hot_key_val == &effective_recording_hot_key
                 || launcher_hot_key_val == &effective_mic_toggle_hot_key
             {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    "启动器快捷键不能与其他快捷键相同",
+                return Err(frontend_error_kind(
+                    AppErrorKind::SettingsHotkeysIdentical,
                     format!(
                         "hot_key={}, image_hot_key={}, screenshot_hot_key={}, recording_hot_key={}, mic_toggle_hot_key={}, launcher_hot_key={}",
                         effective_hot_key,
@@ -1117,9 +1104,9 @@ pub async fn save_app_settings(
                 .global_shortcut()
                 .is_registered(launcher_hot_key_val.as_str())
             {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    format!("启动器快捷键被占用：{}", launcher_hot_key_val),
+                return Err(frontend_error_kind_params(
+                    AppErrorKind::SettingsHotkeyConflict,
+                    serde_json::json!({"key": launcher_hot_key_val}),
                     "launcher global shortcut already registered",
                 ));
             }
@@ -1153,9 +1140,9 @@ pub async fn save_app_settings(
                         launcher_hot_key_val,
                         e
                     );
-                    return Err(frontend_error(
-                        ErrorCode::ValidationError,
-                        format!("启动器快捷键被占用或注册失败：{}", launcher_hot_key_val),
+                    return Err(frontend_error_kind_params(
+                        AppErrorKind::ClipboardHotkeyRegisterFailed,
+                        serde_json::json!({"key": launcher_hot_key_val}),
                         e.to_string(),
                     ));
                 }
@@ -1166,9 +1153,8 @@ pub async fn save_app_settings(
 
     if let Some(ref doc_manager_hot_key_val) = doc_manager_hot_key {
         if doc_manager_hot_key_val.is_empty() {
-            return Err(frontend_error(
-                ErrorCode::ValidationError,
-                "文档管理快捷键不能为空",
+            return Err(frontend_error_kind(
+                AppErrorKind::SettingsHotkeyEmpty,
                 "doc_manager_hot_key is empty",
             ));
         }
@@ -1188,17 +1174,16 @@ pub async fn save_app_settings(
                 || doc_manager_hot_key_val == &effective_mic_toggle_hot_key
                 || doc_manager_hot_key_val == &effective_launcher_hot_key
             {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    "文档管理快捷键不能与其他快捷键相同",
+                return Err(frontend_error_kind(
+                    AppErrorKind::SettingsHotkeysIdentical,
                     format!("doc_manager_hot_key={} conflicts with existing shortcut", doc_manager_hot_key_val),
                 ));
             }
 
             if app.global_shortcut().is_registered(doc_manager_hot_key_val.as_str()) {
-                return Err(frontend_error(
-                    ErrorCode::ValidationError,
-                    format!("文档管理快捷键被占用：{}", doc_manager_hot_key_val),
+                return Err(frontend_error_kind_params(
+                    AppErrorKind::SettingsHotkeyConflict,
+                    serde_json::json!({"key": doc_manager_hot_key_val}),
                     "doc_manager global shortcut already registered",
                 ));
             }
@@ -1218,9 +1203,9 @@ pub async fn save_app_settings(
                     },
                 ) {
                     log::warn!("注册文档管理快捷键 '{}' 失败: {}", doc_manager_hot_key_val, e);
-                    return Err(frontend_error(
-                        ErrorCode::ValidationError,
-                        format!("文档管理快捷键被占用或注册失败：{}", doc_manager_hot_key_val),
+                    return Err(frontend_error_kind_params(
+                        AppErrorKind::ClipboardHotkeyRegisterFailed,
+                        serde_json::json!({"key": doc_manager_hot_key_val}),
                         e.to_string(),
                     ));
                 }
@@ -1406,9 +1391,8 @@ pub async fn save_app_settings(
 
     if let Some(ref ai_provider_val) = ai_provider {
         if ai_provider_val.is_empty() {
-            return Err(frontend_error(
-                ErrorCode::ValidationError,
-                "提供商名称不能为空",
+            return Err(frontend_error_kind(
+                AppErrorKind::SettingsProviderNameEmpty,
                 "ai_provider is empty",
             ));
         }
@@ -1434,7 +1418,7 @@ pub async fn save_app_settings(
             if api_key != "********" {
                 settings
                     .save_current_provider_config(api_key)
-                    .map_err(|e| frontend_error(ErrorCode::ConfigError, "保存提供商配置失败", e))?;
+                    .map_err(|e| frontend_error_kind(AppErrorKind::SettingsSaveProviderFailed, e))?;
 
                 if api_key.trim().is_empty() {
                     log::info!("提供商 {} 的API密钥已清空", ai_provider_val);
@@ -1445,17 +1429,15 @@ pub async fn save_app_settings(
                         }
                         Ok(_) => {
                             log::warn!("密钥保存验证失败: 读取到的密钥与保存的不一致");
-                            return Err(frontend_error(
-                                ErrorCode::SystemError,
-                                "系统凭据管理器异常: 密钥保存验证失败，请重试",
+                            return Err(frontend_error_kind(
+                                AppErrorKind::SettingsApiKeySaveFailed,
                                 "saved key mismatch",
                             ));
                         }
                         Err(e) => {
                             log::error!("密钥保存验证错误: {}", e);
-                            return Err(frontend_error(
-                                ErrorCode::SystemError,
-                                "系统凭据管理器错误: 无法读取刚保存的密钥",
+                            return Err(frontend_error_kind(
+                                AppErrorKind::SettingsApiKeyGetFailed,
                                 e,
                             ));
                         }
@@ -1469,10 +1451,10 @@ pub async fn save_app_settings(
 
     settings
         .validate()
-        .map_err(|e| frontend_error(ErrorCode::ValidationError, "设置验证失败", e))?;
+        .map_err(|e| frontend_error_kind(AppErrorKind::SettingsValidationFailed, e))?;
 
     save_settings(&settings)
-        .map_err(|e| frontend_error(ErrorCode::ConfigError, "保存设置失败", e))?;
+        .map_err(|e| frontend_error_kind(AppErrorKind::SettingsSaveFailed, e))?;
     set_image_fill_verify_mode(&settings.image_fill_verify_mode);
 
     let selection_enabled = settings.selection_enabled;
@@ -1613,9 +1595,8 @@ pub async fn test_ai_connection(
                 real_api_key = key;
             }
             _ => {
-                return Err(frontend_error(
-                    ErrorCode::ConfigError,
-                    "未能获取到真实的 API 密钥",
+                return Err(frontend_error_kind(
+                    AppErrorKind::SettingsLocalKeyNotFound,
                     "real api key not found",
                 ));
             }
@@ -1629,25 +1610,23 @@ pub async fn test_ai_connection(
     };
 
     let client = AIClient::new(config)
-        .map_err(|e| frontend_error(ErrorCode::NetworkError, "客户端初始化失败", e.to_string()))?;
+        .map_err(|e| frontend_error_kind(AppErrorKind::AiClientInitFailed, e.to_string()))?;
 
     match client.test_connection().await {
         Ok(success) => {
             if success {
                 Ok("连接成功".to_string())
             } else {
-                Err(frontend_error(
-                    ErrorCode::NetworkError,
-                    "连接测试未返回预期结果",
+                Err(frontend_error_kind(
+                    AppErrorKind::AiConnectionTestNoResponse,
                     "test_connection returned false",
                 ))
             }
         }
         Err(e) => {
             log::error!("AI连接测试失败: {}", e);
-            Err(frontend_error(
-                ErrorCode::NetworkError,
-                "连接测试失败",
+            Err(frontend_error_kind(
+                AppErrorKind::AiConnectionTestFailed,
                 e.to_string(),
             ))
         }
@@ -1663,7 +1642,7 @@ pub async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
         }
         Err(e) => {
             let error_msg =
-                frontend_error(ErrorCode::ClipboardError, "复制文本失败", e.to_string());
+                frontend_error_kind(AppErrorKind::ClipboardCopyTextFailed, e.to_string());
             log::error!("{}", error_msg);
             Err(error_msg)
         }
@@ -1694,7 +1673,7 @@ pub async fn copy_and_paste_text(
     }
     let clipboard_started_at = std::time::Instant::now();
     app.clipboard().write_text(text).map_err(|e| {
-        let error = frontend_error(ErrorCode::ClipboardError, "复制文本失败", e.to_string());
+        let error = frontend_error_kind(AppErrorKind::ClipboardCopyTextFailed, e.to_string());
         record_writeback_stage_metric(
             "结果窗",
             "write_clipboard",
@@ -1731,9 +1710,8 @@ pub async fn copy_and_paste_text(
     })
     .await
     .map_err(|e| {
-        frontend_error(
-            ErrorCode::SystemError,
-            "自动粘贴任务执行失败",
+        frontend_error_kind(
+            AppErrorKind::TaskExecutionFailed,
             e.to_string(),
         )
     })?;
@@ -1793,9 +1771,8 @@ pub async fn copy_and_paste_text(
                 Some(result.detail.clone()),
             );
             emit_writeback_result(&app, &result);
-            Err(frontend_error(
-                ErrorCode::ClipboardError,
-                "自动粘贴失败",
+            Err(frontend_error_kind(
+                AppErrorKind::ClipboardAutoPasteFailed,
                 result.detail,
             ))
         }
@@ -1814,18 +1791,16 @@ pub async fn remove_ai_provider(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
     if provider.is_empty() {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "提供商名称不能为空",
+        return Err(frontend_error_kind(
+            AppErrorKind::SettingsProviderNameEmpty,
             "provider is empty",
         ));
     }
 
     let is_builtin = matches!(provider.as_str(), "deepseek" | "qwen" | "xiaomimimo");
     if is_builtin {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "内置提供商不支持删除",
+        return Err(frontend_error_kind(
+            AppErrorKind::InternalError,
             provider.clone(),
         ));
     }
@@ -1836,9 +1811,8 @@ pub async fn remove_ai_provider(
     };
 
     if settings.provider_configs.remove(&provider).is_none() {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "未找到该提供商配置",
+        return Err(frontend_error_kind(
+            AppErrorKind::AiProviderNotFound,
             provider.clone(),
         ));
     }
@@ -1855,7 +1829,7 @@ pub async fn remove_ai_provider(
     }
 
     save_settings(&settings)
-        .map_err(|e| frontend_error(ErrorCode::ConfigError, "保存设置失败", e))?;
+        .map_err(|e| frontend_error_kind(AppErrorKind::SettingsSaveFailed, e))?;
 
     {
         let mut state_guard = lock_arc_mutex(state.inner());
@@ -1919,9 +1893,8 @@ pub async fn check_previews_ready(
     })
     .await
     .map_err(|e| {
-        frontend_error(
-            ErrorCode::SystemError,
-            "检查预览状态任务执行失败",
+        frontend_error_kind(
+            AppErrorKind::TaskExecutionFailed,
             e.to_string(),
         )
     })?

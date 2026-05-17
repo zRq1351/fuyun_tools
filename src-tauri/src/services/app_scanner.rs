@@ -1,3 +1,4 @@
+use crate::core::error_codes::AppErrorKind;
 use crate::utils::icon_extractor;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -174,9 +175,9 @@ pub fn search_apps(query: &str, limit: usize) -> Vec<LauncherItem> {
 #[cfg(target_os = "windows")]
 fn shell_execute_open(path: &str, args: Option<&str>) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
-    use windows::Win32::UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_FLAG_NO_UI};
+    use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SHELLEXECUTEINFOW};
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
-    use windows::Win32::Foundation::{HWND, HINSTANCE};
+    use windows::Win32::Foundation::{HINSTANCE, HWND};
     use windows::core::PCWSTR;
 
     let wide_path: Vec<u16> = std::ffi::OsStr::new(path)
@@ -212,13 +213,13 @@ fn shell_execute_open(path: &str, args: Option<&str>) -> Result<(), String> {
         Ok(())
     } else {
         let err = std::io::Error::last_os_error();
-        Err(format!("启动失败: {}", err))
+        Err(AppErrorKind::LauncherStartupFailed.to_frontend_json_with_details(format!("{}", err)))
     }
 }
 
 #[cfg(not(target_os = "windows"))]
 fn shell_execute_open(_path: &str, _args: Option<&str>) -> Result<(), String> {
-    Err("非 Windows 平台不支持 ShellExecute".to_string())
+    Err(AppErrorKind::LauncherNotWindows.to_frontend_json())
 }
 
 pub fn launch_app(path: &str) -> Result<(), String> {
@@ -261,7 +262,7 @@ pub fn launch_app(path: &str) -> Result<(), String> {
                 }
                 Err(e) => {
                     log::error!("[launch_app] 启动失败: {}", e);
-                    Err(format!("启动失败: {}", e))
+                    Err(AppErrorKind::LauncherStartupFailed.to_frontend_json_with_details(format!("{}", e)))
                 }
             }
         }
@@ -274,7 +275,7 @@ pub fn launch_app(path: &str) -> Result<(), String> {
                 }
                 Err(e) => {
                     log::error!("[launch_app] 启动失败: {}", e);
-                    Err(format!("启动失败: {}", e))
+                    Err(AppErrorKind::LauncherStartupFailed.to_frontend_json_with_details(format!("{}", e)))
                 }
             }
         }
@@ -326,7 +327,7 @@ pub fn launch_app_with_args(path: &str, args: Option<&str>) -> Result<(), String
                 }
                 Err(e) => {
                     log::error!("[launch_app_with_args] 启动失败: {}", e);
-                    Err(format!("启动失败: {}", e))
+                    Err(AppErrorKind::LauncherStartupFailed.to_frontend_json_with_details(format!("{}", e)))
                 }
             }
         }
@@ -348,7 +349,7 @@ pub fn launch_app_with_args(path: &str, args: Option<&str>) -> Result<(), String
                 }
                 Err(e) => {
                     log::error!("[launch_app_with_args] 启动失败: {}", e);
-                    Err(format!("启动失败: {}", e))
+                    Err(AppErrorKind::LauncherStartupFailed.to_frontend_json_with_details(format!("{}", e)))
                 }
             }
         }

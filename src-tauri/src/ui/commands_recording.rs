@@ -1,5 +1,6 @@
 use crate::core::app_state::AppState as SharedAppState;
-use crate::core::error::to_frontend_error_string;
+use crate::core::error_codes::AppErrorKind;
+use crate::core::frontend_error::app_error_to_frontend_json;
 use crate::core::perf_metrics::record_perf_metric;
 use crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path;
 use crate::features::recording::recorder_service;
@@ -116,11 +117,11 @@ fn normalize_sha256_hex(raw: &str) -> Option<String> {
 fn split_download_url_and_sha256(raw: &str) -> Result<(String, Option<String>), String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err("下载地址不能为空".to_string());
+        return Err(AppErrorKind::VcRuntimeDownloadUrlEmpty.to_frontend_json());
     }
     if let Some((url, fragment)) = trimmed.split_once("#sha256=") {
         let expected = normalize_sha256_hex(fragment)
-            .ok_or_else(|| "下载地址中的 sha256 参数格式无效（应为64位十六进制）".to_string())?;
+            .ok_or_else(|| AppErrorKind::VcRuntimeDownloadUrlSha256Invalid.to_frontend_json())?;
         return Ok((url.trim().to_string(), Some(expected)));
     }
     Ok((trimmed.to_string(), None))
@@ -381,7 +382,7 @@ pub async fn start_recording(
     let state_arc = state.inner().clone();
     let result = run_blocking_command(move || {
         recorder_service::start_recording(&app, state_arc, request)
-            .map_err(to_frontend_error_string)
+            .map_err(app_error_to_frontend_json)
     })
     .await;
     match &result {
@@ -433,7 +434,7 @@ pub async fn stop_recording(
                 match recorder_service::cancel_recording(&app, state_arc.clone(), fallback_req) {
                     Ok(()) => {
                         log::warn!("stop_recording 失败，已自动执行 cancel_recording 兜底清理");
-                        Err(to_frontend_error_string(stop_err))
+                        Err(app_error_to_frontend_json(stop_err))
                     }
                     Err(cancel_err) => {
                         log::warn!(
@@ -442,7 +443,7 @@ pub async fn stop_recording(
                         );
                         let merged_err =
                             stop_err.with_details(format!("自动兜底清理失败: {}", cancel_err));
-                        Err(to_frontend_error_string(merged_err))
+                        Err(app_error_to_frontend_json(merged_err))
                     }
                 }
             }
@@ -477,7 +478,7 @@ pub async fn cancel_recording(
     let state_arc = state.inner().clone();
     run_blocking_command(move || {
         recorder_service::cancel_recording(&app, state_arc, request)
-            .map_err(to_frontend_error_string)
+            .map_err(app_error_to_frontend_json)
     })
     .await
 }
@@ -489,7 +490,7 @@ pub async fn pause_recording(
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
     run_blocking_command(move || {
-        recorder_service::pause_recording(&app, state_arc).map_err(to_frontend_error_string)
+        recorder_service::pause_recording(&app, state_arc).map_err(app_error_to_frontend_json)
     })
     .await
 }
@@ -501,7 +502,7 @@ pub async fn resume_recording(
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
     run_blocking_command(move || {
-        recorder_service::resume_recording(&app, state_arc).map_err(to_frontend_error_string)
+        recorder_service::resume_recording(&app, state_arc).map_err(app_error_to_frontend_json)
     })
     .await
 }
@@ -531,7 +532,7 @@ pub async fn update_recording_audio_capture(
             request.capture_microphone,
             request.microphone_device_id,
         )
-        .map_err(to_frontend_error_string)
+            .map_err(app_error_to_frontend_json)
     })
     .await
 }
@@ -548,24 +549,24 @@ pub async fn get_recording_output_dir(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<String, String> {
     recorder_service::get_recording_output_dir(state.inner().clone())
-        .map_err(to_frontend_error_string)
+        .map_err(app_error_to_frontend_json)
 }
 
 #[tauri::command]
 pub async fn list_recording_audio_devices(app: AppHandle) -> Result<Vec<AudioInputDevice>, String> {
-    recorder_service::list_audio_devices(&app).map_err(to_frontend_error_string)
+    recorder_service::list_audio_devices(&app).map_err(app_error_to_frontend_json)
 }
 
 #[tauri::command]
 pub async fn list_recording_system_output_devices(
     app: AppHandle,
 ) -> Result<Vec<AudioInputDevice>, String> {
-    recorder_service::list_system_output_devices(&app).map_err(to_frontend_error_string)
+    recorder_service::list_system_output_devices(&app).map_err(app_error_to_frontend_json)
 }
 
 #[tauri::command]
 pub async fn list_recording_audio_processes() -> Result<Vec<AudioProcessItem>, String> {
-    recorder_service::list_audio_process_items().map_err(to_frontend_error_string)
+    recorder_service::list_audio_process_items().map_err(app_error_to_frontend_json)
 }
 // input device listing & capability/installer commands removed in native WASAPI mode
 
@@ -575,7 +576,7 @@ pub async fn open_recording_folder(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
     recorder_service::open_recording_folder(&app, state.inner().clone())
-        .map_err(to_frontend_error_string)
+        .map_err(app_error_to_frontend_json)
 }
 
 #[tauri::command]
@@ -777,7 +778,7 @@ pub async fn run_recording_regression(
     let state_arc = state.inner().clone();
     run_blocking_command(move || {
         recorder_service::run_recording_regression(&app, state_arc)
-            .map_err(to_frontend_error_string)
+            .map_err(app_error_to_frontend_json)
     })
     .await
 }

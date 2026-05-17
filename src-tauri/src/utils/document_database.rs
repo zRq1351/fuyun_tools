@@ -1,3 +1,4 @@
+﻿use crate::core::error_codes::AppErrorKind;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
@@ -131,18 +132,18 @@ async fn get_docs_db_pool() -> Result<&'static SqlitePool, String> {
         .get_or_try_init(|| async {
             let db_path = get_docs_db_path();
             if let Some(parent) = db_path.parent() {
-                fs::create_dir_all(parent).map_err(|e| format!("创建文档数据库目录失败: {}", e))?;
+                fs::create_dir_all(parent).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             }
             let pool = SqlitePoolOptions::new()
                 .max_connections(3)
                 .connect_with(db_options(&db_path))
                 .await
-                .map_err(|e| format!("打开文档数据库连接池失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
             let mut conn = pool
                 .acquire()
                 .await
-                .map_err(|e| format!("获取数据库连接失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             ensure_docs_db_schema(&mut conn).await?;
 
             Ok(pool)
@@ -154,7 +155,7 @@ async fn open_docs_db() -> Result<sqlx::pool::PoolConnection<Sqlite>, String> {
     let pool = get_docs_db_pool().await?;
     pool.acquire()
         .await
-        .map_err(|e| format!("获取数据库连接失败: {}", e))
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String> {
@@ -169,7 +170,7 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     )
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("初始化文档数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS document_categories (
@@ -184,7 +185,7 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     )
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("初始化文档数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS document_files (
@@ -212,7 +213,7 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     )
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("初始化文档数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_doc_files_root_id ON document_files(root_id)")
         .execute(&mut *conn).await.ok();
@@ -239,7 +240,7 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     )
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("初始化文档数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS document_import_items (
@@ -253,7 +254,7 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     )
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("初始化文档数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_import_items_import_id ON document_import_items(import_id)")
         .execute(&mut *conn).await.ok();
@@ -269,7 +270,7 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     )
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("初始化文档数据库失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     ensure_category_directories(conn).await?;
 
@@ -280,7 +281,7 @@ async fn ensure_category_directories(conn: &mut SqliteConnection) -> Result<(), 
     let roots = sqlx::query("SELECT id, root_path FROM document_roots")
         .fetch_all(&mut *conn)
         .await
-        .map_err(|e| format!("查询根目录失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     if roots.is_empty() {
         return Ok(());
@@ -289,7 +290,7 @@ async fn ensure_category_directories(conn: &mut SqliteConnection) -> Result<(), 
     let cats = sqlx::query("SELECT root_id, name FROM document_categories ORDER BY position")
         .fetch_all(&mut *conn)
         .await
-        .map_err(|e| format!("查询分类失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     for row in &roots {
         let rid: i64 = row.try_get(0).unwrap_or(0);
@@ -322,12 +323,12 @@ pub async fn add_doc_root(name: &str, root_path: &str) -> Result<DocRoot, String
         .bind(max_pos + 1)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("添加根目录失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let id = sqlx::query_scalar::<_, i64>("SELECT last_insert_rowid()")
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("获取ID失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(DocRoot {
         id,
@@ -344,7 +345,7 @@ pub async fn get_doc_roots() -> Result<Vec<DocRoot>, String> {
     )
     .fetch_all(&mut *conn)
     .await
-    .map_err(|e| format!("获取根目录列表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let roots = rows
         .iter()
@@ -361,16 +362,16 @@ pub async fn get_doc_roots() -> Result<Vec<DocRoot>, String> {
 
 pub async fn reorder_doc_roots(ids: Vec<i64>) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+    let mut tx = conn.begin().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     for (idx, id) in ids.iter().enumerate() {
         sqlx::query::<Sqlite>("UPDATE document_roots SET position = ?1 WHERE id = ?2")
             .bind(idx as i64)
             .bind(*id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("更新根目录顺序失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))
+    tx.commit().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 pub async fn remove_doc_root(id: i64) -> Result<(), String> {
@@ -382,17 +383,17 @@ pub async fn remove_doc_root(id: i64) -> Result<(), String> {
         .bind(id)
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("查询根目录下文件失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     if count.0 > 0 {
-        return Err("该目录下存在文件，请先将文件删除或移至其他目录后再删除".to_string());
+        return Err(AppErrorKind::DocumentDirHasFiles.to_frontend_json());
     }
 
     let root = sqlx::query("SELECT name, root_path FROM document_roots WHERE id = ?1")
         .bind(id)
         .fetch_optional(&mut *conn)
         .await
-        .map_err(|e| format!("查询根目录失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     if let Some(row) = root {
         let root_path: String = row.try_get(1).unwrap_or_default();
@@ -400,7 +401,7 @@ pub async fn remove_doc_root(id: i64) -> Result<(), String> {
             .bind(id)
             .fetch_all(&mut *conn)
             .await
-            .map_err(|e| format!("查询分类失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         for crow in &cat_rows {
             let cat_name: String = crow.try_get(0).unwrap_or_default();
             let dir = Path::new(&root_path).join(&cat_name);
@@ -414,13 +415,13 @@ pub async fn remove_doc_root(id: i64) -> Result<(), String> {
         .bind(id)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("删除关联分类失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query("DELETE FROM document_roots WHERE id = ?1")
         .bind(id)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("删除根目录失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(())
 }
@@ -444,12 +445,12 @@ pub async fn add_doc_category(name: &str, icon: &str, color: &str, root_id: i64)
     .bind(root_id)
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("添加分类失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let id = sqlx::query_scalar::<_, i64>("SELECT last_insert_rowid()")
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("获取ID失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(DocCategory {
         id,
@@ -469,7 +470,7 @@ pub async fn get_doc_categories(root_id: Option<i64>) -> Result<Vec<DocCategory>
     .bind(root_id)
     .fetch_all(&mut *conn)
     .await
-    .map_err(|e| format!("获取分类列表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let categories = rows
         .iter()
@@ -495,10 +496,10 @@ pub async fn remove_doc_category(id: i64) -> Result<(), String> {
         .bind(id)
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("查询分类下文件失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     if count.0 > 0 {
-        return Err("该分类下存在文件，请先将文件移至其他分类或取消分类后再删除".to_string());
+        return Err(AppErrorKind::DocumentCategoryHasFiles.to_frontend_json());
     }
 
     let cat_info = sqlx::query(
@@ -507,13 +508,13 @@ pub async fn remove_doc_category(id: i64) -> Result<(), String> {
         .bind(id)
         .fetch_optional(&mut *conn)
         .await
-        .map_err(|e| format!("查询分类信息失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query("DELETE FROM document_categories WHERE id = ?1")
         .bind(id)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("删除分类失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     if let Some(row) = cat_info {
         let cat_name: String = row.try_get(0).unwrap_or_default();
@@ -538,7 +539,7 @@ pub async fn update_managed_path_prefix(old_prefix: &str, new_prefix: &str, root
     .bind(category_id)
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("更新文件路径失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -548,14 +549,14 @@ pub async fn rename_doc_category(id: i64, name: &str) -> Result<String, String> 
         .bind(id)
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("查询分类失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query("UPDATE document_categories SET name = ?1 WHERE id = ?2")
         .bind(name)
         .bind(id)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("重命名分类失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(old_name)
 }
@@ -565,7 +566,7 @@ pub async fn reorder_doc_categories(ids: Vec<i64>) -> Result<(), String> {
     let mut tx = conn
         .begin()
         .await
-        .map_err(|e| format!("创建事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     for (idx, id) in ids.iter().enumerate() {
         sqlx::query::<Sqlite>("UPDATE document_categories SET position = ?1 WHERE id = ?2")
@@ -573,12 +574,12 @@ pub async fn reorder_doc_categories(ids: Vec<i64>) -> Result<(), String> {
             .bind(*id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("更新分类顺序失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(())
 }
@@ -620,12 +621,12 @@ pub async fn insert_doc_file(
     .bind(content_text)
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("插入文件记录失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let id = sqlx::query_scalar::<_, i64>("SELECT last_insert_rowid()")
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("获取ID失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let _ = sqlx::query(
         "INSERT INTO document_files_fts(rowid, title, content_text, tags, notes) VALUES (?1, ?2, ?3, ?4, '')",
@@ -648,13 +649,13 @@ pub async fn delete_doc_file(id: i64) -> Result<Option<String>, String> {
             .bind(id)
             .fetch_optional(&mut *conn)
             .await
-            .map_err(|e| format!("查询文件记录失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query("DELETE FROM document_files WHERE id = ?1")
         .bind(id)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("删除文件记录失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let _ = sqlx::query("DELETE FROM document_files_fts WHERE rowid = ?1")
         .bind(id)
@@ -679,7 +680,7 @@ pub async fn delete_doc_record(id: i64) -> Result<(), String> {
         .bind(id)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("删除文件记录失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let _ = sqlx::query("DELETE FROM document_files_fts WHERE rowid = ?1")
         .bind(id)
         .execute(&mut *conn)
@@ -745,7 +746,7 @@ pub async fn update_doc_file_meta(
         .bind(id)
         .fetch_optional(&mut *conn)
         .await
-        .map_err(|e| format!("查询文件信息失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
         if let Some(row) = row {
             let storage_mode: String = row.try_get(0).unwrap_or_default();
@@ -762,7 +763,7 @@ pub async fn update_doc_file_meta(
                         .bind(new_cid)
                         .fetch_optional(&mut *conn)
                         .await
-                        .map_err(|e| format!("查询分类失败: {}", e))?
+                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                         .unwrap_or_default()
                 };
                 needs_move = true;
@@ -776,7 +777,7 @@ pub async fn update_doc_file_meta(
             .bind(id)
             .execute(&mut *conn)
             .await
-            .map_err(|e| format!("更新标题失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
         let _ = sqlx::query("UPDATE document_files_fts SET title = ?1 WHERE rowid = ?2")
             .bind(t)
@@ -791,14 +792,14 @@ pub async fn update_doc_file_meta(
                 .bind(id)
                 .execute(&mut *conn)
                 .await
-                .map_err(|e| format!("更新分类失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         } else {
             sqlx::query("UPDATE document_files SET category_id = ?1 WHERE id = ?2")
                 .bind(cid)
                 .bind(id)
                 .execute(&mut *conn)
                 .await
-                .map_err(|e| format!("更新分类失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
     }
 
@@ -808,7 +809,7 @@ pub async fn update_doc_file_meta(
             .bind(id)
             .execute(&mut *conn)
             .await
-            .map_err(|e| format!("更新标签失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
         let _ = sqlx::query("UPDATE document_files_fts SET tags = ?1 WHERE rowid = ?2")
             .bind(tg)
@@ -823,7 +824,7 @@ pub async fn update_doc_file_meta(
             .bind(id)
             .execute(&mut *conn)
             .await
-            .map_err(|e| format!("更新备注失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
         let _ = sqlx::query("UPDATE document_files_fts SET notes = ?1 WHERE rowid = ?2")
             .bind(n)
@@ -841,7 +842,7 @@ pub async fn update_doc_file_meta(
             } else {
                 Path::new(&root_path).join(&new_cat_name)
             };
-            fs::create_dir_all(&target_dir).map_err(|e| format!("创建目标目录失败: {}", e))?;
+            fs::create_dir_all(&target_dir).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let new_name = resolve_unused_filename(&target_dir,
                 Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name),
                 Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or(""));
@@ -853,7 +854,7 @@ pub async fn update_doc_file_meta(
                 .bind(id)
                 .execute(&mut *conn)
                 .await
-                .map_err(|e| format!("更新文件路径失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
     }
 
@@ -867,14 +868,14 @@ pub async fn update_doc_managed_path(id: i64, managed_path: &str) -> Result<(), 
         .bind(id)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("更新文件路径失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
 pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
     let doc = get_doc_file_by_id(id)
         .await?
-        .ok_or("文件不存在".to_string())?;
+        .ok_or(AppErrorKind::DocumentFileNotFound.to_frontend_json())?;
 
     if doc.root_id == new_root_id {
         return Ok(());
@@ -882,7 +883,7 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
 
     let new_root = get_doc_root_by_id(new_root_id)
         .await?
-        .ok_or("目标根目录不存在".to_string())?;
+        .ok_or(AppErrorKind::InternalError.to_frontend_json())?;
 
     let mut conn = open_docs_db().await?;
 
@@ -905,13 +906,13 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
             };
 
             fs::create_dir_all(&target_dir)
-                .map_err(|e| format!("创建目标目录失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
             let new_path = resolve_unused_filename(&target_dir, file_name, &doc.file_ext);
             let dest = target_dir.join(&new_path);
 
             safe_move_file(old_path, &dest)
-                .map_err(|e| format!("移动文件失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
             let new_managed_path = dest.to_string_lossy().to_string();
             sqlx::query("UPDATE document_files SET managed_path = ?1, root_id = ?2 WHERE id = ?3")
@@ -920,14 +921,14 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
                 .bind(id)
                 .execute(&mut *conn)
                 .await
-                .map_err(|e| format!("更新文件记录失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         } else {
             sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
                 .bind(new_root_id)
                 .bind(id)
                 .execute(&mut *conn)
                 .await
-                .map_err(|e| format!("更新文件记录失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
     } else {
         sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
@@ -935,7 +936,7 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
             .bind(id)
             .execute(&mut *conn)
             .await
-            .map_err(|e| format!("更新文件记录失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     Ok(())
@@ -947,17 +948,17 @@ pub async fn atomic_move_doc(
     new_category_id: Option<i64>,
 ) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+    let mut tx = conn.begin().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let doc = get_doc_file_in_tx(&mut tx, id)
         .await?
-        .ok_or("文件不存在".to_string())?;
+        .ok_or(AppErrorKind::DocumentFileNotFound.to_frontend_json())?;
 
     let effective_root_id = new_root_id.unwrap_or(doc.root_id);
     if effective_root_id != doc.root_id {
         let new_root = get_doc_root_by_id_in_tx(&mut tx, effective_root_id)
             .await?
-            .ok_or("目标根目录不存在".to_string())?;
+            .ok_or(AppErrorKind::InternalError.to_frontend_json())?;
 
         if doc.storage_mode == "repo" {
             let old_path = Path::new(&doc.managed_path);
@@ -974,7 +975,7 @@ pub async fn atomic_move_doc(
                             .bind(cid)
                             .fetch_optional(&mut *tx)
                             .await
-                            .map_err(|e| format!("查询分类失败: {}", e))?
+                            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                             .unwrap_or_default()
                     }
                 } else {
@@ -985,14 +986,14 @@ pub async fn atomic_move_doc(
                 } else {
                     Path::new(&new_root.root_path).join(&target_cat_name)
                 };
-                fs::create_dir_all(&target_dir).map_err(|e| format!("创建目标目录失败: {}", e))?;
+                fs::create_dir_all(&target_dir).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
                 let new_name = resolve_unused_filename(
                     &target_dir,
                     Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name),
                     Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or(""),
                 );
                 let dest = target_dir.join(&new_name);
-                safe_move_file(old_path, &dest).map_err(|e| format!("移动文件失败: {}", e))?;
+                safe_move_file(old_path, &dest).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
                 let new_managed = dest.to_string_lossy().to_string();
                 sqlx::query("UPDATE document_files SET root_id = ?1, managed_path = ?2 WHERE id = ?3")
                     .bind(effective_root_id)
@@ -1000,14 +1001,14 @@ pub async fn atomic_move_doc(
                     .bind(id)
                     .execute(&mut *tx)
                     .await
-                    .map_err(|e| format!("更新文件记录失败: {}", e))?;
+                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             } else {
                 sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
                     .bind(effective_root_id)
                     .bind(id)
                     .execute(&mut *tx)
                     .await
-                    .map_err(|e| format!("更新文件记录失败: {}", e))?;
+                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             }
         } else {
             sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
@@ -1015,7 +1016,7 @@ pub async fn atomic_move_doc(
                 .bind(id)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| format!("更新文件记录失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
     }
 
@@ -1030,7 +1031,7 @@ pub async fn atomic_move_doc(
                 .bind(id)
                 .fetch_optional(&mut *tx)
                 .await
-                .map_err(|e| format!("查询文件信息失败: {}", e))?;
+                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
                 if let Some(row) = row {
                     let storage_mode: String = row.try_get(0).unwrap_or_default();
@@ -1045,7 +1046,7 @@ pub async fn atomic_move_doc(
                                 .bind(cid)
                                 .fetch_optional(&mut *tx)
                                 .await
-                                .map_err(|e| format!("查询分类失败: {}", e))?
+                                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                                 .unwrap_or_default()
                         };
                         let old_path = Path::new(&old_managed);
@@ -1056,7 +1057,7 @@ pub async fn atomic_move_doc(
                             } else {
                                 Path::new(&root_path).join(&new_cat_name)
                             };
-                            fs::create_dir_all(&target_dir).map_err(|e| format!("创建目标目录失败: {}", e))?;
+                            fs::create_dir_all(&target_dir).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
                             let new_name = resolve_unused_filename(
                                 &target_dir,
                                 Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name),
@@ -1069,7 +1070,7 @@ pub async fn atomic_move_doc(
                                 .bind(id)
                                 .execute(&mut *tx)
                                 .await
-                                .map_err(|e| format!("更新文件路径失败: {}", e))?;
+                                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
                         }
                     }
                 }
@@ -1079,19 +1080,19 @@ pub async fn atomic_move_doc(
                     .bind(id)
                     .execute(&mut *tx)
                     .await
-                    .map_err(|e| format!("更新分类失败: {}", e))?;
+                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             } else {
                 sqlx::query("UPDATE document_files SET category_id = ?1 WHERE id = ?2")
                     .bind(cid)
                     .bind(id)
                     .execute(&mut *tx)
                     .await
-                    .map_err(|e| format!("更新分类失败: {}", e))?;
+                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             }
         }
     }
 
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))
+    tx.commit().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 async fn get_doc_file_in_tx(tx: &mut sqlx::Transaction<'_, Sqlite>, id: i64) -> Result<Option<DocFile>, String> {
@@ -1106,7 +1107,7 @@ async fn get_doc_file_in_tx(tx: &mut sqlx::Transaction<'_, Sqlite>, id: i64) -> 
     .bind(id)
     .fetch_optional(&mut **tx)
     .await
-    .map_err(|e| format!("查询文件失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(row.as_ref().map(|r| row_to_doc_file(r)))
 }
 
@@ -1115,7 +1116,7 @@ async fn get_doc_root_by_id_in_tx(tx: &mut sqlx::Transaction<'_, Sqlite>, id: i6
         .bind(id)
         .fetch_optional(&mut **tx)
         .await
-        .map_err(|e| format!("查询根目录失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(row.map(|r| DocRoot {
         id: r.try_get::<i64, _>(0).unwrap_or(0),
         name: r.try_get::<String, _>(1).unwrap_or_default(),
@@ -1126,16 +1127,16 @@ async fn get_doc_root_by_id_in_tx(tx: &mut sqlx::Transaction<'_, Sqlite>, id: i6
 
 pub async fn reorder_doc_files(ids: Vec<i64>) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+    let mut tx = conn.begin().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     for (idx, id) in ids.iter().enumerate() {
         sqlx::query::<Sqlite>("UPDATE document_files SET sort_order = ?1 WHERE id = ?2")
             .bind(idx as i64)
             .bind(*id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("更新文件顺序失败: {}", e))?;
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))
+    tx.commit().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 pub async fn get_doc_root_by_id(id: i64) -> Result<Option<DocRoot>, String> {
@@ -1144,7 +1145,7 @@ pub async fn get_doc_root_by_id(id: i64) -> Result<Option<DocRoot>, String> {
         .bind(id)
         .fetch_optional(&mut *conn)
         .await
-        .map_err(|e| format!("查询根目录失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(row.map(|r| DocRoot {
         id: r.try_get::<i64, _>(0).unwrap_or(0),
@@ -1162,7 +1163,7 @@ pub async fn get_managed_paths_for_root(root_id: i64) -> Result<std::collections
         .bind(root_id)
         .fetch_all(&mut *conn)
         .await
-        .map_err(|e| format!("查询管理路径失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(rows.into_iter().collect())
 }
 
@@ -1179,7 +1180,7 @@ pub async fn get_doc_file_by_id(id: i64) -> Result<Option<DocFile>, String> {
     .bind(id)
     .fetch_optional(&mut *conn)
     .await
-    .map_err(|e| format!("查询文件失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(row.map(|r| row_to_doc_file(&r)))
 }
@@ -1190,7 +1191,7 @@ pub async fn increment_visit_count(id: i64) -> Result<(), String> {
         .bind(id)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("更新访问计数失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -1200,7 +1201,7 @@ pub async fn mark_doc_missing(id: i64) -> Result<(), String> {
         .bind(id)
         .execute(&mut *conn)
         .await
-        .map_err(|e| format!("标记文件缺失失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -1214,7 +1215,7 @@ pub async fn doc_exists_by_hash(file_hash: &str, root_id: i64, category_id: Opti
     .bind(category_id)
     .fetch_one(&mut *conn)
     .await
-    .map_err(|e| format!("查询文件重复失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(count > 0)
 }
 
@@ -1316,7 +1317,7 @@ pub async fn get_doc_page(
             .bind(&extra_param)
             .fetch_one(&mut *conn)
             .await
-            .map_err(|e| format!("查询总数失败: {}", e))?
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
     } else {
         sqlx::query_scalar::<_, i64>(&count_sql)
             .bind(category_id)
@@ -1324,7 +1325,7 @@ pub async fn get_doc_page(
             .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
             .fetch_one(&mut *conn)
             .await
-            .map_err(|e| format!("查询总数失败: {}", e))?
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
     };
 
     let rows = if has_extra {
@@ -1337,7 +1338,7 @@ pub async fn get_doc_page(
             .bind(offset)
             .fetch_all(&mut *conn)
             .await
-            .map_err(|e| format!("查询文件列表失败: {}", e))?
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
     } else {
         sqlx::query::<Sqlite>(&list_sql)
             .bind(category_id)
@@ -1347,7 +1348,7 @@ pub async fn get_doc_page(
             .bind(offset)
             .fetch_all(&mut *conn)
             .await
-            .map_err(|e| format!("查询文件列表失败: {}", e))?
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
     };
 
     let items: Vec<DocFile> = rows.iter().map(|r| row_to_doc_file(r)).collect();
@@ -1369,7 +1370,7 @@ pub async fn get_doc_stats(root_id: Option<i64>) -> Result<DocStats, String> {
     .bind(root_id)
     .fetch_one(&mut *conn)
     .await
-    .map_err(|e| format!("查询文件总数失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let total_size: i64 = sqlx::query_scalar::<_, i64>(
         "SELECT COALESCE(SUM(file_size), 0) FROM document_files WHERE (?1 IS NULL OR root_id = ?1)",
@@ -1377,7 +1378,7 @@ pub async fn get_doc_stats(root_id: Option<i64>) -> Result<DocStats, String> {
     .bind(root_id)
     .fetch_one(&mut *conn)
     .await
-    .map_err(|e| format!("查询总大小失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let missing_files: i64 = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM document_files WHERE is_missing = 1 AND (?1 IS NULL OR root_id = ?1)",
@@ -1385,7 +1386,7 @@ pub async fn get_doc_stats(root_id: Option<i64>) -> Result<DocStats, String> {
     .bind(root_id)
     .fetch_one(&mut *conn)
     .await
-    .map_err(|e| format!("查询缺失文件数失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let rows = sqlx::query::<Sqlite>(
         "SELECT df.category_id, COALESCE(c.name, '未分类') as category_name, COUNT(*) as cnt
@@ -1398,7 +1399,7 @@ pub async fn get_doc_stats(root_id: Option<i64>) -> Result<DocStats, String> {
     .bind(root_id)
     .fetch_all(&mut *conn)
     .await
-    .map_err(|e| format!("查询分类统计失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let category_counts: Vec<CategoryCount> = rows
         .iter()
@@ -1457,15 +1458,15 @@ fn build_fts_query(keyword: &str) -> String {
 }
 
 pub fn compute_file_hash(path: &std::path::Path) -> Result<String, String> {
-    let meta = fs::metadata(path).map_err(|e| format!("读取文件信息失败: {}", e))?;
+    let meta = fs::metadata(path).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let file_size = meta.len();
-    let mut file = fs::File::open(path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let mut file = fs::File::open(path).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let mut hasher = xxhash_rust::xxh3::Xxh3::new();
     let mut buf = [0u8; 65536];
     let max_hash_bytes: u64 = 10 * 1024 * 1024;
     let mut read_total: u64 = 0;
     loop {
-        let n = file.read(&mut buf).map_err(|e| format!("读取文件失败: {}", e))?;
+        let n = file.read(&mut buf).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         if n == 0 { break; }
         hasher.update(&buf[..n]);
         read_total += n as u64;
@@ -1485,7 +1486,7 @@ pub fn safe_move_file(src: &Path, dest: &Path) -> Result<(), String> {
     let options = fs_extra::file::CopyOptions::new().overwrite(true);
     fs_extra::file::move_file(src, dest, &options)
         .map(|_| ())
-        .map_err(|e| format!("移动文件失败: {}", e))
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 pub fn resolve_unused_filename(dir: &std::path::Path, base_name: &str, ext: &str) -> String {
@@ -1527,11 +1528,11 @@ pub async fn create_import_history(
     .bind(now)
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("创建导入历史失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     sqlx::query_scalar::<_, i64>("SELECT last_insert_rowid()")
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| format!("获取历史ID失败: {}", e))
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 pub async fn link_import_item(import_id: i64, doc_file_id: i64, source_path: &str, managed_path: &str) -> Result<(), String> {
@@ -1545,7 +1546,7 @@ pub async fn link_import_item(import_id: i64, doc_file_id: i64, source_path: &st
     .bind(managed_path)
     .execute(&mut *conn)
     .await
-    .map_err(|e| format!("关联导入记录失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 
@@ -1561,7 +1562,7 @@ pub async fn get_import_history(limit: i64) -> Result<Vec<ImportHistory>, String
     .bind(limit)
     .fetch_all(&mut *conn)
     .await
-    .map_err(|e| format!("查询导入历史失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(rows.iter().map(|r| ImportHistory {
         id: r.try_get::<i64, _>(0).unwrap_or(0),
         root_id: r.try_get::<i64, _>(1).unwrap_or(0),
@@ -1580,7 +1581,7 @@ pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
     let mut tx = conn
         .begin()
         .await
-        .map_err(|e| format!("创建事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let items = sqlx::query::<Sqlite>(
         "SELECT dii.doc_file_id, dii.source_path, COALESCE(df.managed_path, dii.managed_path) as managed_path, di.storage_mode
@@ -1592,7 +1593,7 @@ pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
     .bind(import_id)
     .fetch_all(&mut *tx)
     .await
-    .map_err(|e| format!("查询导入项失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let mut errors = Vec::new();
     for row in &items {
@@ -1640,14 +1641,14 @@ pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
 
     tx.commit()
         .await
-        .map_err(|e| format!("提交事务失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(errors)
 }
 
 pub async fn undo_import_item(import_id: i64, doc_file_id: i64) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("创建事务失败: {}", e))?;
+    let mut tx = conn.begin().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let item = sqlx::query::<Sqlite>(
         "SELECT dii.source_path, COALESCE(df.managed_path, dii.managed_path) as managed_path, di.storage_mode
@@ -1660,7 +1661,7 @@ pub async fn undo_import_item(import_id: i64, doc_file_id: i64) -> Result<(), St
     .bind(doc_file_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|e| format!("查询导入项失败: {}", e))?
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
     .ok_or("导入项不存在".to_string())?;
 
     let source: String = item.try_get(0).unwrap_or_default();
@@ -1675,7 +1676,7 @@ pub async fn undo_import_item(import_id: i64, doc_file_id: i64) -> Result<(), St
                 let _ = std::fs::create_dir_all(parent);
             }
             safe_move_file(managed_path, source_path)
-                .map_err(|e| format!("回退失败: {}", e))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
     }
 
@@ -1698,7 +1699,7 @@ pub async fn undo_import_item(import_id: i64, doc_file_id: i64) -> Result<(), St
             .bind(remaining).bind(import_id).execute(&mut *tx).await.ok();
     }
 
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))
+    tx.commit().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 pub async fn get_import_files(import_id: i64) -> Result<Vec<ImportFileItem>, String> {
@@ -1713,7 +1714,7 @@ pub async fn get_import_files(import_id: i64) -> Result<Vec<ImportFileItem>, Str
     .bind(import_id)
     .fetch_all(&mut *conn)
     .await
-    .map_err(|e| format!("查询导入文件列表失败: {}", e))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(rows.iter().map(|r| ImportFileItem {
         doc_file_id: r.try_get::<i64, _>(0).unwrap_or(0),
         file_name: r.try_get::<String, _>(1).unwrap_or_default(),

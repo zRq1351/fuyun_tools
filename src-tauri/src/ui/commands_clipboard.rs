@@ -1,5 +1,6 @@
 use crate::core::app_state::AppState as SharedAppState;
-use crate::core::error::{to_frontend_error_string, AppError, AppResult, ErrorCode};
+use crate::core::error::{to_frontend_error_string, AppError, ErrorCode};
+use crate::core::error_codes::AppErrorKind;
 use crate::core::perf_metrics::record_perf_metric;
 use crate::features;
 use crate::services::image_clipboard_manager::emit_image_history_payload;
@@ -218,9 +219,9 @@ pub(crate) fn register_text_shortcut(
             }
         })
         .map_err(|e| {
-            frontend_error(
-                ErrorCode::ValidationError,
-                format!("快捷键被占用或注册失败：{}", hot_key_string),
+            frontend_error_kind_params(
+                AppErrorKind::ClipboardHotkeyRegisterFailed,
+                serde_json::json!({"key": hot_key_string}),
                 e.to_string(),
             )
         })?;
@@ -250,9 +251,9 @@ pub(crate) fn register_image_shortcut(
             }
         })
         .map_err(|e| {
-            frontend_error(
-                ErrorCode::ValidationError,
-                format!("图片窗口快捷键被占用或注册失败：{}", hot_key_string),
+            frontend_error_kind_params(
+                AppErrorKind::ClipboardHotkeyRegisterFailed,
+                serde_json::json!({"key": hot_key_string}),
                 e.to_string(),
             )
         })?;
@@ -272,7 +273,7 @@ pub(crate) fn register_screenshot_shortcut(app: &AppHandle, hot_key: &str) -> Re
                 });
             }
         })
-        .map_err(|e| frontend_error(ErrorCode::ValidationError, format!("截图快捷键被占用或注册失败：{}", hot_key), e.to_string()))?;
+        .map_err(|e| frontend_error_kind_params(AppErrorKind::ClipboardHotkeyRegisterFailed, serde_json::json!({"key": hot_key}), e.to_string()))?;
     Ok(())
 }
 
@@ -332,48 +333,42 @@ async fn category_set<M: CategoryOps>(
     manager_arc: Arc<Mutex<M>>,
     item_id: String,
     category: String,
-    label: &str,
+    _label: &str,
 ) -> Result<(), String> {
     let manager = {
         let guard = lock_arc_mutex(&manager_arc);
         guard.clone()
     };
     manager.set_category_async(item_id, category).await.map_err(|e| {
-        to_frontend_error_string(
-            AppError::new(ErrorCode::ClipboardError, format!("设置{}分类失败", label)).with_details(e),
-        )
+        frontend_error_kind(AppErrorKind::ClipboardCategorySetFailed, e)
     })
 }
 
 async fn category_remove<M: CategoryOps>(
     manager_arc: Arc<Mutex<M>>,
     category: String,
-    label: &str,
+    _label: &str,
 ) -> Result<(), String> {
     let manager = {
         let guard = lock_arc_mutex(&manager_arc);
         guard.clone()
     };
     manager.remove_category_async(category).await.map_err(|e| {
-        to_frontend_error_string(
-            AppError::new(ErrorCode::ClipboardError, format!("删除{}分类失败", label)).with_details(e),
-        )
+        frontend_error_kind(AppErrorKind::ClipboardCategoryRemoveFailed, e)
     })
 }
 
 async fn category_add<M: CategoryOps>(
     manager_arc: Arc<Mutex<M>>,
     category: String,
-    label: &str,
+    _label: &str,
 ) -> Result<(), String> {
     let manager = {
         let guard = lock_arc_mutex(&manager_arc);
         guard.clone()
     };
     manager.add_category_async(category).await.map_err(|e| {
-        to_frontend_error_string(
-            AppError::new(ErrorCode::ClipboardError, format!("新增{}分类失败", label)).with_details(e),
-        )
+        frontend_error_kind(AppErrorKind::ClipboardCategoryAddFailed, e)
     })
 }
 
@@ -385,16 +380,34 @@ pub(crate) fn frontend_error(
     to_frontend_error_string(AppError::new(code, message).with_details(details.into()))
 }
 
+/// New-style frontend error with AppErrorKind for proper i18n on frontend
+pub(crate) fn frontend_error_kind(
+    kind: crate::core::error_codes::AppErrorKind,
+    details: impl Into<String>,
+) -> String {
+    let details = details.into();
+    crate::core::frontend_error::to_frontend_error_json_with_details(kind, None, details)
+}
+
+/// New-style frontend error with AppErrorKind + params for i18n
+pub(crate) fn frontend_error_kind_params(
+    kind: crate::core::error_codes::AppErrorKind,
+    params: serde_json::Value,
+    details: impl Into<String>,
+) -> String {
+    let details = details.into();
+    crate::core::frontend_error::to_frontend_error_json_with_details(kind, Some(params), details)
+}
+
 /// 通用的 spawn_blocking 包装器，统一错误映射
-pub(crate) async fn run_blocking<T, F>(label: &str, task: F) -> Result<T, String>
+pub(crate) async fn run_blocking<T, F>(_label: &str, task: F) -> Result<T, String>
 where
     T: Send + 'static,
-    F: FnOnce() -> AppResult<T> + Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
 {
     match tauri::async_runtime::spawn_blocking(task).await {
-        Ok(Ok(value)) => Ok(value),
-        Ok(Err(app_err)) => Err(to_frontend_error_string(app_err)),
-        Err(join_err) => Err(frontend_error(ErrorCode::SystemError, format!("{}任务执行失败", label), join_err.to_string())),
+        Ok(result) => result,
+        Err(join_err) => Err(frontend_error_kind(AppErrorKind::TaskExecutionFailed, join_err.to_string())),
     }
 }
 
@@ -472,7 +485,7 @@ pub(crate) fn execute_select_and_fill_text(
     request: SelectAndFillRequest,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
-) -> AppResult<String> {
+) -> Result<String, String> {
     let item_id = request.item_id;
     let fill_seq = begin_fill_sequence(&state, FillKind::Text);
     let operation_id = request.op_id.unwrap_or(fill_seq);
@@ -481,7 +494,7 @@ pub(crate) fn execute_select_and_fill_text(
     let item_content = {
         let manager = lock_arc_mutex(&manager_arc);
         manager.promote_to_top(&item_id).map_err(|e| {
-            AppError::new(ErrorCode::ClipboardError, "找不到目标项目".to_string()).with_details(e)
+            frontend_error_kind(AppErrorKind::ClipboardItemNotFound, e)
         })?
     };
 
@@ -517,7 +530,7 @@ pub(crate) fn execute_remove_clipboard_item(
     item_id: String,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
-) -> AppResult<()> {
+) -> Result<(), String> {
     log::info!("删除剪贴板项目: {}", item_id);
     let manager_arc = get_clipboard_manager_arc(&state);
     with_updating_clipboard(&state, || -> Result<(), String> {
@@ -528,14 +541,14 @@ pub(crate) fn execute_remove_clipboard_item(
         try_replace_text_clipboard_after_remove(&state, &app, &removed_item);
         Ok(())
     })
-        .map_err(|e| AppError::new(ErrorCode::ClipboardError, "删除文本历史失败").with_details(e))
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardDeleteTextFailed, e))
 }
 
 pub(crate) fn execute_open_image_preview_window_by_id(
     item_id: String,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
-) -> AppResult<()> {
+) -> Result<(), String> {
     let request_id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
@@ -545,19 +558,19 @@ pub(crate) fn execute_open_image_preview_window_by_id(
     let image_path = {
         let manager = lock_arc_mutex(&manager_arc);
         manager.get_preview_image_path_by_id(&item_id)
-            .map_err(|e| AppError::new(ErrorCode::SystemError, "获取预览图片路径失败").with_details(e))?
+            .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardPreviewPathFailed, e))?
     };
     let preview_path = ensure_preview_image_path_for_asset(&item_id, &image_path)
-        .map_err(|e| AppError::new(ErrorCode::SystemError, "准备预览图片资源失败").with_details(e))?;
+        .map_err(|e| AppErrorKind::ClipboardPreviewPathFailed.to_frontend_json_with_details(e))?;
     show_image_preview_window(app, request_id, preview_path)
-        .map_err(|e| AppError::new(ErrorCode::SystemError, "显示图片预览失败").with_details(e))
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardPreviewShowFailed, e))
 }
 
 pub(crate) fn ensure_preview_image_path_for_asset(item_id: &str, image_path: &str) -> Result<String, String> {
     let started_at = std::time::Instant::now();
     let trimmed = image_path.trim();
     if trimmed.is_empty() {
-        let error = "图片路径为空".to_string();
+        let error = frontend_error_kind(AppErrorKind::ClipboardImagePathEmpty, "");
         record_perf_metric(
             "image.preview_asset_path",
             "图片预览路径准备耗时",
@@ -569,7 +582,7 @@ pub(crate) fn ensure_preview_image_path_for_asset(item_id: &str, image_path: &st
     }
     let source_path = PathBuf::from(trimmed);
     if !source_path.exists() {
-        let error = format!("图片文件不存在: {}", trimmed);
+        let error = frontend_error_kind_params(AppErrorKind::ClipboardImageFileNotFound, serde_json::json!({"path": trimmed}), trimmed);
         record_perf_metric(
             "image.preview_asset_path",
             "图片预览路径准备耗时",
@@ -608,7 +621,7 @@ pub(crate) fn ensure_preview_image_path_for_asset(item_id: &str, image_path: &st
         .unwrap_or_default();
     let allowed_ext = ["png", "jpg", "jpeg", "webp", "bmp", "gif"];
     if !allowed_ext.contains(&ext.as_str()) {
-        let error = format!("不支持的图片格式: {}", ext);
+        let error = frontend_error_kind_params(AppErrorKind::ClipboardImageFormatUnsupported, serde_json::json!({"ext": ext}), ext);
         record_perf_metric(
             "image.preview_asset_path",
             "图片预览路径准备耗时",
@@ -709,7 +722,7 @@ pub(crate) fn sanitize_image_item_id(raw: &str) -> String {
 pub(crate) fn execute_warmup_image_clipboard_item_by_id(
     item_id: String,
     state: Arc<Mutex<SharedAppState>>,
-) -> AppResult<()> {
+) -> Result<(), String> {
     let started_at = std::time::Instant::now();
     let manager_arc = get_image_clipboard_manager_arc(&state);
     let manager = lock_arc_mutex(&manager_arc);
@@ -721,7 +734,7 @@ pub(crate) fn execute_warmup_image_clipboard_item_by_id(
             false,
             Some(e.clone()),
         );
-        AppError::new(ErrorCode::ClipboardError, "预热图片失败").with_details(e)
+        frontend_error_kind(AppErrorKind::ClipboardWarmupFailed, e)
     })?;
     record_perf_metric(
         "image.warmup",
@@ -736,19 +749,19 @@ pub(crate) fn execute_warmup_image_clipboard_item_by_id(
 pub(crate) fn execute_promote_image_clipboard_item_by_id(
     item_id: String,
     state: Arc<Mutex<SharedAppState>>,
-) -> AppResult<()> {
+) -> Result<(), String> {
     let manager_arc = get_image_clipboard_manager_arc(&state);
     let manager = lock_arc_mutex(&manager_arc);
     manager
         .promote_to_top_by_id(&item_id)
-        .map_err(|e| AppError::new(ErrorCode::ClipboardError, "置顶图片失败").with_details(e))
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardPinImageFailed, e))
 }
 
 pub(crate) fn execute_remove_image_clipboard_item_by_id(
     item_id: String,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
-) -> AppResult<()> {
+) -> Result<(), String> {
     let manager_arc = get_image_clipboard_manager_arc(&state);
     with_updating_clipboard(&state, || -> Result<(), String> {
         let removed_signature = {
@@ -759,14 +772,14 @@ pub(crate) fn execute_remove_image_clipboard_item_by_id(
         try_replace_image_clipboard_after_remove(&state, &app, &removed_signature);
         Ok(())
     })
-        .map_err(|e| AppError::new(ErrorCode::ClipboardError, "删除图片历史失败").with_details(e))
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardDeleteImageFailed, e))
 }
 
 pub(crate) fn execute_select_and_fill_image_by_id(
     request: SelectAndFillImageByIdRequest,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
-) -> AppResult<()> {
+) -> Result<(), String> {
     let item_id = request.item_id;
     let fill_seq = begin_fill_sequence(&state, FillKind::Image);
     let operation_id = request.op_id.unwrap_or(fill_seq);
@@ -1091,9 +1104,7 @@ pub async fn set_image_item_tags(
         guard.clone()
     };
     manager.set_tags_async(item_id, tags).await.map_err(|e| {
-        to_frontend_error_string(
-            AppError::new(ErrorCode::ClipboardError, "设置图片标签失败").with_details(e),
-        )
+        frontend_error_kind(AppErrorKind::ClipboardSetTagsFailed, e)
     })
 }
 
@@ -1114,9 +1125,7 @@ pub async fn update_text_item(
         .update_item_content(&item_id, new_content.clone())
         .await
         .map_err(|e| {
-            to_frontend_error_string(
-                AppError::new(ErrorCode::ClipboardError, "更新文本内容失败").with_details(e),
-            )
+            frontend_error_kind(AppErrorKind::ClipboardUpdateContentFailed, e)
         });
 
     if result.is_ok() {
@@ -1147,11 +1156,9 @@ pub async fn set_clipboard_item_pinned(
         .await
         .map_err(|e| {
             if e == "索引超出范围" {
-                to_frontend_error_string(AppError::new(ErrorCode::ValidationError, "索引超出范围"))
+                frontend_error_kind(AppErrorKind::SystemIndexOutOfRange, "")
             } else {
-                to_frontend_error_string(
-                    AppError::new(ErrorCode::ClipboardError, "设置置顶状态失败").with_details(e),
-                )
+                frontend_error_kind(AppErrorKind::ClipboardSetPinFailed, e)
             }
         })
 }
@@ -1171,9 +1178,7 @@ pub async fn set_image_item_pinned(
         .set_pinned_async(item_id, pinned)
         .await
         .map_err(|e| {
-            to_frontend_error_string(
-                AppError::new(ErrorCode::ClipboardError, "设置图片置顶状态失败").with_details(e),
-            )
+            frontend_error_kind(AppErrorKind::ClipboardSetPinFailed, e)
         })
 }
 
@@ -1192,9 +1197,7 @@ pub async fn promote_clipboard_item(
         .await
         .map(|item| crate::utils::database::stable_history_item_id(&item))
         .map_err(|e| {
-            to_frontend_error_string(
-                AppError::new(ErrorCode::ClipboardError, "置顶文本失败").with_details(e),
-            )
+            frontend_error_kind(AppErrorKind::ClipboardPinFailed, e)
         })
 }
 
@@ -1223,9 +1226,7 @@ pub async fn clear_text_history(
         .clear_history_by_mode_async(mode.as_str())
         .await
         .map_err(|e| {
-            to_frontend_error_string(
-                AppError::new(ErrorCode::ClipboardError, "清理文本历史失败").with_details(e),
-            )
+            frontend_error_kind(AppErrorKind::ClipboardCleanTextFailed, e)
         })
 }
 
@@ -1244,9 +1245,7 @@ pub async fn clear_image_history(
         .clear_history_by_mode_async(mode.as_str())
         .await
         .map_err(|e| {
-            to_frontend_error_string(
-                AppError::new(ErrorCode::ClipboardError, "清理图片历史失败").with_details(e),
-            )
+            frontend_error_kind(AppErrorKind::ClipboardCleanImageFailed, e)
         })?;
 
     let is_visible = {
@@ -1270,18 +1269,16 @@ pub async fn import_image_files(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<usize, String> {
     if paths.is_empty() {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "未选择任何文件或文件夹",
+        return Err(frontend_error_kind(
+            AppErrorKind::ClipboardNoFilesSelected,
             "paths is empty",
         ));
     }
     let image_paths = collect_import_image_paths(paths)
         .map_err(|e| frontend_error(ErrorCode::IoError, "收集可导入图片路径失败", e))?;
     if image_paths.is_empty() {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "未找到可导入的图片",
+        return Err(frontend_error_kind(
+            AppErrorKind::ClipboardNoImagesFound,
             "collected image paths is empty",
         ));
     }
@@ -1345,15 +1342,13 @@ pub async fn import_image_files(
     }
     if imported == 0 {
         if last_error.is_empty() {
-            Err(frontend_error(
-                ErrorCode::ClipboardError,
-                "未导入任何图片",
+            Err(frontend_error_kind(
+                AppErrorKind::ClipboardNoImagesImported,
                 "imported == 0 and no detailed error",
             ))
         } else {
-            Err(frontend_error(
-                ErrorCode::ClipboardError,
-                "导入图片失败",
+            Err(frontend_error_kind(
+                AppErrorKind::ClipboardImportFailed,
                 last_error,
             ))
         }
@@ -1365,9 +1360,8 @@ pub async fn import_image_files(
 #[tauri::command]
 pub async fn count_import_image_files(paths: Vec<String>) -> Result<usize, String> {
     if paths.is_empty() {
-        return Err(frontend_error(
-            ErrorCode::ValidationError,
-            "未选择任何文件或文件夹",
+        return Err(frontend_error_kind(
+            AppErrorKind::ClipboardNoFilesSelected,
             "paths is empty",
         ));
     }
