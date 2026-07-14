@@ -107,7 +107,7 @@ export function handleAppError(error, context = 'Operation failed') {
             default:
                 // Check for known patterns in legacy messages
                 const lowerMsg = legacy.message.toLowerCase()
-                if (lowerMsg.includes('未配置ai') || lowerMsg.includes('ai') && lowerMsg.includes('提供商')) {
+                if (lowerMsg.includes('未配置ai') || (lowerMsg.includes('ai') && lowerMsg.includes('提供商'))) {
                     ElMessage.error(t('errorHandler.noAIProvider'))
                     return
                 }

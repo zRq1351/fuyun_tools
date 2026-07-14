@@ -93,6 +93,12 @@ pub async fn copy_image_clipboard_item_to_directory(
         if target_dir.as_os_str().is_empty() {
             return Err(frontend_error_kind(AppErrorKind::ScreenshotTargetDirEmpty, ""));
         }
+
+        // 防御性路径校验：拒绝包含 ".." 的路径（路径穿越攻击防护）
+        if target_dir.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err("不允许的路径：包含路径遍历".to_string());
+        }
+
         fs::create_dir_all(&target_dir).map_err(|e| format!("创建目标目录失败: {}", e))?;
 
         let stem = Path::new(&file_name)
@@ -437,6 +443,12 @@ pub async fn save_screenshot_to_path(
     }
 
     let target_path = PathBuf::from(&output_path);
+
+    // 防御性路径校验：拒绝包含 ".." 的路径（路径穿越攻击防护）
+    if target_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err("不允许的路径：包含路径遍历".to_string());
+    }
+
     timed_sync("screenshot.save_file", "截图保存耗时", || {
         let png_data = base64::engine::general_purpose::STANDARD
             .decode(&png_base64)
@@ -461,6 +473,13 @@ pub async fn export_screenshot_to_path(
     request: ScreenshotExportRequest,
 ) -> Result<serde_json::Value, String> {
     let output_path = request.output_path.clone();
+
+    // 防御性路径校验：拒绝包含 ".." 的路径（路径穿越攻击防护）
+    let target = PathBuf::from(&output_path);
+    if target.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err("不允许的路径：包含路径遍历".to_string());
+    }
+
     tauri::async_runtime::spawn_blocking(move || export_screenshot_image(&request))
         .await
         .map_err(|e| format!("执行截图导出任务失败: {}", e))?

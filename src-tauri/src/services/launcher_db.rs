@@ -260,9 +260,11 @@ pub async fn sync_category_positions(ids: &[String]) -> Result<(), String> {
 
 pub async fn sync_category_apps(category_id: &str, app_ids: &[String]) -> Result<(), String> {
     let mut conn = open_launcher_db_conn().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
+
     sqlx::query("DELETE FROM launcher_category_apps WHERE category_id = ?")
         .bind(category_id)
-        .execute(&mut *conn)
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("清空分类应用关联失败: {}", e))?;
     for (i, app_id) in app_ids.iter().enumerate() {
@@ -272,10 +274,12 @@ pub async fn sync_category_apps(category_id: &str, app_ids: &[String]) -> Result
         .bind(category_id)
         .bind(app_id)
         .bind(i as i32)
-        .execute(&mut *conn)
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("保存分类应用关联失败: {}", e))?;
     }
+
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 

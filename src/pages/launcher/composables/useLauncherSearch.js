@@ -85,36 +85,45 @@ export function useLauncherSearch() {
 
     const executeAction = async (item) => {
         const action = item.action || 'launch_app'
-        switch (action) {
-            case 'open_settings':
-                await invoke('show_standard_window_command', {label: 'settings'})
-                break
-            case 'open_clipboard':
-                await invoke('show_clipboard_window_command')
-                break
-            case 'start_screenshot':
-                await invoke('start_screenshot_command')
-                break
-            case 'start_recording':
-                await invoke('toggle_recording_command')
-                break
-            case 'custom_command':
-                await executeCustomCommand(item)
-                break
-            case 'launch_app':
-                if (item.path) {
-                    await invoke('launch_app', {appId: item.id, path: item.path})
-                }
-                break
-            case 'open_file':
-                if (item.path) {
-                    await invoke('open_file', {path: item.path})
-                }
-                break
-            default:
-                if (item.path) {
-                    await invoke('launch_app', {appId: item.id, path: item.path})
-                }
+        try {
+            switch (action) {
+                case 'open_settings':
+                    await invoke('show_standard_window_command', {label: 'settings'})
+                    break
+                case 'open_clipboard':
+                    await invoke('show_clipboard_window_command')
+                    break
+                case 'start_screenshot':
+                    await invoke('start_screenshot_command')
+                    break
+                case 'start_recording':
+                    await invoke('toggle_recording_command')
+                    break
+                case 'custom_command':
+                    await executeCustomCommand(item)
+                    break
+                case 'launch_app':
+                    if (item.path) {
+                        await invoke('launch_app', {appId: item.id, path: item.path})
+                    }
+                    break
+                case 'open_file':
+                    if (item.path) {
+                        await invoke('open_file', {path: item.path})
+                    }
+                    break
+                default:
+                    if (item.path) {
+                        await invoke('launch_app', {appId: item.id, path: item.path})
+                    }
+            }
+        } catch (error) {
+            console.error('执行操作失败:', error)
+            ElMessage({
+                message: `操作失败: ${error.message || error}`,
+                type: 'error',
+                duration: 3000
+            })
         }
     }
 

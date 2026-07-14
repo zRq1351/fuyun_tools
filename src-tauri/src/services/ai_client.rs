@@ -321,7 +321,14 @@ impl AIClient {
                 }
             }
             Err(e) => {
-                log::error!("AI连接测试失败: {}", e);
+                // 截断错误信息，避免在日志中泄露 API 密钥
+                let error_msg = e.to_string();
+                let truncated = if error_msg.len() > 200 {
+                    format!("{}...", &error_msg[..200])
+                } else {
+                    error_msg.clone()
+                };
+                log::error!("AI连接测试失败: {}", truncated);
                 let raw = e
                     .details
                     .clone()

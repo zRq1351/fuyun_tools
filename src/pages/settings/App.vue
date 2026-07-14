@@ -169,11 +169,11 @@ import {
   View,
   WarningFilled
 } from '@element-plus/icons-vue'
-import {useTheme} from '../../composables/useTheme'
-import {useLocale} from '../../composables/useLocale'
+import {useTheme} from '@/composables/useTheme.js'
+import {useLocale} from '@/composables/useLocale.js'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import {listen} from '@tauri-apps/api/event'
-import {AISettingsService, RecordingService} from '../../services/ipc'
+import {AISettingsService, RecordingService} from '@/services/ipc.js'
 import ClipboardSettings from './components/ClipboardSettings.vue'
 import ScreenshotSettings from './components/ScreenshotSettings.vue'
 import RecordingSettings from './components/RecordingSettings.vue'

@@ -154,9 +154,15 @@ impl ClipboardManager {
                 }
 
                 // 通知等待的线程保存已完成
+                // 仅当没有新的脏数据时才标记完成，否则循环继续处理
                 let mut state = lock.lock();
-                state.save_completed = true;
-                cvar.notify_all();
+                if state.history_dirty || state.categories_dirty || state.pinned_dirty || state.clear_all {
+                    // save_history_on_exit 在我们做 I/O 期间设置了新的脏标记
+                    // 不设置 save_completed，让循环继续处理新数据
+                } else {
+                    state.save_completed = true;
+                    cvar.notify_all();
+                }
             }
         });
 
@@ -240,7 +246,11 @@ impl ClipboardManager {
     ) -> Result<(), String> {
         use tauri_plugin_clipboard_manager::ClipboardExt;
 
-        match app_handle.clipboard().write_text(content) {
+        let result = crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
+            app_handle.clipboard().write_text(content)
+        });
+
+        match result {
             Ok(()) => {
                 log::info!("成功设置剪贴板内容");
                 Ok(())

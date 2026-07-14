@@ -409,11 +409,14 @@ export function useClipboardHistory() {
 
         try {
             if (categoryMap.value[itemId]) {
+                const prevCategory = categoryMap.value[itemId]
                 removeItemCategoryLocal(itemId)
                 try {
                     await CategoryService.setItemCategory(itemId, "")
                 } catch (error) {
                     console.error('移除分类失败:', error)
+                    // 回滚本地分类索引
+                    setItemCategoryLocal(itemId, prevCategory)
                 }
             }
             await ClipboardService.removeItem(itemId)

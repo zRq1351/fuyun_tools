@@ -1,4 +1,4 @@
-﻿use crate::core::error_codes::AppErrorKind;
+use crate::core::error_codes::AppErrorKind;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
@@ -272,7 +272,7 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
     }
 
     if !item_id_is_pk_categories {
-        let _ = sqlx::query(
+        let result = sqlx::query(
             "
             CREATE TABLE categories_new (
                 category TEXT NOT NULL,
@@ -286,6 +286,9 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         )
         .execute(&mut *conn)
         .await;
+        if let Err(e) = result {
+            log::error!("categories 表迁移失败，数据可能不完整: {}", e);
+        }
     }
 
     let pinned_info: Vec<sqlx::sqlite::SqliteRow> = sqlx::query("PRAGMA table_info(pinned_items)")
@@ -302,7 +305,7 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
     }
 
     if !item_id_is_pk_pinned {
-        let _ = sqlx::query(
+        let result = sqlx::query(
             "
             CREATE TABLE pinned_items_new (
                 pinned_at INTEGER NOT NULL DEFAULT 0,
@@ -316,6 +319,9 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         )
         .execute(&mut *conn)
         .await;
+        if let Err(e) = result {
+            log::error!("pinned_items 表迁移失败，数据可能不完整: {}", e);
+        }
     }
 
     let _ = sqlx::query(
@@ -353,7 +359,7 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
             fts_row_count,
             history_row_count
         );
-        let _ = sqlx::query(
+        let insert_result = sqlx::query(
             "
             INSERT OR REPLACE INTO history_items_fts(rowid, item_id, content)
             SELECT id, COALESCE(item_id, ''), content
@@ -362,8 +368,11 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         )
         .execute(&mut *conn)
         .await;
+        if let Err(e) = insert_result {
+            log::error!("FTS 索引重建（INSERT）失败: {}", e);
+        }
 
-        let _ = sqlx::query(
+        let delete_result = sqlx::query(
             "
             DELETE FROM history_items_fts
             WHERE rowid NOT IN (SELECT id FROM history_items)
@@ -371,6 +380,9 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         )
         .execute(&mut *conn)
         .await;
+        if let Err(e) = delete_result {
+            log::error!("FTS 索引重建（清理孤儿行）失败: {}", e);
+        }
     } else {
         log::debug!("FTS 索引已同步 ({} 行)，跳过重建", fts_row_count);
     }

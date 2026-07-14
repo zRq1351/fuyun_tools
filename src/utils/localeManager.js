@@ -26,15 +26,6 @@ export function setLocale(locale) {
     }
     document.documentElement.setAttribute('lang', locale)
     window.dispatchEvent(new CustomEvent('locale-change', {detail: {locale}}))
-    try {
-        window.dispatchEvent(new StorageEvent('storage', {
-            key: LOCALE_KEY,
-            newValue: locale,
-            oldValue: null,
-            storageArea: localStorage
-        }))
-    } catch (e) {
-    }
 }
 
 export function createI18nInstance(messages) {

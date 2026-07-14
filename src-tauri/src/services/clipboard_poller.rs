@@ -44,7 +44,6 @@ impl ClipboardPoller {
         }
 
         let running = self.running;
-        let stop_tx_ref = self.stop_tx;
 
         thread::spawn(move || {
             let wake_rx = subscribe_clipboard_wake_events();
@@ -78,9 +77,6 @@ impl ClipboardPoller {
             }
 
             running.store(false, Ordering::SeqCst);
-            if let Ok(mut guard) = stop_tx_ref.get_or_init(|| std::sync::Mutex::new(None)).lock() {
-                *guard = None;
-            }
         });
     }
 

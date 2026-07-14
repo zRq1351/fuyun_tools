@@ -1,4 +1,4 @@
-﻿use crate::core::error_codes::AppErrorKind;
+use crate::core::error_codes::AppErrorKind;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
@@ -651,6 +651,15 @@ pub async fn delete_doc_file(id: i64) -> Result<Option<String>, String> {
             .await
             .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
+    // 清理关联的导入记录
+    let affected_imports: Vec<i64> = sqlx::query_scalar(
+        "SELECT import_id FROM document_import_items WHERE doc_file_id = ?1"
+    )
+    .bind(id)
+    .fetch_all(&mut *conn)
+    .await
+    .unwrap_or_default();
+
     sqlx::query("DELETE FROM document_files WHERE id = ?1")
         .bind(id)
         .execute(&mut *conn)
@@ -661,6 +670,35 @@ pub async fn delete_doc_file(id: i64) -> Result<Option<String>, String> {
         .bind(id)
         .execute(&mut *conn)
         .await;
+
+    for import_id in &affected_imports {
+        let _ = sqlx::query("DELETE FROM document_import_items WHERE import_id = ?1 AND doc_file_id = ?2")
+            .bind(import_id)
+            .bind(id)
+            .execute(&mut *conn)
+            .await;
+
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM document_import_items WHERE import_id = ?1"
+        )
+        .bind(import_id)
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap_or(0);
+
+        if remaining == 0 {
+            let _ = sqlx::query("DELETE FROM document_imports WHERE id = ?1")
+                .bind(import_id)
+                .execute(&mut *conn)
+                .await;
+        } else {
+            let _ = sqlx::query("UPDATE document_imports SET file_count = ?1 WHERE id = ?2")
+                .bind(remaining)
+                .bind(import_id)
+                .execute(&mut *conn)
+                .await;
+        }
+    }
 
     Ok(managed_path)
 }
@@ -910,18 +948,30 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
 
             let new_path = resolve_unused_filename(&target_dir, file_name, &doc.file_ext);
             let dest = target_dir.join(&new_path);
-
-            safe_move_file(old_path, &dest)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-
             let new_managed_path = dest.to_string_lossy().to_string();
-            sqlx::query("UPDATE document_files SET managed_path = ?1, root_id = ?2 WHERE id = ?3")
-                .bind(&new_managed_path)
-                .bind(new_root_id)
-                .bind(id)
-                .execute(&mut *conn)
-                .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+
+            // 先在事务中更新数据库，再移动文件
+            // 如果文件移动失败，数据库已指向新路径（可恢复状态）
+            // 而非文件已移动但数据库未更新（不可恢复）
+            {
+                let mut tx = conn.begin().await
+                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                sqlx::query("UPDATE document_files SET managed_path = ?1, root_id = ?2 WHERE id = ?3")
+                    .bind(&new_managed_path)
+                    .bind(new_root_id)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                tx.commit().await
+                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            }
+
+            // 数据库已更新，现在移动文件
+            if let Err(e) = safe_move_file(old_path, &dest) {
+                log::error!("文件移动失败（数据库已更新到新路径）: {}", e);
+                return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
+            }
         } else {
             sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
                 .bind(new_root_id)

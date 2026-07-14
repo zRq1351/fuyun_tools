@@ -124,6 +124,11 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
     const removeCategory = async (category) => {
         if (!canDeleteCategory(category)) return
 
+        // 保存旧状态用于回滚
+        const prevCategories = categories.value.slice()
+        const prevCategoryMap = {...categoryMap.value}
+        const prevFilter = categoryFilter.value
+
         if (onCategoryRemoved) {
             onCategoryRemoved(category)
         } else {
@@ -147,6 +152,14 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             await categoryService.removeCategory(category)
         } catch (error) {
             console.error('删除分类失败:', error)
+            // 回滚本地状态
+            categories.value = prevCategories
+            Object.keys(categoryMap.value).forEach(key => delete categoryMap.value[key])
+            Object.assign(categoryMap.value, prevCategoryMap)
+            categoryFilter.value = prevFilter
+            if (bumpFilterDataRevision) {
+                bumpFilterDataRevision()
+            }
         }
     }
 
