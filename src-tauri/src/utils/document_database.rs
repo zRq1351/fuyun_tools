@@ -950,27 +950,33 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
             let dest = target_dir.join(&new_path);
             let new_managed_path = dest.to_string_lossy().to_string();
 
-            // 先在事务中更新数据库，再移动文件
-            // 如果文件移动失败，数据库已指向新路径（可恢复状态）
-            // 而非文件已移动但数据库未更新（不可恢复）
+            // 先移动文件，再更新数据库
+            // 如果文件移动成功但数据库更新失败，可回滚文件
+            safe_move_file(old_path, &dest)
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+
             {
                 let mut tx = conn.begin().await
-                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-                sqlx::query("UPDATE document_files SET managed_path = ?1, root_id = ?2 WHERE id = ?3")
+                    .map_err(|e| {
+                        // 数据库事务开启失败，回滚文件移动
+                        let _ = safe_move_file(&dest, old_path);
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?;
+                if let Err(e) = sqlx::query("UPDATE document_files SET managed_path = ?1, root_id = ?2 WHERE id = ?3")
                     .bind(&new_managed_path)
                     .bind(new_root_id)
                     .bind(id)
                     .execute(&mut *tx)
-                    .await
-                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                    .await {
+                    let _ = tx.rollback().await;
+                    let _ = safe_move_file(&dest, old_path);
+                    return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
+                }
                 tx.commit().await
-                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-            }
-
-            // 数据库已更新，现在移动文件
-            if let Err(e) = safe_move_file(old_path, &dest) {
-                log::error!("文件移动失败（数据库已更新到新路径）: {}", e);
-                return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
+                    .map_err(|e| {
+                        let _ = safe_move_file(&dest, old_path);
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?;
             }
         } else {
             sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
@@ -1479,6 +1485,10 @@ fn build_fts_query(keyword: &str) -> String {
             match ch {
                 '\\' => s.push_str("\\\\"),
                 '"' => s.push_str("\"\""),
+                '(' | ')' | '+' | '-' | '*' | ':' | '^' => {
+                    s.push('\\');
+                    s.push(ch);
+                }
                 _ => s.push(ch),
             }
         }
@@ -1771,4 +1781,600 @@ pub async fn get_import_files(import_id: i64) -> Result<Vec<ImportFileItem>, Str
         source_path: r.try_get::<String, _>(2).unwrap_or_default(),
         managed_path: r.try_get::<String, _>(3).unwrap_or_default(),
     }).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn resolve_unused_no_conflict() {
+        let tmp = std::env::temp_dir().join("fuyun_test_resolve_1");
+        fs::create_dir_all(&tmp).unwrap();
+        let name = resolve_unused_filename(&tmp, "doc", "pdf");
+        assert_eq!(name, "doc.pdf");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_unused_with_conflict() {
+        let tmp = std::env::temp_dir().join("fuyun_test_resolve_2");
+        fs::create_dir_all(&tmp).unwrap();
+        fs::write(tmp.join("doc.pdf"), "").unwrap();
+        let name = resolve_unused_filename(&tmp, "doc", "pdf");
+        assert_eq!(name, "doc (1).pdf");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_unused_multiple_conflicts() {
+        let tmp = std::env::temp_dir().join("fuyun_test_resolve_3");
+        fs::create_dir_all(&tmp).unwrap();
+        fs::write(tmp.join("doc.pdf"), "").unwrap();
+        fs::write(tmp.join("doc (1).pdf"), "").unwrap();
+        fs::write(tmp.join("doc (2).pdf"), "").unwrap();
+        let name = resolve_unused_filename(&tmp, "doc", "pdf");
+        assert_eq!(name, "doc (3).pdf");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_unused_empty_ext() {
+        let tmp = std::env::temp_dir().join("fuyun_test_resolve_4");
+        fs::create_dir_all(&tmp).unwrap();
+        let name = resolve_unused_filename(&tmp, "readme", "");
+        assert_eq!(name, "readme.");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn compute_file_hash_deterministic() {
+        let tmp = std::env::temp_dir().join("fuyun_test_hash_1");
+        fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("test.txt");
+        let mut f = fs::File::create(&path).unwrap();
+        f.write_all(b"hello world").unwrap();
+        drop(f);
+
+        let h1 = compute_file_hash(&path).unwrap();
+        let h2 = compute_file_hash(&path).unwrap();
+        assert_eq!(h1, h2);
+        assert_eq!(h1.len(), 16);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn compute_file_hash_different_contents() {
+        let tmp = std::env::temp_dir().join("fuyun_test_hash_2");
+        fs::create_dir_all(&tmp).unwrap();
+
+        let p1 = tmp.join("a.txt");
+        let p2 = tmp.join("b.txt");
+        fs::write(&p1, b"content A").unwrap();
+        fs::write(&p2, b"content B").unwrap();
+
+        let h1 = compute_file_hash(&p1).unwrap();
+        let h2 = compute_file_hash(&p2).unwrap();
+        assert_ne!(h1, h2);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn compute_file_hash_includes_size() {
+        let tmp = std::env::temp_dir().join("fuyun_test_hash_3");
+        fs::create_dir_all(&tmp).unwrap();
+
+        // Same first 10MB content but different file sizes should produce different hashes
+        // because compute_file_hash appends file_size to the hash
+        let p1 = tmp.join("a.txt");
+        let p2 = tmp.join("b.txt");
+        fs::write(&p1, b"same").unwrap();
+        fs::write(&p2, b"same!").unwrap();
+
+        let h1 = compute_file_hash(&p1).unwrap();
+        let h2 = compute_file_hash(&p2).unwrap();
+        assert_ne!(h1, h2);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // ===== build_fts_query (document version) =====
+
+    #[test]
+    fn doc_fts_empty() {
+        assert_eq!(build_fts_query(""), "");
+    }
+
+    #[test]
+    fn doc_fts_single_token() {
+        assert_eq!(build_fts_query("hello"), "\"hello\"*");
+    }
+
+    #[test]
+    fn doc_fts_multi_tokens() {
+        let q = build_fts_query("foo bar");
+        assert!(q.contains(" "));
+        assert!(!q.contains("AND")); // document version uses space join, not AND
+    }
+
+    #[test]
+    fn doc_fts_escapes_special_chars() {
+        let q = build_fts_query("test(1)+v2");
+        assert!(q.contains("\\("));
+        assert!(q.contains("\\)"));
+        assert!(q.contains("\\+"));
+    }
+
+    // ===== safe_move_file =====
+
+    #[test]
+    fn safe_move_file_rename() {
+        let tmp = std::env::temp_dir().join("fuyun_test_move_1");
+        fs::create_dir_all(&tmp).unwrap();
+        let src = tmp.join("a.txt");
+        let dest = tmp.join("b.txt");
+        fs::write(&src, "content").unwrap();
+        safe_move_file(&src, &dest).unwrap();
+        assert!(!src.exists());
+        assert!(dest.exists());
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "content");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn safe_move_file_cross_dir() {
+        let tmp = std::env::temp_dir().join("fuyun_test_move_2");
+        let dir1 = tmp.join("a");
+        let dir2 = tmp.join("b");
+        fs::create_dir_all(&dir1).unwrap();
+        fs::create_dir_all(&dir2).unwrap();
+        let src = dir1.join("file.txt");
+        let dest = dir2.join("file.txt");
+        fs::write(&src, "data").unwrap();
+        safe_move_file(&src, &dest).unwrap();
+        assert!(!src.exists());
+        assert!(dest.exists());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // ===== compute_file_hash edge cases =====
+
+    #[test]
+    fn compute_file_hash_large_file() {
+        let tmp = std::env::temp_dir().join("fuyun_test_hash_large");
+        fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("large.bin");
+        // Write 1MB of data
+        let data = vec![0xABu8; 1024 * 1024];
+        fs::write(&path, &data).unwrap();
+        let hash = compute_file_hash(&path).unwrap();
+        assert_eq!(hash.len(), 16);
+        // Same data should produce same hash
+        let hash2 = compute_file_hash(&path).unwrap();
+        assert_eq!(hash, hash2);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // ===== resolve_unused_filename edge cases =====
+
+    #[test]
+    fn resolve_unused_special_chars_in_name() {
+        let tmp = std::env::temp_dir().join("fuyun_test_resolve_special");
+        fs::create_dir_all(&tmp).unwrap();
+        let name = resolve_unused_filename(&tmp, "file (copy)", "txt");
+        assert_eq!(name, "file (copy).txt");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_unused_long_name() {
+        let tmp = std::env::temp_dir().join("fuyun_test_resolve_long");
+        fs::create_dir_all(&tmp).unwrap();
+        let long_name = "a".repeat(200);
+        let name = resolve_unused_filename(&tmp, &long_name, "txt");
+        assert!(name.starts_with(&long_name));
+        assert!(name.ends_with(".txt"));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // ===== build_fts_query edge cases =====
+
+    #[test]
+    fn doc_fts_single_char_token() {
+        let q = build_fts_query("x");
+        assert_eq!(q, "\"x\"*");
+    }
+
+    #[test]
+    fn doc_fts_unicode_token() {
+        let q = build_fts_query("中文");
+        assert!(q.contains("中文"));
+    }
+
+    #[test]
+    fn doc_fts_mixed_spaces() {
+        let q = build_fts_query("  a  b  ");
+        assert!(q.contains("\"a\"*"));
+        assert!(q.contains("\"b\"*"));
+    }
+
+    // ===================================================================
+    // 集成测试：真实 SQLite 文档数据库
+    // ===================================================================
+
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn create_test_doc_pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "
+            CREATE TABLE IF NOT EXISTS document_roots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                root_path TEXT NOT NULL UNIQUE,
+                position INTEGER DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS document_categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                icon TEXT DEFAULT 'folder',
+                color TEXT DEFAULT '#409EFF',
+                position INTEGER DEFAULT 0,
+                root_id INTEGER DEFAULT 0,
+                UNIQUE(name, root_id)
+            );
+            CREATE TABLE IF NOT EXISTS document_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                root_id INTEGER NOT NULL,
+                title TEXT DEFAULT '',
+                file_name TEXT NOT NULL,
+                file_ext TEXT NOT NULL DEFAULT '',
+                file_size INTEGER NOT NULL DEFAULT 0,
+                file_hash TEXT DEFAULT '',
+                category_id INTEGER,
+                tags TEXT DEFAULT '[]',
+                notes TEXT DEFAULT '',
+                content_text TEXT DEFAULT '',
+                source_path TEXT DEFAULT '',
+                managed_path TEXT NOT NULL DEFAULT '',
+                storage_mode TEXT NOT NULL DEFAULT 'index',
+                is_missing INTEGER DEFAULT 0,
+                sort_order INTEGER DEFAULT 0,
+                added_at INTEGER NOT NULL DEFAULT 0,
+                file_modified INTEGER NOT NULL DEFAULT 0,
+                visit_count INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS document_imports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                root_id INTEGER NOT NULL,
+                category_id INTEGER,
+                storage_mode TEXT NOT NULL DEFAULT 'index',
+                source_dir TEXT DEFAULT '',
+                target_dir TEXT DEFAULT '',
+                file_count INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS document_import_items (
+                import_id INTEGER NOT NULL,
+                doc_file_id INTEGER NOT NULL,
+                source_path TEXT DEFAULT '',
+                managed_path TEXT DEFAULT '',
+                PRIMARY KEY (import_id, doc_file_id)
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS document_files_fts USING fts5(
+                title, content_text, tags, notes, tokenize = 'unicode61'
+            );
+            ",
+        )
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn integration_doc_root_crud() {
+        let pool = create_test_doc_pool().await;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        // 插入 root
+        sqlx::query("INSERT INTO document_roots (name, root_path, created_at, position) VALUES (?1, ?2, ?3, ?4)")
+            .bind("测试文档库")
+            .bind("D:\\docs")
+            .bind(now)
+            .bind(0)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let roots: Vec<String> = sqlx::query_scalar("SELECT name FROM document_roots")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(roots, vec!["测试文档库"]);
+
+        // 更新 root
+        sqlx::query("UPDATE document_roots SET name = ?1 WHERE id = 1")
+            .bind("重命名文档库")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let name: String = sqlx::query_scalar("SELECT name FROM document_roots WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(name, "重命名文档库");
+
+        // 删除 root
+        sqlx::query("DELETE FROM document_roots WHERE id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM document_roots")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn integration_doc_file_full_lifecycle() {
+        let pool = create_test_doc_pool().await;
+        let now = 1700000000000i64;
+
+        // 创建 root
+        sqlx::query("INSERT INTO document_roots (name, root_path, created_at) VALUES (?1, ?2, ?3)")
+            .bind("root")
+            .bind("D:\\test")
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // 创建 category
+        sqlx::query("INSERT INTO document_categories (name, root_id, position) VALUES (?1, 1, 0)")
+            .bind("分类A")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // 插入文件
+        sqlx::query(
+            "INSERT INTO document_files (root_id, title, file_name, file_ext, file_size, category_id, storage_mode, added_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )
+            .bind(1i64)
+            .bind("测试文档")
+            .bind("test.pdf")
+            .bind("pdf")
+            .bind(1024i64)
+            .bind(1i64)
+            .bind("repo")
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // 查询文件（带 JOIN）
+        let row: (String, String, Option<String>) = sqlx::query_as(
+            "SELECT df.title, df.file_name, c.name FROM document_files df
+             LEFT JOIN document_categories c ON df.category_id = c.id
+             WHERE df.id = 1",
+        )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.0, "测试文档");
+        assert_eq!(row.1, "test.pdf");
+        assert_eq!(row.2, Some("分类A".to_string()));
+
+        // 更新元数据
+        sqlx::query("UPDATE document_files SET title = ?1, notes = ?2 WHERE id = 1")
+            .bind("更新标题")
+            .bind("这是备注")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let title: String = sqlx::query_scalar("SELECT title FROM document_files WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(title, "更新标题");
+
+        // 增加访问计数
+        sqlx::query("UPDATE document_files SET visit_count = visit_count + 1 WHERE id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let visits: i64 = sqlx::query_scalar("SELECT visit_count FROM document_files WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(visits, 1);
+
+        // 标记缺失
+        sqlx::query("UPDATE document_files SET is_missing = 1 WHERE id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let missing: i64 = sqlx::query_scalar("SELECT is_missing FROM document_files WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(missing, 1);
+    }
+
+    #[tokio::test]
+    async fn integration_doc_fts_search() {
+        let pool = create_test_doc_pool().await;
+        let now = 1700000000000i64;
+
+        // 插入文件
+        let files = vec![
+            ("Rust 编程指南", "rust.pdf", "Rust 是系统编程语言"),
+            ("Python 入门", "python.pdf", "Python 是脚本语言"),
+            ("Rust 高级特性", "advanced.pdf", "Rust 的高级特性包括泛型"),
+        ];
+        for (title, name, content) in &files {
+            sqlx::query(
+                "INSERT INTO document_files (root_id, title, file_name, file_ext, content_text, added_at)
+                 VALUES (1, ?1, ?2, 'pdf', ?3, ?4)",
+            )
+                .bind(title)
+                .bind(name)
+                .bind(content)
+                .bind(now)
+                .execute(&pool)
+                .await
+                .unwrap();
+
+            let id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO document_files_fts(rowid, title, content_text, tags, notes) VALUES (?1, ?2, ?3, '', '')",
+            )
+                .bind(id)
+                .bind(title)
+                .bind(content)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        // FTS 搜索 "Rust"
+        let results: Vec<String> = sqlx::query_scalar(
+            "SELECT title FROM document_files WHERE id IN (
+                SELECT rowid FROM document_files_fts WHERE document_files_fts MATCH '\"Rust\"*'
+            )",
+        )
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 2, "FTS 应该找到 2 个 Rust 相关文档");
+        assert!(results.contains(&"Rust 编程指南".to_string()));
+        assert!(results.contains(&"Rust 高级特性".to_string()));
+    }
+
+    #[tokio::test]
+    async fn integration_doc_import_tracking() {
+        let pool = create_test_doc_pool().await;
+        let now = 1700000000000i64;
+
+        // 创建 root
+        sqlx::query("INSERT INTO document_roots (name, root_path, created_at) VALUES (?1, ?2, ?3)")
+            .bind("root")
+            .bind("D:\\test")
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // 创建导入记录
+        sqlx::query(
+            "INSERT INTO document_imports (root_id, storage_mode, source_dir, file_count, created_at)
+             VALUES (1, 'repo', 'E:\\source', 3, ?1)",
+        )
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let import_id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        // 创建文件并关联导入
+        for i in 0..3 {
+            sqlx::query(
+                "INSERT INTO document_files (root_id, title, file_name, file_ext, managed_path, added_at)
+                 VALUES (1, ?1, ?2, 'txt', ?3, ?4)",
+            )
+                .bind(format!("file {}", i))
+                .bind(format!("file{}.txt", i))
+                .bind(format!("D:\\test\\file{}.txt", i))
+                .bind(now)
+                .execute(&pool)
+                .await
+                .unwrap();
+
+            let file_id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO document_import_items (import_id, doc_file_id, source_path) VALUES (?1, ?2, ?3)",
+            )
+                .bind(import_id)
+                .bind(file_id)
+                .bind(format!("E:\\source\\file{}.txt", i))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        // 验证导入记录
+        let imports: Vec<i64> = sqlx::query_scalar("SELECT file_count FROM document_imports WHERE id = ?1")
+            .bind(import_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(imports, vec![3]);
+
+        // 验证关联文件
+        let items: Vec<i64> = sqlx::query_scalar(
+            "SELECT doc_file_id FROM document_import_items WHERE import_id = ?1",
+        )
+            .bind(import_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(items.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn integration_doc_concurrent_root_operations() {
+        let pool = create_test_doc_pool().await;
+        let pool = std::sync::Arc::new(pool);
+        let now = 1700000000000i64;
+
+        let mut handles = vec![];
+        for i in 0..10 {
+            let pool = pool.clone();
+            handles.push(tokio::spawn(async move {
+                sqlx::query(
+                    "INSERT INTO document_roots (name, root_path, created_at, position) VALUES (?1, ?2, ?3, ?4)",
+                )
+                    .bind(format!("root_{}", i))
+                    .bind(format!("D:\\root_{}", i))
+                    .bind(now + i)
+                    .bind(i)
+                    .execute(pool.as_ref())
+                    .await
+                    .unwrap();
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM document_roots")
+            .fetch_one(pool.as_ref())
+            .await
+            .unwrap();
+        assert_eq!(count, 10);
+    }
 }

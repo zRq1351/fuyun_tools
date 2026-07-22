@@ -165,6 +165,39 @@ impl RecordingRuntime {
     }
 
     pub fn reset_to_idle(&mut self) {
+        // Signal stop flags before joining threads to ensure they exit promptly
+        if let Some(flag) = self.wgc_stop_flag.as_ref() {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        if let Some(flag) = self.system_audio_stop_flag.as_ref() {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        if let Some(flag) = self.mic_audio_stop_flag.as_ref() {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        // Join threads with timeout to prevent resource leaks
+        if let Some(join) = self.wgc_thread.take() {
+            let mut wgc_exited = false;
+            for _ in 0..500 {
+                if join.is_finished() {
+                    wgc_exited = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            if wgc_exited {
+                let _ = join.join();
+            } else {
+                log::warn!("reset_to_idle: WGC 线程超时，放弃等待");
+            }
+        }
+        if let Some(join) = self.system_audio_thread.take() {
+            let _ = join.join();
+        }
+        if let Some(join) = self.mic_audio_thread.take() {
+            let _ = join.join();
+        }
         self.phase = RecordingPhase::Idle;
         self.session_id = None;
         self.started_at_ms = 0;

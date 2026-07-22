@@ -1,6 +1,6 @@
+use crate::core::error_codes::AppErrorKind;
 use crate::utils::document_database;
 use crate::utils::document_text_extract;
-use crate::core::error_codes::AppErrorKind;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -10,11 +10,18 @@ use tokio::task;
 #[tauri::command]
 pub async fn add_doc_root(name: String, root_path: String) -> Result<document_database::DocRoot, String> {
     let path = Path::new(&root_path);
-    fs::create_dir_all(path).map_err(|e| format!("创建目录失败: {}", e))?;
-    if !path.is_dir() {
+    // Validate name and path to prevent path traversal and empty values
+    if name.trim().is_empty() {
+        return Err(AppErrorKind::InternalError.to_frontend_json_with_details(
+            "名称不能为空".to_string(),
+        ));
+    }
+    let canonical = path.canonicalize().map_err(|e| format!("路径无效: {}", e))?;
+    fs::create_dir_all(&canonical).map_err(|e| format!("创建目录失败: {}", e))?;
+    if !canonical.is_dir() {
         return Err(AppErrorKind::DocumentPathNotDir.to_frontend_json());
     }
-    document_database::add_doc_root(&name, &root_path).await
+    document_database::add_doc_root(&name, &canonical.to_string_lossy()).await
 }
 
 #[tauri::command]

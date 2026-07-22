@@ -165,7 +165,13 @@ export function useClipboardHistory() {
                 })
             }
             if (item.id) {
-                setItemCategoryLocal(item.id, item.category || '未分类')
+                // 仅当后端返回了明确的 category 时才更新，
+                // 避免增量同步（后端不返回 category）覆盖前端已设置的分类
+                if (item.category) {
+                    setItemCategoryLocal(item.id, item.category)
+                } else if (!categoryMap.value[item.id]) {
+                    setItemCategoryLocal(item.id, '未分类')
+                }
             }
         }
 
@@ -287,7 +293,13 @@ export function useClipboardHistory() {
                     category: item.category || existing.category || '未分类'
                 })
 
-                setItemCategoryLocal(item.id, item.category || '未分类')
+                // 仅当后端返回了明确的 category 时才更新，
+                // 避免增量同步（后端不返回 category）覆盖前端已设置的分类
+                if (item.category) {
+                    setItemCategoryLocal(item.id, item.category)
+                } else if (!categoryMap.value[item.id]) {
+                    setItemCategoryLocal(item.id, '未分类')
+                }
             }
 
 

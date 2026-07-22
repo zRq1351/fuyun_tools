@@ -610,6 +610,8 @@ pub async fn save_app_settings(
 ) -> Result<(), String> {
     let version = app.package_info().version.to_string();
 
+    // 注意：此处克隆后释放锁，修改期间（~800行）并发命令读取到的是旧值。
+    // 这是一个已知的设计限制，完整修复需要重构为 write-through 模式。
     let mut settings = {
         let state_guard = lock_arc_mutex(state.inner());
         state_guard.settings.clone()
@@ -806,7 +808,11 @@ pub async fn save_app_settings(
                 );
             }
             if settings.text_clipboard_enabled {
-                register_text_shortcut(&app, state.inner().clone(), hot_key_val.as_str())?;
+                if let Err(e) = register_text_shortcut(&app, state.inner().clone(), hot_key_val.as_str()) {
+                    log::warn!("注册新文字窗口快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", hot_key_val, e);
+                    let _ = register_text_shortcut(&app, state.inner().clone(), old_hot_key.as_str());
+                    return Err(e);
+                }
             }
             settings.hot_key = hot_key_val.clone();
         }
@@ -859,7 +865,11 @@ pub async fn save_app_settings(
                 );
             }
             if settings.image_clipboard_enabled {
-                register_image_shortcut(&app, state.inner().clone(), image_hot_key_val.as_str())?;
+                if let Err(e) = register_image_shortcut(&app, state.inner().clone(), image_hot_key_val.as_str()) {
+                    log::warn!("注册新图片窗口快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", image_hot_key_val, e);
+                    let _ = register_image_shortcut(&app, state.inner().clone(), old_image_hot_key.as_str());
+                    return Err(e);
+                }
             }
             settings.image_hot_key = image_hot_key_val.clone();
         }
@@ -899,18 +909,23 @@ pub async fn save_app_settings(
                 ));
             }
 
+            let old_screenshot_hot_key = settings.screenshot_hot_key.clone();
             if let Err(e) = app
                 .global_shortcut()
-                .unregister(settings.screenshot_hot_key.as_str())
+                .unregister(old_screenshot_hot_key.as_str())
             {
                 log::warn!(
                     "注销旧截图快捷键 '{}' 失败 (可能从未注册成功): {}",
-                    settings.screenshot_hot_key,
+                    old_screenshot_hot_key,
                     e
                 );
             }
             if settings.screenshot_enabled {
-                register_screenshot_shortcut(&app, screenshot_hot_key_val.as_str())?;
+                if let Err(e) = register_screenshot_shortcut(&app, screenshot_hot_key_val.as_str()) {
+                    log::warn!("注册新截图快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", screenshot_hot_key_val, e);
+                    let _ = register_screenshot_shortcut(&app, old_screenshot_hot_key.as_str());
+                    return Err(e);
+                }
             }
             settings.screenshot_hot_key = screenshot_hot_key_val.clone();
         }
@@ -954,22 +969,27 @@ pub async fn save_app_settings(
                 ));
             }
 
+            let old_recording_hot_key = settings.recording_hot_key.clone();
             if let Err(e) = app
                 .global_shortcut()
-                .unregister(settings.recording_hot_key.as_str())
+                .unregister(old_recording_hot_key.as_str())
             {
                 log::warn!(
                     "注销旧录屏快捷键 '{}' 失败 (可能从未注册成功): {}",
-                    settings.recording_hot_key,
+                    old_recording_hot_key,
                     e
                 );
             }
             if settings.recording_enabled {
-                register_recording_shortcut(
+                if let Err(e) = register_recording_shortcut(
                     &app,
                     state.inner().clone(),
                     recording_hot_key_val.as_str(),
-                )?;
+                ) {
+                    log::warn!("注册新录屏快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", recording_hot_key_val, e);
+                    let _ = register_recording_shortcut(&app, state.inner().clone(), old_recording_hot_key.as_str());
+                    return Err(e);
+                }
             }
             settings.recording_hot_key = recording_hot_key_val.clone();
         }
@@ -1017,19 +1037,21 @@ pub async fn save_app_settings(
                 ));
             }
 
+            let old_mic_toggle_hot_key = settings.recording_mic_toggle_hot_key.clone();
             if let Err(e) = app
                 .global_shortcut()
-                .unregister(settings.recording_mic_toggle_hot_key.as_str())
+                .unregister(old_mic_toggle_hot_key.as_str())
             {
                 log::warn!(
                     "注销旧麦克风切换快捷键 '{}' 失败: {}",
-                    settings.recording_mic_toggle_hot_key,
+                    old_mic_toggle_hot_key,
                     e
                 );
             }
 
             if settings.recording_enabled {
                 let app_handle_for_mic = app.clone();
+                let old_mic_key_for_rollback = old_mic_toggle_hot_key.clone();
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     mic_toggle_hot_key_val.as_str(),
                     move |_app, _shortcut, event| {
@@ -1049,9 +1071,28 @@ pub async fn save_app_settings(
                     },
                 ) {
                     log::warn!(
-                        "注册麦克风切换快捷键 '{}' 失败: {}",
+                        "注册麦克风切换快捷键 '{}' 失败, 尝试恢复旧快捷键: {}",
                         mic_toggle_hot_key_val,
                         e
+                    );
+                    let app_handle_for_rollback = app.clone();
+                    let _ = app.global_shortcut().on_shortcut(
+                        old_mic_key_for_rollback.as_str(),
+                        move |_app, _shortcut, event| {
+                            let app_handle_inner = app_handle_for_rollback.clone();
+                            match event.state {
+                                ShortcutState::Pressed => {
+                                    tauri::async_runtime::spawn(async move {
+                                        toggle_microphone_from_shortcut(app_handle_inner, true).await;
+                                    });
+                                }
+                                ShortcutState::Released => {
+                                    tauri::async_runtime::spawn(async move {
+                                        toggle_microphone_from_shortcut(app_handle_inner, false).await;
+                                    });
+                                }
+                            }
+                        },
                     );
                     return Err(frontend_error_kind_params(
                         AppErrorKind::ClipboardHotkeyRegisterFailed,
@@ -1124,6 +1165,7 @@ pub async fn save_app_settings(
             }
             if settings.launcher_enabled {
                 let app_handle_for_launcher = app.clone();
+                let old_launcher_key_for_rollback = old_launcher_hot_key.clone();
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     launcher_hot_key_val.as_str(),
                     move |_app, _shortcut, event| {
@@ -1136,9 +1178,21 @@ pub async fn save_app_settings(
                     },
                 ) {
                     log::warn!(
-                        "注册启动器快捷键 '{}' 失败: {}",
+                        "注册启动器快捷键 '{}' 失败, 尝试恢复旧快捷键: {}",
                         launcher_hot_key_val,
                         e
+                    );
+                    let app_handle_for_rollback = app.clone();
+                    let _ = app.global_shortcut().on_shortcut(
+                        old_launcher_key_for_rollback.as_str(),
+                        move |_app, _shortcut, event| {
+                            if let ShortcutState::Pressed = event.state {
+                                let app_handle = app_handle_for_rollback.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    let _ = crate::ui::commands_launcher::show_launcher(app_handle).await;
+                                });
+                            }
+                        },
                     );
                     return Err(frontend_error_kind_params(
                         AppErrorKind::ClipboardHotkeyRegisterFailed,
@@ -1194,6 +1248,7 @@ pub async fn save_app_settings(
             }
             if settings.doc_manager_enabled {
                 let app_handle_for_doc = app.clone();
+                let old_doc_key_for_rollback = old_doc_manager_hot_key.clone();
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     doc_manager_hot_key_val.as_str(),
                     move |_app, _shortcut, event| {
@@ -1202,7 +1257,16 @@ pub async fn save_app_settings(
                         }
                     },
                 ) {
-                    log::warn!("注册文档管理快捷键 '{}' 失败: {}", doc_manager_hot_key_val, e);
+                    log::warn!("注册文档管理快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", doc_manager_hot_key_val, e);
+                    let app_handle_for_rollback = app.clone();
+                    let _ = app.global_shortcut().on_shortcut(
+                        old_doc_key_for_rollback.as_str(),
+                        move |_app, _shortcut, event| {
+                            if let ShortcutState::Pressed = event.state {
+                                let _ = crate::ui::window_manager::show_standard_window_by_label(&app_handle_for_rollback, "document_manager");
+                            }
+                        },
+                    );
                     return Err(frontend_error_kind_params(
                         AppErrorKind::ClipboardHotkeyRegisterFailed,
                         serde_json::json!({"key": doc_manager_hot_key_val}),
@@ -1418,12 +1482,13 @@ pub async fn save_app_settings(
             if api_key != "********" {
                 settings
                     .save_current_provider_config(api_key)
+                    .await
                     .map_err(|e| frontend_error_kind(AppErrorKind::SettingsSaveProviderFailed, e))?;
 
                 if api_key.trim().is_empty() {
                     log::info!("提供商 {} 的API密钥已清空", ai_provider_val);
                 } else {
-                    match settings.get_provider_api_key(ai_provider_val) {
+                    match settings.get_provider_api_key(ai_provider_val).await {
                         Ok(key) if key == *api_key => {
                             log::info!("密钥保存验证通过");
                         }
@@ -1589,7 +1654,7 @@ pub async fn test_ai_connection(
                 state_guard.settings.clone(),
             )
         };
-        let key = settings_snapshot.get_provider_api_key(&provider);
+        let key = settings_snapshot.get_provider_api_key(&provider).await;
         match key {
             Ok(key) if !key.is_empty() => {
                 real_api_key = key;

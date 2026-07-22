@@ -1,22 +1,14 @@
 use crate::services::ocr_engine::{OcrLine, OcrParagraph, clean_ocr_text};
 use ocr_rs::{OcrEngine, OcrEngineConfig};
-use std::sync::OnceLock;
+use std::sync::{LazyLock, Mutex};
 
-/// 缓存的 OCR 引擎实例（全局单例）
-static CACHED_OCR_ENGINE: OnceLock<Option<OcrEngine>> = OnceLock::new();
+/// 互斥锁保证同一时刻只有一个 OCR 引擎初始化在进行
+static OCR_INIT_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
-/// 获取或初始化缓存的 OCR 引擎
-fn get_or_init_engine(app_handle: &tauri::AppHandle) -> Result<&'static OcrEngine, String> {
-    let engine_opt = CACHED_OCR_ENGINE.get_or_init(|| {
-        match init_ocr_engine(app_handle) {
-            Ok(engine) => Some(engine),
-            Err(e) => {
-                log::error!("OCR 引擎初始化失败: {}", e);
-                None
-            }
-        }
-    });
-    engine_opt.as_ref().ok_or_else(|| "OCR 引擎未初始化".to_string())
+/// 获取 OCR 引擎（每次调用创建新实例，因为 OcrEngine 不实现 Clone）
+fn get_or_init_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {
+    let _guard = OCR_INIT_LOCK.lock().map_err(|e| format!("OCR 初始化锁中毒: {}", e))?;
+    init_ocr_engine(app_handle)
 }
 
 fn init_ocr_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {

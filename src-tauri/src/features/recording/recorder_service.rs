@@ -1,4 +1,4 @@
-﻿use crate::core::app_state::AppState as SharedAppState;
+use crate::core::app_state::AppState as SharedAppState;
 use crate::core::error::{AppError, ErrorCode};
 use crate::core::error_codes::AppErrorKind;
 use crate::core::perf_metrics::record_perf_metric;
@@ -2923,47 +2923,9 @@ pub fn pause_recording(
         runtime.mic_audio_wav_path = None;
         runtime.mic_audio_stream_start_ms = None;
 
-        // 🔧 修复：暂停时清理已完成的音频片段，避免内存泄漏
-        // 这些片段已在磁盘上，合并时会重新读取，无需常驻内存
-        let sys_segments_to_clean: Vec<_> = std::mem::take(&mut runtime.system_audio_segments)
-            .into_iter()
-            .filter(|seg| seg.path.exists())
-            .collect();
-        let mic_segments_to_clean: Vec<_> = std::mem::take(&mut runtime.mic_audio_segments)
-            .into_iter()
-            .filter(|seg| seg.path.exists())
-            .collect();
-
-        // ✅ 添加诊断日志：记录暂停时清理的音频片段
-        if !sys_segments_to_clean.is_empty() {
-            log::info!("暂停时清理 {} 个系统音频片段", sys_segments_to_clean.len());
-            for seg in &sys_segments_to_clean {
-                log::info!("  - {:?}", seg.path.file_name());
-            }
-        }
-        if !mic_segments_to_clean.is_empty() {
-            log::info!(
-                "暂停时清理 {} 个麦克风音频片段",
-                mic_segments_to_clean.len()
-            );
-            for seg in &mic_segments_to_clean {
-                log::info!("  - {:?}", seg.path.file_name());
-            }
-        }
-
-        drop(runtime); // 释放锁后再执行I/O操作
-
-        // 异步删除已完成的音频片段文件，释放磁盘空间
-        for seg in sys_segments_to_clean {
-            if let Err(e) = fs::remove_file(&seg.path) {
-                log::warn!("清理暂停音频片段失败 {:?}: {}", seg.path, e);
-            }
-        }
-        for seg in mic_segments_to_clean {
-            if let Err(e) = fs::remove_file(&seg.path) {
-                log::warn!("清理暂停音频片段失败 {:?}: {}", seg.path, e);
-            }
-        }
+        // 🔧 修复：暂停时不再删除音频片段文件，保留元数据用于合并
+        // 原代码删除文件导致暂停/恢复后丢失暂停前的音频数据
+        // AudioSegment 结构体仅含 PathBuf + 2个u64，内存开销极小
 
         let mut runtime = lock_arc_mutex(&runtime_arc);
         runtime.phase = RecordingPhase::Paused;

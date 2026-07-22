@@ -410,6 +410,7 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
 
 pub fn stop_image_clipboard_listener() {
     IMAGE_POLLER.stop();
+    IMAGE_WORKERS_STARTED.store(false, Ordering::SeqCst);
 }
 
 pub fn set_image_clipboard_listener_enabled(

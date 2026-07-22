@@ -1221,14 +1221,23 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
             "origin_y": origin_y,
             "session_id": session_id
         });
+        // Sanitize selection_mode for safe JS interpolation
+        let safe_mode = selection_mode
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('<', "\\x3c")
+            .replace('>', "\\x3e");
         let script = format!(
             "if (!window.__SCREENSHOT_BOOT_READY__) {{ throw new Error('screenshot boot not ready'); }}\
 window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || {{ pendingData: null, pendingStartSessionId: 0 }};\
 window.__SCREENSHOT_BOOT__.pendingData = {payload};\
 window.__SCREENSHOT_BOOT__.pendingStartSessionId = {session_id};\
-window.__SCREENSHOT_BOOT__.pendingMode = '{selection_mode}';\
+window.__SCREENSHOT_BOOT__.pendingMode = '{safe_mode}';\
 window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {payload} }}));\
-window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ session_id: {session_id}, mode: '{selection_mode}' }} }}));"
+window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ session_id: {session_id}, mode: '{safe_mode}' }} }}));"
         );
 
         let app_for_window = app.clone();
@@ -1281,12 +1290,20 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
             "origin_y": origin_y,
             "session_id": session_id
         });
+        let safe_mode = selection_mode
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('<', "\\x3c")
+            .replace('>', "\\x3e");
         let boot_script = format!(
             "window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || {{ pendingData: null, pendingStartSessionId: 0 }};\
 window.__SCREENSHOT_BOOT__.pendingData = {};\
 window.__SCREENSHOT_BOOT__.pendingStartSessionId = {};\
 window.__SCREENSHOT_BOOT__.pendingMode = '{}';",
-            payload, session_id, selection_mode
+            payload, session_id, safe_mode
         );
         let window = tauri::WebviewWindowBuilder::new(
             &app,

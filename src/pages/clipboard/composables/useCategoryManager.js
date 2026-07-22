@@ -187,6 +187,7 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
         }
         if (category && category !== '未分类' && category !== '全部') {
             if (!categories.value.includes(category)) {
+                const prevCategories = categories.value.slice()
                 if (onCategoryAdded) {
                     onCategoryAdded(category)
                 } else {
@@ -196,6 +197,8 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
                     await categoryService.addCategory(category)
                 } catch (error) {
                     console.error('添加分类失败:', error)
+                    // 回滚：移除本地添加的分类
+                    categories.value = prevCategories
                 }
             }
         }

@@ -20,7 +20,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 static CACHED_AI_CLIENT: LazyLock<Mutex<Option<(AIConfig, AIClient)>>> =
     LazyLock::new(|| Mutex::new(None));
 
-fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
+async fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
     let (settings_snapshot, provider_key, api_url, model_name) = {
         let state_guard = lock_arc_mutex(state);
         let settings_snapshot = state_guard.settings.clone();
@@ -66,6 +66,7 @@ fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
     log::info!("正在验证提供商 {} 的配置", provider_key);
     let api_key = settings_snapshot
         .get_provider_api_key(&provider_key)
+        .await
         .map_err(|e| {
             log::error!("读取密钥库失败: {}", e);
             AppErrorKind::AiKeychainReadFailed.to_app_error_with_details(format!("{}", e))
@@ -86,7 +87,7 @@ fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
 
 /// 获取或创建AI客户端（配置不变时复用缓存的客户端）
 pub async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> AppResult<AIClient> {
-    let current_config = build_ai_config(&state)?;
+    let current_config = build_ai_config(&state).await?;
 
     // 检查缓存的客户端是否仍然有效
     {

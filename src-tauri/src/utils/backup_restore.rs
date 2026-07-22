@@ -400,7 +400,7 @@ async fn restore_settings(
 }
 
 async fn restore_text_history(
-    state: &std::sync::Arc<crate::sync::Mutex<AppState>>,
+    _state: &std::sync::Arc<crate::sync::Mutex<AppState>>,
     extracted_dir: &Path,
     strategy: &str,
 ) -> Result<(), String> {
@@ -417,8 +417,6 @@ async fn restore_text_history(
         log::info!("文本历史恢复: 使用合并模式");
     }
 
-    let mut guard = state.lock().unwrap_or_else(|never| match never {});
-    let _ = &mut guard;
     Ok(())
 }
 
@@ -447,7 +445,13 @@ async fn restore_image_history(
     fs::create_dir_all(&blob_root).map_err(|e| format!("创建图片目录失败: {}", e))?;
 
     for (position, item) in wrapper.items.iter().enumerate() {
-        let source = extracted_dir.join("image_history").join(&item.blob_path);
+        // Validate blob_path to prevent path traversal
+        let blob_path = item.blob_path.replace('\\', "/");
+        if blob_path.contains("..") || blob_path.starts_with('/') || blob_path.contains(':') {
+            log::warn!("跳过包含路径遍历的图片条目: {}", item.blob_path);
+            continue;
+        }
+        let source = extracted_dir.join("image_history").join(&blob_path);
         let extension = source
             .extension()
             .and_then(|ext| ext.to_str())

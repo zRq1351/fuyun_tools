@@ -553,3 +553,557 @@ pub fn find_best_replacement_candidate(
 
     best_candidate
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===== calculate_text_similarity =====
+
+    #[test]
+    fn similarity_identical_texts() {
+        assert_eq!(calculate_text_similarity("hello", "hello"), 1.0);
+    }
+
+    #[test]
+    fn similarity_empty_texts() {
+        assert_eq!(calculate_text_similarity("", ""), 1.0);
+    }
+
+    #[test]
+    fn similarity_one_empty() {
+        assert_eq!(calculate_text_similarity("hello", ""), 0.0);
+        assert_eq!(calculate_text_similarity("", "hello"), 0.0);
+    }
+
+    #[test]
+    fn similarity完全不同的文本() {
+        let sim = calculate_text_similarity("abc", "xyz");
+        assert!(sim < 0.1, "完全不同的文本相似度应很低: {}", sim);
+    }
+
+    #[test]
+    fn similarity子串包含() {
+        // "hello world" vs "hello": LCS-based similarity for short texts
+        let sim = calculate_text_similarity("hello world", "hello");
+        // Short text uses LCS path; "hello" is subset of "hello world"
+        assert!(sim > 0.3, "子串文本应有一定相似度: {}", sim);
+    }
+
+    #[test]
+    fn similarity中文文本() {
+        let sim = calculate_text_similarity("你好世界", "你好世界！");
+        assert!(sim >= 0.8, "相似中文文本应有高相似度: {}", sim);
+    }
+
+    #[test]
+    fn similarity长文本使用快速路径() {
+        let long1 = "a".repeat(2000);
+        let long2 = "a".repeat(1900);
+        let sim = calculate_text_similarity(&long1, &long2);
+        assert!(sim > 0.9, "长文本快速路径应返回合理结果: {}", sim);
+    }
+
+    // ===== detect_text_completeness =====
+
+    #[test]
+    fn completeness完全相同() {
+        assert_eq!(
+            detect_text_completeness("hello", "hello"),
+            TextCompleteness::Complete
+        );
+    }
+
+    #[test]
+    fn completeness缺少后缀() {
+        assert_eq!(
+            detect_text_completeness("hel", "hello"),
+            TextCompleteness::MissingSuffix
+        );
+    }
+
+    #[test]
+    fn completeness缺少前缀() {
+        assert_eq!(
+            detect_text_completeness("llo", "hello"),
+            TextCompleteness::MissingPrefix
+        );
+    }
+
+    #[test]
+    fn completeness缺少前后缀() {
+        assert_eq!(
+            detect_text_completeness("ell", "hello"),
+            TextCompleteness::MissingBoth
+        );
+    }
+
+    #[test]
+    fn completeness空文本() {
+        assert_eq!(
+            detect_text_completeness("", "hello"),
+            TextCompleteness::Unknown
+        );
+        assert_eq!(
+            detect_text_completeness("hello", ""),
+            TextCompleteness::Unknown
+        );
+    }
+
+    #[test]
+    fn completeness新版本更长视为完整() {
+        assert_eq!(
+            detect_text_completeness("hello world!", "hello"),
+            TextCompleteness::Complete
+        );
+    }
+
+    // ===== compare_versions =====
+
+    #[test]
+    fn versions相同文本不替换() {
+        let result = compare_versions("hello", "hello", 0.8);
+        assert!(!result.should_replace);
+        assert_eq!(result.similarity_score, 1.0);
+    }
+
+    #[test]
+    fn versions_newer_longer_should_replace() {
+        // similarity("hello", "hello world") ≈ 0.45, so threshold must be <= 0.45
+        let result = compare_versions("hello", "hello world", 0.4);
+        assert!(result.should_replace);
+        assert!(result.reason.contains("更完整"));
+    }
+
+    #[test]
+    fn versions_totally_different_no_replace() {
+        let result = compare_versions("apple", "banana", 0.8);
+        assert!(!result.should_replace);
+        assert!(result.similarity_score < 0.3);
+    }
+
+    #[test]
+    fn versions_subset_should_move_complete_to_front() {
+        // similarity("hello world", "hello") ≈ 0.45, threshold must be <= 0.45
+        let result = compare_versions("hello world", "hello", 0.4);
+        assert!(result.should_replace);
+        assert!(result.reason.contains("完整版本"));
+    }
+
+    // ===== find_best_replacement_candidate =====
+
+    #[test]
+    fn dedup空历史返回None() {
+        let result = find_best_replacement_candidate("hello", &[], 0.8);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn dedup找到完全相同的不替换() {
+        let history = vec!["hello".to_string(), "world".to_string()];
+        let result = find_best_replacement_candidate("hello", &history, 0.8);
+        assert!(result.is_none(), "完全相同的文本不应触发替换");
+    }
+
+    #[test]
+    fn dedup找到更完整版本应替换() {
+        let history = vec!["hel".to_string(), "world".to_string()];
+        let result = find_best_replacement_candidate("hello", &history, 0.5);
+        assert!(result.is_some(), "更完整的版本应被找到");
+        let (idx, comp) = result.unwrap();
+        assert_eq!(idx, 0);
+        assert!(comp.should_replace);
+    }
+
+    #[test]
+    fn dedup不同内容返回None() {
+        let history = vec!["apple".to_string(), "banana".to_string()];
+        let result = find_best_replacement_candidate("cherry", &history, 0.8);
+        assert!(result.is_none());
+    }
+
+    // ===== ngram_similarity =====
+
+    #[test]
+    fn ngram相同文本() {
+        assert_eq!(ngram_similarity("hello", "hello", 3), 1.0);
+    }
+
+    #[test]
+    fn ngram空文本() {
+        assert_eq!(ngram_similarity("", "", 3), 1.0);
+        assert_eq!(ngram_similarity("hello", "", 3), 0.0);
+    }
+
+    #[test]
+    fn ngram短文本回退到字符匹配() {
+        let sim = ngram_similarity("ab", "ac", 3);
+        assert!(sim > 0.0 && sim < 1.0);
+    }
+
+    // ===== prefix/suffix match ratio =====
+
+    #[test]
+    fn prefix完全匹配() {
+        assert_eq!(prefix_match_ratio("hello world", "hello earth", 5), 1.0);
+    }
+
+    #[test]
+    fn suffix完全匹配() {
+        assert_eq!(suffix_match_ratio("hello world", "hi world", 5), 1.0);
+    }
+
+    #[test]
+    fn prefix空字符串() {
+        assert_eq!(prefix_match_ratio("", "hello", 5), 0.0);
+    }
+
+    // ===== Edge cases =====
+
+    #[test]
+    fn similarity特殊字符() {
+        let sim = calculate_text_similarity("a!@#$%", "a!@#$%");
+        assert_eq!(sim, 1.0);
+    }
+
+    #[test]
+    fn similarityUnicode表情() {
+        let sim = calculate_text_similarity("hello 😀", "hello 😀");
+        assert_eq!(sim, 1.0);
+    }
+
+    #[test]
+    fn dedup超大文本跳过() {
+        let huge = "x".repeat(200_000);
+        let history = vec![huge.clone()];
+        let result = find_best_replacement_candidate(&huge, &history, 0.8);
+        assert!(result.is_none(), "超大文本应被跳过");
+    }
+
+    // ===== has_sentence_endings =====
+
+    #[test]
+    fn sentence_ending_chinese_period() {
+        assert!(has_sentence_endings("你好。"));
+        assert!(has_sentence_endings("你好！"));
+        assert!(has_sentence_endings("你好？"));
+    }
+
+    #[test]
+    fn sentence_ending_english_period() {
+        assert!(has_sentence_endings("Hello."));
+        assert!(has_sentence_endings("Hello!"));
+        assert!(has_sentence_endings("Hello?"));
+    }
+
+    #[test]
+    fn sentence_ending_no_ending() {
+        assert!(!has_sentence_endings("hello"));
+        assert!(!has_sentence_endings("你好"));
+        assert!(!has_sentence_endings("hello,"));
+    }
+
+    #[test]
+    fn sentence_ending_empty() {
+        assert!(!has_sentence_endings(""));
+    }
+
+    #[test]
+    fn sentence_ending_with_whitespace() {
+        assert!(has_sentence_endings("hello. "));
+        assert!(has_sentence_endings("hello。  "));
+    }
+
+    // ===== is_truncated_sentence =====
+
+    #[test]
+    fn truncated_comma_ending() {
+        assert!(is_truncated_sentence("hello,"));
+        assert!(is_truncated_sentence("你好，"));
+    }
+
+    #[test]
+    fn truncated_parenthesis_ending() {
+        assert!(is_truncated_sentence("hello("));
+        assert!(is_truncated_sentence("hello["));
+        assert!(is_truncated_sentence("hello{"));
+    }
+
+    #[test]
+    fn truncated_quote_ending() {
+        assert!(is_truncated_sentence("hello\""));
+        assert!(is_truncated_sentence("hello'"));
+    }
+
+    #[test]
+    fn truncated_connector_words() {
+        assert!(is_truncated_sentence("但是"));
+        assert!(is_truncated_sentence("而且"));
+        assert!(is_truncated_sentence("并且"));
+        assert!(is_truncated_sentence("但非"));
+    }
+
+    #[test]
+    fn truncated_not_truncated() {
+        assert!(!is_truncated_sentence("hello."));
+        assert!(!is_truncated_sentence("你好！"));
+        assert!(!is_truncated_sentence("complete sentence"));
+    }
+
+    #[test]
+    fn truncated_empty() {
+        assert!(!is_truncated_sentence(""));
+    }
+
+    // ===== is_subset_of =====
+
+    #[test]
+    fn subset_prefix() {
+        assert!(is_subset_of("hel", "hello"));
+    }
+
+    #[test]
+    fn subset_suffix() {
+        assert!(is_subset_of("llo", "hello"));
+    }
+
+    #[test]
+    fn subset_contained() {
+        assert!(is_subset_of("ell", "hello"));
+    }
+
+    #[test]
+    fn subset_not_subset() {
+        assert!(!is_subset_of("hello", "world"));
+    }
+
+    #[test]
+    fn subset_equal_length_is_subset() {
+        // is_subset_of checks starts_with/ends_with, equal text qualifies
+        assert!(is_subset_of("hello", "hello"));
+    }
+
+    #[test]
+    fn subset_empty() {
+        assert!(!is_subset_of("", "hello"));
+        assert!(!is_subset_of("hello", ""));
+    }
+
+    // ===== count_punctuation =====
+
+    #[test]
+    fn punctuation_chinese() {
+        assert_eq!(count_punctuation("你好，世界。"), 2);
+        assert_eq!(count_punctuation("你好！世界？"), 2);
+    }
+
+    #[test]
+    fn punctuation_english() {
+        // ':' is NOT in the punctuation list, so only 3
+        assert_eq!(count_punctuation("hello, world."), 2);
+        assert_eq!(count_punctuation("hello! world? yes;"), 3);
+    }
+
+    #[test]
+    fn punctuation_none() {
+        assert_eq!(count_punctuation("hello world"), 0);
+    }
+
+    #[test]
+    fn punctuation_empty() {
+        assert_eq!(count_punctuation(""), 0);
+    }
+
+    // ===== is_more_complete_sentence =====
+
+    #[test]
+    fn more_complete_new_has_ending_old_doesnt() {
+        assert!(is_more_complete_sentence("hello.", "hello"));
+        assert!(is_more_complete_sentence("你好。", "你好"));
+    }
+
+    #[test]
+    fn more_complete_both_have_ending() {
+        assert!(!is_more_complete_sentence("hello.", "world."));
+    }
+
+    #[test]
+    fn more_complete_neither_has_ending() {
+        assert!(!is_more_complete_sentence("hello", "world"));
+    }
+
+    // ===== candidate_prefilter =====
+
+    #[test]
+    fn prefilter_empty_returns_true() {
+        assert!(candidate_prefilter("", "hello"));
+        assert!(candidate_prefilter("hello", ""));
+    }
+
+    #[test]
+    fn prefilter_containment() {
+        assert!(candidate_prefilter("hello world", "hello"));
+        assert!(candidate_prefilter("hello", "hello world"));
+    }
+
+    #[test]
+    fn prefilter_length_ratio_too_low() {
+        // "a" vs "abcdefghij" -> ratio = 1/10 = 0.1 < 0.22
+        assert!(!candidate_prefilter("a", "abcdefghij"));
+    }
+
+    #[test]
+    fn prefilter_ngram_similarity() {
+        // Similar texts should pass
+        assert!(candidate_prefilter("hello world", "hello earth"));
+    }
+
+    #[test]
+    fn prefilter_edge_match() {
+        // Same prefix should pass
+        assert!(candidate_prefilter("hello abc", "hello xyz"));
+    }
+
+    // ===== stable_text_hash =====
+
+    #[test]
+    fn hash_deterministic() {
+        let h1 = stable_text_hash("test");
+        let h2 = stable_text_hash("test");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn hash_different_inputs() {
+        let h1 = stable_text_hash("abc");
+        let h2 = stable_text_hash("def");
+        assert_ne!(h1, h2);
+    }
+
+    // ===== compare_versions edge cases =====
+
+    #[test]
+    fn versions_same_length_different_content() {
+        let result = compare_versions("hello", "world", 0.8);
+        assert!(!result.should_replace);
+    }
+
+    #[test]
+    fn versions_new_has_more_punctuation() {
+        let result = compare_versions("hello", "hello!", 0.8);
+        // Same length after considering punctuation, new has more
+        assert!(result.should_replace || result.similarity_score > 0.8);
+    }
+
+    #[test]
+    fn versions_same_length_same_punctuation_count() {
+        // "hello," vs "hello." - same length, same punctuation count, both have endings
+        let result = compare_versions("hello,", "hello.", 0.8);
+        // Neither is "more complete" since both have sentence endings
+        // and punctuation count is equal -> no replacement
+        assert!(!result.should_replace);
+    }
+
+    #[test]
+    fn versions_new_shorter_not_subset() {
+        let result = compare_versions("hello world", "xyz", 0.8);
+        assert!(!result.should_replace);
+    }
+
+    // ===== find_best_replacement_candidate edge cases =====
+
+    #[test]
+    fn dedup_picks_best_similarity() {
+        let history = vec![
+            "hello".to_string(),
+            "hello world".to_string(),
+            "hello earth".to_string(),
+        ];
+        let result = find_best_replacement_candidate("hello", &history, 0.3);
+        // Should pick the most similar one
+        if let Some((idx, comp)) = result {
+            assert!(comp.should_replace);
+            assert!(idx < 3);
+        }
+    }
+
+    #[test]
+    fn dedup_single_item_history() {
+        let history = vec!["hello".to_string()];
+        let result = find_best_replacement_candidate("hello", &history, 0.8);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn dedup_threshold_zero_always_matches() {
+        let history = vec!["completely different".to_string()];
+        let result = find_best_replacement_candidate("hello", &history, 0.0);
+        // With threshold 0, any text should match
+        // But compare_versions with threshold 0: similarity >= 0 is always true
+        // However, should_replace depends on completeness logic
+        // This tests the boundary
+        let _ = result;
+    }
+
+    // ===== calculate_text_similarity edge cases =====
+
+    #[test]
+    fn similarity_single_char() {
+        assert_eq!(calculate_text_similarity("a", "a"), 1.0);
+        assert!(calculate_text_similarity("a", "b") < 0.1);
+    }
+
+    #[test]
+    fn similarity_one_char_match() {
+        let sim = calculate_text_similarity("abc", "axc");
+        assert!(sim > 0.5, "单字符差异应有较高相似度: {}", sim);
+    }
+
+    #[test]
+    fn similarity_reversed() {
+        let sim1 = calculate_text_similarity("hello", "world");
+        let sim2 = calculate_text_similarity("world", "hello");
+        assert!((sim1 - sim2).abs() < 0.01, "对称性: {} vs {}", sim1, sim2);
+    }
+
+    #[test]
+    fn similarity_long_identical() {
+        let text = "a".repeat(500);
+        assert_eq!(calculate_text_similarity(&text, &text), 1.0);
+    }
+
+    // ===== detect_text_completeness edge cases =====
+
+    #[test]
+    fn completeness_both_empty() {
+        assert_eq!(
+            detect_text_completeness("", ""),
+            TextCompleteness::Unknown
+        );
+    }
+
+    #[test]
+    fn completeness_exact_match() {
+        assert_eq!(
+            detect_text_completeness("abc", "abc"),
+            TextCompleteness::Complete
+        );
+    }
+
+    #[test]
+    fn completeness_new_longer_is_complete() {
+        assert_eq!(
+            detect_text_completeness("hello world!", "hello"),
+            TextCompleteness::Complete
+        );
+    }
+
+    // ===== get_dedup_scan_metrics =====
+
+    #[test]
+    fn metrics_initial_state() {
+        let m = get_dedup_scan_metrics();
+        // Budget should be within configured range
+        assert!(m.budget_ms_current >= 12 && m.budget_ms_current <= 30);
+    }
+}

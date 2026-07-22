@@ -570,20 +570,24 @@ impl ClipboardManager {
         normalize_pinned_items(&mut pinned_items, &history);
         apply_pin_order(&mut history, &pinned_items);
         self.enqueue_history_only_persist();
+        // 锁顺序必须与 Path A 一致: history_fingerprints -> exact_index_cache
+        let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
         let mut exact_index_cache = self.exact_index_cache.lock();
         exact_index_cache.clear();
         if let Some(first) = history.first() {
             exact_index_cache.put(stable_text_hash(first), 0);
         }
-        let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
         *fingerprints = build_history_fingerprints(&history);
         self.history_cache_dirty.store(false, Ordering::Relaxed);
     }
 
     pub async fn update_item_content(&self, old_item_id: &str, new_content: String) -> Result<(), String> {
-        // 在独立作用域中获取 index，然后释放 history 锁
-        let index = {
-            let history = lock_arc_mutex(&self.history);
+        let new_item_id = crate::utils::database::stable_history_item_id(&new_content);
+
+        // === 阶段一：持有 history 锁，原子完成所有内存状态修改 ===
+        // 这确保 index 在整个操作期间不会因并发修改而失效
+        let (category_to_db, was_pinned) = {
+            let mut history = lock_arc_mutex(&self.history);
             let index = self
                 .find_index_by_id_with_lock(&history, old_item_id)
                 .ok_or_else(|| AppErrorKind::ClipboardItemNotFound.to_frontend_json())?;
@@ -592,64 +596,52 @@ impl ClipboardManager {
             if old_content == new_content {
                 return Ok(());
             }
-            index
-        };
 
-        let new_item_id = crate::utils::database::stable_history_item_id(&new_content);
+            // 更新 history 内容
+            history[index] = new_content.clone();
 
-        // 提取需要的数据，然后释放 categories 锁
-        let categories_to_update = {
-            let mut categories = lock_arc_mutex(&self.categories);
-            if let Some(cat) = categories.remove(old_item_id) {
-                categories.insert(new_item_id.clone(), cat.clone());
-                Some((new_item_id.clone(), cat))
-            } else {
-                None
-            }
-        };
+            // 同步更新 categories 内存状态
+            let category_to_db = {
+                let mut categories = lock_arc_mutex(&self.categories);
+                if let Some(cat) = categories.remove(old_item_id) {
+                    categories.insert(new_item_id.clone(), cat.clone());
+                    Some((new_item_id.clone(), cat))
+                } else {
+                    None
+                }
+            };
 
-        // 执行异步数据库操作（此时所有锁都已释放）
-        if let Some((item_id, cat)) = categories_to_update {
-            let _ = crate::utils::database::set_item_category(&item_id, &cat).await;
-        }
-        let _ = crate::utils::database::remove_item_category(old_item_id).await;
-
-        // 处理 pinned_items
-        let was_pinned = {
+            // 同步更新 pinned_items 内存状态
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
-            if let Some(pos) = pinned_items.iter().position(|id| id == old_item_id) {
+            let was_pinned = if let Some(pos) = pinned_items.iter().position(|id| id == old_item_id) {
                 pinned_items[pos] = new_item_id.clone();
                 true
             } else {
                 false
-            }
+            };
+
+            // 清理缓存
+            self.exact_index_cache.lock().clear();
+            self.history_cache_dirty.store(true, Ordering::Relaxed);
+
+            // 重建指纹索引（在 history 锁内完成，保证一致性）
+            let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
+            *fingerprints = build_history_fingerprints(&history);
+
+            (category_to_db, was_pinned)
         };
+        // history 锁在此释放，所有内存状态已一致
+
+        // === 阶段二：异步持久化到数据库（无需持有锁）===
+        if let Some((item_id, cat)) = category_to_db {
+            let _ = crate::utils::database::set_item_category(&item_id, &cat).await;
+        }
+        let _ = crate::utils::database::remove_item_category(old_item_id).await;
 
         if was_pinned {
             let _ = crate::utils::database::pin_item(&new_item_id).await;
             let _ = crate::utils::database::unpin_item(old_item_id).await;
         }
-
-        // 重新获取 history 锁来更新内容
-        let mut history = lock_arc_mutex(&self.history);
-        // Bug修复 (B3): 验证 index 在锁释放期间是否仍然有效
-        if index >= history.len() {
-            log::warn!("update_item_content: index {} 已过期（history 长度 {}），跳过更新", index, history.len());
-            return Err(AppErrorKind::InternalError.to_frontend_json());
-        }
-        let current_hash = stable_text_hash(&history[index]);
-        let expected_old_hash = u64::from_str_radix(old_item_id, 16).unwrap_or(0);
-        if current_hash != expected_old_hash {
-            log::warn!("update_item_content: index {} 指向的项目已变更，跳过更新", index);
-            return Err(AppErrorKind::InternalError.to_frontend_json());
-        }
-        history[index] = new_content.clone();
-
-        self.exact_index_cache.lock().clear();
-        self.history_cache_dirty.store(true, Ordering::Relaxed);
-        
-        let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
-        *fingerprints = build_history_fingerprints(&history);
 
         self.enqueue_history_only_persist();
 

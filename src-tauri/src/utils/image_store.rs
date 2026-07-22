@@ -326,6 +326,9 @@ async fn get_pool() -> Result<Arc<SqlitePool>, String> {
 }
 
 fn block_on_result<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        panic!("block_on_result must not be called from within a tokio runtime; use the async variant instead");
+    }
     tauri::async_runtime::block_on(future)
 }
 
@@ -1511,4 +1514,445 @@ pub async fn merge_pinned_items_async(item_ids: &[String]) -> Result<(), String>
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn create_test_image_pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "
+            CREATE TABLE IF NOT EXISTS image_items (
+                position INTEGER NOT NULL,
+                item_id TEXT PRIMARY KEY,
+                width INTEGER NOT NULL,
+                height INTEGER NOT NULL,
+                image_path TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS image_async_previews (
+                item_id TEXT PRIMARY KEY,
+                preview_width INTEGER NOT NULL,
+                preview_height INTEGER NOT NULL,
+                preview_base64 TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS image_categories (
+                item_id TEXT PRIMARY KEY,
+                category TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS image_category_list (
+                position INTEGER NOT NULL,
+                category TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS image_tags (
+                item_id TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                PRIMARY KEY (item_id, tag)
+            );
+            CREATE TABLE IF NOT EXISTS image_pinned (
+                item_id TEXT PRIMARY KEY,
+                position INTEGER NOT NULL
+            );
+            ",
+        )
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn integration_image_upsert_and_query() {
+        let pool = create_test_image_pool().await;
+
+        sqlx::query(
+            "INSERT INTO image_items (position, item_id, width, height, image_path)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+            .bind(0i64)
+            .bind("img001")
+            .bind(1920i64)
+            .bind(1080i64)
+            .bind("/tmp/img001.png")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row: (i64, i64, String) = sqlx::query_as(
+            "SELECT width, height, image_path FROM image_items WHERE item_id = 'img001'",
+        )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.0, 1920);
+        assert_eq!(row.1, 1080);
+        assert_eq!(row.2, "/tmp/img001.png");
+    }
+
+    #[tokio::test]
+    async fn integration_image_upsert_update() {
+        let pool = create_test_image_pool().await;
+
+        sqlx::query(
+            "INSERT INTO image_items (position, item_id, width, height, image_path)
+             VALUES (0, 'img001', 100, 100, '/old.png')",
+        )
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT INTO image_items (position, item_id, width, height, image_path)
+             VALUES (1, 'img001', 200, 200, '/new.png')
+             ON CONFLICT(item_id) DO UPDATE SET
+                position=excluded.position, width=excluded.width,
+                height=excluded.height, image_path=excluded.image_path",
+        )
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row: (i64, String) = sqlx::query_as(
+            "SELECT width, image_path FROM image_items WHERE item_id = 'img001'",
+        )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.0, 200);
+        assert_eq!(row.1, "/new.png");
+    }
+
+    #[tokio::test]
+    async fn integration_image_categories_full_flow() {
+        let pool = create_test_image_pool().await;
+
+        sqlx::query("INSERT INTO image_categories (item_id, category) VALUES (?1, ?2)")
+            .bind("img001")
+            .bind("截图")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let cat: String = sqlx::query_scalar("SELECT category FROM image_categories WHERE item_id = 'img001'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(cat, "截图");
+
+        sqlx::query(
+            "INSERT INTO image_categories (item_id, category) VALUES (?1, ?2)
+             ON CONFLICT(item_id) DO UPDATE SET category=excluded.category",
+        )
+            .bind("img001")
+            .bind("照片")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let cat: String = sqlx::query_scalar("SELECT category FROM image_categories WHERE item_id = 'img001'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(cat, "照片");
+
+        sqlx::query("DELETE FROM image_categories WHERE item_id = 'img001'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM image_categories WHERE item_id = 'img001'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn integration_image_tags_flow() {
+        let pool = create_test_image_pool().await;
+
+        let tags = vec!["风景", "旅行", "2024"];
+        for (pos, tag) in tags.iter().enumerate() {
+            sqlx::query("INSERT INTO image_tags (item_id, tag, position) VALUES (?1, ?2, ?3)")
+                .bind("img001")
+                .bind(tag)
+                .bind(pos as i64)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let result: Vec<String> = sqlx::query_scalar(
+            "SELECT tag FROM image_tags WHERE item_id = 'img001' ORDER BY position ASC",
+        )
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(result, vec!["风景", "旅行", "2024"]);
+
+        sqlx::query("DELETE FROM image_tags WHERE item_id = 'img001'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let new_tags = vec!["美食", "城市"];
+        for (pos, tag) in new_tags.iter().enumerate() {
+            sqlx::query("INSERT INTO image_tags (item_id, tag, position) VALUES (?1, ?2, ?3)")
+                .bind("img001")
+                .bind(tag)
+                .bind(pos as i64)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let result: Vec<String> = sqlx::query_scalar(
+            "SELECT tag FROM image_tags WHERE item_id = 'img001' ORDER BY position ASC",
+        )
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(result, vec!["美食", "城市"]);
+    }
+
+    #[tokio::test]
+    async fn integration_image_pinned_with_position() {
+        let pool = create_test_image_pool().await;
+
+        sqlx::query("INSERT INTO image_pinned (item_id, position) VALUES (?1, ?2)")
+            .bind("img001")
+            .bind(0i64)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO image_pinned (item_id, position) VALUES (?1, ?2)")
+            .bind("img002")
+            .bind(1i64)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let result: Vec<String> = sqlx::query_scalar(
+            "SELECT item_id FROM image_pinned ORDER BY position ASC",
+        )
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(result, vec!["img001", "img002"]);
+
+        sqlx::query("UPDATE image_pinned SET position = 10 WHERE item_id = 'img001'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let result: Vec<String> = sqlx::query_scalar(
+            "SELECT item_id FROM image_pinned ORDER BY position ASC",
+        )
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(result, vec!["img002", "img001"]);
+    }
+
+    #[tokio::test]
+    async fn integration_image_category_list_with_position() {
+        let pool = create_test_image_pool().await;
+
+        let cats = vec!["风景", "人物", "建筑"];
+        for (pos, cat) in cats.iter().enumerate() {
+            sqlx::query("INSERT INTO image_category_list (position, category) VALUES (?1, ?2)")
+                .bind(pos as i64)
+                .bind(cat)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let result: Vec<String> = sqlx::query_scalar(
+            "SELECT category FROM image_category_list ORDER BY position ASC",
+        )
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(result, vec!["风景", "人物", "建筑"]);
+
+        sqlx::query("DELETE FROM image_category_list").execute(&pool).await.unwrap();
+        let new_order = vec!["建筑", "风景", "人物"];
+        for (pos, cat) in new_order.iter().enumerate() {
+            sqlx::query("INSERT INTO image_category_list (position, category) VALUES (?1, ?2)")
+                .bind(pos as i64)
+                .bind(cat)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let result: Vec<String> = sqlx::query_scalar(
+            "SELECT category FROM image_category_list ORDER BY position ASC",
+        )
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(result, vec!["建筑", "风景", "人物"]);
+    }
+
+    #[tokio::test]
+    async fn integration_image_bulk_delete() {
+        let pool = create_test_image_pool().await;
+
+        for i in 0..10 {
+            sqlx::query(
+                "INSERT INTO image_items (position, item_id, width, height, image_path)
+                 VALUES (?1, ?2, 100, 100, ?3)",
+            )
+                .bind(i as i64)
+                .bind(format!("img{:02}", i))
+                .bind(format!("/tmp/img{:02}.png", i))
+                .execute(&pool)
+                .await
+                .unwrap();
+
+            sqlx::query("INSERT INTO image_categories (item_id, category) VALUES (?1, '测试')")
+                .bind(format!("img{:02}", i))
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO image_tags (item_id, tag, position) VALUES (?1, 'tag', 0)")
+                .bind(format!("img{:02}", i))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let to_delete = vec!["img00", "img02", "img04", "img06", "img08"];
+        for id in &to_delete {
+            sqlx::query("DELETE FROM image_items WHERE item_id = ?1")
+                .bind(id).execute(&pool).await.unwrap();
+            sqlx::query("DELETE FROM image_categories WHERE item_id = ?1")
+                .bind(id).execute(&pool).await.unwrap();
+            sqlx::query("DELETE FROM image_tags WHERE item_id = ?1")
+                .bind(id).execute(&pool).await.unwrap();
+        }
+
+        let item_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM image_items")
+            .fetch_one(&pool).await.unwrap();
+        let cat_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM image_categories")
+            .fetch_one(&pool).await.unwrap();
+        let tag_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM image_tags")
+            .fetch_one(&pool).await.unwrap();
+
+        assert_eq!(item_count, 5);
+        assert_eq!(cat_count, 5);
+        assert_eq!(tag_count, 5);
+    }
+
+    #[tokio::test]
+    async fn integration_image_preview_roundtrip() {
+        let pool = create_test_image_pool().await;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        sqlx::query(
+            "INSERT INTO image_async_previews (item_id, preview_width, preview_height, preview_base64, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(item_id) DO UPDATE SET
+                preview_width=excluded.preview_width, preview_height=excluded.preview_height,
+                preview_base64=excluded.preview_base64, created_at=excluded.created_at",
+        )
+            .bind("img001")
+            .bind(200i64)
+            .bind(150i64)
+            .bind("base64data123")
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row: (i64, i64, String) = sqlx::query_as(
+            "SELECT preview_width, preview_height, preview_base64 FROM image_async_previews WHERE item_id = 'img001'",
+        )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.0, 200);
+        assert_eq!(row.1, 150);
+        assert_eq!(row.2, "base64data123");
+
+        sqlx::query(
+            "INSERT INTO image_async_previews (item_id, preview_width, preview_height, preview_base64, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(item_id) DO UPDATE SET
+                preview_width=excluded.preview_width, preview_base64=excluded.preview_base64",
+        )
+            .bind("img001")
+            .bind(400i64)
+            .bind(300i64)
+            .bind("newbase64data")
+            .bind(now + 100)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row: (i64, String) = sqlx::query_as(
+            "SELECT preview_width, preview_base64 FROM image_async_previews WHERE item_id = 'img001'",
+        )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.0, 400);
+        assert_eq!(row.1, "newbase64data");
+    }
+
+    #[tokio::test]
+    async fn integration_image_concurrent_position_updates() {
+        let pool = std::sync::Arc::new(create_test_image_pool().await);
+
+        for i in 0..20 {
+            sqlx::query(
+                "INSERT INTO image_items (position, item_id, width, height, image_path)
+                 VALUES (?1, ?2, 100, 100, ?3)",
+            )
+                .bind(i as i64)
+                .bind(format!("img{:02}", i))
+                .bind(format!("/tmp/img{:02}.png", i))
+                .execute(pool.as_ref())
+                .await
+                .unwrap();
+        }
+
+        let mut handles = vec![];
+
+        for w in 0..5 {
+            let pool = pool.clone();
+            handles.push(tokio::spawn(async move {
+                for j in 0..4 {
+                    let item_id = format!("img{:02}", w * 4 + j);
+                    let new_pos = (w * 4 + j + 10) as i64;
+                    sqlx::query("UPDATE image_items SET position = ?1 WHERE item_id = ?2")
+                        .bind(new_pos)
+                        .bind(&item_id)
+                        .execute(pool.as_ref())
+                        .await
+                        .unwrap();
+                }
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM image_items")
+            .fetch_one(pool.as_ref())
+            .await
+            .unwrap();
+        assert_eq!(count, 20, "并发更新后图片数量不变");
+    }
 }

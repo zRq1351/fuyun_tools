@@ -6,7 +6,6 @@ use crate::core::error_codes::AppErrorKind;
 use crate::utils::system_utils::get_default_app_version;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::thread;
 use std::time::Duration;
 
 /// 旧版XOR加密密钥（仅用于迁移旧配置到OS keyring，新密钥不再使用XOR加密）
@@ -441,7 +440,7 @@ fn parse_migration_version(raw: &str) -> Option<MigrationVersion> {
 }
 
 impl AppSettingsData {
-    pub fn set_provider_api_key(
+    pub async fn set_provider_api_key(
         &mut self,
         provider_key: &str,
         api_key: &str,
@@ -466,17 +465,16 @@ impl AppSettingsData {
                     return Ok(());
                 }
                 Err(e) => {
-                    let _ = entry.delete_credential();
                     log::warn!("Failed to save API key (attempt {}): {}", i + 1, e);
                     last_error = e.to_string();
-                    thread::sleep(Duration::from_millis(100));
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             }
         }
         Err(AppErrorKind::SettingsApiKeySaveFailed.to_frontend_json_with_details(last_error))
     }
 
-    pub fn get_provider_api_key(&self, provider_key: &str) -> Result<String, String> {
+    pub async fn get_provider_api_key(&self, provider_key: &str) -> Result<String, String> {
         let service_name = "fuyun_tools";
         let user_name = format!("api_key_{}", provider_key);
         let entry = keyring::Entry::new(service_name, &user_name)
@@ -499,7 +497,7 @@ impl AppSettingsData {
                     }
                     log::warn!("Failed to retrieve API key for provider {} (attempt {}): {}", provider_key, i + 1, e);
                     last_error = error_msg;
-                    thread::sleep(Duration::from_millis(100));
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             }
         }
@@ -549,13 +547,13 @@ impl AppSettingsData {
         migrated
     }
 
-    pub fn save_current_provider_config(&mut self, api_key: &str) -> Result<(), String> {
+    pub async fn save_current_provider_config(&mut self, api_key: &str) -> Result<(), String> {
         let provider_key = self.ai_provider.clone();
-        self.set_provider_api_key(&provider_key, api_key)?;
+        self.set_provider_api_key(&provider_key, api_key).await?;
         Ok(())
     }
 
-    pub fn load_provider_config_to_current(
+    pub async fn load_provider_config_to_current(
         &mut self,
         provider_name: &str,
     ) -> Result<ProviderConfig, String> {
@@ -584,7 +582,7 @@ impl AppSettingsData {
                 encrypted_api_key: String::new(),
             }
         };
-        let _ = self.get_provider_api_key(&provider_key);
+        let _ = self.get_provider_api_key(&provider_key).await;
         self.ai_provider = provider_name.to_string();
         if self.provider_configs.contains_key(&provider_key) {
             if let Some(decrypted_config) = self.provider_configs.get(&provider_key) {
@@ -741,8 +739,8 @@ impl AppSettingsData {
         Ok(())
     }
 
-    pub fn get_masked_api_key(&self) -> String {
-        match self.get_provider_api_key(&self.ai_provider) {
+    pub async fn get_masked_api_key(&self) -> String {
+        match self.get_provider_api_key(&self.ai_provider).await {
             Ok(api_key) => {
                 if api_key.is_empty() {
                     return String::new();
@@ -769,7 +767,9 @@ impl AppSettingsData {
     pub fn migrate_from_old(&mut self) {
         let current_version = get_default_app_version();
         if self.version == current_version {
-            log::debug!("当前已是最新版本: {}，无需迁移", self.version);
+            // 即使版本匹配，仍需校验配置值（防止手动编辑导致的损坏值）
+            self.ensure_basic_config_integrity();
+            log::debug!("当前已是最新版本: {}，已校验配置", self.version);
             return;
         }
         match (

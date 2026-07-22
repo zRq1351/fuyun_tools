@@ -59,7 +59,7 @@ fn now_unix_ms_u64() -> u64 {
 
 fn start_auto_backup_scheduler(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     thread::spawn(move || {
-        while !BACKUP_SCHEDULER_STOP.load(Ordering::Relaxed) {
+        while !BACKUP_SCHEDULER_STOP.load(Ordering::Acquire) {
             match tauri::async_runtime::block_on(crate::ui::commands_backup::run_auto_backup_tick(
                 state.clone(),
             )) {
@@ -281,7 +281,7 @@ pub fn run() {
                             if RECORDING_SHORTCUT_IN_FLIGHT.swap(true, Ordering::AcqRel) {
                                 return;
                             }
-                            RECORDING_SHORTCUT_LAST_TRIGGER_MS.store(now_ms, Ordering::Relaxed);
+                            RECORDING_SHORTCUT_LAST_TRIGGER_MS.store(now_ms, Ordering::Release);
                             let app_handle_inner = app_handle_clone_recording.clone();
                             let state_inner = state_clone_recording.clone();
                             tauri::async_runtime::spawn(async move {
@@ -689,7 +689,34 @@ pub fn run() {
 
     match app {
         Ok(app) => {
-            app.run(move |_app_handle, _event| {});
+            app.run(move |app_handle, event| {
+                match event {
+                    tauri::RunEvent::ExitRequested { api, .. } => {
+                        // Signal background threads to stop
+                        BACKUP_SCHEDULER_STOP.store(true, Ordering::Release);
+                        // Prevent immediate exit if recording is active
+                        let has_active_recording = {
+                            if let Some(state) = app_handle.try_state::<Arc<Mutex<AppState>>>() {
+                                let guard = lock_arc_mutex(&state);
+                                let rt = lock_arc_mutex(&guard.recording_runtime);
+                                rt.phase == crate::features::recording::state::RecordingPhase::Recording
+                                    || rt.phase == crate::features::recording::state::RecordingPhase::Paused
+                            } else {
+                                false
+                            }
+                        };
+                        if has_active_recording {
+                            log::warn!("录屏进行中，阻止应用退出");
+                            api.prevent_exit();
+                        }
+                    }
+                    tauri::RunEvent::Exit => {
+                        BACKUP_SCHEDULER_STOP.store(true, Ordering::Release);
+                        log::info!("应用退出，已发送后台线程停止信号");
+                    }
+                    _ => {}
+                }
+            });
         }
         Err(e) => {
             log::error!("构建Tauri应用失败: {}", e);

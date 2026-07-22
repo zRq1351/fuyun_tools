@@ -87,6 +87,7 @@ impl ClipboardPoller {
                 let _ = tx.send(());
             }
         }
+        self.running.store(false, Ordering::SeqCst);
     }
 
     /// 根据 enabled 参数启动或停止监听器
