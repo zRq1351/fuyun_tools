@@ -561,20 +561,20 @@ html, body, #app {
   -webkit-app-region: drag;
   width: 32px;
   height: 32px;
-  background: var(--fy-bg-primary);
+  background: rgba(30, 34, 48, 0.72);
   border-radius: 50%;
-  box-shadow: var(--fy-shadow);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border: 1px solid var(--fy-border);
+  border: 0.5px solid rgba(255, 255, 255, 0.08);
   transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, background 0.2s ease;
 }
 
 .mini-icon:hover {
   transform: scale(1.1);
-  box-shadow: var(--fy-shadow-lg);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
 .magic-icon {
@@ -597,12 +597,12 @@ html, body, #app {
 .toolbar.active {
   opacity: 1;
   pointer-events: auto;
-  background: var(--fy-bg-primary);
-  backdrop-filter: var(--fy-backdrop-blur-light);
-  border-radius: 12px;
+  background: rgba(30, 34, 48, 0.72);
+  backdrop-filter: blur(40px) saturate(180%);
+  border-radius: 14px;
   padding: 6px;
-  box-shadow: var(--fy-shadow);
-  border: 1px solid var(--fy-border-light);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  border: 0.5px solid rgba(255, 255, 255, 0.08);
   display: flex;
   flex-direction: row;
   gap: 2px;
@@ -633,7 +633,7 @@ html, body, #app {
   color: var(--fy-text-primary);
   width: 56px;
   height: 42px;
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
   font-size: 18px;
   transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -667,7 +667,7 @@ html, body, #app {
 
 .btn-text {
   position: absolute;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.5px;
   opacity: 0;

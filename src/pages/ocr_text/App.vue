@@ -132,10 +132,10 @@ onUnmounted(() => {
   padding: 8px 12px 12px;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 13px;
+  font-size: var(--fy-text-base);
   line-height: 1.5;
   user-select: text;
-  font-family: 'Consolas', 'Microsoft YaHei', sans-serif;
+  font-family: var(--fy-font-mono);
   overflow: auto;
   overflow-x: hidden;
   overflow-wrap: anywhere;

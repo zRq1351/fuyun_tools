@@ -349,14 +349,14 @@ onUnmounted(() => {
   top: 12px;
   right: 12px;
   z-index: 10;
-  background: var(--fy-bg-overlay);
+  background: rgba(30, 34, 48, 0.72);
   color: var(--fy-text-primary);
-  font-size: 13px;
+  font-size: var(--fy-text-base);
   padding: 6px 12px;
-  border-radius: 8px;
+  border-radius: var(--fy-radius-md);
   pointer-events: none;
-  backdrop-filter: var(--fy-backdrop-blur-light);
-  box-shadow: var(--fy-shadow);
+  backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
   transition: opacity 0.3s;
 }
 .ocr-toast-error {

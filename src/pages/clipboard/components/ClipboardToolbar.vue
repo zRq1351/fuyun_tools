@@ -284,7 +284,7 @@ const handleToggleAiSettings = () => {
 .category-pill.active {
   background: var(--fy-accent);
   border-color: transparent;
-  color: #fff;
+  color: var(--fy-text-primary);
 }
 
 .category-pill.drag-over {
@@ -342,6 +342,6 @@ const handleToggleAiSettings = () => {
 
 .category-pill:hover .category-remove {
   background: var(--fy-danger);
-  color: #fff;
+  color: var(--fy-text-primary);
 }
 </style>

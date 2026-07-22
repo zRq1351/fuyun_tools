@@ -888,7 +888,7 @@ onBeforeUnmount(() => {
 .clipboard-ai-select-popper .el-select-dropdown__item.hover,
 .clipboard-ai-select-popper .el-select-dropdown__item:hover {
   background: var(--fy-accent-bg-hover) !important;
-  color: #ffffff !important;
+  color: var(--fy-text-primary) !important;
 }
 
 .clipboard-ai-select-popper .el-select-dropdown__item.selected,

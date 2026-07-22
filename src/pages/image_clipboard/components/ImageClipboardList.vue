@@ -20,7 +20,7 @@
           entry.item.preview_png_base64,
           entry.item.image_path
         ]"
-        :class="{ selected: selectedIndex === entry.index }"
+        :class="{ selected: selectedIndex === entry.index, pinned: entry.pinned }"
         :draggable="isCtrlKeyPressed"
         class="clipboard-item"
         @click="handleClick(entry.index)"
@@ -30,55 +30,58 @@
         @mouseenter="handleItemHover(entry.index)"
         @contextmenu.prevent="showContextMenu($event, entry.item.id)"
     >
-      <div class="delete-btn" @click.stop="deleteItem(entry.item.id, entry.index)">
-        <el-icon>
-          <Close/>
-        </el-icon>
+      <!-- 顶栏 -->
+      <div class="item-header">
+        <span class="item-index">{{ entry.index + 1 }}</span>
+        <span class="item-category" @click.stop>{{ entry.category }}</span>
+        <div v-if="entry.pinned" class="item-pinned-dot"></div>
+        <div class="item-actions">
+          <div class="action-btn" @click.stop="openFullscreen(entry.item.id)">
+            <el-icon :size="9">
+              <FullScreen/>
+            </el-icon>
+          </div>
+          <div class="action-btn" @click.stop="downloadItem(entry.item.id)">
+            <el-icon :size="9">
+              <Download/>
+            </el-icon>
+          </div>
+          <div :class="{ active: entry.pinned }" class="action-btn" @click.stop="promoteItem(entry.item.id)">
+            <Star :size="9"/>
+          </div>
+          <div class="action-btn action-delete" @click.stop="deleteItem(entry.item.id, entry.index)">
+            <el-icon :size="9">
+              <Close/>
+            </el-icon>
+          </div>
+        </div>
       </div>
-      <button :title="$t('imageClipboard.downloadToDir')" class="download-btn"
-              @click.stop="downloadItem(entry.item.id)">
-        <el-icon>
-          <Download/>
-        </el-icon>
-      </button>
-      <button :title="$t('imageClipboard.fullscreenPreview')" class="fullscreen-btn"
-              @click.stop="openFullscreen(entry.item.id)">
-        <el-icon>
-          <FullScreen/>
-        </el-icon>
-      </button>
-      <button :class="{ active: entry.pinned }" :title="$t('imageClipboard.pin')" class="pin-btn"
-              @click.stop="promoteItem(entry.item.id)">
-        <Pin class="pin-lucide"/>
-      </button>
-      <div class="index-tools">
-        <div class="index">{{ entry.index + 1 }}</div>
+
+      <!-- 内容区 -->
+      <div class="item-content">
+        <img :src="getPreviewDataUrl(entry.item)" alt="" class="image-preview" decoding="async" draggable="false"
+             @dragstart.prevent/>
       </div>
-      <div class="category-wrap">
-        <div class="category-chip">{{ entry.category }}</div>
-      </div>
-      <div class="tag-wrap">
-        <div v-if="entry.tags.length" class="tag-chip-list">
+
+      <!-- 标签 -->
+      <div v-if="entry.tags.length" class="tag-wrap">
+        <div class="tag-chip-list">
           <span v-for="tag in entry.tags" :key="`${entry.item.id}-${tag}`" class="tag-chip">#{{
               tag
             }}</span>
         </div>
-        <div v-else class="tag-chip-empty">{{ $t('imageClipboard.noTags') }}</div>
       </div>
-      <div class="item-content">
-        <img :src="getPreviewDataUrl(entry.item)" alt="" class="image-preview" decoding="async" draggable="false"
-             @dragstart.prevent/>
-        <div class="image-meta">{{ entry.item.width }} × {{ entry.item.height }}</div>
-      </div>
+
+      <!-- 尺寸信息 -->
+      <div class="image-meta">{{ entry.item.width }} × {{ entry.item.height }}</div>
     </div>
-    <div v-if="showTailLoadMoreHint" class="load-more-tail-indicator">
-      <el-icon v-if="isLoadingMore" class="load-more-tail-spinner is-loading">
+    <div v-if="showTailLoadMoreHint" class="load-more">
+      <el-icon v-if="isLoadingMore" :size="14" class="is-loading">
         <Loading/>
       </el-icon>
-      <div class="load-more-tail-text">
-        <span>左滑</span>
-        <span>{{ isLoadingMore ? $t('imageClipboard.loading') : $t('imageClipboard.loadMore') }}</span>
-      </div>
+      <span class="load-more-text">
+        {{ isLoadingMore ? $t('imageClipboard.loading') : $t('imageClipboard.loadMore') }}
+      </span>
     </div>
     <div aria-hidden="true" class="spacer"></div>
   </div>
@@ -86,8 +89,7 @@
 
 <script setup>
 import {computed, onMounted, onUnmounted, ref} from 'vue'
-import {Close, Download, FullScreen, Loading} from '@element-plus/icons-vue'
-import {Pin} from 'lucide-vue-next'
+import {Close, Download, FullScreen, Loading, Star} from '@element-plus/icons-vue'
 
 const props = defineProps({
   visibleHistory: {
@@ -296,296 +298,210 @@ defineExpose({
   min-width: 0;
   min-height: 0;
   display: flex;
-  gap: 8px;
-  padding: 8px;
+  gap: 10px;
+  padding: 10px 14px;
   flex-direction: row;
   overflow-x: auto;
   overflow-y: hidden;
-  margin-top: 10px;
   scrollbar-width: none;
 }
 
 .content::-webkit-scrollbar {
-  display: none;
+  display: none
 }
 
 .content.is-dragging .clipboard-item {
-  transition: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+  transition: none !important
 }
 
-.content.is-dragging .clipboard-item:hover,
-.content.is-dragging .clipboard-item.selected {
-  box-shadow: none !important;
+.content.is-dragging .clipboard-item:hover {
+  transform: none !important
 }
 
-.content.is-dragging .clipboard-item.selected {
-  transform: none !important;
-}
-
-.content.is-dragging .delete-btn,
-.content.is-dragging .download-btn,
-.content.is-dragging .fullscreen-btn,
-.content.is-dragging .pin-btn {
-  opacity: 0 !important;
-}
-
-.content.is-dragging .clipboard-item {
-  pointer-events: none;
+.content.is-dragging .item-actions {
+  opacity: 0 !important
 }
 
 .spacer {
-  flex: 0 0 742px;
-  height: 1px;
+  flex: 0 0 600px;
+  height: 1px
 }
 
-.load-more-tail-indicator {
-  width: 56px;
-  flex: 0 0 56px;
+.load-more {
+  width: 48px;
+  flex: 0 0 48px;
   min-height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  color: var(--fy-text-accent);
+  gap: 4px;
+  color: var(--fy-text-muted);
   user-select: none;
   pointer-events: none;
 }
 
-.load-more-tail-text {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  letter-spacing: 0.5px;
-  line-height: 1;
-}
-
-.load-more-tail-spinner {
-  font-size: 16px;
-  color: var(--fy-text-accent);
-}
-
-.clipboard-item {
-  background: var(--fy-bg-overlay);
-  border: 1px solid var(--fy-border-light);
-  border-radius: 8px;
-  padding: 12px;
-  cursor: pointer;
-  position: relative;
-  user-select: none;
-  width: 250px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  backdrop-filter: blur(10px);
-  color: var(--fy-text-primary);
-  transition: all 0.3s ease;
-  box-sizing: border-box;
-}
-
-.clipboard-item:hover, .clipboard-item.selected {
-  background: var(--fy-bg-active);
-  border-color: var(--fy-accent);
-  box-shadow: 0 0 15px var(--fy-accent-bg);
-}
-
-.clipboard-item.selected {
-  transform: scale(1.02);
-}
-
-.delete-btn {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--fy-bg-hover);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s;
-  z-index: 10;
-}
-
-.delete-btn .el-icon {
-  font-size: 12px;
-}
-
-.clipboard-item:hover .delete-btn {
-  opacity: 1;
-}
-
-.delete-btn:hover {
-  background: #f56c6c;
-}
-
-.fullscreen-btn {
-  position: absolute;
-  top: 5px;
-  right: 53px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1px solid var(--fy-border);
-  background: var(--fy-bg-surface);
-  color: var(--fy-text-secondary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s, border-color 0.2s, color 0.2s, background-color 0.2s;
-  z-index: 10;
-  padding: 0;
-}
-
-.pin-btn {
-  position: absolute;
-  top: 5px;
-  right: 77px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1px solid var(--fy-border);
-  background: var(--fy-bg-surface);
-  color: var(--fy-text-secondary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s, border-color 0.2s, color 0.2s, background-color 0.2s;
-  z-index: 10;
-  padding: 0;
-}
-
-.pin-lucide {
-  width: 12px;
-  height: 12px;
-  stroke-width: 2;
-}
-
-.pin-btn:hover {
-  border-color: var(--fy-accent);
-  color: var(--fy-text-primary);
-  background: var(--fy-accent);
-}
-
-.pin-btn.active {
-  opacity: 1;
-  border-color: #f7b955;
-  color: var(--fy-text-primary);
-  background: rgba(247, 185, 85, 0.75);
-}
-
-.fullscreen-btn:hover {
-  border-color: var(--fy-accent);
-  color: var(--fy-text-primary);
-  background: var(--fy-accent);
-}
-
-.download-btn {
-  position: absolute;
-  top: 5px;
-  right: 29px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1px solid var(--fy-border);
-  background: var(--fy-bg-surface);
-  color: var(--fy-text-secondary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s, border-color 0.2s, color 0.2s, background-color 0.2s;
-  z-index: 10;
-  padding: 0;
-}
-
-.download-btn:hover {
-  border-color: #67c23a;
-  color: var(--fy-text-primary);
-  background: #67c23a;
-}
-
-.clipboard-item:hover .download-btn {
-  opacity: 1;
-}
-
-.clipboard-item:hover .fullscreen-btn {
-  opacity: 1;
-}
-
-.clipboard-item:hover .pin-btn {
-  opacity: 1;
-}
-
-.index-tools {
-  position: absolute;
-  top: 5px;
-  left: 5px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  z-index: 10;
-}
-
-.index {
-  background: var(--fy-bg-hover);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
+.load-more-text {
+  font-size: 10px;
   color: var(--fy-text-muted);
 }
 
-.clipboard-item:hover .index, .clipboard-item.selected .index {
-  background: var(--fy-accent);
+/* ===== 卡片 ===== */
+.clipboard-item {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.5px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+  user-select: none;
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  color: var(--fy-text-primary);
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.clipboard-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.clipboard-item.selected {
+  background: rgba(108, 140, 255, 0.1);
+  border-color: rgba(108, 140, 255, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(108, 140, 255, 0.1);
+}
+
+/* ===== 顶栏 ===== */
+.item-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 0;
+  min-height: 0;
+}
+
+.item-index {
+  font-size: 10px;
+  font-family: var(--fy-font-mono);
+  color: var(--fy-text-muted);
+  opacity: 0.5;
+  flex: 0 0 auto;
+  transition: opacity 0.2s;
+}
+
+.clipboard-item:hover .item-index {
+  opacity: 1;
+  color: var(--fy-accent)
+}
+
+.item-category {
+  font-size: 10px;
+  color: var(--fy-text-muted);
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  transition: opacity 0.2s;
+}
+
+.clipboard-item:hover .item-category {
+  opacity: 1
+}
+
+.item-pinned-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fy-warning);
+  flex: 0 0 auto;
+}
+
+/* ===== 操作按钮 ===== */
+.item-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.clipboard-item:hover .item-actions,
+.clipboard-item.selected .item-actions {
+  opacity: 1
+}
+
+.action-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--fy-text-muted);
+  transition: all 0.15s ease;
+}
+
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
   color: var(--fy-text-primary);
 }
 
-.category-wrap {
-  position: absolute;
-  left: 36px;
-  right: 86px;
-  top: 5px;
-  display: flex;
-  justify-content: center;
-  z-index: 10;
-  pointer-events: none;
+.action-btn.active {
+  color: var(--fy-warning);
 }
 
-.category-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  max-width: 100%;
+.action-delete:hover {
+  color: var(--fy-danger);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+/* ===== 内容区 ===== */
+.item-content {
+  flex: 1;
+  min-height: 0;
   padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--fy-bg-hover);
-  border: 1px solid var(--fy-border-light);
-  color: var(--fy-text-secondary);
-  font-size: 12px;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
+.image-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+}
+
+.image-meta {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  padding: 2px 6px;
+  border-radius: var(--fy-radius-xs);
+  font-size: 10px;
+  color: var(--fy-text-muted);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* ===== 标签 ===== */
 .tag-wrap {
   position: absolute;
   left: 10px;
   right: 10px;
-  top: 32px;
-  min-height: 20px;
+  bottom: 6px;
+  min-height: 16px;
   display: flex;
   align-items: center;
   z-index: 8;
@@ -594,7 +510,7 @@ defineExpose({
 .tag-chip-list {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   flex-wrap: wrap;
 }
 
@@ -602,42 +518,10 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   padding: 1px 6px;
-  border-radius: 999px;
-  font-size: 11px;
+  border-radius: var(--fy-radius-full);
+  font-size: 9px;
   color: var(--fy-text-accent);
-  background: var(--fy-accent-bg);
-  border: 1px solid var(--fy-accent-bg-hover);
-}
-
-.tag-chip-empty {
-  font-size: 11px;
-  color: var(--fy-text-muted);
-}
-
-.item-content {
-  margin-top: 56px;
-  flex: 1;
-  min-height: 0;
-  position: relative;
-  z-index: 1;
-}
-
-.image-preview {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  border-radius: 4px;
-  background: var(--fy-bg-overlay);
-}
-
-.image-meta {
-  position: absolute;
-  right: 8px;
-  bottom: 6px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--fy-text-secondary);
-  background: var(--fy-bg-overlay);
+  background: rgba(108, 140, 255, 0.1);
+  border: 0.5px solid rgba(108, 140, 255, 0.15);
 }
 </style>

@@ -228,15 +228,9 @@ const bgColorPresets = [
   'rgba(255, 255, 255, 0.2)', // 更亮的白色
 ]
 
-// 解析背景颜色，处理渐变和纯色
+// 解析背景颜色，使用纯色半透明
 const parseBackground = (bgColor) => {
-  if (!bgColor) return 'linear-gradient(145deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05))'
-
-  // 如果是纯色或rgba，创建渐变效果
-  if (bgColor.startsWith('rgba') || bgColor.startsWith('#')) {
-    return `linear-gradient(145deg, ${bgColor}, ${adjustOpacity(bgColor, 0.5)})`
-  }
-
+  if (!bgColor) return 'rgba(255, 255, 255, 0.06)'
   return bgColor
 }
 
@@ -407,7 +401,7 @@ const validatePrompt = (item) => {
 .preview-button:hover {
   transform: translateY(-2px);
   box-shadow: var(--fy-shadow);
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.2), var(--fy-border-light));
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .preview-button:active {

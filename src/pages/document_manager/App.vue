@@ -1633,8 +1633,8 @@ onMounted(async () => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--el-bg-color);
-  color: var(--el-text-color-primary);
+  background: var(--fy-bg-primary);
+  color: var(--fy-text-primary);
   position: relative
 }
 
@@ -1647,21 +1647,21 @@ onMounted(async () => {
 .dm-sidebar {
   width: 240px;
   min-width: 240px;
-  border-right: 1px solid var(--el-border-color-light);
+  border-right: 0.5px solid var(--fy-border-light);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  background: var(--el-bg-color-page)
+  background: var(--fy-bg-secondary)
 }
 
 .dm-sidebar-header {
   padding: 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter)
+  border-bottom: 0.5px solid var(--fy-border-light)
 }
 
 .dm-sidebar-header h3 {
   margin: 0;
-  font-size: 16px
+  font-size: var(--fy-text-lg)
 }
 
 .dm-sidebar-stats {
@@ -1680,18 +1680,18 @@ onMounted(async () => {
 .dm-stat-value {
   font-size: 18px;
   font-weight: 600;
-  color: var(--el-color-primary)
+  color: var(--fy-accent)
 }
 
 .dm-stat-label {
-  font-size: 12px;
-  color: var(--el-text-color-secondary)
+  font-size: var(--fy-text-sm);
+  color: var(--fy-text-secondary)
 }
 
 .dm-sort-ghost {
   opacity: 0.4;
-  background: var(--el-color-primary-light-9) !important;
-  border: 2px dashed var(--el-color-primary) !important
+  background: var(--fy-accent-bg) !important;
+  border: 2px dashed var(--fy-accent) !important
 }
 
 .dm-sort-drag {
@@ -1703,14 +1703,14 @@ onMounted(async () => {
   transform: scale(1.05);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   z-index: 10;
-  border-color: var(--el-color-primary) !important
+  border-color: var(--fy-accent) !important
 }
 
 .dm-sort-fallback {
   opacity: 0.95 !important;
-  background: var(--el-bg-color) !important;
-  border: 2px solid var(--el-color-primary) !important;
-  border-radius: 8px;
+  background: var(--fy-bg-primary) !important;
+  border: 2px solid var(--fy-accent) !important;
+  border-radius: var(--fy-radius-md);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
   cursor: grabbing !important;
   pointer-events: none;
@@ -1725,8 +1725,8 @@ onMounted(async () => {
 
 .dm-section-title {
   padding: 8px 16px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
+  font-size: var(--fy-text-sm);
+  color: var(--fy-text-secondary);
   display: flex;
   align-items: center;
   justify-content: space-between
@@ -1750,7 +1750,7 @@ onMounted(async () => {
   gap: 8px;
   padding: 6px 16px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--fy-text-base);
   border-radius: 0;
   transition: background .15s
 }
@@ -1767,25 +1767,25 @@ onMounted(async () => {
 }
 
 .dm-root-item:hover, .dm-category-item:hover {
-  background: var(--el-fill-color-light)
+  background: var(--fy-bg-hover)
 }
 
 .dm-root-item.active, .dm-category-item.active {
-  background: var(--el-color-primary-light-9);
-  color: var(--el-color-primary)
+  background: var(--fy-accent-bg);
+  color: var(--fy-accent)
 }
 
 .dm-root-add {
-  color: var(--el-text-color-secondary);
-  font-size: 12px
+  color: var(--fy-text-secondary);
+  font-size: var(--fy-text-sm)
 }
 
 .dm-cat-count {
   font-size: 11px;
-  color: var(--el-text-color-secondary);
-  background: var(--el-fill-color);
+  color: var(--fy-text-secondary);
+  background: var(--fy-bg-surface);
   padding: 1px 6px;
-  border-radius: 10px
+  border-radius: var(--fy-radius-full)
 }
 
 .dm-cat-more {
@@ -1794,7 +1794,7 @@ onMounted(async () => {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: var(--fy-radius-sm);
   opacity: 0.6;
   transition: opacity .15s, background .15s;
   margin-left: auto;
@@ -1804,11 +1804,11 @@ onMounted(async () => {
 .dm-category-item:hover .dm-cat-more,
 .dm-root-item:hover .dm-cat-more {
   opacity: 1;
-  background: var(--el-fill-color)
+  background: var(--fy-bg-surface)
 }
 
 .dm-cat-more:active {
-  background: var(--el-fill-color-dark)
+  background: var(--fy-bg-hover)
 }
 
 .dm-dots-spacer {
@@ -1817,9 +1817,9 @@ onMounted(async () => {
 }
 
 .dm-cat-empty {
-  color: var(--el-text-color-secondary);
+  color: var(--fy-text-secondary);
   cursor: default;
-  font-size: 12px;
+  font-size: var(--fy-text-sm);
   padding-left: 16px
 }
 
@@ -1835,22 +1835,22 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--fy-radius-sm);
   cursor: pointer;
   border: 2px solid transparent;
   transition: all .15s;
-  color: var(--el-text-color-secondary)
+  color: var(--fy-text-secondary)
 }
 
 .dm-icon-option:hover {
-  background: var(--el-fill-color-light);
-  color: var(--el-color-primary)
+  background: var(--fy-bg-hover);
+  color: var(--fy-accent)
 }
 
 .dm-icon-option.active {
-  border-color: var(--el-color-primary);
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9)
+  border-color: var(--fy-accent);
+  color: var(--fy-accent);
+  background: var(--fy-accent-bg)
 }
 
 .dm-color-picker {
@@ -1873,8 +1873,8 @@ onMounted(async () => {
 }
 
 .dm-color-option.active {
-  border-color: var(--el-text-color-primary);
-  box-shadow: 0 0 0 2px var(--el-bg-color), 0 0 0 4px currentColor
+  border-color: var(--fy-text-primary);
+  box-shadow: 0 0 0 2px var(--fy-bg-primary), 0 0 0 4px currentColor
 }
 
 .dm-root-name {
@@ -1897,7 +1897,7 @@ onMounted(async () => {
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter)
+  border-bottom: 0.5px solid var(--fy-border-light)
 }
 
 .dm-tabs {
@@ -1910,20 +1910,20 @@ onMounted(async () => {
   border: none;
   background: transparent;
   cursor: pointer;
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-  border-radius: 6px;
+  font-size: var(--fy-text-md);
+  color: var(--fy-text-secondary);
+  border-radius: var(--fy-radius-sm);
   transition: all .15s
 }
 
 .dm-tab:hover {
-  color: var(--el-text-color-primary);
-  background: var(--el-fill-color-light)
+  color: var(--fy-text-primary);
+  background: var(--fy-bg-hover)
 }
 
 .dm-tab.active {
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
+  color: var(--fy-accent);
+  background: var(--fy-accent-bg);
   font-weight: 500
 }
 
@@ -1961,15 +1961,15 @@ onMounted(async () => {
 .dm-file-card {
   width: 140px;
   padding: 12px 8px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
+  border: 0.5px solid var(--fy-border-light);
+  border-radius: var(--fy-radius-md);
   cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
   transition: all .15s;
-  background: var(--el-bg-color);
+  background: var(--fy-bg-surface);
   position: relative
 }
 
@@ -1979,19 +1979,19 @@ onMounted(async () => {
   right: 2px;
   font-size: 10px;
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: var(--fy-radius-xs);
   line-height: 16px;
   pointer-events: none
 }
 
 .dm-mode-badge.repo {
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9)
+  color: var(--fy-accent);
+  background: var(--fy-accent-bg)
 }
 
 .dm-mode-badge.index {
-  color: var(--el-text-color-secondary);
-  background: var(--el-fill-color-light)
+  color: var(--fy-text-secondary);
+  background: var(--fy-bg-hover)
 }
 
 .dm-file-card.sortable-file {
@@ -2004,18 +2004,18 @@ onMounted(async () => {
 }
 
 .dm-file-card:hover {
-  border-color: var(--el-color-primary-light-5);
-  background: var(--el-color-primary-light-9)
+  border-color: var(--fy-border-hover);
+  background: var(--fy-accent-bg)
 }
 
 .dm-file-card.selected {
-  border-color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9)
+  border-color: var(--fy-accent);
+  background: var(--fy-accent-bg)
 }
 
 .dm-file-card.ctx-anchor {
-  border-color: var(--el-color-primary-light-5);
-  background: var(--el-color-primary-light-9)
+  border-color: var(--fy-border-hover);
+  background: var(--fy-accent-bg)
 }
 
 .dm-file-icon {
@@ -2033,7 +2033,7 @@ onMounted(async () => {
 }
 
 .dm-file-name {
-  font-size: 12px;
+  font-size: var(--fy-text-sm);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2042,7 +2042,7 @@ onMounted(async () => {
 
 .dm-file-meta {
   font-size: 11px;
-  color: var(--el-text-color-secondary);
+  color: var(--fy-text-secondary);
   display: flex;
   justify-content: center;
   gap: 6px;
@@ -2050,9 +2050,9 @@ onMounted(async () => {
 }
 
 .dm-file-ext {
-  background: var(--el-fill-color);
+  background: var(--fy-bg-surface);
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: var(--fy-radius-xs);
   font-size: 10px;
   font-weight: bold
 }
@@ -2069,8 +2069,8 @@ onMounted(async () => {
   top: 0;
   bottom: 0;
   width: 280px;
-  background: var(--el-bg-color);
-  border-left: 1px solid var(--el-border-color-light);
+  background: var(--fy-bg-surface);
+  border-left: 0.5px solid var(--fy-border-light);
   display: flex;
   flex-direction: column;
   z-index: 10;
@@ -2082,7 +2082,7 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-bottom: 0.5px solid var(--fy-border-light);
   font-weight: 500;
   gap: 8px;
 }
@@ -2115,17 +2115,17 @@ onMounted(async () => {
 
 .dm-detail-label {
   font-size: 11px;
-  color: var(--el-text-color-secondary)
+  color: var(--fy-text-secondary)
 }
 
 .dm-detail-row span {
-  font-size: 13px;
+  font-size: var(--fy-text-base);
   word-break: break-all
 }
 
 .dm-detail-path {
   font-size: 11px !important;
-  color: var(--el-text-color-secondary);
+  color: var(--fy-text-secondary);
   word-break: break-all;
 }
 
@@ -2133,14 +2133,14 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   padding: 12px 16px;
-  border-top: 1px solid var(--el-border-color-lighter)
+  border-top: 0.5px solid var(--fy-border-light)
 }
 
 .dm-drop-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(64, 158, 255, .08);
-  border: 2px dashed var(--el-color-primary);
+  background: var(--fy-accent-bg);
+  border: 2px dashed var(--fy-accent);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2151,8 +2151,8 @@ onMounted(async () => {
 }
 
 .dm-drop-overlay p {
-  font-size: 16px;
-  color: var(--el-color-primary)
+  font-size: var(--fy-text-lg);
+  color: var(--fy-accent)
 }
 
 .dm-hint-warn {
@@ -2160,11 +2160,11 @@ onMounted(async () => {
   align-items: flex-start;
   gap: 8px;
   padding: 10px 12px;
-  background: var(--el-color-warning-light-9);
-  border-radius: 6px;
+  background: var(--fy-warning-bg);
+  border-radius: var(--fy-radius-sm);
   margin-top: 12px;
-  font-size: 13px;
-  color: var(--el-color-warning-dark-2)
+  font-size: var(--fy-text-base);
+  color: var(--fy-warning)
 }
 
 .dm-import-files {
@@ -2181,8 +2181,8 @@ onMounted(async () => {
 
 .dm-scan-list p {
   margin: 0 0 8px;
-  font-size: 13px;
-  color: var(--el-text-color-secondary)
+  font-size: var(--fy-text-base);
+  color: var(--fy-text-secondary)
 }
 
 .dm-scan-files {
@@ -2197,23 +2197,23 @@ onMounted(async () => {
   gap: 8px;
   padding: 6px 8px;
   cursor: pointer;
-  border-radius: 4px;
-  font-size: 13px
+  border-radius: var(--fy-radius-xs);
+  font-size: var(--fy-text-base)
 }
 
 .dm-scan-file-item:hover {
-  background: var(--el-fill-color-light)
+  background: var(--fy-bg-hover)
 }
 
 .dm-scan-file-item.checked {
-  background: var(--el-color-primary-light-9);
-  color: var(--el-color-primary)
+  background: var(--fy-accent-bg);
+  color: var(--fy-accent)
 }
 
 .dm-scan-size {
   margin-left: auto;
   font-size: 11px;
-  color: var(--el-text-color-secondary)
+  color: var(--fy-text-secondary)
 }
 
 .dm-history-page {
@@ -2226,9 +2226,9 @@ onMounted(async () => {
 }
 
 .dm-history-card {
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
+  background: var(--fy-bg-surface);
+  border: 0.5px solid var(--fy-border-light);
+  border-radius: var(--fy-radius-md);
   padding: 12px 16px
 }
 
@@ -2241,19 +2241,19 @@ onMounted(async () => {
 
 .dm-history-badge {
   font-weight: 600;
-  color: var(--el-color-primary);
-  font-size: 13px
+  color: var(--fy-accent);
+  font-size: var(--fy-text-base)
 }
 
 .dm-history-fc {
-  font-size: 13px;
-  color: var(--el-text-color-secondary)
+  font-size: var(--fy-text-base);
+  color: var(--fy-text-secondary)
 }
 
 .dm-history-time {
   margin-left: auto;
-  font-size: 12px;
-  color: var(--el-text-color-disabled)
+  font-size: var(--fy-text-sm);
+  color: var(--fy-text-muted)
 }
 
 .dm-history-card-body {
@@ -2266,16 +2266,16 @@ onMounted(async () => {
 .dm-history-row {
   display: flex;
   gap: 8px;
-  font-size: 13px
+  font-size: var(--fy-text-base)
 }
 
 .dm-history-label {
-  color: var(--el-text-color-secondary);
+  color: var(--fy-text-secondary);
   white-space: nowrap
 }
 
 .dm-history-val {
-  color: var(--el-text-color-primary);
+  color: var(--fy-text-primary);
   word-break: break-all
 }
 
@@ -2288,7 +2288,7 @@ onMounted(async () => {
 .dm-history-files {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid var(--el-border-color-lighter);
+  border-top: 0.5px solid var(--fy-border-light);
   max-height: 200px;
   overflow-y: auto
 }
@@ -2298,8 +2298,8 @@ onMounted(async () => {
   align-items: center;
   gap: 6px;
   padding: 3px 0;
-  font-size: 12px;
-  color: var(--el-text-color-secondary)
+  font-size: var(--fy-text-sm);
+  color: var(--fy-text-secondary)
 }
 
 .dm-move-body {
@@ -2309,14 +2309,14 @@ onMounted(async () => {
 }
 
 .dm-move-section-title {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
+  font-size: var(--fy-text-base);
+  color: var(--fy-text-secondary);
   margin-bottom: 6px;
 }
 
 .dm-move-hint {
-  font-size: 12px;
-  color: var(--el-color-warning);
+  font-size: var(--fy-text-sm);
+  color: var(--fy-warning);
   margin-top: 4px;
 }
 
@@ -2327,8 +2327,8 @@ onMounted(async () => {
 }
 
 .dm-guide-desc {
-  font-size: 14px;
-  color: var(--el-text-color-regular);
+  font-size: var(--fy-text-md);
+  color: var(--fy-text-secondary);
   margin: 0;
   line-height: 1.6;
 }
@@ -2349,9 +2349,9 @@ onMounted(async () => {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: var(--el-color-primary);
-  color: #fff;
-  font-size: 13px;
+  background: var(--fy-accent);
+  color: var(--fy-text-primary);
+  font-size: var(--fy-text-base);
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -2361,15 +2361,15 @@ onMounted(async () => {
 }
 
 .dm-guide-step-title {
-  font-size: 14px;
+  font-size: var(--fy-text-md);
   font-weight: 600;
-  color: var(--el-text-color-primary);
+  color: var(--fy-text-primary);
   margin-bottom: 4px;
 }
 
 .dm-guide-step-desc {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
+  font-size: var(--fy-text-base);
+  color: var(--fy-text-secondary);
   line-height: 1.5;
 }
 

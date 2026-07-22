@@ -238,11 +238,11 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--fy-radius-xs);
   background: var(--fy-bg-overlay);
   color: var(--fy-text-primary);
   cursor: grab;
-  transition: background-color 0.2s, color 0.2s;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .viewer-drag-icon:active {
@@ -256,15 +256,15 @@ onBeforeUnmount(() => {
 
 .viewer-action-btn {
   background: var(--fy-bg-overlay);
-  border: 1px solid var(--fy-border);
+  border: 0.5px solid var(--fy-border-light);
   color: var(--fy-text-primary);
   padding: 6px 16px;
-  border-radius: 6px;
+  border-radius: var(--fy-radius-sm);
   cursor: pointer;
-  font-size: 13px;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  transition: all 0.2s;
+  font-size: var(--fy-text-base);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  transition: all 0.15s ease;
   user-select: none;
 }
 
@@ -290,7 +290,7 @@ onBeforeUnmount(() => {
   border: none;
   outline: none;
   color: var(--fy-text-primary);
-  font-size: 15px;
+  font-size: var(--fy-text-md);
   line-height: 1.6;
   font-family: inherit;
   resize: none;
@@ -300,8 +300,8 @@ onBeforeUnmount(() => {
   width: calc(100vw - 32px);
   height: calc(100vh - 32px);
   background: var(--fy-container-bg);
-  border-radius: 12px;
-  box-shadow: var(--fy-shadow-lg), 0 0 0 1px var(--fy-container-border);
+  border-radius: var(--fy-radius-xl);
+  box-shadow: var(--fy-shadow-lg), 0 0 0 0.5px var(--fy-container-border);
   display: flex;
   flex-direction: column;
   position: relative;
@@ -332,7 +332,7 @@ onBeforeUnmount(() => {
   padding-top: 60px;
   overflow-y: auto;
   color: var(--fy-text-primary);
-  font-size: 15px;
+  font-size: var(--fy-text-md);
   line-height: 1.6;
 }
 

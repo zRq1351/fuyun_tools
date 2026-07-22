@@ -232,12 +232,12 @@ const renderUsageItem = (key, shortcut, defaultShortcut) => {
   max-height: 320px;
   overflow-y: auto;
   padding: 14px 16px;
-  border-radius: 10px;
-  background: linear-gradient(160deg, #f8fbff 0%, #f4f8ff 100%);
-  border: 1px solid #dbe7ff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  border-radius: var(--fy-radius-lg);
+  background: var(--fy-content-bg);
+  border: 0.5px solid var(--fy-content-border);
+  box-shadow: var(--fy-shadow);
   scrollbar-width: thin;
-  scrollbar-color: rgba(64, 158, 255, 0.4) transparent;
+  scrollbar-color: var(--fy-scrollbar-thumb) transparent;
 }
 
 .update-body-content::-webkit-scrollbar {
@@ -346,7 +346,7 @@ const renderUsageItem = (key, shortcut, defaultShortcut) => {
   border-collapse: collapse;
   margin: 10px 0;
   width: 100%;
-  background: #fff;
+  background: var(--fy-bg-surface);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -403,9 +403,9 @@ const renderUsageItem = (key, shortcut, defaultShortcut) => {
 }
 
 .update-dialog__hero {
-  border-radius: 10px;
-  border: 1px solid #dbe7ff;
-  background: linear-gradient(145deg, #f6f9ff 0%, #eff5ff 100%);
+  border-radius: var(--fy-radius-lg);
+  border: 0.5px solid var(--fy-content-border);
+  background: var(--fy-content-bg);
   padding: 12px 14px;
 }
 
@@ -446,8 +446,8 @@ html.dark .update-message-box,
 
 html.dark .update-dialog__hero,
 .dark .update-dialog__hero {
-  border-color: #3a4252;
-  background: linear-gradient(145deg, #28303c 0%, #232a35 100%);
+  border-color: var(--fy-content-border);
+  background: var(--fy-content-bg);
 }
 
 html.dark .update-dialog__tag,
@@ -470,11 +470,11 @@ html.dark .update-dialog__hint,
 
 html.dark .update-body-content,
 .dark .update-body-content {
-  background: linear-gradient(160deg, #242b36 0%, #202631 100%);
-  border-color: #3a4252;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  color: #e6ebf5;
-  scrollbar-color: rgba(143, 180, 255, 0.55) transparent;
+  background: var(--fy-content-bg);
+  border-color: var(--fy-content-border);
+  box-shadow: var(--fy-shadow);
+  color: var(--fy-text-primary);
+  scrollbar-color: var(--fy-scrollbar-thumb) transparent;
 }
 
 html.dark .update-body-content::-webkit-scrollbar-thumb,
