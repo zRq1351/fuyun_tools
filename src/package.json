@@ -38,6 +38,6 @@
     "sass": "^1.99.0",
     "unplugin-auto-import": "^21.0.0",
     "unplugin-vue-components": "^32.0.0",
-    "vite": "8.0.8"
+    "vite": "^8.1.5"
   }
 }
