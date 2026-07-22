@@ -576,7 +576,7 @@ body {
 
 .window-btn-close:hover {
   background: var(--fy-danger);
-  color: #fff;
+  color: var(--fy-text-primary);
 }
 
 .header {

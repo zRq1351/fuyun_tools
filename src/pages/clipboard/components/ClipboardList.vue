@@ -11,7 +11,7 @@
         :id="'clipboard-item-' + entry.id"
         :key="entry.id"
         v-memo="[entry.content, index, selectedItemId, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
-        :class="{ selected: selectedItemId === entry.id }"
+        :class="{ selected: selectedItemId === entry.id, pinned: isPinned(entry.id) }"
         class="clipboard-item"
         :draggable="isCtrlKeyPressed"
         @click="handleClick(entry.id)"
@@ -20,34 +20,34 @@
         @dragstart="handleItemDragStart($event, entry.id)"
         @dragend="handleDragEnd"
     >
-      <div v-if="isWebUrl(entry.content)" class="open-btn" @click.stop="openWebUrl(entry.content)">
-        <el-icon>
-          <Link/>
-        </el-icon>
+      <!-- 顶栏：序号 + 分类 + 操作按钮 -->
+      <div class="item-header">
+        <span class="item-index">{{ index + 1 }}</span>
+        <span class="item-category" @click.stop>{{ getItemCategory(entry.id) }}</span>
+        <div v-if="isPinned(entry.id)" class="item-pinned-dot"></div>
+        <div class="item-actions">
+          <div v-if="isWebUrl(entry.content)" class="action-btn" @click.stop="openWebUrl(entry.content)">
+            <Link :size="9"/>
+          </div>
+          <div class="action-btn" @click.stop="emit('preview', entry.content, entry.id)">
+            <View :size="9"/>
+          </div>
+          <div :class="{ active: isPinned(entry.id) }" class="action-btn"
+               @click.stop="promoteItem(entry.id)">
+            <Star :size="9"/>
+          </div>
+          <div class="action-btn action-delete" @click.stop="deleteItem(entry.id)">
+            <Close :size="9"/>
+          </div>
+        </div>
       </div>
-      <div class="preview-btn" @click.stop="emit('preview', entry.content, entry.id)">
-        <el-icon>
-          <View/>
-        </el-icon>
-      </div>
-      <div :class="{ active: isPinned(entry.id) }" class="pin-btn"
-           @click.stop="promoteItem(entry.id)">
-        <el-icon>
-          <Pin/>
-        </el-icon>
-      </div>
-      <div class="delete-btn" @click.stop="deleteItem(entry.id)">
-        <el-icon>
-          <Close/>
-        </el-icon>
-      </div>
-      <div class="index">{{ index + 1 }}</div>
-      <div class="category-wrap" @click.stop>
-        <div class="category-chip">{{ getItemCategory(entry.id) }}</div>
-      </div>
-      <div class="item-content">
+
+      <!-- 内容区 -->
+      <div class="item-body">
         <FormattedContent :content="entry.content" />
       </div>
+
+      <!-- 搜索高亮摘要 -->
       <div v-if="entry.snippet" class="item-snippet">
         <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
           <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
@@ -55,14 +55,14 @@
         </template>
       </div>
     </div>
-    <div v-if="showTailLoadMoreHint" class="load-more-tail-indicator">
-      <el-icon v-if="isLoadingMore" class="load-more-tail-spinner is-loading">
+
+    <div v-if="showTailLoadMoreHint" class="load-more">
+      <el-icon v-if="isLoadingMore" :size="14" class="is-loading">
         <Loading/>
       </el-icon>
-      <div class="load-more-tail-text">
-        <span>左滑</span>
-        <span>{{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}</span>
-      </div>
+      <span class="load-more-text">
+        {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
+      </span>
     </div>
     <div class="spacer"></div>
   </div>
@@ -70,72 +70,26 @@
 
 <script setup>
 import {computed, onMounted, onUnmounted, ref} from 'vue'
-import {Close, Link, Loading, View} from '@element-plus/icons-vue'
-import {Pin} from 'lucide-vue-next'
+import {Close, Link, Loading, Star, View} from '@element-plus/icons-vue'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
 import FormattedContent from '../../../components/FormattedContent.vue'
 
 const props = defineProps({
-  visibleHistory: {
-    type: Array,
-    required: true
-  },
-  selectedItemId: {
-    type: String,
-    required: true
-  },
-  getItemCategory: {
-    type: Function,
-    required: true
-  },
-  deleteItem: {
-    type: Function,
-    required: true
-  },
-  updateSelection: {
-    type: Function,
-    required: true
-  },
-  selectAndFillDirect: {
-    type: Function,
-    required: true
-  },
-  showContextMenu: {
-    type: Function,
-    required: true
-  },
-  handleDragStart: {
-    type: Function,
-    required: true
-  },
-  handleDragEnd: {
-    type: Function,
-    required: true
-  },
-  promoteItem: {
-    type: Function,
-    required: true
-  },
-  isPinned: {
-    type: Function,
-    required: true
-  },
-  isCtrlKeyPressed: {
-    type: Boolean,
-    default: false
-  },
-  highlightKeyword: {
-    type: String,
-    default: ''
-  },
-  hasMore: {
-    type: Boolean,
-    default: false
-  },
-  isLoadingPage: {
-    type: Boolean,
-    default: false
-  }
+  visibleHistory: {type: Array, required: true},
+  selectedItemId: {type: String, required: true},
+  getItemCategory: {type: Function, required: true},
+  deleteItem: {type: Function, required: true},
+  updateSelection: {type: Function, required: true},
+  selectAndFillDirect: {type: Function, required: true},
+  showContextMenu: {type: Function, required: true},
+  handleDragStart: {type: Function, required: true},
+  handleDragEnd: {type: Function, required: true},
+  promoteItem: {type: Function, required: true},
+  isPinned: {type: Function, required: true},
+  isCtrlKeyPressed: {type: Boolean, default: false},
+  highlightKeyword: {type: String, default: ''},
+  hasMore: {type: Boolean, default: false},
+  isLoadingPage: {type: Boolean, default: false}
 })
 const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
@@ -147,19 +101,14 @@ let scrollLeftVal = 0
 let dragTargetScrollLeft = 0
 let dragScrollRafId = 0
 
-const handleScroll = () => {
-  emit('content-scroll')
-}
+const handleScroll = () => emit('content-scroll')
 
 const renderHighlightParts = (text) => {
   const value = typeof text === 'string' ? text : ''
   const keyword = (props.highlightKeyword || '').trim()
   const tokens = Array.from(new Set(keyword.split(/\s+/).map((v) => v.trim()).filter(Boolean)))
       .sort((a, b) => b.length - a.length)
-  if (!value || tokens.length === 0) {
-    return [{text: value, hit: false}]
-  }
-
+  if (!value || tokens.length === 0) return [{text: value, hit: false}]
   const sourceLower = value.toLowerCase()
   const tokenLowers = tokens.map((t) => t.toLowerCase())
   const out = []
@@ -167,25 +116,21 @@ const renderHighlightParts = (text) => {
   while (start < value.length) {
     let bestIndex = -1
     let bestToken = ''
-    for (let i = 0; i < tokenLowers.length; i += 1) {
-      const token = tokenLowers[i]
-      const idx = sourceLower.indexOf(token, start)
+    for (let i = 0; i < tokenLowers.length; i++) {
+      const idx = sourceLower.indexOf(tokenLowers[i], start)
       if (idx === -1) continue
-      if (bestIndex === -1 || idx < bestIndex || (idx === bestIndex && token.length > bestToken.length)) {
+      if (bestIndex === -1 || idx < bestIndex || (idx === bestIndex && tokenLowers[i].length > bestToken.length)) {
         bestIndex = idx
-        bestToken = token
+        bestToken = tokenLowers[i]
       }
     }
     if (bestIndex === -1) {
-      out.push({text: value.slice(start), hit: false})
+      out.push({text: value.slice(start), hit: false});
       break
     }
-    if (bestIndex > start) {
-      out.push({text: value.slice(start, bestIndex), hit: false})
-    }
-    const hitEnd = bestIndex + bestToken.length
-    out.push({text: value.slice(bestIndex, hitEnd), hit: true})
-    start = hitEnd
+    if (bestIndex > start) out.push({text: value.slice(start, bestIndex), hit: false})
+    out.push({text: value.slice(bestIndex, bestIndex + bestToken.length), hit: true})
+    start = bestIndex + bestToken.length
   }
   return out.length > 0 ? out : [{text: value, hit: false}]
 }
@@ -195,11 +140,11 @@ const stopDragging = () => {
   isDown = false
   isDragging = false
   if (dragScrollRafId) {
-    cancelAnimationFrame(dragScrollRafId)
+    cancelAnimationFrame(dragScrollRafId);
     dragScrollRafId = 0
   }
   if (contentRef.value) {
-    contentRef.value.classList.remove('is-dragging')
+    contentRef.value.classList.remove('is-dragging');
     contentRef.value.style.cursor = 'default'
   }
   document.body.style.removeProperty('user-select')
@@ -215,7 +160,6 @@ onMounted(() => {
   window.addEventListener('blur', stopDragging)
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
-
 onUnmounted(() => {
   stopDragging()
   window.removeEventListener('blur', stopDragging)
@@ -226,126 +170,79 @@ onUnmounted(() => {
 })
 
 const handleItemDragStart = (e, id) => {
-  if (typeof props.handleDragStart === 'function') {
-    props.handleDragStart(e, id);
-  }
+  if (typeof props.handleDragStart === 'function') props.handleDragStart(e, id)
 }
+const handleClick = (entryId) => props.updateSelection(entryId, false, contentRef.value, null)
+const handleDoubleClick = (entryId) => props.selectAndFillDirect(entryId)
 
-const handleClick = (entryId) => {
-  props.updateSelection(entryId, false, contentRef.value, null)
+const isWebUrl = (v) => {
+  if (!v) return false
+  const t = v.trim()
+  return /^https?:\/\/\S+$/i.test(t) || /^www\.\S+$/i.test(t)
 }
-
-const handleDoubleClick = (entryId) => {
-  props.selectAndFillDirect(entryId)
+const normalizeUrl = (v) => {
+  const t = v.trim()
+  if (/^https?:\/\//i.test(t)) return t
+  if (/^www\./i.test(t)) return `https://${t}`
+  return t
 }
-
-const isWebUrl = (value) => {
-  if (!value) return false
-  const text = value.trim()
-  return /^https?:\/\/\S+$/i.test(text) || /^www\.\S+$/i.test(text)
-}
-
-const normalizeUrl = (value) => {
-  const text = value.trim()
-  if (/^https?:\/\//i.test(text)) return text
-  if (/^www\./i.test(text)) return `https://${text}`
-  return text
-}
-
-const openWebUrl = async (value) => {
+const openWebUrl = async (v) => {
   try {
-    const url = normalizeUrl(value)
-    if (isWebUrl(url)) {
-      await openExternalUrl(url)
-    }
-  } catch (error) {
-    console.error('打开网址失败:', error)
+    if (isWebUrl(v)) await openExternalUrl(normalizeUrl(v))
+  } catch (e) {
+    console.error('打开网址失败:', e)
   }
 }
 
 const handleMouseDown = (e) => {
-    if (e.target.closest('.delete-btn') || e.target.closest('.open-btn') || e.target.closest('.pin-btn') || e.target.closest('.preview-btn')) {
-      return
-    }
-
-  isDown = true
-  isDragging = false
+  if (e.target.closest('.action-btn')) return
+  isDown = true;
+  isDragging = false;
   startX = e.pageX
   if (contentRef.value) {
-    scrollLeftVal = contentRef.value.scrollLeft
+    scrollLeftVal = contentRef.value.scrollLeft;
     dragTargetScrollLeft = scrollLeftVal
   }
-
-
   window.addEventListener('mousemove', handleGlobalMouseMove)
   window.addEventListener('mouseup', handleGlobalMouseUp, true)
   window.addEventListener('dragend', handleGlobalDragEnd)
 }
-
-const handleGlobalMouseUp = () => {
-  stopDragging()
-}
-
-const handleGlobalDragEnd = () => {
-  stopDragging()
-}
-
+const handleGlobalMouseUp = () => stopDragging()
+const handleGlobalDragEnd = () => stopDragging()
 const handleGlobalMouseMove = (e) => {
   if (!isDown || !contentRef.value) return
   const walk = e.pageX - startX
-
   if (!isDragging && Math.abs(walk) > 4) {
-    isDragging = true
+    isDragging = true;
     contentRef.value.style.cursor = 'grabbing'
-    contentRef.value.classList.add('is-dragging')
+    contentRef.value.classList.add('is-dragging');
     document.body.style.userSelect = 'none'
-
-
-    if (window.getSelection) {
-      window.getSelection().removeAllRanges();
-    }
+    if (window.getSelection) window.getSelection().removeAllRanges()
   }
-
   if (!isDragging) return
-
-
-  e.preventDefault();
-
+  e.preventDefault()
   dragTargetScrollLeft = scrollLeftVal - walk
-  const maxScrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
-  if (dragTargetScrollLeft > maxScrollLeft + 36) {
-    emit('load-more-intent')
-  }
+  const max = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+  if (dragTargetScrollLeft > max + 36) emit('load-more-intent')
   if (!dragScrollRafId) {
     dragScrollRafId = requestAnimationFrame(() => {
       dragScrollRafId = 0
-      if (contentRef.value) {
-        contentRef.value.scrollLeft = dragTargetScrollLeft
-      }
+      if (contentRef.value) contentRef.value.scrollLeft = dragTargetScrollLeft
     })
   }
 }
-
 const handleVisibilityChange = () => {
-  if (document.hidden) {
-    stopDragging()
-  }
+  if (document.hidden) stopDragging()
 }
-
 const handleWheel = (e) => {
   if (!contentRef.value) return
   const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
-  const maxScrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
-  const nearEnd = contentRef.value.scrollLeft >= maxScrollLeft - 8
-  if (delta > 0 && nearEnd) {
-    emit('load-more-intent')
-  }
+  const max = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+  if (delta > 0 && contentRef.value.scrollLeft >= max - 8) emit('load-more-intent')
   contentRef.value.scrollLeft += delta
 }
 
-defineExpose({
-  contentRef
-})
+defineExpose({contentRef})
 </script>
 
 <style scoped>
@@ -353,314 +250,214 @@ defineExpose({
   flex: 1;
   min-height: 0;
   display: flex;
-  gap: 8px;
-  padding: 8px;
+  gap: 10px;
+  padding: 10px 14px;
   flex-direction: row;
   overflow-x: auto;
   overflow-y: hidden;
-  margin-top: 10px;
   scrollbar-width: none;
 }
 
 .content::-webkit-scrollbar {
-  display: none;
+  display: none
 }
 
 .content.is-dragging .clipboard-item {
-  transition: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+  transition: none !important
 }
 
-.content.is-dragging .clipboard-item:hover,
-.content.is-dragging .clipboard-item.selected {
-  box-shadow: none !important;
+.content.is-dragging .clipboard-item:hover {
+  transform: none !important
 }
 
-.preview-btn {
-  position: absolute;
-  top: 5px;
-  right: 80px;
-  width: 20px;
-  height: 20px;
+/* ===== 卡片 ===== */
+.clipboard-item {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.5px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+  user-select: none;
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  color: var(--fy-text-primary);
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.clipboard-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.clipboard-item.selected {
+  background: rgba(108, 140, 255, 0.1);
+  border-color: rgba(108, 140, 255, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(108, 140, 255, 0.1);
+}
+
+/* ===== 顶栏 ===== */
+.item-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 0;
+  min-height: 0;
+}
+
+.item-index {
+  font-size: 10px;
+  font-family: var(--fy-font-mono);
+  color: var(--fy-text-muted);
+  opacity: 0.5;
+  flex: 0 0 auto;
+  transition: opacity 0.2s;
+}
+
+.clipboard-item:hover .item-index {
+  opacity: 1;
+  color: var(--fy-accent)
+}
+
+.item-category {
+  font-size: 10px;
+  color: var(--fy-text-muted);
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  transition: opacity 0.2s;
+}
+
+.clipboard-item:hover .item-category {
+  opacity: 1
+}
+
+.item-pinned-dot {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--fy-bg-overlay);
+  background: var(--fy-warning);
+  flex: 0 0 auto;
+}
+
+.item-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.clipboard-item:hover .item-actions,
+.clipboard-item.selected .item-actions {
+  opacity: 1
+}
+
+.action-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  background: transparent;
+  border: none;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s;
-  z-index: 10;
+  color: var(--fy-text-muted);
+  transition: all 0.15s ease;
 }
 
-.preview-btn:hover {
-  background: var(--fy-accent-hover);
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--fy-text-primary);
 }
 
-.preview-btn .el-icon {
-  font-size: 12px;
+.action-btn.active {
+  color: var(--fy-warning);
 }
 
-.clipboard-item:hover .preview-btn {
-  opacity: 1;
+.action-delete:hover {
+  color: var(--fy-danger);
+  background: rgba(248, 113, 113, 0.1);
 }
 
-.content.is-dragging .preview-btn,
-  .content.is-dragging .delete-btn,
-.content.is-dragging .open-btn,
-.content.is-dragging .pin-btn {
-  opacity: 0 !important;
+/* ===== 内容区 ===== */
+.item-body {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 12px;
+  font-size: var(--fy-text-sm);
+  line-height: 1.55;
+  color: var(--fy-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
 }
 
-.spacer {
-  flex: 0 0 742px;
-  height: 1px;
+.item-body::-webkit-scrollbar {
+  display: none
 }
 
-.load-more-tail-indicator {
-  width: 56px;
-  flex: 0 0 56px;
+/* ===== 搜索摘要 ===== */
+.item-snippet {
+  margin: 0 12px 8px;
+  padding: 6px 0 0;
+  border-top: 0.5px solid rgba(255, 255, 255, 0.05);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--fy-text-accent);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 40px;
+  overflow: hidden;
+}
+.snippet-hit {
+  background: var(--fy-accent-bg);
+  color: var(--fy-accent);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* ===== 加载更多 ===== */
+.load-more {
+  width: 48px;
+  flex: 0 0 48px;
   min-height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  color: var(--fy-text-accent);
+  gap: 4px;
+  color: var(--fy-text-muted);
   user-select: none;
   pointer-events: none;
 }
 
-.load-more-tail-text {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  letter-spacing: 0.5px;
-  line-height: 1;
-}
-
-.load-more-tail-spinner {
-  font-size: 16px;
-  color: var(--fy-text-accent);
-}
-
-.clipboard-item {
-  background: var(--fy-bg-secondary);
-  border: 1px solid var(--fy-border);
-  border-radius: 8px;
-  padding: 12px;
-  cursor: pointer;
-  position: relative;
-  user-select: none;
-  width: 250px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  backdrop-filter: blur(10px);
-  color: var(--fy-text-primary);
-  transition: all 0.3s ease;
-  box-sizing: border-box;
-  /* 优化：限制重排重绘范围 */
-  contain: layout style paint;
-  will-change: transform;
-}
-
-.clipboard-item:hover, .clipboard-item.selected {
-  background: var(--fy-bg-hover);
-  border-color: var(--fy-accent);
-  box-shadow: 0 0 15px var(--fy-accent-bg);
-}
-
-.clipboard-item.selected {
-  transform: scale(1.02);
-}
-
-.delete-btn {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--fy-bg-overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s;
-  z-index: 10;
-}
-
-.open-btn {
-  position: absolute;
-  top: 5px;
-  right: 30px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--fy-bg-overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s;
-  z-index: 10;
-}
-
-.pin-btn {
-  position: absolute;
-  top: 5px;
-  right: 55px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1px solid var(--fy-border);
-  background: var(--fy-bg-surface);
-  color: var(--fy-text-secondary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s, border-color 0.2s, color 0.2s, background-color 0.2s;
-  z-index: 10;
-  padding: 0;
-}
-
-.pin-btn .el-icon {
-  width: 12px;
-  height: 12px;
-}
-
-.pin-btn:hover {
-  border-color: var(--fy-accent);
-  color: var(--fy-text-primary);
-  background: var(--fy-accent);
-}
-
-.open-btn .el-icon {
-  font-size: 12px;
-}
-
-.clipboard-item:hover .open-btn {
-  opacity: 1;
-}
-
-.clipboard-item:hover .pin-btn {
-  opacity: 1;
-}
-
-.pin-btn.active {
-  opacity: 1;
-  border-color: #f7b955;
-  color: var(--fy-text-primary);
-  background: rgba(247, 185, 85, 0.75);
-}
-
-.open-btn:hover {
-  background: var(--fy-accent-hover);
-}
-
-.delete-btn .el-icon {
-  font-size: 12px;
-}
-
-.clipboard-item:hover .delete-btn {
-  opacity: 1;
-}
-
-.delete-btn:hover {
-  background: #f56c6c;
-}
-
-.index {
-  position: absolute;
-  top: 5px;
-  left: 5px;
-  background: var(--fy-bg-overlay);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
+.load-more-text {
+  font-size: 10px;
   color: var(--fy-text-muted);
 }
 
-.clipboard-item:hover .index, .clipboard-item.selected .index {
-  background: var(--fy-accent);
-  color: var(--fy-text-primary);
+.spacer {
+  flex: 0 0 600px;
+  height: 1px
 }
 
-.category-wrap {
-  position: absolute;
-  left: 36px;
-  right: 56px;
-  top: 5px;
-  display: flex;
-  justify-content: center;
-  z-index: 10;
-  pointer-events: none;
-}
-
-.category-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  max-width: 100%;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--fy-bg-overlay);
-  border: 1px solid var(--fy-border-light);
-  color: var(--fy-text-secondary);
-  font-size: 12px;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.item-content {
-  margin-top: 38px;
-  padding-bottom: 10px;
-  flex: 1;
-  min-height: 0;
-  position: relative;
-  z-index: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--fy-text-secondary);
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.item-content::-webkit-scrollbar {
-  display: none;
-}
-
-.item-snippet {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--fy-border-light);
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--fy-text-accent);
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 52px;
-  overflow: hidden;
-}
-
-.snippet-hit {
-  background: var(--fy-accent-bg);
-  color: var(--fy-text-primary);
-  border-radius: 2px;
-  padding: 0 1px;
+.content.is-dragging .item-actions {
+  opacity: 0 !important
 }
 </style>

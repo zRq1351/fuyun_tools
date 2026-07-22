@@ -40,7 +40,7 @@
 
         <div v-for="prompt in enabledCustomPrompts" :key="prompt.name"
              :class="{ disabled: actionLoading }"
-             :style="{ color: prompt.color || '#909399', background: parseBackground(prompt.bg_color) }"
+             :style="{ color: prompt.color || 'var(--fy-text-muted)', background: parseBackground(prompt.bg_color) }"
              class="toolbar-button custom-btn"
              @click="handleCustomPrompt(prompt.name)">
           <el-icon class="btn-icon">
@@ -100,15 +100,9 @@ const enabledCustomPrompts = computed(() => {
   return customPrompts.value.filter(prompt => prompt.enabled !== false)
 })
 
-// 解析背景颜色，处理渐变和纯色
+// 解析背景颜色，使用纯色半透明
 const parseBackground = (bgColor) => {
-  if (!bgColor) return 'linear-gradient(145deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05))'
-
-  // 如果是纯色或rgba，创建渐变效果
-  if (bgColor.startsWith('rgba') || bgColor.startsWith('#')) {
-    return `linear-gradient(145deg, ${bgColor}, ${adjustOpacity(bgColor, 0.5)})`
-  }
-
+  if (!bgColor) return 'rgba(255, 255, 255, 0.06)'
   return bgColor
 }
 
@@ -693,34 +687,34 @@ html, body, #app {
 
 .translate-btn {
   color: var(--fy-success);
-  background: linear-gradient(145deg, rgba(82, 165, 112, 0.22), rgba(44, 96, 65, 0.2));
+  background: rgba(74, 222, 128, 0.12);
 }
 .translate-btn:hover {
-  background: linear-gradient(145deg, rgba(82, 165, 112, 0.35), rgba(44, 96, 65, 0.3));
+  background: rgba(74, 222, 128, 0.22);
 }
 
 .explain-btn {
   color: var(--fy-accent);
-  background: linear-gradient(145deg, rgba(84, 148, 230, 0.22), rgba(44, 83, 150, 0.2));
+  background: rgba(108, 140, 255, 0.12);
 }
 .explain-btn:hover {
-  background: linear-gradient(145deg, rgba(84, 148, 230, 0.35), rgba(44, 83, 150, 0.3));
+  background: rgba(108, 140, 255, 0.22);
 }
 
 .copy-btn {
   color: var(--fy-warning);
-  background: linear-gradient(145deg, rgba(209, 152, 61, 0.22), rgba(133, 89, 35, 0.2));
+  background: rgba(251, 191, 36, 0.12);
 }
 .copy-btn:hover {
-  background: linear-gradient(145deg, rgba(209, 152, 61, 0.35), rgba(133, 89, 35, 0.3));
+  background: rgba(251, 191, 36, 0.22);
 }
 
 .search-btn {
   color: var(--fy-info);
-  background: linear-gradient(145deg, rgba(167, 139, 250, 0.22), rgba(109, 40, 217, 0.2));
+  background: rgba(148, 163, 184, 0.12);
 }
 .search-btn:hover {
-  background: linear-gradient(145deg, rgba(167, 139, 250, 0.35), rgba(109, 40, 217, 0.3));
+  background: rgba(148, 163, 184, 0.22);
 }
 
 .custom-btn {
@@ -733,83 +727,75 @@ html, body, #app {
 /* 亮色主题按钮样式适配 */
 html.light .translate-btn,
 [data-theme="light"] .translate-btn {
-  background: linear-gradient(145deg, rgba(82, 165, 112, 0.15), rgba(44, 96, 65, 0.1));
+  background: rgba(34, 197, 94, 0.08);
 }
-
 html.light .translate-btn:hover,
 [data-theme="light"] .translate-btn:hover {
-  background: linear-gradient(145deg, rgba(82, 165, 112, 0.25), rgba(44, 96, 65, 0.18));
+  background: rgba(34, 197, 94, 0.15);
 }
 
 html.light .explain-btn,
 [data-theme="light"] .explain-btn {
-  background: linear-gradient(145deg, rgba(84, 148, 230, 0.15), rgba(44, 83, 150, 0.1));
+  background: rgba(79, 107, 246, 0.08);
 }
-
 html.light .explain-btn:hover,
 [data-theme="light"] .explain-btn:hover {
-  background: linear-gradient(145deg, rgba(84, 148, 230, 0.25), rgba(44, 83, 150, 0.18));
+  background: rgba(79, 107, 246, 0.15);
 }
 
 html.light .copy-btn,
 [data-theme="light"] .copy-btn {
-  background: linear-gradient(145deg, rgba(209, 152, 61, 0.15), rgba(133, 89, 35, 0.1));
+  background: rgba(245, 158, 11, 0.08);
 }
-
 html.light .copy-btn:hover,
 [data-theme="light"] .copy-btn:hover {
-  background: linear-gradient(145deg, rgba(209, 152, 61, 0.25), rgba(133, 89, 35, 0.18));
+  background: rgba(245, 158, 11, 0.15);
 }
 
 html.light .search-btn,
 [data-theme="light"] .search-btn {
-  background: linear-gradient(145deg, rgba(167, 139, 250, 0.15), rgba(109, 40, 217, 0.1));
+  background: rgba(148, 163, 184, 0.08);
 }
-
 html.light .search-btn:hover,
 [data-theme="light"] .search-btn:hover {
-  background: linear-gradient(145deg, rgba(167, 139, 250, 0.25), rgba(109, 40, 217, 0.18));
+  background: rgba(148, 163, 184, 0.15);
 }
 
 /* 护眼主题按钮样式适配 */
 html.eye-care .translate-btn,
 [data-theme="eye-care"] .translate-btn {
-  background: linear-gradient(145deg, rgba(106, 154, 74, 0.18), rgba(74, 112, 52, 0.12));
+  background: rgba(106, 154, 74, 0.1);
 }
-
 html.eye-care .translate-btn:hover,
 [data-theme="eye-care"] .translate-btn:hover {
-  background: linear-gradient(145deg, rgba(106, 154, 74, 0.28), rgba(74, 112, 52, 0.2));
+  background: rgba(106, 154, 74, 0.18);
 }
 
 html.eye-care .explain-btn,
 [data-theme="eye-care"] .explain-btn {
-  background: linear-gradient(145deg, rgba(139, 115, 85, 0.18), rgba(109, 85, 55, 0.12));
+  background: rgba(139, 115, 85, 0.1);
 }
-
 html.eye-care .explain-btn:hover,
 [data-theme="eye-care"] .explain-btn:hover {
-  background: linear-gradient(145deg, rgba(139, 115, 85, 0.28), rgba(109, 85, 55, 0.2));
+  background: rgba(139, 115, 85, 0.18);
 }
 
 html.eye-care .copy-btn,
 [data-theme="eye-care"] .copy-btn {
-  background: linear-gradient(145deg, rgba(196, 154, 58, 0.18), rgba(156, 118, 38, 0.12));
+  background: rgba(196, 154, 58, 0.1);
 }
-
 html.eye-care .copy-btn:hover,
 [data-theme="eye-care"] .copy-btn:hover {
-  background: linear-gradient(145deg, rgba(196, 154, 58, 0.28), rgba(156, 118, 38, 0.2));
+  background: rgba(196, 154, 58, 0.18);
 }
 
 html.eye-care .search-btn,
 [data-theme="eye-care"] .search-btn {
-  background: linear-gradient(145deg, rgba(139, 115, 85, 0.18), rgba(109, 85, 55, 0.12));
+  background: rgba(139, 115, 85, 0.1);
 }
-
 html.eye-care .search-btn:hover,
 [data-theme="eye-care"] .search-btn:hover {
-  background: linear-gradient(145deg, rgba(139, 115, 85, 0.28), rgba(109, 85, 55, 0.2));
+  background: rgba(139, 115, 85, 0.18);
 }
 
 </style>

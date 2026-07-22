@@ -2084,7 +2084,7 @@ watch([searchKeyword, categoryFilter], () => {
 .nav-action-btn:hover {
   border-color: var(--fy-border-hover);
   background: var(--fy-bg-hover);
-  color: #ffffff;
+  color: var(--fy-text-primary);
   box-shadow: 0 0 0 1px var(--fy-border-hover);
 }
 

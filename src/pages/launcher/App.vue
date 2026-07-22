@@ -584,17 +584,17 @@ onBeforeUnmount(() => {
 .launcher-box {
   width: 100%;
   height: 100%;
-  background: var(--fy-bg-surface);
-  border: 1px solid var(--fy-border);
-  border-radius: 12px;
-  box-shadow: var(--fy-shadow-lg);
-  backdrop-filter: var(--fy-backdrop-blur);
+  background: var(--fy-glass-bg);
+  border: 1px solid var(--fy-glass-border);
+  border-radius: var(--fy-radius-xl);
+  box-shadow: var(--fy-glass-shadow);
+  backdrop-filter: var(--fy-glass-blur);
+  -webkit-backdrop-filter: var(--fy-glass-blur);
   overflow: hidden;
   display: flex;
   flex-direction: column;
   pointer-events: auto;
-  /* 使用 clip-path 确保圆角外完全透明 */
-  clip-path: inset(0 round 12px);
+  clip-path: inset(0 round var(--fy-radius-xl));
 }
 
 .search-wrapper {
@@ -608,8 +608,8 @@ onBeforeUnmount(() => {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
-  margin-right: 8px;
+  gap: var(--fy-space-1);
+  margin-right: var(--fy-space-2);
 }
 
 .mode-button {
@@ -620,10 +620,10 @@ onBeforeUnmount(() => {
   height: 28px;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--fy-radius-sm);
   cursor: pointer;
   color: var(--fy-text-muted);
-  transition: all 0.2s;
+  transition: all var(--fy-duration-normal) var(--fy-ease-out);
 }
 
 .mode-button:hover {
@@ -652,10 +652,10 @@ onBeforeUnmount(() => {
   height: 28px;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--fy-radius-sm);
   cursor: pointer;
   color: var(--fy-text-muted);
-  transition: all 0.2s;
+  transition: all var(--fy-duration-normal) var(--fy-ease-out);
 }
 
 .close-button:hover {
@@ -669,9 +669,9 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: var(--fy-space-3);
   color: var(--fy-text-muted);
-  font-size: 14px;
+  font-size: var(--fy-text-md);
 }
 
 .loading-icon {
@@ -683,27 +683,27 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   min-height: 0;
   position: relative;
-  padding-bottom: 8px;
+  padding-bottom: var(--fy-space-2);
 }
 
 .command-section {
   border-top: 1px solid var(--fy-border-light);
-  padding: 4px 0;
+  padding: var(--fy-space-1) 0;
 }
 
 .command-header {
-  padding: 4px 16px;
-  font-size: 11px;
+  padding: var(--fy-space-1) var(--fy-space-4);
+  font-size: var(--fy-text-xs);
   color: var(--fy-text-muted);
 }
 
 .command-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
+  gap: var(--fy-space-3);
+  padding: var(--fy-space-2) var(--fy-space-4);
   cursor: pointer;
-  transition: background-color 0.15s;
+  transition: background-color var(--fy-duration-fast) var(--fy-ease-out);
 }
 
 .command-item:hover,
@@ -712,14 +712,14 @@ onBeforeUnmount(() => {
 }
 
 .command-prefix {
-  font-family: monospace;
-  font-size: 12px;
+  font-family: var(--fy-font-mono);
+  font-size: var(--fy-text-sm);
   color: var(--fy-accent);
   min-width: 80px;
 }
 
 .command-title {
-  font-size: 13px;
+  font-size: var(--fy-text-base);
   color: var(--fy-text-primary);
 }
 
@@ -729,7 +729,7 @@ onBeforeUnmount(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -738,38 +738,42 @@ onBeforeUnmount(() => {
 
 .manual-dialog {
   width: 420px;
-  background: var(--fy-bg-surface);
-  border-radius: 12px;
-  padding: 24px;
+  background: var(--fy-glass-bg);
+  border: 1px solid var(--fy-glass-border);
+  border-radius: var(--fy-radius-xl);
+  padding: var(--fy-space-6);
+  box-shadow: var(--fy-glass-shadow);
+  backdrop-filter: var(--fy-glass-blur-light);
+  -webkit-backdrop-filter: var(--fy-glass-blur-light);
 }
 
 .dialog-title {
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--fy-text-lg);
+  font-weight: var(--fy-weight-semibold);
   color: var(--fy-text-primary);
-  margin-bottom: 20px;
+  margin-bottom: var(--fy-space-5);
 }
 
 .form-group {
-  margin-bottom: 16px;
+  margin-bottom: var(--fy-space-4);
 }
 
 .form-group label {
   display: block;
-  font-size: 13px;
+  font-size: var(--fy-text-base);
   color: var(--fy-text-secondary);
-  margin-bottom: 6px;
+  margin-bottom: var(--fy-space-1);
 }
 
 .form-input {
   width: 100%;
   height: 36px;
-  padding: 0 12px;
+  padding: 0 var(--fy-space-3);
   border: 1px solid var(--fy-border);
-  border-radius: 6px;
+  border-radius: var(--fy-radius-sm);
   background: var(--fy-bg-card);
   color: var(--fy-text-primary);
-  font-size: 14px;
+  font-size: var(--fy-text-md);
   outline: none;
   box-sizing: border-box;
 }
@@ -780,7 +784,7 @@ onBeforeUnmount(() => {
 
 .file-input-row {
   display: flex;
-  gap: 8px;
+  gap: var(--fy-space-2);
 }
 
 .file-input-row .form-input {
@@ -790,17 +794,17 @@ onBeforeUnmount(() => {
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 20px;
+  gap: var(--fy-space-2);
+  margin-top: var(--fy-space-5);
 }
 
 .dialog-btn {
-  padding: 6px 16px;
+  padding: var(--fy-space-1) var(--fy-space-4);
   border: none;
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: var(--fy-radius-sm);
+  font-size: var(--fy-text-base);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--fy-duration-normal) var(--fy-ease-out);
 }
 
 .dialog-btn.cancel {
@@ -816,7 +820,11 @@ onBeforeUnmount(() => {
 
 .dialog-btn.confirm {
   background: var(--fy-accent);
-  color: #fff;
+  color: var(--fy-text-primary);
+}
+
+.dialog-btn.confirm:hover {
+  background: var(--fy-accent-hover);
 }
 
 .dialog-btn.confirm:disabled {
@@ -827,8 +835,8 @@ onBeforeUnmount(() => {
 .launcher-hints {
   display: flex;
   justify-content: center;
-  gap: 16px;
-  padding: 10px 16px;
+  gap: var(--fy-space-4);
+  padding: var(--fy-space-3) var(--fy-space-4);
   border-top: 1px solid var(--fy-border-light);
   cursor: move;
   flex-shrink: 0;
@@ -837,8 +845,8 @@ onBeforeUnmount(() => {
 .hint-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: var(--fy-space-1);
+  font-size: var(--fy-text-sm);
   color: var(--fy-text-muted);
 }
 
@@ -848,12 +856,12 @@ onBeforeUnmount(() => {
   justify-content: center;
   min-width: 24px;
   height: 20px;
-  padding: 0 6px;
+  padding: 0 var(--fy-space-1);
   background: var(--fy-bg-hover);
   border: 1px solid var(--fy-border-light);
-  border-radius: 4px;
-  font-size: 11px;
-  font-family: monospace;
+  border-radius: var(--fy-radius-xs);
+  font-size: var(--fy-text-xs);
+  font-family: var(--fy-font-mono);
   color: var(--fy-text-secondary);
 }
 </style>

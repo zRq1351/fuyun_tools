@@ -2,14 +2,13 @@
   <div class="toolbar">
     <div :title="$t('clipboard.dragHint')" class="window-offset-handle"
          @mousedown.stop.prevent="startWindowOffsetDrag">
-      <el-icon>
+      <el-icon :size="14">
         <Rank/>
       </el-icon>
-      <span class="window-offset-label">{{ $t('clipboard.offsetUp') }}</span>
     </div>
     <button v-if="showAiToggle" class="ai-toggle-btn" type="button" @click.stop
             @mousedown.stop="handleToggleAiSettings">
-      <el-icon class="ai-toggle-arrow">
+      <el-icon :size="14" class="ai-toggle-arrow">
         <ArrowRight v-if="isAiSettingsCollapsed"/>
         <ArrowDown v-else/>
       </el-icon>
@@ -22,7 +21,7 @@
         size="small"
     >
       <template #prefix>
-        <el-icon>
+        <el-icon :size="14">
           <Search/>
         </el-icon>
       </template>
@@ -52,16 +51,13 @@
             class="category-remove"
             @click.stop="removeCategory(category)"
         >
-          <el-icon>
-            <Close/>
-          </el-icon>
+          <el-icon :size="10"><Close/></el-icon>
         </span>
       </div>
       <div v-if="!isAddingCategory" class="category-pill add-category" @click="startCreateCategory">
-        <el-icon>
+        <el-icon :size="12">
           <Plus/>
         </el-icon>
-        <span>{{ createCategoryText || $t('clipboard.createCategory') }}</span>
       </div>
       <el-input
           v-else
@@ -106,8 +102,7 @@ const props = defineProps({
   startCreateCategory: Function,
   confirmCreateCategory: Function,
   cancelCreateCategory: Function,
-  handleDrop: Function
-  ,
+  handleDrop: Function,
   searchPlaceholder: {
     type: String,
     default: ''
@@ -164,99 +159,82 @@ const handleToggleAiSettings = () => {
 <style scoped>
 .toolbar {
   display: flex;
-  gap: 8px;
-  padding: 8px;
+  gap: 6px;
+  padding: 10px 14px;
   align-items: center;
 }
 
 .window-offset-handle {
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
-  border-radius: 10px;
+  border-radius: var(--fy-radius-sm);
   background: transparent;
-  border: 1px solid transparent;
-  color: var(--fy-text-primary);
+  border: none;
+  color: var(--fy-text-muted);
   cursor: ns-resize;
   flex: 0 0 auto;
   user-select: none;
-  transition: all 0.2s ease;
-  box-shadow: none;
-}
-
-.window-offset-label {
-  font-size: 10px;
-  line-height: 1;
-  letter-spacing: 0.5px;
+  transition: all var(--fy-duration-normal) var(--fy-ease-out);
 }
 
 .window-offset-handle:hover {
-  border-color: var(--fy-danger);
-  color: #fff;
+  color: var(--fy-danger);
   background: var(--fy-danger-bg);
-  box-shadow: 0 4px 14px rgba(245, 108, 108, 0.35);
 }
 
 .ai-toggle-btn {
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 10px;
-  border: 1px solid var(--fy-border-light);
+  border-radius: var(--fy-radius-sm);
+  border: none;
   background: transparent;
   color: var(--fy-text-accent);
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: all var(--fy-duration-normal) var(--fy-ease-out);
 }
 
 .ai-toggle-btn:hover {
-  background: var(--fy-bg-surface);
-  border-color: var(--fy-accent);
-  box-shadow: 0 0 0 1px var(--fy-accent-bg);
-}
-
-.ai-toggle-arrow {
-  font-size: 14px;
-  color: var(--fy-text-accent);
+  background: var(--fy-accent-bg);
 }
 
 .search-input {
-  width: 240px;
+  width: 200px;
   flex: 0 0 auto;
 }
 
 .search-input :deep(.el-input__wrapper) {
-  background: var(--fy-bg-surface);
-  border: 1px solid var(--fy-border-light);
-  box-shadow: 0 0 0 1px var(--fy-accent-bg);
-  border-radius: 10px;
-  padding: 2px 10px;
-  backdrop-filter: blur(12px);
-  transition: all 0.2s ease;
+  background: rgba(255, 255, 255, 0.05);
+  border: 0.5px solid var(--fy-border-light);
+  box-shadow: none;
+  border-radius: var(--fy-radius-full);
+  padding: 1px 10px;
+  height: 28px;
+  transition: all var(--fy-duration-normal) var(--fy-ease-out);
+}
+
+.search-input :deep(.el-input__wrapper:hover) {
+  border-color: var(--fy-border);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .search-input :deep(.el-input__wrapper.is-focus) {
   border-color: var(--fy-accent);
-  box-shadow: 0 0 0 2px var(--fy-accent-bg-hover);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .search-input :deep(.el-input__inner) {
   color: var(--fy-text-primary);
-  font-size: 13px;
-  letter-spacing: 0.2px;
+  font-size: var(--fy-text-sm);
 }
 
-.search-input :deep(.el-input__prefix) {
-  color: var(--fy-text-muted);
-}
-
+.search-input :deep(.el-input__prefix),
 .search-input :deep(.el-input__suffix) {
   color: var(--fy-text-muted);
 }
@@ -268,7 +246,7 @@ const handleToggleAiSettings = () => {
 .category-nav {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex: 1;
   min-width: 0;
 }
@@ -276,15 +254,16 @@ const handleToggleAiSettings = () => {
 .category-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: var(--fy-bg-surface);
-  border: 1px solid var(--fy-border-light);
-  color: var(--fy-text-secondary);
-  font-size: 12px;
+  gap: 3px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--fy-radius-full);
+  background: rgba(255, 255, 255, 0.12);
+  border: 0.5px solid rgba(255, 255, 255, 0.15);
+  color: var(--fy-text-primary);
+  font-size: var(--fy-text-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--fy-duration-normal) var(--fy-ease-out);
   white-space: nowrap;
 }
 
@@ -297,71 +276,72 @@ const handleToggleAiSettings = () => {
 }
 
 .category-pill:hover {
-  border-color: var(--fy-accent);
-  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: var(--fy-text-primary);
 }
 
 .category-pill.active {
-  background: var(--fy-accent-bg);
-  border-color: var(--fy-accent);
+  background: var(--fy-accent);
+  border-color: transparent;
   color: #fff;
-  box-shadow: 0 0 0 1px var(--fy-accent-bg-hover);
 }
 
 .category-pill.drag-over {
   background: var(--fy-success-bg);
   border-color: var(--fy-success);
-  color: #fff;
-  box-shadow: 0 0 0 1px var(--fy-success);
+  color: var(--fy-success);
 }
 
 .category-pill.add-category {
   border-style: dashed;
   color: var(--fy-text-muted);
+  padding: 0 8px;
 }
 
 .category-pill.add-category:hover {
-  color: #fff;
+  color: var(--fy-accent);
   border-color: var(--fy-accent);
+  border-style: solid;
 }
 
 .category-input {
-  width: 160px;
+  width: 140px;
 }
 
 .category-input :deep(.el-input__wrapper) {
-  background: var(--fy-bg-surface);
-  border: 1px solid var(--fy-border-light);
-  box-shadow: 0 0 0 1px var(--fy-accent-bg);
-  border-radius: 999px;
-  padding: 2px 10px;
-  transition: all 0.2s ease;
+  background: rgba(255, 255, 255, 0.05);
+  border: 0.5px solid var(--fy-border-light);
+  box-shadow: none;
+  border-radius: var(--fy-radius-full);
+  padding: 1px 10px;
+  height: 26px;
+  transition: all var(--fy-duration-normal) var(--fy-ease-out);
 }
 
 .category-input :deep(.el-input__wrapper.is-focus) {
   border-color: var(--fy-accent);
-  box-shadow: 0 0 0 2px var(--fy-accent-bg-hover);
 }
 
 .category-input :deep(.el-input__inner) {
   color: var(--fy-text-primary);
-  font-size: 12px;
+  font-size: var(--fy-text-sm);
 }
 
 .category-remove {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: var(--fy-bg-hover);
-  color: var(--fy-text-muted);
-  transition: all 0.2s ease;
+  background: rgba(0, 0, 0, 0.15);
+  color: inherit;
+  transition: all var(--fy-duration-normal) var(--fy-ease-out);
 }
 
 .category-pill:hover .category-remove {
-  background: var(--fy-danger-bg);
-  color: var(--fy-danger);
+  background: var(--fy-danger);
+  color: #fff;
 }
 </style>

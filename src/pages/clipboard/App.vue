@@ -874,9 +874,11 @@ onBeforeUnmount(() => {
 
 .clipboard-ai-select-popper {
   border: 1px solid var(--fy-border) !important;
-  border-radius: 10px !important;
-  background: var(--fy-bg-surface) !important;
-  backdrop-filter: blur(10px);
+  border-radius: var(--fy-radius-lg) !important;
+  background: var(--fy-glass-bg) !important;
+  backdrop-filter: var(--fy-glass-blur-light);
+  -webkit-backdrop-filter: var(--fy-glass-blur-light);
+  box-shadow: var(--fy-glass-shadow) !important;
 }
 
 .clipboard-ai-select-popper .el-select-dropdown__item {
@@ -907,11 +909,11 @@ onBeforeUnmount(() => {
   background: var(--fy-container-bg);
   backdrop-filter: var(--fy-backdrop-blur);
   -webkit-backdrop-filter: var(--fy-backdrop-blur);
-  border: 1px solid var(--fy-container-border);
-  box-shadow: var(--fy-shadow-inset), var(--fy-shadow);
+  border: 0.5px solid var(--fy-container-border);
+  box-shadow: var(--fy-shadow-lg);
   overflow: hidden;
   outline: none;
-  transition: background 0.3s, border-color 0.3s;
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
 
 .container > * {
@@ -932,15 +934,15 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: var(--fy-space-3);
   color: var(--fy-text-accent);
-  font-size: 14px;
+  font-size: var(--fy-text-md);
 }
 
 .ai-quick-panel-wrap {
   position: relative;
   height: 0;
-  margin: 0 8px;
+  margin: 0 var(--fy-space-2);
   z-index: 50;
 }
 
@@ -949,12 +951,13 @@ onBeforeUnmount(() => {
   top: 4px;
   left: 0;
   width: min(560px, calc(100vw - 36px));
-  padding: 8px;
-  border-radius: 10px;
-  background: var(--fy-bg-overlay);
-  border: 1px solid var(--fy-border);
-  box-shadow: var(--fy-shadow-lg);
+  padding: var(--fy-space-3);
+  border-radius: var(--fy-radius-lg);
+  background: var(--fy-glass-bg);
+  border: 0.5px solid var(--fy-glass-border);
+  box-shadow: var(--fy-glass-shadow);
   backdrop-filter: var(--fy-backdrop-blur-light);
+  -webkit-backdrop-filter: var(--fy-backdrop-blur-light);
 }
 
 .history-list {
@@ -964,17 +967,18 @@ onBeforeUnmount(() => {
 
 .status-footer {
   flex: 0 0 auto;
-  min-height: 44px;
+  min-height: 32px;
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 0 14px;
   position: sticky;
   bottom: 0;
   left: 0;
   right: 0;
   z-index: 120;
+  border-top: 0.5px solid rgba(255, 255, 255, 0.05);
 }
 
 .status-text {
@@ -982,9 +986,10 @@ onBeforeUnmount(() => {
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--fy-text-primary);
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fy-text-muted);
+  font-family: var(--fy-font-mono);
 }
 
 .status-label {
@@ -1000,10 +1005,11 @@ onBeforeUnmount(() => {
 .status-meta {
   flex: 0 1 auto;
   min-width: 0;
-  color: var(--fy-text-accent);
+  color: var(--fy-accent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: var(--fy-weight-medium);
 }
 
 .status-actions {
@@ -1017,39 +1023,40 @@ onBeforeUnmount(() => {
 .nav-action-btn {
   appearance: none;
   border: 1px solid var(--fy-border);
-  background: transparent;
-  color: var(--fy-text-primary);
-  border-radius: 7px;
-  font-size: 12px;
+  background: var(--fy-glass-bg);
+  color: var(--fy-text-secondary);
+  border-radius: var(--fy-radius-sm);
+  font-size: var(--fy-text-xs);
   line-height: 1;
-  font-weight: 700;
-  padding: 9px 14px;
-  min-height: 32px;
+  font-weight: var(--fy-weight-semibold);
+  padding: var(--fy-space-2) var(--fy-space-3);
+  min-height: 30px;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: all var(--fy-duration-normal) var(--fy-ease-out);
   box-shadow: none;
+  backdrop-filter: var(--fy-glass-blur-light);
+  -webkit-backdrop-filter: var(--fy-glass-blur-light);
 }
 
 .icon-btn {
   flex: 0 0 auto;
-  width: 36px;
-  height: 34px;
-  min-width: 36px;
+  width: 32px;
+  height: 30px;
+  min-width: 32px;
   padding: 0;
-  border-radius: 8px;
-  font-size: 16px;
+  border-radius: var(--fy-radius-sm);
+  font-size: 14px;
   line-height: 1;
   justify-content: center;
   display: inline-flex;
   align-items: center;
-  font-weight: 800;
+  font-weight: var(--fy-weight-bold);
 }
 
 .nav-action-btn:hover {
-  border-color: var(--fy-border-hover);
-  background: var(--fy-bg-hover);
-  color: #ffffff;
-  box-shadow: 0 0 0 1px var(--fy-accent-bg);
+  border-color: var(--fy-accent);
+  background: var(--fy-accent-bg);
+  color: var(--fy-accent);
 }
 
 .nav-action-btn:focus-visible {
@@ -1061,7 +1068,7 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: max-content max-content minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: var(--fy-space-3);
   width: 100%;
   min-width: 0;
 }
@@ -1069,32 +1076,32 @@ onBeforeUnmount(() => {
 .ai-control-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--fy-space-2);
   color: var(--fy-text-secondary);
-  font-size: 12px;
+  font-size: var(--fy-text-sm);
   min-width: 0;
 }
 
 .ai-select-item {
-  padding: 4px 8px;
-  border-radius: 8px;
+  padding: var(--fy-space-1) var(--fy-space-2);
+  border-radius: var(--fy-radius-md);
   background: transparent;
-  border: 1px solid var(--fy-border-light);
+  border: 0.5px solid var(--fy-border-light);
   flex: 0 0 auto;
 }
 
 .ai-control-label {
   color: var(--fy-text-secondary);
   white-space: nowrap;
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  font-weight: var(--fy-weight-semibold);
+  letter-spacing: var(--fy-tracking-wide);
 }
 
 .ai-shortcut-tip {
   margin-top: 0;
   justify-self: end;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--fy-text-xs);
   color: var(--fy-text-muted);
 }
 
@@ -1105,7 +1112,7 @@ onBeforeUnmount(() => {
 :deep(.ai-select .el-select__wrapper) {
   background: var(--fy-bg-input);
   border: 1px solid var(--fy-border);
-  border-radius: 8px;
+  border-radius: var(--fy-radius-md);
   box-shadow: none;
 }
 
@@ -1117,7 +1124,7 @@ onBeforeUnmount(() => {
 
 :deep(.ai-select .el-select__selected-item) {
   color: var(--fy-text-primary);
-  font-size: 12px;
+  font-size: var(--fy-text-sm);
 }
 
 :deep(.ai-select .el-select__placeholder) {
@@ -1126,7 +1133,7 @@ onBeforeUnmount(() => {
 
 .hint {
   color: var(--fy-text-muted);
-  font-size: 12px;
+  font-size: var(--fy-text-sm);
 }
 
 </style>
