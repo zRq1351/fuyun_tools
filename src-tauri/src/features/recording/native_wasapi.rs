@@ -1,4 +1,4 @@
-﻿use crate::core::error_codes::AppErrorKind;
+use crate::core::error_codes::AppErrorKind;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat as CpalSampleFormat, StreamConfig};
 use hound::SampleFormat;
@@ -1245,6 +1245,7 @@ pub fn start_system_loopback_aac_with_device(
     output_path: PathBuf,
     enabled_flag: Arc<AtomicBool>,
     recording_pause_flag: Arc<AtomicBool>,
+    audio_bitrate_kbps: Option<u32>,
 ) -> Result<WasapiFfmpegHandle, String> {
     AUDIO_WRITE_ERR_COUNT.store(false, Ordering::Relaxed);
     let stop_flag = Arc::new(AtomicBool::new(false));
@@ -1268,6 +1269,7 @@ pub fn start_system_loopback_aac_with_device(
                 ffmpeg_cmd.creation_flags(CREATE_NO_WINDOW);
             }
 
+            let effective_bitrate = audio_bitrate_kbps.unwrap_or(128).clamp(32, 512);
             ffmpeg_cmd
                 .args(&[
                     "-f",
@@ -1281,7 +1283,7 @@ pub fn start_system_loopback_aac_with_device(
                     "-c:a",
                     "aac",
                     "-b:a",
-                    "128k",
+                    &format!("{}k", effective_bitrate),
                     "-profile:a",
                     "aac_low",
                     "-y",

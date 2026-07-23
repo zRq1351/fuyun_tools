@@ -1081,10 +1081,6 @@ onMounted(async () => {
     isMicMuted.value = true;
   });
   try {
-    await refreshRecordableWindows();
-  } catch (_e) {
-  }
-  try {
     const settings = await AISettingsService.getSettings();
     recordingFeatureEnabled.value = settings.recording_enabled === true;
     captureSystemAudio.value = settings.recording_capture_system_audio === true;
@@ -1097,18 +1093,12 @@ onMounted(async () => {
     microphoneDeviceId.value = settings.recording_microphone_device_id || null;
   } catch (_e) {
   }
-  try {
-    await refreshSystemOutputDevices();
-  } catch (_e) {
-  }
-  try {
-    await refreshMicrophoneDevices();
-  } catch (_e) {
-  }
-  try {
-    await refreshAudioProcesses();
-  } catch (_e) {
-  }
+  await Promise.allSettled([
+    refreshRecordableWindows(),
+    refreshSystemOutputDevices(),
+    refreshMicrophoneDevices(),
+    refreshAudioProcesses(),
+  ]);
   await refresh();
   await syncCapsuleLayout();
 });

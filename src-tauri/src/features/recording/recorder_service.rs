@@ -1265,6 +1265,7 @@ fn ensure_system_audio_capture_started(
         sys_aac.clone(),
         enabled_flag.clone(),
         pause_flag.clone(),
+        Some(runtime.audio_bitrate_kbps.max(32)),
     );
     let start_result = match first_try {
         Ok(h) => Ok(h),
@@ -1276,6 +1277,7 @@ fn ensure_system_audio_capture_started(
                     sys_aac.clone(),
                     enabled_flag,
                     pause_flag,
+                    Some(runtime.audio_bitrate_kbps.max(32)),
                 )
                 .map_err(|second_err| format!("{}；回退默认设备失败: {}", first_err, second_err))
             } else {
@@ -1650,7 +1652,7 @@ fn spawn_stats_loop(
                 runtime.audio_bitrate_kbps,
                 runtime.dropped_video_frames,
                 runtime.audio_buffer_level_ms,
-                runtime.snapshot().elapsed_ms,
+                snapshot.elapsed_ms,
             )
         };
         if let Some((code, message, sid)) = emit_error {
@@ -2927,7 +2929,6 @@ pub fn pause_recording(
         // 原代码删除文件导致暂停/恢复后丢失暂停前的音频数据
         // AudioSegment 结构体仅含 PathBuf + 2个u64，内存开销极小
 
-        let mut runtime = lock_arc_mutex(&runtime_arc);
         runtime.phase = RecordingPhase::Paused;
         runtime.paused_at_instant = Some(std::time::Instant::now());
         runtime.snapshot().elapsed_ms
