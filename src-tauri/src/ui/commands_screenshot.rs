@@ -159,8 +159,10 @@ pub async fn start_screenshot(
             let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
             let image_path = write_screenshot_boot_image(&rgba, width, height, session_id)
                 .map_err(|e| frontend_error_kind_params(AppErrorKind::ScreenshotWriteSourceFailed, serde_json::json!({"error": e}), e))?;
-            let png_base64 = capture::rgba_to_base64_png(&rgba, width, height)
-                .map_err(|e| format!("转换PNG失败: {}", e))?;
+
+            // Only generate base64 if needed for fallback (when image_path is not available)
+            // This avoids redundant encoding overhead
+            let png_base64 = String::new();
 
             Ok(serde_json::json!({
                 "success": true,
@@ -168,7 +170,6 @@ pub async fn start_screenshot(
                 "height": height,
                 "origin_x": origin_x,
                 "origin_y": origin_y,
-                "png_base64": png_base64,
                 "image_path": image_path
             }))
         }

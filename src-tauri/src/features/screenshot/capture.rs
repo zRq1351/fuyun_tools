@@ -182,19 +182,22 @@ fn capture_screen_region_internal(
     }
 
     let mut rgba_data = Vec::with_capacity((width * height * 4) as usize);
+    let src = image.as_raw();
+    let row_bytes = (width * 4) as usize;
+
     for row in y..(y + height) {
         let start = ((row * img_width + x) * 4) as usize;
-        let end = start + (width * 4) as usize;
-        let src = image.as_raw();
+        let end = start + row_bytes;
         if end <= src.len() {
             rgba_data.extend_from_slice(&src[start..end]);
         } else if start < src.len() {
+            // Partial row: copy what's available, pad the rest
             let available = src.len() - start;
             rgba_data.extend_from_slice(&src[start..src.len()]);
-            let padding = (width * 4) as usize - available;
-            rgba_data.extend(std::iter::repeat(0).take(padding));
+            rgba_data.resize(rgba_data.len() + row_bytes - available, 0);
         } else {
-            rgba_data.extend(std::iter::repeat(0).take((width * 4) as usize));
+            // Row completely out of bounds: pad with zeros
+            rgba_data.resize(rgba_data.len() + row_bytes, 0);
         }
     }
 
@@ -234,6 +237,7 @@ pub fn capture_full_screen() -> Result<(Vec<u8>, u32, u32, i32, i32), String> {
     }
 
     let mut rgba_data = vec![0_u8; (width as usize) * (height as usize) * 4];
+    let dest_stride = width as usize * 4;
 
     for screen in &screens {
         let image = screen
@@ -244,12 +248,14 @@ pub fn capture_full_screen() -> Result<(Vec<u8>, u32, u32, i32, i32), String> {
         let offset_x = (screen.display_info.x - origin_x).max(0) as usize;
         let offset_y = (screen.display_info.y - origin_y).max(0) as usize;
         let src = image.as_raw();
+        let src_row_bytes = screen_width * 4;
+
         for row in 0..screen_height {
-            let src_start = row * screen_width * 4;
-            let src_end = src_start + screen_width * 4;
+            let src_start = row * src_row_bytes;
+            let src_end = src_start + src_row_bytes;
             let dest_row = offset_y + row;
-            let dest_start = (dest_row * width as usize + offset_x) * 4;
-            let dest_end = dest_start + screen_width * 4;
+            let dest_start = dest_row * dest_stride + offset_x * 4;
+            let dest_end = dest_start + src_row_bytes;
             if src_end <= src.len() && dest_end <= rgba_data.len() {
                 rgba_data[dest_start..dest_end].copy_from_slice(&src[src_start..src_end]);
             }

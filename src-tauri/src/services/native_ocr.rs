@@ -221,17 +221,18 @@ pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<OcrResult, String> 
             .map(|p| {
                 let chars = p.text.chars().filter(|c| !c.is_whitespace()).count();
                 let lines = p.lines.len();
-                
+
                 // 基础分数：字符数 + 行数奖励
                 let base_score = chars + lines * 8;
-                
+
                 // 质量奖励：更长连续文本通常质量更高
                 let quality_bonus = if chars > 50 { 20 } else if chars > 20 { 10 } else { 0 };
-                
+
                 // 惩罚：如果行数太多但字符很少，可能是识别错误
+                // 使用 saturating_sub 防止下溢到负值（usize 不能为负）
                 let penalty = if lines > 0 && chars / lines < 3 { lines * 5 } else { 0 };
-                
-                base_score + quality_bonus - penalty
+
+                base_score.saturating_add(quality_bonus).saturating_sub(penalty)
             })
             .sum()
     }
