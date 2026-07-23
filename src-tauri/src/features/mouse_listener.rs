@@ -360,25 +360,17 @@ fn handle_hook_event(
                     while positions.len() > 20 {
                         positions.pop_front();
                     }
-                    let new_positions = positions.clone();
-                    
-                    if !has_seen_ibeam {
-                        let is_ibeam_now = is_cursor_ibeam();
-                        if is_ibeam_now {
-                            log::debug!("拖拽过程中检测到文本输入型光标");
-                            *state_guard = MouseActionState::Dragging(
-                                start_x, start_y, start_time, true, new_positions
-                            );
-                        } else {
-                            *state_guard = MouseActionState::Dragging(
-                                start_x, start_y, start_time, false, new_positions
-                            );
-                        }
+
+                    let ibeam_flag = if !has_seen_ibeam && is_cursor_ibeam() {
+                        log::debug!("拖拽过程中检测到文本输入型光标");
+                        true
                     } else {
-                        *state_guard = MouseActionState::Dragging(
-                            start_x, start_y, start_time, true, new_positions
-                        );
-                    }
+                        has_seen_ibeam
+                    };
+
+                    // Take positions out, then put them back in the new state
+                    let pos = std::mem::take(positions);
+                    *state_guard = MouseActionState::Dragging(start_x, start_y, start_time, ibeam_flag, pos);
                 }
                 _ => {}
             }
