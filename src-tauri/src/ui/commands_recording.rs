@@ -10,15 +10,15 @@ use crate::features::recording::types::{
 };
 use crate::sync::Mutex;
 use crate::ui::window_manager::show_overlay_window_by_label;
-use crate::utils::utils_helpers::load_settings;
+use crate::utils::utils_helpers::{
+    load_settings, split_download_url_and_sha256, verify_downloaded_exe_integrity,
+};
 use futures_util::StreamExt;
 use serde::Deserialize;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
-use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -105,22 +105,13 @@ fn get_default_ffmpeg_download_url() -> String {
         })
 }
 
-fn normalize_sha256_hex(raw: &str) -> Option<String> {
-    let value = raw.trim().to_ascii_lowercase();
-    if value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit()) {
-        Some(value)
-    } else {
-        None
-    }
-}
-
 fn split_download_url_and_sha256(raw: &str) -> Result<(String, Option<String>), String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err(AppErrorKind::VcRuntimeDownloadUrlEmpty.to_frontend_json());
     }
     if let Some((url, fragment)) = trimmed.split_once("#sha256=") {
-        let expected = normalize_sha256_hex(fragment)
+        let expected = crate::utils::utils_helpers::normalize_sha256_hex(fragment)
             .ok_or_else(|| AppErrorKind::VcRuntimeDownloadUrlSha256Invalid.to_frontend_json())?;
         return Ok((url.trim().to_string(), Some(expected)));
     }
@@ -148,50 +139,6 @@ fn validate_download_url_policy(url: &str, expected_sha256: Option<&str>) -> Res
             "未提供 sha256 时，仅允许可信下载域名；当前域名不受信任: {}",
             host
         ));
-    }
-    Ok(())
-}
-
-fn compute_file_sha256(path: &Path) -> Result<String, String> {
-    let mut file = fs::File::open(path).map_err(|e| format!("读取下载文件失败: {}", e))?;
-    let mut hasher = Sha256::new();
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = file
-            .read(&mut buf)
-            .map_err(|e| format!("读取下载文件失败: {}", e))?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    let digest = hasher.finalize();
-    let mut hex = String::with_capacity(64);
-    for b in digest {
-        hex.push_str(format!("{:02x}", b).as_str());
-    }
-    Ok(hex)
-}
-
-fn verify_downloaded_exe_integrity(
-    path: &Path,
-    expected_sha256: Option<&str>,
-) -> Result<(), String> {
-    let mut header = [0u8; 2];
-    let mut file = fs::File::open(path).map_err(|e| format!("读取下载文件失败: {}", e))?;
-    file.read_exact(&mut header)
-        .map_err(|e| format!("读取下载文件头失败: {}", e))?;
-    if header != [b'M', b'Z'] {
-        return Err("下载文件不是有效的 Windows 可执行文件".to_string());
-    }
-    if let Some(expected) = expected_sha256 {
-        let actual = compute_file_sha256(path)?;
-        if actual != expected {
-            return Err(format!(
-                "下载文件 SHA-256 校验失败，expected={}, actual={}",
-                expected, actual
-            ));
-        }
     }
     Ok(())
 }

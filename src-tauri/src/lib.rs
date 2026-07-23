@@ -105,6 +105,37 @@ pub fn start_text_selection_listener(app_handle: AppHandle, state: Arc<Mutex<App
     features::mouse_listener::set_selection_listener_enabled(app_handle, state, selection_enabled);
 }
 
+/// 清理启动时遗留的截图临时文件
+/// Bug修复 (B15): 防止异常退出后临时文件累积
+fn cleanup_stale_screenshot_boot_files() {
+    let mut dir = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    dir.pop();
+    dir.push("screenshot_boot");
+    if !dir.exists() {
+        return;
+    }
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        let mut count = 0usize;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with("screenshot_boot_") && name.ends_with(".png") {
+                        let _ = std::fs::remove_file(&path);
+                        count += 1;
+                    }
+                }
+            }
+        }
+        if count > 0 {
+            log::info!("启动清理: 删除 {} 个遗留截图临时文件", count);
+        }
+    }
+}
+
 /// 运行Tauri应用程序
 pub fn run() {
     install_global_panic_hook();
@@ -647,37 +678,6 @@ pub fn run() {
     // 仅调试模式启用日志插件；发布版不注册，避免任何日志落盘
     #[cfg(debug_assertions)]
     let builder = builder.plugin(core::logger::build_logger().build());
-
-    /// 清理启动时遗留的截图临时文件
-    /// Bug修复 (B15): 防止异常退出后临时文件累积
-    fn cleanup_stale_screenshot_boot_files() {
-        let mut dir = match std::env::current_exe() {
-            Ok(p) => p,
-            Err(_) => return,
-        };
-        dir.pop();
-        dir.push("screenshot_boot");
-        if !dir.exists() {
-            return;
-        }
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            let mut count = 0usize;
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() {
-                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        if name.starts_with("screenshot_boot_") && name.ends_with(".png") {
-                            let _ = std::fs::remove_file(&path);
-                            count += 1;
-                        }
-                    }
-                }
-            }
-            if count > 0 {
-                log::info!("启动清理: 删除 {} 个遗留截图临时文件", count);
-            }
-        }
-    }
 
     let app = builder
         .plugin(tauri_plugin_clipboard_manager::init())

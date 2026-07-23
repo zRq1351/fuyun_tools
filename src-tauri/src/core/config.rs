@@ -20,11 +20,7 @@ pub const DEFAULT_SCREENSHOT_SHORTCUT: &str = if cfg!(target_os = "macos") {
 } else {
     "Ctrl+Shift+s"
 };
-pub const DEFAULT_RECORDING_SHORTCUT: &str = if cfg!(target_os = "macos") {
-    "Alt+R"
-} else {
-    "Alt+R"
-};
+pub const DEFAULT_RECORDING_SHORTCUT: &str = "Alt+R";
 pub const DEFAULT_LAUNCHER_SHORTCUT: &str = if cfg!(target_os = "macos") {
     "Cmd+K"
 } else {
@@ -68,7 +64,7 @@ impl std::fmt::Display for AIProvider {
             AIProvider::Qwen => "qwen",
             AIProvider::XiaoMiMimo => "xiaomimimo",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 

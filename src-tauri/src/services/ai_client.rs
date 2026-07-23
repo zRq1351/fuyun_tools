@@ -323,10 +323,11 @@ impl AIClient {
             Err(e) => {
                 // 截断错误信息，避免在日志中泄露 API 密钥
                 let error_msg = e.to_string();
-                let truncated = if error_msg.len() > 200 {
-                    format!("{}...", &error_msg[..200])
+                let truncated: String = error_msg.chars().take(200).collect();
+                let truncated = if truncated.len() < error_msg.len() {
+                    format!("{}...", truncated)
                 } else {
-                    error_msg.clone()
+                    truncated
                 };
                 log::error!("AI连接测试失败: {}", truncated);
                 let raw = e

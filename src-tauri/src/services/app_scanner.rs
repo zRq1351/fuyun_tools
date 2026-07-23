@@ -1,7 +1,7 @@
 use crate::core::error_codes::AppErrorKind;
 use crate::utils::icon_extractor;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LauncherItem {
@@ -61,7 +61,7 @@ pub fn scan_apps_by_category() -> Vec<AppCategory> {
 }
 
 fn scan_dir_by_category(
-    dir: &PathBuf,
+    dir: &Path,
     default_category: &str,
     category_map: &mut std::collections::HashMap<String, Vec<LauncherItem>>,
 ) {
@@ -83,7 +83,7 @@ fn scan_dir_by_category(
             }
 
             scan_dir_flat(&path, &folder_name, category_map);
-        } else if path.extension().map_or(false, |e| e == "lnk") {
+        } else if path.extension().is_some_and(|e| e == "lnk") {
             if let Some(item) = parse_shortcut(&path, default_category) {
                 category_map.entry(default_category.to_string()).or_default().push(item);
             }
@@ -92,7 +92,7 @@ fn scan_dir_by_category(
 }
 
 fn scan_dir_flat(
-    dir: &PathBuf,
+    dir: &Path,
     category: &str,
     category_map: &mut std::collections::HashMap<String, Vec<LauncherItem>>,
 ) {
@@ -103,7 +103,7 @@ fn scan_dir_flat(
 
         if path.is_dir() {
             scan_dir_flat(&path, category, category_map);
-        } else if path.extension().map_or(false, |e| e == "lnk") {
+        } else if path.extension().is_some_and(|e| e == "lnk") {
             if let Some(item) = parse_shortcut(&path, category) {
                 category_map.entry(category.to_string()).or_default().push(item);
             }
@@ -111,7 +111,7 @@ fn scan_dir_flat(
     }
 }
 
-fn parse_shortcut(path: &PathBuf, category: &str) -> Option<LauncherItem> {
+fn parse_shortcut(path: &Path, category: &str) -> Option<LauncherItem> {
     let file_name = path.file_stem()?.to_str()?;
     let path_str = path.to_str()?;
 
