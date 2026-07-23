@@ -1,11 +1,12 @@
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::process;
 use std::sync::OnceLock;
 use std::time::Instant;
 
 #[cfg(target_os = "windows")]
-use sysinfo::System;
+use sysinfo::{System, Pid};
 
 /// Performance metric categories
 #[derive(Clone, Debug, Serialize, PartialEq, Eq, Hash)]
@@ -276,13 +277,11 @@ pub fn get_system_resources() -> SystemResourceSnapshot {
         };
 
         let process_memory = {
-            let mut process_memory = 0u64;
-            for (_pid, process) in sys.processes() {
-                // Try to get current process memory
-                process_memory = process.memory() / 1024 / 1024;
-                break; // Just get the first process for now
-            }
-            process_memory
+            let pid = Pid::from_u32(process::id());
+            sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+            sys.process(pid)
+                .map(|p| p.memory() / 1024 / 1024)
+                .unwrap_or(0)
         };
 
         let cpu_usage = sys.global_cpu_usage() as f64;
