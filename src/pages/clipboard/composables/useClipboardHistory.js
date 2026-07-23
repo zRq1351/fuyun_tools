@@ -17,6 +17,10 @@ export function useClipboardHistory() {
     const sortOrder = ref('asc')
     const searchMatchedIds = ref(null)
 
+    // Reusable sort cache to avoid redundant sorts
+    let _lastSortedData = null
+    let _lastSortedResult = null
+
     const {
         filterDataRevision,
         categorySearchIndex,
@@ -81,6 +85,10 @@ export function useClipboardHistory() {
     }
 
     const sortPageItems = (entries) => {
+        // Skip sort if same array reference with same length (optimization for applyGroupedEntries)
+        if (entries === _lastSortedData) {
+            return _lastSortedResult
+        }
         const merged = entries.slice()
         const orderKey = sortBy.value
         merged.sort((a, b) => {
@@ -100,6 +108,8 @@ export function useClipboardHistory() {
             }
             return a.position - b.position
         })
+        _lastSortedData = entries
+        _lastSortedResult = merged
         return merged
     }
 
@@ -264,7 +274,6 @@ export function useClipboardHistory() {
             }
 
             if (items.length === 0) {
-
                 if (Number.isFinite(response?.total)) {
                     totalCount.value = Math.max(Number(response.total), getActiveCategoryCount(), Number(totalCount.value) || 0)
                     pageOffset.value = pagedHistory.value.length
@@ -274,10 +283,15 @@ export function useClipboardHistory() {
                 return
             }
 
-
-            const existingById = new Map(pagedHistory.value.map(entry => [entry.id, entry]))
-            const incomingIds = new Set(items.map(item => item.id))
-
+            // Reuse existing maps to reduce GC pressure
+            const existingById = new Map()
+            for (const entry of pagedHistory.value) {
+                existingById.set(entry.id, entry)
+            }
+            const incomingIds = new Set()
+            for (const item of items) {
+                incomingIds.add(item.id)
+            }
 
             const front = []
             for (const item of items) {
@@ -302,7 +316,6 @@ export function useClipboardHistory() {
                 }
             }
 
-
             const rest = []
             for (const entry of pagedHistory.value) {
                 if (!incomingIds.has(entry.id)) {
@@ -313,14 +326,15 @@ export function useClipboardHistory() {
                 }
             }
 
-
             const merged = [...front, ...rest]
-
-
 
             merged.forEach((entry, index) => {
                 entry.position = index;
             });
+
+            // Invalidate sort cache since data changed
+            _lastSortedData = null
+            _lastSortedResult = null
 
             pagedHistory.value = sortPageItems(merged);
 
@@ -329,7 +343,6 @@ export function useClipboardHistory() {
                 : Math.max(totalCount.value || 0, getActiveCategoryCount())
             pageOffset.value = pagedHistory.value.length
             hasMore.value = getActiveCategoryCount() < totalCount.value
-
 
             if (pagedHistory.value.length === 0) {
                 selectedItemId.value = ''
@@ -462,7 +475,6 @@ export function useClipboardHistory() {
             ? payload.categories
             : categoryMap.value
 
-
         categorySearchIndex.clear()
         itemCategorySnapshot.clear()
         keywordCategoryMatchCache.clear()
@@ -495,6 +507,10 @@ export function useClipboardHistory() {
             })
 
         const loadedTarget = Math.max(pageOffset.value || 0, pageSize.value)
+        // Invalidate sort cache
+        _lastSortedData = null
+        _lastSortedResult = null
+
         const sortedFiltered = sortPageItems(filtered)
         const loadedCount = Math.min(sortedFiltered.length, loadedTarget)
 

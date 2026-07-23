@@ -88,28 +88,22 @@ pub fn add_to_clipboard_history(
         return;
     }
 
-    let (should_skip, allow_during_selection) = {
-        let state_guard = lock_arc_mutex(&state);
-        let is_processing = state_guard.is_processing_selection;
-        let allow = is_processing 
-            && crate::features::text_selection::should_allow_clipboard_listener();
-        // 如果正在处理划词且不允许监听器处理，则跳过
-        (is_processing && !allow, allow)
-    };
-
-    if should_skip {
-        log::debug!("正在进行划词操作且未检测到手动复制，跳过添加到历史记录");
-        return;
-    }
-
-    if allow_during_selection {
-        log::info!("检测到划词期间的手动复制，允许添加到历史记录");
-        // 清除标志，避免后续重复处理
-        crate::features::text_selection::clear_manual_copy_flag();
-    }
-
+    // Single lock acquisition for all state reads to reduce contention
     let (manager_arc, should_emit) = {
         let state_guard = lock_arc_mutex(&state);
+        let is_processing = state_guard.is_processing_selection;
+        let allow = is_processing
+            && crate::features::text_selection::should_allow_clipboard_listener();
+        // 如果正在处理划词且不允许监听器处理，则跳过
+        if is_processing && !allow {
+            log::debug!("正在进行划词操作且未检测到手动复制，跳过添加到历史记录");
+            return;
+        }
+        if allow {
+            log::info!("检测到划词期间的手动复制，允许添加到历史记录");
+            // 清除标志，避免后续重复处理
+            crate::features::text_selection::clear_manual_copy_flag();
+        }
         (
             state_guard.clipboard_manager.clone(),
             state_guard.is_visible,

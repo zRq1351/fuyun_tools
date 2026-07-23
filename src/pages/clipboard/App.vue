@@ -350,9 +350,13 @@ const keywordHitCount = computed(() => {
       .map((t) => t.trim())
       .filter(Boolean)
   if (tokens.length === 0) return 0
+  const tokenCount = tokens.length
   return visibleHistory.value.filter((entry) => {
     const text = `${entry.content || ''}\n${entry.snippet || ''}`.toLowerCase()
-    return tokens.some((token) => text.includes(token))
+    for (let i = 0; i < tokenCount; i++) {
+      if (text.includes(tokens[i])) return true
+    }
+    return false
   }).length
 })
 

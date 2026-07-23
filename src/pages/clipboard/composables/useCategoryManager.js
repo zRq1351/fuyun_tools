@@ -74,7 +74,7 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
                 if (setIsUpdatingCategory) {
                     setIsUpdatingCategory(false)
                 }
-            }, 800)
+            }, 300)
         }
     }
 
@@ -116,7 +116,7 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
                     if (setIsUpdatingCategory) {
                         setIsUpdatingCategory(false)
                     }
-                }, 800)
+                }, 300)
             }
         }
     }
