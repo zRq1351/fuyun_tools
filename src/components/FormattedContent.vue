@@ -119,7 +119,7 @@ const detectAndProcess = (text) => {
   }
 
   // 3. Markdown (simplified detection)
-  if (/(^|\n)(#{1,6}\s|- \[[ x]\]|[\*\-]\s|> \S|```)/.test(text)) {
+  if (/(^|\n)(#{1,6}\s|- \[[ x]\]|[*-]\s|> \S|```)/.test(text)) {
     try {
       const rawHtml = marked.parse(text)
       const html = DOMPurify.sanitize(rawHtml)
