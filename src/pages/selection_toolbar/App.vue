@@ -79,6 +79,9 @@ let unlistenMouseLeave = null
 let hoverTimeout = null
 let enterTimeout = null
 let isAnimating = false // 添加动画锁，防止重复触发
+let cachedSettings = null // 缓存AI设置，避免每次操作都请求IPC
+let settingsCacheTime = 0 // 设置缓存时间戳
+const SETTINGS_CACHE_TTL = 5000 // 缓存有效期5秒
 
 const appWindow = getCurrentWindow()
 
@@ -99,6 +102,27 @@ const getIconComponent = (iconName) => {
 const enabledCustomPrompts = computed(() => {
   return customPrompts.value.filter(prompt => prompt.enabled !== false)
 })
+
+// 获取缓存的AI设置（避免每次操作都发起IPC请求）
+const getCachedSettings = async (forceRefresh = false) => {
+  const now = Date.now()
+  if (!forceRefresh && cachedSettings && (now - settingsCacheTime) < SETTINGS_CACHE_TTL) {
+    return cachedSettings
+  }
+  try {
+    const settings = await AISettingsService.getSettings()
+    cachedSettings = settings
+    settingsCacheTime = now
+    return settings
+  } catch {
+    return cachedSettings // 返回旧缓存作为降级
+  }
+}
+
+// 使设置缓存失效（在操作完成后调用，延迟刷新）
+const invalidateSettingsCache = () => {
+  settingsCacheTime = 0
+}
 
 // 解析背景颜色，使用纯色半透明
 const parseBackground = (bgColor) => {
@@ -152,8 +176,8 @@ const onMouseEnter = async () => {
       // 等待一帧确保魔法棒隐藏生效
     await new Promise(resolve => requestAnimationFrame(resolve))
 
-    // 每次展开前重新加载配置以获取最新的按钮列表
-    const settings = await AISettingsService.getSettings().catch(() => null)
+    // 使用缓存设置获取按钮列表（避免每次展开都发起IPC请求）
+    const settings = await getCachedSettings().catch(() => null)
     if (settings) {
       webSearchEngine.value = settings.selection_web_search_engine || 'bing'
       customPrompts.value = Array.isArray(settings.selection_custom_prompts) ? settings.selection_custom_prompts : []
@@ -294,7 +318,7 @@ const hasSelectionAiConfig = (settings) => {
 }
 const ensureSelectionAiConfigured = async () => {
   try {
-    const settings = await AISettingsService.getSettings()
+    const settings = await getCachedSettings(true)
     if (hasSelectionAiConfig(settings)) {
       return true
     }
@@ -327,6 +351,7 @@ const runAction = async (executor, errorMessage) => {
   } catch (error) {
     handleAppError(error, errorMessage)
   } finally {
+    invalidateSettingsCache() // 操作完成后使缓存失效，下次展开时刷新
     actionLoading.value = false
   }
 }
@@ -474,8 +499,8 @@ const handleCopy = async () => {
 
 const handleWebSearch = async () => {
   await runAction(async (text) => {
-    // 点击搜索时重新获取最新设置
-    const settings = await AISettingsService.getSettings().catch(() => null)
+    // 点击搜索时使用缓存设置（刷新缓存以获取最新搜索引擎）
+    const settings = await getCachedSettings(true).catch(() => null)
     if (settings) {
       webSearchEngine.value = settings.selection_web_search_engine || 'bing'
     }

@@ -343,6 +343,7 @@ fn wait_for_clipboard_update(
 ) -> Option<String> {
     let start_time = std::time::Instant::now();
     let mut attempts = 0;
+    let mut consecutive_unchanged = 0u32; // 连续未变化计数，用于提前退出
     let wake_rx = subscribe_clipboard_wake_events();
 
     log::info!("使用事件优先+轮询兜底检测模式");
@@ -354,6 +355,23 @@ fn wait_for_clipboard_update(
         let sequence_changed = current_sequence != 0
             && sequence_before_copy != 0
             && current_sequence != sequence_before_copy;
+
+        // 如果序列号持续未变化且已超过初始等待期，提前退出
+        if !sequence_changed && attempts > 5 {
+            consecutive_unchanged += 1;
+            // 连续30次未变化（约300ms），且未检测到任何剪贴板活动，提前退出
+            if consecutive_unchanged >= 30 && original_content.is_some() {
+                log::debug!(
+                    "连续{}次序列号未变化，提前退出检测，耗时: {:?}",
+                    consecutive_unchanged,
+                    start_time.elapsed()
+                );
+                return None;
+            }
+        } else if sequence_changed {
+            consecutive_unchanged = 0;
+        }
+
         let should_read_content =
             sequence_changed || sequence_before_copy == 0 || attempts % 4 == 0;
         if !should_read_content {

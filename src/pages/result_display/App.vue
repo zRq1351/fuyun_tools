@@ -294,12 +294,20 @@ const originalHtml = computed(() => renderMarkdownSafely(originalText.value))
 // 流式更新时使用requestAnimationFrame节流，避免每次chunk都重新解析markdown
 const resultHtmlRaw = ref('')
 let rafId = null
+let scrollRafId = null
 let waitingTimeout = null
 watch(resultText, (newText) => {
   if (rafId) cancelAnimationFrame(rafId)
   rafId = requestAnimationFrame(() => {
     resultHtmlRaw.value = renderMarkdownSafely(newText)
     rafId = null
+    // 合并滚动操作到同一帧，避免频繁触发滚动
+    if (shouldAutoFollow.value && !scrollRafId) {
+      scrollRafId = requestAnimationFrame(() => {
+        scrollToBottom()
+        scrollRafId = null
+      })
+    }
   })
 }, {immediate: true})
 const resultHtml = computed(() => resultHtmlRaw.value)
@@ -394,6 +402,10 @@ onBeforeUnmount(() => {
   if (rafId) {
     cancelAnimationFrame(rafId)
     rafId = null
+  }
+  if (scrollRafId) {
+    cancelAnimationFrame(scrollRafId)
+    scrollRafId = null
   }
   if (waitingTimeout) {
     clearTimeout(waitingTimeout)

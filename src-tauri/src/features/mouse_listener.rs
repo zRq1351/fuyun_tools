@@ -1,6 +1,7 @@
 use crate::features::screenshot::capture;
 use crate::sync::{lock_arc_mutex, Mutex};
 use log;
+use std::collections::VecDeque;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -35,7 +36,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 enum MouseActionState {
     Idle,
     MouseDown(i32, i32, std::time::Instant),
-    Dragging(i32, i32, std::time::Instant, bool, Vec<(i32, i32)>), // (start_x, start_y, time, has_seen_ibeam, positions)
+    Dragging(i32, i32, std::time::Instant, bool, VecDeque<(i32, i32)>), // (start_x, start_y, time, has_seen_ibeam, positions)
     MouseUp(i32, i32, std::time::Instant),
 }
 
@@ -160,7 +161,10 @@ fn handle_hook_event(
                 MouseActionState::MouseDown(x, y, t) => {
                     // 从 MouseDown 直接到 MouseUp，检查当前光标
                     let is_ibeam = is_cursor_ibeam();
-                    (x, y, t, is_ibeam, vec![(x, y), (last_x, last_y)])
+                    let mut deque = VecDeque::with_capacity(20);
+                    deque.push_back((x, y));
+                    deque.push_back((last_x, last_y));
+                    (x, y, t, is_ibeam, deque)
                 }
                 MouseActionState::Dragging(x, y, t, seen_ibeam, pos) => {
                     // 已经在拖拽过程中，使用记录的标志和轨迹
@@ -211,7 +215,7 @@ fn handle_hook_event(
                         true
                     } else {
                         // 完全没见过 IBEAM，根据轨迹特征判断
-                        let feature_linear = check_linear_movement(&positions);
+                        let feature_linear = check_linear_movement(positions.make_contiguous());
                         
                         let feature_horizontal = {
                             if let (Some(first), Some(last)) = (positions.first(), positions.last()) {
@@ -336,24 +340,27 @@ fn handle_hook_event(
                     if distance >= 5.0 {
                         // 转换为 Dragging 状态
                         let is_ibeam = is_cursor_ibeam();
+                        let mut deque = VecDeque::with_capacity(20);
+                        deque.push_back((start_x, start_y));
+                        deque.push_back((mouse_x, mouse_y));
                         *state_guard = MouseActionState::Dragging(
-                            start_x, start_y, start_time, is_ibeam, 
-                            vec![(start_x, start_y), (mouse_x, mouse_y)]
+                            start_x, start_y, start_time, is_ibeam,
+                            deque
                         );
                         if is_ibeam {
                             log::debug!("开始拖拽并检测到文本输入型光标");
                         }
                     }
                 }
-                MouseActionState::Dragging(start_x, start_y, start_time, has_seen_ibeam, ref positions) => {
-                    // 已经在拖拽过程中，持续监测
-                    let mut new_positions = positions.clone();
-                    new_positions.push((mouse_x, mouse_y));
-                    
+                MouseActionState::Dragging(start_x, start_y, start_time, has_seen_ibeam, ref mut positions) => {
+                    // 已经在拖拽过程中，持续监测（原地操作避免克隆开销）
+                    positions.push_back((mouse_x, mouse_y));
+
                     // 限制轨迹长度，只保留最近20个点
-                    if new_positions.len() > 20 {
-                        new_positions.drain(0..new_positions.len() - 20);
+                    while positions.len() > 20 {
+                        positions.pop_front();
                     }
+                    let new_positions = positions.clone();
                     
                     if !has_seen_ibeam {
                         let is_ibeam_now = is_cursor_ibeam();
