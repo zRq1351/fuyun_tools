@@ -162,7 +162,7 @@ pub async fn start_screenshot(
 
             // Only generate base64 if needed for fallback (when image_path is not available)
             // This avoids redundant encoding overhead
-            let png_base64 = String::new();
+            let _png_base64 = String::new();
 
             Ok(serde_json::json!({
                 "success": true,

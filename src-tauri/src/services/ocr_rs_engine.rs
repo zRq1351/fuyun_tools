@@ -1,45 +1,14 @@
 use crate::services::ocr_engine::{OcrLine, OcrParagraph, clean_ocr_text};
 use ocr_rs::{OcrEngine, OcrEngineConfig};
-use std::sync::{LazyLock, Mutex, OnceLock};
+use std::sync::{LazyLock, Mutex};
 
 /// 互斥锁保证同一时刻只有一个 OCR 引擎初始化在进行
 static OCR_INIT_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
-/// 缓存的 OCR 引擎实例
-static OCR_ENGINE_CACHE: OnceLock<Mutex<Option<OcrEngine>>> = OnceLock::new();
-
-/// 获取 OCR 引擎（使用缓存避免重复初始化）
+/// 获取 OCR 引擎（每次调用创建新实例，因为 OcrEngine 不实现 Clone）
 fn get_or_init_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {
-    let cache = OCR_ENGINE_CACHE.get_or_init(|| Mutex::new(None));
-
-    // 尝试从缓存获取
-    {
-        let guard = cache.lock().map_err(|e| format!("OCR 缓存锁中毒: {}", e))?;
-        if let Some(ref engine) = *guard {
-            return Ok(engine.clone());
-        }
-    }
-
-    // 缓存未命中，初始化新引擎
-    let _init_guard = OCR_INIT_LOCK.lock().map_err(|e| format!("OCR 初始化锁中毒: {}", e))?;
-
-    // 双重检查：可能在等待锁期间其他线程已初始化
-    {
-        let guard = cache.lock().map_err(|e| format!("OCR 缓存锁中毒: {}", e))?;
-        if let Some(ref engine) = *guard {
-            return Ok(engine.clone());
-        }
-    }
-
-    let engine = init_ocr_engine(app_handle)?;
-
-    // 存入缓存
-    {
-        let mut guard = cache.lock().map_err(|e| format!("OCR 缓存锁中毒: {}", e))?;
-        *guard = Some(engine.clone());
-    }
-
-    Ok(engine)
+    let _guard = OCR_INIT_LOCK.lock().map_err(|e| format!("OCR 初始化锁中毒: {}", e))?;
+    init_ocr_engine(app_handle)
 }
 
 fn init_ocr_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {
