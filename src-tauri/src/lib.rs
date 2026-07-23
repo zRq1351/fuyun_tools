@@ -671,6 +671,13 @@ pub fn run() {
             undo_import_item,
             get_import_files,
             detect_orphan_files,
+            // 性能监控命令
+            get_system_resources,
+            get_perf_summary,
+            get_metrics_by_category,
+            get_startup_metrics,
+            get_memory_metrics,
+            get_ipc_metrics,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());

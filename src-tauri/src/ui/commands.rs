@@ -2006,3 +2006,43 @@ pub async fn toggle_recording_command(app: AppHandle, state: State<'_, Arc<Mutex
     toggle_recording_from_shortcut(app, state_arc).await;
     Ok(())
 }
+
+// ========================================
+// 性能监控命令
+// ========================================
+
+/// 获取系统资源使用情况（内存、CPU）
+#[tauri::command]
+pub async fn get_system_resources() -> Result<crate::core::perf_metrics::SystemResourceSnapshot, String> {
+    Ok(crate::core::perf_metrics::get_system_resources())
+}
+
+/// 获取性能指标摘要
+#[tauri::command]
+pub async fn get_perf_summary() -> Result<crate::core::perf_metrics::PerfSummary, String> {
+    Ok(crate::core::perf_metrics::get_perf_summary())
+}
+
+/// 按类别获取性能指标
+#[tauri::command]
+pub async fn get_metrics_by_category() -> Result<std::collections::BTreeMap<String, Vec<crate::core::perf_metrics::PerfMetricSnapshot>>, String> {
+    Ok(crate::core::perf_metrics::get_metrics_by_category())
+}
+
+/// 获取启动相关指标
+#[tauri::command]
+pub async fn get_startup_metrics() -> Result<Vec<crate::core::perf_metrics::PerfMetricSnapshot>, String> {
+    Ok(crate::core::perf_metrics::get_startup_metrics())
+}
+
+/// 获取内存相关指标
+#[tauri::command]
+pub async fn get_memory_metrics() -> Result<Vec<crate::core::perf_metrics::PerfMetricSnapshot>, String> {
+    Ok(crate::core::perf_metrics::get_memory_metrics())
+}
+
+/// 获取IPC延迟指标
+#[tauri::command]
+pub async fn get_ipc_metrics() -> Result<Vec<crate::core::perf_metrics::PerfMetricSnapshot>, String> {
+    Ok(crate::core::perf_metrics::get_ipc_metrics())
+}
