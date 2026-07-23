@@ -119,7 +119,7 @@
         <span>移出分类</span>
       </div>
       <div class="context-menu-divider"></div>
-      <div class="context-menu-item" @click="showAddCommandDialog">
+      <div class="context-menu-item" @click="showAddCommandDialogFn">
         <el-icon :size="14">
           <Star/>
         </el-icon>
@@ -165,6 +165,7 @@ import {Close, Delete, FolderAdd, FolderOpened, Monitor, Star} from '@element-pl
 import Sortable from 'sortablejs'
 import {invoke} from '@tauri-apps/api/core'
 import ContextMenu from '../../../components/ContextMenu.vue'
+import {useAppActions} from '../composables/useAppActions'
 
 const {t} = useI18n()
 
@@ -175,6 +176,19 @@ const props = defineProps({
 
 const emit = defineEmits(['select', 'reorder-apps', 'reorder-categories', 'category-changed'])
 
+// Use shared composable for app actions
+const {
+  showCommandDialog,
+  commandForm,
+  ctxApp: sharedCtxApp,
+  openAppDirectory: sharedOpenAppDirectory,
+  removeApp: sharedRemoveApp,
+  removeFromCategory: sharedRemoveFromCategory,
+  showAddCommandDialog: sharedShowAddCommandDialog,
+  closeCommandDialog: sharedCloseCommandDialog,
+  confirmAddCommand: sharedConfirmAddCommand
+} = useAppActions(emit)
+
 const customCategories = ref([])
 const ctxVisible = ref(false)
 const ctxX = ref(0)
@@ -184,10 +198,6 @@ const ctxAnchorId = ref(null)
 const expandedCategory = ref(null)
 const appsContainer = ref(null)
 const categoriesContainer = ref(null)
-const showCommandDialog = ref(false)
-const commandForm = ref({
-  prefix: ''
-})
 
 // 加载分类列表
 const loadCategories = async () => {
@@ -345,13 +355,8 @@ const openApp = (app) => {
 }
 
 const openAppDirectory = async (app) => {
-  if (!app || !app.path) return
-  try {
-    await invoke('open_app_directory', {path: app.path})
-    closeCtxMenu()
-  } catch (error) {
-    console.error('打开应用目录失败:', error)
-  }
+  await sharedOpenAppDirectory(app)
+  closeCtxMenu()
 }
 
 const showContextMenu = (event, app) => {
@@ -402,27 +407,13 @@ const launchAllApps = async (category) => {
 }
 
 const removeFromCategory = async (app) => {
-  if (!app || !app.id) return
-  try {
-    const {invoke} = await import('@tauri-apps/api/core')
-    await invoke('set_app_category', {appId: app.id, categoryId: ''})
-    closeCtxMenu()
-    emit('category-changed')
-  } catch (error) {
-    console.error('Remove category error:', error)
-  }
+  await sharedRemoveFromCategory(app)
+  closeCtxMenu()
 }
 
 const removeApp = async (app) => {
-  if (!app || !app.id) return
-  try {
-    const {invoke} = await import('@tauri-apps/api/core')
-    await invoke('remove_app_record', {appId: app.id})
-    closeCtxMenu()
-    emit('category-changed')
-  } catch (error) {
-    console.error('Remove app error:', error)
-  }
+  await sharedRemoveApp(app)
+  closeCtxMenu()
 }
 
 const assignToCategory = async (app, categoryId) => {
@@ -430,102 +421,25 @@ const assignToCategory = async (app, categoryId) => {
   try {
     await invoke('set_app_category', {appId: app.id, categoryId})
     closeCtxMenu()
-    // 通知父组件重新加载配置
     emit('category-changed')
   } catch (error) {
     console.error('Assign category error:', error)
   }
 }
 
-// 显示添加命令对话框
-const showAddCommandDialog = () => {
-  const app = ctxApp.value
-  if (!app) return
-
-  // 自动生成前缀：使用应用名称的小写形式（不包含 :）
-  const prefix = app.title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 10)
-
-  commandForm.value = {
-    prefix
-  }
-  showCommandDialog.value = true
+const showAddCommandDialogFn = () => {
+  sharedShowAddCommandDialog(ctxApp.value)
 }
 
-// 关闭命令对话框
 const closeCommandDialog = () => {
-  showCommandDialog.value = false
+  sharedCloseCommandDialog()
   closeCtxMenu()
 }
 
-// 确认添加命令
 const confirmAddCommand = async () => {
-  const app = ctxApp.value
-  if (!app || !commandForm.value.prefix.trim()) return
-
-  try {
-    // 加载配置检查该应用是否已有命令
-    const config = await invoke('get_launcher_config')
-    const existingCommands = config.custom_commands || []
-
-    // 检查该应用是否已有命令（通过 path 判断）
-    const existingCommand = existingCommands.find(cmd => {
-      if (cmd.command_type.RunProgram) {
-        return cmd.command_type.RunProgram.path === app.path
-      }
-      return false
-    })
-
-    if (existingCommand) {
-      ElMessage({
-        message: `该应用已有命令 "${existingCommand.prefix}"，请勿重复添加`,
-        type: 'warning',
-        duration: 3000,
-        offset: 60
-      })
-      return
-    }
-
-    // 检查前缀是否已存在
-    const finalPrefix = ':' + commandForm.value.prefix.trim()
-    const prefixExists = existingCommands.some(cmd => cmd.prefix === finalPrefix)
-    if (prefixExists) {
-      ElMessage({
-        message: `命令前缀 "${finalPrefix}" 已被使用，请使用其他前缀`,
-        type: 'warning',
-        duration: 3000,
-        offset: 60
-      })
-      return
-    }
-
-    // 构建命令类型 - 运行程序
-    const commandType = {
-      RunProgram: {
-        path: app.path,
-        args: null
-      }
-    }
-
-    await invoke('add_custom_command', {
-      prefix: finalPrefix,
-      title: app.title,
-      description: `启动 ${app.title}`,
-      icon: app.icon_base64 || 'Monitor',
-      commandType: commandType
-    })
-
-    closeCommandDialog()
-    // 通知父组件重新加载自定义命令
-    emit('category-changed')
-  } catch (error) {
-    console.error('添加命令失败:', error)
-    ElMessage({
-      message: error,
-      type: 'error',
-      duration: 3000,
-      offset: 60
-    })
-  }
+  // Sync ctxApp to shared composable
+  sharedCtxApp.value = ctxApp.value
+  await sharedConfirmAddCommand()
 }
 
 onMounted(() => {

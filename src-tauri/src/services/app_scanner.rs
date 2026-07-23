@@ -2,6 +2,8 @@ use crate::core::error_codes::AppErrorKind;
 use crate::utils::icon_extractor;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LauncherItem {
@@ -23,7 +25,39 @@ pub struct AppCategory {
     pub apps: Vec<LauncherItem>,
 }
 
+/// Cached scan result with timestamp for invalidation
+struct CachedScanResult {
+    categories: Vec<AppCategory>,
+    last_scan_time: SystemTime,
+}
+
+static CACHED_APPS: OnceLock<std::sync::Mutex<Option<CachedScanResult>>> = OnceLock::new();
+
+fn get_cache() -> &'static std::sync::Mutex<Option<CachedScanResult>> {
+    CACHED_APPS.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// Clear the in-memory app cache (call after scan_and_save_apps)
+pub fn clear_app_cache() {
+    if let Ok(mut cache) = get_cache().lock() {
+        *cache = None;
+    }
+}
+
 pub fn scan_apps_by_category() -> Vec<AppCategory> {
+    // Check cache first
+    if let Ok(cache) = get_cache().lock() {
+        if let Some(ref cached) = *cache {
+            // Cache valid for 5 minutes
+            if let Ok(elapsed) = cached.last_scan_time.elapsed() {
+                if elapsed.as_secs() < 300 {
+                    return cached.categories.clone();
+                }
+            }
+        }
+    }
+
+    // Perform full scan
     let mut category_map: std::collections::HashMap<String, Vec<LauncherItem>> =
         std::collections::HashMap::new();
 
@@ -57,7 +91,32 @@ pub fn scan_apps_by_category() -> Vec<AppCategory> {
         categories.push(other);
     }
 
+    // Update cache
+    if let Ok(mut cache) = get_cache().lock() {
+        *cache = Some(CachedScanResult {
+            categories: categories.clone(),
+            last_scan_time: SystemTime::now(),
+        });
+    }
+
     categories
+}
+
+/// Get cached apps without filesystem scan (for search)
+pub fn get_cached_apps() -> Vec<LauncherItem> {
+    if let Ok(cache) = get_cache().lock() {
+        if let Some(ref cached) = *cache {
+            // Return cached data if available and fresh
+            if let Ok(elapsed) = cached.last_scan_time.elapsed() {
+                if elapsed.as_secs() < 300 {
+                    return cached.categories.iter().flat_map(|c| c.apps.clone()).collect();
+                }
+            }
+        }
+    }
+    // Fallback to scanning
+    let categories = scan_apps_by_category();
+    categories.into_iter().flat_map(|c| c.apps).collect()
 }
 
 fn scan_dir_by_category(
@@ -150,8 +209,8 @@ fn parse_shortcut(path: &Path, category: &str) -> Option<LauncherItem> {
 }
 
 pub fn search_apps(query: &str, limit: usize) -> Vec<LauncherItem> {
-    let categories = scan_apps_by_category();
-    let all_apps: Vec<LauncherItem> = categories.into_iter().flat_map(|c| c.apps).collect();
+    // Use cached apps instead of re-scanning filesystem
+    let all_apps = get_cached_apps();
     let query_lower = query.to_lowercase();
 
     let mut results: Vec<LauncherItem> = all_apps
@@ -160,12 +219,17 @@ pub fn search_apps(query: &str, limit: usize) -> Vec<LauncherItem> {
         .take(limit)
         .collect();
 
+    // Sort by relevance: starts_with > contains, then alphabetically
     results.sort_by(|a, b| {
         let a_lower = a.title.to_lowercase();
         let b_lower = b.title.to_lowercase();
         let a_starts = a_lower.starts_with(&query_lower) as i32;
         let b_starts = b_lower.starts_with(&query_lower) as i32;
-        b_starts.cmp(&a_starts)
+        if a_starts != b_starts {
+            b_starts.cmp(&a_starts)
+        } else {
+            a_lower.cmp(&b_lower)
+        }
     });
 
     results
@@ -222,40 +286,41 @@ fn shell_execute_open(_path: &str, _args: Option<&str>) -> Result<(), String> {
     Err(AppErrorKind::LauncherNotWindows.to_frontend_json())
 }
 
-pub fn launch_app(path: &str) -> Result<(), String> {
-    log::info!("[launch_app] 尝试启动程序: {}", path);
+/// 启动应用程序（统一入口，支持可选参数）
+pub fn launch_app_with_optional_args(path: &str, args: Option<&str>) -> Result<(), String> {
+    let args_desc = match args {
+        Some(a) if !a.is_empty() => format!(", args: {:?}", a),
+        _ => String::new(),
+    };
+    log::info!("[launch_app] 尝试启动程序: {}{}", path, args_desc);
+    
     let path_buf = PathBuf::from(path);
     if !path_buf.exists() {
         log::error!("[launch_app] 文件不存在: {}", path);
         return Err(format!("文件不存在: {}", path));
     }
 
-    // 检查是否是快捷方式 (.lnk)
     let is_shortcut = path.to_lowercase().ends_with(".lnk");
 
     if is_shortcut {
         log::info!("[launch_app] 检测到快捷方式，使用 ShellExecute 启动");
-        match shell_execute_open(path, None) {
-            Ok(()) => {
-                log::info!("[launch_app] 快捷方式启动成功");
-                Ok(())
-            }
-            Err(e) => {
-                log::error!("[launch_app] 快捷方式启动失败: {}", e);
-                Err(e)
-            }
-        }
+        shell_execute_open(path, args)
     } else {
         log::info!("[launch_app] 文件存在，开始启动...");
-        // 直接使用 std::process::Command 启动程序，模拟双击行为
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
-            match std::process::Command::new(path)
-                .creation_flags(CREATE_NO_WINDOW)
-                .spawn()
-            {
+            let mut command = std::process::Command::new(path);
+            command.creation_flags(CREATE_NO_WINDOW);
+
+            if let Some(arguments) = args {
+                for arg in arguments.split_whitespace() {
+                    command.arg(arg);
+                }
+            }
+
+            match command.spawn() {
                 Ok(child) => {
                     log::info!("[launch_app] 启动成功, PID: {:?}", child.id());
                     Ok(())
@@ -268,7 +333,15 @@ pub fn launch_app(path: &str) -> Result<(), String> {
         }
         #[cfg(not(target_os = "windows"))]
         {
-            match std::process::Command::new(path).spawn() {
+            let mut command = std::process::Command::new(path);
+
+            if let Some(arguments) = args {
+                for arg in arguments.split_whitespace() {
+                    command.arg(arg);
+                }
+            }
+
+            match command.spawn() {
                 Ok(child) => {
                     log::info!("[launch_app] 启动成功, PID: {:?}", child.id());
                     Ok(())
@@ -282,78 +355,14 @@ pub fn launch_app(path: &str) -> Result<(), String> {
     }
 }
 
+/// 启动应用程序（无参数版本，保持向后兼容）
+pub fn launch_app(path: &str) -> Result<(), String> {
+    launch_app_with_optional_args(path, None)
+}
+
+/// 启动应用程序（带参数版本）
 pub fn launch_app_with_args(path: &str, args: Option<&str>) -> Result<(), String> {
-    log::info!("[launch_app_with_args] 尝试启动程序: {}, args: {:?}", path, args);
-    let path_buf = PathBuf::from(path);
-    if !path_buf.exists() {
-        log::error!("[launch_app_with_args] 文件不存在: {}", path);
-        return Err(format!("文件不存在: {}", path));
-    }
-
-    // 检查是否是快捷方式 (.lnk)
-    let is_shortcut = path.to_lowercase().ends_with(".lnk");
-
-    if is_shortcut {
-        log::info!("[launch_app_with_args] 检测到快捷方式，使用 ShellExecute 启动");
-        match shell_execute_open(path, args) {
-            Ok(()) => {
-                log::info!("[launch_app_with_args] 快捷方式启动成功");
-                Ok(())
-            }
-            Err(e) => {
-                log::error!("[launch_app_with_args] 快捷方式启动失败: {}", e);
-                Err(e)
-            }
-        }
-    } else {
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            let mut command = std::process::Command::new(path);
-            command.creation_flags(CREATE_NO_WINDOW);
-
-            if let Some(arguments) = args {
-                // 解析参数并添加
-                for arg in arguments.split_whitespace() {
-                    command.arg(arg);
-                }
-            }
-
-            match command.spawn() {
-                Ok(child) => {
-                    log::info!("[launch_app_with_args] 启动成功, PID: {:?}", child.id());
-                    Ok(())
-                }
-                Err(e) => {
-                    log::error!("[launch_app_with_args] 启动失败: {}", e);
-                    Err(AppErrorKind::LauncherStartupFailed.to_frontend_json_with_details(format!("{}", e)))
-                }
-            }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let mut command = std::process::Command::new(path);
-
-            if let Some(arguments) = args {
-                // 解析参数并添加
-                for arg in arguments.split_whitespace() {
-                    command.arg(arg);
-                }
-            }
-
-            match command.spawn() {
-                Ok(child) => {
-                    log::info!("[launch_app_with_args] 启动成功, PID: {:?}", child.id());
-                    Ok(())
-                }
-                Err(e) => {
-                    log::error!("[launch_app_with_args] 启动失败: {}", e);
-                    Err(AppErrorKind::LauncherStartupFailed.to_frontend_json_with_details(format!("{}", e)))
-                }
-            }
-        }
-    }
+    launch_app_with_optional_args(path, args)
 }
 
 pub fn open_file(path: &str) -> Result<(), String> {

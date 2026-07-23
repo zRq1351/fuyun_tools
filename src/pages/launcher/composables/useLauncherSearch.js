@@ -10,6 +10,7 @@ export function useLauncherSearch() {
     ]
 
     let customCommandsCache = []
+    let customCommandsLoaded = false
 
     const loadCustomCommands = async () => {
         try {
@@ -27,6 +28,7 @@ export function useLauncherSearch() {
                     commandType: cmd.command_type,
                     shortcut: cmd.prefix
                 }))
+            customCommandsLoaded = true
         } catch (error) {
             console.error('加载自定义命令失败:', error)
             customCommandsCache = []
@@ -36,9 +38,11 @@ export function useLauncherSearch() {
     const findCommand = (text) => {
         const lowerText = text.toLowerCase()
         const allCommands = [...builtinCommands, ...customCommandsCache]
-        return allCommands.filter(cmd =>
-            cmd.prefix.startsWith(lowerText) || lowerText.startsWith(cmd.prefix)
-        )
+        return allCommands.filter(cmd => {
+            const prefix = cmd.prefix.toLowerCase()
+            // Check if query matches prefix (prefix starts with query OR query starts with prefix)
+            return prefix.startsWith(lowerText) || lowerText.startsWith(prefix)
+        })
     }
 
     const searchApps = (query, allApps) => {
@@ -61,6 +65,11 @@ export function useLauncherSearch() {
 
     const search = async (query, allApps) => {
         if (!query.trim()) return []
+
+        // Ensure custom commands are loaded
+        if (!customCommandsLoaded) {
+            await loadCustomCommands()
+        }
 
         const results = []
 

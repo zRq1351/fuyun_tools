@@ -376,6 +376,9 @@ fn is_windows_system_path(_target: &str) -> bool {
 }
 
 pub async fn scan_and_save_apps() -> Result<AppStore, String> {
+    // Clear the in-memory cache before scanning
+    crate::services::app_scanner::clear_app_cache();
+    
     let categories = crate::services::app_scanner::scan_apps_by_category();
     let mut apps = Vec::new();
 

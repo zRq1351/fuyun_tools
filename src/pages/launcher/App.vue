@@ -168,6 +168,7 @@ const isRefreshing = ref(false)
 const isDragging = ref(false)
 const isResizing = ref(false)
 let resizeTimer = null
+let searchDebounceTimer = null
 const launcherBoxRef = ref(null)
 const searchBoxRef = ref(null)
 const viewMode = ref('list')
@@ -294,24 +295,33 @@ const displayApps = computed(() => {
   return allApps.value.filter(a => a.title.toLowerCase().includes(query))
 })
 
-const handleSearch = async () => {
+const handleSearch = () => {
   const query = searchQuery.value.trim()
   if (!query) {
     commandResults.value = []
     activeIndex.value = 0
     return
   }
-  isSearching.value = true
-  try {
-    commandResults.value = (await search(query, allApps.value))
-        .filter(item => item.action !== 'launch_app')
-    activeIndex.value = 0
-  } catch (error) {
-    console.error('Command search error:', error)
-    commandResults.value = []
-  } finally {
-    isSearching.value = false
+  
+  // Clear previous debounce timer
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
   }
+  
+  // Debounce search by 100ms to reduce IPC calls
+  searchDebounceTimer = setTimeout(async () => {
+    isSearching.value = true
+    try {
+      commandResults.value = (await search(query, allApps.value))
+          .filter(item => item.action !== 'launch_app')
+      activeIndex.value = 0
+    } catch (error) {
+      console.error('Command search error:', error)
+      commandResults.value = []
+    } finally {
+      isSearching.value = false
+    }
+  }, 100)
 }
 
 const handleClear = () => {
@@ -563,6 +573,7 @@ onBeforeUnmount(() => {
   if (unlistenBlur) unlistenBlur()
   if (unlistenResize) unlistenResize()
   clearTimeout(resizeTimer)
+  clearTimeout(searchDebounceTimer)
 })
 </script>
 
