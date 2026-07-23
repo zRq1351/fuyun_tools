@@ -91,7 +91,7 @@
                   <component :is="getCatIcon(cat.icon)"/>
                 </el-icon>
                 <span class="dm-root-name">{{ cat.name }}</span>
-                <span v-if="getCatCount(cat.id) > 0" class="dm-cat-count">{{ getCatCount(cat.id) }}</span>
+                <span v-if="getCatCount(cat.id) > 0" class="dm-cat-count">{{ catCountMap.get(cat.id) || 0 }}</span>
                 <el-dropdown trigger="click">
                   <span class="dm-cat-more">
                     <el-icon>
@@ -614,7 +614,7 @@
 </template>
 
 <script setup>
-import {computed, nextTick, onMounted, reactive, ref, watch} from 'vue'
+import {computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {DocumentService} from '@/services/ipc.js'
 import {open as openDialog} from '@tauri-apps/plugin-dialog'
@@ -874,6 +874,16 @@ function getCatCount(catId) {
   const e = stats.value.categoryCounts.find(c => c.categoryId === catId)
   return e?.count || 0
 }
+
+const catCountMap = computed(() => {
+  const map = new Map()
+  if (stats.value?.categoryCounts) {
+    for (const c of stats.value.categoryCounts) {
+      map.set(c.categoryId, c.count)
+    }
+  }
+  return map
+})
 
 const uncatCount = computed(() => {
   if (!stats.value?.categoryCounts) return 0
@@ -1622,6 +1632,13 @@ onMounted(async () => {
   }
   loadImportHistory();
   detectOrphans()
+})
+
+onBeforeUnmount(() => {
+  if (rootSortable) { rootSortable.destroy(); rootSortable = null }
+  if (catSortable) { catSortable.destroy(); catSortable = null }
+  if (fileSortable) { fileSortable.destroy(); fileSortable = null }
+  if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
 })
 
 </script>

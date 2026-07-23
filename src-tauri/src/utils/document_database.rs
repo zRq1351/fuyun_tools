@@ -4,6 +4,7 @@ use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
 use sqlx::{Acquire, Row, Sqlite, SqliteConnection};
+use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ use std::time::Duration;
 use tokio::sync::OnceCell;
 
 static DOCS_DB_POOL: OnceCell<SqlitePool> = OnceCell::const_new();
+static FTS_ENABLED: OnceCell<bool> = OnceCell::const_new();
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -125,6 +127,81 @@ fn db_options(db_path: &PathBuf) -> SqliteConnectOptions {
 
 fn now_unix_ms() -> i64 {
     crate::utils::utils_helpers::now_unix_ms_i64()
+}
+
+async fn is_fts_enabled(conn: &mut SqliteConnection) -> Result<bool, String> {
+    let val = FTS_ENABLED.get_or_try_init(|| async {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'document_files_fts'",
+        )
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        Ok::<bool, String>(count > 0)
+    }).await?;
+    Ok(*val)
+}
+
+async fn delete_doc_file_internal(
+    conn: &mut SqliteConnection,
+    id: i64,
+) -> Result<Option<String>, String> {
+    let managed_path: Option<String> =
+        sqlx::query_scalar::<_, String>("SELECT managed_path FROM document_files WHERE id = ?1")
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+
+    let affected_imports: Vec<i64> = sqlx::query_scalar(
+        "SELECT import_id FROM document_import_items WHERE doc_file_id = ?1"
+    )
+    .bind(id)
+    .fetch_all(&mut *conn)
+    .await
+    .unwrap_or_default();
+
+    sqlx::query("DELETE FROM document_files WHERE id = ?1")
+        .bind(id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+
+    let _ = sqlx::query("DELETE FROM document_files_fts WHERE rowid = ?1")
+        .bind(id)
+        .execute(&mut *conn)
+        .await;
+
+    for import_id in &affected_imports {
+        let _ = sqlx::query("DELETE FROM document_import_items WHERE import_id = ?1 AND doc_file_id = ?2")
+            .bind(import_id)
+            .bind(id)
+            .execute(&mut *conn)
+            .await;
+
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM document_import_items WHERE import_id = ?1"
+        )
+        .bind(import_id)
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap_or(0);
+
+        if remaining == 0 {
+            let _ = sqlx::query("DELETE FROM document_imports WHERE id = ?1")
+                .bind(import_id)
+                .execute(&mut *conn)
+                .await;
+        } else {
+            let _ = sqlx::query("UPDATE document_imports SET file_count = ?1 WHERE id = ?2")
+                .bind(remaining)
+                .bind(import_id)
+                .execute(&mut *conn)
+                .await;
+        }
+    }
+
+    Ok(managed_path)
 }
 
 async fn get_docs_db_pool() -> Result<&'static SqlitePool, String> {
@@ -643,119 +720,12 @@ pub async fn insert_doc_file(
 
 pub async fn delete_doc_file(id: i64) -> Result<Option<String>, String> {
     let mut conn = open_docs_db().await?;
-
-    let managed_path: Option<String> =
-        sqlx::query_scalar::<_, String>("SELECT managed_path FROM document_files WHERE id = ?1")
-            .bind(id)
-            .fetch_optional(&mut *conn)
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-
-    // 清理关联的导入记录
-    let affected_imports: Vec<i64> = sqlx::query_scalar(
-        "SELECT import_id FROM document_import_items WHERE doc_file_id = ?1"
-    )
-    .bind(id)
-    .fetch_all(&mut *conn)
-    .await
-    .unwrap_or_default();
-
-    sqlx::query("DELETE FROM document_files WHERE id = ?1")
-        .bind(id)
-        .execute(&mut *conn)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-
-    let _ = sqlx::query("DELETE FROM document_files_fts WHERE rowid = ?1")
-        .bind(id)
-        .execute(&mut *conn)
-        .await;
-
-    for import_id in &affected_imports {
-        let _ = sqlx::query("DELETE FROM document_import_items WHERE import_id = ?1 AND doc_file_id = ?2")
-            .bind(import_id)
-            .bind(id)
-            .execute(&mut *conn)
-            .await;
-
-        let remaining: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM document_import_items WHERE import_id = ?1"
-        )
-        .bind(import_id)
-        .fetch_one(&mut *conn)
-        .await
-        .unwrap_or(0);
-
-        if remaining == 0 {
-            let _ = sqlx::query("DELETE FROM document_imports WHERE id = ?1")
-                .bind(import_id)
-                .execute(&mut *conn)
-                .await;
-        } else {
-            let _ = sqlx::query("UPDATE document_imports SET file_count = ?1 WHERE id = ?2")
-                .bind(remaining)
-                .bind(import_id)
-                .execute(&mut *conn)
-                .await;
-        }
-    }
-
-    Ok(managed_path)
+    delete_doc_file_internal(&mut conn, id).await
 }
 
 pub async fn delete_doc_record(id: i64) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
-
-    let affected_imports: Vec<i64> = sqlx::query_scalar(
-        "SELECT import_id FROM document_import_items WHERE doc_file_id = ?1"
-    )
-    .bind(id)
-    .fetch_all(&mut *conn)
-    .await
-    .unwrap_or_default();
-
-    sqlx::query("DELETE FROM document_files WHERE id = ?1")
-        .bind(id)
-        .execute(&mut *conn)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-    let _ = sqlx::query("DELETE FROM document_files_fts WHERE rowid = ?1")
-        .bind(id)
-        .execute(&mut *conn)
-        .await;
-
-    for import_id in &affected_imports {
-        sqlx::query("DELETE FROM document_import_items WHERE import_id = ?1 AND doc_file_id = ?2")
-            .bind(import_id)
-            .bind(id)
-            .execute(&mut *conn)
-            .await
-            .ok();
-
-        let remaining: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM document_import_items WHERE import_id = ?1"
-        )
-        .bind(import_id)
-        .fetch_one(&mut *conn)
-        .await
-        .unwrap_or(0);
-
-        if remaining == 0 {
-            sqlx::query("DELETE FROM document_imports WHERE id = ?1")
-                .bind(import_id)
-                .execute(&mut *conn)
-                .await
-                .ok();
-        } else {
-            sqlx::query("UPDATE document_imports SET file_count = ?1 WHERE id = ?2")
-                .bind(remaining)
-                .bind(import_id)
-                .execute(&mut *conn)
-                .await
-                .ok();
-        }
-    }
-
+    delete_doc_file_internal(&mut conn, id).await?;
     Ok(())
 }
 
@@ -1211,7 +1181,7 @@ pub async fn get_doc_root_by_id(id: i64) -> Result<Option<DocRoot>, String> {
     }))
 }
 
-pub async fn get_managed_paths_for_root(root_id: i64) -> Result<std::collections::HashSet<String>, String> {
+pub async fn get_managed_paths_for_root(root_id: i64) -> Result<HashSet<String>, String> {
     let mut conn = open_docs_db().await?;
     let rows = sqlx::query_scalar::<_, String>(
         "SELECT managed_path FROM document_files WHERE root_id = ?1",
@@ -1315,12 +1285,7 @@ pub async fn get_doc_page(
         .filter(|k| !k.is_empty());
 
     let fts_query = keyword_val.as_ref().map(|k| build_fts_query(k)).filter(|q| !q.is_empty());
-    let fts_enabled = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'document_files_fts'",
-    )
-    .fetch_one(&mut *conn)
-    .await
-    .unwrap_or(0) > 0;
+    let fts_enabled = is_fts_enabled(&mut conn).await?;
 
     let use_fts = fts_enabled && fts_query.is_some();
     let fallback_search = !use_fts && keyword_val.is_some();
