@@ -5,7 +5,7 @@
       @mousedown="onMouseDown"
       @wheel.prevent="handleWheel"
   >
-    <div class="scroll-track" :style="{ paddingRight: rightPadding + 'px' }">
+    <div ref="trackRef" class="scroll-track">
       <div
           v-for="(entry, index) in visibleHistory"
           :id="'clipboard-item-' + entry.id"
@@ -89,30 +89,29 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
-const rightPadding = ref(0)
-
-const ensureLastCardVisible = () => {
-  rightPadding.value = 0
-}
+const trackRef = ref(null)
+let scrollOffset = 0
 
 const getMaxScroll = () => {
   const el = contentRef.value
-  if (!el) return 0
-  return Math.max(0, el.scrollWidth - el.clientWidth)
+  const track = trackRef.value
+  if (!el || !track) return 0
+  return Math.max(0, track.scrollWidth - el.clientWidth)
 }
 
 const setScroll = (val) => {
   const el = contentRef.value
-  if (!el) return
-  el.scrollLeft = Math.min(getMaxScroll(), Math.max(0, val))
+  const track = trackRef.value
+  if (!el || !track) return
+  const max = getMaxScroll()
+  scrollOffset = Math.min(max, Math.max(0, val))
+  track.style.transform = `translateX(${-scrollOffset}px)`
 }
 
 const handleWheel = (e) => {
-  const el = contentRef.value
-  if (!el) return
   e.preventDefault()
   const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
-  setScroll(el.scrollLeft + delta)
+  setScroll(scrollOffset + delta)
 }
 let isDown = false
 let isDragging = false
@@ -166,7 +165,6 @@ const onMouseUp = () => stopDragging()
 
 onMounted(() => {
   window.addEventListener('blur', stopDragging)
-  nextTick(() => setTimeout(ensureLastCardVisible, 100))
 })
 onUnmounted(() => {
   stopDragging()
@@ -175,9 +173,7 @@ onUnmounted(() => {
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 
-watch(() => props.visibleHistory.length, () => {
-  nextTick(() => setTimeout(ensureLastCardVisible, 100))
-})
+
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
 const handleScroll = () => {
@@ -254,7 +250,6 @@ defineExpose({contentRef})
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  white-space: nowrap;
   cursor: grab;
 }
 
@@ -266,6 +261,7 @@ defineExpose({contentRef})
   padding: 0 0 0 14px;
   height: 100%;
   gap: 10px;
+  will-change: transform;
 }
 
 .clipboard-item {
