@@ -33,7 +33,6 @@ export function setTheme(theme) {
         console.warn(`[ThemeManager] 无效的主题: ${theme}`)
         return
     }
-    console.log('[ThemeManager] setTheme:', theme)
     localStorage.setItem(THEME_KEY, theme)
     applyTheme(theme)
     // 触发自定义事件供同窗口监听
@@ -142,7 +141,6 @@ export function watchThemeChange(callback) {
 export function initTheme() {
     const saved = localStorage.getItem(THEME_KEY)
     const theme = THEMES.includes(saved) ? saved : 'dark'
-    console.log('[ThemeManager] initTheme:', {saved, theme})
     applyTheme(theme)
     return theme
 }
