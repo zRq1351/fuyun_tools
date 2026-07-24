@@ -99,7 +99,7 @@ const ensureLastCardVisible = () => {
   const cardRight = lastCard.offsetLeft + lastCard.offsetWidth
   const visibleRight = el.scrollLeft + el.clientWidth
   if (cardRight > visibleRight) {
-    rightPadding.value = cardRight - visibleRight + 20
+    rightPadding.value = cardRight - visibleRight + 200
   }
 }
 let isDown = false
