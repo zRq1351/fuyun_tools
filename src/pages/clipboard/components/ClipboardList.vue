@@ -97,10 +97,14 @@ const ensureLastCardVisible = () => {
   const lastCard = el.querySelector('.clipboard-item:last-of-type')
   if (!lastCard) return
   const cardRight = lastCard.offsetLeft + lastCard.offsetWidth
-  const visibleRight = el.scrollLeft + el.clientWidth
-  if (cardRight > visibleRight) {
-    rightPadding.value = cardRight - visibleRight
-  }
+  rightPadding.value = Math.max(0, cardRight - el.clientWidth)
+}
+
+const clampScroll = () => {
+  const el = contentRef.value
+  if (!el) return
+  const max = el.scrollWidth - el.clientWidth
+  if (el.scrollLeft > max) el.scrollLeft = max
 }
 let isDown = false
 let isDragging = false
@@ -169,6 +173,7 @@ watch(() => props.visibleHistory.length, () => {
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
 const handleScroll = () => {
+  clampScroll()
   emit('content-scroll')
   if (!contentRef.value || !props.hasMore || props.isLoadingPage) return
   const {scrollWidth, scrollLeft, clientWidth} = contentRef.value
