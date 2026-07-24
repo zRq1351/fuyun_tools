@@ -179,7 +179,8 @@ defineExpose({contentRef})
   display: inline-block;
   vertical-align: top;
   white-space: nowrap;
-  padding: 10px 14px;
+  padding: 10px 14px 10px 14px;
+  padding-right: 800px;
   height: calc(100% - 20px);
 }
 
