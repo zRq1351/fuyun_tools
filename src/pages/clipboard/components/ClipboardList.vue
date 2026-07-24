@@ -175,22 +175,23 @@ defineExpose({contentRef})
 }
 
 .scroll-track {
-  display: inline-block;
-  vertical-align: top;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
   white-space: nowrap;
-  padding: 10px 14px 10px 14px;
+  padding: 0 14px 0 14px;
   padding-right: 800px;
   height: 100%;
+  gap: 10px;
 }
 
 .clipboard-item {
   display: inline-flex;
   flex-direction: column;
-  vertical-align: top;
   width: 260px;
-  height: 100%;
+  height: calc(100% - 8px);
   white-space: normal;
-  margin-right: 10px;
+  flex-shrink: 0;
   background: rgba(255, 255, 255, 0.04);
   border: 0.5px solid rgba(255, 255, 255, 0.07);
   border-radius: 14px;
