@@ -3,7 +3,7 @@
       ref="contentRef"
       class="content"
       @mousedown="onMouseDown"
-      @wheel.prevent="handleWheel"
+      @wheel.prevent="onWheel"
   >
     <div ref="trackRef" class="scroll-track">
       <div
@@ -94,25 +94,25 @@ let scrollOffset = 0
 
 const getMaxScroll = () => {
   const el = contentRef.value
-  const track = trackRef.value
-  if (!el || !track) return 0
-  return Math.max(0, track.scrollWidth - el.clientWidth)
+  if (!el) return 0
+  const trackWidth = el.scrollWidth
+  return Math.max(0, trackWidth - el.clientWidth)
 }
 
 const setScroll = (val) => {
   const el = contentRef.value
-  const track = trackRef.value
-  if (!el || !track) return
+  if (!el) return
   const max = getMaxScroll()
   scrollOffset = Math.min(max, Math.max(0, val))
-  track.style.transform = `translateX(${-scrollOffset}px)`
+  el.scrollLeft = scrollOffset
 }
 
-const handleWheel = (e) => {
+const onWheel = (e) => {
   e.preventDefault()
   const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
   setScroll(scrollOffset + delta)
 }
+
 let isDown = false
 let isDragging = false
 let startX = 0
@@ -127,7 +127,6 @@ const stopDragging = () => {
     cancelAnimationFrame(dragRafId)
     dragRafId = 0
   }
-  if (contentRef.value) contentRef.value.style.cursor = 'grab'
   document.body.style.removeProperty('user-select')
   window.removeEventListener('mousemove', onMouseMove)
   window.removeEventListener('mouseup', onMouseUp)
@@ -172,18 +171,7 @@ onUnmounted(() => {
 })
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
-
-
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
-
-const handleScroll = () => {
-  emit('content-scroll')
-  if (!contentRef.value || !props.hasMore || props.isLoadingPage) return
-  const {scrollWidth, scrollLeft, clientWidth} = contentRef.value
-  if (scrollWidth - scrollLeft - clientWidth < 260) {
-    emit('load-more-intent')
-  }
-}
 
 const renderHighlightParts = (text) => {
   const value = typeof text === 'string' ? text : ''
@@ -249,8 +237,12 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: auto;
   cursor: grab;
+}
+
+.content::-webkit-scrollbar {
+  display: none
 }
 
 .scroll-track {
@@ -261,7 +253,6 @@ defineExpose({contentRef})
   padding: 0 0 0 14px;
   height: 100%;
   gap: 10px;
-  will-change: transform;
 }
 
 .clipboard-item {
@@ -283,10 +274,6 @@ defineExpose({contentRef})
   color: var(--fy-text-primary);
   transition: all 0.2s ease;
   overflow: hidden;
-}
-
-.clipboard-item:last-child {
-  margin-right: 0;
 }
 
 .clipboard-item:hover {
@@ -424,15 +411,12 @@ defineExpose({contentRef})
 }
 
 .load-more {
-  display: inline-block;
-  vertical-align: top;
-  width: 48px;
-  height: 100%;
-  white-space: normal;
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  width: 48px;
+  height: 250px;
   gap: 4px;
   color: var(--fy-text-muted);
   user-select: none;
