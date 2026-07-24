@@ -5,7 +5,7 @@
       @mousedown="onMouseDown"
       @scroll="handleScroll"
   >
-    <div class="scroll-track">
+    <div class="scroll-track" :style="{ paddingRight: rightPadding + 'px' }">
       <div
           v-for="(entry, index) in visibleHistory"
           :id="'clipboard-item-' + entry.id"
@@ -89,6 +89,8 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
+const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1
+const rightPadding = Math.round(280 * dpr)
 let isDown = false
 let isDragging = false
 let startX = 0
@@ -238,8 +240,7 @@ defineExpose({contentRef})
   flex-direction: row;
   align-items: center;
   white-space: nowrap;
-  padding: 0 14px 0 14px;
-  padding-right: 800px;
+  padding: 0 14px;
   height: 100%;
   gap: 10px;
 }
