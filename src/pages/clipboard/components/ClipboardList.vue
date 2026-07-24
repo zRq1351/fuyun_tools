@@ -166,7 +166,6 @@ defineExpose({contentRef})
   flex: 1;
   min-height: 0;
   overflow-x: auto;
-  overflow-y: hidden;
   white-space: nowrap;
   scrollbar-width: none;
 }
@@ -189,7 +188,7 @@ defineExpose({contentRef})
   flex-direction: column;
   vertical-align: top;
   width: 260px;
-  height: calc(100% - 8px);
+  height: 100%;
   white-space: normal;
   margin-right: 10px;
   background: rgba(255, 255, 255, 0.04);
