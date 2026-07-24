@@ -26,3 +26,5 @@ src-tauri/target/
 *.sln
 *.sw?
 /docs/compose/
+!/docs/compose/reports/
+/tasks/
