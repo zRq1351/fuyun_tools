@@ -168,13 +168,17 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 10px 14px;
+  overflow-x: auto;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  gap: 10px;
+  padding: 10px 14px;
+  align-items: flex-start;
   scrollbar-width: none;
+}
+
+.content::-webkit-scrollbar {
+  display: none
 }
 
 .content::-webkit-scrollbar {
@@ -183,7 +187,7 @@ defineExpose({contentRef})
 
 /* ===== 卡片 ===== */
 .clipboard-item {
-  width: 100%;
+  width: 260px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -204,11 +208,15 @@ defineExpose({contentRef})
 .clipboard-item:hover {
   background: rgba(255, 255, 255, 0.07);
   border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
 
 .clipboard-item.selected {
   background: rgba(108, 140, 255, 0.1);
   border-color: rgba(108, 140, 255, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(108, 140, 255, 0.1);
 }
 
 /* ===== 顶栏 ===== */
@@ -342,17 +350,19 @@ defineExpose({contentRef})
 
 /* ===== 加载更多 ===== */
 .load-more {
+  width: 48px;
+  flex-shrink: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 12px;
+  gap: 4px;
   color: var(--fy-text-muted);
   user-select: none;
 }
 
 .load-more-text {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--fy-text-muted);
 }
 </style>
