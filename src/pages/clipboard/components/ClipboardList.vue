@@ -102,10 +102,11 @@ const getMaxScroll = () => {
 
 const setScroll = (val) => {
   const el = contentRef.value
-  if (!el) return
+  const track = trackRef.value
+  if (!el || !track) return
   const max = getMaxScroll()
   scrollOffset = Math.min(max, Math.max(0, val))
-  el.scrollLeft = scrollOffset
+  track.style.transform = `translateX(${-scrollOffset}px)`
 }
 
 const onWheel = (e) => {
@@ -138,7 +139,7 @@ const onMouseDown = (e) => {
   isDown = true
   isDragging = false
   startX = e.pageX
-  scrollLeftStart = contentRef.value?.scrollLeft || 0
+  scrollLeftStart = scrollOffset
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
 }
@@ -238,12 +239,8 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
-  overflow-x: auto;
+  overflow: hidden;
   cursor: grab;
-}
-
-.content::-webkit-scrollbar {
-  display: none
 }
 
 .scroll-track {
@@ -254,6 +251,7 @@ defineExpose({contentRef})
   padding: 0 0 0 14px;
   height: 100%;
   gap: 10px;
+  will-change: transform;
 }
 
 .clipboard-item {
