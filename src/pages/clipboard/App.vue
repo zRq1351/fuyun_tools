@@ -653,9 +653,9 @@ const ensureKeyboardSelectionVisible = async () => {
   const container = containerRefOrEl?.value || containerRefOrEl || element?.closest('.content')
   if (!element || !container) return
   const EDGE_PADDING = 8
-  const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth)
-  const targetLeft = Math.max(0, element.offsetLeft - EDGE_PADDING)
-  container.scrollLeft = Math.min(maxScrollLeft, targetLeft)
+  const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight)
+  const targetTop = Math.max(0, element.offsetTop - EDGE_PADDING)
+  container.scrollTop = Math.min(maxScrollTop, targetTop)
 }
 
 const getContentContainer = () => {
@@ -667,7 +667,7 @@ const tryLoadMoreByScroll = async () => {
   if (!hasMore.value || isLoadingPage.value) return
   const container = getContentContainer()
   if (!container) return
-  const remaining = container.scrollWidth - container.clientWidth - container.scrollLeft
+  const remaining = container.scrollHeight - container.clientHeight - container.scrollTop
   if (remaining <= 240 && loadMoreIntent.value) {
     loadMoreIntent.value = false
     await loadMoreHistory()
@@ -683,7 +683,7 @@ const handleLoadMoreIntent = () => {
 const scrollToStart = async () => {
   const container = getContentContainer()
   if (container) {
-    container.scrollLeft = 0
+    container.scrollTop = 0
   }
   if (visibleHistory.value.length > 0) {
     selectedItemId.value = visibleHistory.value[0].id
@@ -694,7 +694,7 @@ const scrollToStart = async () => {
 const scrollToEnd = async () => {
   const container = getContentContainer()
   if (container) {
-    container.scrollLeft = Math.max(0, container.scrollWidth - container.clientWidth)
+    container.scrollTop = Math.max(0, container.scrollHeight - container.clientHeight)
   }
   if (hasMore.value) {
     try {

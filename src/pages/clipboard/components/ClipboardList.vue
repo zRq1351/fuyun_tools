@@ -2,10 +2,8 @@
   <div
       ref="contentRef"
       class="content"
-      @mousedown="handleMouseDown"
-      @wheel.prevent="handleWheel"
+      @scroll="handleScroll"
   >
-    <div ref="trackRef" class="scroll-track">
     <div
         v-for="(entry, index) in visibleHistory"
         :id="'clipboard-item-' + entry.id"
@@ -64,7 +62,6 @@
         {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
       </span>
     </div>
-    </div>
   </div>
 </template>
 
@@ -94,29 +91,18 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
-const trackRef = ref(null)
-let scrollOffset = 0
 
-const getTrackWidth = () => trackRef.value ? trackRef.value.scrollWidth : 0
-const getContainerWidth = () => contentRef.value ? contentRef.value.clientWidth : 0
-const getMaxScroll = () => Math.max(0, getTrackWidth() - getContainerWidth())
+const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
+const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
-const applyScroll = () => {
-  if (!trackRef.value) return
-  const max = getMaxScroll()
-  scrollOffset = Math.min(max, Math.max(0, scrollOffset))
-  trackRef.value.style.transform = `translateX(${-scrollOffset}px)`
-  emitScroll()
+const handleScroll = () => {
+  emit('content-scroll')
+  if (!contentRef.value || !props.hasMore || props.isLoadingPage) return
+  const {scrollHeight, scrollTop, clientHeight} = contentRef.value
+  if (scrollHeight - scrollTop - clientHeight < 120) {
+    emit('load-more-intent')
+  }
 }
-
-let isDown = false
-let isDragging = false
-let startX = 0
-let scrollLeftVal = 0
-let dragTargetScrollLeft = 0
-let dragScrollRafId = 0
-
-const emitScroll = () => emit('content-scroll')
 
 const renderHighlightParts = (text) => {
   const value = typeof text === 'string' ? text : ''
@@ -150,40 +136,6 @@ const renderHighlightParts = (text) => {
   return out.length > 0 ? out : [{text: value, hit: false}]
 }
 
-const stopDragging = () => {
-  if (!isDown) return
-  isDown = false
-  isDragging = false
-  if (dragScrollRafId) {
-    cancelAnimationFrame(dragScrollRafId);
-    dragScrollRafId = 0
-  }
-  if (contentRef.value) {
-    contentRef.value.classList.remove('is-dragging');
-    contentRef.value.style.cursor = 'default'
-  }
-  document.body.style.removeProperty('user-select')
-  window.removeEventListener('mousemove', handleGlobalMouseMove)
-  window.removeEventListener('mouseup', handleGlobalMouseUp, true)
-  window.removeEventListener('dragend', handleGlobalDragEnd)
-}
-
-const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
-const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
-
-onMounted(() => {
-  window.addEventListener('blur', stopDragging)
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-})
-onUnmounted(() => {
-  stopDragging()
-  window.removeEventListener('blur', stopDragging)
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-  window.removeEventListener('mousemove', handleGlobalMouseMove)
-  window.removeEventListener('mouseup', handleGlobalMouseUp, true)
-  window.removeEventListener('dragend', handleGlobalDragEnd)
-})
-
 const handleItemDragStart = (e, id) => {
   if (typeof props.handleDragStart === 'function') props.handleDragStart(e, id)
 }
@@ -209,55 +161,6 @@ const openWebUrl = async (v) => {
   }
 }
 
-const handleMouseDown = (e) => {
-  if (e.target.closest('.action-btn')) return
-  isDown = true;
-  isDragging = false;
-  startX = e.pageX
-  scrollLeftVal = scrollOffset
-  dragTargetScrollLeft = scrollOffset
-  window.addEventListener('mousemove', handleGlobalMouseMove)
-  window.addEventListener('mouseup', handleGlobalMouseUp, true)
-  window.addEventListener('dragend', handleGlobalDragEnd)
-}
-const handleGlobalMouseUp = () => stopDragging()
-const handleGlobalDragEnd = () => stopDragging()
-const handleGlobalMouseMove = (e) => {
-  if (!isDown || !contentRef.value) return
-  const walk = e.pageX - startX
-  if (!isDragging && Math.abs(walk) > 4) {
-    isDragging = true;
-    contentRef.value.style.cursor = 'grabbing'
-    contentRef.value.classList.add('is-dragging');
-    document.body.style.userSelect = 'none'
-    if (window.getSelection) window.getSelection().removeAllRanges()
-  }
-  if (!isDragging) return
-  e.preventDefault()
-  const max = getMaxScroll()
-  dragTargetScrollLeft = Math.min(max, Math.max(0, scrollLeftVal - walk))
-  if (dragTargetScrollLeft >= max - 36) emit('load-more-intent')
-  if (!dragScrollRafId) {
-    dragScrollRafId = requestAnimationFrame(() => {
-      dragScrollRafId = 0
-      scrollOffset = dragTargetScrollLeft
-      applyScroll()
-    })
-  }
-}
-const handleVisibilityChange = () => {
-  if (document.hidden) stopDragging()
-}
-const handleWheel = (e) => {
-  if (!contentRef.value) return
-  const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
-  const max = getMaxScroll()
-  const newOffset = Math.min(max, Math.max(0, scrollOffset + delta))
-  if (delta > 0 && newOffset >= max - 8) emit('load-more-intent')
-  scrollOffset = newOffset
-  applyScroll()
-}
-
 defineExpose({contentRef})
 </script>
 
@@ -265,32 +168,22 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
-  position: relative;
-}
-
-.scroll-track {
-  display: flex;
-  gap: 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 10px 14px;
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  will-change: transform;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  scrollbar-width: none;
 }
 
-.content.is-dragging .clipboard-item {
-  transition: none !important
-}
-
-.content.is-dragging .clipboard-item:hover {
-  transform: none !important
+.content::-webkit-scrollbar {
+  display: none
 }
 
 /* ===== 卡片 ===== */
 .clipboard-item {
-  width: 260px;
+  width: 100%;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -311,15 +204,11 @@ defineExpose({contentRef})
 .clipboard-item:hover {
   background: rgba(255, 255, 255, 0.07);
   border-color: rgba(255, 255, 255, 0.12);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
 
 .clipboard-item.selected {
   background: rgba(108, 140, 255, 0.1);
   border-color: rgba(108, 140, 255, 0.4);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(108, 140, 255, 0.1);
 }
 
 /* ===== 顶栏 ===== */
@@ -424,6 +313,7 @@ defineExpose({contentRef})
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
+  max-height: 120px;
 }
 
 .item-body::-webkit-scrollbar {
@@ -452,25 +342,17 @@ defineExpose({contentRef})
 
 /* ===== 加载更多 ===== */
 .load-more {
-  width: 48px;
-  flex: 0 0 48px;
-  min-height: 100%;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 6px;
+  padding: 12px;
   color: var(--fy-text-muted);
   user-select: none;
-  pointer-events: none;
 }
 
 .load-more-text {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--fy-text-muted);
-}
-
-.content.is-dragging .item-actions {
-  opacity: 0 !important
 }
 </style>
