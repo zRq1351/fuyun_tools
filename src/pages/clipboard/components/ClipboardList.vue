@@ -159,6 +159,18 @@ const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.valu
 onMounted(() => {
   window.addEventListener('blur', stopDragging)
   document.addEventListener('visibilitychange', handleVisibilityChange)
+  setTimeout(() => {
+    if (contentRef.value) {
+      const el = contentRef.value
+      console.log('[clipboard-init]', JSON.stringify({
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        children: el.childElementCount,
+        offsetWidth: el.offsetWidth,
+        parentWidth: el.parentElement?.clientWidth
+      }))
+    }
+  }, 500)
 })
 onUnmounted(() => {
   stopDragging()
@@ -236,11 +248,21 @@ const handleVisibilityChange = () => {
 }
 const handleWheel = (e) => {
   if (!contentRef.value) return
+  const el = contentRef.value
   const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
-  const max = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
-  const newScrollLeft = Math.min(max, Math.max(0, contentRef.value.scrollLeft + delta))
+  const max = Math.max(0, el.scrollWidth - el.clientWidth)
+  console.log('[clipboard-scroll]', JSON.stringify({
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+    scrollLeft: el.scrollLeft,
+    max,
+    delta,
+    children: el.childElementCount,
+    lastChildClass: el.lastElementChild?.className
+  }))
+  const newScrollLeft = Math.min(max, Math.max(0, el.scrollLeft + delta))
   if (delta > 0 && newScrollLeft >= max - 8) emit('load-more-intent')
-  contentRef.value.scrollLeft = newScrollLeft
+  el.scrollLeft = newScrollLeft
 }
 
 defineExpose({contentRef})
