@@ -454,8 +454,10 @@ defineExpose({contentRef})
 }
 
 .spacer {
-  flex: 0 0 600px;
-  height: 1px
+  flex-shrink: 0;
+  width: 800px;
+  height: 1px;
+  margin-left: auto;
 }
 
 .content.is-dragging .item-actions {
