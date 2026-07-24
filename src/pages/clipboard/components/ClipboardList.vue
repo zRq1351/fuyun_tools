@@ -162,12 +162,19 @@ onMounted(() => {
   setTimeout(() => {
     if (contentRef.value) {
       const el = contentRef.value
+      const cards = el.querySelectorAll('.clipboard-item')
+      const lastCard = cards[cards.length - 1]
       console.log('[clipboard-init]', JSON.stringify({
         scrollWidth: el.scrollWidth,
         clientWidth: el.clientWidth,
         children: el.childElementCount,
-        offsetWidth: el.offsetWidth,
-        parentWidth: el.parentElement?.clientWidth
+        cardCount: cards.length,
+        lastCardRect: lastCard ? {
+          left: lastCard.getBoundingClientRect().left,
+          right: lastCard.getBoundingClientRect().right,
+          width: lastCard.getBoundingClientRect().width
+        } : null,
+        contentRect: el.getBoundingClientRect()
       }))
     }
   }, 500)
@@ -283,6 +290,7 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
+  width: 100%;
   display: flex;
   gap: 10px;
   padding: 10px 14px;
