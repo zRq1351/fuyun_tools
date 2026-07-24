@@ -187,6 +187,7 @@ const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.valu
 
 const onScroll = () => {
   emit('content-scroll')
+  ensureLastCardVisible()
 }
 
 const stopDragging = () => {
