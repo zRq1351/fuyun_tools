@@ -5,7 +5,7 @@
       @mousedown="onMouseDown"
       @scroll="onScroll"
   >
-    <div ref="trackRef" class="scroll-track">
+    <div ref="trackRef" class="scroll-track" :style="{ paddingRight: rightPadding + 'px' }">
       <div
           v-for="(entry, index) in visibleHistory"
           :id="'clipboard-item-' + entry.id"
@@ -90,6 +90,17 @@ const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
 const trackRef = ref(null)
+const rightPadding = ref(0)
+
+const ensureLastCardVisible = () => {
+  const el = contentRef.value
+  if (!el) return
+  const lastCard = el.querySelector('.clipboard-item:last-of-type')
+  if (!lastCard) return
+  const lastCardRight = lastCard.offsetLeft + lastCard.offsetWidth
+  const needed = lastCardRight - el.scrollWidth + el.clientWidth
+  if (needed > 0) rightPadding.value = needed
+}
 
 let isDown = false
 let isDragging = false
@@ -142,6 +153,7 @@ const onMouseUp = () => stopDragging()
 
 onMounted(() => {
   window.addEventListener('blur', stopDragging)
+  nextTick(ensureLastCardVisible)
 })
 onUnmounted(() => {
   stopDragging()
@@ -149,6 +161,8 @@ onUnmounted(() => {
 })
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
+
+watch(() => props.visibleHistory.length, () => nextTick(ensureLastCardVisible))
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
 const onScroll = () => {
@@ -232,7 +246,7 @@ defineExpose({contentRef})
   flex-direction: row;
   align-items: center;
   white-space: nowrap;
-  padding: 0 800px 0 14px;
+  padding: 0 0 0 14px;
   height: 100%;
   gap: 10px;
 }
