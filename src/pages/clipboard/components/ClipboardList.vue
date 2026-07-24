@@ -455,7 +455,7 @@ defineExpose({contentRef})
 
 .spacer {
   flex-shrink: 0;
-  width: 800px;
+  width: 200px;
   height: 1px;
   margin-left: auto;
 }
