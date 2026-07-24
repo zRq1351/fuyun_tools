@@ -189,7 +189,7 @@ defineExpose({contentRef})
   flex-direction: column;
   vertical-align: top;
   width: 260px;
-  height: 100%;
+  height: calc(100% - 8px);
   white-space: normal;
   margin-right: 10px;
   background: rgba(255, 255, 255, 0.04);
