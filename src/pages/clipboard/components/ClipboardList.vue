@@ -89,18 +89,17 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
-const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1
-const rightPadding = ref(Math.round(533 * dpr))
+const rightPadding = ref(0)
 
 const ensureLastCardVisible = () => {
   const el = contentRef.value
   if (!el) return
   const lastCard = el.querySelector('.clipboard-item:last-of-type')
   if (!lastCard) return
-  const cardRect = lastCard.getBoundingClientRect()
-  const elRect = el.getBoundingClientRect()
-  if (cardRect.right > elRect.right + 2) {
-    rightPadding.value += Math.round((cardRect.right - elRect.right) * dpr) + 50
+  const cardRight = lastCard.offsetLeft + lastCard.offsetWidth
+  const visibleRight = el.scrollLeft + el.clientWidth
+  if (cardRight > visibleRight) {
+    rightPadding.value = cardRight - visibleRight + 20
   }
 }
 let isDown = false
