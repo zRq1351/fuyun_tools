@@ -3,9 +3,9 @@
       ref="contentRef"
       class="content"
       @mousedown="handleMouseDown"
-      @scroll="handleScroll"
       @wheel.prevent="handleWheel"
   >
+    <div ref="trackRef" class="scroll-track">
     <div
         v-for="(entry, index) in visibleHistory"
         :id="'clipboard-item-' + entry.id"
@@ -64,7 +64,7 @@
         {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
       </span>
     </div>
-    <div class="scroll-end-sentinel"></div>
+    </div>
   </div>
 </template>
 
@@ -94,6 +94,21 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
+const trackRef = ref(null)
+let scrollOffset = 0
+
+const getTrackWidth = () => trackRef.value ? trackRef.value.scrollWidth : 0
+const getContainerWidth = () => contentRef.value ? contentRef.value.clientWidth : 0
+const getMaxScroll = () => Math.max(0, getTrackWidth() - getContainerWidth())
+
+const applyScroll = () => {
+  if (!trackRef.value) return
+  const max = getMaxScroll()
+  scrollOffset = Math.min(max, Math.max(0, scrollOffset))
+  trackRef.value.style.transform = `translateX(${-scrollOffset}px)`
+  emitScroll()
+}
+
 let isDown = false
 let isDragging = false
 let startX = 0
@@ -101,7 +116,7 @@ let scrollLeftVal = 0
 let dragTargetScrollLeft = 0
 let dragScrollRafId = 0
 
-const handleScroll = () => emit('content-scroll')
+const emitScroll = () => emit('content-scroll')
 
 const renderHighlightParts = (text) => {
   const value = typeof text === 'string' ? text : ''
@@ -199,10 +214,8 @@ const handleMouseDown = (e) => {
   isDown = true;
   isDragging = false;
   startX = e.pageX
-  if (contentRef.value) {
-    scrollLeftVal = contentRef.value.scrollLeft;
-    dragTargetScrollLeft = scrollLeftVal
-  }
+  scrollLeftVal = scrollOffset
+  dragTargetScrollLeft = scrollOffset
   window.addEventListener('mousemove', handleGlobalMouseMove)
   window.addEventListener('mouseup', handleGlobalMouseUp, true)
   window.addEventListener('dragend', handleGlobalDragEnd)
@@ -221,14 +234,14 @@ const handleGlobalMouseMove = (e) => {
   }
   if (!isDragging) return
   e.preventDefault()
-  const el = contentRef.value
-  const max = Math.max(0, el.scrollWidth - el.clientWidth)
+  const max = getMaxScroll()
   dragTargetScrollLeft = Math.min(max, Math.max(0, scrollLeftVal - walk))
   if (dragTargetScrollLeft >= max - 36) emit('load-more-intent')
   if (!dragScrollRafId) {
     dragScrollRafId = requestAnimationFrame(() => {
       dragScrollRafId = 0
-      if (contentRef.value) contentRef.value.scrollLeft = dragTargetScrollLeft
+      scrollOffset = dragTargetScrollLeft
+      applyScroll()
     })
   }
 }
@@ -237,12 +250,12 @@ const handleVisibilityChange = () => {
 }
 const handleWheel = (e) => {
   if (!contentRef.value) return
-  const el = contentRef.value
   const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
-  const max = Math.max(0, el.scrollWidth - el.clientWidth)
-  const newScrollLeft = Math.min(max, Math.max(0, el.scrollLeft + delta))
-  if (delta > 0 && newScrollLeft >= max - 8) emit('load-more-intent')
-  el.scrollLeft = newScrollLeft
+  const max = getMaxScroll()
+  const newOffset = Math.min(max, Math.max(0, scrollOffset + delta))
+  if (delta > 0 && newOffset >= max - 8) emit('load-more-intent')
+  scrollOffset = newOffset
+  applyScroll()
 }
 
 defineExpose({contentRef})
@@ -252,24 +265,19 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.scroll-track {
   display: flex;
   gap: 10px;
   padding: 10px 14px;
-  flex-direction: row;
-  overflow-x: scroll;
-  overflow-y: hidden;
-  scrollbar-width: none;
-}
-
-.scroll-end-sentinel {
-  flex-shrink: 0;
-  width: 1px;
-  height: 1px;
-  align-self: flex-start;
-}
-
-.content::-webkit-scrollbar {
-  display: none
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  will-change: transform;
 }
 
 .content.is-dragging .clipboard-item {
