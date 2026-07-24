@@ -3,7 +3,7 @@
       ref="contentRef"
       class="content"
       @mousedown="onMouseDown"
-      @wheel.prevent="onWheel"
+      @scroll="onScroll"
   >
     <div ref="trackRef" class="scroll-track">
       <div
@@ -64,7 +64,7 @@
 </template>
 
 <script setup>
-import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue'
+import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {Close, Link, Loading, Star, View} from '@element-plus/icons-vue'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
 import FormattedContent from '../../../components/FormattedContent.vue'
@@ -90,30 +90,6 @@ const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
 const trackRef = ref(null)
-let scrollOffset = 0
-
-const getMaxScroll = () => {
-  const el = contentRef.value
-  if (!el) return 0
-  const count = props.visibleHistory.length
-  const trackWidth = 14 + count * 260 + (count - 1) * 10
-  return Math.max(0, trackWidth - el.clientWidth)
-}
-
-const setScroll = (val) => {
-  const el = contentRef.value
-  const track = trackRef.value
-  if (!el || !track) return
-  const max = getMaxScroll()
-  scrollOffset = Math.min(max, Math.max(0, val))
-  track.style.transform = `translateX(${-scrollOffset}px)`
-}
-
-const onWheel = (e) => {
-  e.preventDefault()
-  const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
-  setScroll(scrollOffset + delta)
-}
 
 let isDown = false
 let isDragging = false
@@ -139,7 +115,7 @@ const onMouseDown = (e) => {
   isDown = true
   isDragging = false
   startX = e.pageX
-  scrollLeftStart = scrollOffset
+  scrollLeftStart = contentRef.value?.scrollLeft || 0
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
 }
@@ -157,7 +133,7 @@ const onMouseMove = (e) => {
   if (!dragRafId) {
     dragRafId = requestAnimationFrame(() => {
       dragRafId = 0
-      setScroll(scrollLeftStart - walk)
+      if (contentRef.value) contentRef.value.scrollLeft = scrollLeftStart - walk
     })
   }
 }
@@ -174,6 +150,10 @@ onUnmounted(() => {
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
+
+const onScroll = () => {
+  emit('content-scroll')
+}
 
 const renderHighlightParts = (text) => {
   const value = typeof text === 'string' ? text : ''
@@ -239,8 +219,12 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: auto;
   cursor: grab;
+}
+
+.content::-webkit-scrollbar {
+  display: none
 }
 
 .scroll-track {
@@ -248,10 +232,9 @@ defineExpose({contentRef})
   flex-direction: row;
   align-items: center;
   white-space: nowrap;
-  padding: 0 0 0 14px;
+  padding: 0 800px 0 14px;
   height: 100%;
   gap: 10px;
-  will-change: transform;
 }
 
 .clipboard-item {
