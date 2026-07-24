@@ -976,7 +976,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
-  padding: 0 14px;
+  padding: 10px 14px;
   position: sticky;
   bottom: 0;
   left: 0;
