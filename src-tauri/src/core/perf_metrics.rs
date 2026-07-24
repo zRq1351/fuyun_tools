@@ -335,6 +335,7 @@ pub fn record_memory_usage(label: &str, memory_mb: u64) {
 
 /// Record a CPU usage metric
 pub fn record_cpu_usage(label: &str, cpu_percent: f64) {
+    // Store as basis points (percent * 100) for integer precision
     record_perf_metric_with_category(
         "cpu",
         label,
@@ -403,10 +404,12 @@ pub fn get_perf_summary() -> PerfSummary {
 
     let total_samples: u64 = metrics.iter().map(|m| m.sample_count).sum();
     let total_errors: u64 = metrics.iter().map(|m| m.error_count).sum();
-    let avg_duration: f64 = if metrics.is_empty() {
-        0.0
-    } else {
-        metrics.iter().map(|m| m.avg_duration_ms).sum::<f64>() / metrics.len() as f64
+    let avg_duration: f64 = {
+        let (total_weighted, total_samples_dur) = metrics.iter()
+            .fold((0.0, 0u64), |(w_sum, s_sum), m| {
+                (w_sum + m.avg_duration_ms * m.sample_count as f64, s_sum + m.sample_count)
+            });
+        if total_samples_dur > 0 { total_weighted / total_samples_dur as f64 } else { 0.0 }
     };
 
     let startup_metrics = get_startup_metrics();
