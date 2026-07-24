@@ -92,21 +92,7 @@ const contentRef = ref(null)
 const rightPadding = ref(0)
 
 const ensureLastCardVisible = () => {
-  const el = contentRef.value
-  if (!el) return
-  const lastCard = el.querySelector('.clipboard-item:last-of-type')
-  if (!lastCard) return
-  const lastCardRight = lastCard.offsetLeft + lastCard.offsetWidth
-  const max = el.scrollWidth - el.clientWidth
-  console.log('[scroll-debug]', JSON.stringify({
-    scrollWidth: el.scrollWidth,
-    clientWidth: el.clientWidth,
-    max,
-    lastCardRight,
-    scrollLeft: el.scrollLeft,
-    needed: lastCardRight - max
-  }))
-  rightPadding.value = Math.max(0, lastCardRight - max)
+  rightPadding.value = 0
 }
 
 const getMaxScroll = () => {
