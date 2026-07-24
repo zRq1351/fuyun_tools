@@ -6,63 +6,65 @@
       @scroll="handleScroll"
       @wheel.prevent="handleWheel"
   >
-    <div
-        v-for="(entry, index) in visibleHistory"
-        :id="'clipboard-item-' + entry.id"
-        :key="entry.id"
-        v-memo="[entry.content, index, selectedItemId, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
-        :class="{ selected: selectedItemId === entry.id, pinned: isPinned(entry.id) }"
-        class="clipboard-item"
-        :draggable="isCtrlKeyPressed"
-        @click="handleClick(entry.id)"
-        @dblclick="handleDoubleClick(entry.id)"
-        @contextmenu.prevent="showContextMenu($event, entry.id, index)"
-        @dragstart="handleItemDragStart($event, entry.id)"
-        @dragend="handleDragEnd"
-    >
-      <!-- 顶栏：序号 + 分类 + 操作按钮 -->
-      <div class="item-header">
-        <span class="item-index">{{ index + 1 }}</span>
-        <span class="item-category" @click.stop>{{ getItemCategory(entry.id) }}</span>
-        <div v-if="isPinned(entry.id)" class="item-pinned-dot"></div>
-        <div class="item-actions">
-          <div v-if="isWebUrl(entry.content)" class="action-btn" @click.stop="openWebUrl(entry.content)">
-            <Link :size="9"/>
+    <div class="scroll-inner">
+      <div
+          v-for="(entry, index) in visibleHistory"
+          :id="'clipboard-item-' + entry.id"
+          :key="entry.id"
+          v-memo="[entry.content, index, selectedItemId, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
+          :class="{ selected: selectedItemId === entry.id, pinned: isPinned(entry.id) }"
+          class="clipboard-item"
+          :draggable="isCtrlKeyPressed"
+          @click="handleClick(entry.id)"
+          @dblclick="handleDoubleClick(entry.id)"
+          @contextmenu.prevent="showContextMenu($event, entry.id, index)"
+          @dragstart="handleItemDragStart($event, entry.id)"
+          @dragend="handleDragEnd"
+      >
+        <!-- 顶栏：序号 + 分类 + 操作按钮 -->
+        <div class="item-header">
+          <span class="item-index">{{ index + 1 }}</span>
+          <span class="item-category" @click.stop>{{ getItemCategory(entry.id) }}</span>
+          <div v-if="isPinned(entry.id)" class="item-pinned-dot"></div>
+          <div class="item-actions">
+            <div v-if="isWebUrl(entry.content)" class="action-btn" @click.stop="openWebUrl(entry.content)">
+              <Link :size="9"/>
+            </div>
+            <div class="action-btn" @click.stop="emit('preview', entry.content, entry.id)">
+              <View :size="9"/>
+            </div>
+            <div :class="{ active: isPinned(entry.id) }" class="action-btn"
+                 @click.stop="promoteItem(entry.id)">
+              <Star :size="9"/>
+            </div>
+            <div class="action-btn action-delete" @click.stop="deleteItem(entry.id)">
+              <Close :size="9"/>
+            </div>
           </div>
-          <div class="action-btn" @click.stop="emit('preview', entry.content, entry.id)">
-            <View :size="9"/>
-          </div>
-          <div :class="{ active: isPinned(entry.id) }" class="action-btn"
-               @click.stop="promoteItem(entry.id)">
-            <Star :size="9"/>
-          </div>
-          <div class="action-btn action-delete" @click.stop="deleteItem(entry.id)">
-            <Close :size="9"/>
-          </div>
+        </div>
+
+        <!-- 内容区 -->
+        <div class="item-body">
+          <FormattedContent :content="entry.content" />
+        </div>
+
+        <!-- 搜索高亮摘要 -->
+        <div v-if="entry.snippet" class="item-snippet">
+          <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
+            <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
+            <span v-else>{{ part.text }}</span>
+          </template>
         </div>
       </div>
 
-      <!-- 内容区 -->
-      <div class="item-body">
-        <FormattedContent :content="entry.content" />
+      <div v-if="showTailLoadMoreHint" class="load-more">
+        <el-icon v-if="isLoadingMore" :size="14" class="is-loading">
+          <Loading/>
+        </el-icon>
+        <span class="load-more-text">
+          {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
+        </span>
       </div>
-
-      <!-- 搜索高亮摘要 -->
-      <div v-if="entry.snippet" class="item-snippet">
-        <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
-          <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
-          <span v-else>{{ part.text }}</span>
-        </template>
-      </div>
-    </div>
-
-    <div v-if="showTailLoadMoreHint" class="load-more">
-      <el-icon v-if="isLoadingMore" :size="14" class="is-loading">
-        <Loading/>
-      </el-icon>
-      <span class="load-more-text">
-        {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
-      </span>
     </div>
   </div>
 </template>
@@ -249,13 +251,17 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
-  display: flex;
-  gap: 10px;
-  padding: 10px 14px 10px 14px;
-  flex-direction: row;
   overflow-x: auto;
-  overflow-y: clip;
+  overflow-y: hidden;
   scrollbar-width: none;
+}
+
+.scroll-inner {
+  display: inline-flex;
+  flex-direction: row;
+  gap: 10px;
+  padding: 10px 14px;
+  height: 100%;
 }
 
 .content::-webkit-scrollbar {
