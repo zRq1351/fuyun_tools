@@ -64,7 +64,6 @@
         {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
       </span>
     </div>
-    <div ref="spacerRef" class="spacer"></div>
   </div>
 </template>
 
@@ -94,21 +93,6 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
-const spacerRef = ref(null)
-
-const updateSpacer = () => {
-  if (!contentRef.value || !spacerRef.value) return
-  const clientW = contentRef.value.clientWidth
-  spacerRef.value.style.width = Math.max(0, clientW - 260) + 'px'
-}
-
-onMounted(() => {
-  updateSpacer()
-  const ro = new ResizeObserver(updateSpacer)
-  if (contentRef.value) ro.observe(contentRef.value)
-  onUnmounted(() => ro.disconnect())
-})
-
 let isDown = false
 let isDragging = false
 let startX = 0
@@ -267,10 +251,10 @@ defineExpose({contentRef})
   min-height: 0;
   display: flex;
   gap: 10px;
-  padding: 10px 14px;
+  padding: 10px 14px 10px 14px;
   flex-direction: row;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: clip;
   scrollbar-width: none;
 }
 
@@ -466,11 +450,6 @@ defineExpose({contentRef})
 .load-more-text {
   font-size: 10px;
   color: var(--fy-text-muted);
-}
-
-.spacer {
-  flex-shrink: 0;
-  height: 1px;
 }
 
 .content.is-dragging .item-actions {
