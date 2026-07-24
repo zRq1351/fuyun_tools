@@ -94,14 +94,12 @@ const rightPadding = ref(0)
 const ensureLastCardVisible = () => {
   const el = contentRef.value
   if (!el) return
-  const track = el.querySelector('.scroll-track')
-  if (!track) return
-  const lastCard = track.querySelector('.clipboard-item:last-of-type')
+  const lastCard = el.querySelector('.clipboard-item:last-of-type')
   if (!lastCard) return
-  const trackWidth = track.scrollWidth
-  const containerWidth = el.clientWidth
-  if (trackWidth > containerWidth) {
-    rightPadding.value = trackWidth - containerWidth
+  const lastCardRight = lastCard.offsetLeft + lastCard.offsetWidth
+  const max = el.scrollWidth - el.clientWidth
+  if (lastCardRight > max) {
+    rightPadding.value = lastCardRight - max
   }
 }
 
@@ -273,7 +271,7 @@ defineExpose({contentRef})
   flex-direction: row;
   align-items: center;
   white-space: nowrap;
-  padding: 0 14px;
+  padding: 0 0 0 14px;
   height: 100%;
   gap: 10px;
 }
