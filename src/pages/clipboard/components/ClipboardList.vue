@@ -2,6 +2,7 @@
   <div
       ref="contentRef"
       class="content"
+      @mousedown="onMouseDown"
       @scroll="handleScroll"
   >
     <div class="scroll-track">
@@ -88,6 +89,67 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
+let isDown = false
+let isDragging = false
+let startX = 0
+let scrollLeftStart = 0
+let dragRafId = 0
+
+const stopDragging = () => {
+  if (!isDown) return
+  isDown = false
+  isDragging = false
+  if (dragRafId) {
+    cancelAnimationFrame(dragRafId)
+    dragRafId = 0
+  }
+  if (contentRef.value) {
+    contentRef.value.style.cursor = 'grab'
+  }
+  document.body.style.removeProperty('user-select')
+  window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('mouseup', onMouseUp)
+}
+
+const onMouseDown = (e) => {
+  if (e.target.closest('.action-btn')) return
+  isDown = true
+  isDragging = false
+  startX = e.pageX
+  scrollLeftStart = contentRef.value?.scrollLeft || 0
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
+
+const onMouseMove = (e) => {
+  if (!isDown || !contentRef.value) return
+  const walk = e.pageX - startX
+  if (!isDragging && Math.abs(walk) > 4) {
+    isDragging = true
+    document.body.style.userSelect = 'none'
+    if (window.getSelection) window.getSelection().removeAllRanges()
+  }
+  if (!isDragging) return
+  e.preventDefault()
+  if (!dragRafId) {
+    dragRafId = requestAnimationFrame(() => {
+      dragRafId = 0
+      if (contentRef.value) {
+        contentRef.value.scrollLeft = scrollLeftStart - walk
+      }
+    })
+  }
+}
+
+const onMouseUp = () => stopDragging()
+
+onMounted(() => {
+  window.addEventListener('blur', stopDragging)
+})
+onUnmounted(() => {
+  stopDragging()
+  window.removeEventListener('blur', stopDragging)
+})
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
@@ -167,6 +229,11 @@ defineExpose({contentRef})
   min-height: 0;
   overflow-x: auto;
   overflow-y: hidden;
+  cursor: grab;
+}
+
+.content:active {
+  cursor: grabbing;
 }
 
 .scroll-track {
@@ -175,7 +242,7 @@ defineExpose({contentRef})
   gap: 10px;
   padding: 10px 14px;
   height: 100%;
-  align-items: flex-start;
+  align-items: stretch;
 }
 
 .content::-webkit-scrollbar {
@@ -185,6 +252,7 @@ defineExpose({contentRef})
 /* ===== 卡片 ===== */
 .clipboard-item {
   width: 260px;
+  height: 100%;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -317,7 +385,6 @@ defineExpose({contentRef})
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
-  max-height: 120px;
 }
 
 .item-body::-webkit-scrollbar {
