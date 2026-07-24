@@ -95,7 +95,8 @@ let scrollOffset = 0
 const getMaxScroll = () => {
   const el = contentRef.value
   if (!el) return 0
-  const trackWidth = el.scrollWidth
+  const count = props.visibleHistory.length
+  const trackWidth = 14 + count * 260 + (count - 1) * 10
   return Math.max(0, trackWidth - el.clientWidth)
 }
 
