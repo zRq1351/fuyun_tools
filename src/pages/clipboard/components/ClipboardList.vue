@@ -221,9 +221,9 @@ const handleGlobalMouseMove = (e) => {
   }
   if (!isDragging) return
   e.preventDefault()
-  dragTargetScrollLeft = scrollLeftVal - walk
   const max = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
-  if (dragTargetScrollLeft > max + 36) emit('load-more-intent')
+  dragTargetScrollLeft = Math.min(max, Math.max(0, scrollLeftVal - walk))
+  if (dragTargetScrollLeft >= max - 36) emit('load-more-intent')
   if (!dragScrollRafId) {
     dragScrollRafId = requestAnimationFrame(() => {
       dragScrollRafId = 0
