@@ -6,6 +6,7 @@
       @scroll="handleScroll"
       @wheel.prevent="handleWheel"
   >
+    <div class="scroll-track" :style="{ paddingRight: rightPadding + 'px' }">
     <div
         v-for="entry in visibleHistory"
         :id="`image-item-${entry.index}`"
@@ -83,12 +84,12 @@
         {{ isLoadingMore ? $t('imageClipboard.loading') : $t('imageClipboard.loadMore') }}
       </span>
     </div>
-    <div aria-hidden="true" class="spacer"></div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import {computed, onMounted, onUnmounted, ref} from 'vue'
+import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue'
 import {Close, Download, FullScreen, Loading, Star} from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -161,6 +162,18 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent'])
 
 const contentRef = ref(null)
+const rightPadding = ref(0)
+
+const ensureLastCardVisible = () => {
+  const el = contentRef.value
+  if (!el) return
+  const lastCard = el.querySelector('.clipboard-item:last-of-type')
+  if (!lastCard) return
+  const lastCardRight = lastCard.offsetLeft + lastCard.offsetWidth
+  const needed = lastCardRight - el.scrollWidth + el.clientWidth
+  if (needed > 0) rightPadding.value = needed
+}
+
 let isDown = false
 let isDragging = false
 let startX = 0
@@ -169,6 +182,8 @@ let dragTargetScrollLeft = 0
 let dragScrollRafId = 0
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
+
+watch(() => props.visibleHistory.length, () => nextTick(ensureLastCardVisible))
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
 const handleScroll = () => {
@@ -276,6 +291,7 @@ const handleVisibilityChange = () => {
 onMounted(() => {
   window.addEventListener('blur', stopDragging)
   document.addEventListener('visibilitychange', handleVisibilityChange)
+  nextTick(ensureLastCardVisible)
 })
 
 onUnmounted(() => {
@@ -295,19 +311,23 @@ defineExpose({
 <style scoped>
 .content {
   flex: 1;
-  min-width: 0;
   min-height: 0;
-  display: flex;
-  gap: 10px;
-  padding: 10px 14px;
-  flex-direction: row;
   overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
+  cursor: grab;
 }
 
 .content::-webkit-scrollbar {
   display: none
+}
+
+.scroll-track {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  white-space: nowrap;
+  padding: 0 0 0 14px;
+  height: 100%;
+  gap: 10px;
 }
 
 .content.is-dragging .clipboard-item {
@@ -320,11 +340,6 @@ defineExpose({
 
 .content.is-dragging .item-actions {
   opacity: 0 !important
-}
-
-.spacer {
-  flex: 0 0 600px;
-  height: 1px
 }
 
 .load-more {
@@ -349,6 +364,7 @@ defineExpose({
 /* ===== 卡片 ===== */
 .clipboard-item {
   width: 260px;
+  height: 250px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
