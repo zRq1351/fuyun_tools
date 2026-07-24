@@ -233,13 +233,24 @@ const handleGlobalMouseMove = (e) => {
   }
   if (!isDragging) return
   e.preventDefault()
-  const max = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+  const el = contentRef.value
+  const max = Math.max(0, el.scrollWidth - el.clientWidth)
   dragTargetScrollLeft = Math.min(max, Math.max(0, scrollLeftVal - walk))
+  console.log('[clipboard-drag]', JSON.stringify({
+    walk, scrollLeftVal, dragTargetScrollLeft, max,
+    scrollWidth: el.scrollWidth, clientWidth: el.clientWidth
+  }))
   if (dragTargetScrollLeft >= max - 36) emit('load-more-intent')
   if (!dragScrollRafId) {
     dragScrollRafId = requestAnimationFrame(() => {
       dragScrollRafId = 0
-      if (contentRef.value) contentRef.value.scrollLeft = dragTargetScrollLeft
+      if (contentRef.value) {
+        contentRef.value.scrollLeft = dragTargetScrollLeft
+        console.log('[clipboard-set]', JSON.stringify({
+          target: dragTargetScrollLeft,
+          actual: contentRef.value.scrollLeft
+        }))
+      }
     })
   }
 }
