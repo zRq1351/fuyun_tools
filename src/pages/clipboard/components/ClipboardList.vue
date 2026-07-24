@@ -181,13 +181,14 @@ defineExpose({contentRef})
   white-space: nowrap;
   padding: 10px 14px 10px 14px;
   padding-right: 800px;
-  height: calc(100% - 20px);
+  height: 100%;
 }
 
 .clipboard-item {
   display: inline-block;
   vertical-align: top;
   width: 260px;
+  height: 100%;
   white-space: normal;
   margin-right: 10px;
   background: rgba(255, 255, 255, 0.04);
