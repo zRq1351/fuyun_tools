@@ -95,7 +95,7 @@ const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
 const containerWidth = ref(0)
-const spacerWidth = computed(() => Math.max(0, containerWidth.value - 260 - 28))
+const spacerWidth = computed(() => Math.max(0, containerWidth.value - 288))
 
 onMounted(() => {
   if (contentRef.value) {
