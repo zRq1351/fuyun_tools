@@ -2,63 +2,60 @@
   <div
       ref="contentRef"
       class="content"
-      @mousedown="onMouseDown"
       @scroll="handleScroll"
   >
-    <div class="scroll-track">
-      <div
-          v-for="(entry, index) in visibleHistory"
-          :id="'clipboard-item-' + entry.id"
-          :key="entry.id"
-          v-memo="[entry.content, index, selectedItemId, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
-          :class="{ selected: selectedItemId === entry.id, pinned: isPinned(entry.id) }"
-          class="clipboard-item"
-          :draggable="isCtrlKeyPressed"
-          @click="handleClick(entry.id)"
-          @dblclick="handleDoubleClick(entry.id)"
-          @contextmenu.prevent="showContextMenu($event, entry.id, index)"
-          @dragstart="handleItemDragStart($event, entry.id)"
-          @dragend="handleDragEnd"
-      >
-        <div class="item-header">
-          <span class="item-index">{{ index + 1 }}</span>
-          <span class="item-category" @click.stop>{{ getItemCategory(entry.id) }}</span>
-          <div v-if="isPinned(entry.id)" class="item-pinned-dot"></div>
-          <div class="item-actions">
-            <div v-if="isWebUrl(entry.content)" class="action-btn" @click.stop="openWebUrl(entry.content)">
-              <Link :size="9"/>
-            </div>
-            <div class="action-btn" @click.stop="emit('preview', entry.content, entry.id)">
-              <View :size="9"/>
-            </div>
-            <div :class="{ active: isPinned(entry.id) }" class="action-btn"
-                 @click.stop="promoteItem(entry.id)">
-              <Star :size="9"/>
-            </div>
-            <div class="action-btn action-delete" @click.stop="deleteItem(entry.id)">
-              <Close :size="9"/>
-            </div>
+    <div
+        v-for="(entry, index) in visibleHistory"
+        :id="'clipboard-item-' + entry.id"
+        :key="entry.id"
+        v-memo="[entry.content, index, selectedItemId, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
+        :class="{ selected: selectedItemId === entry.id, pinned: isPinned(entry.id) }"
+        class="clipboard-item"
+        :draggable="isCtrlKeyPressed"
+        @click="handleClick(entry.id)"
+        @dblclick="handleDoubleClick(entry.id)"
+        @contextmenu.prevent="showContextMenu($event, entry.id, index)"
+        @dragstart="handleItemDragStart($event, entry.id)"
+        @dragend="handleDragEnd"
+    >
+      <div class="item-header">
+        <span class="item-index">{{ index + 1 }}</span>
+        <span class="item-category" @click.stop>{{ getItemCategory(entry.id) }}</span>
+        <div v-if="isPinned(entry.id)" class="item-pinned-dot"></div>
+        <div class="item-actions">
+          <div v-if="isWebUrl(entry.content)" class="action-btn" @click.stop="openWebUrl(entry.content)">
+            <Link :size="9"/>
+          </div>
+          <div class="action-btn" @click.stop="emit('preview', entry.content, entry.id)">
+            <View :size="9"/>
+          </div>
+          <div :class="{ active: isPinned(entry.id) }" class="action-btn"
+               @click.stop="promoteItem(entry.id)">
+            <Star :size="9"/>
+          </div>
+          <div class="action-btn action-delete" @click.stop="deleteItem(entry.id)">
+            <Close :size="9"/>
           </div>
         </div>
-        <div class="item-body">
-          <FormattedContent :content="entry.content" />
-        </div>
-        <div v-if="entry.snippet" class="item-snippet">
-          <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
-            <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
-            <span v-else>{{ part.text }}</span>
-          </template>
-        </div>
       </div>
+      <div class="item-body">
+        <FormattedContent :content="entry.content" />
+      </div>
+      <div v-if="entry.snippet" class="item-snippet">
+        <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
+          <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
+          <span v-else>{{ part.text }}</span>
+        </template>
+      </div>
+    </div>
 
-      <div v-if="showTailLoadMoreHint" class="load-more">
-        <el-icon v-if="isLoadingMore" :size="14" class="is-loading">
-          <Loading/>
-        </el-icon>
-        <span class="load-more-text">
-          {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
-        </span>
-      </div>
+    <div v-if="showTailLoadMoreHint" class="load-more">
+      <el-icon v-if="isLoadingMore" :size="14" class="is-loading">
+        <Loading/>
+      </el-icon>
+      <span class="load-more-text">
+        {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
+      </span>
     </div>
   </div>
 </template>
@@ -89,67 +86,6 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
-let isDown = false
-let isDragging = false
-let startX = 0
-let scrollLeftStart = 0
-let dragRafId = 0
-
-const stopDragging = () => {
-  if (!isDown) return
-  isDown = false
-  isDragging = false
-  if (dragRafId) {
-    cancelAnimationFrame(dragRafId)
-    dragRafId = 0
-  }
-  if (contentRef.value) {
-    contentRef.value.style.cursor = 'grab'
-  }
-  document.body.style.removeProperty('user-select')
-  window.removeEventListener('mousemove', onMouseMove)
-  window.removeEventListener('mouseup', onMouseUp)
-}
-
-const onMouseDown = (e) => {
-  if (e.target.closest('.action-btn')) return
-  isDown = true
-  isDragging = false
-  startX = e.pageX
-  scrollLeftStart = contentRef.value?.scrollLeft || 0
-  window.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('mouseup', onMouseUp)
-}
-
-const onMouseMove = (e) => {
-  if (!isDown || !contentRef.value) return
-  const walk = e.pageX - startX
-  if (!isDragging && Math.abs(walk) > 4) {
-    isDragging = true
-    document.body.style.userSelect = 'none'
-    if (window.getSelection) window.getSelection().removeAllRanges()
-  }
-  if (!isDragging) return
-  e.preventDefault()
-  if (!dragRafId) {
-    dragRafId = requestAnimationFrame(() => {
-      dragRafId = 0
-      if (contentRef.value) {
-        contentRef.value.scrollLeft = scrollLeftStart - walk
-      }
-    })
-  }
-}
-
-const onMouseUp = () => stopDragging()
-
-onMounted(() => {
-  window.addEventListener('blur', stopDragging)
-})
-onUnmounted(() => {
-  stopDragging()
-  window.removeEventListener('blur', stopDragging)
-})
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
@@ -157,8 +93,8 @@ const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.valu
 const handleScroll = () => {
   emit('content-scroll')
   if (!contentRef.value || !props.hasMore || props.isLoadingPage) return
-  const {scrollWidth, scrollLeft, clientWidth} = contentRef.value
-  if (scrollWidth - scrollLeft - clientWidth < 260) {
+  const {scrollHeight, scrollTop, clientHeight} = contentRef.value
+  if (scrollHeight - scrollTop - clientHeight < 120) {
     emit('load-more-intent')
   }
 }
@@ -227,34 +163,20 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
-  width: 0;
-  min-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  cursor: grab;
-}
-
-.content:active {
-  cursor: grabbing;
-}
-
-.scroll-track {
-  display: inline-flex;
-  flex-direction: row;
-  gap: 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 10px 14px;
-  height: calc(100% - 20px);
-  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  scrollbar-width: none;
 }
 
 .content::-webkit-scrollbar {
   display: none
 }
 
-/* ===== 卡片 ===== */
 .clipboard-item {
-  width: 260px;
-  height: 100%;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -275,18 +197,13 @@ defineExpose({contentRef})
 .clipboard-item:hover {
   background: rgba(255, 255, 255, 0.07);
   border-color: rgba(255, 255, 255, 0.12);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
 
 .clipboard-item.selected {
   background: rgba(108, 140, 255, 0.1);
   border-color: rgba(108, 140, 255, 0.4);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(108, 140, 255, 0.1);
 }
 
-/* ===== 顶栏 ===== */
 .item-header {
   display: flex;
   align-items: center;
@@ -374,7 +291,6 @@ defineExpose({contentRef})
   background: rgba(248, 113, 113, 0.1);
 }
 
-/* ===== 内容区 ===== */
 .item-body {
   flex: 1;
   min-height: 0;
@@ -387,13 +303,13 @@ defineExpose({contentRef})
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
+  max-height: 120px;
 }
 
 .item-body::-webkit-scrollbar {
   display: none
 }
 
-/* ===== 搜索摘要 ===== */
 .item-snippet {
   margin: 0 12px 8px;
   padding: 6px 0 0;
@@ -413,21 +329,18 @@ defineExpose({contentRef})
   padding: 0 2px;
 }
 
-/* ===== 加载更多 ===== */
 .load-more {
-  width: 48px;
-  flex-shrink: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 6px;
+  padding: 12px;
   color: var(--fy-text-muted);
   user-select: none;
 }
 
 .load-more-text {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--fy-text-muted);
 }
 </style>
