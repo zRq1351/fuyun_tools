@@ -159,29 +159,6 @@ const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.valu
 onMounted(() => {
   window.addEventListener('blur', stopDragging)
   document.addEventListener('visibilitychange', handleVisibilityChange)
-  setTimeout(() => {
-    if (contentRef.value) {
-      const el = contentRef.value
-      const max = el.scrollWidth - el.clientWidth
-      el.scrollLeft = max
-      const cards = el.querySelectorAll('.clipboard-item')
-      const lastCard = cards[cards.length - 1]
-      const lastCardRect = lastCard ? lastCard.getBoundingClientRect() : null
-      const contentRect = el.getBoundingClientRect()
-      console.log('[clipboard-debug]', JSON.stringify({
-        scrollWidth: el.scrollWidth,
-        clientWidth: el.clientWidth,
-        max,
-        scrollLeft: el.scrollLeft,
-        cardCount: cards.length,
-        lastCardLeft: lastCardRect?.left,
-        lastCardRight: lastCardRect?.right,
-        contentLeft: contentRect.left,
-        contentRight: contentRect.right,
-        lastCardVisible: lastCardRect ? lastCardRect.right <= contentRect.right : false
-      }))
-    }
-  }, 500)
 })
 onUnmounted(() => {
   stopDragging()
@@ -247,21 +224,11 @@ const handleGlobalMouseMove = (e) => {
   const el = contentRef.value
   const max = Math.max(0, el.scrollWidth - el.clientWidth)
   dragTargetScrollLeft = Math.min(max, Math.max(0, scrollLeftVal - walk))
-  console.log('[clipboard-drag]', JSON.stringify({
-    walk, scrollLeftVal, dragTargetScrollLeft, max,
-    scrollWidth: el.scrollWidth, clientWidth: el.clientWidth
-  }))
   if (dragTargetScrollLeft >= max - 36) emit('load-more-intent')
   if (!dragScrollRafId) {
     dragScrollRafId = requestAnimationFrame(() => {
       dragScrollRafId = 0
-      if (contentRef.value) {
-        contentRef.value.scrollLeft = dragTargetScrollLeft
-        console.log('[clipboard-set]', JSON.stringify({
-          target: dragTargetScrollLeft,
-          actual: contentRef.value.scrollLeft
-        }))
-      }
+      if (contentRef.value) contentRef.value.scrollLeft = dragTargetScrollLeft
     })
   }
 }
@@ -273,15 +240,6 @@ const handleWheel = (e) => {
   const el = contentRef.value
   const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
   const max = Math.max(0, el.scrollWidth - el.clientWidth)
-  console.log('[clipboard-scroll]', JSON.stringify({
-    scrollWidth: el.scrollWidth,
-    clientWidth: el.clientWidth,
-    scrollLeft: el.scrollLeft,
-    max,
-    delta,
-    children: el.childElementCount,
-    lastChildClass: el.lastElementChild?.className
-  }))
   const newScrollLeft = Math.min(max, Math.max(0, el.scrollLeft + delta))
   if (delta > 0 && newScrollLeft >= max - 8) emit('load-more-intent')
   el.scrollLeft = newScrollLeft
