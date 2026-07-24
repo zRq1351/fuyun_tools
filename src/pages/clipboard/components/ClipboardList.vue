@@ -241,7 +241,7 @@ defineExpose({contentRef})
   flex-direction: row;
   gap: 10px;
   padding: 10px 14px;
-  height: 100%;
+  height: calc(100% - 20px);
   align-items: stretch;
 }
 
