@@ -185,7 +185,8 @@ defineExpose({contentRef})
 }
 
 .clipboard-item {
-  display: inline-block;
+  display: inline-flex;
+  flex-direction: column;
   vertical-align: top;
   width: 260px;
   height: calc(100% - 12px);
@@ -307,6 +308,8 @@ defineExpose({contentRef})
 }
 
 .item-body {
+  flex: 1;
+  min-height: 0;
   padding: 6px 12px;
   font-size: var(--fy-text-sm);
   line-height: 1.55;
@@ -316,7 +319,6 @@ defineExpose({contentRef})
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
-  max-height: 120px;
 }
 
 .item-body::-webkit-scrollbar {
