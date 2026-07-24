@@ -248,7 +248,7 @@ defineExpose({contentRef})
   display: inline-flex;
   flex-direction: column;
   width: 260px;
-  height: calc(100% - 8px);
+  height: 280px;
   white-space: normal;
   flex-shrink: 0;
   background: rgba(255, 255, 255, 0.04);
