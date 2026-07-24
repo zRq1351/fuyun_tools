@@ -253,6 +253,7 @@ defineExpose({contentRef})
   gap: 10px;
   padding: 10px 14px;
   flex-direction: row;
+  align-items: flex-start;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
