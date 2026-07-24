@@ -182,7 +182,7 @@ let dragRafId = 0
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 
-watch(() => props.visibleHistory.length, () => nextTick(ensureLastCardVisible))
+watch(() => props.visibleHistory.length, () => setTimeout(ensureLastCardVisible, 500))
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
 const onScroll = () => {
@@ -266,7 +266,7 @@ const handleVisibilityChange = () => {
 
 onMounted(() => {
   window.addEventListener('blur', stopDragging)
-  nextTick(ensureLastCardVisible)
+  setTimeout(ensureLastCardVisible, 500)
 })
 
 onUnmounted(() => {
