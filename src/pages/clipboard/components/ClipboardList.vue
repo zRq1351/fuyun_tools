@@ -238,8 +238,9 @@ const handleWheel = (e) => {
   if (!contentRef.value) return
   const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
   const max = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
-  if (delta > 0 && contentRef.value.scrollLeft >= max - 8) emit('load-more-intent')
-  contentRef.value.scrollLeft += delta
+  const newScrollLeft = Math.min(max, Math.max(0, contentRef.value.scrollLeft + delta))
+  if (delta > 0 && newScrollLeft >= max - 8) emit('load-more-intent')
+  contentRef.value.scrollLeft = newScrollLeft
 }
 
 defineExpose({contentRef})
@@ -253,7 +254,6 @@ defineExpose({contentRef})
   gap: 10px;
   padding: 10px 14px;
   flex-direction: row;
-  align-items: flex-start;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
