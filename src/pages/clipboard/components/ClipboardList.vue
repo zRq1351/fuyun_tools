@@ -4,58 +4,60 @@
       class="content"
       @scroll="handleScroll"
   >
-    <div
-        v-for="(entry, index) in visibleHistory"
-        :id="'clipboard-item-' + entry.id"
-        :key="entry.id"
-        v-memo="[entry.content, index, selectedItemId, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
-        :class="{ selected: selectedItemId === entry.id, pinned: isPinned(entry.id) }"
-        class="clipboard-item"
-        :draggable="isCtrlKeyPressed"
-        @click="handleClick(entry.id)"
-        @dblclick="handleDoubleClick(entry.id)"
-        @contextmenu.prevent="showContextMenu($event, entry.id, index)"
-        @dragstart="handleItemDragStart($event, entry.id)"
-        @dragend="handleDragEnd"
-    >
-      <div class="item-header">
-        <span class="item-index">{{ index + 1 }}</span>
-        <span class="item-category" @click.stop>{{ getItemCategory(entry.id) }}</span>
-        <div v-if="isPinned(entry.id)" class="item-pinned-dot"></div>
-        <div class="item-actions">
-          <div v-if="isWebUrl(entry.content)" class="action-btn" @click.stop="openWebUrl(entry.content)">
-            <Link :size="9"/>
-          </div>
-          <div class="action-btn" @click.stop="emit('preview', entry.content, entry.id)">
-            <View :size="9"/>
-          </div>
-          <div :class="{ active: isPinned(entry.id) }" class="action-btn"
-               @click.stop="promoteItem(entry.id)">
-            <Star :size="9"/>
-          </div>
-          <div class="action-btn action-delete" @click.stop="deleteItem(entry.id)">
-            <Close :size="9"/>
+    <div class="scroll-track">
+      <div
+          v-for="(entry, index) in visibleHistory"
+          :id="'clipboard-item-' + entry.id"
+          :key="entry.id"
+          v-memo="[entry.content, index, selectedItemId, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
+          :class="{ selected: selectedItemId === entry.id, pinned: isPinned(entry.id) }"
+          class="clipboard-item"
+          :draggable="isCtrlKeyPressed"
+          @click="handleClick(entry.id)"
+          @dblclick="handleDoubleClick(entry.id)"
+          @contextmenu.prevent="showContextMenu($event, entry.id, index)"
+          @dragstart="handleItemDragStart($event, entry.id)"
+          @dragend="handleDragEnd"
+      >
+        <div class="item-header">
+          <span class="item-index">{{ index + 1 }}</span>
+          <span class="item-category" @click.stop>{{ getItemCategory(entry.id) }}</span>
+          <div v-if="isPinned(entry.id)" class="item-pinned-dot"></div>
+          <div class="item-actions">
+            <div v-if="isWebUrl(entry.content)" class="action-btn" @click.stop="openWebUrl(entry.content)">
+              <Link :size="9"/>
+            </div>
+            <div class="action-btn" @click.stop="emit('preview', entry.content, entry.id)">
+              <View :size="9"/>
+            </div>
+            <div :class="{ active: isPinned(entry.id) }" class="action-btn"
+                 @click.stop="promoteItem(entry.id)">
+              <Star :size="9"/>
+            </div>
+            <div class="action-btn action-delete" @click.stop="deleteItem(entry.id)">
+              <Close :size="9"/>
+            </div>
           </div>
         </div>
+        <div class="item-body">
+          <FormattedContent :content="entry.content" />
+        </div>
+        <div v-if="entry.snippet" class="item-snippet">
+          <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
+            <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
+            <span v-else>{{ part.text }}</span>
+          </template>
+        </div>
       </div>
-      <div class="item-body">
-        <FormattedContent :content="entry.content" />
-      </div>
-      <div v-if="entry.snippet" class="item-snippet">
-        <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
-          <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
-          <span v-else>{{ part.text }}</span>
-        </template>
-      </div>
-    </div>
 
-    <div v-if="showTailLoadMoreHint" class="load-more">
-      <el-icon v-if="isLoadingMore" :size="14" class="is-loading">
-        <Loading/>
-      </el-icon>
-      <span class="load-more-text">
-        {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
-      </span>
+      <div v-if="showTailLoadMoreHint" class="load-more">
+        <el-icon v-if="isLoadingMore" :size="14" class="is-loading">
+          <Loading/>
+        </el-icon>
+        <span class="load-more-text">
+          {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
+        </span>
+      </div>
     </div>
   </div>
 </template>
@@ -93,8 +95,8 @@ const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.valu
 const handleScroll = () => {
   emit('content-scroll')
   if (!contentRef.value || !props.hasMore || props.isLoadingPage) return
-  const {scrollHeight, scrollTop, clientHeight} = contentRef.value
-  if (scrollHeight - scrollTop - clientHeight < 120) {
+  const {scrollWidth, scrollLeft, clientWidth} = contentRef.value
+  if (scrollWidth - scrollLeft - clientWidth < 260) {
     emit('load-more-intent')
   }
 }
@@ -163,12 +165,9 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 10px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
   scrollbar-width: none;
 }
 
@@ -176,10 +175,20 @@ defineExpose({contentRef})
   display: none
 }
 
+.scroll-track {
+  display: inline-block;
+  vertical-align: top;
+  white-space: nowrap;
+  padding: 10px 14px;
+  height: calc(100% - 20px);
+}
+
 .clipboard-item {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
+  display: inline-block;
+  vertical-align: top;
+  width: 260px;
+  white-space: normal;
+  margin-right: 10px;
   background: rgba(255, 255, 255, 0.04);
   border: 0.5px solid rgba(255, 255, 255, 0.07);
   border-radius: 14px;
@@ -192,6 +201,10 @@ defineExpose({contentRef})
   color: var(--fy-text-primary);
   transition: all 0.2s ease;
   overflow: hidden;
+}
+
+.clipboard-item:last-child {
+  margin-right: 0;
 }
 
 .clipboard-item:hover {
@@ -292,8 +305,6 @@ defineExpose({contentRef})
 }
 
 .item-body {
-  flex: 1;
-  min-height: 0;
   padding: 6px 12px;
   font-size: var(--fy-text-sm);
   line-height: 1.55;
@@ -330,17 +341,22 @@ defineExpose({contentRef})
 }
 
 .load-more {
+  display: inline-block;
+  vertical-align: top;
+  width: 48px;
+  height: 100%;
+  white-space: normal;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 12px;
+  gap: 4px;
   color: var(--fy-text-muted);
   user-select: none;
 }
 
 .load-more-text {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--fy-text-muted);
 }
 </style>
