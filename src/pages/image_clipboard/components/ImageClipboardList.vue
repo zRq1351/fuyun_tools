@@ -155,10 +155,15 @@ const onMouseMove = (event) => {
   }
   if (!isDragging) return
   event.preventDefault()
+  const newScroll = scrollLeftStart - walk
+  const max = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+  if (newScroll >= max - 260 && props.hasMore && !props.isLoadingPage) {
+    emit('load-more-intent')
+  }
   if (!dragRafId) {
     dragRafId = requestAnimationFrame(() => {
       dragRafId = 0
-      if (contentRef.value) contentRef.value.scrollLeft = scrollLeftStart - walk
+      if (contentRef.value) contentRef.value.scrollLeft = newScroll
     })
   }
 }
