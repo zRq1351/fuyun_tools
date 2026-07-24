@@ -162,19 +162,23 @@ onMounted(() => {
   setTimeout(() => {
     if (contentRef.value) {
       const el = contentRef.value
+      const max = el.scrollWidth - el.clientWidth
+      el.scrollLeft = max
       const cards = el.querySelectorAll('.clipboard-item')
       const lastCard = cards[cards.length - 1]
-      console.log('[clipboard-init]', JSON.stringify({
+      const lastCardRect = lastCard ? lastCard.getBoundingClientRect() : null
+      const contentRect = el.getBoundingClientRect()
+      console.log('[clipboard-debug]', JSON.stringify({
         scrollWidth: el.scrollWidth,
         clientWidth: el.clientWidth,
-        children: el.childElementCount,
+        max,
+        scrollLeft: el.scrollLeft,
         cardCount: cards.length,
-        lastCardRect: lastCard ? {
-          left: lastCard.getBoundingClientRect().left,
-          right: lastCard.getBoundingClientRect().right,
-          width: lastCard.getBoundingClientRect().width
-        } : null,
-        contentRect: el.getBoundingClientRect()
+        lastCardLeft: lastCardRect?.left,
+        lastCardRight: lastCardRect?.right,
+        contentLeft: contentRect.left,
+        contentRight: contentRect.right,
+        lastCardVisible: lastCardRect ? lastCardRect.right <= contentRect.right : false
       }))
     }
   }, 500)
