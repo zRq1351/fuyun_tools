@@ -6,7 +6,7 @@
       @scroll="onScroll"
       @wheel.prevent="handleWheel"
   >
-    <div class="scroll-track" :style="{ paddingRight: rightPadding + 'px' }">
+    <div class="scroll-track">
     <div
         v-for="entry in visibleHistory"
         :id="`image-item-${entry.index}`"
@@ -89,7 +89,7 @@
 </template>
 
 <script setup>
-import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue'
+import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {Close, Download, FullScreen, Loading, Star} from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -162,17 +162,6 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent'])
 
 const contentRef = ref(null)
-const rightPadding = ref(0)
-
-const ensureLastCardVisible = () => {
-  const el = contentRef.value
-  if (!el) return
-  const lastCard = el.querySelector('.clipboard-item:last-of-type')
-  if (!lastCard) return
-  const lastCardRight = lastCard.offsetLeft + lastCard.offsetWidth
-  const needed = lastCardRight - el.scrollWidth + el.clientWidth
-  if (needed > 0) rightPadding.value = needed
-}
 
 let isDown = false
 let isDragging = false
@@ -182,12 +171,11 @@ let dragRafId = 0
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 
-watch(() => props.visibleHistory.length, () => setTimeout(ensureLastCardVisible, 500))
+
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
 const onScroll = () => {
   emit('content-scroll')
-  ensureLastCardVisible()
 }
 
 const stopDragging = () => {
@@ -267,7 +255,6 @@ const handleVisibilityChange = () => {
 
 onMounted(() => {
   window.addEventListener('blur', stopDragging)
-  setTimeout(ensureLastCardVisible, 500)
 })
 
 onUnmounted(() => {
@@ -300,6 +287,7 @@ defineExpose({
   padding: 0 0 0 14px;
   height: 100%;
   gap: 10px;
+  min-width: max-content;
 }
 
 .content.is-dragging .clipboard-item {
