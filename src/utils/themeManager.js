@@ -139,8 +139,8 @@ export function watchThemeChange(callback) {
  * @returns {string} 当前主题
  */
 export function initTheme() {
-    const theme = 'dark'
-    localStorage.setItem(THEME_KEY, theme)
+    const saved = localStorage.getItem(THEME_KEY)
+    const theme = THEMES.includes(saved) ? saved : 'dark'
     applyTheme(theme)
     return theme
 }
