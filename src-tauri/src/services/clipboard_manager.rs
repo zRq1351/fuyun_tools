@@ -89,7 +89,7 @@ pub fn add_to_clipboard_history(
     }
 
     // Single lock acquisition for all state reads to reduce contention
-    let (manager_arc, should_emit) = {
+    let (manager_arc, should_emit, allow) = {
         let state_guard = lock_arc_mutex(&state);
         let is_processing = state_guard.is_processing_selection;
         let allow = is_processing
@@ -99,16 +99,17 @@ pub fn add_to_clipboard_history(
             log::debug!("正在进行划词操作且未检测到手动复制，跳过添加到历史记录");
             return;
         }
-        if allow {
-            log::info!("检测到划词期间的手动复制，允许添加到历史记录");
-            // 清除标志，避免后续重复处理
-            crate::features::text_selection::clear_manual_copy_flag();
-        }
         (
             state_guard.clipboard_manager.clone(),
             state_guard.is_visible,
+            allow,
         )
     };
+    if allow {
+        log::info!("检测到划词期间的手动复制，允许添加到历史记录");
+        // 清除标志，避免后续重复处理（在锁外调用以避免潜在死锁）
+        crate::features::text_selection::clear_manual_copy_flag();
+    }
 
     let payload = {
         let manager = manager_arc.lock().unwrap();

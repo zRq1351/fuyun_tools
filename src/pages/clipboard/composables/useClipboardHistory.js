@@ -1,4 +1,4 @@
-import {computed, ref, shallowRef} from 'vue'
+import {computed, ref, shallowRef, watch} from 'vue'
 import {CategoryService, ClipboardService} from '../../../services/ipc'
 import {useCategorySearchIndex} from '../../shared/useCategorySearchIndex'
 
@@ -20,6 +20,22 @@ export function useClipboardHistory() {
     // Reusable sort cache to avoid redundant sorts
     let _lastSortedData = null
     let _lastSortedResult = null
+    let _lastSortBy = null
+    let _lastSortOrder = null
+
+    // Invalidate sort cache when sort params change
+    watch(sortBy, () => {
+        _lastSortedData = null
+        _lastSortedResult = null
+        _lastSortBy = null
+        _lastSortOrder = null
+    })
+    watch(sortOrder, () => {
+        _lastSortedData = null
+        _lastSortedResult = null
+        _lastSortBy = null
+        _lastSortOrder = null
+    })
 
     const {
         filterDataRevision,
@@ -85,8 +101,8 @@ export function useClipboardHistory() {
     }
 
     const sortPageItems = (entries) => {
-        // Skip sort if same array reference with same length (optimization for applyGroupedEntries)
-        if (entries === _lastSortedData) {
+        // Skip sort if same array reference and same sort params
+        if (entries === _lastSortedData && sortBy.value === _lastSortBy && sortOrder.value === _lastSortOrder) {
             return _lastSortedResult
         }
         const merged = entries.slice()
@@ -110,6 +126,8 @@ export function useClipboardHistory() {
         })
         _lastSortedData = entries
         _lastSortedResult = merged
+        _lastSortBy = sortBy.value
+        _lastSortOrder = sortOrder.value
         return merged
     }
 
@@ -335,6 +353,8 @@ export function useClipboardHistory() {
             // Invalidate sort cache since data changed
             _lastSortedData = null
             _lastSortedResult = null
+            _lastSortBy = null
+            _lastSortOrder = null
 
             pagedHistory.value = sortPageItems(merged);
 
@@ -510,6 +530,8 @@ export function useClipboardHistory() {
         // Invalidate sort cache
         _lastSortedData = null
         _lastSortedResult = null
+        _lastSortBy = null
+        _lastSortOrder = null
 
         const sortedFiltered = sortPageItems(filtered)
         const loadedCount = Math.min(sortedFiltered.length, loadedTarget)
