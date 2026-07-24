@@ -3,7 +3,7 @@
       ref="contentRef"
       class="content"
       @mousedown="handleMouseDown"
-      @scroll="handleScroll"
+      @scroll="onScroll"
       @wheel.prevent="handleWheel"
   >
     <div class="scroll-track" :style="{ paddingRight: rightPadding + 'px' }">
@@ -177,16 +177,15 @@ const ensureLastCardVisible = () => {
 let isDown = false
 let isDragging = false
 let startX = 0
-let scrollLeftVal = 0
-let dragTargetScrollLeft = 0
-let dragScrollRafId = 0
+let scrollLeftStart = 0
+let dragRafId = 0
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 
 watch(() => props.visibleHistory.length, () => nextTick(ensureLastCardVisible))
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
-const handleScroll = () => {
+const onScroll = () => {
   emit('content-scroll')
 }
 
@@ -194,18 +193,13 @@ const stopDragging = () => {
   if (!isDown) return
   isDown = false
   isDragging = false
-  if (dragScrollRafId) {
-    cancelAnimationFrame(dragScrollRafId)
-    dragScrollRafId = 0
-  }
-  if (contentRef.value) {
-    contentRef.value.classList.remove('is-dragging')
-    contentRef.value.style.cursor = 'default'
+  if (dragRafId) {
+    cancelAnimationFrame(dragRafId)
+    dragRafId = 0
   }
   document.body.style.removeProperty('user-select')
-  window.removeEventListener('mousemove', handleGlobalMouseMove)
-  window.removeEventListener('mouseup', handleGlobalMouseUp, true)
-  window.removeEventListener('dragend', handleGlobalDragEnd)
+  window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('mouseup', onMouseUp)
 }
 
 const handleClick = (entryIndex) => {
@@ -229,54 +223,36 @@ const handleMouseDown = (event) => {
   isDown = true
   isDragging = false
   startX = event.pageX
-  if (contentRef.value) {
-    scrollLeftVal = contentRef.value.scrollLeft
-    dragTargetScrollLeft = scrollLeftVal
-  }
-  window.addEventListener('mousemove', handleGlobalMouseMove)
-  window.addEventListener('mouseup', handleGlobalMouseUp, true)
-  window.addEventListener('dragend', handleGlobalDragEnd)
+  scrollLeftStart = contentRef.value?.scrollLeft || 0
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
 }
 
-const handleGlobalMouseUp = () => {
-  stopDragging()
-}
-
-const handleGlobalDragEnd = () => {
-  stopDragging()
-}
-
-const handleGlobalMouseMove = (event) => {
+const onMouseMove = (event) => {
   if (!isDown || !contentRef.value) return
   const walk = event.pageX - startX
   if (!isDragging && Math.abs(walk) > 4) {
     isDragging = true
-    contentRef.value.style.cursor = 'grabbing'
-    contentRef.value.classList.add('is-dragging')
     document.body.style.userSelect = 'none'
+    if (window.getSelection) window.getSelection().removeAllRanges()
   }
   if (!isDragging) return
-  dragTargetScrollLeft = scrollLeftVal - walk
-  const maxScrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
-  if (dragTargetScrollLeft > maxScrollLeft + 36) {
-    emit('load-more-intent')
-  }
-  if (!dragScrollRafId) {
-    dragScrollRafId = requestAnimationFrame(() => {
-      dragScrollRafId = 0
-      if (contentRef.value) {
-        contentRef.value.scrollLeft = dragTargetScrollLeft
-      }
+  event.preventDefault()
+  if (!dragRafId) {
+    dragRafId = requestAnimationFrame(() => {
+      dragRafId = 0
+      if (contentRef.value) contentRef.value.scrollLeft = scrollLeftStart - walk
     })
   }
 }
 
+const onMouseUp = () => stopDragging()
+
 const handleWheel = (event) => {
   if (!contentRef.value) return
   const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
-  const maxScrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
-  const nearEnd = contentRef.value.scrollLeft >= maxScrollLeft - 8
-  if (delta > 0 && nearEnd) {
+  const max = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+  if (delta > 0 && contentRef.value.scrollLeft >= max - 8) {
     emit('load-more-intent')
   }
   contentRef.value.scrollLeft += delta
@@ -290,17 +266,12 @@ const handleVisibilityChange = () => {
 
 onMounted(() => {
   window.addEventListener('blur', stopDragging)
-  document.addEventListener('visibilitychange', handleVisibilityChange)
   nextTick(ensureLastCardVisible)
 })
 
 onUnmounted(() => {
   stopDragging()
   window.removeEventListener('blur', stopDragging)
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-  window.removeEventListener('mousemove', handleGlobalMouseMove)
-  window.removeEventListener('mouseup', handleGlobalMouseUp, true)
-  window.removeEventListener('dragend', handleGlobalDragEnd)
 })
 
 defineExpose({
