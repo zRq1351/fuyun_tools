@@ -78,6 +78,7 @@ pub fn to_frontend_error_json_with_details(
 /// 将 AppError 转换为新的 JSON 格式，失败时回退到旧格式
 /// 用于迁移期间的向后兼容
 pub fn app_error_to_frontend_json(err: AppError) -> String {
+    let err_clone = err.clone();
     let code_str = err.code.to_string();
     let details = err.details.filter(|d| !d.is_empty());
     // 对没有明确 AppErrorKind 的错误，包装为通用错误
@@ -89,7 +90,7 @@ pub fn app_error_to_frontend_json(err: AppError) -> String {
         details,
     };
     serde_json::to_string(&payload).unwrap_or_else(|_| {
-        crate::core::error::to_frontend_error_string(err)
+        crate::core::error::to_frontend_error_string(err_clone)
     })
 }
 

@@ -11,7 +11,7 @@ use crate::features::recording::types::{
 use crate::sync::Mutex;
 use crate::ui::window_manager::show_overlay_window_by_label;
 use crate::utils::utils_helpers::{
-    load_settings, split_download_url_and_sha256, verify_downloaded_exe_integrity,
+    load_settings, verify_downloaded_exe_integrity,
 };
 use futures_util::StreamExt;
 use serde::Deserialize;

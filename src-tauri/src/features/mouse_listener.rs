@@ -157,7 +157,7 @@ fn handle_hook_event(
             let prev_state = std::mem::replace(&mut *state_guard, MouseActionState::Idle);
             
             // 处理从 MouseDown 或 Dragging 状态转换
-            let (down_x, down_y, down_time, has_seen_ibeam, positions) = match prev_state {
+            let (down_x, down_y, down_time, has_seen_ibeam, mut positions) = match prev_state {
                 MouseActionState::MouseDown(x, y, t) => {
                     // 从 MouseDown 直接到 MouseUp，检查当前光标
                     let is_ibeam = is_cursor_ibeam();
@@ -218,7 +218,7 @@ fn handle_hook_event(
                         let feature_linear = check_linear_movement(positions.make_contiguous());
                         
                         let feature_horizontal = {
-                            if let (Some(first), Some(last)) = (positions.first(), positions.last()) {
+                            if let (Some(first), Some(last)) = (positions.front(), positions.back()) {
                                 let dx = (last.0 - first.0).abs() as f64;
                                 let dy = (last.1 - first.1).abs() as f64;
                                 dx > dy * 0.3 && dx > 10.0
