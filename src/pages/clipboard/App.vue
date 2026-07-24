@@ -982,7 +982,6 @@ onBeforeUnmount(() => {
   left: 0;
   right: 0;
   z-index: 120;
-  border-top: 0.5px solid rgba(255, 255, 255, 0.05);
 }
 
 .status-text {
