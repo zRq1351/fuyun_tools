@@ -107,7 +107,27 @@ const handleWheel = (e) => {
   if (!el) return
   e.preventDefault()
   const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
-  setScroll(el.scrollLeft + delta)
+  const max = getMaxScroll()
+  const newScroll = Math.min(max, Math.max(0, el.scrollLeft + delta))
+  el.scrollLeft = newScroll
+  startClampLoop()
+}
+
+let clampRafId = 0
+const startClampLoop = () => {
+  if (clampRafId) return
+  const tick = () => {
+    const el = contentRef.value
+    if (!el) { clampRafId = 0; return }
+    const max = getMaxScroll()
+    if (el.scrollLeft > max) {
+      el.scrollLeft = max
+      clampRafId = requestAnimationFrame(tick)
+    } else {
+      clampRafId = 0
+    }
+  }
+  clampRafId = requestAnimationFrame(tick)
 }
 let isDown = false
 let isDragging = false
@@ -153,6 +173,7 @@ const onMouseMove = (e) => {
     dragRafId = requestAnimationFrame(() => {
       dragRafId = 0
       setScroll(scrollLeftStart - walk)
+      startClampLoop()
     })
   }
 }
@@ -248,9 +269,13 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: auto;
   white-space: nowrap;
   cursor: grab;
+}
+
+.content::-webkit-scrollbar {
+  display: none
 }
 
 .scroll-track {
