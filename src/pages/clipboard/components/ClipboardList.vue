@@ -98,9 +98,15 @@ const ensureLastCardVisible = () => {
   if (!lastCard) return
   const lastCardRight = lastCard.offsetLeft + lastCard.offsetWidth
   const max = el.scrollWidth - el.clientWidth
-  if (lastCardRight > max) {
-    rightPadding.value = lastCardRight - max
-  }
+  console.log('[scroll-debug]', JSON.stringify({
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+    max,
+    lastCardRight,
+    scrollLeft: el.scrollLeft,
+    needed: lastCardRight - max
+  }))
+  rightPadding.value = Math.max(0, lastCardRight - max)
 }
 
 const getMaxScroll = () => {
