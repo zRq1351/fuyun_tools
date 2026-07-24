@@ -90,7 +90,7 @@ const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
 const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1
-const rightPadding = Math.round(280 * dpr)
+const rightPadding = Math.round(533 * dpr)
 let isDown = false
 let isDragging = false
 let startX = 0
@@ -249,7 +249,7 @@ defineExpose({contentRef})
   display: inline-flex;
   flex-direction: column;
   width: 260px;
-  height: 280px;
+  height: 250px;
   white-space: normal;
   flex-shrink: 0;
   background: rgba(255, 255, 255, 0.04);
