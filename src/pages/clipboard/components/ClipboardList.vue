@@ -290,12 +290,11 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
-  width: 100%;
   display: flex;
   gap: 10px;
   padding: 10px 14px;
   flex-direction: row;
-  overflow-x: auto;
+  overflow-x: scroll;
   overflow-y: hidden;
   scrollbar-width: none;
 }
