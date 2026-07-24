@@ -21,7 +21,7 @@ const THEME_LABELS = {
 export function getTheme() {
     const saved = localStorage.getItem(THEME_KEY)
     if (THEMES.includes(saved)) return saved
-    return getSystemTheme()
+    return 'dark'
 }
 
 /**
