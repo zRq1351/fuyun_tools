@@ -5,7 +5,7 @@
       @mousedown="onMouseDown"
       @wheel.prevent="handleWheel"
   >
-    <div class="scroll-track">
+    <div class="scroll-track" :style="{ paddingRight: rightPadding + 'px' }">
       <div
           v-for="(entry, index) in visibleHistory"
           :id="'clipboard-item-' + entry.id"
@@ -89,6 +89,17 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
+const rightPadding = ref(0)
+
+const ensureLastCardVisible = () => {
+  const el = contentRef.value
+  if (!el) return
+  const lastCard = el.querySelector('.clipboard-item:last-of-type')
+  if (!lastCard) return
+  const cardRight = lastCard.offsetLeft + lastCard.offsetWidth
+  const needed = cardRight - el.clientWidth
+  if (needed > rightPadding.value) rightPadding.value = needed
+}
 
 const getMaxScroll = () => {
   const el = contentRef.value
