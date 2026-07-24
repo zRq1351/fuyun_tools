@@ -4,9 +4,8 @@
       class="content"
       @mousedown="onMouseDown"
       @wheel.prevent="handleWheel"
-      @scroll="handleScroll"
   >
-    <div class="scroll-track" :style="{ paddingRight: rightPadding + 'px' }">
+    <div class="scroll-track">
       <div
           v-for="(entry, index) in visibleHistory"
           :id="'clipboard-item-' + entry.id"
@@ -90,24 +89,25 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
-const rightPadding = ref(0)
 
-const ensureLastCardVisible = () => {
+const getMaxScroll = () => {
+  const el = contentRef.value
+  if (!el) return 0
+  return Math.max(0, el.scrollWidth - el.clientWidth)
+}
+
+const setScroll = (val) => {
   const el = contentRef.value
   if (!el) return
-  const lastCard = el.querySelector('.clipboard-item:last-of-type')
-  if (!lastCard) return
-  const cardRight = lastCard.offsetLeft + lastCard.offsetWidth
-  rightPadding.value = Math.max(0, cardRight - el.clientWidth)
+  el.scrollLeft = Math.min(getMaxScroll(), Math.max(0, val))
 }
 
 const handleWheel = (e) => {
   const el = contentRef.value
   if (!el) return
-  const max = el.scrollWidth - el.clientWidth
-  if (el.scrollLeft >= max && e.deltaX > 0) {
-    e.preventDefault()
-  }
+  e.preventDefault()
+  const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
+  setScroll(el.scrollLeft + delta)
 }
 let isDown = false
 let isDragging = false
@@ -152,7 +152,7 @@ const onMouseMove = (e) => {
   if (!dragRafId) {
     dragRafId = requestAnimationFrame(() => {
       dragRafId = 0
-      if (contentRef.value) contentRef.value.scrollLeft = scrollLeftStart - walk
+      setScroll(scrollLeftStart - walk)
     })
   }
 }
@@ -176,7 +176,6 @@ watch(() => props.visibleHistory.length, () => {
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
 const handleScroll = () => {
-  clampScroll()
   emit('content-scroll')
   if (!contentRef.value || !props.hasMore || props.isLoadingPage) return
   const {scrollWidth, scrollLeft, clientWidth} = contentRef.value
@@ -249,14 +248,9 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
-  overflow-x: auto;
+  overflow: hidden;
   white-space: nowrap;
-  scrollbar-width: none;
   cursor: grab;
-}
-
-.content::-webkit-scrollbar {
-  display: none
 }
 
 .scroll-track {
