@@ -239,7 +239,7 @@ defineExpose({contentRef})
   align-items: center;
   white-space: nowrap;
   padding: 0 14px 0 14px;
-  padding-right: 600px;
+  padding-right: 800px;
   height: 100%;
   gap: 10px;
 }
