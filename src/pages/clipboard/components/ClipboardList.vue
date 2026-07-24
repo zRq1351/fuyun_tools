@@ -94,11 +94,15 @@ const rightPadding = ref(0)
 const ensureLastCardVisible = () => {
   const el = contentRef.value
   if (!el) return
-  const lastCard = el.querySelector('.clipboard-item:last-of-type')
+  const track = el.querySelector('.scroll-track')
+  if (!track) return
+  const lastCard = track.querySelector('.clipboard-item:last-of-type')
   if (!lastCard) return
-  const cardRight = lastCard.offsetLeft + lastCard.offsetWidth
-  const needed = cardRight - el.clientWidth
-  if (needed > rightPadding.value) rightPadding.value = needed
+  const trackWidth = track.scrollWidth
+  const containerWidth = el.clientWidth
+  if (trackWidth > containerWidth) {
+    rightPadding.value = trackWidth - containerWidth
+  }
 }
 
 const getMaxScroll = () => {
@@ -118,27 +122,7 @@ const handleWheel = (e) => {
   if (!el) return
   e.preventDefault()
   const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
-  const max = getMaxScroll()
-  const newScroll = Math.min(max, Math.max(0, el.scrollLeft + delta))
-  el.scrollLeft = newScroll
-  startClampLoop()
-}
-
-let clampRafId = 0
-const startClampLoop = () => {
-  if (clampRafId) return
-  const tick = () => {
-    const el = contentRef.value
-    if (!el) { clampRafId = 0; return }
-    const max = getMaxScroll()
-    if (el.scrollLeft > max) {
-      el.scrollLeft = max
-      clampRafId = requestAnimationFrame(tick)
-    } else {
-      clampRafId = 0
-    }
-  }
-  clampRafId = requestAnimationFrame(tick)
+  setScroll(el.scrollLeft + delta)
 }
 let isDown = false
 let isDragging = false
@@ -184,7 +168,6 @@ const onMouseMove = (e) => {
     dragRafId = requestAnimationFrame(() => {
       dragRafId = 0
       setScroll(scrollLeftStart - walk)
-      startClampLoop()
     })
   }
 }
@@ -193,7 +176,7 @@ const onMouseUp = () => stopDragging()
 
 onMounted(() => {
   window.addEventListener('blur', stopDragging)
-  setTimeout(ensureLastCardVisible, 300)
+  nextTick(() => setTimeout(ensureLastCardVisible, 100))
 })
 onUnmounted(() => {
   stopDragging()
@@ -203,7 +186,7 @@ onUnmounted(() => {
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 
 watch(() => props.visibleHistory.length, () => {
-  nextTick(ensureLastCardVisible)
+  nextTick(() => setTimeout(ensureLastCardVisible, 100))
 })
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
@@ -280,13 +263,9 @@ defineExpose({contentRef})
 .content {
   flex: 1;
   min-height: 0;
-  overflow-x: auto;
+  overflow: hidden;
   white-space: nowrap;
   cursor: grab;
-}
-
-.content::-webkit-scrollbar {
-  display: none
 }
 
 .scroll-track {
