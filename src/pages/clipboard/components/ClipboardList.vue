@@ -64,7 +64,7 @@
 </template>
 
 <script setup>
-import {computed, onMounted, onUnmounted, ref} from 'vue'
+import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue'
 import {Close, Link, Loading, Star, View} from '@element-plus/icons-vue'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
 import FormattedContent from '../../../components/FormattedContent.vue'
@@ -90,7 +90,19 @@ const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
 const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1
-const rightPadding = Math.round(533 * dpr)
+const rightPadding = ref(Math.round(533 * dpr))
+
+const ensureLastCardVisible = () => {
+  const el = contentRef.value
+  if (!el) return
+  const lastCard = el.querySelector('.clipboard-item:last-of-type')
+  if (!lastCard) return
+  const cardRect = lastCard.getBoundingClientRect()
+  const elRect = el.getBoundingClientRect()
+  if (cardRect.right > elRect.right + 2) {
+    rightPadding.value += Math.round((cardRect.right - elRect.right) * dpr) + 50
+  }
+}
 let isDown = false
 let isDragging = false
 let startX = 0
@@ -143,6 +155,7 @@ const onMouseUp = () => stopDragging()
 
 onMounted(() => {
   window.addEventListener('blur', stopDragging)
+  setTimeout(ensureLastCardVisible, 300)
 })
 onUnmounted(() => {
   stopDragging()
@@ -150,6 +163,10 @@ onUnmounted(() => {
 })
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
+
+watch(() => props.visibleHistory.length, () => {
+  nextTick(ensureLastCardVisible)
+})
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
 const handleScroll = () => {
