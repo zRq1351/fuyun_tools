@@ -25,14 +25,6 @@ export function getTheme() {
 }
 
 /**
- * 获取系统主题偏好
- * @returns {'dark' | 'light'}
- */
-export function getSystemTheme() {
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-/**
  * 设置主题
  * @param {string} theme - 主题名称
  */
@@ -147,8 +139,7 @@ export function watchThemeChange(callback) {
  * @returns {string} 当前主题
  */
 export function initTheme() {
-    const theme = 'dark'
-    localStorage.setItem(THEME_KEY, theme)
+    const theme = getTheme()
     applyTheme(theme)
     return theme
 }
