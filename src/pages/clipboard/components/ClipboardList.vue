@@ -240,9 +240,15 @@ defineExpose({contentRef})
   display: inline-flex;
   flex-direction: row;
   gap: 10px;
-  padding: 10px 14px;
+  padding: 10px 14px 10px 14px;
   height: calc(100% - 20px);
   align-items: stretch;
+}
+
+.scroll-track::after {
+  content: '';
+  flex-shrink: 0;
+  width: 1px;
 }
 
 .content::-webkit-scrollbar {
