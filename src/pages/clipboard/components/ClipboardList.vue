@@ -252,7 +252,6 @@ defineExpose({contentRef})
 /* ===== 卡片 ===== */
 .clipboard-item {
   width: 260px;
-  height: 100%;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -268,6 +267,7 @@ defineExpose({contentRef})
   color: var(--fy-text-primary);
   transition: all 0.2s ease;
   overflow: hidden;
+  align-self: flex-start;
 }
 
 .clipboard-item:hover {
