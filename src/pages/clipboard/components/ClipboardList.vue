@@ -3,6 +3,7 @@
       ref="contentRef"
       class="content"
       @mousedown="onMouseDown"
+      @wheel.prevent="handleWheel"
       @scroll="handleScroll"
   >
     <div class="scroll-track" :style="{ paddingRight: rightPadding + 'px' }">
@@ -100,11 +101,13 @@ const ensureLastCardVisible = () => {
   rightPadding.value = Math.max(0, cardRight - el.clientWidth)
 }
 
-const clampScroll = () => {
+const handleWheel = (e) => {
   const el = contentRef.value
   if (!el) return
   const max = el.scrollWidth - el.clientWidth
-  if (el.scrollLeft > max) el.scrollLeft = max
+  if (el.scrollLeft >= max && e.deltaX > 0) {
+    e.preventDefault()
+  }
 }
 let isDown = false
 let isDragging = false
