@@ -91,7 +91,7 @@
                   <component :is="getCatIcon(cat.icon)"/>
                 </el-icon>
                 <span class="dm-root-name">{{ cat.name }}</span>
-                <span v-if="getCatCount(cat.id) > 0" class="dm-cat-count">{{ catCountMap.get(cat.id) || 0 }}</span>
+                <span v-if="(catCountMap.get(cat.id) || 0) > 0" class="dm-cat-count">{{ catCountMap.get(cat.id) || 0 }}</span>
                 <el-dropdown trigger="click">
                   <span class="dm-cat-more">
                     <el-icon>
@@ -867,12 +867,6 @@ function getFileColor(ext) {
 function getCatIcon(name) {
   const ic = catIcons.find(i => i.value === name)
   return ic?.component || Folder
-}
-
-function getCatCount(catId) {
-  if (!stats.value?.categoryCounts) return 0
-  const e = stats.value.categoryCounts.find(c => c.categoryId === catId)
-  return e?.count || 0
 }
 
 const catCountMap = computed(() => {

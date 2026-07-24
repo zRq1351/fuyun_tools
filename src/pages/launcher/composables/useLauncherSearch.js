@@ -193,5 +193,10 @@ export function useLauncherSearch() {
         }
     }
 
-    return {search, executeAction, commands: builtinCommands, loadCustomCommands}
+    const reloadCustomCommands = async () => {
+        customCommandsLoaded = false
+        await loadCustomCommands()
+    }
+
+    return {search, executeAction, commands: builtinCommands, loadCustomCommands, reloadCustomCommands}
 }
