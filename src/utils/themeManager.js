@@ -51,9 +51,16 @@ export function setTheme(theme) {
     }
     localStorage.setItem(THEME_KEY, theme)
     applyTheme(theme)
-    invoke('set_theme', {theme}).catch(err => {
-        console.warn('[ThemeManager] 保存主题到后端失败:', err)
-    })
+    // 带重试的后端保存
+    const saveWithRetry = (retries = 2) => {
+        invoke('set_theme', {theme}).catch(err => {
+            console.warn('[ThemeManager] 保存主题到后端失败:', err)
+            if (retries > 0) {
+                setTimeout(() => saveWithRetry(retries - 1), 1000)
+            }
+        })
+    }
+    saveWithRetry()
     window.dispatchEvent(new CustomEvent('theme-change', {detail: {theme}}))
 }
 

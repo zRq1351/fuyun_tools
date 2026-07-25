@@ -1,3 +1,4 @@
+use crate::core::error_codes::AppErrorKind;
 use crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path;
 use base64::Engine;
 use image::ImageEncoder;
@@ -237,7 +238,7 @@ pub fn start_manual_longshot(
     mut request: StartManualLongshotRequest,
 ) -> Result<serde_json::Value, String> {
     if request.region.width < 64 || request.region.height < 64 {
-        return Err("长截图区域太小，最小为 64x64".to_string());
+        return Err(AppErrorKind::LongshotAreaTooSmall.to_frontend_json());
     }
     request.fps = request.fps.clamp(4, 24);
     request.min_confidence = request.min_confidence.clamp(0.5, 0.99);
@@ -246,19 +247,19 @@ pub fn start_manual_longshot(
 
     let mut slot = runtime_slot()
         .lock()
-        .map_err(|_| "长截图会话锁不可用".to_string())?;
+        .map_err(|_| AppErrorKind::LongshotSessionNotFound.to_frontend_json())?;
     if let Some(existing) = slot.as_ref() {
         let status = existing
             .control
             .status
             .lock()
-            .map_err(|_| "长截图状态锁不可用".to_string())?;
+            .map_err(|_| AppErrorKind::LongshotSessionNotFound.to_frontend_json())?;
         if status.state == "running"
             || status.state == "paused"
             || status.state == "finishing"
             || status.state == "canceling"
         {
-            return Err("已有长截图会话进行中，请先完成或取消".to_string());
+            return Err(AppErrorKind::LongshotAlreadyRunning.to_frontend_json());
         }
     }
 
@@ -357,12 +358,12 @@ pub fn resume_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
 pub fn cancel_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), String> {
     let mut slot = runtime_slot()
         .lock()
-        .map_err(|_| "长截图会话锁不可用".to_string())?;
+        .map_err(|_| AppErrorKind::LongshotSessionNotFound.to_frontend_json())?;
     let Some(runtime) = slot.as_mut() else {
-        return Err("未找到进行中的长截图会话".to_string());
+        return Err(AppErrorKind::LongshotSessionNotFound.to_frontend_json());
     };
     if runtime.session_id != session_id {
-        return Err("长截图会话 ID 不匹配".to_string());
+        return Err(AppErrorKind::LongshotSessionIdMismatch.to_frontend_json());
     }
 
     runtime.control.stop.store(true, Ordering::Release);
@@ -401,13 +402,13 @@ pub fn finish_manual_longshot(
 ) -> Result<ManualLongshotFinishResult, String> {
     let mut slot = runtime_slot()
         .lock()
-        .map_err(|_| "长截图会话锁不可用".to_string())?;
+        .map_err(|_| AppErrorKind::LongshotSessionNotFound.to_frontend_json())?;
     let Some(mut runtime) = slot.take() else {
-        return Err("未找到进行中的长截图会话".to_string());
+        return Err(AppErrorKind::LongshotSessionNotFound.to_frontend_json());
     };
     if runtime.session_id != session_id {
         *slot = Some(runtime);
-        return Err("长截图会话 ID 不匹配".to_string());
+        return Err(AppErrorKind::LongshotSessionIdMismatch.to_frontend_json());
     }
 
     runtime.control.stop.store(true, Ordering::Release);
@@ -487,12 +488,12 @@ where
 {
     let slot = runtime_slot()
         .lock()
-        .map_err(|_| "长截图会话锁不可用".to_string())?;
+        .map_err(|_| AppErrorKind::LongshotSessionNotFound.to_frontend_json())?;
     let Some(runtime) = slot.as_ref() else {
-        return Err("未找到进行中的长截图会话".to_string());
+        return Err(AppErrorKind::LongshotSessionNotFound.to_frontend_json());
     };
     if runtime.session_id != session_id {
-        return Err("长截图会话 ID 不匹配".to_string());
+        return Err(AppErrorKind::LongshotSessionIdMismatch.to_frontend_json());
     }
     f(runtime)
 }
@@ -577,7 +578,7 @@ fn run_longshot_worker_inner(
         .arg("rawvideo")
         .arg("pipe:1")
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
 
     let mut child = command
         .spawn()
@@ -586,6 +587,25 @@ fn run_longshot_worker_inner(
         .stdout
         .take()
         .ok_or_else(|| "无法读取 ffmpeg stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "无法读取 ffmpeg stderr".to_string())?;
+
+    // 后台读取 ffmpeg stderr 并记录日志
+    let stderr_handle = thread::spawn(move || {
+        use std::io::BufRead;
+        let reader = std::io::BufReader::new(stderr);
+        for line in reader.lines() {
+            match line {
+                Ok(line) if !line.is_empty() => {
+                    log::debug!("[长截图 ffmpeg] {}", line);
+                }
+                Err(_) => break,
+                _ => {}
+            }
+        }
+    });
 
     let start_at = Instant::now();
     let mut last_progress_emit = Instant::now();
@@ -790,6 +810,7 @@ fn run_longshot_worker_inner(
 
     let _ = child.kill();
     let _ = child.wait();
+    let _ = stderr_handle.join();
 
     if ended_by_finishing {
         if let Ok(final_frame_color) = capture_single_bgr_frame(request) {

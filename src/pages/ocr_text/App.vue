@@ -17,6 +17,7 @@
 import {onMounted, onUnmounted, ref} from 'vue'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {useI18n} from 'vue-i18n'
+import {ElMessage} from 'element-plus'
 import {useTheme} from '../../composables/useTheme'
 import {useWindowDrag} from '../../composables/useWindowDrag'
 
@@ -31,7 +32,14 @@ let initialPayloadTryCount = 0
 
 function applyPayload(payload) {
   const value = String(payload?.text || '').trim()
-  if (!value) return
+  if (!value) {
+    // OCR 结果为空时提示用户并清除旧文本
+    if (payload?.text !== undefined) {
+      ElMessage.warning(t('ocrText.noResult'))
+      text.value = ''
+    }
+    return
+  }
   text.value = value
 }
 

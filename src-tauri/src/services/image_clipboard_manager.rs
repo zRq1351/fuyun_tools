@@ -393,6 +393,10 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                                 IMAGE_QUEUE_METRICS
                                     .dropped_full
                                     .fetch_add(1, Ordering::Relaxed);
+                                // 通知前端队列已满
+                                let _ = app_for_event.emit("image-queue-full", serde_json::json!({
+                                    "message": "图片处理队列已满，部分图片未被捕获"
+                                }));
                             }
                             Err(mpsc::TrySendError::Disconnected(_)) => {
                                 log::error!("[监听线程] 处理线程-{} 通道已断开", worker_idx + 1);

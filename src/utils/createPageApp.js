@@ -38,6 +38,12 @@ function initLocaleListeners() {
  * @returns {Object} Vue application instance
  */
 export function createPageApp(rootComponent, options = {}) {
+    // 全局未捕获 Promise 异常处理
+    window.addEventListener('unhandledrejection', (event) => {
+        console.error('[UnhandledRejection]', event.reason)
+        event.preventDefault()
+    })
+
     initTheme()
 
     watchThemeStorage((theme) => {

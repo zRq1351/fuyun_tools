@@ -269,11 +269,10 @@ pub async fn restore_backup_package(
             extracted_dir,
             rollback_dir,
         }),
-        Err((error, rollback_dir)) => {
+        Err((error, _rollback_dir)) => {
             cleanup_dir(&extracted_dir);
-            if let Some(path) = rollback_dir.as_ref() {
-                cleanup_dir(path);
-            }
+            // 不清理 rollback_dir — 保留以便用户手动恢复
+            // rollback_dir 在成功恢复后由调用方清理
             Err(error)
         }
     }

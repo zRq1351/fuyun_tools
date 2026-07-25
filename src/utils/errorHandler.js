@@ -105,17 +105,17 @@ export function handleAppError(error, context = 'Operation failed') {
             case 'CLIPBOARD_ERROR':
             case 'SYSTEM_ERROR':
             default:
-                // Check for known patterns in legacy messages
+                // Check for known patterns in legacy messages (中文 + English)
                 const lowerMsg = legacy.message.toLowerCase()
-                if (lowerMsg.includes('未配置ai') || (lowerMsg.includes('ai') && lowerMsg.includes('提供商'))) {
+                if (lowerMsg.includes('未配置ai') || lowerMsg.includes('ai not configured') || lowerMsg.includes('no ai provider') || (lowerMsg.includes('ai') && lowerMsg.includes('提供商'))) {
                     ElMessage.error(t('errorHandler.noAIProvider'))
                     return
                 }
-                if (lowerMsg.includes('api地址') || lowerMsg.includes('api url')) {
+                if (lowerMsg.includes('api地址') || lowerMsg.includes('api url') || lowerMsg.includes('api地址未配置')) {
                     ElMessage.error(t('errorHandler.noApiUrl'))
                     return
                 }
-                if (lowerMsg.includes('api密钥') || lowerMsg.includes('api key')) {
+                if (lowerMsg.includes('api密钥') || lowerMsg.includes('api key') || lowerMsg.includes('api密钥未配置')) {
                     ElMessage.error(t('errorHandler.noApiKey'))
                     return
                 }
@@ -128,13 +128,13 @@ export function handleAppError(error, context = 'Operation failed') {
         }
     }
 
-    // Raw/unknown format - keyword matching
+    // Raw/unknown format - keyword matching (中文 + English)
     const lowerMsg = raw.toLowerCase()
-    if (lowerMsg.includes('未配置ai') || (lowerMsg.includes('ai') && lowerMsg.includes('提供商'))) {
+    if (lowerMsg.includes('未配置ai') || lowerMsg.includes('ai not configured') || lowerMsg.includes('no ai provider') || (lowerMsg.includes('ai') && lowerMsg.includes('提供商'))) {
         ElMessage.error(t('errorHandler.noAIProvider'))
-    } else if (lowerMsg.includes('api地址') || lowerMsg.includes('api url')) {
+    } else if (lowerMsg.includes('api地址') || lowerMsg.includes('api url') || lowerMsg.includes('api地址未配置')) {
         ElMessage.error(t('errorHandler.noApiUrl'))
-    } else if (lowerMsg.includes('api密钥') || lowerMsg.includes('api key')) {
+    } else if (lowerMsg.includes('api密钥') || lowerMsg.includes('api key') || lowerMsg.includes('api密钥未配置')) {
         ElMessage.error(t('errorHandler.noApiKey'))
     } else {
         ElMessage.error({

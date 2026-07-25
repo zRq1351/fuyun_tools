@@ -99,28 +99,26 @@ function closeCtxMenu() {
 }
 
 let ocrTaskId = 0
+let lastPayloadBase64 = ''
 
 function applyPinnedPayload(detail) {
   if (!detail?.png_base64) return
+  // 防止重复处理相同载荷（初始化脚本和 eval 都会触发）
+  if (detail.png_base64 === lastPayloadBase64) return
+  lastPayloadBase64 = detail.png_base64
   if (detail?.label) {
     windowLabel.value = detail.label
   }
   const width = Number(detail?.width) || 0
   const height = Number(detail?.height) || 0
-  if (width > 0 && height > 0) {
-    sourceWidth.value = width
-    sourceHeight.value = height
-  }
   currentPngBase64.value = detail.png_base64
   currentImageWidth.value = width
   currentImageHeight.value = height
   imageSrc.value = `data:image/png;base64,${detail.png_base64}`
 
-  // 静默触发OCR
-  ocrLines.value = []
-  setTimeout(() => {
-    runOcr(detail.png_base64, width, height)
-  }, 100)
+  // 注意：sourceWidth/sourceHeight 由 handleImageLoaded 设置（自然图片尺寸），
+  // 不从 payload 设置（payload 是窗口尺寸，与 OCR 坐标空间不一致）
+  // OCR 在图片加载完成后触发
 }
 
 function handlePinnedImageData(event) {
@@ -194,6 +192,11 @@ function handleImageLoaded(event) {
   if (naturalWidth > 0 && naturalHeight > 0) {
     sourceWidth.value = naturalWidth
     sourceHeight.value = naturalHeight
+    // 图片加载完成后触发 OCR（使用自然尺寸作为坐标空间）
+    if (currentPngBase64.value) {
+      ocrLines.value = []
+      runOcr(currentPngBase64.value, naturalWidth, naturalHeight)
+    }
   }
 }
 

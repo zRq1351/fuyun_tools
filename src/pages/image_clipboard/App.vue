@@ -1843,6 +1843,11 @@ onMounted(async () => {
     }
   })
 
+  await listen('image-queue-full', (event) => {
+    const msg = event?.payload?.message || '图片处理队列已满'
+    ElMessage.warning({message: msg, duration: 3000})
+  })
+
 
   unlistenPreviewReady = await listen('preview-ready', (event) => {
     const {itemId, previewUrl} = event.payload || {}

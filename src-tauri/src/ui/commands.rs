@@ -57,6 +57,7 @@ pub(crate) static COPY_PASTE_DEDUP_LOG_COUNT: AtomicU64 = AtomicU64::new(0);
 pub(crate) static COPY_PASTE_DEDUP_WINDOW_STATS: OnceLock<StdMutex<DedupWindowStats>> = OnceLock::new();
 pub(crate) static AUTO_BACKUP_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 pub(crate) static BACKUP_JOB_MUTEX: OnceLock<tauri::async_runtime::Mutex<()>> = OnceLock::new();
+static SETTINGS_SAVE_MUTEX: OnceLock<tauri::async_runtime::Mutex<()>> = OnceLock::new();
 
 pub(crate) struct RecentCopyPaste {
     pub(crate) request_id: String,
@@ -610,6 +611,12 @@ pub async fn save_app_settings(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
     let version = app.package_info().version.to_string();
+
+    // 防止并发保存设置导致数据丢失
+    let _settings_guard = SETTINGS_SAVE_MUTEX
+        .get_or_init(|| tauri::async_runtime::Mutex::new(()))
+        .lock()
+        .await;
 
     // 注意：此处克隆后释放锁，修改期间（~800行）并发命令读取到的是旧值。
     // 这是一个已知的设计限制，完整修复需要重构为 write-through 模式。

@@ -130,18 +130,6 @@ const parseBackground = (bgColor) => {
   return bgColor
 }
 
-// 调整颜色的透明度
-const adjustOpacity = (color, opacityFactor) => {
-  if (color.startsWith('rgba')) {
-    const match = color.match(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/)
-    if (match) {
-      const [, r, g, b] = match
-      const newOpacity = (parseFloat(match[4]) * opacityFactor).toFixed(2)
-      return `rgba(${r}, ${g}, ${b}, ${newOpacity})`
-    }
-  }
-  return color
-}
 
 let stateVersion = 0
 let shrunkPhysicalX = null

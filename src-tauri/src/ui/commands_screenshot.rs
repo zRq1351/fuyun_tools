@@ -632,6 +632,16 @@ pub async fn pin_screenshot_on_screen(
     request: PinScreenshotRequest,
     app: AppHandle,
 ) -> Result<serde_json::Value, String> {
+    // 限制贴图窗口数量，防止资源耗尽
+    const MAX_PINNED_WINDOWS: usize = 20;
+    let existing_count = app.webview_windows()
+        .keys()
+        .filter(|k| k.starts_with("pinned_image_"))
+        .count();
+    if existing_count >= MAX_PINNED_WINDOWS {
+        return Err("贴图数量已达上限（20个），请先关闭部分贴图".to_string());
+    }
+
     let label = format!(
         "pinned_image_{}",
         NEXT_PINNED_IMAGE_WINDOW_ID.fetch_add(1, Ordering::Relaxed)

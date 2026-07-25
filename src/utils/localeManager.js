@@ -11,7 +11,8 @@ export function getLocale() {
     if (SUPPORTED_LOCALES.includes(saved)) return saved
     const navLang = navigator.language || ''
     if (navLang.toLowerCase().startsWith('zh')) return 'zh-CN'
-    if (navLang) return 'en-US'
+    if (navLang.toLowerCase().startsWith('en')) return 'en-US'
+    // 不支持的语言回退到默认语言
     return FALLBACK_LOCALE
 }
 

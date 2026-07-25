@@ -94,6 +94,18 @@ pub enum AppErrorKind {
     ScreenshotWriteSourceFailed,
     ScreenshotCreateWindowFailed,
     ScreenshotLongshotStatusFailed,
+    LongshotAreaTooSmall,
+    LongshotAlreadyRunning,
+    LongshotSessionNotFound,
+    LongshotSessionIdMismatch,
+    LongshotNoValidCapture,
+    LongshotNoSegments,
+    LongshotResultEmpty,
+    LongshotFrameTooSmall,
+    LongshotAreaTooLarge,
+    LongshotDependencyMissing,
+    LongshotFfmpegReadFailed,
+    LongshotCancelled,
 
     // === 录屏 ===
     RecordingFeatureDisabled,
@@ -256,6 +268,18 @@ impl AppErrorKind {
             Self::ScreenshotWriteSourceFailed => "写入截图源图失败",
             Self::ScreenshotCreateWindowFailed => "创建截图窗口失败",
             Self::ScreenshotLongshotStatusFailed => "长截图状态获取失败",
+            Self::LongshotAreaTooSmall => "长截图区域太小，最小为 64x64",
+            Self::LongshotAlreadyRunning => "已有长截图会话正在运行，请先完成或取消",
+            Self::LongshotSessionNotFound => "未找到进行中的长截图会话",
+            Self::LongshotSessionIdMismatch => "长截图会话 ID 不匹配",
+            Self::LongshotNoValidCapture => "长截图没有采集到有效画面",
+            Self::LongshotNoSegments => "长截图没有可拼接分段",
+            Self::LongshotResultEmpty => "长截图结果为空",
+            Self::LongshotFrameTooSmall => "长截图帧尺寸过小",
+            Self::LongshotAreaTooLarge => "长截图区域尺寸过大",
+            Self::LongshotDependencyMissing => "长截图依赖未就绪，请检查 FFmpeg 或 OpenCV 环境",
+            Self::LongshotFfmpegReadFailed => "无法读取 ffmpeg 输出",
+            Self::LongshotCancelled => "长截图已取消",
 
             Self::RecordingFeatureDisabled => "录屏功能已停用",
             Self::RecordingFfmpegNotFound => "未找到ffmpeg",
@@ -404,7 +428,19 @@ impl AppErrorKind {
             | Self::ScreenshotFailed
             | Self::ScreenshotWriteSourceFailed
             | Self::ScreenshotCreateWindowFailed
-            | Self::ScreenshotLongshotStatusFailed => ErrorCode::SystemError,
+            | Self::ScreenshotLongshotStatusFailed
+            | Self::LongshotAreaTooSmall
+            | Self::LongshotAlreadyRunning
+            | Self::LongshotSessionNotFound
+            | Self::LongshotSessionIdMismatch
+            | Self::LongshotNoValidCapture
+            | Self::LongshotNoSegments
+            | Self::LongshotResultEmpty
+            | Self::LongshotFrameTooSmall
+            | Self::LongshotAreaTooLarge
+            | Self::LongshotDependencyMissing
+            | Self::LongshotFfmpegReadFailed
+            | Self::LongshotCancelled => ErrorCode::SystemError,
             Self::RecordingFeatureDisabled
             | Self::RecordingFfmpegNotFound
             | Self::RecordingStartFailed

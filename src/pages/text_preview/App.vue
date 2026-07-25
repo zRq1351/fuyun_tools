@@ -4,7 +4,6 @@
         class="viewer-drag-strip"
         data-tauri-drag-region
         @click.stop
-        @mousedown.left="startWindowDrag"
     ></div>
     <div class="viewer-topbar" @click.stop>
       <div
@@ -20,7 +19,7 @@
             t('textPreview.edit')
           }}
         </button>
-        <button class="viewer-action-btn" @mousedown.left.stop.prevent @click.stop="requestClose(true)">
+        <button class="viewer-action-btn" @mousedown.left.stop.prevent @click.stop="requestClose">
           {{ t('textPreview.close') }}
         </button>
       </template>
@@ -81,7 +80,7 @@ const startWindowDrag = async () => {
   }
 }
 
-const requestClose = (fromButton = false) => {
+const requestClose = () => {
   if (animationState.value === 'leaving') return
   animationState.value = 'leaving'
   setTimeout(() => {
@@ -187,6 +186,14 @@ onMounted(async () => {
 
   unlisten = await listen('show-text-preview', (event) => {
     processPayload(event.payload || {})
+  })
+
+  // 监听文本编辑后 ID 变更事件
+  await listen('text-item-replaced', (event) => {
+    const {old_id, new_id} = event.payload || {}
+    if (old_id && new_id && itemId.value === old_id) {
+      itemId.value = new_id
+    }
   })
 })
 
