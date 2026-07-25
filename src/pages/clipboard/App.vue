@@ -265,7 +265,7 @@ const {
   setItemCategoryLocal,
   removeItemCategoryLocal,
   rebuildCategorySearchIndex
-} = useClipboardHistory()
+} = useClipboardHistory(pinnedItems)
 
 const {
   isAddingCategory,
@@ -527,7 +527,9 @@ const selectAndFillDirect = async (itemId) => {
   }
 }
 
-const showContextMenu = openContextMenu
+const showContextMenu = (event, itemId, index) => {
+  openContextMenu(event, itemId)
+}
 
 const closeFloatingPanels = () => {
   closeContextMenu()
@@ -809,6 +811,8 @@ watch(visibleHistory, (list) => {
     selectedItemId.value = ''
     return
   }
+  // 仅当选中的项不在当前列表中时才重置选择（删除、过滤或首次加载导致），
+  // 而非列表顺序变化时也重置，避免覆盖用户操作
   const exists = list.some((entry) => entry.id === selectedItemId.value)
   if (!exists) {
     selectedItemId.value = list[0].id

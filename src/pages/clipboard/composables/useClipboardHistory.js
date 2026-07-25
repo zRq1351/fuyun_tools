@@ -2,7 +2,7 @@ import {computed, ref, shallowRef, watch} from 'vue'
 import {CategoryService, ClipboardService} from '../../../services/ipc'
 import {useCategorySearchIndex} from '../../shared/useCategorySearchIndex'
 
-export function useClipboardHistory() {
+export function useClipboardHistory(pinnedItems = ref([])) {
     const pagedHistory = shallowRef([])
     const selectedItemId = ref('')
     const searchKeyword = ref('')
@@ -58,6 +58,8 @@ export function useClipboardHistory() {
 
     const visibleHistory = computed(() => {
         filterDataRevision.value
+        // 建立对 pinnedItems 的响应式依赖，使 v-memo 能检测到置顶状态变化
+        void pinnedItems.value
 
         const activeCategory = categoryFilter.value === '全部' ? null : categoryFilter.value
         const keyword = searchKeyword.value.trim().toLowerCase()
@@ -409,7 +411,8 @@ export function useClipboardHistory() {
             mergePageItems(items, false)
             totalCount.value = Number.isFinite(response?.total) ? response.total : getActiveCategoryCount()
             pageOffset.value = pagedHistory.value.length
-            hasMore.value = false
+            // 仅当加载的项数达到总数时才标记为无更多数据
+            hasMore.value = getActiveCategoryCount() < totalCount.value
 
             return true
         } catch (error) {
@@ -433,9 +436,7 @@ export function useClipboardHistory() {
         const localIndex = pagedHistory.value.findIndex(
             (entry) => entry.id === itemId
         )
-        let removedEntry = null
         if (localIndex >= 0) {
-            removedEntry = pagedHistory.value[localIndex]
             const newArr = [...pagedHistory.value]
             newArr.splice(localIndex, 1)
             pagedHistory.value = newArr
@@ -497,6 +498,7 @@ export function useClipboardHistory() {
         itemCategorySnapshot.clear()
         keywordCategoryMatchCache.clear()
 
+        // 重建分类索引（setItemCategoryLocal 会逐个更新索引，但这里先确保基础结构正确）
         const activeCategory = categoryFilter.value === '全部' ? null : categoryFilter.value
         const keyword = searchKeyword.value.trim().toLowerCase()
         const pinnedSet = new Set(Array.isArray(payload.pinned_items) ? payload.pinned_items : [])
