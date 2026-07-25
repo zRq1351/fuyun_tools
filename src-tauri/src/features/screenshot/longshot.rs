@@ -127,6 +127,10 @@ mod fallback {
     pub fn get_last_manual_longshot_failure() -> Option<ManualLongshotFailureRecord> {
         None
     }
+
+    pub fn kill_active_ffmpeg_child() {
+        // 未启用 longshot-opencv 时无需清理
+    }
 }
 
 #[cfg(not(feature = "longshot-opencv"))]

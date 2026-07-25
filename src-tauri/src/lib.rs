@@ -743,6 +743,8 @@ pub fn run() {
                     tauri::RunEvent::ExitRequested { api, .. } => {
                         // Signal background threads to stop
                         BACKUP_SCHEDULER_STOP.store(true, Ordering::Release);
+                        // 清理可能残留的长截图 FFmpeg 子进程，防止孤儿进程
+                        crate::features::screenshot::longshot::kill_active_ffmpeg_child();
                         // Prevent immediate exit if recording is active
                         let has_active_recording = {
                             if let Some(state) = app_handle.try_state::<Arc<Mutex<AppState>>>() {
@@ -761,6 +763,7 @@ pub fn run() {
                     }
                     tauri::RunEvent::Exit => {
                         BACKUP_SCHEDULER_STOP.store(true, Ordering::Release);
+                        crate::features::screenshot::longshot::kill_active_ffmpeg_child();
                         log::info!("应用退出，已发送后台线程停止信号");
                     }
                     _ => {}

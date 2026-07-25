@@ -111,6 +111,10 @@ pub async fn copy_image_clipboard_item_to_directory(
             .unwrap_or("png");
 
         let mut target_path = target_dir.join(&file_name);
+        // 防御性路径校验：拼接后的最终路径也不允许包含 ".."（防止文件名注入路径穿越）
+        if target_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err("不允许的路径：包含路径遍历".to_string());
+        }
         if target_path.exists() {
             for idx in 1..10000u32 {
                 let candidate = target_dir.join(format!("{} ({idx}).{}", stem, ext));
@@ -159,10 +163,6 @@ pub async fn start_screenshot(
             let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
             let image_path = write_screenshot_boot_image(&rgba, width, height, session_id)
                 .map_err(|e| frontend_error_kind_params(AppErrorKind::ScreenshotWriteSourceFailed, serde_json::json!({"error": e}), e))?;
-
-            // Only generate base64 if needed for fallback (when image_path is not available)
-            // This avoids redundant encoding overhead
-            let _png_base64 = String::new();
 
             Ok(serde_json::json!({
                 "success": true,
@@ -1309,9 +1309,12 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
             "window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || {{ pendingData: null, pendingStartSessionId: 0 }};\
 window.__SCREENSHOT_BOOT__.pendingData = {};\
 window.__SCREENSHOT_BOOT__.pendingStartSessionId = {};\
-window.__SCREENSHOT_BOOT__.pendingMode = '{}';",
-            payload, session_id, safe_mode
+window.__SCREENSHOT_BOOT__.pendingMode = '{}';\
+window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {} }}));\
+window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ session_id: {}, mode: '{}' }} }}));",
+            payload, session_id, safe_mode, payload, session_id, safe_mode
         );
+        let boot_script_for_page_load = boot_script.clone();
         let window = tauri::WebviewWindowBuilder::new(
             &app,
             "screenshot",
@@ -1328,7 +1331,7 @@ window.__SCREENSHOT_BOOT__.pendingMode = '{}';",
             .position(origin_x as f64, origin_y as f64)
             .fullscreen(true)
             .on_page_load(move |window, _| {
-                let _ = window.eval(&boot_script);
+                let _ = window.eval(&boot_script_for_page_load);
                 let app_handle = window.app_handle();
                 let _ = show_overlay_window_by_label(&app_handle, "screenshot", true);
             })
@@ -1351,6 +1354,25 @@ window.__SCREENSHOT_BOOT__.pendingMode = '{}';",
             x: origin_x,
             y: origin_y,
         }));
+        // 冷启动路径：on_page_load 可能因 webview 未完全就绪而 eval 失败，添加重试逻辑
+        let app_for_cold = app.clone();
+        thread::spawn(move || {
+            let mut injected = false;
+            for _attempt in 0..20 {
+                if window.eval(&boot_script).is_ok() {
+                    injected = true;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            if injected {
+                let _ = show_overlay_window_by_label(&app_for_cold, "screenshot", true);
+            } else {
+                let _ = hide_overlay_window_by_label(&app_for_cold, "screenshot");
+                cleanup_all_screenshot_boot_images();
+                capture::set_screenshot_in_progress(false);
+            }
+        });
         record_perf_metric(
             "screenshot.open_prepare",
             "截图打开准备耗时",

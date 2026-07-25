@@ -25,6 +25,8 @@ static NEXT_LONGSHOT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 static MANUAL_LONGSHOT_RUNTIME: OnceLock<StdMutex<Option<ManualLongshotRuntime>>> = OnceLock::new();
 static LAST_LONGSHOT_FAILURE: OnceLock<StdMutex<Option<ManualLongshotFailureRecord>>> =
     OnceLock::new();
+/// FFmpeg 子进程 PID，用于应用退出时清理孤儿进程
+static FFMPEG_CHILD_PID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -583,6 +585,8 @@ fn run_longshot_worker_inner(
     let mut child = command
         .spawn()
         .map_err(|e| format!("启动 ffmpeg 长截图采样失败: {}", e))?;
+    // 记录 FFmpeg 子进程 PID，用于应用退出时清理孤儿进程
+    FFMPEG_CHILD_PID.store(child.id() as u64, Ordering::Release);
     let mut stdout = child
         .stdout
         .take()
@@ -808,6 +812,8 @@ fn run_longshot_worker_inner(
         }
     }
 
+    // 清除 PID 记录并终止主 FFmpeg 子进程
+    FFMPEG_CHILD_PID.store(0, Ordering::Release);
     let _ = child.kill();
     let _ = child.wait();
     let _ = stderr_handle.join();
@@ -947,6 +953,8 @@ fn capture_single_bgr_frame(request: &StartManualLongshotRequest) -> Result<Mat,
     let mut child = command
         .spawn()
         .map_err(|e| format!("收尾抓取最终帧失败: {}", e))?;
+    // 短暂 FFmpeg 进程也记录 PID，防止收尾期间应用退出导致孤儿进程
+    FFMPEG_CHILD_PID.store(child.id() as u64, Ordering::Release);
     let mut stdout = child
         .stdout
         .take()
@@ -955,6 +963,7 @@ fn capture_single_bgr_frame(request: &StartManualLongshotRequest) -> Result<Mat,
     stdout
         .read_exact(&mut frame_buf)
         .map_err(|e| format!("收尾抓取读取最终帧失败: {}", e))?;
+    FFMPEG_CHILD_PID.store(0, Ordering::Release);
     let _ = child.kill();
     let _ = child.wait();
     frame_from_bgr_bytes(&frame_buf, request.region.height as i32)
@@ -1380,4 +1389,30 @@ fn exceeds_stitched_limit(width: u32, height: u32) -> bool {
         return true;
     }
     (width as u64).saturating_mul(height as u64) > MAX_STITCHED_PIXELS
+}
+
+/// 应用退出时清理可能残留的 FFmpeg 子进程，防止孤儿进程占用 CPU
+pub fn kill_active_ffmpeg_child() {
+    let pid = FFMPEG_CHILD_PID.swap(0, Ordering::Release);
+    if pid == 0 {
+        return;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+        unsafe {
+            let handle = OpenProcess(PROCESS_TERMINATE, false, pid as u32);
+            if let Ok(h) = handle {
+                let _ = TerminateProcess(h, 1);
+                let _ = CloseHandle(h);
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        unsafe {
+            libc::kill(pid as i32, libc::SIGTERM);
+        }
+    }
 }
