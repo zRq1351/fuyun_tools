@@ -52,7 +52,6 @@ export default [
         },
         rules: {
             'vue/multi-word-component-names': 'off',
-            'vue/no-v-html': 'off',
             'no-unused-vars': ['warn', {argsIgnorePattern: '^_'}],
             'no-console': ['warn', {allow: ['warn', 'error']}],
             'no-empty': ['warn', {allowEmptyCatch: true}],

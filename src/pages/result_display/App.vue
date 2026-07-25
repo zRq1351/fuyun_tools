@@ -80,6 +80,7 @@
           </div>
         </el-tooltip>
       </div>
+      <!-- eslint-disable-next-line vue/no-v-html -->
       <div
           ref="originalRef"
           class="content original-content"
@@ -116,6 +117,7 @@
           <span class="loading-dot"></span>
           <span class="loading-text">{{ t('resultDisplay.generating') }}</span>
         </div>
+        <!-- eslint-disable-next-line vue/no-v-html -->
         <div v-html="resultHtml"></div>
       </div>
     </div>

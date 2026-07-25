@@ -43,6 +43,7 @@
         <el-icon>
           <component :is="featureIcons[key]"/>
         </el-icon>
+        <!-- eslint-disable-next-line vue/no-v-html -->
         <span v-html="renderFeatureItem(key)"></span>
       </li>
     </ul>
@@ -55,6 +56,7 @@
       </el-icon>
       {{ $t('settings.about.usage') }}
     </h3>
+    <!-- eslint-disable vue/no-v-html -->
     <ol class="usage-list">
       <li v-html="renderUsageItem('settings.about.usage1', toggleShortcut, 'Ctrl+Shift+Z')"></li>
       <li v-html="renderUsageItem('settings.about.usage2', imageToggleShortcut, 'Ctrl+Shift+X')"></li>
@@ -122,6 +124,7 @@ import {
   Refresh,
   Star
 } from '@element-plus/icons-vue'
+import DOMPurify from 'dompurify'
 import {useUpdater} from '../composables/useUpdater'
 
 const {t} = useI18n()
@@ -166,8 +169,8 @@ const featureIcons = {
 const renderFeatureItem = (key) => {
   const text = t(key)
   const idx = text.indexOf(' - ')
-  if (idx === -1) return text
-  return `<strong>${text.slice(0, idx)}</strong> - ${text.slice(idx + 3)}`
+  if (idx === -1) return DOMPurify.sanitize(text)
+  return DOMPurify.sanitize(`<strong>${text.slice(0, idx)}</strong> - ${text.slice(idx + 3)}`)
 }
 
 const renderUsageItem = (key, shortcut, defaultShortcut) => {
@@ -183,9 +186,9 @@ const renderUsageItem = (key, shortcut, defaultShortcut) => {
     body = body.replace(defaultShortcut, `<code>${shortcut || defaultShortcut}</code>`)
   }
   if (title) {
-    return `<strong>${title}</strong>\uFF1A${body}`
+    return DOMPurify.sanitize(`<strong>${title}</strong>\uFF1A${body}`)
   }
-  return body
+  return DOMPurify.sanitize(body)
 }
 </script>
 

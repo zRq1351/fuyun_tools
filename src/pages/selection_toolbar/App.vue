@@ -223,7 +223,7 @@ const onMouseEnter = async () => {
       }
       isHovered.value = true
     } catch (e) {
-      console.error(e)
+      console.error('展开工具栏失败:', e)
       // Restore miniIcon opacity if it was hidden before the error
       if (miniIcon) {
         miniIcon.style.removeProperty('opacity')
@@ -274,7 +274,7 @@ const shrinkWindow = async (version) => {
     await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
   } catch (e) {
     isHovered.value = false
-    console.error(e)
+    console.error('收起工具栏失败:', e)
   } finally {
     isAnimating = false // 释放动画锁
   }

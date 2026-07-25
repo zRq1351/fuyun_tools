@@ -163,8 +163,6 @@ const syncContextMenuPosition = () => {
 const dragItemId = ref('')
 const isFilling = ref(false)
 const categoryInputOpenedAt = ref(0)
-const previewCache = new Map()
-const asyncPreviewCache = new Map()
 const warmedIndices = new Set()
 const warmingIndices = new Set()
 const pendingWarmupItemIds = new Set()
@@ -206,6 +204,8 @@ const createBoundedMap = (maxSize) => {
   return map
 }
 
+const previewCache = createBoundedMap(IMAGE_PREVIEW_CACHE_MAX_ITEMS)
+const asyncPreviewCache = createBoundedMap(ASYNC_PREVIEW_CACHE_MAX_ITEMS)
 const filterEntriesCache = createBoundedMap(FILTER_CACHE_MAX_SIZE)
 const keywordTagMatchCache = createBoundedMap(FILTER_CACHE_MAX_SIZE)
 const keywordCategoryMatchCache = createBoundedMap(FILTER_CACHE_MAX_SIZE)

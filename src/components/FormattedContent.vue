@@ -1,5 +1,6 @@
 <template>
   <div :class="contentType" class="formatted-content" @click="handleClick">
+    <!-- eslint-disable vue/no-v-html -->
     <div v-if="contentType === 'markdown'" class="markdown-body" v-html="renderedHtml"></div>
     <pre v-else-if="contentType === 'code'"><code class="hljs" v-html="renderedHtml"></code></pre>
     <div v-else class="plain-text">{{ content }}</div>

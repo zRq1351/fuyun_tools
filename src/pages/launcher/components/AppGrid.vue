@@ -969,4 +969,38 @@ onBeforeUnmount(() => {
 .dialog-btn.confirm:hover {
   background: var(--fy-accent-hover);
 }
+
+/* 响应式布局 */
+@media (max-width: 900px) {
+  .categories-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+
+  .expand-popup {
+    width: min(340px, calc(100vw - 32px));
+  }
+
+  .expand-apps {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .categories-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .expand-popup {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 48px);
+  }
+
+  .expand-apps {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .category-apps {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
 </style>
