@@ -171,6 +171,7 @@ let unlistenHistoryPayloadUpdated = null
 let unlistenHistoryItemAdded = null
 let unlistenPreviewReady = null
 let unlistenWritebackResult = null
+let unlistenImageQueueFull = null
 let writebackErrorMsg = null
 let pendingHistorySync = false
 let historyUpdateTimer = null
@@ -1868,7 +1869,7 @@ onMounted(async () => {
     }
   })
 
-  await listen('image-queue-full', (event) => {
+  unlistenImageQueueFull = await listen('image-queue-full', (event) => {
     const msg = event?.payload?.message || '图片处理队列已满'
     ElMessage.warning({message: msg, duration: 3000})
   })
@@ -1936,6 +1937,10 @@ onBeforeUnmount(() => {
     unlistenWritebackResult()
     unlistenWritebackResult = null
   }
+  if (unlistenImageQueueFull) {
+    unlistenImageQueueFull()
+    unlistenImageQueueFull = null
+  }
   window.removeEventListener('keydown', handleWindowKeydown)
   window.removeEventListener('keyup', handleWindowKeyup)
   window.removeEventListener('blur', handleWindowBlur)
@@ -1946,10 +1951,7 @@ watch(selectedIndex, (value) => {
 })
 
 watch(filteredHistory, (list) => {
-  if (!Array.isArray(list) || list.length === 0) {
-    selectedIndex.value = -1
-    return
-  }
+  if (!Array.isArray(list) || list.length === 0) return
   const exists = list.some((entry) => entry.index === selectedIndex.value)
   if (!exists) {
     selectedIndex.value = list[0].index
