@@ -687,14 +687,14 @@ body {
 }
 
 .content-actions .action-btn {
-  background: rgba(30, 34, 48, 0.72);
-  backdrop-filter: blur(20px) saturate(150%);
-  border: 0.5px solid rgba(255, 255, 255, 0.08);
+  background: var(--fy-glass-bg);
+  backdrop-filter: var(--fy-backdrop-blur-light);
+  border: 0.5px solid var(--fy-glass-border);
 }
 
 .content-actions .action-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--fy-bg-hover);
+  border-color: var(--fy-border-hover);
 }
 
 .content {

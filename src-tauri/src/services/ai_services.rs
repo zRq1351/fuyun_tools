@@ -122,10 +122,10 @@ fn fill_prompt_template(
     source_language: Option<&str>,
     target_language: &str,
 ) -> String {
-    let mut prompt = template.replace("{text}", text);
     let source = source_language.unwrap_or("自动识别");
-    prompt = prompt.replace("{source_language}", source);
+    let mut prompt = template.replace("{source_language}", source);
     prompt = prompt.replace("{target_language}", target_language);
+    prompt = prompt.replace("{text}", text);
     prompt
 }
 
@@ -222,6 +222,8 @@ pub struct StreamExplainRequest {
 pub struct StreamCustomPromptRequest {
     pub text: String,
     pub prompt_name: String,
+    #[serde(default)]
+    pub target_language: Option<String>,
     #[serde(default)]
     pub scene_hint: Option<String>,
     #[serde(default)]
@@ -527,7 +529,7 @@ pub async fn stream_custom_prompt_text(
         StreamExecutionRequest {
             text: request.text,
             source_language: None,
-            target_language: "中文".to_string(),
+            target_language: request.target_language.unwrap_or_else(|| "中文".to_string()),
             scene_hint: request.scene_hint,
             op_id: request.op_id,
             window_label: request.window_label,

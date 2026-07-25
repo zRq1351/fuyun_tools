@@ -446,7 +446,8 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
             "categories": manager.get_categories(),
             "category_list": manager.get_category_list(),
             "image_tags": manager.get_image_tags(),
-            "pinned_items": manager.get_pinned_items()
+            "pinned_items": manager.get_pinned_items(),
+            "is_full_snapshot": true
         }))
     } else {
         None

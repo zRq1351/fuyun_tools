@@ -367,6 +367,13 @@ pub struct ImageHistoryData {
     pub pinned_items: Vec<String>,
 }
 
+/// 从历史记录中移除图片后的返回信息
+pub struct RemovedImageInfo {
+    pub id: String,
+    pub image_path: String,
+    pub signature: String,
+}
+
 #[derive(Clone)]
 pub struct ImageClipboardManager {
     history: Arc<Mutex<Vec<ImageHistoryItem>>>,
@@ -1130,28 +1137,33 @@ impl ImageClipboardManager {
             .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
     }
 
-    pub fn remove_from_history(&self, index: usize) -> Result<(String, String, String), String> {
-        let (removed_id, removed_path, removed_signature, item_ids_after_remove) = {
+    pub fn remove_from_history(&self, index: usize) -> Result<RemovedImageInfo, String> {
+        let (removed_id, removed_path, removed_signature, item_ids_after_remove, pinned_snapshot) = {
             let mut history = lock_arc_mutex(&self.history);
             if index >= history.len() {
                 return Err(AppErrorKind::SystemIndexOutOfRange.to_frontend_json());
             }
             let removed = history.remove(index);
-            self.signature_index_dirty.store(true, Ordering::SeqCst);
             let ids = history
                 .iter()
                 .map(|item| item.id.clone())
                 .collect::<Vec<_>>();
-            (removed.id, removed.image_path, removed.signature, ids)
+            // Rebuild signature_index before dropping history lock to prevent
+            // stale lookups in concurrent code paths between here and the next insert.
+            let mut signature_index = lock_arc_mutex(&self.signature_index);
+            *signature_index = build_signature_index(&history);
+            self.signature_index_dirty.store(false, Ordering::SeqCst);
+            drop(signature_index);
+            let pinned_snapshot = {
+                let mut pinned_items = lock_arc_mutex(&self.pinned_items);
+                pinned_items.retain(|id| id != &removed.id);
+                pinned_items.clone()
+            };
+            (removed.id, removed.image_path, removed.signature, ids, pinned_snapshot)
         };
 
         crate::services::image_clipboard_manager::clear_recent_samples();
 
-        let pinned_snapshot = {
-            let mut pinned_items = lock_arc_mutex(&self.pinned_items);
-            pinned_items.retain(|id| id != &removed_id);
-            pinned_items.clone()
-        };
         {
             let mut categories = lock_arc_mutex(&self.categories);
             categories.remove(&removed_id);
@@ -1177,13 +1189,13 @@ impl ImageClipboardManager {
         if let Err(e) = image_store::sync_item_positions(&item_ids_after_remove) {
             log::error!("同步图片位置失败: {}", e);
         }
-        Ok((removed_id, removed_path, removed_signature))
+        Ok(RemovedImageInfo { id: removed_id, image_path: removed_path, signature: removed_signature })
     }
 
     pub fn remove_from_history_by_id(
         &self,
         item_id: &str,
-    ) -> Result<(String, String, String), String> {
+    ) -> Result<RemovedImageInfo, String> {
         let index = {
             let history = lock_arc_mutex(&self.history);
             history
@@ -1287,6 +1299,9 @@ impl ImageClipboardManager {
                 {
                     log::error!("增量同步图片位置失败: {}", e);
 
+                    // Re-acquire history lock to get the latest snapshot,
+                    // as history may have been modified by another thread
+                    // between the previous lock release and this fallback.
                     let history = lock_arc_mutex(&self.history);
                     let item_ids = history
                         .iter()

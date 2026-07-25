@@ -906,8 +906,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .container {
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   background: var(--fy-container-bg);
@@ -976,12 +976,13 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 0 14px;
   position: sticky;
   bottom: 0;
   left: 0;
   right: 0;
   z-index: 120;
+  border-top: 0.5px solid var(--fy-border-light);
 }
 
 .status-text {

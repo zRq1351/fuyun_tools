@@ -54,35 +54,22 @@ fn is_cloaked(hwnd: windows::Win32::Foundation::HWND) -> bool {
 #[cfg(target_os = "windows")]
 fn is_system_or_invalid_process(process_name: &str) -> bool {
     let lower = process_name.to_lowercase();
+    let stem = lower.strip_suffix(".exe").unwrap_or(&lower);
     matches!(
-        lower.as_str(),
-        "textinputhost.exe"
-            | "textinputhost"
-            | "applicationframehost.exe"
+        stem,
+        "textinputhost"
             | "applicationframehost"
-            | "runtimebroker.exe"
             | "runtimebroker"
-            | "svchost.exe"
             | "svchost"
-            | "shellhost.exe"
             | "shellhost"
-            | "searchhost.exe"
             | "searchhost"
-            | "taskhostw.exe"
             | "taskhostw"
-            | "dwm.exe"
             | "dwm"
-            | "systemsettings.exe"
             | "systemsettings"
-            | "widgetboard.exe"
             | "widgetboard"
-            | "widgetservice.exe"
             | "widgetservice"
-            | "startmenuexperiencehost.exe"
             | "startmenuexperiencehost"
-            | "phoneexperiencehost.exe"
             | "phoneexperiencehost"
-            | "crossdeviceresume.exe"
             | "crossdeviceresume"
     )
 }

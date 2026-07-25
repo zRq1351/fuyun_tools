@@ -982,3 +982,55 @@ pub fn initialize_builtin_providers(settings: &mut AppSettingsData) {
     }
     log::info!("已初始化内置AI提供商配置");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_migration_version_semver() {
+        let v = parse_migration_version("0.3.0").unwrap();
+        assert_eq!(v, MigrationVersion::new(0, 3, 0));
+    }
+
+    #[test]
+    fn test_parse_migration_version_with_v_prefix() {
+        let v = parse_migration_version("v1.2.3").unwrap();
+        assert_eq!(v, MigrationVersion::new(1, 2, 3));
+    }
+
+    #[test]
+    fn test_parse_migration_version_legacy_integer() {
+        let v = parse_migration_version("2").unwrap();
+        assert_eq!(v, MigrationVersion::new(0, 2, 0));
+    }
+
+    #[test]
+    fn test_parse_migration_version_with_prerelease() {
+        let v = parse_migration_version("1.0.0-beta.1").unwrap();
+        assert_eq!(v, MigrationVersion::new(1, 0, 0));
+    }
+
+    #[test]
+    fn test_parse_migration_version_with_build_metadata() {
+        let v = parse_migration_version("1.0.0+build.123").unwrap();
+        assert_eq!(v, MigrationVersion::new(1, 0, 0));
+    }
+
+    #[test]
+    fn test_parse_migration_version_empty() {
+        assert!(parse_migration_version("").is_none());
+    }
+
+    #[test]
+    fn test_parse_migration_version_invalid() {
+        assert!(parse_migration_version("abc").is_none());
+    }
+
+    #[test]
+    fn test_migration_version_ordering() {
+        let v1 = parse_migration_version("0.2.0").unwrap();
+        let v2 = parse_migration_version("0.3.0").unwrap();
+        assert!(v1 < v2);
+    }
+}

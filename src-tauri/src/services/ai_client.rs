@@ -47,8 +47,6 @@ pub struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_completion_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frequency_penalty: Option<f32>,
@@ -210,30 +208,38 @@ impl AIClient {
 
         use futures_util::StreamExt;
         let chunk_timeout = std::time::Duration::from_secs(30);
-        while let Ok(Some(result)) = tokio::time::timeout(chunk_timeout, stream.next()).await {
-            match result {
-                Ok(response) => {
-                    for choice in response.choices {
-                        if let Some(content) = choice.delta.content {
-                            if !content.is_empty() && !callback(content) {
-                                return Ok(());
+        loop {
+            match tokio::time::timeout(chunk_timeout, stream.next()).await {
+                Ok(Some(result)) => {
+                    match result {
+                        Ok(response) => {
+                            for choice in response.choices {
+                                if let Some(content) = choice.delta.content {
+                                    if !content.is_empty() && !callback(content) {
+                                        return Ok(());
+                                    }
+                                }
+                                if let Some(finish_reason) = choice.finish_reason {
+                                    if format!("{:?}", finish_reason) == "Stop" {
+                                        return Ok(());
+                                    }
+                                }
                             }
                         }
-                        if let Some(finish_reason) = choice.finish_reason {
-                            if format!("{:?}", finish_reason) == "Stop" {
-                                return Ok(());
-                            }
+                        Err(e) => {
+                            return Err(AppError::new(ErrorCode::NetworkError, "流式响应错误")
+                                .with_details(e.to_string()));
                         }
                     }
                 }
-                Err(e) => {
-                    return Err(AppError::new(ErrorCode::NetworkError, "流式响应错误")
-                        .with_details(e.to_string()));
+                Ok(None) => {
+                    return Ok(());
+                }
+                Err(_) => {
+                    return Err(AppError::new(ErrorCode::NetworkError, "流式响应超时"));
                 }
             }
         }
-        // If timeout occurred, the stream is considered stalled
-        Ok(())
     }
 
     /// 简单的文本生成
@@ -248,7 +254,6 @@ impl AIClient {
             messages,
             temperature: Some(0.7),
             max_tokens,
-            max_completion_tokens: max_tokens,
             top_p: Some(1.0),
             frequency_penalty: Some(0.0),
             presence_penalty: Some(0.0),
@@ -284,7 +289,6 @@ impl AIClient {
             messages,
             temperature: Some(0.7),
             max_tokens,
-            max_completion_tokens: max_tokens,
             top_p: Some(1.0),
             frequency_penalty: Some(0.0),
             presence_penalty: Some(0.0),
@@ -305,7 +309,6 @@ impl AIClient {
             messages,
             temperature: Some(0.0),
             max_tokens: Some(1),
-            max_completion_tokens: Some(1),
             top_p: Some(1.0),
             frequency_penalty: Some(0.0),
             presence_penalty: Some(0.0),

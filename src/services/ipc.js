@@ -460,9 +460,9 @@ export const AIService = {
      * @param {string} promptName Prompt 名称
      * @returns {Promise<void>}
      */
-    streamCustomPrompt: (text, promptName, opId, sceneHint) =>
+    streamCustomPrompt: (text, promptName, targetLanguage, opId, sceneHint) =>
         invoke(IPC_COMMANDS.STREAM_CUSTOM_PROMPT_TEXT, {
-            request: { text, promptName, opId, sceneHint }
+            request: {text, promptName, targetLanguage, opId, sceneHint}
         }),
 };
 

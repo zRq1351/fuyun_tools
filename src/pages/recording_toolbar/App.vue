@@ -1339,7 +1339,7 @@ body {
 .target-mode-btn.active {
   border-color: var(--fy-border-active);
   background: var(--fy-accent-bg);
-  color: #ffffff;
+  color: var(--fy-text-inverse);
 }
 
 .target-region-meta {
@@ -1480,7 +1480,7 @@ body {
 }
 
 .collapsed-pill[data-state="disabled"] .collapsed-pill-content {
-  color: #ffffff;
+  color: var(--fy-text-inverse);
 }
 
 .recording-dot {
@@ -1640,8 +1640,8 @@ body {
 }
 
 .capsule-settings-panel :deep(.el-select .el-tag) {
-  background: rgba(64, 158, 255, 0.2) !important;
-  border-color: rgba(64, 158, 255, 0.4) !important;
+  background: var(--fy-accent-bg) !important;
+  border-color: var(--fy-accent) !important;
 }
 
 .capsule-settings-panel :deep(.el-switch) {
@@ -1694,14 +1694,16 @@ body {
 
 .toolbar-inline-notice.is-warning {
   color: var(--fy-warning);
-  background: rgba(230, 162, 60, 0.14);
-  border-color: rgba(230, 162, 60, 0.36);
+  background: var(--fy-warning-bg);
+  border-color: var(--fy-warning);
+  border-opacity: 0.36;
 }
 
 .toolbar-inline-notice.is-error {
   color: var(--fy-danger);
-  background: rgba(245, 108, 108, 0.12);
-  border-color: rgba(245, 108, 108, 0.3);
+  background: var(--fy-danger-bg);
+  border-color: var(--fy-danger);
+  border-opacity: 0.3;
 }
 
 .collapsed-stop-btn,
@@ -1723,15 +1725,15 @@ body {
 
 .collapsed-stop-btn {
   border-color: var(--fy-danger);
-  background: rgba(245, 108, 108, 0.15);
+  background: var(--fy-danger-bg);
 }
 
 .collapsed-stop-btn:hover:not(:disabled) {
-  background: rgba(245, 108, 108, 0.25);
+  background: var(--fy-danger-bg-hover, var(--fy-danger-bg));
 }
 
 .collapsed-stop-btn:active:not(:disabled) {
-  background: rgba(245, 108, 108, 0.35);
+  background: var(--fy-danger-bg-hover, var(--fy-danger-bg));
 }
 
 .collapsed-stop-btn:disabled {
@@ -1952,7 +1954,7 @@ body {
 
 .collapsed-mic-toggle-btn.is-muted {
   background: var(--fy-danger);
-  color: #ffd6d6;
+  color: var(--fy-text-inverse);
 }
 
 .collapsed-mic-toggle-btn.is-muted:hover:not(:disabled) {

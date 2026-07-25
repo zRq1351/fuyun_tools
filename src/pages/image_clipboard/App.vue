@@ -194,12 +194,21 @@ const filterDataRevision = ref(0)
 const createBoundedMap = (maxSize) => {
   const map = new Map()
   const originalSet = map.set.bind(map)
+  const originalGet = map.get.bind(map)
   map.set = (key, value) => {
     if (map.size >= maxSize && !map.has(key)) {
       const firstKey = map.keys().next().value
       map.delete(firstKey)
     }
     return originalSet(key, value)
+  }
+  map.get = (key) => {
+    if (!map.has(key)) return undefined
+    const value = originalGet(key)
+    // 刷新 key 顺序，实现 LRU 淘汰
+    map.delete(key)
+    originalSet(key, value)
+    return value
   }
   return map
 }
@@ -718,6 +727,14 @@ const mergeIncrementalImageItem = (rawItem) => {
   )
   if (history.value.length > keepCount) {
     history.value = history.value.slice(0, keepCount)
+    // 清理预热缓存中已不在可见列表中的条目
+    const visibleIds = new Set(history.value.map((h) => h.id))
+    for (const id of warmedIndices) {
+      if (!visibleIds.has(id)) warmedIndices.delete(id)
+    }
+    for (const id of warmingIndices) {
+      if (!visibleIds.has(id)) warmingIndices.delete(id)
+    }
   }
   let loadedCount = 0
   let nextSelectedIndex = -1
@@ -732,9 +749,9 @@ const mergeIncrementalImageItem = (rawItem) => {
   totalCount.value = Math.max(totalCount.value || 0, loadedCount)
   pageOffset.value = Math.max(pageOffset.value || 0, loadedCount)
   if (selectedId) {
-    selectedIndex.value = nextSelectedIndex >= 0 ? nextSelectedIndex : 0
+    selectedIndex.value = nextSelectedIndex >= 0 ? nextSelectedIndex : (history.value.length > 0 ? 0 : -1)
   } else if (selectedIndex.value < 0) {
-    selectedIndex.value = 0
+    selectedIndex.value = history.value.length > 0 ? 0 : -1
   }
   const wasHistoryMutated = existingIndex >= 0 || !!rawItem?.id
   if (wasHistoryMutated) {
@@ -1047,7 +1064,9 @@ const deleteItem = async (itemId, index) => {
     selectedIndex: selectedIndex.value,
     totalCount: totalCount.value,
     pageOffset: pageOffset.value,
-    hasMore: hasMore.value
+    hasMore: hasMore.value,
+    previewCacheValue: previewCache.get(itemId),
+    asyncPreviewCacheValue: asyncPreviewCache.get(itemId)
   }
   try {
     previewCache.delete(itemId)
@@ -1074,6 +1093,12 @@ const deleteItem = async (itemId, index) => {
     totalCount.value = snapshot.totalCount
     pageOffset.value = snapshot.pageOffset
     hasMore.value = snapshot.hasMore
+    if (snapshot.previewCacheValue !== undefined) {
+      previewCache.set(itemId, snapshot.previewCacheValue)
+    }
+    if (snapshot.asyncPreviewCacheValue !== undefined) {
+      asyncPreviewCache.set(itemId, snapshot.asyncPreviewCacheValue)
+    }
     rebuildFilterIndexes()
     bumpFilterDataRevision()
     try {
@@ -1263,7 +1288,7 @@ const mergeShowWindowPayload = (data) => {
 
 
   const hasHistoryField = Object.prototype.hasOwnProperty.call(data, 'history') && Array.isArray(data.history)
-  const isFullSnapshot = hasHistoryField && (incoming.length === 0 || (incoming.length > 0 && incoming[0]?.image_path !== undefined))
+  const isFullSnapshot = hasHistoryField && (data.is_full_snapshot === true || incoming.length === 0)
 
   if (isFullSnapshot) {
 
@@ -1456,7 +1481,7 @@ const mergeIncrementalPageIntoState = (data) => {
     if (Number.isFinite(data?.total)) {
       const loadedCount = getLoadedHistoryCount()
 
-      totalCount.value = Math.max(Number(data.total), loadedCount, Number(totalCount.value) || 0)
+      totalCount.value = Math.max(Number(data.total), loadedCount)
       pageOffset.value = loadedCount
       hasMore.value = pageOffset.value < totalCount.value
     }
@@ -1999,7 +2024,7 @@ watch([searchKeyword, categoryFilter], () => {
   left: 0;
   right: 0;
   z-index: 120;
-  border-top: 0.5px solid rgba(255, 255, 255, 0.05);
+  border-top: 0.5px solid var(--fy-border-light);
 }
 
 .status-text {
@@ -2045,7 +2070,7 @@ watch([searchKeyword, categoryFilter], () => {
 .nav-action-btn {
   appearance: none;
   border: none;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--fy-bg-overlay);
   color: var(--fy-text-secondary);
   border-radius: var(--fy-radius-sm);
   font-size: 11px;
@@ -2054,7 +2079,7 @@ watch([searchKeyword, categoryFilter], () => {
   padding: 0 10px;
   height: 24px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--fy-duration-fast) ease;
 }
 
 .icon-btn {
@@ -2073,7 +2098,7 @@ watch([searchKeyword, categoryFilter], () => {
 }
 
 .nav-action-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--fy-bg-hover);
   color: var(--fy-text-primary);
 }
 

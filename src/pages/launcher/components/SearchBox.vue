@@ -94,7 +94,7 @@ watch(() => props.modelValue, (newVal) => {
   flex: 1;
   height: 32px;
   border: 1px solid var(--fy-border);
-  border-radius: 6px;
+  border-radius: var(--fy-radius-sm);
   outline: none;
   background: var(--fy-bg-card);
   font-size: 14px;

@@ -200,7 +200,7 @@ const renderUsageItem = (key, shortcut, defaultShortcut) => {
 
 .intro-text {
   line-height: 1.8;
-  color: #606266;
+  color: var(--fy-text-secondary);
 }
 
 .feature-list li, .usage-list li {
@@ -210,22 +210,24 @@ const renderUsageItem = (key, shortcut, defaultShortcut) => {
 .update-status {
   margin-top: 10px;
   padding: 10px;
-  border-radius: 4px;
+  border-radius: var(--fy-radius-md);
+  transition: background-color var(--fy-duration-normal) var(--fy-ease-out),
+  color var(--fy-duration-normal) var(--fy-ease-out);
 }
 
 .update-status.success {
-  background-color: #f0f9eb;
-  color: #67c23a;
+  background-color: var(--fy-success-bg, #f0f9eb);
+  color: var(--fy-success);
 }
 
 .update-status.error {
-  background-color: #fef0f0;
-  color: #f56c6c;
+  background-color: var(--fy-danger-bg, #fef0f0);
+  color: var(--fy-danger);
 }
 
 .update-status.info {
-  background-color: #f4f4f5;
-  color: #909399;
+  background-color: var(--fy-bg-surface);
+  color: var(--fy-text-muted);
 }
 </style>
 
@@ -240,7 +242,11 @@ const renderUsageItem = (key, shortcut, defaultShortcut) => {
   border: 0.5px solid var(--fy-content-border);
   box-shadow: var(--fy-shadow);
   scrollbar-width: thin;
-  scrollbar-color: var(--fy-scrollbar-thumb) transparent;
+  scrollbar-color: var(--fy-border) transparent;
+  color: var(--fy-text-primary);
+  transition: background var(--fy-duration-slow) var(--fy-ease-out),
+  border-color var(--fy-duration-slow) var(--fy-ease-out),
+  color var(--fy-duration-slow) var(--fy-ease-out);
 }
 
 .update-body-content::-webkit-scrollbar {
@@ -249,7 +255,7 @@ const renderUsageItem = (key, shortcut, defaultShortcut) => {
 
 .update-body-content::-webkit-scrollbar-thumb {
   border-radius: 4px;
-  background: rgba(64, 158, 255, 0.4);
+  background: var(--fy-border);
 }
 
 .update-body-content::-webkit-scrollbar-track {
@@ -265,7 +271,7 @@ const renderUsageItem = (key, shortcut, defaultShortcut) => {
   margin-top: 16px;
   margin-bottom: 8px;
   font-weight: 600;
-  color: #303133;
+  color: var(--fy-text-primary);
 }
 
 .update-body-content h1 {
@@ -283,6 +289,7 @@ const renderUsageItem = (key, shortcut, defaultShortcut) => {
 .update-body-content p {
   margin: 10px 0;
   line-height: 1.6;
+  color: var(--fy-text-secondary);
 }
 
 .update-body-content ul,
@@ -294,44 +301,45 @@ const renderUsageItem = (key, shortcut, defaultShortcut) => {
 .update-body-content li {
   margin: 6px 0;
   line-height: 1.6;
+  color: var(--fy-text-secondary);
 }
 
 .update-body-content code {
-  background-color: rgba(64, 158, 255, 0.12);
+  background-color: var(--fy-accent-bg);
   padding: 2px 6px;
   border-radius: 3px;
   font-family: Consolas, Monaco, 'Andale Mono', monospace;
   font-size: 0.9em;
-  color: #476582;
+  color: var(--fy-accent);
 }
 
 .update-body-content pre {
-  background-color: #eef4ff;
+  background-color: var(--fy-bg-surface);
   padding: 12px;
   border-radius: 8px;
   overflow-x: auto;
   margin: 10px 0;
-  border: 1px solid #d7e5ff;
+  border: 1px solid var(--fy-border-light);
 }
 
 .update-body-content pre code {
   background-color: transparent;
   padding: 0;
   font-size: 0.85em;
-  color: #303133;
+  color: var(--fy-text-primary);
 }
 
 .update-body-content blockquote {
   margin: 10px 0;
   padding: 10px 12px;
-  border-left: 4px solid #409eff;
-  background-color: #edf5ff;
-  color: #606266;
+  border-left: 4px solid var(--fy-accent);
+  background-color: var(--fy-accent-bg);
+  color: var(--fy-text-secondary);
   border-radius: 0 8px 8px 0;
 }
 
 .update-body-content a {
-  color: #409eff;
+  color: var(--fy-accent);
   text-decoration: none;
 }
 
@@ -356,20 +364,20 @@ const renderUsageItem = (key, shortcut, defaultShortcut) => {
 
 .update-body-content th,
 .update-body-content td {
-  border: 1px solid #e3ebfb;
+  border: 1px solid var(--fy-border-light);
   padding: 8px 12px;
   text-align: left;
 }
 
 .update-body-content th {
-  background-color: #eff5ff;
+  background-color: var(--fy-bg-card);
   font-weight: 600;
 }
 
 .update-body-content hr {
   margin: 16px 0;
   border: 0;
-  border-top: 1px solid #dcdfe6;
+  border-top: 1px solid var(--fy-border-light);
 }
 
 /* 自定义消息框样式 */
@@ -418,132 +426,26 @@ const renderUsageItem = (key, shortcut, defaultShortcut) => {
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 12px;
-  color: #2b6be8;
-  background: rgba(64, 158, 255, 0.16);
+  color: var(--fy-accent);
+  background: var(--fy-accent-bg);
 }
 
 .update-dialog__title {
   margin: 8px 0 4px;
   font-size: 20px;
   line-height: 1.2;
-  color: #1f2d3d;
+  color: var(--fy-text-primary);
 }
 
 .update-dialog__subtitle {
   margin: 0;
   font-size: 13px;
-  color: #5e6d82;
+  color: var(--fy-text-muted);
 }
 
 .update-dialog__hint {
   margin: 0;
   font-size: 12px;
-  color: #7b8795;
-}
-
-html.dark .update-message-box,
-.dark .update-message-box {
-  background: #1f232b !important;
-  border: 1px solid #343a46;
-}
-
-html.dark .update-dialog__hero,
-.dark .update-dialog__hero {
-  border-color: var(--fy-content-border);
-  background: var(--fy-content-bg);
-}
-
-html.dark .update-dialog__tag,
-.dark .update-dialog__tag {
-  color: #8ec5ff;
-  background: rgba(64, 158, 255, 0.22);
-}
-
-html.dark .update-dialog__title,
-.dark .update-dialog__title {
-  color: #eef3ff;
-}
-
-html.dark .update-dialog__subtitle,
-html.dark .update-dialog__hint,
-.dark .update-dialog__subtitle,
-.dark .update-dialog__hint {
-  color: #aab6cc;
-}
-
-html.dark .update-body-content,
-.dark .update-body-content {
-  background: var(--fy-content-bg);
-  border-color: var(--fy-content-border);
-  box-shadow: var(--fy-shadow);
-  color: var(--fy-text-primary);
-  scrollbar-color: var(--fy-scrollbar-thumb) transparent;
-}
-
-html.dark .update-body-content::-webkit-scrollbar-thumb,
-.dark .update-body-content::-webkit-scrollbar-thumb {
-  background: rgba(143, 180, 255, 0.55);
-}
-
-html.dark .update-body-content h1,
-html.dark .update-body-content h2,
-html.dark .update-body-content h3,
-html.dark .update-body-content h4,
-html.dark .update-body-content h5,
-html.dark .update-body-content h6,
-.dark .update-body-content h1,
-.dark .update-body-content h2,
-.dark .update-body-content h3,
-.dark .update-body-content h4,
-.dark .update-body-content h5,
-.dark .update-body-content h6 {
-  color: #edf3ff;
-}
-
-html.dark .update-body-content code,
-.dark .update-body-content code {
-  background: rgba(110, 148, 255, 0.22);
-  color: #cfe0ff;
-}
-
-html.dark .update-body-content pre,
-.dark .update-body-content pre {
-  background: #1c212b;
-  border-color: #3c4350;
-}
-
-html.dark .update-body-content pre code,
-.dark .update-body-content pre code {
-  color: #d7deea;
-  background: transparent;
-}
-
-html.dark .update-body-content blockquote,
-.dark .update-body-content blockquote {
-  background: #273246;
-  color: #c8d3e9;
-}
-
-html.dark .update-body-content table,
-.dark .update-body-content table {
-  background: #1d2430;
-}
-
-html.dark .update-body-content th,
-html.dark .update-body-content td,
-.dark .update-body-content th,
-.dark .update-body-content td {
-  border-color: #3a4352;
-  color: #d6deec;
-}
-
-html.dark .update-body-content th,
-.dark .update-body-content th {
-  background: #263042;
-}
-
-html.dark .update-body-content hr,
-.dark .update-body-content hr {
-  border-top-color: #3a4352;
+  color: var(--fy-text-muted);
 }
 </style>

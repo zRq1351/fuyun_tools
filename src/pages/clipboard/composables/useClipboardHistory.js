@@ -293,7 +293,7 @@ export function useClipboardHistory() {
 
             if (items.length === 0) {
                 if (Number.isFinite(response?.total)) {
-                    totalCount.value = Math.max(Number(response.total), getActiveCategoryCount(), Number(totalCount.value) || 0)
+                    totalCount.value = Math.max(Number(response.total), getActiveCategoryCount())
                     pageOffset.value = pagedHistory.value.length
                     hasMore.value = getActiveCategoryCount() < totalCount.value
                 }
@@ -359,7 +359,7 @@ export function useClipboardHistory() {
             pagedHistory.value = sortPageItems(merged);
 
             totalCount.value = Number.isFinite(response?.total)
-                ? Math.max(Number(response.total), getActiveCategoryCount(), Number(totalCount.value) || 0)
+                ? Math.max(Number(response.total), getActiveCategoryCount())
                 : Math.max(totalCount.value || 0, getActiveCategoryCount())
             pageOffset.value = pagedHistory.value.length
             hasMore.value = getActiveCategoryCount() < totalCount.value
@@ -429,7 +429,7 @@ export function useClipboardHistory() {
     }
 
     const deleteItem = async (itemId) => {
-        if (!itemId) return
+        if (!itemId || isLoadingPage.value) return
         const localIndex = pagedHistory.value.findIndex(
             (entry) => entry.id === itemId
         )
@@ -454,14 +454,12 @@ export function useClipboardHistory() {
 
         try {
             if (categoryMap.value[itemId]) {
-                const prevCategory = categoryMap.value[itemId]
                 removeItemCategoryLocal(itemId)
                 try {
                     await CategoryService.setItemCategory(itemId, "")
                 } catch (error) {
                     console.error('移除分类失败:', error)
-                    // 回滚本地分类索引
-                    setItemCategoryLocal(itemId, prevCategory)
+                    // 不回滚分类索引，因为项即将被删除，回滚的分类数据会成为孤立数据
                 }
             }
             await ClipboardService.removeItem(itemId)

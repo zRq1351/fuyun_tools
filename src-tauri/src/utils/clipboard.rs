@@ -542,8 +542,7 @@ impl ClipboardManager {
                 history.insert(0, complete_version);
                 log::info!("已将完整版本移动到最前面");
             } else {
-                history[replace_index] = content.clone();
-                let item = history.remove(replace_index);
+                let item = std::mem::replace(&mut history[replace_index], content.clone());
                 history.insert(0, item);
                 log::info!("已用完整版本替换不完整版本");
             }

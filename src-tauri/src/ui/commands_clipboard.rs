@@ -766,8 +766,8 @@ pub(crate) fn execute_remove_image_clipboard_item_by_id(
     with_updating_clipboard(&state, || -> Result<(), String> {
         let removed_signature = {
             let manager = lock_arc_mutex(&manager_arc);
-            let (_, _, signature) = manager.remove_from_history_by_id(&item_id)?;
-            signature
+            let removed = manager.remove_from_history_by_id(&item_id)?;
+            removed.signature
         };
         try_replace_image_clipboard_after_remove(&state, &app, &removed_signature);
         Ok(())
