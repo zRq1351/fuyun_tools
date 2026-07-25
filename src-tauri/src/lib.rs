@@ -678,9 +678,6 @@ pub fn run() {
             get_startup_metrics,
             get_memory_metrics,
             get_ipc_metrics,
-            // 主题命令
-            get_theme,
-            set_theme,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());

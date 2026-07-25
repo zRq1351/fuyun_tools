@@ -149,8 +149,6 @@ pub struct AppSettingsData {
     pub backup_last_run_at: i64,
     #[serde(default = "default_backup_last_run_status")]
     pub backup_last_run_status: String,
-    #[serde(default = "default_theme")]
-    pub theme: String,
 }
 
 impl Default for AppSettingsData {
@@ -212,7 +210,6 @@ impl Default for AppSettingsData {
             backup_max_count: default_backup_max_count(),
             backup_last_run_at: 0,
             backup_last_run_status: default_backup_last_run_status(),
-            theme: default_theme(),
         }
     }
 }
@@ -391,10 +388,6 @@ fn default_backup_max_count() -> usize {
 
 fn default_backup_last_run_status() -> String {
     "idle".to_string()
-}
-
-fn default_theme() -> String {
-    "dark".to_string()
 }
 
 pub fn default_translation_prompt_template() -> String {
