@@ -598,7 +598,7 @@ pub async fn remove_doc_category(id: i64) -> Result<(), String> {
         let root_path: String = row.try_get(1).unwrap_or_default();
         let dir = std::path::Path::new(&root_path).join(&cat_name);
         if dir.exists() {
-            let _ = std::fs::remove_dir(&dir);
+            let _ = std::fs::remove_dir_all(&dir);
         }
     }
 
@@ -860,14 +860,17 @@ pub async fn update_doc_file_meta(
                 Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name),
                 Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or(""));
             let dest = target_dir.join(&new_name);
-            safe_move_file(old_path, &dest)?;
+            safe_move_file(old_path, &dest).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let new_managed = dest.to_string_lossy().to_string();
-            sqlx::query("UPDATE document_files SET managed_path = ?1 WHERE id = ?2")
+            if let Err(e) = sqlx::query("UPDATE document_files SET managed_path = ?1 WHERE id = ?2")
                 .bind(&new_managed)
                 .bind(id)
                 .execute(&mut *tx)
-                .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .await {
+                let _ = tx.rollback().await;
+                let _ = safe_move_file(&dest, old_path);
+                return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
+            }
         }
     }
 

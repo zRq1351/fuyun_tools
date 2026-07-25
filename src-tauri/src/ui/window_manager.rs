@@ -1146,6 +1146,8 @@ pub fn hide_selection_toolbar_impl(app_handle: AppHandle) {
             }
         }
     }
+    // 清除去抖状态，允许下次选中文本时立即弹出工具栏
+    crate::features::mouse_listener::clear_toolbar_debounce();
 }
 
 /// 检查并自动关闭划词工具栏

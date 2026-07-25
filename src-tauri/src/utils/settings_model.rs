@@ -703,8 +703,14 @@ impl AppSettingsData {
         }
 
         for (_provider_name, config) in &self.provider_configs {
-            if !config.api_url.is_empty() && !config.api_url.starts_with("https://") {
-                return Err(AppErrorKind::AiApiUrlInvalid.to_frontend_json());
+            if !config.api_url.is_empty() {
+                let is_secure = config.api_url.starts_with("https://");
+                let is_localhost = config.api_url.starts_with("http://localhost")
+                    || config.api_url.starts_with("http://127.0.0.1")
+                    || config.api_url.starts_with("http://[::1]");
+                if !is_secure && !is_localhost {
+                    return Err(AppErrorKind::AiApiUrlInvalid.to_frontend_json());
+                }
             }
         }
 
@@ -739,6 +745,12 @@ impl AppSettingsData {
                 return Err(AppErrorKind::SettingsValidationFailed.to_frontend_json());
             }
             if !Self::is_valid_css_color(&prompt.bg_color) {
+                return Err(AppErrorKind::SettingsValidationFailed.to_frontend_json());
+            }
+            if prompt.prompt.trim().is_empty() {
+                return Err(AppErrorKind::SettingsValidationFailed.to_frontend_json());
+            }
+            if !prompt.prompt.contains("{text}") {
                 return Err(AppErrorKind::SettingsValidationFailed.to_frontend_json());
             }
         }

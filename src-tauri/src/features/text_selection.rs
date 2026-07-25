@@ -467,14 +467,16 @@ fn restore_clipboard_snapshot(
             }
         }
         ClipboardSnapshot::Empty => {
-            let result = {
-                let manager = lock_arc_mutex(clipboard_manager);
-                manager.set_clipboard_content(app_handle, "")
-            };
-            match result {
-                Ok(()) => log::debug!("已按空态恢复剪贴板内容"),
-                Err(e) => log::error!("恢复空态剪贴板内容失败: {}", e),
+            // 空快照意味着捕获前剪贴板无文本/图片内容
+            // 如果当前剪贴板已经是空的（模拟Ctrl+C后未改变），无需恢复
+            let current = get_current_clipboard_content_with_manager(clipboard_manager, app_handle);
+            if current.is_none() || current.as_deref() == Some("") {
+                log::debug!("剪贴板已为空，跳过空态恢复");
+                return;
             }
+            // 当前剪贴板有内容且不是我们捕获的文本（captured_content为None），
+            // 说明用户在捕获期间手动修改了剪贴板，不应覆盖
+            log::info!("检测到空快照但剪贴板已有用户内容，跳过恢复以避免覆盖");
         }
     }
 }

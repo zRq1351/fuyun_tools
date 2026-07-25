@@ -83,8 +83,27 @@ export function useAppActions(emit) {
                 return
             }
 
-            // Check if prefix is already used
-            const finalPrefix = ':' + commandForm.value.prefix.trim()
+            // Strip leading colon if user typed it manually
+            let prefixInput = commandForm.value.prefix.trim()
+            if (prefixInput.startsWith(':')) {
+                prefixInput = prefixInput.substring(1)
+            }
+            if (!prefixInput) return
+
+            // Check if prefix conflicts with built-in commands
+            const builtinPrefixes = [':settings', ':clipboard', ':screenshot', ':record']
+            const finalPrefix = ':' + prefixInput
+            if (builtinPrefixes.includes(finalPrefix)) {
+                ElMessage({
+                    message: `命令前缀 "${finalPrefix}" 与内置命令冲突，请使用其他前缀`,
+                    type: 'warning',
+                    duration: 3000,
+                    offset: 60
+                })
+                return
+            }
+
+            // Check if prefix is already used by custom commands
             const prefixExists = existingCommands.some(cmd => cmd.prefix === finalPrefix)
             if (prefixExists) {
                 ElMessage({

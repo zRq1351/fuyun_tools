@@ -210,16 +210,18 @@ pub async fn upsert_category(id: &str, name: &str, icon: &str, position: i32) ->
 
 pub async fn delete_category(category_id: &str) -> Result<(), String> {
     let mut conn = open_launcher_db_conn().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
     sqlx::query("DELETE FROM launcher_categories WHERE id = ?")
         .bind(category_id)
-        .execute(&mut *conn)
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("删除分类失败: {}", e))?;
     sqlx::query("DELETE FROM launcher_category_apps WHERE category_id = ?")
         .bind(category_id)
-        .execute(&mut *conn)
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("删除分类应用关联失败: {}", e))?;
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 

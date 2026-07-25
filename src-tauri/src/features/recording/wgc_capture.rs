@@ -109,15 +109,13 @@ pub fn validate_window_capture_target(target_id: &str) -> Result<(), String> {
 }
 
 pub fn bootstrap_force_default_border_from_settings(force_default: bool) {
-    if force_default {
-        WGC_FORCE_DEFAULT_BORDER.store(true, Ordering::Relaxed);
-    }
+    // M2 修复：每次录制开始时根据设置重置标志，避免永久降级
+    WGC_FORCE_DEFAULT_BORDER.store(force_default, Ordering::Relaxed);
 }
 
 pub fn bootstrap_force_default_dirty_region_from_settings(force_default: bool) {
-    if force_default {
-        WGC_FORCE_DEFAULT_DIRTY_REGION.store(true, Ordering::Relaxed);
-    }
+    // M2 修复：每次录制开始时根据设置重置标志，避免永久降级
+    WGC_FORCE_DEFAULT_DIRTY_REGION.store(force_default, Ordering::Relaxed);
 }
 
 pub fn is_force_default_border_enabled() -> bool {

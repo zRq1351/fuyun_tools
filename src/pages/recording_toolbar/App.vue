@@ -339,6 +339,7 @@ const currentRecordingState = computed(() => {
       normalized === "paused" ||
       normalized === "starting" ||
       normalized === "stopping" ||
+      normalized === "error" ||
       normalized === "disabled"
   ) {
     return normalized;
@@ -635,6 +636,7 @@ const toggleRecordingState = async () => {
 };
 
 const stop = async () => {
+  if (isBusy.value) return;
   loadingAction.value = "stop";
   try {
     await RecordingService.stop(state.sessionId);
@@ -662,8 +664,10 @@ const closeCapsule = async () => {
   }
 };
 
+let isTogglingMic = false;
 const toggleMicState = async () => {
-  if (!canToggleMic.value || isBusy.value) return;
+  if (!canToggleMic.value || isBusy.value || isTogglingMic) return;
+  isTogglingMic = true;
   try {
     const newMutedState = !isMicMuted.value;
     await RecordingService.updateAudioCapture({
@@ -676,6 +680,8 @@ const toggleMicState = async () => {
     showInlineNotice(newMutedState ? t('recordingToolbar.micTemporarilyOff') : t('recordingToolbar.micReenabled'), "warning");
   } catch (e) {
     showBackendErrorInSettings(t('recordingToolbar.toggleMicFailed', {error: String(e)}));
+  } finally {
+    isTogglingMic = false;
   }
 };
 
@@ -932,7 +938,8 @@ onMounted(async () => {
   unlistenStateChanged = await listen("recording-state-changed", (event) => {
     const payload = event.payload || {};
     const incomingState = String(payload.state || state.state || "idle");
-    const nextState = incomingState === "error" ? "idle" : incomingState;
+    // M4 修复：保留 error 状态，不静默映射为 idle
+    const nextState = incomingState;
     const stateChanged = nextState !== state.state;
     state.state = nextState;
     state.sessionId = nextState === "idle" ? null : (payload.sessionId ?? state.sessionId);
@@ -1101,7 +1108,11 @@ onMounted(async () => {
     refreshMicrophoneDevices(),
     refreshAudioProcesses(),
   ]);
-  await refresh();
+  try {
+    await refresh();
+  } catch (_e) {
+    // getState 失败时不阻塞布局初始化
+  }
   await syncCapsuleLayout();
 });
 

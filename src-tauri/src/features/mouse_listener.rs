@@ -609,6 +609,11 @@ pub fn set_selection_listener_enabled(
     }
 }
 
+/// 清除工具栏去抖状态，允许下次选中文本时立即弹出工具栏
+pub fn clear_toolbar_debounce() {
+    lock_arc_mutex(&GLOBAL_STATE.last_toolbar_emit).take();
+}
+
 /// 检查是否有Ctrl键被按下
 pub fn is_any_ctrl_pressed() -> bool {
     GLOBAL_STATE.ctrl_left_pressed.load(Ordering::SeqCst)
@@ -681,8 +686,12 @@ fn is_cursor_ibeam() -> bool {
 
 /// 检查移动轨迹是否呈线性（划词通常是直线）
 fn check_linear_movement(positions: &[(i32, i32)]) -> bool {
-    if positions.len() < 3 {
-        // 点数太少，无法判断
+    if positions.len() < 2 {
+        // 无法判断线性，拒绝通过
+        return false;
+    }
+    if positions.len() == 2 {
+        // 两个点总是"线性"的，配合距离阈值使用
         return true;
     }
     

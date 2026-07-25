@@ -1298,6 +1298,22 @@ pub fn start_system_loopback_aac_with_device(
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
             let stdin = child.stdin.take().ok_or("无法获取 FFmpeg stdin")?;
+            // H1 修复：消费 FFmpeg stderr 防止管道满导致挂起
+            if let Some(stderr) = child.stderr.take() {
+                std::thread::spawn(move || {
+                    use std::io::BufRead;
+                    let reader = std::io::BufReader::new(stderr);
+                    for line in reader.lines() {
+                        match line {
+                            Ok(l) if !l.trim().is_empty() => {
+                                log::debug!("[ffmpeg-aac-stderr] {}", l);
+                            }
+                            Err(_) => break,
+                            _ => {}
+                        }
+                    }
+                });
+            }
 
             {
                 if let Ok(mut guard) = thread_ffmpeg.lock() {
@@ -1340,8 +1356,9 @@ pub fn start_system_loopback_aac_with_device(
                 buffer_size: cpal::BufferSize::Default,
             };
 
-            let (tx_audio, rx_audio) = std::sync::mpsc::channel::<Vec<u8>>();
-            let (tx_pool, rx_pool) = std::sync::mpsc::channel::<Vec<u8>>();
+            // H2 修复：使用有界通道防止音频缓冲区无限累积导致 OOM
+            let (tx_audio, rx_audio) = std::sync::mpsc::sync_channel::<Vec<u8>>(200);
+            let (tx_pool, rx_pool) = std::sync::mpsc::sync_channel::<Vec<u8>>(200);
             for _ in 0..50 {
                 let _ = tx_pool.send(Vec::with_capacity(4096));
             }

@@ -1466,10 +1466,11 @@ fn map_ffmpeg_error(line: &str) -> Option<(&'static str, String)> {
     if lower.contains("immediate exit requested")
         || lower.contains("conversion failed")
         || lower.contains("i/o error")
-        || lower.contains("error")
     {
         return Some((RECORDING_PROCESS_EXITED, line.trim().to_string()));
     }
+    // M1 修复：移除过于宽泛的 "error" catch-all，避免非致命 FFmpeg 消息触发虚假错误
+    // 仅匹配明确的致命错误模式
     None
 }
 
