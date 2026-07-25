@@ -25,7 +25,8 @@ use crate::utils::image_clipboard::set_image_fill_verify_mode;
 #[cfg(debug_assertions)]
 use crate::utils::utils_helpers::get_dedup_scan_metrics;
 use crate::utils::utils_helpers::{
-    default_explanation_prompt_template, default_translation_prompt_template, save_settings,
+    default_explanation_prompt_template, default_translation_prompt_template, load_settings,
+    save_settings,
 };
 use std::collections::HashSet;
 use std::fs;
@@ -2045,4 +2046,20 @@ pub async fn get_memory_metrics() -> Result<Vec<crate::core::perf_metrics::PerfM
 #[tauri::command]
 pub async fn get_ipc_metrics() -> Result<Vec<crate::core::perf_metrics::PerfMetricSnapshot>, String> {
     Ok(crate::core::perf_metrics::get_ipc_metrics())
+}
+
+/// 获取主题
+#[tauri::command]
+pub async fn get_theme() -> Result<String, String> {
+    let settings = load_settings().map_err(|e| e.to_string())?;
+    Ok(settings.theme)
+}
+
+/// 设置主题
+#[tauri::command]
+pub async fn set_theme(theme: String) -> Result<(), String> {
+    let mut settings = load_settings().map_err(|e| e.to_string())?;
+    settings.theme = theme;
+    save_settings(&settings).map_err(|e| e.to_string())?;
+    Ok(())
 }

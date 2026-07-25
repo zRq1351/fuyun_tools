@@ -2,9 +2,11 @@
  * 浮云工具 - 主题管理器
  * 支持：暗色(dark) / 亮色(light) / 护眼(eye-care)
  *
- * 基于 Element Plus 官方暗黑模式实现
- * 使用 .dark 类激活 Element Plus 暗黑模式变量
+ * 主题唯一存储：Rust 后端 settings.json（通过 get_theme / set_theme IPC 命令）
+ * localStorage 仅作为同步缓存，不作为持久存储
  */
+
+import {invoke} from '@tauri-apps/api/core'
 
 const THEME_KEY = 'fuyun-theme'
 const THEMES = ['dark', 'light', 'eye-care']
@@ -15,8 +17,23 @@ const THEME_LABELS = {
 }
 
 /**
- * 获取当前主题
- * @returns {string} 主题名称
+ * 获取当前主题（从后端异步读取，同步回退到 localStorage）
+ */
+export async function fetchTheme() {
+    try {
+        const theme = await invoke('get_theme')
+        if (THEMES.includes(theme)) {
+            localStorage.setItem(THEME_KEY, theme)
+            return theme
+        }
+    } catch (e) {
+        // 后端不可用时使用 localStorage 缓存
+    }
+    return getTheme()
+}
+
+/**
+ * 获取当前主题（同步，从 localStorage 缓存读取）
  */
 export function getTheme() {
     const saved = localStorage.getItem(THEME_KEY)
@@ -25,8 +42,7 @@ export function getTheme() {
 }
 
 /**
- * 设置主题
- * @param {string} theme - 主题名称
+ * 设置主题（写入后端 + 更新 localStorage 缓存）
  */
 export function setTheme(theme) {
     if (!THEMES.includes(theme)) {
@@ -35,12 +51,14 @@ export function setTheme(theme) {
     }
     localStorage.setItem(THEME_KEY, theme)
     applyTheme(theme)
+    invoke('set_theme', {theme}).catch(err => {
+        console.warn('[ThemeManager] 保存主题到后端失败:', err)
+    })
     window.dispatchEvent(new CustomEvent('theme-change', {detail: {theme}}))
 }
 
 /**
  * 应用主题到 DOM
- * @param {string} theme - 主题名称
  */
 export function applyTheme(theme) {
     const validTheme = THEMES.includes(theme) ? theme : 'dark'
@@ -56,25 +74,16 @@ export function applyTheme(theme) {
     document.body.classList.add(`theme-${validTheme}`)
 }
 
-/**
- * 重置为系统主题
- */
 export function resetToSystemTheme() {
     localStorage.removeItem(THEME_KEY)
     applyTheme(getSystemTheme())
+    invoke('set_theme', {theme: getSystemTheme()}).catch(() => {})
 }
 
-/**
- * 获取系统主题偏好
- * @returns {'dark' | 'light'}
- */
 function getSystemTheme() {
     return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-/**
- * 监听系统主题变化
- */
 export function watchSystemTheme(callback) {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
     const handler = (e) => {
@@ -88,9 +97,6 @@ export function watchSystemTheme(callback) {
     return () => mediaQuery.removeEventListener('change', handler)
 }
 
-/**
- * 监听跨窗口主题变化
- */
 export function watchThemeStorage(callback) {
     const handler = (e) => {
         if (e.key === THEME_KEY) {
@@ -103,9 +109,6 @@ export function watchThemeStorage(callback) {
     return () => window.removeEventListener('storage', handler)
 }
 
-/**
- * 监听同窗口主题变化
- */
 export function watchThemeChange(callback) {
     const handler = (e) => {
         callback?.(e.detail.theme)
@@ -115,20 +118,21 @@ export function watchThemeChange(callback) {
 }
 
 /**
- * 初始化主题（在页面加载时调用）
- * @returns {string} 当前主题
+ * 初始化主题：先用 localStorage 快速应用，再从后端同步
  */
 export function initTheme() {
     const saved = localStorage.getItem(THEME_KEY)
     const theme = THEMES.includes(saved) ? saved : 'dark'
     applyTheme(theme)
+    // 异步从后端同步最新主题
+    fetchTheme().then(backendTheme => {
+        if (backendTheme && backendTheme !== theme) {
+            applyTheme(backendTheme)
+        }
+    }).catch(() => {})
     return theme
 }
 
-/**
- * 获取所有可用主题
- * @returns {Array<{value: string, label: string}>}
- */
 export function getAvailableThemes() {
     return THEMES.map(value => ({
         value,
@@ -136,10 +140,6 @@ export function getAvailableThemes() {
     }))
 }
 
-/**
- * 检查是否为暗色主题
- * @returns {boolean}
- */
 export function isDarkTheme() {
     return getTheme() === 'dark'
 }
