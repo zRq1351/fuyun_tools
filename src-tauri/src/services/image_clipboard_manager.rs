@@ -10,7 +10,7 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::OnceLock;
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 /// 待处理图片任务
@@ -55,6 +55,7 @@ static IMAGE_QUEUE_METRICS: LazyLock<ImageQueueMetrics> = LazyLock::new(|| Image
 static IMAGE_WORKERS_STARTED: AtomicBool = AtomicBool::new(false);
 static IMAGE_LISTENER_RUNNING: AtomicBool = AtomicBool::new(false);
 static IMAGE_STOP_TX: OnceLock<StdMutex<Option<Sender<()>>>> = OnceLock::new();
+static IMAGE_WORKERS_SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
 static IMAGE_POLLER: ClipboardPoller = ClipboardPoller::new(&IMAGE_LISTENER_RUNNING, &IMAGE_STOP_TX);
 
@@ -199,7 +200,13 @@ fn process_pending_queue(
     rx: mpsc::Receiver<PendingImageTask>,
 ) {
     log::info!("[处理线程-{}] 图片处理线程已启动，等待任务...", worker_id);
-    while let Ok(task) = rx.recv() {
+    loop {
+        if IMAGE_WORKERS_SHUTDOWN.load(Ordering::Relaxed) {
+            log::info!("[处理线程-{}] 收到关闭信号，退出", worker_id);
+            break;
+        }
+        match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(task) => {
         let wait_ms = task.enqueued_at.elapsed().as_millis() as u64;
         IMAGE_QUEUE_METRICS.dequeued.fetch_add(1, Ordering::Relaxed);
         IMAGE_QUEUE_METRICS
@@ -303,10 +310,18 @@ fn process_pending_queue(
 
         log::info!("[处理线程-{}] 图片处理流程完成", worker_id);
         maybe_log_queue_metrics();
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                log::info!("[处理线程-{}] 通道已关闭，退出", worker_id);
+                break;
+            }
+        }
     }
 }
 
 pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
+    IMAGE_WORKERS_SHUTDOWN.store(false, Ordering::SeqCst);
     if IMAGE_WORKERS_STARTED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
@@ -409,8 +424,13 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
 }
 
 pub fn stop_image_clipboard_listener() {
+    IMAGE_WORKERS_SHUTDOWN.store(true, Ordering::SeqCst);
     IMAGE_POLLER.stop();
     IMAGE_WORKERS_STARTED.store(false, Ordering::SeqCst);
+    // Drop senders so worker threads' recv_timeout returns Disconnected
+    if let Ok(mut senders) = IMAGE_WORKER_SENDERS.lock() {
+        senders.clear();
+    }
 }
 
 pub fn set_image_clipboard_listener_enabled(

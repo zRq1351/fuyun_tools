@@ -2550,9 +2550,6 @@ pub fn stop_recording(
         file_size_bytes,
     };
 
-    // ✅ 立即发送完成事件，UI 可以立即响应
-    emit_recording_finished(app, &result);
-
     // ✅ 在后台异步执行音频合并，不阻塞 UI
     let runtime_audio_bitrate_kbps = {
         let runtime = lock_arc_mutex(&runtime_arc);
@@ -2566,6 +2563,8 @@ pub fn stop_recording(
             Some(path) => path,
             None => {
                 log::warn!("音频合并跳过：输出路径为空");
+                // 无输出路径时直接发送完成事件
+                emit_recording_finished(app, &result);
                 return Ok(result);
             }
         };
@@ -2575,6 +2574,8 @@ pub fn stop_recording(
         let audio_segment_paths_vec: Vec<std::path::PathBuf> =
             audio_segment_paths.into_iter().collect();
 
+        // ✅ 移动 result 到 async 块中，音频合并完成后再发送 finished 事件
+        let result_for_emit = result.clone();
         tauri::async_runtime::spawn(async move {
             // 发送开始事件
             emit_recording_audio_merging(
@@ -2653,6 +2654,8 @@ pub fn stop_recording(
                         Some(100),
                         Some("音频合并完成"),
                     );
+                    // ✅ 音频合并完成后才发送 finished 事件，确保 UI 看到的视频已包含音频
+                    emit_recording_finished(&app_handle, &result_for_emit);
                 }
                 Err(e) => {
                     let detail = e.details.clone().unwrap_or_default();
@@ -2669,6 +2672,8 @@ pub fn stop_recording(
                         None,
                         Some(&msg),
                     );
+                    // ✅ 即使音频合并失败，也发送 finished 事件（视频仍可用，只是无音频）
+                    emit_recording_finished(&app_handle, &result_for_emit);
                     emit_recording_error(
                         &app_handle,
                         Some(&session_id_clone),
@@ -2679,9 +2684,9 @@ pub fn stop_recording(
             }
         });
     } else {
-        // ✅ 如果没有音频片段，直接清理 window_video_segments
-        // （已在前面清理）
+        // ✅ 如果没有音频片段，直接清理 window_video_segments 并发送完成事件
         log::info!("无音频片段，跳过音频合并");
+        emit_recording_finished(app, &result);
     }
 
     Ok(result)

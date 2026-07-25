@@ -209,7 +209,8 @@ impl AIClient {
             })?;
 
         use futures_util::StreamExt;
-        while let Some(result) = stream.next().await {
+        let chunk_timeout = std::time::Duration::from_secs(30);
+        while let Ok(Some(result)) = tokio::time::timeout(chunk_timeout, stream.next()).await {
             match result {
                 Ok(response) => {
                     for choice in response.choices {
@@ -231,7 +232,7 @@ impl AIClient {
                 }
             }
         }
-
+        // If timeout occurred, the stream is considered stalled
         Ok(())
     }
 

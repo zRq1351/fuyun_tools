@@ -258,8 +258,8 @@
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch} from "vue";
 import {useI18n} from "vue-i18n";
+import {useLocale} from "@/composables/useLocale.js";
 import {provideGlobalConfig} from "element-plus";
-import zhCn from "element-plus/dist/locale/zh-cn";
 import {listen} from "@tauri-apps/api/event";
 import {invoke} from "@tauri-apps/api/core";
 import {getCurrentWindow} from "@tauri-apps/api/window";
@@ -269,7 +269,9 @@ import {GripVertical, Mic, MicOff, Settings} from "lucide-vue-next";
 
 const {t} = useI18n()
 
-provideGlobalConfig({locale: zhCn});
+const {elLocale} = useLocale()
+
+provideGlobalConfig({locale: elLocale});
 
 const loadingAction = ref(null);
 const capsuleSettingsVisible = ref(false);

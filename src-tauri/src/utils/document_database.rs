@@ -737,6 +737,8 @@ pub async fn update_doc_file_meta(
     notes: Option<&str>,
 ) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
+    let mut tx = conn.begin().await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let cat_change = category_id.is_some();
     let mut needs_move = false;
@@ -752,7 +754,7 @@ pub async fn update_doc_file_meta(
              WHERE df.id = ?1"
         )
         .bind(id)
-        .fetch_optional(&mut *conn)
+            .fetch_optional(&mut *tx)
         .await
             .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
@@ -769,7 +771,7 @@ pub async fn update_doc_file_meta(
                 } else {
                     sqlx::query_scalar::<_, String>("SELECT name FROM document_categories WHERE id = ?1")
                         .bind(new_cid)
-                        .fetch_optional(&mut *conn)
+                        .fetch_optional(&mut *tx)
                         .await
                         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
                         .unwrap_or_default()
@@ -783,29 +785,30 @@ pub async fn update_doc_file_meta(
         sqlx::query("UPDATE document_files SET title = ?1 WHERE id = ?2")
             .bind(t)
             .bind(id)
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await
             .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
-        let _ = sqlx::query("UPDATE document_files_fts SET title = ?1 WHERE rowid = ?2")
+        sqlx::query("UPDATE document_files_fts SET title = ?1 WHERE rowid = ?2")
             .bind(t)
             .bind(id)
-            .execute(&mut *conn)
-            .await;
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     if let Some(cid) = category_id {
         if cid == -1 {
             sqlx::query("UPDATE document_files SET category_id = NULL WHERE id = ?1")
                 .bind(id)
-                .execute(&mut *conn)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         } else {
             sqlx::query("UPDATE document_files SET category_id = ?1 WHERE id = ?2")
                 .bind(cid)
                 .bind(id)
-                .execute(&mut *conn)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
@@ -815,30 +818,32 @@ pub async fn update_doc_file_meta(
         sqlx::query("UPDATE document_files SET tags = ?1 WHERE id = ?2")
             .bind(tg)
             .bind(id)
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await
             .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
-        let _ = sqlx::query("UPDATE document_files_fts SET tags = ?1 WHERE rowid = ?2")
+        sqlx::query("UPDATE document_files_fts SET tags = ?1 WHERE rowid = ?2")
             .bind(tg)
             .bind(id)
-            .execute(&mut *conn)
-            .await;
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     if let Some(n) = notes {
         sqlx::query("UPDATE document_files SET notes = ?1 WHERE id = ?2")
             .bind(n)
             .bind(id)
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await
             .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
-        let _ = sqlx::query("UPDATE document_files_fts SET notes = ?1 WHERE rowid = ?2")
+        sqlx::query("UPDATE document_files_fts SET notes = ?1 WHERE rowid = ?2")
             .bind(n)
             .bind(id)
-            .execute(&mut *conn)
-            .await;
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     if needs_move {
@@ -860,12 +865,14 @@ pub async fn update_doc_file_meta(
             sqlx::query("UPDATE document_files SET managed_path = ?1 WHERE id = ?2")
                 .bind(&new_managed)
                 .bind(id)
-                .execute(&mut *conn)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
     }
 
+    tx.commit().await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
 

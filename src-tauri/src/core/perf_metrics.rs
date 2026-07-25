@@ -3,10 +3,19 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::process;
 use std::sync::OnceLock;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[cfg(target_os = "windows")]
 use sysinfo::{System, Pid};
+
+/// 缓存的系统资源快照，避免每次查询都重建 System
+struct CachedSystemResources {
+    snapshot: SystemResourceSnapshot,
+    last_refresh: Instant,
+}
+
+static CACHED_SYSTEM_RESOURCES: OnceLock<Mutex<CachedSystemResources>> = OnceLock::new();
+const SYSTEM_RESOURCE_CACHE_TTL: Duration = Duration::from_secs(2);
 
 /// Performance metric categories
 #[derive(Clone, Debug, Serialize, PartialEq, Eq, Hash)]
@@ -62,7 +71,7 @@ pub struct PerfMetricSnapshot {
 }
 
 /// System resource snapshot for memory and CPU monitoring
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemResourceSnapshot {
     pub total_memory_mb: u64,
@@ -260,7 +269,34 @@ where
 }
 
 /// Get current system resource usage (memory and CPU)
+/// 使用 2 秒缓存避免频繁创建 System 实例
 pub fn get_system_resources() -> SystemResourceSnapshot {
+    let cache = CACHED_SYSTEM_RESOURCES.get_or_init(|| {
+        Mutex::new(CachedSystemResources {
+            snapshot: SystemResourceSnapshot::default(),
+            last_refresh: Instant::now() - SYSTEM_RESOURCE_CACHE_TTL * 2,
+        })
+    });
+
+    {
+        let cached = cache.lock();
+        if cached.last_refresh.elapsed() < SYSTEM_RESOURCE_CACHE_TTL {
+            return cached.snapshot.clone();
+        }
+    }
+
+    let snapshot = get_system_resources_inner();
+
+    {
+        let mut cached = cache.lock();
+        cached.snapshot = snapshot.clone();
+        cached.last_refresh = Instant::now();
+    }
+
+    snapshot
+}
+
+fn get_system_resources_inner() -> SystemResourceSnapshot {
     let timestamp = now_unix_ms();
 
     #[cfg(target_os = "windows")]

@@ -1018,7 +1018,7 @@ onMounted(async () => {
   }
 })
 
-const featureLabels = {
+const featureLabels = computed(() => ({
   textClipboardEnabled: t('settings.featureLabels.textClipboardEnabled'),
   imageClipboardEnabled: t('settings.featureLabels.imageClipboardEnabled'),
   screenshotEnabled: t('settings.featureLabels.screenshotEnabled'),
@@ -1026,10 +1026,10 @@ const featureLabels = {
   selectionEnabled: t('settings.featureLabels.selectionEnabled'),
   launcherEnabled: t('settings.featureLabels.launcherEnabled'),
   docManagerEnabled: t('settings.featureLabels.docManagerEnabled'),
-}
+}))
 
 const handleFeatureToggle = async (fieldName, newValue) => {
-  const label = featureLabels[fieldName] || fieldName
+  const label = featureLabels.value[fieldName] || fieldName
   const action = newValue ? t('common.enable') : t('common.disable')
   const actionVerb = newValue ? t('common.enabling') : t('common.disabling')
   const loading = ElLoading.service({

@@ -2794,7 +2794,7 @@ function truncateFutureHistoryForMutation() {
 function pruneHistoryWindowIfNeeded() {
   if (history.value.length <= 50) return
   history.value.shift()
-  historyIndex.value--
+  historyIndex.value = Math.max(0, historyIndex.value - 1)
   const keepOverlayFrom = history.value[0]?.overlayCommandCount ?? 0
   const keepVectorFrom = history.value[0]?.vectorCommandCount ?? 0
   if (keepOverlayFrom > 0) {

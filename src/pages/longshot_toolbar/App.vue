@@ -52,15 +52,27 @@ let unlistenReset = null
 let snapTimer = null
 
 const togglePause = async () => {
-  await invoke('longshot_toolbar_action', {action: paused.value ? 'resume' : 'pause'})
+  try {
+    await invoke('longshot_toolbar_action', {action: paused.value ? 'resume' : 'pause'})
+  } catch (e) {
+    console.error('longshot togglePause failed:', e)
+  }
 }
 
 const finish = async () => {
-  await invoke('longshot_toolbar_action', {action: 'finish'})
+  try {
+    await invoke('longshot_toolbar_action', {action: 'finish'})
+  } catch (e) {
+    console.error('longshot finish failed:', e)
+  }
 }
 
 const cancel = async () => {
-  await invoke('longshot_toolbar_action', {action: 'cancel'})
+  try {
+    await invoke('longshot_toolbar_action', {action: 'cancel'})
+  } catch (e) {
+    console.error('longshot cancel failed:', e)
+  }
 }
 
 const phaseText = computed(() => {

@@ -136,11 +136,50 @@ fn cleanup_stale_screenshot_boot_files() {
     }
 }
 
+/// 清理启动时遗留的录屏临时文件
+/// 防止崩溃后 .tmp.mp4 / .sys.* / .mic.* 文件累积
+fn cleanup_stale_recording_tmp_files() {
+    let mut dir = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    dir.pop();
+    let recordings_dir = dir.join("recordings");
+    if !recordings_dir.exists() {
+        return;
+    }
+    if let Ok(entries) = std::fs::read_dir(&recordings_dir) {
+        let mut count = 0usize;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n,
+                None => continue,
+            };
+            let is_tmp = name.ends_with(".tmp.mp4")
+                || name.contains(".sys.")
+                || name.contains(".mic.");
+            if is_tmp {
+                let _ = std::fs::remove_file(&path);
+                count += 1;
+            }
+        }
+        if count > 0 {
+            log::info!("启动清理: 删除 {} 个遗留录屏临时文件", count);
+        }
+    }
+}
+
 /// 运行Tauri应用程序
 pub fn run() {
     install_global_panic_hook();
     // Bug修复 (B15): 启动时清理上次遗留的截图临时文件
     cleanup_stale_screenshot_boot_files();
+    // 启动时清理遗留的录屏临时文件
+    cleanup_stale_recording_tmp_files();
     let initial_state = AppState::default();
     let state_arc = Arc::new(Mutex::new(initial_state));
 

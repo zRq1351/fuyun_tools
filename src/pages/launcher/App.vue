@@ -245,11 +245,12 @@ const loadIcons = async () => {
 
   try {
     const icons = await invoke('batch_extract_icons', {paths})
-    for (const app of allApps.value) {
+    allApps.value = allApps.value.map(app => {
       if (app.path && icons[app.path]) {
-        app.icon_base64 = icons[app.path]
+        return {...app, icon_base64: icons[app.path]}
       }
-    }
+      return app
+    })
   } catch (error) {
     console.error('Load icons error:', error)
   }

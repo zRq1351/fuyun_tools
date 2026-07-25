@@ -169,7 +169,6 @@ const warmedIndices = new Set()
 const warmingIndices = new Set()
 const pendingWarmupItemIds = new Set()
 let unlistenShowWindow = null
-let unlistenItemPromoted = null
 let unlistenHistoryPayloadUpdated = null
 let unlistenHistoryItemAdded = null
 let unlistenPreviewReady = null
@@ -995,9 +994,6 @@ const promoteImageItem = async (itemId) => {
       demoteLocalItemFromTop(itemId)
     }
 
-
-    const {emit} = await import('@tauri-apps/api/event')
-    await emit('image-item-pinned', {itemId, pinned: shouldPin})
 
   } catch (error) {
     console.error('置顶图片失败:', error)
@@ -1829,15 +1825,6 @@ onMounted(async () => {
     if (isAddingCategory.value) return
     mergeIncrementalImageItem(event?.payload?.item)
   })
-  unlistenItemPromoted = await listen('image-item-pinned', (event) => {
-    const itemId = event?.payload?.itemId
-    const pinned = event?.payload?.pinned !== false
-    if (pinned) {
-      promoteLocalItemToTop(itemId)
-    } else {
-      demoteLocalItemFromTop(itemId)
-    }
-  })
   unlistenWritebackResult = await listen('writeback-result', (event) => {
     const payload = event.payload || {}
     if (payload.source !== '图片') return
@@ -1910,10 +1897,6 @@ onBeforeUnmount(() => {
   if (unlistenHistoryItemAdded) {
     unlistenHistoryItemAdded()
     unlistenHistoryItemAdded = null
-  }
-  if (unlistenItemPromoted) {
-    unlistenItemPromoted()
-    unlistenItemPromoted = null
   }
   if (unlistenPreviewReady) {
     unlistenPreviewReady()

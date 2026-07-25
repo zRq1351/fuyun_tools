@@ -236,6 +236,11 @@ const onMouseEnter = async () => {
       isHovered.value = true
     } catch (e) {
       console.error(e)
+      // Restore miniIcon opacity if it was hidden before the error
+      if (miniIcon) {
+        miniIcon.style.removeProperty('opacity')
+        miniIcon.style.removeProperty('pointer-events')
+      }
     } finally {
       isAnimating = false // 释放动画锁
     }

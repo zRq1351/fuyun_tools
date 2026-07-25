@@ -106,7 +106,7 @@ const INITIAL_DELAY: Duration = Duration::from_millis(10);
 
 use crate::core::app_state::AppState as SharedAppState;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use crate::utils::utils_helpers::now_unix_ms_u64;
 use tauri::image::Image;
 use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -117,7 +117,7 @@ static MANUAL_CTRL_C_TIME: AtomicU64 = AtomicU64::new(0);
 static ALLOW_CLIPBOARD_LISTENER_DURING_SELECTION: AtomicBool = AtomicBool::new(false);
 
 pub fn mark_manual_ctrl_c() {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let now = now_unix_ms_u64();
     MANUAL_CTRL_C_TIME.store(now, Ordering::SeqCst);
     // 允许剪贴板监听器在划词期间处理这次变化
     ALLOW_CLIPBOARD_LISTENER_DURING_SELECTION.store(true, Ordering::SeqCst);
@@ -195,7 +195,7 @@ fn get_selected_text_windows(
     let state_manager = app_handle.state::<Arc<Mutex<SharedAppState>>>();
     let _processing_guard = SelectionProcessingGuard::acquire(state_manager.inner().clone())?;
 
-    let start_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let start_time = now_unix_ms_u64();
 
     // 1. 获取原始剪贴板内容（用于后续恢复）
     let original_snapshot = capture_clipboard_snapshot(&clipboard_manager, app_handle);

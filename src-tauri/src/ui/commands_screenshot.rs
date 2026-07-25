@@ -1201,8 +1201,6 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
             );
             e
         })?;
-    let png_base64 = capture::rgba_to_base64_png(&rgba, width, height)
-        .unwrap_or_default();
 
     let selection_mode = selection_mode;
     ensure_window_for_label(&app, "screenshot")?;
@@ -1214,7 +1212,6 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
             bind_screenshot_window_lifecycle(&window, &app);
         }
         let payload = serde_json::json!({
-            "png_base64": png_base64,
             "image_path": image_path,
             "width": width,
             "height": height,
@@ -1283,7 +1280,6 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
         });
     } else {
         let payload = serde_json::json!({
-            "png_base64": png_base64,
             "image_path": image_path,
             "width": width,
             "height": height,

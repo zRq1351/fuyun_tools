@@ -270,6 +270,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (toastTimer) clearTimeout(toastTimer)
   window.removeEventListener('pinned-image-data', handlePinnedImageData)
 })
 </script>

@@ -1,5 +1,24 @@
 import {invoke} from '@tauri-apps/api/core';
 
+/**
+ * 带统一错误处理的 IPC 调用包装器
+ * 将 Rust 后端的错误转换为包含上下文信息的 Error 对象
+ * @param {string} command - IPC 命令名
+ * @param {object} [args] - 命令参数
+ * @returns {Promise<any>}
+ */
+async function ipcInvoke(command, args) {
+    try {
+        return await invoke(command, args);
+    } catch (error) {
+        const msg = typeof error === 'string' ? error : error?.message || String(error);
+        const err = new Error(`IPC ${command} failed: ${msg}`);
+        err.originalError = error;
+        err.command = command;
+        throw err;
+    }
+}
+
 const buildSelectAndFillRequest = (itemId, opId) => ({
     itemId,
     opId

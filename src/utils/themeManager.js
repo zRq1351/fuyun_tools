@@ -128,6 +128,8 @@ export function initTheme() {
     fetchTheme().then(backendTheme => {
         if (backendTheme && backendTheme !== theme) {
             applyTheme(backendTheme)
+            localStorage.setItem(THEME_KEY, backendTheme)
+            window.dispatchEvent(new CustomEvent('theme-change', {detail: {theme: backendTheme}}))
         }
     }).catch(() => {})
     return theme
