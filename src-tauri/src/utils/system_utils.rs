@@ -132,7 +132,10 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
     let fields_added = contents != new_contents;
 
     // 只有在版本变化、密钥迁移或字段添加时才保存，避免频繁IO
-    if old_version != settings.version || keys_migrated || fields_added {
+    // 使用静态标志防止并发调用时重复保存和日志
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static SAVED_ONCE: AtomicBool = AtomicBool::new(false);
+    if (old_version != settings.version || keys_migrated || fields_added) && !SAVED_ONCE.swap(true, Ordering::Relaxed) {
         log::info!("配置已更新或补全缺失字段，保存到文件");
         save_settings(&settings)?;
     }
