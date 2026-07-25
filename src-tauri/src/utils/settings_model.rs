@@ -825,6 +825,11 @@ impl AppSettingsData {
     }
 
     fn ensure_basic_config_integrity(&mut self) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static INTEGRITY_CHECKED: AtomicBool = AtomicBool::new(false);
+        if INTEGRITY_CHECKED.swap(true, Ordering::Relaxed) {
+            return;
+        }
         log::info!("开始确保基础配置完整性");
         log::debug!("迁移前 max_items: {}", self.max_items);
         if self.max_items < 10 || self.max_items > 1000 {
