@@ -345,7 +345,6 @@ pub fn run() {
             }
 
             let app_handle_clone_recording = app_handle.clone();
-            let state_clone_recording = state_arc.clone();
             if recording_enabled {
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     recording_hot_key.as_str(),
@@ -365,9 +364,8 @@ pub fn run() {
                             }
                             RECORDING_SHORTCUT_LAST_TRIGGER_MS.store(now_ms, Ordering::Release);
                             let app_handle_inner = app_handle_clone_recording.clone();
-                            let state_inner = state_clone_recording.clone();
                             tauri::async_runtime::spawn(async move {
-                                toggle_recording_from_shortcut(app_handle_inner, state_inner).await;
+                                toggle_recording_from_shortcut(app_handle_inner).await;
                                 RECORDING_SHORTCUT_IN_FLIGHT.store(false, Ordering::Release);
                             });
                         }

@@ -295,7 +295,7 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         .execute(&mut *conn)
         .await;
 
-    // Enforce UNIQUE constraint on item_id (idempotent for new installs)
+    // Enforce UNIQUE constraint on item_id (idempotent for new installations)
     let _ = sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_history_items_item_id_unique ON history_items(item_id)")
         .execute(&mut *conn)
         .await;
@@ -1735,7 +1735,7 @@ mod tests {
 
     #[test]
     fn snippet_keyword_at_byte_boundary() {
-        // Chinese characters are multi-byte
+        // Chinese characters are multibyte
         let snippet = build_keyword_snippet("这是测试内容", "测试");
         assert!(snippet.contains("测试"));
     }
@@ -1793,6 +1793,7 @@ mod tests {
     // ===================================================================
 
     use sqlx::sqlite::SqlitePoolOptions;
+    use crate::utils::db_utils::adjust_to_char_boundary;
 
     async fn create_test_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()

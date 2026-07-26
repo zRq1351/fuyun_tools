@@ -736,7 +736,7 @@ pub async fn run_recording_regression(
     .await
 }
 
-pub async fn toggle_recording_from_shortcut(app: AppHandle, _state: Arc<Mutex<SharedAppState>>) {
+pub async fn toggle_recording_from_shortcut(app: AppHandle) {
     if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
         let is_visible = window.is_visible().unwrap_or(false);
         if is_visible {

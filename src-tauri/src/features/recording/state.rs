@@ -193,10 +193,34 @@ impl RecordingRuntime {
             }
         }
         if let Some(join) = self.system_audio_thread.take() {
-            let _ = join.join();
+            let mut exited = false;
+            for _ in 0..500 {
+                if join.is_finished() {
+                    exited = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            if exited {
+                let _ = join.join();
+            } else {
+                log::warn!("reset_to_idle: 系统音频线程超时，放弃等待");
+            }
         }
         if let Some(join) = self.mic_audio_thread.take() {
-            let _ = join.join();
+            let mut exited = false;
+            for _ in 0..500 {
+                if join.is_finished() {
+                    exited = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            if exited {
+                let _ = join.join();
+            } else {
+                log::warn!("reset_to_idle: 麦克风音频线程超时，放弃等待");
+            }
         }
         self.phase = RecordingPhase::Idle;
         self.session_id = None;

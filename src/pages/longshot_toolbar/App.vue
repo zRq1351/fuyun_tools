@@ -242,15 +242,34 @@ const viewportStyle = computed(() => {
   padding: 0;
   cursor: pointer;
   backdrop-filter: blur(2px);
+  transition: all 0.15s var(--fy-ease-out);
 }
 
 .region-icon-btn:hover {
   background: var(--fy-bg-surface);
+  border-color: var(--fy-text-muted);
+  transform: scale(1.05);
+}
+
+.region-icon-btn:active {
+  transform: scale(0.95);
+}
+
+.region-icon-btn:focus-visible {
+  outline: 2px solid var(--fy-accent);
+  outline-offset: 2px;
 }
 
 .region-icon-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
+  transform: none;
+}
+
+.region-icon-btn:disabled:hover {
+  background: var(--fy-bg-hover);
+  border-color: var(--fy-border);
+  transform: none;
 }
 
 .region-icon-btn.primary {
@@ -259,10 +278,19 @@ const viewportStyle = computed(() => {
   color: var(--fy-text-inverse);
 }
 
+.region-icon-btn.primary:hover {
+  background: var(--fy-accent-hover, var(--fy-accent));
+  filter: brightness(1.1);
+}
+
 .region-icon-btn.danger {
   background: var(--fy-danger);
   border-color: var(--fy-danger);
   color: var(--fy-text-inverse);
+}
+
+.region-icon-btn.danger:hover {
+  filter: brightness(1.15);
 }
 
 .tool-icon-wrap {
@@ -282,7 +310,7 @@ const viewportStyle = computed(() => {
   border-radius: 6px;
   overflow: hidden;
   background: var(--fy-bg-surface);
-  border: none;
+  border: 1px solid var(--fy-border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -292,6 +320,7 @@ const viewportStyle = computed(() => {
   height: 100%;
   object-fit: contain;
   image-rendering: auto;
+  transition: opacity 0.2s var(--fy-ease-out);
 }
 .viewport-marker {
   position: absolute;
@@ -303,12 +332,23 @@ const viewportStyle = computed(() => {
   box-shadow: 0 0 0 1px var(--fy-border);
   background: var(--fy-accent-bg);
   pointer-events: none;
+  transition: top 0.1s linear, height 0.1s linear;
 }
-.preview-empty { font-size: 12px; opacity: 0.75; }
-.meta { font-size: 11px; line-height: 1.35; opacity: 0.92; }
+
+.preview-empty {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.meta {
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: 0.75;
+  padding: 2px 0;
+}
 .no-drag { -webkit-app-region: no-drag; }
 
-/* PixPin 风格：预览窗不显示滚动条 */
+
 .panel,
 .preview-wrap {
   scrollbar-width: none;

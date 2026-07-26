@@ -278,6 +278,18 @@ pub(crate) fn register_screenshot_shortcut(app: &AppHandle, hot_key: &str) -> Re
 }
 
 
+/// RAII guard：确保 panic 时也能重置 is_updating_clipboard 标志
+struct UpdatingClipboardGuard(Arc<Mutex<SharedAppState>>);
+
+impl Drop for UpdatingClipboardGuard {
+    fn drop(&mut self) {
+        let mut state_guard = lock_arc_mutex(&self.0);
+        state_guard.is_text_writeback_active = false;
+        state_guard.is_image_writeback_active = false;
+        recompute_selection_related_flags(&mut state_guard);
+    }
+}
+
 pub(crate) fn set_updating_clipboard(state: &Arc<Mutex<SharedAppState>>, updating: bool) {
     let mut state_guard = lock_arc_mutex(state);
     if !updating {
@@ -419,9 +431,8 @@ where
     F: FnOnce() -> Result<T, String>,
 {
     set_updating_clipboard(state, true);
-    let result = operation();
-    set_updating_clipboard(state, false);
-    result
+    let _guard = UpdatingClipboardGuard(state.clone());
+    operation()
 }
 
 pub(crate) fn try_replace_text_clipboard_after_remove(

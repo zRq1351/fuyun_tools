@@ -832,4 +832,21 @@ body {
   margin: 0.8em 0;
   color: var(--fy-text-muted);
 }
+
+/* 全局交互增强：焦点环 + 过渡 */
+button:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--fy-accent);
+  outline-offset: 2px;
+}
+
+button, [role="button"] {
+  transition: transform 0.12s var(--fy-ease-out), filter 0.12s var(--fy-ease-out), opacity 0.15s var(--fy-ease-out);
+}
+
+button:active:not(:disabled),
+[role="button"]:active:not([aria-disabled="true"]) {
+  transform: scale(0.96);
+}
 </style>

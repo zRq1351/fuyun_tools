@@ -38,7 +38,7 @@
       <!-- 选区镂空及控制点 -->
       <div v-if="hasSelection || state === 'selecting'"
            ref="cutoutRef"
-           :class="{ 'is-active': state === 'selected', 'longshot-running': longshotOverlayOnly }"
+           :class="{ 'is-active': state === 'selected', 'longshot-running': longshotOverlayOnly, 'picker-active': currentTool === 'picker' }"
            class="cutout">
 
         <div :class="{ 'is-active': state !== 'drawing' }" class="cutout-border"></div>
@@ -804,16 +804,27 @@ function adjustToolbarPosition() {
 }
 
 const pickerStyle = computed(() => {
-  let left = drawStart.x + 15
-  let top = drawStart.y + 15
-  const pickerWidth = 100
-  const pickerHeight = 40
-  if (left + pickerWidth > window.innerWidth) {
-    left = window.innerWidth - pickerWidth
+  // 取色器实际尺寸：放大镜 132px + gap 8px + meta ~130px ≈ 270px 宽，132px 高
+  const pickerWidth = 276
+  const pickerHeight = 140
+  const margin = 16
+
+  // 优先显示在鼠标右下方
+  let left = drawStart.x + margin
+  let top = drawStart.y + margin
+
+  // 右溢出：改到鼠标左侧
+  if (left + pickerWidth > window.innerWidth - margin) {
+    left = drawStart.x - pickerWidth - margin
   }
-  if (top + pickerHeight > window.innerHeight) {
-    top = window.innerHeight - pickerHeight
+  // 下溢出：改到鼠标上方
+  if (top + pickerHeight > window.innerHeight - margin) {
+    top = drawStart.y - pickerHeight - margin
   }
+  // 边界兜底
+  left = Math.max(margin, Math.min(left, window.innerWidth - pickerWidth - margin))
+  top = Math.max(margin, Math.min(top, window.innerHeight - pickerHeight - margin))
+
   return {
     left: `${left}px`,
     top: `${top}px`
@@ -864,6 +875,10 @@ onMounted(async () => {
   window.addEventListener('start-region-select', handleStartRegionSelect)
   window.addEventListener('screenshot-reset', handleScreenshotReset)
   document.addEventListener('keydown', handleKeyDown)
+  // 全局 mouseup：防止 Alt+Tab 切走后松手导致绘制状态卡死
+  window.addEventListener('mouseup', onGlobalMouseUp)
+  // 窗口失焦时清理绘制状态
+  window.addEventListener('blur', onWindowBlur)
   unlistenManualLongshotProgress = await listen('manual-longshot-progress', (event) => {
     const payload = event.payload || {}
     const sessionId = Number(payload.sessionId || 0)
@@ -993,7 +1008,27 @@ onUnmounted(() => {
     window.clearTimeout(manualLongshotAvailabilityRefreshTimer)
     manualLongshotAvailabilityRefreshTimer = null
   }
+  window.removeEventListener('mouseup', onGlobalMouseUp)
+  window.removeEventListener('blur', onWindowBlur)
 })
+
+function onGlobalMouseUp(e) {
+  // 全局 mouseup：清理 Alt+Tab 切走后残留的绘制状态
+  if (isDrawing.value) {
+    handleCanvasMouseUp(e)
+    state.value = 'selected'
+  }
+}
+
+function onWindowBlur() {
+  // 窗口失焦时结束当前绘制，防止状态残留
+  if (isDrawing.value) {
+    isDrawing.value = false
+    currentDrawingSnapshot = null
+    activeRasterCommand = null
+    state.value = 'selected'
+  }
+}
 
 function handleScreenshotReset() {
   cancelManualLongshotCapture(false)
@@ -1462,6 +1497,10 @@ function loadImageFromSrc(src) {
   isCaptureReady.value = false
   screenshotSrc.value = src
   const img = new Image()
+  // 避免跨域 canvas taint（Tauri asset:// 与 app:// 不同源）
+  if (src.startsWith('http')) {
+    img.crossOrigin = 'anonymous'
+  }
   img.onload = () => {
     screenshotImg.value = img
     screenshotPixelCanvas = document.createElement('canvas')
@@ -1469,7 +1508,13 @@ function loadImageFromSrc(src) {
     screenshotPixelCanvas.height = img.height
     screenshotPixelCtx = screenshotPixelCanvas.getContext('2d')
     if (screenshotPixelCtx) {
-      screenshotPixelCtx.drawImage(img, 0, 0)
+      try {
+        screenshotPixelCtx.drawImage(img, 0, 0)
+      } catch (_) {
+        // 跨域 taint 时回退：通过 fetch+blob 重新加载
+        loadScreenshotPixelFromBlob(src)
+        return
+      }
     }
     try {
       resetAnnotationStateForNewImage()
@@ -1486,6 +1531,30 @@ function loadImageFromSrc(src) {
     isCaptureReady.value = false
   }
   img.src = src
+}
+
+async function loadScreenshotPixelFromBlob(src) {
+  try {
+    const resp = await fetch(src)
+    const blob = await resp.blob()
+    const bitmap = await createImageBitmap(blob)
+    screenshotPixelCanvas = document.createElement('canvas')
+    screenshotPixelCanvas.width = bitmap.width
+    screenshotPixelCanvas.height = bitmap.height
+    screenshotPixelCtx = screenshotPixelCanvas.getContext('2d')
+    if (screenshotPixelCtx) {
+      screenshotPixelCtx.drawImage(bitmap, 0, 0)
+    }
+    bitmap.close()
+    resetAnnotationStateForNewImage()
+    nextTick(() => {
+      initCanvas()
+      isCaptureReady.value = Boolean(canvas.value && canvas.value.width > 0 && canvas.value.height > 0)
+    })
+  } catch (e) {
+    console.error('通过 blob 加载截图像素失败:', e)
+    isCaptureReady.value = false
+  }
 }
 
 function loadImageFromBase64(base64Data) {
@@ -1646,7 +1715,11 @@ function onMouseDown(e) {
       }
     } else {
 
-      if (!isInside(p.x, p.y, rect) && currentTool.value !== 'picker') {
+      if (!isInside(p.x, p.y, rect)) {
+        if (currentTool.value === 'picker') {
+          // 取色器在选区外点击忽略
+          return
+        }
 
         state.value = 'selecting'
         startPoint.x = p.x
@@ -1678,6 +1751,14 @@ function onMouseDown(e) {
 function onMouseMove(e) {
   if (editingTextId.value !== null) return
   const p = toScenePoint(e)
+  // 取色器：鼠标悬停即可拾色，无需点击
+  if (currentTool.value === 'picker' && hasSelection.value) {
+    if (!isInside(p.x, p.y, rect)) return
+    drawStart.x = p.x
+    drawStart.y = p.y
+    pickColorAtScene(p.x, p.y)
+    return
+  }
   if (state.value === 'idle') {
     highlightedWindow.value = detectWindowAt(p.x, p.y)
   } else if (state.value === 'selecting') {
@@ -1989,12 +2070,6 @@ function handleCanvasMouseDown(event) {
 
 function handleCanvasMouseMove(event) {
   const p = toScenePoint(event)
-  if (currentTool.value === 'picker' && !isDrawing.value) {
-    drawStart.x = p.x;
-    drawStart.y = p.y;
-    pickColorAtScene(p.x, p.y);
-    return;
-  }
 
   if (!isDrawing.value) return
 
@@ -2583,13 +2658,22 @@ function pickColorAtScene(sceneX, sceneY) {
 function getMergedPixelColorAt(px, py) {
   const drawCanvas = canvas.value
   if (!drawCanvas || !screenshotPixelCtx || !drawCanvas.width || !drawCanvas.height) return null
-  if (px < 0 || py < 0 || px >= drawCanvas.width || py >= drawCanvas.height) return null
+  // px/py 是物理像素坐标，边界检查用截图画布（物理像素分辨率）
+  const pixelCanvas = screenshotPixelCanvas
+  if (!pixelCanvas) return null
+  if (px < 0 || py < 0 || px >= pixelCanvas.width || py >= pixelCanvas.height) return null
   const baseData = screenshotPixelCtx.getImageData(px, py, 1, 1).data
   const drawCtx = drawCanvas.getContext('2d')
   if (!drawCtx) return {r: baseData[0], g: baseData[1], b: baseData[2]}
+  // 叠加层标注画布使用 CSS 像素分辨率，坐标需缩放
+  const cpx = Math.round(px / dpr)
+  const cpy = Math.round(py / dpr)
+  if (cpx < 0 || cpy < 0 || cpx >= drawCanvas.width || cpy >= drawCanvas.height) {
+    return {r: baseData[0], g: baseData[1], b: baseData[2]}
+  }
   const oldTransform = drawCtx.getTransform()
   drawCtx.resetTransform()
-  const overlayData = drawCtx.getImageData(px, py, 1, 1).data
+  const overlayData = drawCtx.getImageData(cpx, cpy, 1, 1).data
   drawCtx.setTransform(oldTransform)
   if (overlayData[3] > 0) {
     return {r: overlayData[0], g: overlayData[1], b: overlayData[2]}
@@ -3395,6 +3479,11 @@ function handleKeyDown(event) {
     undo()
     return
   }
+  if (event.ctrlKey && event.key === 'y') {
+    event.preventDefault()
+    redo()
+    return
+  }
   if (currentTool.value === 'picker') {
     if (event.key === 'Shift' && !event.repeat) {
       event.preventDefault()
@@ -3612,10 +3701,20 @@ function handleKeyDown(event) {
 .cutout {
   position: absolute;
   pointer-events: none;
+  /* 选区外暗化遮罩 (hole-punch) */
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
 }
 
 .cutout.longshot-running {
   box-shadow: none;
+}
+
+.cutout.picker-active .cutout-border {
+  border-color: #2ecc71;
+}
+
+.cutout.picker-active .cutout-border.is-active {
+  border-color: #2ecc71;
 }
 
 .cutout.is-active {
@@ -3628,7 +3727,7 @@ function handleKeyDown(event) {
   left: 0;
   right: 0;
   bottom: 0;
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 2px solid rgba(255, 255, 255, 0.85);
   pointer-events: auto;
   cursor: crosshair;
 }
@@ -3640,8 +3739,15 @@ function handleKeyDown(event) {
 
 .cutout.longshot-running .cutout-border {
   border: 2px solid #4cb7ff;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 10px rgba(76, 183, 255, 0.5);
   pointer-events: none;
+}
+
+.cutout.picker-active .cutout-border {
+  border-color: #2ecc71;
+}
+
+.cutout.picker-active .cutout-border.is-active {
+  border-color: #2ecc71;
 }
 
 .size-info {

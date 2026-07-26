@@ -108,6 +108,9 @@ onUnmounted(() => {
   color: var(--fy-text-primary);
   display: flex;
   flex-direction: column;
+  border-radius: 10px;
+  backdrop-filter: var(--fy-backdrop-blur-light);
+  transition: background 0.25s var(--fy-ease-out), color 0.25s var(--fy-ease-out);
 }
 
 .drag-handle-wrap {
@@ -125,6 +128,12 @@ onUnmounted(() => {
   border-radius: 999px;
   background: var(--fy-border);
   cursor: move;
+  transition: background 0.15s var(--fy-ease-out), width 0.15s var(--fy-ease-out);
+}
+
+.drag-handle:hover {
+  background: var(--fy-text-muted);
+  width: 120px;
 }
 
 .ocr-editor {
@@ -149,6 +158,24 @@ onUnmounted(() => {
   overflow-wrap: anywhere;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  transition: color 0.2s var(--fy-ease-out);
+}
+
+.ocr-editor::placeholder {
+  color: var(--fy-text-muted);
+  opacity: 0.5;
+}
+
+.ocr-editor:focus {
+  box-shadow: inset 0 0 0 1px var(--fy-accent);
+  border-radius: 6px;
+  outline: none;
+}
+
+textarea:focus-visible {
+  outline: 2px solid var(--fy-accent);
+  outline-offset: -2px;
+  border-radius: 6px;
 }
 
 .ocr-editor::-webkit-scrollbar {

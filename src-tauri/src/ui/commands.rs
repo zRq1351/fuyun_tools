@@ -290,9 +290,8 @@ pub(crate) fn register_recording_shortcut(
         .on_shortcut(hot_key, move |_app, _shortcut, event| {
             if let ShortcutState::Pressed = event.state {
                 let app_handle_inner = app_clone.clone();
-                let state_inner = state.clone();
                 tauri::async_runtime::spawn(async move {
-                    toggle_recording_from_shortcut(app_handle_inner, state_inner).await;
+                    toggle_recording_from_shortcut(app_handle_inner).await;
                 });
             }
         })
@@ -2041,10 +2040,9 @@ pub async fn start_screenshot_command(state: State<'_, Arc<Mutex<SharedAppState>
 
 /// 切换录屏状态
 #[tauri::command]
-pub async fn toggle_recording_command(app: AppHandle, state: State<'_, Arc<Mutex<SharedAppState>>>) -> Result<(), String> {
+pub async fn toggle_recording_command(app: AppHandle, _state: State<'_, Arc<Mutex<SharedAppState>>>) -> Result<(), String> {
     use crate::ui::commands_recording::toggle_recording_from_shortcut;
-    let state_arc = state.inner().clone();
-    toggle_recording_from_shortcut(app, state_arc).await;
+    toggle_recording_from_shortcut(app).await;
     Ok(())
 }
 
