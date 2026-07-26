@@ -763,7 +763,10 @@ pub async fn update_doc_file_meta(
             old_managed = row.try_get(1).unwrap_or_default();
             root_path = row.try_get(2).unwrap_or_default();
             let old_cat_id: Option<i64> = row.try_get(3).unwrap_or(None);
-            let new_cid = category_id.expect("category_id must be provided");
+            let new_cid = match category_id {
+                Some(id) => id,
+                None => return Err(AppErrorKind::InternalError.to_frontend_json_with_details("category_id is required".to_string())),
+            };
 
             if storage_mode == "repo" && !old_managed.is_empty() && old_cat_id != Some(new_cid) {
                 new_cat_name = if new_cid == -1 {

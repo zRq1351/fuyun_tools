@@ -2,10 +2,10 @@ import {h, ref} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {check} from '@tauri-apps/plugin-updater'
 import {relaunch} from '@tauri-apps/plugin-process'
-import {marked} from 'marked'
+import {Marked} from 'marked'
 import {ElMessageBox} from 'element-plus'
 
-marked.setOptions({
+const marked = new Marked({
     breaks: false,
     gfm: true,
 })

@@ -96,5 +96,8 @@ pub fn app_error_to_frontend_json(err: AppError) -> String {
 
 /// 检查字符串是否为有效的前端错误 JSON
 pub fn is_frontend_error_json(s: &str) -> bool {
-    s.starts_with("{\"code\":\"E_")
+    serde_json::from_str::<serde_json::Value>(s)
+        .ok()
+        .map(|v| v.get("code").is_some())
+        .unwrap_or(false)
 }

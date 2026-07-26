@@ -85,11 +85,12 @@ fn wake_hub() -> &'static WakeHub {
 
 fn ensure_wake_dispatcher_started() {
     static STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     STARTED.get_or_init(|| {
         thread::spawn(move || {
             let mut wake_backend = ClipboardWakeBackend::new();
-            loop {
-                let signal = wake_backend.wait_with_signal(Duration::from_secs(24 * 60 * 60));
+            while !SHUTDOWN.load(std::sync::atomic::Ordering::Relaxed) {
+                let signal = wake_backend.wait_with_signal(Duration::from_secs(60));
                 if !matches!(signal, WakeSignal::Event) {
                     continue;
                 }

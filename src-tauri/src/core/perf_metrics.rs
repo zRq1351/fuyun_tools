@@ -301,8 +301,8 @@ fn get_system_resources_inner() -> SystemResourceSnapshot {
 
     #[cfg(target_os = "windows")]
     {
-        let mut sys = System::new_all();
-        sys.refresh_all();
+        let mut sys = System::new();
+        sys.refresh_memory();
 
         let total_memory = sys.total_memory() / 1024 / 1024;
         let used_memory = sys.used_memory() / 1024 / 1024;
@@ -320,6 +320,7 @@ fn get_system_resources_inner() -> SystemResourceSnapshot {
                 .unwrap_or(0)
         };
 
+        sys.refresh_cpu_all();
         let cpu_usage = sys.global_cpu_usage() as f64;
 
         SystemResourceSnapshot {

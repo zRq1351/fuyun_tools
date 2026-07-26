@@ -321,11 +321,11 @@ fn process_pending_queue(
 }
 
 pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
-    IMAGE_WORKERS_SHUTDOWN.store(false, Ordering::SeqCst);
     if IMAGE_WORKERS_STARTED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
     {
+        IMAGE_WORKERS_SHUTDOWN.store(false, Ordering::SeqCst);
         let mut senders = IMAGE_WORKER_SENDERS
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());

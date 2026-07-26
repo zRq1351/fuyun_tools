@@ -1,13 +1,8 @@
 use crate::services::ocr_engine::{OcrLine, OcrParagraph, clean_ocr_text};
 use ocr_rs::{OcrEngine, OcrEngineConfig};
-use std::sync::{LazyLock, Mutex};
 
-/// 互斥锁保证同一时刻只有一个 OCR 引擎初始化在进行
-static OCR_INIT_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-
-/// 获取 OCR 引擎（每次调用创建新实例，因为 OcrEngine 不实现 Clone）
+/// 获取 OCR 引擎（每次调用创建新实例，因为 OcrEngine 不实现 Clone/Sync）
 fn get_or_init_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {
-    let _guard = OCR_INIT_LOCK.lock().map_err(|e| format!("OCR 初始化锁中毒: {}", e))?;
     init_ocr_engine(app_handle)
 }
 
