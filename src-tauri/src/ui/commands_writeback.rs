@@ -50,7 +50,7 @@ pub(crate) fn emit_writeback_phase(
     operation_id: Option<u64>,
     detail: Option<String>,
 ) {
-    let _ = app.emit(
+    if let Err(e) = app.emit(
         "writeback-phase",
         serde_json::json!({
             "source": source,
@@ -58,7 +58,9 @@ pub(crate) fn emit_writeback_phase(
             "operationId": operation_id,
             "detail": detail,
         }),
-    );
+    ) {
+        log::warn!("发送回写阶段事件失败: {}", e);
+    }
 }
 
 pub(crate) fn writeback_metric_source_key(source: &str) -> &'static str {
@@ -636,5 +638,7 @@ pub(crate) fn emit_writeback_result(app: &AppHandle, result: &WriteBackExecution
     if let Ok(mut guard) = slot.lock() {
         *guard = Some(result.clone());
     }
-    let _ = app.emit("writeback-result", result);
+    if let Err(e) = app.emit("writeback-result", result) {
+        log::warn!("发送回写结果事件失败: {}", e);
+    }
 }

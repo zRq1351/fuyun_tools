@@ -3,13 +3,23 @@
     <div class="header" data-tauri-drag-region>
       <div class="title" data-tauri-drag-region>{{ titleText }}</div>
       <div class="actions no-drag">
-        <button :disabled="phase === 'finishing' || phase === 'canceling' || phase === 'failed'" class="btn"
-                @click="togglePause">{{ paused ? t('longshot.continue') : t('longshot.pause') }}
+        <button :disabled="phase === 'finishing' || phase === 'canceling' || phase === 'failed'" :title="paused ? t('longshot.continue') : t('longshot.pause')"
+                class="region-icon-btn"
+                @click="togglePause">
+          <span v-if="paused" class="btn-icon">▶</span>
+          <span v-else class="btn-icon">||</span>
         </button>
-        <button :disabled="phase === 'finishing' || phase === 'canceling' || phase === 'failed'" class="btn primary"
-                @click="finish">{{ t('longshot.finish') }}
+        <button :disabled="phase === 'finishing' || phase === 'canceling' || phase === 'failed'"
+                :title="t('longshot.finish')"
+                class="region-icon-btn primary"
+                @click="finish">
+          <Check class="tool-icon-wrap"/>
         </button>
-        <button :disabled="phase === 'canceling'" class="btn danger" @click="cancel">{{ t('longshot.cancel') }}</button>
+        <button :disabled="phase === 'canceling'" :title="t('longshot.cancel')"
+                class="region-icon-btn danger"
+                @click="cancel">
+          <X class="tool-icon-wrap"/>
+        </button>
       </div>
     </div>
 
@@ -34,6 +44,7 @@ import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
 import {listen} from '@tauri-apps/api/event'
 import {useI18n} from 'vue-i18n'
+import {Check, X} from 'lucide-vue-next'
 
 const {t} = useI18n()
 const paused = ref(false)
@@ -217,26 +228,51 @@ const viewportStyle = computed(() => {
   display: flex;
   gap: 6px;
 }
-.btn {
-  flex: 1;
-  height: 24px;
-  border-radius: 6px;
+
+.region-icon-btn {
+  width: 32px;
+  height: 32px;
   border: 1px solid var(--fy-border);
   background: var(--fy-bg-hover);
   color: var(--fy-text-primary);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   cursor: pointer;
-  padding: 0 4px;
-  font-size: 12px;
+  backdrop-filter: blur(2px);
 }
 
-.btn.primary {
-  background: var(--fy-accent-bg);
+.region-icon-btn:hover {
+  background: var(--fy-bg-surface);
+}
+
+.region-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.region-icon-btn.primary {
+  background: var(--fy-accent);
   border-color: var(--fy-accent);
+  color: var(--fy-text-inverse);
 }
 
-.btn.danger {
-  background: var(--fy-danger-bg);
+.region-icon-btn.danger {
+  background: var(--fy-danger);
   border-color: var(--fy-danger);
+  color: var(--fy-text-inverse);
+}
+
+.tool-icon-wrap {
+  width: 16px;
+  height: 16px;
+}
+
+.btn-icon {
+  font-size: 12px;
+  line-height: 1;
 }
 .preview-wrap {
   position: relative;

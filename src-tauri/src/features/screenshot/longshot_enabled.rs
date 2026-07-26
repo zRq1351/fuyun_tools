@@ -299,7 +299,7 @@ pub fn start_manual_longshot(
     });
     drop(slot);
 
-    let _ = app.emit(
+    if let Err(e) = app.emit(
         "manual-longshot-lifecycle",
         serde_json::json!({
             "sessionId": session_id,
@@ -307,7 +307,9 @@ pub fn start_manual_longshot(
             "phase": "starting",
             "userMessage": "正在准备长截图环境",
         }),
-    );
+    ) {
+        log::warn!("发送长截图启动事件失败: {}", e);
+    }
 
     Ok(serde_json::json!({
         "success": true,
@@ -323,7 +325,7 @@ pub fn pause_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Stri
             status.phase = status_phase(&status.state);
             status.user_message = user_message_for_state(&status.state, None, None);
         }
-        let _ = app.emit(
+        if let Err(e) = app.emit(
             "manual-longshot-lifecycle",
             serde_json::json!({
                 "sessionId": session_id,
@@ -331,7 +333,9 @@ pub fn pause_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Stri
                 "phase": "paused",
                 "userMessage": "长截图已暂停，可继续或完成",
             }),
-        );
+        ) {
+            log::warn!("发送长截图暂停事件失败: {}", e);
+        }
         Ok(())
     })
 }
@@ -344,7 +348,7 @@ pub fn resume_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
             status.phase = status_phase(&status.state);
             status.user_message = user_message_for_state(&status.state, None, None);
         }
-        let _ = app.emit(
+        if let Err(e) = app.emit(
             "manual-longshot-lifecycle",
             serde_json::json!({
                 "sessionId": session_id,
@@ -352,7 +356,9 @@ pub fn resume_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
                 "phase": "running",
                 "userMessage": "长截图进行中，请继续滚动目标内容",
             }),
-        );
+        ) {
+            log::warn!("发送长截图恢复事件失败: {}", e);
+        }
         Ok(())
     })
 }
@@ -379,14 +385,29 @@ pub fn cancel_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
     drop(slot);
     if let Some(handle) = worker {
         thread::spawn(move || {
-            let _ = handle.join();
+            // 等待 worker 结束，最多 5 秒超时避免永久阻塞
+            let join_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                // 先尝试 join，同时设置一个超时检测
+                let start = Instant::now();
+                while !handle.is_finished() {
+                    if start.elapsed() > Duration::from_secs(5) {
+                        log::warn!("长截图 worker 线程未在 {} 秒内退出，放弃等待", 5);
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+                let _ = handle.join();
+            }));
+            if let Err(_) = join_result {
+                log::warn!("长截图 worker 线程 panic，已忽略");
+            }
             clear_runtime_if_finished(session_id);
         });
     } else {
         clear_runtime_if_finished(session_id);
     }
 
-    let _ = app.emit(
+    if let Err(e) = app.emit(
         "manual-longshot-lifecycle",
         serde_json::json!({
             "sessionId": session_id,
@@ -394,7 +415,9 @@ pub fn cancel_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
             "phase": "canceling",
             "userMessage": "正在取消长截图并回收资源",
         }),
-    );
+    ) {
+        log::warn!("发送长截图取消事件失败: {}", e);
+    }
     Ok(())
 }
 
@@ -425,6 +448,15 @@ pub fn finish_manual_longshot(
     drop(slot);
 
     if let Some(handle) = worker {
+        // 等待 worker 最多 30 秒，超时返回错误
+        let start = Instant::now();
+        while !handle.is_finished() {
+            if start.elapsed() > Duration::from_secs(30) {
+                log::error!("长截图 worker 线程在 {} 秒内未完成，超时放弃", 30);
+                return Err(AppErrorKind::LongshotTimeout.to_frontend_json());
+            }
+            thread::sleep(Duration::from_millis(200));
+        }
         let _ = handle.join();
     }
     let result = control
@@ -443,7 +475,7 @@ pub fn finish_manual_longshot(
             .unwrap_or_else(|| "长截图结束失败，未生成结果图片".to_string()));
     };
 
-    let _ = app.emit(
+    if let Err(e) = app.emit(
         "manual-longshot-lifecycle",
         serde_json::json!({
             "sessionId": session_id,
@@ -453,7 +485,9 @@ pub fn finish_manual_longshot(
             "width": final_result.width,
             "height": final_result.height,
         }),
-    );
+    ) {
+        log::warn!("发送长截图完成事件失败: {}", e);
+    }
     Ok(final_result)
 }
 

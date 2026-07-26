@@ -84,14 +84,16 @@ fn emit_overlay_window_lifecycle(app_handle: &AppHandle, label: &str, action: &s
         guard.overlay_lifecycle_history.pop_front();
     }
     }
-    let _ = app_handle.emit(
+    if let Err(e) = app_handle.emit(
         "overlay-window-lifecycle",
         serde_json::json!({
             "label": label,
             "action": action,
             "focused": focused,
         }),
-    );
+    ) {
+        log::warn!("发送覆盖窗口生命周期事件失败: {}", e);
+    }
 }
 
 fn show_overlay_window(
@@ -741,7 +743,8 @@ pub fn ensure_overlay_window(
     .shadow(false)
     .transparent(true)
     .always_on_top(true)
-    .skip_taskbar(true);
+        .skip_taskbar(true)
+        .accept_first_mouse(true);
 
     if let Some((w, h)) = inner_size {
         builder = builder.inner_size(w, h);
@@ -807,6 +810,7 @@ fn ensure_clipboard_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Stri
     .resizable(true)
     .maximizable(false)
     .minimizable(false)
+        .accept_first_mouse(true)
     .build()
     .map_err(|e| format!("创建剪贴板窗口失败: {}", e))?;
     bind_overlay_window_events(&window, app.clone(), label);
@@ -835,6 +839,7 @@ fn ensure_image_clipboard_window(app: &AppHandle) -> Result<tauri::WebviewWindow
     .resizable(true)
     .maximizable(false)
     .minimizable(false)
+        .accept_first_mouse(true)
     .build()
     .map_err(|e| format!("创建图片剪贴板窗口失败: {}", e))?;
     bind_overlay_window_events(&window, app.clone(), label);
@@ -861,6 +866,7 @@ fn ensure_launcher_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Strin
     .resizable(true)
     .maximizable(false)
     .minimizable(false)
+        .accept_first_mouse(true)
     .center()
     .min_inner_size(620.0, 480.0)
     .inner_size(800.0, 600.0)
@@ -892,9 +898,10 @@ fn ensure_screenshot_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Str
     .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
-    .resizable(true)
+        .resizable(false)
     .maximizable(false)
     .minimizable(false)
+        .accept_first_mouse(true)
     .build()
     .map_err(|e| format!("创建截图窗口失败: {}", e))?;
     bind_overlay_window_events(&window, app.clone(), label);

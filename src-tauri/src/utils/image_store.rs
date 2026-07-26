@@ -3,7 +3,7 @@ use crate::core::error_codes::AppErrorKind;
 use crate::utils::image_clipboard::{
     ImageHistoryData, ImageHistoryItem, ImageHistoryPageData, ImageHistoryPageItem,
 };
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqliteSynchronous};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Row, SqliteConnection};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -135,6 +135,11 @@ async fn init_image_store_schema_async(conn: &mut SqliteConnection) -> Result<()
         .await?;
     exec(
         conn,
+        "CREATE INDEX IF NOT EXISTS idx_image_category_list_category ON image_category_list(category)",
+    )
+        .await?;
+    exec(
+        conn,
         "
         CREATE TABLE IF NOT EXISTS image_tags (
             item_id TEXT NOT NULL,
@@ -204,7 +209,9 @@ async fn get_pool() -> Result<Arc<SqlitePool>, String> {
         fs::create_dir_all(parent).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
-    let pool = SqlitePool::connect_with(image_store_options(&db_path))
+    let pool = SqlitePoolOptions::new()
+        .max_connections(3)
+        .connect_with(image_store_options(&db_path))
         .await
         .map_err(|e| AppErrorKind::ImageStorePoolFailed.to_frontend_json_with_details(format!("{}", e)))?;
 

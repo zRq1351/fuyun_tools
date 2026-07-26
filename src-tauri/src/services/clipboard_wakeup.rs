@@ -285,12 +285,14 @@ impl WindowsClipboardEventBackend {
                     None,
                 );
 
-                if hwnd.is_err() {
-                    log::error!("创建剪贴板消息窗口失败");
-                    let _ = ready_tx.send(false);
-                    return;
-                }
-                let hwnd = hwnd.unwrap();
+                let hwnd = match hwnd {
+                    Ok(h) => h,
+                    Err(_) => {
+                        log::error!("创建剪贴板消息窗口失败");
+                        let _ = ready_tx.send(false);
+                        return;
+                    }
+                };
                 // Bug修复 (B10): 使用 RAII 保护窗口资源
                 let mut window_guard = WindowGuard { hwnd, listener_added: false };
                 hwnd_holder_for_thread.store(hwnd.0 as isize, Ordering::Release);

@@ -1,6 +1,6 @@
 <template>
   <div
-      :class="['pixpin-editor', editorCursorClass]"
+      :class="['fy-editor', editorCursorClass]"
        @mousedown="onMouseDown"
        @mousemove="onMouseMove"
        @mouseup="onMouseUp"
@@ -186,10 +186,10 @@
                 @click="pinToScreenAndClose">
           <Pin class="tool-icon-wrap"/>
         </button>
-        <button :title="t('screenshot.cancelSelection')" class="tool-btn" @click="cancelSelection">
+        <button :title="t('screenshot.cancelSelection')" class="tool-btn danger" @click="cancelSelection">
           <X class="tool-icon-wrap"/>
         </button>
-        <button :disabled="!canExport" :title="t('screenshot.finishAndCopy')" class="tool-btn"
+        <button :disabled="!canExport" :title="t('screenshot.finishAndCopy')" class="tool-btn confirm"
                 @click="completeAndCopyUnlinked">
           <Check class="tool-icon-wrap"/>
         </button>
@@ -776,16 +776,32 @@ const toolbarStyle = computed(() => {
   }
 
   if (right < 10) right = 10
-  const estimatedToolbarWidth = 650
-  if (right + estimatedToolbarWidth > window.innerWidth) {
-    right = Math.max(10, window.innerWidth - estimatedToolbarWidth)
-  }
 
   return {
     top: `${top}px`,
     right: `${right}px`
   }
 })
+
+function adjustToolbarPosition() {
+  const toolbar = floatingToolbarRef.value
+  if (!toolbar) return
+
+  const toolbarRect = toolbar.getBoundingClientRect()
+  const toolbarWidth = toolbarRect.width
+  const toolbarLeft = toolbarRect.left
+
+  // 如果工具栏超出屏幕左侧
+  if (toolbarLeft < 0) {
+    const newRight = window.innerWidth - toolbarWidth - 10
+    toolbar.style.right = `${Math.max(10, newRight)}px`
+  }
+
+  // 如果工具栏超出屏幕右侧
+  if (toolbarLeft + toolbarWidth > window.innerWidth) {
+    toolbar.style.right = '10px'
+  }
+}
 
 const pickerStyle = computed(() => {
   let left = drawStart.x + 15
@@ -834,6 +850,10 @@ watchPostEffect(() => {
     }
     applyStyleObject(el, getTextItemStyle(item))
   }
+  // 调整工具栏位置，确保不超出屏幕边界
+  nextTick(() => {
+    adjustToolbarPosition()
+  })
 })
 
 // 初始化与通信
@@ -1558,6 +1578,10 @@ async function ensureCaptureReady() {
 }
 
 // 鼠标交互逻辑
+function onBorderMouseDown(e) {
+  onMouseDown(e)
+}
+
 function onMouseDown(e) {
   if (editingTextId.value !== null) {
     finishInlineEdit()
@@ -1571,6 +1595,7 @@ function onMouseDown(e) {
     selectedShapeId.value = null
   }
   const p = toScenePoint(e)
+  if (isDevMode) console.log('[mousedown]', 'state=' + state.value, 'target=' + e.target.className, 'p=' + Math.round(p.x) + ',' + Math.round(p.y), 'rect=' + Math.round(rect.x) + ',' + Math.round(rect.y) + ' ' + Math.round(rect.width) + 'x' + Math.round(rect.height), 'border=' + isInsideBorder(p.x, p.y, rect), 'inside=' + isInside(p.x, p.y, rect))
   if (state.value === 'idle') {
     state.value = 'selecting'
     startPoint.x = p.x
@@ -1587,6 +1612,18 @@ function onMouseDown(e) {
         startPoint.y = e.clientY
         startRect.x = longshotViewOffset.x
         startRect.y = longshotViewOffset.y
+      } else if (isInsideBorder(p.x, p.y, rect)) {
+        state.value = 'selecting'
+        startPoint.x = p.x
+        startPoint.y = p.y
+        rect.x = p.x
+        rect.y = p.y
+        rect.width = 0
+        rect.height = 0
+        if (history.value.length > 0) {
+          historyIndex.value = 0
+          restoreFromHistory()
+        }
       } else if (isInside(p.x, p.y, rect)) {
         state.value = 'moving'
         startPoint.x = p.x
@@ -1630,7 +1667,11 @@ function onMouseDown(e) {
       handleCanvasMouseDown(e)
     }
   } else if (state.value === 'drawing') {
-    handleCanvasMouseDown(e)
+    // 正在绘制时再次点击：先结束当前绘制，再开始新的
+    handleCanvasMouseUp(e)
+    if (currentTool.value !== 'picker') {
+      handleCanvasMouseDown(e)
+    }
   }
 }
 
@@ -1785,6 +1826,16 @@ function cancelSelection() {
 // 辅助函数
 function isInside(x, y, r) {
   return x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height
+}
+
+function isInsideBorder(x, y, r, borderThreshold = 4) {
+  if (!isInside(x, y, r)) return false
+  if (!r.width || !r.height) return false
+  const nearLeft = x - r.x < borderThreshold
+  const nearRight = (r.x + r.width) - x < borderThreshold
+  const nearTop = y - r.y < borderThreshold
+  const nearBottom = (r.y + r.height) - y < borderThreshold
+  return nearLeft || nearRight || nearTop || nearBottom
 }
 
 function detectWindowAt(x, y) {
@@ -3388,7 +3439,7 @@ function handleKeyDown(event) {
   overflow: hidden;
 }
 
-.pixpin-editor {
+.fy-editor {
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -3397,11 +3448,11 @@ function handleKeyDown(event) {
   background: transparent;
 }
 
-.pixpin-editor.cursor-crosshair {
+.fy-editor.cursor-crosshair {
   cursor: crosshair;
 }
 
-.pixpin-editor.cursor-default {
+.fy-editor.cursor-default {
   cursor: default;
 }
 
@@ -3416,7 +3467,7 @@ function handleKeyDown(event) {
   width: 32px;
   height: 32px;
   border: 1px solid var(--fy-border);
-  background: var(--fy-bg-surface);
+  background: var(--fy-bg-hover);
   color: var(--fy-text-primary);
   border-radius: 8px;
   display: flex;
@@ -3428,18 +3479,19 @@ function handleKeyDown(event) {
 }
 
 .region-icon-btn:hover {
-  background: var(--fy-bg-hover);
+  background: var(--fy-bg-surface);
 }
 
 .region-icon-btn.primary {
-  background: var(--fy-accent-bg);
+  background: var(--fy-accent);
   border-color: var(--fy-accent);
   color: var(--fy-text-inverse);
 }
 
 .region-icon-btn.danger {
-  background: var(--fy-danger-bg);
+  background: var(--fy-danger);
   border-color: var(--fy-danger);
+  color: var(--fy-text-inverse);
 }
 
 .manual-longshot-hint {
@@ -3546,6 +3598,7 @@ function handleKeyDown(event) {
   width: 100vw;
   height: 100vh;
   z-index: 3;
+  background: transparent;
 }
 
 .mask-layer.pointer-none {
@@ -3558,8 +3611,7 @@ function handleKeyDown(event) {
 
 .cutout {
   position: absolute;
-  /* 使用巨大阴影实现外围遮罩效果 */
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
 }
 
 .cutout.longshot-running {
@@ -3577,15 +3629,19 @@ function handleKeyDown(event) {
   right: 0;
   bottom: 0;
   border: 1px solid rgba(255, 255, 255, 0.5);
+  pointer-events: auto;
+  cursor: crosshair;
 }
 
 .cutout-border.is-active {
   border: 2px solid var(--fy-accent);
+  cursor: move;
 }
 
 .cutout.longshot-running .cutout-border {
   border: 2px solid #4cb7ff;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 10px rgba(76, 183, 255, 0.5);
+  pointer-events: none;
 }
 
 .size-info {
@@ -3610,6 +3666,7 @@ function handleKeyDown(event) {
   border-radius: 50%;
   transform: translate(-50%, -50%);
   z-index: 10;
+  pointer-events: auto;
 }
 
 .handle.tl {
@@ -3696,49 +3753,54 @@ function handleKeyDown(event) {
   position: absolute;
   background: var(--fy-bg-surface);
   border: 1px solid var(--fy-border);
-  border-radius: 6px;
-  padding: 4px;
+  border-radius: 8px;
+  padding: 5px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   z-index: 1000;
-  box-shadow: var(--fy-shadow);
+  box-shadow: var(--fy-shadow-lg);
+  backdrop-filter: var(--fy-backdrop-blur-light);
+  max-width: calc(100vw - 20px);
 }
 
 .tools-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  flex-wrap: nowrap;
 }
 
 .tool-btn {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border: none;
   background: transparent;
   color: var(--fy-text-secondary);
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   display: flex;
   justify-content: center;
   align-items: center;
   font-size: 14px;
-  transition: all 0.2s;
+  transition: all 0.15s ease;
 }
 
 .tool-btn:hover {
   background: var(--fy-bg-hover);
   color: var(--fy-text-primary);
+  transform: scale(1.05);
 }
 
 .tool-btn.active {
-  background: var(--fy-accent-bg);
-  color: var(--fy-accent);
+  background: var(--fy-accent);
+  color: var(--fy-text-inverse);
 }
 
 .tool-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+  transform: none;
 }
 
 .tool-icon-wrap {
@@ -3749,13 +3811,31 @@ function handleKeyDown(event) {
 }
 
 .tool-btn.primary {
-  color: #00aaff;
+  color: var(--fy-accent);
 }
 
 .tool-btn.mini {
   width: 26px;
   height: 26px;
   font-size: 12px;
+}
+
+.tool-btn.danger {
+  color: var(--fy-danger);
+}
+
+.tool-btn.danger:hover {
+  background: var(--fy-danger);
+  color: var(--fy-text-inverse);
+}
+
+.tool-btn.confirm {
+  color: var(--fy-success);
+}
+
+.tool-btn.confirm:hover {
+  background: var(--fy-success);
+  color: var(--fy-text-inverse);
 }
 
 .divider {

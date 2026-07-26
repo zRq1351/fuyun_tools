@@ -106,6 +106,7 @@ pub enum AppErrorKind {
     LongshotDependencyMissing,
     LongshotFfmpegReadFailed,
     LongshotCancelled,
+    LongshotTimeout,
 
     // === 录屏 ===
     RecordingFeatureDisabled,
@@ -280,6 +281,7 @@ impl AppErrorKind {
             Self::LongshotDependencyMissing => "长截图依赖未就绪，请检查 FFmpeg 或 OpenCV 环境",
             Self::LongshotFfmpegReadFailed => "无法读取 ffmpeg 输出",
             Self::LongshotCancelled => "长截图已取消",
+            Self::LongshotTimeout => "长截图处理超时，请重试",
 
             Self::RecordingFeatureDisabled => "录屏功能已停用",
             Self::RecordingFfmpegNotFound => "未找到ffmpeg",
@@ -440,7 +442,8 @@ impl AppErrorKind {
             | Self::LongshotAreaTooLarge
             | Self::LongshotDependencyMissing
             | Self::LongshotFfmpegReadFailed
-            | Self::LongshotCancelled => ErrorCode::SystemError,
+            | Self::LongshotCancelled
+            | Self::LongshotTimeout => ErrorCode::SystemError,
             Self::RecordingFeatureDisabled
             | Self::RecordingFfmpegNotFound
             | Self::RecordingStartFailed

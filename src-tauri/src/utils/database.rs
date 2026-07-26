@@ -110,6 +110,96 @@ async fn bulk_upsert_history_items(
     Ok(())
 }
 
+async fn bulk_upsert_categories(
+    tx: &mut Transaction<'_, Sqlite>,
+    entries: &[(String, String)],
+) -> Result<(), String> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    sqlx::query("CREATE TEMP TABLE IF NOT EXISTS temp_upsert_categories (item_id TEXT PRIMARY KEY, category TEXT)")
+        .execute(&mut **tx).await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM temp_upsert_categories")
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    for chunk in entries.chunks(300) {
+        let mut qb: QueryBuilder<Sqlite> =
+            QueryBuilder::new("INSERT INTO temp_upsert_categories (item_id, category) ");
+        qb.push_values(chunk, |mut b, (item_id, category)| {
+            b.push_bind(item_id).push_bind(category);
+        });
+        qb.build()
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    }
+
+    sqlx::query("
+        INSERT INTO categories(category, item_id)
+        SELECT category, item_id FROM temp_upsert_categories
+        ON CONFLICT(item_id) DO UPDATE SET category = excluded.category
+    ").execute(&mut **tx).await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+
+    Ok(())
+}
+
+async fn bulk_upsert_category_list(
+    tx: &mut Transaction<'_, Sqlite>,
+    categories: &[String],
+) -> Result<(), String> {
+    if categories.is_empty() {
+        return Ok(());
+    }
+    let mut qb: QueryBuilder<Sqlite> =
+        QueryBuilder::new("INSERT INTO category_list(category) ");
+    qb.push_values(categories, |mut b, category| {
+        b.push_bind(category);
+    });
+    qb.build()
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+
+    Ok(())
+}
+
+async fn bulk_upsert_pinned_items(
+    tx: &mut Transaction<'_, Sqlite>,
+    entries: &[(String, i64)],
+) -> Result<(), String> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    sqlx::query("CREATE TEMP TABLE IF NOT EXISTS temp_upsert_pinned (item_id TEXT PRIMARY KEY, pinned_at INTEGER)")
+        .execute(&mut **tx).await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM temp_upsert_pinned")
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    for chunk in entries.chunks(300) {
+        let mut qb: QueryBuilder<Sqlite> =
+            QueryBuilder::new("INSERT INTO temp_upsert_pinned (item_id, pinned_at) ");
+        qb.push_values(chunk, |mut b, (item_id, pinned_at)| {
+            b.push_bind(item_id).push_bind(*pinned_at);
+        });
+        qb.build()
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    }
+
+    sqlx::query("
+        INSERT INTO pinned_items(pinned_at, item_id)
+        SELECT pinned_at, item_id FROM temp_upsert_pinned
+        ON CONFLICT(item_id) DO UPDATE SET pinned_at = excluded.pinned_at
+    ").execute(&mut **tx).await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+
+    Ok(())
+}
+
 async fn get_history_db_pool() -> Result<&'static SqlitePool, String> {
     HISTORY_DB_POOL
         .get_or_try_init(|| async {
@@ -867,50 +957,23 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         .await;
     }
 
-    for (item_id, category) in &data.categories {
-        let item_id_str = item_id.as_str();
-        if !desired_item_id_set.contains(item_id_str) {
-            continue;
-        }
-        sqlx::query(
-            "INSERT INTO categories(category, item_id) VALUES(?1, ?2)
-             ON CONFLICT(item_id) DO UPDATE SET category = ?1",
-        )
-        .bind(category)
-        .bind(item_id_str)
-        .execute(&mut *tx)
-        .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-    }
+    let categories_to_upsert: Vec<(String, String)> = data.categories.iter()
+        .filter(|(item_id, _)| desired_item_id_set.contains(item_id.as_str()))
+        .map(|(item_id, category)| (item_id.clone(), category.clone()))
+        .collect();
+    bulk_upsert_categories(&mut tx, &categories_to_upsert).await?;
 
     sqlx::query("DELETE FROM category_list")
         .execute(&mut *tx)
         .await
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-    for category in &data.category_list {
-        sqlx::query("INSERT INTO category_list(category) VALUES(?)")
-            .bind(category)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-    }
+    bulk_upsert_category_list(&mut tx, &data.category_list).await?;
 
-    for (idx, item_id) in data.pinned_items.iter().enumerate() {
-        let item_id_str = item_id.as_str();
-        if !desired_item_id_set.contains(item_id_str) {
-            continue;
-        }
-        let pinned_at = now_ms - (idx as i64);
-        sqlx::query(
-            "INSERT INTO pinned_items(pinned_at, item_id) VALUES(?1, ?2)
-             ON CONFLICT(item_id) DO UPDATE SET pinned_at = ?1",
-        )
-        .bind(pinned_at)
-        .bind(item_id_str)
-        .execute(&mut *tx)
-        .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-    }
+    let pinned_to_upsert: Vec<(String, i64)> = data.pinned_items.iter().enumerate()
+        .filter(|(_, item_id)| desired_item_id_set.contains(item_id.as_str()))
+        .map(|(idx, item_id)| (item_id.clone(), now_ms - (idx as i64)))
+        .collect();
+    bulk_upsert_pinned_items(&mut tx, &pinned_to_upsert).await?;
 
     // 批量更新FTS索引：用一条SQL替代逐条N+1查询
     let _ = sqlx::query(

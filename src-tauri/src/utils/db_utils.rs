@@ -3,6 +3,22 @@ use sqlx::{QueryBuilder, Sqlite, Transaction};
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// 验证标识符（表名、列名）是否安全
+/// 只允许字母、数字和下划线，且不能为空
+fn validate_identifier(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("Identifier cannot be empty".to_string());
+    }
+    if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err(format!("Invalid identifier: {}", name));
+    }
+    // 防止纯数字开头（SQLite惯例）
+    if name.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+        return Err(format!("Identifier cannot start with a digit: {}", name));
+    }
+    Ok(())
+}
+
 /// FTS5 特殊字符转义
 pub fn escape_fts_token(token: &str) -> String {
     let mut s = String::with_capacity(token.len());
@@ -66,6 +82,9 @@ pub async fn reset_temp_text_table(
     table_name: &str,
     column_name: &str,
 ) -> Result<(), String> {
+    validate_identifier(table_name)?;
+    validate_identifier(column_name)?;
+    
     let create_sql = format!(
         "CREATE TEMP TABLE IF NOT EXISTS {} ({} TEXT PRIMARY KEY)",
         table_name, column_name
@@ -91,6 +110,9 @@ pub async fn fill_temp_text_table(
     column_name: &str,
     values: &[String],
 ) -> Result<(), String> {
+    validate_identifier(table_name)?;
+    validate_identifier(column_name)?;
+    
     if values.is_empty() {
         return Ok(());
     }
@@ -117,6 +139,9 @@ pub async fn reset_temp_position_table(
     table_name: &str,
     key_column: &str,
 ) -> Result<(), String> {
+    validate_identifier(table_name)?;
+    validate_identifier(key_column)?;
+    
     let create_sql = format!(
         "CREATE TEMP TABLE IF NOT EXISTS {} ({} TEXT PRIMARY KEY, position INTEGER NOT NULL)",
         table_name, key_column
@@ -142,6 +167,9 @@ pub async fn fill_temp_position_table(
     key_column: &str,
     values: &[String],
 ) -> Result<(), String> {
+    validate_identifier(table_name)?;
+    validate_identifier(key_column)?;
+    
     if values.is_empty() {
         return Ok(());
     }

@@ -203,7 +203,14 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
         let src_path = file_path_str.clone();
 
         let (resolved_name, managed_path_val, need_move, dest_dir_clone) = if is_repo {
-            let dir = target_dir_opt.as_ref().expect("target_dir must be set when is_repo is true");
+            let dir = match target_dir_opt.as_ref() {
+                Some(d) => d,
+                None => {
+                    log::error!("target_dir 未设置但 is_repo 为 true，跳过该文件");
+                    errors.push(format!("内部错误：目标目录未设置 {}", file_name));
+                    continue;
+                }
+            };
             let name = document_database::resolve_unused_filename(dir, file_name, &file_ext);
             let dest = dir.join(&name);
             (name, dest.to_string_lossy().to_string(), true, Some(dest))
@@ -213,9 +220,21 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
 
         let src_for_extract = src_path.clone();
         let ext_for_extract = file_ext.clone();
-        let content_text = task::spawn_blocking(move || {
+        let content_text = match task::spawn_blocking(move || {
             document_text_extract::extract_file_content(Path::new(&src_for_extract), &ext_for_extract)
-        }).await.unwrap_or_default();
+        }).await {
+            Ok(text) => text,
+            Err(e) => {
+                let msg = if e.is_panic() {
+                    format!("文件内容提取线程 panic: {}", file_name)
+                } else {
+                    format!("文件内容提取被取消: {}", file_name)
+                };
+                log::error!("{}", msg);
+                errors.push(msg);
+                continue;
+            }
+        };
 
         match document_database::insert_doc_file(
             request.root_id, &resolved_name, &file_ext, file_size, &file_hash,
@@ -224,7 +243,14 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
         ).await {
             Ok(id) => {
                 if need_move {
-                    let dest = dest_dir_clone.as_ref().expect("dest_dir must be set when need_move is true");
+                    let dest = match dest_dir_clone.as_ref() {
+                        Some(d) => d,
+                        None => {
+                            log::error!("dest_dir 未设置但 need_move 为 true，跳过文件移动: {}", file_name);
+                            errors.push(format!("内部错误：目标目录未设置 {}", file_name));
+                            continue;
+                        }
+                    };
                     if let Err(e) = document_database::safe_move_file(src, dest) {
                         document_database::delete_doc_file(id).await.ok();
                         errors.push(format!("移动文件失败 {}: {}", file_name, e));
@@ -360,7 +386,9 @@ pub async fn delete_doc(request: DeleteDocRequest) -> Result<(), String> {
         let source = Path::new(&doc.source_path);
         if managed.exists() && managed != source {
             if let Some(parent) = source.parent() {
-                let _ = fs::create_dir_all(parent);
+                if let Err(e) = fs::create_dir_all(parent) {
+                    log::error!("创建源文件目录失败 {}: {}", parent.display(), e);
+                }
             }
             document_database::safe_move_file(managed, source)
                 .map_err(|e| format!("回搬文件失败: {}", e))?;

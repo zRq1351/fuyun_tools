@@ -58,24 +58,55 @@ const renderedHtml = ref('')
 let pendingRafId = null
 
 const RENDER_CACHE_MAX_SIZE = 200
-const renderCache = new Map()
+const RENDER_CACHE_MAX_BYTES = 2 * 1024 * 1024 // 2MB total memory ceiling
+const RENDER_CACHE_TTL_MS = 30_000 // 30s TTL — 超时自动淘汰
+const renderCache = new Map() // key → { type, html, ts }
+let renderCacheBytes = 0
+
+const estimateByteSize = (str) => {
+  return (str || '').length * 2
+}
 
 const getCachedResult = (text) => {
   const cached = renderCache.get(text)
-  if (cached) {
-    renderCache.delete(text)
-    renderCache.set(text, cached)
-    return cached
+  if (!cached) return null
+  if (Date.now() - cached.ts > RENDER_CACHE_TTL_MS) {
+    evictCacheEntry(text)
+    return null
   }
-  return null
+  // LRU: move to end
+  renderCache.delete(text)
+  renderCache.set(text, cached)
+  return cached
+}
+
+const evictCacheEntry = (key) => {
+  const entry = renderCache.get(key)
+  if (entry) {
+    renderCacheBytes -= estimateByteSize(key) + estimateByteSize(entry.html || '')
+    renderCache.delete(key)
+  }
+}
+
+const evictOldestUntilRoom = (neededBytes) => {
+  // 先淘汰过期条目，再按 LRU 淘汰
+  const now = Date.now()
+  for (const [key, entry] of renderCache) {
+    if (now - entry.ts > RENDER_CACHE_TTL_MS) {
+      evictCacheEntry(key)
+    }
+  }
+  while (renderCache.size > 0 && (renderCache.size >= RENDER_CACHE_MAX_SIZE || renderCacheBytes + neededBytes > RENDER_CACHE_MAX_BYTES)) {
+    const firstKey = renderCache.keys().next().value
+    evictCacheEntry(firstKey)
+  }
 }
 
 const setCacheResult = (text, result) => {
-  if (renderCache.size >= RENDER_CACHE_MAX_SIZE) {
-    const firstKey = renderCache.keys().next().value
-    renderCache.delete(firstKey)
-  }
-  renderCache.set(text, result)
+  const entryBytes = estimateByteSize(text) + estimateByteSize(result?.html || '')
+  evictOldestUntilRoom(entryBytes)
+  renderCache.set(text, {...result, ts: Date.now()})
+  renderCacheBytes += entryBytes
 }
 
 const detectAndProcess = (text) => {

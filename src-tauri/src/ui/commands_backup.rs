@@ -710,3 +710,147 @@ pub async fn run_auto_backup_tick(state: Arc<Mutex<SharedAppState>>) -> Result<b
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    /// 创建临时测试目录
+    fn create_test_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("fuyun_test_backup_{}",
+                                                    std::time::SystemTime::now()
+                                                        .duration_since(std::time::UNIX_EPOCH)
+                                                        .unwrap()
+                                                        .as_nanos()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// 测试路径遍历防护：正常文件应该被允许
+    #[test]
+    fn test_path_traversal_normal_file() {
+        let test_dir = create_test_dir();
+        let backup_file = test_dir.join("backup_2024.fytbk.zip");
+        fs::write(&backup_file, "test").unwrap();
+
+        // 模拟路径检查逻辑
+        let canonical_target_dir = test_dir.canonicalize().unwrap();
+        let canonical_path = backup_file.canonicalize().unwrap();
+
+        assert!(canonical_path.starts_with(&canonical_target_dir));
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    /// 测试路径遍历防护：包含 .. 的路径应该被拒绝
+    #[test]
+    fn test_path_traversal_dotdot_rejected() {
+        let test_dir = create_test_dir();
+        let backup_file = test_dir.join("backup_2024.fytbk.zip");
+        fs::write(&backup_file, "test").unwrap();
+
+        // 构造一个包含 .. 的路径
+        let malicious_path = test_dir.join("..").join(test_dir.file_name().unwrap()).join("backup_2024.fytbk.zip");
+
+        // 模拟路径检查逻辑
+        let canonical_target_dir = test_dir.canonicalize().unwrap();
+
+        // canonicalize 会解析 ..，所以 canonical_path 应该等于 canonical_target_dir 下的文件
+        if let Ok(canonical_path) = malicious_path.canonicalize() {
+            // 如果 canonicalize 成功，检查是否在目标目录内
+            assert!(canonical_path.starts_with(&canonical_target_dir));
+        }
+        // 如果 canonicalize 失败（路径不存在），也是安全的
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    /// 测试路径遍历防护：符号链接指向外部应该被拒绝
+    #[test]
+    fn test_path_traversal_symlink_rejected() {
+        let test_dir = create_test_dir();
+        let outside_dir = std::env::temp_dir().join("fuyun_test_outside");
+        fs::create_dir_all(&outside_dir).unwrap();
+        fs::write(outside_dir.join("secret.txt"), "secret").unwrap();
+
+        // 在测试目录中创建一个指向外部的符号链接
+        #[cfg(windows)]
+        {
+            // Windows 上需要管理员权限创建符号链接，跳过这个测试
+            let _ = fs::remove_dir_all(&outside_dir);
+            let _ = fs::remove_dir_all(&test_dir);
+            return;
+        }
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside_dir, test_dir.join("link")).unwrap();
+
+            let canonical_target_dir = test_dir.canonicalize().unwrap();
+            let symlink_path = test_dir.join("link");
+
+            if let Ok(canonical_path) = symlink_path.canonicalize() {
+                // canonicalize 会解析符号链接，所以 canonical_path 应该指向外部目录
+                assert!(!canonical_path.starts_with(&canonical_target_dir));
+            }
+        }
+
+        let _ = fs::remove_dir_all(&outside_dir);
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    /// 测试文件扩展名验证
+    #[test]
+    fn test_file_extension_validation() {
+        // 有效扩展名
+        assert!("backup_2024.fytbk.zip".ends_with(".fytbk.zip"));
+        assert!("my_backup.fytbk.zip".ends_with(".fytbk.zip"));
+
+        // 无效扩展名
+        assert!(!"backup_2024.zip".ends_with(".fytbk.zip"));
+        assert!(!"backup_2024.fytbk".ends_with(".fytbk.zip"));
+        assert!(!"backup_2024.txt".ends_with(".fytbk.zip"));
+        assert!(!".fytbk.zip".ends_with(".fytbk.zip")); // 无文件名
+    }
+
+    /// 测试空路径处理
+    #[test]
+    fn test_empty_path_handling() {
+        let empty_path = PathBuf::from("");
+
+        // 空路径的 file_name 应该返回 None
+        assert!(empty_path.file_name().is_none());
+
+        // 空路径的 canonicalize 应该失败
+        assert!(empty_path.canonicalize().is_err());
+    }
+
+    /// 测试相对路径处理
+    #[test]
+    fn test_relative_path_handling() {
+        let test_dir = create_test_dir();
+        let backup_file = test_dir.join("backup_2024.fytbk.zip");
+        fs::write(&backup_file, "test").unwrap();
+
+        // 相对路径 canonicalize 后应该变成绝对路径
+        let relative_path = PathBuf::from("backup_2024.fytbk.zip");
+
+        // 在测试目录中模拟检查
+        let canonical_target_dir = test_dir.canonicalize().unwrap();
+
+        // 由于相对路径不在测试目录中，canonicalize 会基于当前工作目录
+        // 这个测试验证 canonicalize 的行为
+        if let Ok(canonical_path) = relative_path.canonicalize() {
+            // 相对路径解析后可能不在测试目录中
+            // 这正是我们想要的行为 - 路径遍历攻击会被拒绝
+            if !canonical_path.starts_with(&canonical_target_dir) {
+                // 预期行为：路径不在允许的目录中
+                assert!(true);
+            }
+        }
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+}

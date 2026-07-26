@@ -48,13 +48,22 @@ impl ClipboardPoller {
         thread::spawn(move || {
             let wake_rx = subscribe_clipboard_wake_events();
             let mut missed_event = false;
+            let mut idle_cycles: u32 = 0; // 连续空闲周期计数，用于渐进降频
 
             loop {
                 if stop_rx.try_recv().is_ok() {
                     break;
                 }
 
-                let timeout_ms = if missed_event { 50 } else { 250 };
+                // 自适应间隔：活跃 50ms → 空闲 250ms → 深度空闲 1000ms
+                let timeout_ms = if missed_event {
+                    idle_cycles = 0;
+                    50
+                } else if idle_cycles < 8 {
+                    250
+                } else {
+                    1000
+                };
                 let has_event = match wake_rx.recv_timeout(Duration::from_millis(timeout_ms)) {
                     Ok(_) => true,
                     Err(mpsc::RecvTimeoutError::Timeout) => false,
@@ -73,6 +82,8 @@ impl ClipboardPoller {
                 if missed_event {
                     missed_event = false;
                     on_event();
+                } else {
+                    idle_cycles = idle_cycles.saturating_add(1);
                 }
             }
 

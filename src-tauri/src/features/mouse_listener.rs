@@ -551,8 +551,14 @@ fn start_windows_hook_listener(app_handle: AppHandle, state: Arc<Mutex<SharedApp
             log::error!("安装划词低级键鼠 Hook 失败");
             return;
         }
-        let keyboard_hook = keyboard_hook.unwrap();
-        let mouse_hook = mouse_hook.unwrap();
+        let keyboard_hook = match keyboard_hook {
+            Ok(h) => h,
+            Err(_) => return,
+        };
+        let mouse_hook = match mouse_hook {
+            Ok(h) => h,
+            Err(_) => return,
+        };
 
         log::info!("划词低级键鼠 Hook 已启动");
         let mut msg: MSG = std::mem::zeroed();
@@ -659,12 +665,13 @@ fn is_cursor_ibeam() -> bool {
         }
         
         // 获取系统标准的 IBEAM 光标句柄
-        let ibeam_cursor = LoadCursorW(None, IDC_IBEAM);
-        if ibeam_cursor.is_err() {
-            log::warn!("LoadCursorW(IDC_IBEAM) 调用失败");
-            return false;
-        }
-        let ibeam_cursor = ibeam_cursor.unwrap();
+        let ibeam_cursor = match LoadCursorW(None, IDC_IBEAM) {
+            Ok(h) => h,
+            Err(_) => {
+                log::warn!("LoadCursorW(IDC_IBEAM) 调用失败");
+                return false;
+            }
+        };
         
         // 比较当前光标与 IBEAM 光标
         let is_ibeam = cursor_info.hCursor == ibeam_cursor;

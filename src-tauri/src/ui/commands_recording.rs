@@ -181,7 +181,7 @@ pub async fn download_recording_ffmpeg(
         let _ = fs::remove_file(&tmp_path);
     }
 
-    let _ = app.emit(
+    if let Err(e) = app.emit(
         "recording-ffmpeg-download-progress",
         RecordingFfmpegDownloadProgress {
             phase: "start".to_string(),
@@ -190,7 +190,9 @@ pub async fn download_recording_ffmpeg(
             progress_percent: Some(0),
             message: "开始下载 ffmpeg".to_string(),
         },
-    );
+    ) {
+        log::warn!("发送FFmpeg下载进度事件失败: {}", e);
+    }
 
     let client = reqwest::Client::new();
     let response = client
@@ -225,7 +227,7 @@ pub async fn download_recording_ffmpeg(
                 Some(((downloaded_bytes.saturating_mul(100)) / total).min(100) as u8)
             }
         });
-        let _ = app.emit(
+        if let Err(e) = app.emit(
             "recording-ffmpeg-download-progress",
             RecordingFfmpegDownloadProgress {
                 phase: "downloading".to_string(),
@@ -234,7 +236,9 @@ pub async fn download_recording_ffmpeg(
                 progress_percent,
                 message: "正在下载 ffmpeg".to_string(),
             },
-        );
+        ) {
+            log::warn!("发送FFmpeg下载进度事件失败: {}", e);
+        }
     }
     use tokio::io::AsyncWriteExt;
     file.flush()
@@ -258,7 +262,7 @@ pub async fn download_recording_ffmpeg(
         })
         .map_err(|e| format!("写入 ffmpeg 文件失败: {}", e))?;
 
-    let _ = app.emit(
+    if let Err(e) = app.emit(
         "recording-ffmpeg-download-progress",
         RecordingFfmpegDownloadProgress {
             phase: "completed".to_string(),
@@ -267,7 +271,9 @@ pub async fn download_recording_ffmpeg(
             progress_percent: Some(100),
             message: "ffmpeg 下载完成".to_string(),
         },
-    );
+    ) {
+        log::warn!("发送FFmpeg下载完成事件失败: {}", e);
+    }
 
     Ok(RecordingFfmpegStatus {
         exists: true,
@@ -734,13 +740,21 @@ pub async fn toggle_recording_from_shortcut(app: AppHandle, _state: Arc<Mutex<Sh
     if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
         let is_visible = window.is_visible().unwrap_or(false);
         if is_visible {
-            let _ = crate::ui::window_manager::hide_overlay_window_by_label(&app, "recording_toolbar");
+            if let Err(e) = crate::ui::window_manager::hide_overlay_window_by_label(&app, "recording_toolbar") {
+                log::warn!("隐藏录屏工具栏失败: {}", e);
+            }
         } else {
             let target_width = 226.0;
-            let _ = window.set_size(tauri::LogicalSize::new(target_width, 40.0));
+            if let Err(e) = window.set_size(tauri::LogicalSize::new(target_width, 40.0)) {
+                log::warn!("设置录屏工具栏大小失败: {}", e);
+            }
             move_window_top_center(&window, Some(target_width));
-            let _ = show_overlay_window_by_label(&app, "recording_toolbar", true);
-            let _ = app.emit("recording-toolbar-force-compact", ());
+            if let Err(e) = show_overlay_window_by_label(&app, "recording_toolbar", true) {
+                log::warn!("显示录屏工具栏失败: {}", e);
+            }
+            if let Err(e) = app.emit("recording-toolbar-force-compact", ()) {
+                log::warn!("发送录屏工具栏强制紧凑事件失败: {}", e);
+            }
         }
     }
 }
@@ -794,9 +808,13 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
     }
 
     if enable {
-        let _ = app.emit("recording-mic-key-pressed", serde_json::json!({}));
+        if let Err(e) = app.emit("recording-mic-key-pressed", serde_json::json!({})) {
+            log::warn!("发送麦克风按键按下事件失败: {}", e);
+        }
     } else {
-        let _ = app.emit("recording-mic-key-released", serde_json::json!({}));
+        if let Err(e) = app.emit("recording-mic-key-released", serde_json::json!({})) {
+            log::warn!("发送麦克风按键释放事件失败: {}", e);
+        }
     }
 
     log::info!(
@@ -816,22 +834,26 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
     ) {
         Ok(_) => {
             log::info!("麦克风已{}", if enable { "启用" } else { "禁用" });
-            let _ = app.emit(
+            if let Err(e) = app.emit(
                 "recording-mic-toggled",
                 serde_json::json!({
                     "enabled": enable
                 }),
-            );
+            ) {
+                log::warn!("发送麦克风切换事件失败: {}", e);
+            }
         }
         Err(e) => {
             log::error!("切换麦克风失败: {}", e);
-            let _ = app.emit(
+            if let Err(e) = app.emit(
                 "recording-error",
                 serde_json::json!({
                     "message": format!("切换麦克风失败: {}", e),
                     "code": "MIC_TOGGLE_FAILED"
                 }),
-            );
+            ) {
+                log::warn!("发送录屏错误事件失败: {}", e);
+            }
         }
     }
 }

@@ -255,7 +255,9 @@ pub(crate) fn bind_screenshot_window_lifecycle(window: &tauri::WebviewWindow, ap
 
 #[tauri::command]
 pub async fn selection_toolbar_blur(app: AppHandle) -> Result<(), String> {
-    let _ = hide_overlay_window_by_label(&app, "selection_toolbar");
+    if let Err(e) = hide_overlay_window_by_label(&app, "selection_toolbar") {
+        log::warn!("隐藏选区工具栏失败: {}", e);
+    }
     Ok(())
 }
 
@@ -271,7 +273,9 @@ pub async fn open_settings_window(
             "tab": tab.unwrap_or_else(|| "ai".to_string()),
             "reason": reason.unwrap_or_default()
         });
-        let _ = settings_window.emit("navigate-settings-tab", payload);
+        if let Err(e) = settings_window.emit("navigate-settings-tab", payload) {
+            log::warn!("发送设置窗口导航事件失败: {}", e);
+        }
     }
     Ok(())
 }
@@ -315,7 +319,9 @@ pub async fn show_selection_toolbar_with_text(
         x,
         y
     );
-    let _ = ensure_window_for_label(&app, "selection_toolbar");
+    if let Err(e) = ensure_window_for_label(&app, "selection_toolbar") {
+        log::warn!("创建选区工具栏窗口失败: {}", e);
+    }
     crate::ui::window_manager::show_selection_toolbar_force_impl(
         app.clone(),
         content.clone(),
@@ -327,7 +333,9 @@ pub async fn show_selection_toolbar_with_text(
         let script = format!(
             "window.__SELECTION_TOOLBAR_TEXT__ = {payload}; window.dispatchEvent(new CustomEvent('selection-toolbar-text', {{ detail: {payload} }}));"
         );
-        let _ = toolbar_window.eval(&script);
+        if let Err(e) = toolbar_window.eval(&script) {
+            log::warn!("注入选区工具栏文本脚本失败: {}", e);
+        }
     }
     Ok(())
 }
@@ -401,19 +409,29 @@ pub async fn show_ocr_text_window(
     };
     target_x = target_x.clamp(min_x, max_x.max(min_x));
 
-    let _ = window.set_size(tauri::PhysicalSize::new(
+    if let Err(e) = window.set_size(tauri::PhysicalSize::new(
         target_width as u32,
         target_height as u32,
-    ));
-    let _ = window.set_always_on_top(true);
-    let _ = window.set_position(tauri::PhysicalPosition::new(target_x, target_y));
-    let _ = show_overlay_window_by_label(&app, &result_label, true);
+    )) {
+        log::warn!("设置OCR文本窗口大小失败: {}", e);
+    }
+    if let Err(e) = window.set_always_on_top(true) {
+        log::warn!("设置OCR文本窗口置顶失败: {}", e);
+    }
+    if let Err(e) = window.set_position(tauri::PhysicalPosition::new(target_x, target_y)) {
+        log::warn!("设置OCR文本窗口位置失败: {}", e);
+    }
+    if let Err(e) = show_overlay_window_by_label(&app, &result_label, true) {
+        log::warn!("显示OCR文本窗口失败: {}", e);
+    }
 
     let payload = serde_json::json!({"text": content});
     let script = format!(
         "window.__OCR_TEXT_PAYLOAD__ = {payload}; window.dispatchEvent(new CustomEvent('ocr-text-data', {{ detail: {payload} }}));"
     );
-    let _ = window.eval(&script);
+    if let Err(e) = window.eval(&script) {
+        log::warn!("注入OCR文本数据脚本失败: {}", e);
+    }
     Ok(())
 }
 
@@ -819,7 +837,9 @@ pub async fn save_app_settings(
             if settings.text_clipboard_enabled {
                 if let Err(e) = register_text_shortcut(&app, state.inner().clone(), hot_key_val.as_str()) {
                     log::warn!("注册新文字窗口快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", hot_key_val, e);
-                    let _ = register_text_shortcut(&app, state.inner().clone(), old_hot_key.as_str());
+                    if let Err(e2) = register_text_shortcut(&app, state.inner().clone(), old_hot_key.as_str()) {
+                        log::error!("恢复旧文字窗口快捷键 '{}' 也失败: {}", old_hot_key, e2);
+                    }
                     return Err(e);
                 }
             }
@@ -876,7 +896,9 @@ pub async fn save_app_settings(
             if settings.image_clipboard_enabled {
                 if let Err(e) = register_image_shortcut(&app, state.inner().clone(), image_hot_key_val.as_str()) {
                     log::warn!("注册新图片窗口快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", image_hot_key_val, e);
-                    let _ = register_image_shortcut(&app, state.inner().clone(), old_image_hot_key.as_str());
+                    if let Err(e2) = register_image_shortcut(&app, state.inner().clone(), old_image_hot_key.as_str()) {
+                        log::error!("恢复旧图片窗口快捷键 '{}' 也失败: {}", old_image_hot_key, e2);
+                    }
                     return Err(e);
                 }
             }
@@ -932,7 +954,9 @@ pub async fn save_app_settings(
             if settings.screenshot_enabled {
                 if let Err(e) = register_screenshot_shortcut(&app, screenshot_hot_key_val.as_str()) {
                     log::warn!("注册新截图快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", screenshot_hot_key_val, e);
-                    let _ = register_screenshot_shortcut(&app, old_screenshot_hot_key.as_str());
+                    if let Err(e2) = register_screenshot_shortcut(&app, old_screenshot_hot_key.as_str()) {
+                        log::error!("恢复旧截图快捷键 '{}' 也失败: {}", old_screenshot_hot_key, e2);
+                    }
                     return Err(e);
                 }
             }
@@ -996,7 +1020,9 @@ pub async fn save_app_settings(
                     recording_hot_key_val.as_str(),
                 ) {
                     log::warn!("注册新录屏快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", recording_hot_key_val, e);
-                    let _ = register_recording_shortcut(&app, state.inner().clone(), old_recording_hot_key.as_str());
+                    if let Err(e2) = register_recording_shortcut(&app, state.inner().clone(), old_recording_hot_key.as_str()) {
+                        log::error!("恢复旧录屏快捷键 '{}' 也失败: {}", old_recording_hot_key, e2);
+                    }
                     return Err(e);
                 }
             }
@@ -1085,7 +1111,7 @@ pub async fn save_app_settings(
                         e
                     );
                     let app_handle_for_rollback = app.clone();
-                    let _ = app.global_shortcut().on_shortcut(
+                    if let Err(e2) = app.global_shortcut().on_shortcut(
                         old_mic_key_for_rollback.as_str(),
                         move |_app, _shortcut, event| {
                             let app_handle_inner = app_handle_for_rollback.clone();
@@ -1102,7 +1128,9 @@ pub async fn save_app_settings(
                                 }
                             }
                         },
-                    );
+                    ) {
+                        log::error!("恢复旧麦克风切换快捷键 '{}' 也失败: {}", old_mic_key_for_rollback, e2);
+                    }
                     return Err(frontend_error_kind_params(
                         AppErrorKind::ClipboardHotkeyRegisterFailed,
                         serde_json::json!({"key": mic_toggle_hot_key_val}),
@@ -1192,7 +1220,7 @@ pub async fn save_app_settings(
                         e
                     );
                     let app_handle_for_rollback = app.clone();
-                    let _ = app.global_shortcut().on_shortcut(
+                    if let Err(e2) = app.global_shortcut().on_shortcut(
                         old_launcher_key_for_rollback.as_str(),
                         move |_app, _shortcut, event| {
                             if let ShortcutState::Pressed = event.state {
@@ -1202,7 +1230,9 @@ pub async fn save_app_settings(
                                 });
                             }
                         },
-                    );
+                    ) {
+                        log::error!("恢复旧启动器快捷键 '{}' 也失败: {}", old_launcher_key_for_rollback, e2);
+                    }
                     return Err(frontend_error_kind_params(
                         AppErrorKind::ClipboardHotkeyRegisterFailed,
                         serde_json::json!({"key": launcher_hot_key_val}),
@@ -1268,14 +1298,16 @@ pub async fn save_app_settings(
                 ) {
                     log::warn!("注册文档管理快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", doc_manager_hot_key_val, e);
                     let app_handle_for_rollback = app.clone();
-                    let _ = app.global_shortcut().on_shortcut(
+                    if let Err(e2) = app.global_shortcut().on_shortcut(
                         old_doc_key_for_rollback.as_str(),
                         move |_app, _shortcut, event| {
                             if let ShortcutState::Pressed = event.state {
                                 let _ = crate::ui::window_manager::show_standard_window_by_label(&app_handle_for_rollback, "document_manager");
                             }
                         },
-                    );
+                    ) {
+                        log::error!("恢复旧文档管理快捷键 '{}' 也失败: {}", old_doc_key_for_rollback, e2);
+                    }
                     return Err(frontend_error_kind_params(
                         AppErrorKind::ClipboardHotkeyRegisterFailed,
                         serde_json::json!({"key": doc_manager_hot_key_val}),

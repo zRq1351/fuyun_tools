@@ -9,5 +9,6 @@ pub mod commands_screenshot;
 pub mod commands_screenshot_render;
 pub mod commands_vc_runtime;
 pub mod commands_writeback;
+pub mod hotkey_utils;
 pub mod tray_menu;
 pub mod window_manager;

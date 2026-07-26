@@ -918,17 +918,23 @@ pub async fn show_longshot_toolbar(
     anchor: Option<LongshotToolbarAnchor>,
 ) -> Result<(), String> {
     let (window, _created) = ensure_longshot_toolbar_window(&app)?;
-    let _ = window.set_content_protected(true);
-    let _ = window.emit(
+    if let Err(e) = window.set_content_protected(true) {
+        log::warn!("设置长截图工具栏内容保护失败: {}", e);
+    }
+    if let Err(e) = window.emit(
         "manual-longshot-toolbar-reset",
         serde_json::json!({
             "ts": now_unix_ms()
         }),
-    );
-    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+    ) {
+        log::warn!("发送长截图工具栏重置事件失败: {}", e);
+    }
+    if let Err(e) = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
         width: 260.0,
         height: 430.0,
-    }));
+    })) {
+        log::warn!("设置长截图工具栏大小失败: {}", e);
+    }
     place_longshot_toolbar_near_anchor(&app, &window, anchor);
     show_overlay_window_by_label(&app, "longshot_toolbar", true)?;
     Ok(())
@@ -940,24 +946,34 @@ pub async fn show_longshot_border(
     anchor: LongshotToolbarAnchor,
 ) -> Result<(), String> {
     let (window, _created) = ensure_longshot_border_window(&app)?;
-    let _ = window.set_content_protected(true);
-    let _ = window.set_ignore_cursor_events(true);
+    if let Err(e) = window.set_content_protected(true) {
+        log::warn!("设置长截图边框内容保护失败: {}", e);
+    }
+    if let Err(e) = window.set_ignore_cursor_events(true) {
+        log::warn!("设置长截图边框忽略鼠标事件失败: {}", e);
+    }
     // 边框窗外扩，确保边框不进入实际采集区域
     const BORDER_OUTSET: i32 = 2;
     let width = (anchor.width as i32 + BORDER_OUTSET * 2).max(2) as u32;
     let height = (anchor.height as i32 + BORDER_OUTSET * 2).max(2) as u32;
-    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
-    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
+    if let Err(e) = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height })) {
+        log::warn!("设置长截图边框大小失败: {}", e);
+    }
+    if let Err(e) = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
         anchor.x - BORDER_OUTSET,
         anchor.y - BORDER_OUTSET,
-    )));
+    ))) {
+        log::warn!("设置长截图边框位置失败: {}", e);
+    }
     show_overlay_window_by_label(&app, "longshot_border", false)?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn hide_longshot_border(app: AppHandle) -> Result<(), String> {
-    let _ = hide_overlay_window_by_label(&app, "longshot_border");
+    if let Err(e) = hide_overlay_window_by_label(&app, "longshot_border") {
+        log::warn!("隐藏长截图边框失败: {}", e);
+    }
     Ok(())
 }
 
@@ -1334,6 +1350,7 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
             .always_on_top(true)
             .skip_taskbar(true)
             .resizable(false)
+            .accept_first_mouse(true)
             .inner_size(width as f64, height as f64)
             .position(origin_x as f64, origin_y as f64)
             .fullscreen(true)

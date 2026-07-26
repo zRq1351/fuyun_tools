@@ -90,11 +90,10 @@ fn get_window_process_name(hwnd: windows::Win32::Foundation::HWND) -> Option<Str
         return None;
     }
 
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) };
-    if handle.is_err() {
-        return None;
-    }
-    let handle = handle.unwrap();
+    let handle = match unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } {
+        Ok(h) => h,
+        Err(_) => return None,
+    };
 
     let mut buffer = vec![0u16; 1024];
     let mut size = buffer.len() as u32;

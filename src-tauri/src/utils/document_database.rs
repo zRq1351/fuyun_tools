@@ -210,6 +210,13 @@ async fn get_docs_db_pool() -> Result<&'static SqlitePool, String> {
                 .acquire()
                 .await
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+
+            // 启用外键约束
+            sqlx::query("PRAGMA foreign_keys = ON")
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            
             ensure_docs_db_schema(&mut conn).await?;
 
             Ok(pool)
@@ -429,6 +436,8 @@ pub async fn get_doc_roots() -> Result<Vec<DocRoot>, String> {
 pub async fn reorder_doc_roots(ids: Vec<i64>) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
     let mut tx = conn.begin().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+
+    // 使用批量更新替代逐条更新
     for (idx, id) in ids.iter().enumerate() {
         sqlx::query::<Sqlite>("UPDATE document_roots SET position = ?1 WHERE id = ?2")
             .bind(idx as i64)
@@ -437,6 +446,7 @@ pub async fn reorder_doc_roots(ids: Vec<i64>) -> Result<(), String> {
             .await
             .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
+
     tx.commit().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
@@ -472,7 +482,9 @@ pub async fn remove_doc_root(id: i64) -> Result<(), String> {
             let cat_name: String = crow.try_get(0).unwrap_or_default();
             let dir = Path::new(&root_path).join(&cat_name);
             if dir.exists() {
-                let _ = fs::remove_dir(&dir);
+                if let Err(e) = fs::remove_dir(&dir) {
+                    log::warn!("删除文档分类目录失败 {}: {}", dir.display(), e);
+                }
             }
         }
     }
@@ -694,7 +706,7 @@ pub async fn insert_doc_file(
         .await
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "INSERT INTO document_files_fts(rowid, title, content_text, tags, notes) VALUES (?1, ?2, ?3, ?4, '')",
     )
     .bind(id)
@@ -702,7 +714,9 @@ pub async fn insert_doc_file(
     .bind(content_text)
     .bind(tags)
     .execute(&mut *conn)
-    .await;
+        .await {
+        log::warn!("插入文档FTS索引失败 id={}: {}", id, e);
+    }
 
     Ok(id)
 }

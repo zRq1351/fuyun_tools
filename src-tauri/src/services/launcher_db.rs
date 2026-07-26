@@ -2,6 +2,7 @@ use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
 use sqlx::{Acquire, Row, Sqlite, SqliteConnection};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -191,6 +192,39 @@ pub async fn load_category_app_ids(category_id: &str) -> Result<Vec<String>, Str
     .await
     .map_err(|e| format!("读取分类应用失败: {}", e))?;
     Ok(rows.into_iter().map(|r| r.get::<String, _>("app_id")).collect())
+}
+
+/// 一次性加载所有分类及其应用ID（避免N+1查询）
+pub async fn load_all_categories_with_app_ids() -> Result<Vec<(CategoryRow, Vec<String>)>, String> {
+    let mut conn = open_launcher_db_conn().await?;
+
+    // 加载所有分类
+    let categories = load_categories().await?;
+
+    // 加载所有分类-应用映射
+    let rows = sqlx::query(
+        "SELECT category_id, app_id FROM launcher_category_apps ORDER BY category_id, position ASC"
+    )
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|e| format!("读取分类应用映射失败: {}", e))?;
+
+    // 构建映射
+    let mut category_apps: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        let category_id: String = row.get("category_id");
+        let app_id: String = row.get("app_id");
+        category_apps.entry(category_id).or_default().push(app_id);
+    }
+
+    // 组合结果
+    Ok(categories
+        .into_iter()
+        .map(|cat| {
+            let app_ids = category_apps.remove(&cat.id).unwrap_or_default();
+            (cat, app_ids)
+        })
+        .collect())
 }
 
 pub async fn upsert_category(id: &str, name: &str, icon: &str, position: i32) -> Result<(), String> {

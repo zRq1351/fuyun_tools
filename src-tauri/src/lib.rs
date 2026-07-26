@@ -64,23 +64,27 @@ fn start_auto_backup_scheduler(app_handle: AppHandle, state: Arc<Mutex<AppState>
                 state.clone(),
             )) {
                 Ok(true) => {
-                    let _ = app_handle.emit(
+                    if let Err(e) = app_handle.emit(
                         "backup-run-updated",
                         serde_json::json!({
                             "status": "success",
                         }),
-                    );
+                    ) {
+                        log::warn!("发送自动备份成功事件失败: {}", e);
+                    }
                 }
                 Ok(false) => {}
                 Err(error) => {
                     log::warn!("自动备份执行失败: {}", error);
-                    let _ = app_handle.emit(
+                    if let Err(e) = app_handle.emit(
                         "backup-run-updated",
                         serde_json::json!({
                             "status": "failed",
                             "message": error,
                         }),
-                    );
+                    ) {
+                        log::warn!("发送自动备份失败事件失败: {}", e);
+                    }
                 }
             }
             // 分段睡眠以便及时响应停止信号
@@ -245,13 +249,17 @@ pub fn run() {
                             }
                             if state_guard.is_visible {
                                 drop(state_guard);
-                                let _ = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone, "clipboard");
+                                if let Err(e) = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone, "clipboard") {
+                                    log::warn!("隐藏文字剪贴板窗口失败: {}", e);
+                                }
                                 return;
                             }
                             let is_image_visible = state_guard.is_image_visible;
                             drop(state_guard);
                             if is_image_visible {
-                                let _ = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone, "image_clipboard");
+                                if let Err(e) = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone, "image_clipboard") {
+                                    log::warn!("隐藏图片剪贴板窗口失败: {}", e);
+                                }
                             }
                             crate::ui::commands_writeback::interrupt_text_fill_flow(&state_clone);
                             show_clipboard_window(
@@ -280,13 +288,17 @@ pub fn run() {
                             }
                             if state_guard.is_image_visible {
                                 drop(state_guard);
-                                let _ = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone_image, "image_clipboard");
+                                if let Err(e) = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone_image, "image_clipboard") {
+                                    log::warn!("隐藏图片剪贴板窗口失败: {}", e);
+                                }
                                 return;
                             }
                             let is_text_visible = state_guard.is_visible;
                             drop(state_guard);
                             if is_text_visible {
-                                let _ = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone_image, "clipboard");
+                                if let Err(e) = crate::ui::window_manager::hide_overlay_window_by_label(&app_handle_clone_image, "clipboard") {
+                                    log::warn!("隐藏文字剪贴板窗口失败: {}", e);
+                                }
                             }
                             crate::ui::commands_writeback::interrupt_image_fill_flow(&state_clone_image);
                             show_image_clipboard_window(
@@ -435,10 +447,12 @@ pub fn run() {
                     if let ShortcutState::Pressed = event.state {
                         let app_handle_inner = app_handle_clone_doc.clone();
                         tauri::async_runtime::spawn(async move {
-                            let _ = crate::ui::window_manager::show_standard_window_by_label(
+                            if let Err(e) = crate::ui::window_manager::show_standard_window_by_label(
                                 &app_handle_inner,
                                 "document_manager",
-                            );
+                            ) {
+                                log::error!("显示文档管理器窗口失败: {}", e);
+                            }
                         });
                     }
                 },
@@ -452,12 +466,18 @@ pub fn run() {
                 let payload = serde_json::json!({
                     "conflicts": shortcut_conflicts.clone()
                 });
-                let _ = app_handle.emit("shortcut-conflict-warning", payload.clone());
+                if let Err(e) = app_handle.emit("shortcut-conflict-warning", payload.clone()) {
+                    log::error!("发送快捷键冲突警告失败: {}", e);
+                }
 
                 if let Some(settings_window) = app.get_webview_window("settings") {
-                    let _ = show_standard_window_by_label(&app.handle().clone(), "settings");
+                    if let Err(e) = show_standard_window_by_label(&app.handle().clone(), "settings") {
+                        log::error!("显示设置窗口失败: {}", e);
+                    }
                     let script = format!("window.__SHORTCUT_CONFLICT__ = {};", payload);
-                    let _ = settings_window.eval(&script);
+                    if let Err(e) = settings_window.eval(&script) {
+                        log::error!("注入快捷键冲突脚本失败: {}", e);
+                    }
                 }
             }
 
@@ -488,26 +508,46 @@ pub fn run() {
             }
 
             if text_clipboard_enabled {
-                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "clipboard");
-                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "text_preview");
+                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "clipboard") {
+                    log::error!("创建文字剪贴板窗口失败: {}", e);
+                }
+                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "text_preview") {
+                    log::error!("创建文字预览窗口失败: {}", e);
+                }
             }
             if image_clipboard_enabled {
-                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "image_clipboard");
-                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "image_preview");
+                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "image_clipboard") {
+                    log::error!("创建图片剪贴板窗口失败: {}", e);
+                }
+                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "image_preview") {
+                    log::error!("创建图片预览窗口失败: {}", e);
+                }
             }
             if screenshot_enabled {
-                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "screenshot");
-                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "longshot_toolbar");
-                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "longshot_border");
+                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "screenshot") {
+                    log::error!("创建截图窗口失败: {}", e);
+                }
+                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "longshot_toolbar") {
+                    log::error!("创建长截图工具栏窗口失败: {}", e);
+                }
+                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "longshot_border") {
+                    log::error!("创建长截图边框窗口失败: {}", e);
+                }
             }
             if recording_enabled {
-                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "recording_toolbar");
+                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "recording_toolbar") {
+                    log::error!("创建录屏工具栏窗口失败: {}", e);
+                }
             }
             if launcher_enabled {
-                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "launcher");
+                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "launcher") {
+                    log::error!("创建启动器窗口失败: {}", e);
+                }
             }
             if doc_manager_enabled {
-                let _ = crate::ui::window_manager::ensure_window_for_label(&app_handle, "document_manager");
+                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "document_manager") {
+                    log::error!("创建文档管理器窗口失败: {}", e);
+                }
             }
 
             Ok(())

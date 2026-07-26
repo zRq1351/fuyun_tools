@@ -120,7 +120,9 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
         "image_tags": manager.get_image_tags(),
         "pinned_items": manager.get_pinned_items()
     });
-    let _ = app_handle.emit("image-history-payload-updated", payload);
+    if let Err(e) = app_handle.emit("image-history-payload-updated", payload) {
+        log::warn!("发送图片历史更新事件失败: {}", e);
+    }
     {
         let mut state_guard = lock_arc_mutex(&state);
         state_guard.image_history_dirty = false;
@@ -299,7 +301,9 @@ fn process_pending_queue(
         if is_image_visible {
             if let Some(item) = delta_item {
                 let payload = serde_json::json!({ "item": item });
-                let _ = app_handle.emit("image-history-item-added", payload);
+                if let Err(e) = app_handle.emit("image-history-item-added", payload) {
+                    log::warn!("发送图片历史项添加事件失败: {}", e);
+                }
             } else {
                 emit_image_history_payload(app_handle, state.clone());
             }
@@ -394,9 +398,11 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                                     .dropped_full
                                     .fetch_add(1, Ordering::Relaxed);
                                 // 通知前端队列已满
-                                let _ = app_for_event.emit("image-queue-full", serde_json::json!({
+                                if let Err(e) = app_for_event.emit("image-queue-full", serde_json::json!({
                                     "message": "图片处理队列已满，部分图片未被捕获"
-                                }));
+                                })) {
+                                    log::warn!("发送图片队列已满事件失败: {}", e);
+                                }
                             }
                             Err(mpsc::TrySendError::Disconnected(_)) => {
                                 log::error!("[监听线程] 处理线程-{} 通道已断开", worker_idx + 1);

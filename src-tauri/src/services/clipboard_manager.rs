@@ -141,6 +141,8 @@ pub fn add_to_clipboard_history(
     };
 
     if let Some(payload) = payload {
-        let _ = app_handle.emit("clipboard-history-item-updated", payload);
+        if let Err(e) = app_handle.emit("clipboard-history-item-updated", payload) {
+            log::warn!("发送剪贴板历史更新事件失败: {}", e);
+        }
     }
 }

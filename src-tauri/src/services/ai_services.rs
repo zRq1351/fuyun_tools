@@ -16,8 +16,8 @@ use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-/// 缓存的AI客户端（当配置不变时复用）
-static CACHED_AI_CLIENT: LazyLock<Mutex<Option<(AIConfig, AIClient)>>> =
+/// 缓存的AI客户端（当配置不变时复用），使用 Arc 避免每次命中时 clone 配置字符串
+static CACHED_AI_CLIENT: LazyLock<Mutex<Option<(Arc<AIConfig>, Arc<AIClient>)>>> =
     LazyLock::new(|| Mutex::new(None));
 
 async fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
@@ -86,10 +86,10 @@ async fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConf
 }
 
 /// 获取或创建AI客户端（配置不变时复用缓存的客户端）
-pub async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> AppResult<AIClient> {
+pub async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> AppResult<Arc<AIClient>> {
     let current_config = build_ai_config(&state).await?;
 
-    // 检查缓存的客户端是否仍然有效
+    // 检查缓存的客户端是否仍然有效（比较 Arc 内的配置值）
     {
         let cache = CACHED_AI_CLIENT.lock().unwrap_or_else(|never| match never {});
         if let Some((cached_config, cached_client)) = cache.as_ref() {
@@ -97,20 +97,22 @@ pub async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> AppRe
                 && cached_config.base_url == current_config.base_url
                 && cached_config.model == current_config.model
             {
-                return Ok(cached_client.clone());
+                return Ok(Arc::clone(cached_client));
             }
         }
     }
 
-    // 配置已变更，创建新客户端
+    // 配置已变更，创建新客户端并包装为 Arc
     let client = AIClient::new(current_config.clone()).map_err(|e| {
         AppErrorKind::AiClientInitFailed.to_app_error_with_details(e.to_string())
     })?;
+    let client = Arc::new(client);
+    let config = Arc::new(current_config);
 
     // 更新缓存
     {
         let mut cache = CACHED_AI_CLIENT.lock().unwrap_or_else(|never| match never {});
-        *cache = Some((current_config, client.clone()));
+        *cache = Some((config, Arc::clone(&client)));
     }
 
     Ok(client)
@@ -269,7 +271,7 @@ async fn execute_stream_request(
         .unwrap_or_else(|| next_ai_operation_id(&state_arc));
     set_active_operation(&state_arc, &kind, operation_id);
     log::info!("[AI流式] 开始获取AI客户端...");
-    let client: AIClient = get_or_create_ai_client(state_arc.clone()).await?;
+    let client = get_or_create_ai_client(state_arc.clone()).await?;
     log::info!("[AI流式] AI客户端就绪，开始创建结果窗口...");
 
     // 显示结果窗口并获取窗口标签
@@ -326,14 +328,16 @@ async fn execute_stream_request(
 
     // 发送清理事件到新创建的窗口
     if let Some(window) = app.clone().get_webview_window(&window_label) {
-        let _ = window.emit(
+        if let Err(e) = window.emit(
             "result-clean",
             serde_json::json!({
                 "type": kind.kind_name(),
                 "opId": operation_id,
                 "windowLabel": window_label
             }),
-        );
+        ) {
+            log::warn!("发送结果清理事件失败: {}", e);
+        }
     }
 
     let state_for_stream = state_arc.clone();
@@ -455,14 +459,16 @@ async fn execute_stream_request(
             let error_msg = format!("{}失败: {}", kind.display_name(), e.message);
             // 发送错误信息到新创建的窗口
             if let Some(window) = app.get_webview_window(&window_label) {
-                let _ = window.emit(
+                if let Err(e) = window.emit(
                     "result-update",
                     serde_json::json!({
                         "type": kind.kind_name(),
                         "content": error_msg.clone(),
                         "windowLabel": window_label
                     }),
-                );
+                ) {
+                    log::warn!("发送AI错误结果事件失败: {}", e);
+                }
             }
             log::error!("{}", error_msg);
         }

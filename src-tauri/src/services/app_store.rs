@@ -427,12 +427,16 @@ pub async fn remove_app_from_store(app_id: &str) -> Result<(), String> {
 }
 
 pub async fn update_app_icon(app_id: &str, icon_base64: &str) {
-    let _ = launcher_db::update_app_icon(app_id, icon_base64).await;
+    if let Err(e) = launcher_db::update_app_icon(app_id, icon_base64).await {
+        log::warn!("更新应用图标失败 app_id={}: {}", app_id, e);
+    }
 }
 
 pub async fn batch_update_icons(icons: &HashMap<String, String>) {
     for (path, icon) in icons {
-        let _ = launcher_db::update_app_icon_by_path(path, icon).await;
+        if let Err(e) = launcher_db::update_app_icon_by_path(path, icon).await {
+            log::warn!("批量更新应用图标失败 path={}: {}", path, e);
+        }
     }
 }
 
@@ -447,7 +451,9 @@ pub async fn add_manual_app(id: &str, title: &str, path: &str) -> Result<StoredA
     let icon_base64 = icons.get(path).cloned();
 
     if let Some(ref icon) = icon_base64 {
-        let _ = launcher_db::update_app_icon(id, icon).await;
+        if let Err(e) = launcher_db::update_app_icon(id, icon).await {
+            log::warn!("添加手动应用后更新图标失败 id={}: {}", id, e);
+        }
     }
 
     Ok(StoredApp {

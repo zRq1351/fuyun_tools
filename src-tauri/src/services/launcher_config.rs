@@ -148,10 +148,13 @@ pub async fn load_launcher_config() -> LauncherConfig {
         .unwrap_or(None)
         .unwrap_or_else(|| "list".to_string());
 
-    let cat_rows = launcher_db::load_categories().await.unwrap_or_default();
+    // 使用单次查询加载所有分类及其应用ID（避免N+1查询）
+    let categories_with_apps = launcher_db::load_all_categories_with_app_ids()
+        .await
+        .unwrap_or_default();
+    
     let mut categories = Vec::new();
-    for cr in &cat_rows {
-        let app_ids = launcher_db::load_category_app_ids(&cr.id).await.unwrap_or_default();
+    for (cr, app_ids) in categories_with_apps {
         categories.push(LauncherCategory {
             id: cr.id.clone(),
             name: cr.name.clone(),

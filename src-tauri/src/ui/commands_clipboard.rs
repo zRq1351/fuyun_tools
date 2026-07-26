@@ -513,12 +513,14 @@ pub(crate) fn execute_select_and_fill_text(
             let manager = lock_arc_mutex(&manager_arc_for_fill);
             manager.set_clipboard_content(app_handle, &item_content_clone)?;
             let item_id = crate::utils::database::stable_history_item_id(&item_content_clone);
-            let _ = app_handle.emit(
+            if let Err(e) = app_handle.emit(
                 "text-item-promoted",
                 serde_json::json!({
                     "id": item_id,
                 }),
-            );
+            ) {
+                log::warn!("发送文字项提升事件失败: {}", e);
+            }
             Ok(())
         },
     );
@@ -815,13 +817,15 @@ pub(crate) fn execute_select_and_fill_image_by_id(
                 None,
             );
             ImageClipboardManager::write_clipboard_image(app_handle, &image)?;
-            let _ = app_handle.emit(
+            if let Err(e) = app_handle.emit(
                 "image-item-pinned",
                 serde_json::json!({
                     "itemId": item_id,
                     "pinned": true,
                 }),
-            );
+            ) {
+                log::warn!("发送图片项置顶事件失败: {}", e);
+            }
             if fast_mode {
                 schedule_image_promote_to_top(state_ref.clone(), item_id.clone());
             }
@@ -1130,11 +1134,13 @@ pub async fn update_text_item(
 
     if result.is_ok() {
         let new_item_id = crate::utils::database::stable_history_item_id(&new_content);
-        let _ = app.emit("text-item-replaced", serde_json::json!({
+        if let Err(e) = app.emit("text-item-replaced", serde_json::json!({
             "old_id": item_id,
             "new_id": new_item_id,
             "new_content": new_content
-        }));
+        })) {
+            log::warn!("发送文字项替换事件失败: {}", e);
+        }
     }
 
     result
@@ -1288,7 +1294,7 @@ pub async fn import_image_files(
         let manager_guard = lock_arc_mutex(&state_guard.image_clipboard_manager);
         manager_guard.clone()
     };
-    let _ = app.emit(
+    if let Err(e) = app.emit(
         "image-import-progress",
         serde_json::json!({
             "status": "start",
@@ -1297,7 +1303,9 @@ pub async fn import_image_files(
             "imported": 0,
             "failed": 0
         }),
-    );
+    ) {
+        log::warn!("发送图片导入开始事件失败: {}", e);
+    }
     let mut imported = 0usize;
     let mut failed = 0usize;
     let mut processed = 0usize;
@@ -1316,7 +1324,7 @@ pub async fn import_image_files(
             }
         }
         processed = processed.saturating_add(1);
-        let _ = app.emit(
+        if let Err(e) = app.emit(
             "image-import-progress",
             serde_json::json!({
                 "status": "progress",
@@ -1325,9 +1333,11 @@ pub async fn import_image_files(
                 "imported": imported,
                 "failed": failed
             }),
-        );
+        ) {
+            log::warn!("发送图片导入进度事件失败: {}", e);
+        }
     }
-    let _ = app.emit(
+    if let Err(e) = app.emit(
         "image-import-progress",
         serde_json::json!({
             "status": "finish",
@@ -1336,7 +1346,9 @@ pub async fn import_image_files(
             "imported": imported,
             "failed": failed
         }),
-    );
+    ) {
+        log::warn!("发送图片导入完成事件失败: {}", e);
+    }
     if imported > 0 {
         emit_image_history_payload(&app, state.inner().clone());
     }

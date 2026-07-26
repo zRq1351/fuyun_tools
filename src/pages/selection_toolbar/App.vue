@@ -79,6 +79,7 @@ let unlistenMouseLeave = null
 let hoverTimeout = null
 let enterTimeout = null
 let isAnimating = false // 添加动画锁，防止重复触发
+let pendingLeave = false // 动画期间的离开请求，动画完成后执行
 let cachedSettings = null // 缓存AI设置，避免每次操作都请求IPC
 let settingsCacheTime = 0 // 设置缓存时间戳
 const SETTINGS_CACHE_TTL = 5000 // 缓存有效期5秒
@@ -231,6 +232,13 @@ const onMouseEnter = async () => {
       }
     } finally {
       isAnimating = false // 释放动画锁
+      // 动画执行期间如果鼠标已离开，立即执行收起操作
+      if (pendingLeave) {
+        pendingLeave = false
+        const leaveVersion = ++stateVersion
+        isAnimating = true
+        shrinkWindow(leaveVersion)
+      }
     }
   }, 80)
 }
@@ -281,8 +289,13 @@ const shrinkWindow = async (version) => {
 }
 
 const onMouseLeave = () => {
-  // 如果正在动画中或已经收起，忽略重复触发
-  if (isAnimating || !isHovered.value) return
+  // 如果正在动画中，记录待处理离开请求，等动画完成后执行
+  if (isAnimating) {
+    pendingLeave = true
+    return
+  }
+  // 如果已经收起，忽略重复触发
+  if (!isHovered.value) return
 
   if (enterTimeout) {
     clearTimeout(enterTimeout)
