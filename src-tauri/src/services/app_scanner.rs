@@ -61,7 +61,11 @@ pub fn scan_apps_by_category() -> Vec<AppCategory> {
     let mut category_map: std::collections::HashMap<String, Vec<LauncherItem>> =
         std::collections::HashMap::new();
 
-    let start_menu = PathBuf::from(r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs");
+    // System-wide Start Menu (use PROGRAMDATA env var with fallback)
+    let start_menu = std::env::var("PROGRAMDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(r"C:\ProgramData"))
+        .join("Microsoft").join("Windows").join("Start Menu").join("Programs");
     if start_menu.exists() {
         scan_dir_by_category(&start_menu, "其他", &mut category_map);
     }

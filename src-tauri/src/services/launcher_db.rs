@@ -249,14 +249,16 @@ pub async fn update_category_icon(category_id: &str, icon: &str) -> Result<(), S
 
 pub async fn sync_category_positions(ids: &[String]) -> Result<(), String> {
     let mut conn = open_launcher_db_conn().await?;
+    let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
     for (i, id) in ids.iter().enumerate() {
         sqlx::query("UPDATE launcher_categories SET position = ? WHERE id = ?")
             .bind(i as i32)
             .bind(id)
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await
             .map_err(|e| format!("更新分类排序失败: {}", e))?;
     }
+    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 

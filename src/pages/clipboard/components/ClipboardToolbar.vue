@@ -45,7 +45,7 @@
           @drop="handleDrop($event, category)"
           @dragover.prevent="handleDragOver"
       >
-        <span class="category-label">{{ category }}</span>
+        <span class="category-label">{{ translateCategory(category) }}</span>
         <span
             v-if="canDeleteCategory(category)"
             class="category-remove"
@@ -80,6 +80,16 @@ import {computed} from 'vue'
 import {useI18n} from 'vue-i18n'
 
 const {t} = useI18n()
+
+const CATEGORY_TRANSLATIONS = {
+  '未分类': () => t('common.uncategorized'),
+  '全部': () => t('common.all'),
+}
+
+const translateCategory = (category) => {
+  const translator = CATEGORY_TRANSLATIONS[category]
+  return translator ? translator() : category
+}
 
 const props = defineProps({
   searchKeyword: String,

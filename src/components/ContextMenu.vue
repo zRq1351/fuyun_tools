@@ -46,10 +46,8 @@ watch(() => props.show, async (visible) => {
     adjustPosition()
     if (!hasListeners) {
       hasListeners = true
-      setTimeout(() => {
-        document.addEventListener('mousedown', onDocMouseDown)
-        document.addEventListener('keydown', onKeydown)
-      }, 0)
+      document.addEventListener('mousedown', onDocMouseDown)
+      document.addEventListener('keydown', onKeydown)
     }
   } else {
     document.removeEventListener('mousedown', onDocMouseDown)

@@ -75,7 +75,7 @@ export function useAppActions(emit) {
 
             if (existingCommand) {
                 ElMessage({
-                    message: `该应用已有命令 "${existingCommand.prefix}"，请勿重复添加`,
+                    message: t('launcher.commandAlreadyExists', {prefix: existingCommand.prefix}),
                     type: 'warning',
                     duration: 3000,
                     offset: 60
@@ -95,7 +95,7 @@ export function useAppActions(emit) {
             const finalPrefix = ':' + prefixInput
             if (builtinPrefixes.includes(finalPrefix)) {
                 ElMessage({
-                    message: `命令前缀 "${finalPrefix}" 与内置命令冲突，请使用其他前缀`,
+                    message: t('launcher.commandConflictBuiltin', {prefix: finalPrefix}),
                     type: 'warning',
                     duration: 3000,
                     offset: 60
@@ -107,7 +107,7 @@ export function useAppActions(emit) {
             const prefixExists = existingCommands.some(cmd => cmd.prefix === finalPrefix)
             if (prefixExists) {
                 ElMessage({
-                    message: `命令前缀 "${finalPrefix}" 已被使用，请使用其他前缀`,
+                    message: t('launcher.commandConflictUsed', {prefix: finalPrefix}),
                     type: 'warning',
                     duration: 3000,
                     offset: 60
@@ -126,7 +126,7 @@ export function useAppActions(emit) {
             await invoke('add_custom_command', {
                 prefix: finalPrefix,
                 title: app.title,
-                description: `启动 ${app.title}`,
+                description: t('launcher.launchApp', {title: app.title}),
                 icon: app.icon_base64 || 'Monitor',
                 commandType: commandType
             })
@@ -136,7 +136,7 @@ export function useAppActions(emit) {
         } catch (error) {
             console.error('添加命令失败:', error)
             ElMessage({
-                message: error,
+                message: error?.message || String(error),
                 type: 'error',
                 duration: 3000,
                 offset: 60

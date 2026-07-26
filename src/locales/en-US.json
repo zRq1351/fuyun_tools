@@ -582,7 +582,19 @@
     "addFailed": "Failed to add",
     "appNotFound": "This app has been uninstalled or moved. Remove from list?",
     "appNotFoundTitle": "App Not Found",
-    "executableFile": "Executable Files"
+    "executableFile": "Executable Files",
+    "commandAlreadyExists": "This app already has command \"{prefix}\", please don't add duplicates",
+    "commandConflictBuiltin": "Command prefix \"{prefix}\" conflicts with built-in command, please use a different prefix",
+    "commandConflictUsed": "Command prefix \"{prefix}\" is already in use, please use a different prefix",
+    "launchApp": "Launch {title}",
+    "actionFailed": "Action failed: {error}",
+    "unknownCommandType": "Unknown command type",
+    "emptyProgramPath": "Program path is empty",
+    "launchFailed": "Launch failed: {error}",
+    "customCommandTypeEmpty": "[Custom command] commandType is empty",
+    "unknownCustomAction": "Unknown custom action",
+    "commandExecutionFailed": "[Custom command] Execution failed",
+    "commandTypeUnknown": "[Custom command] Unknown command type"
   },
   "selectionToolbar": {
     "translate": "Translate",

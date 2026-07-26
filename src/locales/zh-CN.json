@@ -582,7 +582,19 @@
     "addFailed": "添加失败",
     "appNotFound": "该应用已被卸载或移动位置，是否从列表中移除？",
     "appNotFoundTitle": "应用不存在",
-    "executableFile": "可执行文件"
+    "executableFile": "可执行文件",
+    "commandAlreadyExists": "该应用已有命令 \"{prefix}\"，请勿重复添加",
+    "commandConflictBuiltin": "命令前缀 \"{prefix}\" 与内置命令冲突，请使用其他前缀",
+    "commandConflictUsed": "命令前缀 \"{prefix}\" 已被使用，请使用其他前缀",
+    "launchApp": "启动 {title}",
+    "actionFailed": "操作失败: {error}",
+    "unknownCommandType": "未知的命令类型",
+    "emptyProgramPath": "程序路径为空",
+    "launchFailed": "启动失败: {error}",
+    "customCommandTypeEmpty": "[自定义命令] commandType 为空",
+    "unknownCustomAction": "未知的自定义动作",
+    "commandExecutionFailed": "[自定义命令] 执行失败",
+    "commandTypeUnknown": "[自定义命令] 未知的命令类型"
   },
   "selectionToolbar": {
     "translate": "翻译",

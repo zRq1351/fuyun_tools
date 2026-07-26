@@ -646,7 +646,7 @@ fn adjust_to_char_boundary(s: &str, idx: usize, backward: bool) -> usize {
 
 fn block_on_result<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> {
     if tokio::runtime::Handle::try_current().is_ok() {
-        panic!("block_on_result must not be called from within a tokio runtime; use the async variant instead");
+        return Err("block_on_result must not be called from within a tokio runtime; use the async variant instead".into());
     }
     tauri::async_runtime::block_on(future)
 }

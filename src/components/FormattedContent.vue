@@ -8,13 +8,19 @@
 </template>
 
 <script setup>
-import {ref, watch} from 'vue'
+import {ref, watch, onBeforeUnmount} from 'vue'
 import {Marked} from 'marked'
 import {markedHighlight} from 'marked-highlight'
 import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import 'highlight.js/styles/atom-one-dark.css'
+
+const DOMPURIFY_CONFIG = {
+  USE_PROFILES: {html: true},
+  ADD_ATTR: ['target'],
+  FORBID_TAGS: ['style'],
+}
 
 const props = defineProps({
   content: {
@@ -48,6 +54,7 @@ const marked = new Marked(
 
 const contentType = ref('text')
 const renderedHtml = ref('')
+let pendingRafId = null
 
 const RENDER_CACHE_MAX_SIZE = 200
 const renderCache = new Map()
@@ -99,7 +106,7 @@ const detectAndProcess = (text) => {
     try {
       JSON.parse(trimmed)
       const rawHtml = hljs.highlight(text, {language: 'json'}).value
-      const html = DOMPurify.sanitize(rawHtml)
+      const html = DOMPurify.sanitize(rawHtml, DOMPURIFY_CONFIG)
       contentType.value = 'code'
       renderedHtml.value = html
       setCacheResult(text, {type: 'code', html})
@@ -112,7 +119,7 @@ const detectAndProcess = (text) => {
   // 2. HTML
   if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
     const rawHtml = hljs.highlight(text, {language: 'html'}).value
-    const html = DOMPurify.sanitize(rawHtml)
+    const html = DOMPurify.sanitize(rawHtml, DOMPURIFY_CONFIG)
     contentType.value = 'code'
     renderedHtml.value = html
     setCacheResult(text, {type: 'code', html})
@@ -123,7 +130,7 @@ const detectAndProcess = (text) => {
   if (/(^|\n)(#{1,6}\s|- \[[ x]\]|[*-]\s|> \S|```)/.test(text)) {
     try {
       const rawHtml = marked.parse(text)
-      const html = DOMPurify.sanitize(rawHtml)
+      const html = DOMPurify.sanitize(rawHtml, DOMPURIFY_CONFIG)
       contentType.value = 'markdown'
       renderedHtml.value = html
       setCacheResult(text, {type: 'markdown', html})
@@ -141,7 +148,7 @@ const detectAndProcess = (text) => {
   if (codeRegex.test(text)) {
     try {
       const rawHtml = hljs.highlightAuto(text).value
-      const html = DOMPurify.sanitize(rawHtml)
+      const html = DOMPurify.sanitize(rawHtml, DOMPURIFY_CONFIG)
       contentType.value = 'code'
       renderedHtml.value = html
       setCacheResult(text, {type: 'code', html})
@@ -160,13 +167,19 @@ const detectAndProcess = (text) => {
 }
 
 watch(() => props.content, (newVal) => {
-  // 使用requestAnimationFrame延迟处理，避免阻塞UI
-  if (detectAndProcess._rafId) cancelAnimationFrame(detectAndProcess._rafId)
-  detectAndProcess._rafId = requestAnimationFrame(() => {
+  if (pendingRafId !== null) cancelAnimationFrame(pendingRafId)
+  pendingRafId = requestAnimationFrame(() => {
     detectAndProcess(newVal || '')
-    detectAndProcess._rafId = null
+    pendingRafId = null
   })
 }, { immediate: true })
+
+onBeforeUnmount(() => {
+  if (pendingRafId !== null) {
+    cancelAnimationFrame(pendingRafId)
+    pendingRafId = null
+  }
+})
 
 </script>
 

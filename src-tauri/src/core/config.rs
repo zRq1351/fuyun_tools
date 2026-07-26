@@ -93,6 +93,4 @@ impl AIProvider {
 pub struct ProviderConfig {
     pub api_url: String,
     pub model_name: String,
-    #[serde(default)]
-    pub encrypted_api_key: String,
 }

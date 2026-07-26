@@ -83,11 +83,7 @@ pub(crate) fn detect_video_hw_accel_encoder(ffmpeg_path: &std::path::Path) -> Op
 pub(crate) fn sanitize_settings_for_backup(
     settings: &crate::utils::settings_model::AppSettingsData,
 ) -> crate::utils::settings_model::AppSettingsData {
-    let mut sanitized = settings.clone();
-    for config in sanitized.provider_configs.values_mut() {
-        config.encrypted_api_key.clear();
-    }
-    sanitized
+    settings.clone()
 }
 
 pub(crate) async fn build_prepared_backup_data(

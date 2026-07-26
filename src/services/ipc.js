@@ -1,4 +1,4 @@
-import {invoke} from '@tauri-apps/api/core';
+import {invoke as tauriInvoke} from '@tauri-apps/api/core';
 
 /**
  * 带统一错误处理的 IPC 调用包装器
@@ -9,7 +9,7 @@ import {invoke} from '@tauri-apps/api/core';
  */
 async function ipcInvoke(command, args) {
     try {
-        return await invoke(command, args);
+        return await tauriInvoke(command, args);
     } catch (error) {
         const msg = typeof error === 'string' ? error : error?.message || String(error);
         const err = new Error(`IPC ${command} failed: ${msg}`);
@@ -147,6 +147,34 @@ export const IPC_COMMANDS = {
     CHECK_RECORDING_FFMPEG: 'check_recording_ffmpeg',
     DOWNLOAD_RECORDING_FFMPEG: 'download_recording_ffmpeg',
 
+    // 文档管理
+    ADD_DOC_ROOT: 'add_doc_root',
+    GET_DOC_ROOTS: 'get_doc_roots',
+    REMOVE_DOC_ROOT: 'remove_doc_root',
+    ADD_DOC_CATEGORY: 'add_doc_category',
+    GET_DOC_CATEGORIES: 'get_doc_categories',
+    REMOVE_DOC_CATEGORY: 'remove_doc_category',
+    RENAME_DOC_CATEGORY: 'rename_doc_category',
+    REORDER_DOC_CATEGORIES: 'reorder_doc_categories',
+    REORDER_DOC_ROOTS: 'reorder_doc_roots',
+    REORDER_DOC_FILES: 'reorder_doc_files',
+    IMPORT_FILES: 'import_files',
+    GET_DOC_PAGE: 'get_doc_page',
+    UPDATE_DOC_META: 'update_doc_meta',
+    DELETE_DOC: 'delete_doc',
+    MOVE_DOC: 'move_doc',
+    ATOMIC_MOVE_DOC: 'atomic_move_doc',
+    GET_DOC_STATS: 'get_doc_stats',
+    OPEN_DOC: 'open_doc',
+    OPEN_DOC_FOLDER: 'open_doc_folder',
+    GET_DOC_DETAIL: 'get_doc_detail',
+    SCAN_FOLDER: 'scan_folder',
+    GET_IMPORT_HISTORY: 'get_import_history',
+    UNDO_IMPORT: 'undo_import',
+    UNDO_IMPORT_ITEM: 'undo_import_item',
+    GET_IMPORT_FILES: 'get_import_files',
+    DETECT_ORPHAN_FILES: 'detect_orphan_files',
+
     // AI 功能
     STREAM_TRANSLATE_TEXT: 'stream_translate_text',
     STREAM_EXPLAIN_TEXT: 'stream_explain_text',
@@ -170,7 +198,7 @@ export const ClipboardService = {
      * 获取剪贴板历史记录
      * @returns {Promise<{history: string[], categories: Object, category_list: string[]}>}
      */
-    getHistory: () => invoke(IPC_COMMANDS.GET_CLIPBOARD_HISTORY),
+    getHistory: () => ipcInvoke(IPC_COMMANDS.GET_CLIPBOARD_HISTORY),
 
     /**
      * 批量获取剪贴板完整快照（优化 IPC 通信）
@@ -187,7 +215,7 @@ export const ClipboardService = {
      *   imagePinnedItems: string[]
      * }>}
      */
-    getFullSnapshot: () => invoke(IPC_COMMANDS.GET_CLIPBOARD_FULL_SNAPSHOT),
+    getFullSnapshot: () => ipcInvoke(IPC_COMMANDS.GET_CLIPBOARD_FULL_SNAPSHOT),
     getHistoryPage: ({
                          offset = 0,
                          limit = 50,
@@ -197,7 +225,7 @@ export const ClipboardService = {
                          sortBy = null,
                          sortOrder = null
                      } = {}) =>
-        invoke(IPC_COMMANDS.GET_CLIPBOARD_HISTORY_PAGE, {
+        ipcInvoke(IPC_COMMANDS.GET_CLIPBOARD_HISTORY_PAGE, {
             request: {offset, limit, category, pinnedOnly, keyword, sortBy, sortOrder}
         }),
 
@@ -206,10 +234,10 @@ export const ClipboardService = {
      * @param {string} itemId
      * @returns {Promise<void>}
      */
-    removeItem: (itemId) => invoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, { itemId }),
-    setItemPinned: (itemId, pinned) => invoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, { itemId, pinned }),
-    promoteItem: (itemId) => invoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, { itemId }),
-    clearHistory: (mode) => invoke(IPC_COMMANDS.CLEAR_TEXT_HISTORY, {mode}),
+    removeItem: (itemId) => ipcInvoke(IPC_COMMANDS.REMOVE_CLIPBOARD_ITEM, { itemId }),
+    setItemPinned: (itemId, pinned) => ipcInvoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, { itemId, pinned }),
+    promoteItem: (itemId) => ipcInvoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, { itemId }),
+    clearHistory: (mode) => ipcInvoke(IPC_COMMANDS.CLEAR_TEXT_HISTORY, {mode}),
 
     /**
      * 选择并填充内容
@@ -217,19 +245,19 @@ export const ClipboardService = {
      * @returns {Promise<void>}
      */
     selectAndFill: (itemId, opId) =>
-        invoke(IPC_COMMANDS.SELECT_AND_FILL, {request: buildSelectAndFillRequest(itemId, opId)}),
+        ipcInvoke(IPC_COMMANDS.SELECT_AND_FILL, {request: buildSelectAndFillRequest(itemId, opId)}),
 
     /**
      * 复制文本到剪贴板
      * @param {string} text
      * @returns {Promise<void>}
      */
-    copyText: (text) => invoke(IPC_COMMANDS.COPY_TEXT, {text}),
-    copyAndPasteText: (text, requestId = null) => invoke(IPC_COMMANDS.COPY_AND_PASTE_TEXT, {text, requestId}),
+    copyText: (text) => ipcInvoke(IPC_COMMANDS.COPY_TEXT, {text}),
+    copyAndPasteText: (text, requestId = null) => ipcInvoke(IPC_COMMANDS.COPY_AND_PASTE_TEXT, {text, requestId}),
 };
 
 export const ImageClipboardService = {
-    getHistory: () => invoke(IPC_COMMANDS.GET_IMAGE_CLIPBOARD_HISTORY),
+    getHistory: () => ipcInvoke(IPC_COMMANDS.GET_IMAGE_CLIPBOARD_HISTORY),
     getHistoryPage: ({
                          offset = 0,
                          limit = 50,
@@ -239,45 +267,45 @@ export const ImageClipboardService = {
                          sortBy = 'pinnedFirst',
                          sortOrder = null
                      } = {}) =>
-        invoke(IPC_COMMANDS.GET_IMAGE_CLIPBOARD_HISTORY_PAGE, {
+        ipcInvoke(IPC_COMMANDS.GET_IMAGE_CLIPBOARD_HISTORY_PAGE, {
             request: {offset, limit, category, keyword, pinnedOnly, sortBy, sortOrder}
         }),
-    removeItemById: (itemId) => invoke(IPC_COMMANDS.REMOVE_IMAGE_CLIPBOARD_ITEM_BY_ID, {itemId}),
+    removeItemById: (itemId) => ipcInvoke(IPC_COMMANDS.REMOVE_IMAGE_CLIPBOARD_ITEM_BY_ID, {itemId}),
     promoteItemById: (itemId) =>
-        invoke(IPC_COMMANDS.PROMOTE_IMAGE_CLIPBOARD_ITEM_BY_ID, {request: {itemId}}),
-    setItemPinned: (itemId, pinned) => invoke(IPC_COMMANDS.SET_IMAGE_ITEM_PINNED, {itemId, pinned}),
-    clearHistory: (mode) => invoke(IPC_COMMANDS.CLEAR_IMAGE_HISTORY, {mode}),
-    importImageFiles: (paths) => invoke(IPC_COMMANDS.IMPORT_IMAGE_FILES, {paths}),
-    countImportImageFiles: (paths) => invoke(IPC_COMMANDS.COUNT_IMPORT_IMAGE_FILES, {paths}),
+        ipcInvoke(IPC_COMMANDS.PROMOTE_IMAGE_CLIPBOARD_ITEM_BY_ID, {request: {itemId}}),
+    setItemPinned: (itemId, pinned) => ipcInvoke(IPC_COMMANDS.SET_IMAGE_ITEM_PINNED, {itemId, pinned}),
+    clearHistory: (mode) => ipcInvoke(IPC_COMMANDS.CLEAR_IMAGE_HISTORY, {mode}),
+    importImageFiles: (paths) => ipcInvoke(IPC_COMMANDS.IMPORT_IMAGE_FILES, {paths}),
+    countImportImageFiles: (paths) => ipcInvoke(IPC_COMMANDS.COUNT_IMPORT_IMAGE_FILES, {paths}),
     selectAndFillById: (itemId, opId) =>
-        invoke(IPC_COMMANDS.SELECT_AND_FILL_IMAGE_BY_ID, {
+        ipcInvoke(IPC_COMMANDS.SELECT_AND_FILL_IMAGE_BY_ID, {
             request: buildSelectAndFillRequest(itemId, opId)
         }),
     warmupItemById: (itemId) =>
-        invoke(IPC_COMMANDS.WARMUP_IMAGE_CLIPBOARD_ITEM_BY_ID, {request: {itemId}}),
+        ipcInvoke(IPC_COMMANDS.WARMUP_IMAGE_CLIPBOARD_ITEM_BY_ID, {request: {itemId}}),
     warmupMultipleItems: (itemIds) =>
-        invoke(IPC_COMMANDS.WARMUP_MULTIPLE_IMAGES, {itemIds}),
+        ipcInvoke(IPC_COMMANDS.WARMUP_MULTIPLE_IMAGES, {itemIds}),
     openPreviewWindowById: (itemId) =>
-        invoke(IPC_COMMANDS.OPEN_IMAGE_PREVIEW_WINDOW_BY_ID, {request: {itemId}}),
-    closePreviewWindow: () => invoke(IPC_COMMANDS.CLOSE_IMAGE_PREVIEW_WINDOW),
-    startPreviewWindowDrag: () => invoke(IPC_COMMANDS.START_IMAGE_PREVIEW_WINDOW_DRAG),
+        ipcInvoke(IPC_COMMANDS.OPEN_IMAGE_PREVIEW_WINDOW_BY_ID, {request: {itemId}}),
+    closePreviewWindow: () => ipcInvoke(IPC_COMMANDS.CLOSE_IMAGE_PREVIEW_WINDOW),
+    startPreviewWindowDrag: () => ipcInvoke(IPC_COMMANDS.START_IMAGE_PREVIEW_WINDOW_DRAG),
 
     openTextPreviewWindow: (text, itemId = null) =>
-        invoke(IPC_COMMANDS.OPEN_TEXT_PREVIEW_WINDOW, {text, itemId}),
-    closeTextPreviewWindow: () => invoke(IPC_COMMANDS.CLOSE_TEXT_PREVIEW_WINDOW),
-    startTextPreviewWindowDrag: () => invoke(IPC_COMMANDS.START_TEXT_PREVIEW_WINDOW_DRAG),
+        ipcInvoke(IPC_COMMANDS.OPEN_TEXT_PREVIEW_WINDOW, {text, itemId}),
+    closeTextPreviewWindow: () => ipcInvoke(IPC_COMMANDS.CLOSE_TEXT_PREVIEW_WINDOW),
+    startTextPreviewWindowDrag: () => ipcInvoke(IPC_COMMANDS.START_TEXT_PREVIEW_WINDOW_DRAG),
     updateTextItem: (itemId, newContent) =>
-        invoke(IPC_COMMANDS.UPDATE_TEXT_ITEM, {itemId, newContent}),
+        ipcInvoke(IPC_COMMANDS.UPDATE_TEXT_ITEM, {itemId, newContent}),
 
     copyItemToDirectory: (itemId, targetDirectory) =>
-        invoke(IPC_COMMANDS.COPY_IMAGE_CLIPBOARD_ITEM_TO_DIRECTORY, {itemId, targetDirectory}),
-    setItemTags: (itemId, tags) => invoke(IPC_COMMANDS.SET_IMAGE_ITEM_TAGS, {itemId, tags}),
+        ipcInvoke(IPC_COMMANDS.COPY_IMAGE_CLIPBOARD_ITEM_TO_DIRECTORY, {itemId, targetDirectory}),
+    setItemTags: (itemId, tags) => ipcInvoke(IPC_COMMANDS.SET_IMAGE_ITEM_TAGS, {itemId, tags}),
 
     // 异步预览相关方法
     getImagePreviewById: (itemId) =>
-        invoke(IPC_COMMANDS.GET_IMAGE_PREVIEW_BY_ID, {itemId}),
+        ipcInvoke(IPC_COMMANDS.GET_IMAGE_PREVIEW_BY_ID, {itemId}),
     checkPreviewsReady: (itemIds) =>
-        invoke(IPC_COMMANDS.CHECK_PREVIEWS_READY, {itemIds}),
+        ipcInvoke(IPC_COMMANDS.CHECK_PREVIEWS_READY, {itemIds}),
 };
 
 /**
@@ -290,27 +318,27 @@ export const CategoryService = {
      * @param {string} category
      * @returns {Promise<void>}
      */
-    setItemCategory: (itemId, category) => invoke(IPC_COMMANDS.SET_ITEM_CATEGORY, {itemId, category}),
+    setItemCategory: (itemId, category) => ipcInvoke(IPC_COMMANDS.SET_ITEM_CATEGORY, {itemId, category}),
 
     /**
      * 删除分类
      * @param {string} category
      * @returns {Promise<void>}
      */
-    removeCategory: (category) => invoke(IPC_COMMANDS.REMOVE_CATEGORY, {category}),
+    removeCategory: (category) => ipcInvoke(IPC_COMMANDS.REMOVE_CATEGORY, {category}),
 
     /**
      * 添加分类
      * @param {string} category
      * @returns {Promise<void>}
      */
-    addCategory: (category) => invoke(IPC_COMMANDS.ADD_CATEGORY, {category}),
+    addCategory: (category) => ipcInvoke(IPC_COMMANDS.ADD_CATEGORY, {category}),
 };
 
 export const ImageCategoryService = {
-    setItemCategory: (itemId, category) => invoke(IPC_COMMANDS.SET_IMAGE_ITEM_CATEGORY, {itemId, category}),
-    removeCategory: (category) => invoke(IPC_COMMANDS.REMOVE_IMAGE_CATEGORY, {category}),
-    addCategory: (category) => invoke(IPC_COMMANDS.ADD_IMAGE_CATEGORY, {category}),
+    setItemCategory: (itemId, category) => ipcInvoke(IPC_COMMANDS.SET_IMAGE_ITEM_CATEGORY, {itemId, category}),
+    removeCategory: (category) => ipcInvoke(IPC_COMMANDS.REMOVE_IMAGE_CATEGORY, {category}),
+    addCategory: (category) => ipcInvoke(IPC_COMMANDS.ADD_IMAGE_CATEGORY, {category}),
 };
 
 /**
@@ -321,36 +349,36 @@ export const WindowService = {
      * 获取窗口底部偏移量
      * @returns {Promise<number>}
      */
-    getBottomOffset: () => invoke(IPC_COMMANDS.GET_CLIPBOARD_BOTTOM_OFFSET),
+    getBottomOffset: () => ipcInvoke(IPC_COMMANDS.GET_CLIPBOARD_BOTTOM_OFFSET),
 
     /**
      * 预览窗口底部偏移量
      * @param {number} offset
      * @returns {Promise<void>}
      */
-    previewBottomOffset: (offset) => invoke(IPC_COMMANDS.PREVIEW_CLIPBOARD_BOTTOM_OFFSET, {offset}),
+    previewBottomOffset: (offset) => ipcInvoke(IPC_COMMANDS.PREVIEW_CLIPBOARD_BOTTOM_OFFSET, {offset}),
 
     /**
      * 保存窗口底部偏移量
      * @param {number} offset
      * @returns {Promise<void>}
      */
-    saveBottomOffset: (offset) => invoke(IPC_COMMANDS.SAVE_CLIPBOARD_BOTTOM_OFFSET, {offset}),
+    saveBottomOffset: (offset) => ipcInvoke(IPC_COMMANDS.SAVE_CLIPBOARD_BOTTOM_OFFSET, {offset}),
 
     /**
      * 窗口失去焦点通知
      * @returns {Promise<void>}
      */
-    blur: () => invoke(IPC_COMMANDS.WINDOW_BLUR),
-    imageBlur: () => invoke(IPC_COMMANDS.IMAGE_WINDOW_BLUR),
-    openSettingsWindow: (tab = 'ai', reason = '') => invoke(IPC_COMMANDS.OPEN_SETTINGS_WINDOW, {tab, reason}),
+    blur: () => ipcInvoke(IPC_COMMANDS.WINDOW_BLUR),
+    imageBlur: () => ipcInvoke(IPC_COMMANDS.IMAGE_WINDOW_BLUR),
+    openSettingsWindow: (tab = 'ai', reason = '') => ipcInvoke(IPC_COMMANDS.OPEN_SETTINGS_WINDOW, {tab, reason}),
 
     /**
      * 选择工具栏失去焦点通知
      * @returns {Promise<void>}
      */
-    selectionToolbarBlur: () => invoke(IPC_COMMANDS.SELECTION_TOOLBAR_BLUR),
-    resizeSelectionToolbar: (x, y, width, height) => invoke(IPC_COMMANDS.RESIZE_SELECTION_TOOLBAR, {x, y, width, height}),
+    selectionToolbarBlur: () => ipcInvoke(IPC_COMMANDS.SELECTION_TOOLBAR_BLUR),
+    resizeSelectionToolbar: (x, y, width, height) => ipcInvoke(IPC_COMMANDS.RESIZE_SELECTION_TOOLBAR, {x, y, width, height}),
 };
 
 /**
@@ -361,14 +389,14 @@ export const AISettingsService = {
      * 获取 AI 设置
      * @returns {Promise<Object>}
      */
-    getSettings: () => invoke(IPC_COMMANDS.GET_AI_SETTINGS),
-    checkVcRuntimeDependencies: () => invoke(IPC_COMMANDS.CHECK_VC_RUNTIME_DEPENDENCIES),
+    getSettings: () => ipcInvoke(IPC_COMMANDS.GET_AI_SETTINGS),
+    checkVcRuntimeDependencies: () => ipcInvoke(IPC_COMMANDS.CHECK_VC_RUNTIME_DEPENDENCIES),
     downloadVcRuntimeInstaller: (downloadUrl = null) =>
-        invoke(IPC_COMMANDS.DOWNLOAD_VC_RUNTIME_INSTALLER, {downloadUrl}),
+        ipcInvoke(IPC_COMMANDS.DOWNLOAD_VC_RUNTIME_INSTALLER, {downloadUrl}),
     openVcRuntimeInstaller: (installerPath) =>
-        invoke(IPC_COMMANDS.OPEN_VC_RUNTIME_INSTALLER, {installerPath}),
+        ipcInvoke(IPC_COMMANDS.OPEN_VC_RUNTIME_INSTALLER, {installerPath}),
     installVcRuntimeAndWait: (installerPath) =>
-        invoke(IPC_COMMANDS.INSTALL_VC_RUNTIME_AND_WAIT, {installerPath}),
+        ipcInvoke(IPC_COMMANDS.INSTALL_VC_RUNTIME_AND_WAIT, {installerPath}),
 
     /**
      * 保存应用设置（传入变化的字段对象即可）
@@ -376,7 +404,7 @@ export const AISettingsService = {
      * @returns {Promise<void>}
      */
     saveSettings: (settings) =>
-        invoke(IPC_COMMANDS.SAVE_APP_SETTINGS, settings),
+        ipcInvoke(IPC_COMMANDS.SAVE_APP_SETTINGS, settings),
 
     /**
      * 测试 AI 连接
@@ -388,42 +416,42 @@ export const AISettingsService = {
      * @returns {Promise<string>}
      */
     testConnection: ({aiProvider, aiApiUrl, aiModelName, aiApiKey}) =>
-        invoke(IPC_COMMANDS.TEST_AI_CONNECTION, {aiProvider, aiApiUrl, aiModelName, aiApiKey}),
+        ipcInvoke(IPC_COMMANDS.TEST_AI_CONNECTION, {aiProvider, aiApiUrl, aiModelName, aiApiKey}),
 
     /**
      * 获取提供商配置
      * @param {string} provider
      * @returns {Promise<[string, string]>} [url, model]
      */
-    getProviderConfig: (provider) => invoke(IPC_COMMANDS.GET_PROVIDER_CONFIG, {provider}),
+    getProviderConfig: (provider) => ipcInvoke(IPC_COMMANDS.GET_PROVIDER_CONFIG, {provider}),
 
     /**
      * 删除 AI 提供商
      * @param {string} provider
      * @returns {Promise<void>}
      */
-    removeProvider: (provider) => invoke(IPC_COMMANDS.REMOVE_AI_PROVIDER, {provider}),
+    removeProvider: (provider) => ipcInvoke(IPC_COMMANDS.REMOVE_AI_PROVIDER, {provider}),
 
     /**
      * 获取所有已配置的提供商
      * @returns {Promise<Array<[string, string]>>}
      */
-    getAllConfiguredProviders: () => invoke(IPC_COMMANDS.GET_ALL_CONFIGURED_PROVIDERS),
+    getAllConfiguredProviders: () => ipcInvoke(IPC_COMMANDS.GET_ALL_CONFIGURED_PROVIDERS),
     ...(__DEV_PANEL__ ? {
         getTextDedupMetrics: () =>
-            invoke(IPC_COMMANDS.GET_TEXT_DEDUP_METRICS),
+            ipcInvoke(IPC_COMMANDS.GET_TEXT_DEDUP_METRICS),
         getImageStorageMetrics: () =>
-            invoke(IPC_COMMANDS.GET_IMAGE_STORAGE_METRICS),
+            ipcInvoke(IPC_COMMANDS.GET_IMAGE_STORAGE_METRICS),
         getImagePersistQueueMetrics: () =>
-            invoke(IPC_COMMANDS.GET_IMAGE_PERSIST_QUEUE_METRICS),
+            ipcInvoke(IPC_COMMANDS.GET_IMAGE_PERSIST_QUEUE_METRICS),
         getCopyPasteDedupDebugState: () =>
-            invoke(IPC_COMMANDS.GET_COPY_PASTE_DEDUP_DEBUG_STATE),
+            ipcInvoke(IPC_COMMANDS.GET_COPY_PASTE_DEDUP_DEBUG_STATE),
         setCopyPasteDedupDebugConfig: ({enabled, windowMs, logEnabled, resetMetrics}) =>
-            invoke(IPC_COMMANDS.SET_COPY_PASTE_DEDUP_DEBUG_CONFIG, {enabled, windowMs, logEnabled, resetMetrics}),
+            ipcInvoke(IPC_COMMANDS.SET_COPY_PASTE_DEDUP_DEBUG_CONFIG, {enabled, windowMs, logEnabled, resetMetrics}),
         getVcRuntimeDebugState: () =>
-            invoke(IPC_COMMANDS.GET_VC_RUNTIME_DEBUG_STATE),
+            ipcInvoke(IPC_COMMANDS.GET_VC_RUNTIME_DEBUG_STATE),
         setVcRuntimeDebugConfig: ({forceMissing}) =>
-            invoke(IPC_COMMANDS.SET_VC_RUNTIME_DEBUG_CONFIG, {forceMissing}),
+            ipcInvoke(IPC_COMMANDS.SET_VC_RUNTIME_DEBUG_CONFIG, {forceMissing}),
     } : {}),
 };
 
@@ -439,7 +467,7 @@ export const AIService = {
      * @returns {Promise<void>}
      */
     streamTranslate: (text, sourceLanguage, targetLanguage, opId, sceneHint, windowLabel) =>
-        invoke(IPC_COMMANDS.STREAM_TRANSLATE_TEXT, {
+        ipcInvoke(IPC_COMMANDS.STREAM_TRANSLATE_TEXT, {
             request: buildStreamTranslateRequest(text, sourceLanguage, targetLanguage, opId, sceneHint, windowLabel)
         }),
 
@@ -450,7 +478,7 @@ export const AIService = {
      * @returns {Promise<void>}
      */
     streamExplain: (text, targetLanguage, opId, sceneHint, windowLabel) =>
-        invoke(IPC_COMMANDS.STREAM_EXPLAIN_TEXT, {
+        ipcInvoke(IPC_COMMANDS.STREAM_EXPLAIN_TEXT, {
             request: buildStreamExplainRequest(text, targetLanguage, opId, sceneHint, windowLabel)
         }),
 
@@ -461,28 +489,28 @@ export const AIService = {
      * @returns {Promise<void>}
      */
     streamCustomPrompt: (text, promptName, targetLanguage, opId, sceneHint) =>
-        invoke(IPC_COMMANDS.STREAM_CUSTOM_PROMPT_TEXT, {
+        ipcInvoke(IPC_COMMANDS.STREAM_CUSTOM_PROMPT_TEXT, {
             request: {text, promptName, targetLanguage, opId, sceneHint}
         }),
 };
 
 export const RecordingService = {
-    start: (request = {}) => invoke(IPC_COMMANDS.START_RECORDING, {request}),
-    pause: () => invoke(IPC_COMMANDS.PAUSE_RECORDING),
-    resume: () => invoke(IPC_COMMANDS.RESUME_RECORDING),
-    updateAudioCapture: (request = {}) => invoke(IPC_COMMANDS.UPDATE_RECORDING_AUDIO_CAPTURE, {request}),
-    stop: (sessionId = null) => invoke(IPC_COMMANDS.STOP_RECORDING, {request: {sessionId}}),
-    cancel: (sessionId = null) => invoke(IPC_COMMANDS.CANCEL_RECORDING, {request: {sessionId}}),
-    getState: () => invoke(IPC_COMMANDS.GET_RECORDING_STATE),
-    getOutputDir: () => invoke(IPC_COMMANDS.GET_RECORDING_OUTPUT_DIR),
-    listWindows: () => invoke(IPC_COMMANDS.GET_WINDOW_LIST),
-    listAudioDevices: () => invoke(IPC_COMMANDS.LIST_RECORDING_AUDIO_DEVICES),
-    listSystemOutputs: () => invoke(IPC_COMMANDS.LIST_RECORDING_SYSTEM_OUTPUT_DEVICES),
-    listAudioProcesses: () => invoke(IPC_COMMANDS.LIST_RECORDING_AUDIO_PROCESSES),
-    openFolder: () => invoke(IPC_COMMANDS.OPEN_RECORDING_FOLDER),
-    runRegression: () => invoke(IPC_COMMANDS.RUN_RECORDING_REGRESSION),
-    checkFfmpeg: () => invoke(IPC_COMMANDS.CHECK_RECORDING_FFMPEG),
-    downloadFfmpeg: (downloadUrl = null) => invoke(IPC_COMMANDS.DOWNLOAD_RECORDING_FFMPEG, {downloadUrl}),
+    start: (request = {}) => ipcInvoke(IPC_COMMANDS.START_RECORDING, {request}),
+    pause: () => ipcInvoke(IPC_COMMANDS.PAUSE_RECORDING),
+    resume: () => ipcInvoke(IPC_COMMANDS.RESUME_RECORDING),
+    updateAudioCapture: (request = {}) => ipcInvoke(IPC_COMMANDS.UPDATE_RECORDING_AUDIO_CAPTURE, {request}),
+    stop: (sessionId = null) => ipcInvoke(IPC_COMMANDS.STOP_RECORDING, {request: {sessionId}}),
+    cancel: (sessionId = null) => ipcInvoke(IPC_COMMANDS.CANCEL_RECORDING, {request: {sessionId}}),
+    getState: () => ipcInvoke(IPC_COMMANDS.GET_RECORDING_STATE),
+    getOutputDir: () => ipcInvoke(IPC_COMMANDS.GET_RECORDING_OUTPUT_DIR),
+    listWindows: () => ipcInvoke(IPC_COMMANDS.GET_WINDOW_LIST),
+    listAudioDevices: () => ipcInvoke(IPC_COMMANDS.LIST_RECORDING_AUDIO_DEVICES),
+    listSystemOutputs: () => ipcInvoke(IPC_COMMANDS.LIST_RECORDING_SYSTEM_OUTPUT_DEVICES),
+    listAudioProcesses: () => ipcInvoke(IPC_COMMANDS.LIST_RECORDING_AUDIO_PROCESSES),
+    openFolder: () => ipcInvoke(IPC_COMMANDS.OPEN_RECORDING_FOLDER),
+    runRegression: () => ipcInvoke(IPC_COMMANDS.RUN_RECORDING_REGRESSION),
+    checkFfmpeg: () => ipcInvoke(IPC_COMMANDS.CHECK_RECORDING_FFMPEG),
+    downloadFfmpeg: (downloadUrl = null) => ipcInvoke(IPC_COMMANDS.DOWNLOAD_RECORDING_FFMPEG, {downloadUrl}),
     resizeToolbar: (
         openSelect,
         openOverlay,
@@ -492,7 +520,7 @@ export const RecordingService = {
         capsuleContentHeight = null,
         capsuleContentWidth = null,
         keepWidth = false
-    ) => invoke(IPC_COMMANDS.RESIZE_RECORDING_TOOLBAR, {
+    ) => ipcInvoke(IPC_COMMANDS.RESIZE_RECORDING_TOOLBAR, {
         request: {
             openSelect,
             openOverlay,
@@ -507,61 +535,61 @@ export const RecordingService = {
 };
 
 export const ScreenshotService = {
-    startManualLongshot: (request) => invoke(IPC_COMMANDS.START_MANUAL_LONGSHOT, {request}),
-    pauseManualLongshot: (sessionId) => invoke(IPC_COMMANDS.PAUSE_MANUAL_LONGSHOT, {request: {sessionId}}),
-    resumeManualLongshot: (sessionId) => invoke(IPC_COMMANDS.RESUME_MANUAL_LONGSHOT, {request: {sessionId}}),
-    cancelManualLongshot: (sessionId) => invoke(IPC_COMMANDS.CANCEL_MANUAL_LONGSHOT, {request: {sessionId}}),
-    finishManualLongshot: (sessionId) => invoke(IPC_COMMANDS.FINISH_MANUAL_LONGSHOT, {request: {sessionId}}),
-    getManualLongshotStatus: (sessionId) => invoke(IPC_COMMANDS.GET_MANUAL_LONGSHOT_STATUS, {request: {sessionId}}),
-    getManualLongshotAvailability: () => invoke(IPC_COMMANDS.GET_MANUAL_LONGSHOT_AVAILABILITY),
+    startManualLongshot: (request) => ipcInvoke(IPC_COMMANDS.START_MANUAL_LONGSHOT, {request}),
+    pauseManualLongshot: (sessionId) => ipcInvoke(IPC_COMMANDS.PAUSE_MANUAL_LONGSHOT, {request: {sessionId}}),
+    resumeManualLongshot: (sessionId) => ipcInvoke(IPC_COMMANDS.RESUME_MANUAL_LONGSHOT, {request: {sessionId}}),
+    cancelManualLongshot: (sessionId) => ipcInvoke(IPC_COMMANDS.CANCEL_MANUAL_LONGSHOT, {request: {sessionId}}),
+    finishManualLongshot: (sessionId) => ipcInvoke(IPC_COMMANDS.FINISH_MANUAL_LONGSHOT, {request: {sessionId}}),
+    getManualLongshotStatus: (sessionId) => ipcInvoke(IPC_COMMANDS.GET_MANUAL_LONGSHOT_STATUS, {request: {sessionId}}),
+    getManualLongshotAvailability: () => ipcInvoke(IPC_COMMANDS.GET_MANUAL_LONGSHOT_AVAILABILITY),
 };
 
 export const BackupService = {
-    previewExport: () => invoke(IPC_COMMANDS.PREVIEW_BACKUP_EXPORT),
-    exportToPath: (targetPath) => invoke(IPC_COMMANDS.EXPORT_BACKUP_TO_PATH, {request: {targetPath}}),
-    previewPackage: (packagePath) => invoke(IPC_COMMANDS.PREVIEW_BACKUP_PACKAGE, {request: {packagePath}}),
-    restorePackage: (payload) => invoke(IPC_COMMANDS.RESTORE_BACKUP_PACKAGE, {request: payload}),
-    listHistory: () => invoke(IPC_COMMANDS.LIST_BACKUP_HISTORY),
-    deleteHistoryItem: (filePath) => invoke(IPC_COMMANDS.DELETE_BACKUP_HISTORY_ITEM, {request: {filePath}}),
-    runManualBackup: () => invoke(IPC_COMMANDS.RUN_MANUAL_BACKUP),
-    getSettings: () => invoke(IPC_COMMANDS.GET_BACKUP_SETTINGS),
-    saveSettings: (payload) => invoke(IPC_COMMANDS.SAVE_BACKUP_SETTINGS, {request: payload}),
+    previewExport: () => ipcInvoke(IPC_COMMANDS.PREVIEW_BACKUP_EXPORT),
+    exportToPath: (targetPath) => ipcInvoke(IPC_COMMANDS.EXPORT_BACKUP_TO_PATH, {request: {targetPath}}),
+    previewPackage: (packagePath) => ipcInvoke(IPC_COMMANDS.PREVIEW_BACKUP_PACKAGE, {request: {packagePath}}),
+    restorePackage: (payload) => ipcInvoke(IPC_COMMANDS.RESTORE_BACKUP_PACKAGE, {request: payload}),
+    listHistory: () => ipcInvoke(IPC_COMMANDS.LIST_BACKUP_HISTORY),
+    deleteHistoryItem: (filePath) => ipcInvoke(IPC_COMMANDS.DELETE_BACKUP_HISTORY_ITEM, {request: {filePath}}),
+    runManualBackup: () => ipcInvoke(IPC_COMMANDS.RUN_MANUAL_BACKUP),
+    getSettings: () => ipcInvoke(IPC_COMMANDS.GET_BACKUP_SETTINGS),
+    saveSettings: (payload) => ipcInvoke(IPC_COMMANDS.SAVE_BACKUP_SETTINGS, {request: payload}),
 };
 
 export const DiagnosticService = {
-    getOverview: () => invoke(IPC_COMMANDS.GET_DIAGNOSTIC_OVERVIEW),
-    getItems: () => invoke(IPC_COMMANDS.GET_DIAGNOSTIC_ITEMS),
-    runAction: (actionKey) => invoke(IPC_COMMANDS.RUN_DIAGNOSTIC_ACTION, {request: {actionKey}}),
+    getOverview: () => ipcInvoke(IPC_COMMANDS.GET_DIAGNOSTIC_OVERVIEW),
+    getItems: () => ipcInvoke(IPC_COMMANDS.GET_DIAGNOSTIC_ITEMS),
+    runAction: (actionKey) => ipcInvoke(IPC_COMMANDS.RUN_DIAGNOSTIC_ACTION, {request: {actionKey}}),
 };
 
 export const DocumentService = {
-    addRoot: (name, rootPath) => invoke('add_doc_root', {name, rootPath}),
-    getRoots: () => invoke('get_doc_roots'),
-    removeRoot: (id) => invoke('remove_doc_root', {id}),
+    addRoot: (name, rootPath) => ipcInvoke(IPC_COMMANDS.ADD_DOC_ROOT, {name, rootPath}),
+    getRoots: () => ipcInvoke(IPC_COMMANDS.GET_DOC_ROOTS),
+    removeRoot: (id) => ipcInvoke(IPC_COMMANDS.REMOVE_DOC_ROOT, {id}),
 
-    addCategory: (name, icon, color, rootId) => invoke('add_doc_category', {name, icon, color, rootId}),
-    getCategories: (rootId) => invoke('get_doc_categories', {rootId}),
-    removeCategory: (id) => invoke('remove_doc_category', {id}),
-    renameCategory: (id, name) => invoke('rename_doc_category', {id, name}),
-    reorderCategories: (ids) => invoke('reorder_doc_categories', {ids}),
-    reorderRoots: (ids) => invoke('reorder_doc_roots', {ids}),
-    reorderFiles: (ids) => invoke('reorder_doc_files', {ids}),
+    addCategory: (name, icon, color, rootId) => ipcInvoke(IPC_COMMANDS.ADD_DOC_CATEGORY, {name, icon, color, rootId}),
+    getCategories: (rootId) => ipcInvoke(IPC_COMMANDS.GET_DOC_CATEGORIES, {rootId}),
+    removeCategory: (id) => ipcInvoke(IPC_COMMANDS.REMOVE_DOC_CATEGORY, {id}),
+    renameCategory: (id, name) => ipcInvoke(IPC_COMMANDS.RENAME_DOC_CATEGORY, {id, name}),
+    reorderCategories: (ids) => ipcInvoke(IPC_COMMANDS.REORDER_DOC_CATEGORIES, {ids}),
+    reorderRoots: (ids) => ipcInvoke(IPC_COMMANDS.REORDER_DOC_ROOTS, {ids}),
+    reorderFiles: (ids) => ipcInvoke(IPC_COMMANDS.REORDER_DOC_FILES, {ids}),
 
-    importFiles: (request) => invoke('import_files', {request}),
-    getPage: (request) => invoke('get_doc_page', {request}),
-    updateMeta: (request) => invoke('update_doc_meta', {request}),
-    deleteDoc: (id, deleteFile) => invoke('delete_doc', {request: {id, deleteFile}}),
-    moveDoc: (id, newRootId) => invoke('move_doc', {id, newRootId}),
-    atomicMoveDoc: (request) => invoke('atomic_move_doc', {request}),
-    getStats: (rootId) => invoke('get_doc_stats', {rootId}),
-    openDoc: (id) => invoke('open_doc', {id}),
-    openFolder: (id) => invoke('open_doc_folder', {id}),
-    getDetail: (id) => invoke('get_doc_detail', {id}),
-    scanFolder: (path, recursive) => invoke('scan_folder', {path, recursive}),
+    importFiles: (request) => ipcInvoke(IPC_COMMANDS.IMPORT_FILES, {request}),
+    getPage: (request) => ipcInvoke(IPC_COMMANDS.GET_DOC_PAGE, {request}),
+    updateMeta: (request) => ipcInvoke(IPC_COMMANDS.UPDATE_DOC_META, {request}),
+    deleteDoc: (id, deleteFile) => ipcInvoke(IPC_COMMANDS.DELETE_DOC, {request: {id, deleteFile}}),
+    moveDoc: (id, newRootId) => ipcInvoke(IPC_COMMANDS.MOVE_DOC, {id, newRootId}),
+    atomicMoveDoc: (request) => ipcInvoke(IPC_COMMANDS.ATOMIC_MOVE_DOC, {request}),
+    getStats: (rootId) => ipcInvoke(IPC_COMMANDS.GET_DOC_STATS, {rootId}),
+    openDoc: (id) => ipcInvoke(IPC_COMMANDS.OPEN_DOC, {id}),
+    openFolder: (id) => ipcInvoke(IPC_COMMANDS.OPEN_DOC_FOLDER, {id}),
+    getDetail: (id) => ipcInvoke(IPC_COMMANDS.GET_DOC_DETAIL, {id}),
+    scanFolder: (path, recursive) => ipcInvoke(IPC_COMMANDS.SCAN_FOLDER, {path, recursive}),
 
-    getImportHistory: (limit) => invoke('get_import_history', {limit}),
-    undoImport: (importId) => invoke('undo_import', {importId}),
-    undoImportItem: (importId, docFileId) => invoke('undo_import_item', {importId, docFileId}),
-    getImportFiles: (importId) => invoke('get_import_files', {importId}),
-    detectOrphanFiles: (rootId) => invoke('detect_orphan_files', {rootId}),
+    getImportHistory: (limit) => ipcInvoke(IPC_COMMANDS.GET_IMPORT_HISTORY, {limit}),
+    undoImport: (importId) => ipcInvoke(IPC_COMMANDS.UNDO_IMPORT, {importId}),
+    undoImportItem: (importId, docFileId) => ipcInvoke(IPC_COMMANDS.UNDO_IMPORT_ITEM, {importId, docFileId}),
+    getImportFiles: (importId) => ipcInvoke(IPC_COMMANDS.GET_IMPORT_FILES, {importId}),
+    detectOrphanFiles: (rootId) => ipcInvoke(IPC_COMMANDS.DETECT_ORPHAN_FILES, {rootId}),
 };

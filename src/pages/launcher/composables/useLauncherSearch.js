@@ -1,7 +1,9 @@
 import {invoke} from '@tauri-apps/api/core'
 import {ElMessage} from 'element-plus'
+import {useI18n} from 'vue-i18n'
 
 export function useLauncherSearch() {
+    const {t} = useI18n()
     const builtinCommands = [
         {prefix: ':settings', title: '打开设置', icon: 'setting', action: 'open_settings', type: '命令'},
         {prefix: ':clipboard', title: '打开剪贴板', icon: 'clipboard', action: 'open_clipboard', type: '命令'},
@@ -127,9 +129,9 @@ export function useLauncherSearch() {
                     }
             }
         } catch (error) {
-            console.error('执行操作失败:', error)
+            console.error('[Custom command] Execution failed:', error)
             ElMessage({
-                message: `操作失败: ${error.message || error}`,
+                message: t('launcher.actionFailed', {error: error.message || String(error)}),
                 type: 'error',
                 duration: 3000
             })
@@ -139,7 +141,7 @@ export function useLauncherSearch() {
     const executeCustomCommand = async (item) => {
         const cmdType = item.commandType
         if (!cmdType) {
-            console.error('[自定义命令] commandType 为空')
+            console.error(t('launcher.customCommandTypeEmpty'))
             return
         }
 
@@ -156,13 +158,13 @@ export function useLauncherSearch() {
                         await invoke('toggle_recording_command')
                         break
                     default:
-                        console.warn('未知的自定义动作:', action)
+                        console.warn(t('launcher.unknownCustomAction'), action)
                 }
             } else if (cmdType.CopyText) {
                 await invoke('copy_to_clipboard', {text: cmdType.CopyText.text})
             } else if (cmdType.RunProgram) {
                 if (!cmdType.RunProgram.path) {
-                    throw new Error('程序路径为空')
+                    throw new Error(t('launcher.emptyProgramPath'))
                 }
 
                 const hasArgs = cmdType.RunProgram.args && cmdType.RunProgram.args.trim() !== ''
@@ -179,13 +181,13 @@ export function useLauncherSearch() {
                     })
                 }
             } else {
-                console.error('[自定义命令] 未知的命令类型:', cmdType)
-                throw new Error('未知的命令类型')
+                console.error(t('launcher.commandTypeUnknown'), cmdType)
+                throw new Error(t('launcher.unknownCommandType'))
             }
         } catch (error) {
-            console.error('[自定义命令] 执行失败:', error)
+            console.error(t('launcher.commandExecutionFailed'), error)
             ElMessage({
-                message: `启动失败: ${error.message || error}`,
+                message: t('launcher.launchFailed', {error: error.message || String(error)}),
                 type: 'error',
                 duration: 5000
             })

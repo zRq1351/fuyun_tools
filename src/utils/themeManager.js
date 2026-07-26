@@ -28,6 +28,7 @@ export async function fetchTheme() {
         }
     } catch (e) {
         // 后端不可用时使用 localStorage 缓存
+        console.debug('[ThemeManager] 从后端获取主题失败，使用缓存:', e?.message || e)
     }
     return getTheme()
 }
@@ -84,7 +85,9 @@ export function applyTheme(theme) {
 export function resetToSystemTheme() {
     localStorage.removeItem(THEME_KEY)
     applyTheme(getSystemTheme())
-    invoke('set_theme', {theme: getSystemTheme()}).catch(() => {})
+    invoke('set_theme', {theme: getSystemTheme()}).catch(err => {
+        console.debug('[ThemeManager] 重置主题到系统主题失败:', err?.message || err)
+    })
 }
 
 function getSystemTheme() {
@@ -138,7 +141,9 @@ export function initTheme() {
             localStorage.setItem(THEME_KEY, backendTheme)
             window.dispatchEvent(new CustomEvent('theme-change', {detail: {theme: backendTheme}}))
         }
-    }).catch(() => {})
+    }).catch(err => {
+        console.debug('[ThemeManager] 从后端同步主题失败:', err?.message || err)
+    })
     return theme
 }
 

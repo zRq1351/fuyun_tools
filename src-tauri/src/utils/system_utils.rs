@@ -122,7 +122,6 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
     let contents = read_text_with_backup(&settings_path)?;
     let mut settings: AppSettingsData = serde_json::from_str(&contents)
         .map_err(|e| AppErrorKind::JsonError.to_frontend_json_with_details(format!("{}", e)))?;
-    let keys_migrated = settings.migrate_legacy_api_keys();
     let old_version = settings.version.clone();
     settings.migrate_from_old();
 
@@ -131,11 +130,11 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
         .map_err(|e| AppErrorKind::JsonError.to_frontend_json_with_details(format!("{}", e)))?;
     let fields_added = contents != new_contents;
 
-    // 只有在版本变化、密钥迁移或字段添加时才保存，避免频繁IO
+    // 只有在版本变化或字段添加时才保存，避免频繁IO
     // 使用静态标志防止并发调用时重复保存和日志
     use std::sync::atomic::{AtomicBool, Ordering};
     static SAVED_ONCE: AtomicBool = AtomicBool::new(false);
-    if (old_version != settings.version || keys_migrated || fields_added) && !SAVED_ONCE.swap(true, Ordering::Relaxed) {
+    if (old_version != settings.version || fields_added) && !SAVED_ONCE.swap(true, Ordering::Relaxed) {
         log::info!("配置已更新或补全缺失字段，保存到文件");
         save_settings(&settings)?;
     }

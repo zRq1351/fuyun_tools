@@ -8,10 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
-/// 旧版XOR加密密钥（仅用于迁移旧配置到OS keyring，新密钥不再使用XOR加密）
-#[deprecated(note = "仅用于 migrate_legacy_api_keys 迁移，新代码请使用 OS keyring")]
-const LEGACY_ENCRYPTION_KEY: &[u8] = b"fuyun_tools_encryption_key_2025!";
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CustomPrompt {
     pub name: String,
@@ -452,9 +448,6 @@ impl AppSettingsData {
         provider_key: &str,
         api_key: &str,
     ) -> Result<(), String> {
-        if let Some(config) = self.provider_configs.get_mut(provider_key) {
-            config.encrypted_api_key.clear();
-        }
         let service_name = "fuyun_tools";
         let user_name = format!("api_key_{}", provider_key);
         let entry = keyring::Entry::new(service_name, &user_name)
@@ -511,49 +504,6 @@ impl AppSettingsData {
         Err(AppErrorKind::SettingsApiKeyGetFailed.to_frontend_json_with_details(last_error))
     }
 
-    /// 迁移旧版XOR加密的API密钥到OS keyring
-    /// 此函数仅在应用启动时调用一次，用于兼容旧版本的配置文件
-    /// 迁移成功后，旧的 encrypted_api_key 字段会被清空
-    #[allow(deprecated)]
-    pub fn migrate_legacy_api_keys(&mut self) -> bool {
-        let mut migrated = false;
-        let provider_keys: Vec<String> = self.provider_configs.keys().cloned().collect();
-        for provider_key in provider_keys {
-            if let Some(config) = self.provider_configs.get_mut(&provider_key) {
-                if !config.encrypted_api_key.is_empty() {
-                    log::info!("发现旧版加密密钥，正在迁移提供商: {}", provider_key);
-                    use base64::engine::general_purpose::STANDARD;
-                    use base64::Engine as _;
-                    let decrypted_result = STANDARD
-                        .decode(&config.encrypted_api_key)
-                        .ok()
-                        .and_then(|encrypted| {
-                            let decrypted: Vec<u8> = encrypted
-                                .iter()
-                                .enumerate()
-                                .map(|(i, &b)| {
-                                    b ^ LEGACY_ENCRYPTION_KEY[i % LEGACY_ENCRYPTION_KEY.len()]
-                                })
-                                .collect();
-                            String::from_utf8(decrypted).ok()
-                        });
-                    if let Some(api_key) = decrypted_result {
-                        if let Ok(entry) = keyring::Entry::new("fuyun_tools", &format!("api_key_{}", provider_key)) {
-                            if let Err(e) = entry.set_password(&api_key) {
-                                log::error!("迁移密钥失败: {}", e);
-                            } else {
-                                log::info!("密钥迁移成功");
-                                migrated = true;
-                                config.encrypted_api_key.clear();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        migrated
-    }
-
     pub async fn save_current_provider_config(&mut self, api_key: &str) -> Result<(), String> {
         let provider_key = self.ai_provider.clone();
         self.set_provider_api_key(&provider_key, api_key).await?;
@@ -586,7 +536,6 @@ impl AppSettingsData {
             ProviderConfig {
                 api_url: default_url,
                 model_name: default_model,
-                encrypted_api_key: String::new(),
             }
         };
         let _ = self.get_provider_api_key(&provider_key).await;
@@ -948,7 +897,6 @@ impl AppSettingsData {
             let config = ProviderConfig {
                 api_url: default_url,
                 model_name: default_model,
-                encrypted_api_key: String::new(),
             };
             self.provider_configs
                 .insert(self.ai_provider.clone(), config);
@@ -988,7 +936,6 @@ pub fn initialize_builtin_providers(settings: &mut AppSettingsData) {
         let config = ProviderConfig {
             api_url: default_url,
             model_name: default_model,
-            encrypted_api_key: String::new(),
         };
         settings.provider_configs.insert(provider_key, config);
     }

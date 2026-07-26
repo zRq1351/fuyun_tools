@@ -32,7 +32,7 @@
       >
         <div class="item-header">
           <span class="item-index">{{ entry.index + 1 }}</span>
-          <span class="item-category" @click.stop>{{ entry.category }}</span>
+          <span class="item-category" @click.stop>{{ translateCategory(entry.category) }}</span>
           <div v-if="entry.pinned" class="item-pinned-dot"></div>
           <div class="item-actions">
             <div class="action-btn" @click.stop="openFullscreen(entry.item.id)">
@@ -71,6 +71,19 @@
 <script setup>
 import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue'
 import {Close, Download, FullScreen, Loading, Star} from '@element-plus/icons-vue'
+import {useI18n} from 'vue-i18n'
+
+const {t} = useI18n()
+
+const CATEGORY_TRANSLATIONS = {
+  '未分类': () => t('common.uncategorized'),
+  '全部': () => t('common.all'),
+}
+
+const translateCategory = (category) => {
+  const translator = CATEGORY_TRANSLATIONS[category]
+  return translator ? translator() : category
+}
 
 const props = defineProps({
   visibleHistory: {type: Array, required: true},
