@@ -19,7 +19,7 @@ export function useWindowDrag(options = {}) {
 
         try {
             await getCurrentWebviewWindow().startDragging()
-        } catch (error) {
+        } catch (_error) {
             if (fallback) {
                 try {
                     await fallback()

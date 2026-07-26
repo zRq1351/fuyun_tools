@@ -1,15 +1,12 @@
 use crate::core::error_codes::AppErrorKind;
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::{
-    SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
-};
+use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::{Acquire, QueryBuilder, Row, Sqlite, SqliteConnection, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
-use std::time::Duration;
 use tokio::sync::OnceCell;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -63,54 +60,7 @@ pub fn stable_history_item_id(content: &str) -> String {
     format!("{:016x}", xxh3_64(content.as_bytes()))
 }
 
-async fn reset_temp_text_table(
-    tx: &mut Transaction<'_, Sqlite>,
-    table_name: &str,
-    column_name: &str,
-) -> Result<(), String> {
-    let create_sql = format!(
-        "CREATE TEMP TABLE IF NOT EXISTS {} ({} TEXT PRIMARY KEY)",
-        table_name, column_name
-    );
-    sqlx::query(&create_sql)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-
-    let clear_sql = format!("DELETE FROM {}", table_name);
-    sqlx::query(&clear_sql)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-
-    Ok(())
-}
-
-async fn fill_temp_text_table(
-    tx: &mut Transaction<'_, Sqlite>,
-    table_name: &str,
-    column_name: &str,
-    values: &[String],
-) -> Result<(), String> {
-    if values.is_empty() {
-        return Ok(());
-    }
-    for chunk in values.chunks(500) {
-        let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
-            "INSERT OR IGNORE INTO {} ({}) ",
-            table_name, column_name
-        ));
-        query_builder.push_values(chunk, |mut b, val| {
-            b.push_bind(val);
-        });
-        let query = query_builder.build();
-        query
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-    }
-    Ok(())
-}
+use super::db_utils::{reset_temp_text_table, fill_temp_text_table, build_fts_query_and, build_keyword_snippet_default as build_keyword_snippet, create_db_options};
 
 async fn bulk_upsert_history_items(
     tx: &mut Transaction<'_, Sqlite>,
@@ -160,15 +110,6 @@ async fn bulk_upsert_history_items(
     Ok(())
 }
 
-fn db_options(db_path: &PathBuf) -> SqliteConnectOptions {
-    SqliteConnectOptions::new()
-        .filename(db_path)
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)
-        .synchronous(SqliteSynchronous::Normal)
-        .busy_timeout(Duration::from_millis(1200))
-}
-
 async fn get_history_db_pool() -> Result<&'static SqlitePool, String> {
     HISTORY_DB_POOL
         .get_or_try_init(|| async {
@@ -178,7 +119,7 @@ async fn get_history_db_pool() -> Result<&'static SqlitePool, String> {
             }
             let pool = SqlitePoolOptions::new()
                 .max_connections(3)
-                .connect_with(db_options(&db_path))
+                .connect_with(create_db_options(&db_path))
                 .await
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
@@ -544,106 +485,6 @@ fn resolve_history_sort(sort_by: Option<String>, sort_order: Option<String>) -> 
     }
 }
 
-fn build_fts_query(keyword: &str) -> String {
-    let trimmed = keyword.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    fn escape_fts_token(token: &str) -> String {
-        let mut s = String::with_capacity(token.len());
-        for ch in token.chars() {
-            match ch {
-                '\\' => s.push_str("\\\\"),
-                '"' => s.push_str("\"\""),
-                '(' | ')' | '+' | '-' | '*' | ':' | '^' => {
-                    // FTS5 特殊字符：在引号内转义为字面量
-                    s.push('\\');
-                    s.push(ch);
-                }
-                _ => s.push(ch),
-            }
-        }
-        s
-    }
-    let tokens: Vec<String> = trimmed
-        .split_whitespace()
-        .map(|token| {
-            let escaped = escape_fts_token(token.trim());
-            if !escaped.is_empty() {
-                format!("\"{}\"*", escaped)
-            } else {
-                String::new()
-            }
-        })
-        .filter(|t| !t.is_empty())
-        .collect();
-    if tokens.is_empty() {
-        let escaped = escape_fts_token(trimmed);
-        if escaped.is_empty() {
-            return String::new();
-        }
-        format!("\"{}\"*", escaped)
-    } else {
-        tokens.join(" AND ")
-    }
-}
-
-/// 生成搜索关键词的上下文摘要片段
-/// 注意：使用字节偏移进行截取（B11），对纯 ASCII 文本精确，
-/// 对多字节 UTF-8（如中文）截取位置可能不是精确的字符边界，
-/// 但 adjust_to_char_boundary 确保不会 panic。
-fn build_keyword_snippet(content: &str, keyword: &str) -> String {
-    if content.is_empty() || keyword.trim().is_empty() {
-        return content.to_string();
-    }
-    let content_lower = content.to_lowercase();
-    let keyword_lower = keyword.to_lowercase();
-    if let Some(idx) = content_lower.find(&keyword_lower) {
-        // 字节偏移截取，adjust_to_char_boundary 确保 UTF-8 安全
-        let start = idx.saturating_sub(36);
-        let end = (idx + keyword_lower.len() + 72).min(content.len());
-        let start_adj = adjust_to_char_boundary(content, start, true);
-        let end_adj = adjust_to_char_boundary(content, end, false);
-        let mut snippet = content[start_adj..end_adj].to_string();
-        if start_adj > 0 {
-            snippet = format!("...{}", snippet);
-        }
-        if end_adj < content.len() {
-            snippet.push_str("...");
-        }
-        snippet
-    } else {
-        let end = adjust_to_char_boundary(content, 108.min(content.len()), false);
-        let mut snippet = content[..end].to_string();
-        if end < content.len() {
-            snippet.push_str("...");
-        }
-        snippet
-    }
-}
-
-fn adjust_to_char_boundary(s: &str, idx: usize, backward: bool) -> usize {
-    if idx >= s.len() {
-        return s.len();
-    }
-    if s.is_char_boundary(idx) {
-        return idx;
-    }
-    if backward {
-        let mut i = idx;
-        while i > 0 && !s.is_char_boundary(i) {
-            i -= 1;
-        }
-        i
-    } else {
-        let mut i = idx;
-        while i < s.len() && !s.is_char_boundary(i) {
-            i += 1;
-        }
-        i
-    }
-}
-
 fn block_on_result<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> {
     if tokio::runtime::Handle::try_current().is_ok() {
         return Err("block_on_result must not be called from within a tokio runtime; use the async variant instead".into());
@@ -694,7 +535,7 @@ pub async fn load_history_page_data_async(
     let keyword_filter = keyword
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
-    let fts_keyword = keyword_filter.as_ref().map(|v| build_fts_query(v));
+    let fts_keyword = keyword_filter.as_ref().map(|v| build_fts_query_and(v));
     let pinned_flag: i64 = if pinned_only { 1 } else { 0 };
     let offset_i64 = offset as i64;
     let limit_i64 = effective_limit as i64;
@@ -1698,44 +1539,44 @@ mod tests {
 
     #[test]
     fn fts_empty() {
-        assert_eq!(build_fts_query(""), "");
-        assert_eq!(build_fts_query("   "), "");
+        assert_eq!(build_fts_query_and(""), "");
+        assert_eq!(build_fts_query_and("   "), "");
     }
 
     #[test]
     fn fts_single_token() {
-        assert_eq!(build_fts_query("hello"), "\"hello\"*");
+        assert_eq!(build_fts_query_and("hello"), "\"hello\"*");
     }
 
     #[test]
     fn fts_multi_tokens_and() {
-        let q = build_fts_query("hello world");
+        let q = build_fts_query_and("hello world");
         assert!(q.contains(" AND "));
     }
 
     #[test]
     fn fts_escapes_quote() {
         // FTS5 inside quoted tokens: " becomes ""
-        let q = build_fts_query("say \"hi\"");
+        let q = build_fts_query_and("say \"hi\"");
         assert!(q.contains("\"\""), "双引号应被转义为双写: {}", q);
     }
 
     #[test]
     fn fts_escapes_backslash() {
-        let q = build_fts_query("a\\b");
+        let q = build_fts_query_and("a\\b");
         assert!(q.contains("\\\\"));
     }
 
     #[test]
     fn fts_escapes_parens() {
-        let q = build_fts_query("a(b)");
+        let q = build_fts_query_and("a(b)");
         assert!(q.contains("\\("));
         assert!(q.contains("\\)"));
     }
 
     #[test]
     fn fts_escapes_operators() {
-        let q = build_fts_query("a+b-c:d*e^f");
+        let q = build_fts_query_and("a+b-c:d*e^f");
         assert!(q.contains("\\+"));
         assert!(q.contains("\\-"));
         assert!(q.contains("\\:"));
@@ -1774,27 +1615,26 @@ mod tests {
     #[test]
     fn boundary_on_boundary() {
         let s = "hello";
-        assert_eq!(adjust_to_char_boundary(s, 3, true), 3);
-        assert_eq!(adjust_to_char_boundary(s, 3, false), 3);
+        assert_eq!(adjust_to_char_boundary(s, 3), 3);
     }
 
     #[test]
     fn boundary_out_of_range() {
         let s = "hello";
-        assert_eq!(adjust_to_char_boundary(s, 100, true), 5);
+        assert_eq!(adjust_to_char_boundary(s, 100), 5);
     }
 
     #[test]
     fn boundary_chinese_backward() {
         let s = "你好世界";
-        let adj = adjust_to_char_boundary(s, 1, true);
+        let adj = adjust_to_char_boundary(s, 1);
         assert!(s.is_char_boundary(adj));
     }
 
     #[test]
     fn boundary_chinese_forward() {
         let s = "你好世界";
-        let adj = adjust_to_char_boundary(s, 1, false);
+        let adj = adjust_to_char_boundary(s, 1);
         assert!(s.is_char_boundary(adj));
     }
 
@@ -1810,13 +1650,13 @@ mod tests {
 
     #[test]
     fn fts_only_whitespace_tokens_filtered() {
-        let q = build_fts_query("   ");
+        let q = build_fts_query_and("   ");
         assert_eq!(q, "");
     }
 
     #[test]
     fn fts_mixed_empty_and_real_tokens() {
-        let q = build_fts_query("  hello   world  ");
+        let q = build_fts_query_and("  hello   world  ");
         assert!(q.contains("\"hello\"*"));
         assert!(q.contains("\"world\"*"));
         assert!(q.contains(" AND "));
@@ -1824,7 +1664,7 @@ mod tests {
 
     #[test]
     fn fts_caret_escaped() {
-        let q = build_fts_query("test^value");
+        let q = build_fts_query_and("test^value");
         assert!(q.contains("\\^"));
     }
 
@@ -1870,22 +1710,19 @@ mod tests {
     #[test]
     fn boundary_at_start() {
         let s = "hello";
-        assert_eq!(adjust_to_char_boundary(s, 0, true), 0);
-        assert_eq!(adjust_to_char_boundary(s, 0, false), 0);
+        assert_eq!(adjust_to_char_boundary(s, 0), 0);
     }
 
     #[test]
     fn boundary_at_end() {
         let s = "hello";
-        assert_eq!(adjust_to_char_boundary(s, 5, true), 5);
-        assert_eq!(adjust_to_char_boundary(s, 5, false), 5);
+        assert_eq!(adjust_to_char_boundary(s, 5), 5);
     }
 
     #[test]
     fn boundary_exact_length() {
         let s = "hi";
-        assert_eq!(adjust_to_char_boundary(s, 2, true), 2);
-        assert_eq!(adjust_to_char_boundary(s, 2, false), 2);
+        assert_eq!(adjust_to_char_boundary(s, 2), 2);
     }
 
     // ===================================================================

@@ -20,7 +20,7 @@ const DOMPURIFY_CONFIG = {
   USE_PROFILES: {html: true},
   ADD_ATTR: ['target'],
   FORBID_TAGS: ['style'],
-  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z]|$))/i,
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z]|$))/i,
 }
 
 const props = defineProps({
@@ -112,7 +112,7 @@ const detectAndProcess = (text) => {
       renderedHtml.value = html
       setCacheResult(text, {type: 'code', html})
       return
-    } catch (e) {
+    } catch (_) {
       // not json
     }
   }
@@ -135,7 +135,7 @@ const detectAndProcess = (text) => {
       contentType.value = 'markdown'
       renderedHtml.value = html
       setCacheResult(text, {type: 'markdown', html})
-    } catch (e) {
+    } catch (_) {
       contentType.value = 'text'
       renderedHtml.value = text
       setCacheResult(text, {type: 'text', html: text})
@@ -153,7 +153,7 @@ const detectAndProcess = (text) => {
       contentType.value = 'code'
       renderedHtml.value = html
       setCacheResult(text, {type: 'code', html})
-    } catch (e) {
+    } catch (_) {
       contentType.value = 'text'
       renderedHtml.value = ''
       setCacheResult(text, {type: 'text', html: ''})

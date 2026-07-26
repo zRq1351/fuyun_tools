@@ -1,9 +1,10 @@
+use super::db_utils::{reset_temp_text_table, fill_temp_text_table, reset_temp_position_table, fill_temp_position_table};
 use crate::core::error_codes::AppErrorKind;
 use crate::utils::image_clipboard::{
     ImageHistoryData, ImageHistoryItem, ImageHistoryPageData, ImageHistoryPageItem,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqliteSynchronous};
-use sqlx::{QueryBuilder, Row, Sqlite, SqliteConnection, Transaction};
+use sqlx::{Row, SqliteConnection};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -72,106 +73,6 @@ async fn exec(conn: &mut SqliteConnection, sql: &str) -> Result<(), String> {
         .execute(conn)
         .await
         .map_err(|e| AppErrorKind::ImageStoreInitFailed.to_frontend_json_with_details(format!("{}", e)))?;
-    Ok(())
-}
-
-async fn reset_temp_text_table(
-    tx: &mut Transaction<'_, Sqlite>,
-    table_name: &str,
-    column_name: &str,
-) -> Result<(), String> {
-    let create_sql = format!(
-        "CREATE TEMP TABLE IF NOT EXISTS {} ({} TEXT PRIMARY KEY)",
-        table_name, column_name
-    );
-    sqlx::query(&create_sql)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-
-    let clear_sql = format!("DELETE FROM {}", table_name);
-    sqlx::query(&clear_sql)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-
-    Ok(())
-}
-
-async fn fill_temp_text_table(
-    tx: &mut Transaction<'_, Sqlite>,
-    table_name: &str,
-    column_name: &str,
-    values: &[String],
-) -> Result<(), String> {
-    if values.is_empty() {
-        return Ok(());
-    }
-    for chunk in values.chunks(500) {
-        let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
-            "INSERT OR IGNORE INTO {} ({}) ",
-            table_name, column_name
-        ));
-        query_builder.push_values(chunk, |mut b, val| {
-            b.push_bind(val);
-        });
-        let query = query_builder.build();
-        query
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-    }
-    Ok(())
-}
-
-async fn reset_temp_position_table(
-    tx: &mut Transaction<'_, Sqlite>,
-    table_name: &str,
-    key_column: &str,
-) -> Result<(), String> {
-    let create_sql = format!(
-        "CREATE TEMP TABLE IF NOT EXISTS {} ({} TEXT PRIMARY KEY, position INTEGER NOT NULL)",
-        table_name, key_column
-    );
-    sqlx::query(&create_sql)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-
-    let clear_sql = format!("DELETE FROM {}", table_name);
-    sqlx::query(&clear_sql)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-
-    Ok(())
-}
-
-async fn fill_temp_position_table(
-    tx: &mut Transaction<'_, Sqlite>,
-    table_name: &str,
-    key_column: &str,
-    values: &[String],
-) -> Result<(), String> {
-    if values.is_empty() {
-        return Ok(());
-    }
-    let chunk_size = 500;
-    for (chunk_idx, chunk) in values.chunks(chunk_size).enumerate() {
-        let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
-            "INSERT OR REPLACE INTO {} ({}, position) ",
-            table_name, key_column
-        ));
-        query_builder.push_values(chunk.iter().enumerate(), |mut b, (i, val)| {
-            b.push_bind(val)
-                .push_bind((chunk_idx * chunk_size + i) as i64);
-        });
-        let query = query_builder.build();
-        query
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-    }
     Ok(())
 }
 

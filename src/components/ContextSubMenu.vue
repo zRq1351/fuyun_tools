@@ -25,7 +25,7 @@ import {onBeforeUnmount, ref, watch} from 'vue'
 import ContextMenu from './ContextMenu.vue'
 
 defineProps({
-  label: String,
+  label: {type: String, default: ''},
   zIndex: {type: Number, default: 10000},
 })
 

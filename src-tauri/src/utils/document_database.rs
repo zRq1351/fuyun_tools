@@ -1,14 +1,12 @@
+use super::db_utils::{build_fts_query_space, create_db_options};
 use crate::core::error_codes::AppErrorKind;
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::{
-    SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
-};
+use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::{Acquire, Row, Sqlite, SqliteConnection};
 use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use tokio::sync::OnceCell;
 
 static DOCS_DB_POOL: OnceCell<SqlitePool> = OnceCell::const_new();
@@ -116,15 +114,6 @@ pub fn get_docs_db_path() -> PathBuf {
     path
 }
 
-fn db_options(db_path: &PathBuf) -> SqliteConnectOptions {
-    SqliteConnectOptions::new()
-        .filename(db_path)
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)
-        .synchronous(SqliteSynchronous::Normal)
-        .busy_timeout(Duration::from_millis(1200))
-}
-
 fn now_unix_ms() -> i64 {
     crate::utils::utils_helpers::now_unix_ms_i64()
 }
@@ -213,7 +202,7 @@ async fn get_docs_db_pool() -> Result<&'static SqlitePool, String> {
             }
             let pool = SqlitePoolOptions::new()
                 .max_connections(3)
-                .connect_with(db_options(&db_path))
+                .connect_with(create_db_options(&db_path))
                 .await
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
@@ -1297,7 +1286,7 @@ pub async fn get_doc_page(
         .map(|k| k.trim().to_string())
         .filter(|k| !k.is_empty());
 
-    let fts_query = keyword_val.as_ref().map(|k| build_fts_query(k)).filter(|q| !q.is_empty());
+    let fts_query = keyword_val.as_ref().map(|k| build_fts_query_space(k)).filter(|q| !q.is_empty());
     let fts_enabled = is_fts_enabled(&mut conn).await?;
 
     let use_fts = fts_enabled && fts_query.is_some();
@@ -1450,49 +1439,6 @@ pub async fn get_doc_stats(root_id: Option<i64>) -> Result<DocStats, String> {
         missing_files,
         category_counts,
     })
-}
-
-fn build_fts_query(keyword: &str) -> String {
-    let trimmed = keyword.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    fn escape_fts_token(token: &str) -> String {
-        let mut s = String::with_capacity(token.len());
-        for ch in token.chars() {
-            match ch {
-                '\\' => s.push_str("\\\\"),
-                '"' => s.push_str("\"\""),
-                '(' | ')' | '+' | '-' | '*' | ':' | '^' => {
-                    s.push('\\');
-                    s.push(ch);
-                }
-                _ => s.push(ch),
-            }
-        }
-        s
-    }
-    let tokens: Vec<String> = trimmed
-        .split_whitespace()
-        .map(|token| {
-            let escaped = escape_fts_token(token);
-            if !escaped.is_empty() {
-                format!("\"{}\"*", escaped)
-            } else {
-                String::new()
-            }
-        })
-        .filter(|t| !t.is_empty())
-        .collect();
-    if tokens.is_empty() {
-        let escaped = escape_fts_token(trimmed);
-        if escaped.is_empty() {
-            return String::new();
-        }
-        format!("\"{}\"*", escaped)
-    } else {
-        tokens.join(" ")
-    }
 }
 
 pub fn compute_file_hash(path: &std::path::Path) -> Result<String, String> {
@@ -1860,24 +1806,24 @@ mod tests {
 
     #[test]
     fn doc_fts_empty() {
-        assert_eq!(build_fts_query(""), "");
+        assert_eq!(build_fts_query_space(""), "");
     }
 
     #[test]
     fn doc_fts_single_token() {
-        assert_eq!(build_fts_query("hello"), "\"hello\"*");
+        assert_eq!(build_fts_query_space("hello"), "\"hello\"*");
     }
 
     #[test]
     fn doc_fts_multi_tokens() {
-        let q = build_fts_query("foo bar");
+        let q = build_fts_query_space("foo bar");
         assert!(q.contains(" "));
         assert!(!q.contains("AND")); // document version uses space join, not AND
     }
 
     #[test]
     fn doc_fts_escapes_special_chars() {
-        let q = build_fts_query("test(1)+v2");
+        let q = build_fts_query_space("test(1)+v2");
         assert!(q.contains("\\("));
         assert!(q.contains("\\)"));
         assert!(q.contains("\\+"));
@@ -1959,19 +1905,19 @@ mod tests {
 
     #[test]
     fn doc_fts_single_char_token() {
-        let q = build_fts_query("x");
+        let q = build_fts_query_space("x");
         assert_eq!(q, "\"x\"*");
     }
 
     #[test]
     fn doc_fts_unicode_token() {
-        let q = build_fts_query("中文");
+        let q = build_fts_query_space("中文");
         assert!(q.contains("中文"));
     }
 
     #[test]
     fn doc_fts_mixed_spaces() {
-        let q = build_fts_query("  a  b  ");
+        let q = build_fts_query_space("  a  b  ");
         assert!(q.contains("\"a\"*"));
         assert!(q.contains("\"b\"*"));
     }

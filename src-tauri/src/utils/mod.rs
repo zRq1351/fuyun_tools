@@ -3,6 +3,7 @@ pub mod backup_model;
 pub mod backup_restore;
 pub mod clipboard;
 pub mod database;
+pub mod db_utils;
 pub mod document_database;
 pub mod document_text_extract;
 pub mod icon_extractor;
