@@ -20,6 +20,7 @@ const DOMPURIFY_CONFIG = {
   USE_PROFILES: {html: true},
   ADD_ATTR: ['target'],
   FORBID_TAGS: ['style'],
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z]|$))/i,
 }
 
 const props = defineProps({

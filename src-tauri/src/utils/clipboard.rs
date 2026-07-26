@@ -421,10 +421,12 @@ impl ClipboardManager {
     }
 
     /// 将内容添加到剪贴板历史记录中
+    ///
+    /// 统一锁顺序（所有路径必须一致）：
+    ///   history → bloom_filter → categories → pinned_items → history_fingerprints → exact_index_cache
     pub fn add_to_history(&self, content: String) {
         let mut history = lock_arc_mutex(&self.history);
 
-        // 优化：使用 len() 获取字节长度，避免 O(N) 遍历超大字符串的 chars
         let content_len = content.len();
         log::debug!(
             "添加到历史记录，长度: {}, 当前数量: {}",
@@ -432,27 +434,29 @@ impl ClipboardManager {
             history.len()
         );
 
-        // 优化：布隆过滤器预筛选 - O(1) 快速检查
+        // 阶段1: 布隆过滤器预筛选
         let bloom_filter = self.bloom_filter.lock();
-        if bloom_filter.contains(&content) {
-            drop(bloom_filter);
+        let may_exist = bloom_filter.contains(&content);
+        drop(bloom_filter);
+
+        if may_exist {
             // 布隆过滤器提示可能存在，进行精确检查
             let content_hash = stable_text_hash(&content);
-            let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
-            let mut exact_index_cache = self.exact_index_cache.lock();
 
-            // 检查精确缓存
-            if let Some(cached_index) = exact_index_cache.get(&content_hash).copied() {
+            // 检查精确缓存（不持锁，先读取）
+            let cached_index = self.exact_index_cache.lock().get(&content_hash).copied();
+
+            if let Some(cached_index) = cached_index {
                 if history
                     .get(cached_index)
                     .is_some_and(|item| item == &content)
                 {
+                    // 命中精确缓存，移动到最前面
                     if cached_index != 0 {
                         let exact_item = history.remove(cached_index);
                         history.insert(0, exact_item);
                     }
-                    exact_index_cache.clear();
-                    exact_index_cache.put(content_hash, 0);
+                    // 按统一顺序获取锁: categories → pinned_items → history_fingerprints → exact_index_cache
                     let mut categories = lock_arc_mutex(&self.categories);
                     let mut pinned_items = lock_arc_mutex(&self.pinned_items);
                     shrink_text_history_with_group_protection(
@@ -465,14 +469,20 @@ impl ClipboardManager {
                     normalize_pinned_items(&mut pinned_items, &history);
                     apply_pin_order(&mut history, &pinned_items);
                     self.enqueue_history_only_persist();
+                    let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
+                    let mut exact_index_cache = self.exact_index_cache.lock();
+                    exact_index_cache.clear();
+                    exact_index_cache.put(content_hash, 0);
                     *fingerprints = build_history_fingerprints(&history);
                     self.history_cache_dirty.store(false, Ordering::Relaxed);
                     return;
                 }
-                exact_index_cache.pop(&content_hash);
+                // 缓存失效，移除旧条目
+                self.exact_index_cache.lock().pop(&content_hash);
             }
 
             // 检查指纹索引
+            let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
             let cache_dirty = self.history_cache_dirty.load(Ordering::Relaxed);
             if cache_dirty || fingerprints.len() != history.len() {
                 *fingerprints = build_history_fingerprints(&history);
@@ -488,12 +498,13 @@ impl ClipboardManager {
                             && history.get(idx).is_some_and(|item| item == &content)
                     })
             {
+                // 在指纹索引中找到，移动到最前面
                 if exact_index != 0 {
                     let exact_item = history.remove(exact_index);
                     history.insert(0, exact_item);
                 }
-                exact_index_cache.clear();
-                exact_index_cache.put(content_hash, 0);
+                drop(fingerprints);
+                // 按统一顺序获取锁: categories → pinned_items → history_fingerprints → exact_index_cache
                 let mut categories = lock_arc_mutex(&self.categories);
                 let mut pinned_items = lock_arc_mutex(&self.pinned_items);
                 shrink_text_history_with_group_protection(
@@ -506,22 +517,25 @@ impl ClipboardManager {
                 normalize_pinned_items(&mut pinned_items, &history);
                 apply_pin_order(&mut history, &pinned_items);
                 self.enqueue_history_only_persist();
+                let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
+                let mut exact_index_cache = self.exact_index_cache.lock();
+                exact_index_cache.clear();
+                exact_index_cache.put(content_hash, 0);
                 *fingerprints = build_history_fingerprints(&history);
                 self.history_cache_dirty.store(false, Ordering::Relaxed);
                 return;
             }
+            drop(fingerprints);
         } else {
-            drop(bloom_filter);
-            // 布隆过滤器明确不存在，直接添加到历史记录
+            // 布隆过滤器明确不存在
             log::debug!("布隆过滤器预筛选：内容不存在，直接添加");
         }
 
+        // 阶段2: 内容不存在，添加或替换
         let similarity_threshold = 0.8;
-
         let scan_len = if content_len >= LONG_TEXT_DEDUP_THRESHOLD {
             history.len().min(LONG_TEXT_DEDUP_SCAN_LIMIT)
         } else {
-            // 优化：限制小文本的扫描范围，避免历史记录很大时出现 O(N) 遍历阻塞
             history.len().min(LONG_TEXT_DEDUP_SCAN_LIMIT * 2)
         };
         let candidate_history = &history[..scan_len];
@@ -549,14 +563,15 @@ impl ClipboardManager {
         } else {
             log::debug!("未找到相似版本，直接添加");
             history.retain(|item| item != &content);
-
             history.insert(0, content.clone());
 
-            // 优化：将新内容添加到布隆过滤器
+            // 将新内容添加到布隆过滤器
             let mut bloom_filter = self.bloom_filter.lock();
             bloom_filter.insert(&content);
         }
 
+        // 阶段3: 按统一锁顺序更新索引
+        // categories → pinned_items → history_fingerprints → exact_index_cache
         let mut categories = lock_arc_mutex(&self.categories);
         let mut pinned_items = lock_arc_mutex(&self.pinned_items);
         shrink_text_history_with_group_protection(
@@ -569,7 +584,6 @@ impl ClipboardManager {
         normalize_pinned_items(&mut pinned_items, &history);
         apply_pin_order(&mut history, &pinned_items);
         self.enqueue_history_only_persist();
-        // 锁顺序必须与 Path A 一致: history_fingerprints -> exact_index_cache
         let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
         let mut exact_index_cache = self.exact_index_cache.lock();
         exact_index_cache.clear();

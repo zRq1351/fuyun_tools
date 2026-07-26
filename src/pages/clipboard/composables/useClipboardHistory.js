@@ -8,6 +8,7 @@ export function useClipboardHistory(pinnedItems = ref([])) {
     const searchKeyword = ref('')
     const categoryFilter = ref('全部')
     const categoryMap = ref({})
+    let syncSequence = 0
     const pageOffset = ref(0)
     const pageSize = ref(50)
     const totalCount = ref(0)
@@ -269,6 +270,7 @@ export function useClipboardHistory(pinnedItems = ref([])) {
     const syncHistoryIncremental = async () => {
         if (isLoadingPage.value) return
         isLoadingPage.value = true
+        const currentSequence = ++syncSequence
         try {
             const keyword = searchKeyword.value.trim()
             const category = categoryFilter.value === '全部' ? null : categoryFilter.value
@@ -282,6 +284,10 @@ export function useClipboardHistory(pinnedItems = ref([])) {
                 sortBy: sortBy.value,
                 sortOrder: sortOrder.value
             })
+
+            // If a newer sync was triggered, discard this result
+            if (currentSequence !== syncSequence) return
+
             const items = Array.isArray(response?.items) ? response.items : []
 
             if (keyword) {

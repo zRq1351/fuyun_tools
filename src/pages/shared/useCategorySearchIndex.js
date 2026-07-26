@@ -27,7 +27,7 @@ export function useCategorySearchIndex(categoryMap, options = {}) {
 
     const removeCategoryIndexForItem = (id) => {
         const oldCategory = itemCategorySnapshot.get(id)
-        if (!oldCategory) {
+        if (oldCategory === undefined) {
             itemCategorySnapshot.delete(id)
             return
         }

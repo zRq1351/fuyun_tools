@@ -75,9 +75,6 @@ export function applyTheme(theme) {
     html.removeAttribute('data-theme')
     html.classList.add(validTheme)
     html.setAttribute('data-theme', validTheme)
-    if (validTheme === 'dark') {
-        html.classList.add('dark')
-    }
     document.body.classList.remove('theme-dark', 'theme-light', 'theme-eye-care')
     document.body.classList.add(`theme-${validTheme}`)
 }
