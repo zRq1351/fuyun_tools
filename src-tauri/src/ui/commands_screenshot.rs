@@ -828,36 +828,41 @@ fn place_longshot_toolbar_near_anchor(
         return;
     };
     let (toolbar_w, toolbar_h) = (260i32, 430i32);
+    let dpi = window.scale_factor().unwrap_or(1.0).max(1.0);
+    let phys_h = (toolbar_h as f64 * dpi) as i32;
+    let margin = (12f64 * dpi) as i32;
     let Some(screen_window) = app.get_webview_window("screenshot") else {
         let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
-            anchor.x + anchor.width as i32 + 12,
-            anchor.y + (anchor.height as i32 / 2) - (toolbar_h / 2),
+            anchor.x + anchor.width as i32 + margin,
+            anchor.y + (anchor.height as i32 / 2) - (phys_h / 2),
         )));
         return;
     };
     let Ok(Some(monitor)) = screen_window.current_monitor() else {
         let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
-            anchor.x + anchor.width as i32 + 12,
-            anchor.y + (anchor.height as i32 / 2) - (toolbar_h / 2),
+            anchor.x + anchor.width as i32 + margin,
+            anchor.y + (anchor.height as i32 / 2) - (phys_h / 2),
         )));
         return;
     };
     let dpi = monitor.scale_factor().max(1.0);
     let phys_w = (toolbar_w as f64 * dpi) as i32;
     let phys_h = (toolbar_h as f64 * dpi) as i32;
-    let anchor_x = (anchor.x as f64 * dpi) as i32;
-    let anchor_y = (anchor.y as f64 * dpi) as i32;
-    let anchor_w = (anchor.width as f64 * dpi) as i32;
-    let anchor_h = (anchor.height as f64 * dpi) as i32;
+    // anchor 坐标已经是物理像素，无需再乘 DPI
+    let anchor_x = anchor.x;
+    let anchor_y = anchor.y;
+    let anchor_w = anchor.width as i32;
+    let anchor_h = anchor.height as i32;
     let margin = (12f64 * dpi) as i32;
     let default_x = anchor_x + anchor_w + margin;
     let default_y = anchor_y + (anchor_h / 2) - (phys_h / 2);
     let mon_pos = monitor.position();
     let mon_size = monitor.size();
-    let min_x = mon_pos.x + 8;
-    let max_x = mon_pos.x + mon_size.width as i32 - phys_w - 8;
-    let min_y = mon_pos.y + 8;
-    let max_y = mon_pos.y + mon_size.height as i32 - phys_h - 8;
+    let edge_margin = (8f64 * dpi) as i32;
+    let min_x = mon_pos.x + edge_margin;
+    let max_x = mon_pos.x + mon_size.width as i32 - phys_w - edge_margin;
+    let min_y = mon_pos.y + edge_margin;
+    let max_y = mon_pos.y + mon_size.height as i32 - phys_h - edge_margin;
     let anchor_left = anchor_x;
     let anchor_top = anchor_y;
     let anchor_right = anchor_x + anchor_w;
@@ -972,10 +977,12 @@ pub async fn snap_longshot_toolbar_window(app: AppHandle) -> Result<(), String> 
     };
     let mon_pos = monitor.position();
     let mon_size = monitor.size();
-    let left = mon_pos.x + 8;
-    let right = mon_pos.x + mon_size.width as i32 - size.width as i32 - 8;
-    let top = mon_pos.y + 8;
-    let threshold = 28;
+    let dpi = monitor.scale_factor().max(1.0);
+    let edge_margin = (8f64 * dpi) as i32;
+    let left = mon_pos.x + edge_margin;
+    let right = mon_pos.x + mon_size.width as i32 - size.width as i32 - edge_margin;
+    let top = mon_pos.y + edge_margin;
+    let threshold = (28f64 * dpi) as i32;
 
     let mut next_x = pos.x;
     let mut next_y = pos.y;

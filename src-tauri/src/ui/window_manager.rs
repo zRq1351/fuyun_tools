@@ -18,6 +18,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     keybd_event, KEYEVENTF_KEYUP, VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
 };
 #[cfg(target_os = "windows")]
+use windows::Win32::UI::HiDpi::GetDpiForSystem;
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, GetForegroundWindow, GetSystemMetrics, GetWindowTextW,
     GetWindowThreadProcessId, IsIconic, IsWindow, SetForegroundWindow, ShowWindow,
@@ -692,14 +694,18 @@ pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
     }
 }
 
-/// 获取任务栏安全偏移量
+/// 获取任务栏安全偏移量（物理像素）
 #[cfg(target_os = "windows")]
 fn get_taskbar_safe_offset() -> i32 {
     unsafe {
         let mut work_area: RECT = std::mem::zeroed();
         if SystemParametersInfoW(SPI_GETWORKAREA, 0, Some(&mut work_area as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)).is_ok() {
             let screen_height = GetSystemMetrics(SM_CYSCREEN);
-            return (screen_height - work_area.bottom).max(0);
+            // work_area 是逻辑像素，需要用 DPI 缩放转为物理像素
+            let dpi = GetDpiForSystem();
+            let scale = dpi as f64 / 96.0;
+            let work_area_bottom_phys = (work_area.bottom as f64 * scale) as i32;
+            return (screen_height - work_area_bottom_phys).max(0);
         }
     }
     CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN

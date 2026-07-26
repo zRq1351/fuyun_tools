@@ -380,9 +380,10 @@ pub async fn show_ocr_text_window(
 
     let monitor_pos = monitor.position();
     let monitor_size = monitor.size();
+    let scale_factor = monitor.scale_factor();
     let target_width = (source_size.width as i32).min(monitor_size.width as i32);
-    let target_height = 240i32;
-    let gap = 8i32;
+    let target_height = (240.0 * scale_factor) as i32;
+    let gap = (8.0 * scale_factor) as i32;
     let min_x = monitor_pos.x;
     let min_y = monitor_pos.y;
     let max_x = monitor_pos.x + monitor_size.width as i32 - target_width;
