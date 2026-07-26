@@ -89,13 +89,4 @@ impl ClipboardPoller {
         }
         self.running.store(false, Ordering::SeqCst);
     }
-
-    /// 根据 enabled 参数启动或停止监听器
-    pub fn set_enabled(&self, enabled: bool, start_fn: impl FnOnce(), stop_fn: impl FnOnce()) {
-        if enabled {
-            start_fn();
-        } else {
-            stop_fn();
-        }
-    }
 }

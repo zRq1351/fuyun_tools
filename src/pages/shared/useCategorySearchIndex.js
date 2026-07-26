@@ -13,7 +13,7 @@ export function useCategorySearchIndex(categoryMap, options = {}) {
     const itemCategorySnapshot = new Map()
     const keywordCategoryMatchCache = new Map()
 
-    const SEARCH_CACHE_MAX_SIZE = 300
+    const SEARCH_CACHE_MAX_SIZE = 50
 
     const bumpFilterDataRevision = () => {
         filterDataRevision.value += 1
@@ -92,9 +92,12 @@ export function useCategorySearchIndex(categoryMap, options = {}) {
                 matchedIds.add(id)
             }
         }
+        // 清理过期缓存，保留最近的条目
         if (keywordCategoryMatchCache.size >= SEARCH_CACHE_MAX_SIZE) {
-            const firstKey = keywordCategoryMatchCache.keys().next().value
-            keywordCategoryMatchCache.delete(firstKey)
+            const keysToDelete = Array.from(keywordCategoryMatchCache.keys()).slice(0, SEARCH_CACHE_MAX_SIZE / 2)
+            for (const key of keysToDelete) {
+                keywordCategoryMatchCache.delete(key)
+            }
         }
         keywordCategoryMatchCache.set(cacheKey, matchedIds)
         return matchedIds

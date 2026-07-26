@@ -674,17 +674,19 @@ pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
     if let Ok(Some(monitor)) = window.current_monitor() {
         let monitor_position = monitor.position();
         let screen_size = monitor.size();
+        let scale_factor = monitor.scale_factor();
         let taskbar_safe_offset = get_taskbar_safe_offset() + bottom_offset.max(0);
 
-        // 使用屏幕宽度
-        let window_width = screen_size.width;
+        // 使用逻辑宽度（物理宽度 / 缩放因子）
+        let window_width = (screen_size.width as f64 / scale_factor) as u32;
         let window_height = 360u32;
 
         let _ = window.set_size(tauri::LogicalSize::new(window_width, window_height));
 
+        // 使用物理坐标计算位置
         let target_x = monitor_position.x;
         let target_y = monitor_position.y + screen_size.height as i32
-            - window_height as i32
+            - (window_height as f64 * scale_factor) as i32
             - taskbar_safe_offset;
         let _ = window.set_position(tauri::PhysicalPosition::new(target_x, target_y));
     }

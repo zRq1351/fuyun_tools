@@ -14,6 +14,7 @@ fn read_clipboard_text(app_handle: &AppHandle) -> Option<String> {
         Ok(content) => Some(content),
         Err(e) => {
             let msg = e.to_string();
+            // Only log non-empty clipboard errors (empty clipboard is expected)
             if !msg.contains("Clipboard") && !msg.contains("empty") {
                 log::debug!("获取剪贴板内容失败: {}", msg);
             }
@@ -94,26 +95,30 @@ pub fn add_to_clipboard_history(
         let is_processing = state_guard.is_processing_selection;
         let allow = is_processing
             && crate::features::text_selection::should_allow_clipboard_listener();
-        // 如果正在处理划词且不允许监听器处理，则跳过
+
+        // Skip if processing selection and manual copy not detected
         if is_processing && !allow {
             log::debug!("正在进行划词操作且未检测到手动复制，跳过添加到历史记录");
             return;
         }
+
         (
             state_guard.clipboard_manager.clone(),
             state_guard.is_visible,
             allow,
         )
     };
+
     if allow {
         log::info!("检测到划词期间的手动复制，允许添加到历史记录");
-        // 清除标志，避免后续重复处理（在锁外调用以避免潜在死锁）
+        // Clear flag outside lock to avoid potential deadlock
         crate::features::text_selection::clear_manual_copy_flag();
     }
 
     let payload = {
         let manager = manager_arc.lock().unwrap();
         manager.add_to_history(content);
+
         if !should_emit {
             None
         } else {
@@ -125,6 +130,7 @@ pub fn add_to_clipboard_history(
                 let item_id = crate::utils::database::stable_history_item_id(&latest_item);
                 manager.get_pinned_items().iter().any(|v| v == &item_id)
             };
+
             Some(serde_json::json!({
                 "latest_item": latest_item,
                 "latest_item_id": crate::utils::database::stable_history_item_id(&latest_item),
@@ -133,6 +139,7 @@ pub fn add_to_clipboard_history(
             }))
         }
     };
+
     if let Some(payload) = payload {
         let _ = app_handle.emit("clipboard-history-item-updated", payload);
     }

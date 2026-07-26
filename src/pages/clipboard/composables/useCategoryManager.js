@@ -27,15 +27,17 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             setIsUpdatingCategory(true)
         }
 
-        // 保存旧值用于回滚
+        // Save previous category for rollback
         const prevCategory = categoryMap.value[itemId]
 
+        // Optimistically update local state
         if (setItemCategoryLocal) {
             setItemCategoryLocal(itemId, category)
         } else {
             categoryMap.value[itemId] = category
         }
 
+        // Add category to list if not exists
         if (!categories.value.includes(category)) {
             if (onCategoryAdded) {
                 onCategoryAdded(category)
@@ -52,7 +54,7 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             await categoryService.setItemCategory(itemId, category)
         } catch (error) {
             console.error('保存分类失败:', error)
-            // 回滚本地状态
+            // Rollback local state on error
             if (prevCategory) {
                 if (setItemCategoryLocal) {
                     setItemCategoryLocal(itemId, prevCategory)
@@ -60,8 +62,9 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
                     categoryMap.value[itemId] = prevCategory
                 }
             } else {
-                if (options.removeItemCategoryLocal) {
-                    options.removeItemCategoryLocal(itemId)
+                // Item had no previous category, remove it
+                if (customRemoveItemCategoryLocal) {
+                    customRemoveItemCategoryLocal(itemId)
                 } else {
                     delete categoryMap.value[itemId]
                 }
@@ -80,61 +83,65 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
 
     const removeItemCategory = async (itemId) => {
         if (!itemId) return
-        if (categoryMap.value[itemId]) {
-            if (setIsUpdatingCategory) {
-                setIsUpdatingCategory(true)
-            }
+        if (!categoryMap.value[itemId]) return
 
-            // 保存旧值用于回滚
-            const prevCategory = categoryMap.value[itemId]
+        if (setIsUpdatingCategory) {
+            setIsUpdatingCategory(true)
+        }
 
-            if (customRemoveItemCategoryLocal) {
-                customRemoveItemCategoryLocal(itemId)
+        // Save previous category for rollback
+        const prevCategory = categoryMap.value[itemId]
+
+        // Optimistically remove category locally
+        if (customRemoveItemCategoryLocal) {
+            customRemoveItemCategoryLocal(itemId)
+        } else {
+            delete categoryMap.value[itemId]
+        }
+
+        if (bumpFilterDataRevision) {
+            bumpFilterDataRevision()
+        }
+
+        try {
+            await categoryService.setItemCategory(itemId, "")
+        } catch (error) {
+            console.error('移除分类失败:', error)
+            // Rollback local state on error
+            if (setItemCategoryLocal) {
+                setItemCategoryLocal(itemId, prevCategory)
             } else {
-                delete categoryMap.value[itemId]
+                categoryMap.value[itemId] = prevCategory
             }
-
             if (bumpFilterDataRevision) {
                 bumpFilterDataRevision()
             }
-
-            try {
-                await categoryService.setItemCategory(itemId, "")
-            } catch (error) {
-                console.error('移除分类失败:', error)
-                // 回滚本地状态
-                if (setItemCategoryLocal) {
-                    setItemCategoryLocal(itemId, prevCategory)
-                } else {
-                    categoryMap.value[itemId] = prevCategory
+        } finally {
+            setTimeout(() => {
+                if (setIsUpdatingCategory) {
+                    setIsUpdatingCategory(false)
                 }
-                if (bumpFilterDataRevision) {
-                    bumpFilterDataRevision()
-                }
-            } finally {
-                setTimeout(() => {
-                    if (setIsUpdatingCategory) {
-                        setIsUpdatingCategory(false)
-                    }
-                }, 300)
-            }
+            }, 300)
         }
     }
 
     const removeCategory = async (category) => {
         if (!canDeleteCategory(category)) return
 
-        // 保存旧状态用于回滚
+        // Save previous state for rollback
         const prevCategories = categories.value.slice()
         const prevCategoryMap = {...categoryMap.value}
         const prevFilter = categoryFilter.value
 
+        // Optimistically update local state
         if (onCategoryRemoved) {
             onCategoryRemoved(category)
         } else {
-            categories.value = categories.value.filter((item) => item !== category)
+            categories.value = categories.value.filter(item => item !== category)
         }
-        Object.keys(categoryMap.value).forEach((item) => {
+
+        // Remove category from all items locally
+        for (const item of Object.keys(categoryMap.value)) {
             if (categoryMap.value[item] === category) {
                 if (customRemoveItemCategoryLocal) {
                     customRemoveItemCategoryLocal(item)
@@ -142,8 +149,9 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
                     delete categoryMap.value[item]
                 }
             }
-        })
+        }
 
+        // Reset filter if it was showing the deleted category
         if (categoryFilter.value === category) {
             categoryFilter.value = '全部'
         }
@@ -152,11 +160,17 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             await categoryService.removeCategory(category)
         } catch (error) {
             console.error('删除分类失败:', error)
-            // 回滚本地状态
+            // Rollback local state on error
             categories.value = prevCategories
-            Object.keys(categoryMap.value).forEach(key => delete categoryMap.value[key])
+
+            // Restore categoryMap by clearing and reassigning
+            for (const key of Object.keys(categoryMap.value)) {
+                delete categoryMap.value[key]
+            }
             Object.assign(categoryMap.value, prevCategoryMap)
+
             categoryFilter.value = prevFilter
+
             if (bumpFilterDataRevision) {
                 bumpFilterDataRevision()
             }
@@ -182,25 +196,33 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
         const category = newCategoryName.value.trim()
         isAddingCategory.value = false
         newCategoryName.value = ''
+
         if (categoryInputOpenedAt) {
             categoryInputOpenedAt.value = 0
         }
-        if (category && category !== '未分类' && category !== '全部') {
-            if (!categories.value.includes(category)) {
-                const prevCategories = categories.value.slice()
-                if (onCategoryAdded) {
-                    onCategoryAdded(category)
-                } else {
-                    categories.value = [...categories.value, category]
-                }
-                try {
-                    await categoryService.addCategory(category)
-                } catch (error) {
-                    console.error('添加分类失败:', error)
-                    // 回滚：移除本地添加的分类
-                    categories.value = prevCategories
-                }
-            }
+
+        // Validate category name
+        if (!category || category === '未分类' || category === '全部') return
+
+        // Skip if category already exists
+        if (categories.value.includes(category)) return
+
+        // Save previous state for rollback
+        const prevCategories = categories.value.slice()
+
+        // Optimistically add category locally
+        if (onCategoryAdded) {
+            onCategoryAdded(category)
+        } else {
+            categories.value = [...categories.value, category]
+        }
+
+        try {
+            await categoryService.addCategory(category)
+        } catch (error) {
+            console.error('添加分类失败:', error)
+            // Rollback: remove locally added category
+            categories.value = prevCategories
         }
     }
 

@@ -111,7 +111,7 @@
           }}</span>
         <div class="status-actions">
           <button
-              :title="`切换分页大小（当前每页 ${pageSize} 条）`"
+              :title="$t('clipboard.cyclePageSize', {size: pageSize})"
               class="nav-action-btn"
               type="button"
               @click="cyclePageSize"
@@ -587,7 +587,7 @@ const handleDrop = async (event, category) => {
   })
 }
 
-const buildOpId = () => Date.now() * 1000 + Math.floor(Math.random() * 1000)
+const buildOpId = () => Date.now() * 10000 + Math.floor(Math.random() * 10000)
 
 const resolveSelectedText = () => {
   if (!selectedItemId.value) {
@@ -651,8 +651,7 @@ const ensureKeyboardSelectionVisible = async () => {
   const selected = selectedItemId.value
   if (!selected) return
   const element = document.getElementById(`clipboard-item-${selected}`)
-  const containerRefOrEl = clipboardListRef.value?.contentRef
-  const container = containerRefOrEl?.value || containerRefOrEl || element?.closest('.content')
+  const container = clipboardListRef.value?.getScrollEl() || document.getElementById(`clipboard-item-${selected}`)?.closest('.content')
   if (!element || !container) return
   const EDGE_PADDING = 8
   const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth)
@@ -661,8 +660,7 @@ const ensureKeyboardSelectionVisible = async () => {
 }
 
 const getContentContainer = () => {
-  const containerRefOrEl = clipboardListRef.value?.contentRef
-  return containerRefOrEl?.value || containerRefOrEl || null
+  return clipboardListRef.value?.getScrollEl() || null
 }
 
 const tryLoadMoreByScroll = async () => {
@@ -724,9 +722,11 @@ const handleKeydown = async (event) => {
   if (event.ctrlKey) {
     isCtrlKeyPressed.value = true
   }
+
   if (!isVisible.value) return
   if (isInputLikeTarget(event.target)) return
 
+  // Ctrl+Number: Quick select and fill
   if (event.ctrlKey && event.key >= '1' && event.key <= '9') {
     event.preventDefault()
     const index = parseInt(event.key, 10) - 1
@@ -736,17 +736,20 @@ const handleKeydown = async (event) => {
     return
   }
 
+  // Escape: Close context menu if open
   if (contextMenuVisible.value && event.key === 'Escape') {
     closeContextMenu()
     return
   }
 
+  // Handle navigation and action keys
   switch (event.key) {
     case 'ArrowLeft':
       event.preventDefault()
       moveSelection(-1, clipboardListRef.value?.contentRef)
       await ensureKeyboardSelectionVisible()
       break
+
     case 'ArrowRight':
       event.preventDefault()
       moveSelection(1, clipboardListRef.value?.contentRef)
@@ -754,20 +757,23 @@ const handleKeydown = async (event) => {
       await tryLoadMoreByScroll()
       await ensureKeyboardSelectionVisible()
       break
+
     case 'Enter':
       event.preventDefault()
       if (selectedItemId.value) {
-        const entry = visibleHistory.value.find((entry) => entry.id === selectedItemId.value)
+        const entry = visibleHistory.value.find(e => e.id === selectedItemId.value)
         if (entry) {
           selectAndFillDirect(entry.id)
         }
       }
       break
+
     case 't':
     case 'T':
       event.preventDefault()
       await triggerAiFromSelection('translate')
       break
+
     case 'e':
     case 'E':
       event.preventDefault()
@@ -783,25 +789,22 @@ let filterDebounceTimer = null
 watch([searchKeyword, categoryFilter], (newVals, oldVals) => {
   if (!isVisible.value) return
 
-
-  if (isUpdatingCategory.value) {
-    return
-  }
+  // Skip sync during category updates to avoid race conditions
+  if (isUpdatingCategory.value) return
 
   const [newSearch, newCategory] = newVals
   const [oldSearch, oldCategory] = oldVals
 
+  // Clear existing timer
   if (filterDebounceTimer) {
     clearTimeout(filterDebounceTimer)
   }
 
-
+  // Use longer delay for search changes to reduce API calls
   const delay = newSearch !== oldSearch ? 300 : 50
 
   filterDebounceTimer = setTimeout(() => {
     loadMoreIntent.value = false
-
-
     syncHistoryIncremental()
   }, delay)
 })

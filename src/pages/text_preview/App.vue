@@ -70,6 +70,7 @@ const isEditing = ref(false)
 const textareaRef = ref(null)
 
 let unlisten = null
+let unlistenReplaced = null
 
 const startWindowDrag = async () => {
   try {
@@ -189,7 +190,7 @@ onMounted(async () => {
   })
 
   // 监听文本编辑后 ID 变更事件
-  await listen('text-item-replaced', (event) => {
+  unlistenReplaced = await listen('text-item-replaced', (event) => {
     const {old_id, new_id} = event.payload || {}
     if (old_id && new_id && itemId.value === old_id) {
       itemId.value = new_id
@@ -200,6 +201,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
   if (unlisten) unlisten()
+  if (unlistenReplaced) unlistenReplaced()
 })
 </script>
 

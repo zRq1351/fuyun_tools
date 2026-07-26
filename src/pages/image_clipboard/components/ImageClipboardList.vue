@@ -1,77 +1,89 @@
 <template>
   <div
-      ref="contentRef"
       class="content"
       @mousedown="onMouseDown"
       @scroll="onScroll"
   >
-    <div ref="trackRef" class="scroll-track" :style="{ paddingRight: rightPadding + 'px' }">
-      <div
-          v-for="entry in visibleHistory"
-          :id="`image-item-${entry.index}`"
-          :key="entry.item.id"
-          v-memo="[
-            entry.item.id,
-            entry.index,
-            selectedIndex === entry.index,
-            entry.pinned,
-            entry.category,
-            entry.tags,
-            entry.item.preview_png_base64,
-            entry.item.image_path
-          ]"
-          :class="{ selected: selectedIndex === entry.index, pinned: entry.pinned }"
-          :draggable="isCtrlKeyPressed"
-          class="clipboard-item"
-          @click="handleClick(entry.index)"
-          @dblclick="handleDoubleClick(entry.item.id)"
-          @dragend="handleDragEnd"
-          @dragstart="handleDragStart($event, entry.item.id)"
-          @mouseenter="handleItemHover(entry.index)"
-          @contextmenu.prevent="showContextMenu($event, entry.item.id)"
-      >
-        <div class="item-header">
-          <span class="item-index">{{ entry.index + 1 }}</span>
-          <span class="item-category" @click.stop>{{ translateCategory(entry.category) }}</span>
-          <div v-if="entry.pinned" class="item-pinned-dot"></div>
-          <div class="item-actions">
-            <div class="action-btn" @click.stop="openFullscreen(entry.item.id)">
-              <el-icon :size="9"><FullScreen/></el-icon>
-            </div>
-            <div class="action-btn" @click.stop="downloadItem(entry.item.id)">
-              <el-icon :size="9"><Download/></el-icon>
-            </div>
-            <div :class="{ active: entry.pinned }" class="action-btn" @click.stop="promoteItem(entry.item.id)">
-              <Star :size="9"/>
-            </div>
-            <div class="action-btn action-delete" @click.stop="deleteItem(entry.item.id, entry.index)">
-              <el-icon :size="9"><Close/></el-icon>
+    <RecycleScroller
+        ref="scrollerRef"
+        :buffer="SCROLL_BUFFER"
+        :item-size="SCROLL_ITEM_SIZE"
+        :items="scrollerItems"
+        class="scroll-track"
+        direction="horizontal"
+        key-field="id"
+        @scroll.native="onScroll"
+    >
+      <template #default="{ item: scrollerItem }">
+        <div
+            :id="`image-item-${scrollerItem.entryIndex}`"
+            :class="{ selected: selectedIndex === scrollerItem.entryIndex, pinned: scrollerItem.pinned }"
+            :draggable="isCtrlKeyPressed"
+            class="clipboard-item"
+            @click="handleClick(scrollerItem.entryIndex)"
+            @dblclick="handleDoubleClick(scrollerItem.id)"
+            @dragend="handleDragEnd"
+            @dragstart="handleDragStart($event, scrollerItem.id)"
+            @mouseenter="handleItemHover(scrollerItem.entryIndex)"
+            @contextmenu.prevent="showContextMenu($event, scrollerItem.id)"
+        >
+          <div class="item-header">
+            <span class="item-index">{{ scrollerItem.entryIndex + 1 }}</span>
+            <span class="item-category" @click.stop>{{ translateCategory(scrollerItem.category) }}</span>
+            <div v-if="scrollerItem.pinned" class="item-pinned-dot"></div>
+            <div class="item-actions">
+              <div class="action-btn" @click.stop="openFullscreen(scrollerItem.id)">
+                <el-icon :size="9">
+                  <FullScreen/>
+                </el-icon>
+              </div>
+              <div class="action-btn" @click.stop="downloadItem(scrollerItem.id)">
+                <el-icon :size="9">
+                  <Download/>
+                </el-icon>
+              </div>
+              <div :class="{ active: scrollerItem.pinned }" class="action-btn"
+                   @click.stop="promoteItem(scrollerItem.id)">
+                <Star :size="9"/>
+              </div>
+              <div class="action-btn action-delete" @click.stop="deleteItem(scrollerItem.id, scrollerItem.entryIndex)">
+                <el-icon :size="9">
+                  <Close/>
+                </el-icon>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="item-content">
-          <img :src="getPreviewDataUrl(entry.item)" alt="" class="image-preview" decoding="async" draggable="false" @dragstart.prevent/>
-        </div>
-        <div v-if="entry.tags.length" class="tag-wrap">
-          <div class="tag-chip-list">
-            <span v-for="tag in entry.tags" :key="`${entry.item.id}-${tag}`" class="tag-chip">#{{ tag }}</span>
+          <div class="item-content">
+            <img :src="getPreviewDataUrl(scrollerItem.rawItem)" alt="" class="image-preview" decoding="async"
+                 draggable="false" @dragstart.prevent/>
           </div>
+          <div v-if="scrollerItem.tags.length" class="tag-wrap">
+            <div class="tag-chip-list">
+              <span v-for="tag in scrollerItem.tags" :key="`${scrollerItem.id}-${tag}`"
+                    class="tag-chip">#{{ tag }}</span>
+            </div>
+          </div>
+          <div class="image-meta">{{ scrollerItem.rawItem.width }} × {{ scrollerItem.rawItem.height }}</div>
         </div>
-        <div class="image-meta">{{ entry.item.width }} × {{ entry.item.height }}</div>
-      </div>
+      </template>
+    </RecycleScroller>
 
-      <div v-if="showTailLoadMoreHint" class="load-more">
-        <el-icon v-if="isLoadingMore" :size="14" class="is-loading"><Loading/></el-icon>
-        <span class="load-more-text">{{ isLoadingMore ? $t('imageClipboard.loading') : $t('imageClipboard.loadMore') }}</span>
-      </div>
+    <div v-if="showTailLoadMoreHint" class="load-more">
+      <el-icon v-if="isLoadingMore" :size="14" class="is-loading">
+        <Loading/>
+      </el-icon>
+      <span
+          class="load-more-text">{{ isLoadingMore ? $t('imageClipboard.loading') : $t('imageClipboard.loadMore') }}</span>
     </div>
   </div>
 </template>
 
 <script setup>
-import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue'
+import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {Close, Download, FullScreen, Loading, Star} from '@element-plus/icons-vue'
 import {useI18n} from 'vue-i18n'
+import {RecycleScroller} from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 
 const {t} = useI18n()
 
@@ -84,6 +96,9 @@ const translateCategory = (category) => {
   const translator = CATEGORY_TRANSLATIONS[category]
   return translator ? translator() : category
 }
+
+const SCROLL_ITEM_SIZE = 270
+const SCROLL_BUFFER = 540
 
 const props = defineProps({
   visibleHistory: {type: Array, required: true},
@@ -107,18 +122,23 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent'])
 
 const contentRef = ref(null)
-const trackRef = ref(null)
-const rightPadding = ref(0)
+const scrollerRef = ref(null)
 
-const ensureLastCardVisible = () => {
-  const el = contentRef.value
-  if (!el) return
-  const lastCard = el.querySelector('.clipboard-item:last-of-type')
-  if (!lastCard) return
-  const lastCardRight = lastCard.offsetLeft + lastCard.offsetWidth
-  const needed = lastCardRight - el.scrollWidth + el.clientWidth
-  if (needed > 0) rightPadding.value = needed
+const getScrollEl = () => {
+  if (!scrollerRef.value?.$el) return null
+  return scrollerRef.value.$el.querySelector('.vue-recycle-scroller') || scrollerRef.value.$el
 }
+
+const scrollerItems = computed(() => {
+  return props.visibleHistory.map((entry) => ({
+    id: entry.item.id,
+    rawItem: entry.item,
+    entryIndex: entry.index,
+    pinned: entry.pinned,
+    category: entry.category,
+    tags: entry.tags,
+  }))
+})
 
 let isDown = false
 let isDragging = false
@@ -131,7 +151,6 @@ const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.valu
 
 const onScroll = () => {
   emit('content-scroll')
-  ensureLastCardVisible()
 }
 
 const stopDragging = () => {
@@ -153,13 +172,15 @@ const onMouseDown = (event) => {
   isDown = true
   isDragging = false
   startX = event.pageX
-  scrollLeftStart = contentRef.value?.scrollLeft || 0
+  scrollLeftStart = getScrollEl()?.scrollLeft || 0
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
 }
 
 const onMouseMove = (event) => {
-  if (!isDown || !contentRef.value) return
+  if (!isDown) return
+  const el = getScrollEl()
+  if (!el) return
   const walk = event.pageX - startX
   if (!isDragging && Math.abs(walk) > 4) {
     isDragging = true
@@ -169,14 +190,14 @@ const onMouseMove = (event) => {
   if (!isDragging) return
   event.preventDefault()
   const newScroll = scrollLeftStart - walk
-  const max = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+  const max = Math.max(0, el.scrollWidth - el.clientWidth)
   if (newScroll >= max - 260 && props.hasMore && !props.isLoadingPage) {
     emit('load-more-intent')
   }
   if (!dragRafId) {
     dragRafId = requestAnimationFrame(() => {
       dragRafId = 0
-      if (contentRef.value) contentRef.value.scrollLeft = newScroll
+      el.scrollLeft = newScroll
     })
   }
 }
@@ -188,38 +209,38 @@ const handleDoubleClick = (itemId) => props.fillById(itemId)
 
 onMounted(() => {
   window.addEventListener('blur', stopDragging)
-  nextTick(ensureLastCardVisible)
 })
 onUnmounted(() => {
   stopDragging()
   window.removeEventListener('blur', stopDragging)
 })
 
-watch(() => props.visibleHistory.length, () => nextTick(ensureLastCardVisible))
-
-defineExpose({contentRef})
+defineExpose({contentRef, scrollerRef, getScrollEl})
 </script>
 
 <style scoped>
 .content {
   flex: 1;
+  min-width: 0;
   min-height: 0;
-  overflow-x: auto;
   cursor: grab;
 }
 
-.content::-webkit-scrollbar {
-  display: none
+.scroll-track {
+  width: 100%;
+  height: 100%;
 }
 
-.scroll-track {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  white-space: nowrap;
-  padding: 0 0 0 14px;
+.scroll-track :deep(.vue-recycle-scroller) {
   height: 100%;
+}
+
+.scroll-track :deep(.vue-recycle-scroller__item-wrapper) {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0 0 14px;
   gap: 10px;
+  height: 100%;
 }
 
 .clipboard-item {

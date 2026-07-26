@@ -23,19 +23,16 @@ export function useClipboardHistory(pinnedItems = ref([])) {
     let _lastSortBy = null
     let _lastSortOrder = null
 
+    const invalidateSortCache = () => {
+        _lastSortedData = null
+        _lastSortedResult = null
+        _lastSortBy = null
+        _lastSortOrder = null
+    }
+
     // Invalidate sort cache when sort params change
-    watch(sortBy, () => {
-        _lastSortedData = null
-        _lastSortedResult = null
-        _lastSortBy = null
-        _lastSortOrder = null
-    })
-    watch(sortOrder, () => {
-        _lastSortedData = null
-        _lastSortedResult = null
-        _lastSortBy = null
-        _lastSortOrder = null
-    })
+    watch(sortBy, invalidateSortCache)
+    watch(sortOrder, invalidateSortCache)
 
     const {
         filterDataRevision,
@@ -109,19 +106,16 @@ export function useClipboardHistory(pinnedItems = ref([])) {
         }
         const merged = entries.slice()
         const orderKey = sortBy.value
+        const order = sortOrder.value
         merged.sort((a, b) => {
             if (orderKey === 'pinnedFirst') {
                 const pinDiff = (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
                 if (pinDiff !== 0) return pinDiff
-                const diff = a.position - b.position
-                if (a.pinned && b.pinned) {
-                    return diff
-                }
-                return diff
+                return a.position - b.position
             }
             if (orderKey === 'updatedAt') {
                 const diff = (b.updatedAt || 0) - (a.updatedAt || 0)
-                if (diff !== 0) return sortOrder.value === 'asc' ? -diff : diff
+                if (diff !== 0) return order === 'asc' ? -diff : diff
                 return a.position - b.position
             }
             return a.position - b.position
@@ -129,7 +123,7 @@ export function useClipboardHistory(pinnedItems = ref([])) {
         _lastSortedData = entries
         _lastSortedResult = merged
         _lastSortBy = sortBy.value
-        _lastSortOrder = sortOrder.value
+        _lastSortOrder = order
         return merged
     }
 
@@ -160,22 +154,21 @@ export function useClipboardHistory(pinnedItems = ref([])) {
 
     const mergePageItems = (items, reset) => {
         if (reset) {
-
             categorySearchIndex.clear()
             itemCategorySnapshot.clear()
             keywordCategoryMatchCache.clear()
 
-
             const resetItems = items.map((item, index) => ({
                 ...item,
                 position: index
-            }));
+            }))
 
             pagedHistory.value = sortPageItems(resetItems)
 
-            pagedHistory.value.forEach((entry, index) => {
-                entry.position = index;
-            });
+            // Update positions after sort
+            for (let i = 0; i < pagedHistory.value.length; i++) {
+                pagedHistory.value[i].position = i
+            }
 
             for (const item of items) {
                 if (item.id) {
@@ -185,18 +178,17 @@ export function useClipboardHistory(pinnedItems = ref([])) {
             return
         }
 
+        // Build lookup for existing items
         const existingIds = new Set(pagedHistory.value.map(entry => entry.id))
         const newItems = []
+
         for (const item of items) {
             if (!existingIds.has(item.id)) {
-                newItems.push({
-                    ...item,
-                    position: 0
-                })
+                newItems.push({...item, position: 0})
             }
             if (item.id) {
-                // 仅当后端返回了明确的 category 时才更新，
-                // 避免增量同步（后端不返回 category）覆盖前端已设置的分类
+                // Only update category if backend provides explicit category
+                // Avoid overwriting frontend-set categories during incremental sync
                 if (item.category) {
                     setItemCategoryLocal(item.id, item.category)
                 } else if (!categoryMap.value[item.id]) {
@@ -205,10 +197,12 @@ export function useClipboardHistory(pinnedItems = ref([])) {
             }
         }
 
+        if (newItems.length === 0) return
+
         const merged = [...pagedHistory.value, ...newItems]
-        merged.forEach((entry, index) => {
-            entry.position = index;
-        });
+        for (let i = 0; i < merged.length; i++) {
+            merged[i].position = i
+        }
 
         pagedHistory.value = sortPageItems(merged)
     }
@@ -232,6 +226,7 @@ export function useClipboardHistory(pinnedItems = ref([])) {
             const offset = reset ? 0 : getActiveCategoryCount()
             const keyword = searchKeyword.value.trim()
             const category = categoryFilter.value === '全部' ? null : categoryFilter.value
+
             const response = await ClipboardService.getHistoryPage({
                 offset,
                 limit: pageSize.value,
@@ -241,12 +236,15 @@ export function useClipboardHistory(pinnedItems = ref([])) {
                 sortBy: sortBy.value,
                 sortOrder: sortOrder.value
             })
+
             const items = Array.isArray(response?.items) ? response.items : []
             mergePageItems(items, reset)
+
             totalCount.value = Number.isFinite(response?.total) ? response.total : getActiveCategoryCount()
             pageOffset.value = pagedHistory.value.length
             hasMore.value = getActiveCategoryCount() < totalCount.value
 
+            // Update selection
             if (pagedHistory.value.length === 0) {
                 selectedItemId.value = ''
             } else if (!pagedHistory.value.some((entry) => entry.id === selectedItemId.value)) {
@@ -303,32 +301,28 @@ export function useClipboardHistory(pinnedItems = ref([])) {
                 return
             }
 
-            // Reuse existing maps to reduce GC pressure
-            const existingById = new Map()
-            for (const entry of pagedHistory.value) {
-                existingById.set(entry.id, entry)
-            }
-            const incomingIds = new Set()
-            for (const item of items) {
-                incomingIds.add(item.id)
-            }
+            // Build lookup structures once
+            const existingById = new Map(pagedHistory.value.map(entry => [entry.id, entry]))
+            const incomingIds = new Set(items.map(item => item.id).filter(Boolean))
+            const hasKeyword = keyword.length > 0
 
+            // Merge incoming items with existing data
             const front = []
             for (const item of items) {
                 if (!item.id) continue
-                const existing = existingById.get(item.id) || {}
+                const existing = existingById.get(item.id)
                 front.push({
-                    ...existing,
+                    ...(existing || {}),
                     id: item.id,
                     content: item.content,
-                    position: item.position ?? existing.position ?? 0,
-                    snippet: keyword ? (item.snippet ?? existing.snippet ?? '') : '',
-                    pinned: item.pinned ?? existing.pinned ?? false,
-                    category: item.category || existing.category || '未分类'
+                    position: item.position ?? (existing?.position ?? 0),
+                    snippet: hasKeyword ? (item.snippet ?? existing?.snippet ?? '') : '',
+                    pinned: item.pinned ?? existing?.pinned ?? false,
+                    category: item.category || existing?.category || '未分类'
                 })
 
-                // 仅当后端返回了明确的 category 时才更新，
-                // 避免增量同步（后端不返回 category）覆盖前端已设置的分类
+                // Only update category if backend provides explicit category
+                // Avoid overwriting frontend-set categories during incremental sync
                 if (item.category) {
                     setItemCategoryLocal(item.id, item.category)
                 } else if (!categoryMap.value[item.id]) {
@@ -336,29 +330,20 @@ export function useClipboardHistory(pinnedItems = ref([])) {
                 }
             }
 
-            const rest = []
-            for (const entry of pagedHistory.value) {
-                if (!incomingIds.has(entry.id)) {
-                    rest.push({
-                        ...entry,
-                        snippet: keyword ? entry.snippet : ''
-                    })
-                }
-            }
+            // Keep items not in incoming set
+            const rest = hasKeyword
+                ? pagedHistory.value.filter(entry => !incomingIds.has(entry.id))
+                : pagedHistory.value.filter(entry => !incomingIds.has(entry.id))
 
             const merged = [...front, ...rest]
 
-            merged.forEach((entry, index) => {
-                entry.position = index;
-            });
+            // Update positions in-place
+            for (let i = 0; i < merged.length; i++) {
+                merged[i].position = i
+            }
 
-            // Invalidate sort cache since data changed
-            _lastSortedData = null
-            _lastSortedResult = null
-            _lastSortBy = null
-            _lastSortOrder = null
-
-            pagedHistory.value = sortPageItems(merged);
+            invalidateSortCache()
+            pagedHistory.value = sortPageItems(merged)
 
             totalCount.value = Number.isFinite(response?.total)
                 ? Math.max(Number(response.total), getActiveCategoryCount())
@@ -387,9 +372,11 @@ export function useClipboardHistory(pinnedItems = ref([])) {
 
     const loadTailPage = async () => {
         if (!hasMore.value || isLoadingPage.value) return false
+
         const loadedCount = getActiveCategoryCount()
         const exactTotal = Math.max(Number(totalCount.value) || 0, loadedCount)
         const targetOffset = Math.max(0, exactTotal - (Number(pageSize.value) || 10))
+
         if (targetOffset <= 0 && loadedCount >= exactTotal) {
             return false
         }
@@ -398,6 +385,7 @@ export function useClipboardHistory(pinnedItems = ref([])) {
         try {
             const keyword = searchKeyword.value.trim()
             const category = categoryFilter.value === '全部' ? null : categoryFilter.value
+
             const response = await ClipboardService.getHistoryPage({
                 offset: targetOffset,
                 limit: pageSize.value,
@@ -407,11 +395,12 @@ export function useClipboardHistory(pinnedItems = ref([])) {
                 sortBy: sortBy.value,
                 sortOrder: sortOrder.value
             })
+
             const items = Array.isArray(response?.items) ? response.items : []
             mergePageItems(items, false)
+
             totalCount.value = Number.isFinite(response?.total) ? response.total : getActiveCategoryCount()
             pageOffset.value = pagedHistory.value.length
-            // 仅当加载的项数达到总数时才标记为无更多数据
             hasMore.value = getActiveCategoryCount() < totalCount.value
 
             return true
@@ -433,19 +422,27 @@ export function useClipboardHistory(pinnedItems = ref([])) {
 
     const deleteItem = async (itemId) => {
         if (!itemId || isLoadingPage.value) return
+
         const localIndex = pagedHistory.value.findIndex(
             (entry) => entry.id === itemId
         )
+
         if (localIndex >= 0) {
+            // Remove item from array
             const newArr = [...pagedHistory.value]
             newArr.splice(localIndex, 1)
             pagedHistory.value = newArr
+
+            // Rebuild sorted groups and apply
             const {pinned, unpinned} = buildSortedGroups()
             applyGroupedEntries(pinned, unpinned)
+
+            // Update counts
             totalCount.value = Math.max(0, (Number.isFinite(totalCount.value) ? totalCount.value : getActiveCategoryCount() + 1) - 1)
             pageOffset.value = pagedHistory.value.length
             hasMore.value = getActiveCategoryCount() < totalCount.value
 
+            // Update selection
             if (pagedHistory.value.length === 0) {
                 selectedItemId.value = ''
             } else if (!pagedHistory.value.some((entry) => entry.id === selectedItemId.value)) {
@@ -454,13 +451,14 @@ export function useClipboardHistory(pinnedItems = ref([])) {
         }
 
         try {
+            // Clean up category if exists
             if (categoryMap.value[itemId]) {
                 removeItemCategoryLocal(itemId)
                 try {
                     await CategoryService.setItemCategory(itemId, "")
                 } catch (error) {
                     console.error('移除分类失败:', error)
-                    // 不回滚分类索引，因为项即将被删除，回滚的分类数据会成为孤立数据
+                    // Don't rollback category index since item is being deleted
                 }
             }
             await ClipboardService.removeItem(itemId)
@@ -498,51 +496,41 @@ export function useClipboardHistory(pinnedItems = ref([])) {
         itemCategorySnapshot.clear()
         keywordCategoryMatchCache.clear()
 
-        // 重建分类索引（setItemCategoryLocal 会逐个更新索引，但这里先确保基础结构正确）
         const activeCategory = categoryFilter.value === '全部' ? null : categoryFilter.value
         const keyword = searchKeyword.value.trim().toLowerCase()
         const pinnedSet = new Set(Array.isArray(payload.pinned_items) ? payload.pinned_items : [])
+        const hasCategoryFilter = activeCategory !== null
+        const hasKeyword = keyword.length > 0
 
-        const filtered = incomingHistory
-            .map((item, position) => {
-                const category = categoriesFromPayload?.[item.id] || '未分类'
-                setItemCategoryLocal(item.id, category)
-                return {
-                    id: item.id,
-                    content: item.content,
-                    position,
-                    snippet: '',
-                    pinned: pinnedSet.has(item.id),
-                    category
-                }
+        // Build filtered list in single pass
+        const filtered = []
+        for (let i = 0; i < incomingHistory.length; i++) {
+            const item = incomingHistory[i]
+            const category = categoriesFromPayload?.[item.id] || '未分类'
+            setItemCategoryLocal(item.id, category)
+
+            // Apply filters
+            if (hasCategoryFilter && category !== activeCategory) continue
+            if (hasKeyword && !item.content.toLowerCase().includes(keyword)) continue
+
+            filtered.push({
+                id: item.id,
+                content: item.content,
+                position: i,
+                snippet: '',
+                pinned: pinnedSet.has(item.id),
+                category
             })
-            .filter((entry) => {
-                if (activeCategory && entry.category !== activeCategory) {
-                    return false
-                }
-                if (keyword && !entry.content.toLowerCase().includes(keyword)) {
-                    return false
-                }
-                return true
-            })
+        }
 
         const loadedTarget = Math.max(pageOffset.value || 0, pageSize.value)
-        // Invalidate sort cache
-        _lastSortedData = null
-        _lastSortedResult = null
-        _lastSortBy = null
-        _lastSortOrder = null
+        invalidateSortCache()
 
         const sortedFiltered = sortPageItems(filtered)
         const loadedCount = Math.min(sortedFiltered.length, loadedTarget)
 
-        pagedHistory.value = sortedFiltered.slice(0, loadedCount).map((entry) => ({
-            id: entry.id,
-            content: entry.content,
-            position: entry.position,
-            snippet: entry.snippet,
-            pinned: entry.pinned
-        }))
+        // Create sliced array with minimal copying
+        pagedHistory.value = sortedFiltered.slice(0, loadedCount)
 
         totalCount.value = sortedFiltered.length
         pageOffset.value = pagedHistory.value.length
@@ -561,29 +549,35 @@ export function useClipboardHistory(pinnedItems = ref([])) {
         if (!id) return
         const target = pagedHistory.value.find((entry) => entry.id === id)
         if (!target) return
+
         const {pinned: pinnedEntries, unpinned: unpinnedEntries} = buildSortedGroups()
-        const normalizedTarget = {
-            ...target,
-            pinned
-        }
+        const normalizedTarget = {...target, pinned}
+
+        // Filter out the target from both lists
         const nextPinned = pinnedEntries.filter((entry) => entry.id !== id)
         const nextUnpinned = unpinnedEntries.filter((entry) => entry.id !== id)
+
         if (pinned) {
             nextPinned.unshift(normalizedTarget)
         } else {
             nextUnpinned.unshift(normalizedTarget)
         }
-        applyGroupedEntries(nextPinned, nextUnpinned)
 
+        applyGroupedEntries(nextPinned, nextUnpinned)
     }
 
     const insertLocalIncomingContent = (content, id, pinned = false) => {
         if (!content || !id) return
+
         const existing = pagedHistory.value.find((entry) => entry.id === id)
         const {pinned: pinnedEntries, unpinned: unpinnedEntries} = buildSortedGroups()
+
+        // Remove target from both lists
         const nextPinned = pinnedEntries.filter((entry) => entry.id !== id)
         const nextUnpinned = unpinnedEntries.filter((entry) => entry.id !== id)
+
         if (existing) {
+            // Update existing item
             const normalized = {...existing, content, pinned}
             if (pinned) {
                 nextPinned.unshift(normalized)
@@ -591,29 +585,22 @@ export function useClipboardHistory(pinnedItems = ref([])) {
                 nextUnpinned.unshift(normalized)
             }
             applyGroupedEntries(nextPinned, nextUnpinned)
-
             setItemCategoryLocal(id, existing.category || '未分类')
-            bumpFilterDataRevision()
-            return
-        }
-        const incoming = {
-            id,
-            content,
-            position: 0,
-            snippet: '',
-            pinned
-        }
-        if (pinned) {
-            nextPinned.unshift(incoming)
         } else {
-            nextUnpinned.unshift(incoming)
+            // Insert new item
+            const incoming = {id, content, position: 0, snippet: '', pinned}
+            if (pinned) {
+                nextPinned.unshift(incoming)
+            } else {
+                nextUnpinned.unshift(incoming)
+            }
+            totalCount.value = (Number.isFinite(totalCount.value) ? totalCount.value : getActiveCategoryCount() - 1) + 1
+            applyGroupedEntries(nextPinned, nextUnpinned)
+            pageOffset.value = pagedHistory.value.length
+            hasMore.value = getActiveCategoryCount() < totalCount.value
+            setItemCategoryLocal(id, '未分类')
         }
-        totalCount.value = (Number.isFinite(totalCount.value) ? totalCount.value : getActiveCategoryCount() - 1) + 1
-        applyGroupedEntries(nextPinned, nextUnpinned)
-        pageOffset.value = pagedHistory.value.length
-        hasMore.value = getActiveCategoryCount() < totalCount.value
 
-        setItemCategoryLocal(id, '未分类')
         bumpFilterDataRevision()
     }
 
@@ -635,25 +622,26 @@ export function useClipboardHistory(pinnedItems = ref([])) {
 
     const replaceLocalById = (oldId, newId, newContent) => {
         const index = pagedHistory.value.findIndex(item => item.id === oldId)
-        if (index !== -1) {
-            const item = pagedHistory.value[index]
+        if (index === -1) return
 
-            const oldCategory = categoryMap.value[oldId] || itemCategorySnapshot.get(oldId) || '未分类'
-            removeItemCategoryLocal(oldId)
-            setItemCategoryLocal(newId, oldCategory)
+        const item = pagedHistory.value[index]
 
-            const newArr = [...pagedHistory.value]
-            newArr.splice(index, 1, {
-                ...item,
-                id: newId,
-                content: newContent
-            })
-            pagedHistory.value = newArr
-            if (selectedItemId.value === oldId) {
-                selectedItemId.value = newId
-            }
-            bumpFilterDataRevision()
+        // Migrate category from old ID to new ID
+        const oldCategory = categoryMap.value[oldId] || itemCategorySnapshot.get(oldId) || '未分类'
+        removeItemCategoryLocal(oldId)
+        setItemCategoryLocal(newId, oldCategory)
+
+        // Replace item in array
+        const newArr = [...pagedHistory.value]
+        newArr.splice(index, 1, {...item, id: newId, content: newContent})
+        pagedHistory.value = newArr
+
+        // Update selection if needed
+        if (selectedItemId.value === oldId) {
+            selectedItemId.value = newId
         }
+
+        bumpFilterDataRevision()
     }
 
     return {

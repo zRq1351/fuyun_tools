@@ -1,73 +1,83 @@
 <template>
   <div
-      ref="contentRef"
       class="content"
       @mousedown="onMouseDown"
       @scroll="onScroll"
   >
-    <div ref="trackRef" class="scroll-track" :style="{ paddingRight: rightPadding + 'px' }">
-      <div
-          v-for="(entry, index) in visibleHistory"
-          :id="'clipboard-item-' + entry.id"
-          :key="entry.id"
-          v-memo="[entry.content, index, selectedItemId, getItemCategory(entry.id), isPinned(entry.id), entry.snippet]"
-          :class="{ selected: selectedItemId === entry.id, pinned: isPinned(entry.id) }"
-          class="clipboard-item"
-          :draggable="isCtrlKeyPressed"
-          @click="handleClick(entry.id)"
-          @dblclick="handleDoubleClick(entry.id)"
-          @contextmenu.prevent="showContextMenu($event, entry.id, index)"
-          @dragstart="handleItemDragStart($event, entry.id)"
-          @dragend="handleDragEnd"
-      >
-        <div class="item-header">
-          <span class="item-index">{{ index + 1 }}</span>
-          <span class="item-category" @click.stop>{{ translateCategory(getItemCategory(entry.id)) }}</span>
-          <div v-if="isPinned(entry.id)" class="item-pinned-dot"></div>
-          <div class="item-actions">
-            <div v-if="isWebUrl(entry.content)" class="action-btn" @click.stop="openWebUrl(entry.content)">
-              <Link :size="9"/>
-            </div>
-            <div class="action-btn" @click.stop="emit('preview', entry.content, entry.id)">
-              <View :size="9"/>
-            </div>
-            <div :class="{ active: isPinned(entry.id) }" class="action-btn"
-                 @click.stop="promoteItem(entry.id)">
-              <Star :size="9"/>
-            </div>
-            <div class="action-btn action-delete" @click.stop="deleteItem(entry.id)">
-              <Close :size="9"/>
+    <RecycleScroller
+        ref="scrollerRef"
+        :buffer="SCROLL_BUFFER"
+        :item-size="SCROLL_ITEM_SIZE"
+        :items="scrollerItems"
+        class="scroll-track"
+        direction="horizontal"
+        key-field="id"
+        @scroll.native="onScroll"
+    >
+      <template #default="{ item: scrollerItem }">
+        <div
+            :id="'clipboard-item-' + scrollerItem.id"
+            :class="{ selected: selectedItemId === scrollerItem.id, pinned: isPinned(scrollerItem.id) }"
+            :draggable="isCtrlKeyPressed"
+            class="clipboard-item"
+            @click="handleClick(scrollerItem.id)"
+            @dblclick="handleDoubleClick(scrollerItem.id)"
+            @dragend="handleDragEnd"
+            @dragstart="handleItemDragStart($event, scrollerItem.id)"
+            @contextmenu.prevent="showContextMenu($event, scrollerItem.id, scrollerItem.entryIndex)"
+        >
+          <div class="item-header">
+            <span class="item-index">{{ scrollerItem.displayIndex + 1 }}</span>
+            <span class="item-category" @click.stop>{{ translateCategory(getItemCategory(scrollerItem.id)) }}</span>
+            <div v-if="isPinned(scrollerItem.id)" class="item-pinned-dot"></div>
+            <div class="item-actions">
+              <div v-if="isWebUrl(scrollerItem.content)" class="action-btn"
+                   @click.stop="openWebUrl(scrollerItem.content)">
+                <Link :size="9"/>
+              </div>
+              <div class="action-btn" @click.stop="emit('preview', scrollerItem.content, scrollerItem.id)">
+                <View :size="9"/>
+              </div>
+              <div :class="{ active: isPinned(scrollerItem.id) }" class="action-btn"
+                   @click.stop="promoteItem(scrollerItem.id)">
+                <Star :size="9"/>
+              </div>
+              <div class="action-btn action-delete" @click.stop="deleteItem(scrollerItem.id)">
+                <Close :size="9"/>
+              </div>
             </div>
           </div>
+          <div class="item-body">
+            <FormattedContent :content="scrollerItem.content"/>
+          </div>
+          <div v-if="scrollerItem.snippet" class="item-snippet">
+            <template v-for="(part, partIndex) in renderHighlightParts(scrollerItem.snippet)" :key="partIndex">
+              <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
+              <span v-else>{{ part.text }}</span>
+            </template>
+          </div>
         </div>
-        <div class="item-body">
-          <FormattedContent :content="entry.content" />
-        </div>
-        <div v-if="entry.snippet" class="item-snippet">
-          <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
-            <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
-            <span v-else>{{ part.text }}</span>
-          </template>
-        </div>
-      </div>
+      </template>
+    </RecycleScroller>
 
-      <div v-if="showTailLoadMoreHint" class="load-more">
-        <el-icon v-if="isLoadingMore" :size="14" class="is-loading">
-          <Loading/>
-        </el-icon>
-        <span class="load-more-text">
-          {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
-        </span>
-      </div>
+    <div v-if="showTailLoadMoreHint" class="load-more">
+      <el-icon v-if="isLoadingMore" :size="14" class="is-loading">
+        <Loading/>
+      </el-icon>
+      <span class="load-more-text">
+        {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
+      </span>
     </div>
   </div>
 </template>
 
 <script setup>
-import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue'
+import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {Close, Link, Loading, Star, View} from '@element-plus/icons-vue'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
 import {useI18n} from 'vue-i18n'
+import {RecycleScroller} from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import FormattedContent from '../../../components/FormattedContent.vue'
 
 const {t} = useI18n()
@@ -81,6 +91,9 @@ const translateCategory = (category) => {
   const translator = CATEGORY_TRANSLATIONS[category]
   return translator ? translator() : category
 }
+
+const SCROLL_ITEM_SIZE = 270
+const SCROLL_BUFFER = 540
 
 const props = defineProps({
   visibleHistory: {type: Array, required: true},
@@ -102,18 +115,22 @@ const props = defineProps({
 const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
 
 const contentRef = ref(null)
-const trackRef = ref(null)
-const rightPadding = ref(0)
+const scrollerRef = ref(null)
 
-const ensureLastCardVisible = () => {
-  const el = contentRef.value
-  if (!el) return
-  const lastCard = el.querySelector('.clipboard-item:last-of-type')
-  if (!lastCard) return
-  const lastCardRight = lastCard.offsetLeft + lastCard.offsetWidth
-  const needed = lastCardRight - el.scrollWidth + el.clientWidth
-  if (needed > 0) rightPadding.value = needed
+const getScrollEl = () => {
+  if (!scrollerRef.value?.$el) return null
+  return scrollerRef.value.$el.querySelector('.vue-recycle-scroller') || scrollerRef.value.$el
 }
+
+const scrollerItems = computed(() => {
+  return props.visibleHistory.map((entry, index) => ({
+    id: entry.id,
+    content: entry.content,
+    snippet: entry.snippet || '',
+    entryIndex: index,
+    displayIndex: index,
+  }))
+})
 
 let isDown = false
 let isDragging = false
@@ -135,34 +152,48 @@ const stopDragging = () => {
 }
 
 const onMouseDown = (e) => {
+  // Ignore clicks on action buttons
   if (e.target.closest('.action-btn')) return
+
   isDown = true
   isDragging = false
   startX = e.pageX
-  scrollLeftStart = contentRef.value?.scrollLeft || 0
+  scrollLeftStart = getScrollEl()?.scrollLeft || 0
+
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
 }
 
 const onMouseMove = (e) => {
-  if (!isDown || !contentRef.value) return
+  if (!isDown) return
+  const el = getScrollEl()
+  if (!el) return
+
   const walk = e.pageX - startX
+
+  // Start dragging after threshold
   if (!isDragging && Math.abs(walk) > 4) {
     isDragging = true
     document.body.style.userSelect = 'none'
     if (window.getSelection) window.getSelection().removeAllRanges()
   }
+
   if (!isDragging) return
+
   e.preventDefault()
   const newScroll = scrollLeftStart - walk
-  const max = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
+  const max = Math.max(0, el.scrollWidth - el.clientWidth)
+
+  // Trigger load more when near end
   if (newScroll >= max - 260 && props.hasMore && !props.isLoadingPage) {
     emit('load-more-intent')
   }
+
+  // Throttle scroll updates with RAF
   if (!dragRafId) {
     dragRafId = requestAnimationFrame(() => {
       dragRafId = 0
-      if (contentRef.value) contentRef.value.scrollLeft = newScroll
+      el.scrollLeft = newScroll
     })
   }
 }
@@ -171,7 +202,6 @@ const onMouseUp = () => stopDragging()
 
 onMounted(() => {
   window.addEventListener('blur', stopDragging)
-  nextTick(ensureLastCardVisible)
 })
 onUnmounted(() => {
   stopDragging()
@@ -180,7 +210,6 @@ onUnmounted(() => {
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 
-watch(() => props.visibleHistory.length, () => nextTick(ensureLastCardVisible))
 const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
 
 const onScroll = () => {
@@ -190,39 +219,55 @@ const onScroll = () => {
 const renderHighlightParts = (text) => {
   const value = typeof text === 'string' ? text : ''
   const keyword = (props.highlightKeyword || '').trim()
-  const tokens = Array.from(new Set(keyword.split(/\s+/).map((v) => v.trim()).filter(Boolean)))
+
+  // Fast path: no keyword or empty text
+  if (!value || !keyword) return [{text: value, hit: false}]
+
+  // Parse and dedupe tokens, sort by length descending for greedy matching
+  const tokens = Array.from(new Set(keyword.split(/\s+/).map(v => v.trim()).filter(Boolean)))
       .sort((a, b) => b.length - a.length)
-  if (!value || tokens.length === 0) return [{text: value, hit: false}]
+
+  if (tokens.length === 0) return [{text: value, hit: false}]
+
   const sourceLower = value.toLowerCase()
-  const tokenLowers = tokens.map((t) => t.toLowerCase())
+  const tokenLowers = tokens.map(t => t.toLowerCase())
   const out = []
   let start = 0
+
   while (start < value.length) {
     let bestIndex = -1
-    let bestToken = ''
+    let bestTokenLength = 0
+
+    // Find earliest and longest matching token
     for (let i = 0; i < tokenLowers.length; i++) {
       const idx = sourceLower.indexOf(tokenLowers[i], start)
       if (idx === -1) continue
-      if (bestIndex === -1 || idx < bestIndex || (idx === bestIndex && tokenLowers[i].length > bestToken.length)) {
+      if (bestIndex === -1 || idx < bestIndex || (idx === bestIndex && tokenLowers[i].length > bestTokenLength)) {
         bestIndex = idx
-        bestToken = tokenLowers[i]
+        bestTokenLength = tokenLowers[i].length
       }
     }
+
     if (bestIndex === -1) {
-      out.push({text: value.slice(start), hit: false});
+      out.push({text: value.slice(start), hit: false})
       break
     }
-    if (bestIndex > start) out.push({text: value.slice(start, bestIndex), hit: false})
-    out.push({text: value.slice(bestIndex, bestIndex + bestToken.length), hit: true})
-    start = bestIndex + bestToken.length
+
+    if (bestIndex > start) {
+      out.push({text: value.slice(start, bestIndex), hit: false})
+    }
+
+    out.push({text: value.slice(bestIndex, bestIndex + bestTokenLength), hit: true})
+    start = bestIndex + bestTokenLength
   }
+
   return out.length > 0 ? out : [{text: value, hit: false}]
 }
 
 const handleItemDragStart = (e, id) => {
   if (typeof props.handleDragStart === 'function') props.handleDragStart(e, id)
 }
-const handleClick = (entryId) => props.updateSelection(entryId, false, contentRef.value, null)
+const handleClick = (entryId) => props.updateSelection(entryId, false, getScrollEl(), null)
 const handleDoubleClick = (entryId) => props.selectAndFillDirect(entryId)
 
 const isWebUrl = (v) => {
@@ -244,29 +289,32 @@ const openWebUrl = async (v) => {
   }
 }
 
-defineExpose({contentRef})
+defineExpose({contentRef, scrollerRef, getScrollEl})
 </script>
 
 <style scoped>
 .content {
   flex: 1;
+  min-width: 0;
   min-height: 0;
-  overflow-x: auto;
   cursor: grab;
 }
 
-.content::-webkit-scrollbar {
-  display: none
+.scroll-track {
+  width: 100%;
+  height: 100%;
 }
 
-.scroll-track {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  white-space: nowrap;
-  padding: 0 0 0 14px;
+.scroll-track :deep(.vue-recycle-scroller) {
   height: 100%;
+}
+
+.scroll-track :deep(.vue-recycle-scroller__item-wrapper) {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0 0 14px;
   gap: 10px;
+  height: 100%;
 }
 
 .clipboard-item {

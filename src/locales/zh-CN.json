@@ -527,7 +527,8 @@
     "dragHint": "按住拖动上下调整窗口位置",
     "offsetUp": "调高",
     "loadMore": "加载更多",
-    "loading": "加载中"
+    "loading": "加载中",
+    "cyclePageSize": "切换分页大小（当前每页 {size} 条）"
   },
   "imageClipboard": {
     "search": "搜索分类/标签",
@@ -558,7 +559,8 @@
     "loaded": "已加载 {loaded} / {total}",
     "allLoaded": "已全部加载 {total} 条",
     "loading": "加载中",
-    "loadMore": "加载更多"
+    "loadMore": "加载更多",
+    "cyclePageSize": "切换分页大小（当前每页 {size} 条）"
   },
   "launcher": {
     "listView": "列表视图",

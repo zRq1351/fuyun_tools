@@ -527,7 +527,8 @@
     "dragHint": "Drag to adjust window position",
     "offsetUp": "Move Up",
     "loadMore": "Load More",
-    "loading": "Loading"
+    "loading": "Loading",
+    "cyclePageSize": "Cycle page size (currently {size} per page)"
   },
   "imageClipboard": {
     "search": "Search category/tags",
@@ -558,7 +559,8 @@
     "loaded": "Loaded {loaded} / {total}",
     "allLoaded": "All {total} items loaded",
     "loading": "Loading",
-    "loadMore": "Load More"
+    "loadMore": "Load More",
+    "cyclePageSize": "Cycle page size (currently {size} per page)"
   },
   "launcher": {
     "listView": "List View",

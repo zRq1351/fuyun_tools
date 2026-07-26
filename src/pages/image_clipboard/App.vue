@@ -52,7 +52,7 @@
         <span class="status-meta">{{ loadStatusText }}</span>
         <div class="status-actions">
           <button
-              :title="`切换分页大小（当前每页 ${pageSize} 条）`"
+              :title="$t('imageClipboard.cyclePageSize', {size: pageSize})"
               class="nav-action-btn"
               type="button"
               @click="cyclePageSize"
@@ -123,7 +123,7 @@ const {t} = useI18n()
 
 const containerRef = ref(null)
 const imageListRef = ref(null)
-const contentRef = computed(() => imageListRef.value?.contentRef?.value || imageListRef.value?.contentRef || null)
+const contentRef = computed(() => imageListRef.value?.getScrollEl?.() || imageListRef.value?.contentRef?.value || imageListRef.value?.contentRef || null)
 const contextMenuRef = ref(null)
 const history = ref([])
 const categoryMap = ref({})
@@ -1459,7 +1459,6 @@ const mergeImagePageIntoState = (data, reset = false) => {
   const incomingTotal = Number.isFinite(data?.total) ? Number(data.total) : loadedItems.length
   totalCount.value = Math.max(Number(totalCount.value) || 0, incomingTotal, loadedItems.length)
 
-  const nextOffset = baseOffset + items.length
   pageOffset.value = loadedItems.length
 
 
