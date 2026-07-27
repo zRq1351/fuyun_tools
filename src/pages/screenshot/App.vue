@@ -1618,30 +1618,21 @@ async function ensureCaptureReady() {
     await requestScreenshot()
   }
   if (!screenshotImg.value && screenshotSrc.value) {
-    const img = new Image()
-    await new Promise((resolve, reject) => {
-      img.onload = resolve
-      img.onerror = reject
-      img.src = screenshotSrc.value
-    }).then(() => {
+    try {
+      const img = new Image()
+      await new Promise((resolve, reject) => {
+        img.onload = resolve
+        img.onerror = reject
+        img.src = screenshotSrc.value
+      })
       screenshotImg.value = img
-    }).catch((err) => {
+    } catch (err) {
       console.error('加载截图源图失败:', err)
-    })
+    }
   }
   await nextTick()
   if (screenshotImg.value && canvas.value) {
     initCanvas()
-  }
-  if (isCaptureReady.value && screenshotImg.value && canvas.value && canvas.value.width > 0 && canvas.value.height > 0) {
-    return true
-  }
-  if (!screenshotImg.value || !canvas.value || canvas.value.width <= 0 || canvas.value.height <= 0) {
-    await requestScreenshot()
-    await nextTick()
-    if (screenshotImg.value && canvas.value) {
-      initCanvas()
-    }
   }
   return Boolean(isCaptureReady.value && screenshotImg.value && canvas.value && canvas.value.width > 0 && canvas.value.height > 0)
 }

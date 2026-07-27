@@ -282,7 +282,7 @@ pub async fn open_settings_window(
 
 pub(crate) fn register_recording_shortcut(
     app: &AppHandle,
-    state: Arc<Mutex<SharedAppState>>,
+    _state: Arc<Mutex<SharedAppState>>,
     hot_key: &str,
 ) -> Result<(), String> {
     let app_clone = app.clone();
