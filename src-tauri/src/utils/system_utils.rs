@@ -142,3 +142,42 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
     let _provider_key = settings.ai_provider.to_string();
     Ok(settings)
 }
+
+/// Resolve a .lnk shortcut to its target path using the Windows Shell COM API.
+/// Much faster than spawning PowerShell — no process overhead.
+#[cfg(target_os = "windows")]
+pub fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
+    use windows::core::{Interface, PCWSTR};
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER, STGM};
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+    use std::os::windows::ffi::OsStrExt;
+
+    unsafe {
+        let shell_link: IShellLinkW =
+            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+        let persist_file: windows::Win32::System::Com::IPersistFile = shell_link.cast().ok()?;
+
+        let wide_path: Vec<u16> = std::ffi::OsStr::new(lnk_path)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        persist_file
+            .Load(PCWSTR(wide_path.as_ptr()), STGM(0))
+            .ok()?;
+
+        let mut buffer = vec![0u16; 260];
+        shell_link.GetPath(&mut buffer, std::ptr::null_mut(), 0).ok()?;
+
+        let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+        if len == 0 {
+            return None;
+        }
+        Some(String::from_utf16_lossy(&buffer[..len]))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn resolve_lnk_target(_lnk_path: &str) -> Option<String> {
+    None
+}

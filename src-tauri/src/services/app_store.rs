@@ -2,16 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::services::launcher_db;
+pub use crate::utils::system_utils::resolve_lnk_target;
 
 #[cfg(target_os = "windows")]
 use windows::{
-    core::{Interface, PCWSTR},
-    Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER, STGM},
-    Win32::UI::Shell::{IShellLinkW, ShellLink},
-};
-#[cfg(target_os = "windows")]
-use windows::Win32::Storage::FileSystem::{
-    GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+    core::PCWSTR,
+    Win32::Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+    }
 };
 #[cfg(target_os = "windows")]
 use std::os::windows::ffi::OsStrExt;
@@ -225,38 +223,6 @@ fn is_microsoft_app(target: &str) -> bool {
 fn is_microsoft_app(_target: &str) -> bool {
     false
 
-}
-
-#[cfg(target_os = "windows")]
-pub fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
-    unsafe {
-        let shell_link: IShellLinkW =
-            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
-        let persist_file: windows::Win32::System::Com::IPersistFile = shell_link.cast().ok()?;
-
-        let wide_path: Vec<u16> = std::ffi::OsStr::new(lnk_path)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-
-        persist_file
-            .Load(PCWSTR(wide_path.as_ptr()), STGM(0))
-            .ok()?;
-
-        let mut buffer = vec![0u16; 260];
-        shell_link.GetPath(&mut buffer, std::ptr::null_mut(), 0).ok()?;
-
-        let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
-        if len == 0 {
-            return None;
-        }
-        Some(String::from_utf16_lossy(&buffer[..len]))
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn resolve_lnk_target(_lnk_path: &str) -> Option<String> {
-    None
 }
 
 #[cfg(target_os = "windows")]
