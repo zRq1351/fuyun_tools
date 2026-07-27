@@ -335,7 +335,7 @@ fn concat_video_segments(
     }
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
-    let output = cmd
+    let output_result = cmd
         .arg("-hide_banner")
         .arg("-loglevel")
         .arg("warning")
@@ -349,11 +349,12 @@ fn concat_video_segments(
         .arg("-c")
         .arg("copy")
         .arg(output_path)
-        .output()
+        .output();
+    let _ = fs::remove_file(&list_path);
+    let output = output_result
         .map_err(|e| {
             AppError::new(ErrorCode::SystemError, "执行视频拼接失败").with_details(e.to_string())
         })?;
-    let _ = fs::remove_file(&list_path);
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(AppError::new(ErrorCode::SystemError, "视频拼接失败").with_details(stderr));
@@ -435,7 +436,7 @@ fn concat_audio_segments(
 
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
-    let output = cmd
+    let output_result = cmd
         .arg("-hide_banner")
         .arg("-loglevel")
         .arg("warning")
@@ -449,10 +450,10 @@ fn concat_audio_segments(
         .arg("-c")
         .arg("copy")
         .arg(&concat_path)
-        .output()
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-
+        .output();
     let _ = fs::remove_file(&list_path);
+    let output = output_result
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
