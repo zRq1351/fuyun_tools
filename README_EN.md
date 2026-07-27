@@ -6,7 +6,7 @@
 
 **One Shortcut Away from Everything**
 
-![Version](https://img.shields.io/badge/version-0.7.1-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.8.1-blue?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows_10/11-0078D6?style=flat-square&logo=windows)
 ![License](https://img.shields.io/badge/license-GPL--2.0-green?style=flat-square)
 ![Rust](https://img.shields.io/badge/Tauri-2.x-FFC131?style=flat-square&logo=tauri)
@@ -231,16 +231,18 @@ triggers.
 
 ## 📁 Document Manager
 
-> Index / Repository dual-mode, FTS5 full-text search, tags and categories.
+> Index / Repository dual-mode, FTS5 full-text search, tags and categories. Desktop widget for always-on access.
 
-| Feature          | Description                                             |
-|------------------|---------------------------------------------------------|
-| Index Mode       | Reference paths only, files stay in place               |
-| Repository Mode  | Physically move files to managed directory              |
-| Full-text Search | SQLite FTS5 across titles / content / tags / notes      |
-| Drag-and-drop    | Drop files or folders to import                         |
-| Import History   | Rollback support by batch                               |
-| Orphan Detection | Auto-discover unregistered files in managed directories |
+| Feature             | Description                                                        |
+|---------------------|--------------------------------------------------------------------|
+| Index Mode          | Reference paths only, files stay in place                          |
+| Repository Mode     | Physically move files to managed directory                         |
+| Full-text Search    | SQLite FTS5 across titles / content / tags / notes                 |
+| File Icons          | Auto-extracts system-associated program icons (up to 256px), lazy-cached, zero wait |
+| Desktop Widget      | Always-on-top floating panel, drag-and-drop import, right-click actions, compact edge-snapping |
+| Drag-and-drop       | Drop files or folders to import, auto-prompt index/repo mode       |
+| Import History      | Rollback support by batch                                          |
+| Orphan Detection    | Auto-discover unregistered files in managed directories            |
 
 ---
 
@@ -248,9 +250,9 @@ triggers.
 
 <div align="center">
 
-| 🖥️ System Tray  | 🚀 Auto-start | ⌨️ Global Shortcuts |      🎨 Themes      |  🔄 Auto-update  |
-|:----------------:|:-------------:|:-------------------:|:-------------------:|:----------------:|
-| Right-click menu |   Optional    |  All customizable   | Light/Dark/Eye-care | Built-in checker |
+| 🖥️ System Tray  | 🚀 Auto-start | ⌨️ Global Shortcuts |      🎨 Themes      |   🌐 i18n    |  🔄 Auto-update  |
+|:----------------:|:-------------:|:-------------------:|:-------------------:|:------------:|:----------------:|
+| Right-click menu |   Optional    |  All customizable   | Light/Dark/Eye-care | zh-CN / EN   | Built-in checker |
 
 </div>
 
@@ -282,7 +284,7 @@ The settings window has 10 tabs in the left sidebar, with auto-save on the right
 | Recording        | Recording hotkey, audio devices, FFmpeg management  |
 | Selection        | Trigger method, custom prompts, search engine       |
 | Launcher         | Launcher hotkey, view mode                          |
-| Doc Manager      | Document manager hotkey, feature toggle             |
+| Doc Manager      | Document manager hotkey, feature toggle, desktop widget toggle |
 | AI Settings      | AI provider, API key, model, connection test        |
 | Backup & Restore | Manual backup, auto-backup schedule, restore        |
 | Diagnostics      | System health checks, one-click repair              |
@@ -329,6 +331,7 @@ fuyun_tools/
 │   │   ├── recording_toolbar/  # Recording capsule
 │   │   ├── launcher/        # App launcher
 │   │   ├── document_manager/   # Document manager
+│   │   ├── document_manager_widget/  # Document manager desktop widget
 │   │   ├── settings/        # Settings
 │   │   └── ...
 │   └── services/            # IPC communication layer
