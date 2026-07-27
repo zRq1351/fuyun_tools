@@ -40,6 +40,14 @@
           </template>
         </el-input>
       </el-form-item>
+
+      <el-form-item :label="$t('settings.docManager.widgetEnabled')">
+        <el-switch
+            :model-value="form.docManagerWidgetEnabled"
+            @update:model-value="onWidgetToggle"
+        />
+        <div class="form-hint">{{ $t('settings.docManager.widgetHint') }}</div>
+      </el-form-item>
     </el-card>
 
     <el-card class="setting-section-card" shadow="never">
@@ -123,6 +131,20 @@ const resetDocManagerShortcut = () => {
   stopDocManagerRecording()
   props.form.docManagerHotKey = 'Ctrl+Shift+D'
   ElMessage.success(t('settings.docManager.shortcutReset', {shortcut: props.form.docManagerHotKey}))
+}
+
+const onWidgetToggle = async (val) => {
+  props.form.docManagerWidgetEnabled = val
+  try {
+    const {invoke} = await import('@tauri-apps/api/core')
+    if (val) {
+      await invoke('show_doc_manager_widget')
+    } else {
+      await invoke('hide_doc_manager_widget')
+    }
+  } catch (e) {
+    console.error('切换文档管理小部件失败:', e)
+  }
 }
 </script>
 

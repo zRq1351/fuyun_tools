@@ -40,7 +40,8 @@ use crate::ui::commands_vc_runtime::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{
     bind_overlay_window_events, bind_standard_window_close_to_hide,
-    show_clipboard_window, show_image_clipboard_window, show_standard_window_by_label,
+    show_clipboard_window, show_doc_manager_widget_window,
+    show_image_clipboard_window, show_standard_window_by_label,
 };
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -221,6 +222,7 @@ pub fn run() {
                 recording_enabled,
                 launcher_enabled,
                 doc_manager_enabled,
+                doc_manager_widget_enabled,
             ) = {
                 let guard = lock_arc_mutex(&state_arc);
                 (
@@ -235,6 +237,7 @@ pub fn run() {
                     guard.settings.recording_enabled,
                     guard.settings.launcher_enabled,
                     guard.settings.doc_manager_enabled,
+                    guard.settings.doc_manager_widget_enabled,
                 )
             };
             let mut shortcut_conflicts: Vec<String> = Vec::new();
@@ -547,6 +550,11 @@ pub fn run() {
                     log::error!("创建文档管理器窗口失败: {}", e);
                 }
             }
+            if doc_manager_widget_enabled && doc_manager_enabled {
+                if let Err(e) = show_doc_manager_widget_window(&app_handle) {
+                    log::error!("显示文档管理小部件失败: {}", e);
+                }
+            }
 
             Ok(())
         })
@@ -748,6 +756,9 @@ pub fn run() {
             undo_import_item,
             get_import_files,
             detect_orphan_files,
+            show_document_manager,
+            show_doc_manager_widget,
+            hide_doc_manager_widget,
             // 性能监控命令
             get_system_resources,
             get_perf_summary,

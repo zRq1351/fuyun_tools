@@ -974,6 +974,67 @@ fn ensure_document_manager_window(app: &AppHandle) -> Result<tauri::WebviewWindo
     Ok(window)
 }
 
+fn ensure_doc_manager_widget_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    let label = "document_manager_widget";
+    if let Some(existing) = app.get_webview_window(label) {
+        return Ok(existing);
+    }
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App("document_manager_widget.html".into()),
+    )
+        .title("文档管理小部件")
+        .visible(false)
+        .resizable(true)
+        .decorations(false)
+        .shadow(false)
+        .transparent(true)
+        .skip_taskbar(true)
+        .inner_size(380.0, 460.0)
+        .build()
+        .map_err(|e| format!("创建文档管理小部件窗口失败: {}", e))?;
+    bind_overlay_window_events(&window, app.clone(), label);
+    Ok(window)
+}
+
+pub fn show_doc_manager_widget_window(app: &AppHandle) -> Result<(), String> {
+    let window = ensure_doc_manager_widget_window(app)?;
+    position_widget_to_top_right(&window)?;
+    if let Ok(true) = window.is_visible() {
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    show_overlay_window(app, "document_manager_widget", &window, false);
+    Ok(())
+}
+
+pub fn hide_doc_manager_widget_window(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("document_manager_widget") {
+        hide_overlay_window(app, "document_manager_widget", &window);
+    }
+    Ok(())
+}
+
+fn position_widget_to_top_right(window: &tauri::WebviewWindow) -> Result<(), String> {
+    let logical_w = 380.0;
+    let margin = 12.0;
+    let monitor = window.current_monitor()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "No monitor found".to_string())?;
+    let scale = monitor.scale_factor();
+    let mpos = monitor.position();
+    let msize = monitor.size();
+    let current_size = window.outer_size().map_err(|e| e.to_string())?;
+    let logical_h = current_size.height as f64 / scale;
+    window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(logical_w, logical_h)))
+        .map_err(|e| format!("set_size: {}", e))?;
+    let px = mpos.x + msize.width as i32 - (logical_w * scale) as i32 - (margin * scale) as i32;
+    let py = mpos.y + (margin * scale) as i32;
+    window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: px, y: py }))
+        .map_err(|e| format!("set_position: {}", e))
+}
+
 fn is_window_feature_enabled(app: &AppHandle, label: &str) -> bool {
     let Some(state) = app.try_state::<Arc<Mutex<AppState>>>() else {
         return true;
@@ -986,6 +1047,7 @@ fn is_window_feature_enabled(app: &AppHandle, label: &str) -> bool {
         "recording_toolbar" => guard.settings.recording_enabled,
         "launcher" => guard.settings.launcher_enabled,
         "document_manager" => guard.settings.doc_manager_enabled,
+        "document_manager_widget" => guard.settings.doc_manager_widget_enabled,
         "selection_toolbar" => guard.settings.selection_enabled,
         "settings" => true,
         _ => true,
@@ -1011,6 +1073,7 @@ pub fn ensure_window_for_label(app: &AppHandle, label: &str) -> Result<(), Strin
         "image_preview" => { ensure_image_preview_window(app)?; }
         "text_preview" => { ensure_text_preview_window(app)?; }
         "document_manager" => { ensure_document_manager_window(app)?; }
+        "document_manager_widget" => { ensure_doc_manager_widget_window(app)?; }
         "selection_toolbar" => { ensure_selection_toolbar_window(app)?; }
         "recording_toolbar" => {
             if app.get_webview_window(label).is_none() {

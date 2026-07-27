@@ -48,10 +48,12 @@ watch(() => props.show, async (visible) => {
       hasListeners = true
       document.addEventListener('mousedown', onDocMouseDown)
       document.addEventListener('keydown', onKeydown)
+      window.addEventListener('blur', onWindowBlur)
     }
   } else {
     document.removeEventListener('mousedown', onDocMouseDown)
     document.removeEventListener('keydown', onKeydown)
+    window.removeEventListener('blur', onWindowBlur)
     activeIndex.value = -1
     hasListeners = false
   }
@@ -104,6 +106,10 @@ function onDocMouseDown(e) {
     if (e.target.closest('.context-menu')) return
     emit('close')
   }
+}
+
+function onWindowBlur() {
+  emit('close')
 }
 
 function onKeydown(e) {
@@ -163,6 +169,7 @@ function activateItemOnHover(e) {
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', onDocMouseDown)
   document.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('blur', onWindowBlur)
 })
 
 defineExpose({menuRef})

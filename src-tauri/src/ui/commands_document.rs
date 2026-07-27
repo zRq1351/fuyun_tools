@@ -651,3 +651,18 @@ pub async fn detect_orphan_files(root_id: Option<i64>) -> Result<Vec<OrphanFiles
 
     Ok(results)
 }
+
+#[tauri::command]
+pub async fn show_document_manager(app: AppHandle) -> Result<(), String> {
+    crate::ui::window_manager::show_standard_window_by_label(&app, "document_manager")
+}
+
+#[tauri::command]
+pub async fn show_doc_manager_widget(app: AppHandle) -> Result<(), String> {
+    crate::ui::window_manager::show_doc_manager_widget_window(&app)
+}
+
+#[tauri::command]
+pub async fn hide_doc_manager_widget(app: AppHandle) -> Result<(), String> {
+    crate::ui::window_manager::hide_doc_manager_widget_window(&app)
+}

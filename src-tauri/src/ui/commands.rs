@@ -601,6 +601,7 @@ pub async fn save_app_settings(
     launcher_enabled: Option<bool>,
     doc_manager_hot_key: Option<String>,
     doc_manager_enabled: Option<bool>,
+    doc_manager_widget_enabled: Option<bool>,
     selection_enabled: Option<bool>,
     selection_modifier_key: Option<String>,
     selection_custom_prompts: Option<Vec<crate::utils::settings_model::CustomPrompt>>,
@@ -708,6 +709,15 @@ pub async fn save_app_settings(
                 settings.doc_manager_hot_key,
                 e
             );
+        }
+    }
+    if let Some(val) = doc_manager_widget_enabled {
+        let old = settings.doc_manager_widget_enabled;
+        settings.doc_manager_widget_enabled = val;
+        if val && !old {
+            let _ = crate::ui::window_manager::show_doc_manager_widget_window(&app);
+        } else if !val && old {
+            let _ = crate::ui::window_manager::hide_doc_manager_widget_window(&app);
         }
     }
     if let Some(val) = selection_enabled {

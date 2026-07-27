@@ -75,6 +75,7 @@ export default defineConfig(({mode}) => {
                     ocr_text: resolve(__dirname, 'ocr_text.html'),
                     launcher: resolve(__dirname, 'launcher.html'),
                     document_manager: resolve(__dirname, 'document_manager.html'),
+                    document_manager_widget: resolve(__dirname, 'document_manager_widget.html'),
                 },
                 output: {
                     manualChunks(id) {

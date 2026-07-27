@@ -356,7 +356,8 @@ const form = reactive({
   launcherEnabled: true,
   launcherHotKey: 'Alt+Q',
   docManagerEnabled: false,
-  docManagerHotKey: 'Ctrl+Shift+D'
+  docManagerHotKey: 'Ctrl+Shift+D',
+  docManagerWidgetEnabled: false
 })
 
 const autoSaveText = computed(() => {
@@ -423,7 +424,8 @@ const buildFormSnapshot = () => ({
   launcherEnabled: form.launcherEnabled,
   launcherHotKey: form.launcherHotKey,
   docManagerEnabled: form.docManagerEnabled,
-  docManagerHotKey: form.docManagerHotKey
+  docManagerHotKey: form.docManagerHotKey,
+  docManagerWidgetEnabled: form.docManagerWidgetEnabled
 })
 
 // 保存初始状态快照
@@ -584,6 +586,9 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
   }
   if (source.docManagerHotKey !== initial.docManagerHotKey) {
     changedFields.docManagerHotKey = source.docManagerHotKey
+  }
+  if (source.docManagerWidgetEnabled !== initial.docManagerWidgetEnabled) {
+    changedFields.docManagerWidgetEnabled = source.docManagerWidgetEnabled
   }
 
   return Object.keys(changedFields).length > 0 ? changedFields : null
@@ -992,6 +997,7 @@ onMounted(async () => {
     form.launcherHotKey = settings.launcher_hot_key || 'Alt+Q'
     form.docManagerEnabled = settings.doc_manager_enabled === true
     form.docManagerHotKey = settings.doc_manager_hot_key || 'Ctrl+Shift+D'
+    form.docManagerWidgetEnabled = settings.doc_manager_widget_enabled === true
 
     if (aiSettingsRef.value) {
       aiSettingsRef.value.applyCurrentProviderConfig(settings)

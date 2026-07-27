@@ -271,7 +271,9 @@
       "fulltextSearchDesc": "Search by filename or full-text content across PDF/Word/code and all text files",
       "categoryTag": "Categories & Tags",
       "categoryTagDesc": "Custom categories and tags. Double-click to open files, one-click locate in Explorer",
-      "shortcutReset": "Reset document manager hotkey to default: {shortcut}"
+      "shortcutReset": "Reset document manager hotkey to default: {shortcut}",
+      "widgetEnabled": "Desktop Widget",
+      "widgetHint": "Show document manager widget at top-right corner of desktop"
     },
     "ai": {
       "serviceConnection": "Service Connection",
