@@ -482,7 +482,7 @@ pub async fn remove_doc_root(id: i64) -> Result<(), String> {
             let cat_name: String = crow.try_get(0).unwrap_or_default();
             let dir = Path::new(&root_path).join(&cat_name);
             if dir.exists() {
-                if let Err(e) = fs::remove_dir(&dir) {
+                if let Err(e) = fs::remove_dir_all(&dir) {
                     log::warn!("删除文档分类目录失败 {}: {}", dir.display(), e);
                 }
             }
@@ -588,20 +588,22 @@ pub async fn remove_doc_category(id: i64) -> Result<(), String> {
         .await
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
-    sqlx::query("DELETE FROM document_categories WHERE id = ?1")
-        .bind(id)
-        .execute(&mut *conn)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-
     if let Some(row) = cat_info {
         let cat_name: String = row.try_get(0).unwrap_or_default();
         let root_path: String = row.try_get(1).unwrap_or_default();
         let dir = std::path::Path::new(&root_path).join(&cat_name);
         if dir.exists() {
-            let _ = std::fs::remove_dir_all(&dir);
+            if let Err(e) = std::fs::remove_dir_all(&dir) {
+                log::warn!("删除文档分类目录失败 {}: {}", dir.display(), e);
+            }
         }
     }
+
+    sqlx::query("DELETE FROM document_categories WHERE id = ?1")
+        .bind(id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(())
 }
