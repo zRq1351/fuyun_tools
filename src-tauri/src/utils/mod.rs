@@ -1,3 +1,4 @@
+pub mod ai_store;
 pub mod backup_archive;
 pub mod backup_model;
 pub mod backup_restore;

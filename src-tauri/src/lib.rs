@@ -556,6 +556,12 @@ pub fn run() {
                 }
             }
 
+            tauri::async_runtime::spawn(async {
+                crate::utils::ai_store::init_db().await;
+                crate::utils::ai_store::migrate_from_old().await;
+                log::info!("AI 数据存储初始化完成");
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -728,6 +734,7 @@ pub fn run() {
             hide_launcher,
             toggle_launcher,
             show_standard_window_command,
+            notify_result_window_ready,
             show_clipboard_window_command,
             start_screenshot_command,
             toggle_recording_command,

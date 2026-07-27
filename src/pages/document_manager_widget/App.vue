@@ -514,6 +514,7 @@ async function openFullManager() {
 async function closeWidget() {
   try {
     const {invoke} = await import('@tauri-apps/api/core')
+    await invoke('save_app_settings', {docManagerWidgetEnabled: false})
     await invoke('hide_doc_manager_widget')
   } catch (e) {
     console.error('关闭小部件失败:', e)

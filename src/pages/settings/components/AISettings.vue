@@ -4,36 +4,28 @@
       <template #header>
         <div class="section-title">{{ $t('settings.ai.serviceConnection') }}</div>
       </template>
+
       <el-form-item :label="$t('settings.ai.provider')">
-        <el-select v-model="form.aiProvider" :placeholder="$t('settings.ai.selectProvider')" class="provider-select"
-                   @change="handleProviderChange">
-          <el-option
-              v-for="provider in providers"
-              :key="provider.value"
-              :label="provider.label"
-              :value="provider.value"
-          >
+        <div style="display: flex; gap: 8px; width: 100%; margin-bottom: 8px;">
+          <el-input v-model="newProviderName" :placeholder="$t('settings.ai.newProvider')" style="flex:1"
+                    @keyup.enter="addNewProvider"/>
+          <el-button :disabled="!newProviderName.trim()" type="primary" @click="addNewProvider">
+            {{ $t('settings.ai.add') }}
+          </el-button>
+        </div>
+        <el-select v-model="form.aiProvider" :placeholder="$t('settings.ai.selectProvider')"
+                   style="width: 100%" @change="handleProviderChange">
+          <el-option v-for="p in providers" :key="p.value" :label="p.label" :value="p.value">
             <div class="provider-option-row">
-              <span class="provider-option-label">{{ provider.label }}</span>
-              <el-button
-                  v-if="isRemovableProvider(provider.value)"
-                  class="provider-option-delete"
-                  link
-                  type="danger"
-                  @click.stop.prevent="removeProvider(provider.value)"
-              >
+              <span>{{ p.label }}</span>
+              <el-button class="provider-option-del" link type="danger" @click.stop.prevent="removeProvider(p.value)">
                 <el-icon>
                   <CloseBold/>
                 </el-icon>
               </el-button>
             </div>
           </el-option>
-          <el-option :label="$t('settings.ai.custom')" value="custom"/>
         </el-select>
-      </el-form-item>
-
-      <el-form-item v-if="form.aiProvider === 'custom'" :label="$t('settings.ai.customProviderName')">
-        <el-input v-model="form.customProviderName" :placeholder="$t('settings.ai.customNamePlaceholder')"/>
       </el-form-item>
 
       <el-form-item :label="$t('settings.ai.apiUrl')">
@@ -53,15 +45,11 @@
       </el-form-item>
 
       <el-form-item :label="$t('settings.ai.apiKey')">
-        <el-input
-            v-model="form.apiKey"
-            :placeholder="$t('settings.ai.apiKeyPlaceholder')"
-            show-password
-            type="password"
-        />
+        <el-input v-model="form.apiKey" :placeholder="$t('settings.ai.apiKeyPlaceholder')" show-password
+                  type="password"/>
       </el-form-item>
-    </el-card>
 
+    </el-card>
   </el-form>
 </template>
 
@@ -70,32 +58,24 @@ import {onMounted} from 'vue'
 import {CloseBold, Connection} from '@element-plus/icons-vue'
 import {useAIProvider} from '../composables/useAIProvider'
 
-const props = defineProps({
-  form: {
-    type: Object,
-    required: true
-  }
-})
+const props = defineProps({form: {type: Object, required: true}})
 
 const {
   providers,
   testingConnection,
+  newProviderName,
   isRemovableProvider,
   loadAiProviders,
+  addNewProvider,
   handleProviderChange,
   applyCurrentProviderConfig,
   removeProvider,
-  testConnection
+  testConnection,
 } = useAIProvider(props.form)
 
-defineExpose({
-  loadAiProviders,
-  applyCurrentProviderConfig
-})
+defineExpose({loadAiProviders, applyCurrentProviderConfig})
 
-onMounted(() => {
-  loadAiProviders()
-})
+onMounted(() => loadAiProviders())
 </script>
 
 <style scoped>
@@ -108,25 +88,15 @@ onMounted(() => {
   font-weight: 600;
 }
 
-.provider-select {
-  flex: 1;
-}
-
 .provider-option-row {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
 }
 
-.provider-option-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.provider-option-delete {
+.provider-option-del {
   padding: 2px;
+  margin-left: 8px;
 }
 </style>

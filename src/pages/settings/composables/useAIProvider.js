@@ -8,47 +8,61 @@ export function useAIProvider(form) {
     const {t} = useI18n()
     const providers = ref([])
     const testingConnection = ref(false)
+    const newProviderName = ref('')
 
-    const builtinProviders = new Set(['deepseek', 'qwen', 'xiaomimimo'])
-    const isRemovableProvider = (provider) => !!provider && provider !== 'custom' && !builtinProviders.has(provider)
+    const isRemovableProvider = (_provider) => true
 
     const loadAiProviders = async () => {
         try {
-            const result = await AISettingsService.getAllConfiguredProviders()
-            if (Array.isArray(result)) {
-                providers.value = result.map(([value, label]) => ({value, label}))
-            }
+            const settings = await AISettingsService.getSettings()
+            const configs = settings.provider_configs || {}
+            providers.value = Object.keys(configs).map(key => ({
+                value: key,
+                label: key,
+            }))
         } catch (error) {
             handleAppError(error, t('settings.ai.loadProviderFailed'))
         }
     }
 
-    const handleProviderChange = async (provider) => {
-        if (!provider) return
-        if (provider === 'custom') {
-            form.apiUrl = ''
-            form.modelName = ''
-            form.apiKey = ''
+    const addNewProvider = async () => {
+        const name = newProviderName.value.trim()
+        if (!name) {
+            ElMessage.warning(t('settings.ai.providerNameRequired'))
             return
         }
+        const settings = await AISettingsService.getSettings()
+        if ((settings.provider_configs || {})[name]) {
+            ElMessage.warning(t('settings.ai.providerExists'))
+            return
+        }
+        newProviderName.value = ''
+        await AISettingsService.saveSettings({
+            aiProvider: name,
+            aiApiUrl: '',
+            aiModelName: '',
+            aiApiKey: '',
+        })
+        form.aiProvider = name
+        form.apiUrl = ''
+        form.modelName = ''
+        form.apiKey = ''
+        await loadAiProviders()
+    }
 
+    const handleProviderChange = async (provider) => {
+        if (!provider) return
         try {
             const settings = await AISettingsService.getSettings()
-            const providerConfigs = settings.provider_configs || {}
-
-            if (providerConfigs[provider]) {
-                const config = providerConfigs[provider]
-                form.apiUrl = config.api_url || ''
-                form.modelName = config.model_name || ''
-                form.apiKey = config.api_key || ''
+            const configs = settings.provider_configs || {}
+            if (configs[provider]) {
+                form.apiUrl = configs[provider].api_url || ''
+                form.modelName = configs[provider].model_name || ''
+                form.apiKey = configs[provider].api_key || ''
             } else {
-                const configResult = await AISettingsService.getProviderConfig(provider)
-                if (Array.isArray(configResult) && configResult.length >= 2) {
-                    const [url, model] = configResult
-                    form.apiUrl = url || ''
-                    form.modelName = model || ''
-                    form.apiKey = ''
-                }
+                form.apiUrl = ''
+                form.modelName = ''
+                form.apiKey = ''
             }
         } catch (error) {
             handleAppError(error, t('settings.ai.loadConfigFailed'))
@@ -57,15 +71,12 @@ export function useAIProvider(form) {
 
     const applyCurrentProviderConfig = (settings) => {
         form.aiProvider = settings.ai_provider || ''
-        form.customProviderName = ''
-        const currentProvider = form.aiProvider
-        const providerConfigs = settings.provider_configs || {}
-
-        if (currentProvider && providerConfigs[currentProvider]) {
-            const config = providerConfigs[currentProvider]
-            form.apiUrl = config.api_url || ''
-            form.modelName = config.model_name || ''
-            form.apiKey = config.api_key || ''
+        const configs = settings.provider_configs || {}
+        const cfg = configs[form.aiProvider]
+        if (cfg) {
+            form.apiUrl = cfg.api_url || ''
+            form.modelName = cfg.model_name || ''
+            form.apiKey = cfg.api_key || ''
         } else {
             form.apiUrl = ''
             form.modelName = ''
@@ -74,10 +85,7 @@ export function useAIProvider(form) {
     }
 
     const removeProvider = async (provider) => {
-        if (!isRemovableProvider(provider)) {
-            return
-        }
-
+        if (!provider) return
         try {
             await ElMessageBox.confirm(
                 t('settings.ai.deleteProviderConfirm', {provider}),
@@ -88,11 +96,14 @@ export function useAIProvider(form) {
                     type: 'warning',
                 }
             )
-
             await AISettingsService.removeProvider(provider)
             await loadAiProviders()
-            const settings = await AISettingsService.getSettings()
-            applyCurrentProviderConfig(settings)
+            if (form.aiProvider === provider) {
+                form.aiProvider = ''
+                form.apiUrl = ''
+                form.modelName = ''
+                form.apiKey = ''
+            }
             ElMessage.success(t('settings.ai.providerDeleted', {provider}))
         } catch (error) {
             if (error !== 'cancel') {
@@ -108,12 +119,8 @@ export function useAIProvider(form) {
         }
         testingConnection.value = true
         try {
-            let provider = form.aiProvider
-            if (provider === 'custom') {
-                provider = form.customProviderName
-            }
             const result = await AISettingsService.testConnection({
-                aiProvider: provider,
+                aiProvider: form.aiProvider,
                 aiApiUrl: form.apiUrl,
                 aiModelName: form.modelName,
                 aiApiKey: form.apiKey
@@ -129,8 +136,10 @@ export function useAIProvider(form) {
     return {
         providers,
         testingConnection,
+        newProviderName,
         isRemovableProvider,
         loadAiProviders,
+        addNewProvider,
         handleProviderChange,
         applyCurrentProviderConfig,
         removeProvider,

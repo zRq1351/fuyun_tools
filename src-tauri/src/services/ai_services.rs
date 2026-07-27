@@ -20,68 +20,52 @@ use tauri::{AppHandle, Emitter, Manager, State};
 static CACHED_AI_CLIENT: LazyLock<Mutex<Option<(Arc<AIConfig>, Arc<AIClient>)>>> =
     LazyLock::new(|| Mutex::new(None));
 
-async fn build_ai_config(state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
-    let (settings_snapshot, provider_key, api_url, model_name) = {
-        let state_guard = lock_arc_mutex(state);
-        let settings_snapshot = state_guard.settings.clone();
+/// 强制清除 AI 客户端缓存，下次请求会重新从凭据管理器读取 API Key 并创建新客户端
+pub fn invalidate_ai_client_cache() {
+    let mut cache = CACHED_AI_CLIENT.lock().unwrap_or_else(|never| match never {});
+    *cache = None;
+    log::info!("AI客户端缓存已强制清除");
+}
 
-        if settings_snapshot.ai_provider.is_empty() {
-            return Err(AppErrorKind::AiNotConfigured.to_app_error());
-        }
+async fn build_ai_config(_state: &Arc<Mutex<SharedAppState>>) -> AppResult<AIConfig> {
+    let provider_key = crate::utils::ai_store::get_current_provider().await;
+    if provider_key.is_empty() {
+        return Err(AppErrorKind::AiNotConfigured.to_app_error());
+    }
 
-        if !settings_snapshot
-            .provider_configs
-            .contains_key(&settings_snapshot.ai_provider)
-        {
-            return Err(AppErrorKind::AiProviderNotFound.to_app_error());
-        }
+    let config = crate::utils::ai_store::get_provider_config(&provider_key)
+        .await
+        .ok_or_else(|| AppErrorKind::AiProviderNotFound.to_app_error())?;
 
-        let provider_key = settings_snapshot.ai_provider.clone();
-        let provider_config = settings_snapshot
-            .get_current_provider_config()
-            .ok_or_else(|| AppErrorKind::AiProviderNotFound.to_app_error())?;
+    if config.api_url.is_empty() {
+        return Err(AppErrorKind::AiApiUrlEmpty.to_app_error());
+    }
+    if config.model_name.is_empty() {
+        return Err(AppErrorKind::AiModelNameEmpty.to_app_error());
+    }
 
-        if provider_config.api_url.is_empty() {
-            return Err(AppErrorKind::AiApiUrlEmpty.to_app_error());
-        }
-
-        if provider_config.model_name.is_empty() {
-            return Err(AppErrorKind::AiModelNameEmpty.to_app_error());
-        }
-
-        let api_url = provider_config.api_url.clone();
-        let model_name = provider_config.model_name.clone();
-
-        (settings_snapshot, provider_key, api_url, model_name)
-    };
-
-    let is_secure = api_url.starts_with("https://");
-    let is_localhost = api_url.starts_with("http://localhost")
-        || api_url.starts_with("http://127.0.0.1")
-        || api_url.starts_with("http://[::1]");
+    let is_secure = config.api_url.starts_with("https://");
+    let is_localhost = config.api_url.starts_with("http://localhost")
+        || config.api_url.starts_with("http://127.0.0.1")
+        || config.api_url.starts_with("http://[::1]");
     if !is_secure && !is_localhost {
         return Err(AppErrorKind::AiApiUrlInvalid.to_app_error());
     }
 
     log::info!("正在验证提供商 {} 的配置", provider_key);
-    let api_key = settings_snapshot
-        .get_provider_api_key(&provider_key)
-        .await
-        .map_err(|e| {
-            log::error!("读取密钥库失败: {}", e);
-            AppErrorKind::AiKeychainReadFailed.to_app_error_with_details(format!("{}", e))
-        })?;
-
-    if api_key.is_empty() {
+    if config.api_key.is_empty() {
         log::warn!("提供商 {} 的API密钥为空", provider_key);
         return Err(AppErrorKind::AiApiKeyNotConfigured.to_app_error());
     }
-    log::info!("提供商 {} 配置验证通过", provider_key);
+    let mask = if config.api_key.len() > 6 {
+        format!("***{}", &config.api_key[config.api_key.len() - 4..])
+    } else { "***".to_string() };
+    log::info!("提供商 {} 配置验证通过，密钥: {}", provider_key, mask);
 
     Ok(AIConfig {
-        api_key,
-        base_url: api_url,
-        model: model_name,
+        api_key: config.api_key,
+        base_url: config.api_url,
+        model: config.model_name,
     })
 }
 
@@ -97,8 +81,15 @@ pub async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> AppRe
                 && cached_config.base_url == current_config.base_url
                 && cached_config.model == current_config.model
             {
+                log::info!("AI客户端缓存命中，复用已有连接");
                 return Ok(Arc::clone(cached_client));
             }
+            log::info!("AI客户端配置变更，创建新连接 (key变更={}, url变更={}, model变更={})",
+                cached_config.api_key != current_config.api_key,
+                cached_config.base_url != current_config.base_url,
+                cached_config.model != current_config.model);
+        } else {
+            log::info!("AI客户端缓存为空，首次创建");
         }
     }
 
@@ -456,7 +447,11 @@ async fn execute_stream_request(
                 );
                 return Ok(());
             }
-            let error_msg = format!("{}失败: {}", kind.display_name(), e.message);
+            let error_msg = if let Some(ref details) = e.details {
+                format!("{}失败: {} | {}", kind.display_name(), e.message, details)
+            } else {
+                format!("{}失败: {}", kind.display_name(), e.message)
+            };
             // 发送错误信息到新创建的窗口
             if let Some(window) = app.get_webview_window(&window_label) {
                 if let Err(e) = window.emit(

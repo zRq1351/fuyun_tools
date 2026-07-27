@@ -1,10 +1,11 @@
 use crate::core::app_state::AppState as SharedAppState;
-use crate::core::config::{AIProvider, ProviderConfig};
+use crate::core::config::{AIProvider};
 #[cfg(debug_assertions)]
 use crate::core::error::to_frontend_error_string;
 use crate::core::error_codes::AppErrorKind;
 use crate::features;
 use crate::services::ai_client::{AIClient, AIConfig};
+use crate::services::ai_services::invalidate_ai_client_cache;
 use crate::services::clipboard_manager::set_clipboard_listener_enabled;
 use crate::services::image_clipboard_manager::set_image_clipboard_listener_enabled;
 use crate::sync::{lock_arc_mutex, Mutex};
@@ -437,50 +438,29 @@ pub async fn show_ocr_text_window(
 
 #[tauri::command]
 pub async fn get_ai_settings(state: State<'_, Arc<Mutex<SharedAppState>>>) -> Result<serde_json::Value, String> {
-    // 直接从内存中的 AppState 获取配置，避免重复从磁盘加载
     let settings = {
         let state_guard = lock_arc_mutex(state.inner());
         state_guard.settings.clone()
     };
+    let mut settings_json = serde_json::to_value(&settings)
+        .map_err(|e| frontend_error_kind(AppErrorKind::JsonError, e.to_string()))?;
 
-    tauri::async_runtime::spawn_blocking(move || {
-        // 直接将整个 settings 序列化为 JSON Value
-        let mut settings_json = serde_json::to_value(&settings)
-            .map_err(|e| frontend_error_kind(AppErrorKind::JsonError, e.to_string()))?;
+    let providers = crate::utils::ai_store::get_all_providers().await;
+    let mut provider_configs_map = serde_json::Map::new();
+    for (key, cfg) in &providers {
+        provider_configs_map.insert(key.clone(), serde_json::json!({
+            "api_url": cfg.api_url,
+            "model_name": cfg.model_name,
+            "api_key": cfg.api_key,
+        }));
+    }
 
-        // 脱敏处理 provider_configs 中的 API 密钥
-        if let Some(settings_obj) = settings_json.as_object_mut() {
-            let mut provider_configs_map: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
-            
-            for provider_key in settings.provider_configs.keys() {
-                if let Some(decrypted_config) = settings.provider_configs.get(provider_key) {
-                    // 不再调用 get_provider_api_key()，直接返回脱敏标记
-                    // 这样可以避免每次访问都读取密钥环，提升性能
-                    let config_obj = serde_json::json!({
-                        "api_url": decrypted_config.api_url,
-                        "model_name": decrypted_config.model_name,
-                        "api_key": "********"  // 始终返回脱敏标记
-                    });
-                    provider_configs_map.insert(provider_key.clone(), config_obj);
-                }
-            }
+    if let Some(obj) = settings_json.as_object_mut() {
+        obj.insert("ai_provider".to_string(), serde_json::Value::String(crate::utils::ai_store::get_current_provider().await));
+        obj.insert("provider_configs".to_string(), serde_json::Value::Object(provider_configs_map));
+    }
 
-            // 替换 provider_configs 为脱敏后的版本
-            settings_obj.insert(
-                "provider_configs".to_string(),
-                serde_json::Value::Object(provider_configs_map),
-            );
-        }
-
-        Ok(settings_json)
-    })
-    .await
-    .map_err(|e| {
-        frontend_error_kind(
-            AppErrorKind::TaskExecutionFailed,
-            e.to_string(),
-        )
-    })?
+    Ok(settings_json)
 }
 
 #[cfg(debug_assertions)]
@@ -1511,59 +1491,50 @@ pub async fn save_app_settings(
                 "ai_provider is empty",
             ));
         }
-        settings.ai_provider = ai_provider_val.clone();
+        crate::utils::ai_store::set_current_provider(ai_provider_val).await
+            .map_err(|e| frontend_error_kind(AppErrorKind::SettingsSaveFailed, e))?;
+    }
 
-        let mut need_update_config = false;
-        let config = settings
-            .provider_configs
-            .entry(ai_provider_val.clone())
-            .or_insert_with(|| {
-                need_update_config = true;
-                ProviderConfig::default()
-            });
+    // 解析当前要操作的提供商
+    let provider_key = match ai_provider {
+        Some(ref p) if !p.is_empty() => p.clone(),
+        _ => crate::utils::ai_store::get_current_provider().await,
+    };
+    if !provider_key.is_empty() {
+        let existing = crate::utils::ai_store::get_provider_config(&provider_key).await;
+        let is_new = existing.is_none();
+        let mut config = existing.unwrap_or_default();
+        let mut changed = is_new;
 
         if let Some(ref api_url) = ai_api_url {
-            config.api_url = api_url.clone();
+            if !api_url.is_empty() && config.api_url != *api_url {
+                config.api_url = api_url.clone();
+                changed = true;
+            }
         }
         if let Some(ref model_name) = ai_model_name {
-            config.model_name = model_name.clone();
+            if !model_name.is_empty() && config.model_name != *model_name {
+                config.model_name = model_name.clone();
+                changed = true;
+            }
         }
-
         if let Some(ref api_key) = ai_api_key {
-            if api_key != "********" {
-                settings
-                    .save_current_provider_config(api_key)
-                    .await
-                    .map_err(|e| frontend_error_kind(AppErrorKind::SettingsSaveProviderFailed, e))?;
-
+            if api_key != "********" && config.api_key != *api_key {
+                config.api_key = api_key.clone();
+                changed = true;
                 if api_key.trim().is_empty() {
-                    log::info!("提供商 {} 的API密钥已清空", ai_provider_val);
-                } else {
-                    match settings.get_provider_api_key(ai_provider_val).await {
-                        Ok(key) if key == *api_key => {
-                            log::info!("密钥保存验证通过");
-                        }
-                        Ok(_) => {
-                            log::warn!("密钥保存验证失败: 读取到的密钥与保存的不一致");
-                            return Err(frontend_error_kind(
-                                AppErrorKind::SettingsApiKeySaveFailed,
-                                "saved key mismatch",
-                            ));
-                        }
-                        Err(e) => {
-                            log::error!("密钥保存验证错误: {}", e);
-                            return Err(frontend_error_kind(
-                                AppErrorKind::SettingsApiKeyGetFailed,
-                                e,
-                            ));
-                        }
-                    }
+                    log::info!("提供商 {} 的API密钥已清空", provider_key);
                 }
             }
         }
+
+        if changed {
+            crate::utils::ai_store::save_provider_config(&provider_key, &config.api_url, &config.model_name, &config.api_key).await
+                .map_err(|e| frontend_error_kind(AppErrorKind::SettingsSaveProviderFailed, e))?;
+        }
     }
 
-    settings.migrate_from_old();
+    invalidate_ai_client_cache();
 
     settings
         .validate()
@@ -1692,30 +1663,17 @@ pub async fn test_ai_connection(
     ai_api_url: String,
     ai_model_name: String,
     ai_api_key: String,
-    state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<String, String> {
     let mut real_api_key = ai_api_key;
 
-    // 如果前端传过来的是脱敏的密钥，则从状态中获取真实的密钥
     if real_api_key == "********" {
-        let (provider, settings_snapshot) = {
-            let state_guard = lock_arc_mutex(state.inner());
-            (
-                ai_provider.unwrap_or_else(|| state_guard.settings.ai_provider.clone()),
-                state_guard.settings.clone(),
-            )
+        let provider = match ai_provider {
+            Some(p) if !p.is_empty() => p,
+            _ => crate::utils::ai_store::get_current_provider().await,
         };
-        let key = settings_snapshot.get_provider_api_key(&provider).await;
-        match key {
-            Ok(key) if !key.is_empty() => {
-                real_api_key = key;
-            }
-            _ => {
-                return Err(frontend_error_kind(
-                    AppErrorKind::SettingsLocalKeyNotFound,
-                    "real api key not found",
-                ));
-            }
+        match crate::utils::ai_store::get_api_key(&provider).await {
+            Ok(key) if !key.is_empty() => real_api_key = key,
+            _ => return Err(frontend_error_kind(AppErrorKind::SettingsLocalKeyNotFound, "real api key not found")),
         }
     }
 
@@ -1904,72 +1862,28 @@ pub async fn get_provider_config(provider: AIProvider) -> Result<(String, String
 #[tauri::command]
 pub async fn remove_ai_provider(
     provider: String,
-    state: State<'_, Arc<Mutex<SharedAppState>>>,
+    _state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
     if provider.is_empty() {
-        return Err(frontend_error_kind(
-            AppErrorKind::SettingsProviderNameEmpty,
-            "provider is empty",
-        ));
+        return Err(frontend_error_kind(AppErrorKind::SettingsProviderNameEmpty, "provider is empty"));
     }
 
-    let is_builtin = matches!(provider.as_str(), "deepseek" | "qwen" | "xiaomimimo");
-    if is_builtin {
-        return Err(frontend_error_kind(
-            AppErrorKind::InternalError,
-            provider.clone(),
-        ));
+    crate::utils::ai_store::remove_provider(&provider).await
+        .map_err(|e| frontend_error_kind(AppErrorKind::AiProviderNotFound, e))?;
+
+    let current = crate::utils::ai_store::get_current_provider().await;
+    if current == provider {
+        crate::utils::ai_store::set_current_provider("").await.ok();
     }
 
-    let mut settings = {
-        let state_guard = lock_arc_mutex(state.inner());
-        state_guard.settings.clone()
-    };
-
-    if settings.provider_configs.remove(&provider).is_none() {
-        return Err(frontend_error_kind(
-            AppErrorKind::AiProviderNotFound,
-            provider.clone(),
-        ));
-    }
-
-    if settings.ai_provider == provider {
-        let fallback = "deepseek".to_string();
-        if settings.provider_configs.contains_key(&fallback) {
-            settings.ai_provider = fallback;
-        } else if let Some(first_provider) = settings.provider_configs.keys().next() {
-            settings.ai_provider = first_provider.clone();
-        } else {
-            settings.ai_provider = "deepseek".to_string();
-        }
-    }
-
-    save_settings(&settings)
-        .map_err(|e| frontend_error_kind(AppErrorKind::SettingsSaveFailed, e))?;
-
-    {
-        let mut state_guard = lock_arc_mutex(state.inner());
-        state_guard.settings = settings;
-    }
-
+    invalidate_ai_client_cache();
     Ok(())
 }
 
-/// 获取所有已配置的提供商列表（包括自定义提供商）
 #[tauri::command]
-pub async fn get_all_configured_providers(
-    state: State<'_, Arc<Mutex<SharedAppState>>>,
-) -> Result<Vec<(String, String)>, String> {
-    let state_guard = lock_arc_mutex(state.inner());
-    let settings = &state_guard.settings;
-
-    let mut providers: Vec<(String, String)> = Vec::new();
-
-    for provider_key in settings.provider_configs.keys() {
-        providers.push((provider_key.clone(), provider_key.clone()));
-    }
-
-    Ok(providers)
+pub async fn get_all_configured_providers() -> Result<Vec<(String, String)>, String> {
+    let providers = crate::utils::ai_store::get_all_providers().await;
+    Ok(providers.into_iter().map(|(k, _)| (k.clone(), k)).collect())
 }
 
 /// 获取图片预览（优先使用已生成的，否则尝试从异步缓存获取）
@@ -2110,5 +2024,10 @@ pub async fn set_theme(theme: String) -> Result<(), String> {
     let mut settings = load_settings().map_err(|e| e.to_string())?;
     settings.theme = theme;
     save_settings(&settings).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn notify_result_window_ready(_window_label: String) -> Result<(), String> {
     Ok(())
 }

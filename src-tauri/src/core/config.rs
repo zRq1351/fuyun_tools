@@ -73,8 +73,8 @@ impl AIProvider {
     pub fn get_default_config(&self) -> (String, String) {
         match self {
             AIProvider::DeepSeek => (
-                "https://api.deepseek.com/v1".to_string(),
-                "deepseek-chat".to_string(),
+                "https://api.deepseek.com".to_string(),
+                "deepseek-v4-flash".to_string(),
             ),
             AIProvider::Qwen => (
                 "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),

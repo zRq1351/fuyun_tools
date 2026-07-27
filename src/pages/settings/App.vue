@@ -343,7 +343,6 @@ const form = reactive({
   apiUrl: '',
   modelName: '',
   apiKey: '',
-  customProviderName: '',
   selectionEnabled: true,
   selectionModifierKey: '',
   selectionCustomPrompts: [],
@@ -411,7 +410,6 @@ const buildFormSnapshot = () => ({
     apiUrl: form.apiUrl,
     modelName: form.modelName,
     apiKey: form.apiKey,
-    customProviderName: form.customProviderName,
     selectionEnabled: form.selectionEnabled,
     selectionModifierKey: form.selectionModifierKey,
     selectionCustomPrompts: form.selectionCustomPrompts,
@@ -528,15 +526,8 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
   }
 
 
-  let selectedProvider = source.aiProvider
-  if (selectedProvider === 'custom') {
-    if (!source.customProviderName) {
-      return null
-    }
-    selectedProvider = source.customProviderName
-  }
-  if (selectedProvider !== initial.aiProvider && selectedProvider !== initial.customProviderName) {
-    changedFields.aiProvider = selectedProvider
+  if (source.aiProvider !== initial.aiProvider) {
+    changedFields.aiProvider = source.aiProvider
   }
 
   if (source.apiUrl !== initial.apiUrl) {
@@ -722,17 +713,8 @@ const persistSettings = async (
 
 
     if (changedFields.aiProvider) {
-      let selectedProvider = snapshot.aiProvider
-      if (selectedProvider === 'custom') {
-        selectedProvider = snapshot.customProviderName
-      }
-      if (snapshot.aiProvider === 'custom' && snapshot.customProviderName === selectedProvider) {
-        if (aiSettingsRef.value) {
-          suppressNextAutoSave.value = true
-          await aiSettingsRef.value.loadAiProviders()
-        }
-        form.aiProvider = selectedProvider
-        snapshot.aiProvider = selectedProvider
+      if (aiSettingsRef.value) {
+        await aiSettingsRef.value.loadAiProviders()
       }
     }
 

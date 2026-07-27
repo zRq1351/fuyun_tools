@@ -6,7 +6,6 @@ use crate::core::error_codes::AppErrorKind;
 use crate::utils::system_utils::get_default_app_version;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CustomPrompt {
@@ -109,9 +108,9 @@ pub struct AppSettingsData {
     pub recording_wgc_force_default_dirty_region: bool,
     #[serde(default = "default_dev_force_ffmpeg_window_capture")]
     pub dev_force_ffmpeg_window_capture: bool,
-    #[serde(default)]
+    #[serde(default)] // 已迁移到 ai_config.db，仅保留用于旧数据反序列化
     pub ai_provider: String,
-    #[serde(default)]
+    #[serde(default)] // 已迁移到 ai_config.db，仅保留用于旧数据反序列化
     pub provider_configs: HashMap<String, ProviderConfig>,
     #[serde(default = "default_selection_enabled")]
     pub selection_enabled: bool,
@@ -455,60 +454,11 @@ impl AppSettingsData {
         provider_key: &str,
         api_key: &str,
     ) -> Result<(), String> {
-        let service_name = "fuyun_tools";
-        let user_name = format!("api_key_{}", provider_key);
-        let entry = keyring::Entry::new(service_name, &user_name)
-            .map_err(|e| AppErrorKind::SettingsCredentialCreateFailed.to_frontend_json_with_details(format!("{}", e)))?;
-        if api_key.is_empty() {
-            let _ = entry.delete_credential();
-            log::info!("API key cleared for provider: {}", provider_key);
-            return Ok(());
-        }
-        let mut last_error = String::new();
-        for i in 0..3 {
-            match entry.set_password(api_key) {
-                Ok(_) => {
-                    log::info!("API key saved for provider: {} (attempt {})", provider_key, i + 1);
-                    return Ok(());
-                }
-                Err(e) => {
-                    log::warn!("Failed to save API key (attempt {}): {}", i + 1, e);
-                    last_error = e.to_string();
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            }
-        }
-        Err(AppErrorKind::SettingsApiKeySaveFailed.to_frontend_json_with_details(last_error))
+        crate::utils::ai_store::set_api_key(provider_key, api_key).await
     }
 
     pub async fn get_provider_api_key(&self, provider_key: &str) -> Result<String, String> {
-        let service_name = "fuyun_tools";
-        let user_name = format!("api_key_{}", provider_key);
-        let entry = keyring::Entry::new(service_name, &user_name)
-            .map_err(|e| AppErrorKind::SettingsCredentialCreateFailed.to_frontend_json_with_details(format!("{}", e)))?;
-        let mut last_error = String::new();
-        for i in 0..3 {
-            match entry.get_password() {
-                Ok(password) => {
-                    log::info!("Successfully retrieved API key for provider: {} (attempt {})", provider_key, i + 1);
-                    return Ok(password);
-                }
-                Err(keyring::Error::NoEntry) => {
-                    log::info!("No API key found in keyring for provider: {}", provider_key);
-                    return Ok(String::new());
-                }
-                Err(e) => {
-                    let error_msg = e.to_string();
-                    if error_msg.contains("Element not found") || error_msg.contains("找不到元素") {
-                        return Ok(String::new());
-                    }
-                    log::warn!("Failed to retrieve API key for provider {} (attempt {}): {}", provider_key, i + 1, e);
-                    last_error = error_msg;
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            }
-        }
-        Err(AppErrorKind::SettingsApiKeyGetFailed.to_frontend_json_with_details(last_error))
+        crate::utils::ai_store::get_api_key(provider_key).await
     }
 
     pub async fn save_current_provider_config(&mut self, api_key: &str) -> Result<(), String> {
@@ -914,8 +864,8 @@ impl AppSettingsData {
     fn get_provider_default_config(&self, provider_name: &str) -> (String, String) {
         match provider_name {
             "deepseek" => (
-                "https://api.deepseek.com/v1".to_string(),
-                "deepseek-chat".to_string(),
+                "https://api.deepseek.com".to_string(),
+                "deepseek-v4-flash".to_string(),
             ),
             "qwen" => (
                 "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
@@ -948,6 +898,82 @@ pub fn initialize_builtin_providers(settings: &mut AppSettingsData) {
     }
     log::info!("已初始化内置AI提供商配置");
 }
+
+#[cfg(windows)]
+pub fn write_windows_credential(target: &str, value: &str) -> Result<(), String> {
+    use windows::Win32::Security::Credentials::{
+        CredWriteW, CREDENTIALW, CRED_TYPE_GENERIC, CRED_PERSIST_LOCAL_MACHINE,
+    };
+    let target_wide: Vec<u16> = target.encode_utf16().chain(Some(0)).collect();
+    let value_wide: Vec<u16> = value.encode_utf16().collect();
+    let credential = CREDENTIALW {
+        Type: CRED_TYPE_GENERIC,
+        TargetName: windows::core::PWSTR(target_wide.as_ptr() as *mut _),
+        CredentialBlobSize: (value_wide.len() * 2) as u32,
+        CredentialBlob: value_wide.as_ptr() as *mut u8,
+        Persist: CRED_PERSIST_LOCAL_MACHINE,
+        UserName: windows::core::PWSTR::null(),
+        ..Default::default()
+    };
+    unsafe {
+        CredWriteW(&credential, 0)
+            .map_err(|e| format!("CredWriteW failed: {e}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+pub fn read_windows_credential(target: &str) -> Result<String, String> {
+    use windows::Win32::Security::Credentials::{CredReadW, CREDENTIALW};
+    use windows::core::PWSTR;
+    let target_wide: Vec<u16> = target.encode_utf16().chain(Some(0)).collect();
+    let mut pcred: *mut CREDENTIALW = std::ptr::null_mut();
+    unsafe {
+        CredReadW(
+            PWSTR(target_wide.as_ptr() as *mut _),
+            CREDENTIALW::default().Type,
+            Some(0),
+            &mut pcred,
+        )
+            .map_err(|e| format!("CredReadW failed: {e}"))?;
+        if pcred.is_null() {
+            return Ok(String::new());
+        }
+        let cred = &*pcred;
+        let len = cred.CredentialBlobSize as usize / 2;
+        let blob = std::slice::from_raw_parts(cred.CredentialBlob as *const u16, len);
+        let result = String::from_utf16(blob).map_err(|e| format!("UTF-16 decode: {e}"))?;
+        windows::Win32::Security::Credentials::CredFree(pcred as *const _);
+        Ok(result)
+    }
+}
+
+#[cfg(windows)]
+pub fn delete_windows_credential(target: &str) {
+    use windows::Win32::Security::Credentials::{CredDeleteW, CREDENTIALW};
+    use windows::core::PWSTR;
+    let target_wide: Vec<u16> = target.encode_utf16().chain(Some(0)).collect();
+    unsafe {
+        let _ = CredDeleteW(
+            PWSTR(target_wide.as_ptr() as *mut _),
+            CREDENTIALW::default().Type,
+            Some(0),
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn write_windows_credential(_target: &str, _value: &str) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn read_windows_credential(_target: &str) -> Result<String, String> {
+    Ok(String::new())
+}
+
+#[cfg(not(windows))]
+fn delete_windows_credential(_target: &str) {}
 
 #[cfg(test)]
 mod tests {
