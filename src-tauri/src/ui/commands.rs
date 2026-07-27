@@ -128,12 +128,12 @@ pub(crate) fn write_screenshot_boot_image(
     width: u32,
     height: u32,
     session_id: u64,
-) -> Result<PathBuf, String> {
+) -> Result<(PathBuf, Vec<u8>), String> {
     let png_data = crate::features::screenshot::capture::rgba_to_png_bytes(rgba, width, height)?;
     let path = build_screenshot_boot_image_path(session_id)?;
-    fs::write(&path, png_data).map_err(|e| format!("写入截图临时文件失败: {}", e))?;
+    fs::write(&path, &png_data).map_err(|e| format!("写入截图临时文件失败: {}", e))?;
     replace_screenshot_boot_image_path(Some(path.clone()));
-    Ok(path)
+    Ok((path, png_data))
 }
 
 

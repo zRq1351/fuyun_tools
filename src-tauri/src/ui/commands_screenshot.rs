@@ -161,8 +161,10 @@ pub async fn start_screenshot(
     match capture::capture_full_screen() {
         Ok((rgba, width, height, origin_x, origin_y)) => {
             let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
-            let image_path = write_screenshot_boot_image(&rgba, width, height, session_id)
+            let (image_path, png_data) = write_screenshot_boot_image(&rgba, width, height, session_id)
                 .map_err(|e| frontend_error_kind_params(AppErrorKind::ScreenshotWriteSourceFailed, serde_json::json!({"error": e}), e))?;
+            use base64::Engine;
+            let png_base64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
 
             Ok(serde_json::json!({
                 "success": true,
@@ -170,7 +172,8 @@ pub async fn start_screenshot(
                 "height": height,
                 "origin_x": origin_x,
                 "origin_y": origin_y,
-                "image_path": image_path
+                "image_path": image_path,
+                "png_base64": png_base64
             }))
         }
         Err(e) => {
@@ -1222,7 +1225,7 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
     };
 
     let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
-    let image_path =
+    let (image_path, png_data) =
         write_screenshot_boot_image(&rgba, width, height, session_id).map_err(|e| {
             capture::set_screenshot_in_progress(false);
             record_perf_metric(
@@ -1234,6 +1237,8 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
             );
             e
         })?;
+    use base64::Engine;
+    let png_base64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
 
     let selection_mode = selection_mode;
     ensure_window_for_label(&app, "screenshot")?;
@@ -1246,6 +1251,7 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
         }
         let payload = serde_json::json!({
             "image_path": image_path,
+            "png_base64": png_base64,
             "width": width,
             "height": height,
             "origin_x": origin_x,
