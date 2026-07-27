@@ -181,10 +181,11 @@ fn cleanup_stale_recording_tmp_files() {
 /// 运行Tauri应用程序
 pub fn run() {
     install_global_panic_hook();
-    // Bug修复 (B15): 启动时清理上次遗留的截图临时文件
-    cleanup_stale_screenshot_boot_files();
-    // 启动时清理遗留的录屏临时文件
-    cleanup_stale_recording_tmp_files();
+    // 启动时清理遗留临时文件（后台线程，不阻塞启动流程）
+    std::thread::spawn(|| {
+        cleanup_stale_screenshot_boot_files();
+        cleanup_stale_recording_tmp_files();
+    });
     let initial_state = AppState::default();
     let state_arc = Arc::new(Mutex::new(initial_state));
 
@@ -509,47 +510,16 @@ pub fn run() {
             }
 
             if text_clipboard_enabled {
-                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "clipboard") {
-                    log::error!("创建文字剪贴板窗口失败: {}", e);
-                }
-                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "text_preview") {
-                    log::error!("创建文字预览窗口失败: {}", e);
-                }
+                // 窗口由 show_clipboard_window 懒创建（首次快捷键调用时）
             }
             if image_clipboard_enabled {
-                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "image_clipboard") {
-                    log::error!("创建图片剪贴板窗口失败: {}", e);
-                }
-                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "image_preview") {
-                    log::error!("创建图片预览窗口失败: {}", e);
-                }
+                // 窗口由 show_image_clipboard_window 懒创建
             }
-            if screenshot_enabled {
-                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "screenshot") {
-                    log::error!("创建截图窗口失败: {}", e);
-                }
-                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "longshot_toolbar") {
-                    log::error!("创建长截图工具栏窗口失败: {}", e);
-                }
-                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "longshot_border") {
-                    log::error!("创建长截图边框窗口失败: {}", e);
-                }
-            }
-            if recording_enabled {
-                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "recording_toolbar") {
-                    log::error!("创建录屏工具栏窗口失败: {}", e);
-                }
-            }
-            if launcher_enabled {
-                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "launcher") {
-                    log::error!("创建启动器窗口失败: {}", e);
-                }
-            }
-            if doc_manager_enabled {
-                if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app_handle, "document_manager") {
-                    log::error!("创建文档管理器窗口失败: {}", e);
-                }
-            }
+            // screenshot/longshot 窗口由 open_screenshot_editor 懒创建
+            // recording_toolbar 窗口由 show_recording_toolbar 懒创建
+            // launcher 窗口由 show_launcher 懒创建
+            // document_manager 窗口由 show_standard_window 懒创建
+
             if doc_manager_widget_enabled && doc_manager_enabled {
                 if let Err(e) = show_doc_manager_widget_window(&app_handle) {
                     log::error!("显示文档管理小部件失败: {}", e);
