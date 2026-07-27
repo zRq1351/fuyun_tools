@@ -96,7 +96,7 @@
               v-for="file in displayFiles"
               :key="file.id"
               :title="file.title || file.fileName"
-              class="dmw-file-item"
+              :class="['dmw-file-item', { active: ctxMenuFile?.id === file.id }]"
               @dblclick="openFile(file)"
               @contextmenu.prevent="showFileMenu($event, file)"
           >
@@ -111,7 +111,7 @@
       </template>
     </div>
 
-    <ContextMenu :show="ctxMenuShow" :x="ctxMenuX" :y="ctxMenuY" @close="ctxMenuShow = false">
+    <ContextMenu :show="ctxMenuShow" :x="ctxMenuX" :y="ctxMenuY" @close="ctxMenuShow = false; ctxMenuFile = null">
       <div class="context-menu-item" @click="openFile(ctxMenuFile)">{{ t('documentManager.open') }}</div>
       <div class="context-menu-divider"></div>
       <div class="context-menu-item context-menu-item-danger" @click="deleteFile(ctxMenuFile)">{{
@@ -155,6 +155,7 @@ const ctxMenuShow = ref(false)
 const ctxMenuX = ref(0)
 const ctxMenuY = ref(0)
 const ctxMenuFile = ref(null)
+const dialogOpen = ref(false)
 
 const iconMap = {
   pdf: Document, docx: Document, doc: Document,
@@ -330,6 +331,7 @@ const dragOverCatId = ref(null)
 async function importDroppedFiles(paths, catId) {
   if (!paths.length || !selectedRootId.value) return
   let mode
+  dialogOpen.value = true
   try {
     const {ElMessageBox} = await import('element-plus')
     const action = await ElMessageBox.confirm(
@@ -350,6 +352,8 @@ async function importDroppedFiles(paths, catId) {
     else {
       return
     }
+  } finally {
+    dialogOpen.value = false
   }
   try {
     const result = await DocumentService.importFiles({
@@ -441,7 +445,7 @@ async function onCategoriesMouseEnter() {
 }
 
 async function onContainerMouseLeave() {
-  if (ctxMenuShow.value) return
+  if (ctxMenuShow.value || dialogOpen.value) return
   hovered.value = false
   await nextTick()
   await resizeToFitContent()
@@ -510,11 +514,28 @@ function showFileMenu(event, file) {
 async function deleteFile(file) {
   ctxMenuShow.value = false
   if (!file?.id) return
+  dialogOpen.value = true
   try {
+    const {ElMessageBox} = await import('element-plus')
+    await ElMessageBox.confirm(
+        t('documentManager.confirmDelete'),
+        t('common.delete'),
+        {
+          confirmButtonText: t('common.delete'),
+          cancelButtonText: t('common.cancel'),
+          type: 'warning',
+          customClass: 'fy-compact'
+        }
+    )
     await DocumentService.deleteDoc(file.id, false)
     allFiles.value = allFiles.value.filter(f => f.id !== file.id)
+    await resizeToFitContent()
+    ctxMenuFile.value = null
   } catch (e) {
+    if (e === 'cancel' || e === 'close') return
     console.error('删除文件失败:', e)
+  } finally {
+    dialogOpen.value = false
   }
 }
 
@@ -969,6 +990,10 @@ onBeforeUnmount(() => {
 }
 
 .dmw-file-item:hover {
+  background: var(--fy-bg-hover);
+}
+
+.dmw-file-item.active {
   background: var(--fy-bg-hover);
 }
 
