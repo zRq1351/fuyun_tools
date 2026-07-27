@@ -6,7 +6,7 @@
 
 **一套快捷键，搞定日常效率**
 
-![Version](https://img.shields.io/badge/version-0.8.1-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.8.11-blue?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows_10/11-0078D6?style=flat-square&logo=windows)
 ![License](https://img.shields.io/badge/license-GPL--2.0-green?style=flat-square)
 ![Rust](https://img.shields.io/badge/Tauri-2.x-FFC131?style=flat-square&logo=tauri)
@@ -297,6 +297,25 @@
 | **格式** | `.fytbk.zip` + SHA-256 校验 | 合并（仅新增）或覆盖    |
 | **安全** | —                         | 自动创建回滚点，失败可回退 |
 | **内容** | 剪贴板历史 · 图片历史 · 分类 · 设置    | 同左            |
+
+---
+
+## 📝 更新日志
+
+### v0.8.11
+
+- 🚀 **启动性能优化**：移除 9 个 Webview 预创建（懒加载），临时文件清理后台化
+- ⚡ **图标提取 5-10x 加速**：PowerShell `.lnk` 解析替换为 Windows COM `IShellLinkW` API
+- ⚡ **剪贴板去重 O(1)**：指纹查找从 O(n) 扫描改为 HashMap 索引
+- 🔧 **GDI 资源泄漏修复**：图标提取增加 `scopeguard::defer!` 自动清理
+- 🔧 **录制线程泄漏修复（10 处）**：`reset_to_idle`/`cancel`/`pause`/`update_audio` 强制 join
+- 🔧 **FFmpeg A/V 同步校准**：测量启动延迟（~10-50ms），同步音频 `start_ms`/`trim_start_ms`
+- 🔧 **OCR 引擎缓存**：首次加载模型后复用，初始化 ~1s → ~0ms
+- 🔧 **WASAPI 代码重复消除**：提取 `audio_write_loop!` 宏，净减 322 行
+- 🔧 **文档管理原子性修复**：删除操作 ordre 调整，避免崩溃遗留孤儿数据
+- 🔧 **FTS 索引优化**：先清理孤儿记录，仅必要时重建
+- 🔧 **DOMPurify 安全配置**：AI 结果渲染添加显式 `ALLOWED_TAGS`/`FORBID_TAGS`
+- 📦 **代码净减 ~400 行**：消除大量重复模式，统一图标/音频/剪贴板逻辑
 
 ---
 
