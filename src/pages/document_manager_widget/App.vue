@@ -24,11 +24,6 @@
               <Setting/>
             </el-icon>
           </button>
-          <button :title="t('common.close')" class="dmw-btn-icon dmw-btn-close" @click="closeWidget" @mousedown.stop>
-            <el-icon :size="13">
-              <Close/>
-            </el-icon>
-          </button>
         </div>
       </div>
 
@@ -134,7 +129,7 @@ import {currentMonitor} from '@tauri-apps/api/window'
 import {DocumentService} from '../../services/ipc.js'
 import ContextMenu from '../../components/ContextMenu.vue'
 import {
-  Close, Folder, FolderOpened, Loading, Refresh,
+  Folder, FolderOpened, Loading, Refresh,
   Document, List, Notebook, Tickets, Setting, Connection,
   MagicStick, Monitor, Picture, Coffee, Search
 } from '@element-plus/icons-vue'
@@ -511,16 +506,6 @@ async function openFullManager() {
   }
 }
 
-async function closeWidget() {
-  try {
-    const {invoke} = await import('@tauri-apps/api/core')
-    await invoke('save_app_settings', {docManagerWidgetEnabled: false})
-    await invoke('hide_doc_manager_widget')
-  } catch (e) {
-    console.error('关闭小部件失败:', e)
-  }
-}
-
 async function refreshData() {
   if (!selectedRootId.value) return
   loading.value = true
@@ -836,11 +821,6 @@ onBeforeUnmount(() => {
 .dmw-btn-icon:hover {
   background: var(--fy-bg-hover);
   color: var(--fy-accent);
-}
-
-.dmw-btn-close:hover {
-  background: var(--fy-danger-bg);
-  color: var(--fy-danger);
 }
 
 .dmw-loading {
