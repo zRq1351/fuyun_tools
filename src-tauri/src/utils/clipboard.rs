@@ -26,6 +26,8 @@ struct PersistState {
 pub struct ClipboardManager {
     history: Arc<Mutex<Vec<String>>>,
     history_fingerprints: Arc<Mutex<Vec<(usize, u64)>>>,
+    /// O(1) 指纹索引： (char_count, hash) → history index
+    fingerprint_index: Arc<ParkingMutex<HashMap<(usize, u64), usize>>>,
     exact_index_cache: Arc<ParkingMutex<LruCache<u64, usize>>>,
     history_cache_dirty: Arc<AtomicBool>,
     persist_state: Arc<(ParkingMutex<PersistState>, ParkingCondvar)>,
@@ -54,6 +56,15 @@ fn build_history_fingerprints(history: &[String]) -> Vec<(usize, u64)> {
         .collect()
 }
 
+/// 从历史记录构建 O(1) 指纹查找索引
+fn build_fingerprint_index(fingerprints: &[(usize, u64)]) -> HashMap<(usize, u64), usize> {
+    let mut index = HashMap::with_capacity(fingerprints.len());
+    for (i, fp) in fingerprints.iter().enumerate() {
+        index.insert(*fp, i);
+    }
+    index
+}
+
 impl ClipboardManager {
     /// 创建剪贴板管理器实例
     pub fn new(max_items: usize, grouped_items_protected_from_limit: bool) -> Self {
@@ -70,6 +81,7 @@ impl ClipboardManager {
             pinned_items: pinned_items.clone(),
         };
         let history_fingerprints = build_history_fingerprints(&history_data.items);
+        let fingerprint_index = build_fingerprint_index(&history_fingerprints);
         let persist_state = Arc::new((
             ParkingMutex::new(PersistState {
                 history_dirty: !initial_snapshot.items.is_empty(),
@@ -178,6 +190,7 @@ impl ClipboardManager {
         Self {
             history: history_arc,
             history_fingerprints: Arc::new(Mutex::new(history_fingerprints)),
+            fingerprint_index: Arc::new(ParkingMutex::new(fingerprint_index)),
             exact_index_cache: Arc::new(ParkingMutex::new(LruCache::new(
                 NonZeroUsize::new(EXACT_INDEX_CACHE_CAPACITY).unwrap_or(NonZeroUsize::MIN),
             ))),
@@ -477,6 +490,7 @@ impl ClipboardManager {
                     exact_index_cache.clear();
                     exact_index_cache.put(content_hash, 0);
                     *fingerprints = build_history_fingerprints(&history);
+                    { let mut idx = self.fingerprint_index.lock(); *idx = build_fingerprint_index(&fingerprints); }
                     self.history_cache_dirty.store(false, Ordering::Relaxed);
                     return;
                 }
@@ -484,22 +498,18 @@ impl ClipboardManager {
                 self.exact_index_cache.lock().pop(&content_hash);
             }
 
-            // 检查指纹索引
+            // 检查指纹索引（O(1) HashMap 查找）
             let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
             let cache_dirty = self.history_cache_dirty.load(Ordering::Relaxed);
             if cache_dirty || fingerprints.len() != history.len() {
                 *fingerprints = build_history_fingerprints(&history);
+                { let mut idx = self.fingerprint_index.lock(); *idx = build_fingerprint_index(&fingerprints); }
                 self.history_cache_dirty.store(false, Ordering::Relaxed);
             }
-            if let Some(exact_index) =
-                fingerprints
-                    .iter()
-                    .enumerate()
-                    .position(|(idx, (item_len, item_hash))| {
-                        *item_len == content_len
-                            && *item_hash == content_hash
-                            && history.get(idx).is_some_and(|item| item == &content)
-                    })
+            let candidate_idx = self.fingerprint_index.lock().get(&(content_len, content_hash)).copied();
+            if let Some(exact_index) = candidate_idx.filter(|&idx| {
+                history.get(idx).is_some_and(|item| item == &content)
+            })
             {
                 // 在指纹索引中找到，移动到最前面
                 if exact_index != 0 {
