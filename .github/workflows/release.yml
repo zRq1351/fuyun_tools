@@ -104,6 +104,11 @@ jobs:
             - **主题持久化防覆盖**：`themeManager.js` 序列号防止过期重试覆盖新主题
             - **文档管理**：`remove_doc_root` 改用 `remove_dir_all`；`remove_doc_category` 先删目录再删 DB
 
+            ### 🚀 性能优化
+            - **启动加速**：移除 9 个 Webview 预创建（懒加载），临时文件清理后台化
+            - **图标提取 5-10x 加速**：PowerShell .lnk 解析 → Windows COM `IShellLinkW` API
+            - **剪贴板去重 O(1)**：指纹扫描 HashMap 索引替代 O(n) 遍历
+
             ### 🏗 底层改进
             - **录制错误吞没**：`ensure_mic/system_capture_started` 3 处增加错误日志
             - **长截图错误传播**：`runtime_slot`/`status`/`result` 锁错误保留原因详情
