@@ -80,6 +80,12 @@ pub struct AppSettingsData {
     pub recording_default_video_bitrate_kbps: u32,
     #[serde(default = "default_recording_default_audio_bitrate_kbps")]
     pub recording_default_audio_bitrate_kbps: u32,
+    #[serde(default = "default_recording_quality_preset")]
+    pub recording_quality_preset: String,
+    #[serde(default = "default_recording_last_target_type")]
+    pub recording_last_target_type: String,
+    #[serde(default = "default_recording_last_target_id")]
+    pub recording_last_target_id: String,
     #[serde(default = "default_recording_capture_cursor")]
     pub recording_capture_cursor: bool,
     #[serde(default = "default_recording_capture_system_audio")]
@@ -175,6 +181,9 @@ impl Default for AppSettingsData {
             recording_default_fps: default_recording_default_fps(),
             recording_default_video_bitrate_kbps: default_recording_default_video_bitrate_kbps(),
             recording_default_audio_bitrate_kbps: default_recording_default_audio_bitrate_kbps(),
+            recording_quality_preset: default_recording_quality_preset(),
+            recording_last_target_type: default_recording_last_target_type(),
+            recording_last_target_id: default_recording_last_target_id(),
             recording_capture_cursor: default_recording_capture_cursor(),
             recording_capture_system_audio: default_recording_capture_system_audio(),
             recording_capture_microphone: default_recording_capture_microphone(),
@@ -309,6 +318,18 @@ fn default_recording_default_video_bitrate_kbps() -> u32 {
 
 fn default_recording_default_audio_bitrate_kbps() -> u32 {
     160
+}
+
+fn default_recording_quality_preset() -> String {
+    "hd".to_string()
+}
+
+fn default_recording_last_target_type() -> String {
+    String::new()
+}
+
+fn default_recording_last_target_id() -> String {
+    String::new()
 }
 
 fn default_recording_capture_cursor() -> bool {

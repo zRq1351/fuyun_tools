@@ -1900,7 +1900,7 @@ pub fn start_recording(
             AppError::new(ErrorCode::IoError, "创建录制目录失败").with_details(e.to_string())
         })?;
         cleanup_stale_tmp_files(&output_dir);
-        let (tmp_path, final_path, session_id) = build_output_paths(&output_dir);
+        let (tmp_path, final_path, session_id) = build_output_paths(&output_dir, &settings_snapshot.recording_file_name_template);
         let mut runtime = lock_arc_mutex(&runtime_arc);
         normalize_runtime_state(&mut runtime);
         if matches!(

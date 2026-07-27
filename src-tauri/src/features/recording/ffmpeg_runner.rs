@@ -72,13 +72,19 @@ pub fn resolve_ffmpeg_path() -> Result<PathBuf, String> {
     ))
 }
 
-pub fn build_output_paths(output_dir: &Path) -> (PathBuf, PathBuf, String) {
+pub fn build_output_paths(output_dir: &Path, naming_template: &str) -> (PathBuf, PathBuf, String) {
+    let now = chrono::Local::now();
     let timestamp_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
     let session_id = format!("rec-{}", timestamp_ms);
-    let final_name = format!("{}.mp4", session_id);
+    let final_name = naming_template
+        .replace("{timestamp}", &timestamp_ms.to_string())
+        .replace("{date}", &now.format("%Y%m%d").to_string())
+        .replace("{time}", &now.format("%H%M%S").to_string())
+        .replace("{type}", "screen");
+    let final_name = format!("{}.mp4", final_name.trim());
     let tmp_name = format!("{}.tmp.mp4", session_id);
     (
         output_dir.join(tmp_name),

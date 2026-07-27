@@ -1,5 +1,11 @@
 <template>
   <div
+      v-if="countdownActive"
+      class="countdown-overlay"
+  >
+    <div class="countdown-number">{{ countdownValue }}</div>
+  </div>
+  <div
         :class="{
         'bar-collapsed-settings-open': capsuleSettingsVisible,
       }"
@@ -211,6 +217,21 @@
               />
           </div>
           <div class="toolbar-settings-row">
+            <span class="toolbar-settings-label">{{ t('recordingToolbar.qualityPreset') }}</span>
+            <el-select
+                :model-value="qualityPreset"
+                :disabled="!canEditRecordingConfig"
+                size="small"
+                style="width: 140px"
+                @change="onPresetChange"
+            >
+              <el-option :label="t('recordingToolbar.presetSd')" value="sd" />
+              <el-option :label="t('recordingToolbar.presetHd')" value="hd" />
+              <el-option :label="t('recordingToolbar.presetFhd')" value="fhd" />
+              <el-option :label="t('recordingToolbar.presetCustom')" value="custom" />
+            </el-select>
+          </div>
+          <div class="toolbar-settings-row">
             <span class="toolbar-settings-label">{{ t('recordingToolbar.defaultFps') }}</span>
             <el-input-number
                 :controls="false"
@@ -219,7 +240,7 @@
                 :model-value="fps"
                 :step="1"
                 size="small"
-                :disabled="!canEditRecordingConfig"
+                :disabled="!canEditRecordingConfig || qualityPreset !== 'custom'"
                 @change="onToolbarSettingChange('recordingDefaultFps', $event)"
             />
           </div>
@@ -302,6 +323,30 @@ let inlineNoticeTimer = null;
 const fps = ref(30);
 const videoBitrateKbps = ref(6000);
 const audioBitrateKbps = ref(160);
+const qualityPreset = ref('hd');
+const countdownActive = ref(false);
+const countdownValue = ref(3);
+
+const PRESET_CONFIG = {
+  sd: { fps: 15, videoBitrateKbps: 1000, audioBitrateKbps: 64 },
+  hd: { fps: 30, videoBitrateKbps: 3000, audioBitrateKbps: 128 },
+  fhd: { fps: 30, videoBitrateKbps: 6000, audioBitrateKbps: 192 },
+};
+
+function onPresetChange(val) {
+  qualityPreset.value = val;
+  if (val === 'custom') return;
+  const cfg = PRESET_CONFIG[val];
+  fps.value = cfg.fps;
+  videoBitrateKbps.value = cfg.videoBitrateKbps;
+  audioBitrateKbps.value = cfg.audioBitrateKbps;
+  saveToolbarSettings({
+    recordingDefaultFps: cfg.fps,
+    recordingDefaultVideoBitrateKbps: cfg.videoBitrateKbps,
+    recordingDefaultAudioBitrateKbps: cfg.audioBitrateKbps,
+    recordingQualityPreset: val,
+  });
+}
 const captureCursor = ref(true);
 const captureToolbar = ref(true);
 
@@ -596,6 +641,13 @@ const toggleRecordingState = async () => {
               : null;
 
       isMicMuted.value = true;
+      // 3 秒倒计时
+      countdownActive.value = true;
+      for (let i = 3; i >= 1; i--) {
+        countdownValue.value = i;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      countdownActive.value = false;
       await RecordingService.start({
         targetType: recordTargetType.value,
         targetId,
@@ -1097,6 +1149,7 @@ onMounted(async () => {
     fps.value = Number(settings.recording_default_fps || 30);
     videoBitrateKbps.value = Number(settings.recording_default_video_bitrate_kbps || 6000);
     audioBitrateKbps.value = Number(settings.recording_default_audio_bitrate_kbps || 160);
+    qualityPreset.value = settings.recording_quality_preset || 'hd';
     captureCursor.value = settings.recording_capture_cursor !== false;
     captureToolbar.value = settings.recording_toolbar_content_protected !== true;
     microphoneDeviceId.value = settings.recording_microphone_device_id || null;
@@ -2015,5 +2068,19 @@ button, [role="button"] {
 button:active:not(:disabled),
 [role="button"]:active:not([aria-disabled="true"]) {
   transform: scale(0.96);
+}
+
+.countdown-overlay {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.5); z-index: 9999;
+}
+.countdown-number {
+  font-size: 120px; font-weight: 700; color: #fff;
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  animation: countdown-pop 0.5s ease-out;
+}
+@keyframes countdown-pop {
+  from { transform: scale(1.5); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 </style>
