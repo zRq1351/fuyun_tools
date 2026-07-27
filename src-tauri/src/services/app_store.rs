@@ -215,7 +215,7 @@ fn is_microsoft_app(target: &str) -> bool {
     if is_windows_system_path(target) {
         return true;
     }
-    if is_microsoft_signed_exe(target) {
+    if is_microsoft_company_exe(target) {
         return true;
     }
     is_microsoft_related_target(target)
@@ -290,7 +290,9 @@ fn is_microsoft_related_target(target: &str) -> bool {
     ms_indicators.iter().any(|k| target_lower.contains(k))
 }
 
-fn is_microsoft_signed_exe(target: &str) -> bool {
+/// 通过 PE 文件版本信息中的 CompanyName 字段判断是否为微软产品。
+/// 注意：这不是数字签名验证（非 WinVerifyTrust），仅用于启动器分类展示。
+fn is_microsoft_company_exe(target: &str) -> bool {
     unsafe {
         let wide_target: Vec<u16> = std::ffi::OsStr::new(target)
             .encode_wide()
