@@ -592,4 +592,6 @@ export const DocumentService = {
     undoImportItem: (importId, docFileId) => ipcInvoke(IPC_COMMANDS.UNDO_IMPORT_ITEM, {importId, docFileId}),
     getImportFiles: (importId) => ipcInvoke(IPC_COMMANDS.GET_IMPORT_FILES, {importId}),
     detectOrphanFiles: (rootId) => ipcInvoke(IPC_COMMANDS.DETECT_ORPHAN_FILES, {rootId}),
+    getFileTypeIcon: (ext) => ipcInvoke('get_file_type_icon', {ext}),
+    getFileTypeIcons: (exts) => ipcInvoke('get_file_type_icons', {exts}),
 };

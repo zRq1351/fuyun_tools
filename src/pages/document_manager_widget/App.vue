@@ -100,7 +100,9 @@
               @dblclick="openFile(file)"
               @contextmenu.prevent="showFileMenu($event, file)"
           >
-            <el-icon :color="getFileColor(file.fileExt)" :size="16">
+            <img v-if="fileIconCache[file.fileExt?.toLowerCase()]" :src="fileIconCache[file.fileExt?.toLowerCase()]"
+                 class="dmw-file-icon-img"/>
+            <el-icon v-else :color="getFileColor(file.fileExt)" :size="16">
               <component :is="getFileIcon(file.fileExt)"/>
             </el-icon>
             <span class="dmw-file-name">{{ file.title || file.fileName }}</span>
@@ -123,7 +125,7 @@
 </template>
 
 <script setup>
-import {computed, nextTick, onMounted, onBeforeUnmount, ref} from 'vue'
+import {computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {useWindowDrag} from '../../composables/useWindowDrag'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
@@ -156,6 +158,29 @@ const ctxMenuX = ref(0)
 const ctxMenuY = ref(0)
 const ctxMenuFile = ref(null)
 const dialogOpen = ref(false)
+
+const fileIconCache = reactive({})
+
+async function loadFileIcons(exts) {
+  const unseen = []
+  for (const ext of exts) {
+    if (fileIconCache[ext] === undefined) {
+      unseen.push(ext)
+      fileIconCache[ext] = null
+    }
+  }
+  if (unseen.length === 0) return
+  try {
+    const result = await DocumentService.getFileTypeIcons(unseen)
+    for (const ext of unseen) {
+      fileIconCache[ext] = result[ext] || null
+    }
+  } catch {
+    for (const ext of unseen) {
+      fileIconCache[ext] = null
+    }
+  }
+}
 
 const iconMap = {
   pdf: Document, docx: Document, doc: Document,
@@ -258,6 +283,11 @@ const displayFiles = computed(() => {
   }
   return allFiles.value.filter(f => f.categoryId === selectedCategoryId.value).slice(0, 30)
 })
+
+watch(displayFiles, (files) => {
+  const exts = [...new Set(files.map(f => f.fileExt?.toLowerCase()).filter(Boolean))]
+  if (exts.length > 0) loadFileIcons(exts)
+}, {immediate: true})
 
 async function resizeToFitContent() {
   await nextTick()
@@ -363,15 +393,13 @@ async function importDroppedFiles(paths, catId) {
       storageMode: mode,
       sourceDir: '',
     })
-    const {ElNotification} = await import('element-plus')
+    const {ElMessage} = await import('element-plus')
     if (result?.success?.length) {
-      ElNotification({
-        title: '',
+      ElMessage({
         message: `+${result.success.length} ${t('common.files')}`,
         type: 'success',
         duration: 3000,
-        customClass: 'fy-compact',
-        offset: 60
+        customClass: 'fy-compact-message',
       })
     }
     await loadDataForRoot(selectedRootId.value)
@@ -384,24 +412,22 @@ async function importDroppedFiles(paths, catId) {
     await nextTick()
     await resizeToFitContent()
     if (result?.errors?.length) {
-      ElNotification({
-        title: t('documentManager.importFailed'),
+      ElMessage({
         message: result.errors.join('\n'),
         type: 'error',
         duration: 5000,
-        customClass: 'fy-compact',
-        offset: 60
+        showClose: true,
+        customClass: 'fy-compact-message',
       })
     }
   } catch (err) {
-    const {ElNotification} = await import('element-plus')
-    ElNotification({
-      title: t('documentManager.importFailed'),
+    const {ElMessage} = await import('element-plus')
+    ElMessage({
       message: String(err),
       type: 'error',
       duration: 8000,
-      customClass: 'fy-compact',
-      offset: 60
+      showClose: true,
+      customClass: 'fy-compact-message',
     })
   }
 }
@@ -979,6 +1005,12 @@ onBeforeUnmount(() => {
   font-size: var(--fy-text-sm, 12px);
 }
 
+.dmw-file-icon-img {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
 .dmw-file-item {
   display: flex;
   align-items: center;
@@ -1094,22 +1126,18 @@ html, body {
   color: var(--fy-text-muted, #999);
 }
 
-.fy-compact.el-notification {
-  width: 260px;
-  padding: 8px 12px;
+.fy-compact-message.el-message {
+  padding: 4px 10px;
+  min-width: auto;
 }
 
-.fy-compact.el-notification .el-notification__title {
+.fy-compact-message.el-message .el-message__content {
   font-size: 12px;
+  line-height: 1.3;
 }
 
-.fy-compact.el-notification .el-notification__content {
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.fy-compact.el-notification .el-notification__closeBtn {
-  top: 8px;
-  right: 8px;
+.fy-compact-message.el-message .el-message__icon {
+  font-size: 14px;
+  margin-right: 6px;
 }
 </style>

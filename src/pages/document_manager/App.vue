@@ -196,7 +196,9 @@
                 }}</span>
               <span v-else class="dm-mode-badge index">{{ t('documentManager.index') }}</span>
               <div class="dm-file-icon">
-                <el-icon :color="getFileColor(item.fileExt)" :size="32">
+                <img v-if="fileIconCache[item.fileExt?.toLowerCase()]" :src="fileIconCache[item.fileExt?.toLowerCase()]"
+                     class="dm-file-icon-img"/>
+                <el-icon v-else :color="getFileColor(item.fileExt)" :size="32">
                   <component :is="getFileIcon(item.fileExt)"/>
                 </el-icon>
               </div>
@@ -722,6 +724,34 @@ const fileGridRef = ref(null)
 let rootSortable = null
 let catSortable = null
 let fileSortable = null
+
+const fileIconCache = reactive({})
+
+async function loadFileIcons(exts) {
+  const unseen = []
+  for (const ext of exts) {
+    if (fileIconCache[ext] === undefined) {
+      unseen.push(ext)
+      fileIconCache[ext] = null
+    }
+  }
+  if (unseen.length === 0) return
+  try {
+    const result = await DocumentService.getFileTypeIcons(unseen)
+    for (const ext of unseen) {
+      fileIconCache[ext] = result[ext] || null
+    }
+  } catch {
+    for (const ext of unseen) {
+      fileIconCache[ext] = null
+    }
+  }
+}
+
+watch(items, (files) => {
+  const exts = [...new Set(files.map(f => f.fileExt?.toLowerCase()).filter(Boolean))]
+  if (exts.length > 0) loadFileIcons(exts)
+}, {immediate: true})
 
 const showAddRoot = ref(false)
 const newRootName = ref('')
@@ -2027,6 +2057,11 @@ onBeforeUnmount(() => {
 .dm-file-card.ctx-anchor {
   border-color: var(--fy-border-hover);
   background: var(--fy-accent-bg)
+}
+
+.dm-file-icon-img {
+  width: 32px;
+  height: 32px;
 }
 
 .dm-file-icon {

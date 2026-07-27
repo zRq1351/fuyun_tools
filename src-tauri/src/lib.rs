@@ -759,6 +759,8 @@ pub fn run() {
             show_document_manager,
             show_doc_manager_widget,
             hide_doc_manager_widget,
+            get_file_type_icon,
+            get_file_type_icons,
             // 性能监控命令
             get_system_resources,
             get_perf_summary,
