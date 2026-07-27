@@ -300,25 +300,6 @@
 
 ---
 
-## 📝 更新日志
-
-### v0.8.11
-
-- 🚀 **启动性能优化**：移除 9 个 Webview 预创建（懒加载），临时文件清理后台化
-- ⚡ **图标提取 5-10x 加速**：PowerShell `.lnk` 解析替换为 Windows COM `IShellLinkW` API
-- ⚡ **剪贴板去重 O(1)**：指纹查找从 O(n) 扫描改为 HashMap 索引
-- 🔧 **GDI 资源泄漏修复**：图标提取增加 `scopeguard::defer!` 自动清理
-- 🔧 **录制线程泄漏修复（10 处）**：`reset_to_idle`/`cancel`/`pause`/`update_audio` 强制 join
-- 🔧 **FFmpeg A/V 同步校准**：测量启动延迟（~10-50ms），同步音频 `start_ms`/`trim_start_ms`
-- 🔧 **OCR 引擎缓存**：首次加载模型后复用，初始化 ~1s → ~0ms
-- 🔧 **WASAPI 代码重复消除**：提取 `audio_write_loop!` 宏，净减 322 行
-- 🔧 **文档管理原子性修复**：删除操作 ordre 调整，避免崩溃遗留孤儿数据
-- 🔧 **FTS 索引优化**：先清理孤儿记录，仅必要时重建
-- 🔧 **DOMPurify 安全配置**：AI 结果渲染添加显式 `ALLOWED_TAGS`/`FORBID_TAGS`
-- 📦 **代码净减 ~400 行**：消除大量重复模式，统一图标/音频/剪贴板逻辑
-
----
-
 ## 🏗️ 技术架构
 
 | 层    | 技术选型                                |
