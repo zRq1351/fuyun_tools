@@ -72,7 +72,7 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
           releaseBody: |
-            ## 🔧 代码质量优化（v0.8.1 → v0.8.12）
+            ## 🔧 代码质量优化（v0.8.1 → v0.8.11）
 
             ### P0 正确性修复
             - **GDI 资源泄漏**：图标提取器 `CreateCompatibleDC` 改用 `scopeguard::defer!` 自动清理
