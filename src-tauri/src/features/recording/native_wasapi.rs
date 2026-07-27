@@ -90,6 +90,8 @@ macro_rules! audio_write_loop {
     }};
 }
 
+/// 写入音频采样，失败时记录日志（避免日志洪水，仅记录前几次错误）
+macro_rules! write_sample_or_log {
     ($writer:expr, $sample:expr, $context:expr) => {
         if let Err(e) = $writer.write_sample($sample) {
             if !AUDIO_WRITE_ERR_COUNT.swap(true, Ordering::Relaxed) {
