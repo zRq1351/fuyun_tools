@@ -445,7 +445,7 @@ impl ClipboardManager {
 
             // 检查精确缓存（瞬时持锁，避免与后续 categories→exact_index_cache 路径形成 ABBA）
             let cached_index = {
-                let cache = self.exact_index_cache.lock();
+                let mut cache = self.exact_index_cache.lock();
                 cache.get(&content_hash).copied()
             };
 
