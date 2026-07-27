@@ -108,6 +108,7 @@ jobs:
             - **启动加速**：移除 9 个 Webview 预创建（懒加载），临时文件清理后台化
             - **图标提取 5-10x 加速**：PowerShell .lnk 解析 → Windows COM `IShellLinkW` API
             - **剪贴板去重 O(1)**：指纹扫描 HashMap 索引替代 O(n) 遍历
+            - **图标提取统一重构**：合并启动器/文档管理两套重复 GDI 代码，统一 `scopeguard` 保护，自适应原生尺寸
 
             ### 🏗 底层改进
             - **录制错误吞没**：`ensure_mic/system_capture_started` 3 处增加错误日志
