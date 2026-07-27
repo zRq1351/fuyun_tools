@@ -68,8 +68,28 @@ fn now_ms() -> u64 {
 /// 全局音频写入错误计数器（每个录音会话重置）
 static AUDIO_WRITE_ERR_COUNT: AtomicBool = AtomicBool::new(false);
 
-/// 写入音频采样，失败时记录日志（避免日志洪水，仅记录前几次错误）
-macro_rules! write_sample_or_log {
+/// 通用化音频写入回调：将任意 cpal 采样格式转为 i16 写入 WAV，受 enabled/pause 标志控制。
+/// 标签（label）用于错误日志区分系统音频/麦克风。
+macro_rules! audio_write_loop {
+    ($writer_cb:expr, $enabled_cb:expr, $pause_cb:expr, $label:expr, $sample_type:ty) => {{
+        let writer = $writer_cb.clone();
+        let enabled = $enabled_cb.clone();
+        let pause = $pause_cb.clone();
+        move |data: &[$sample_type], _| {
+            if let Ok(mut guard) = writer.lock() {
+                if let Some(w) = guard.as_mut() {
+                    let active = enabled.load(Ordering::SeqCst)
+                        && !pause.load(Ordering::SeqCst);
+                    for &v in data {
+                        let s: i16 = if active { v.to_sample::<i16>() } else { 0 };
+                        write_sample_or_log!(w, s, $label);
+                    }
+                }
+            }
+        }
+    }};
+}
+
     ($writer:expr, $sample:expr, $context:expr) => {
         if let Err(e) = $writer.write_sample($sample) {
             if !AUDIO_WRITE_ERR_COUNT.swap(true, Ordering::Relaxed) {
@@ -585,9 +605,6 @@ pub fn start_system_loopback_wav_with_device(
             let writer = hound::WavWriter::new(buf_writer, spec)
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let writer = Arc::new(Mutex::new(Some(writer)));
-            let writer_cb = writer.clone();
-            let enabled_cb = enabled_flag.clone();
-            let pause_cb = recording_pause_flag.clone();
 
             log::info!(
                 "WASAPI音频线程启动: {:?}, enabled={}, pause={}",
@@ -611,202 +628,30 @@ pub fn start_system_loopback_wav_with_device(
                 ),
             }
             let stream = match sample_format {
-                CpalSampleFormat::F32 => device
-                    .build_input_stream(
-                        &config,
-                        move |data: &[f32], _| {
-                            if let Ok(mut guard) = writer_cb.lock() {
-                                if let Some(writer) = guard.as_mut() {
-                                    let enabled = enabled_cb.load(Ordering::SeqCst)
-                                        && !pause_cb.load(Ordering::SeqCst);
-                                    for &v in data {
-                                        let s = if enabled {
-                                            (v * i16::MAX as f32) as i16
-                                        } else {
-                                            0
-                                        };
-                                        write_sample_or_log!(writer, s, "音频采样");
-                                    }
-                                }
-                            }
-                        },
-                        err_fn,
-                        Some(Duration::from_millis(10)),
-                    )
-                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::I16 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[i16], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            write_sample_or_log!(writer, if enabled { v } else { 0i16 }, "麦克风I16");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
-                CpalSampleFormat::U16 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[u16], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            let s: i16 =
-                                                if enabled { v.to_sample::<i16>() } else { 0 };
-                                            write_sample_or_log!(writer, s, "音频采样");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
-                CpalSampleFormat::I8 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[i8], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            let s: i16 =
-                                                if enabled { v.to_sample::<i16>() } else { 0 };
-                                            write_sample_or_log!(writer, s, "音频采样");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
-                CpalSampleFormat::U8 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[u8], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            let s: i16 =
-                                                if enabled { v.to_sample::<i16>() } else { 0 };
-                                            write_sample_or_log!(writer, s, "音频采样");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
-                CpalSampleFormat::I32 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[i32], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            let s: i16 =
-                                                if enabled { v.to_sample::<i16>() } else { 0 };
-                                            write_sample_or_log!(writer, s, "音频采样");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
-                CpalSampleFormat::U32 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[u32], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            let s: i16 =
-                                                if enabled { v.to_sample::<i16>() } else { 0 };
-                                            write_sample_or_log!(writer, s, "音频采样");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
-                CpalSampleFormat::F64 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[f64], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            let s: i16 =
-                                                if enabled { v.to_sample::<i16>() } else { 0 };
-                                            write_sample_or_log!(writer, s, "音频采样");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
+                CpalSampleFormat::F32 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统F32", f32),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::I16 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统I16", i16),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::U16 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统U16", u16),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::I8 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统I8", i8),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::U8 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统U8", u8),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::I32 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统I32", i32),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::U32 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统U32", u32),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::F64 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统F64", f64),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
                 _ => return Err(AppErrorKind::InternalError.to_frontend_json()),
             };
             stream
@@ -960,9 +805,6 @@ pub fn start_microphone_wav_with_device(
             let writer = hound::WavWriter::new(buf_writer, spec)
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
             let writer = Arc::new(Mutex::new(Some(writer)));
-            let writer_cb = writer.clone();
-            let enabled_cb = enabled_flag.clone();
-            let pause_cb = recording_pause_flag.clone();
 
             log::info!(
                 "WASAPI麦克风线程启动: {:?}, enabled={}, pause={}",
@@ -986,202 +828,30 @@ pub fn start_microphone_wav_with_device(
                 ),
             }
             let stream = match sample_format {
-                CpalSampleFormat::F32 => device
-                    .build_input_stream(
-                        &config,
-                        move |data: &[f32], _| {
-                            if let Ok(mut guard) = writer_cb.lock() {
-                                if let Some(writer) = guard.as_mut() {
-                                    let enabled = enabled_cb.load(Ordering::SeqCst)
-                                        && !pause_cb.load(Ordering::SeqCst);
-                                    for &v in data {
-                                        let s = if enabled {
-                                            (v * i16::MAX as f32) as i16
-                                        } else {
-                                            0
-                                        };
-                                        write_sample_or_log!(writer, s, "音频采样");
-                                    }
-                                }
-                            }
-                        },
-                        err_fn,
-                        Some(Duration::from_millis(10)),
-                    )
-                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::I16 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[i16], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            write_sample_or_log!(writer, if enabled { v } else { 0i16 }, "麦克风I16");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
-                CpalSampleFormat::U16 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[u16], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            let s: i16 =
-                                                if enabled { v.to_sample::<i16>() } else { 0 };
-                                            write_sample_or_log!(writer, s, "音频采样");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
-                CpalSampleFormat::I8 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[i8], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            let s: i16 =
-                                                if enabled { v.to_sample::<i16>() } else { 0 };
-                                            write_sample_or_log!(writer, s, "音频采样");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
-                CpalSampleFormat::U8 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[u8], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            let s: i16 =
-                                                if enabled { v.to_sample::<i16>() } else { 0 };
-                                            write_sample_or_log!(writer, s, "音频采样");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
-                CpalSampleFormat::I32 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[i32], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            let s: i16 =
-                                                if enabled { v.to_sample::<i16>() } else { 0 };
-                                            write_sample_or_log!(writer, s, "音频采样");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
-                CpalSampleFormat::U32 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[u32], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            let s: i16 =
-                                                if enabled { v.to_sample::<i16>() } else { 0 };
-                                            write_sample_or_log!(writer, s, "音频采样");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
-                CpalSampleFormat::F64 => {
-                    let writer_cb = writer.clone();
-                    let enabled_cb = enabled_flag.clone();
-                    let pause_cb = recording_pause_flag.clone();
-                    device
-                        .build_input_stream(
-                            &config,
-                            move |data: &[f64], _| {
-                                if let Ok(mut guard) = writer_cb.lock() {
-                                    if let Some(writer) = guard.as_mut() {
-                                        let enabled = enabled_cb.load(Ordering::SeqCst)
-                                            && !pause_cb.load(Ordering::SeqCst);
-                                        for &v in data {
-                                            let s: i16 =
-                                                if enabled { v.to_sample::<i16>() } else { 0 };
-                                            write_sample_or_log!(writer, s, "音频采样");
-                                        }
-                                    }
-                                }
-                            },
-                            err_fn,
-                            Some(Duration::from_millis(10)),
-                        )
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
-                }
+                CpalSampleFormat::F32 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风F32", f32),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::I16 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风I16", i16),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::U16 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风U16", u16),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::I8 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风I8", i8),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::U8 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风U8", u8),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::I32 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风I32", i32),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::U32 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风U32", u32),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::F64 => device.build_input_stream(&config,
+                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风F64", f64),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
                 _ => return Err(AppErrorKind::InternalError.to_frontend_json()),
             };
             stream
@@ -1193,7 +863,15 @@ pub fn start_microphone_wav_with_device(
                 std::thread::sleep(Duration::from_millis(10));
             }
 
-            log::info!("收到麦克风停止信号，立即停止音频流...");
+            log::info!("收到麦克风停止信号，填充500ms静音数据以确保音频完全覆盖...");
+
+            if let Ok(mut guard) = writer.lock() {
+                if let Some(w) = guard.as_mut() {
+                    for _ in 0..(48000 * 2 * 1) {
+                        let _ = w.write_sample(0i16);
+                    }
+                }
+            }
 
             let _ = stream.pause();
 
