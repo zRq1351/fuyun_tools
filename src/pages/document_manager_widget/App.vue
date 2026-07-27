@@ -1,7 +1,7 @@
 <template>
   <div class="dmw-root">
     <div class="dmw-container" @mouseleave="onContainerMouseLeave">
-      <div class="dmw-header" data-tauri-drag-region @mousedown.left.prevent="startDrag">
+      <div class="dmw-header" @mousedown.left.prevent="handleHeaderDrag">
         <div class="dmw-header-left">
           <el-icon :size="14">
             <FolderOpened/>
@@ -122,7 +122,8 @@ import {computed, nextTick, onMounted, onBeforeUnmount, ref} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {useWindowDrag} from '../../composables/useWindowDrag'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
-import {LogicalSize} from '@tauri-apps/api/dpi'
+import {LogicalSize, PhysicalPosition} from '@tauri-apps/api/dpi'
+import {currentMonitor} from '@tauri-apps/api/window'
 import {DocumentService} from '../../services/ipc.js'
 import ContextMenu from '../../components/ContextMenu.vue'
 import {
@@ -271,6 +272,7 @@ async function resizeToFitContent() {
   const h = Math.min(total, maxH)
   try {
     await appWindow.setSize(new LogicalSize(380, h))
+    await snapWindowPosition()
   } catch (e) {
     console.error('调整小部件窗口大小失败:', e)
   }
@@ -501,11 +503,118 @@ async function deleteFile(file) {
   }
 }
 
+let dragState = null
+
+function onWinDragMove(e) {
+  if (!dragState) return
+  const {startX, startY, startSX, startSY, mx, my, mw, mh, sw, sh, dpr} = dragState
+  dragState._px = Math.round(Math.max(mx, Math.min(startX + (e.screenX - startSX) * dpr, mx + mw - sw)))
+  dragState._py = Math.round(Math.max(my, Math.min(startY + (e.screenY - startSY) * dpr, my + mh - sh)))
+  if (!dragState._raf) {
+    dragState._raf = requestAnimationFrame(applyWinDrag)
+  }
+}
+
+function applyWinDrag() {
+  if (!dragState) return
+  dragState._raf = null
+  const x = dragState._px, y = dragState._py
+  if (x !== dragState._lx || y !== dragState._ly) {
+    dragState._lx = x;
+    dragState._ly = y
+    appWindow.setPosition(new PhysicalPosition(x, y)).catch(() => {
+    })
+  }
+}
+
+async function onWinDragUp() {
+  if (dragState?._raf) {
+    cancelAnimationFrame(dragState._raf);
+    dragState._raf = null
+  }
+  document.removeEventListener('mousemove', onWinDragMove)
+  document.removeEventListener('mouseup', onWinDragUp)
+  if (dragState) {
+    const x = dragState._px, y = dragState._py
+    dragState = null
+    if (x !== undefined) {
+      await appWindow.setPosition(new PhysicalPosition(x, y))
+    }
+    await snapWindowPosition()
+  }
+}
+
+async function handleHeaderDrag(e) {
+  const dpr = window.devicePixelRatio || 1
+  const [pos, mon] = await Promise.all([appWindow.outerPosition(), currentMonitor()])
+  if (!mon) {
+    await startDrag();
+    return
+  }
+  const {x: mx, y: my} = mon.position
+  const {width: mw, height: mh} = mon.size
+  const size = await appWindow.outerSize()
+  dragState = {
+    startX: pos.x,
+    startY: pos.y,
+    startSX: e.screenX,
+    startSY: e.screenY,
+    mx,
+    my,
+    mw,
+    mh,
+    sw: size.width,
+    sh: size.height,
+    dpr,
+    _lx: pos.x,
+    _ly: pos.y,
+    _px: pos.x,
+    _py: pos.y,
+    _raf: null
+  }
+  document.addEventListener('mousemove', onWinDragMove)
+  document.addEventListener('mouseup', onWinDragUp)
+}
+
+async function snapWindowPosition() {
+  try {
+    const monitor = await currentMonitor()
+    if (!monitor) return
+    const {x: mx, y: my} = monitor.position
+    const {width: mw, height: mh} = monitor.size
+    const pos = await appWindow.outerPosition()
+    const size = await appWindow.outerSize()
+
+    const SNAP = 20
+    let nx = pos.x
+    let ny = pos.y
+
+    if (Math.abs(pos.x - mx) < SNAP) nx = mx
+    else if (Math.abs(pos.x + size.width - (mx + mw)) < SNAP) nx = mx + mw - size.width
+    if (Math.abs(pos.y - my) < SNAP) ny = my
+    else if (Math.abs(pos.y + size.height - (my + mh)) < SNAP) ny = my + mh - size.height
+
+    nx = Math.max(mx, Math.min(nx, mx + mw - size.width))
+    ny = Math.max(my, Math.min(ny, my + mh - size.height))
+
+    if (nx !== pos.x || ny !== pos.y) {
+      await appWindow.setPosition(new PhysicalPosition(nx, ny))
+    }
+  } catch (e) {
+    console.error('吸附失败:', e)
+  }
+}
+
 let unlistenData = null
 let unlistenDragDrop = null
 
 function onWindowBlur() {
   onDragEnd()
+  if (dragState) {
+    document.removeEventListener('mousemove', onWinDragMove)
+    document.removeEventListener('mouseup', onWinDragUp)
+    dragState = null
+  }
   hovered.value = false
   nextTick().then(() => resizeToFitContent())
   import('element-plus').then(({ElMessageBox}) => ElMessageBox.close()).catch(() => {
