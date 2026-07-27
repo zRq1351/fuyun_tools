@@ -14,9 +14,14 @@
           <span class="dmw-stat">{{ formatSize(stats?.totalSize) }}</span>
         </div>
         <div class="dmw-header-actions">
-          <button :title="t('common.open')" class="dmw-btn-icon" @click="openFullManager" @mousedown.stop>
+          <button :title="t('common.refresh')" class="dmw-btn-icon" @click="refreshData" @mousedown.stop>
             <el-icon :size="13">
-              <FullScreen/>
+              <Refresh/>
+            </el-icon>
+          </button>
+          <button :title="t('common.settings')" class="dmw-btn-icon" @click="openFullManager" @mousedown.stop>
+            <el-icon :size="13">
+              <Setting/>
             </el-icon>
           </button>
           <button :title="t('common.close')" class="dmw-btn-icon dmw-btn-close" @click="closeWidget" @mousedown.stop>
@@ -127,7 +132,7 @@ import {currentMonitor} from '@tauri-apps/api/window'
 import {DocumentService} from '../../services/ipc.js'
 import ContextMenu from '../../components/ContextMenu.vue'
 import {
-  Close, Folder, FolderOpened, FullScreen, Loading,
+  Close, Folder, FolderOpened, Loading, Refresh,
   Document, List, Notebook, Tickets, Setting, Connection,
   MagicStick, Monitor, Picture, Coffee, Search
 } from '@element-plus/icons-vue'
@@ -483,6 +488,16 @@ async function closeWidget() {
   } catch (e) {
     console.error('关闭小部件失败:', e)
   }
+}
+
+async function refreshData() {
+  if (!selectedRootId.value) return
+  loading.value = true
+  await loadDataForRoot(selectedRootId.value)
+  hovered.value = true
+  await nextTick()
+  await resizeToFitContent()
+  loading.value = false
 }
 
 function showFileMenu(event, file) {
