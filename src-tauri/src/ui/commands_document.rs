@@ -1,6 +1,7 @@
 use crate::core::error_codes::AppErrorKind;
 use crate::utils::document_database;
 use crate::utils::document_text_extract;
+use crate::utils::icon_extractor;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -681,7 +682,8 @@ pub async fn get_file_type_icon(ext: String) -> Result<String, String> {
     if let Some(cached) = icon_cache().lock().unwrap().get(&ext_lower) {
         return Ok(cached.clone());
     }
-    let data_url = get_file_icon_base64(&ext_lower)?;
+    let data_url = icon_extractor::extract_icon_by_extension(&ext_lower)
+        .ok_or_else(|| format!("无法获取图标: {}", ext_lower))?;
     icon_cache().lock().unwrap().insert(ext_lower, data_url.clone());
     Ok(data_url)
 }
@@ -695,142 +697,4 @@ pub async fn get_file_type_icons(exts: Vec<String>) -> Result<HashMap<String, St
         result.insert(k, v);
     }
     Ok(result)
-}
-
-#[cfg(windows)]
-fn get_file_icon_base64(ext: &str) -> Result<String, String> {
-    use std::io::Cursor;
-    use windows::core::PCWSTR;
-    use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW,
-        BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ, BITMAP,
-    };
-    use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
-    use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_USEFILEATTRIBUTES};
-    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
-    use image::{ImageBuffer, Rgba};
-    use base64::Engine;
-
-    let wide: Vec<u16> = format!(".{}", ext).encode_utf16().chain(Some(0)).collect();
-
-    let mut shfi = SHFILEINFOW::default();
-    let ret = unsafe {
-        SHGetFileInfoW(
-            PCWSTR::from_raw(wide.as_ptr()),
-            FILE_FLAGS_AND_ATTRIBUTES(0),
-            Some(&mut shfi),
-            std::mem::size_of::<SHFILEINFOW>() as u32,
-            SHGFI_ICON | SHGFI_USEFILEATTRIBUTES,
-        )
-    };
-    if ret == 0 {
-        return Err("无法获取图标".into());
-    }
-    let hicon = shfi.hIcon;
-    if hicon.is_invalid() {
-        return Err("图标句柄无效".into());
-    }
-
-    unsafe {
-        let mut ii = ICONINFO::default();
-        if GetIconInfo(hicon, &mut ii).is_err() {
-            let _ = DestroyIcon(hicon);
-            return Err("GetIconInfo 失败".into());
-        }
-
-        let color_w = if ii.hbmColor.is_invalid() { 0 } else {
-            let mut bm = BITMAP::default();
-            if GetObjectW(HGDIOBJ(ii.hbmColor.0), std::mem::size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as _)) != 0 {
-                bm.bmWidth
-            } else { 0 }
-        };
-        let mask_w = if ii.hbmMask.is_invalid() { 0 } else {
-            let mut bm = BITMAP::default();
-            if GetObjectW(HGDIOBJ(ii.hbmMask.0), std::mem::size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as _)) != 0 {
-                bm.bmWidth
-            } else { 0 }
-        };
-
-        let native_w = color_w.max(mask_w);
-        let size = if native_w > 0 { native_w } else { 32 };
-        let w = size;
-        let h = size;
-
-        let mut bmi = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: w,
-                biHeight: -(h),
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                biSizeImage: (w * h * 4) as u32,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        let hdc = CreateCompatibleDC(None);
-        if hdc.is_invalid() {
-            if !ii.hbmColor.is_invalid() { let _ = DeleteObject(HGDIOBJ(ii.hbmColor.0)); }
-            if !ii.hbmMask.is_invalid() { let _ = DeleteObject(HGDIOBJ(ii.hbmMask.0)); }
-            let _ = DestroyIcon(hicon);
-            return Err("CreateCompatibleDC 失败".into());
-        }
-
-        let buf_size = (w * h * 4) as usize;
-        let mut color_buf = vec![0u8; buf_size];
-        let mut mask_buf = vec![0u8; buf_size];
-
-        if !ii.hbmColor.is_invalid() {
-            let _ = GetDIBits(hdc, ii.hbmColor, 0, h as u32, Some(color_buf.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS);
-        }
-        if !ii.hbmMask.is_invalid() {
-            let _ = GetDIBits(hdc, ii.hbmMask, 0, h as u32, Some(mask_buf.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS);
-        }
-
-        let has_alpha = color_buf.chunks_exact(4).any(|c| c[3] != 0);
-
-        let mut pixels: Vec<u8> = Vec::with_capacity(buf_size);
-        for i in 0..(w * h) as usize {
-            let ci = i * 4;
-            if !ii.hbmColor.is_invalid() {
-                let b = color_buf[ci];
-                let g = color_buf[ci + 1];
-                let r = color_buf[ci + 2];
-                let a = if has_alpha {
-                    color_buf[ci + 3]
-                } else if !ii.hbmMask.is_invalid() {
-                    let mask_byte = mask_buf[ci];
-                    if mask_byte == 0 { 255 } else { 0 }
-                } else {
-                    255
-                };
-                pixels.extend_from_slice(&[r, g, b, a]);
-            } else {
-                let mask_byte = if !ii.hbmMask.is_invalid() { mask_buf[ci] } else { 0 };
-                let a = if mask_byte == 0 { 255 } else { 0 };
-                pixels.extend_from_slice(&[255, 255, 255, a]);
-            }
-        }
-
-        if !ii.hbmColor.is_invalid() { let _ = DeleteObject(HGDIOBJ(ii.hbmColor.0)); }
-        if !ii.hbmMask.is_invalid() { let _ = DeleteObject(HGDIOBJ(ii.hbmMask.0)); }
-        let _ = DeleteDC(hdc);
-        let _ = DestroyIcon(hicon);
-
-        if let Some(img) = ImageBuffer::<Rgba<u8>, _>::from_raw(w as u32, h as u32, pixels) {
-            let mut png = Vec::new();
-            if img.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png).is_ok() {
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
-                return Ok(format!("data:image/png;base64,{}", b64));
-            }
-        }
-        Err("图标编码失败".into())
-    }
-}
-
-#[cfg(not(windows))]
-fn get_file_icon_base64(_ext: &str) -> Result<String, String> {
-    Err("不支持的操作系统".into())
 }
