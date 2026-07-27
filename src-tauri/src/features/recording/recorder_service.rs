@@ -2040,12 +2040,15 @@ pub fn start_recording(
         } else {
             (None, None)
         };
+        let ffmpeg_spawned_at = std::time::Instant::now();
         runtime.phase = RecordingPhase::Recording;
         runtime.session_id = Some(session_id.clone());
         runtime.started_at_ms = capture_origin_unix_ms;
         runtime.started_instant = Some(capture_origin_instant);
         runtime.paused_at_instant = None;
         runtime.paused_total_ms = 0;
+        // 记录 FFmpeg 启动延迟（用于 A/V 同步校正，类似 WGC 的 first_frame_elapsed_ms）
+        runtime.ffmpeg_start_delay_ms = ffmpeg_spawned_at.duration_since(capture_origin_instant).as_millis() as u64;
         runtime.max_duration_ms =
             (settings_snapshot.recording_max_duration_minutes as u64).saturating_mul(60_000);
         runtime.auto_stop_requested = false;
@@ -2164,6 +2167,7 @@ pub fn stop_recording(
         wgc_thread,
         wgc_first_frame_elapsed_ms,
         wgc_audio_sync_advance_ms,
+        ffmpeg_start_delay_ms,
         system_audio_stop_flag,
         system_audio_thread,
         mic_audio_stop_flag,
@@ -2219,6 +2223,7 @@ pub fn stop_recording(
         let wgc_thread = runtime.wgc_thread.take();
         let wgc_first_frame_elapsed_ms = runtime.wgc_first_frame_elapsed_ms.take();
         let wgc_audio_sync_advance_ms = runtime.wgc_audio_sync_advance_ms;
+        let ffmpeg_start_delay_ms = runtime.ffmpeg_start_delay_ms;
         runtime.wgc_stop_flag = None;
         let system_audio_stop_flag = runtime.system_audio_stop_flag.take();
         let system_audio_thread = runtime.system_audio_thread.take();
@@ -2254,6 +2259,7 @@ pub fn stop_recording(
             wgc_thread,
             wgc_first_frame_elapsed_ms,
             wgc_audio_sync_advance_ms,
+            ffmpeg_start_delay_ms,
             system_audio_stop_flag,
             system_audio_thread,
             mic_audio_stop_flag,
@@ -2431,6 +2437,33 @@ pub fn stop_recording(
         }
     } else if let Some(details) = pending_window_capture_unavailable_details.take() {
         fatal_error = Some(build_window_capture_unavailable_error(&details));
+    }
+
+    // FFmpeg/gdigrab 录制 A/V 同步校正：测量 FFmpeg 进程启动相对于录制原点的延迟
+    // 类似 WGC 的 first_frame_elapsed_ms 机制，消除音频提前 10~50ms 的固有偏差
+    if target_type != "window" && ffmpeg_start_delay_ms > 0 {
+        log::info!(
+            "应用 FFmpeg 启动延迟校正: ffmpeg_delay={}ms",
+            ffmpeg_start_delay_ms
+        );
+        for seg in &mut sys_segments {
+            if seg.start_ms < ffmpeg_start_delay_ms {
+                seg.trim_start_ms = ffmpeg_start_delay_ms - seg.start_ms;
+                seg.start_ms = 0;
+            } else {
+                seg.start_ms = seg.start_ms - ffmpeg_start_delay_ms;
+                seg.trim_start_ms = 0;
+            }
+        }
+        for seg in &mut mic_segments {
+            if seg.start_ms < ffmpeg_start_delay_ms {
+                seg.trim_start_ms = ffmpeg_start_delay_ms - seg.start_ms;
+                seg.start_ms = 0;
+            } else {
+                seg.start_ms = seg.start_ms - ffmpeg_start_delay_ms;
+                seg.trim_start_ms = 0;
+            }
+        }
     }
 
     if let (Some(output_tmp), Some(output_final)) = (output_tmp.as_ref(), output_final.as_ref()) {
@@ -3106,6 +3139,8 @@ pub fn resume_recording(
             "录制状态已变化，请刷新状态后重试",
         ));
     }
+    // 恢复录制时 FFmpeg 延迟清零：新的视频分段与音频缓存同时启动，无需额外校正
+    runtime.ffmpeg_start_delay_ms = 0;
 
     // 如果是非窗口录制，记录新分段
     if !is_window_target {

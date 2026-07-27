@@ -63,6 +63,7 @@ pub struct RecordingRuntime {
     pub wgc_pause_flag: Option<Arc<AtomicBool>>,
     pub wgc_first_frame_elapsed_ms: Option<Arc<AtomicU64>>,
     pub wgc_audio_sync_advance_ms: u64,
+    pub ffmpeg_start_delay_ms: u64,
     pub wgc_thread: Option<JoinHandle<Result<(), String>>>,
     pub recording_pause_flag: Option<Arc<AtomicBool>>,
     pub window_video_segments: Vec<PathBuf>,
@@ -115,6 +116,7 @@ impl Default for RecordingRuntime {
             wgc_pause_flag: None,
             wgc_first_frame_elapsed_ms: None,
             wgc_audio_sync_advance_ms: 80,
+            ffmpeg_start_delay_ms: 0,
             wgc_thread: None,
             recording_pause_flag: None,
             window_video_segments: Vec::new(),
@@ -250,6 +252,7 @@ impl RecordingRuntime {
         self.wgc_pause_flag = None;
         self.wgc_first_frame_elapsed_ms = None;
         self.wgc_audio_sync_advance_ms = 80;
+        self.ffmpeg_start_delay_ms = 0;
         self.wgc_thread = None;
         self.recording_pause_flag = None;
         self.window_video_segments.clear();
