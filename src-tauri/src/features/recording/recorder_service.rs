@@ -60,6 +60,25 @@ fn suppress_console_window(command: &mut Command) -> &mut Command {
     command
 }
 
+/// 等待线程退出（每 10ms 轮询，最多 max_iters 次）。
+/// 无论是否超时都会 join——绝不泄漏 JoinHandle。
+fn join_thread_with_timeout<T>(join: std::thread::JoinHandle<T>, name: &str, max_iters: u32) {
+    let mut exited = false;
+    for _ in 0..max_iters {
+        if join.is_finished() {
+            exited = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if exited {
+        let _ = join.join();
+    } else {
+        log::warn!("{} 线程超时 ({:.1}s)，强制等待退出...", name, max_iters as f64 * 0.01);
+        let _ = join.join();
+    }
+}
+
 fn normalize_runtime_state(runtime: &mut crate::features::recording::state::RecordingRuntime) {
     if let Some(process) = runtime.process.as_mut() {
         if let Ok(Some(_)) = process.try_wait() {
@@ -2092,7 +2111,9 @@ pub fn start_recording(
             }
         }
         if capture_microphone {
-            let _ = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true);
+            if let Err(e) = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true) {
+                log::error!("麦克风捕获启动失败: {}", e);
+            }
         }
         runtime.process = child_opt;
         if let Some(handle) = window_wgc_handle {
@@ -2295,7 +2316,8 @@ pub fn stop_recording(
                     }
                 }
             } else {
-                log::warn!("WGC 线程停止超时，放弃等待以防死锁");
+                log::warn!("WGC 线程停止超时 (5.0s)，强制等待退出...");
+                let _ = join.join();
             }
         }
         persist_wgc_capture_fallback_if_needed(&state_arc);
@@ -2777,41 +2799,19 @@ pub fn cancel_recording(
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
     if let Some(join) = wgc_thread {
-        for _ in 0..500 {
-            if join.is_finished() {
-                let _ = join.join();
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        join_thread_with_timeout(join, "cancel WGC", 500);
     }
     if let Some(flag) = system_audio_stop_flag.as_ref() {
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
     if let Some(join) = system_audio_thread {
-        let mut exited = false;
-        for _ in 0..500 {
-            if join.is_finished() {
-                exited = true;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        if exited { let _ = join.join(); } else { log::warn!("cancel_recording: 系统音频线程超时，放弃等待"); }
+        join_thread_with_timeout(join, "cancel 系统音频", 500);
     }
     if let Some(flag) = mic_audio_stop_flag.as_ref() {
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
     if let Some(join) = mic_audio_thread {
-        let mut exited = false;
-        for _ in 0..500 {
-            if join.is_finished() {
-                exited = true;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        if exited { let _ = join.join(); } else { log::warn!("cancel_recording: 麦克风音频线程超时，放弃等待"); }
+        join_thread_with_timeout(join, "cancel 麦克风音频", 500);
     }
     for path in cleanup_paths {
         let _ = fs::remove_file(path);
@@ -2891,29 +2891,13 @@ pub fn pause_recording(
         flag.store(true, Ordering::SeqCst);
     }
     if let Some(join) = system_audio_thread {
-        let mut exited = false;
-        for _ in 0..500 {
-            if join.is_finished() {
-                exited = true;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        if exited { let _ = join.join(); } else { log::warn!("pause_recording: 系统音频线程超时，放弃等待"); }
+        join_thread_with_timeout(join, "pause 系统音频", 500);
     }
     if let Some(flag) = mic_audio_stop_flag.as_ref() {
         flag.store(true, Ordering::SeqCst);
     }
     if let Some(join) = mic_audio_thread {
-        let mut exited = false;
-        for _ in 0..500 {
-            if join.is_finished() {
-                exited = true;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        if exited { let _ = join.join(); } else { log::warn!("pause_recording: 麦克风音频线程超时，放弃等待"); }
+        join_thread_with_timeout(join, "pause 麦克风音频", 500);
     }
 
     if target_type == "window" {
@@ -2953,7 +2937,8 @@ pub fn pause_recording(
                     }
                 }
             } else {
-                log::warn!("WGC 线程暂停超时，放弃等待以防死锁");
+                log::warn!("WGC 线程暂停超时 (5.0s)，强制等待退出...");
+                let _ = join.join();
             }
         }
     }
@@ -3149,13 +3134,15 @@ pub fn resume_recording(
         runtime.wgc_thread = Some(handle.join);
     }
     if should_restore_system_audio && runtime.system_audio_thread.is_none() {
-        let _ = ensure_system_audio_capture_started(
+        if let Err(e) = ensure_system_audio_capture_started(
             app,
             &mut runtime,
             &output_dir,
             &session_id_for_audio,
             false,
-        );
+        ) {
+            log::error!("恢复系统音频捕获失败: {}", e);
+        }
         // BUG-04 修复：对于非窗口录制（FFmpeg），校正恢复后的音频起始时间戳
         // 新视频分段从0开始，音频 start_ms 应减去暂停累计时长，以保持 A/V 对齐
         if !is_window_target && paused_total_ms > 0 {
@@ -3172,13 +3159,15 @@ pub fn resume_recording(
         }
     }
     if should_restore_mic_audio && runtime.mic_audio_thread.is_none() {
-        let _ = ensure_mic_capture_started(
+        if let Err(e) = ensure_mic_capture_started(
             app,
             &mut runtime,
             &output_dir,
             &session_id_for_audio,
             false,
-        );
+        ) {
+            log::error!("恢复麦克风捕获失败: {}", e);
+        }
         // BUG-04 修复：同上，校正麦克风音频的起始时间戳
         if !is_window_target && paused_total_ms > 0 {
             if let Some(last_seg) = runtime.mic_audio_segments.last_mut() {
@@ -3327,29 +3316,13 @@ pub fn update_audio_capture(
         flag.store(true, Ordering::SeqCst);
     }
     if let Some(join) = system_audio_thread {
-        let mut exited = false;
-        for _ in 0..500 {
-            if join.is_finished() {
-                exited = true;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        if exited { let _ = join.join(); } else { log::warn!("update_audio_capture: 系统音频线程超时，放弃等待"); }
+        join_thread_with_timeout(join, "update_audio 系统音频", 500);
     }
     if let Some(flag) = mic_audio_stop_flag.as_ref() {
         flag.store(true, Ordering::SeqCst);
     }
     if let Some(join) = mic_audio_thread {
-        let mut exited = false;
-        for _ in 0..500 {
-            if join.is_finished() {
-                exited = true;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        if exited { let _ = join.join(); } else { log::warn!("update_audio_capture: 麦克风音频线程超时，放弃等待"); }
+        join_thread_with_timeout(join, "update_audio 麦克风音频", 500);
     }
     let mut runtime = lock_arc_mutex(&runtime_arc);
     if sys_device_changed {
