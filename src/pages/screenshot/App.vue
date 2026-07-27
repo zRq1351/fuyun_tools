@@ -3345,6 +3345,7 @@ async function pinToScreenAndClose() {
     let base64 = ''
     let pinWidth = 0
     let pinHeight = 0
+    const region = getGlobalSelectionRect()
     if (sourceImagePath.value) {
       const renderResult = await invoke('render_screenshot_to_png_data', {
         request: buildBackendExportRequest('')
@@ -3357,15 +3358,9 @@ async function pinToScreenAndClose() {
       pinHeight = Math.max(1, Number(renderResult?.height) || 1)
     } else {
       base64 = resolveExportBase64()
-      pinWidth = longshotResultActive.value && longshotRawPngBase64.value && !hasOverlayForLongshotExport()
-          ? Math.max(1, Number(screenshotImg.value?.width) || Math.round(rect.width))
-          : Math.max(1, Math.round(rect.width))
-      pinHeight = longshotResultActive.value && longshotRawPngBase64.value && !hasOverlayForLongshotExport()
-          ? Math.max(1, Number(screenshotImg.value?.height) || Math.round(rect.height))
-          : Math.max(1, Math.round(rect.height))
+      pinWidth = region.width
+      pinHeight = region.height
     }
-
-    const region = getGlobalSelectionRect()
 
     const payload = {
       request: {

@@ -1344,6 +1344,11 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
             payload, session_id, safe_mode, payload, session_id, safe_mode
         );
         let boot_script_for_page_load = boot_script.clone();
+        let screenshot_scale = app.primary_monitor()
+            .ok()
+            .flatten()
+            .map(|m| m.scale_factor())
+            .unwrap_or(1.0);
         let window = tauri::WebviewWindowBuilder::new(
             &app,
             "screenshot",
@@ -1357,8 +1362,8 @@ window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ sessio
             .skip_taskbar(true)
             .resizable(false)
             .accept_first_mouse(true)
-            .inner_size(width as f64, height as f64)
-            .position(origin_x as f64, origin_y as f64)
+            .inner_size(width as f64 / screenshot_scale, height as f64 / screenshot_scale)
+            .position(origin_x as f64 / screenshot_scale, origin_y as f64 / screenshot_scale)
             .fullscreen(true)
             .on_page_load(move |window, _| {
                 let _ = window.eval(&boot_script_for_page_load);

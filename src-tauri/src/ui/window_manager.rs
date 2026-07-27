@@ -624,13 +624,14 @@ fn prepare_image_preview_window(window: &tauri::WebviewWindow) -> Result<(), Str
     if let Some(monitor) = window.current_monitor().map_err(|e| e.to_string())? {
         let monitor_pos = monitor.position();
         let monitor_size = monitor.size();
+        let scale = monitor.scale_factor();
         let mut preview_width = ((monitor_size.width as f64) * 0.86) as u32;
         let mut preview_height = ((monitor_size.height as f64) * 0.86) as u32;
         preview_width = preview_width.max(760).min(monitor_size.width);
         preview_height = preview_height.max(520).min(monitor_size.height);
         let target_x = monitor_pos.x + ((monitor_size.width - preview_width) / 2) as i32;
         let target_y = monitor_pos.y + ((monitor_size.height - preview_height) / 2) as i32;
-        let _ = window.set_size(tauri::PhysicalSize::new(preview_width, preview_height));
+        let _ = window.set_size(tauri::LogicalSize::new(preview_width as f64 / scale, preview_height as f64 / scale));
         let _ = window.set_position(tauri::PhysicalPosition::new(target_x, target_y));
     }
     Ok(())
