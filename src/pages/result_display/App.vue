@@ -128,6 +128,13 @@
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {marked} from 'marked'
 import DOMPurify from 'dompurify'
+
+const DOMPURIFY_CONFIG = {
+  USE_PROFILES: {html: true},
+  ADD_ATTR: ['target'],
+  FORBID_TAGS: ['style'],
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z]|$))/i,
+}
 import {getCurrentWindow} from '@tauri-apps/api/window'
 import {invoke} from '@tauri-apps/api/core'
 import {openUrl} from '@tauri-apps/plugin-opener'
@@ -289,7 +296,7 @@ const renderMarkdownSafely = (markdownText) =>
       renderer,
       gfm: true,
       breaks: true
-    }))
+    }), DOMPURIFY_CONFIG)
 
 const originalHtml = computed(() => renderMarkdownSafely(originalText.value))
 

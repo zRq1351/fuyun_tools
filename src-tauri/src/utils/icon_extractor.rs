@@ -115,6 +115,8 @@ fn get_icon_for_file(icon_path: &str) -> Option<String> {
         bitmap_info.bmiHeader.biCompression = BI_RGB;
 
         let hdc = CreateCompatibleDC(std::ptr::null_mut());
+        scopeguard::defer! { cleanup(hicon, &icon_info, hdc); }
+
         let mut color_buffer: Vec<u8> = vec![0u8; (width * height * 4) as usize];
         let mut mask_buffer: Vec<u8> = vec![0u8; (width * height * 4) as usize];
 
@@ -157,10 +159,7 @@ fn get_icon_for_file(icon_path: &str) -> Option<String> {
 
         let img = match image::RgbaImage::from_raw(width as u32, height as u32, final_buffer) {
             Some(img) => img,
-            None => {
-                cleanup(hicon, &icon_info, hdc);
-                return None;
-            }
+            None => return None,
         };
 
         let mut png_data = Vec::new();
@@ -171,12 +170,9 @@ fn get_icon_for_file(icon_path: &str) -> Option<String> {
                 .write_image(img.as_raw(), width as u32, height as u32, image::ColorType::Rgba8.into())
                 .is_err()
             {
-                cleanup(hicon, &icon_info, hdc);
                 return None;
             }
         }
-
-        cleanup(hicon, &icon_info, hdc);
 
         let base64_str = base64::engine::general_purpose::STANDARD.encode(&png_data);
         Some(format!("data:image/png;base64,{}", base64_str))

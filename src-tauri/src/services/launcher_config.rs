@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::core::error_codes::AppErrorKind;
 use crate::services::launcher_db;
+
+static LAUNCHER_CONFIG_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LauncherCategory {
@@ -141,8 +144,10 @@ async fn ensure_default_categories() {
 }
 
 pub async fn load_launcher_config() -> LauncherConfig {
-    try_migrate_old_data().await;
-    ensure_default_categories().await;
+    if !LAUNCHER_CONFIG_INITIALIZED.swap(true, Ordering::AcqRel) {
+        try_migrate_old_data().await;
+        ensure_default_categories().await;
+    }
     let view_mode = launcher_db::get_config_value("view_mode")
         .await
         .unwrap_or(None)

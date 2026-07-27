@@ -821,6 +821,7 @@ pub fn run() {
                     }
                     tauri::RunEvent::Exit => {
                         BACKUP_SCHEDULER_STOP.store(true, Ordering::Release);
+                        crate::services::clipboard_wakeup::stop_wake_dispatcher();
                         crate::features::screenshot::longshot::kill_active_ffmpeg_child();
                         log::info!("应用退出，已发送后台线程停止信号");
                     }

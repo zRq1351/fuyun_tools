@@ -174,6 +174,8 @@ export const IPC_COMMANDS = {
     UNDO_IMPORT_ITEM: 'undo_import_item',
     GET_IMPORT_FILES: 'get_import_files',
     DETECT_ORPHAN_FILES: 'detect_orphan_files',
+    GET_FILE_TYPE_ICON: 'get_file_type_icon',
+    GET_FILE_TYPE_ICONS: 'get_file_type_icons',
 
     // AI 功能
     STREAM_TRANSLATE_TEXT: 'stream_translate_text',
@@ -592,6 +594,6 @@ export const DocumentService = {
     undoImportItem: (importId, docFileId) => ipcInvoke(IPC_COMMANDS.UNDO_IMPORT_ITEM, {importId, docFileId}),
     getImportFiles: (importId) => ipcInvoke(IPC_COMMANDS.GET_IMPORT_FILES, {importId}),
     detectOrphanFiles: (rootId) => ipcInvoke(IPC_COMMANDS.DETECT_ORPHAN_FILES, {rootId}),
-    getFileTypeIcon: (ext) => ipcInvoke('get_file_type_icon', {ext}),
-    getFileTypeIcons: (exts) => ipcInvoke('get_file_type_icons', {exts}),
+    getFileTypeIcon: (ext) => ipcInvoke(IPC_COMMANDS.GET_FILE_TYPE_ICON, {ext}),
+    getFileTypeIcons: (exts) => ipcInvoke(IPC_COMMANDS.GET_FILE_TYPE_ICONS, {exts}),
 };

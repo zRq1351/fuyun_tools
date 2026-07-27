@@ -15,6 +15,7 @@ const THEME_LABELS = {
     light: '亮色',
     'eye-care': '护眼'
 }
+let themeSaveSeq = 0
 
 /**
  * 获取当前主题（从后端异步读取，同步回退到 localStorage）
@@ -52,11 +53,12 @@ export function setTheme(theme) {
     }
     localStorage.setItem(THEME_KEY, theme)
     applyTheme(theme)
-    // 带重试的后端保存
+    // 带重试的后端保存（序列号防止过期主题覆盖新主题）
+    const seq = ++themeSaveSeq
     const saveWithRetry = (retries = 2) => {
         invoke('set_theme', {theme}).catch(err => {
             console.warn('[ThemeManager] 保存主题到后端失败:', err)
-            if (retries > 0) {
+            if (retries > 0 && seq === themeSaveSeq) {
                 setTimeout(() => saveWithRetry(retries - 1), 1000)
             }
         })

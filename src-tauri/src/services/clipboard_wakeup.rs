@@ -1,6 +1,15 @@
 use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
+
+static WAKE_DISPATCHER_SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+/// Signal the background wake dispatcher thread to exit.
+/// Safe to call multiple times; idempotent if dispatcher was never started.
+pub fn stop_wake_dispatcher() {
+    WAKE_DISPATCHER_SHUTDOWN.store(true, Ordering::Release);
+}
 
 #[cfg(target_os = "windows")]
 static CLIPBOARD_WAKE_EVENT_COUNT: std::sync::atomic::AtomicU64 =
@@ -85,11 +94,10 @@ fn wake_hub() -> &'static WakeHub {
 
 fn ensure_wake_dispatcher_started() {
     static STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     STARTED.get_or_init(|| {
         thread::spawn(move || {
             let mut wake_backend = ClipboardWakeBackend::new();
-            while !SHUTDOWN.load(std::sync::atomic::Ordering::Relaxed) {
+            while !WAKE_DISPATCHER_SHUTDOWN.load(Ordering::Relaxed) {
                 let signal = wake_backend.wait_with_signal(Duration::from_secs(60));
                 if !matches!(signal, WakeSignal::Event) {
                     continue;

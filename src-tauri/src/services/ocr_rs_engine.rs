@@ -1,9 +1,18 @@
 use crate::services::ocr_engine::{OcrLine, OcrParagraph, clean_ocr_text};
 use ocr_rs::{OcrEngine, OcrEngineConfig};
+use std::sync::{Mutex, OnceLock};
 
-/// 获取 OCR 引擎（每次调用创建新实例，因为 OcrEngine 不实现 Clone/Sync）
-fn get_or_init_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {
-    init_ocr_engine(app_handle)
+static ENGINE_CACHE: OnceLock<Mutex<Option<OcrEngine>>> = OnceLock::new();
+
+/// 确保引擎已初始化（首次调用完成模型加载，后续调用直接返回）
+fn ensure_engine(app_handle: &tauri::AppHandle) -> Result<(), String> {
+    let cache = ENGINE_CACHE.get_or_init(|| Mutex::new(None));
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        *guard = Some(init_ocr_engine(app_handle)?);
+        log::info!("OCR 引擎初始化完成（已缓存）");
+    }
+    Ok(())
 }
 
 fn init_ocr_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {
@@ -28,16 +37,13 @@ fn init_ocr_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {
     let config = OcrEngineConfig::fast()
         .with_min_result_confidence(0.5);
 
-    let engine = OcrEngine::new(
+    OcrEngine::new(
         det_model.to_str().ok_or("检测模型路径无效")?,
         rec_model.to_str().ok_or("识别模型路径无效")?,
         charset.to_str().ok_or("字符集路径无效")?,
         Some(config),
     )
-        .map_err(|e| format!("初始化 OCR 引擎失败: {}", e))?;
-
-    log::info!("OCR 引擎初始化完成（已缓存）");
-    Ok(engine)
+        .map_err(|e| format!("初始化 OCR 引擎失败: {}", e))
 }
 
 /// 使用 ocr-rs 进行 OCR 识别（使用缓存的引擎）
@@ -48,11 +54,15 @@ pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHan
     let img = image::load_from_memory(image_data)
         .map_err(|e| format!("图片加载失败: {}", e))?;
 
-    // 获取缓存的引擎
-    let engine = get_or_init_engine(app_handle)?;
+    // 确保引擎已初始化（首次加载模型，后续跳过）
+    ensure_engine(app_handle)?;
 
     // 执行 OCR（在阻塞线程中运行）
     let result = tokio::task::spawn_blocking(move || -> Result<Vec<OcrParagraph>, String> {
+        let cache = ENGINE_CACHE.get().ok_or("引擎缓存未初始化")?;
+        let guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        let engine = guard.as_ref().ok_or("引擎未初始化")?;
+
         // 执行识别
         let ocr_results = engine.recognize(&img)
             .map_err(|e| format!("OCR识别失败: {}", e))?;

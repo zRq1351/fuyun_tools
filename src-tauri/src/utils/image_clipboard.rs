@@ -374,6 +374,9 @@ pub struct RemovedImageInfo {
     pub signature: String,
 }
 
+/// Lock ordering: when acquiring multiple locks, always follow:
+/// `history` → `signature_index` → `categories` → `category_list` → `pinned_items` → `pending_images`
+/// This prevents deadlocks. All methods that need multiple locks MUST respect this order.
 #[derive(Clone)]
 pub struct ImageClipboardManager {
     history: Arc<Mutex<Vec<ImageHistoryItem>>>,
@@ -670,6 +673,8 @@ impl ImageClipboardManager {
                 .filter(|id| !after_id_set.contains(id))
                 .collect::<Vec<_>>();
             let pinned_for_store = pinned_items.clone();
+            drop(categories);
+            drop(pinned_items);
             drop(history);
             self.signature_index_dirty.store(true, Ordering::SeqCst);
             for (position, item) in items_for_store.iter().enumerate() {
