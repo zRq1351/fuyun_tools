@@ -18,7 +18,6 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     keybd_event, KEYEVENTF_KEYUP, VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
 };
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::HiDpi::GetDpiForSystem;
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, GetForegroundWindow, GetSystemMetrics, GetWindowTextW,
@@ -704,11 +703,8 @@ fn get_taskbar_safe_offset() -> i32 {
         let mut work_area: RECT = std::mem::zeroed();
         if SystemParametersInfoW(SPI_GETWORKAREA, 0, Some(&mut work_area as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)).is_ok() {
             let screen_height = GetSystemMetrics(SM_CYSCREEN);
-            // work_area 是逻辑像素，需要用 DPI 缩放转为物理像素
-            let dpi = GetDpiForSystem();
-            let scale = dpi as f64 / 96.0;
-            let work_area_bottom_phys = (work_area.bottom as f64 * scale) as i32;
-            return (screen_height - work_area_bottom_phys).max(0);
+            // Tauri 是 per-monitor DPI-aware，SPI_GETWORKAREA 返回物理像素
+            return (screen_height - work_area.bottom).max(0);
         }
     }
     CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN
@@ -1019,7 +1015,7 @@ pub fn hide_doc_manager_widget_window(app: &AppHandle) -> Result<(), String> {
 
 fn position_widget_to_top_right(window: &tauri::WebviewWindow) -> Result<(), String> {
     let logical_w = 380.0;
-    let margin = 12.0;
+    let margin = 0.0;
     let monitor = window.current_monitor()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "No monitor found".to_string())?;
