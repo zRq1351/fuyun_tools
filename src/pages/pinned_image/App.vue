@@ -246,10 +246,6 @@ async function runOcr(base64, width, height, engine = null) {
     if (!lines.length) {
       showToast(t('pinnedImage.noTextRecognized'), true)
     }
-    if (width > 0 && height > 0) {
-      sourceWidth.value = width
-      sourceHeight.value = height
-    }
     ocrLines.value = lines
     return lines
   } catch (error) {

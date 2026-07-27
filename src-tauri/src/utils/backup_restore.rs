@@ -432,10 +432,12 @@ async fn restore_image_history(
     let blob_root = app_blob_dir()?;
 
     if strategy.eq_ignore_ascii_case("overwrite") {
-        image_store::clear_all_history_async().await?;
+        // 先删除文件再清理数据库：若在两者之间崩溃，DB 有孤儿记录（指向已删除文件）
+        // 比反向（文件存在但 DB 无记录）更容易检测和恢复
         if blob_root.exists() {
             fs::remove_dir_all(&blob_root).map_err(|e| format!("清理旧图片目录失败: {}", e))?;
         }
+        image_store::clear_all_history_async().await?;
         log::info!("图片历史恢复: 使用覆盖模式");
     } else {
         log::info!("图片历史恢复: 使用合并模式");

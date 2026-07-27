@@ -443,8 +443,11 @@ impl ClipboardManager {
             // 布隆过滤器提示可能存在，进行精确检查
             let content_hash = stable_text_hash(&content);
 
-            // 检查精确缓存（不持锁，先读取）
-            let cached_index = self.exact_index_cache.lock().get(&content_hash).copied();
+            // 检查精确缓存（瞬时持锁，避免与后续 categories→exact_index_cache 路径形成 ABBA）
+            let cached_index = {
+                let cache = self.exact_index_cache.lock();
+                cache.get(&content_hash).copied()
+            };
 
             if let Some(cached_index) = cached_index {
                 if history
@@ -983,11 +986,11 @@ impl ClipboardManager {
             state.save_completed = false;
             cvar.notify_one();
         }
-        // 等待持久化线程完成（最多 2 秒）
+        // 等待持久化线程完成（最多 5 秒）
         let (lock, cvar) = &*self.persist_state;
         let mut state = lock.lock();
         if !state.save_completed {
-            let result = cvar.wait_for(&mut state, std::time::Duration::from_secs(2));
+            let result = cvar.wait_for(&mut state, std::time::Duration::from_secs(5));
             if result.timed_out() {
                 log::warn!("等待持久化线程完成超时");
             }

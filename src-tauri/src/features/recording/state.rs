@@ -189,7 +189,8 @@ impl RecordingRuntime {
             if wgc_exited {
                 let _ = join.join();
             } else {
-                log::warn!("reset_to_idle: WGC 线程超时，放弃等待");
+                log::warn!("reset_to_idle: WGC 线程超时，强制等待退出...");
+                let _ = join.join();
             }
         }
         if let Some(join) = self.system_audio_thread.take() {
@@ -204,7 +205,8 @@ impl RecordingRuntime {
             if exited {
                 let _ = join.join();
             } else {
-                log::warn!("reset_to_idle: 系统音频线程超时，放弃等待");
+                log::warn!("reset_to_idle: 系统音频线程超时，强制等待退出...");
+                let _ = join.join();
             }
         }
         if let Some(join) = self.mic_audio_thread.take() {
@@ -219,7 +221,8 @@ impl RecordingRuntime {
             if exited {
                 let _ = join.join();
             } else {
-                log::warn!("reset_to_idle: 麦克风音频线程超时，放弃等待");
+                log::warn!("reset_to_idle: 麦克风音频线程超时，强制等待退出...");
+                let _ = join.join();
             }
         }
         self.phase = RecordingPhase::Idle;

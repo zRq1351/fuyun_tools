@@ -401,8 +401,7 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
     .execute(&mut *conn)
     .await;
 
-    // P2 性能优化：仅在 FTS 表数据不同步时才重建索引
-    // 避免每次启动时对大量历史记录执行全量 INSERT OR REPLACE
+    // P2 性能优化：先清理 FTS 孤儿记录（廉价操作），仅在必要时才重建索引
     let fts_row_count = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM history_items_fts"
     )
@@ -417,7 +416,14 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
     .await
     .unwrap_or(0);
 
-    // 仅当行数不一致时才执行全量重建（跳过孤儿记录清理的额外查询）
+    // 无条件清理孤儿记录（DELETE 子查询非常廉价）
+    let _ = sqlx::query(
+        "DELETE FROM history_items_fts WHERE rowid NOT IN (SELECT id FROM history_items)"
+    )
+    .execute(&mut *conn)
+    .await;
+
+    // 仅当行数不一致时才执行全量重建
     if fts_row_count != history_row_count {
         log::info!(
             "FTS 索引需要同步 (fts={}, history={})，执行全量重建",
