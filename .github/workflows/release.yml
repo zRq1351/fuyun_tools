@@ -97,6 +97,7 @@ jobs:
             - **音视频合成**：`concat_video/audio_segments` 临时文件泄漏修复
             - **长截图错误详情**：9 处 `.map_err(|_|)` + 5 处 `let _ =` 改为保留原始错误
             - **启动器命名修正**：`is_microsoft_signed_exe` → `is_microsoft_company_exe`（非签名验证）
+            - **音频日志优化**：录制时 WAV 写入失败仅报告首次错误，避免日志洪水
 
             ### P3 质量 & 安全
             - **DOMPurify 显式配置**：`result_display/App.vue` 添加 `USE_PROFILES`/`FORBID_TAGS`
@@ -106,6 +107,7 @@ jobs:
             ### 🏗 底层改进
             - **录制错误吞没**：`ensure_mic/system_capture_started` 3 处增加错误日志
             - **长截图错误传播**：`runtime_slot`/`status`/`result` 锁错误保留原因详情
+            - **版本号修正**：版本显示修复为正确版本号
             - **总体净减代码 ~350 行**，消除大量重复模式
           releaseDraft: false
           prerelease: false
