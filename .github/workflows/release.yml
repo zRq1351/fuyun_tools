@@ -72,43 +72,40 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
           releaseBody: |
-            ## 🆕 新增功能
+            ## 🔧 代码质量优化（v0.8.1 → v0.8.12）
 
-            ### 📂 文档管理器（全新模块）
-            - 支持多根目录管理与拖拽导入，自动提取文件元数据
-            - 索引/搬迁两种存储模式，适配不同使用场景
-            - 分类管理、搜索过滤、排序，快速定位文件
-            - **桌面小部件**：常驻桌面，拖拽即导入，极简交互
+            ### P0 正确性修复
+            - **GDI 资源泄漏**：图标提取器 `CreateCompatibleDC` 改用 `scopeguard::defer!` 自动清理
+            - **锁顺序死锁**：`ImageClipboardManager` 统一锁顺序并文档化，缩小临界区
+            - **ABBA 死锁缓释**：`ClipboardManager` 精确缓存锁显式块作用域
+            - **备份恢复竞态**：先删文件再清数据库，避免崩溃留下孤儿 blob
 
-            ### 🎨 文件类型图标
-            - 自动调用系统关联程序图标（GDI 原生提取，最高 256px）
-            - 静态缓存 + 批量加载，毫秒级响应，零延迟体验
-            - 图标遮罩/透明度完美保留，清晰不模糊
+            ### P1 性能 & 可靠性
+            - **OCR 引擎缓存**：`OnceLock<Mutex<OcrEngine>>` 首次加载模型后复用，初始化从 ~1s → ~0ms
+            - **后台线程退出**：`clipboard_wakeup` 添加 `stop_wake_dispatcher()`，退出时优雅关闭
+            - **启动优化**：`launcher_config` 首次后跳过冗余 DB 迁移
+            - **FTS 误触发重建**：先清理孤儿记录，仅在计数不一致时重建索引
+            - **保存超时延长**：`save_history_on_exit` 条件变量等待 2s → 5s
+            - **录制线程泄漏（10处）**：`reset_to_idle`/`cancel_recording`/`pause_recording`/`update_audio_capture` 超时强制 join，不再丢弃 JoinHandle
+            - **FFmpeg A/V 同步校正**：测量 FFmpeg 启动延迟（~10-50ms），对齐音频 `start_ms`/`trim_start_ms`
 
-            ### 🌐 国际化（i18n）
-            - 完整中英文界面切换（zh-CN / en-US），覆盖全部页面
+            ### P2 代码质量
+            - **IPC 常量完善**：最后 2 处硬编码 `ipcInvoke('raw')` → `IPC_COMMANDS.*`
+            - **WASAPI 重复消除**：提取 `audio_write_loop!` 宏，消除 322 行重复代码
+            - **音频标签修正**：系统音频 7 处错误标签 `'麦克风'` → `'系统'`
+            - **麦克风静音填充**：停止时增加 500ms 静音，与系统音频对齐
+            - **音视频合成**：`concat_video/audio_segments` 临时文件泄漏修复
+            - **长截图错误详情**：9 处 `.map_err(|_|)` + 5 处 `let _ =` 改为保留原始错误
+            - **启动器命名修正**：`is_microsoft_signed_exe` → `is_microsoft_company_exe`（非签名验证）
 
-            ## ✨ 体验优化
-            - **窗口拖拽吸附**：手动拖拽 + 20px 边缘吸附，流畅跟手
-            - **紧凑通知**：切换为 ElMessage 顶部滑入，极简不打扰
-            - **右键菜单优化**：菜单打开时文件列表不折叠；空白处点击自动收起
-            - **删除确认弹窗**：二次确认防误删，弹窗期间列表不关闭
-            - **文件激活态**：右键选中文件高亮突出显示
-            - **刷新按钮**：小部件顶部一键刷新数据
-            - **导入模式弹窗**：精简为双按钮，不再显示正文说明
+            ### P3 质量 & 安全
+            - **DOMPurify 显式配置**：`result_display/App.vue` 添加 `USE_PROFILES`/`FORBID_TAGS`
+            - **主题持久化防覆盖**：`themeManager.js` 序列号防止过期重试覆盖新主题
+            - **文档管理**：`remove_doc_root` 改用 `remove_dir_all`；`remove_doc_category` 先删目录再删 DB
 
-            ## 🔧 问题修复
-            - 修复截图窗口 DPI 缩放下尺寸计算偏差
-            - 修复拖拽导入 Tauri v2 IPC 字段名反序列化失败
-            - 修复剪贴板历史滚动卡顿与图片数据异常
-            - 修复录制麦克风时偶发系统音频消失
-            - 修复窗口拖拽坐标反馈循环抖动
-
-            ## 🏗 底层改进
-            - 数据库工具函数重构，新增错误码体系与前端错误处理
-            - 全局主题变量统一，深色/浅色模式完整覆盖
-            - 启动器应用图标批量提取，分类管理增强
-            - AI 客户端缓存优化，OCR 引擎稳健性提升
-            - 备份归档工具，120+ 文件代码质量增强
+            ### 🏗 底层改进
+            - **录制错误吞没**：`ensure_mic/system_capture_started` 3 处增加错误日志
+            - **长截图错误传播**：`runtime_slot`/`status`/`result` 锁错误保留原因详情
+            - **总体净减代码 ~350 行**，消除大量重复模式
           releaseDraft: false
           prerelease: false
