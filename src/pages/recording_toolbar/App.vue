@@ -5,6 +5,11 @@
       }"
         class="bar bar-collapsed"
     >
+      <!-- 展开时倒计时遮罩覆盖整个 bar 区域（含 padding） -->
+      <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-panel-overlay" @click.stop="countdownCancelled = true">
+        <span class="countdown-in-panel-number">{{ countdownValue }}</span>
+        <div class="countdown-cancel-hint">{{ t('recordingToolbar.pressEscToCancel') }}</div>
+      </div>
       <div
           :data-state="rawRecordingState"
           class="collapsed-shell"
@@ -73,10 +78,6 @@
           </button>
         </div>
         <div class="capsule-settings-panel-wrapper" :class="{ 'is-open': capsuleSettingsVisible }">
-          <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-panel-overlay" @click.stop="countdownCancelled = true">
-            <span class="countdown-in-panel-number">{{ countdownValue }}</span>
-            <div class="countdown-cancel-hint">{{ t('recordingToolbar.pressEscToCancel') }}</div>
-          </div>
           <div class="capsule-settings-panel no-drag">
             <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
                  :title="t('recordingToolbar.clickToDismiss')" @click="clearInlineNotice">
