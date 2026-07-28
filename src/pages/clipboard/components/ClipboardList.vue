@@ -269,12 +269,12 @@ const onStageMouseUp = () => {
 }
 
 // --- Inertia animation ---
-const FRICTION = 0.94
-const MIN_SPEED = 0.015
+const FRICTION = 0.88
+const MIN_SPEED = 0.02
 
 const startInertia = (velocity) => {
   stopInertia()
-  let v = Math.max(-3, Math.min(3, velocity))
+  let v = Math.max(-1.5, Math.min(1.5, velocity))
   const maxPos = Math.max(0, (props.visibleHistory.length - 1) * CARD_STEP)
   const animate = () => {
     scrollPos.value += v * 16
