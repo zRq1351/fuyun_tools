@@ -74,11 +74,10 @@
         </div>
         <div class="capsule-settings-panel-wrapper" :class="{ 'is-open': capsuleSettingsVisible }">
           <div class="capsule-settings-panel no-drag">
-            <!-- 设置展开时的内嵌倒计时 -->
-            <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-in-panel">
+            <!-- 设置展开时：半透明遮罩覆盖在设置内容上显示倒计时 -->
+            <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-panel-overlay">
               <span class="countdown-in-panel-number">{{ countdownValue }}</span>
             </div>
-            <template v-if="!countdownActive || !capsuleSettingsVisible">
             <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
                  :title="t('recordingToolbar.clickToDismiss')" @click="clearInlineNotice">
               {{ inlineNotice }}
@@ -281,7 +280,6 @@
                 @change="onToolbarSettingChange('recordingDefaultAudioBitrateKbps', $event)"
             />
           </div>
-            </template>
         </div>
       </div>
     </div>
@@ -1340,6 +1338,7 @@ body {
 
 /* Element Plus 深色主题 CSS 变量覆盖 - 所有组件自动生效 */
 .capsule-settings-panel {
+  position: relative;
   /* 背景色 */
   --el-bg-color: var(--fy-bg-primary);
   --el-bg-color-overlay: var(--fy-bg-overlay);
@@ -2141,14 +2140,18 @@ button:active:not(:disabled),
   font-weight: 700;
   animation: countdown-pop 0.4s ease-out;
 }
-/* 展开时面板内倒计时 */
-.countdown-in-panel {
+/* 展开时：半透明遮罩覆盖在设置面板上 */
+.countdown-panel-overlay {
+  position: absolute; inset: 0; z-index: 10;
   display: flex; align-items: center; justify-content: center;
-  height: 200px;
+  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: inherit;
 }
 .countdown-in-panel-number {
   font-size: 96px; font-weight: 700;
-  color: var(--fy-text-primary);
+  color: #fff;
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
   animation: countdown-pop 0.5s ease-out;
 }
 @keyframes countdown-pop {
