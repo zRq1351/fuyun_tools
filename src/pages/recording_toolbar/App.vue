@@ -5,10 +5,6 @@
       }"
         class="bar bar-collapsed"
     >
-      <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-panel-overlay" @click.stop="countdownCancelled = true">
-        <span class="countdown-in-panel-number">{{ countdownValue }}</span>
-        <div class="countdown-cancel-hint">{{ t('recordingToolbar.pressEscToCancel') }}</div>
-      </div>
       <div
           :data-state="rawRecordingState"
           class="collapsed-shell"
@@ -76,7 +72,12 @@
             ×
           </button>
         </div>
-        <div class="capsule-settings-panel-wrapper" :class="{ 'is-open': capsuleSettingsVisible }">
+        <div class="settings-area">
+          <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-panel-overlay" @click.stop="countdownCancelled = true">
+            <span class="countdown-in-panel-number">{{ countdownValue }}</span>
+            <div class="countdown-cancel-hint">{{ t('recordingToolbar.pressEscToCancel') }}</div>
+          </div>
+          <div class="capsule-settings-panel-wrapper" :class="{ 'is-open': capsuleSettingsVisible }">
           <div class="capsule-settings-panel no-drag">
             <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
                  :title="t('recordingToolbar.clickToDismiss')" @click="clearInlineNotice">
@@ -280,6 +281,7 @@
                 @change="onToolbarSettingChange('recordingDefaultAudioBitrateKbps', $event)"
             />
           </div>
+        </div>
         </div>
       </div>
     </div>
@@ -2154,11 +2156,16 @@ button:active:not(:disabled),
 }
 /* 展开时：半透明遮罩覆盖在设置面板上 */
 .countdown-panel-overlay {
-  position: absolute; top: 46px; right: 0; bottom: 0; left: 0; z-index: 10;
+  position: absolute; inset: 0; z-index: 10;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   backdrop-filter: blur(8px);
   background: rgba(0, 0, 0, 0.4);
   border-radius: 0 0 12px 12px;
+}
+.settings-area {
+  position: relative;
+  flex: 1;
+  width: 100%;
 }
 .countdown-in-panel-number {
   font-size: 96px; font-weight: 700;
