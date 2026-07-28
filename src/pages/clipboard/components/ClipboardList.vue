@@ -4,12 +4,16 @@
       <button
           v-if="selectedIndex > 0"
           class="nav-arrow nav-prev"
-          @click.stop="navigateTo(selectedIndex - 1)"
+          @mousedown.stop="startNavRepeat(-1)"
+          @mouseup.stop="stopNavRepeat"
+          @mouseleave.stop="stopNavRepeat"
       >‹</button>
       <button
           v-if="selectedIndex < stackItems.length - 1"
           class="nav-arrow nav-next"
-          @click.stop="navigateTo(selectedIndex + 1)"
+          @mousedown.stop="startNavRepeat(1)"
+          @mouseup.stop="stopNavRepeat"
+          @mouseleave.stop="stopNavRepeat"
       >›</button>
       <div
           v-for="entry in visibleCards"
@@ -385,9 +389,6 @@ const onStageClick = (e) => {
 }
 
 const navigateTo = (idx) => {
-  if (navLocked) return
-  navLocked = true
-  setTimeout(() => { navLocked = false }, 300)
   const id = props.visibleHistory[idx]?.id
   if (id) {
     scrollPos.value = idx * CARD_STEP
@@ -395,7 +396,26 @@ const navigateTo = (idx) => {
   }
 }
 
-let navLocked = false
+// Long-press repeat for nav arrows
+let navRepeatTimer = null
+let navRepeatDir = 0
+
+const startNavRepeat = (dir) => {
+  navRepeatDir = dir
+  navigateTo(selectedIndex.value + dir)
+  navRepeatTimer = setTimeout(() => {
+    navRepeatTimer = setInterval(() => {
+      const next = selectedIndex.value + navRepeatDir
+      if (next < 0 || next >= props.visibleHistory.length) { stopNavRepeat(); return }
+      navigateTo(next)
+    }, 120)
+  }, 400)
+}
+
+const stopNavRepeat = () => {
+  if (navRepeatTimer) { clearInterval(navRepeatTimer); clearTimeout(navRepeatTimer); navRepeatTimer = null }
+  navRepeatDir = 0
+}
 
 const jumpToStart = () => navigateTo(0)
 const jumpToEnd = () => navigateTo(props.visibleHistory.length - 1)
@@ -439,6 +459,7 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   stageRef.value?.removeEventListener('wheel', onWheel)
   stopInertia()
+  stopNavRepeat()
 })
 
 defineExpose({contentRef, jumpToStart, jumpToEnd})
