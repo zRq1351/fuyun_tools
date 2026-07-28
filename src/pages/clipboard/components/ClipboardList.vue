@@ -1,13 +1,13 @@
 <template>
   <div ref="contentRef" class="content">
-    <div ref="stackRef" class="cards-stack">
+    <div ref="stageRef" class="carousel-stage">
       <div
           v-for="(entry, index) in stackItems"
           :id="'clipboard-item-' + entry.id"
           :key="entry.id"
-          :class="{ selected: selectedItemId === entry.id, pinned: entry.pinned }"
+          :class="{ selected: entry.id === selectedItemId, pinned: entry.pinned }"
           :draggable="isCtrlKeyPressed"
-          :style="{ zIndex: entry.zIndex, marginLeft: index > 0 ? (-overlapPx) + 'px' : '0' }"
+          :style="cardStyle(index)"
           class="clipboard-item"
           @click="handleClick(entry.id)"
           @dblclick="handleDoubleClick(entry.id)"
@@ -20,15 +20,13 @@
           <span class="item-category" @click.stop>{{ translateCategory(getItemCategory(entry.id)) }}</span>
           <div v-if="entry.pinned" class="item-pinned-dot"></div>
           <div class="item-actions">
-            <div v-if="isWebUrl(entry.content)" class="action-btn"
-                 @click.stop="openWebUrl(entry.content)">
+            <div v-if="isWebUrl(entry.content)" class="action-btn" @click.stop="openWebUrl(entry.content)">
               <Link :size="9"/>
             </div>
             <div class="action-btn" @click.stop="emit('preview', entry.content, entry.id)">
               <View :size="9"/>
             </div>
-            <div :class="{ active: entry.pinned }" class="action-btn"
-                 @click.stop="promoteItem(entry.id)">
+            <div :class="{ active: entry.pinned }" class="action-btn" @click.stop="promoteItem(entry.id)">
               <Star :size="9"/>
             </div>
             <div class="action-btn action-delete" @click.stop="deleteItem(entry.id)">
@@ -49,9 +47,7 @@
     </div>
 
     <div v-if="showLoadMoreHint" class="load-more-bar">
-      <el-icon v-if="isLoadingMore" :size="14" class="is-loading">
-        <Loading/>
-      </el-icon>
+      <el-icon v-if="isLoadingMore" :size="14" class="is-loading"><Loading/></el-icon>
       <span class="load-more-text" @click="emit('load-more-intent')">
         {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
       </span>
@@ -69,8 +65,8 @@ import FormattedContent from '../../../components/FormattedContent.vue'
 const {t} = useI18n()
 
 const CARD_WIDTH = 260
-const MIN_PEEK = 24
-const MAX_OVERLAP = 220
+const CARD_HEIGHT = 250
+const CARD_STEP = 72  // px between adjacent card centers
 
 const CATEGORY_TRANSLATIONS = {
   '未分类': () => t('common.uncategorized'),
@@ -102,31 +98,48 @@ const props = defineProps({
 const emit = defineEmits(['load-more-intent', 'preview'])
 
 const contentRef = ref(null)
-const stackRef = ref(null)
-const containerWidth = ref(0)
+const stageRef = ref(null)
+const containerWidth = ref(800)
 
 let resizeObserver = null
 
-const stackItems = computed(() => {
-  const total = props.visibleHistory.length
-  return props.visibleHistory.map((entry, index) => ({
+const selectedIndex = computed(() => {
+  const idx = props.visibleHistory.findIndex(e => e.id === props.selectedItemId)
+  return idx >= 0 ? idx : 0
+})
+
+const stackItems = computed(() =>
+  props.visibleHistory.map((entry, index) => ({
     ...entry,
     snippet: entry.snippet || '',
     pinned: props.isPinned(entry.id),
-    zIndex: total - index,
   }))
-})
+)
 
-const overlapPx = computed(() => {
-  const count = stackItems.value.length
-  if (count <= 1) return 0
-  const w = containerWidth.value || 800
-  // Calculate overlap so all cards fit in container
-  // Total width = CARD_WIDTH + (count-1)*(CARD_WIDTH - overlap)
-  // overlap = CARD_WIDTH - (w - CARD_WIDTH) / (count-1)
-  const calc = CARD_WIDTH - (w - CARD_WIDTH - 40) / (count - 1)
-  return Math.round(Math.min(MAX_OVERLAP, Math.max(MIN_PEEK, calc)))
-})
+// Calculate visual properties for each card based on distance from selection
+const cardStyle = (index) => {
+  const d = index - selectedIndex.value
+  const absD = Math.abs(d)
+  const scale = Math.max(0.55, 1 - absD * 0.22)
+  const opacity = Math.max(0.2, 1 - absD * 0.35)
+  const zIndex = 100 - absD * 10
+
+  const w = containerWidth.value
+  const centerX = w / 2
+  const cardVisualW = CARD_WIDTH * scale
+  const cardCenterX = centerX + d * CARD_STEP
+  const left = cardCenterX - cardVisualW / 2
+
+  return {
+    left: left + 'px',
+    top: '50%',
+    width: CARD_WIDTH + 'px',
+    height: CARD_HEIGHT + 'px',
+    transform: `translateY(-50%) scale(${scale})`,
+    opacity,
+    zIndex,
+  }
+}
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 const showLoadMoreHint = computed(() => props.hasMore || isLoadingMore.value)
@@ -146,20 +159,18 @@ const renderHighlightParts = (text) => {
   const out = []
   let start = 0
   while (start < value.length) {
-    let bestIndex = -1
-    let bestTokenLength = 0
+    let bestIndex = -1, bestLen = 0
     for (let i = 0; i < tokenLowers.length; i++) {
       const idx = sourceLower.indexOf(tokenLowers[i], start)
       if (idx === -1) continue
-      if (bestIndex === -1 || idx < bestIndex || (idx === bestIndex && tokenLowers[i].length > bestTokenLength)) {
-        bestIndex = idx
-        bestTokenLength = tokenLowers[i].length
+      if (bestIndex === -1 || idx < bestIndex || (idx === bestIndex && tokenLowers[i].length > bestLen)) {
+        bestIndex = idx; bestLen = tokenLowers[i].length
       }
     }
     if (bestIndex === -1) { out.push({text: value.slice(start), hit: false}); break }
     if (bestIndex > start) out.push({text: value.slice(start, bestIndex), hit: false})
-    out.push({text: value.slice(bestIndex, bestIndex + bestTokenLength), hit: true})
-    start = bestIndex + bestTokenLength
+    out.push({text: value.slice(bestIndex, bestIndex + bestLen), hit: true})
+    start = bestIndex + bestLen
   }
   return out.length > 0 ? out : [{text: value, hit: false}]
 }
@@ -168,38 +179,26 @@ const handleItemDragStart = (e, id) => {
   if (typeof props.handleDragStart === 'function') props.handleDragStart(e, id)
 }
 
-const isWebUrl = (v) => {
-  if (!v) return false
-  return /^https?:\/\/\S+$/i.test(t) || /^www\.\S+$/i.test(t)
-}
-const normalizeUrl = (v) => {
-  const t = v.trim()
-  if (/^https?:\/\//i.test(t)) return t
-  if (/^www\./i.test(t)) return `https://${t}`
-  return t
-}
+const isWebUrl = (v) => !!v && /^https?:\/\/\S+$/i.test(v.trim()) || /^www\.\S+$/i.test(v.trim())
 const openWebUrl = async (v) => {
-  try { if (isWebUrl(v)) await openExternalUrl(normalizeUrl(v)) }
-  catch (e) { console.error('打开网址失败:', e) }
-}
-
-const measureWidth = () => {
-  if (contentRef.value) {
-    containerWidth.value = contentRef.value.clientWidth
-  }
+  try {
+    if (!v) return
+    const t = v.trim()
+    const url = /^https?:\/\//i.test(t) ? t : /^www\./i.test(t) ? `https://${t}` : t
+    await openExternalUrl(url)
+  } catch (e) { /* ignore */ }
 }
 
 onMounted(() => {
-  measureWidth()
-  resizeObserver = new ResizeObserver(() => measureWidth())
+  containerWidth.value = contentRef.value?.clientWidth || 800
+  resizeObserver = new ResizeObserver(() => {
+    containerWidth.value = contentRef.value?.clientWidth || 800
+  })
   if (contentRef.value) resizeObserver.observe(contentRef.value)
 })
 
 onBeforeUnmount(() => {
-  if (resizeObserver) {
-    resizeObserver.disconnect()
-    resizeObserver = null
-  }
+  resizeObserver?.disconnect()
 })
 
 defineExpose({contentRef})
@@ -213,60 +212,48 @@ defineExpose({contentRef})
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  perspective: 800px;
 }
 
-.cards-stack {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
+.carousel-stage {
   flex: 1;
   min-height: 0;
-  padding: 0 20px;
+  position: relative;
   overflow: hidden;
+  perspective: 1000px;
 }
 
 .clipboard-item {
-  display: inline-flex;
+  position: absolute;
+  display: flex;
   flex-direction: column;
   width: 260px;
-  min-width: 260px;
   height: 250px;
   white-space: normal;
-  flex-shrink: 0;
   background: var(--fy-glass-bg);
   border: 0.5px solid var(--fy-glass-border);
   border-radius: 14px;
   padding: 0;
   cursor: pointer;
-  position: relative;
   user-select: none;
   backdrop-filter: var(--fy-glass-blur);
   -webkit-backdrop-filter: var(--fy-glass-blur);
   color: var(--fy-text-primary);
-  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.1),
-              0 4px 16px rgba(0, 0, 0, 0.06);
-  transition: transform 0.3s var(--fy-ease-out),
-              box-shadow 0.3s var(--fy-ease-out),
-              margin-top 0.3s var(--fy-ease-out);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  transition: left 0.45s var(--fy-ease-out),
+              transform 0.45s var(--fy-ease-out),
+              opacity 0.45s var(--fy-ease-out),
+              box-shadow 0.3s ease;
   overflow: hidden;
-}
-
-.clipboard-item:hover {
-  background: var(--fy-bg-surface);
-  border-color: var(--fy-border-hover);
-  transform: translateY(-8px) scale(1.02);
-  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15),
-              0 8px 28px rgba(0, 0, 0, 0.12);
-  z-index: 1000 !important;
 }
 
 .clipboard-item.selected {
   background: var(--fy-accent-bg);
   border-color: var(--fy-border-active);
-  transform: translateY(-8px) scale(1.02);
-  box-shadow: -4px 0 24px rgba(108, 140, 255, 0.12),
-              0 8px 28px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 28px rgba(108, 140, 255, 0.2), 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+.clipboard-item:hover {
+  box-shadow: 0 4px 24px rgba(108, 140, 255, 0.15), 0 8px 32px rgba(0, 0, 0, 0.12);
   z-index: 1000 !important;
 }
 
@@ -275,6 +262,7 @@ defineExpose({contentRef})
   align-items: center;
   gap: 6px;
   padding: 8px 10px 0;
+  flex-shrink: 0;
 }
 
 .item-index {
@@ -282,11 +270,11 @@ defineExpose({contentRef})
   font-family: var(--fy-font-mono);
   color: var(--fy-text-muted);
   opacity: 0.5;
-  flex: 0 0 auto;
   transition: opacity 0.2s;
 }
 
-.clipboard-item:hover .item-index {
+.clipboard-item:hover .item-index,
+.clipboard-item.selected .item-index {
   opacity: 1;
   color: var(--fy-accent);
 }
@@ -303,7 +291,8 @@ defineExpose({contentRef})
   transition: opacity 0.2s;
 }
 
-.clipboard-item:hover .item-category {
+.clipboard-item:hover .item-category,
+.clipboard-item.selected .item-category {
   opacity: 1;
 }
 
@@ -312,14 +301,14 @@ defineExpose({contentRef})
   height: 6px;
   border-radius: 50%;
   background: var(--fy-warning);
-  flex: 0 0 auto;
+  flex-shrink: 0;
 }
 
 .item-actions {
   display: flex;
   align-items: center;
   gap: 1px;
-  flex: 0 0 auto;
+  flex-shrink: 0;
   opacity: 0;
   transition: opacity 0.15s;
 }
@@ -348,9 +337,7 @@ defineExpose({contentRef})
   color: var(--fy-text-primary);
 }
 
-.action-btn.active {
-  color: var(--fy-warning);
-}
+.action-btn.active { color: var(--fy-warning); }
 
 .action-delete:hover {
   color: var(--fy-danger);
@@ -370,10 +357,7 @@ defineExpose({contentRef})
   overflow-x: hidden;
   scrollbar-width: none;
 }
-
-.item-body::-webkit-scrollbar {
-  display: none;
-}
+.item-body::-webkit-scrollbar { display: none; }
 
 .item-snippet {
   margin: 0 12px 8px;
@@ -386,6 +370,7 @@ defineExpose({contentRef})
   word-break: break-all;
   max-height: 40px;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .snippet-hit {
@@ -407,12 +392,6 @@ defineExpose({contentRef})
   border-top: 0.5px solid var(--fy-border-light);
   cursor: pointer;
 }
-
-.load-more-text {
-  font-size: 12px;
-}
-
-.load-more-text:hover {
-  color: var(--fy-accent);
-}
+.load-more-text { font-size: 12px; }
+.load-more-text:hover { color: var(--fy-accent); }
 </style>
