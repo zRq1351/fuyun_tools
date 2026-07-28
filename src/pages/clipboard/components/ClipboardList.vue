@@ -56,7 +56,7 @@
 </template>
 
 <script setup>
-import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
+import {computed, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {Close, Link, Loading, Star, View} from '@element-plus/icons-vue'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
 import {useI18n} from 'vue-i18n'
@@ -102,11 +102,6 @@ const containerWidth = ref(800)
 
 let resizeObserver = null
 
-const selectedIndex = computed(() => {
-  const idx = props.visibleHistory.findIndex(e => e.id === props.selectedItemId)
-  return idx >= 0 ? idx : 0
-})
-
 const stackItems = computed(() =>
   props.visibleHistory.map((entry, index) => ({
     ...entry,
@@ -115,65 +110,30 @@ const stackItems = computed(() =>
   }))
 )
 
-// Calculate visual properties for each card — stacked deck with swipe
-const STACK_OFFSET_X = 32
-const STACK_OFFSET_Y = 10
-const STACK_SCALE_STEP = 0.06
-const SWIPE_THRESHOLD = 0.3  // fraction of stage width to trigger navigation
+// Calculate visual properties — continuous scroll strip with center-focused scale
+const CARD_STEP = 66  // px between consecutive cards in the strip
 
 const cardStyle = (index) => {
-  const d = index - selectedIndex.value
-  const absD = Math.abs(d)
-
-  // Base stack transform (no swipe): cards behind are offset & scaled
-  const baseX = d * STACK_OFFSET_X
-  const baseY = absD * STACK_OFFSET_Y
-  const baseScale = 1 - absD * STACK_SCALE_STEP
-  const baseOpacity = absD <= 1 ? 1 - absD * 0.35 : Math.max(0.1, 1 - absD * 0.4)
-  let zIndex = 100 - absD * 15
-
   const w = containerWidth.value
-  const centerX = w / 2 - CARD_WIDTH / 2
+  const viewCenter = w / 2 - CARD_WIDTH / 2
 
-  // Apply swipe — focused card follows finger, cards behind shift toward center
-  const progress = swipeProgress.value  // -1 to +1
-  const swipeAbs = Math.abs(progress)
-  const swipeDir = progress > 0 ? 1 : -1  // +1=swipe right (to prev), -1=swipe left (to next)
+  // Card's left edge in the scroll strip
+  const cardX = index * CARD_STEP - scrollPos.value + viewCenter
+  const cardCenter = cardX + CARD_WIDTH / 2
+  const distFromCenter = cardCenter - w / 2
+  const absDist = Math.abs(distFromCenter)
 
-  const isFocus = d === 0
-  const isNext = d === swipeDir  // card being revealed
-
-  let x, y, s, opacity
-
-  if (isFocus) {
-    // Focus card follows mouse, fades as it moves away
-    x = centerX + progress * w * 0.6
-    y = swipeAbs * STACK_OFFSET_Y  // slightly down as it slides
-    s = 1 - swipeAbs * 0.08
-    opacity = 1 - swipeAbs * 0.5
-    zIndex = 100
-  } else if (isNext && swipeAbs > 0.05) {
-    // Card being revealed: moves from offset toward center, scales up, opacity up
-    const t = Math.min(1, swipeAbs / SWIPE_THRESHOLD)
-    x = centerX + (1 - t) * swipeDir * STACK_OFFSET_X
-    y = (1 - t) * STACK_OFFSET_Y
-    s = baseScale + t * (1 - baseScale)
-    opacity = baseOpacity + t * (1 - baseOpacity)
-    zIndex = 95
-  } else {
-    // Other cards: stay in stack position
-    x = centerX + baseX
-    y = baseY
-    s = baseScale
-    opacity = baseOpacity
-  }
+  // Scale / opacity based on distance from viewport center
+  const scale = Math.max(0.68, 1 - absDist / (w * 0.45))
+  const opacity = Math.max(0.18, 1 - absDist / (w * 0.7))
+  const zIndex = 100 - Math.floor(absDist / CARD_STEP) * 5
 
   return {
-    left: x + 'px',
+    left: cardX + 'px',
     top: '50%',
     width: CARD_WIDTH + 'px',
     height: CARD_HEIGHT + 'px',
-    transform: `translateY(-50%) translateY(${y}px) scale(${s})`,
+    transform: `translateY(-50%) scale(${scale})`,
     opacity,
     zIndex,
     transition: dragActive ? 'none' : undefined,
@@ -227,16 +187,34 @@ const openWebUrl = async (v) => {
   } catch (e) { /* ignore */ }
 }
 
-// --- Swipe state ---
-const swipeProgress = ref(0)
-let swipeStartX = 0
+// --- Scroll / drag state ---
+const scrollPos = ref(0)  // current scroll offset in px
+let dragStartX = 0
+let dragStartScroll = 0
 let dragActive = false
 let dragMoved = false
+
+// Derived: which card is closest to center
+const selectedIndex = computed(() => {
+  if (props.visibleHistory.length === 0) return 0
+  const center = containerWidth.value / 2 - CARD_WIDTH / 2
+  const raw = Math.round((center - scrollPos.value) / CARD_STEP)
+  return Math.max(0, Math.min(props.visibleHistory.length - 1, raw))
+})
+
+// Keep scrollPos synced with external selection changes
+const syncScrollToSelection = () => {
+  const idx = selectedIndex.value
+  const w = containerWidth.value
+  const viewCenter = w / 2 - CARD_WIDTH / 2
+  scrollPos.value = idx * CARD_STEP - viewCenter
+}
 
 const onStageMouseDown = (e) => {
   if (e.button !== 0) return
   if (e.target.closest('.action-btn')) return
-  swipeStartX = e.clientX
+  dragStartX = e.clientX
+  dragStartScroll = scrollPos.value
   dragActive = true
   dragMoved = false
   document.body.style.userSelect = 'none'
@@ -246,11 +224,10 @@ const onStageMouseDown = (e) => {
 
 const onStageMouseMove = (e) => {
   if (!dragActive) return
-  const delta = e.clientX - swipeStartX
-  if (!dragMoved && Math.abs(delta) > 4) dragMoved = true
+  const delta = e.clientX - dragStartX
+  if (!dragMoved && Math.abs(delta) > 3) dragMoved = true
   if (!dragMoved) return
-  const w = containerWidth.value || 800
-  swipeProgress.value = Math.max(-1, Math.min(1, delta / (w * 0.5)))
+  scrollPos.value = dragStartScroll - delta
 }
 
 const onStageMouseUp = () => {
@@ -259,32 +236,43 @@ const onStageMouseUp = () => {
   document.body.style.removeProperty('user-select')
   document.removeEventListener('mousemove', onStageMouseMove)
   document.removeEventListener('mouseup', onStageMouseUp)
+
   if (!wasDragged) return
-
-  const p = swipeProgress.value
-  if (p > SWIPE_THRESHOLD && selectedIndex.value > 0) {
-    swipeProgress.value = 0
-    navigateTo(selectedIndex.value - 1)
-  } else if (p < -SWIPE_THRESHOLD && selectedIndex.value < props.visibleHistory.length - 1) {
-    swipeProgress.value = 0
-    navigateTo(selectedIndex.value + 1)
-  } else {
-    swipeProgress.value = 0  // snap back
-  }
   skipNextClick = true
-}
 
-const navigateTo = (idx) => {
-  const id = props.visibleHistory[idx]?.id
-  if (id) props.updateSelection(id, false, null, null)
+  // Snap to nearest card
+  const w = containerWidth.value
+  const viewCenter = w / 2 - CARD_WIDTH / 2
+  const nearestIdx = Math.max(0, Math.min(props.visibleHistory.length - 1,
+    Math.round((viewCenter - scrollPos.value) / CARD_STEP)))
+  scrollPos.value = nearestIdx * CARD_STEP - viewCenter
+  navigateTo(nearestIdx)
 }
 
 let skipNextClick = false
 
 const handleClick = (entryId) => {
   if (skipNextClick) { skipNextClick = false; return }
-  navigateTo(props.visibleHistory.findIndex(e => e.id === entryId))
+  const idx = props.visibleHistory.findIndex(e => e.id === entryId)
+  if (idx >= 0) navigateTo(idx)
 }
+
+const navigateTo = (idx) => {
+  const id = props.visibleHistory[idx]?.id
+  if (id) {
+    scrollPos.value = idx * CARD_STEP - (containerWidth.value / 2 - CARD_WIDTH / 2)
+    props.updateSelection(id, false, null, null)
+  }
+}
+
+// Sync scroll position when selection changes externally (keyboard, etc.)
+watch(() => props.selectedItemId, () => {
+  if (dragActive) return
+  const idx = props.visibleHistory.findIndex(e => e.id === props.selectedItemId)
+  if (idx >= 0) {
+    scrollPos.value = idx * CARD_STEP - (containerWidth.value / 2 - CARD_WIDTH / 2)
+  }
+})
 
 let wheelTimer = null
 const WHEEL_GAP = 200
@@ -304,6 +292,7 @@ const onWheel = (e) => {
 
 onMounted(() => {
   containerWidth.value = contentRef.value?.clientWidth || 800
+  syncScrollToSelection()
   resizeObserver = new ResizeObserver(() => {
     containerWidth.value = contentRef.value?.clientWidth || 800
   })
