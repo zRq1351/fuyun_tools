@@ -514,7 +514,7 @@ const handleLoadMoreIntent = () => {
 
 const tryLoadMoreByScroll = async () => {
   if (!hasMore.value || isLoadingPage.value) return false
-  await loadMoreHistory()
+  await loadHistoryPage({reset: false})
   return true
 }
 
