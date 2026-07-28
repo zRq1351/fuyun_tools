@@ -78,7 +78,6 @@
             <div class="countdown-cancel-hint">{{ t('recordingToolbar.pressEscToCancel') }}</div>
           </div>
           <div class="capsule-settings-panel no-drag">
-          <div class="capsule-settings-panel no-drag">
             <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
                  :title="t('recordingToolbar.clickToDismiss')" @click="clearInlineNotice">
               {{ inlineNotice }}
