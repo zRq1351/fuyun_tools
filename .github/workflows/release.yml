@@ -38,20 +38,38 @@ jobs:
       - name: 安装 Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+
       - name: 安装 LLVM（提供 clang/libclang）
         run: choco install llvm --no-progress -y
 
+      - name: Cache vcpkg
+        id: cache-vcpkg
+        uses: actions/cache@v4
+        with:
+          path: D:\vcpkg
+          key: vcpkg-opencv-${{ runner.os }}-static-md-v1
+
       - name: 安装 vcpkg 并集成
+        if: steps.cache-vcpkg.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          git clone https://github.com/microsoft/vcpkg.git "$env:RUNNER_TEMP\vcpkg"
-          & "$env:RUNNER_TEMP\vcpkg\bootstrap-vcpkg.bat"
-          & "$env:RUNNER_TEMP\vcpkg\vcpkg.exe" integrate install
+          git clone https://github.com/microsoft/vcpkg.git D:\vcpkg
+          & D:\vcpkg\bootstrap-vcpkg.bat
+          & D:\vcpkg\vcpkg.exe integrate install
 
       - name: 安装 OpenCV（x64-windows）
+        if: steps.cache-vcpkg.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          & "$env:RUNNER_TEMP\vcpkg\vcpkg.exe" install opencv4:x64-windows-static-md
+          & D:\vcpkg\vcpkg.exe install opencv4:x64-windows-static-md
 
       - name: 构建并发布 Tauri 应用
         uses: tauri-apps/tauri-action@v0
@@ -59,10 +77,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          VCPKG_ROOT: ${{ runner.temp }}\vcpkg
+          VCPKG_ROOT: D:\vcpkg
           VCPKGRS_TRIPLET: x64-windows-static-md
           VCPKGRS_DYNAMIC: "0"
-          OpenCV_DIR: ${{ runner.temp }}\vcpkg\installed\x64-windows-static-md\share\opencv4
+          OpenCV_DIR: D:\vcpkg\installed\x64-windows-static-md\share\opencv4
           OPENCV_MSVC_CRT: dynamic
           OPENCV_DISABLE_PROBES: environment,cmake,vcpkg_cmake,pkg_config
           LIBCLANG_PATH: C:\Program Files\LLVM\bin
