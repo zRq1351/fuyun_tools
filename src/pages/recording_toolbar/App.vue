@@ -2159,14 +2159,22 @@ button:active:not(:disabled),
   display: flex; flex-direction: column; align-items: center; justify-content: center;
 }
 .countdown-in-panel-number {
+  display: flex; align-items: center; justify-content: center;
+  width: 180px; height: 180px;
   font-size: 96px; font-weight: 700;
   color: var(--fy-text-primary);
-  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  background: var(--fy-glass-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  border-radius: 50%;
   animation: countdown-pop 0.5s ease-out;
 }
 .countdown-cancel-hint {
-  margin-top: 8px; font-size: 13px;
+  margin-top: 12px; font-size: 13px;
   color: var(--fy-text-secondary);
+  background: var(--fy-glass-bg);
+  backdrop-filter: blur(20px) saturate(180%);
+  padding: 4px 16px;
+  border-radius: 20px;
 }
 @keyframes countdown-pop {
   from { transform: scale(1.5); opacity: 0; }
