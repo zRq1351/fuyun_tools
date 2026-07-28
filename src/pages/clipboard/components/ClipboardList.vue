@@ -116,9 +116,9 @@ const stackItems = computed(() =>
 )
 
 // Calculate visual properties for each card — stacked deck with swipe
-const STACK_OFFSET_X = 10
-const STACK_OFFSET_Y = 14
-const STACK_SCALE_STEP = 0.07
+const STACK_OFFSET_X = 32
+const STACK_OFFSET_Y = 10
+const STACK_SCALE_STEP = 0.06
 const SWIPE_THRESHOLD = 0.3  // fraction of stage width to trigger navigation
 
 const cardStyle = (index) => {
@@ -129,7 +129,7 @@ const cardStyle = (index) => {
   const baseX = d * STACK_OFFSET_X
   const baseY = absD * STACK_OFFSET_Y
   const baseScale = 1 - absD * STACK_SCALE_STEP
-  const baseOpacity = absD <= 1 ? 1 - absD * 0.5 : 0.15
+  const baseOpacity = absD <= 1 ? 1 - absD * 0.35 : Math.max(0.1, 1 - absD * 0.4)
   let zIndex = 100 - absD * 15
 
   const w = containerWidth.value
