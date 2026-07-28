@@ -287,6 +287,7 @@ const startInertia = (velocity) => {
     if (Math.abs(v) > MIN_SPEED) {
       inertiaId = requestAnimationFrame(animate)
     } else {
+      inertiaId = null
       snapToNearest()
     }
   }
