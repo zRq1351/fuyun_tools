@@ -133,13 +133,21 @@ const visibleCards = computed(() => {
   const half = (containerWidth.value / CARD_STEP) / 2 + VISIBLE_PAD
   const start = Math.max(0, Math.floor(centerIdx - half))
   const end = Math.min(total, Math.ceil(centerIdx + half) + 1)
-  return props.visibleHistory.slice(start, end).map((entry, i) => ({
+  // Cache: only rebuild when the visible range actually shifts
+  if (start === _lastStart && end === _lastEnd) return _lastVisible
+  _lastStart = start; _lastEnd = end
+  _lastVisible = props.visibleHistory.slice(start, end).map((entry, i) => ({
     ...entry,
     _index: start + i,
     snippet: entry.snippet || '',
     pinned: props.isPinned(entry.id),
   }))
+  return _lastVisible
 })
+
+let _lastStart = -1
+let _lastEnd = -1
+let _lastVisible = []
 
 const cardStyle = (index) => {
   const w = containerWidth.value
@@ -269,11 +277,23 @@ const onStageMouseMove = (e) => {
   const delta = e.clientX - dragStartX
   if (!dragMoved && Math.abs(delta) > 3) dragMoved = true
   if (!dragMoved) return
-  scrollPos.value = dragStartScroll - delta
-  // Track velocity samples (cap at 5)
-  velocitySamples.push({ time: performance.now(), pos: scrollPos.value })
-  if (velocitySamples.length > 5) velocitySamples.shift()
+  // RAF-throttle: batch all mousemove events into at most one update per frame
+  pendingScroll = dragStartScroll - delta
+  if (!rafPending) {
+    rafPending = true
+    requestAnimationFrame(() => {
+      rafPending = false
+      scrollPos.value = pendingScroll
+      if (dragActive) {
+        velocitySamples.push({ time: performance.now(), pos: scrollPos.value })
+        if (velocitySamples.length > 5) velocitySamples.shift()
+      }
+    })
+  }
 }
+
+let rafPending = false
+let pendingScroll = 0
 
 const onStageMouseUp = () => {
   const wasDragged = dragMoved
