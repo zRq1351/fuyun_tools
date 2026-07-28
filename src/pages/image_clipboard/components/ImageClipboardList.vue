@@ -151,9 +151,7 @@ const visibleCards = computed(() => {
   const half = (containerWidth.value / CARD_STEP) / 2 + VISIBLE_PAD
   const start = Math.max(0, Math.floor(centerIdx - half))
   const end = Math.min(total, Math.ceil(centerIdx + half) + 1)
-  if (start === _lastStart && end === _lastEnd && total === _lastTotal) return _lastVisible
-  _lastStart = start; _lastEnd = end; _lastTotal = total
-  _lastVisible = props.visibleHistory.slice(start, end).map((entry, i) => ({
+  return props.visibleHistory.slice(start, end).map((entry, i) => ({
     id: entry.item.id,
     rawItem: entry.item,
     _index: start + i,
@@ -161,10 +159,9 @@ const visibleCards = computed(() => {
     category: entry.category,
     tags: entry.tags,
   }))
-  return _lastVisible
 })
 
-let _lastStart = -1, _lastEnd = -1, _lastTotal = -1, _lastVisible = []
+let _lastStart = -1, _lastEnd = -1, _lastVisible = []
 
 // Card visual style
 const cardStyle = (index) => {

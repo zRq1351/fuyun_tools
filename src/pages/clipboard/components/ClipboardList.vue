@@ -137,21 +137,13 @@ const visibleCards = computed(() => {
   const start = Math.max(0, Math.floor(centerIdx - half))
   const end = Math.min(total, Math.ceil(centerIdx + half) + 1)
   // Cache: only rebuild when the visible range actually shifts
-  if (start === _lastStart && end === _lastEnd && total === _lastTotal) return _lastVisible
-  _lastStart = start; _lastEnd = end; _lastTotal = total
-  _lastVisible = props.visibleHistory.slice(start, end).map((entry, i) => ({
+  return props.visibleHistory.slice(start, end).map((entry, i) => ({
     ...entry,
     _index: start + i,
     snippet: entry.snippet || '',
     pinned: props.isPinned(entry.id),
   }))
-  return _lastVisible
 })
-
-let _lastStart = -1
-let _lastEnd = -1
-let _lastTotal = -1
-let _lastVisible = []
 
 const cardStyle = (index) => {
   const w = containerWidth.value
