@@ -126,8 +126,8 @@ const cardStyle = (index) => {
   const moving = dragActive || inertiaId  // disable blur during motion for perf
 
   // Scale / opacity based on distance from viewport center
-  const scale = Math.max(0.68, 1 - absDist / (w * 0.45))
-  const opacity = Math.max(0.18, 1 - absDist / (w * 0.7))
+  const scale = Math.max(0.78, 1 - absDist / (w * 0.55))
+  const opacity = Math.max(0.3, 1 - absDist / (w * 0.85))
   const zIndex = 100 - Math.floor(absDist / CARD_STEP) * 5
 
   return {
