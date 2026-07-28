@@ -538,6 +538,7 @@
     "search": "Search category/tags",
     "createCategory": "New Category",
     "noRecords": "No image clipboard records",
+    "emptyHint": "Copy or screenshot images to view them here",
     "perPage": "{size} per page",
     "backToStart": "Back to start",
     "scrollToEnd": "Scroll to end",

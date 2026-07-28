@@ -26,7 +26,12 @@
       <span>{{ $t('clipboard.loading') }}</span>
     </div>
     <div v-else-if="filteredHistory.length === 0" class="empty-state">
-      <el-empty :description="$t('imageClipboard.noRecords')" :image-size="100"/>
+      <el-empty :image-size="100">
+        <template #description>
+          <p>{{ $t('imageClipboard.noRecords') }}</p>
+          <p class="hint">{{ $t('imageClipboard.emptyHint') }}</p>
+        </template>
+      </el-empty>
     </div>
 
     <ImageClipboardList
@@ -38,7 +43,6 @@
         :get-preview-data-url="getPreviewDataUrl"
         :handle-drag-end="handleDragEnd"
         :handle-drag-start="handleDragStart"
-        :handle-item-hover="handleItemHover"
         :has-more="hasMore"
         :is-ctrl-key-pressed="isCtrlKeyPressed"
         :is-loading-page="isLoadingPage"
@@ -48,7 +52,7 @@
         :selected-index="selectedIndex"
         :show-context-menu="showContextMenu"
         :visible-history="filteredHistory"
-        @content-scroll="tryLoadMoreByScroll"
+        :total-count="totalCount"
         @load-more-intent="handleLoadMoreIntent"
     />
 
@@ -510,16 +514,8 @@ const handleLoadMoreIntent = () => {
 
 const tryLoadMoreByScroll = async () => {
   if (!hasMore.value || isLoadingPage.value) return false
-  const container = contentRef.value
-  if (!container) return false
-  const remaining = container.scrollWidth - container.clientWidth - container.scrollLeft
-  if (remaining <= 240 && loadMoreIntent.value) {
-    loadMoreIntent.value = false
-    const beforeLoaded = getLoadedHistoryCount()
-    await loadHistoryPage({reset: false})
-    return getLoadedHistoryCount() > beforeLoaded
-  }
-  return false
+  await loadMoreHistory()
+  return true
 }
 
 const loadTailPage = async () => {
@@ -914,20 +910,11 @@ const handleItemHover = (index) => {
   warmupAround(index)
 }
 
-const scrollToStart = async () => {
-  if (contentRef.value) {
-    contentRef.value.scrollLeft = 0
-  }
-  if (filteredHistory.value.length > 0) {
-    const firstIndex = filteredHistory.value[0].index
-    selectedIndex.value = firstIndex
-    await ensureKeyboardSelectionVisible()
-  }
+const scrollToStart = () => {
+  imageListRef.value?.jumpToStart()
 }
 
 const scrollToEnd = async () => {
-  if (!contentRef.value) return
-  contentRef.value.scrollLeft = Math.max(0, contentRef.value.scrollWidth - contentRef.value.clientWidth)
   if (hasMore.value) {
     try {
       await loadTailPage()
@@ -938,11 +925,7 @@ const scrollToEnd = async () => {
       await nextTick()
     }
   }
-  if (filteredHistory.value.length > 0) {
-    const lastIndex = filteredHistory.value[filteredHistory.value.length - 1].index
-    selectedIndex.value = lastIndex
-    await ensureKeyboardSelectionVisible()
-  }
+  imageListRef.value?.jumpToEnd()
 }
 
 const fillById = async (itemId) => {
@@ -1695,14 +1678,14 @@ const handleKeydown = async (event) => {
     event.preventDefault()
     currentVisibleIndex = Math.max(0, currentVisibleIndex - 1)
     selectedIndex.value = visible[currentVisibleIndex].index
-    await ensureKeyboardSelectionVisible()
   } else if (event.key === 'ArrowRight') {
     event.preventDefault()
     currentVisibleIndex = Math.min(visible.length - 1, currentVisibleIndex + 1)
     selectedIndex.value = visible[currentVisibleIndex].index
     handleLoadMoreIntent()
-    await tryLoadMoreByScroll()
-    await ensureKeyboardSelectionVisible()
+  } else if (event.key === 'Home') {
+    event.preventDefault()
+    imageListRef.value?.jumpToStart()
   } else if (event.key === 'Enter') {
     event.preventDefault()
     if (selectedIndex.value >= 0 && selectedIndex.value < history.value.length) {
@@ -2000,7 +1983,7 @@ watch([searchKeyword, categoryFilter], () => {
   -webkit-backdrop-filter: var(--fy-backdrop-blur);
   border: 0.5px solid var(--fy-container-border);
   box-shadow: var(--fy-shadow-lg);
-  overflow: hidden;
+  overflow: visible;
   outline: none;
   transition: background 0.3s ease, border-color 0.3s ease;
 }

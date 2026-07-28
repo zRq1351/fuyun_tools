@@ -538,6 +538,7 @@
     "search": "搜索分类/标签",
     "createCategory": "新增分类",
     "noRecords": "暂无图片剪切板记录",
+    "emptyHint": "复制或截图后会自动出现在这里",
     "perPage": "每页{size}",
     "backToStart": "回到开头",
     "scrollToEnd": "滑动到最后",
