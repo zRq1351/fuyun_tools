@@ -5,7 +5,12 @@
       }"
         class="bar bar-collapsed"
     >
+      <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-panel-overlay" :style="overlayStyle" @click.stop="countdownCancelled = true">
+        <span class="countdown-in-panel-number">{{ countdownValue }}</span>
+        <div class="countdown-cancel-hint">{{ t('recordingToolbar.pressEscToCancel') }}</div>
+      </div>
       <div
+          ref="collapsedShellEl"
           :data-state="rawRecordingState"
           class="collapsed-shell"
       >
@@ -73,10 +78,6 @@
           </button>
         </div>
         <div class="capsule-settings-panel-wrapper" :class="{ 'is-open': capsuleSettingsVisible }">
-          <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-panel-overlay" @click.stop="countdownCancelled = true">
-            <span class="countdown-in-panel-number">{{ countdownValue }}</span>
-            <div class="countdown-cancel-hint">{{ t('recordingToolbar.pressEscToCancel') }}</div>
-          </div>
           <div class="capsule-settings-panel no-drag">
             <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
                  :title="t('recordingToolbar.clickToDismiss')" @click="clearInlineNotice">
@@ -336,6 +337,12 @@ const audioBitrateKbps = ref(160);
 const qualityPreset = ref('hd');
 const countdownActive = ref(false);
 const countdownValue = ref(3);
+const collapsedShellEl = ref(null);
+const overlayStyle = computed(() => {
+  if (!collapsedShellEl.value) return {};
+  const h = collapsedShellEl.value.offsetHeight;
+  return { top: h + 'px' };
+});
 let countdownCancelled = false;
 const lastTargetType = ref('');
 const lastTargetId = ref('');
@@ -2154,10 +2161,11 @@ button:active:not(:disabled),
 }
 /* 展开时：半透明遮罩覆盖在设置面板上 */
 .countdown-panel-overlay {
-  position: absolute; top: -12px; right: 0; bottom: 0; left: 0; z-index: 10;
+  position: absolute; right: 0; bottom: 0; left: 0; z-index: 10;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   backdrop-filter: blur(8px);
   background: rgba(0, 0, 0, 0.4);
+  border-radius: 0 0 12px 12px;
 }
 .countdown-in-panel-number {
   font-size: 96px; font-weight: 700;
