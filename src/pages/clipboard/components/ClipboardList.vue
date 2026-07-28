@@ -127,8 +127,10 @@ const CARD_STEP = 76  // px between consecutive cards in the strip
 const cardStyle = (index) => {
   const w = containerWidth.value
   const viewCenter = w / 2 - CARD_WIDTH / 2
+  const moving = dragActive || inertiaId
+  const searching = (props.highlightKeyword || '').trim().length > 0
 
-  // Card's left edge — spread out during drag so cards don't block each other
+  // Spread out during drag so cards don't block each other
   const spread = moving ? 1.35 : 1
   const step = CARD_STEP * spread
   const cardX = index * step - scrollPos.value * spread + viewCenter
@@ -136,10 +138,7 @@ const cardStyle = (index) => {
   const distFromCenter = cardCenter - w / 2
   const absDist = Math.abs(distFromCenter)
   const far = absDist > w * 1.2
-  const moving = dragActive || inertiaId
-  const searching = (props.highlightKeyword || '').trim().length > 0
 
-  // During drag: spread cards out so they don't block each other
   const scaleMin = searching ? 0.88 : (moving ? 0.8 : 0.78)
   const scaleDecay = searching ? 0.70 : 0.55
   const opacityMin = searching ? 0.4 : 0.3
