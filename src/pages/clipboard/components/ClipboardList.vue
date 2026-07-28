@@ -7,7 +7,7 @@
           :key="entry.id"
           :class="{ selected: selectedItemId === entry.id, pinned: entry.pinned }"
           :draggable="isCtrlKeyPressed"
-          :style="{ zIndex: entry.zIndex, marginRight: index < stackItems.length - 1 ? (-overlapPx) + 'px' : '0' }"
+          :style="{ zIndex: entry.zIndex, marginLeft: index > 0 ? (-overlapPx) + 'px' : '0' }"
           class="clipboard-item"
           @click="handleClick(entry.id)"
           @dblclick="handleDoubleClick(entry.id)"
@@ -219,6 +219,7 @@ defineExpose({contentRef})
 .cards-stack {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   flex: 1;
   min-height: 0;
   padding: 0 20px;
