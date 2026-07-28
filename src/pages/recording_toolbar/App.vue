@@ -73,12 +73,11 @@
           </button>
         </div>
         <div class="capsule-settings-panel-wrapper" :class="{ 'is-open': capsuleSettingsVisible }">
+          <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-panel-overlay" @click.stop="countdownCancelled = true">
+            <span class="countdown-in-panel-number">{{ countdownValue }}</span>
+            <div class="countdown-cancel-hint">{{ t('recordingToolbar.pressEscToCancel') }}</div>
+          </div>
           <div class="capsule-settings-panel no-drag">
-            <!-- 设置展开时：半透明遮罩覆盖在设置内容上显示倒计时 -->
-            <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-panel-overlay" @click.stop="countdownCancelled = true">
-              <span class="countdown-in-panel-number">{{ countdownValue }}</span>
-              <div class="countdown-cancel-hint">{{ t('recordingToolbar.pressEscToCancel') }}</div>
-            </div>
             <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
                  :title="t('recordingToolbar.clickToDismiss')" @click="clearInlineNotice">
               {{ inlineNotice }}
@@ -1671,6 +1670,7 @@ body {
 }
 
 .capsule-settings-panel-wrapper {
+  position: relative;
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows 0.18s ease-out,
