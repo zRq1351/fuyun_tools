@@ -27,7 +27,7 @@
               @click.stop="toggleRecordingState"
           >
             <span class="collapsed-pill-content">
-              <span v-if="countdownActive" class="collapsed-countdown-num">{{ countdownValue }}</span>
+              <span v-if="countdownActive && !capsuleSettingsVisible" class="collapsed-countdown-num">{{ countdownValue }}</span>
               <template v-else>
               <span
                   v-if="currentRecordingState === 'recording'"
