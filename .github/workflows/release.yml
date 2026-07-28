@@ -56,6 +56,8 @@ jobs:
         with:
           path: D:\vcpkg
           key: vcpkg-opencv-${{ runner.os }}-static-md-v1
+          restore-keys: |
+            vcpkg-opencv-${{ runner.os }}-static-md
 
       - name: 安装 vcpkg 并集成
         if: steps.cache-vcpkg.outputs.cache-hit != 'true'
