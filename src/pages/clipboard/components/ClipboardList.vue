@@ -204,10 +204,10 @@ const selectedIndex = computed(() => {
 
 // Keep scrollPos synced with external selection changes
 const syncScrollToSelection = () => {
-  const idx = selectedIndex.value
-  const w = containerWidth.value
-  const viewCenter = w / 2 - CARD_WIDTH / 2
-  scrollPos.value = idx * CARD_STEP - viewCenter
+  const idx = props.visibleHistory.findIndex(e => e.id === props.selectedItemId)
+  if (idx >= 0) {
+    scrollPos.value = idx * CARD_STEP
+  }
 }
 
 const onStageMouseDown = (e) => {
@@ -241,11 +241,9 @@ const onStageMouseUp = () => {
   skipNextClick = true
 
   // Snap to nearest card
-  const w = containerWidth.value
-  const viewCenter = w / 2 - CARD_WIDTH / 2
   const nearestIdx = Math.max(0, Math.min(props.visibleHistory.length - 1,
-    Math.round((viewCenter - scrollPos.value) / CARD_STEP)))
-  scrollPos.value = nearestIdx * CARD_STEP - viewCenter
+    Math.round(scrollPos.value / CARD_STEP)))
+  scrollPos.value = nearestIdx * CARD_STEP
   navigateTo(nearestIdx)
 }
 
@@ -260,7 +258,7 @@ const handleClick = (entryId) => {
 const navigateTo = (idx) => {
   const id = props.visibleHistory[idx]?.id
   if (id) {
-    scrollPos.value = idx * CARD_STEP - (containerWidth.value / 2 - CARD_WIDTH / 2)
+    scrollPos.value = idx * CARD_STEP
     props.updateSelection(id, false, null, null)
   }
 }
@@ -270,7 +268,7 @@ watch(() => props.selectedItemId, () => {
   if (dragActive) return
   const idx = props.visibleHistory.findIndex(e => e.id === props.selectedItemId)
   if (idx >= 0) {
-    scrollPos.value = idx * CARD_STEP - (containerWidth.value / 2 - CARD_WIDTH / 2)
+    scrollPos.value = idx * CARD_STEP
   }
 })
 
