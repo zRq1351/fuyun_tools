@@ -3,6 +3,7 @@ use crate::core::config::{CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN, CTRL_KEY};
 use crate::core::error_codes::AppErrorKind;
 use crate::sync::{lock_arc_mutex, Mutex};
 use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex};
 use std::thread;
 use std::time::Duration;
