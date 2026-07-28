@@ -96,7 +96,6 @@
         :update-selection="updateSelection"
         :has-more="hasMore"
         :is-loading-page="isLoadingPage"
-        @content-scroll="tryLoadMoreByScroll"
         @load-more-intent="handleLoadMoreIntent"
         @preview="handlePreview"
         :visible-history="visibleHistory"

@@ -1,72 +1,58 @@
 <template>
-  <div
-      ref="contentRef"
-      class="content"
-      @mousedown="onMouseDown"
-      @scroll="onScroll"
-  >
-    <RecycleScroller
-        ref="scrollerRef"
-        :buffer="SCROLL_BUFFER"
-        :item-size="SCROLL_ITEM_SIZE"
-        :items="scrollerItems"
-        class="scroll-track"
-        direction="horizontal"
-        key-field="id"
-        @scroll.passive="onScroll"
-    >
-      <template #default="{ item: scrollerItem }">
-        <div
-            :id="'clipboard-item-' + scrollerItem.id"
-            :class="{ selected: selectedItemId === scrollerItem.id, pinned: isPinned(scrollerItem.id) }"
-            :draggable="isCtrlKeyPressed"
-            :style="{ zIndex: scrollerItem.zIndex }"
-            class="clipboard-item"
-            @click="handleClick(scrollerItem.id)"
-            @dblclick="handleDoubleClick(scrollerItem.id)"
-            @dragend="handleDragEnd"
-            @dragstart="handleItemDragStart($event, scrollerItem.id)"
-            @contextmenu.prevent="showContextMenu($event, scrollerItem.id, scrollerItem.entryIndex)"
-        >
-          <div class="item-header">
-            <span class="item-index">{{ scrollerItem.displayIndex + 1 }}</span>
-            <span class="item-category" @click.stop>{{ translateCategory(getItemCategory(scrollerItem.id)) }}</span>
-            <div v-if="isPinned(scrollerItem.id)" class="item-pinned-dot"></div>
-            <div class="item-actions">
-              <div v-if="isWebUrl(scrollerItem.content)" class="action-btn"
-                   @click.stop="openWebUrl(scrollerItem.content)">
-                <Link :size="9"/>
-              </div>
-              <div class="action-btn" @click.stop="emit('preview', scrollerItem.content, scrollerItem.id)">
-                <View :size="9"/>
-              </div>
-              <div :class="{ active: isPinned(scrollerItem.id) }" class="action-btn"
-                   @click.stop="promoteItem(scrollerItem.id)">
-                <Star :size="9"/>
-              </div>
-              <div class="action-btn action-delete" @click.stop="deleteItem(scrollerItem.id)">
-                <Close :size="9"/>
-              </div>
+  <div ref="contentRef" class="content">
+    <div ref="stackRef" class="cards-stack">
+      <div
+          v-for="(entry, index) in stackItems"
+          :id="'clipboard-item-' + entry.id"
+          :key="entry.id"
+          :class="{ selected: selectedItemId === entry.id, pinned: entry.pinned }"
+          :draggable="isCtrlKeyPressed"
+          :style="{ zIndex: entry.zIndex, marginRight: index < stackItems.length - 1 ? (-overlapPx) + 'px' : '0' }"
+          class="clipboard-item"
+          @click="handleClick(entry.id)"
+          @dblclick="handleDoubleClick(entry.id)"
+          @dragend="handleDragEnd"
+          @dragstart="handleItemDragStart($event, entry.id)"
+          @contextmenu.prevent="showContextMenu($event, entry.id, index)"
+      >
+        <div class="item-header">
+          <span class="item-index">{{ index + 1 }}</span>
+          <span class="item-category" @click.stop>{{ translateCategory(getItemCategory(entry.id)) }}</span>
+          <div v-if="entry.pinned" class="item-pinned-dot"></div>
+          <div class="item-actions">
+            <div v-if="isWebUrl(entry.content)" class="action-btn"
+                 @click.stop="openWebUrl(entry.content)">
+              <Link :size="9"/>
+            </div>
+            <div class="action-btn" @click.stop="emit('preview', entry.content, entry.id)">
+              <View :size="9"/>
+            </div>
+            <div :class="{ active: entry.pinned }" class="action-btn"
+                 @click.stop="promoteItem(entry.id)">
+              <Star :size="9"/>
+            </div>
+            <div class="action-btn action-delete" @click.stop="deleteItem(entry.id)">
+              <Close :size="9"/>
             </div>
           </div>
-          <div class="item-body">
-            <FormattedContent :content="scrollerItem.content"/>
-          </div>
-          <div v-if="scrollerItem.snippet" class="item-snippet">
-            <template v-for="(part, partIndex) in renderHighlightParts(scrollerItem.snippet)" :key="partIndex">
-              <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
-              <span v-else>{{ part.text }}</span>
-            </template>
-          </div>
         </div>
-      </template>
-    </RecycleScroller>
+        <div class="item-body">
+          <FormattedContent :content="entry.content"/>
+        </div>
+        <div v-if="entry.snippet" class="item-snippet">
+          <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
+            <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
+            <span v-else>{{ part.text }}</span>
+          </template>
+        </div>
+      </div>
+    </div>
 
-    <div v-if="showTailLoadMoreHint" class="load-more">
+    <div v-if="showLoadMoreHint" class="load-more-bar">
       <el-icon v-if="isLoadingMore" :size="14" class="is-loading">
         <Loading/>
       </el-icon>
-      <span class="load-more-text">
+      <span class="load-more-text" @click="emit('load-more-intent')">
         {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
       </span>
     </div>
@@ -74,15 +60,17 @@
 </template>
 
 <script setup>
-import {computed, onMounted, onUnmounted, ref} from 'vue'
+import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import {Close, Link, Loading, Star, View} from '@element-plus/icons-vue'
 import {openUrl as openExternalUrl} from '@tauri-apps/plugin-opener'
 import {useI18n} from 'vue-i18n'
-import {RecycleScroller} from 'vue-virtual-scroller'
-import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import FormattedContent from '../../../components/FormattedContent.vue'
 
 const {t} = useI18n()
+
+const CARD_WIDTH = 260
+const MIN_PEEK = 24
+const MAX_OVERLAP = 220
 
 const CATEGORY_TRANSLATIONS = {
   '未分类': () => t('common.uncategorized'),
@@ -93,9 +81,6 @@ const translateCategory = (category) => {
   const translator = CATEGORY_TRANSLATIONS[category]
   return translator ? translator() : category
 }
-
-const SCROLL_ITEM_SIZE = 80
-const SCROLL_BUFFER = 480
 
 const props = defineProps({
   visibleHistory: {type: Array, required: true},
@@ -114,135 +99,55 @@ const props = defineProps({
   hasMore: {type: Boolean, default: false},
   isLoadingPage: {type: Boolean, default: false}
 })
-const emit = defineEmits(['content-scroll', 'load-more-intent', 'preview'])
+const emit = defineEmits(['load-more-intent', 'preview'])
 
 const contentRef = ref(null)
-const scrollerRef = ref(null)
+const stackRef = ref(null)
+const containerWidth = ref(0)
 
-const getScrollEl = () => {
-  if (!scrollerRef.value?.$el) return null
-  return scrollerRef.value.$el.querySelector('.vue-recycle-scroller') || scrollerRef.value.$el
-}
+let resizeObserver = null
 
-const scrollerItems = computed(() => {
+const stackItems = computed(() => {
   const total = props.visibleHistory.length
   return props.visibleHistory.map((entry, index) => ({
-    id: entry.id,
-    content: entry.content,
+    ...entry,
     snippet: entry.snippet || '',
-    entryIndex: index,
-    displayIndex: index,
+    pinned: props.isPinned(entry.id),
     zIndex: total - index,
   }))
 })
 
-let isDown = false
-let isDragging = false
-let startX = 0
-let scrollLeftStart = 0
-let dragRafId = 0
-
-const stopDragging = () => {
-  if (!isDown) return
-  isDown = false
-  isDragging = false
-  if (dragRafId) {
-    cancelAnimationFrame(dragRafId)
-    dragRafId = 0
-  }
-  document.body.style.removeProperty('user-select')
-  window.removeEventListener('mousemove', onMouseMove)
-  window.removeEventListener('mouseup', onMouseUp)
-}
-
-const onMouseDown = (e) => {
-  // Ignore clicks on action buttons
-  if (e.target.closest('.action-btn')) return
-
-  isDown = true
-  isDragging = false
-  startX = e.pageX
-  scrollLeftStart = getScrollEl()?.scrollLeft || 0
-
-  window.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('mouseup', onMouseUp)
-}
-
-const onMouseMove = (e) => {
-  if (!isDown) return
-  const el = getScrollEl()
-  if (!el) return
-
-  const walk = e.pageX - startX
-
-  // Start dragging after threshold
-  if (!isDragging && Math.abs(walk) > 4) {
-    isDragging = true
-    document.body.style.userSelect = 'none'
-    if (window.getSelection) window.getSelection().removeAllRanges()
-  }
-
-  if (!isDragging) return
-
-  e.preventDefault()
-  const newScroll = scrollLeftStart - walk
-  const max = Math.max(0, el.scrollWidth - el.clientWidth)
-
-  // Trigger load more when near end
-  if (newScroll >= max - 160 && props.hasMore && !props.isLoadingPage) {
-    emit('load-more-intent')
-  }
-
-  // Throttle scroll updates with RAF
-  if (!dragRafId) {
-    dragRafId = requestAnimationFrame(() => {
-      dragRafId = 0
-      el.scrollLeft = newScroll
-    })
-  }
-}
-
-const onMouseUp = () => stopDragging()
-
-onMounted(() => {
-  window.addEventListener('blur', stopDragging)
-})
-onUnmounted(() => {
-  stopDragging()
-  window.removeEventListener('blur', stopDragging)
+const overlapPx = computed(() => {
+  const count = stackItems.value.length
+  if (count <= 1) return 0
+  const w = containerWidth.value || 800
+  // Calculate overlap so all cards fit in container
+  // Total width = CARD_WIDTH + (count-1)*(CARD_WIDTH - overlap)
+  // overlap = CARD_WIDTH - (w - CARD_WIDTH) / (count-1)
+  const calc = CARD_WIDTH - (w - CARD_WIDTH - 40) / (count - 1)
+  return Math.round(Math.min(MAX_OVERLAP, Math.max(MIN_PEEK, calc)))
 })
 
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
+const showLoadMoreHint = computed(() => props.hasMore || isLoadingMore.value)
 
-const showTailLoadMoreHint = computed(() => (props.hasMore || isLoadingMore.value) && props.visibleHistory.length > 0)
-
-const onScroll = () => {
-  emit('content-scroll')
-}
+const handleClick = (entryId) => props.updateSelection(entryId, false, null, null)
+const handleDoubleClick = (entryId) => props.selectAndFillDirect(entryId)
 
 const renderHighlightParts = (text) => {
   const value = typeof text === 'string' ? text : ''
   const keyword = (props.highlightKeyword || '').trim()
-
-  // Fast path: no keyword or empty text
   if (!value || !keyword) return [{text: value, hit: false}]
-
-  // Parse and dedupe tokens, sort by length descending for greedy matching
   const tokens = Array.from(new Set(keyword.split(/\s+/).map(v => v.trim()).filter(Boolean)))
       .sort((a, b) => b.length - a.length)
-
   if (tokens.length === 0) return [{text: value, hit: false}]
-
   const sourceLower = value.toLowerCase()
   const tokenLowers = tokens.map(t => t.toLowerCase())
   const out = []
   let start = 0
-
   while (start < value.length) {
     let bestIndex = -1
     let bestTokenLength = 0
-
-    // Find earliest and longest matching token
     for (let i = 0; i < tokenLowers.length; i++) {
       const idx = sourceLower.indexOf(tokenLowers[i], start)
       if (idx === -1) continue
@@ -251,32 +156,20 @@ const renderHighlightParts = (text) => {
         bestTokenLength = tokenLowers[i].length
       }
     }
-
-    if (bestIndex === -1) {
-      out.push({text: value.slice(start), hit: false})
-      break
-    }
-
-    if (bestIndex > start) {
-      out.push({text: value.slice(start, bestIndex), hit: false})
-    }
-
+    if (bestIndex === -1) { out.push({text: value.slice(start), hit: false}); break }
+    if (bestIndex > start) out.push({text: value.slice(start, bestIndex), hit: false})
     out.push({text: value.slice(bestIndex, bestIndex + bestTokenLength), hit: true})
     start = bestIndex + bestTokenLength
   }
-
   return out.length > 0 ? out : [{text: value, hit: false}]
 }
 
 const handleItemDragStart = (e, id) => {
   if (typeof props.handleDragStart === 'function') props.handleDragStart(e, id)
 }
-const handleClick = (entryId) => props.updateSelection(entryId, false, getScrollEl(), null)
-const handleDoubleClick = (entryId) => props.selectAndFillDirect(entryId)
 
 const isWebUrl = (v) => {
   if (!v) return false
-  const t = v.trim()
   return /^https?:\/\/\S+$/i.test(t) || /^www\.\S+$/i.test(t)
 }
 const normalizeUrl = (v) => {
@@ -286,14 +179,30 @@ const normalizeUrl = (v) => {
   return t
 }
 const openWebUrl = async (v) => {
-  try {
-    if (isWebUrl(v)) await openExternalUrl(normalizeUrl(v))
-  } catch (e) {
-    console.error('打开网址失败:', e)
+  try { if (isWebUrl(v)) await openExternalUrl(normalizeUrl(v)) }
+  catch (e) { console.error('打开网址失败:', e) }
+}
+
+const measureWidth = () => {
+  if (contentRef.value) {
+    containerWidth.value = contentRef.value.clientWidth
   }
 }
 
-defineExpose({contentRef, scrollerRef, getScrollEl})
+onMounted(() => {
+  measureWidth()
+  resizeObserver = new ResizeObserver(() => measureWidth())
+  if (contentRef.value) resizeObserver.observe(contentRef.value)
+})
+
+onBeforeUnmount(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+})
+
+defineExpose({contentRef})
 </script>
 
 <style scoped>
@@ -301,30 +210,19 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
   flex: 1;
   min-width: 0;
   min-height: 0;
-  cursor: grab;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   perspective: 800px;
 }
 
-.scroll-track {
-  width: 100%;
-  height: 100%;
-}
-
-.scroll-track :deep(.vue-recycle-scroller) {
-  height: 100%;
-  overflow: visible !important;
-}
-
-.scroll-track :deep(.vue-recycle-scroller__item-wrapper) {
-  display: inline-flex;
+.cards-stack {
+  display: flex;
   align-items: center;
-  padding: 0 0 0 20px;
-  gap: 0;
-  height: 100%;
-}
-
-.scroll-track :deep(.vue-recycle-scroller__item-view) {
-  overflow: visible !important;
+  flex: 1;
+  min-height: 0;
+  padding: 0 20px;
+  overflow: hidden;
 }
 
 .clipboard-item {
@@ -335,7 +233,6 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
   height: 250px;
   white-space: normal;
   flex-shrink: 0;
-  margin-right: -180px;
   background: var(--fy-glass-bg);
   border: 0.5px solid var(--fy-glass-border);
   border-radius: 14px;
@@ -346,32 +243,29 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
   backdrop-filter: var(--fy-glass-blur);
   -webkit-backdrop-filter: var(--fy-glass-blur);
   color: var(--fy-text-primary);
-  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.12), 0 4px 16px rgba(0, 0, 0, 0.08);
-  transition: transform 0.25s var(--fy-ease-out),
-              box-shadow 0.25s var(--fy-ease-out),
-              margin-top 0.25s var(--fy-ease-out),
-              background 0.2s ease,
-              border-color 0.2s ease;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.1),
+              0 4px 16px rgba(0, 0, 0, 0.06);
+  transition: transform 0.3s var(--fy-ease-out),
+              box-shadow 0.3s var(--fy-ease-out),
+              margin-top 0.3s var(--fy-ease-out);
   overflow: hidden;
 }
 
-.clipboard-item:last-child {
-  margin-right: 0;
-}
-
 .clipboard-item:hover {
-  background: var(--fy-glass-bg);
+  background: var(--fy-bg-surface);
   border-color: var(--fy-border-hover);
-  transform: translateY(-6px);
-  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.18), 0 8px 24px rgba(0, 0, 0, 0.15);
+  transform: translateY(-8px) scale(1.02);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15),
+              0 8px 28px rgba(0, 0, 0, 0.12);
   z-index: 1000 !important;
 }
 
 .clipboard-item.selected {
   background: var(--fy-accent-bg);
   border-color: var(--fy-border-active);
-  transform: translateY(-6px);
-  box-shadow: -4px 0 20px rgba(108, 140, 255, 0.15), 0 8px 24px rgba(0, 0, 0, 0.15);
+  transform: translateY(-8px) scale(1.02);
+  box-shadow: -4px 0 24px rgba(108, 140, 255, 0.12),
+              0 8px 28px rgba(0, 0, 0, 0.12);
   z-index: 1000 !important;
 }
 
@@ -393,7 +287,7 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
 
 .clipboard-item:hover .item-index {
   opacity: 1;
-  color: var(--fy-accent)
+  color: var(--fy-accent);
 }
 
 .item-category {
@@ -409,7 +303,7 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
 }
 
 .clipboard-item:hover .item-category {
-  opacity: 1
+  opacity: 1;
 }
 
 .item-pinned-dot {
@@ -431,7 +325,7 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
 
 .clipboard-item:hover .item-actions,
 .clipboard-item.selected .item-actions {
-  opacity: 1
+  opacity: 1;
 }
 
 .action-btn {
@@ -477,7 +371,7 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
 }
 
 .item-body::-webkit-scrollbar {
-  display: none
+  display: none;
 }
 
 .item-snippet {
@@ -492,6 +386,7 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
   max-height: 40px;
   overflow: hidden;
 }
+
 .snippet-hit {
   background: var(--fy-accent-bg);
   color: var(--fy-accent);
@@ -499,22 +394,24 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
   padding: 0 2px;
 }
 
-.load-more {
-  display: inline-flex;
-  flex-direction: column;
+.load-more-bar {
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 60px;
-  height: 250px;
-  gap: 4px;
+  gap: 6px;
+  padding: 8px 0;
   flex-shrink: 0;
   color: var(--fy-text-muted);
-  user-select: none;
-  margin-left: 10px;
+  font-size: var(--fy-text-sm);
+  border-top: 0.5px solid var(--fy-border-light);
+  cursor: pointer;
 }
 
 .load-more-text {
-  font-size: 10px;
-  color: var(--fy-text-muted);
+  font-size: 12px;
+}
+
+.load-more-text:hover {
+  color: var(--fy-accent);
 }
 </style>
