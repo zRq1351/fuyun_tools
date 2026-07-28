@@ -258,6 +258,12 @@ onMounted(async () => {
     resetViewTransform()
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        // Prefer base64 data URL (reliable in production)
+        if (payload.base64 && payload.mime) {
+          imageUrl.value = `data:${payload.mime};base64,${payload.base64}`
+          return
+        }
+        // Fallback: asset protocol URL
         const nextUrl = buildFileUrlFromPath(payload.image_path)
         imageUrl.value = nextUrl
         if (!nextUrl) {

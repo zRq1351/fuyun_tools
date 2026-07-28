@@ -2,6 +2,7 @@ use crate::core::app_state::{AppState, ForegroundTargetSnapshot, OverlayLifecycl
 use crate::core::config::{CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN, CTRL_KEY};
 use crate::core::error_codes::AppErrorKind;
 use crate::sync::{lock_arc_mutex, Mutex};
+use base64::engine::general_purpose::STANDARD as BASE64;
 use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex};
 use std::thread;
 use std::time::Duration;
@@ -602,9 +603,27 @@ pub fn show_image_preview_window(
     let window = ensure_image_preview_window(&app_handle)?;
     prepare_image_preview_window(&window)?;
 
+    let ext = std::path::Path::new(&image_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+    let mime = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "gif" => "image/gif",
+        _ => "image/png",
+    };
+    let base64 = std::fs::read(&image_path)
+        .map(|bytes| BASE64.encode(&bytes))
+        .unwrap_or_default();
+
     let payload = serde_json::json!({
         "request_id": request_id,
         "image_path": image_path,
+        "base64": base64,
+        "mime": mime,
         "is_final": true
     });
     let _ = window.set_always_on_top(false);
