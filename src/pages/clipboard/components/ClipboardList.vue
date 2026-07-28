@@ -122,6 +122,7 @@ const cardStyle = (index) => {
   const cardCenter = cardX + CARD_WIDTH / 2
   const distFromCenter = cardCenter - w / 2
   const absDist = Math.abs(distFromCenter)
+  const far = absDist > w * 1.2
 
   // Scale / opacity based on distance from viewport center
   const scale = Math.max(0.68, 1 - absDist / (w * 0.45))
@@ -129,14 +130,18 @@ const cardStyle = (index) => {
   const zIndex = 100 - Math.floor(absDist / CARD_STEP) * 5
 
   return {
-    left: cardX + 'px',
+    left: '0px',
     top: '50%',
     width: CARD_WIDTH + 'px',
     height: CARD_HEIGHT + 'px',
-    transform: `translateY(-50%) scale(${scale})`,
+    // GPU-composited: translateX instead of left avoids layout thrashing
+    transform: `translateX(${cardX}px) translateY(-50%) scale(${scale})`,
     opacity,
     zIndex,
     transition: dragActive ? 'none' : undefined,
+    // Disable expensive backdrop-filter for far-away cards
+    backdropFilter: far ? 'none' : undefined,
+    WebkitBackdropFilter: far ? 'none' : undefined,
   }
 }
 
@@ -386,6 +391,7 @@ defineExpose({contentRef})
 
 .clipboard-item {
   position: absolute;
+  left: 0;
   display: flex;
   flex-direction: column;
   width: 260px;
@@ -401,12 +407,12 @@ defineExpose({contentRef})
   -webkit-backdrop-filter: var(--fy-glass-blur);
   color: var(--fy-text-primary);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-  transition: left 0.4s var(--fy-ease-out),
-              transform 0.4s var(--fy-ease-out),
+  transition: transform 0.4s var(--fy-ease-out),
               opacity 0.4s var(--fy-ease-out),
               box-shadow 0.3s ease;
   overflow: hidden;
-  will-change: transform, opacity, left;
+  contain: layout style paint;
+  will-change: transform, opacity;
 }
 
 .clipboard-item.selected {
