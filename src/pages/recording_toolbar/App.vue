@@ -1,6 +1,7 @@
 <template>
+  <!-- 设置收起时的全屏倒计时 -->
   <div
-      v-if="countdownActive"
+      v-if="countdownActive && !capsuleSettingsVisible"
       class="countdown-overlay"
   >
     <div class="countdown-number">{{ countdownValue }}</div>
@@ -77,6 +78,11 @@
         </div>
         <div class="capsule-settings-panel-wrapper" :class="{ 'is-open': capsuleSettingsVisible }">
           <div class="capsule-settings-panel no-drag">
+            <!-- 设置展开时的内嵌倒计时 -->
+            <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-in-panel">
+              <span class="countdown-in-panel-number">{{ countdownValue }}</span>
+            </div>
+            <template v-if="!countdownActive || !capsuleSettingsVisible">
             <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
                  :title="t('recordingToolbar.clickToDismiss')" @click="clearInlineNotice">
               {{ inlineNotice }}
@@ -279,6 +285,7 @@
                 @change="onToolbarSettingChange('recordingDefaultAudioBitrateKbps', $event)"
             />
           </div>
+            </template>
         </div>
       </div>
     </div>
@@ -682,9 +689,11 @@ const toggleRecordingState = async () => {
               : null;
 
       isMicMuted.value = true;
-      // 3 秒倒计时 — 临时扩大窗口确保全屏可见
+      // 倒计时：收起时扩大窗口，展开时在面板内显示
       countdownActive.value = true;
-      await RecordingService.resizeToolbar(false, false, false, 'expanded', false, 300, 400);
+      if (!capsuleSettingsVisible.value) {
+        await RecordingService.resizeToolbar(false, false, false, 'expanded', false, 300, 400);
+      }
       for (let i = 3; i >= 1; i--) {
         countdownValue.value = i;
         await new Promise((r) => setTimeout(r, 1000));
@@ -2131,5 +2140,14 @@ button:active:not(:disabled),
   font-size: 15px;
   width: 36px;
   flex: 0 0 auto;
+}
+.countdown-in-panel {
+  display: flex; align-items: center; justify-content: center;
+  height: 200px;
+}
+.countdown-in-panel-number {
+  font-size: 96px; font-weight: 700;
+  color: var(--fy-text-primary);
+  animation: countdown-pop 0.5s ease-out;
 }
 </style>
