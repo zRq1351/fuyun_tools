@@ -2148,7 +2148,7 @@ dependencies = [
 
 [[package]]
 name = "fuyun_tools"
-version = "0.8.21"
+version = "0.8.22"
 dependencies = [
  "ab_glyph",
  "aes-gcm",
