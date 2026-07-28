@@ -123,6 +123,7 @@ const cardStyle = (index) => {
   const distFromCenter = cardCenter - w / 2
   const absDist = Math.abs(distFromCenter)
   const far = absDist > w * 1.2
+  const moving = dragActive || inertiaId  // disable blur during motion for perf
 
   // Scale / opacity based on distance from viewport center
   const scale = Math.max(0.68, 1 - absDist / (w * 0.45))
@@ -134,14 +135,14 @@ const cardStyle = (index) => {
     top: '50%',
     width: CARD_WIDTH + 'px',
     height: CARD_HEIGHT + 'px',
-    // GPU-composited: translateX instead of left avoids layout thrashing
     transform: `translateX(${cardX}px) translateY(-50%) scale(${scale})`,
     opacity,
     zIndex,
     transition: dragActive ? 'none' : undefined,
-    // Disable expensive backdrop-filter for far-away cards
-    backdropFilter: far ? 'none' : undefined,
-    WebkitBackdropFilter: far ? 'none' : undefined,
+    // Solid bg during motion, glass only when stationary — massive perf win
+    background: (moving || far) ? 'var(--fy-bg-surface)' : undefined,
+    backdropFilter: (moving || far) ? 'none' : undefined,
+    WebkitBackdropFilter: (moving || far) ? 'none' : undefined,
   }
 }
 
