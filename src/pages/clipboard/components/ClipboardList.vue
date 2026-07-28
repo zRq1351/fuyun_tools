@@ -20,6 +20,7 @@
             :id="'clipboard-item-' + scrollerItem.id"
             :class="{ selected: selectedItemId === scrollerItem.id, pinned: isPinned(scrollerItem.id) }"
             :draggable="isCtrlKeyPressed"
+            :style="{ zIndex: scrollerItem.zIndex }"
             class="clipboard-item"
             @click="handleClick(scrollerItem.id)"
             @dblclick="handleDoubleClick(scrollerItem.id)"
@@ -93,8 +94,8 @@ const translateCategory = (category) => {
   return translator ? translator() : category
 }
 
-const SCROLL_ITEM_SIZE = 270
-const SCROLL_BUFFER = 540
+const SCROLL_ITEM_SIZE = 80
+const SCROLL_BUFFER = 480
 
 const props = defineProps({
   visibleHistory: {type: Array, required: true},
@@ -124,12 +125,14 @@ const getScrollEl = () => {
 }
 
 const scrollerItems = computed(() => {
+  const total = props.visibleHistory.length
   return props.visibleHistory.map((entry, index) => ({
     id: entry.id,
     content: entry.content,
     snippet: entry.snippet || '',
     entryIndex: index,
     displayIndex: index,
+    zIndex: total - index,
   }))
 })
 
@@ -186,7 +189,7 @@ const onMouseMove = (e) => {
   const max = Math.max(0, el.scrollWidth - el.clientWidth)
 
   // Trigger load more when near end
-  if (newScroll >= max - 260 && props.hasMore && !props.isLoadingPage) {
+  if (newScroll >= max - 160 && props.hasMore && !props.isLoadingPage) {
     emit('load-more-intent')
   }
 
@@ -299,6 +302,7 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
   min-width: 0;
   min-height: 0;
   cursor: grab;
+  perspective: 800px;
 }
 
 .scroll-track {
@@ -308,45 +312,67 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
 
 .scroll-track :deep(.vue-recycle-scroller) {
   height: 100%;
+  overflow: visible !important;
 }
 
 .scroll-track :deep(.vue-recycle-scroller__item-wrapper) {
   display: inline-flex;
   align-items: center;
-  padding: 0 0 0 14px;
-  gap: 10px;
+  padding: 0 0 0 20px;
+  gap: 0;
   height: 100%;
+}
+
+.scroll-track :deep(.vue-recycle-scroller__item-view) {
+  overflow: visible !important;
 }
 
 .clipboard-item {
   display: inline-flex;
   flex-direction: column;
   width: 260px;
+  min-width: 260px;
   height: 250px;
   white-space: normal;
   flex-shrink: 0;
-  background: var(--fy-bg-card);
-  border: 0.5px solid var(--fy-border);
+  margin-right: -180px;
+  background: var(--fy-glass-bg);
+  border: 0.5px solid var(--fy-glass-border);
   border-radius: 14px;
   padding: 0;
   cursor: pointer;
   position: relative;
   user-select: none;
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: var(--fy-glass-blur);
+  -webkit-backdrop-filter: var(--fy-glass-blur);
   color: var(--fy-text-primary);
-  transition: all 0.2s ease;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.12), 0 4px 16px rgba(0, 0, 0, 0.08);
+  transition: transform 0.25s var(--fy-ease-out),
+              box-shadow 0.25s var(--fy-ease-out),
+              margin-top 0.25s var(--fy-ease-out),
+              background 0.2s ease,
+              border-color 0.2s ease;
   overflow: hidden;
 }
 
+.clipboard-item:last-child {
+  margin-right: 0;
+}
+
 .clipboard-item:hover {
-  background: var(--fy-bg-hover);
+  background: var(--fy-glass-bg);
   border-color: var(--fy-border-hover);
+  transform: translateY(-6px);
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.18), 0 8px 24px rgba(0, 0, 0, 0.15);
+  z-index: 1000 !important;
 }
 
 .clipboard-item.selected {
   background: var(--fy-accent-bg);
   border-color: var(--fy-border-active);
+  transform: translateY(-6px);
+  box-shadow: -4px 0 20px rgba(108, 140, 255, 0.15), 0 8px 24px rgba(0, 0, 0, 0.15);
+  z-index: 1000 !important;
 }
 
 .item-header {
@@ -478,11 +504,13 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 48px;
+  width: 60px;
   height: 250px;
   gap: 4px;
+  flex-shrink: 0;
   color: var(--fy-text-muted);
   user-select: none;
+  margin-left: 10px;
 }
 
 .load-more-text {
