@@ -927,7 +927,7 @@ onBeforeUnmount(() => {
   -webkit-backdrop-filter: var(--fy-backdrop-blur);
   border: 0.5px solid var(--fy-container-border);
   box-shadow: var(--fy-shadow-lg);
-  overflow: hidden;
+  overflow: visible;
   outline: none;
   transition: background 0.3s ease, border-color 0.3s ease;
 }

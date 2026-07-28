@@ -129,7 +129,7 @@ const cardStyle = (index) => {
   // Scale / opacity based on distance from viewport center
   const scale = Math.max(0.78, 1 - absDist / (w * 0.55))
   const opacity = Math.max(0.3, 1 - absDist / (w * 0.85))
-  const zIndex = 100 - Math.floor(absDist / CARD_STEP) * 5
+  const zIndex = 200 - Math.floor(absDist / CARD_STEP) * 5
 
   return {
     left: '0px',
@@ -378,14 +378,14 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .carousel-stage {
   flex: 1;
   min-height: 0;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   perspective: 1000px;
   cursor: grab;
 }
