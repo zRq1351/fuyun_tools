@@ -1,14 +1,22 @@
 ---
 feature: ui-beautification
-status: in-progress
+status: delivered
 updated: 2026-07-28
 branch: feat/ui-beautification
-commits: # filled at delivery
+commits: 878fdc2..8e7e32d
 ---
 
 # UI Beautification
 
 ## Report
+
+**What was built** — Replaced all hardcoded `rgba(255,255,255,*)` and `rgba(0,0,0,*)` color values in 11 component style sheets with theme-aware CSS custom properties (`var(--fy-*)`). This ensures all UI elements render correctly across dark, light, and eye-care themes. Key areas: clipboard toolbar category pills now use `--fy-bg-hover`/`--fy-border`/`--fy-accent-bg`; clipboard cards use `--fy-bg-card`/`--fy-border` with accent states; all sortable drag shadows use `--fy-shadow`/`--fy-shadow-lg`; search inputs gained a subtle focus ring; category pill active state improved with `--fy-text-inverse` for proper contrast on accent background. Dialog box shadows across launcher components now use the theme-shadow tokens. The SelectionSettings warning prompt background and border were also corrected to use theme tokens.
+
+**Verification** — `vite build`: PASS (3764 modules, 8.56s, zero errors). Reviewer confirmed all spec requirements met with no critical findings.
+
+**Journey log** — 
+- The `--fy-shadow-xs` through `--fy-shadow-xl` tokens (defined in `:root`) are not theme-aware — they use fixed `rgba(0,0,0,*)` values. Used `--fy-shadow`/`--fy-shadow-lg` instead, which DO have per-theme values. This is a latent inconsistency in the theme system worth addressing separately.
+- S2.4 (category pill design) took precedence over the general S2.1 mapping table for pill backgrounds, using `--fy-bg-hover` instead of `--fy-bg-surface`. The spec table described the general pattern; the specific design section was the correct authority.
 
 ## [S1] Problem
 
