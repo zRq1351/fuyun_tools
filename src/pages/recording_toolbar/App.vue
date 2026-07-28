@@ -111,6 +111,15 @@
               >
                 {{ t('recordingToolbar.region') }}
               </button>
+              <button
+                  v-if="lastTargetType && lastTargetType !== 'screen'"
+                  class="target-mode-btn target-repeat-btn"
+                  :disabled="!canEditRecordingConfig"
+                  :title="t('recordingToolbar.repeatLastTarget')"
+                  @click="onRepeatLastTarget"
+              >
+                ↻
+              </button>
             </div>
           </div>
           <div v-if="recordTargetType === 'window'" class="toolbar-settings-row">
@@ -326,6 +335,8 @@ const audioBitrateKbps = ref(160);
 const qualityPreset = ref('hd');
 const countdownActive = ref(false);
 const countdownValue = ref(3);
+const lastTargetType = ref('');
+const lastTargetId = ref('');
 
 const PRESET_CONFIG = {
   sd: { fps: 15, videoBitrateKbps: 1000, audioBitrateKbps: 64 },
@@ -340,12 +351,12 @@ function onPresetChange(val) {
   fps.value = cfg.fps;
   videoBitrateKbps.value = cfg.videoBitrateKbps;
   audioBitrateKbps.value = cfg.audioBitrateKbps;
-  saveToolbarSettings({
+  AISettingsService.saveSettings({
     recordingDefaultFps: cfg.fps,
     recordingDefaultVideoBitrateKbps: cfg.videoBitrateKbps,
     recordingDefaultAudioBitrateKbps: cfg.audioBitrateKbps,
     recordingQualityPreset: val,
-  });
+  }).catch(() => {});
 }
 const captureCursor = ref(true);
 const captureToolbar = ref(true);
@@ -589,6 +600,36 @@ const onTargetModeClick = (mode) => {
   }
 };
 
+const onRepeatLastTarget = async () => {
+  if (!lastTargetType.value) return;
+  recordTargetType.value = lastTargetType.value;
+  if (lastTargetType.value === 'window' && lastTargetId.value) {
+    recordTargetWindowId.value = lastTargetId.value;
+    await refreshRecordableWindows();
+  }
+};
+
+const saveLastTarget = () => {
+  const type = recordTargetType.value;
+  if (type === 'screen') return;
+  lastTargetType.value = type;
+  lastTargetId.value = type === 'window' ? recordTargetWindowId.value : '';
+  try {
+    localStorage.setItem('recording_last_target', JSON.stringify({ type, id: lastTargetId.value }));
+  } catch (_) {}
+};
+
+const loadLastTarget = () => {
+  try {
+    const raw = localStorage.getItem('recording_last_target');
+    if (raw) {
+      const { type, id } = JSON.parse(raw);
+      lastTargetType.value = type || '';
+      lastTargetId.value = id || '';
+    }
+  } catch (_) {}
+};
+
 const regionCoordinateText = computed(() => {
   if (!regionSelectionReady.value) return t('recordingToolbar.notSelected');
   const x1 = Math.round(recordRegionX.value);
@@ -665,6 +706,7 @@ const toggleRecordingState = async () => {
         videoBitrateKbps: videoBitrateKbps.value,
         audioBitrateKbps: audioBitrateKbps.value,
       });
+      saveLastTarget();
     } else if (rawRecordingState.value === "recording") {
       loadingAction.value = "pause";
       await RecordingService.pause();
@@ -1153,6 +1195,7 @@ onMounted(async () => {
     captureCursor.value = settings.recording_capture_cursor !== false;
     captureToolbar.value = settings.recording_toolbar_content_protected !== true;
     microphoneDeviceId.value = settings.recording_microphone_device_id || null;
+    loadLastTarget();
   } catch (_e) {
   }
   await Promise.allSettled([
@@ -2082,5 +2125,10 @@ button:active:not(:disabled),
 @keyframes countdown-pop {
   from { transform: scale(1.5); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
+}
+.target-repeat-btn {
+  font-size: 15px;
+  width: 36px;
+  flex: 0 0 auto;
 }
 </style>

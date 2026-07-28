@@ -641,6 +641,7 @@
     "presetHd": "HD",
     "presetFhd": "FHD",
     "presetCustom": "Custom",
+    "repeatLastTarget": "Repeat last target",
     "videoBitrate": "Video Bitrate (kbps)",
     "audioBitrate": "Audio Bitrate (kbps)",
     "recordingDisabled": "Recording disabled",

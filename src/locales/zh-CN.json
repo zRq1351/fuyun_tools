@@ -641,6 +641,7 @@
     "presetHd": "高清 HD",
     "presetFhd": "超清 FHD",
     "presetCustom": "自定义",
+    "repeatLastTarget": "重复上次录制目标",
     "videoBitrate": "视频码率 (kbps)",
     "audioBitrate": "音频码率 (kbps)",
     "recordingDisabled": "录屏已停用",
