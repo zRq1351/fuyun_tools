@@ -1311,6 +1311,7 @@ body {
 .recording-toolbar-select-popper .el-select-dropdown__item.is-selected {
   color: var(--fy-accent);
   font-weight: 600;
+  background-color: var(--fy-accent-bg);
 }
 
 .recording-toolbar-select-popper .el-select-dropdown__item.is-disabled {
@@ -1458,7 +1459,7 @@ body {
 .target-mode-btn.active {
   border-color: var(--fy-border-active);
   background: var(--fy-accent-bg);
-  color: var(--fy-text-inverse);
+  color: var(--fy-accent);
 }
 
 .target-region-meta {

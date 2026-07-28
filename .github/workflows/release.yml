@@ -90,48 +90,10 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
           releaseBody: |
-            ## 🔧 代码质量优化 + 🎥 录制增强（v0.8.1 → v0.8.12）
+            ## 🎨 主题色彩修复（v0.8.12 → v0.8.13）
 
-            ### P0 正确性修复
-            - **GDI 资源泄漏**：图标提取器 `CreateCompatibleDC` 改用 `scopeguard::defer!` 自动清理
-            - **锁顺序死锁**：`ImageClipboardManager` 统一锁顺序并文档化，缩小临界区
-            - **ABBA 死锁缓释**：`ClipboardManager` 精确缓存锁显式块作用域
-            - **备份恢复竞态**：先删文件再清数据库，避免崩溃留下孤儿 blob
-
-            ### P1 性能 & 可靠性
-            - **OCR 引擎缓存**：`OnceLock<Mutex<OcrEngine>>` 首次加载模型后复用，初始化从 ~1s → ~0ms
-            - **后台线程退出**：`clipboard_wakeup` 添加 `stop_wake_dispatcher()`，退出时优雅关闭
-            - **FTS 误触发重建**：先清理孤儿记录，仅在计数不一致时重建索引
-            - **保存超时延长**：`save_history_on_exit` 条件变量等待 2s → 5s
-            - **录制线程泄漏（10处）**：`reset_to_idle`/`cancel_recording`/`pause_recording`/`update_audio_capture` 超时强制 join，不再丢弃 JoinHandle
-            - **FFmpeg A/V 同步校正**：测量 FFmpeg 启动延迟（~10-50ms），对齐音频 `start_ms`/`trim_start_ms`
-
-            ### 🎥 录制增强（新功能）
-            - **画质预设**：标清 SD / 高清 HD / 超清 FHD / 自定义，一键切换 FPS+码率
-            - **文件自动命名**：支持 `{date}` `{time}` `{type}` `{timestamp}` 模板变量
-            - **录制倒计时**：3-2-1 毛玻璃圆形数字，Esc/点击可取消，展开/收起双模式自动适配
-            - **区域记忆**：↻ 按钮一键复用上次录制目标（窗口/区域），localStorage 持久化
-
-            ### P2 代码质量
-            - **IPC 常量完善**：最后 2 处硬编码 `ipcInvoke('raw')` → `IPC_COMMANDS.*`
-            - **WASAPI 重复消除**：提取 `audio_write_loop!` 宏，消除 322 行重复代码
-            - **音频标签修正**：系统音频 7 处错误标签 `'麦克风'` → `'系统'`
-            - **长截图错误详情**：9 处 `.map_err(|_|)` + 5 处 `let _ =` 改为保留原始错误
-
-            ### P3 质量 & 安全
-            - **DOMPurify 显式配置**：`result_display/App.vue` 添加 `USE_PROFILES`/`FORBID_TAGS`
-            - **主题持久化防覆盖**：`themeManager.js` 序列号防止过期重试覆盖新主题
-            - **文档管理**：`remove_doc_root` 改用 `remove_dir_all`；`remove_doc_category` 先删目录再删 DB
-
-            ### 🚀 性能优化
-            - **启动加速**：移除 9 个 Webview 预创建（懒加载），临时文件清理后台化
-            - **图标提取 5-10x 加速**：PowerShell .lnk 解析 → Windows COM `IShellLinkW` API
-            - **剪贴板去重 O(1)**：指纹扫描 HashMap 索引替代 O(n) 遍历
-            - **图标提取统一重构**：合并启动器/文档管理两套重复 GDI 代码，净减 130+ 行
-
-            ### 🏗 底层改进
-            - **录制错误吞没**：`ensure_mic/system_capture_started` 3 处增加错误日志
-            - **长截图错误传播**：`runtime_slot`/`status`/`result` 锁错误保留原因详情
-            - **总体净减代码 ~450 行**，消除大量重复模式
+            ### 🐛 Bug 修复
+            - **录制工具栏按钮选中态看不清**：`.target-mode-btn.active` 文字色从反色变量改为强调色变量，修复在暗色/亮色/护眼主题下文字与低透明度背景对比度不足的问题
+            - **下拉菜单选中项不易辨识**：`.el-select-dropdown__item.selected` 补充选中态背景色，仅靠文字颜色变化不足以区分选中与未选中项
           releaseDraft: false
           prerelease: false
