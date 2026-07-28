@@ -14,7 +14,22 @@ const i18n = createI18nInstance({
     'en-US': enUS
 })
 
-function initLocaleListeners() {
+// 全局单例：防止多窗口重复注册
+let _globalRejectionHandlerRegistered = false
+let _localeListenersRegistered = false
+
+function ensureGlobalRejectionHandler() {
+    if (_globalRejectionHandlerRegistered) return
+    _globalRejectionHandlerRegistered = true
+    window.addEventListener('unhandledrejection', (event) => {
+        console.error('[UnhandledRejection]', event.reason)
+        event.preventDefault()
+    })
+}
+
+function ensureLocaleListeners() {
+    if (_localeListenersRegistered) return
+    _localeListenersRegistered = true
     const handler = () => {
         const inst = getI18nInstance()
         if (inst && inst.global) {
@@ -38,11 +53,7 @@ function initLocaleListeners() {
  * @returns {Object} Vue application instance
  */
 export function createPageApp(rootComponent, options = {}) {
-    // 全局未捕获 Promise 异常处理
-    window.addEventListener('unhandledrejection', (event) => {
-        console.error('[UnhandledRejection]', event.reason)
-        event.preventDefault()
-    })
+    ensureGlobalRejectionHandler()
 
     initTheme()
 
@@ -54,7 +65,7 @@ export function createPageApp(rootComponent, options = {}) {
         // themeManager already calls applyTheme internally
     })
 
-    initLocaleListeners()
+    ensureLocaleListeners()
 
     const app = createApp(rootComponent)
 

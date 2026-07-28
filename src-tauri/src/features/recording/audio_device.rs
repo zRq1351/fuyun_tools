@@ -65,7 +65,7 @@ pub fn list_system_audio_sources(ffmpeg_path: &Path) -> Result<Vec<AudioInputDev
         if out.is_empty() {
             return Err("未检测到可用输出设备".to_string());
         }
-        return Ok(out);
+        Ok(out)
     }
     #[cfg(not(target_os = "windows"))]
     {

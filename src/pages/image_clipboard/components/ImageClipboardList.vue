@@ -12,7 +12,7 @@
         class="scroll-track"
         direction="horizontal"
         key-field="id"
-        @scroll.native="onScroll"
+        @scroll.passive="onScroll"
     >
       <template #default="{ item: scrollerItem }">
         <div

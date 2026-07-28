@@ -512,7 +512,7 @@ const handleWebSearch = async () => {
     }
 
     const query = encodeURIComponent(text)
-    let url = ''
+    let url
     switch (webSearchEngine.value) {
       case 'google':
         url = `https://www.google.com/search?q=${query}`

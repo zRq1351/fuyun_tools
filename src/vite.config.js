@@ -79,13 +79,34 @@ export default defineConfig(({mode}) => {
                 },
                 output: {
                     manualChunks(id) {
-                        if (id.includes('/node_modules/vue/')) {
+                        // Vue 核心生态
+                        if (id.includes('/node_modules/vue/') || id.includes('/node_modules/@vue/') || id.includes('/node_modules/vue-')) {
                             return 'vendor-vue'
                         }
+                        // Element Plus UI 框架
                         if (id.includes('/node_modules/element-plus/') || id.includes('/node_modules/@element-plus/')) {
                             return 'vendor-element-plus'
                         }
-
+                        // 拖拽排序库
+                        if (id.includes('/node_modules/sortablejs/') || id.includes('/node_modules/vuedraggable/')) {
+                            return 'vendor-sortable'
+                        }
+                        // Markdown 渲染
+                        if (id.includes('/node_modules/marked/') || id.includes('/node_modules/dompurify/') || id.includes('/node_modules/highlight.js/')) {
+                            return 'vendor-markdown'
+                        }
+                        // 图标库
+                        if (id.includes('/node_modules/lucide-vue-next/')) {
+                            return 'vendor-icons'
+                        }
+                        // 虚拟滚动
+                        if (id.includes('/node_modules/vue-virtual-scroller/')) {
+                            return 'vendor-virtual'
+                        }
+                        // 工具库
+                        if (id.includes('/node_modules/@vueuse/')) {
+                            return 'vendor-utils'
+                        }
                     }
                 }
             },

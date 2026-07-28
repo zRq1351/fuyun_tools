@@ -220,8 +220,12 @@ const translationTargetLanguage = ref(localStorage.getItem('clipboard_ai_target_
 const explanationTargetLanguage = ref(localStorage.getItem('clipboard_ai_explain_language') || '中文')
   const loadMoreIntent = ref(false)
 
-  const handlePreview = (content, id) => {
-    ImageClipboardService.openTextPreviewWindow(content, id)
+const handlePreview = async (content, id) => {
+  try {
+    await ImageClipboardService.openTextPreviewWindow(content, id)
+  } catch (error) {
+    console.error('打开文本预览失败:', error)
+  }
   }
 
   const isUpdatingCategory = ref(false)

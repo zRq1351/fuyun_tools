@@ -19,7 +19,13 @@
         :start-window-offset-drag="startWindowOffsetDrag"
         :show-ai-toggle="false"
     />
-    <div v-if="filteredHistory.length === 0" class="empty-state">
+    <div v-if="isLoadingPage && filteredHistory.length === 0" class="loading-state">
+      <el-icon :size="24" class="is-loading">
+        <Loading/>
+      </el-icon>
+      <span>{{ $t('clipboard.loading') }}</span>
+    </div>
+    <div v-else-if="filteredHistory.length === 0" class="empty-state">
       <el-empty :description="$t('imageClipboard.noRecords')" :image-size="100"/>
     </div>
 
@@ -107,7 +113,7 @@
 <script setup>
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {useI18n} from 'vue-i18n'
-import {ArrowLeftBold, ArrowRightBold, Check} from '@element-plus/icons-vue'
+import {ArrowLeftBold, ArrowRightBold, Check, Loading} from '@element-plus/icons-vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {listen} from '@tauri-apps/api/event'
 import {buildFileUrlFromPath} from '../../utils/fileUrl'
@@ -185,7 +191,7 @@ const isPrefetchingPage = ref(false)
 let prefetchRequestSeq = 0
 let prefetchPromise = null
 
-const IMAGE_ITEM_UNIT = 258
+const IMAGE_ITEM_UNIT = 270 // 与 ImageClipboardList 的 SCROLL_ITEM_SIZE 保持一致
 const IMAGE_PREVIEW_CACHE_MARGIN = 24
 const IMAGE_PREVIEW_CACHE_MAX_ITEMS = 300
 const ASYNC_PREVIEW_CACHE_MAX_ITEMS = 180
@@ -1375,8 +1381,7 @@ const promoteLocalItemToTop = (itemId) => {
   const selectedId = history.value[selectedIndex.value]?.id
   const [moved] = history.value.splice(currentIndex, 1)
   if (!moved) return
-  let insertIndex = 0
-  insertIndex = history.value.findIndex((item) => !pinnedSet.has(item?.id))
+  let insertIndex = history.value.findIndex((item) => !pinnedSet.has(item?.id))
   if (insertIndex < 0) {
     insertIndex = history.value.length
   }
@@ -2002,6 +2007,17 @@ watch([searchKeyword, categoryFilter], () => {
 
 .container > * {
   min-width: 0;
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--fy-text-secondary);
+  font-size: var(--fy-text-sm);
 }
 
 .empty-state {

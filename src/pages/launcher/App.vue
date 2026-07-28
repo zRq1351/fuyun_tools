@@ -75,6 +75,7 @@
         />
         <AppList
             v-else
+            :active-index="activeIndex"
             :apps="displayApps"
             :categories="launcherConfig?.categories || []"
             :app-category-map="launcherConfig?.app_category_map || {}"

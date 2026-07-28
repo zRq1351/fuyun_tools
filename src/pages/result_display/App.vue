@@ -164,6 +164,7 @@ const loadingStartedAt = ref(0)
 const isWindowMaximized = ref(false)
 const currentWindowLabel = ref('')
 let initDataHandler = null
+let streamGeneration = 0 // 流式输出代际计数器
 const currentWindow = getCurrentWindow()
 const {listenEvent} = useEventListeners()
 let unlistenResize = null
@@ -253,9 +254,7 @@ renderer.html = (...args) => {
   return escapeHtml(raw)
 }
 renderer.link = (...args) => {
-  let href = ''
-  let title = ''
-  let text = ''
+  let href, title, text
   if (args.length === 1 && typeof args[0] === 'object') {
     href = args[0]?.href || ''
     title = args[0]?.title || ''
@@ -272,9 +271,7 @@ renderer.link = (...args) => {
   return `<a href="${escapeHtml(href)}"${safeTitle} target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(text || href)}</a>`
 }
 renderer.image = (...args) => {
-  let href = ''
-  let title = ''
-  let text = ''
+  let href, title, text
   if (args.length === 1 && typeof args[0] === 'object') {
     href = args[0]?.href || ''
     title = args[0]?.title || ''
@@ -377,6 +374,8 @@ onMounted(async () => {
       // 验证窗口标签，只处理当前窗口的事件
       if (data && data.windowLabel && data.windowLabel !== currentWindowLabel.value) return
       if (data && data.type && data.type !== mode.value) return
+      // 代际校验：丢弃过期流的结果
+      if (typeof data.generation === 'number' && data.generation !== streamGeneration) return
       if (data.content) {
         resultText.value += data.content
         const elapsed = Date.now() - loadingStartedAt.value
@@ -472,6 +471,7 @@ const handleContentClick = (event) => {
 const handleLanguageChange = async () => {
   if (!originalText.value) return
 
+  streamGeneration++ // 递增代际，丢弃旧流的结果
   resultText.value = ''
   isWaitingResult.value = true
   loadingStartedAt.value = Date.now()

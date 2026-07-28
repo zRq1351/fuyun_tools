@@ -403,11 +403,15 @@ const restoreBackup = async () => {
   }
 
   const strategyText = restoreStrategy.value === 'merge' ? t('documentManager.mergeModeLabel') : t('documentManager.overwriteModeLabel')
-  await ElMessageBox.confirm(
-      t('settings.backup.restoreConfirm', {strategy: strategyText}),
-      t('common.confirmRestore'),
-      {type: restoreStrategy.value === 'overwrite' ? 'error' : 'warning'}
-  )
+  try {
+    await ElMessageBox.confirm(
+        t('settings.backup.restoreConfirm', {strategy: strategyText}),
+        t('common.confirmRestore'),
+        {type: restoreStrategy.value === 'overwrite' ? 'error' : 'warning'}
+    )
+  } catch {
+    return // 用户取消
+  }
   restoring.value = true
   try {
     const response = await BackupService.restorePackage({
@@ -430,7 +434,11 @@ const restoreBackup = async () => {
 }
 
 const removeHistoryItem = async (filePath) => {
-  await ElMessageBox.confirm(t('settings.backup.deleteBackupConfirm'), t('settings.backup.deleteBackupTitle'), {type: 'warning'})
+  try {
+    await ElMessageBox.confirm(t('settings.backup.deleteBackupConfirm'), t('settings.backup.deleteBackupTitle'), {type: 'warning'})
+  } catch {
+    return // 用户取消
+  }
   try {
     await BackupService.deleteHistoryItem(filePath)
     ElMessage.success(t('settings.backup.backupDeleted'))

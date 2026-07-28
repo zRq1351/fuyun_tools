@@ -125,7 +125,7 @@ pub fn install_global_panic_hook() {
             } else {
                 "unknown panic payload".to_string()
             };
-            let bt = std::panic::catch_unwind(|| std::backtrace::Backtrace::force_capture())
+            let bt = std::panic::catch_unwind(std::backtrace::Backtrace::force_capture)
                 .map(|bt| bt.to_string())
                 .unwrap_or_else(|_| "backtrace capture failed".to_string());
             log::error!(

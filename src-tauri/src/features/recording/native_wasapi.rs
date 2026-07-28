@@ -317,7 +317,7 @@ pub fn start_process_loopback_wavs(
     let process_count = process_ids.len();
     let (startup_tx, startup_rx) = mpsc::channel::<(u32, Result<(), String>)>();
     let mut workers = Vec::new();
-    for (pid, path) in process_ids.into_iter().zip(output_paths.into_iter()) {
+    for (pid, path) in process_ids.into_iter().zip(output_paths) {
         let worker_stop = thread_stop.clone();
         let worker_enabled = thread_enabled.clone();
         let worker_pause = thread_pause.clone();
@@ -542,7 +542,7 @@ pub fn start_system_loopback_wav_with_device(
     let handle = std::thread::spawn(move || {
         let run = || -> Result<(), String> {
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
             let device = if let Some(key) = thread_device_key.as_ref() {
                 if let Ok(devs) = host.output_devices() {
@@ -602,10 +602,10 @@ pub fn start_system_loopback_wav_with_device(
             };
 
             let file = std::fs::File::create(&thread_output)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
             let buf_writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
             let writer = hound::WavWriter::new(buf_writer, spec)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
             let writer = Arc::new(Mutex::new(Some(writer)));
 
             log::info!(
@@ -658,7 +658,7 @@ pub fn start_system_loopback_wav_with_device(
             };
             stream
                 .play()
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
             let _ = tx.send(Ok(()));
 
             while !thread_stop_flag.load(Ordering::SeqCst) {
@@ -704,10 +704,8 @@ pub fn start_system_loopback_wav_with_device(
         }
     });
 
-    let init = rx
-        .recv_timeout(Duration::from_secs(2))
+    rx.recv_timeout(Duration::from_secs(2))
         .map_err(|_| "启动 WASAPI 捕获超时".to_string())??;
-    let _ = init;
 
     Ok(WasapiCaptureHandle {
         stop_flag,
@@ -742,7 +740,7 @@ pub fn start_microphone_wav_with_device(
     let handle = std::thread::spawn(move || {
         let run = || -> Result<(), String> {
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
             let device = if let Some(key) = thread_device_key.as_ref() {
                 if let Ok(devs) = host.input_devices() {
                     let mut picked = None;
@@ -802,10 +800,10 @@ pub fn start_microphone_wav_with_device(
             };
 
             let file = std::fs::File::create(&thread_output)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
             let buf_writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
             let writer = hound::WavWriter::new(buf_writer, spec)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
             let writer = Arc::new(Mutex::new(Some(writer)));
 
             log::info!(
@@ -858,7 +856,7 @@ pub fn start_microphone_wav_with_device(
             };
             stream
                 .play()
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
             let _ = tx.send(Ok(()));
 
             while !thread_stop_flag.load(Ordering::SeqCst) {
@@ -869,7 +867,7 @@ pub fn start_microphone_wav_with_device(
 
             if let Ok(mut guard) = writer.lock() {
                 if let Some(w) = guard.as_mut() {
-                    for _ in 0..(48000 * 2 * 1) {
+                    for _ in 0..(48000 * 2) {
                         let _ = w.write_sample(0i16);
                     }
                 }
@@ -907,10 +905,8 @@ pub fn start_microphone_wav_with_device(
         }
     });
 
-    let init = rx
-        .recv_timeout(Duration::from_secs(2))
+    rx.recv_timeout(Duration::from_secs(2))
         .map_err(|_| "启动 WASAPI 麦克风捕获超时".to_string())??;
-    let _ = init;
 
     Ok(WasapiCaptureHandle {
         stop_flag,
@@ -939,7 +935,7 @@ pub fn start_system_loopback_aac_with_device(
     let handle = std::thread::spawn(move || {
         let run = || -> Result<(), String> {
             let ffmpeg_path = crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path()
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
             let mut ffmpeg_cmd = Command::new(&ffmpeg_path);
             #[cfg(target_os = "windows")]
@@ -951,7 +947,7 @@ pub fn start_system_loopback_aac_with_device(
 
             let effective_bitrate = audio_bitrate_kbps.unwrap_or(128).clamp(32, 512);
             ffmpeg_cmd
-                .args(&[
+                .args([
                     "-f",
                     "f32le",
                     "-ar",
@@ -975,7 +971,7 @@ pub fn start_system_loopback_aac_with_device(
 
             let mut child = ffmpeg_cmd
                 .spawn()
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
             let stdin = child.stdin.take().ok_or("无法获取 FFmpeg stdin")?;
             // H1 修复：消费 FFmpeg stderr 防止管道满导致挂起
@@ -1007,7 +1003,7 @@ pub fn start_system_loopback_aac_with_device(
             );
 
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
             let device = if let Some(key) = thread_device_key.as_ref() {
                 if let Ok(devs) = host.output_devices() {
@@ -1096,11 +1092,11 @@ pub fn start_system_loopback_aac_with_device(
                     err_fn,
                     Some(Duration::from_millis(10)),
                 )
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
             stream
                 .play()
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
             let _ = tx.send(Ok(()));
 
             while !thread_stop_flag.load(Ordering::SeqCst) {
@@ -1181,10 +1177,8 @@ pub fn start_system_loopback_aac_with_device(
         }
     });
 
-    let init = rx
-        .recv_timeout(Duration::from_secs(2))
+    rx.recv_timeout(Duration::from_secs(2))
         .map_err(|_| "启动 WASAPI+FFmpeg 捕获超时".to_string())??;
-    let _ = init;
 
     Ok(WasapiFfmpegHandle {
         stop_flag,

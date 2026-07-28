@@ -54,7 +54,7 @@ pub fn resolve_ffmpeg_path() -> Result<PathBuf, String> {
     let mut checked = Vec::new();
     for path in candidate_paths() {
         checked.push(path.to_string_lossy().to_string());
-        if path == PathBuf::from("ffmpeg") || path == PathBuf::from("ffmpeg.exe") {
+        if path == Path::new("ffmpeg") || path == Path::new("ffmpeg.exe") {
             let mut probe = Command::new(&path);
             suppress_console_window(&mut probe);
             if probe.arg("-version").output().is_ok() {

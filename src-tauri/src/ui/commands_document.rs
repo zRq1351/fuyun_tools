@@ -2,10 +2,11 @@ use crate::core::error_codes::AppErrorKind;
 use crate::utils::document_database;
 use crate::utils::document_text_extract;
 use crate::utils::icon_extractor;
+use crate::sync::Mutex;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::UNIX_EPOCH;
 use tauri::AppHandle;
 use tokio::task;
@@ -679,12 +680,18 @@ fn icon_cache() -> &'static Mutex<HashMap<String, String>> {
 #[tauri::command]
 pub async fn get_file_type_icon(ext: String) -> Result<String, String> {
     let ext_lower = ext.to_lowercase();
-    if let Some(cached) = icon_cache().lock().unwrap().get(&ext_lower) {
-        return Ok(cached.clone());
+    {
+        let guard = icon_cache().lock().unwrap_or_else(|never| match never {});
+        if let Some(cached) = guard.get(&ext_lower) {
+            return Ok(cached.clone());
+        }
     }
     let data_url = icon_extractor::extract_icon_by_extension(&ext_lower)
         .ok_or_else(|| format!("无法获取图标: {}", ext_lower))?;
-    icon_cache().lock().unwrap().insert(ext_lower, data_url.clone());
+    {
+        let mut guard = icon_cache().lock().unwrap_or_else(|never| match never {});
+        guard.insert(ext_lower, data_url.clone());
+    }
     Ok(data_url)
 }
 

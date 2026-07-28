@@ -8,7 +8,7 @@ use crate::features::recording::types::{
     AudioInputDevice, AudioProcessItem, RecordingRegressionReport, RecordingRuntimeState,
     RecordingSessionInfo, RecordingStopResult, SessionRequest, StartRecordingRequest,
 };
-use crate::sync::Mutex;
+use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::window_manager::show_overlay_window_by_label;
 use crate::utils::utils_helpers::{
     load_settings, verify_downloaded_exe_integrity,
@@ -369,7 +369,7 @@ pub async fn stop_recording(
         match recorder_service::stop_recording(&app, state_arc.clone(), request.clone()) {
             Ok(result) => {
                 let auto_open_folder = {
-                    let guard = state_arc.lock().unwrap();
+                    let guard = lock_arc_mutex(&state_arc);
                     guard.settings.recording_auto_open_folder
                 };
                 if auto_open_folder {
@@ -783,12 +783,12 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
     }
 
     let runtime_arc = {
-        let state_guard = state_arc.lock().unwrap();
+        let state_guard = lock_arc_mutex(&state_arc);
         state_guard.recording_runtime.clone()
     };
 
     let (mic_device_id, sys_audio_enabled, sys_audio_thread_exists) = {
-        let runtime_guard = runtime_arc.lock().unwrap();
+        let runtime_guard = lock_arc_mutex(&runtime_arc);
         let sys_enabled = runtime_guard
             .system_audio_enabled_flag
             .as_ref()

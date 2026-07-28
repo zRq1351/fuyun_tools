@@ -359,7 +359,7 @@ const runImageImport = async (paths) => {
 }
 
 const confirmImport = async (kind, paths) => {
-  let total = 0
+  let total
   try {
     total = Number(await ImageClipboardService.countImportImageFiles(paths)) || 0
   } catch {

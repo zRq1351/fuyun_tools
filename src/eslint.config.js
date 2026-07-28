@@ -29,6 +29,9 @@ export default [
                 URL: 'readonly',
                 Image: 'readonly',
                 Blob: 'readonly',
+                fetch: 'readonly',
+                createImageBitmap: 'readonly',
+                miniIcon: 'readonly',
                 // DOM types
                 Element: 'readonly',
                 HTMLElement: 'readonly',

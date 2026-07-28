@@ -1,5 +1,6 @@
 <template>
   <div
+      ref="contentRef"
       class="content"
       @mousedown="onMouseDown"
       @scroll="onScroll"
@@ -12,7 +13,7 @@
         class="scroll-track"
         direction="horizontal"
         key-field="id"
-        @scroll.native="onScroll"
+        @scroll.passive="onScroll"
     >
       <template #default="{ item: scrollerItem }">
         <div

@@ -40,6 +40,8 @@ enum MouseActionState {
     MouseUp(i32, i32, std::time::Instant),
 }
 
+type LastToolbarEmit = Arc<Mutex<Option<(String, (i32, i32), std::time::Instant)>>>;
+
 struct GlobalState {
     mouse_action_state: Arc<Mutex<MouseActionState>>,
     ctrl_left_pressed: AtomicBool,
@@ -48,7 +50,7 @@ struct GlobalState {
     last_processed_time: Arc<Mutex<std::time::Instant>>,
     last_mouse_pos: Arc<Mutex<(i32, i32)>>,
     detection_anchor_pos: Arc<Mutex<(i32, i32)>>,
-    last_toolbar_emit: Arc<Mutex<Option<(String, (i32, i32), std::time::Instant)>>>,
+    last_toolbar_emit: LastToolbarEmit,
     last_click: Arc<Mutex<Option<(i32, i32, std::time::Instant)>>>,
     detection_notify: Arc<(std::sync::Mutex<bool>, Condvar)>,
 }
@@ -232,7 +234,7 @@ fn handle_hook_event(
                             let duration_ms = duration.as_millis() as f64;
                             if duration_ms > 0.0 {
                                 let speed = total_distance / duration_ms;
-                                speed >= 0.2 && speed <= 10.0
+                                (0.2..=10.0).contains(&speed)
                             } else {
                                 false
                             }
@@ -397,7 +399,6 @@ fn start_input_listener_source(app_handle: AppHandle, state: Arc<Mutex<SharedApp
     #[cfg(target_os = "windows")]
     {
         start_windows_hook_listener(app_handle, state);
-        return;
     }
     #[cfg(not(target_os = "windows"))]
     {

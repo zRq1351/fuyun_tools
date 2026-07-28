@@ -14,7 +14,7 @@
         <div
             v-for="app in thirdPartyApps"
             :key="app.id"
-            :class="{ 'ctx-anchor': ctxAnchorId === app.id }"
+            :class="{ 'ctx-anchor': ctxAnchorId === app.id, 'keyboard-active': getFlatIndex(app) === props.activeIndex }"
             class="app-item"
             @dblclick="$emit('select', app)"
             @contextmenu.prevent="showContextMenu($event, app)"
@@ -53,7 +53,7 @@
         <div
             v-for="app in systemApps"
             :key="app.id"
-            :class="{ 'ctx-anchor': ctxAnchorId === app.id }"
+            :class="{ 'ctx-anchor': ctxAnchorId === app.id, 'keyboard-active': getFlatIndex(app) === props.activeIndex }"
             class="app-item"
             @dblclick="$emit('select', app)"
             @contextmenu.prevent="showContextMenu($event, app)"
@@ -175,6 +175,10 @@ const props = defineProps({
     type: Array,
     required: true
   },
+  activeIndex: {
+    type: Number,
+    default: -1
+  },
   categories: {
     type: Array,
     default: () => []
@@ -247,6 +251,11 @@ const systemActualHeight = ref('0px')
 
 const thirdPartyApps = computed(() => props.apps.filter(a => a.app_type !== 'system'))
 const systemApps = computed(() => props.apps.filter(a => a.app_type === 'system'))
+
+// 计算跨分组的扁平索引，用于键盘导航高亮
+const getFlatIndex = (app) => {
+  return props.apps.findIndex(a => a.id === app.id)
+}
 
 const thirdPartyContentStyle = computed(() => ({
   maxHeight: thirdPartyCollapsed.value ? '0' : thirdPartyActualHeight.value,
@@ -453,6 +462,12 @@ onBeforeUnmount(() => {
   background: var(--fy-accent-bg);
   padding-left: 20px;
   border-left: 3px solid var(--fy-accent);
+}
+
+.app-item.keyboard-active {
+  background: var(--fy-accent-bg-hover);
+  border-left: 3px solid var(--fy-accent);
+  padding-left: 20px;
 }
 
 .app-icon {

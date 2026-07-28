@@ -19,6 +19,7 @@ use crate::ui::window_manager::{
 };
 use crate::utils::image_clipboard::ImageClipboardManager;
 use crate::utils::utils_helpers::load_settings;
+use base64::Engine;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -264,12 +265,17 @@ pub async fn get_manual_longshot_status(
 
 #[tauri::command]
 pub async fn recognize_image_ocr(
-    png_bytes: Vec<u8>,
+    png_base64: String,
     engine: Option<String>,
     _app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<serde_json::Value, String> {
     let started_at = std::time::Instant::now();
+
+    // 从 base64 解码 PNG 字节
+    let png_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&png_base64)
+        .map_err(|e| format!("base64 解码失败: {}", e))?;
 
     // 选择 OCR 引擎
     let engine_type = match engine.as_deref() {

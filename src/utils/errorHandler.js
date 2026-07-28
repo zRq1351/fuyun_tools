@@ -104,7 +104,7 @@ export function handleAppError(error, context = 'Operation failed') {
             case 'IO_ERROR':
             case 'CLIPBOARD_ERROR':
             case 'SYSTEM_ERROR':
-            default:
+            default: {
                 // Check for known patterns in legacy messages (中文 + English)
                 const lowerMsg = legacy.message.toLowerCase()
                 if (lowerMsg.includes('未配置ai') || lowerMsg.includes('ai not configured') || lowerMsg.includes('no ai provider') || (lowerMsg.includes('ai') && lowerMsg.includes('提供商'))) {
@@ -125,6 +125,7 @@ export function handleAppError(error, context = 'Operation failed') {
                     showClose: true
                 })
                 return
+            }
         }
     }
 

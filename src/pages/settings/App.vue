@@ -734,9 +734,9 @@ const persistSettings = async (
       autoSaveStateResetTimer = null
     }, 1500)
   } catch (error) {
-      let raw = ''
+    let raw
     let errorCode = null
-    let errorParams = null
+    let errorParams
       if (typeof error === 'object' && error !== null) {
         raw = error.message || JSON.stringify(error)
       } else {
@@ -1126,6 +1126,14 @@ watch(form, () => {
 }, {deep: true})
 
 onBeforeUnmount(() => {
+  // 窗口关闭前，立即冲刷未保存的更改，防止 450ms 防抖窗口内数据丢失
+  if (pendingPersistSnapshot) {
+    const snapshot = pendingPersistSnapshot
+    pendingPersistSnapshot = null
+    pendingPersistVersion = 0
+    // 使用同步方式保存（不等待，窗口即将关闭）
+    void persistSettings(true, snapshot, formMutationVersion)
+  }
   if (saveTimer) {
     clearTimeout(saveTimer)
     saveTimer = null

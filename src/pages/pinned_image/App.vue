@@ -227,12 +227,7 @@ async function runOcr(base64, width, height, engine = null) {
   isRecognizing.value = true
   toastMessage.value = ''
   try {
-    const binaryString = atob(base64)
-    const bytes = new Uint8Array(binaryString.length)
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i)
-    }
-    const payload = { pngBytes: Array.from(bytes) }
+    const payload = {pngBase64: base64}
     if (engine) {
       payload.engine = engine
     }
