@@ -501,7 +501,6 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
 
 .clipboard-item:hover {
   box-shadow: 0 4px 24px rgba(108, 140, 255, 0.15), 0 8px 32px rgba(0, 0, 0, 0.12);
-  z-index: 1000 !important;
 }
 
 .item-header {
