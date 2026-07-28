@@ -28,3 +28,5 @@ src-tauri/target/
 /docs/compose/
 !/docs/compose/reports/
 /tasks/
+/.mimocode/
+/.workbuddy/
