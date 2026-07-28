@@ -128,8 +128,10 @@ const cardStyle = (index) => {
   const w = containerWidth.value
   const viewCenter = w / 2 - CARD_WIDTH / 2
 
-  // Card's left edge in the scroll strip
-  const cardX = index * CARD_STEP - scrollPos.value + viewCenter
+  // Card's left edge — spread out during drag so cards don't block each other
+  const spread = moving ? 1.35 : 1
+  const step = CARD_STEP * spread
+  const cardX = index * step - scrollPos.value * spread + viewCenter
   const cardCenter = cardX + CARD_WIDTH / 2
   const distFromCenter = cardCenter - w / 2
   const absDist = Math.abs(distFromCenter)
@@ -137,15 +139,14 @@ const cardStyle = (index) => {
   const moving = dragActive || inertiaId
   const searching = (props.highlightKeyword || '').trim().length > 0
 
-  // During drag/inertia: make cards semi-transparent so background cards peek through
-  const dragOpacityMul = moving ? 0.55 : 1
-  const scaleMin = searching ? 0.88 : 0.78
+  // During drag: spread cards out so they don't block each other
+  const scaleMin = searching ? 0.88 : (moving ? 0.8 : 0.78)
   const scaleDecay = searching ? 0.70 : 0.55
   const opacityMin = searching ? 0.4 : 0.3
   const opacityDecay = searching ? 1.0 : 0.85
 
   const scale = Math.max(scaleMin, 1 - absDist / (w * scaleDecay))
-  const opacity = Math.max(opacityMin, 1 - absDist / (w * opacityDecay)) * dragOpacityMul
+  const opacity = Math.max(opacityMin, 1 - absDist / (w * opacityDecay))
   const zIndex = 200 - Math.floor(absDist / CARD_STEP) * 5
 
   return {
