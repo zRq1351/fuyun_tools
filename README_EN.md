@@ -6,7 +6,7 @@
 
 **One Shortcut Away from Everything**
 
-![Version](https://img.shields.io/badge/version-0.8.3-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.8.22-blue?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows_10/11-0078D6?style=flat-square&logo=windows)
 ![License](https://img.shields.io/badge/license-GPL--2.0-green?style=flat-square)
 ![Rust](https://img.shields.io/badge/Tauri-2.x-FFC131?style=flat-square&logo=tauri)

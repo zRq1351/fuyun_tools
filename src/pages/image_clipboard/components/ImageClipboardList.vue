@@ -241,6 +241,7 @@ const onStageMouseUp = () => {
   document.removeEventListener('mouseup', onStageMouseUp)
   if (!wasDragged) return
   skipNextClick = true
+  setTimeout(() => { skipNextClick = false }, 0)
 
   let vx = 0
   if (velocitySamples.length >= 2) {
@@ -314,13 +315,15 @@ const handleItemDragStart = (e, id) => {
 }
 
 // --- Nav arrows long-press ---
-let navRepeatTimer = null, navRepeatDir = 0
+let navRepeatDelayId = null
+let navRepeatIntervalId = null
+let navRepeatDir = 0
 
 const startNavRepeat = (dir) => {
   navRepeatDir = dir
   navigateTo(displayIndex.value + dir)
-  navRepeatTimer = setTimeout(() => {
-    navRepeatTimer = setInterval(() => {
+  navRepeatDelayId = setTimeout(() => {
+    navRepeatIntervalId = setInterval(() => {
       const next = displayIndex.value + navRepeatDir
       if (next < 0 || next >= props.visibleHistory.length) { stopNavRepeat(); return }
       navigateTo(next)
@@ -329,7 +332,9 @@ const startNavRepeat = (dir) => {
 }
 
 const stopNavRepeat = () => {
-  if (navRepeatTimer) { clearInterval(navRepeatTimer); clearTimeout(navRepeatTimer); navRepeatTimer = null }
+  if (navRepeatDelayId) { clearTimeout(navRepeatDelayId); navRepeatDelayId = null }
+  if (navRepeatIntervalId) { clearInterval(navRepeatIntervalId); navRepeatIntervalId = null }
+  navRepeatDir = 0
 }
 
 // --- Wheel ---
