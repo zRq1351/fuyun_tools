@@ -22,7 +22,17 @@ jobs:
         with:
           node-version: lts/*
 
+      - name: Cache npm
+        id: cache-npm
+        uses: actions/cache@v4
+        with:
+          path: src/node_modules
+          key: npm-${{ runner.os }}-${{ hashFiles('src/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
       - name: install frontend dependencies
+        if: steps.cache-npm.outputs.cache-hit != 'true'
         run: npm install
         working-directory: src
 
@@ -38,16 +48,22 @@ jobs:
       - name: 安装 Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Cargo
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Cache LLVM
+        id: cache-llvm
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          path: C:\Program Files\LLVM
+          key: llvm-${{ runner.os }}-v1
+          restore-keys: |
+            llvm-${{ runner.os }}-
 
       - name: 安装 LLVM（提供 clang/libclang）
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: choco install llvm --no-progress -y
 
       - name: Cache vcpkg
@@ -55,7 +71,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: D:\vcpkg
-          key: vcpkg-opencv-${{ runner.os }}-static-md-v1
+          key: vcpkg-opencv-${{ runner.os }}-static-md-v2
           restore-keys: |
             vcpkg-opencv-${{ runner.os }}-static-md
 
@@ -76,6 +92,7 @@ jobs:
       - name: 构建并发布 Tauri 应用
         uses: tauri-apps/tauri-action@v0
         env:
+          RUSTFLAGS: "-Clink-arg=-fuse-ld=lld"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
