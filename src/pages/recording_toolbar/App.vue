@@ -682,8 +682,9 @@ const toggleRecordingState = async () => {
               : null;
 
       isMicMuted.value = true;
-      // 3 秒倒计时
+      // 3 秒倒计时 — 临时扩大窗口确保全屏可见
       countdownActive.value = true;
+      await RecordingService.resizeToolbar(false, false, false, 'expanded', false, 300, 400);
       for (let i = 3; i >= 1; i--) {
         countdownValue.value = i;
         await new Promise((r) => setTimeout(r, 1000));
