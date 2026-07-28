@@ -582,8 +582,8 @@ fn resolve_history_sort(sort_by: Option<String>, sort_order: Option<String>) -> 
 }
 
 fn block_on_result<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> {
-    if tokio::runtime::Handle::try_current().is_ok() {
-        return Err("block_on_result must not be called from within a tokio runtime; use the async variant instead".into());
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        return handle.block_on(future)
     }
     tauri::async_runtime::block_on(future)
 }
