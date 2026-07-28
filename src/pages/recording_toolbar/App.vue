@@ -1,11 +1,4 @@
 <template>
-  <!-- 设置收起时的全屏倒计时 -->
-  <div
-      v-if="countdownActive && !capsuleSettingsVisible"
-      class="countdown-overlay"
-  >
-    <div class="countdown-number">{{ countdownValue }}</div>
-  </div>
   <div
         :class="{
         'bar-collapsed-settings-open': capsuleSettingsVisible,
@@ -30,10 +23,12 @@
           </button>
           <div
               :data-state="currentRecordingState"
-              class="collapsed-pill"
+              :class="['collapsed-pill', { 'countdown-pill': countdownActive }]"
               @click.stop="toggleRecordingState"
           >
             <span class="collapsed-pill-content">
+              <span v-if="countdownActive" class="collapsed-countdown-num">{{ countdownValue }}</span>
+              <template v-else>
               <span
                   v-if="currentRecordingState === 'recording'"
                   class="recording-dot"
@@ -47,6 +42,7 @@
                   class="recording-ready-dot"
               ></span>
               <span class="collapsed-pill-text">{{ collapsedDisplayText }}</span>
+              </template>
             </span>
           </div>
           <button
@@ -689,11 +685,7 @@ const toggleRecordingState = async () => {
               : null;
 
       isMicMuted.value = true;
-      // 倒计时：收起时扩大窗口，展开时在面板内显示
       countdownActive.value = true;
-      if (!capsuleSettingsVisible.value) {
-        await RecordingService.resizeToolbar(false, false, false, 'expanded', false, 300, 400);
-      }
       for (let i = 3; i >= 1; i--) {
         countdownValue.value = i;
         await new Promise((r) => setTimeout(r, 1000));
@@ -2141,6 +2133,15 @@ button:active:not(:disabled),
   width: 36px;
   flex: 0 0 auto;
 }
+.countdown-pill {
+  cursor: default;
+}
+.collapsed-countdown-num {
+  font-size: 20px;
+  font-weight: 700;
+  animation: countdown-pop 0.4s ease-out;
+}
+/* 展开时面板内倒计时 */
 .countdown-in-panel {
   display: flex; align-items: center; justify-content: center;
   height: 200px;
@@ -2149,5 +2150,9 @@ button:active:not(:disabled),
   font-size: 96px; font-weight: 700;
   color: var(--fy-text-primary);
   animation: countdown-pop 0.5s ease-out;
+}
+@keyframes countdown-pop {
+  from { transform: scale(1.5); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 </style>
