@@ -307,6 +307,9 @@ const onStageMouseUp = () => {
 
   if (!wasDragged) return
   skipNextClick = true
+  // Reset flag on next tick — handles case where mouseup happens outside stage
+  // and no click event fires to consume the flag
+  setTimeout(() => { skipNextClick = false }, 0)
 
   // Calculate velocity from recent samples (px/ms)
   let vx = 0
@@ -397,14 +400,15 @@ const navigateTo = (idx) => {
 }
 
 // Long-press repeat for nav arrows
-let navRepeatTimer = null
+let navRepeatDelayId = null
+let navRepeatIntervalId = null
 let navRepeatDir = 0
 
 const startNavRepeat = (dir) => {
   navRepeatDir = dir
   navigateTo(selectedIndex.value + dir)
-  navRepeatTimer = setTimeout(() => {
-    navRepeatTimer = setInterval(() => {
+  navRepeatDelayId = setTimeout(() => {
+    navRepeatIntervalId = setInterval(() => {
       const next = selectedIndex.value + navRepeatDir
       if (next < 0 || next >= props.visibleHistory.length) { stopNavRepeat(); return }
       navigateTo(next)
@@ -413,7 +417,8 @@ const startNavRepeat = (dir) => {
 }
 
 const stopNavRepeat = () => {
-  if (navRepeatTimer) { clearInterval(navRepeatTimer); clearTimeout(navRepeatTimer); navRepeatTimer = null }
+  if (navRepeatDelayId) { clearTimeout(navRepeatDelayId); navRepeatDelayId = null }
+  if (navRepeatIntervalId) { clearInterval(navRepeatIntervalId); navRepeatIntervalId = null }
   navRepeatDir = 0
 }
 
