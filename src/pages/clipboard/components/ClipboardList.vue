@@ -45,6 +45,17 @@
       </div>
     </div>
 
+    <div v-if="stackItems.length > 1" class="timeline-bar">
+      <div
+          v-for="(_, idx) in stackItems"
+          :key="idx"
+          :class="{ active: idx === selectedIndex }"
+          class="timeline-dot"
+          :title="(idx + 1) + ' / ' + stackItems.length"
+          @click.stop="navigateTo(idx)"
+      />
+    </div>
+
     <div v-if="showLoadMoreHint" class="load-more-bar">
       <el-icon v-if="isLoadingMore" :size="14" class="is-loading"><Loading/></el-icon>
       <span class="load-more-text" @click="emit('load-more-intent')">
@@ -123,11 +134,17 @@ const cardStyle = (index) => {
   const distFromCenter = cardCenter - w / 2
   const absDist = Math.abs(distFromCenter)
   const far = absDist > w * 1.2
-  const moving = dragActive || inertiaId  // disable blur during motion for perf
+  const moving = dragActive || inertiaId
+  const searching = (props.highlightKeyword || '').trim().length > 0
 
-  // Scale / opacity based on distance from viewport center
-  const scale = Math.max(0.78, 1 - absDist / (w * 0.55))
-  const opacity = Math.max(0.3, 1 - absDist / (w * 0.85))
+  // When searching: fewer cards, make them larger & more readable
+  const scaleMin = searching ? 0.88 : 0.78
+  const scaleDecay = searching ? 0.70 : 0.55
+  const opacityMin = searching ? 0.4 : 0.3
+  const opacityDecay = searching ? 1.0 : 0.85
+
+  const scale = Math.max(scaleMin, 1 - absDist / (w * scaleDecay))
+  const opacity = Math.max(opacityMin, 1 - absDist / (w * opacityDecay))
   const zIndex = 200 - Math.floor(absDist / CARD_STEP) * 5
 
   return {
@@ -570,6 +587,40 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
   color: var(--fy-accent);
   border-radius: 2px;
   padding: 0 2px;
+}
+
+.timeline-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 16px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.timeline-bar::-webkit-scrollbar { display: none; }
+
+.timeline-dot {
+  width: 7px;
+  height: 7px;
+  min-width: 7px;
+  border-radius: 50%;
+  background: var(--fy-border);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.timeline-dot:hover {
+  background: var(--fy-accent);
+  transform: scale(1.6);
+}
+
+.timeline-dot.active {
+  background: var(--fy-accent);
+  width: 18px;
+  border-radius: 4px;
 }
 
 .load-more-bar {
