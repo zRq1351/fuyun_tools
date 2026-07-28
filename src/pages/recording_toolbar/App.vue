@@ -2157,9 +2157,6 @@ button:active:not(:disabled),
 .countdown-panel-overlay {
   position: absolute; inset: -12px; z-index: 10;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  backdrop-filter: blur(8px);
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 8px;
 }
 .countdown-in-panel-number {
   font-size: 96px; font-weight: 700;
