@@ -31,8 +31,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "**/image_history_blobs/**",
-          "**/screenshot_boot/**"
+          "**"
         ]
       }
     },
