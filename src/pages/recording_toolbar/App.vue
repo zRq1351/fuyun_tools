@@ -2162,7 +2162,7 @@ button:active:not(:disabled),
 }
 /* 展开时：半透明遮罩覆盖在设置面板上 */
 .countdown-panel-overlay {
-  position: absolute; right: 0; bottom: 0; left: 0; z-index: 10;
+  position: fixed; right: 0; bottom: 0; left: 0; z-index: 10;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   backdrop-filter: blur(8px);
   background: rgba(0, 0, 0, 0.4);
