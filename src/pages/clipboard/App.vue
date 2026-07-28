@@ -66,10 +66,10 @@
     </div>
 
     <div v-if="visibleHistory.length === 0" class="empty-state">
-      <el-empty v-if="!isLoadingPage" :description="$t('clipboard.noRecords')" :image-size="100">
+      <el-empty v-if="!isLoadingPage" :image-size="100">
         <template #description>
           <p>{{ $t('clipboard.noRecords') }}</p>
-          <p class="hint">{{ $t('clipboard.autoAddHint') }}</p>
+          <p class="hint">{{ $t('clipboard.emptyHint') }}</p>
         </template>
       </el-empty>
       <div v-else class="loading-state">
@@ -96,6 +96,7 @@
         :update-selection="updateSelection"
         :has-more="hasMore"
         :is-loading-page="isLoadingPage"
+        :total-count="totalCount"
         @load-more-intent="handleLoadMoreIntent"
         @preview="handlePreview"
         :visible-history="visibleHistory"
@@ -684,21 +685,10 @@ const handleLoadMoreIntent = () => {
 }
 
 const scrollToStart = async () => {
-  const container = getContentContainer()
-  if (container) {
-    container.scrollLeft = 0
-  }
-  if (visibleHistory.value.length > 0) {
-    selectedItemId.value = visibleHistory.value[0].id
-    await ensureKeyboardSelectionVisible()
-  }
+  clipboardListRef.value?.jumpToStart()
 }
 
 const scrollToEnd = async () => {
-  const container = getContentContainer()
-  if (container) {
-    container.scrollLeft = Math.max(0, container.scrollWidth - container.clientWidth)
-  }
   if (hasMore.value) {
     try {
       await loadTailPage()
@@ -709,10 +699,7 @@ const scrollToEnd = async () => {
       await nextTick()
     }
   }
-  if (visibleHistory.value.length > 0) {
-    selectedItemId.value = visibleHistory.value[visibleHistory.value.length - 1].id
-    await ensureKeyboardSelectionVisible()
-  }
+  clipboardListRef.value?.jumpToEnd()
 }
 
 const handleKeyup = (event) => {
@@ -747,6 +734,11 @@ const handleKeydown = async (event) => {
 
   // Handle navigation and action keys
   switch (event.key) {
+    case 'Home':
+      event.preventDefault()
+      clipboardListRef.value?.jumpToStart()
+      break
+
     case 'ArrowLeft':
       event.preventDefault()
       moveSelection(-1, clipboardListRef.value?.contentRef)
@@ -823,6 +815,16 @@ watch(visibleHistory, (list) => {
   if (!exists) {
     selectedItemId.value = list[0].id
   }
+})
+
+// Auto-jump to first item when category filter changes
+watch(categoryFilter, (newVal, oldVal) => {
+  if (!isVisible.value || newVal === oldVal) return
+  nextTick(() => {
+    if (visibleHistory.value.length > 0) {
+      clipboardListRef.value?.jumpToStart()
+    }
+  })
 })
 
 watch([contextMenuVisible, contextMenuX, contextMenuY], async ([visible]) => {

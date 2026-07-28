@@ -509,6 +509,7 @@
     "shortcutTip": "Select an item then press: T Translate / E Explain",
     "noRecords": "No clipboard records",
     "autoAddHint": "Records are added automatically when you copy",
+    "emptyHint": "Copy any text or image to view and manage it here",
     "perPage": "{size} per page",
     "backToStart": "Back to start",
     "scrollToEnd": "Scroll to end",

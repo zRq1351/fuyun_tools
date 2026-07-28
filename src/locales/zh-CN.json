@@ -509,6 +509,7 @@
     "shortcutTip": "选中记录后按：T 翻译 / E 解释",
     "noRecords": "暂无剪切板记录",
     "autoAddHint": "复制内容后会自动添加",
+    "emptyHint": "复制任意文本或图片即可在此查看和管理",
     "perPage": "每页{size}",
     "backToStart": "回到开头",
     "scrollToEnd": "滑动到最后",

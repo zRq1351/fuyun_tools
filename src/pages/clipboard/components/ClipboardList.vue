@@ -16,7 +16,7 @@
           @contextmenu.prevent="showContextMenu($event, entry.id, index)"
       >
         <div class="item-header">
-          <span class="item-index">{{ index + 1 }}</span>
+          <span class="item-index">{{ index + 1 }}/{{ totalCount || stackItems.length }}</span>
           <span class="item-category" @click.stop>{{ translateCategory(getItemCategory(entry.id)) }}</span>
           <div v-if="entry.pinned" class="item-pinned-dot"></div>
           <div class="item-actions">
@@ -92,7 +92,8 @@ const props = defineProps({
   isCtrlKeyPressed: {type: Boolean, default: false},
   highlightKeyword: {type: String, default: ''},
   hasMore: {type: Boolean, default: false},
-  isLoadingPage: {type: Boolean, default: false}
+  isLoadingPage: {type: Boolean, default: false},
+  totalCount: {type: Number, default: 0}
 })
 const emit = defineEmits(['load-more-intent', 'preview'])
 
@@ -323,6 +324,9 @@ const navigateTo = (idx) => {
   }
 }
 
+const jumpToStart = () => navigateTo(0)
+const jumpToEnd = () => navigateTo(props.visibleHistory.length - 1)
+
 // Sync scroll position when selection changes externally (keyboard, etc.)
 watch(() => props.selectedItemId, () => {
   if (dragActive) return
@@ -364,7 +368,7 @@ onBeforeUnmount(() => {
   stopInertia()
 })
 
-defineExpose({contentRef})
+defineExpose({contentRef, jumpToStart, jumpToEnd})
 </script>
 
 <style scoped>
@@ -420,6 +424,10 @@ defineExpose({contentRef})
   background: var(--fy-accent-bg);
   border-color: var(--fy-border-active);
   box-shadow: 0 4px 28px rgba(108, 140, 255, 0.2), 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+.clipboard-item.pinned {
+  border-top: 2px solid var(--fy-warning);
 }
 
 .clipboard-item:hover {
