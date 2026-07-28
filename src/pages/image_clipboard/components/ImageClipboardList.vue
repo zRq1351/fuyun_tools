@@ -136,6 +136,14 @@ const displayIndex = computed(() => {
     Math.round(scrollPos.value / CARD_STEP)))
 })
 
+// Auto-load more when approaching end of loaded items
+const LOAD_MORE_GAP = 5
+watch(displayIndex, (idx) => {
+  if (props.hasMore && !props.isLoadingPage && idx >= props.visibleHistory.length - LOAD_MORE_GAP) {
+    emit('load-more-intent')
+  }
+})
+
 const visibleCards = computed(() => {
   const total = props.visibleHistory.length
   if (total === 0) return []

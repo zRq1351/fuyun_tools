@@ -253,6 +253,14 @@ const selectedIndex = computed(() => {
     Math.round(scrollPos.value / CARD_STEP)))
 })
 
+// Auto-load more when approaching end of loaded items
+const LOAD_MORE_GAP = 5
+watch(selectedIndex, (idx) => {
+  if (props.hasMore && !props.isLoadingPage && idx >= props.visibleHistory.length - LOAD_MORE_GAP) {
+    emit('load-more-intent')
+  }
+})
+
 // Keep scrollPos synced with external selection changes
 const syncScrollToSelection = () => {
   const idx = props.visibleHistory.findIndex(e => e.id === props.selectedItemId)
