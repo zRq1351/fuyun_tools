@@ -197,9 +197,8 @@ let dragMoved = false
 // Derived: which card is closest to center
 const selectedIndex = computed(() => {
   if (props.visibleHistory.length === 0) return 0
-  const center = containerWidth.value / 2 - CARD_WIDTH / 2
-  const raw = Math.round((center - scrollPos.value) / CARD_STEP)
-  return Math.max(0, Math.min(props.visibleHistory.length - 1, raw))
+  return Math.max(0, Math.min(props.visibleHistory.length - 1,
+    Math.round(scrollPos.value / CARD_STEP)))
 })
 
 // Keep scrollPos synced with external selection changes
@@ -213,10 +212,12 @@ const syncScrollToSelection = () => {
 const onStageMouseDown = (e) => {
   if (e.button !== 0) return
   if (e.target.closest('.action-btn')) return
+  stopInertia()
   dragStartX = e.clientX
   dragStartScroll = scrollPos.value
   dragActive = true
   dragMoved = false
+  velocitySamples = []
   document.body.style.userSelect = 'none'
   document.addEventListener('mousemove', onStageMouseMove)
   document.addEventListener('mouseup', onStageMouseUp)
@@ -228,6 +229,9 @@ const onStageMouseMove = (e) => {
   if (!dragMoved && Math.abs(delta) > 3) dragMoved = true
   if (!dragMoved) return
   scrollPos.value = dragStartScroll - delta
+  // Track velocity samples (cap at 5)
+  velocitySamples.push({ time: performance.now(), pos: scrollPos.value })
+  if (velocitySamples.length > 5) velocitySamples.shift()
 }
 
 const onStageMouseUp = () => {
@@ -240,12 +244,62 @@ const onStageMouseUp = () => {
   if (!wasDragged) return
   skipNextClick = true
 
-  // Snap to nearest card
+  // Calculate velocity from recent samples (px/ms)
+  let vx = 0
+  if (velocitySamples.length >= 2) {
+    const first = velocitySamples[0]
+    const last = velocitySamples[velocitySamples.length - 1]
+    const dt = last.time - first.time
+    if (dt > 0) vx = (last.pos - first.pos) / dt
+  }
+  velocitySamples = []
+
+  const absV = Math.abs(vx)
+  if (absV < 0.02) {
+    snapToNearest()
+    return
+  }
+  startInertia(vx)
+}
+
+// --- Inertia animation ---
+const FRICTION = 0.94
+const MIN_SPEED = 0.015
+
+const startInertia = (velocity) => {
+  stopInertia()
+  let v = Math.max(-3, Math.min(3, velocity))
+  const maxPos = Math.max(0, (props.visibleHistory.length - 1) * CARD_STEP)
+  const animate = () => {
+    scrollPos.value += v * 16
+    v *= FRICTION
+
+    // Bounce at edges
+    if (scrollPos.value < 0) { scrollPos.value = 0; v = Math.abs(v) * 0.3 }
+    if (scrollPos.value > maxPos) { scrollPos.value = maxPos; v = -Math.abs(v) * 0.3 }
+
+    if (Math.abs(v) > MIN_SPEED) {
+      inertiaId = requestAnimationFrame(animate)
+    } else {
+      snapToNearest()
+    }
+  }
+  inertiaId = requestAnimationFrame(animate)
+}
+
+const stopInertia = () => {
+  if (inertiaId) { cancelAnimationFrame(inertiaId); inertiaId = null }
+}
+
+const snapToNearest = () => {
   const nearestIdx = Math.max(0, Math.min(props.visibleHistory.length - 1,
     Math.round(scrollPos.value / CARD_STEP)))
   scrollPos.value = nearestIdx * CARD_STEP
   navigateTo(nearestIdx)
 }
+
+let velocitySamples = []
+let inertiaId = null
 
 let skipNextClick = false
 
@@ -301,6 +355,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   stageRef.value?.removeEventListener('wheel', onWheel)
+  stopInertia()
 })
 
 defineExpose({contentRef})
