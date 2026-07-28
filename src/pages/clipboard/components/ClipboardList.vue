@@ -64,8 +64,8 @@ import FormattedContent from '../../../components/FormattedContent.vue'
 
 const {t} = useI18n()
 
-const CARD_WIDTH = 260
-const CARD_HEIGHT = 250
+const CARD_WIDTH = 300
+const CARD_HEIGHT = 280
 
 const CATEGORY_TRANSLATIONS = {
   '未分类': () => t('common.uncategorized'),
@@ -111,7 +111,7 @@ const stackItems = computed(() =>
 )
 
 // Calculate visual properties — continuous scroll strip with center-focused scale
-const CARD_STEP = 66  // px between consecutive cards in the strip
+const CARD_STEP = 76  // px between consecutive cards in the strip
 
 const cardStyle = (index) => {
   const w = containerWidth.value
