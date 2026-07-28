@@ -55,17 +55,6 @@
       </div>
     </div>
 
-    <div v-if="stackItems.length > 1" class="timeline-bar">
-      <div
-          v-for="(_, idx) in stackItems"
-          :key="idx"
-          :class="{ active: idx === selectedIndex }"
-          class="timeline-dot"
-          :title="(idx + 1) + ' / ' + stackItems.length"
-          @click.stop="navigateTo(idx)"
-      />
-    </div>
-
     <div v-if="showLoadMoreHint" class="load-more-bar">
       <el-icon v-if="isLoadingMore" :size="14" class="is-loading"><Loading/></el-icon>
       <span class="load-more-text" @click="emit('load-more-intent')">
@@ -396,12 +385,17 @@ const onStageClick = (e) => {
 }
 
 const navigateTo = (idx) => {
+  if (navLocked) return
+  navLocked = true
+  setTimeout(() => { navLocked = false }, 300)
   const id = props.visibleHistory[idx]?.id
   if (id) {
     scrollPos.value = idx * CARD_STEP
     props.updateSelection(id, false, null, null)
   }
 }
+
+let navLocked = false
 
 const jumpToStart = () => navigateTo(0)
 const jumpToEnd = () => navigateTo(props.visibleHistory.length - 1)
@@ -668,42 +662,6 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
   color: var(--fy-accent);
   border-radius: 2px;
   padding: 0 2px;
-}
-
-.timeline-bar {
-  position: relative;
-  z-index: 250;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  padding: 6px 16px;
-  flex-shrink: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.timeline-bar::-webkit-scrollbar { display: none; }
-
-.timeline-dot {
-  width: 7px;
-  height: 7px;
-  min-width: 7px;
-  border-radius: 50%;
-  background: var(--fy-border);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.timeline-dot:hover {
-  background: var(--fy-accent);
-  transform: scale(1.6);
-}
-
-.timeline-dot.active {
-  background: var(--fy-accent);
-  width: 18px;
-  border-radius: 4px;
 }
 
 .load-more-bar {
