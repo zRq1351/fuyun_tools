@@ -333,8 +333,8 @@ const validatePrompt = (item) => {
   align-items: center;
   margin-top: 6px;
   padding: 6px 10px;
-  background-color: var(--fy-warning);
-  border: 1px solid #f5dab1;
+  background-color: var(--fy-warning-bg);
+  border: 1px solid var(--fy-warning);
   border-radius: 4px;
   font-size: 12px;
   color: var(--fy-warning);
@@ -401,7 +401,7 @@ const validatePrompt = (item) => {
 .preview-button:hover {
   transform: translateY(-2px);
   box-shadow: var(--fy-shadow);
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--fy-bg-hover);
 }
 
 .preview-button:active {

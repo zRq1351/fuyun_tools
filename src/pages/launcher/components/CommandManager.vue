@@ -252,7 +252,7 @@ const confirmEdit = async () => {
   border-radius: 12px;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--fy-shadow-lg);
 }
 
 .manager-header {
@@ -419,7 +419,7 @@ const confirmEdit = async () => {
   width: 16px;
   left: 2px;
   bottom: 2px;
-  background-color: white;
+  background-color: var(--fy-text-primary);
   transition: 0.3s;
   border-radius: 50%;
 }
@@ -475,7 +475,7 @@ input:checked + .slider:before {
   background: var(--fy-bg-surface);
   border-radius: 12px;
   padding: 20px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--fy-shadow-lg);
 }
 
 .edit-dialog .dialog-title {

@@ -1742,7 +1742,7 @@ onBeforeUnmount(() => {
 .dm-sort-chosen {
   opacity: 1 !important;
   transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--fy-shadow);
   z-index: 10;
   border-color: var(--fy-accent) !important
 }
@@ -1752,7 +1752,7 @@ onBeforeUnmount(() => {
   background: var(--fy-bg-primary) !important;
   border: 2px solid var(--fy-accent) !important;
   border-radius: var(--fy-radius-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--fy-shadow-lg);
   cursor: grabbing !important;
   pointer-events: none;
   position: fixed !important;
@@ -2120,7 +2120,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   z-index: 10;
-  box-shadow: -2px 0 8px rgba(0, 0, 0, .08)
+  box-shadow: var(--fy-shadow)
 }
 
 .dm-detail-header {

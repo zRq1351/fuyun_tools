@@ -325,8 +325,8 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
   height: 250px;
   white-space: normal;
   flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.04);
-  border: 0.5px solid rgba(255, 255, 255, 0.07);
+  background: var(--fy-bg-card);
+  border: 0.5px solid var(--fy-border);
   border-radius: 14px;
   padding: 0;
   cursor: pointer;
@@ -340,13 +340,13 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
 }
 
 .clipboard-item:hover {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--fy-bg-hover);
+  border-color: var(--fy-border-hover);
 }
 
 .clipboard-item.selected {
-  background: rgba(108, 140, 255, 0.1);
-  border-color: rgba(108, 140, 255, 0.4);
+  background: var(--fy-accent-bg);
+  border-color: var(--fy-border-active);
 }
 
 .item-header {
@@ -423,7 +423,7 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
 }
 
 .action-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--fy-bg-hover);
   color: var(--fy-text-primary);
 }
 
@@ -433,7 +433,7 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
 
 .action-delete:hover {
   color: var(--fy-danger);
-  background: rgba(248, 113, 113, 0.1);
+  background: var(--fy-danger-bg);
 }
 
 .item-body {
@@ -457,7 +457,7 @@ defineExpose({contentRef, scrollerRef, getScrollEl})
 .item-snippet {
   margin: 0 12px 8px;
   padding: 6px 0 0;
-  border-top: 0.5px solid rgba(255, 255, 255, 0.05);
+  border-top: 0.5px solid var(--fy-border-light);
   font-size: 10px;
   line-height: 1.4;
   color: var(--fy-text-accent);

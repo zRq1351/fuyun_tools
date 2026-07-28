@@ -518,7 +518,7 @@ onBeforeUnmount(() => {
 /* Sortable chosen 状态 - 长按后准备拖动 */
 .category-box.category-chosen {
   transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--fy-shadow);
   z-index: 10;
   border-color: var(--fy-accent);
 }
@@ -539,7 +539,7 @@ onBeforeUnmount(() => {
   background: var(--fy-bg-card);
   border: 2px solid var(--fy-accent);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--fy-shadow-lg);
   overflow: hidden;
   z-index: 9999;
   cursor: grabbing !important;
@@ -634,7 +634,7 @@ onBeforeUnmount(() => {
 .app-item:hover {
   background: var(--fy-accent-bg);
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--fy-shadow);
 }
 
 .app-item.ctx-anchor {
@@ -653,7 +653,7 @@ onBeforeUnmount(() => {
 /* Sortable chosen 状态 - 长按后准备拖动 */
 .app-item.app-chosen {
   transform: scale(1.1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--fy-shadow);
   z-index: 10;
 }
 
@@ -673,7 +673,7 @@ onBeforeUnmount(() => {
   background: var(--fy-bg-surface);
   border: 2px solid var(--fy-accent);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--fy-shadow-lg);
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -830,7 +830,7 @@ onBeforeUnmount(() => {
   background: var(--fy-bg-surface);
   border-radius: 12px;
   padding: 20px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--fy-shadow-lg);
 }
 
 .dialog-title {

@@ -101,11 +101,13 @@ watch(() => props.modelValue, (newVal) => {
   color: var(--fy-text-primary);
   caret-color: var(--fy-accent);
   padding: 0 8px;
-  transition: border-color 0.15s;
+  transition: border-color var(--fy-duration-normal) var(--fy-ease-out),
+              box-shadow var(--fy-duration-normal) var(--fy-ease-out);
 }
 
 .search-input:focus {
   border-color: var(--fy-accent);
+  box-shadow: 0 0 0 2px var(--fy-accent-bg);
 }
 
 .search-input::placeholder {

@@ -220,7 +220,7 @@ const handleToggleAiSettings = () => {
 }
 
 .search-input :deep(.el-input__wrapper) {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--fy-bg-input);
   border: 0.5px solid var(--fy-border-light);
   box-shadow: none;
   border-radius: var(--fy-radius-full);
@@ -231,12 +231,13 @@ const handleToggleAiSettings = () => {
 
 .search-input :deep(.el-input__wrapper:hover) {
   border-color: var(--fy-border);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--fy-bg-hover);
 }
 
 .search-input :deep(.el-input__wrapper.is-focus) {
   border-color: var(--fy-accent);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--fy-bg-hover);
+  box-shadow: 0 0 0 2px var(--fy-accent-bg);
 }
 
 .search-input :deep(.el-input__inner) {
@@ -268,8 +269,8 @@ const handleToggleAiSettings = () => {
   height: 26px;
   padding: 0 10px;
   border-radius: var(--fy-radius-full);
-  background: rgba(255, 255, 255, 0.12);
-  border: 0.5px solid rgba(255, 255, 255, 0.15);
+  background: var(--fy-bg-hover);
+  border: 0.5px solid var(--fy-border);
   color: var(--fy-text-primary);
   font-size: var(--fy-text-sm);
   cursor: pointer;
@@ -286,15 +287,15 @@ const handleToggleAiSettings = () => {
 }
 
 .category-pill:hover {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.25);
+  background: var(--fy-accent-bg);
+  border-color: var(--fy-border-hover);
   color: var(--fy-text-primary);
 }
 
 .category-pill.active {
   background: var(--fy-accent);
-  border-color: transparent;
-  color: var(--fy-text-primary);
+  border-color: var(--fy-accent);
+  color: var(--fy-text-inverse);
 }
 
 .category-pill.drag-over {
@@ -320,7 +321,7 @@ const handleToggleAiSettings = () => {
 }
 
 .category-input :deep(.el-input__wrapper) {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--fy-bg-input);
   border: 0.5px solid var(--fy-border-light);
   box-shadow: none;
   border-radius: var(--fy-radius-full);
@@ -345,7 +346,7 @@ const handleToggleAiSettings = () => {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--fy-bg-overlay);
   color: inherit;
   transition: all var(--fy-duration-normal) var(--fy-ease-out);
 }

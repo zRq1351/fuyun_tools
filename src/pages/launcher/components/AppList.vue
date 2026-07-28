@@ -595,7 +595,7 @@ onBeforeUnmount(() => {
   background: var(--fy-bg-surface);
   border-radius: 12px;
   padding: 20px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--fy-shadow-lg);
 }
 
 .dialog-title {

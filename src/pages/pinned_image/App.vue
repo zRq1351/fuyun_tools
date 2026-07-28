@@ -344,14 +344,14 @@ onUnmounted(() => {
   top: 12px;
   right: 12px;
   z-index: 10;
-  background: rgba(30, 34, 48, 0.72);
+  background: var(--fy-glass-bg);
   color: var(--fy-text-primary);
   font-size: var(--fy-text-base);
   padding: 6px 12px;
   border-radius: var(--fy-radius-md);
   pointer-events: none;
   backdrop-filter: blur(20px) saturate(150%);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--fy-shadow);
   transition: opacity 0.3s;
 }
 .ocr-toast-error {

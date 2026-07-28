@@ -337,7 +337,7 @@ watch(() => props.categories, () => {
   background: var(--fy-bg-surface);
   border: 1px solid var(--fy-border);
   border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--fy-shadow-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -442,7 +442,7 @@ watch(() => props.categories, () => {
 
 .category-chosen {
   transform: scale(1.08);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 3px var(--fy-accent);
+  box-shadow: var(--fy-shadow-lg), 0 0 0 3px var(--fy-accent);
   z-index: 10;
   background: var(--fy-accent-bg);
   animation: chosen-pulse 0.6s ease-in-out infinite alternate;
@@ -450,10 +450,10 @@ watch(() => props.categories, () => {
 
 @keyframes chosen-pulse {
   from {
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 3px var(--fy-accent);
+    box-shadow: var(--fy-shadow-lg), 0 0 0 3px var(--fy-accent);
   }
   to {
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 5px var(--fy-accent);
+    box-shadow: var(--fy-shadow-lg), 0 0 0 5px var(--fy-accent);
   }
 }
 
@@ -468,7 +468,7 @@ watch(() => props.categories, () => {
   pointer-events: none;
   opacity: 0.95;
   transform: scale(1.05);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--fy-shadow-lg);
   background: var(--fy-bg-surface);
   border: 2px solid var(--fy-accent);
   border-radius: 8px;
