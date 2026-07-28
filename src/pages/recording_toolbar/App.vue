@@ -2,6 +2,7 @@
   <div
         :class="{
         'bar-collapsed-settings-open': capsuleSettingsVisible,
+        'countdown-active': countdownActive,
       }"
         class="bar bar-collapsed"
     >
@@ -2166,6 +2167,9 @@ button:active:not(:disabled),
   backdrop-filter: blur(8px);
   background: rgba(0, 0, 0, 0.4);
   border-radius: 0 0 12px 12px;
+}
+.bar.countdown-active {
+  overflow: visible;
 }
 .countdown-in-panel-number {
   font-size: 96px; font-weight: 700;
