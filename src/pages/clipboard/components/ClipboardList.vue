@@ -1,6 +1,6 @@
 <template>
   <div ref="contentRef" class="content">
-    <div ref="stageRef" class="carousel-stage" @mousedown="onStageMouseDown">
+    <div ref="stageRef" class="carousel-stage" @mousedown="onStageMouseDown" @click="onStageClick">
       <div
           v-for="(entry, index) in stackItems"
           :id="'clipboard-item-' + entry.id"
@@ -9,7 +9,6 @@
           :draggable="isCtrlKeyPressed"
           :style="cardStyle(index)"
           class="clipboard-item"
-          @click="handleClick(entry.id)"
           @dblclick="handleDoubleClick(entry.id)"
           @dragend="handleDragEnd"
           @dragstart="handleItemDragStart($event, entry.id)"
@@ -314,6 +313,20 @@ const handleClick = (entryId) => {
   if (skipNextClick) { skipNextClick = false; return }
   const idx = props.visibleHistory.findIndex(e => e.id === entryId)
   if (idx >= 0) navigateTo(idx)
+}
+
+// Stage-level click: use elementFromPoint to hit the correct card
+// (per-card @click fails when cards overlap — the topmost card captures all clicks)
+const onStageClick = (e) => {
+  if (skipNextClick) { skipNextClick = false; return }
+  const el = document.elementFromPoint(e.clientX, e.clientY)
+  const card = el?.closest('.clipboard-item')
+  if (!card) return
+  const id = card.id?.replace('clipboard-item-', '')
+  if (id) {
+    const idx = props.visibleHistory.findIndex(entry => entry.id === id)
+    if (idx >= 0) navigateTo(idx)
+  }
 }
 
 const navigateTo = (idx) => {
