@@ -2,16 +2,10 @@
   <div
         :class="{
         'bar-collapsed-settings-open': capsuleSettingsVisible,
-        'countdown-active': countdownActive,
       }"
         class="bar bar-collapsed"
     >
-      <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-panel-overlay" :style="overlayStyle" @click.stop="countdownCancelled = true">
-        <span class="countdown-in-panel-number">{{ countdownValue }}</span>
-        <div class="countdown-cancel-hint">{{ t('recordingToolbar.pressEscToCancel') }}</div>
-      </div>
       <div
-          ref="collapsedShellEl"
           :data-state="rawRecordingState"
           class="collapsed-shell"
       >
@@ -80,6 +74,12 @@
         </div>
         <div class="capsule-settings-panel-wrapper" :class="{ 'is-open': capsuleSettingsVisible }">
           <div class="capsule-settings-panel no-drag">
+            <!-- 展开时倒计时：铺满面板区域 -->
+            <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-full-panel" @click.stop="countdownCancelled = true">
+              <span class="countdown-in-panel-number">{{ countdownValue }}</span>
+              <div class="countdown-cancel-hint">{{ t('recordingToolbar.pressEscToCancel') }}</div>
+            </div>
+            <template v-if="!countdownActive || !capsuleSettingsVisible">
             <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
                  :title="t('recordingToolbar.clickToDismiss')" @click="clearInlineNotice">
               {{ inlineNotice }}
@@ -282,6 +282,7 @@
                 @change="onToolbarSettingChange('recordingDefaultAudioBitrateKbps', $event)"
             />
           </div>
+            </template>
         </div>
       </div>
     </div>
@@ -338,12 +339,6 @@ const audioBitrateKbps = ref(160);
 const qualityPreset = ref('hd');
 const countdownActive = ref(false);
 const countdownValue = ref(3);
-const collapsedShellEl = ref(null);
-const overlayStyle = computed(() => {
-  if (!collapsedShellEl.value) return {};
-  const h = collapsedShellEl.value.offsetHeight;
-  return { top: h + 'px' };
-});
 let countdownCancelled = false;
 const lastTargetType = ref('');
 const lastTargetId = ref('');
@@ -2161,15 +2156,13 @@ button:active:not(:disabled),
   animation: countdown-pop 0.4s ease-out;
 }
 /* 展开时：半透明遮罩覆盖在设置面板上 */
-.countdown-panel-overlay {
-  position: fixed; right: 0; bottom: 0; left: 0; z-index: 10;
+/* 展开时：铺满面板区域的倒计时 */
+.countdown-full-panel {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 240px;
   backdrop-filter: blur(8px);
   background: rgba(0, 0, 0, 0.4);
-  border-radius: 0 0 12px 12px;
-}
-.bar.countdown-active {
-  overflow: visible;
+  border-radius: 8px;
 }
 .countdown-in-panel-number {
   font-size: 96px; font-weight: 700;
@@ -2178,7 +2171,7 @@ button:active:not(:disabled),
   animation: countdown-pop 0.5s ease-out;
 }
 .countdown-cancel-hint {
-  position: absolute; bottom: 24px; font-size: 13px;
+  margin-top: 8px; font-size: 13px;
   color: rgba(255, 255, 255, 0.6);
 }
 @keyframes countdown-pop {
