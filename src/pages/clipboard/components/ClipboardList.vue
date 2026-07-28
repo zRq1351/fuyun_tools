@@ -2,20 +2,20 @@
   <div ref="contentRef" class="content">
     <div ref="stageRef" class="carousel-stage" @mousedown="onStageMouseDown" @click="onStageClick">
       <div
-          v-for="(entry, index) in stackItems"
+          v-for="entry in visibleCards"
           :id="'clipboard-item-' + entry.id"
           :key="entry.id"
           :class="{ selected: entry.id === selectedItemId, pinned: entry.pinned }"
           :draggable="isCtrlKeyPressed"
-          :style="cardStyle(index)"
+          :style="cardStyle(entry._index)"
           class="clipboard-item"
           @dblclick="handleDoubleClick(entry.id)"
           @dragend="handleDragEnd"
           @dragstart="handleItemDragStart($event, entry.id)"
-          @contextmenu.prevent="showContextMenu($event, entry.id, index)"
+          @contextmenu.prevent="showContextMenu($event, entry.id, entry._index)"
       >
         <div class="item-header">
-          <span class="item-index">{{ index + 1 }}/{{ totalCount || stackItems.length }}</span>
+          <span class="item-index">{{ entry._index + 1 }}/{{ totalCount || stackItems.length }}</span>
           <span class="item-category" @click.stop>{{ translateCategory(getItemCategory(entry.id)) }}</span>
           <div v-if="entry.pinned" class="item-pinned-dot"></div>
           <div class="item-actions">
@@ -113,6 +113,10 @@ const containerWidth = ref(800)
 
 let resizeObserver = null
 
+// Calculate visual properties — continuous scroll strip with center-focused scale
+const CARD_STEP = 76
+const VISIBLE_PAD = 6  // extra cards rendered on each side of viewport
+
 const stackItems = computed(() =>
   props.visibleHistory.map((entry, index) => ({
     ...entry,
@@ -121,8 +125,21 @@ const stackItems = computed(() =>
   }))
 )
 
-// Calculate visual properties — continuous scroll strip with center-focused scale
-const CARD_STEP = 76  // px between consecutive cards in the strip
+// Only render cards within viewport range — massive perf win for large lists
+const visibleCards = computed(() => {
+  const total = props.visibleHistory.length
+  if (total === 0) return []
+  const centerIdx = scrollPos.value / CARD_STEP
+  const half = (containerWidth.value / CARD_STEP) / 2 + VISIBLE_PAD
+  const start = Math.max(0, Math.floor(centerIdx - half))
+  const end = Math.min(total, Math.ceil(centerIdx + half) + 1)
+  return props.visibleHistory.slice(start, end).map((entry, i) => ({
+    ...entry,
+    _index: start + i,
+    snippet: entry.snippet || '',
+    pinned: props.isPinned(entry.id),
+  }))
+})
 
 const cardStyle = (index) => {
   const w = containerWidth.value
