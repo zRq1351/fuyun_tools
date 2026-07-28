@@ -66,7 +66,6 @@ const {t} = useI18n()
 
 const CARD_WIDTH = 260
 const CARD_HEIGHT = 250
-const CARD_STEP = 72  // px between adjacent card centers
 
 const CATEGORY_TRANSLATIONS = {
   '未分类': () => t('common.uncategorized'),
@@ -116,28 +115,68 @@ const stackItems = computed(() =>
   }))
 )
 
-// Calculate visual properties for each card based on distance from selection
+// Calculate visual properties for each card — stacked deck with swipe
+const STACK_OFFSET_X = 10
+const STACK_OFFSET_Y = 14
+const STACK_SCALE_STEP = 0.07
+const SWIPE_THRESHOLD = 0.3  // fraction of stage width to trigger navigation
+
 const cardStyle = (index) => {
   const d = index - selectedIndex.value
   const absD = Math.abs(d)
-  const scale = Math.max(0.55, 1 - absD * 0.22)
-  const opacity = Math.max(0.2, 1 - absD * 0.35)
-  const zIndex = 100 - absD * 10
+
+  // Base stack transform (no swipe): cards behind are offset & scaled
+  const baseX = d * STACK_OFFSET_X
+  const baseY = absD * STACK_OFFSET_Y
+  const baseScale = 1 - absD * STACK_SCALE_STEP
+  const baseOpacity = absD <= 1 ? 1 - absD * 0.5 : 0.15
+  let zIndex = 100 - absD * 15
 
   const w = containerWidth.value
-  const centerX = w / 2
-  const cardVisualW = CARD_WIDTH * scale
-  const cardCenterX = centerX + d * CARD_STEP
-  const left = cardCenterX - cardVisualW / 2 + dragOffset.value
+  const centerX = w / 2 - CARD_WIDTH / 2
+
+  // Apply swipe — focused card follows finger, cards behind shift toward center
+  const progress = swipeProgress.value  // -1 to +1
+  const swipeAbs = Math.abs(progress)
+  const swipeDir = progress > 0 ? 1 : -1  // +1=swipe right (to prev), -1=swipe left (to next)
+
+  const isFocus = d === 0
+  const isNext = d === swipeDir  // card being revealed
+
+  let x, y, s, opacity
+
+  if (isFocus) {
+    // Focus card follows mouse, fades as it moves away
+    x = centerX + progress * w * 0.6
+    y = swipeAbs * STACK_OFFSET_Y  // slightly down as it slides
+    s = 1 - swipeAbs * 0.08
+    opacity = 1 - swipeAbs * 0.5
+    zIndex = 100
+  } else if (isNext && swipeAbs > 0.05) {
+    // Card being revealed: moves from offset toward center, scales up, opacity up
+    const t = Math.min(1, swipeAbs / SWIPE_THRESHOLD)
+    x = centerX + (1 - t) * swipeDir * STACK_OFFSET_X
+    y = (1 - t) * STACK_OFFSET_Y
+    s = baseScale + t * (1 - baseScale)
+    opacity = baseOpacity + t * (1 - baseOpacity)
+    zIndex = 95
+  } else {
+    // Other cards: stay in stack position
+    x = centerX + baseX
+    y = baseY
+    s = baseScale
+    opacity = baseOpacity
+  }
 
   return {
-    left: left + 'px',
+    left: x + 'px',
     top: '50%',
     width: CARD_WIDTH + 'px',
     height: CARD_HEIGHT + 'px',
-    transform: `translateY(-50%) scale(${scale})`,
+    transform: `translateY(-50%) translateY(${y}px) scale(${s})`,
     opacity,
     zIndex,
+    transition: dragActive ? 'none' : undefined,
   }
 }
 
@@ -188,20 +227,18 @@ const openWebUrl = async (v) => {
   } catch (e) { /* ignore */ }
 }
 
-// --- Mouse drag/swipe ---
-const dragOffset = ref(0)
-let dragStartX = 0
+// --- Swipe state ---
+const swipeProgress = ref(0)
+let swipeStartX = 0
 let dragActive = false
 let dragMoved = false
-let dragSnapshot = 0
 
 const onStageMouseDown = (e) => {
   if (e.button !== 0) return
   if (e.target.closest('.action-btn')) return
-  dragStartX = e.clientX
+  swipeStartX = e.clientX
   dragActive = true
   dragMoved = false
-  dragSnapshot = dragOffset.value
   document.body.style.userSelect = 'none'
   document.addEventListener('mousemove', onStageMouseMove)
   document.addEventListener('mouseup', onStageMouseUp)
@@ -209,10 +246,11 @@ const onStageMouseDown = (e) => {
 
 const onStageMouseMove = (e) => {
   if (!dragActive) return
-  const delta = e.clientX - dragStartX
+  const delta = e.clientX - swipeStartX
   if (!dragMoved && Math.abs(delta) > 4) dragMoved = true
   if (!dragMoved) return
-  dragOffset.value = dragSnapshot + delta
+  const w = containerWidth.value || 800
+  swipeProgress.value = Math.max(-1, Math.min(1, delta / (w * 0.5)))
 }
 
 const onStageMouseUp = () => {
@@ -223,25 +261,29 @@ const onStageMouseUp = () => {
   document.removeEventListener('mouseup', onStageMouseUp)
   if (!wasDragged) return
 
-  const threshold = 60
-  const delta = dragOffset.value - dragSnapshot
-  if (delta > threshold && selectedIndex.value > 0) {
-    dragOffset.value = 0
-    handleClick(props.visibleHistory[selectedIndex.value - 1].id)
-  } else if (delta < -threshold && selectedIndex.value < props.visibleHistory.length - 1) {
-    dragOffset.value = 0
-    handleClick(props.visibleHistory[selectedIndex.value + 1].id)
+  const p = swipeProgress.value
+  if (p > SWIPE_THRESHOLD && selectedIndex.value > 0) {
+    swipeProgress.value = 0
+    navigateTo(selectedIndex.value - 1)
+  } else if (p < -SWIPE_THRESHOLD && selectedIndex.value < props.visibleHistory.length - 1) {
+    swipeProgress.value = 0
+    navigateTo(selectedIndex.value + 1)
   } else {
-    dragOffset.value = 0
+    swipeProgress.value = 0  // snap back
   }
   skipNextClick = true
+}
+
+const navigateTo = (idx) => {
+  const id = props.visibleHistory[idx]?.id
+  if (id) props.updateSelection(id, false, null, null)
 }
 
 let skipNextClick = false
 
 const handleClick = (entryId) => {
   if (skipNextClick) { skipNextClick = false; return }
-  props.updateSelection(entryId, false, null, null)
+  navigateTo(props.visibleHistory.findIndex(e => e.id === entryId))
 }
 
 let wheelTimer = null
@@ -253,12 +295,10 @@ const onWheel = (e) => {
   wheelTimer = setTimeout(() => { wheelTimer = null }, WHEEL_GAP)
   const current = selectedIndex.value
   if (current < 0 || props.visibleHistory.length === 0) return
-  // deltaY < 0 = scroll up (towards user) → next card
-  // deltaY > 0 = scroll down → previous card
   if (e.deltaY < 0 && current < props.visibleHistory.length - 1) {
-    handleClick(props.visibleHistory[current + 1].id)
+    navigateTo(current + 1)
   } else if (e.deltaY > 0 && current > 0) {
-    handleClick(props.visibleHistory[current - 1].id)
+    navigateTo(current - 1)
   }
 }
 
@@ -319,11 +359,12 @@ defineExpose({contentRef})
   -webkit-backdrop-filter: var(--fy-glass-blur);
   color: var(--fy-text-primary);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-  transition: left 0.45s var(--fy-ease-out),
-              transform 0.45s var(--fy-ease-out),
-              opacity 0.45s var(--fy-ease-out),
+  transition: left 0.4s var(--fy-ease-out),
+              transform 0.4s var(--fy-ease-out),
+              opacity 0.4s var(--fy-ease-out),
               box-shadow 0.3s ease;
   overflow: hidden;
+  will-change: transform, opacity, left;
 }
 
 .clipboard-item.selected {
