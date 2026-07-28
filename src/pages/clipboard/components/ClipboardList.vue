@@ -137,14 +137,15 @@ const cardStyle = (index) => {
   const moving = dragActive || inertiaId
   const searching = (props.highlightKeyword || '').trim().length > 0
 
-  // When searching: fewer cards, make them larger & more readable
+  // During drag/inertia: make cards semi-transparent so background cards peek through
+  const dragOpacityMul = moving ? 0.55 : 1
   const scaleMin = searching ? 0.88 : 0.78
   const scaleDecay = searching ? 0.70 : 0.55
   const opacityMin = searching ? 0.4 : 0.3
   const opacityDecay = searching ? 1.0 : 0.85
 
   const scale = Math.max(scaleMin, 1 - absDist / (w * scaleDecay))
-  const opacity = Math.max(opacityMin, 1 - absDist / (w * opacityDecay))
+  const opacity = Math.max(opacityMin, 1 - absDist / (w * opacityDecay)) * dragOpacityMul
   const zIndex = 200 - Math.floor(absDist / CARD_STEP) * 5
 
   return {
