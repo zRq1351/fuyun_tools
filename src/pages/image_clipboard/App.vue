@@ -906,10 +906,6 @@ const warmupAround = (index) => {
   warmupBatch(Math.max(0, index - 1), 3)
 }
 
-const handleItemHover = (index) => {
-  warmupAround(index)
-}
-
 const scrollToStart = () => {
   imageListRef.value?.jumpToStart()
 }

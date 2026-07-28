@@ -2,14 +2,14 @@
   <div ref="contentRef" class="content">
     <div ref="stageRef" class="carousel-stage" @mousedown="onStageMouseDown" @click="onStageClick">
       <button
-          v-if="selectedIndex > 0"
+          v-if="displayIndex > 0"
           class="nav-arrow nav-prev"
           @mousedown.stop="startNavRepeat(-1)"
           @mouseup.stop="stopNavRepeat"
           @mouseleave.stop="stopNavRepeat"
       >‹</button>
       <button
-          v-if="selectedIndex < visibleHistory.length - 1"
+          v-if="displayIndex < visibleHistory.length - 1"
           class="nav-arrow nav-next"
           @mousedown.stop="startNavRepeat(1)"
           @mouseup.stop="stopNavRepeat"
@@ -160,8 +160,6 @@ const visibleCards = computed(() => {
     tags: entry.tags,
   }))
 })
-
-let _lastStart = -1, _lastEnd = -1, _lastVisible = []
 
 // Card visual style
 const cardStyle = (index) => {

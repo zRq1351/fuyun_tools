@@ -136,7 +136,6 @@ const visibleCards = computed(() => {
   const half = (containerWidth.value / CARD_STEP) / 2 + VISIBLE_PAD
   const start = Math.max(0, Math.floor(centerIdx - half))
   const end = Math.min(total, Math.ceil(centerIdx + half) + 1)
-  // Cache: only rebuild when the visible range actually shifts
   return props.visibleHistory.slice(start, end).map((entry, i) => ({
     ...entry,
     _index: start + i,
