@@ -264,7 +264,7 @@
                 :model-value="videoBitrateKbps"
                 :step="500"
                 size="small"
-                :disabled="!canEditRecordingConfig"
+                :disabled="!canEditRecordingConfig || qualityPreset !== 'custom'"
                 @change="onToolbarSettingChange('recordingDefaultVideoBitrateKbps', $event)"
             />
           </div>
@@ -277,7 +277,7 @@
                 :model-value="audioBitrateKbps"
                 :step="16"
                 size="small"
-                :disabled="!canEditRecordingConfig"
+                :disabled="!canEditRecordingConfig || qualityPreset !== 'custom'"
                 @change="onToolbarSettingChange('recordingDefaultAudioBitrateKbps', $event)"
             />
           </div>
