@@ -642,6 +642,7 @@
     "presetFhd": "FHD",
     "presetCustom": "Custom",
     "repeatLastTarget": "Repeat last target",
+    "pressEscToCancel": "Press Esc or click to cancel",
     "videoBitrate": "Video Bitrate (kbps)",
     "audioBitrate": "Audio Bitrate (kbps)",
     "recordingDisabled": "Recording disabled",

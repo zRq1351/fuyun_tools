@@ -24,7 +24,7 @@
           <div
               :data-state="currentRecordingState"
               :class="['collapsed-pill', { 'countdown-pill': countdownActive }]"
-              @click.stop="toggleRecordingState"
+              @click.stop="countdownActive ? (countdownCancelled = true) : toggleRecordingState()"
           >
             <span class="collapsed-pill-content">
               <span v-if="countdownActive && !capsuleSettingsVisible" class="collapsed-countdown-num">{{ countdownValue }}</span>
@@ -75,8 +75,9 @@
         <div class="capsule-settings-panel-wrapper" :class="{ 'is-open': capsuleSettingsVisible }">
           <div class="capsule-settings-panel no-drag">
             <!-- 设置展开时：半透明遮罩覆盖在设置内容上显示倒计时 -->
-            <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-panel-overlay">
+            <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-panel-overlay" @click.stop="countdownCancelled = true">
               <span class="countdown-in-panel-number">{{ countdownValue }}</span>
+              <div class="countdown-cancel-hint">{{ t('recordingToolbar.pressEscToCancel') }}</div>
             </div>
             <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
                  :title="t('recordingToolbar.clickToDismiss')" @click="clearInlineNotice">
@@ -336,6 +337,7 @@ const audioBitrateKbps = ref(160);
 const qualityPreset = ref('hd');
 const countdownActive = ref(false);
 const countdownValue = ref(3);
+let countdownCancelled = false;
 const lastTargetType = ref('');
 const lastTargetId = ref('');
 
@@ -684,11 +686,21 @@ const toggleRecordingState = async () => {
 
       isMicMuted.value = true;
       countdownActive.value = true;
+      const cancel = () => { countdownCancelled = true; };
+      const onKey = (e) => { if (e.key === 'Escape') cancel(); };
+      window.addEventListener('keydown', onKey);
+      countdownCancelled = false;
       for (let i = 3; i >= 1; i--) {
         countdownValue.value = i;
-        await new Promise((r) => setTimeout(r, 1000));
+        for (let _ = 0; _ < 50; _++) {
+          if (countdownCancelled) break;
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        if (countdownCancelled) break;
       }
+      window.removeEventListener('keydown', onKey);
       countdownActive.value = false;
+      if (countdownCancelled) return;
       await RecordingService.start({
         targetType: recordTargetType.value,
         targetId,
@@ -2153,6 +2165,10 @@ button:active:not(:disabled),
   color: #fff;
   text-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
   animation: countdown-pop 0.5s ease-out;
+}
+.countdown-cancel-hint {
+  position: absolute; bottom: 24px; font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
 }
 @keyframes countdown-pop {
   from { transform: scale(1.5); opacity: 0; }
