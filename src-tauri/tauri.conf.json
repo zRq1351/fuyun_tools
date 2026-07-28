@@ -27,7 +27,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; style-src-elem 'self' 'unsafe-inline'; style-src-attr 'unsafe-inline'; connect-src 'self' tauri://ipc; img-src 'self' data: https: asset: https://asset.localhost; media-src 'self' https:; font-src 'self'; object-src 'none';",
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; style-src-elem 'self' 'unsafe-inline'; style-src-attr 'unsafe-inline'; connect-src 'self' tauri://ipc; img-src 'self' data: https: asset: https://asset.localhost; media-src 'self' https:; font-src 'self'; object-src 'none';",
       "assetProtocol": {
         "enable": true,
         "scope": [
