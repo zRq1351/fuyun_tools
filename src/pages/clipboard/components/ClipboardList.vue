@@ -1,6 +1,16 @@
 <template>
   <div ref="contentRef" class="content">
     <div ref="stageRef" class="carousel-stage" @mousedown="onStageMouseDown" @click="onStageClick">
+      <button
+          v-if="selectedIndex > 0"
+          class="nav-arrow nav-prev"
+          @click.stop="navigateTo(selectedIndex - 1)"
+      >‹</button>
+      <button
+          v-if="selectedIndex < stackItems.length - 1"
+          class="nav-arrow nav-next"
+          @click.stop="navigateTo(selectedIndex + 1)"
+      >›</button>
       <div
           v-for="entry in visibleCards"
           :id="'clipboard-item-' + entry.id"
@@ -462,6 +472,40 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
 .carousel-stage:active {
   cursor: grabbing;
 }
+
+.nav-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 300;
+  width: 36px;
+  height: 60px;
+  border: none;
+  background: rgba(0, 0, 0, 0.15);
+  color: var(--fy-text-primary);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--fy-radius-md);
+  opacity: 0;
+  transition: opacity 0.2s ease, background 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+}
+
+.carousel-stage:hover .nav-arrow {
+  opacity: 1;
+}
+
+.nav-arrow:hover {
+  background: var(--fy-accent-bg);
+  color: var(--fy-accent);
+}
+
+.nav-prev { left: 8px; }
+.nav-next { right: 8px; }
 
 .clipboard-item {
   position: absolute;
