@@ -1535,6 +1535,7 @@ body {
 }
 
 .bar.bar-collapsed.bar-collapsed-settings-open {
+  flex-direction: column;
   justify-content: flex-start;
   align-items: stretch;
   padding: 12px;
@@ -2166,6 +2167,7 @@ button:active:not(:disabled),
   position: relative;
   flex: 1;
   width: 100%;
+  min-height: 0;
 }
 .countdown-in-panel-number {
   font-size: 96px; font-weight: 700;
