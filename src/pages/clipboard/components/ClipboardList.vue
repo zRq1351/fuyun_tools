@@ -1,6 +1,6 @@
 <template>
   <div ref="contentRef" class="content">
-    <div ref="stageRef" class="carousel-stage">
+    <div ref="stageRef" class="carousel-stage" @mousedown="onStageMouseDown">
       <div
           v-for="(entry, index) in stackItems"
           :id="'clipboard-item-' + entry.id"
@@ -128,7 +128,7 @@ const cardStyle = (index) => {
   const centerX = w / 2
   const cardVisualW = CARD_WIDTH * scale
   const cardCenterX = centerX + d * CARD_STEP
-  const left = cardCenterX - cardVisualW / 2
+  const left = cardCenterX - cardVisualW / 2 + dragOffset.value
 
   return {
     left: left + 'px',
@@ -144,7 +144,6 @@ const cardStyle = (index) => {
 const isLoadingMore = computed(() => props.isLoadingPage && props.visibleHistory.length > 0)
 const showLoadMoreHint = computed(() => props.hasMore || isLoadingMore.value)
 
-const handleClick = (entryId) => props.updateSelection(entryId, false, null, null)
 const handleDoubleClick = (entryId) => props.selectAndFillDirect(entryId)
 
 const renderHighlightParts = (text) => {
@@ -187,6 +186,62 @@ const openWebUrl = async (v) => {
     const url = /^https?:\/\//i.test(t) ? t : /^www\./i.test(t) ? `https://${t}` : t
     await openExternalUrl(url)
   } catch (e) { /* ignore */ }
+}
+
+// --- Mouse drag/swipe ---
+const dragOffset = ref(0)
+let dragStartX = 0
+let dragActive = false
+let dragMoved = false
+let dragSnapshot = 0
+
+const onStageMouseDown = (e) => {
+  if (e.button !== 0) return
+  if (e.target.closest('.action-btn')) return
+  dragStartX = e.clientX
+  dragActive = true
+  dragMoved = false
+  dragSnapshot = dragOffset.value
+  document.body.style.userSelect = 'none'
+  document.addEventListener('mousemove', onStageMouseMove)
+  document.addEventListener('mouseup', onStageMouseUp)
+}
+
+const onStageMouseMove = (e) => {
+  if (!dragActive) return
+  const delta = e.clientX - dragStartX
+  if (!dragMoved && Math.abs(delta) > 4) dragMoved = true
+  if (!dragMoved) return
+  dragOffset.value = dragSnapshot + delta
+}
+
+const onStageMouseUp = () => {
+  const wasDragged = dragMoved
+  dragActive = false
+  document.body.style.removeProperty('user-select')
+  document.removeEventListener('mousemove', onStageMouseMove)
+  document.removeEventListener('mouseup', onStageMouseUp)
+  if (!wasDragged) return
+
+  const threshold = 60
+  const delta = dragOffset.value - dragSnapshot
+  if (delta > threshold && selectedIndex.value > 0) {
+    dragOffset.value = 0
+    handleClick(props.visibleHistory[selectedIndex.value - 1].id)
+  } else if (delta < -threshold && selectedIndex.value < props.visibleHistory.length - 1) {
+    dragOffset.value = 0
+    handleClick(props.visibleHistory[selectedIndex.value + 1].id)
+  } else {
+    dragOffset.value = 0
+  }
+  skipNextClick = true
+}
+
+let skipNextClick = false
+
+const handleClick = (entryId) => {
+  if (skipNextClick) { skipNextClick = false; return }
+  props.updateSelection(entryId, false, null, null)
 }
 
 let wheelTimer = null
@@ -240,6 +295,11 @@ defineExpose({contentRef})
   position: relative;
   overflow: hidden;
   perspective: 1000px;
+  cursor: grab;
+}
+
+.carousel-stage:active {
+  cursor: grabbing;
 }
 
 .clipboard-item {
