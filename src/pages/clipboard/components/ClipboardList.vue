@@ -671,6 +671,8 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
 }
 
 .timeline-bar {
+  position: relative;
+  z-index: 250;
   display: flex;
   align-items: center;
   justify-content: center;
