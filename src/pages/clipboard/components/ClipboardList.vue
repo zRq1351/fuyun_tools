@@ -189,16 +189,36 @@ const openWebUrl = async (v) => {
   } catch (e) { /* ignore */ }
 }
 
+let wheelTimer = null
+const WHEEL_GAP = 200
+
+const onWheel = (e) => {
+  e.preventDefault()
+  if (wheelTimer) return
+  wheelTimer = setTimeout(() => { wheelTimer = null }, WHEEL_GAP)
+  const current = selectedIndex.value
+  if (current < 0 || props.visibleHistory.length === 0) return
+  // deltaY < 0 = scroll up (towards user) → next card
+  // deltaY > 0 = scroll down → previous card
+  if (e.deltaY < 0 && current < props.visibleHistory.length - 1) {
+    handleClick(props.visibleHistory[current + 1].id)
+  } else if (e.deltaY > 0 && current > 0) {
+    handleClick(props.visibleHistory[current - 1].id)
+  }
+}
+
 onMounted(() => {
   containerWidth.value = contentRef.value?.clientWidth || 800
   resizeObserver = new ResizeObserver(() => {
     containerWidth.value = contentRef.value?.clientWidth || 800
   })
   if (contentRef.value) resizeObserver.observe(contentRef.value)
+  stageRef.value?.addEventListener('wheel', onWheel, {passive: false})
 })
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
+  stageRef.value?.removeEventListener('wheel', onWheel)
 })
 
 defineExpose({contentRef})
