@@ -2158,18 +2158,18 @@ button:active:not(:disabled),
   position: absolute; inset: -12px; z-index: 10;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   backdrop-filter: blur(8px);
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(255, 255, 255, 0.04);
   border-radius: 8px;
 }
 .countdown-in-panel-number {
   font-size: 96px; font-weight: 700;
-  color: #fff;
-  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  color: var(--fy-text-primary);
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
   animation: countdown-pop 0.5s ease-out;
 }
 .countdown-cancel-hint {
   margin-top: 8px; font-size: 13px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--fy-text-secondary);
 }
 @keyframes countdown-pop {
   from { transform: scale(1.5); opacity: 0; }
