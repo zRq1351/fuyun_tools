@@ -117,10 +117,8 @@ pub(crate) fn cleanup_all_screenshot_boot_images() {
 }
 
 pub(crate) fn build_screenshot_boot_image_path(session_id: u64) -> Result<PathBuf, String> {
-    let mut dir = std::env::current_exe().map_err(|e| format!("获取程序目录失败: {}", e))?;
-    dir.pop();
-    dir.push("screenshot_boot");
-    fs::create_dir_all(&dir).map_err(|e| format!("创建截图启动目录失败: {}", e))?;
+    let dir = std::env::temp_dir().join("fuyun_tools").join("screenshot_boot");
+    fs::create_dir_all(&dir).map_err(|e| format!("创建截图临时目录失败: {}", e))?;
     Ok(dir.join(format!("screenshot_boot_{}.png", session_id)))
 }
 
