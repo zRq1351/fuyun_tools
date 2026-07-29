@@ -812,6 +812,13 @@ const getPreviewDataUrl = (item) => {
     return previewCache.get(item.id)
   }
   try {
+    // 优先文件路径（asset://），回退 base64
+    const fileUrl = buildFileUrlFromPath(item.image_path)
+    if (fileUrl) {
+      previewCache.set(item.id, fileUrl)
+      enforcePreviewCacheSize()
+      return fileUrl
+    }
 
     const previewBase64 = typeof item.preview_png_base64 === 'string' ? item.preview_png_base64.trim() : ''
     if (previewBase64) {

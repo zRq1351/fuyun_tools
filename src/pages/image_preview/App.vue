@@ -258,18 +258,18 @@ onMounted(async () => {
     resetViewTransform()
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        // Prefer base64 data URL (reliable in production)
+        // 优先文件路径（asset:// 协议），回退 base64
+        const fileUrl = buildFileUrlFromPath(payload.image_path)
+        if (fileUrl) {
+          imageUrl.value = fileUrl
+          return
+        }
         if (payload.base64 && payload.mime) {
           imageUrl.value = `data:${payload.mime};base64,${payload.base64}`
           return
         }
-        // Fallback: asset protocol URL
-        const nextUrl = buildFileUrlFromPath(payload.image_path)
-        imageUrl.value = nextUrl
-        if (!nextUrl) {
-          loadErrorMessage.value = '图片路径无效或不在允许目录内'
-          onImageError()
-        }
+        loadErrorMessage.value = '图片路径无效或不在允许目录内'
+        onImageError()
       })
     })
     playOpenAnimation()
