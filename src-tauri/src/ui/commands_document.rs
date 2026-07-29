@@ -88,12 +88,18 @@ pub async fn rename_doc_category(id: i64, name: String) -> Result<(), String> {
     let old_dir = Path::new(&root.root_path).join(&cat.name);
     let new_dir = Path::new(&root.root_path).join(name_trim);
     if old_dir.exists() && old_dir != new_dir {
-        document_database::safe_move_file(&old_dir, &new_dir).map_err(|e| format!("重命名目录失败: {}", e))?;
+        // 先更新数据库，再移动目录 —— 如果目录移动失败，DB 状态仍可恢复
+        let _old_name = document_database::rename_doc_category(id, name_trim).await?;
+        let old_prefix = old_dir.to_string_lossy().to_string();
+        let new_prefix = new_dir.to_string_lossy().to_string();
+        document_database::update_managed_path_prefix(&old_prefix, &new_prefix, root.id, id).await?;
+        document_database::safe_move_file(&old_dir, &new_dir).map_err(|e| {
+            log::error!("分类目录重命名失败（数据库已更新）: {} -> {}: {}", old_dir.display(), new_dir.display(), e);
+            format!("重命名目录失败: {}", e)
+        })?;
+    } else {
+        let _old_name = document_database::rename_doc_category(id, name_trim).await?;
     }
-    let _old_name = document_database::rename_doc_category(id, name_trim).await?;
-    let old_prefix = old_dir.to_string_lossy().to_string();
-    let new_prefix = new_dir.to_string_lossy().to_string();
-    document_database::update_managed_path_prefix(&old_prefix, &new_prefix, root.id, id).await?;
     Ok(())
 }
 

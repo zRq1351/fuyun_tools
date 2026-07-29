@@ -363,12 +363,10 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
         return;
     }
     let (selected_index, bottom_offset, manager_arc) = {
-        let mut state_guard = lock_arc_mutex(&state);
+        let state_guard = lock_arc_mutex(&state);
         if state_guard.is_visible {
             return;
         }
-        state_guard.is_visible = true;
-        notify_window_visibility_changed();
         (
             state_guard.selected_index,
             state_guard.settings.clipboard_bottom_offset,
@@ -401,10 +399,16 @@ pub fn show_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
     let categories_clone = categories.clone();
     let category_list_clone = category_list.clone();
     let pinned_items_clone = pinned_items.clone();
+    let state_clone = state.clone();
     thread::spawn(move || {
         if let Some(window) = app_handle_clone.get_webview_window("clipboard") {
             set_window_position(&window, bottom_offset);
             if show_overlay_window(&app_handle_clone, "clipboard", &window, true) {
+                {
+                    let mut guard = lock_arc_mutex(&state_clone);
+                    guard.is_visible = true;
+                    notify_window_visibility_changed();
+                }
                 let payload = serde_json::json!({
                     "history": history_clone,
                     "categories": categories_clone,
@@ -427,8 +431,6 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
     let (already_visible, selected_index, bottom_offset, manager_arc, should_sync_history) = {
         let mut state_guard = lock_arc_mutex(&state);
         let already_visible = state_guard.is_image_visible;
-        state_guard.is_image_visible = true;
-        notify_window_visibility_changed();
         let should_sync_history = !already_visible && state_guard.image_history_dirty;
         if should_sync_history {
             state_guard.image_history_dirty = false;
@@ -460,6 +462,7 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
 
     let app_handle_clone = app_handle.clone();
     let snapshot_payload_clone = snapshot_payload.clone();
+    let state_clone = state.clone();
     thread::spawn(move || {
         if let Some(window) = app_handle_clone.get_webview_window("image_clipboard") {
             set_window_position(&window, bottom_offset);
@@ -468,6 +471,9 @@ pub fn show_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppSt
             {
                 if !already_visible {
                     set_active_overlay_window(&app_handle_clone, Some("image_clipboard"));
+                    let mut guard = lock_arc_mutex(&state_clone);
+                    guard.is_image_visible = true;
+                    notify_window_visibility_changed();
                 }
                 let mut payload = serde_json::json!({
                     "bottomOffset": bottom_offset,

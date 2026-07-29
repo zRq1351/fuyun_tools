@@ -675,6 +675,14 @@ pub async fn run_auto_backup_tick(state: Arc<Mutex<SharedAppState>>) -> Result<b
     if AUTO_BACKUP_IN_FLIGHT.swap(true, Ordering::AcqRel) {
         return Ok(false);
     }
+    // RAII guard: 确保无论成功、失败还是 panic，标志位都会被重置
+    struct AutoBackupGuard;
+    impl Drop for AutoBackupGuard {
+        fn drop(&mut self) {
+            AUTO_BACKUP_IN_FLIGHT.store(false, Ordering::Release);
+        }
+    }
+    let _guard = AutoBackupGuard;
     let _backup_job_guard = BACKUP_JOB_MUTEX
         .get_or_init(|| tauri::async_runtime::Mutex::new(()))
         .lock()
@@ -697,8 +705,6 @@ pub async fn run_auto_backup_tick(state: Arc<Mutex<SharedAppState>>) -> Result<b
     }
         .await;
 
-    AUTO_BACKUP_IN_FLIGHT.store(false, Ordering::Release);
-
     match run_result {
         Ok(_) => Ok(true),
         Err(err) => {
@@ -713,7 +719,6 @@ pub async fn run_auto_backup_tick(state: Arc<Mutex<SharedAppState>>) -> Result<b
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
     use std::path::PathBuf;
 
@@ -795,10 +800,9 @@ mod tests {
                 // canonicalize 会解析符号链接，所以 canonical_path 应该指向外部目录
                 assert!(!canonical_path.starts_with(&canonical_target_dir));
             }
+            let _ = fs::remove_dir_all(&outside_dir);
+            let _ = fs::remove_dir_all(&test_dir);
         }
-
-        let _ = fs::remove_dir_all(&outside_dir);
-        let _ = fs::remove_dir_all(&test_dir);
     }
 
     /// 测试文件扩展名验证
@@ -812,7 +816,7 @@ mod tests {
         assert!(!"backup_2024.zip".ends_with(".fytbk.zip"));
         assert!(!"backup_2024.fytbk".ends_with(".fytbk.zip"));
         assert!(!"backup_2024.txt".ends_with(".fytbk.zip"));
-        assert!(!".fytbk.zip".ends_with(".fytbk.zip")); // 无文件名
+        assert!(".fytbk.zip".ends_with(".fytbk.zip")); // 无文件名但扩展名有效
     }
 
     /// 测试空路径处理

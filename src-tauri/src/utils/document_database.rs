@@ -876,7 +876,9 @@ pub async fn update_doc_file_meta(
                 .execute(&mut *tx)
                 .await {
                 let _ = tx.rollback().await;
-                let _ = safe_move_file(&dest, old_path);
+                if let Err(e) = safe_move_file(&dest, old_path) {
+                    log::error!("回滚文件移动失败: {} -> {}: {}", dest.display(), old_path.display(), e);
+                }
                 return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
             }
         }

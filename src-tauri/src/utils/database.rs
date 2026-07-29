@@ -1158,21 +1158,32 @@ pub async fn save_categories_state_async(
 
     // 清理不再需要的分类映射
     if !categories.is_empty() {
+        // 创建临时表收集所有有效 ID，避免分块 NOT IN 导致互相删除
+        sqlx::query("CREATE TEMP TABLE IF NOT EXISTS _valid_cat_ids (item_id TEXT PRIMARY KEY)")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         let category_ids: Vec<&str> = categories.keys().map(|s| s.as_str()).collect();
         for chunk in category_ids.chunks(500) {
-            let placeholders: Vec<String> = chunk.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
-            let sql = format!(
-                "DELETE FROM categories WHERE item_id NOT IN ({})",
-                placeholders.join(",")
+            let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+                "INSERT OR IGNORE INTO _valid_cat_ids(item_id) ",
             );
-            let mut query = sqlx::query(&sql);
-            for id in chunk {
-                query = query.bind(*id);
-            }
-            query.execute(&mut *tx)
+            qb.push_values(chunk.iter(), |mut b, id| {
+                b.push_bind(*id);
+            });
+            qb.build()
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
+        sqlx::query("DELETE FROM categories WHERE item_id NOT IN (SELECT item_id FROM _valid_cat_ids)")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        sqlx::query("DROP TABLE _valid_cat_ids")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     } else {
         sqlx::query("DELETE FROM categories")
             .execute(&mut *tx)

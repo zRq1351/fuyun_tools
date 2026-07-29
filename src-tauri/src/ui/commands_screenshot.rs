@@ -25,11 +25,50 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_positioner::WindowExt;
+
+/// 截图会话数据，前端通过 `get_screenshot_data` IPC 主动拉取
+struct ScreenshotSession {
+    bmp_path: PathBuf,   // BMP 快速显示（无压缩，浏览器零解码）
+    png_path: PathBuf,   // PNG 用于保存/复制/固定
+    width: u32,
+    height: u32,
+    origin_x: i32,
+    origin_y: i32,
+    session_id: u64,
+    selection_mode: String,
+}
+
+static SCREENSHOT_SESSION: std::sync::OnceLock<std::sync::Mutex<Option<ScreenshotSession>>> =
+    std::sync::OnceLock::new();
+
+fn screenshot_session_store() -> &'static std::sync::Mutex<Option<ScreenshotSession>> {
+    SCREENSHOT_SESSION.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+#[tauri::command]
+pub async fn get_screenshot_data() -> Result<serde_json::Value, String> {
+    let mut guard = screenshot_session_store()
+        .lock()
+        .map_err(|e| format!("锁获取失败: {}", e))?;
+    match guard.take() {
+        Some(session) => Ok(serde_json::json!({
+            "success": true,
+            "bmp_path": session.bmp_path,
+            "image_path": session.png_path,
+            "width": session.width,
+            "height": session.height,
+            "origin_x": session.origin_x,
+            "origin_y": session.origin_y,
+            "session_id": session.session_id,
+            "selection_mode": session.selection_mode,
+        })),
+        None => Ok(serde_json::json!({ "success": false })),
+    }
+}
 
 #[tauri::command]
 pub async fn resize_selection_toolbar(
@@ -608,6 +647,10 @@ pub async fn save_screenshot(
             "message": "用户取消保存"
         }));
     };
+    // 防御性路径校验：拒绝包含 ".." 的路径（路径穿越攻击防护）
+    if path_buf.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err("路径包含非法字符".to_string());
+    }
 
     fs::write(&path_buf, &png_data).map_err(|e| format!("写入文件失败: {}", e))?;
     record_perf_metric(
@@ -1231,198 +1274,80 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
     };
 
     let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
-    let (image_path, png_data) =
-        write_screenshot_boot_image(&rgba, width, height, session_id).map_err(|e| {
-            capture::set_screenshot_in_progress(false);
-            record_perf_metric(
-                "screenshot.open_prepare",
-                "截图打开准备耗时",
-                started_at.elapsed().as_millis() as u64,
-                false,
-                Some(e.clone()),
-            );
-            e
-        })?;
-    use base64::Engine;
-    let png_base64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
 
-    let selection_mode = selection_mode;
-    ensure_window_for_label(&app, "screenshot")?;
-    if let Some(window) = app.get_webview_window("screenshot") {
-        if SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_ok()
-        {
-            bind_screenshot_window_lifecycle(&window, &app);
-        }
-        let payload = serde_json::json!({
-            "image_path": image_path,
-            "png_base64": png_base64,
-            "width": width,
-            "height": height,
-            "origin_x": origin_x,
-            "origin_y": origin_y,
-            "session_id": session_id
-        });
-        // Sanitize selection_mode for safe JS interpolation
-        let safe_mode = selection_mode
-            .replace('\\', "\\\\")
-            .replace('\'', "\\'")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('<', "\\x3c")
-            .replace('>', "\\x3e");
-        let script = format!(
-            "if (!window.__SCREENSHOT_BOOT_READY__) {{ throw new Error('screenshot boot not ready'); }}\
-window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || {{ pendingData: null, pendingStartSessionId: 0 }};\
-window.__SCREENSHOT_BOOT__.pendingData = {payload};\
-window.__SCREENSHOT_BOOT__.pendingStartSessionId = {session_id};\
-window.__SCREENSHOT_BOOT__.pendingMode = '{safe_mode}';\
-window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {payload} }}));\
-window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ session_id: {session_id}, mode: '{safe_mode}' }} }}));"
-        );
+    // BMP 快速写入（~5ms，浏览器零解码显示）
+    let bmp_data = capture::rgba_to_bmp_bytes(&rgba, width, height).map_err(|e| {
+        capture::set_screenshot_in_progress(false);
+        format!("BMP编码失败: {}", e)
+    })?;
+    let bmp_path = {
+        let mut dir = std::env::current_exe().map_err(|e| format!("获取程序目录失败: {}", e))?;
+        dir.pop();
+        dir.push("screenshot_boot");
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join(format!("screenshot_boot_{}.bmp", session_id))
+    };
+    std::fs::write(&bmp_path, &bmp_data).map_err(|e| format!("BMP写入失败: {}", e))?;
 
-        let app_for_window = app.clone();
-        thread::spawn(move || {
-            let _ = window.set_always_on_top(true);
-            let _ = window.set_ignore_cursor_events(false);
-            let _ = window.set_fullscreen(true);
-            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
-            let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-                x: origin_x,
-                y: origin_y,
-            }));
-            let mut injected = false;
-            for _attempt in 0..20 {
-                if window.eval(&script).is_ok() {
-                    injected = true;
-                    break;
-                }
-                thread::sleep(Duration::from_millis(25));
-            }
-            if injected {
-                record_perf_metric(
-                    "screenshot.open_prepare",
-                    "截图打开准备耗时",
-                    started_at.elapsed().as_millis() as u64,
-                    true,
-                    None,
-                );
-                let _ = show_overlay_window_by_label(&app_for_window, "screenshot", true);
-            } else {
-                record_perf_metric(
-                    "screenshot.open_prepare",
-                    "截图打开准备耗时",
-                    started_at.elapsed().as_millis() as u64,
-                    false,
-                    Some("截图窗口脚本注入失败".to_string()),
-                );
-                let _ = hide_overlay_window_by_label(&app_for_window, "screenshot");
-                cleanup_all_screenshot_boot_images();
-                capture::set_screenshot_in_progress(false);
-            }
+    // PNG 后台异步编码保存（用于导出，不阻塞热路径）
+    let png_path = bmp_path.with_extension("png");
+    capture::save_png_async(rgba, width, height, png_path.clone());
+
+    let bmp_path_str = bmp_path.to_string_lossy().replace('\\', "\\\\");
+
+    // 存储会话数据
+    {
+        let mut guard = screenshot_session_store()
+            .lock()
+            .map_err(|e| format!("锁获取失败: {}", e))?;
+        *guard = Some(ScreenshotSession {
+            bmp_path: bmp_path.clone(),
+            png_path: png_path.clone(),
+            width,
+            height,
+            origin_x,
+            origin_y,
+            session_id,
+            selection_mode: selection_mode.clone(),
         });
-    } else {
-        let payload = serde_json::json!({
-            "image_path": image_path,
-            "width": width,
-            "height": height,
-            "origin_x": origin_x,
-            "origin_y": origin_y,
-            "session_id": session_id
-        });
-        let safe_mode = selection_mode
-            .replace('\\', "\\\\")
-            .replace('\'', "\\'")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('<', "\\x3c")
-            .replace('>', "\\x3e");
-        let boot_script = format!(
-            "window.__SCREENSHOT_BOOT__ = window.__SCREENSHOT_BOOT__ || {{ pendingData: null, pendingStartSessionId: 0 }};\
-window.__SCREENSHOT_BOOT__.pendingData = {};\
-window.__SCREENSHOT_BOOT__.pendingStartSessionId = {};\
-window.__SCREENSHOT_BOOT__.pendingMode = '{}';\
-window.dispatchEvent(new CustomEvent('screenshot-data', {{ detail: {} }}));\
-window.dispatchEvent(new CustomEvent('start-region-select', {{ detail: {{ session_id: {}, mode: '{}' }} }}));",
-            payload, session_id, safe_mode, payload, session_id, safe_mode
-        );
-        let boot_script_for_page_load = boot_script.clone();
-        let screenshot_scale = app.primary_monitor()
-            .ok()
-            .flatten()
-            .map(|m| m.scale_factor())
-            .unwrap_or(1.0);
-        let window = tauri::WebviewWindowBuilder::new(
-            &app,
-            "screenshot",
-            tauri::WebviewUrl::App("screenshot.html".into()),
-        )
-            .title("截图选择")
-            .visible(false)
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .resizable(false)
-            .accept_first_mouse(true)
-            .inner_size(width as f64 / screenshot_scale, height as f64 / screenshot_scale)
-            .position(origin_x as f64 / screenshot_scale, origin_y as f64 / screenshot_scale)
-            .fullscreen(true)
-            .on_page_load(move |window, _| {
-                let _ = window.eval(&boot_script_for_page_load);
-                let app_handle = window.app_handle();
-                let _ = show_overlay_window_by_label(&app_handle, "screenshot", true);
-            })
-            .build()
-            .map_err(|e| {
-                cleanup_all_screenshot_boot_images();
-                capture::set_screenshot_in_progress(false);
-                record_perf_metric(
-                    "screenshot.open_prepare",
-                    "截图打开准备耗时",
-                    started_at.elapsed().as_millis() as u64,
-                    false,
-                    Some(e.to_string()),
-                );
-                frontend_error_kind_params(AppErrorKind::ScreenshotCreateWindowFailed, serde_json::json!({"error": e.to_string()}), e.to_string())
-            })?;
-        bind_screenshot_window_lifecycle(&window, &app);
-        let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
-        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-            x: origin_x,
-            y: origin_y,
-        }));
-        // 冷启动路径：on_page_load 可能因 webview 未完全就绪而 eval 失败，添加重试逻辑
-        let app_for_cold = app.clone();
-        thread::spawn(move || {
-            let mut injected = false;
-            for _attempt in 0..20 {
-                if window.eval(&boot_script).is_ok() {
-                    injected = true;
-                    break;
-                }
-                thread::sleep(Duration::from_millis(25));
-            }
-            if injected {
-                let _ = show_overlay_window_by_label(&app_for_cold, "screenshot", true);
-            } else {
-                let _ = hide_overlay_window_by_label(&app_for_cold, "screenshot");
-                cleanup_all_screenshot_boot_images();
-                capture::set_screenshot_in_progress(false);
-            }
-        });
-        record_perf_metric(
-            "screenshot.open_prepare",
-            "截图打开准备耗时",
-            started_at.elapsed().as_millis() as u64,
-            true,
-            None,
-        );
     }
 
+    ensure_window_for_label(&app, "screenshot")?;
+    let window = app
+        .get_webview_window("screenshot")
+        .ok_or_else(|| "截图窗口创建失败".to_string())?;
+    if SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        bind_screenshot_window_lifecycle(&window, &app);
+    }
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_fullscreen(true);
+    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+        x: origin_x,
+        y: origin_y,
+    }));
+    // 注入 BMP 路径预加载（图片加载与 Vue 挂载并行）
+    let preload_script = format!(
+        "window.__SCREENSHOT_PRELOAD__ = {{ bmpPath: '{}', imagePath: '{}', sessionId: {}, mode: '{}' }};\
+window.dispatchEvent(new CustomEvent('screenshot-preload-ready'));",
+        bmp_path_str,
+        png_path.to_string_lossy().replace('\\', "\\\\"),
+        session_id,
+        selection_mode
+    );
+    let _ = window.eval(&preload_script);
+
+    capture::set_screenshot_in_progress(false);
+    record_perf_metric(
+        "screenshot.open_prepare",
+        "截图打开准备耗时",
+        started_at.elapsed().as_millis() as u64,
+        true,
+        None,
+    );
     Ok(())
 }
 

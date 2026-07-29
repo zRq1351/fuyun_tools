@@ -625,6 +625,7 @@ pub fn run() {
             get_clipboard_full_snapshot,
             // 截图相关命令
             start_screenshot,
+            get_screenshot_data,
             start_manual_longshot,
             pause_manual_longshot,
             resume_manual_longshot,

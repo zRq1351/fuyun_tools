@@ -555,6 +555,7 @@ pub fn find_best_replacement_candidate(
 }
 
 #[cfg(test)]
+#[allow(non_snake_case)]
 mod tests {
     use super::*;
 

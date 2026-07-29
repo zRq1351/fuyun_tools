@@ -36,7 +36,7 @@
       </div>
 
       <!-- 选区镂空及控制点 -->
-      <div v-if="hasSelection || state === 'selecting'"
+      <div v-if="hasSelection || state === 'selecting' || state === 'idle'"
            ref="cutoutRef"
            :class="{ 'is-active': state === 'selected', 'longshot-running': longshotOverlayOnly, 'picker-active': currentTool === 'picker' }"
            class="cutout">
@@ -871,13 +871,13 @@ watchPostEffect(() => {
 onMounted(async () => {
   window.__SCREENSHOT_KEYDOWN_HANDLER_READY__ = true
   await refreshManualLongshotAvailability()
-  window.addEventListener('screenshot-data', handleScreenshotData)
-  window.addEventListener('start-region-select', handleStartRegionSelect)
+  // 预创建窗口后，热键触发的截图通过 eval 派发此事件
+  window.addEventListener('screenshot-preload-ready', () => {
+    loadScreenshotSession()
+  })
   window.addEventListener('screenshot-reset', handleScreenshotReset)
   document.addEventListener('keydown', handleKeyDown)
-  // 全局 mouseup：防止 Alt+Tab 切走后松手导致绘制状态卡死
   window.addEventListener('mouseup', onGlobalMouseUp)
-  // 窗口失焦时清理绘制状态
   window.addEventListener('blur', onWindowBlur)
   unlistenManualLongshotProgress = await listen('manual-longshot-progress', (event) => {
     const payload = event.payload || {}
@@ -957,7 +957,7 @@ onMounted(async () => {
     manualLongshotRunning.value = true
     manualLongshotHint.value = t('screenshot.longshotResumeHint')
   })
-  consumeBootPayload()
+  await loadScreenshotSession()
 })
 
 onUnmounted(() => {
@@ -968,8 +968,6 @@ onUnmounted(() => {
   }
   revokeScreenshotObjectUrl()
   cancelManualLongshotCapture(false, false)
-  window.removeEventListener('screenshot-data', handleScreenshotData)
-  window.removeEventListener('start-region-select', handleStartRegionSelect)
   window.removeEventListener('screenshot-reset', handleScreenshotReset)
   document.removeEventListener('keydown', handleKeyDown)
   if (typeof unlistenManualLongshotProgress === 'function') {
@@ -1080,59 +1078,90 @@ function handleScreenshotReset() {
   longshotViewOffset.y = 0
 }
 
-function consumeBootPayload() {
-  const boot = window.__SCREENSHOT_BOOT__
-  if (!boot) return
-  const bootStartSessionId = Number(boot.pendingStartSessionId) || 0
-  if (bootStartSessionId > 0) {
-    activeSessionId.value = bootStartSessionId
+async function loadScreenshotSession() {
+  // 优先使用 main.js 预加载的图片（零延迟，不等 IPC）
+  const preload = window.__SCREENSHOT_PRELOAD__
+  const preloadedImg = window.__SCREENSHOT_PRELOADED_IMAGE__
+  if (preloadedImg && preload) {
+    screenshotImg.value = preloadedImg
+    sourceImagePath.value = preload.imagePath || preload.bmpPath || ''
+    isCaptureReady.value = true
+    const sessionId = Number(preload.sessionId) || 0
+    if (sessionId > 0) {
+      activeSessionId.value = sessionId
+      payloadSessionId.value = sessionId
+    }
     screenshotSessionRequested.value = true
-    hasScreenshotPayload.value = payloadSessionId.value === bootStartSessionId
+    hasScreenshotPayload.value = true
+    regionSelectMode.value = String(preload.mode || 'screenshot')
+    state.value = 'idle'
+    currentTool.value = 'select'
+    rect.width = 0
+    rect.height = 0
+    manualLongshotSessionId.value = 0
+    manualLongshotRunning.value = false
+    longshotResultActive.value = false
+    longshotRawPngBase64.value = ''
+    longshotViewScale.value = 1
+    longshotViewOffset.x = 0
+    longshotViewOffset.y = 0
+    await fetchWindows()
+    try {
+      resetAnnotationStateForNewImage()
+    } catch (e) {
+    }
+    nextTick(() => {
+      initCanvas()
+    })
+    // 图片就绪，显示窗口
+    invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
+    })
+    return
   }
-  if (boot.pendingData && (boot.pendingData.png_base64 || boot.pendingData.image_path)) {
-    handleScreenshotData({detail: boot.pendingData})
-    boot.pendingData = null
-  }
-  if (bootStartSessionId > 0) {
-    const bootMode = String(boot.pendingMode || 'screenshot')
-    handleStartRegionSelect({detail: {session_id: bootStartSessionId, mode: bootMode}})
-    boot.pendingStartSessionId = 0
-    boot.pendingMode = null
-  }
-}
-
-function scheduleScreenshotFallback() {
-  if (!screenshotSessionRequested.value || hasScreenshotPayload.value) return
-  if (screenshotFallbackTimer) {
-    window.clearTimeout(screenshotFallbackTimer)
-  }
-  const scheduledSessionId = activeSessionId.value
-  screenshotFallbackTimer = window.setTimeout(async () => {
-    if (scheduledSessionId > 0 && activeSessionId.value !== scheduledSessionId) {
+  // 回退：IPC 拉取
+  try {
+    const result = await invoke('get_screenshot_data')
+    if (result?.success && (result.png_base64 || result.image_path)) {
+      longshotResultActive.value = false
+      longshotRawPngBase64.value = ''
+      sourceImagePath.value = String(result.image_path || '')
+      longshotViewScale.value = 1
+      longshotViewOffset.x = 0
+      longshotViewOffset.y = 0
+      const sessionId = Number(result.session_id) || 0
+      if (sessionId > 0) {
+        activeSessionId.value = sessionId
+        payloadSessionId.value = sessionId
+      }
+      screenshotSessionRequested.value = true
+      hasScreenshotPayload.value = true
+      captureOriginX.value = Number(result.origin_x) || 0
+      captureOriginY.value = Number(result.origin_y) || 0
+      await fetchWindows()
+      const mode = String(result.selection_mode || 'screenshot')
+      regionSelectMode.value = mode
+      state.value = 'idle'
+      currentTool.value = 'select'
+      rect.width = 0
+      rect.height = 0
+      manualLongshotSessionId.value = 0
+      manualLongshotRunning.value = false
+      longshotResultActive.value = false
+      longshotRawPngBase64.value = ''
+      if (result.image_path) {
+        loadImageFromPath(result.image_path)
+      } else if (result.png_base64) {
+        loadImageFromBase64(result.png_base64)
+      }
+      invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
+      })
       return
     }
-    if (screenshotSessionRequested.value && !hasScreenshotPayload.value) {
-      if (scheduledSessionId > 0) {
-        if (fallbackRequestedSessionIds.has(scheduledSessionId)) {
-          return
-        }
-        fallbackRequestedSessionIds.add(scheduledSessionId)
-      } else {
-        if (fallbackRequestedWithoutSession) {
-          return
-        }
-        fallbackRequestedWithoutSession = true
-      }
-      const success = await requestScreenshot()
-      if (!success) {
-        if (scheduledSessionId > 0) {
-          fallbackRequestedSessionIds.delete(scheduledSessionId)
-        } else {
-          fallbackRequestedWithoutSession = false
-        }
-      }
-    }
-  }, 120)
+    // 无会话数据，窗口为预创建状态，不显示不截图
+    return
+  } catch (e) {
+    console.error('加载截图会话失败:', e)
+  }
 }
 
 async function fetchWindows() {
@@ -1498,7 +1527,8 @@ function loadImageFromSrc(src) {
   screenshotSrc.value = src
   const img = new Image()
   // 避免跨域 canvas taint（Tauri asset:// 与 app:// 不同源）
-  if (src.startsWith('http')) {
+  // asset.localhost 不支持 CORS，跳过 crossOrigin 设置
+  if (src.startsWith('http') && !src.includes('asset.localhost')) {
     img.crossOrigin = 'anonymous'
   }
   img.onload = () => {

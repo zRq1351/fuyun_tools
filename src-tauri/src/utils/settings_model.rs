@@ -458,10 +458,11 @@ fn parse_migration_version(raw: &str) -> Option<MigrationVersion> {
     let core = trimmed
         .split_once('-')
         .map(|(left, _)| left)
-        .unwrap_or(trimmed)
+        .unwrap_or(trimmed);
+    let core = core
         .split_once('+')
         .map(|(left, _)| left)
-        .unwrap_or(trimmed);
+        .unwrap_or(core);
     let mut parts = core.split('.');
     let major = parts.next()?.parse::<u32>().ok()?;
     let minor = parts.next().unwrap_or("0").parse::<u32>().ok()?;

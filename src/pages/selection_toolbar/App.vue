@@ -294,8 +294,14 @@ const onMouseLeave = () => {
     pendingLeave = true
     return
   }
-  // 如果已经收起，忽略重复触发
-  if (!isHovered.value) return
+  // 鼠标未正式进入（还在 enterTimeout 延迟中），取消延迟并忽略
+  if (!isHovered.value) {
+    if (enterTimeout) {
+      clearTimeout(enterTimeout)
+      enterTimeout = null
+    }
+    return
+  }
 
   if (enterTimeout) {
     clearTimeout(enterTimeout)

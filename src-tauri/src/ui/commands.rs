@@ -1350,15 +1350,25 @@ pub async fn save_app_settings(
             {
                 register_screenshot_shortcut(&app, settings.screenshot_hot_key.as_str())?;
             }
-        } else if let Err(e) = app
-            .global_shortcut()
-            .unregister(settings.screenshot_hot_key.as_str())
-        {
-            log::warn!(
-                "注销截图快捷键 '{}' 失败: {}",
-                settings.screenshot_hot_key,
+            // 截图功能启用时预创建窗口（常驻后台，首次截图零延迟）
+            if let Err(e) = crate::ui::window_manager::ensure_window_for_label(&app, "screenshot") {
+                log::warn!("预创建截图窗口失败: {}", e);
+            }
+        } else {
+            if let Err(e) = app
+                .global_shortcut()
+                .unregister(settings.screenshot_hot_key.as_str())
+            {
+                log::warn!(
+                    "注销截图快捷键 '{}' 失败: {}",
+                    settings.screenshot_hot_key,
                 e
             );
+            }
+            // 截图功能关闭时销毁窗口
+            if let Some(window) = app.get_webview_window("screenshot") {
+                let _ = window.close();
+            }
         }
     }
 

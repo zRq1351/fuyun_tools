@@ -1035,6 +1035,8 @@ const handleFeatureToggle = async (fieldName, newValue) => {
       if (missing.length > 0) {
         loading.close()
         await showVcRuntimeMissingWarning(runtimeStatus)
+        form[fieldName] = !newValue
+        suppressNextAutoSave.value = true
         return false
       }
     }
@@ -1056,6 +1058,8 @@ const handleFeatureToggle = async (fieldName, newValue) => {
           )
         } catch {
           ElMessage.info(t('settings.recording.cancelEnableRecording'))
+          form[fieldName] = !newValue
+          suppressNextAutoSave.value = true
           return false
         }
         const dl = ElLoading.service({
@@ -1092,6 +1096,8 @@ const handleFeatureToggle = async (fieldName, newValue) => {
     return true
   } catch (error) {
     ElMessage.error(t('common.operationFailed', {error: String(error)}))
+    form[fieldName] = !newValue
+    suppressNextAutoSave.value = true
     return false
   } finally {
     const remaining = minUntil - Date.now()

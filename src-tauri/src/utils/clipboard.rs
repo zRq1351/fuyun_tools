@@ -569,8 +569,8 @@ impl ClipboardManager {
                 history.insert(0, complete_version);
                 log::info!("已将完整版本移动到最前面");
             } else {
-                let item = std::mem::replace(&mut history[replace_index], content.clone());
-                history.insert(0, item);
+                history.remove(replace_index);
+                history.insert(0, content.clone());
                 log::info!("已用完整版本替换不完整版本");
             }
         } else {
@@ -697,6 +697,10 @@ impl ClipboardManager {
         // 清空指纹缓存
         let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
         fingerprints.clear();
+        drop(fingerprints);
+
+        // 清空指纹索引
+        self.fingerprint_index.lock().clear();
 
         self.enqueue_clear_all_persist();
 
@@ -768,6 +772,8 @@ impl ClipboardManager {
             normalize_pinned_items(&mut pinned_items, &history);
 
             self.enqueue_history_only_persist();
+            self.enqueue_categories_only_persist();
+            self.enqueue_pinned_only_persist();
             Ok(item)
         } else {
             Err(AppErrorKind::SystemIndexOutOfRange.to_frontend_json())

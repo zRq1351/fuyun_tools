@@ -382,6 +382,8 @@ pub fn cancel_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
         status.user_message = user_message_for_state(&status.state, None, None);
     }
     let worker = runtime.worker.take();
+    // 立即清除 slot，使新会话可以立即创建
+    *slot = None;
     drop(slot);
     if let Some(handle) = worker {
         thread::spawn(move || {

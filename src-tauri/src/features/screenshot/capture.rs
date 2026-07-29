@@ -300,6 +300,27 @@ pub fn rgba_to_png_bytes(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>
     Ok(png_data)
 }
 
+/// 将RGBA数据编码为BMP字节（极快，无压缩，约5-10ms）
+pub fn rgba_to_bmp_bytes(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+    let mut bmp_data = Vec::new();
+    let mut encoder = image::codecs::bmp::BmpEncoder::new(&mut bmp_data);
+    encoder
+        .encode(rgba, width, height, image::ColorType::Rgba8.into())
+        .map_err(|e| format!("编码BMP失败: {}", e))?;
+    Ok(bmp_data)
+}
+
+/// 后台线程异步编码PNG（用于保存/复制/固定等导出操作）
+pub fn save_png_async(rgba: Vec<u8>, width: u32, height: u32, path: std::path::PathBuf) {
+    std::thread::spawn(move || {
+        if let Ok(png_data) = rgba_to_png_bytes(&rgba, width, height) {
+            if let Err(e) = std::fs::write(&path, &png_data) {
+                log::error!("后台PNG保存失败 {}: {}", path.display(), e);
+            }
+        }
+    });
+}
+
 /// 将RGBA数据转换为PNG Base64字符串
 pub fn rgba_to_base64_png(rgba: &[u8], width: u32, height: u32) -> Result<String, String> {
     use base64::engine::general_purpose::STANDARD;

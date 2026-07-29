@@ -1055,7 +1055,8 @@ impl ImageClipboardManager {
             height,
             encoded_bytes: source_blob.map(|(bytes, _)| bytes),
         };
-        if let Err(task_back) = push_persist_task_with_timeout(&self.persist_tx, task) {
+        let queue_result = push_persist_task_with_timeout(&self.persist_tx, task);
+        if let Err(task_back) = &queue_result {
             log::error!(
                 "图片持久化队列发送失败或超时降级丢弃: {}",
                 task_back.item_id
@@ -1063,22 +1064,24 @@ impl ImageClipboardManager {
             let mut pending = lock_arc_mutex(&self.pending_images);
             pending.remove(&task_back.item_id);
         }
-        log::info!(
-            "准备增量保存图片到数据库: item_id={}, 总数={}",
-            id,
-            item_ids_snapshot.len()
-        );
-        let new_position = item_ids_snapshot.iter().position(|item_id| item_id == &id);
-        if let (Some(item), Some(position)) = (new_item_compact.as_ref(), new_position) {
-            if let Err(e) = image_store::upsert_item(item, position) {
-                log::error!("增量写入新增图片项失败: {}", e);
+        if queue_result.is_ok() {
+            log::info!(
+                "准备增量保存图片到数据库: item_id={}, 总数={}",
+                id,
+                item_ids_snapshot.len()
+            );
+            let new_position = item_ids_snapshot.iter().position(|item_id| item_id == &id);
+            if let (Some(item), Some(position)) = (new_item_compact.as_ref(), new_position) {
+                if let Err(e) = image_store::upsert_item(item, position) {
+                    log::error!("增量写入新增图片项失败: {}", e);
+                } else {
+                    log::debug!("新增图片项保存成功: item_id={}, position={}", id, position);
+                }
             } else {
-                log::debug!("新增图片项保存成功: item_id={}, position={}", id, position);
+                log::warn!("未能定位新增图片项的持久化快照: item_id={}", id);
             }
-        } else {
-            log::warn!("未能定位新增图片项的持久化快照: item_id={}", id);
+            log::info!("图片数据库保存完成: item_id={}", id);
         }
-        log::info!("图片数据库保存完成: item_id={}", id);
         for removed_id in removed_ids_after_insert {
             if let Err(e) = image_store::delete_category(&removed_id) {
                 log::error!("删除分类失败: {}", e);

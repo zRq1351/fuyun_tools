@@ -72,6 +72,11 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             if (bumpFilterDataRevision) {
                 bumpFilterDataRevision()
             }
+            // 失败时立即清除抑制标志，让 UI 立即反映回滚结果
+            if (setIsUpdatingCategory) {
+                setIsUpdatingCategory(false)
+            }
+            return
         } finally {
             setTimeout(() => {
                 if (setIsUpdatingCategory) {
@@ -116,6 +121,11 @@ export function useCategoryManager(categories, categoryMap, categoryFilter, opti
             if (bumpFilterDataRevision) {
                 bumpFilterDataRevision()
             }
+            // 失败时立即清除抑制标志
+            if (setIsUpdatingCategory) {
+                setIsUpdatingCategory(false)
+            }
+            return
         } finally {
             setTimeout(() => {
                 if (setIsUpdatingCategory) {

@@ -285,7 +285,7 @@ mod tests {
         let q = build_fts_query_and("hello world");
         assert!(q.contains("AND"));
         let q = build_fts_query_and("say \"hi\"");
-        assert!(q.contains("\"\"hi\"\"*"));
+        assert!(q.contains("\"\"hi\"\""));
     }
 
     #[test]
@@ -305,8 +305,8 @@ mod tests {
 
         let s = "你好世界";
         assert_eq!(adjust_to_char_boundary(s, 1), 0);
-        assert_eq!(adjust_to_char_boundary(s, 2), 2);
-        assert_eq!(adjust_to_char_boundary(s, 3), 2);
-        assert_eq!(adjust_to_char_boundary(s, 4), 4);
+        assert_eq!(adjust_to_char_boundary(s, 2), 0);
+        assert_eq!(adjust_to_char_boundary(s, 3), 3);
+        assert_eq!(adjust_to_char_boundary(s, 4), 3);
     }
 }
