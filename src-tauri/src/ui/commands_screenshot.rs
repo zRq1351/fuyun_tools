@@ -1286,8 +1286,6 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
             e
         })?;
 
-    let image_path_str = image_path.to_string_lossy().replace('\\', "\\\\");
-
     // 存储会话数据
     {
         let mut guard = screenshot_session_store()
@@ -1321,15 +1319,11 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
         x: origin_x,
         y: origin_y,
     }));
-    // 注入 PNG 路径预加载
-    let preload_script = format!(
-        "window.__SCREENSHOT_PRELOAD__ = {{ imagePath: '{}', sessionId: {}, mode: '{}' }};\
-window.dispatchEvent(new CustomEvent('screenshot-preload-ready'));",
-        image_path_str,
-        session_id,
-        selection_mode
-    );
-    let _ = window.eval(&preload_script);
+    // 通知前端：截图会话已就绪，前端通过 get_screenshot_data IPC 拉取数据
+    let _ = app.emit("screenshot-session-ready", serde_json::json!({
+        "session_id": session_id,
+        "mode": selection_mode
+    }));
 
     capture::set_screenshot_in_progress(false);
     record_perf_metric(

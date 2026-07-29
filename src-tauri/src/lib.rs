@@ -40,6 +40,7 @@ use crate::ui::commands_vc_runtime::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{
     bind_overlay_window_events, bind_standard_window_close_to_hide,
+    ensure_window_for_label,
     show_clipboard_window, show_doc_manager_widget_window,
     show_image_clipboard_window, show_standard_window_by_label,
 };
@@ -243,6 +244,8 @@ pub fn run() {
             };
             let mut shortcut_conflicts: Vec<String> = Vec::new();
             if text_clipboard_enabled {
+                let _ = ensure_window_for_label(app_handle, "clipboard");
+                let _ = ensure_window_for_label(app_handle, "text_preview");
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     hot_key.as_str(),
                     move |_app, _shortcut, event| {
@@ -282,6 +285,8 @@ pub fn run() {
             let state_clone_image = state_arc.clone();
             let app_handle_clone_image = app_handle.clone();
             if image_clipboard_enabled {
+                let _ = ensure_window_for_label(app_handle, "image_clipboard");
+                let _ = ensure_window_for_label(app_handle, "image_preview");
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     image_hot_key.as_str(),
                     move |_app, _shortcut, event| {
@@ -320,6 +325,8 @@ pub fn run() {
             let app_handle_clone_screenshot = app_handle.clone();
             let state_clone_screenshot = state_arc.clone();
             if screenshot_enabled {
+                // 软件启动时预创建截图窗口（常驻后台，首次截图零延迟）
+                let _ = crate::ui::window_manager::ensure_window_for_label(app_handle, "screenshot");
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     screenshot_hot_key.as_str(),
                     move |_app, _shortcut, event| {
@@ -350,6 +357,7 @@ pub fn run() {
 
             let app_handle_clone_recording = app_handle.clone();
             if recording_enabled {
+                let _ = ensure_window_for_label(app_handle, "recording_toolbar");
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     recording_hot_key.as_str(),
                     move |_app, _shortcut, event| {
@@ -414,6 +422,7 @@ pub fn run() {
 
             // 注册启动器快捷键
             if launcher_enabled {
+                let _ = ensure_window_for_label(app_handle, "launcher");
                 let app_handle_clone_launcher = app_handle.clone();
                 let launcher_hot_key = {
                     let guard = lock_arc_mutex(&state_arc);
@@ -438,6 +447,7 @@ pub fn run() {
             }
 
             if doc_manager_enabled {
+                let _ = ensure_window_for_label(app_handle, "document_manager");
                 let app_handle_clone_doc = app_handle.clone();
                 let doc_manager_hot_key_str = {
                     let guard = lock_arc_mutex(&state_arc);

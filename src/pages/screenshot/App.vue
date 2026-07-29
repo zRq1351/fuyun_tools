@@ -469,6 +469,7 @@ const longshotBorderShown = ref(false)
 let unlistenManualLongshotProgress = null
 let unlistenManualLongshotLifecycle = null
 let unlistenManualLongshotFirstFrame = null
+let unlistenSessionReady = null
 let unlistenManualLongshotShortcutFinished = null
 let unlistenManualLongshotShortcutCanceled = null
 let unlistenManualLongshotShortcutPaused = null
@@ -871,8 +872,8 @@ watchPostEffect(() => {
 onMounted(async () => {
   window.__SCREENSHOT_KEYDOWN_HANDLER_READY__ = true
   await refreshManualLongshotAvailability()
-  // 预创建窗口后，热键触发的截图通过 eval 派发此事件
-  window.addEventListener('screenshot-preload-ready', () => {
+  // 预创建窗口后，热键截图通过 Tauri 事件触发重新加载
+  unlistenSessionReady = await listen('screenshot-session-ready', () => {
     loadScreenshotSession()
   })
   window.addEventListener('screenshot-reset', handleScreenshotReset)
@@ -998,6 +999,10 @@ onUnmounted(() => {
     unlistenManualLongshotShortcutResumed()
     unlistenManualLongshotShortcutResumed = null
   }
+  if (typeof unlistenSessionReady === 'function') {
+    unlistenSessionReady()
+    unlistenSessionReady = null
+  }
   if (screenshotFallbackTimer) {
     window.clearTimeout(screenshotFallbackTimer)
     screenshotFallbackTimer = null
@@ -1079,55 +1084,12 @@ function handleScreenshotReset() {
 }
 
 async function loadScreenshotSession() {
-  // 优先使用 main.js 预加载的图片（零延迟，不等 IPC）
-  const preload = window.__SCREENSHOT_PRELOAD__
-  const preloadedImg = window.__SCREENSHOT_PRELOADED_IMAGE__
-  if (preloadedImg && preload) {
-    screenshotImg.value = preloadedImg
-    sourceImagePath.value = preload.imagePath || ''
-    isCaptureReady.value = true
-    const sessionId = Number(preload.sessionId) || 0
-    if (sessionId > 0) {
-      activeSessionId.value = sessionId
-      payloadSessionId.value = sessionId
-    }
-    screenshotSessionRequested.value = true
-    hasScreenshotPayload.value = true
-    regionSelectMode.value = String(preload.mode || 'screenshot')
-    state.value = 'idle'
-    currentTool.value = 'select'
-    rect.width = 0
-    rect.height = 0
-    manualLongshotSessionId.value = 0
-    manualLongshotRunning.value = false
-    longshotResultActive.value = false
-    longshotRawPngBase64.value = ''
-    longshotViewScale.value = 1
-    longshotViewOffset.x = 0
-    longshotViewOffset.y = 0
-    await fetchWindows()
-    try {
-      resetAnnotationStateForNewImage()
-    } catch (e) {
-    }
-    nextTick(() => {
-      initCanvas()
-    })
-    // 图片就绪，显示窗口
-    invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
-    })
-    return
-  }
-  // 回退：IPC 拉取
   try {
     const result = await invoke('get_screenshot_data')
-    if (result?.success && (result.png_base64 || result.image_path)) {
-      longshotResultActive.value = false
-      longshotRawPngBase64.value = ''
+    if (result?.success && result.image_path) {
       sourceImagePath.value = String(result.image_path || '')
-      longshotViewScale.value = 1
-      longshotViewOffset.x = 0
-      longshotViewOffset.y = 0
+      captureOriginX.value = Number(result.origin_x) || 0
+      captureOriginY.value = Number(result.origin_y) || 0
       const sessionId = Number(result.session_id) || 0
       if (sessionId > 0) {
         activeSessionId.value = sessionId
@@ -1135,11 +1097,8 @@ async function loadScreenshotSession() {
       }
       screenshotSessionRequested.value = true
       hasScreenshotPayload.value = true
-      captureOriginX.value = Number(result.origin_x) || 0
-      captureOriginY.value = Number(result.origin_y) || 0
       await fetchWindows()
-      const mode = String(result.selection_mode || 'screenshot')
-      regionSelectMode.value = mode
+      regionSelectMode.value = String(result.selection_mode || 'screenshot')
       state.value = 'idle'
       currentTool.value = 'select'
       rect.width = 0
@@ -1148,17 +1107,16 @@ async function loadScreenshotSession() {
       manualLongshotRunning.value = false
       longshotResultActive.value = false
       longshotRawPngBase64.value = ''
-      if (result.image_path) {
-        loadImageFromPath(result.image_path)
-      } else if (result.png_base64) {
-        loadImageFromBase64(result.png_base64)
-      }
+      longshotViewScale.value = 1
+      longshotViewOffset.x = 0
+      longshotViewOffset.y = 0
+      loadImageFromPath(result.image_path)
+      // 图片开始加载，显示窗口
       invoke('set_screenshot_window_visible', {visible: true}).catch(() => {
       })
       return
     }
-    // 无会话数据，窗口为预创建状态，不显示不截图
-    return
+    // 无会话数据，窗口为预创建状态，不显示
   } catch (e) {
     console.error('加载截图会话失败:', e)
   }
