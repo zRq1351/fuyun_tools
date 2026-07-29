@@ -32,8 +32,7 @@ use tauri_plugin_positioner::WindowExt;
 
 /// 截图会话数据，前端通过 `get_screenshot_data` IPC 主动拉取
 struct ScreenshotSession {
-    bmp_path: PathBuf,   // BMP 快速显示（无压缩，浏览器零解码）
-    png_path: PathBuf,   // PNG 用于保存/复制/固定
+    image_path: PathBuf,
     width: u32,
     height: u32,
     origin_x: i32,
@@ -57,8 +56,7 @@ pub async fn get_screenshot_data() -> Result<serde_json::Value, String> {
     match guard.take() {
         Some(session) => Ok(serde_json::json!({
             "success": true,
-            "bmp_path": session.bmp_path,
-            "image_path": session.png_path,
+            "image_path": session.image_path,
             "width": session.width,
             "height": session.height,
             "origin_x": session.origin_x,
@@ -1275,25 +1273,20 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
 
     let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
 
-    // BMP 快速写入（~5ms，浏览器零解码显示）
-    let bmp_data = capture::rgba_to_bmp_bytes(&rgba, width, height).map_err(|e| {
-        capture::set_screenshot_in_progress(false);
-        format!("BMP编码失败: {}", e)
-    })?;
-    let bmp_path = {
-        let mut dir = std::env::current_exe().map_err(|e| format!("获取程序目录失败: {}", e))?;
-        dir.pop();
-        dir.push("screenshot_boot");
-        let _ = std::fs::create_dir_all(&dir);
-        dir.join(format!("screenshot_boot_{}.bmp", session_id))
-    };
-    std::fs::write(&bmp_path, &bmp_data).map_err(|e| format!("BMP写入失败: {}", e))?;
+    let (image_path, _png_data) =
+        write_screenshot_boot_image(&rgba, width, height, session_id).map_err(|e| {
+            capture::set_screenshot_in_progress(false);
+            record_perf_metric(
+                "screenshot.open_prepare",
+                "截图打开准备耗时",
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some(e.clone()),
+            );
+            e
+        })?;
 
-    // PNG 后台异步编码保存（用于导出，不阻塞热路径）
-    let png_path = bmp_path.with_extension("png");
-    capture::save_png_async(rgba, width, height, png_path.clone());
-
-    let bmp_path_str = bmp_path.to_string_lossy().replace('\\', "\\\\");
+    let image_path_str = image_path.to_string_lossy().replace('\\', "\\\\");
 
     // 存储会话数据
     {
@@ -1301,8 +1294,7 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
             .lock()
             .map_err(|e| format!("锁获取失败: {}", e))?;
         *guard = Some(ScreenshotSession {
-            bmp_path: bmp_path.clone(),
-            png_path: png_path.clone(),
+            image_path: image_path.clone(),
             width,
             height,
             origin_x,
@@ -1329,12 +1321,11 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
         x: origin_x,
         y: origin_y,
     }));
-    // 注入 BMP 路径预加载（图片加载与 Vue 挂载并行）
+    // 注入 PNG 路径预加载
     let preload_script = format!(
-        "window.__SCREENSHOT_PRELOAD__ = {{ bmpPath: '{}', imagePath: '{}', sessionId: {}, mode: '{}' }};\
+        "window.__SCREENSHOT_PRELOAD__ = {{ imagePath: '{}', sessionId: {}, mode: '{}' }};\
 window.dispatchEvent(new CustomEvent('screenshot-preload-ready'));",
-        bmp_path_str,
-        png_path.to_string_lossy().replace('\\', "\\\\"),
+        image_path_str,
         session_id,
         selection_mode
     );

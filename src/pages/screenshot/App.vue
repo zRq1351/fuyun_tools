@@ -1084,7 +1084,7 @@ async function loadScreenshotSession() {
   const preloadedImg = window.__SCREENSHOT_PRELOADED_IMAGE__
   if (preloadedImg && preload) {
     screenshotImg.value = preloadedImg
-    sourceImagePath.value = preload.imagePath || preload.bmpPath || ''
+    sourceImagePath.value = preload.imagePath || ''
     isCaptureReady.value = true
     const sessionId = Number(preload.sessionId) || 0
     if (sessionId > 0) {

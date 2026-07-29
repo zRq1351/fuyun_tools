@@ -16,11 +16,11 @@ if (typeof screenshotBoot.pendingMode !== 'string') {
 window.__SCREENSHOT_BOOT__ = screenshotBoot
 window.__SCREENSHOT_BOOT_READY__ = true
 
-// 预加载截图图片（不等 Vue 挂载），BMP 无压缩零解码
+// 预加载截图图片（不等 Vue 挂载）
 const preload = window.__SCREENSHOT_PRELOAD__
-if (preload?.bmpPath || preload?.imagePath) {
+if (preload?.imagePath) {
     import('../../utils/fileUrl').then(({buildFileUrlFromPath}) => {
-        const url = buildFileUrlFromPath(preload.bmpPath || preload.imagePath)
+        const url = buildFileUrlFromPath(preload.imagePath)
         if (url) {
             const img = new Image()
             img.onload = () => {
