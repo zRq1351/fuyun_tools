@@ -2910,7 +2910,7 @@ pub fn resume_recording(
         fps,
         video_bitrate_kbps,
         capture_cursor,
-        paused_total_ms,
+        _paused_total_ms,
     ) = {
         let mut runtime = lock_arc_mutex(&runtime_arc);
         if runtime.phase != RecordingPhase::Paused {
@@ -3073,20 +3073,6 @@ pub fn resume_recording(
         ) {
             log::error!("恢复系统音频捕获失败: {}", e);
         }
-        // BUG-04 修复：对于非窗口录制（FFmpeg），校正恢复后的音频起始时间戳
-        // 新视频分段从0开始，音频 start_ms 应减去暂停累计时长，以保持 A/V 对齐
-        if !is_window_target && paused_total_ms > 0 {
-            if let Some(last_seg) = runtime.system_audio_segments.last_mut() {
-                let original_start = last_seg.start_ms;
-                last_seg.start_ms = last_seg.start_ms.saturating_sub(paused_total_ms);
-                log::info!(
-                    "BUG-04校正: 系统音频 start_ms {} -> {} (减去暂停时长 {}ms)",
-                    original_start,
-                    last_seg.start_ms,
-                    paused_total_ms
-                );
-            }
-        }
     }
     if should_restore_mic_audio && runtime.mic_audio_thread.is_none() {
         if let Err(e) = ensure_mic_capture_started(
@@ -3097,19 +3083,6 @@ pub fn resume_recording(
             false,
         ) {
             log::error!("恢复麦克风捕获失败: {}", e);
-        }
-        // BUG-04 修复：同上，校正麦克风音频的起始时间戳
-        if !is_window_target && paused_total_ms > 0 {
-            if let Some(last_seg) = runtime.mic_audio_segments.last_mut() {
-                let original_start = last_seg.start_ms;
-                last_seg.start_ms = last_seg.start_ms.saturating_sub(paused_total_ms);
-                log::info!(
-                    "BUG-04校正: 麦克风音频 start_ms {} -> {} (减去暂停时长 {}ms)",
-                    original_start,
-                    last_seg.start_ms,
-                    paused_total_ms
-                );
-            }
         }
     }
     runtime.phase = RecordingPhase::Recording;
