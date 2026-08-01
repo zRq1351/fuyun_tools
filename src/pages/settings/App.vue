@@ -72,6 +72,8 @@
               <component :is="section.icon"/>
             </el-icon>
             <span>{{ section.label }}</span>
+            <span v-if="section.key === 'about' && updateAvailable"
+                  class="update-badge">v{{ updateAvailable.version }}</span>
           </button>
         </aside>
         <div class="content">
@@ -185,6 +187,7 @@ import BackupSettings from './components/BackupSettings.vue'
 import DiagnosticSettings from './components/DiagnosticSettings.vue'
 import AboutSettings from './components/AboutSettings.vue'
 import DeveloperSettings from '@dev/DeveloperSettings'
+import {useUpdater} from './composables/useUpdater'
 
 const {t} = useI18n()
 
@@ -231,6 +234,8 @@ const isInitializing = ref(true)
 const isAutoSaving = ref(false)
 const suppressNextAutoSave = ref(false)
 const autoSaveState = ref('idle')
+const updateAvailable = ref(null) // { version: string } 或 null
+const {silentCheck} = useUpdater(currentVersion)
 // 保存初始状态用于差异比较
 const initialFormState = ref(null)
 // 阻止初始化后的第一次 watch 触发
@@ -1003,6 +1008,11 @@ onMounted(async () => {
 
     skipNextWatch.value = true
     isInitializing.value = false
+
+    // 启动后静默检查更新（useUpdater 内部已做版本比较）
+    silentCheck().then(update => {
+      if (update) updateAvailable.value = update
+    })
   }
 })
 
@@ -1354,6 +1364,29 @@ body {
 .section-nav-item .el-icon {
   font-size: 18px;
   flex-shrink: 0;
+}
+
+/* 更新提示红点 */
+.update-badge {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: var(--fy-radius-full);
+  background: var(--fy-danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: var(--fy-weight-bold);
+  line-height: 18px;
+  white-space: nowrap;
+  animation: badgePulse 2s var(--fy-ease-out) infinite;
+}
+
+@keyframes badgePulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }
 
 /* ===== 内容区 ===== */

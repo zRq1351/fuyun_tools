@@ -122,6 +122,30 @@ export function useUpdater(currentVersion) {
     const updateProgress = ref(0)
     const showUpdateProgress = ref(false)
 
+    /**
+     * 版本比较：短段尾部补零后数值比较
+     * 返回 >0 表示 a > b，=0 表示相等，<0 表示 a < b
+     */
+    const compareVersions = (a, b) => {
+        const pa = (a || '').replace(/^v/i, '').split('.').map(n => n.trim())
+        const pb = (b || '').replace(/^v/i, '').split('.').map(n => n.trim())
+        for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+            const sa = pa[i] || '0'
+            const sb = pb[i] || '0'
+            const maxLen = Math.max(sa.length, sb.length)
+            const na = parseInt(sa.padEnd(maxLen, '0'), 10) || 0
+            const nb = parseInt(sb.padEnd(maxLen, '0'), 10) || 0
+            if (na !== nb) return na - nb
+        }
+        return 0
+    }
+
+    const isNewerThan = (updateVersion, currentVer) => {
+        const ver = typeof currentVer === 'object' && currentVer?.value !== undefined ? currentVer.value : currentVer
+        if (!ver) return true
+        return compareVersions(updateVersion, ver) > 0
+    }
+
     const checkUpdate = async () => {
         checkingUpdate.value = true
         updateStatus.value = {message: t('updater.status.checking'), type: 'info'}
@@ -130,7 +154,7 @@ export function useUpdater(currentVersion) {
 
         try {
             const update = await check()
-            if (update) {
+            if (update && isNewerThan(update.version, currentVersion)) {
                 updateStatus.value = null
 
                 try {
@@ -204,6 +228,20 @@ export function useUpdater(currentVersion) {
         updateStatus,
         updateProgress,
         showUpdateProgress,
-        checkUpdate
+        checkUpdate,
+        /**
+         * 静默检查更新（不弹窗），返回 { version, body } 或 null
+         */
+        silentCheck: async () => {
+            try {
+                const update = await check()
+                if (update && isNewerThan(update.version, currentVersion)) {
+                    return {version: update.version, body: update.body}
+                }
+                return null
+            } catch {
+                return null
+            }
+        }
     }
 }
