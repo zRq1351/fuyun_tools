@@ -56,7 +56,7 @@
           </button>
           <button
               :class="['collapsed-mic-toggle-btn', 'no-drag', { 'is-muted': isMicMuted || !canToggleMic, 'is-active': !isMicMuted && canToggleMic, 'is-disabled': !canToggleMic || !microphoneDeviceId }]"
-              :disabled="!canToggleMic || !microphoneDeviceId"
+              :disabled="!canToggleMic || !microphoneDeviceId || isTogglingMic"
               type="button"
               @click.stop="toggleMicState"
           >
@@ -306,7 +306,7 @@ provideGlobalConfig({locale: elLocale});
 
 const loadingAction = ref(null);
 const capsuleSettingsVisible = ref(false);
-const recordingFeatureEnabled = ref(true);
+const recordingFeatureEnabled = ref(false);
 
 const captureSystemAudio = ref(false);
 const captureMicrophone = ref(false);
@@ -379,6 +379,7 @@ let keepSettingsOpenUntilTs = 0;
 let autoCollapseAfterStartPending = false;
 let lastElapsedUiSyncAt = 0;
 const isOpeningFolder = ref(false);
+let openingFolderTimer = null;
 let isUpdatingAudio = false;
 
 const formatElapsedText = (ms) => {
@@ -428,7 +429,7 @@ const capsuleTooltipContent = computed(() => {
   return recordingHintText.value;
 });
 const isBusy = computed(() => loadingAction.value !== null);
-const canEditRecordingConfig = computed(() => rawRecordingState.value === "idle" || rawRecordingState.value === "error");
+const canEditRecordingConfig = computed(() => !isBusy.value && (rawRecordingState.value === "idle" || rawRecordingState.value === "error"));
 const canEditAudioConfig = computed(() => {
   const s = rawRecordingState.value;
   return s === "idle" || s === "error" || s === "recording" || s === "paused";
@@ -706,7 +707,10 @@ const toggleRecordingState = async () => {
       window.removeEventListener('keydown', onKey);
       countdownAbortController = null;
       countdownActive.value = false;
-      if (countdownCancelled) return;
+      if (countdownCancelled) {
+        autoCollapseAfterStartPending = false;
+        return;
+      }
       await RecordingService.start({
         targetType: recordTargetType.value,
         targetId,
@@ -742,6 +746,10 @@ const toggleRecordingState = async () => {
     autoCollapseAfterStartPending = false;
     const msg = String(e || "");
     showBackendErrorInSettings(msg);
+    try {
+      await refresh();
+    } catch (_) {
+    }
   } finally {
     loadingAction.value = null;
   }
@@ -766,6 +774,11 @@ const toggleCapsuleSettings = () => {
 };
 
 const closeCapsule = async () => {
+  const isRecording = rawRecordingState.value === "recording" || rawRecordingState.value === "paused" || rawRecordingState.value === "starting";
+  if (isRecording) {
+    showInlineNotice(t('recordingToolbar.recordingInProgressCloseHint'), "warning");
+    return;
+  }
   capsuleSettingsVisible.value = false;
   try {
     await getCurrentWindow().hide();
@@ -773,10 +786,10 @@ const closeCapsule = async () => {
   }
 };
 
-let isTogglingMic = false;
+let isTogglingMic = ref(false);
 const toggleMicState = async () => {
-  if (!canToggleMic.value || isBusy.value || isTogglingMic) return;
-  isTogglingMic = true;
+  if (!canToggleMic.value || isBusy.value || isTogglingMic.value) return;
+  isTogglingMic.value = true;
   try {
     if (!canToggleMic.value) return;
     const newMutedState = !isMicMuted.value;
@@ -791,7 +804,7 @@ const toggleMicState = async () => {
   } catch (e) {
     showBackendErrorInSettings(t('recordingToolbar.toggleMicFailed', {error: String(e)}));
   } finally {
-    isTogglingMic = false;
+    isTogglingMic.value = false;
   }
 };
 
@@ -816,8 +829,9 @@ const openRecordingFolder = async () => {
   } catch (e) {
     showInlineNotice(t('recordingToolbar.openSaveFolderFailed', {error: String(e)}), "error");
   } finally {
-    window.setTimeout(() => {
+    openingFolderTimer = window.setTimeout(() => {
       isOpeningFolder.value = false;
+      openingFolderTimer = null;
     }, 800);
   }
 };
@@ -972,7 +986,10 @@ const refreshRecordableWindows = async () => {
       (w) => (w.hwnd || w.title) === recordTargetWindowId.value,
   );
   if (!exists) {
-    recordTargetWindowId.value = nextWindows[0].hwnd || nextWindows[0].title;
+    recordTargetWindowId.value = "";
+    if (recordTargetType.value === "window") {
+      showInlineNotice(t('recordingToolbar.windowNoLongerAvailable'), "warning");
+    }
   }
 };
 
@@ -1108,8 +1125,12 @@ onMounted(async () => {
       const message = parseErrorMessage(rawMsg) || t('recordingToolbar.recordingError');
       const code = String(payload.code || "");
       isMicMuted.value = false;
-      state.state = "idle";
-      state.sessionId = null;
+      // 仅当未在录制中时才切换为 idle，避免非致命错误（如麦克风切换失败）误杀录制状态
+      const isRecording = state.state === "recording" || state.state === "paused" || state.state === "starting";
+      if (!isRecording) {
+        state.state = "idle";
+        state.sessionId = null;
+      }
       showBackendErrorInSettings(code ? `${code}: ${message}` : message);
     }),
     listen("recording-toolbar-force-compact", () => {
@@ -1257,6 +1278,7 @@ watch(currentRecordingState, (next) => {
 });
 
 onBeforeUnmount(() => {
+  countdownCancelled = true;
   if (countdownAbortController) {
     countdownAbortController.abort();
     countdownAbortController = null;
@@ -1264,6 +1286,10 @@ onBeforeUnmount(() => {
   if (inlineNoticeTimer) {
     clearTimeout(inlineNoticeTimer);
     inlineNoticeTimer = null;
+  }
+  if (openingFolderTimer) {
+    clearTimeout(openingFolderTimer);
+    openingFolderTimer = null;
   }
   window.removeEventListener("blur", onWindowBlur);
   window.removeEventListener("resize", onWindowViewportChanged);

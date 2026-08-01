@@ -92,7 +92,15 @@ fn normalize_runtime_state(runtime: &mut crate::features::recording::state::Reco
         .as_ref()
         .map(|t| !t.is_finished())
         .unwrap_or(false);
+    let audio_running = !runtime.system_audio_threads.is_empty()
+        || runtime.mic_audio_thread.is_some();
     if runtime.process.is_none() && !wgc_running {
+        if audio_running {
+            log::warn!(
+                "normalize_runtime_state: 视频已停止但音频线程仍在运行，跳过 reset_to_idle 避免泄漏"
+            );
+            return;
+        }
         match runtime.phase {
             RecordingPhase::Idle => {}
             RecordingPhase::Starting
@@ -789,6 +797,8 @@ fn merge_audio_fast(
         .arg(video_path)
         .arg("-i")
         .arg(audio_path)
+        .arg("-map").arg("0:v:0")
+        .arg("-map").arg("1:a:0")
         .arg("-c:v")
         .arg("copy")
         .arg("-c:a")
@@ -1200,11 +1210,13 @@ fn ensure_system_audio_capture_started(
             runtime.system_audio_wav_path = Some(sys_aac);
             runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
             runtime.system_audio_threads = handle.join.into_iter().collect();
-            runtime.system_audio_stream_start_ms = Some(start_ms);
+            // 重新采集 start_ms，以反映设备初始化/回退的实际延迟
+            let actual_start_ms = runtime.snapshot().elapsed_ms;
+            runtime.system_audio_stream_start_ms = Some(actual_start_ms);
             if let Some(path) = runtime.system_audio_wav_path.clone() {
                 runtime
                         .system_audio_segments
-                        .push(crate::features::recording::state::AudioSegment { path, start_ms, trim_start_ms: 0 });
+                    .push(crate::features::recording::state::AudioSegment { path, start_ms: actual_start_ms, trim_start_ms: 0 });
             } else {
                 return Err(AppErrorKind::InternalError.to_frontend_json());
             }
@@ -1719,7 +1731,11 @@ fn spawn_ffmpeg_video_segment(
     let stderr = child
         .stderr
         .take()
-        .ok_or_else(|| AppError::new(ErrorCode::SystemError, "获取录制进程 stderr 失败"))?;
+        .ok_or_else(|| {
+            let _ = child.kill();
+            let _ = child.wait();
+            AppError::new(ErrorCode::SystemError, "获取录制进程 stderr 失败")
+        })?;
 
     Ok((child, stderr))
 }
@@ -1936,10 +1952,15 @@ pub fn start_recording(
         runtime.session_id = Some(session_id.clone());
         runtime.started_at_ms = capture_origin_unix_ms;
         runtime.started_instant = Some(capture_origin_instant);
+        runtime.video_segment_started_at = Some(capture_origin_instant);
         runtime.paused_at_instant = None;
         runtime.paused_total_ms = 0;
-        // 记录 FFmpeg 启动延迟（用于 A/V 同步校正，类似 WGC 的 first_frame_elapsed_ms）
-        runtime.ffmpeg_start_delay_ms = ffmpeg_spawned_at.duration_since(capture_origin_instant).as_millis() as u64;
+        // 记录 FFmpeg 启动延迟（仅对非窗口录制有意义）
+        runtime.ffmpeg_start_delay_ms = if target_type != "window" {
+            ffmpeg_spawned_at.duration_since(capture_origin_instant).as_millis() as u64
+        } else {
+            0
+        };
         runtime.max_duration_ms =
             (settings_snapshot.recording_max_duration_minutes as u64).saturating_mul(60_000);
         runtime.auto_stop_requested = false;
@@ -1990,7 +2011,6 @@ pub fn start_recording(
         runtime.window_segment_index = 0;
         if let Some(seg_path) = window_segment_path.as_ref() {
             runtime.window_video_segments.push(seg_path.clone());
-            runtime.video_segment_started_at = Some(std::time::Instant::now());
         }
         // 系统音频关闭时不占用 loopback 设备；重新开启时再创建新音频分段并在合成阶段按 start_ms 对齐。
         if capture_system_audio {
@@ -2017,11 +2037,6 @@ pub fn start_recording(
             runtime.wgc_pause_flag = Some(handle.pause_flag);
             runtime.wgc_first_frame_elapsed_ms = Some(handle.first_frame_elapsed_ms);
             runtime.wgc_thread = Some(handle.join);
-        } else {
-            runtime.wgc_stop_flag = None;
-            runtime.wgc_pause_flag = None;
-            runtime.wgc_first_frame_elapsed_ms = None;
-            runtime.wgc_thread = None;
         }
         let started_at_ms = runtime.started_at_ms;
         emit_recording_state_changed(app, Some(&session_id), runtime.phase.as_str(), 0);
@@ -2489,6 +2504,10 @@ pub fn stop_recording(
     };
 
     if let Some(err) = fatal_error {
+        // 清理错误路径上的临时音频文件
+        for path in &audio_segment_paths {
+            let _ = fs::remove_file(path);
+        }
         return Err(err);
     }
 
@@ -2690,6 +2709,9 @@ pub fn cancel_recording(
         if let Some(path) = runtime.output_path_tmp.take() {
             cleanup_paths.insert(path);
         }
+        if let Some(path) = runtime.output_path_final.take() {
+            cleanup_paths.insert(path);
+        }
         for seg in std::mem::take(&mut runtime.system_audio_segments) {
             cleanup_paths.insert(seg.path);
         }
@@ -2715,8 +2737,19 @@ pub fn cancel_recording(
         if let Err(e) = process.kill() {
             log::warn!("取消录制时终止 FFmpeg 进程失败: {}", e);
         }
-        if let Err(e) = process.wait() {
-            log::warn!("取消录制时等待 FFmpeg 进程退出失败: {}", e);
+        // 等待进程退出，最多 10 秒
+        let mut exited = false;
+        for _ in 0..1000 {
+            if let Ok(Some(_)) = process.try_wait() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        if !exited {
+            log::warn!("取消录制时 FFmpeg 进程未能在 10 秒内退出，强制结束");
+            let _ = process.kill();
+            let _ = process.wait();
         }
     }
     if let Some(flag) = wgc_stop_flag.as_ref() {
@@ -2910,7 +2943,7 @@ pub fn resume_recording(
         fps,
         video_bitrate_kbps,
         capture_cursor,
-        _paused_total_ms,
+        pending_paused_total_ms,
     ) = {
         let mut runtime = lock_arc_mutex(&runtime_arc);
         if runtime.phase != RecordingPhase::Paused {
@@ -2919,12 +2952,13 @@ pub fn resume_recording(
                 "当前状态不允许恢复",
             ));
         }
-        if let Some(paused_at) = runtime.paused_at_instant {
-            runtime.paused_total_ms = runtime
-                .paused_total_ms
-                .saturating_add(paused_at.elapsed().as_millis() as u64);
-            runtime.paused_at_instant = None;
-        }
+        // 暂存暂停累计时长，等待阶段验证通过后再正式写入
+        let take_paused_at = runtime.paused_at_instant.take();
+        let pending_paused_ms = runtime.paused_total_ms.saturating_add(
+            take_paused_at.map(|t| t.elapsed().as_millis() as u64).unwrap_or(0),
+        );
+        // 使用暂存值（在最终阶段验证后再写入 runtime）
+        let paused_total_ms = take_paused_at.map(|_| pending_paused_ms).unwrap_or(runtime.paused_total_ms);
         let output_dir = runtime
             .output_path_tmp
             .as_ref()
@@ -2952,10 +2986,6 @@ pub fn resume_recording(
         let fps = runtime.fps;
         let video_bitrate_kbps = runtime.video_bitrate_kbps;
         let capture_cursor = runtime.capture_cursor;
-        // BUG-04 修复：记录暂停累计时长，用于后续音频时间戳校正
-        // 对于 FFmpeg 模式，暂停恢复后新视频分段从0开始，
-        // 但音频流的 elapsed_ms 包含暂停时间，需要在启动音频前校正
-        let paused_total_ms = runtime.paused_total_ms;
         log::info!(
             "恢复录制: paused_total_ms={}, elapsed_ms={}",
             paused_total_ms,
@@ -3031,6 +3061,8 @@ pub fn resume_recording(
 
     let mut runtime = lock_arc_mutex(&runtime_arc);
     debug_assert_eq!(runtime.phase, RecordingPhase::Paused, "状态应在资源创建前已验证");
+    // 阶段验证通过后，正式写入暂停累计时长（避免竞态导致时间膨胀）
+    runtime.paused_total_ms = pending_paused_total_ms;
     // 恢复录制时 FFmpeg 延迟清零：新的视频分段与音频缓存同时启动，无需额外校正
     runtime.ffmpeg_start_delay_ms = 0;
 
