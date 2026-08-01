@@ -1339,6 +1339,7 @@ fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
 
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             let is_stale_pattern = file_name.ends_with(".tmp.mp4")
+                || file_name.contains("_aligned.tmp.")
                 || file_name.contains(".sys.")
                 || file_name.contains(".mic.");
             if !is_stale_pattern {
