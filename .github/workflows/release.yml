@@ -48,10 +48,15 @@ jobs:
       - name: 安装 Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+      - name: Cache Rust
+        id: cache-rust
+        uses: actions/cache@v4
         with:
-          workspaces: src-tauri -> target
+          path: |
+            src-tauri/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: rust-${{ runner.os }}-v2
 
       - name: Cache LLVM
         id: cache-llvm
