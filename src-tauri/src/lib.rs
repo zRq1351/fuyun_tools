@@ -166,6 +166,7 @@ fn cleanup_stale_recording_tmp_files() {
                 None => continue,
             };
             let is_tmp = name.ends_with(".tmp.mp4")
+                || name.contains("_aligned.tmp.")
                 || name.contains(".sys.")
                 || name.contains(".mic.");
             if is_tmp {
