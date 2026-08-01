@@ -4,9 +4,38 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
 
 jobs:
+  # 将 OpenCV vcpkg 缓存绑定到默认分支，让 tag release 能跨 ref 命中缓存
+  cache-opencv:
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    steps:
+      - name: Cache vcpkg (OpenCV)
+        id: cache-vcpkg
+        uses: actions/cache@v4
+        with:
+          path: D:\vcpkg
+          key: vcpkg-opencv-${{ runner.os }}-static-md-v2
+          restore-keys: |
+            vcpkg-opencv-${{ runner.os }}-static-md
+
+      - name: 安装 vcpkg 并编译 OpenCV
+        if: steps.cache-vcpkg.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git D:\vcpkg
+          & D:\vcpkg\bootstrap-vcpkg.bat
+          & D:\vcpkg\vcpkg.exe integrate install
+          & D:\vcpkg\vcpkg.exe install opencv4:x64-windows-static-md
+
   publish-tauri:
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     strategy:
