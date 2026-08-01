@@ -58,14 +58,15 @@ pub async fn add_doc_category(name: String, icon: Option<String>, color: Option<
     let name_trim = name.trim();
     validate_category_name(name_trim)?;
     let root = document_database::get_doc_root_by_id(root_id).await?.ok_or("根目录不存在".to_string())?;
+    // 先创建目录（幂等），失败时不再写 DB，避免孤儿分类记录
+    fs::create_dir_all(Path::new(&root.root_path).join(name_trim))
+        .map_err(|e| format!("创建分类目录失败: {}", e))?;
     let result = document_database::add_doc_category(
         name_trim,
         &icon.unwrap_or_else(|| "folder".to_string()),
         &color.unwrap_or_else(|| "#409EFF".to_string()),
         root_id,
     ).await?;
-    fs::create_dir_all(Path::new(&root.root_path).join(name_trim))
-        .map_err(|e| format!("创建分类目录失败: {}", e))?;
     Ok(result)
 }
 
@@ -295,7 +296,9 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
             success_ids.len() as i64,
         ).await {
             for (doc_id, src, managed) in &success_ids {
-                document_database::link_import_item(import_id, *doc_id, src, managed).await.ok();
+                if let Err(e) = document_database::link_import_item(import_id, *doc_id, src, managed).await {
+                    log::warn!("关联导入项失败 (import_id={}, doc_id={}): {}", import_id, doc_id, e);
+                }
             }
         }
     }

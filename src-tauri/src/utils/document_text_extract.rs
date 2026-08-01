@@ -6,6 +6,7 @@ use std::sync::LazyLock;
 
 static XML_TAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]*>").unwrap());
 static WS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
+static XML_T_TEXT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<t[^>]*>(.*?)</t>").unwrap());
 
 const TEXT_EXTS: &[&str] = &[
     "txt", "md", "csv", "log", "json", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf",
@@ -60,14 +61,9 @@ fn extract_xlsx(path: &Path) -> String {
 
     // Replace shared string references with actual text
     if !shared_strings.is_empty() {
-        let strings: Vec<&str> = shared_strings
-            .split("<t ")
-            .skip(1)
-            .filter_map(|s| {
-                let start = s.find('>')? + 1;
-                let end = s.find("</t>")?;
-                Some(&s[start..end])
-            })
+        let strings: Vec<&str> = XML_T_TEXT_RE
+            .captures_iter(&shared_strings)
+            .filter_map(|cap| cap.get(1).map(|m| m.as_str()))
             .collect();
         // Re-add shared strings at the end for searchability
         for s in strings {
