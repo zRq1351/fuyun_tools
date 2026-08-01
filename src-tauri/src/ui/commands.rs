@@ -598,6 +598,7 @@ pub async fn save_app_settings(
     recording_capture_system_audio: Option<bool>,
     recording_capture_microphone: Option<bool>,
     recording_microphone_device_id: Option<String>,
+    recording_system_audio_device_id: Option<String>,
     recording_output_dir: Option<String>,
     recording_auto_open_folder: Option<bool>,
     recording_toolbar_content_protected: Option<bool>,
@@ -765,6 +766,9 @@ pub async fn save_app_settings(
     }
     if let Some(val) = recording_microphone_device_id {
         settings.recording_microphone_device_id = val.trim().to_string();
+    }
+    if let Some(val) = recording_system_audio_device_id {
+        settings.recording_system_audio_device_id = val.trim().to_string();
     }
     if let Some(val) = recording_output_dir {
         settings.recording_output_dir = val.trim().to_string();

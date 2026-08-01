@@ -68,9 +68,11 @@ pub struct RecordingRuntime {
     pub recording_pause_flag: Option<Arc<AtomicBool>>,
     pub window_video_segments: Vec<PathBuf>,
     pub window_segment_index: usize,
+    /// 当前视频分段开始时间，用于看门狗判断分段存在时长（避免恢复后立即误判无画面）
+    pub video_segment_started_at: Option<Instant>,
     pub system_audio_wav_path: Option<PathBuf>,
     pub system_audio_stop_flag: Option<Arc<AtomicBool>>,
-    pub system_audio_thread: Option<JoinHandle<()>>,
+    pub system_audio_threads: Vec<JoinHandle<()>>,
     pub system_audio_enabled_flag: Option<Arc<AtomicBool>>,
     pub system_audio_device_id: Option<String>,
     pub system_audio_process_ids: Vec<u32>,
@@ -121,9 +123,10 @@ impl Default for RecordingRuntime {
             recording_pause_flag: None,
             window_video_segments: Vec::new(),
             window_segment_index: 0,
+            video_segment_started_at: None,
             system_audio_wav_path: None,
             system_audio_stop_flag: None,
-            system_audio_thread: None,
+            system_audio_threads: Vec::new(),
             system_audio_enabled_flag: None,
             system_audio_device_id: None,
             system_audio_process_ids: Vec::new(),
@@ -195,7 +198,7 @@ impl RecordingRuntime {
                 let _ = join.join();
             }
         }
-        if let Some(join) = self.system_audio_thread.take() {
+        for join in self.system_audio_threads.drain(..) {
             let mut exited = false;
             for _ in 0..500 {
                 if join.is_finished() {
@@ -257,9 +260,10 @@ impl RecordingRuntime {
         self.recording_pause_flag = None;
         self.window_video_segments.clear();
         self.window_segment_index = 0;
+        self.video_segment_started_at = None;
         self.system_audio_wav_path = None;
         self.system_audio_stop_flag = None;
-        self.system_audio_thread = None;
+        self.system_audio_threads.clear();
         self.system_audio_enabled_flag = None;
         self.system_audio_device_id = None;
         self.system_audio_process_ids.clear();

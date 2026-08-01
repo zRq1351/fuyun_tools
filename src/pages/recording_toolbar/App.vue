@@ -337,6 +337,7 @@ const qualityPreset = ref('hd');
 const countdownActive = ref(false);
 const countdownValue = ref(3);
 let countdownCancelled = false;
+let countdownAbortController = null;
 const lastTargetType = ref('');
 const lastTargetId = ref('');
 
@@ -378,6 +379,7 @@ let keepSettingsOpenUntilTs = 0;
 let autoCollapseAfterStartPending = false;
 let lastElapsedUiSyncAt = 0;
 const isOpeningFolder = ref(false);
+let isUpdatingAudio = false;
 
 const formatElapsedText = (ms) => {
   const totalSeconds = Math.floor(ms / 1000);
@@ -666,10 +668,12 @@ const toggleRecordingState = async () => {
       loadingAction.value = "start";
       autoCollapseAfterStartPending = true;
       if (recordTargetType.value === "window" && !recordTargetWindowId.value) {
+        autoCollapseAfterStartPending = false;
         showInlineNotice(t('recordingToolbar.selectWindowFirst'), "warning");
         return;
       }
       if (recordTargetType.value === "region" && (recordRegionWidth.value <= 0 || recordRegionHeight.value <= 0)) {
+        autoCollapseAfterStartPending = false;
         showInlineNotice(t('recordingToolbar.regionSizeInvalid'), "warning");
         return;
       }
@@ -687,7 +691,9 @@ const toggleRecordingState = async () => {
       countdownActive.value = true;
       const cancel = () => { countdownCancelled = true; };
       const onKey = (e) => { if (e.key === 'Escape') cancel(); };
-      window.addEventListener('keydown', onKey);
+      countdownAbortController = new AbortController();
+      const {signal} = countdownAbortController;
+      window.addEventListener('keydown', onKey, {signal});
       countdownCancelled = false;
       for (let i = 3; i >= 1; i--) {
         countdownValue.value = i;
@@ -698,6 +704,7 @@ const toggleRecordingState = async () => {
         if (countdownCancelled) break;
       }
       window.removeEventListener('keydown', onKey);
+      countdownAbortController = null;
       countdownActive.value = false;
       if (countdownCancelled) return;
       await RecordingService.start({
@@ -726,7 +733,7 @@ const toggleRecordingState = async () => {
       await RecordingService.resume();
     }
     await refresh();
-    if ((prevRawState === "idle" || prevRawState === "error") && currentRecordingState.value === "recording") {
+    if ((prevRawState === "idle" || prevRawState === "error") && rawRecordingState.value === "recording") {
       capsuleSettingsVisible.value = false;
       void syncCapsuleLayout();
       autoCollapseAfterStartPending = false;
@@ -756,9 +763,6 @@ const stop = async () => {
 
 const toggleCapsuleSettings = () => {
   capsuleSettingsVisible.value = !capsuleSettingsVisible.value;
-  if (capsuleSettingsVisible.value) {
-    void refreshAllDropdownOptions();
-  }
 };
 
 const closeCapsule = async () => {
@@ -774,6 +778,7 @@ const toggleMicState = async () => {
   if (!canToggleMic.value || isBusy.value || isTogglingMic) return;
   isTogglingMic = true;
   try {
+    if (!canToggleMic.value) return;
     const newMutedState = !isMicMuted.value;
     await RecordingService.updateAudioCapture({
       captureSystemAudio: captureSystemAudio.value,
@@ -818,91 +823,100 @@ const openRecordingFolder = async () => {
 };
 
 const onSystemAudioDeviceChange = async (deviceId) => {
-  if (!canEditAudioConfig.value) return;
-  const prevCapture = captureSystemAudio.value;
-  const prevId = systemOutputId.value;
-  const id = String(deviceId || "");
-  const nextCapture = id.length > 0;
-  const nextId = nextCapture ? id : null;
-  captureSystemAudio.value = id.length > 0;
-  systemOutputId.value = id.length > 0 ? id : null;
-  if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
-    try {
-      if (prevCapture && nextCapture && prevId && nextId && prevId !== nextId) {
-
-        await RecordingService.updateAudioCapture({
-          captureSystemAudio: false,
-          systemAudioDeviceId: prevId || "",
-        });
-        await RecordingService.updateAudioCapture({
-          captureSystemAudio: true,
-          systemAudioDeviceId: nextId || "",
-        });
-      } else {
-        await RecordingService.updateAudioCapture({
-          captureSystemAudio: captureSystemAudio.value,
-          systemAudioDeviceId: systemOutputId.value || "",
-        });
-      }
-    } catch (e) {
-      captureSystemAudio.value = prevCapture;
-      systemOutputId.value = prevId;
-      showBackendErrorInSettings(String(e));
-      return;
-    }
-  }
+  if (!canEditAudioConfig.value || isUpdatingAudio) return;
+  isUpdatingAudio = true;
   try {
-    await AISettingsService.saveSettings({
-      recordingCaptureSystemAudio: captureSystemAudio.value,
-    });
-  } catch (e) {
-    showInlineNotice(t('recordingToolbar.saveAudioSettingsFailed', {error: String(e)}), "error");
+    const prevCapture = captureSystemAudio.value;
+    const prevId = systemOutputId.value;
+    const id = String(deviceId || "");
+    const nextCapture = id.length > 0;
+    const nextId = nextCapture ? id : null;
+    captureSystemAudio.value = id.length > 0;
+    systemOutputId.value = id.length > 0 ? id : null;
+    if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
+      try {
+        if (prevCapture && nextCapture && prevId && nextId && prevId !== nextId) {
+          await RecordingService.updateAudioCapture({
+            captureSystemAudio: false,
+            systemAudioDeviceId: prevId || "",
+          });
+          await RecordingService.updateAudioCapture({
+            captureSystemAudio: true,
+            systemAudioDeviceId: nextId || "",
+          });
+        } else {
+          await RecordingService.updateAudioCapture({
+            captureSystemAudio: captureSystemAudio.value,
+            systemAudioDeviceId: systemOutputId.value || "",
+          });
+        }
+      } catch (e) {
+        captureSystemAudio.value = prevCapture;
+        systemOutputId.value = prevId;
+        showBackendErrorInSettings(String(e));
+        return;
+      }
+    }
+    try {
+      await AISettingsService.saveSettings({
+        recordingCaptureSystemAudio: captureSystemAudio.value,
+        recordingSystemAudioDeviceId: systemOutputId.value || "",
+      });
+    } catch (e) {
+      showInlineNotice(t('recordingToolbar.saveAudioSettingsFailed', {error: String(e)}), "error");
+    }
+  } finally {
+    isUpdatingAudio = false;
   }
 };
 
 const onMicrophoneDeviceChange = async (deviceId) => {
-  if (!canEditAudioConfig.value) return;
-  const prevCapture = captureMicrophone.value;
-  const prevId = microphoneDeviceId.value;
-  const id = String(deviceId || "");
-  const nextCapture = id.length > 0;
-  const nextId = nextCapture ? id : null;
-  captureMicrophone.value = id.length > 0;
-  microphoneDeviceId.value = id.length > 0 ? id : null;
-
-  isMicMuted.value = false;
-  if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
-    try {
-      if (prevCapture && nextCapture && prevId && nextId && prevId !== nextId) {
-
-        await RecordingService.updateAudioCapture({
-          captureMicrophone: false,
-          microphoneDeviceId: prevId || "",
-        });
-        await RecordingService.updateAudioCapture({
-          captureMicrophone: true,
-          microphoneDeviceId: nextId || "",
-        });
-      } else {
-        await RecordingService.updateAudioCapture({
-          captureMicrophone: captureMicrophone.value,
-          microphoneDeviceId: microphoneDeviceId.value || "",
-        });
-      }
-    } catch (e) {
-      captureMicrophone.value = prevCapture;
-      microphoneDeviceId.value = prevId;
-      showBackendErrorInSettings(String(e));
-      return;
-    }
-  }
+  if (!canEditAudioConfig.value || isUpdatingAudio) return;
+  isUpdatingAudio = true;
   try {
-    await AISettingsService.saveSettings({
-      recordingCaptureMicrophone: captureMicrophone.value,
-      recordingMicrophoneDeviceId: microphoneDeviceId.value || "",
-    });
-  } catch (e) {
-    showInlineNotice(t('recordingToolbar.saveMicSettingsFailed', {error: String(e)}), "error");
+    const prevCapture = captureMicrophone.value;
+    const prevId = microphoneDeviceId.value;
+    const id = String(deviceId || "");
+    const nextCapture = id.length > 0;
+    const nextId = nextCapture ? id : null;
+    captureMicrophone.value = id.length > 0;
+    microphoneDeviceId.value = id.length > 0 ? id : null;
+
+    isMicMuted.value = false;
+    if (rawRecordingState.value === "recording" || rawRecordingState.value === "paused") {
+      try {
+        if (prevCapture && nextCapture && prevId && nextId && prevId !== nextId) {
+          await RecordingService.updateAudioCapture({
+            captureMicrophone: false,
+            microphoneDeviceId: prevId || "",
+          });
+          await RecordingService.updateAudioCapture({
+            captureMicrophone: true,
+            microphoneDeviceId: nextId || "",
+          });
+        } else {
+          await RecordingService.updateAudioCapture({
+            captureMicrophone: captureMicrophone.value,
+            microphoneDeviceId: microphoneDeviceId.value || "",
+          });
+        }
+      } catch (e) {
+        captureMicrophone.value = prevCapture;
+        microphoneDeviceId.value = prevId;
+        showBackendErrorInSettings(String(e));
+        return;
+      }
+    }
+    try {
+      await AISettingsService.saveSettings({
+        recordingCaptureMicrophone: captureMicrophone.value,
+        recordingMicrophoneDeviceId: microphoneDeviceId.value || "",
+      });
+    } catch (e) {
+      showInlineNotice(t('recordingToolbar.saveMicSettingsFailed', {error: String(e)}), "error");
+    }
+  } finally {
+    isUpdatingAudio = false;
   }
 };
 
@@ -1040,160 +1054,158 @@ const onToolbarSettingChange = async (key, rawValue) => {
 onMounted(async () => {
   window.addEventListener("blur", onWindowBlur);
   window.addEventListener("resize", onWindowViewportChanged);
-  unlistenStateChanged = await listen("recording-state-changed", (event) => {
-    const payload = event.payload || {};
-    const incomingState = String(payload.state || state.state || "idle");
-    // M4 修复：保留 error 状态，不静默映射为 idle
-    const nextState = incomingState;
-    const stateChanged = nextState !== state.state;
-    state.state = nextState;
-    state.sessionId = nextState === "idle" ? null : (payload.sessionId ?? state.sessionId);
-    const nextElapsedMs = Number(payload.elapsedMs || state.elapsedMs || 0);
-    const now = Date.now();
-    if (stateChanged || now - lastElapsedUiSyncAt >= 1000) {
-      state.elapsedMs = nextElapsedMs;
-      lastElapsedUiSyncAt = now;
-    }
 
-    if (nextState === "idle" || nextState === "error") {
-      isMicMuted.value = false;
-    }
-    if (nextState === "recording" && capsuleSettingsVisible.value && autoCollapseAfterStartPending) {
-      capsuleSettingsVisible.value = false;
-      void syncCapsuleLayout();
-      autoCollapseAfterStartPending = false;
-    }
-    if (nextState !== "starting" && nextState !== "recording") {
-      autoCollapseAfterStartPending = false;
-    }
-  });
-  unlistenRecordingFinished = await listen("recording-finished", async () => {
-    state.state = "idle";
-    state.sessionId = null;
-
-
-    if (!inlineNotice.value) {
-      clearInlineNotice();
-      capsuleSettingsVisible.value = false;
-      void syncCapsuleLayout();
-    }
-
-    try {
-      const win = getCurrentWindow();
-      if (await win.isVisible() === false) {
-        await win.show();
-        await win.setFocus();
+  const listenerResults = await Promise.allSettled([
+    listen("recording-state-changed", (event) => {
+      const payload = event.payload || {};
+      const incomingState = String(payload.state || state.state || "idle");
+      const nextState = incomingState;
+      const stateChanged = nextState !== state.state;
+      state.state = nextState;
+      state.sessionId = nextState === "idle" ? null : (payload.sessionId ?? state.sessionId);
+      const nextElapsedMs = Number(payload.elapsedMs || state.elapsedMs || 0);
+      const now = Date.now();
+      if (stateChanged || now - lastElapsedUiSyncAt >= 1000) {
+        state.elapsedMs = nextElapsedMs;
+        lastElapsedUiSyncAt = now;
       }
-    } catch (e) {
-      console.error("唤醒控制台窗口失败:", e);
-    }
-  });
-  unlistenRecordingError = await listen("recording-error", (event) => {
-    const payload = event.payload || {};
-    const rawMsg = String(payload.message || '');
-    const message = parseErrorMessage(rawMsg) || t('recordingToolbar.recordingError');
-    const code = String(payload.code || "");
-    state.state = "idle";
-    state.sessionId = null;
-    showBackendErrorInSettings(code ? `${code}: ${message}` : message);
-  });
-  unlistenForceCompact = await listen("recording-toolbar-force-compact", () => {
-    if (Date.now() < keepSettingsOpenUntilTs) {
-      return;
-    }
 
-    if (inlineNotice.value) return;
-    capsuleSettingsVisible.value = false;
-    void syncCapsuleLayout();
-  });
-  unlistenRecordingRegionSelected = await listen("recording-region-selected", async (event) => {
-    const payload = event.payload || {};
-    const x = Number(payload.x || 0);
-    const y = Number(payload.y || 0);
-    const width = Math.max(1, Number(payload.width || 1));
-    const height = Math.max(1, Number(payload.height || 1));
-    recordTargetType.value = "region";
-    recordRegionX.value = x;
-    recordRegionY.value = y;
-    recordRegionWidth.value = width;
-    recordRegionHeight.value = height;
-    regionSelectionReady.value = true;
-    keepSettingsOpenUntilTs = Date.now() + 1500;
+      if (nextState === "idle" || nextState === "error") {
+        isMicMuted.value = false;
+      }
+      if (nextState === "recording" && capsuleSettingsVisible.value && autoCollapseAfterStartPending) {
+        capsuleSettingsVisible.value = false;
+        void syncCapsuleLayout();
+        autoCollapseAfterStartPending = false;
+      }
+      if (nextState !== "starting" && nextState !== "recording") {
+        autoCollapseAfterStartPending = false;
+      }
+    }),
+    listen("recording-finished", async () => {
+      state.state = "idle";
+      state.sessionId = null;
 
-    // 先显示窗口
-    try {
-      await getCurrentWindow().show();
-    } catch (_e) {
-    }
+      if (!inlineNotice.value) {
+        clearInlineNotice();
+        capsuleSettingsVisible.value = false;
+        void syncCapsuleLayout();
+      }
 
-    // 等待窗口显示后再展开设置面板
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    // 展开设置面板（watch 监听器会自动调用 syncCapsuleLayout）
-    capsuleSettingsVisible.value = true;
-
-    // 等待下一帧确保 watch 已触发
-    await nextTick();
-
-    // 手动调用一次 resize 确保窗口正确展开
-    try {
-      const targetHeight = measureCapsuleContentHeight();
-      await RecordingService.resizeToolbar(false, true, false, "capsule", true, targetHeight, null);
-    } catch (e) {
-      console.error("展开录制工具栏失败:", e);
-    }
-  });
-
-  // 监听截图窗口关闭事件，确保工具栏重新显示（仅当被录屏区域框选流程隐藏时）
-  unlistenScreenshotReset = await listen("screenshot-reset", () => {
-    if (wasHiddenForRegionPick) {
-      wasHiddenForRegionPick = false
       try {
-        getCurrentWindow().show().catch(() => {
-        });
+        const win = getCurrentWindow();
+        if (await win.isVisible() === false) {
+          await win.show();
+          await win.setFocus();
+        }
+      } catch (e) {
+        console.error("唤醒控制台窗口失败:", e);
+      }
+    }),
+    listen("recording-error", (event) => {
+      const payload = event.payload || {};
+      const rawMsg = String(payload.message || '');
+      const message = parseErrorMessage(rawMsg) || t('recordingToolbar.recordingError');
+      const code = String(payload.code || "");
+      isMicMuted.value = false;
+      state.state = "idle";
+      state.sessionId = null;
+      showBackendErrorInSettings(code ? `${code}: ${message}` : message);
+    }),
+    listen("recording-toolbar-force-compact", () => {
+      if (Date.now() < keepSettingsOpenUntilTs) return;
+      if (inlineNotice.value) return;
+      capsuleSettingsVisible.value = false;
+      void syncCapsuleLayout();
+    }),
+    listen("recording-region-selected", async (event) => {
+      const payload = event.payload || {};
+      const x = Number(payload.x || 0);
+      const y = Number(payload.y || 0);
+      const width = Math.max(1, Number(payload.width || 1));
+      const height = Math.max(1, Number(payload.height || 1));
+      recordTargetType.value = "region";
+      recordRegionX.value = x;
+      recordRegionY.value = y;
+      recordRegionWidth.value = width;
+      recordRegionHeight.value = height;
+      regionSelectionReady.value = true;
+      keepSettingsOpenUntilTs = Date.now() + 1500;
+
+      try {
+        await getCurrentWindow().show();
       } catch (_e) {
       }
-    }
-  });
+      await new Promise(resolve => setTimeout(resolve, 50));
+      capsuleSettingsVisible.value = true;
+      await nextTick();
 
+      try {
+        const targetHeight = measureCapsuleContentHeight();
+        await RecordingService.resizeToolbar(false, true, false, "capsule", true, targetHeight, null);
+      } catch (e) {
+        console.error("展开录制工具栏失败:", e);
+      }
+    }),
+    listen("screenshot-reset", () => {
+      if (wasHiddenForRegionPick) {
+        wasHiddenForRegionPick = false;
+        try {
+          getCurrentWindow().show().catch(() => {
+          });
+        } catch (_e) {
+        }
+      }
+    }),
+    listen("recording-audio-merging", (event) => {
+      const payload = event.payload || {};
+      const status = String(payload.status || "");
+      const message = String(payload.message || "");
 
-  unlistenAudioMerging = await listen("recording-audio-merging", (event) => {
-    const payload = event.payload || {};
-    const status = String(payload.status || "");
-    const message = String(payload.message || "");
-    const progress = payload.progress;
+      if (status === "started") {
+        showInlineNotice(message || t('recordingToolbar.mergingAudioInBackground'), "warning");
+      } else if (status === "completed") {
+        clearInlineNotice();
+      } else if (status === "failed") {
+        showInlineNotice(message || t('recordingToolbar.audioMergeFailed'), "error");
+      }
+    }),
+    listen("recording-mic-toggled", (event) => {
+      const payload = event.payload || {};
+      isMicMuted.value = !payload.enabled;
+      const action = payload.enabled ? t('recordingToolbar.micActionEnable') : t('recordingToolbar.micActionDisable');
+      showInlineNotice(t('recordingToolbar.micToggledByShortcut', {action}), "warning");
+    }),
+    listen("recording-mic-key-pressed", () => {
+      isMicMuted.value = false;
+    }),
+    listen("recording-mic-key-released", () => {
+      isMicMuted.value = true;
+    }),
+  ]);
 
-    if (status === "started") {
+  const [stateChangedResult, recordingFinishedResult, recordingErrorResult, forceCompactResult, recordingRegionSelectedResult, screenshotResetResult, audioMergingResult, micToggledResult, micKeyPressedResult, micKeyReleasedResult] = listenerResults;
 
-      showInlineNotice(message || t('recordingToolbar.mergingAudioInBackground'), "warning");
-    } else if (status === "completed") {
-
-      clearInlineNotice();
-    } else if (status === "failed") {
-
-      showInlineNotice(message || t('recordingToolbar.audioMergeFailed'), "error");
-    }
-  });
-
-
-  unlistenMicToggled = await listen("recording-mic-toggled", (event) => {
-    const payload = event.payload || {};
-    isMicMuted.value = !payload.enabled;
-    const action = payload.enabled ? t('recordingToolbar.micActionEnable') : t('recordingToolbar.micActionDisable');
-    showInlineNotice(t('recordingToolbar.micToggledByShortcut', {action}), "warning");
-  });
-
-
-  unlistenMicKeyPressed = await listen("recording-mic-key-pressed", () => {
-
-    isMicMuted.value = false;
-  });
-
-
-  unlistenMicKeyReleased = await listen("recording-mic-key-released", () => {
-
-    isMicMuted.value = true;
-  });
+  if (stateChangedResult.status === "fulfilled") unlistenStateChanged = stateChangedResult.value;
+  else console.error("注册 recording-state-changed 监听器失败:", stateChangedResult.reason);
+  if (recordingFinishedResult.status === "fulfilled") unlistenRecordingFinished = recordingFinishedResult.value;
+  else console.error("注册 recording-finished 监听器失败:", recordingFinishedResult.reason);
+  if (recordingErrorResult.status === "fulfilled") unlistenRecordingError = recordingErrorResult.value;
+  else console.error("注册 recording-error 监听器失败:", recordingErrorResult.reason);
+  if (forceCompactResult.status === "fulfilled") unlistenForceCompact = forceCompactResult.value;
+  else console.error("注册 recording-toolbar-force-compact 监听器失败:", forceCompactResult.reason);
+  if (recordingRegionSelectedResult.status === "fulfilled") unlistenRecordingRegionSelected = recordingRegionSelectedResult.value;
+  else console.error("注册 recording-region-selected 监听器失败:", recordingRegionSelectedResult.reason);
+  if (screenshotResetResult.status === "fulfilled") unlistenScreenshotReset = screenshotResetResult.value;
+  else console.error("注册 screenshot-reset 监听器失败:", screenshotResetResult.reason);
+  if (audioMergingResult.status === "fulfilled") unlistenAudioMerging = audioMergingResult.value;
+  else console.error("注册 recording-audio-merging 监听器失败:", audioMergingResult.reason);
+  if (micToggledResult.status === "fulfilled") unlistenMicToggled = micToggledResult.value;
+  else console.error("注册 recording-mic-toggled 监听器失败:", micToggledResult.reason);
+  if (micKeyPressedResult.status === "fulfilled") unlistenMicKeyPressed = micKeyPressedResult.value;
+  else console.error("注册 recording-mic-key-pressed 监听器失败:", micKeyPressedResult.reason);
+  if (micKeyReleasedResult.status === "fulfilled") unlistenMicKeyReleased = micKeyReleasedResult.value;
+  else console.error("注册 recording-mic-key-released 监听器失败:", micKeyReleasedResult.reason);
   try {
     const settings = await AISettingsService.getSettings();
     recordingFeatureEnabled.value = settings.recording_enabled === true;
@@ -1206,6 +1218,7 @@ onMounted(async () => {
     captureCursor.value = settings.recording_capture_cursor !== false;
     captureToolbar.value = settings.recording_toolbar_content_protected !== true;
     microphoneDeviceId.value = settings.recording_microphone_device_id || null;
+    systemOutputId.value = settings.recording_system_audio_device_id || null;
     loadLastTarget();
   } catch (_e) {
   }
@@ -1239,10 +1252,15 @@ watch(
 );
 
 watch(currentRecordingState, (next) => {
+  if (!capsuleSettingsVisible.value) return;
   void syncCapsuleLayout();
 });
 
 onBeforeUnmount(() => {
+  if (countdownAbortController) {
+    countdownAbortController.abort();
+    countdownAbortController = null;
+  }
   if (inlineNoticeTimer) {
     clearTimeout(inlineNoticeTimer);
     inlineNoticeTimer = null;

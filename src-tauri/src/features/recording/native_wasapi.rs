@@ -54,6 +54,7 @@ pub struct AudioProcessInfo {
 
 static AUDIO_RECENT_ACTIVITY: std::sync::OnceLock<Mutex<HashMap<u32, u64>>> =
     std::sync::OnceLock::new();
+static COM_INIT: std::sync::Once = std::sync::Once::new();
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -120,7 +121,9 @@ fn capture_process_loopback_to_wav(
 ) -> Result<(), String> {
     AUDIO_WRITE_ERR_COUNT.store(false, Ordering::Relaxed);
     let run = || -> Result<(), String> {
-        let _ = initialize_mta();
+        COM_INIT.call_once(|| {
+            let _ = initialize_mta();
+        });
         let desired_format = WaveFormat::new(32, 32, &SampleType::Float, 48000, 2, None);
         let mut audio_client = AudioClient::new_application_loopback_client(process_id, true)
             .map_err(|e| format!("创建进程 loopback 客户端失败(pid={}): {}", process_id, e))?;
@@ -1046,8 +1049,16 @@ pub fn start_system_loopback_aac_with_device(
                         break;
                     }
                     if let Some(writer) = writer_opt.as_mut() {
-                        let _ = writer.write_all(&data);
-                        let _ = writer.flush();
+                        if let Err(e) = writer.write_all(&data) {
+                            log::error!("FFmpeg stdin 写入失败，停止音频采集: {}", e);
+                            let _ = tx_pool.send(data);
+                            break;
+                        }
+                        if let Err(e) = writer.flush() {
+                            log::error!("FFmpeg stdin flush 失败，停止音频采集: {}", e);
+                            let _ = tx_pool.send(data);
+                            break;
+                        }
                     }
                     data.clear();
                     let _ = tx_pool.send(data);

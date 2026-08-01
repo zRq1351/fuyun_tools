@@ -94,6 +94,8 @@ pub struct AppSettingsData {
     pub recording_capture_microphone: bool,
     #[serde(default)]
     pub recording_microphone_device_id: String,
+    #[serde(default)]
+    pub recording_system_audio_device_id: String,
     #[serde(default = "default_recording_output_dir")]
     pub recording_output_dir: String,
     #[serde(default = "default_recording_auto_open_folder")]
@@ -188,6 +190,7 @@ impl Default for AppSettingsData {
             recording_capture_system_audio: default_recording_capture_system_audio(),
             recording_capture_microphone: default_recording_capture_microphone(),
             recording_microphone_device_id: String::new(),
+            recording_system_audio_device_id: String::new(),
             recording_output_dir: default_recording_output_dir(),
             recording_auto_open_folder: default_recording_auto_open_folder(),
             recording_toolbar_content_protected: default_recording_toolbar_content_protected(),

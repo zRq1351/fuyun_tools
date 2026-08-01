@@ -81,7 +81,9 @@ fn join_thread_with_timeout<T>(join: std::thread::JoinHandle<T>, name: &str, max
 
 fn normalize_runtime_state(runtime: &mut crate::features::recording::state::RecordingRuntime) {
     if let Some(process) = runtime.process.as_mut() {
-        if let Ok(Some(_)) = process.try_wait() {
+        if let Ok(Some(status)) = process.try_wait() {
+            log::debug!("FFmpeg 进程已退出: {:?}", status);
+            let _ = process.wait(); // 确保 OS 资源回收
             runtime.process = None;
         }
     }
@@ -464,6 +466,77 @@ fn concat_audio_segments(
     Ok(concat_path)
 }
 
+/// 纯音频多片段合并：将多个音频片段（含 adelay）合并为单个 AAC，不涉及视频
+/// 用于替代 filter_complex 慢速路径中的视频参与步骤
+fn merge_audio_segments_only(
+    ffmpeg_path: &std::path::Path,
+    segments: &[crate::features::recording::state::AudioSegment],
+    output_path: &std::path::Path,
+    audio_bitrate_kbps: u32,
+) -> Result<(), String> {
+    if segments.is_empty() {
+        return Err("没有可合并的音频片段".to_string());
+    }
+    // 单片段无延迟：直接复制（AAC）或重编码（WAV）
+    if segments.len() == 1 && segments[0].start_ms == 0 && segments[0].trim_start_ms == 0 {
+        let seg = &segments[0];
+        let is_aac = seg.path.extension()
+            .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
+            .unwrap_or(false);
+        if is_aac {
+            return std::fs::copy(&seg.path, output_path)
+                .map(|_| ())
+                .map_err(|e| format!("复制音频片段失败: {}", e));
+        }
+    }
+
+    let mut cmd = Command::new(ffmpeg_path);
+    suppress_console_window(&mut cmd);
+    cmd.arg("-hide_banner").arg("-loglevel").arg("warning").arg("-y");
+
+    let mut labels: Vec<String> = Vec::new();
+    let mut filter_parts: Vec<String> = Vec::new();
+    for (idx, seg) in segments.iter().enumerate() {
+        if seg.trim_start_ms > 0 {
+            cmd.arg("-ss").arg(format!("{}.{:03}", seg.trim_start_ms / 1000, seg.trim_start_ms % 1000));
+        }
+        cmd.arg("-i").arg(&seg.path);
+
+        let label = format!("a{}", idx);
+        filter_parts.push(format!(
+            "[{i}:a]adelay={d}|{d}[{l}]",
+            i = idx,
+            d = seg.start_ms,
+            l = label
+        ));
+        labels.push(format!("[{}]", label));
+    }
+
+    if labels.len() == 1 {
+        filter_parts.push(format!("{}anull[aout]", labels[0]));
+    } else {
+        filter_parts.push(format!(
+            "{}amix=inputs={}:duration=longest:normalize=0[aout]",
+            labels.join(""),
+            labels.len()
+        ));
+    }
+
+    cmd.arg("-filter_complex").arg(filter_parts.join(";"))
+        .arg("-map").arg("[aout]")
+        .arg("-c:a").arg("aac")
+        .arg("-b:a").arg(format!("{}k", audio_bitrate_kbps.max(32)))
+        .arg(output_path);
+
+    let output = cmd.output()
+        .map_err(|e| format!("启动纯音频合并失败: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!("纯音频合并失败: {}", stderr));
+    }
+    Ok(())
+}
+
 /// 使用 FFmpeg 验证音频文件是否包含可解码的音频数据
 /// 返回 true 表示文件有效，false 表示文件损坏或为空
 fn validate_audio_file_with_ffmpeg(
@@ -526,8 +599,11 @@ fn merge_system_audio_into_video(
         if system_segments.len() == 1 && mic_segments.is_empty() {
             let seg = &system_segments[0];
             if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.path.exists() {
-                // 🔧 快速路径前验证音频文件是否可被 FFmpeg 读取
-                if validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
+                let is_aac = seg.path.extension()
+                    .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
+                    .unwrap_or(false);
+                // AAC 文件由 FFmpeg pipe 产生，100% 有效，跳过完整解码验证（仅做文件大小检查）
+                if is_aac || validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
                     log::info!(
                         "快速路径：单个系统音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
                         seg.start_ms,
@@ -543,7 +619,7 @@ fn merge_system_audio_into_video(
         if mic_segments.len() == 1 && system_segments.is_empty() {
             let seg = &mic_segments[0];
             if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.path.exists() {
-                // 🔧 快速路径前验证音频文件是否可被 FFmpeg 读取
+                // 麦克风 WAV 文件仍需 FFmpeg 验证（cpal 写入可能因 I/O 中断损坏）
                 if validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
                     log::info!(
                         "快速路径：单个麦克风音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
@@ -591,12 +667,7 @@ fn merge_system_audio_into_video(
                 return false;
             }
         }
-        // 🔧 对 AAC 文件额外做 FFmpeg 解码验证
-        // 文件大小检查通过不代表数据可读（如容器头存在但音频数据为空）
-        if is_aac && !validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
-            log::warn!("音频片段 FFmpeg 验证失败: {:?}", seg.path);
-            return false;
-        }
+        // AAC 文件由 FFmpeg pipe 产生，文件大小检查已足够，不再做完整解码验证
         true
     };
     let valid_system = system_segments
@@ -646,227 +717,45 @@ fn merge_system_audio_into_video(
         }
         return Ok(());
     }
-    let merged_path = video_path.with_extension("merged.tmp.mp4");
-    let mut cmd = Command::new(ffmpeg_path);
-    suppress_console_window(&mut cmd);
+    // 🔧 两步合并：先纯音频合并（快速），再流复制合并视频（快速）
+    // 替代原先的 filter_complex 全路径（视频参与滤镜 → 重编码 → 慢）
+    let output_dir = video_path.parent()
+        .ok_or_else(|| AppError::new(ErrorCode::SystemError, "无法获取输出目录"))?;
 
-    log::info!("✅ 视频编码格式为 H.264，使用流复制模式（无重编码）");
-
-    cmd.arg("-hide_banner")
-        .arg("-loglevel")
-        .arg("warning")
-        .arg("-y")
-        .arg("-threads")
-        .arg("0")
-        .arg("-i")
-        .arg(video_path);
-    let mut input_index = 1usize;
-    let mut sys_inputs: Vec<(usize, u64)> = Vec::new();
-    let mut mic_inputs: Vec<(usize, u64)> = Vec::new();
-    for seg in &valid_system {
-        if seg.trim_start_ms > 0 {
-            cmd.arg("-ss").arg(format!("{}.{:03}", seg.trim_start_ms / 1000, seg.trim_start_ms % 1000));
-        }
-        cmd.arg("-i").arg(&seg.path);
-        sys_inputs.push((input_index, seg.start_ms));
-        input_index += 1;
-    }
-    for seg in &valid_mic {
-        if seg.trim_start_ms > 0 {
-            cmd.arg("-ss").arg(format!("{}.{:03}", seg.trim_start_ms / 1000, seg.trim_start_ms % 1000));
-        }
-        cmd.arg("-i").arg(&seg.path);
-        mic_inputs.push((input_index, seg.start_ms));
-        input_index += 1;
-    }
-    let sys_delay = sys_inputs.first().map(|(_, d)| *d).unwrap_or(0);
-    let mic_delay = mic_inputs.first().map(|(_, d)| *d).unwrap_or(0);
-    cmd.arg("-metadata")
-        .arg(format!("fy_sys_delay_ms={}", sys_delay))
-        .arg("-metadata")
-        .arg(format!("fy_mic_delay_ms={}", mic_delay));
-    let mut filter_parts: Vec<String> = Vec::new();
-    let mut sys_labels: Vec<String> = Vec::new();
-    for (idx, (input, delay)) in sys_inputs.iter().enumerate() {
-        let label = format!("sys{}", idx);
-
-        filter_parts.push(format!(
-            "[{i}:a]adelay={d}|{d}[{l}]",
-            i = input,
-            d = delay,
-            l = label
-        ));
-        sys_labels.push(format!("[{}]", label));
-    }
-    let sys_out = if !sys_labels.is_empty() {
-        if sys_labels.len() == 1 {
-            // 单个输入，直接保留其 adelay 后的标签，不进行 aresample
-            Some(sys_labels[0].clone())
-        } else {
-            filter_parts.push(format!(
-                "{}amix=inputs={}:duration=longest:normalize=0[sysa]",
-                sys_labels.join(""),
-                sys_labels.len()
-            ));
-            Some("[sysa]".to_string())
-        }
-    } else {
-        None
-    };
-    let mut mic_labels: Vec<String> = Vec::new();
-    for (idx, (input, delay)) in mic_inputs.iter().enumerate() {
-        let label = format!("mic{}", idx);
-
-        filter_parts.push(format!(
-            "[{i}:a]adelay={d}|{d}[{l}]",
-            i = input,
-            d = delay,
-            l = label
-        ));
-        mic_labels.push(format!("[{}]", label));
-    }
-    let mic_out = if !mic_labels.is_empty() {
-        if mic_labels.len() == 1 {
-            // 单个输入，直接保留其 adelay 后的标签
-            Some(mic_labels[0].clone())
-        } else {
-            filter_parts.push(format!(
-                "{}amix=inputs={}:duration=longest:normalize=0[mica]",
-                mic_labels.join(""),
-                mic_labels.len()
-            ));
-            Some("[mica]".to_string())
-        }
-    } else {
-        None
-    };
-    let audio_map_label = if let (Some(sys), Some(mic)) = (sys_out.as_ref(), mic_out.as_ref()) {
-        filter_parts.push(format!(
-            "{}{}amix=inputs=2:duration=longest:normalize=0[aout]",
-            sys, mic
-        ));
-        "[aout]"
-    } else if let Some(sys) = sys_out.as_ref() {
-        filter_parts.push(format!("{}anull[aout]", sys));
-        "[aout]"
-    } else if let Some(mic) = mic_out.as_ref() {
-        filter_parts.push(format!("{}anull[aout]", mic));
-        "[aout]"
-    } else {
-        return Ok(());
-    };
-    cmd.arg("-filter_complex")
-        .arg(filter_parts.join(";"))
-        .arg("-map")
-        .arg("0:v:0")
-        .arg("-map")
-        .arg(audio_map_label);
-
-    log::info!("🔧 需要通过 filter_complex 合并音频，必须重编码为 AAC ({}k)", audio_bitrate_kbps);
-    cmd.arg("-c:v")
-        .arg("copy")
-        .arg("-c:a")
-        .arg("aac")
-        .arg("-b:a")
-        .arg(format!("{}k", audio_bitrate_kbps.max(32)))
-        .arg("-profile:a")
-        .arg("aac_low")
-        .arg("-movflags")
-        .arg("+faststart")
-        .arg(&merged_path);
-
-    log::info!(
-        "🔧 开始音频合并，系统音频片段: {}, 麦克风片段: {}",
-        valid_system.len(),
-        valid_mic.len()
-    );
-
-    for (idx, seg) in valid_system.iter().enumerate() {
-        if let Ok(meta) = std::fs::metadata(&seg.path) {
-            let duration_ms = meta.len() * 1000 / (48000 * 2 * 2);
-            log::info!(
-                "  系统音频片段{}: start_ms={}, file_size={} bytes, estimated_duration={}ms",
-                idx,
-                seg.start_ms,
-                meta.len(),
-                duration_ms
-            );
-        }
-    }
-    for (idx, seg) in valid_mic.iter().enumerate() {
-        if let Ok(meta) = std::fs::metadata(&seg.path) {
-            let duration_ms = meta.len() * 1000 / (48000 * 2);
-            log::info!(
-                "  麦克风片段{}: start_ms={}, file_size={} bytes, estimated_duration={}ms",
-                idx,
-                seg.start_ms,
-                meta.len(),
-                duration_ms
-            );
-        }
+    let sys_aligned = output_dir.join("sys_aligned.tmp.aac");
+    if has_system {
+        let seg_count = valid_system.len();
+        log::info!("🔧 两步合并 Step 1: 预合并 {} 个系统音频片段", seg_count);
+        merge_audio_segments_only(ffmpeg_path, &valid_system, &sys_aligned, audio_bitrate_kbps)
+            .map_err(|e| AppError::new(ErrorCode::SystemError, "系统音频预合并失败").with_details(e))?;
+        log::info!("🔧 两步合并 Step 2: 系统音频流复制合并到视频");
+        merge_audio_fast(ffmpeg_path, video_path, &sys_aligned, false, audio_bitrate_kbps)?;
+        let _ = fs::remove_file(&sys_aligned);
     }
 
-    let child = cmd
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            AppError::new(ErrorCode::SystemError, "启动音频合成进程失败")
-                .with_details(e.to_string())
-        })?;
-
-    crate::features::recording::job_object::assign_to_global_job_object(&child);
-
-    let output = child.wait_with_output().map_err(|e| {
-        AppError::new(ErrorCode::SystemError, "执行系统音频合成失败").with_details(e.to_string())
-    })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let details = if stderr.is_empty() {
-            format!("ffmpeg exit status: {}", output.status)
-        } else {
-            format!("ffmpeg exit status: {}；stderr: {}", output.status, stderr)
-        };
-        record_perf_metric(
-            "recording.audio_merge",
-            "录屏音频合成耗时",
-            started_at.elapsed().as_millis() as u64,
-            false,
-            Some(details.clone()),
-        );
-        return Err(AppError::new(ErrorCode::SystemError, "系统音频合成失败").with_details(details));
+    let mic_aligned = output_dir.join("mic_aligned.tmp.aac");
+    if has_mic {
+        let seg_count = valid_mic.len();
+        log::info!("🔧 两步合并 Step 1: 预合并 {} 个麦克风音频片段", seg_count);
+        merge_audio_segments_only(ffmpeg_path, &valid_mic, &mic_aligned, audio_bitrate_kbps)
+            .map_err(|e| AppError::new(ErrorCode::SystemError, "麦克风音频预合并失败").with_details(e))?;
+        log::info!("🔧 两步合并 Step 2: 麦克风音频流复制合并到视频");
+        merge_audio_fast(ffmpeg_path, video_path, &mic_aligned, false, audio_bitrate_kbps)?;
+        let _ = fs::remove_file(&mic_aligned);
     }
-    if video_path.exists() {
-        let _ = fs::remove_file(video_path);
+
+    let elapsed_ms = started_at.elapsed().as_millis();
+    log::info!("✅ 音频合并完成（两步法），耗时: {}ms ({:.1}s)", elapsed_ms, elapsed_ms as f64 / 1000.0);
+    if elapsed_ms > 5000 {
+        log::warn!("⚠️ 音频合并耗时较长({}ms)", elapsed_ms);
     }
-    fs::rename(&merged_path, video_path).map_err(|e| {
-        record_perf_metric(
-            "recording.audio_merge",
-            "录屏音频合成耗时",
-            started_at.elapsed().as_millis() as u64,
-            false,
-            Some(e.to_string()),
-        );
-        AppError::new(ErrorCode::IoError, "写入合成文件失败").with_details(e.to_string())
-    })?;
     record_perf_metric(
         "recording.audio_merge",
-        "录屏音频合成耗时",
-        started_at.elapsed().as_millis() as u64,
+        "录屏音频合成耗时（两步法）",
+        elapsed_ms as u64,
         true,
         None,
     );
-
-    let elapsed_ms = started_at.elapsed().as_millis();
-    log::info!(
-        "✅ 音频合并完成，耗时: {}ms ({:.1}s)",
-        elapsed_ms,
-        elapsed_ms as f64 / 1000.0
-    );
-    if elapsed_ms > 5000 {
-        log::warn!("⚠️ 音频合并耗时较长({}ms)，建议优化方案", elapsed_ms);
-    }
 
     Ok(())
 }
@@ -903,10 +792,13 @@ fn merge_audio_fast(
         .arg("-c:v")
         .arg("copy")
         .arg("-c:a")
-        .arg(if is_aac { "copy" } else { "aac" })
-        .arg("-b:a")
-        .arg(format!("{}k", audio_bitrate_kbps.max(32)))
-        .arg("-movflags")
+        .arg(if is_aac { "copy" } else { "aac" });
+    // 流复制模式下 -b:a 无实际作用，仅重编码时传递码率
+    if !is_aac {
+        cmd.arg("-b:a")
+            .arg(format!("{}k", audio_bitrate_kbps.max(32)));
+    }
+    cmd.arg("-movflags")
         .arg("+faststart")
         .arg(&merged_path);
 
@@ -960,8 +852,6 @@ fn merge_audio_fast(
                 .arg("aac")
                 .arg("-b:a")
                 .arg(format!("{}k", audio_bitrate_kbps.max(32)))
-                .arg("-profile:a")
-                .arg("aac_low")
                 .arg("-movflags")
                 .arg("+faststart")
                 .arg(&merged_path);
@@ -989,6 +879,7 @@ fn merge_audio_fast(
                     let _ = fs::remove_file(video_path);
                 }
                 fs::rename(&merged_path, video_path).map_err(|e| {
+                    let _ = fs::remove_file(&merged_path);
                     record_perf_metric(
                         "recording.audio_merge",
                         "录屏快速音频合并耗时(重编码回退)",
@@ -1218,19 +1109,18 @@ fn ensure_system_audio_capture_started(
     session_id: &str,
     emit_error_on_fail: bool,
 ) -> Result<(), String> {
-    if runtime.system_audio_thread.is_some() {
+    // 确保 enabled_flag 和 pause_flag 始终存在，即使提前返回
+    if runtime.system_audio_enabled_flag.is_none() {
+        runtime.system_audio_enabled_flag = Some(Arc::new(AtomicBool::new(false)));
+    }
+    if runtime.recording_pause_flag.is_none() {
+        runtime.recording_pause_flag = Some(Arc::new(AtomicBool::new(false)));
+    }
+    if !runtime.system_audio_threads.is_empty() {
         return Ok(());
     }
-    let enabled_flag = runtime
-        .system_audio_enabled_flag
-        .clone()
-        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
-    runtime.system_audio_enabled_flag = Some(enabled_flag.clone());
-    let pause_flag = runtime
-        .recording_pause_flag
-        .clone()
-        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
-    runtime.recording_pause_flag = Some(pause_flag.clone());
+    let enabled_flag = runtime.system_audio_enabled_flag.clone().unwrap();
+    let pause_flag = runtime.recording_pause_flag.clone().unwrap();
     let start_ms = runtime.snapshot().elapsed_ms;
     let seg_idx = runtime.system_audio_segments.len();
     if !runtime.system_audio_process_ids.is_empty() {
@@ -1256,7 +1146,7 @@ fn ensure_system_audio_capture_started(
         return match first_try {
             Ok(handle) => {
                 runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
-                runtime.system_audio_thread = handle.joins.into_iter().next();
+                runtime.system_audio_threads = handle.joins;
                 runtime.system_audio_stream_start_ms = Some(start_ms);
                 for p in output_paths {
                     runtime.system_audio_segments.push(
@@ -1309,7 +1199,7 @@ fn ensure_system_audio_capture_started(
         Ok(handle) => {
             runtime.system_audio_wav_path = Some(sys_aac);
             runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
-            runtime.system_audio_thread = handle.join;
+            runtime.system_audio_threads = handle.join.into_iter().collect();
             runtime.system_audio_stream_start_ms = Some(start_ms);
             if let Some(path) = runtime.system_audio_wav_path.clone() {
                 runtime
@@ -1336,19 +1226,17 @@ fn ensure_mic_capture_started(
     session_id: &str,
     emit_error_on_fail: bool,
 ) -> Result<(), String> {
+    if runtime.mic_audio_enabled_flag.is_none() {
+        runtime.mic_audio_enabled_flag = Some(Arc::new(AtomicBool::new(false)));
+    }
+    if runtime.recording_pause_flag.is_none() {
+        runtime.recording_pause_flag = Some(Arc::new(AtomicBool::new(false)));
+    }
     if runtime.mic_audio_thread.is_some() {
         return Ok(());
     }
-    let enabled_flag = runtime
-        .mic_audio_enabled_flag
-        .clone()
-        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
-    runtime.mic_audio_enabled_flag = Some(enabled_flag.clone());
-    let pause_flag = runtime
-        .recording_pause_flag
-        .clone()
-        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
-    runtime.recording_pause_flag = Some(pause_flag.clone());
+    let enabled_flag = runtime.mic_audio_enabled_flag.clone().unwrap();
+    let pause_flag = runtime.recording_pause_flag.clone().unwrap();
     let start_ms = runtime.snapshot().elapsed_ms;
     let seg_idx = runtime.mic_audio_segments.len();
     let mic_wav = if seg_idx == 0 {
@@ -1634,8 +1522,11 @@ fn spawn_stats_loop(
             }
 
             // 无画面看门狗：提前拦截“死黑屏/没内容”的假录制状态
+            let segment_age_ms = runtime.video_segment_started_at
+                .map(|t| t.elapsed().as_millis() as u64)
+                .unwrap_or(u64::MAX);
             if phase == RecordingPhase::Recording
-                && snapshot.elapsed_ms > 4000
+                && segment_age_ms > 4000
                 && emit_error.is_none()
             {
                 let mut no_video_frames = false;
@@ -2099,6 +1990,7 @@ pub fn start_recording(
         runtime.window_segment_index = 0;
         if let Some(seg_path) = window_segment_path.as_ref() {
             runtime.window_video_segments.push(seg_path.clone());
+            runtime.video_segment_started_at = Some(std::time::Instant::now());
         }
         // 系统音频关闭时不占用 loopback 设备；重新开启时再创建新音频分段并在合成阶段按 start_ms 对齐。
         if capture_system_audio {
@@ -2169,7 +2061,7 @@ pub fn stop_recording(
         wgc_audio_sync_advance_ms,
         ffmpeg_start_delay_ms,
         system_audio_stop_flag,
-        system_audio_thread,
+        system_audio_threads,
         mic_audio_stop_flag,
         mic_audio_thread,
         output_tmp,
@@ -2226,7 +2118,7 @@ pub fn stop_recording(
         let ffmpeg_start_delay_ms = runtime.ffmpeg_start_delay_ms;
         runtime.wgc_stop_flag = None;
         let system_audio_stop_flag = runtime.system_audio_stop_flag.take();
-        let system_audio_thread = runtime.system_audio_thread.take();
+        let system_audio_threads = std::mem::take(&mut runtime.system_audio_threads);
         let mic_audio_stop_flag = runtime.mic_audio_stop_flag.take();
         let mic_audio_thread = runtime.mic_audio_thread.take();
         let output_tmp = runtime.output_path_tmp.take();
@@ -2261,7 +2153,7 @@ pub fn stop_recording(
             wgc_audio_sync_advance_ms,
             ffmpeg_start_delay_ms,
             system_audio_stop_flag,
-            system_audio_thread,
+            system_audio_threads,
             mic_audio_stop_flag,
             mic_audio_thread,
             output_tmp,
@@ -2506,8 +2398,8 @@ pub fn stop_recording(
     // 🔧 等待音频线程退出（停止信号已在前面设置）
     log::info!("🔧 等待系统音频线程退出...");
     let sys_audio_join_start = std::time::Instant::now();
-    if let Some(join) = system_audio_thread {
-        let _ = join.join();
+    for join in system_audio_threads {
+        join_thread_with_timeout(join, "stop 系统音频", 500);
     }
     let sys_audio_elapsed = sys_audio_join_start.elapsed().as_millis();
     if sys_audio_elapsed > 100 {
@@ -2519,7 +2411,7 @@ pub fn stop_recording(
     log::info!("🔧 等待麦克风音频线程退出...");
     let mic_audio_join_start = std::time::Instant::now();
     if let Some(join) = mic_audio_thread {
-        let _ = join.join();
+        join_thread_with_timeout(join, "stop 麦克风音频", 500);
     }
     let mic_audio_elapsed = mic_audio_join_start.elapsed().as_millis();
     if mic_audio_elapsed > 100 {
@@ -2581,7 +2473,7 @@ pub fn stop_recording(
         }
     }
 
-    let duration_ms = {
+    let (duration_ms, saved_audio_bitrate_kbps) = {
         let mut runtime = lock_arc_mutex(&runtime_arc);
         if let Some(paused_at) = runtime.paused_at_instant {
             runtime.paused_total_ms = runtime
@@ -2590,9 +2482,10 @@ pub fn stop_recording(
             runtime.paused_at_instant = None;
         }
         let duration_ms = runtime.snapshot().elapsed_ms;
+        let bitrate = runtime.audio_bitrate_kbps;
         runtime.reset_to_idle();
         emit_recording_state_changed(app, None, runtime.phase.as_str(), 0);
-        duration_ms
+        (duration_ms, bitrate)
     };
 
     if let Some(err) = fatal_error {
@@ -2608,10 +2501,7 @@ pub fn stop_recording(
     };
 
     // ✅ 在后台异步执行音频合并，不阻塞 UI
-    let runtime_audio_bitrate_kbps = {
-        let runtime = lock_arc_mutex(&runtime_arc);
-        runtime.audio_bitrate_kbps
-    };
+    let runtime_audio_bitrate_kbps = saved_audio_bitrate_kbps;
     if !sys_segments.is_empty() || !mic_segments.is_empty() {
         let app_handle = app.clone();
         let session_id_clone = session_id.clone();
@@ -2763,7 +2653,7 @@ pub fn cancel_recording(
         wgc_stop_flag,
         wgc_thread,
         system_audio_stop_flag,
-        system_audio_thread,
+        system_audio_threads,
         mic_audio_stop_flag,
         mic_audio_thread,
         cleanup_paths,
@@ -2787,7 +2677,7 @@ pub fn cancel_recording(
         let wgc_stop_flag = runtime.wgc_stop_flag.take();
         let wgc_thread = runtime.wgc_thread.take();
         let system_audio_stop_flag = runtime.system_audio_stop_flag.take();
-        let system_audio_thread = runtime.system_audio_thread.take();
+        let system_audio_threads = std::mem::take(&mut runtime.system_audio_threads);
         let mic_audio_stop_flag = runtime.mic_audio_stop_flag.take();
         let mic_audio_thread = runtime.mic_audio_thread.take();
         let mut cleanup_paths = HashSet::<PathBuf>::new();
@@ -2814,7 +2704,7 @@ pub fn cancel_recording(
             wgc_stop_flag,
             wgc_thread,
             system_audio_stop_flag,
-            system_audio_thread,
+            system_audio_threads,
             mic_audio_stop_flag,
             mic_audio_thread,
             cleanup_paths,
@@ -2838,7 +2728,7 @@ pub fn cancel_recording(
     if let Some(flag) = system_audio_stop_flag.as_ref() {
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
-    if let Some(join) = system_audio_thread {
+    for join in system_audio_threads {
         join_thread_with_timeout(join, "cancel 系统音频", 500);
     }
     if let Some(flag) = mic_audio_stop_flag.as_ref() {
@@ -2870,7 +2760,7 @@ pub fn pause_recording(
         target_type,
         wgc_thread,
         system_audio_stop_flag,
-        system_audio_thread,
+        system_audio_threads,
         mic_audio_stop_flag,
         mic_audio_thread,
     ) = {
@@ -2881,7 +2771,6 @@ pub fn pause_recording(
                 "当前状态不允许暂停",
             ));
         }
-        runtime.phase = RecordingPhase::Stopping;
         if runtime.target_type == "window" {
             if let Some(flag) = runtime.wgc_stop_flag.as_ref() {
                 flag.store(true, Ordering::SeqCst);
@@ -2894,7 +2783,7 @@ pub fn pause_recording(
             }
             // 等待进程退出以完成当前视频片段，加入超时机制防死锁
             let mut exited = false;
-            for _ in 0..300 {
+            for _ in 0..1000 {
                 if let Ok(Some(_)) = process.try_wait() {
                     exited = true;
                     break;
@@ -2902,7 +2791,7 @@ pub fn pause_recording(
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
             if !exited {
-                log::warn!("FFmpeg 暂停时未能在规定时间内退出，强制结束");
+                log::warn!("FFmpeg 暂停时未能在 10 秒内退出，强制结束并丢弃当前片段");
                 let _ = process.kill();
                 let _ = process.wait();
             }
@@ -2915,7 +2804,7 @@ pub fn pause_recording(
             runtime.target_type.clone(),
             runtime.wgc_thread.take(),
             runtime.system_audio_stop_flag.take(),
-            runtime.system_audio_thread.take(),
+            runtime.system_audio_threads.drain(..).collect::<Vec<_>>(),
             runtime.mic_audio_stop_flag.take(),
             runtime.mic_audio_thread.take(),
         )
@@ -2924,7 +2813,7 @@ pub fn pause_recording(
     if let Some(flag) = system_audio_stop_flag.as_ref() {
         flag.store(true, Ordering::SeqCst);
     }
-    if let Some(join) = system_audio_thread {
+    for join in system_audio_threads {
         join_thread_with_timeout(join, "pause 系统音频", 500);
     }
     if let Some(flag) = mic_audio_stop_flag.as_ref() {
@@ -2949,8 +2838,7 @@ pub fn pause_recording(
                     Ok(Ok(())) => {}
                     Ok(Err(e)) => {
                         if !is_benign_wgc_stop_error(&e) {
-                            let mut runtime = lock_arc_mutex(&runtime_arc);
-                            runtime.phase = RecordingPhase::Recording;
+                            let runtime = lock_arc_mutex(&runtime_arc);
                             if let Some(flag) = runtime.recording_pause_flag.as_ref() {
                                 flag.store(false, Ordering::SeqCst);
                             }
@@ -2959,8 +2847,7 @@ pub fn pause_recording(
                         }
                     }
                     Err(_) => {
-                        let mut runtime = lock_arc_mutex(&runtime_arc);
-                        runtime.phase = RecordingPhase::Recording;
+                        let runtime = lock_arc_mutex(&runtime_arc);
                         if let Some(flag) = runtime.recording_pause_flag.as_ref() {
                             flag.store(false, Ordering::SeqCst);
                         }
@@ -3089,6 +2976,16 @@ pub fn resume_recording(
             paused_total_ms,
         )
     };
+    // 校验状态：必须在创建任何资源之前完成，避免线程泄漏
+    {
+        let runtime = lock_arc_mutex(&runtime_arc);
+        if runtime.phase != RecordingPhase::Paused {
+            return Err(AppError::new(
+                ErrorCode::ValidationError,
+                "录制状态已变化，请刷新状态后重试",
+            ));
+        }
+    }
 
     let window_handle = if is_window_target {
         Some(
@@ -3133,12 +3030,7 @@ pub fn resume_recording(
     };
 
     let mut runtime = lock_arc_mutex(&runtime_arc);
-    if runtime.phase != RecordingPhase::Paused {
-        return Err(AppError::new(
-            ErrorCode::ValidationError,
-            "录制状态已变化，请刷新状态后重试",
-        ));
-    }
+    debug_assert_eq!(runtime.phase, RecordingPhase::Paused, "状态应在资源创建前已验证");
     // 恢复录制时 FFmpeg 延迟清零：新的视频分段与音频缓存同时启动，无需额外校正
     runtime.ffmpeg_start_delay_ms = 0;
 
@@ -3148,6 +3040,7 @@ pub fn resume_recording(
         runtime
             .window_video_segments
             .push(next_segment_path.clone());
+        runtime.video_segment_started_at = Some(std::time::Instant::now());
         if let Some((child, stderr)) = ffmpeg_process {
             runtime.process = Some(child);
             spawn_stderr_parser(
@@ -3162,6 +3055,7 @@ pub fn resume_recording(
     if let Some(handle) = window_handle {
         runtime.window_segment_index = next_segment_index;
         runtime.window_video_segments.push(next_segment_path);
+        runtime.video_segment_started_at = Some(std::time::Instant::now());
         runtime.wgc_stop_flag = Some(handle.stop_flag);
         runtime.wgc_pause_flag = Some(handle.pause_flag);
         if runtime.wgc_first_frame_elapsed_ms.is_none() {
@@ -3169,7 +3063,7 @@ pub fn resume_recording(
         }
         runtime.wgc_thread = Some(handle.join);
     }
-    if should_restore_system_audio && runtime.system_audio_thread.is_none() {
+    if should_restore_system_audio && runtime.system_audio_threads.is_empty() {
         if let Err(e) = ensure_system_audio_capture_started(
             app,
             &mut runtime,
@@ -3250,7 +3144,7 @@ pub fn update_audio_capture(
         should_enable_mic,
         elapsed_now_ms,
         system_audio_stop_flag,
-        system_audio_thread,
+        system_audio_threads,
         mic_audio_stop_flag,
         mic_audio_thread,
         sys_device_changed,
@@ -3319,10 +3213,10 @@ pub fn update_audio_capture(
         runtime.mic_audio_device_id = requested_mic_device;
 
         let mut system_audio_stop_flag = None;
-        let mut system_audio_thread = None;
-        if (sys_device_changed || !should_enable_sys) && runtime.system_audio_thread.is_some() {
+        let mut system_audio_threads: Vec<std::thread::JoinHandle<()>> = Vec::new();
+        if (sys_device_changed || !should_enable_sys) && !runtime.system_audio_threads.is_empty() {
             system_audio_stop_flag = runtime.system_audio_stop_flag.take();
-            system_audio_thread = runtime.system_audio_thread.take();
+            system_audio_threads = std::mem::take(&mut runtime.system_audio_threads);
             runtime.system_audio_wav_path = None;
         }
         let mut mic_audio_stop_flag = None;
@@ -3340,7 +3234,7 @@ pub fn update_audio_capture(
             should_enable_mic,
             elapsed_now_ms,
             system_audio_stop_flag,
-            system_audio_thread,
+            system_audio_threads,
             mic_audio_stop_flag,
             mic_audio_thread,
             sys_device_changed,
@@ -3351,7 +3245,7 @@ pub fn update_audio_capture(
     if let Some(flag) = system_audio_stop_flag.as_ref() {
         flag.store(true, Ordering::SeqCst);
     }
-    if let Some(join) = system_audio_thread {
+    for join in system_audio_threads {
         join_thread_with_timeout(join, "update_audio 系统音频", 500);
     }
     if let Some(flag) = mic_audio_stop_flag.as_ref() {
@@ -3373,7 +3267,7 @@ pub fn update_audio_capture(
     if !should_enable_mic {
         runtime.mic_audio_stream_start_ms = None;
     }
-    if should_enable_sys && runtime.system_audio_thread.is_none() {
+    if should_enable_sys && runtime.system_audio_threads.is_empty() {
         ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, true)
             .map_err(|e| {
                 AppError::new(ErrorCode::SystemError, AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))

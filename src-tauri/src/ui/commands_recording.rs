@@ -798,7 +798,7 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
         (
             runtime_guard.mic_audio_device_id.clone(),
             sys_enabled,
-            runtime_guard.system_audio_thread.is_some(),
+            !runtime_guard.system_audio_threads.is_empty(),
         )
     };
 

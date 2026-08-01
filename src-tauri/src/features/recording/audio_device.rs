@@ -51,13 +51,15 @@ pub fn list_system_audio_sources(ffmpeg_path: &Path) -> Result<Vec<AudioInputDev
         let devices = host
             .output_devices()
             .map_err(|e| format!("枚举输出设备失败: {}", e))?;
-        for d in devices {
+        for (i, d) in devices.enumerate() {
             let desc = d
                 .description()
                 .map(|x| x.to_string())
                 .unwrap_or_else(|_| "Unknown Output".to_string());
+            // 使用描述+索引作为唯一ID，确保枚举内可区分
+            let unique_id = format!("{}_{}", desc, i);
             out.push(AudioInputDevice {
-                id: desc.clone(),
+                id: unique_id,
                 name: format!("WASAPI {}", desc),
                 is_default: default_desc.as_deref() == Some(desc.as_str()),
             });
