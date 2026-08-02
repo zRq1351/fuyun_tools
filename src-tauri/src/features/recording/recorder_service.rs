@@ -96,10 +96,22 @@ fn normalize_runtime_state(runtime: &mut crate::features::recording::state::Reco
         || runtime.mic_audio_thread.is_some();
     if runtime.process.is_none() && !wgc_running {
         if audio_running {
-            log::warn!(
-                "normalize_runtime_state: 视频已停止但音频线程仍在运行，跳过 reset_to_idle 避免泄漏"
-            );
-            return;
+            // 视频链路已结束但音频线程仍在运行（如 ffmpeg 崩溃进入 Error）：
+            // 主动停止并回收音频线程，否则会永久泄漏且下一次录制无法重新启动音频
+            if let Some(flag) = runtime.system_audio_stop_flag.take() {
+                flag.store(true, Ordering::SeqCst);
+            }
+            let sys_threads = std::mem::take(&mut runtime.system_audio_threads);
+            for join in sys_threads {
+                join_thread_with_timeout(join, "normalize 系统音频", 500);
+            }
+            if let Some(flag) = runtime.mic_audio_stop_flag.take() {
+                flag.store(true, Ordering::SeqCst);
+            }
+            if let Some(join) = runtime.mic_audio_thread.take() {
+                join_thread_with_timeout(join, "normalize 麦克风音频", 500);
+            }
+            log::warn!("normalize_runtime_state: 已停止残留音频线程");
         }
         match runtime.phase {
             RecordingPhase::Idle => {}

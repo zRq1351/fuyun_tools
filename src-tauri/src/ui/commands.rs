@@ -242,8 +242,14 @@ pub(crate) fn get_copy_paste_dedup_debug_state_value() -> serde_json::Value {
 
 pub(crate) fn bind_screenshot_window_lifecycle(window: &tauri::WebviewWindow, app: &AppHandle) {
     bind_overlay_window_events(window, app.clone(), "screenshot");
+    let app_for_window = app.clone();
     window.on_window_event(move |event| match event {
-        tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+        tauri::WindowEvent::CloseRequested { .. } => {
+            features::screenshot::capture::set_screenshot_in_progress(false);
+            // 截图/区域选择窗口被非正常关闭（如 Alt+F4）时，通知录制工具栏复位隐藏状态
+            let _ = app_for_window.emit("screenshot-reset", ());
+        }
+        tauri::WindowEvent::Destroyed => {
             features::screenshot::capture::set_screenshot_in_progress(false);
         }
         _ => {}

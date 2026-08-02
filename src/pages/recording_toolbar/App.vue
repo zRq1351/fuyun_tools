@@ -375,6 +375,7 @@ let unlistenAudioMerging = null;  // ✅ 新增：监听音频合并事件
 let unlistenMicToggled = null;  // ✅ 新增：监听麦克风切换事件
 let unlistenMicKeyPressed = null;  // ✅ 新增：监听麦克风按键按下事件
 let unlistenMicKeyReleased = null;  // ✅ 新增：监听麦克风按键释放事件
+let unlistenVisibility = null;
 let keepSettingsOpenUntilTs = 0;
 let autoCollapseAfterStartPending = false;
 let lastElapsedUiSyncAt = 0;
@@ -867,6 +868,15 @@ const onSystemAudioDeviceChange = async (deviceId) => {
       } catch (e) {
         captureSystemAudio.value = prevCapture;
         systemOutputId.value = prevId;
+        // 切换失败可能已停止旧采集线程，尝试恢复原设备，避免后端静默停音
+        try {
+          await RecordingService.updateAudioCapture({
+            captureSystemAudio: prevCapture,
+            systemAudioDeviceId: prevId || "",
+          });
+        } catch (restoreErr) {
+          console.error("恢复系统音频采集失败:", restoreErr);
+        }
         showBackendErrorInSettings(String(e));
         return;
       }
@@ -917,6 +927,15 @@ const onMicrophoneDeviceChange = async (deviceId) => {
       } catch (e) {
         captureMicrophone.value = prevCapture;
         microphoneDeviceId.value = prevId;
+        // 切换失败可能已停止旧采集线程，尝试恢复原设备，避免后端静默停音
+        try {
+          await RecordingService.updateAudioCapture({
+            captureMicrophone: prevCapture,
+            microphoneDeviceId: prevId || "",
+          });
+        } catch (restoreErr) {
+          console.error("恢复麦克风采集失败:", restoreErr);
+        }
         showBackendErrorInSettings(String(e));
         return;
       }
@@ -1099,7 +1118,13 @@ onMounted(async () => {
         autoCollapseAfterStartPending = false;
       }
     }),
-    listen("recording-finished", async () => {
+    listen("recording-finished", async (event) => {
+      const payload = event.payload || {};
+      const finishedSessionId = payload.sessionId ? String(payload.sessionId) : null;
+      // 忽略旧会话的完成事件：停止后立即开始新录制时，后台合并完成事件不应冲掉新会话 UI
+      if (finishedSessionId && state.sessionId && finishedSessionId !== state.sessionId) {
+        return;
+      }
       state.state = "idle";
       state.sessionId = null;
 
@@ -1205,6 +1230,20 @@ onMounted(async () => {
     }),
   ]);
 
+  // 倒计时期间窗口被隐藏（快捷键/关闭按钮）时取消开始，避免录制在无 UI 状态下进行
+  getCurrentWindow()
+      .onVisibilityChanged(({ visible }) => {
+        if (!visible && countdownActive.value) {
+          countdownCancelled = true;
+        }
+      })
+      .then((fn) => {
+        unlistenVisibility = fn;
+      })
+      .catch((err) => {
+        console.error("注册窗口可见性监听失败:", err);
+      });
+
   const [stateChangedResult, recordingFinishedResult, recordingErrorResult, forceCompactResult, recordingRegionSelectedResult, screenshotResetResult, audioMergingResult, micToggledResult, micKeyPressedResult, micKeyReleasedResult] = listenerResults;
 
   if (stateChangedResult.status === "fulfilled") unlistenStateChanged = stateChangedResult.value;
@@ -1303,6 +1342,7 @@ onBeforeUnmount(() => {
   if (unlistenMicToggled) unlistenMicToggled();
   if (unlistenMicKeyPressed) unlistenMicKeyPressed();
   if (unlistenMicKeyReleased) unlistenMicKeyReleased();
+  if (unlistenVisibility) unlistenVisibility();
 });
 </script>
 

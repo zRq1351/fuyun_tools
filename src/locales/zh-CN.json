@@ -212,7 +212,8 @@
       "confirmDownload": "确认下载",
       "cancelEnableRecording": "已取消启用录屏",
       "downloadingFfmpeg": "正在下载 ffmpeg... {percent}%",
-      "ffmpegDownloaded": "ffmpeg 下载完成，已启用录屏"
+      "ffmpegDownloaded": "ffmpeg 下载完成，已启用录屏",
+      "confirmDisableWhileRecording": "当前正在录制，禁用录屏功能将取消本次录制并删除已录文件。确定继续吗？"
     },
     "selection": {
       "title": "划词能力",

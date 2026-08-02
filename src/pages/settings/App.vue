@@ -714,6 +714,39 @@ const persistSettings = async (
     }
 
 
+    if (changedFields.recordingEnabled === false) {
+      // 禁用录屏会由后端取消并删除当前录制，若正在录制需先确认
+      let recordingActive = false
+      try {
+        const rs = await RecordingService.getState()
+        recordingActive = rs && (rs.state === 'recording' || rs.state === 'paused' || rs.state === 'starting')
+      } catch (_e) {
+      }
+      if (recordingActive) {
+        suppressNextAutoSave.value = true
+        try {
+          await ElMessageBox.confirm(
+              t('settings.recording.confirmDisableWhileRecording'),
+              t('settings.recording.disabledHint'),
+              {
+                confirmButtonText: t('common.confirm'),
+                cancelButtonText: t('common.cancel'),
+                type: 'warning',
+                closeOnClickModal: false,
+                closeOnPressEscape: true
+              }
+          )
+        } catch {
+          // 取消禁用：还原开关状态，不保存本次变更
+          form.recordingEnabled = true
+          snapshot.recordingEnabled = true
+          delete changedFields.recordingEnabled
+          autoSaveState.value = 'idle'
+          return
+        }
+      }
+    }
+
     await AISettingsService.saveSettings(changedFields)
 
 
