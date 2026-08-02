@@ -44,6 +44,7 @@ impl ClipboardPoller {
         }
 
         let running = self.running;
+        let stop_tx_slot = self.stop_tx;
 
         thread::spawn(move || {
             let wake_rx = subscribe_clipboard_wake_events();
@@ -75,7 +76,7 @@ impl ClipboardPoller {
                 }
 
                 if !on_poll() {
-                    missed_event = false;
+                    // 保留 missed_event：跳过窗口期内到达的真实事件不应被丢弃
                     continue;
                 }
 
@@ -87,7 +88,15 @@ impl ClipboardPoller {
                 }
             }
 
-            running.store(false, Ordering::SeqCst);
+            // 仅当没有新线程接管时清空 running，避免 stop→start 竞态下误清新线程的标志
+            let no_new_thread = stop_tx_slot
+                .get_or_init(|| std::sync::Mutex::new(None))
+                .lock()
+                .map(|g| g.is_none())
+                .unwrap_or(true);
+            if no_new_thread {
+                running.store(false, Ordering::SeqCst);
+            }
         });
     }
 

@@ -655,7 +655,7 @@ const ensureKeyboardSelectionVisible = async () => {
   const selected = selectedItemId.value
   if (!selected) return
   const element = document.getElementById(`clipboard-item-${selected}`)
-  const container = clipboardListRef.value?.getScrollEl() || document.getElementById(`clipboard-item-${selected}`)?.closest('.content')
+  const container = clipboardListRef.value?.contentRef || document.getElementById(`clipboard-item-${selected}`)?.closest('.content')
   if (!element || !container) return
   const EDGE_PADDING = 8
   const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth)
@@ -664,7 +664,7 @@ const ensureKeyboardSelectionVisible = async () => {
 }
 
 const getContentContainer = () => {
-  return clipboardListRef.value?.getScrollEl() || null
+  return clipboardListRef.value?.contentRef || null
 }
 
 const tryLoadMoreByScroll = async () => {

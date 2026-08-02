@@ -49,7 +49,7 @@
         :open-fullscreen="openFullscreen"
         :promote-item="promoteImageItem"
         :select-by-index="selectByIndex"
-        :selected-index="selectedIndex"
+        :selected-index="selectedDisplayIndex"
         :show-context-menu="showContextMenu"
         :visible-history="filteredHistory"
         :total-count="totalCount"
@@ -195,7 +195,7 @@ const isPrefetchingPage = ref(false)
 let prefetchRequestSeq = 0
 let prefetchPromise = null
 
-const IMAGE_ITEM_UNIT = 270 // 与 ImageClipboardList 的 SCROLL_ITEM_SIZE 保持一致
+const IMAGE_ITEM_UNIT = 76 // 与 ImageClipboardList 的 CARD_STEP 保持一致
 const IMAGE_PREVIEW_CACHE_MARGIN = 24
 const IMAGE_PREVIEW_CACHE_MAX_ITEMS = 300
 const ASYNC_PREVIEW_CACHE_MAX_ITEMS = 180
@@ -629,6 +629,12 @@ const filteredHistoryState = computed(() => {
 })
 
 const filteredHistory = computed(() => filteredHistoryState.value.entries)
+
+// 列表组件用显示位判断选中：过滤后需把历史下标换算为过滤列表中的位置
+const selectedDisplayIndex = computed(() => {
+  const idx = filteredHistory.value.findIndex((e) => e.index === selectedIndex.value)
+  return idx < 0 ? -1 : idx
+})
 
 const previewCacheKeepIds = computed(() => {
   if (filteredHistoryState.value.total === 0) return []
