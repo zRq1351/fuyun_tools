@@ -1,6 +1,6 @@
 {
   "productName": "fuyun_tools",
-  "version": "0.8.3",
+  "version": "0.8.31",
   "identifier": "com.fuyun.tools",
   "build": {
     "beforeDevCommand": "npm run dev",
