@@ -297,6 +297,34 @@ pub(crate) fn register_recording_shortcut(
     Ok(())
 }
 
+/// 注册麦克风切换快捷键（按住开启，松开关闭）
+/// 供运行时启用/禁用录屏时与录屏快捷键一同注册/注销
+pub(crate) fn register_mic_toggle_shortcut(
+    app: &AppHandle,
+    _state: Arc<Mutex<SharedAppState>>,
+    hot_key: &str,
+) -> Result<(), String> {
+    let app_clone = app.clone();
+    app.global_shortcut()
+        .on_shortcut(hot_key, move |_app, _shortcut, event| {
+            let app_handle_inner = app_clone.clone();
+            match event.state {
+                ShortcutState::Pressed => {
+                    tauri::async_runtime::spawn(async move {
+                        toggle_microphone_from_shortcut(app_handle_inner, true).await;
+                    });
+                }
+                ShortcutState::Released => {
+                    tauri::async_runtime::spawn(async move {
+                        toggle_microphone_from_shortcut(app_handle_inner, false).await;
+                    });
+                }
+            }
+        })
+        .map_err(|e| frontend_error_kind_params(AppErrorKind::ClipboardHotkeyRegisterFailed, serde_json::json!({"key": hot_key}), e.to_string()))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn show_selection_toolbar_with_text(
     app: AppHandle,
@@ -1377,15 +1405,43 @@ pub async fn save_app_settings(
                     settings.recording_hot_key.as_str(),
                 )?;
             }
-        } else if let Err(e) = app
-            .global_shortcut()
-            .unregister(settings.recording_hot_key.as_str())
-        {
-            log::warn!(
-                "注销录屏快捷键 '{}' 失败: {}",
-                settings.recording_hot_key,
-                e
-            );
+            // 麦克风切换快捷键同样需要随启用即时注册（否则重启前不生效）
+            if !app
+                .global_shortcut()
+                .is_registered(settings.recording_mic_toggle_hot_key.as_str())
+            {
+                register_mic_toggle_shortcut(
+                    &app,
+                    state.inner().clone(),
+                    settings.recording_mic_toggle_hot_key.as_str(),
+                )?;
+            }
+        } else {
+            if let Err(e) = app
+                .global_shortcut()
+                .unregister(settings.recording_hot_key.as_str())
+            {
+                log::warn!(
+                    "注销录屏快捷键 '{}' 失败: {}",
+                    settings.recording_hot_key,
+                    e
+                );
+            }
+            if app
+                .global_shortcut()
+                .is_registered(settings.recording_mic_toggle_hot_key.as_str())
+            {
+                if let Err(e) = app
+                    .global_shortcut()
+                    .unregister(settings.recording_mic_toggle_hot_key.as_str())
+                {
+                    log::warn!(
+                        "注销麦克风切换快捷键 '{}' 失败: {}",
+                        settings.recording_mic_toggle_hot_key,
+                        e
+                    );
+                }
+            }
         }
     }
 

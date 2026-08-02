@@ -1080,7 +1080,7 @@ onMounted(async () => {
       const stateChanged = nextState !== state.state;
       state.state = nextState;
       state.sessionId = nextState === "idle" ? null : (payload.sessionId ?? state.sessionId);
-      const nextElapsedMs = Number(payload.elapsedMs || state.elapsedMs || 0);
+      const nextElapsedMs = Number(payload.elapsedMs ?? state.elapsedMs ?? 0);
       const now = Date.now();
       if (stateChanged || now - lastElapsedUiSyncAt >= 1000) {
         state.elapsedMs = nextElapsedMs;

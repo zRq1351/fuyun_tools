@@ -2384,6 +2384,12 @@ pub fn stop_recording(
             {
                 fatal_error = Some(e);
             }
+        } else if fatal_error.is_none() && window_video_segments.is_empty() {
+            // 立即开始并停止的极短录制没有任何视频分段，给出明确错误而非 rename 失败
+            fatal_error = Some(AppError::new(
+                ErrorCode::ValidationError,
+                "录制时间过短，未生成视频文件",
+            ));
         }
 
         // 🔧 非窗口录制（gdigrab）时，裁剪视频开头的灰色帧
@@ -2900,6 +2906,16 @@ pub fn pause_recording(
 
     let elapsed_ms = {
         let mut runtime = lock_arc_mutex(&runtime_arc);
+        if runtime.phase != RecordingPhase::Recording {
+            // 等待线程退出期间 stop/cancel 已插入并完成，放弃置为 Paused，避免状态复活
+            if let Some(flag) = runtime.recording_pause_flag.as_ref() {
+                flag.store(false, Ordering::SeqCst);
+            }
+            return Err(AppError::new(
+                ErrorCode::ValidationError,
+                "录制状态已变化，无法暂停",
+            ));
+        }
         runtime.wgc_stop_flag = None;
         runtime.wgc_pause_flag = None;
         runtime.system_audio_wav_path = None;
@@ -3061,7 +3077,24 @@ pub fn resume_recording(
     };
 
     let mut runtime = lock_arc_mutex(&runtime_arc);
-    debug_assert_eq!(runtime.phase, RecordingPhase::Paused, "状态应在资源创建前已验证");
+    if runtime.phase != RecordingPhase::Paused {
+        // 资源创建期间状态已变化（stop/cancel 已插入并完成）：回滚已创建的资源，避免孤儿进程/线程
+        if let Some((mut child, _stderr)) = ffmpeg_process {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        if let Some(handle) = window_handle {
+            handle
+                .stop_flag
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            join_thread_with_timeout(handle.join, "resume 回滚 WGC", 500);
+        }
+        let _ = fs::remove_file(&next_segment_path);
+        return Err(AppError::new(
+            ErrorCode::ValidationError,
+            "录制状态已变化，请刷新状态后重试",
+        ));
+    }
     // 阶段验证通过后，正式写入暂停累计时长（避免竞态导致时间膨胀）
     runtime.paused_total_ms = pending_paused_total_ms;
     // 恢复录制时 FFmpeg 延迟清零：新的视频分段与音频缓存同时启动，无需额外校正
@@ -3261,6 +3294,13 @@ pub fn update_audio_capture(
         join_thread_with_timeout(join, "update_audio 麦克风音频", 500);
     }
     let mut runtime = lock_arc_mutex(&runtime_arc);
+    if runtime.phase != RecordingPhase::Recording && runtime.phase != RecordingPhase::Paused {
+        // 等待旧音频线程退出期间 stop/cancel 已插入并完成，不再重启采集线程
+        return Err(AppError::new(
+            ErrorCode::ValidationError,
+            "录制状态已变化，音频配置未应用",
+        ));
+    }
     if sys_device_changed {
         runtime.system_audio_stream_start_ms = Some(elapsed_now_ms);
     }
