@@ -162,6 +162,16 @@ fn finalize_auto_stop_recording(
         }
         Err(stop_err) => {
             let stop_msg = stop_err.to_string();
+            // 录制已被其他路径收尾（手动停止/另一路自动停止）：此时无残留可清理，不打扰用户
+            let already_finalizing = {
+                let state_guard = lock_arc_mutex(&state_arc);
+                let rt = lock_arc_mutex(&state_guard.recording_runtime);
+                matches!(rt.phase, RecordingPhase::Idle | RecordingPhase::Stopping)
+            };
+            if already_finalizing {
+                log::warn!("自动停止收尾时录制已被其他流程处理，跳过兜底清理: {}", stop_msg);
+                return;
+            }
             match cancel_recording(app, state_arc, request) {
                 Ok(()) => {
                     log::warn!(
@@ -725,10 +735,48 @@ fn merge_system_audio_into_video(
         }
         return Ok(());
     }
-    // 🔧 两步合并：先纯音频合并（快速），再流复制合并视频（快速）
-    // 替代原先的 filter_complex 全路径（视频参与滤镜 → 重编码 → 慢）
+    // 🔧 双音源（sys+mic）：分别对齐合并后 amix 混音，再单次写入视频
+    // 两步法对双音源不适用：第二次 merge_audio_fast 的 -map 会替换第一次写入的音频轨，导致系统音频丢失
     let output_dir = video_path.parent()
         .ok_or_else(|| AppError::new(ErrorCode::SystemError, "无法获取输出目录"))?;
+    if has_system && has_mic {
+        log::info!(
+            "🔧 双音源合并: sys={} 段, mic={} 段, 先分别对齐再 amix 混音",
+            valid_system.len(),
+            valid_mic.len()
+        );
+        let sys_aligned = output_dir.join("sys_aligned.tmp.aac");
+        let mic_aligned = output_dir.join("mic_aligned.tmp.aac");
+        let mixed = output_dir.join("mixed.tmp.aac");
+        if let Err(e) =
+            merge_audio_segments_only(ffmpeg_path, &valid_system, &sys_aligned, audio_bitrate_kbps)
+        {
+            let _ = fs::remove_file(&sys_aligned);
+            let _ = fs::remove_file(&mic_aligned);
+            return Err(
+                AppError::new(ErrorCode::SystemError, "系统音频预合并失败").with_details(e)
+            );
+        }
+        if let Err(e) =
+            merge_audio_segments_only(ffmpeg_path, &valid_mic, &mic_aligned, audio_bitrate_kbps)
+        {
+            let _ = fs::remove_file(&sys_aligned);
+            let _ = fs::remove_file(&mic_aligned);
+            return Err(
+                AppError::new(ErrorCode::SystemError, "麦克风音频预合并失败").with_details(e)
+            );
+        }
+        let mix_result =
+            mix_audio_files(ffmpeg_path, &sys_aligned, &mic_aligned, &mixed, audio_bitrate_kbps);
+        let _ = fs::remove_file(&sys_aligned);
+        let _ = fs::remove_file(&mic_aligned);
+        mix_result?;
+        let result = merge_audio_fast(ffmpeg_path, video_path, &mixed, false, audio_bitrate_kbps);
+        let _ = fs::remove_file(&mixed);
+        return result;
+    }
+    // 🔧 两步合并：先纯音频合并（快速），再流复制合并视频（快速）
+    // 替代原先的 filter_complex 全路径（视频参与滤镜 → 重编码 → 慢）
 
     let sys_aligned = output_dir.join("sys_aligned.tmp.aac");
     if has_system {
@@ -978,6 +1026,47 @@ fn merge_audio_fast(
     let warn_threshold = if is_aac { 2000 } else { 5000 };
     if elapsed_ms > warn_threshold {
         log::warn!("⚠️ 快速路径耗时较长({}ms)，考虑优化方案", elapsed_ms);
+    }
+    Ok(())
+}
+
+// 🔧 将两个已对齐的音频文件混音为单轨 AAC（统一重采样到 48kHz 以满足 amix 输入一致性）
+fn mix_audio_files(
+    ffmpeg_path: &std::path::Path,
+    audio_a: &PathBuf,
+    audio_b: &PathBuf,
+    output_path: &PathBuf,
+    audio_bitrate_kbps: u32,
+) -> Result<(), AppError> {
+    let mut cmd = Command::new(ffmpeg_path);
+    suppress_console_window(&mut cmd);
+    cmd.arg("-hide_banner").arg("-loglevel").arg("warning").arg("-y")
+        .arg("-i").arg(audio_a)
+        .arg("-i").arg(audio_b)
+        .arg("-filter_complex")
+        .arg("[0:a]aresample=48000,aformat=channel_layouts=stereo[a0];[1:a]aresample=48000,aformat=channel_layouts=stereo[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0[aout]")
+        .arg("-map").arg("[aout]")
+        .arg("-c:a").arg("aac")
+        .arg("-b:a").arg(format!("{}k", audio_bitrate_kbps.max(32)))
+        .arg(output_path);
+
+    let output = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| {
+            AppError::new(ErrorCode::SystemError, "启动音频混音失败").with_details(e.to_string())
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let _ = fs::remove_file(output_path);
+        let details = if stderr.is_empty() {
+            format!("ffmpeg exit status: {}", output.status)
+        } else {
+            stderr
+        };
+        return Err(AppError::new(ErrorCode::SystemError, "音频混音失败").with_details(details));
     }
     Ok(())
 }
@@ -1249,7 +1338,6 @@ fn ensure_mic_capture_started(
     }
     let enabled_flag = runtime.mic_audio_enabled_flag.clone().unwrap();
     let pause_flag = runtime.recording_pause_flag.clone().unwrap();
-    let start_ms = runtime.snapshot().elapsed_ms;
     let seg_idx = runtime.mic_audio_segments.len();
     let mic_wav = if seg_idx == 0 {
         output_dir.join(format!("{}.mic.wav", session_id))
@@ -1281,11 +1369,13 @@ fn ensure_mic_capture_started(
             runtime.mic_audio_wav_path = Some(mic_wav);
             runtime.mic_audio_stop_flag = Some(handle.stop_flag.clone());
             runtime.mic_audio_thread = handle.joins.into_iter().next();
-            runtime.mic_audio_stream_start_ms = Some(start_ms);
+            // 与系统音频路径一致：设备初始化完成后重读 start_ms，避免麦克风相对系统音频提前
+            let actual_start_ms = runtime.snapshot().elapsed_ms;
+            runtime.mic_audio_stream_start_ms = Some(actual_start_ms);
             if let Some(path) = runtime.mic_audio_wav_path.clone() {
                 runtime
                     .mic_audio_segments
-                    .push(crate::features::recording::state::AudioSegment { path, start_ms, trim_start_ms: 0 });
+                    .push(crate::features::recording::state::AudioSegment { path, start_ms: actual_start_ms, trim_start_ms: 0 });
             } else {
                 return Err(AppErrorKind::InternalError.to_frontend_json());
             }
@@ -1582,6 +1672,15 @@ fn spawn_stats_loop(
         };
         if let Some((code, message, sid)) = emit_error {
             emit_recording_error(&app, sid.as_deref(), code, message.as_str());
+            // 进程异常退出进入 Error 态时补发状态事件，否则前端停留在"录制中"无法恢复
+            if phase == RecordingPhase::Error {
+                emit_recording_state_changed(
+                    &app,
+                    sid.as_deref(),
+                    RecordingPhase::Error.as_str(),
+                    elapsed_ms,
+                );
+            }
         }
         if let Some(session_id) = auto_stop_session_id.clone() {
             let app_clone = app.clone();
@@ -3124,9 +3223,8 @@ pub fn resume_recording(
         runtime.video_segment_started_at = Some(std::time::Instant::now());
         runtime.wgc_stop_flag = Some(handle.stop_flag);
         runtime.wgc_pause_flag = Some(handle.pause_flag);
-        if runtime.wgc_first_frame_elapsed_ms.is_none() {
-            runtime.wgc_first_frame_elapsed_ms = Some(handle.first_frame_elapsed_ms.clone());
-        }
+        // 恢复录制时替换首帧计数：旧计数属于已停止的上一分段，保留会导致看门狗无法检测新分段无画面
+        runtime.wgc_first_frame_elapsed_ms = Some(handle.first_frame_elapsed_ms.clone());
         runtime.wgc_thread = Some(handle.join);
     }
     if should_restore_system_audio && runtime.system_audio_threads.is_empty() {

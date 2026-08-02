@@ -46,6 +46,27 @@ impl Drop for ChildGuard {
     }
 }
 
+/// 按设备 ID 选择设备。ID 格式为 "{描述}_{枚举索引}"（audio_device.rs 生成），
+/// 同时兼容纯描述形式的旧 ID。匹配失败返回 None，由调用方回退默认设备。
+fn pick_device_by_key(
+    devices: impl IntoIterator<Item = cpal::Device>,
+    key: &str,
+) -> Option<cpal::Device> {
+    let mut exact: Option<cpal::Device> = None;
+    for (i, d) in devices.into_iter().enumerate() {
+        if let Ok(desc) = d.description() {
+            let desc = desc.to_string();
+            if format!("{}_{}", desc, i) == key {
+                return Some(d);
+            }
+            if desc == key && exact.is_none() {
+                exact = Some(d);
+            }
+        }
+    }
+    exact
+}
+
 #[derive(Debug, Clone)]
 pub struct AudioProcessInfo {
     pub pid: u32,
@@ -547,26 +568,15 @@ pub fn start_system_loopback_wav_with_device(
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
-            let device = if let Some(key) = thread_device_key.as_ref() {
-                if let Ok(devs) = host.output_devices() {
-                    let mut picked = None;
-                    for d in devs {
-                        if let Ok(desc) = d.description() {
-                            if desc.to_string() == *key {
-                                picked = Some(d);
-                                break;
-                            }
-                        }
-                    }
-                    picked
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-            .or_else(|| host.default_output_device())
-            .ok_or_else(|| "未找到输出设备".to_string())?;
+            let device = thread_device_key
+                .as_ref()
+                .and_then(|key| {
+                    host.output_devices()
+                        .ok()
+                        .and_then(|devs| pick_device_by_key(devs, key))
+                })
+                .or_else(|| host.default_output_device())
+                .ok_or_else(|| "未找到输出设备".to_string())?;
 
             let mut sample_format = CpalSampleFormat::F32;
             let mut config: StreamConfig = StreamConfig {
@@ -744,26 +754,15 @@ pub fn start_microphone_wav_with_device(
         let run = || -> Result<(), String> {
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
-            let device = if let Some(key) = thread_device_key.as_ref() {
-                if let Ok(devs) = host.input_devices() {
-                    let mut picked = None;
-                    for d in devs {
-                        if let Ok(desc) = d.description() {
-                            if desc.to_string() == *key {
-                                picked = Some(d);
-                                break;
-                            }
-                        }
-                    }
-                    picked
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-            .or_else(|| host.default_input_device())
-            .ok_or_else(|| "未找到输入设备".to_string())?;
+            let device = thread_device_key
+                .as_ref()
+                .and_then(|key| {
+                    host.input_devices()
+                        .ok()
+                        .and_then(|devs| pick_device_by_key(devs, key))
+                })
+                .or_else(|| host.default_input_device())
+                .ok_or_else(|| "未找到输入设备".to_string())?;
 
             let mut sample_format = CpalSampleFormat::F32;
             let mut config: StreamConfig = StreamConfig {
@@ -1008,26 +1007,15 @@ pub fn start_system_loopback_aac_with_device(
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
-            let device = if let Some(key) = thread_device_key.as_ref() {
-                if let Ok(devs) = host.output_devices() {
-                    let mut picked = None;
-                    for d in devs {
-                        if let Ok(desc) = d.description() {
-                            if desc.to_string() == *key {
-                                picked = Some(d);
-                                break;
-                            }
-                        }
-                    }
-                    picked
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-            .or_else(|| host.default_output_device())
-            .ok_or_else(|| "未找到输出设备".to_string())?;
+            let device = thread_device_key
+                .as_ref()
+                .and_then(|key| {
+                    host.output_devices()
+                        .ok()
+                        .and_then(|devs| pick_device_by_key(devs, key))
+                })
+                .or_else(|| host.default_output_device())
+                .ok_or_else(|| "未找到输出设备".to_string())?;
 
             let config: StreamConfig = StreamConfig {
                 channels: 2,
