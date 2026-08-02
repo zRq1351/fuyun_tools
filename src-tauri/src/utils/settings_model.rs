@@ -753,18 +753,11 @@ impl AppSettingsData {
             log::info!("迁移至版本 2: 确保基础配置完整性");
             self.ensure_basic_config_integrity();
         }
-        if old_version < MigrationVersion::new(0, 3, 0)
-            && new_version >= MigrationVersion::new(0, 3, 0)
-        {
-            log::info!("迁移至版本 3: 初始化AI提供商配置");
-            self.initialize_ai_provider_configs_if_needed();
-        }
     }
 
     fn perform_generic_migration(&mut self) {
         log::info!("执行通用配置迁移");
         self.ensure_basic_config_integrity();
-        self.initialize_ai_provider_configs_if_needed();
     }
 
     fn ensure_basic_config_integrity(&mut self) {
@@ -868,61 +861,7 @@ impl AppSettingsData {
             self.image_disk_limit_mb
         );
     }
-
-    fn initialize_ai_provider_configs_if_needed(&mut self) {
-        if self.provider_configs.is_empty() {
-            initialize_builtin_providers(self);
-            log::info!("初始化内置AI提供商配置");
-        }
-        if !self.provider_configs.contains_key(&self.ai_provider) {
-            let (default_url, default_model) = self.get_provider_default_config(&self.ai_provider);
-            let config = ProviderConfig {
-                api_url: default_url,
-                model_name: default_model,
-            };
-            self.provider_configs
-                .insert(self.ai_provider.clone(), config);
-            log::info!("为提供商 {} 创建默认配置", self.ai_provider);
-        }
-    }
-
-    fn get_provider_default_config(&self, provider_name: &str) -> (String, String) {
-        match provider_name {
-            "deepseek" => (
-                "https://api.deepseek.com".to_string(),
-                "deepseek-v4-flash".to_string(),
-            ),
-            "qwen" => (
-                "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
-                "qwen-plus".to_string(),
-            ),
-            "xiaomimimo" => (
-                "https://api.xiaomimimo.com/v1".to_string(),
-                "mimo-v2-flash".to_string(),
-            ),
-            _ => (String::new(), String::new()),
-        }
-    }
-}
-
-pub fn initialize_builtin_providers(settings: &mut AppSettingsData) {
-    use crate::core::config::{AIProvider, ProviderConfig};
-    let builtin_providers = [
-        AIProvider::DeepSeek,
-        AIProvider::Qwen,
-        AIProvider::XiaoMiMimo,
-    ];
-    for provider in builtin_providers {
-        let provider_key = provider.to_string();
-        let (default_url, default_model) = provider.get_default_config();
-        let config = ProviderConfig {
-            api_url: default_url,
-            model_name: default_model,
-        };
-        settings.provider_configs.insert(provider_key, config);
-    }
-    log::info!("已初始化内置AI提供商配置");
-}
+} // impl AppSettingsData
 
 #[cfg(windows)]
 pub fn write_windows_credential(target: &str, value: &str) -> Result<(), String> {

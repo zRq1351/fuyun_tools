@@ -6,7 +6,7 @@
 
 **One Shortcut Away from Everything**
 
-![Version](https://img.shields.io/badge/version-0.8.22-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.8.23-blue?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows_10/11-0078D6?style=flat-square&logo=windows)
 ![License](https://img.shields.io/badge/license-GPL--2.0-green?style=flat-square)
 ![Rust](https://img.shields.io/badge/Tauri-2.x-FFC131?style=flat-square&logo=tauri)
@@ -50,7 +50,8 @@ screenshot OCR, screen recording, app launching, and document management into a 
 
 **Step 1: Configure AI**
 
-Go to Settings → AI Settings, choose a provider (DeepSeek / Qwen / Xiaomi Mimo / custom OpenAI-compatible), enter the
+Go to Settings → AI Settings, add a custom OpenAI-compatible provider (supports DeepSeek / Qwen / Xiaomi Mimo etc.),
+enter the
 API URL, model name, and key, then click "Test Connection".
 
 **Step 2: Try AI Selection**
@@ -120,7 +121,7 @@ triggers.
 
 ### AI Providers
 
-- **Built-in**: DeepSeek · Qwen (Tongyi) · Xiaomi Mimo
+- **Custom**: Add any OpenAI-compatible endpoint (DeepSeek / Qwen / Xiaomi Mimo etc.)
 - **Extensible**: Any OpenAI-compatible endpoint
 - **Secure**: API key stored in Windows Credential Manager, never in plaintext
 - **Streaming**: SSE real-time delivery, Markdown rendering
@@ -250,9 +251,9 @@ triggers.
 
 <div align="center">
 
-| 🖥️ System Tray  | 🚀 Auto-start | ⌨️ Global Shortcuts |      🎨 Themes      |   🌐 i18n    |  🔄 Auto-update  |
-|:----------------:|:-------------:|:-------------------:|:-------------------:|:------------:|:----------------:|
-| Right-click menu |   Optional    |  All customizable   | Light/Dark/Eye-care | zh-CN / EN   | Built-in checker |
+|  🖥️ System Tray  | 🚀 Auto-start | ⌨️ Global Shortcuts |      🎨 Themes      |  🌐 i18n   |            🔄 Auto-update             |
+|:----------------:|:-------------:|:------------------:|:-------------------:|:----------:|:-------------------------------------:|
+| Right-click menu |   Optional    |  All customizable  | Light/Dark/Eye-care | zh-CN / EN | Silent check on startup + badge alert |
 
 </div>
 
@@ -277,18 +278,18 @@ Right-click the system tray icon:
 
 The settings window has 10 tabs in the left sidebar, with auto-save on the right (450ms debounce):
 
-| Tab              | Configuration                                       |
-|------------------|-----------------------------------------------------|
-| Clipboard        | Shortcuts, item limit, capacity protection strategy |
-| Screenshot       | Screenshot hotkey, OCR engine selection             |
-| Recording        | Recording hotkey, audio devices, FFmpeg management  |
-| Selection        | Trigger method, custom prompts, search engine       |
-| Launcher         | Launcher hotkey, view mode                          |
-| Doc Manager      | Document manager hotkey, feature toggle, desktop widget toggle |
-| AI Settings      | AI provider, API key, model, connection test        |
-| Backup & Restore | Manual backup, auto-backup schedule, restore        |
-| Diagnostics      | System health checks, one-click repair              |
-| About            | Version info, update check, project links           |
+| Tab              | Configuration                                                        |
+|------------------|----------------------------------------------------------------------|
+| Clipboard        | Shortcuts, item limit, capacity protection strategy                  |
+| Screenshot       | Screenshot hotkey, OCR engine selection                              |
+| Recording        | Recording hotkey, audio devices, FFmpeg management                   |
+| Selection        | Trigger method, custom prompts, search engine                        |
+| Launcher         | Launcher hotkey, view mode                                           |
+| Doc Manager      | Document manager hotkey, feature toggle, desktop widget toggle       |
+| AI Settings      | AI provider, API key, model, connection test                         |
+| Backup & Restore | Manual backup, auto-backup schedule, restore                         |
+| Diagnostics      | System health checks, one-click repair                               |
+| About            | Version info, update check, auto startup notification, project links |
 
 ---
 
@@ -360,7 +361,7 @@ ported to other platforms.
 <details>
 <summary><b>How do I delete a custom AI provider?</b></summary>
 
-Click the `✕` next to the custom provider in the dropdown. Built-in providers cannot be deleted.
+Click the `✕` next to the provider in the dropdown.
 
 </details>
 

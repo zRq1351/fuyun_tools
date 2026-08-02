@@ -1,5 +1,5 @@
 use crate::core::error_codes::AppErrorKind;
-use crate::utils::settings_model::{initialize_builtin_providers, AppSettingsData};
+use crate::utils::settings_model::AppSettingsData;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -111,8 +111,7 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
     let settings_path = get_settings_file_path();
     if !settings_path.exists() {
         log::info!("首次运行，创建默认设置文件");
-        let mut default_settings = AppSettingsData::default();
-        initialize_builtin_providers(&mut default_settings);
+        let default_settings = AppSettingsData::default();
         let json = serde_json::to_string_pretty(&default_settings)
             .map_err(|e| AppErrorKind::JsonError.to_frontend_json_with_details(format!("{}", e)))?;
         atomic_write_with_backup(&settings_path, json.as_bytes())?;

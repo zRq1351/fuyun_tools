@@ -4,7 +4,7 @@ pub use crate::utils::database::{
 };
 pub use crate::utils::settings_model::{
     default_explanation_prompt_template, default_translation_prompt_template,
-    initialize_builtin_providers, AppSettingsData,
+    AppSettingsData,
 };
 pub use crate::utils::system_utils::{
     atomic_write_with_backup, get_default_app_version, get_logs_dir_path, get_settings_file_path,

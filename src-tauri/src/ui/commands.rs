@@ -1,5 +1,4 @@
 use crate::core::app_state::AppState as SharedAppState;
-use crate::core::config::{AIProvider};
 #[cfg(debug_assertions)]
 use crate::core::error::to_frontend_error_string;
 use crate::core::error_codes::AppErrorKind;
@@ -1855,12 +1854,6 @@ pub async fn copy_and_paste_text(
             ))
         }
     }
-}
-
-#[tauri::command]
-pub async fn get_provider_config(provider: AIProvider) -> Result<(String, String), String> {
-    let (url, model) = provider.get_default_config();
-    Ok((url, model))
 }
 
 #[tauri::command]

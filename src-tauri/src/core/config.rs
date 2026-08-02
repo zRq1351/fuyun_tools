@@ -38,58 +38,8 @@ pub const CTRL_KEY: Key = if cfg!(target_os = "macos") {
     Key::Control
 };
 
-/// AI服务提供商枚举
+/// AI服务提供商配置
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum AIProvider {
-    #[serde(rename = "deepseek")]
-    DeepSeek,
-    #[serde(rename = "qwen")]
-    Qwen,
-    #[serde(rename = "xiaomimimo")]
-    XiaoMiMimo,
-}
-
-impl Default for AIProvider {
-    /// 默认AI提供商
-    fn default() -> Self {
-        AIProvider::DeepSeek
-    }
-}
-
-impl std::fmt::Display for AIProvider {
-    /// 格式化显示
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            AIProvider::DeepSeek => "deepseek",
-            AIProvider::Qwen => "qwen",
-            AIProvider::XiaoMiMimo => "xiaomimimo",
-        };
-        write!(f, "{s}")
-    }
-}
-
-impl AIProvider {
-    /// 获取提供商的默认配置
-    pub fn get_default_config(&self) -> (String, String) {
-        match self {
-            AIProvider::DeepSeek => (
-                "https://api.deepseek.com".to_string(),
-                "deepseek-v4-flash".to_string(),
-            ),
-            AIProvider::Qwen => (
-                "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
-                "qwen-plus".to_string(),
-            ),
-            AIProvider::XiaoMiMimo => (
-                "https://api.xiaomimimo.com/v1".to_string(),
-                "mimo-v2-flash".to_string(),
-            ),
-        }
-    }
-}
-
-/// 单个AI提供商的配置
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ProviderConfig {
     pub api_url: String,
     pub model_name: String,

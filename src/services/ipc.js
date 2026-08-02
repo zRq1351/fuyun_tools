@@ -107,7 +107,6 @@ export const IPC_COMMANDS = {
     INSTALL_VC_RUNTIME_AND_WAIT: 'install_vc_runtime_and_wait',
     SAVE_APP_SETTINGS: 'save_app_settings',
     TEST_AI_CONNECTION: 'test_ai_connection',
-    GET_PROVIDER_CONFIG: 'get_provider_config',
     REMOVE_AI_PROVIDER: 'remove_ai_provider',
     GET_ALL_CONFIGURED_PROVIDERS: 'get_all_configured_providers',
     START_RECORDING: 'start_recording',
@@ -425,7 +424,6 @@ export const AISettingsService = {
      * @param {string} provider
      * @returns {Promise<[string, string]>} [url, model]
      */
-    getProviderConfig: (provider) => ipcInvoke(IPC_COMMANDS.GET_PROVIDER_CONFIG, {provider}),
 
     /**
      * 删除 AI 提供商
