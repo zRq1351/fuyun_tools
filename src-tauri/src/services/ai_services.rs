@@ -57,8 +57,9 @@ async fn build_ai_config(_state: &Arc<Mutex<SharedAppState>>) -> AppResult<AICon
         log::warn!("提供商 {} 的API密钥为空", provider_key);
         return Err(AppErrorKind::AiApiKeyNotConfigured.to_app_error());
     }
-    let mask = if config.api_key.len() > 6 {
-        format!("***{}", &config.api_key[config.api_key.len() - 4..])
+    let mask = if config.api_key.chars().count() > 6 {
+        let tail: String = config.api_key.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+        format!("***{}", tail)
     } else { "***".to_string() };
     log::info!("提供商 {} 配置验证通过，密钥: {}", provider_key, mask);
 

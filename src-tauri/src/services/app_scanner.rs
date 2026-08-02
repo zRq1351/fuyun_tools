@@ -220,7 +220,6 @@ pub fn search_apps(query: &str, limit: usize) -> Vec<LauncherItem> {
     let mut results: Vec<LauncherItem> = all_apps
         .into_iter()
         .filter(|item| item.title.to_lowercase().contains(&query_lower))
-        .take(limit)
         .collect();
 
     // Sort by relevance: starts_with > contains, then alphabetically
@@ -236,6 +235,8 @@ pub fn search_apps(query: &str, limit: usize) -> Vec<LauncherItem> {
         }
     });
 
+    // 先按相关度排序再截断，避免好匹配被提前截掉
+    results.truncate(limit);
     results
 }
 

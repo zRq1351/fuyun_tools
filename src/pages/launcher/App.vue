@@ -386,8 +386,7 @@ const handleSelect = async (item) => {
 
 const hideLauncher = async () => {
   try {
-    const window = getCurrentWebviewWindow()
-    await window.hide()
+    await invoke('hide_launcher')
   } catch (error) {
     console.error('Hide window error:', error)
   }

@@ -1489,6 +1489,14 @@ pub async fn show_result_window(
         }
     }
 
+    // 先销毁同类型旧结果窗口，避免每次请求累积隐藏窗口（webview 资源泄漏）
+    let stale_prefix = format!("result_{}_", window_type);
+    for label in app.webview_windows().keys() {
+        if label.starts_with(&stale_prefix) {
+            let _ = app.get_webview_window(label).map(|w| w.destroy());
+        }
+    }
+
     // 使用时间戳生成唯一窗口标签，确保每次都创建新窗口
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

@@ -467,11 +467,15 @@ fn restore_clipboard_snapshot(
             }
         }
         ClipboardSnapshot::Empty => {
-            // 空快照意味着捕获前剪贴板无文本/图片内容
-            // 如果当前剪贴板已经是空的（模拟Ctrl+C后未改变），无需恢复
-            let current = get_current_clipboard_content_with_manager(clipboard_manager, app_handle);
-            if current.is_none() || current.as_deref() == Some("") {
-                log::debug!("剪贴板已为空，跳过空态恢复");
+            // 空快照：若剪贴板仍是我们捕获的选中文本，清空以恢复空态
+            if still_holds_captured_text {
+                let result = crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
+                    app_handle.clipboard().write_text("")
+                });
+                match result {
+                    Ok(()) => log::debug!("已清空剪贴板，恢复空态"),
+                    Err(e) => log::warn!("清空剪贴板失败（恢复空态）: {}", e),
+                }
                 return;
             }
             // 当前剪贴板有内容且不是我们捕获的文本（captured_content为None），

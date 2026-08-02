@@ -222,10 +222,8 @@ pub async fn show_launcher(app: AppHandle) -> Result<(), String> {
 /// 隐藏启动器窗口
 #[tauri::command]
 pub async fn hide_launcher(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("launcher") {
-        window.hide().map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    // 走 overlay 隐藏路径以正确清理 active 槽，避免影响其它 overlay 窗口联动
+    crate::ui::window_manager::hide_overlay_window_by_label(&app, "launcher")
 }
 
 /// 调整启动器窗口大小
@@ -249,7 +247,8 @@ pub async fn resize_launcher(app: AppHandle, height: f64) -> Result<(), String> 
 pub async fn toggle_launcher(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("launcher") {
         if window.is_visible().unwrap_or(false) {
-            window.hide().map_err(|e| e.to_string())?;
+            // 走 overlay 隐藏路径以正确清理 active 槽
+            crate::ui::window_manager::hide_overlay_window_by_label(&app, "launcher")?;
         } else {
             show_overlay_window_by_label(&app, "launcher", true)?;
             app.emit("show-launcher", ()).map_err(|e| e.to_string())?;
