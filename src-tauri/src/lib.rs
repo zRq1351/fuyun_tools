@@ -194,6 +194,14 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // 已有实例运行时启动新实例：聚焦主设置窗口并提示
+            log::info!("检测到已运行的实例，聚焦设置窗口并退出新实例");
+            if let Some(window) = app.get_webview_window("settings") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(state_arc.clone())
         .setup(move |app| {
             if let Some(settings_window) = app.get_webview_window("settings") {

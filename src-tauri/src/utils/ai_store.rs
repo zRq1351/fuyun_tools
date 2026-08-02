@@ -44,6 +44,19 @@ async fn ensure_schema() {
     let _ = ensure_cipher().await;
 }
 
+/// 生成新的 32 字节随机密钥并写入 ai_meta，返回原始字节
+async fn generate_and_store_key(pool: &sqlx::SqlitePool) -> [u8; 32] {
+    let mut key_bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut key_bytes);
+    let k = base64::engine::general_purpose::STANDARD.encode(&key_bytes);
+    sqlx::query("INSERT OR IGNORE INTO ai_meta (key, value) VALUES ('encryption_key', ?1)")
+        .bind(&k)
+        .execute(pool)
+        .await
+        .ok();
+    key_bytes
+}
+
 async fn ensure_cipher() -> &'static Aes256Gcm {
     if let Some(c) = CIPHER.get() {
         return c;
@@ -53,31 +66,35 @@ async fn ensure_cipher() -> &'static Aes256Gcm {
         sqlx::query_scalar("SELECT value FROM ai_meta WHERE key = 'encryption_key'")
             .fetch_one(pool)
             .await;
-    let key_b64 = match key_b64 {
-        Ok(k) if !k.is_empty() => k,
-        _ => {
-            let mut key_bytes = [0u8; 32];
-            OsRng.fill_bytes(&mut key_bytes);
-            let k = base64::engine::general_purpose::STANDARD.encode(&key_bytes);
-            sqlx::query("INSERT OR IGNORE INTO ai_meta (key, value) VALUES ('encryption_key', ?1)")
-                .bind(&k)
-                .execute(pool)
-                .await
-                .ok();
-            k
+    let key_bytes: [u8; 32] = match key_b64 {
+        Ok(k) if !k.is_empty() => {
+            match base64::engine::general_purpose::STANDARD.decode(&k) {
+                Ok(bytes) if bytes.len() == 32 => {
+                    let mut arr = [0u8; 32];
+                    arr.copy_from_slice(&bytes);
+                    arr
+                }
+                // 存储的密钥损坏：重新生成（历史密文将无法解密，decrypt 已优雅返回错误）
+                _ => {
+                    log::warn!("ai_meta 中加密密钥损坏，已重新生成");
+                    generate_and_store_key(pool).await
+                }
+            }
         }
+        _ => generate_and_store_key(pool).await,
     };
-    let key_bytes = base64::engine::general_purpose::STANDARD.decode(&key_b64).expect("decode key");
     CIPHER.get_or_init(|| Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key_bytes)))
 }
 
-async fn encrypt(plain: &str) -> String {
+async fn encrypt(plain: &str) -> Result<String, String> {
     let cipher = ensure_cipher().await;
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-    let ct = cipher.encrypt(&nonce, plain.as_bytes()).expect("encrypt");
+    let ct = cipher
+        .encrypt(&nonce, plain.as_bytes())
+        .map_err(|e| format!("encrypt: {e}"))?;
     let mut combined = nonce.to_vec();
     combined.extend_from_slice(&ct);
-    base64::engine::general_purpose::STANDARD.encode(&combined)
+    Ok(base64::engine::general_purpose::STANDARD.encode(&combined))
 }
 
 async fn decrypt(encoded: &str) -> Result<String, String> {
@@ -148,7 +165,17 @@ pub async fn get_provider_config(provider_key: &str) -> Option<ProviderConfigFul
 pub async fn save_provider_config(key: &str, api_url: &str, model_name: &str, api_key: &str) -> Result<(), String> {
     ensure_schema().await;
     let pool = get_pool().await;
-    let encrypted = if api_key.is_empty() { String::new() } else { encrypt(api_key).await };
+    let encrypted = if api_key.is_empty() {
+        String::new()
+    } else {
+        match encrypt(api_key).await {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("加密 API key 失败: {}", e);
+                String::new()
+            }
+        }
+    };
     sqlx::query(
         "INSERT OR REPLACE INTO provider_configs (provider_key, api_url, model_name, encrypted_api_key) VALUES (?1, ?2, ?3, ?4)"
     )
