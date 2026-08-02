@@ -103,7 +103,7 @@ pub fn capture_screen_region(
     // _guard 在此处自动drop，重置标志
 }
 
-/// 内部实现：捕获屏幕区域
+/// 内部实现：捕获屏幕区域（支持跨屏：逐屏采集与目标区域重叠的部分并拼接）
 fn capture_screen_region_internal(
     x: i32,
     y: i32,
@@ -121,98 +121,70 @@ fn capture_screen_region_internal(
     let req_right = req_left.saturating_add(i64::from(width));
     let req_bottom = req_top.saturating_add(i64::from(height));
 
-    let mut best_screen_index: Option<usize> = None;
-    let mut best_overlap_area: i64 = -1;
-    let mut best_distance_sq: i128 = i128::MAX;
-    let center_x = req_left.saturating_add(i64::from(width / 2));
-    let center_y = req_top.saturating_add(i64::from(height / 2));
+    if req_right <= req_left || req_bottom <= req_top {
+        return Err("截图区域无效".to_string());
+    }
 
-    for (index, screen) in screens.iter().enumerate() {
+    let out_width = (req_right - req_left) as usize;
+    let out_height = (req_bottom - req_top) as usize;
+    let mut rgba_data = vec![0_u8; out_width.saturating_mul(out_height).saturating_mul(4)];
+
+    for screen in &screens {
         let sx = i64::from(screen.display_info.x);
         let sy = i64::from(screen.display_info.y);
         let sw = i64::from(screen.display_info.width);
         let sh = i64::from(screen.display_info.height);
-        let s_right = sx.saturating_add(sw);
-        let s_bottom = sy.saturating_add(sh);
 
-        let overlap_w = (req_right.min(s_right) - req_left.max(sx)).max(0);
-        let overlap_h = (req_bottom.min(s_bottom) - req_top.max(sy)).max(0);
-        let overlap_area = overlap_w.saturating_mul(overlap_h);
-
-        let clamped_x = center_x.clamp(sx, s_right.saturating_sub(1));
-        let clamped_y = center_y.clamp(sy, s_bottom.saturating_sub(1));
-        let dx = i128::from(center_x.saturating_sub(clamped_x));
-        let dy = i128::from(center_y.saturating_sub(clamped_y));
-        let distance_sq = dx.saturating_mul(dx).saturating_add(dy.saturating_mul(dy));
-
-        if overlap_area > best_overlap_area
-            || (overlap_area == best_overlap_area && distance_sq < best_distance_sq)
-        {
-            best_overlap_area = overlap_area;
-            best_distance_sq = distance_sq;
-            best_screen_index = Some(index);
+        // 该屏幕与目标区域在虚拟桌面坐标下的交集
+        let inter_left = req_left.max(sx);
+        let inter_top = req_top.max(sy);
+        let inter_right = req_right.min(sx.saturating_add(sw));
+        let inter_bottom = req_bottom.min(sy.saturating_add(sh));
+        let inter_w = inter_right - inter_left;
+        let inter_h = inter_bottom - inter_top;
+        if inter_w <= 0 || inter_h <= 0 {
+            continue;
         }
-    }
 
-    let screen = screens
-        .get(best_screen_index.unwrap_or(0))
-        .ok_or_else(|| "无法获取目标屏幕".to_string())?;
+        let image = screen
+            .capture()
+            .map_err(|e| format!("捕获屏幕失败: {}", e))?;
+        let img_width = image.width() as usize;
+        let img_height = image.height() as usize;
+        let src = image.as_raw();
 
-    let image = screen
-        .capture()
-        .map_err(|e| format!("捕获屏幕失败: {}", e))?;
+        let loc_x = (inter_left - sx) as usize;
+        let loc_y = (inter_top - sy) as usize;
+        let src_row_bytes = inter_w as usize * 4;
+        let dest_offset_x = (inter_left - req_left) as usize;
+        let dest_offset_y = (inter_top - req_top) as usize;
 
-    let img_width = image.width();
-    let img_height = image.height();
-    let screen_x = i64::from(screen.display_info.x);
-    let screen_y = i64::from(screen.display_info.y);
-
-    let local_left = (req_left - screen_x).max(0);
-    let local_top = (req_top - screen_y).max(0);
-    let local_right = (req_right - screen_x).min(i64::from(img_width));
-    let local_bottom = (req_bottom - screen_y).min(i64::from(img_height));
-
-    let width = (local_right - local_left).max(0) as u32;
-    let height = (local_bottom - local_top).max(0) as u32;
-    let x = local_left as u32;
-    let y = local_top as u32;
-
-    if width == 0 || height == 0 {
-        return Err(format!("截图区域无效: {}x{}", width, height));
-    }
-
-    let mut rgba_data = Vec::with_capacity((width * height * 4) as usize);
-    let src = image.as_raw();
-    let row_bytes = (width * 4) as usize;
-
-    for row in y..(y + height) {
-        let start = ((row * img_width + x) * 4) as usize;
-        let end = start + row_bytes;
-        if end <= src.len() {
-            rgba_data.extend_from_slice(&src[start..end]);
-        } else if start < src.len() {
-            // Partial row: copy what's available, pad the rest
-            let available = src.len() - start;
-            rgba_data.extend_from_slice(&src[start..src.len()]);
-            rgba_data.resize(rgba_data.len() + row_bytes - available, 0);
-        } else {
-            // Row completely out of bounds: pad with zeros
-            rgba_data.resize(rgba_data.len() + row_bytes, 0);
+        for row in 0..inter_h as usize {
+            if loc_y + row >= img_height {
+                continue;
+            }
+            let src_start = ((loc_y + row) * img_width + loc_x) * 4;
+            let src_end = src_start + src_row_bytes;
+            if src_end > src.len() {
+                continue;
+            }
+            let dest_start = ((dest_offset_y + row) * out_width + dest_offset_x) * 4;
+            let dest_end = dest_start + src_row_bytes;
+            if dest_end > rgba_data.len() {
+                continue;
+            }
+            rgba_data[dest_start..dest_end].copy_from_slice(&src[src_start..src_end]);
         }
-    }
-
-    if rgba_data.len() != (width * height * 4) as usize {
-        return Err("裁剪图片数据长度不匹配".to_string());
     }
 
     log::info!(
         "截图成功: {}x{}, 数据大小: {} bytes",
-        width,
-        height,
+        out_width,
+        out_height,
         rgba_data.len()
     );
 
-    Ok((rgba_data, width, height))
+    Ok((rgba_data, out_width as u32, out_height as u32))
 }
 
 /// 捕获全屏截图

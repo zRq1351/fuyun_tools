@@ -10,7 +10,7 @@ use std::fs;
 use std::io::Read;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::thread::{self, JoinHandle};
@@ -27,6 +27,31 @@ static LAST_LONGSHOT_FAILURE: OnceLock<StdMutex<Option<ManualLongshotFailureReco
     OnceLock::new();
 /// FFmpeg 子进程 PID，用于应用退出时清理孤儿进程
 static FFMPEG_CHILD_PID: AtomicU64 = AtomicU64::new(0);
+
+/// RAII 守卫：确保长截图 ffmpeg 子进程、PID 记录与 stderr 线程在任何退出路径都被清理
+struct FfmpegChildGuard {
+    pid: u64,
+    child: Option<Child>,
+    stderr_handle: Option<JoinHandle<()>>,
+}
+
+impl Drop for FfmpegChildGuard {
+    fn drop(&mut self) {
+        // 仅当 PID 仍属于本进程时才清零，避免误清新会话的 PID
+        FFMPEG_CHILD_PID.compare_exchange(self.pid, 0, Ordering::AcqRel, Ordering::Relaxed);
+        if let Some(child) = self.child.as_mut() {
+            if let Err(e) = child.kill() {
+                log::debug!("长截图 FFmpeg 进程终止失败: {}", e);
+            }
+            if let Err(e) = child.wait() {
+                log::debug!("长截图 FFmpeg 进程等待失败: {}", e);
+            }
+        }
+        if let Some(handle) = self.stderr_handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -123,7 +148,7 @@ fn status_phase(state: &str) -> String {
         "running" => "running",
         "paused" => "paused",
         "finishing" => "finishing",
-        "canceling" => "canceling",
+        "canceling" | "canceled" => "canceling",
         "failed" | "error" => "failed",
         "ended" => "done",
         _ => "unknown",
@@ -160,7 +185,7 @@ fn user_message_for_state(
         "running" => "长截图进行中，请继续滚动目标内容".to_string(),
         "paused" => "长截图已暂停，可继续或完成".to_string(),
         "finishing" => "正在收尾并生成长截图结果".to_string(),
-        "canceling" => "正在取消长截图并回收资源".to_string(),
+        "canceling" | "canceled" => "长截图已取消".to_string(),
         "ended" => "长截图已完成".to_string(),
         "failed" | "error" => match failure_kind.unwrap_or("runtime_error") {
             "missing_dependency" => "长截图依赖未就绪，请检查 FFmpeg 或 OpenCV 环境".to_string(),
@@ -452,11 +477,18 @@ pub fn finish_manual_longshot(
     drop(slot);
 
     if let Some(handle) = worker {
-        // 等待 worker 最多 30 秒，超时返回错误
+        // 等待 worker 最多 30 秒，超时归还会话并返回错误
         let start = Instant::now();
         while !handle.is_finished() {
             if start.elapsed() > Duration::from_secs(30) {
                 log::error!("长截图 worker 线程在 {} 秒内未完成，超时放弃", 30);
+                // 归还 runtime 与 worker，避免会话状态丢失（后续 finish/cancel 仍可用）
+                if let Ok(mut slot) = runtime_slot().lock() {
+                    if slot.is_none() {
+                        runtime.worker = Some(handle);
+                        *slot = Some(runtime);
+                    }
+                }
                 return Err(AppErrorKind::LongshotTimeout.to_frontend_json());
             }
             thread::sleep(Duration::from_millis(200));
@@ -649,6 +681,14 @@ fn run_longshot_worker_inner(
         }
     });
 
+    // 任何退出路径（含错误 `?` 提前返回）都会通过 Drop 清理子进程/PID/stderr 线程
+    let child_pid = child.id() as u64;
+    let _ffmpeg_guard = FfmpegChildGuard {
+        pid: child_pid,
+        child: Some(child),
+        stderr_handle: Some(stderr_handle),
+    };
+
     let start_at = Instant::now();
     let mut last_progress_emit = Instant::now();
     let mut frame_buf = vec![0u8; frame_bytes];
@@ -793,7 +833,7 @@ fn run_longshot_worker_inner(
             status.last_confidence = estimate.confidence;
             status.stitched_height = stitched_height;
             status.stitched_width = stitched_width;
-            if status.state != "paused" {
+            if status.state != "paused" && status.state != "canceling" {
                 status.state = "running".to_string();
                 status.phase = "running".to_string();
                 status.user_message = user_message_for_state(&status.state, None, None);
@@ -850,16 +890,24 @@ fn run_longshot_worker_inner(
         }
     }
 
-    // 清除 PID 记录并终止主 FFmpeg 子进程
-    FFMPEG_CHILD_PID.store(0, Ordering::Release);
-    if let Err(e) = child.kill() {
-        log::warn!("长截图 FFmpeg 进程终止失败: {}", e);
-    }
-    if let Err(e) = child.wait() {
-        log::warn!("长截图 FFmpeg 进程等待失败: {}", e);
-    }
-    if let Err(e) = stderr_handle.join() {
-        log::warn!("长截图 stderr 线程退出异常: {:?}", e);
+    // 终止主 FFmpeg 子进程并回收资源（Drop 也会清理 PID 记录与 stderr 线程）
+    drop(_ffmpeg_guard);
+
+    // 取消路径：不拼接、不写文件，状态收敛为 canceled
+    let canceling = control
+        .status
+        .lock()
+        .map(|s| s.state == "canceling")
+        .unwrap_or(false);
+    if canceling {
+        if let Ok(mut status) = control.status.lock() {
+            status.state = "canceled".to_string();
+            status.phase = status_phase(&status.state);
+            status.failure_kind = None;
+            status.user_message = user_message_for_state(&status.state, None, None);
+        }
+        clear_last_failure();
+        return Ok(());
     }
 
     if ended_by_finishing {
@@ -1007,7 +1055,8 @@ fn capture_single_bgr_frame(request: &StartManualLongshotRequest) -> Result<Mat,
     stdout
         .read_exact(&mut frame_buf)
         .map_err(|e| format!("收尾抓取读取最终帧失败: {}", e))?;
-    FFMPEG_CHILD_PID.store(0, Ordering::Release);
+    // 仅当 PID 仍属于本进程时才清零，避免误清新会话的 PID
+    FFMPEG_CHILD_PID.compare_exchange(child.id() as u64, 0, Ordering::AcqRel, Ordering::Relaxed);
     if let Err(e) = child.kill() {
         log::warn!("长截图收尾 FFmpeg 进程终止失败: {}", e);
     }

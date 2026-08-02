@@ -1248,6 +1248,14 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
             ));
         }
     }
+    // 编辑器已打开（编辑进行中）时忽略重复触发，避免覆盖当前会话
+    if let Some(window) = app.get_webview_window("screenshot") {
+        if window.is_visible().unwrap_or(false) {
+            log::info!("截图编辑器已打开，忽略重复触发");
+            return Ok(());
+        }
+    }
+
     log::info!("打开截图编辑窗口");
     let started_at = std::time::Instant::now();
 
