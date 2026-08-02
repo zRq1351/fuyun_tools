@@ -591,7 +591,8 @@ const handleDrop = async (event, category) => {
   })
 }
 
-const buildOpId = () => Date.now() * 10000 + Math.floor(Math.random() * 10000)
+// opId 作为 u64 传后端，需保持在 JS 安全整数（2^53）范围内，避免精度丢失
+const buildOpId = () => Math.floor((Date.now() % 1e11) * 10000 + Math.random() * 10000)
 
 const resolveSelectedText = () => {
   if (!selectedItemId.value) {

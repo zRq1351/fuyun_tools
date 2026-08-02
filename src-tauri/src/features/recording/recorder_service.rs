@@ -1936,7 +1936,8 @@ pub fn start_recording(
         }
         runtime.phase = RecordingPhase::Starting;
         runtime.last_error = None;
-        emit_recording_state_changed(app, None, runtime.phase.as_str(), 0);
+        // starting 态即携带 sessionId，供前端过滤旧会话的迟到事件（如上一段后台合并的 finished）
+        emit_recording_state_changed(app, Some(&session_id), runtime.phase.as_str(), 0);
         let mut rollback_starting = |public_message: &str, details: String| -> AppError {
             runtime.reset_to_idle();
             runtime.last_error = Some(details.clone());
