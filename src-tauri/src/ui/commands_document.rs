@@ -94,10 +94,19 @@ pub async fn rename_doc_category(id: i64, name: String) -> Result<(), String> {
         let old_prefix = old_dir.to_string_lossy().to_string();
         let new_prefix = new_dir.to_string_lossy().to_string();
         document_database::update_managed_path_prefix(&old_prefix, &new_prefix, root.id, id).await?;
-        document_database::safe_move_file(&old_dir, &new_dir).map_err(|e| {
-            log::error!("分类目录重命名失败（数据库已更新）: {} -> {}: {}", old_dir.display(), new_dir.display(), e);
-            format!("重命名目录失败: {}", e)
-        })?;
+        if let Err(e) = document_database::safe_move_file(&old_dir, &new_dir) {
+            // 目录移动失败：回滚数据库重命名与前缀更新，保持 DB/磁盘一致
+            if let Err(rollback_err) = document_database::rename_doc_category(id, &cat.name).await {
+                log::error!("回滚分类重命名失败: {}", rollback_err);
+            }
+            if let Err(rollback_err) =
+                document_database::update_managed_path_prefix(&new_prefix, &old_prefix, root.id, id).await
+            {
+                log::error!("回滚 managed_path 前缀失败: {}", rollback_err);
+            }
+            log::error!("分类目录重命名失败（已回滚数据库）: {} -> {}: {}", old_dir.display(), new_dir.display(), e);
+            return Err(format!("重命名目录失败: {}", e));
+        }
     } else {
         let _old_name = document_database::rename_doc_category(id, name_trim).await?;
     }
@@ -389,10 +398,15 @@ pub async fn delete_doc(request: DeleteDocRequest) -> Result<(), String> {
         .await?
         .ok_or("文档不存在".to_string())?;
 
+    // 先删数据库记录，文件清理尽力而为（记录删除失败可回退；文件残留可被扫描重新发现，文件丢失不可逆）
+    document_database::delete_doc_record(request.id).await?;
+
     if request.delete_file.unwrap_or(false) {
         let p = Path::new(&doc.managed_path);
         if p.exists() {
-            fs::remove_file(p).map_err(|e| format!("删除文件失败: {}", e))?;
+            if let Err(e) = fs::remove_file(p) {
+                log::warn!("删除文件失败（记录已删除）: {}: {}", p.display(), e);
+            }
         }
     } else if doc.storage_mode == "repo" && !doc.source_path.is_empty() {
         let managed = Path::new(&doc.managed_path);
@@ -400,15 +414,14 @@ pub async fn delete_doc(request: DeleteDocRequest) -> Result<(), String> {
         if managed.exists() && managed != source {
             if let Some(parent) = source.parent() {
                 if let Err(e) = fs::create_dir_all(parent) {
-                    log::error!("创建源文件目录失败 {}: {}", parent.display(), e);
+                    log::warn!("创建源文件目录失败 {}: {}", parent.display(), e);
                 }
             }
-            document_database::safe_move_file(managed, source)
-                .map_err(|e| format!("回搬文件失败: {}", e))?;
+            if let Err(e) = document_database::safe_move_file(managed, source) {
+                log::warn!("回搬文件失败（记录已删除）: {}", e);
+            }
         }
     }
-
-    document_database::delete_doc_record(request.id).await?;
 
     Ok(())
 }

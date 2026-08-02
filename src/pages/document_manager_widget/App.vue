@@ -145,6 +145,7 @@ const categories = ref([])
 const allFiles = ref([])
 const selectedCategoryId = ref(null)
 const loading = ref(true)
+const refreshing = ref(false)
 const hovered = ref(false)
 const rootScrollRef = ref(null)
 const catScrollRef = ref(null)
@@ -655,6 +656,7 @@ async function snapWindowPosition() {
 
 let unlistenData = null
 let unlistenDragDrop = null
+let refreshTimer = null
 
 function onWindowBlur() {
   onDragEnd()
@@ -721,6 +723,20 @@ onMounted(async () => {
     }
     await resizeToFitContent()
   })
+
+  // 后端尚无 doc-widget-refresh 事件源，改为定时刷新保持数据同步
+  refreshTimer = window.setInterval(async () => {
+    if (loading.value || refreshing.value) return
+    refreshing.value = true
+    try {
+      await loadDataForRoot(selectedRootId.value)
+    } catch (e) {
+      console.error('定时刷新文档数据失败:', e)
+    } finally {
+      refreshing.value = false
+    }
+    await resizeToFitContent()
+  }, 5000)
 })
 
 onBeforeUnmount(() => {
@@ -728,6 +744,10 @@ onBeforeUnmount(() => {
   window.removeEventListener('blur', onWindowBlur)
   if (unlistenDragDrop) unlistenDragDrop()
   if (unlistenData) unlistenData()
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
 })
 
 </script>

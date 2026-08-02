@@ -1042,6 +1042,7 @@ watch(scanImportRootId, async (rid) => {
 })
 
 let searchTimer = null
+let unlistenDragDrop = null
 watch(searchKeyword, (val, old) => {
   if (val === old) return
   clearTimeout(searchTimer)
@@ -1459,6 +1460,19 @@ async function importOrphans() {
   }
 }
 
+function handleDroppedPaths(paths) {
+  if (!paths || paths.length === 0) return
+  if (!roots.value || roots.value.length === 0) {
+    ElMessage.warning(t('documentManager.addDirFirst'));
+    return
+  }
+  importRootId.value = rootFilter.value || roots.value[0].id;
+  importCategoryId.value = categoryFilter.value === -1 ? null : categoryFilter.value;
+  importFiles.value = paths;
+  importMode.value = 'index';
+  showImportDialog.value = true
+}
+
 async function handleDrop(event) {
   dragover.value = false;
   const files = event.dataTransfer?.files;
@@ -1656,6 +1670,18 @@ onMounted(async () => {
   }
   loadImportHistory();
   detectOrphans()
+  // Tauri v2 的 HTML5 File 无 path 属性，改用原生拖拽事件获取文件路径
+  try {
+    const {getCurrentWebview} = await import('@tauri-apps/api/webview')
+    unlistenDragDrop = await getCurrentWebview().onDragDropEvent((event) => {
+      const {type, paths} = event.payload
+      if (type === 'drop' && paths && paths.length > 0) {
+        handleDroppedPaths(paths)
+      }
+    })
+  } catch (e) {
+    console.error('注册拖拽事件失败:', e)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -1663,6 +1689,7 @@ onBeforeUnmount(() => {
   if (catSortable) { catSortable.destroy(); catSortable = null }
   if (fileSortable) { fileSortable.destroy(); fileSortable = null }
   if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
+  if (unlistenDragDrop) unlistenDragDrop()
 })
 
 </script>

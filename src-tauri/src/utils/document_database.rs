@@ -1039,15 +1039,25 @@ pub async fn atomic_move_doc(
                     Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or(""),
                 );
                 let dest = target_dir.join(&new_name);
-                safe_move_file(old_path, &dest).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                safe_move_file(old_path, &dest).map_err(|e| {
+                    // 移动失败时清理可能残留的目标副本，保持源文件不变
+                    let _ = fs::remove_file(&dest);
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
                 let new_managed = dest.to_string_lossy().to_string();
-                sqlx::query("UPDATE document_files SET root_id = ?1, managed_path = ?2 WHERE id = ?3")
+                if let Err(e) = sqlx::query("UPDATE document_files SET root_id = ?1, managed_path = ?2 WHERE id = ?3")
                     .bind(effective_root_id)
                     .bind(&new_managed)
                     .bind(id)
                     .execute(&mut *tx)
                     .await
-                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                {
+                    // 文件已移动但 DB 更新失败：把文件移回原位，避免 DB/磁盘不一致
+                    if let Err(rollback_err) = safe_move_file(&dest, old_path) {
+                        log::warn!("回移文件失败（DB 已回滚）: {} -> {}: {}", dest.display(), old_path.display(), rollback_err);
+                    }
+                    return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
+                }
             } else {
                 sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
                     .bind(effective_root_id)
@@ -1304,7 +1314,22 @@ pub async fn get_doc_page(
         .map(|k| k.trim().to_string())
         .filter(|k| !k.is_empty());
 
-    let fts_query = keyword_val.as_ref().map(|k| build_fts_query_space(k)).filter(|q| !q.is_empty());
+    // FTS5 unicode61 不做中文分词，含 CJK 的关键词走 LIKE 子串匹配
+    let has_cjk = keyword_val
+        .as_ref()
+        .map(|k| {
+            k.chars().any(|c| {
+                matches!(c,
+                    '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}'
+                    | '\u{F900}'..='\u{FAFF}' | '\u{FF00}'..='\u{FFEF}')
+            })
+        })
+        .unwrap_or(false);
+    let fts_query = if has_cjk {
+        None
+    } else {
+        keyword_val.as_ref().map(|k| build_fts_query_space(k)).filter(|q| !q.is_empty())
+    };
     let fts_enabled = is_fts_enabled(&mut conn).await?;
 
     let use_fts = fts_enabled && fts_query.is_some();
