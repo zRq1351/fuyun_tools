@@ -38,7 +38,7 @@ struct FfmpegChildGuard {
 impl Drop for FfmpegChildGuard {
     fn drop(&mut self) {
         // 仅当 PID 仍属于本进程时才清零，避免误清新会话的 PID
-        FFMPEG_CHILD_PID.compare_exchange(self.pid, 0, Ordering::AcqRel, Ordering::Relaxed);
+        let _ = FFMPEG_CHILD_PID.compare_exchange(self.pid, 0, Ordering::AcqRel, Ordering::Relaxed);
         if let Some(child) = self.child.as_mut() {
             if let Err(e) = child.kill() {
                 log::debug!("长截图 FFmpeg 进程终止失败: {}", e);
@@ -1056,7 +1056,7 @@ fn capture_single_bgr_frame(request: &StartManualLongshotRequest) -> Result<Mat,
         .read_exact(&mut frame_buf)
         .map_err(|e| format!("收尾抓取读取最终帧失败: {}", e))?;
     // 仅当 PID 仍属于本进程时才清零，避免误清新会话的 PID
-    FFMPEG_CHILD_PID.compare_exchange(child.id() as u64, 0, Ordering::AcqRel, Ordering::Relaxed);
+    let _ = FFMPEG_CHILD_PID.compare_exchange(child.id() as u64, 0, Ordering::AcqRel, Ordering::Relaxed);
     if let Err(e) = child.kill() {
         log::warn!("长截图收尾 FFmpeg 进程终止失败: {}", e);
     }
