@@ -269,10 +269,14 @@ pub async fn restore_backup_package(
             extracted_dir,
             rollback_dir,
         }),
-        Err((error, _rollback_dir)) => {
+        Err((error, rollback_dir)) => {
             cleanup_dir(&extracted_dir);
-            // 不清理 rollback_dir — 保留以便用户手动恢复
-            // rollback_dir 在成功恢复后由调用方清理
+            // 不清理 rollback_dir — 保留以便用户手动恢复，并把路径带进错误信息
+            if let Some(dir) = rollback_dir.as_ref() {
+                if dir.exists() {
+                    return Err(format!("{}；回滚点已保留于: {}", error, dir.display()));
+                }
+            }
             Err(error)
         }
     }
@@ -457,6 +461,11 @@ async fn restore_image_history(
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or("png");
+        // 校验 id 防止写入穿越（blob_path 已校验，item.id 拼接目标名同样需要校验）
+        if item.id.contains("..") || item.id.contains('/') || item.id.contains('\\') || item.id.contains(':') {
+            log::warn!("跳过包含非法 id 的图片条目: {}", item.id);
+            continue;
+        }
         let target = blob_root.join(format!("{}.{}", item.id, extension));
         let overwrite = strategy.eq_ignore_ascii_case("overwrite");
         let item_exists = image_store::item_exists_async(&item.id).await?;

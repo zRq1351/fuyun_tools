@@ -275,11 +275,9 @@ pub(crate) fn current_backup_settings() -> Result<BackupSettingsData, String> {
     })
 }
 
-pub(crate) fn update_backup_run_state(target_path: &str, status: &str) -> Result<(), String> {
+pub(crate) fn update_backup_run_state(_target_path: &str, status: &str) -> Result<(), String> {
+    // 注意：不修改 backup_target_dir —— 手动导出到其它目录不应静默改变自动备份目录
     let mut settings = load_settings()?;
-    if let Some(parent) = Path::new(target_path).parent() {
-        settings.backup_target_dir = parent.to_string_lossy().to_string();
-    }
     settings.backup_last_run_at = now_unix_ms() as i64;
     settings.backup_last_run_status = status.to_string();
     save_settings(&settings)
