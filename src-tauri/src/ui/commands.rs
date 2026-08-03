@@ -1845,7 +1845,7 @@ pub async fn copy_and_paste_text(
     let paste_started_at = std::time::Instant::now();
     let app_for_paste = app.clone();
     let paste_result = tauri::async_runtime::spawn_blocking(move || {
-        simulate_paste_with_retry(&app_for_paste, "结果窗", None, started_at, false)
+        simulate_paste_with_retry(&app_for_paste, "结果窗", None, started_at, false, None)
     })
     .await
     .map_err(|e| {

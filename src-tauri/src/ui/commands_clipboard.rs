@@ -279,13 +279,15 @@ pub(crate) fn register_screenshot_shortcut(app: &AppHandle, hot_key: &str) -> Re
 
 
 /// RAII guard：确保 panic 时也能重置 is_updating_clipboard 标志
-struct UpdatingClipboardGuard(Arc<Mutex<SharedAppState>>);
+/// 保存进入时两个 writeback 标志的先前值并在 drop 时恢复，
+/// 避免并发在途的填充（由 begin_fill_sequence 置位）被本 guard 误清
+struct UpdatingClipboardGuard(Arc<Mutex<SharedAppState>>, bool, bool);
 
 impl Drop for UpdatingClipboardGuard {
     fn drop(&mut self) {
         let mut state_guard = lock_arc_mutex(&self.0);
-        state_guard.is_text_writeback_active = false;
-        state_guard.is_image_writeback_active = false;
+        state_guard.is_text_writeback_active = self.1;
+        state_guard.is_image_writeback_active = self.2;
         recompute_selection_related_flags(&mut state_guard);
     }
 }
@@ -430,8 +432,13 @@ pub(crate) fn with_updating_clipboard<T, F>(
 where
     F: FnOnce() -> Result<T, String>,
 {
+    // 记录进入前的 writeback 标志，drop 时恢复（不清除并发在途的填充标志）
+    let prev = {
+        let guard = lock_arc_mutex(state);
+        (guard.is_text_writeback_active, guard.is_image_writeback_active)
+    };
     set_updating_clipboard(state, true);
-    let _guard = UpdatingClipboardGuard(state.clone());
+    let _guard = UpdatingClipboardGuard(state.clone(), prev.0, prev.1);
     operation()
 }
 

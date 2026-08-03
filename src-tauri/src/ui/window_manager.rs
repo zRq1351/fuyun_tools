@@ -1274,9 +1274,19 @@ pub fn handle_selection_toolbar_autoclose(app_handle: &AppHandle, click_pos: Opt
 }
 
 /// 模拟粘贴操作
-pub fn simulate_paste(app_handle: &AppHandle) -> Result<ForegroundWindowInfo, String> {
+pub fn simulate_paste(
+    app_handle: &AppHandle,
+    abort_check: Option<&dyn Fn() -> bool>,
+) -> Result<ForegroundWindowInfo, String> {
     use enigo::{Enigo, Settings};
     let target = wait_for_foreground_ready_for_paste(app_handle)?;
+
+    // 前台就绪后、按键前复查 staleness，防止快速连续填充时旧任务粘贴旧内容
+    if let Some(check) = abort_check {
+        if check() {
+            return Err("回填请求已被更新请求替代".to_string());
+        }
+    }
 
     {
         let mut enigo_guard = lock_arc_mutex(&ENIGO_INSTANCE);

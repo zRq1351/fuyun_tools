@@ -283,6 +283,36 @@ pub(crate) fn spawn_fill_task<F>(
             ),
         }
 
+        // 等待窗口隐藏超时：继续粘贴会落入 overlay 自身却误报成功，直接中止
+        if let Err(wait_error) = &wait_result {
+            log::warn!(
+                "{}回写等待窗口隐藏超时，中止粘贴（避免按键落入 overlay）: {}",
+                kind.label(),
+                wait_error
+            );
+            emit_writeback_phase(
+                &app_handle,
+                kind.label(),
+                "wait_hidden_failed",
+                Some(operation_id),
+                Some(wait_error.clone()),
+            );
+            emit_writeback_result(
+                &app_handle,
+                &WriteBackExecutionResult {
+                    source: kind.label().to_string(),
+                    success: false,
+                    stage: "wait_hidden_failed".to_string(),
+                    target_window_title: String::new(),
+                    target_window_pid: 0,
+                    detail: wait_error.clone(),
+                    operation_id: Some(operation_id),
+                },
+            );
+            finish_fill_if_latest(&state, kind, fill_seq);
+            return;
+        }
+
         if !is_fill_latest(&state, kind, fill_seq) {
             log::info!(
                 "{}回填请求过期，跳过执行: op_id={}",
@@ -346,6 +376,7 @@ pub(crate) fn spawn_fill_task<F>(
                 Some(operation_id),
                 started_at,
                 fast_path,
+                Some(&|| !is_fill_latest(&state, kind, fill_seq)),
             );
             match paste_result {
                 Ok(result) => {
@@ -455,6 +486,7 @@ pub(crate) fn simulate_paste_with_retry(
     operation_id: Option<u64>,
     started_at: std::time::Instant,
     fast_path: bool,
+    abort_check: Option<&dyn Fn() -> bool>,
 ) -> Result<WriteBackExecutionResult, WriteBackExecutionResult> {
     let is_post_paste_ctrl_release_error = |err: &str| err.contains("释放 Ctrl");
     let mode_name = if fast_path {
@@ -464,7 +496,7 @@ pub(crate) fn simulate_paste_with_retry(
     };
     let retry_delays: &[u64] = if fast_path { &[8, 16] } else { &[22, 40, 58] };
 
-    match crate::ui::window_manager::simulate_paste(app_handle) {
+    match crate::ui::window_manager::simulate_paste(app_handle, abort_check) {
         Ok(target) => {
             if let Some(op_id) = operation_id {
                 log::info!(
@@ -521,7 +553,7 @@ pub(crate) fn simulate_paste_with_retry(
                         release_error
                     );
                 }
-                match crate::ui::window_manager::simulate_paste(app_handle) {
+                match crate::ui::window_manager::simulate_paste(app_handle, abort_check) {
                     Ok(target) => {
                         if let Some(op_id) = operation_id {
                             log::warn!(
