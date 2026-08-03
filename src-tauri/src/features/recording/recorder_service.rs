@@ -427,6 +427,13 @@ fn trim_video_initial_frames(
         let _ = fs::remove_file(&trimmed_path);
         return Err(AppError::new(ErrorCode::SystemError, "视频裁剪失败").with_details(stderr));
     }
+    // 短视频（时长 < trim_seconds）时 ffmpeg 可能产出 0 字节文件且 exit 0：保留原视频，跳过裁剪
+    let trimmed_size = fs::metadata(&trimmed_path).map(|m| m.len()).unwrap_or(0);
+    if trimmed_size == 0 {
+        let _ = fs::remove_file(&trimmed_path);
+        log::warn!("视频过短（裁剪结果为 0 字节），跳过灰帧裁剪");
+        return Ok(());
+    }
     if video_path.exists() {
         let _ = fs::remove_file(video_path);
     }
@@ -1139,6 +1146,33 @@ fn rename_recording_output_with_retry(
         }
     }
     Err(AppError::new(ErrorCode::IoError, "重命名录制文件失败").with_details(last_err))
+}
+
+/// 将临时文件重命名为最终输出；目标已存在时追加序号 (1)/(2)…，避免静默覆盖历史录制
+fn rename_to_final_output(output_tmp: &PathBuf, output_final: &PathBuf) -> Result<PathBuf, AppError> {
+    let target = if !output_final.exists() {
+        output_final.clone()
+    } else {
+        let stem = output_final
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("recording");
+        let ext = output_final
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("mp4");
+        let dir = output_final.parent().unwrap_or(std::path::Path::new("."));
+        let mut idx = 1;
+        loop {
+            let candidate = dir.join(format!("{} ({}).{}", stem, idx, ext));
+            if !candidate.exists() {
+                break candidate;
+            }
+            idx += 1;
+        }
+    };
+    rename_recording_output_with_retry(output_tmp, &target)?;
+    Ok(target)
 }
 
 // 🔧 保留用于未来可能的视频验证需求
@@ -2193,7 +2227,7 @@ pub fn stop_recording(
         mic_audio_stop_flag,
         mic_audio_thread,
         output_tmp,
-        output_final,
+        mut output_final,
         mut sys_segments,
         mut mic_segments,
         window_video_segments,
@@ -2486,7 +2520,7 @@ pub fn stop_recording(
         }
     }
 
-    if let (Some(output_tmp), Some(output_final)) = (output_tmp.as_ref(), output_final.as_ref()) {
+    if let (Some(output_tmp), Some(output_final)) = (output_tmp.as_ref(), output_final.as_mut()) {
         log::info!("🔧 开始视频后处理...");
         let video_post_start = std::time::Instant::now();
 
@@ -2516,8 +2550,9 @@ pub fn stop_recording(
 
         if fatal_error.is_none() {
             log::info!("🔧 重命名输出文件...");
-            if let Err(e) = rename_recording_output_with_retry(output_tmp, output_final) {
-                fatal_error = Some(e);
+            match rename_to_final_output(output_tmp, output_final) {
+                Ok(actual_path) => *output_final = actual_path,
+                Err(e) => fatal_error = Some(e),
             }
         }
 

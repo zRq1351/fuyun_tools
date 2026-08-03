@@ -696,8 +696,9 @@ pub async fn pin_screenshot_on_screen(
         "pinned_image_{}",
         NEXT_PINNED_IMAGE_WINDOW_ID.fetch_add(1, Ordering::Relaxed)
     );
-    let x = request.x.unwrap_or(100.0).max(0.0);
-    let y = request.y.unwrap_or(100.0).max(0.0);
+    // 允许负坐标（左侧/上方副屏的原点在虚拟桌面坐标系中为负），不做钳制
+    let x = request.x.unwrap_or(100.0);
+    let y = request.y.unwrap_or(100.0);
     let width = request.width.unwrap_or(360.0).max(1.0);
     let height = request.height.unwrap_or(240.0).max(1.0);
     let payload = serde_json::json!({
@@ -741,7 +742,8 @@ pub async fn pin_screenshot_on_screen(
 #[tauri::command]
 pub async fn close_pinned_image_window(label: String, app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(&label) {
-        let _ = window.close();
+        // destroy 而非 close：close 会被 overlay 生命周期 prevent_close 拦截成隐藏，窗口永远不销毁导致贴图上限永久封顶
+        let _ = window.destroy();
     }
     Ok(())
 }

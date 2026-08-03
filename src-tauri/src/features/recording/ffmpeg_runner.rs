@@ -84,11 +84,47 @@ pub fn build_output_paths(output_dir: &Path, naming_template: &str) -> (PathBuf,
         .replace("{date}", &now.format("%Y%m%d").to_string())
         .replace("{time}", &now.format("%H%M%S").to_string())
         .replace("{type}", "screen");
-    let final_name = format!("{}.mp4", final_name.trim());
+    let final_name = sanitize_output_filename(&final_name);
+    // 净化后为空（如纯分隔符模板）时回退到时间戳，避免生成非法/穿越路径
+    let final_name = if final_name.is_empty() {
+        timestamp_ms.to_string()
+    } else {
+        final_name
+    };
+    let final_name = format!("{}.mp4", final_name);
     let tmp_name = format!("{}.tmp.mp4", session_id);
     (
         output_dir.join(tmp_name),
         output_dir.join(final_name),
         session_id,
     )
+}
+
+/// 净化输出文件名：替换路径分隔符与 Windows 非法字符、去除路径穿越片段、规避保留设备名
+fn sanitize_output_filename(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for ch in name.trim().chars() {
+        match ch {
+            '\\' | '/' | '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\0' => out.push('_'),
+            c if (c as u32) < 0x20 => out.push('_'),
+            _ => out.push(ch),
+        }
+    }
+    // 去除路径穿越片段
+    let cleaned = out.replace("..", "_");
+    // Windows 保留设备名（含扩展名前缀，如 CON.txt）
+    let stem = cleaned.split('.').next().unwrap_or("").trim();
+    let upper = stem.to_ascii_uppercase();
+    let reserved = matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+            | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
+            | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    ) || upper.starts_with("COM")
+        || upper.starts_with("LPT");
+    if reserved {
+        format!("_{}", cleaned)
+    } else {
+        cleaned
+    }
 }
