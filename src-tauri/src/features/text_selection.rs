@@ -8,7 +8,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 #[cfg(target_os = "windows")]
-fn send_safe_ctrl_c() -> bool {
+fn send_copy_combination(vk: u16) -> bool {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
     };
@@ -35,12 +35,12 @@ fn send_safe_ctrl_c() -> bool {
             count += 1;
         }
 
-        let vk_insert = windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(0x2D);
+        let vkey = windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk);
         inputs[count] = INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
                 ki: KEYBDINPUT {
-                    wVk: vk_insert,
+                    wVk: vkey,
                     wScan: 0,
                     dwFlags: KEYBD_EVENT_FLAGS(0),
                     time: 0,
@@ -53,7 +53,7 @@ fn send_safe_ctrl_c() -> bool {
             r#type: INPUT_KEYBOARD,
             Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
                 ki: KEYBDINPUT {
-                    wVk: vk_insert,
+                    wVk: vkey,
                     wScan: 0,
                     dwFlags: KEYEVENTF_KEYUP,
                     time: 0,
@@ -87,13 +87,18 @@ fn send_safe_ctrl_c() -> bool {
 
         // If the user is physically holding Ctrl but we didn't press it,
         // the copy might not have worked. But we don't corrupt their state.
-        log::info!("已通过 SendInput 发送 Ctrl+C (ctrl_was_pressed: {})", ctrl_was_pressed);
+        let key_name = if vk == 0x43 { "C" } else { "Insert" };
+        log::info!(
+            "已通过 SendInput 发送 Ctrl+{} (ctrl_was_pressed: {})",
+            key_name,
+            ctrl_was_pressed
+        );
         true
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn send_safe_ctrl_c() -> bool {
+fn send_copy_combination(_vk: u16) -> bool {
     false
 }
 
@@ -101,8 +106,6 @@ fn send_safe_ctrl_c() -> bool {
 const CAPTURE_RETRY_MAX_DURATION: Duration = Duration::from_millis(600);
 /// 轮询间隔，使用序列号检测时可以更频繁
 const CAPTURE_RETRY_INTERVAL: Duration = Duration::from_millis(10);
-/// 模拟按键后的初始等待时间
-const INITIAL_DELAY: Duration = Duration::from_millis(10);
 
 use crate::core::app_state::AppState as SharedAppState;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -217,22 +220,58 @@ fn get_selected_text_windows(
         thread::sleep(Duration::from_millis(20));
     }
 
-    // 3. 发送 Ctrl+C（如果用户正在按 Ctrl 则跳过，避免干扰用户按键）
+    // 3. 依次尝试多种复制按键组合，适配不同应用
+    //    Ctrl+Insert 是 Windows 传统复制加速键，终端（conhost/Windows Terminal）支持；
+    //    在多数 GUI 应用中多为无害空操作。Ctrl+C 覆盖浏览器/Office 等，
+    //    但终端中可能是中断信号，故放在 Ctrl+Insert 之后兜底
+    const VK_C: u16 = 0x43;
+    const VK_INSERT: u16 = 0x2D;
+    let mut new_content: Option<String> = None;
     if user_copying {
-        log::info!("检测到用户正在按 Ctrl 键，跳过模拟 Ctrl+C，等待用户手动复制");
+        log::info!("检测到用户正在按 Ctrl 键，跳过模拟复制，等待用户手动复制");
+        new_content = wait_for_clipboard_update(
+            &clipboard_manager,
+            app_handle,
+            &original_text,
+            sequence_before_copy,
+        );
     } else {
-        send_safe_ctrl_c();
+        for vk in [VK_INSERT, VK_C] {
+            if !send_copy_combination(vk) {
+                continue;
+            }
+            // 短等待检测剪贴板序列号变化，命中则进入完整等待读取
+            let short_deadline = std::time::Instant::now() + Duration::from_millis(150);
+            let mut seq_changed = false;
+            while std::time::Instant::now() < short_deadline {
+                let current_sequence = get_clipboard_sequence_number();
+                if current_sequence != 0
+                    && sequence_before_copy != 0
+                    && current_sequence != sequence_before_copy
+                {
+                    seq_changed = true;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            if !seq_changed {
+                log::debug!(
+                    "Ctrl+{} 未触发剪贴板变化，尝试下一组合",
+                    if vk == VK_C { "C" } else { "Insert" }
+                );
+                continue;
+            }
+            new_content = wait_for_clipboard_update(
+                &clipboard_manager,
+                app_handle,
+                &original_text,
+                sequence_before_copy,
+            );
+            if new_content.is_some() {
+                break;
+            }
+        }
     }
-
-    thread::sleep(INITIAL_DELAY);
-
-    // 4. 等待剪贴板更新并获取新内容
-    let new_content = wait_for_clipboard_update(
-        &clipboard_manager,
-        app_handle,
-        &original_text,
-        sequence_before_copy,
-    );
 
     let sequence_after_copy = get_clipboard_sequence_number();
     let sequence_changed = sequence_after_copy != 0
