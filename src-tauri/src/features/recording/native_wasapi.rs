@@ -678,10 +678,12 @@ pub fn start_system_loopback_wav_with_device(
                 std::thread::sleep(Duration::from_millis(10));
             }
 
-            log::info!("收到停止信号，填充2000ms静音数据以确保音频完全覆盖视频最后一段...");
+            log::info!("收到停止信号，填充2s静音数据以确保音频完全覆盖视频最后一段...");
+            // 按实际采样率/声道数填充 2s，避免 44.1k/96k 设备填充时长偏差
+            let tail_samples = (config.sample_rate as usize) * (config.channels as usize) * 2;
             if let Ok(mut guard) = writer.lock() {
                 if let Some(w) = guard.as_mut() {
-                    for _ in 0..(48000 * 2 * 2) {
+                    for _ in 0..tail_samples {
                         let _ = w.write_sample(0i16);
                     }
                 }
@@ -865,11 +867,12 @@ pub fn start_microphone_wav_with_device(
                 std::thread::sleep(Duration::from_millis(10));
             }
 
-            log::info!("收到麦克风停止信号，填充500ms静音数据以确保音频完全覆盖...");
-
+            log::info!("收到麦克风停止信号，填充1s静音数据以确保音频完全覆盖...");
+            // 按实际采样率/声道数填充 1s
+            let tail_samples = (config.sample_rate as usize) * (config.channels as usize);
             if let Ok(mut guard) = writer.lock() {
                 if let Some(w) = guard.as_mut() {
-                    for _ in 0..(48000 * 2) {
+                    for _ in 0..tail_samples {
                         let _ = w.write_sample(0i16);
                     }
                 }
@@ -1114,7 +1117,7 @@ pub fn start_system_loopback_aac_with_device(
             log::info!("等待 FFmpeg AAC 编码完成...");
             if let Ok(mut guard) = thread_ffmpeg.lock() {
                 if let Some(ref mut child) = *guard {
-                    for _ in 0..150 {
+                    for _ in 0..1000 {
                         match child.0.try_wait() {
                             Ok(Some(status)) => {
                                 log::info!(

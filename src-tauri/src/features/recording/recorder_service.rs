@@ -361,9 +361,11 @@ fn concat_video_segments(
     for seg in segments {
         let seg_path = seg.to_string_lossy().replace('\'', "'\\''");
         let line = format!("file '{}'\n", seg_path);
-        list_file.write_all(line.as_bytes()).map_err(|e| {
-            AppError::new(ErrorCode::IoError, "写入视频拼接列表失败").with_details(e.to_string())
-        })?;
+        if let Err(e) = list_file.write_all(line.as_bytes()) {
+            drop(list_file);
+            let _ = fs::remove_file(&list_path);
+            return Err(AppError::new(ErrorCode::IoError, "写入视频拼接列表失败").with_details(e.to_string()));
+        }
     }
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
@@ -468,9 +470,12 @@ fn concat_audio_segments(
     for seg in segments {
         let seg_path = seg.path.to_string_lossy().replace('\'', "'\\''");
         let line = format!("file '{}'\n", seg_path);
-        list_file
-            .write_all(line.as_bytes())
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        if let Err(e) = list_file.write_all(line.as_bytes()) {
+            drop(list_file);
+            let _ = fs::remove_file(&list_path);
+            let _ = fs::remove_file(&concat_path);
+            return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
+        }
     }
 
     let mut cmd = Command::new(ffmpeg_path);
@@ -1266,7 +1271,6 @@ fn ensure_system_audio_capture_started(
     }
     let enabled_flag = runtime.system_audio_enabled_flag.clone().unwrap();
     let pause_flag = runtime.recording_pause_flag.clone().unwrap();
-    let start_ms = runtime.snapshot().elapsed_ms;
     let seg_idx = runtime.system_audio_segments.len();
     if !runtime.system_audio_process_ids.is_empty() {
         let process_ids = runtime.system_audio_process_ids.clone();
@@ -1292,10 +1296,12 @@ fn ensure_system_audio_capture_started(
             Ok(handle) => {
                 runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
                 runtime.system_audio_threads = handle.joins;
-                runtime.system_audio_stream_start_ms = Some(start_ms);
+                // 与 AAC 路径一致：设备初始化完成后重读 start_ms，避免音频段整体偏早
+                let actual_start_ms = runtime.snapshot().elapsed_ms;
+                runtime.system_audio_stream_start_ms = Some(actual_start_ms);
                 for p in output_paths {
                     runtime.system_audio_segments.push(
-                        crate::features::recording::state::AudioSegment { path: p, start_ms, trim_start_ms: 0 },
+                        crate::features::recording::state::AudioSegment { path: p, start_ms: actual_start_ms, trim_start_ms: 0 },
                     );
                 }
                 Ok(())
