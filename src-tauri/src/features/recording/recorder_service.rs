@@ -52,6 +52,9 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 static LAST_OPEN_FOLDER_MS: AtomicU64 = AtomicU64::new(0);
 const VIDEO_IO_RETRY_DELAYS_MS: [u64; 5] = [60, 120, 240, 480, 800];
 
+/// 非窗口录制开头灰色帧的裁剪时长（ms），音频校准需同步补偿该值
+const GRAY_FRAME_TRIM_MS: u64 = 300;
+
 fn suppress_console_window(command: &mut Command) -> &mut Command {
     #[cfg(target_os = "windows")]
     {
@@ -446,68 +449,6 @@ fn trim_video_initial_frames(
     Ok(())
 }
 
-/// P4 辅助函数：使用 FFmpeg concat demuxer 拼接多个音频片段为单个文件（流复制，无重编码）
-fn concat_audio_segments(
-    ffmpeg_path: &std::path::Path,
-    segments: &[crate::features::recording::state::AudioSegment],
-) -> Result<PathBuf, String> {
-    if segments.is_empty() {
-        return Err(AppErrorKind::InternalError.to_frontend_json());
-    }
-    if segments.len() == 1 {
-        return Ok(segments[0].path.clone());
-    }
-
-    let output_dir = segments[0]
-        .path
-        .parent()
-        .ok_or_else(|| "无法获取音频片段目录".to_string())?;
-    let concat_path = output_dir.join("concat_audio.tmp.wav");
-
-    let list_path = output_dir.join("concat_audio_list.txt");
-    let mut list_file = fs::File::create(&list_path)
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-    for seg in segments {
-        let seg_path = seg.path.to_string_lossy().replace('\'', "'\\''");
-        let line = format!("file '{}'\n", seg_path);
-        if let Err(e) = list_file.write_all(line.as_bytes()) {
-            drop(list_file);
-            let _ = fs::remove_file(&list_path);
-            let _ = fs::remove_file(&concat_path);
-            return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
-        }
-    }
-
-    let mut cmd = Command::new(ffmpeg_path);
-    suppress_console_window(&mut cmd);
-    let output_result = cmd
-        .arg("-hide_banner")
-        .arg("-loglevel")
-        .arg("warning")
-        .arg("-y")
-        .arg("-f")
-        .arg("concat")
-        .arg("-safe")
-        .arg("0")
-        .arg("-i")
-        .arg(&list_path)
-        .arg("-c")
-        .arg("copy")
-        .arg(&concat_path)
-        .output();
-    let _ = fs::remove_file(&list_path);
-    let output = output_result
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let _ = fs::remove_file(&concat_path);
-        return Err(format!("音频拼接失败: {}", stderr));
-    }
-
-    Ok(concat_path)
-}
-
 /// 纯音频多片段合并：将多个音频片段（含 adelay）合并为单个 AAC，不涉及视频
 /// 用于替代 filter_complex 慢速路径中的视频参与步骤
 fn merge_audio_segments_only(
@@ -726,26 +667,9 @@ fn merge_system_audio_into_video(
     let has_mic = !valid_mic.is_empty();
     // P4 优化：多片段快速路径 — 当所有系统音频片段延迟极低且无裁剪时，
     // 先用 concat 拼接为单个文件，再走快速路径，避免 amix 重编码
-    if valid_system.len() > 1 && valid_mic.is_empty() {
-        let all_low_latency = valid_system.iter().all(|s| s.start_ms < 200 && s.trim_start_ms == 0);
-        if all_low_latency {
-            let concat_result = concat_audio_segments(ffmpeg_path, &valid_system);
-            match concat_result {
-                Ok(concat_path) => {
-                    log::info!(
-                        "P4 快速路径：{}个系统音频片段已拼接，使用流复制模式",
-                        valid_system.len()
-                    );
-                    let result = merge_audio_fast(ffmpeg_path, video_path, &concat_path, false, audio_bitrate_kbps);
-                    let _ = fs::remove_file(&concat_path);
-                    return result;
-                }
-                Err(e) => {
-                    log::warn!("P4 多片段拼接失败，回退到 amix 模式: {}", e);
-                }
-            }
-        }
-    }
+    // ⚠️ 已移除：多进程并行音频段 start_ms 相同，concat 首尾拼接会错误地把并行流串接，
+    //    正确语义是 amix 混音（走下方两步法）；pause/resume 段 start_ms 递增、永远不满足
+    //    all_low_latency，故该快路径仅会命中错误的并行场景。
 
     if !has_system && !has_mic {
         if expected_system_count > 0 || expected_mic_count > 0 {
@@ -2501,26 +2425,31 @@ pub fn stop_recording(
 
     // FFmpeg/gdigrab 录制 A/V 同步校正：测量 FFmpeg 进程启动相对于录制原点的延迟
     // 类似 WGC 的 first_frame_elapsed_ms 机制，消除音频提前 10~50ms 的固有偏差
-    if target_type != "window" && ffmpeg_start_delay_ms > 0 {
+    // 注意：非窗口视频尾部会裁剪开头 GRAY_FRAME_TRIM_MS 的灰色帧，视频时间线整体前移，
+    // 音频侧需同步多扣 GRAY_FRAME_TRIM_MS，否则音频相对视频滞后约 0.3s
+    if target_type != "window" && (ffmpeg_start_delay_ms > 0 || GRAY_FRAME_TRIM_MS > 0) {
+        let effective_delay = ffmpeg_start_delay_ms.saturating_add(GRAY_FRAME_TRIM_MS);
         log::info!(
-            "应用 FFmpeg 启动延迟校正: ffmpeg_delay={}ms",
-            ffmpeg_start_delay_ms
+            "应用 FFmpeg 启动延迟校正: ffmpeg_delay={}ms, trim_compensation={}ms, effective={}ms",
+            ffmpeg_start_delay_ms,
+            GRAY_FRAME_TRIM_MS,
+            effective_delay
         );
         for seg in &mut sys_segments {
-            if seg.start_ms < ffmpeg_start_delay_ms {
-                seg.trim_start_ms = ffmpeg_start_delay_ms - seg.start_ms;
+            if seg.start_ms < effective_delay {
+                seg.trim_start_ms = effective_delay - seg.start_ms;
                 seg.start_ms = 0;
             } else {
-                seg.start_ms = seg.start_ms - ffmpeg_start_delay_ms;
+                seg.start_ms = seg.start_ms - effective_delay;
                 seg.trim_start_ms = 0;
             }
         }
         for seg in &mut mic_segments {
-            if seg.start_ms < ffmpeg_start_delay_ms {
-                seg.trim_start_ms = ffmpeg_start_delay_ms - seg.start_ms;
+            if seg.start_ms < effective_delay {
+                seg.trim_start_ms = effective_delay - seg.start_ms;
                 seg.start_ms = 0;
             } else {
-                seg.start_ms = seg.start_ms - ffmpeg_start_delay_ms;
+                seg.start_ms = seg.start_ms - effective_delay;
                 seg.trim_start_ms = 0;
             }
         }
@@ -2546,9 +2475,14 @@ pub fn stop_recording(
 
         // 🔧 非窗口录制（gdigrab）时，裁剪视频开头的灰色帧
         // gdigrab 初始化时前几帧可能是灰色/黑色的，裁剪掉前 0.3 秒
+        // （音频校准已按 GRAY_FRAME_TRIM_MS 同步补偿）
         if fatal_error.is_none() && target_type != "window" {
             log::info!("🔧 裁剪 gdigrab 初始化灰色帧...");
-            if let Err(e) = trim_video_initial_frames(&ffmpeg_path, output_tmp, 0.3) {
+            if let Err(e) = trim_video_initial_frames(
+                &ffmpeg_path,
+                output_tmp,
+                GRAY_FRAME_TRIM_MS as f64 / 1000.0,
+            ) {
                 // 裁剪失败不影响主流程，只记录警告
                 log::warn!("裁剪灰色帧失败（不影响视频保存）: {}", e);
             }

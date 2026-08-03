@@ -2,7 +2,7 @@ use crate::core::app_state::AppState as SharedAppState;
 use crate::core::error_codes::AppErrorKind;
 use crate::core::frontend_error::app_error_to_frontend_json;
 use crate::core::perf_metrics::record_perf_metric;
-use crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path;
+use crate::features::recording::ffmpeg_runner::{is_valid_ffmpeg_file, resolve_ffmpeg_path};
 use crate::features::recording::recorder_service;
 use crate::features::recording::types::{
     AudioInputDevice, AudioProcessItem, RecordingRegressionReport, RecordingRuntimeState,
@@ -13,6 +13,10 @@ use crate::ui::window_manager::show_overlay_window_by_label;
 use crate::utils::utils_helpers::{
     load_settings, verify_downloaded_exe_integrity,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// ffmpeg 下载进行中标志，防止并发下载互相破坏临时文件
+static FFMPEG_DOWNLOAD_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 use futures_util::StreamExt;
 use serde::Deserialize;
 use serde::Serialize;
@@ -151,7 +155,7 @@ pub async fn check_recording_ffmpeg() -> Result<RecordingFfmpegStatus, String> {
         .map(|p| p.to_path_buf())
         .unwrap_or(get_software_bin_dir()?);
     Ok(RecordingFfmpegStatus {
-        exists: ffmpeg_path.exists() && ffmpeg_path.is_file(),
+        exists: is_valid_ffmpeg_file(&ffmpeg_path),
         ffmpeg_path: ffmpeg_path.to_string_lossy().to_string(),
         bin_dir: bin_dir.to_string_lossy().to_string(),
         download_url: get_default_ffmpeg_download_url(),
@@ -163,6 +167,18 @@ pub async fn download_recording_ffmpeg(
     download_url: Option<String>,
     app: AppHandle,
 ) -> Result<RecordingFfmpegStatus, String> {
+    // 并发下载保护：重复点击/多处触发共用同一临时文件会互相破坏
+    if FFMPEG_DOWNLOAD_IN_PROGRESS.swap(true, Ordering::AcqRel) {
+        return Err("ffmpeg 正在下载中，请稍后再试".to_string());
+    }
+    struct DownloadGuard;
+    impl Drop for DownloadGuard {
+        fn drop(&mut self) {
+            FFMPEG_DOWNLOAD_IN_PROGRESS.store(false, Ordering::Release);
+        }
+    }
+    let _download_guard = DownloadGuard;
+
     let ffmpeg_path = get_preferred_install_ffmpeg_path()?;
     let bin_dir = ffmpeg_path
         .parent()
@@ -194,7 +210,11 @@ pub async fn download_recording_ffmpeg(
         log::warn!("发送FFmpeg下载进度事件失败: {}", e);
     }
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("构建下载客户端失败: {}", e))?;
     let response = client
         .get(&url)
         .send()

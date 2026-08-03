@@ -50,6 +50,22 @@ fn candidate_paths() -> Vec<PathBuf> {
     candidates
 }
 
+/// 校验 ffmpeg 文件是否可用：MZ 头 + 合理大小，避免损坏/0 字节/伪造文件被误判可用
+pub(crate) fn is_valid_ffmpeg_file(path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if meta.len() < 1024 * 1024 {
+        return false;
+    }
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut magic = [0u8; 2];
+    f.read_exact(&mut magic).is_ok() && &magic == b"MZ"
+}
+
 pub fn resolve_ffmpeg_path() -> Result<PathBuf, String> {
     let mut checked = Vec::new();
     for path in candidate_paths() {
@@ -62,7 +78,7 @@ pub fn resolve_ffmpeg_path() -> Result<PathBuf, String> {
             }
             continue;
         }
-        if path.exists() && path.is_file() {
+        if is_valid_ffmpeg_file(&path) {
             return Ok(path);
         }
     }
