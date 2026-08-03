@@ -3484,6 +3484,13 @@ function handleKeyDown(event) {
   }
   if (state.value === 'selected' || state.value === 'selecting') {
     cancelSelection()
+  } else if (state.value === 'drawing') {
+    // 丢弃未完成的笔画，避免直接关闭编辑器丢失标注
+    activeRasterCommand = null
+    state.value = 'selected'
+  } else if (state.value === 'moving' || state.value === 'resizing' || state.value === 'text-moving'
+      || state.value === 'shape-moving' || state.value === 'shape-resizing' || state.value === 'shape-point-moving') {
+    state.value = 'selected'
   } else {
     close()
   }

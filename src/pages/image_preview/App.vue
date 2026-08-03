@@ -224,6 +224,14 @@ onMounted(async () => {
     if (!activeRequestId.value) {
       activeRequestId.value = payloadRequestId
     }
+    // 新 payload 到达时取消挂起的关闭定时器，避免关闭动画期间新图片被误关
+    if (closeTimer) {
+      window.clearTimeout(closeTimer)
+      closeTimer = null
+    }
+    if (animationState.value === 'closing') {
+      animationState.value = 'opened'
+    }
     if (revealTimer) {
       window.clearTimeout(revealTimer)
       revealTimer = null

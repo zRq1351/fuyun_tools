@@ -157,6 +157,21 @@ fn load_font_arc(font_family: Option<&str>) -> Result<ab_glyph::FontArc, String>
     Err(format!("未找到可用字体: {}", cache_key))
 }
 
+/// 加载用于文本标注的字体：若文本含 CJK 而所选字体无 CJK 字形（单一字体渲染无逐字形回退），
+/// 改用中文字体（含 Latin+CJK），避免导出截图中的中文标注渲染成方块
+fn load_font_for_text(font_family: Option<&str>, text: &str) -> Result<ab_glyph::FontArc, String> {
+    let font = load_font_arc(font_family)?;
+    let has_cjk = text.chars().any(|c| {
+        matches!(c, '\u{2E80}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}' | '\u{FF00}'..='\u{FFEF}')
+    });
+    if has_cjk && ab_glyph::Font::glyph_id(&font, '中').0 == 0 {
+        if let Ok(cjk_font) = load_font_arc(Some("Microsoft YaHei")) {
+            return Ok(cjk_font);
+        }
+    }
+    Ok(font)
+}
+
 fn clamp_crop_rect(
     source: &RgbaImage,
     selection: &ScreenshotExportSelection,
@@ -410,7 +425,7 @@ fn draw_text_item(
     y: f32,
     font_size: f32,
 ) -> Result<(), String> {
-    let font = load_font_arc(item.font_family.as_deref())?;
+    let font = load_font_for_text(item.font_family.as_deref(), &item.text)?;
     let scale = ab_glyph::PxScale::from(font_size.max(8.0));
     let color = parse_hex_color(&item.color);
     let shadow = item.shadow.unwrap_or(false);
@@ -578,15 +593,19 @@ pub(super) fn render_screenshot_image(request: &ScreenshotExportRequest) -> Resu
     let source = image::open(&request.source_image_path)
         .map_err(|e| format!("读取源图失败: {}", e))?
         .to_rgba8();
+    let dpr = request.device_pixel_ratio.unwrap_or(1.0).max(0.1);
+    // 裁剪与绘制统一使用钳制后的选区原点，避免多屏负原点时绘制偏移与裁剪不一致
+    let selection = request.selection.as_ref().map(|s| ScreenshotExportSelection {
+        x: s.x.max(0.0),
+        y: s.y.max(0.0),
+        width: s.width,
+        height: s.height,
+    });
     let mut canvas = if request.is_longshot {
         source.clone()
     } else {
-        let selection = request
-            .selection
-            .as_ref()
-            .ok_or_else(|| "缺少裁剪区域".to_string())?;
-        let dpr = request.device_pixel_ratio.unwrap_or(1.0).max(0.1);
-        let (crop_x, crop_y, crop_w, crop_h) = clamp_crop_rect(&source, selection, dpr);
+        let sel = selection.as_ref().ok_or_else(|| "缺少裁剪区域".to_string())?;
+        let (crop_x, crop_y, crop_w, crop_h) = clamp_crop_rect(&source, sel, dpr);
         imageops::crop_imm(&source, crop_x, crop_y, crop_w, crop_h).to_image()
     };
 
@@ -604,20 +623,15 @@ pub(super) fn render_screenshot_image(request: &ScreenshotExportRequest) -> Resu
             let font_size = (item.font_size / fit).max(8.0);
             draw_text_item(&mut canvas, item, x, y, font_size)?;
         }
-    } else {
-        let selection = request
-            .selection
-            .as_ref()
-            .ok_or_else(|| "缺少裁剪区域".to_string())?;
-        let dpr = request.device_pixel_ratio.unwrap_or(1.0).max(0.1);
-        render_normal_raster_commands(&mut canvas, &source, request, selection, dpr);
-        render_normal_shapes(&mut canvas, request, selection, dpr);
+    } else if let Some(sel) = selection.as_ref() {
+        render_normal_raster_commands(&mut canvas, &source, request, sel, dpr);
+        render_normal_shapes(&mut canvas, request, sel, dpr);
         for item in &request.text_items {
             draw_text_item(
                 &mut canvas,
                 item,
-                (item.x - selection.x) * dpr,
-                (item.y - selection.y) * dpr,
+                (item.x - sel.x) * dpr,
+                (item.y - sel.y) * dpr,
                 item.font_size * dpr,
             )?;
         }
