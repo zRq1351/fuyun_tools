@@ -33,6 +33,96 @@ impl CustomCommandType {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_custom_command_type_roundtrip() {
+        let cases = vec![
+            CustomCommandType::OpenWindow {
+                label: "settings".to_string(),
+            },
+            CustomCommandType::ExecuteAction {
+                action: "screenshot".to_string(),
+            },
+            CustomCommandType::CopyText {
+                text: "hello".to_string(),
+            },
+            CustomCommandType::RunProgram {
+                path: "C:/app.exe".to_string(),
+                args: Some("--flag".to_string()),
+            },
+            CustomCommandType::RunProgram {
+                path: "C:/app.exe".to_string(),
+                args: None,
+            },
+        ];
+        for case in cases {
+            let json = case.to_json();
+            let back = CustomCommandType::from_json(&json).unwrap();
+            let back_json = serde_json::to_string(&back).unwrap();
+            assert_eq!(json, back_json);
+        }
+    }
+
+    #[test]
+    fn test_custom_command_type_from_invalid_json() {
+        assert!(CustomCommandType::from_json("").is_none());
+        assert!(CustomCommandType::from_json("{bad").is_none());
+        assert!(CustomCommandType::from_json("123").is_none());
+    }
+
+    #[test]
+    fn test_launcher_config_default() {
+        let cfg = LauncherConfig::default();
+        assert_eq!(cfg.view_mode, "list");
+        assert!(cfg.categories.is_empty());
+        assert!(cfg.app_category_map.is_empty());
+        assert!(cfg.custom_commands.is_empty());
+    }
+
+    #[test]
+    fn test_launcher_category_serde() {
+        let cat = LauncherCategory {
+            id: "c1".to_string(),
+            name: "开发".to_string(),
+            icon: "code".to_string(),
+            app_ids: vec!["a".to_string(), "b".to_string()],
+        };
+        let v: serde_json::Value = serde_json::to_value(&cat).unwrap();
+        assert_eq!(v["id"], "c1");
+        assert_eq!(v["name"], "开发");
+        assert_eq!(v["icon"], "code");
+        // 结构体无 rename_all，字段为 snake_case
+        assert_eq!(v["app_ids"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_custom_command_serde() {
+        let cmd = CustomCommand {
+            id: "cmd1".to_string(),
+            prefix: ":run".to_string(),
+            title: "运行".to_string(),
+            description: Some("desc".to_string()),
+            icon: "icon".to_string(),
+            command_type: CustomCommandType::ExecuteAction {
+                action: "recording".to_string(),
+            },
+            enabled: true,
+            created_at: 123,
+        };
+        let v: serde_json::Value = serde_json::to_value(&cmd).unwrap();
+        assert_eq!(v["prefix"], ":run");
+        assert_eq!(v["title"], "运行");
+        // 字段 snake_case；枚举默认序列化为 {"VariantName": {...}}
+        assert_eq!(v["command_type"]["ExecuteAction"]["action"], "recording");
+        assert_eq!(v["enabled"], true);
+        assert_eq!(v["description"], "desc");
+        assert_eq!(v["created_at"], 123);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomCommand {
     pub id: String,

@@ -1058,7 +1058,7 @@ fn position_widget_to_top_right(window: &tauri::WebviewWindow) -> Result<(), Str
         .map_err(|e| format!("set_position: {}", e))
 }
 
-fn is_window_feature_enabled(app: &AppHandle, label: &str) -> bool {
+pub(crate) fn is_window_feature_enabled(app: &AppHandle, label: &str) -> bool {
     let Some(state) = app.try_state::<Arc<Mutex<AppState>>>() else {
         return true;
     };

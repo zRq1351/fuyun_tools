@@ -719,6 +719,7 @@ pub async fn run_auto_backup_tick(state: Arc<Mutex<SharedAppState>>) -> Result<b
 mod tests {
     use std::fs;
     use std::path::PathBuf;
+    use super::*;
 
     /// 创建临时测试目录
     fn create_test_dir() -> PathBuf {
@@ -854,5 +855,35 @@ mod tests {
         }
 
         let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_backup_frequency_interval_ms() {
+        assert_eq!(backup_frequency_interval_ms("daily"), Some(86_400_000));
+        assert_eq!(backup_frequency_interval_ms("weekly"), Some(604_800_000));
+        assert_eq!(backup_frequency_interval_ms("monthly"), None);
+        assert_eq!(backup_frequency_interval_ms(""), None);
+    }
+
+    #[test]
+    fn test_default_backup_file_name_format() {
+        let name = default_backup_file_name();
+        assert!(name.starts_with("fuyun_tools_"));
+        assert!(name.ends_with(".fytbk.zip"));
+    }
+
+    #[test]
+    fn test_list_backup_history_empty_dir() {
+        let dir = std::env::temp_dir().join("fyt_bak_history_empty");
+        let _ = std::fs::create_dir_all(&dir);
+        let items = list_backup_history_items(&dir).unwrap();
+        assert!(items.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_list_backup_history_nonexistent_dir() {
+        let items = list_backup_history_items(std::path::Path::new("C:/no/such/bak_dir")).unwrap();
+        assert!(items.is_empty());
     }
 }

@@ -288,3 +288,77 @@ pub fn rgba_to_base64_png(rgba: &[u8], width: u32, height: u32) -> Result<String
     }
     String::from_utf8(base64_output).map_err(|e| format!("Base64转字符串失败: {}", e))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 截图标志为全局静态，测试需串行避免互相干扰
+    static FLAG_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_flags() -> std::sync::MutexGuard<'static, ()> {
+        FLAG_MUTEX.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    #[test]
+    fn test_try_begin_screenshot_guards_concurrency() {
+        let _g = lock_flags();
+        set_screenshot_in_progress(false);
+        assert!(!is_screenshot_in_progress());
+        assert!(try_begin_screenshot());
+        assert!(is_screenshot_in_progress());
+        // 第二次获取应失败（已在进行中）
+        assert!(!try_begin_screenshot());
+        set_screenshot_in_progress(false);
+        assert!(!is_screenshot_in_progress());
+    }
+
+    #[test]
+    fn test_set_screenshot_in_progress_resets_clipboard_flag() {
+        let _g = lock_flags();
+        set_allow_image_clipboard_once(true);
+        set_screenshot_in_progress(true);
+        assert!(is_screenshot_in_progress());
+        set_screenshot_in_progress(false);
+        assert!(!is_screenshot_in_progress());
+        // 结束后 allow-flag 应被清除
+        assert!(!take_allow_image_clipboard_once());
+    }
+
+    #[test]
+    fn test_take_allow_image_clipboard_once() {
+        let _g = lock_flags();
+        set_allow_image_clipboard_once(true);
+        assert!(take_allow_image_clipboard_once());
+        // 第二次应为 false（一次性标志已被取走）
+        assert!(!take_allow_image_clipboard_once());
+    }
+
+    #[test]
+    fn test_rgba_to_png_bytes_valid() {
+        let rgba = vec![255u8, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255];
+        let png = rgba_to_png_bytes(&rgba, 2, 2).unwrap();
+        // PNG 签名: 89 50 4E 47
+        assert_eq!(&png[0..4], b"\x89PNG");
+    }
+
+    #[test]
+    fn test_rgba_to_png_bytes_invalid_size() {
+        // 2x2 需要 16 字节，给 8 字节应报错
+        let rgba = vec![0u8; 8];
+        assert!(rgba_to_png_bytes(&rgba, 2, 2).is_err());
+    }
+
+    #[test]
+    fn test_rgba_to_base64_png_roundtrip() {
+        let rgba = vec![0u8; 4 * 4 * 4]; // 4x4 透明黑
+        let b64 = rgba_to_base64_png(&rgba, 4, 4).unwrap();
+        assert!(b64.starts_with("iVBORw0KGgo")); // PNG base64 标准前缀
+        // base64 解码后可得到 PNG 签名
+        use base64::Engine;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&b64)
+            .unwrap();
+        assert_eq!(&decoded[0..4], b"\x89PNG");
+    }
+}

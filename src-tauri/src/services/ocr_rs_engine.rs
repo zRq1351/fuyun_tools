@@ -165,3 +165,86 @@ fn create_paragraph(lines: Vec<OcrLine>) -> OcrParagraph {
         lines,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line(text: &str, y0: f64) -> OcrLine {
+        OcrLine {
+            text: text.to_string(),
+            x0: 0.0,
+            y0,
+            x1: 100.0,
+            y1: y0 + 15.0,
+            confidence: None,
+        }
+    }
+
+    #[test]
+    fn test_merge_empty_lines() {
+        assert!(merge_lines_to_paragraphs(vec![]).is_empty());
+    }
+
+    #[test]
+    fn test_merge_close_lines_into_one_paragraph() {
+        // 与段落首行 y 比较：10→25 差距 15 < 20 合并；40-10=30 >= 20 拆段
+        let lines = vec![line("第一行", 10.0), line("第二行", 25.0), line("第三行", 40.0)];
+        let paragraphs = merge_lines_to_paragraphs(lines);
+        assert_eq!(paragraphs.len(), 2);
+        assert_eq!(paragraphs[0].text, "第一行\n第二行");
+        assert_eq!(paragraphs[0].lines.len(), 2);
+        assert_eq!(paragraphs[0].y0, 10.0);
+        assert_eq!(paragraphs[0].y1, 40.0);
+        assert_eq!(paragraphs[1].text, "第三行");
+    }
+
+    #[test]
+    fn test_merge_all_close_to_first_line() {
+        // 各行与首行 10 的差距都 < 20 → 单段
+        let lines = vec![line("A", 10.0), line("B", 25.0), line("C", 29.0)];
+        let paragraphs = merge_lines_to_paragraphs(lines);
+        assert_eq!(paragraphs.len(), 1);
+        assert_eq!(paragraphs[0].lines.len(), 3);
+    }
+
+    #[test]
+    fn test_merge_far_lines_split_paragraphs() {
+        let lines = vec![line("标题", 10.0), line("正文", 100.0), line("结尾", 110.0)];
+        let paragraphs = merge_lines_to_paragraphs(lines);
+        assert_eq!(paragraphs.len(), 2);
+        assert_eq!(paragraphs[0].text, "标题");
+        assert_eq!(paragraphs[1].text, "正文\n结尾");
+    }
+
+    #[test]
+    fn test_merge_boundary_gap_20px_split() {
+        // 差距恰好 20 像素：严格小于 20 才合并，20 应拆段
+        let lines = vec![line("A", 10.0), line("B", 30.0)];
+        let paragraphs = merge_lines_to_paragraphs(lines);
+        assert_eq!(paragraphs.len(), 2);
+
+        // 差距 19 像素应合并
+        let lines2 = vec![line("A", 10.0), line("B", 29.0)];
+        let paragraphs2 = merge_lines_to_paragraphs(lines2);
+        assert_eq!(paragraphs2.len(), 1);
+    }
+
+    #[test]
+    fn test_merge_single_line() {
+        let lines = vec![line("只有一行", 5.0)];
+        let paragraphs = merge_lines_to_paragraphs(lines);
+        assert_eq!(paragraphs.len(), 1);
+        assert_eq!(paragraphs[0].text, "只有一行");
+        assert_eq!(paragraphs[0].x0, 0.0);
+        assert_eq!(paragraphs[0].x1, 100.0);
+    }
+
+    #[test]
+    fn test_merge_sorts_text_by_join() {
+        let lines = vec![line("乙", 10.0), line("甲", 20.0)];
+        let paragraphs = merge_lines_to_paragraphs(lines);
+        // 保持输入顺序连接
+        assert_eq!(paragraphs[0].text, "乙\n甲");
+    }
+}

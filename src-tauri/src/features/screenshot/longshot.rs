@@ -131,6 +131,97 @@ mod fallback {
     pub fn kill_active_ffmpeg_child() {
         // 未启用 longshot-opencv 时无需清理
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_default_values() {
+            assert_eq!(default_longshot_fps(), 10);
+            assert_eq!(default_longshot_min_confidence(), 0.82);
+            assert_eq!(default_longshot_max_duration_sec(), 90);
+            assert_eq!(default_longshot_preview_interval_ms(), 300);
+        }
+
+        #[test]
+        fn test_request_defaults_applied_on_missing_fields() {
+            let json = r#"{"region": {"x": 0, "y": 0, "width": 100, "height": 100}}"#;
+            let req: StartManualLongshotRequest = serde_json::from_str(json).unwrap();
+            assert_eq!(req.fps, 10);
+            assert_eq!(req.min_confidence, 0.82);
+            assert_eq!(req.max_duration_sec, 90);
+            assert_eq!(req.preview_interval_ms, 300);
+            assert_eq!(req.region.width, 100);
+        }
+
+        #[test]
+        fn test_request_explicit_values_kept() {
+            let json = r#"{"region": {"x": 1, "y": 2, "width": 3, "height": 4}, "fps": 30, "minConfidence": 0.5, "maxDurationSec": 60, "previewIntervalMs": 500}"#;
+            let req: StartManualLongshotRequest = serde_json::from_str(json).unwrap();
+            assert_eq!(req.fps, 30);
+            assert_eq!(req.min_confidence, 0.5);
+            assert_eq!(req.max_duration_sec, 60);
+            assert_eq!(req.preview_interval_ms, 500);
+        }
+
+        #[test]
+        fn test_opencv_disabled_error_message() {
+            assert!(opencv_disabled_error().contains("longshot-opencv"));
+        }
+
+        #[test]
+        fn test_fallback_functions_return_disabled_error() {
+            let request = StartManualLongshotRequest {
+                region: LongshotRegion {
+                    x: 0,
+                    y: 0,
+                    width: 10,
+                    height: 10,
+                },
+                fps: 10,
+                min_confidence: 0.82,
+                max_duration_sec: 90,
+                preview_interval_ms: 300,
+            };
+            // 需要 AppHandle 的函数无法在单测中构造，此处仅测不依赖 AppHandle 的
+            assert!(active_manual_longshot_session_id().is_none());
+            assert!(get_last_manual_longshot_failure().is_none());
+            kill_active_ffmpeg_child(); // 不 panic 即通过
+        }
+
+        #[test]
+        fn test_status_serialize_camel_case() {
+            let status = ManualLongshotStatus {
+                session_id: 1,
+                state: "running".to_string(),
+                phase: "capturing".to_string(),
+                region: LongshotRegion {
+                    x: 0,
+                    y: 0,
+                    width: 640,
+                    height: 480,
+                },
+                frame_count: 10,
+                dropped_frames: 2,
+                stitched_height: 960,
+                stitched_width: 640,
+                last_confidence: 0.9,
+                last_error: None,
+                failure_kind: None,
+                user_message: "ok".to_string(),
+            };
+            let v: serde_json::Value = serde_json::to_value(&status).unwrap();
+            assert_eq!(v["sessionId"], 1);
+            assert_eq!(v["frameCount"], 10);
+            assert_eq!(v["droppedFrames"], 2);
+            assert_eq!(v["stitchedHeight"], 960);
+            // f32 -> f64 序列化存在精度误差，用近似断言
+            let conf = v["lastConfidence"].as_f64().unwrap();
+            assert!((conf - 0.9).abs() < 0.0001);
+            assert_eq!(v["userMessage"], "ok");
+        }
+    }
 }
 
 #[cfg(not(feature = "longshot-opencv"))]

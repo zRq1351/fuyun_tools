@@ -18,7 +18,7 @@ export const ErrorCode = {
  * @param {string} raw - The raw error string from Tauri
  * @returns {{code: string, message: string, params?: object}|null}
  */
-function parseFrontendErrorJson(raw) {
+export function parseFrontendErrorJson(raw) {
     if (typeof raw !== 'string') return null
     try {
         const parsed = JSON.parse(raw)
@@ -34,7 +34,7 @@ function parseFrontendErrorJson(raw) {
 /**
  * Parse legacy string error format: "[CODE] message；details"
  */
-function parseLegacyError(raw) {
+export function parseLegacyError(raw) {
     const match = raw.match(/^\[(CONFIG_ERROR|NETWORK_ERROR|IO_ERROR|CLIPBOARD_ERROR|SYSTEM_ERROR|VALIDATION_ERROR)\]\s*(.+)/)
     if (match) {
         const parts = match[2].split('；')

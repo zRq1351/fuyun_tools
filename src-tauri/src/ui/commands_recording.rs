@@ -331,6 +331,10 @@ fn move_window_top_center(window: &tauri::WebviewWindow, target_logical_width: O
 fn ensure_recording_toolbar_window(
     app: &AppHandle,
 ) -> Result<(tauri::WebviewWindow, bool), String> {
+    // 录屏功能未启用时拒绝创建/显示工具栏，避免出现"录屏已停用"这类不可操作状态
+    if !crate::ui::window_manager::is_window_feature_enabled(app, "recording_toolbar") {
+        return Err(AppErrorKind::RecordingFeatureDisabled.to_frontend_json());
+    }
     let (window, is_new) = crate::ui::window_manager::ensure_overlay_window(
         app, "recording_toolbar", "recording_toolbar.html", "", Some((530.0, 64.0)),
     )?;
@@ -875,5 +879,72 @@ pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
                 log::warn!("发送录屏错误事件失败: {}", e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_layout_mode() {
+        assert_eq!(default_layout_mode(), "capsule");
+    }
+
+    #[test]
+    fn test_is_trusted_download_host() {
+        assert!(is_trusted_download_host("gitee.com"));
+        assert!(is_trusted_download_host("github.com"));
+        assert!(is_trusted_download_host("objects.githubusercontent.com"));
+        assert!(is_trusted_download_host("aka.ms"));
+        assert!(!is_trusted_download_host("evil.example.com"));
+        assert!(!is_trusted_download_host(""));
+    }
+
+    #[test]
+    fn test_validate_download_url_policy_rejects_http() {
+        let err = validate_download_url_policy("http://gitee.com/ffmpeg.exe", Some("a".repeat(64).as_str()))
+            .unwrap_err();
+        assert!(err.contains("HTTPS"));
+    }
+
+    #[test]
+    fn test_validate_download_url_policy_rejects_untrusted_without_hash() {
+        let err =
+            validate_download_url_policy("https://evil.example.com/ffmpeg.exe", None).unwrap_err();
+        assert!(err.contains("不受信任"));
+    }
+
+    #[test]
+    fn test_validate_download_url_policy_allows_trusted_without_hash() {
+        assert!(validate_download_url_policy("https://gitee.com/ffmpeg.exe", None).is_ok());
+        assert!(validate_download_url_policy("https://github.com/x/y", None).is_ok());
+    }
+
+    #[test]
+    fn test_validate_download_url_policy_allows_any_with_hash() {
+        let hash = "a".repeat(64);
+        assert!(validate_download_url_policy("https://any.example.com/f.exe", Some(&hash)).is_ok());
+    }
+
+    #[test]
+    fn test_validate_download_url_policy_rejects_invalid_url() {
+        assert!(validate_download_url_policy("not a url", None).is_err());
+        assert!(validate_download_url_policy("", None).is_err());
+    }
+
+    #[test]
+    fn test_ffmpeg_status_serde_camel_case() {
+        let status = RecordingFfmpegStatus {
+            exists: true,
+            ffmpeg_path: "C:/bin/ffmpeg.exe".to_string(),
+            bin_dir: "C:/bin".to_string(),
+            download_url: "https://gitee.com/f".to_string(),
+        };
+        let v: serde_json::Value = serde_json::to_value(&status).unwrap();
+        assert_eq!(v["exists"], true);
+        assert_eq!(v["ffmpegPath"], "C:/bin/ffmpeg.exe");
+        assert_eq!(v["binDir"], "C:/bin");
+        assert_eq!(v["downloadUrl"], "https://gitee.com/f");
     }
 }

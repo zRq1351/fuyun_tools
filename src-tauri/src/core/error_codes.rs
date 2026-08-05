@@ -538,3 +538,166 @@ impl AppErrorKind {
         crate::core::frontend_error::to_frontend_error_json_with_params(*self, params)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::error::ErrorCode;
+
+    /// 全量枚举，用于验证每个错误码都有分类、消息与机器可读 key
+    fn all_error_kinds() -> Vec<AppErrorKind> {
+        use AppErrorKind::*;
+        vec![
+            Unknown, InternalError, TaskExecutionFailed,
+            SettingsMaxItemsRange, SettingsTextMaxItemsRange, SettingsImageMaxItemsRange,
+            SettingsImageDiskLimitRange, SettingsImageFillVerifyModeInvalid,
+            SettingsHotkeyFormatInvalid, SettingsHotkeyEmpty, SettingsHotkeyConflict,
+            SettingsHotkeysIdentical, SettingsRecordingFpsRange,
+            SettingsRecordingVideoBitrateRange, SettingsRecordingAudioBitrateRange,
+            SettingsRecordingMaxDurationRange, SettingsRecordingFileNameEmpty,
+            SettingsRecordingFfmpegUrlEmpty, SettingsRecordingFfmpegUrlNotHttps,
+            SettingsRecordingAudioSyncRange, SettingsClipboardBottomOffsetRange,
+            SettingsTranslationPromptEmpty, SettingsExplanationPromptEmpty,
+            SettingsTranslationPromptMissingPlaceholder,
+            SettingsExplanationPromptMissingPlaceholder, SettingsProviderNameEmpty,
+            SettingsSaveProviderFailed, SettingsSaveFailed, SettingsValidationFailed,
+            SettingsApiKeySaveFailed, SettingsApiKeyGetFailed,
+            SettingsCredentialCreateFailed, SettingsLocalKeyNotFound,
+            AiNotConfigured, AiProviderNotFound, AiApiUrlEmpty, AiModelNameEmpty,
+            AiApiUrlInvalid, AiApiKeyNotConfigured, AiKeychainReadFailed,
+            AiClientInitFailed, AiConnectionTestFailed, AiConnectionTestNoResponse, AiTextEmpty,
+            ClipboardHotkeyRegisterFailed, ClipboardCategoryAddFailed,
+            ClipboardCategoryRemoveFailed, ClipboardCategorySetFailed,
+            ClipboardDeleteTextFailed, ClipboardDeleteImageFailed, ClipboardItemNotFound,
+            ClipboardPinFailed, ClipboardPinImageFailed, ClipboardWarmupFailed,
+            ClipboardPreviewPathFailed, ClipboardPreviewShowFailed, ClipboardImagePathEmpty,
+            ClipboardImageFileNotFound, ClipboardImageFormatUnsupported, ClipboardSetTagsFailed,
+            ClipboardUpdateContentFailed, ClipboardSetPinFailed, ClipboardCleanTextFailed,
+            ClipboardCleanImageFailed, ClipboardNoFilesSelected, ClipboardNoImagesFound,
+            ClipboardNoImagesImported, ClipboardImportFailed, ClipboardCopyTextFailed,
+            ClipboardAutoPasteFailed,
+            ScreenshotSourceFileNotFound, ScreenshotTargetDirEmpty, ScreenshotSavePathEmpty,
+            ScreenshotUnsupportedOperation, ScreenshotFeatureDisabled, ScreenshotFailed,
+            ScreenshotWriteSourceFailed, ScreenshotCreateWindowFailed,
+            ScreenshotLongshotStatusFailed, LongshotAreaTooSmall, LongshotAlreadyRunning,
+            LongshotSessionNotFound, LongshotSessionIdMismatch, LongshotNoValidCapture,
+            LongshotNoSegments, LongshotResultEmpty, LongshotFrameTooSmall,
+            LongshotAreaTooLarge, LongshotDependencyMissing, LongshotFfmpegReadFailed,
+            LongshotCancelled, LongshotTimeout,
+            RecordingFeatureDisabled, RecordingFfmpegNotFound, RecordingStartFailed,
+            RecordingStopFailed, RecordingPauseFailed, RecordingResumeFailed,
+            RecordingWindowInvalid, RecordingWindowInvisible, RecordingWindowMinimized,
+            BackupDirNotConfigured, BackupDirNotSet, BackupInvalidFile, BackupDeleteOutsideDir,
+            DocumentDirHasFiles, DocumentCategoryHasFiles, DocumentPathNotDir,
+            DocumentCategoryNameEmpty, DocumentCategoryNameInvalidChar, DocumentFileNotFound,
+            DocumentMoveFailed, DocumentDeleteFailed, DocumentRenameFailed, DocumentScanFailed,
+            DocumentImportFailed, DocumentDetectionFailed, DocumentDirNotFound,
+            LauncherStartupFailed, LauncherCommandPrefixExists, LauncherCommandNotFound,
+            LauncherShortcutNotFound, LauncherShortcutResolveFailed, LauncherAppDirFailed,
+            LauncherNotWindows,
+            SelectionFeatureDisabled, SelectionClipboardDisabled,
+            SelectionImageClipboardDisabled, SelectionCtrlReleaseFailed,
+            SelectionWaitHideTimeout,
+            VcRuntimeDownloadUrlEmpty, VcRuntimeDownloadUrlSha256Invalid,
+            ImageStoreReadFailed, ImageStoreWriteFailed, ImageStoreInitFailed,
+            ImageStorePoolFailed, ImageStoreBatchDeleteFailed, DatabaseTargetNotFound,
+            DatabaseError, IoError, JsonError,
+            SystemImageDataEmpty, SystemLocalImageEmpty, SystemIndexOutOfRange,
+            SystemUnsupportedCleanMode, SystemPreviewGenerating, SystemWebImageNoData,
+            SystemClipboardNotBitmap, SystemWriteClipboardFailed,
+        ]
+    }
+
+    #[test]
+    fn test_all_error_kinds_have_non_empty_message() {
+        for kind in all_error_kinds() {
+            assert!(
+                !kind.default_message().trim().is_empty(),
+                "错误码 {} 缺少默认消息",
+                kind.to_key()
+            );
+        }
+    }
+
+    #[test]
+    fn test_all_error_kinds_have_machine_key() {
+        for kind in all_error_kinds() {
+            let key = kind.to_key();
+            assert!(!key.is_empty(), "错误码 {} 的 key 为空", kind.to_key());
+            assert!(
+                key.chars().all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit()),
+                "key 格式不是 SCREAMING_SNAKE_CASE: {}",
+                key
+            );
+            assert!(!key.starts_with('_') && !key.ends_with('_'));
+        }
+    }
+
+    #[test]
+    fn test_error_categories_are_valid() {
+        let valid = [
+            ErrorCode::ConfigError,
+            ErrorCode::NetworkError,
+            ErrorCode::IoError,
+            ErrorCode::ClipboardError,
+            ErrorCode::SystemError,
+            ErrorCode::ValidationError,
+        ];
+        for kind in all_error_kinds() {
+            let cat = kind.category();
+            assert!(
+                valid.contains(&cat),
+                "错误码 {} 的分类非法: {:?}",
+                kind.to_key(),
+                cat
+            );
+        }
+    }
+
+    #[test]
+    fn test_to_frontend_json_roundtrip() {
+        for kind in all_error_kinds() {
+            let s = kind.to_frontend_json();
+            let v: serde_json::Value = serde_json::from_str(&s)
+                .unwrap_or_else(|e| panic!("错误码 {} JSON 解析失败: {}", kind.to_key(), e));
+            assert_eq!(
+                v["code"],
+                format!("E_{}", kind.to_key()),
+                "错误码 {} 的 code 不匹配",
+                kind.to_key()
+            );
+            assert!(!v["message"].as_str().unwrap_or("").is_empty());
+        }
+    }
+
+    #[test]
+    fn test_unknown_key_mapping() {
+        assert_eq!(AppErrorKind::Unknown.to_key(), "UNKNOWN");
+        assert_eq!(AppErrorKind::Unknown.category(), ErrorCode::SystemError);
+        assert_eq!(AppErrorKind::Unknown.default_message(), "未知错误");
+    }
+
+    #[test]
+    fn test_specific_category_spot_checks() {
+        assert_eq!(AppErrorKind::SettingsHotkeyConflict.category(), ErrorCode::ValidationError);
+        assert_eq!(AppErrorKind::AiNotConfigured.category(), ErrorCode::ConfigError);
+        assert_eq!(AppErrorKind::AiConnectionTestFailed.category(), ErrorCode::NetworkError);
+        assert_eq!(AppErrorKind::ClipboardItemNotFound.category(), ErrorCode::ClipboardError);
+        assert_eq!(AppErrorKind::ScreenshotFailed.category(), ErrorCode::SystemError);
+        assert_eq!(AppErrorKind::IoError.category(), ErrorCode::IoError);
+        assert_eq!(AppErrorKind::RecordingFeatureDisabled.category(), ErrorCode::SystemError);
+        assert_eq!(AppErrorKind::BackupDirNotConfigured.category(), ErrorCode::ConfigError);
+    }
+
+    #[test]
+    fn test_to_app_error_keeps_message() {
+        let err = AppErrorKind::ClipboardCopyTextFailed.to_app_error();
+        assert_eq!(err.code, ErrorCode::ClipboardError);
+        assert_eq!(err.message, "复制文本失败");
+        assert!(err.details.is_none());
+
+        let err2 = AppErrorKind::DatabaseError
+            .to_app_error_with_details("locked");
+        assert_eq!(err2.details.as_deref(), Some("locked"));
+    }
+}

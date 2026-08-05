@@ -306,7 +306,9 @@ provideGlobalConfig({locale: elLocale});
 
 const loadingAction = ref(null);
 const capsuleSettingsVisible = ref(false);
-const recordingFeatureEnabled = ref(false);
+// 后端已保证窗口只在录屏启用时才能打开（ensure_recording_toolbar_window 拦截），
+// 因此初始即视为已启用，避免读取设置前短暂显示"录屏已停用"
+const recordingFeatureEnabled = ref(true);
 
 const captureSystemAudio = ref(false);
 const captureMicrophone = ref(false);

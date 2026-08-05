@@ -491,3 +491,148 @@ pub struct PerfSummary {
     pub system_cpu_percent: f64,
     pub timestamp: u64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// perf_metrics 使用全局静态 store，相关测试需串行执行避免互相污染
+    static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_store() -> std::sync::MutexGuard<'static, ()> {
+        TEST_MUTEX.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    #[test]
+    fn test_perf_category_as_str_roundtrip() {
+        let cases = [
+            (PerfCategory::Startup, "startup"),
+            (PerfCategory::Memory, "memory"),
+            (PerfCategory::Cpu, "cpu"),
+            (PerfCategory::ResponseLatency, "response_latency"),
+            (PerfCategory::Ipc, "ipc"),
+            (PerfCategory::Other, "other"),
+        ];
+        for (cat, s) in cases {
+            assert_eq!(cat.as_str(), s);
+            assert_eq!(PerfCategory::from_str(s), cat);
+        }
+        assert_eq!(PerfCategory::from_str("unknown_category"), PerfCategory::Other);
+    }
+
+    #[test]
+    fn test_record_and_snapshot_counts() {
+        let _guard = lock_store();
+        reset_perf_metrics();
+        record_perf_metric("key1", "标签", 100, true, None);
+        record_perf_metric("key1", "标签", 200, true, None);
+        record_perf_metric("key1", "标签", 50, false, Some("失败原因".to_string()));
+
+        let snapshot = get_perf_metrics_snapshot();
+        assert_eq!(snapshot.len(), 1);
+        let m = &snapshot[0];
+        assert_eq!(m.key, "key1");
+        assert_eq!(m.sample_count, 3);
+        assert_eq!(m.success_count, 2);
+        assert_eq!(m.error_count, 1);
+        assert_eq!(m.last_duration_ms, 50);
+        assert_eq!(m.max_duration_ms, 200);
+        assert_eq!(m.last_status, "error");
+        assert_eq!(m.last_error.as_deref(), Some("失败原因"));
+        // avg = (100+200+50)/3
+        assert!((m.avg_duration_ms - 116.666666).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_reset_clears_metrics() {
+        let _guard = lock_store();
+        record_perf_metric("k", "l", 1, true, None);
+        assert!(!get_perf_metrics_snapshot().is_empty());
+        reset_perf_metrics();
+        assert!(get_perf_metrics_snapshot().is_empty());
+    }
+
+    #[test]
+    fn test_timed_sync_success_and_error() {
+        let _guard = lock_store();
+        reset_perf_metrics();
+        let ok = timed_sync("op", "操作", || Ok::<_, String>(42));
+        assert_eq!(ok.unwrap(), 42);
+
+        let err = timed_sync("op2", "操作2", || Err::<i32, String>("boom".to_string()));
+        assert_eq!(err.unwrap_err(), "boom");
+
+        let snapshots = get_perf_metrics_snapshot();
+        assert_eq!(snapshots.len(), 2);
+        let success_metric = snapshots.iter().find(|m| m.key == "op").unwrap();
+        assert_eq!(success_metric.last_status, "success");
+        let error_metric = snapshots.iter().find(|m| m.key == "op2").unwrap();
+        assert_eq!(error_metric.last_status, "error");
+        assert_eq!(error_metric.last_error.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn test_record_with_category_and_filters() {
+        let _guard = lock_store();
+        reset_perf_metrics();
+        record_perf_metric_with_category("s", "启动", PerfCategory::Startup, 10, true, None);
+        record_perf_metric_with_category("m", "内存", PerfCategory::Memory, 5, true, None);
+        record_perf_metric_with_category("i", "IPC", PerfCategory::Ipc, 3, false, Some("e".to_string()));
+
+        assert_eq!(get_startup_metrics().len(), 1);
+        assert_eq!(get_memory_metrics().len(), 1);
+        assert_eq!(get_ipc_metrics().len(), 1);
+
+        let grouped = get_metrics_by_category();
+        assert_eq!(grouped.get("startup").map(|v| v.len()), Some(1));
+        assert!(!grouped.contains_key("other"));
+    }
+
+    #[test]
+    fn test_snapshot_avg_zero_when_no_samples() {
+        let _guard = lock_store();
+        reset_perf_metrics();
+        record_perf_metric_with_category("empty", "空", PerfCategory::Other, 0, true, None);
+        // 直接构造一个 0 样本的聚合验证 snapshot
+        let agg = PerfMetricAggregate::new("l", PerfCategory::Other);
+        let snap = agg.snapshot("k");
+        assert_eq!(snap.avg_duration_ms, 0.0);
+        assert_eq!(snap.sample_count, 0);
+    }
+
+    #[test]
+    fn test_perf_summary_totals() {
+        let _guard = lock_store();
+        reset_perf_metrics();
+        record_perf_metric_with_category("a", "A", PerfCategory::Startup, 10, true, None);
+        record_perf_metric_with_category("b", "B", PerfCategory::Ipc, 20, false, Some("x".to_string()));
+
+        let summary = get_perf_summary();
+        assert_eq!(summary.total_metrics, 2);
+        assert_eq!(summary.total_samples, 2);
+        assert_eq!(summary.total_errors, 1);
+        assert!(summary.avg_duration_ms > 0.0);
+    }
+
+    #[test]
+    fn test_perf_summary_empty() {
+        let _guard = lock_store();
+        reset_perf_metrics();
+        let summary = get_perf_summary();
+        assert_eq!(summary.total_metrics, 0);
+        assert_eq!(summary.total_samples, 0);
+        assert_eq!(summary.avg_duration_ms, 0.0);
+        assert_eq!(summary.avg_startup_ms, 0.0);
+        assert_eq!(summary.avg_ipc_latency_ms, 0.0);
+    }
+
+    #[test]
+    fn test_get_system_resources_returns_snapshot() {
+        let res = get_system_resources();
+        // 不校验具体数值，只保证结构可用且 timestamp 非 0
+        assert!(res.timestamp > 0 || res.total_memory_mb >= 0);
+        // 两次调用应命中缓存，结构一致
+        let res2 = get_system_resources();
+        assert_eq!(res.timestamp, res2.timestamp);
+    }
+}

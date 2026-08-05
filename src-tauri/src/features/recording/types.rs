@@ -90,3 +90,128 @@ pub struct RecordingRegressionReport {
     pub steps: Vec<String>,
     pub message: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_start_recording_request_deserializes_camel_case() {
+        let json = r#"{
+            "targetType": "window",
+            "targetId": "hwnd1",
+            "captureCursor": true,
+            "captureSystemAudio": false,
+            "fps": 30,
+            "videoBitrateKbps": 6000,
+            "audioBitrateKbps": 192,
+            "systemAudioProcessIds": [1, 2],
+            "opId": 99
+        }"#;
+        let req: StartRecordingRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.target_type.as_deref(), Some("window"));
+        assert_eq!(req.target_id.as_deref(), Some("hwnd1"));
+        assert_eq!(req.capture_cursor, Some(true));
+        assert_eq!(req.capture_system_audio, Some(false));
+        assert_eq!(req.fps, Some(30));
+        assert_eq!(req.video_bitrate_kbps, Some(6000));
+        assert_eq!(req.audio_bitrate_kbps, Some(192));
+        assert_eq!(req.system_audio_process_ids, Some(vec![1, 2]));
+        assert_eq!(req.op_id, Some(99));
+    }
+
+    #[test]
+    fn test_start_recording_request_empty_json() {
+        let req: StartRecordingRequest = serde_json::from_str("{}").unwrap();
+        assert!(req.target_type.is_none());
+        assert!(req.fps.is_none());
+        assert!(req.op_id.is_none());
+    }
+
+    #[test]
+    fn test_session_request() {
+        let req: SessionRequest = serde_json::from_str(r#"{"sessionId": "abc"}"#).unwrap();
+        assert_eq!(req.session_id.as_deref(), Some("abc"));
+        let req2: SessionRequest = serde_json::from_str("{}").unwrap();
+        assert!(req2.session_id.is_none());
+    }
+
+    #[test]
+    fn test_recording_session_info_serializes_camel_case() {
+        let info = RecordingSessionInfo {
+            session_id: "s1".to_string(),
+            started_at_ms: 123,
+            output_path_tmp: "out.mp4".to_string(),
+        };
+        let v: serde_json::Value = serde_json::to_value(&info).unwrap();
+        assert_eq!(v["sessionId"], "s1");
+        assert_eq!(v["startedAtMs"], 123);
+        assert_eq!(v["outputPathTmp"], "out.mp4");
+    }
+
+    #[test]
+    fn test_recording_runtime_state_serializes() {
+        let st = RecordingRuntimeState {
+            state: "recording".to_string(),
+            session_id: Some("s".to_string()),
+            elapsed_ms: 42,
+            dropped_video_frames: 1,
+            audio_buffer_level_ms: 2,
+            last_error: Some("err".to_string()),
+        };
+        let v: serde_json::Value = serde_json::to_value(&st).unwrap();
+        assert_eq!(v["state"], "recording");
+        assert_eq!(v["elapsedMs"], 42);
+        assert_eq!(v["droppedVideoFrames"], 1);
+        assert_eq!(v["audioBufferLevelMs"], 2);
+        assert_eq!(v["lastError"], "err");
+
+        // None 字段序列化为 null
+        let st2 = RecordingRuntimeState {
+            last_error: None,
+            ..st
+        };
+        let v2: serde_json::Value = serde_json::to_value(&st2).unwrap();
+        assert_eq!(v2["lastError"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_audio_device_and_process_serde() {
+        let dev = AudioInputDevice {
+            id: "mic-1".to_string(),
+            name: "麦克风".to_string(),
+            is_default: true,
+        };
+        let v: serde_json::Value = serde_json::to_value(&dev).unwrap();
+        assert_eq!(v["id"], "mic-1");
+        assert_eq!(v["isDefault"], true);
+
+        let proc = AudioProcessItem {
+            pid: 1234,
+            name: "app.exe".to_string(),
+        };
+        let v2: serde_json::Value = serde_json::to_value(&proc).unwrap();
+        assert_eq!(v2["pid"], 1234);
+    }
+
+    #[test]
+    fn test_regression_report_serializes() {
+        let report = RecordingRegressionReport {
+            success: true,
+            session_id: Some("s".to_string()),
+            output_path: Some("out.mp4".to_string()),
+            duration_ms: 1000,
+            file_size_bytes: 2048,
+            steps: vec!["a".to_string(), "b".to_string()],
+            message: "ok".to_string(),
+        };
+        let v: serde_json::Value = serde_json::to_value(&report).unwrap();
+        assert_eq!(v["success"], true);
+        assert_eq!(v["sessionId"], "s");
+        assert_eq!(v["outputPath"], "out.mp4");
+        assert_eq!(v["durationMs"], 1000);
+        assert_eq!(v["fileSizeBytes"], 2048);
+        assert_eq!(v["steps"].as_array().unwrap().len(), 2);
+        assert_eq!(v["message"], "ok");
+    }
+}

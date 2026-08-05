@@ -281,3 +281,137 @@ impl RecordingRuntime {
         self.ffmpeg_stderr_tail.clear();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_phase_as_str_mapping() {
+        assert_eq!(RecordingPhase::Idle.as_str(), "idle");
+        assert_eq!(RecordingPhase::Starting.as_str(), "starting");
+        assert_eq!(RecordingPhase::Recording.as_str(), "recording");
+        assert_eq!(RecordingPhase::Paused.as_str(), "paused");
+        assert_eq!(RecordingPhase::Stopping.as_str(), "stopping");
+        assert_eq!(RecordingPhase::Error.as_str(), "error");
+    }
+
+    #[test]
+    fn test_phase_equality() {
+        assert_eq!(RecordingPhase::Idle, RecordingPhase::Idle);
+        assert_ne!(RecordingPhase::Idle, RecordingPhase::Recording);
+        assert_eq!(RecordingPhase::Recording, RecordingPhase::Recording);
+    }
+
+    #[test]
+    fn test_default_runtime_is_idle() {
+        let rt = RecordingRuntime::default();
+        assert_eq!(rt.phase, RecordingPhase::Idle);
+        assert!(rt.session_id.is_none());
+        assert_eq!(rt.started_at_ms, 0);
+        assert!(rt.started_instant.is_none());
+        assert_eq!(rt.paused_total_ms, 0);
+        assert_eq!(rt.max_duration_ms, 0);
+        assert_eq!(rt.fps, 0);
+        assert!(!rt.mic_enabled);
+        assert!(rt.last_error.is_none());
+        assert!(rt.output_path_tmp.is_none());
+        assert!(rt.output_path_final.is_none());
+        assert_eq!(rt.target_type, "screen");
+        assert!(rt.process.is_none());
+        assert!(rt.window_video_segments.is_empty());
+        assert!(rt.system_audio_threads.is_empty());
+        assert!(rt.mic_audio_segments.is_empty());
+    }
+
+    #[test]
+    fn test_snapshot_idle() {
+        let rt = RecordingRuntime::default();
+        let snap = rt.snapshot();
+        assert_eq!(snap.state, "idle");
+        assert!(snap.session_id.is_none());
+        assert_eq!(snap.elapsed_ms, 0);
+        assert_eq!(snap.dropped_video_frames, 0);
+        assert_eq!(snap.audio_buffer_level_ms, 0);
+        assert!(snap.last_error.is_none());
+    }
+
+    #[test]
+    fn test_snapshot_with_session_fields() {
+        let mut rt = RecordingRuntime::default();
+        rt.phase = RecordingPhase::Recording;
+        rt.session_id = Some("sess-1".to_string());
+        rt.started_at_ms = 1000;
+        rt.started_instant = Some(Instant::now());
+        rt.dropped_video_frames = 7;
+        rt.audio_buffer_level_ms = 12;
+        rt.last_error = None;
+
+        let snap = rt.snapshot();
+        assert_eq!(snap.state, "recording");
+        assert_eq!(snap.session_id.as_deref(), Some("sess-1"));
+        assert_eq!(snap.dropped_video_frames, 7);
+        assert_eq!(snap.audio_buffer_level_ms, 12);
+    }
+
+    #[test]
+    fn test_snapshot_error_state() {
+        let mut rt = RecordingRuntime::default();
+        rt.phase = RecordingPhase::Error;
+        rt.last_error = Some("录音失败".to_string());
+        let snap = rt.snapshot();
+        assert_eq!(snap.state, "error");
+        assert_eq!(snap.last_error.as_deref(), Some("录音失败"));
+    }
+
+    #[test]
+    fn test_reset_to_idle_clears_state() {
+        let mut rt = RecordingRuntime::default();
+        rt.phase = RecordingPhase::Recording;
+        rt.session_id = Some("sess-2".to_string());
+        rt.started_at_ms = 5000;
+        rt.started_instant = Some(Instant::now());
+        rt.paused_total_ms = 100;
+        rt.max_duration_ms = 300000;
+        rt.fps = 30;
+        rt.video_bitrate_kbps = 6000;
+        rt.audio_bitrate_kbps = 192;
+        rt.mic_enabled = true;
+        rt.dropped_video_frames = 3;
+        rt.last_error = Some("x".to_string());
+        rt.output_path_tmp = Some(PathBuf::from("t.mp4"));
+        rt.output_path_final = Some(PathBuf::from("f.mp4"));
+        rt.target_type = "window".to_string();
+        rt.target_id = "hwnd1".to_string();
+        rt.window_video_segments = vec![PathBuf::from("seg.mp4")];
+        rt.system_audio_process_ids = vec![1, 2];
+        rt.ffmpeg_stderr_tail = VecDeque::from(vec!["line".to_string()]);
+
+        rt.reset_to_idle();
+        assert_eq!(rt.phase, RecordingPhase::Idle);
+        assert!(rt.session_id.is_none());
+        assert_eq!(rt.started_at_ms, 0);
+        assert!(rt.started_instant.is_none());
+        assert_eq!(rt.paused_total_ms, 0);
+        assert_eq!(rt.max_duration_ms, 0);
+        assert_eq!(rt.fps, 0);
+        assert!(!rt.mic_enabled);
+        assert_eq!(rt.dropped_video_frames, 0);
+        assert!(rt.last_error.is_none());
+        assert!(rt.output_path_tmp.is_none());
+        assert!(rt.output_path_final.is_none());
+        assert_eq!(rt.target_type, "screen");
+        assert!(rt.target_id.is_empty());
+        assert!(rt.window_video_segments.is_empty());
+        assert!(rt.system_audio_process_ids.is_empty());
+        assert!(rt.ffmpeg_stderr_tail.is_empty());
+    }
+
+    #[test]
+    fn test_reset_to_idle_from_idle_is_noop_safe() {
+        let mut rt = RecordingRuntime::default();
+        rt.reset_to_idle();
+        let snap = rt.snapshot();
+        assert_eq!(snap.state, "idle");
+    }
+}

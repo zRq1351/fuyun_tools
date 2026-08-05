@@ -173,3 +173,101 @@ impl From<serde_json::Error> for AppError {
         AppError::new(ErrorCode::SystemError, format!("JSON 解析错误: {}", err))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_code_display() {
+        assert_eq!(ErrorCode::ConfigError.to_string(), "CONFIG_ERROR");
+        assert_eq!(ErrorCode::NetworkError.to_string(), "NETWORK_ERROR");
+        assert_eq!(ErrorCode::IoError.to_string(), "IO_ERROR");
+        assert_eq!(ErrorCode::ClipboardError.to_string(), "CLIPBOARD_ERROR");
+        assert_eq!(ErrorCode::SystemError.to_string(), "SYSTEM_ERROR");
+        assert_eq!(ErrorCode::ValidationError.to_string(), "VALIDATION_ERROR");
+    }
+
+    #[test]
+    fn test_app_error_new_without_details() {
+        let err = AppError::new(ErrorCode::SystemError, "出错");
+        assert_eq!(err.code, ErrorCode::SystemError);
+        assert_eq!(err.message, "出错");
+        assert!(err.details.is_none());
+        assert_eq!(err.to_string(), "[SYSTEM_ERROR] 出错");
+    }
+
+    #[test]
+    fn test_app_error_with_details() {
+        let err = AppError::new(ErrorCode::IoError, "读取失败").with_details("path not found");
+        assert_eq!(err.code, ErrorCode::IoError);
+        assert_eq!(err.details.as_deref(), Some("path not found"));
+    }
+
+    #[test]
+    fn test_from_string_and_str() {
+        let err: AppError = "直接消息".into();
+        assert_eq!(err.code, ErrorCode::SystemError);
+        assert_eq!(err.message, "直接消息");
+
+        let err2: AppError = String::from("字符串消息").into();
+        assert_eq!(err2.code, ErrorCode::SystemError);
+        assert_eq!(err2.message, "字符串消息");
+    }
+
+    #[test]
+    fn test_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let err: AppError = io_err.into();
+        assert_eq!(err.code, ErrorCode::IoError);
+        assert!(err.message.contains("file missing"));
+    }
+
+    #[test]
+    fn test_from_sqlx_and_json_error() {
+        let err: AppError = serde_json::from_str::<serde_json::Value>("{bad json")
+            .unwrap_err()
+            .into();
+        assert_eq!(err.code, ErrorCode::SystemError);
+        assert!(err.message.contains("JSON 解析错误"));
+    }
+
+    #[test]
+    fn test_to_frontend_error_string_without_details() {
+        let err = AppError::new(ErrorCode::ValidationError, "参数无效");
+        assert_eq!(to_frontend_error_string(err), "[VALIDATION_ERROR] 参数无效");
+    }
+
+    #[test]
+    fn test_to_frontend_error_string_with_details() {
+        let err = AppError::new(ErrorCode::ClipboardError, "剪贴板失败").with_details("detail line1\n\ndetail line2");
+        let s = to_frontend_error_string(err);
+        assert!(s.starts_with("[CLIPBOARD_ERROR] 剪贴板失败；"));
+        assert!(s.contains("detail line1"));
+        assert!(s.contains("detail line2"));
+        // 空行应被压缩
+        assert!(!s.contains("\n\n"));
+    }
+
+    #[test]
+    fn test_to_frontend_error_string_details_truncated_at_500() {
+        let long = "x".repeat(600);
+        let err = AppError::new(ErrorCode::SystemError, "长详情").with_details(long);
+        let s = to_frontend_error_string(err);
+        assert!(s.ends_with("..."));
+        assert!(s.len() < 600 + 100);
+    }
+
+    #[test]
+    fn test_compact_error_details_joins_and_trims() {
+        assert_eq!(compact_error_details("  a \n\n  b \n"), "a | b");
+        assert_eq!(compact_error_details(""), "");
+    }
+
+    #[test]
+    fn test_install_global_panic_hook_idempotent() {
+        install_global_panic_hook();
+        install_global_panic_hook();
+        // 不 panic 即通过（OnceLock 保证只安装一次）
+    }
+}

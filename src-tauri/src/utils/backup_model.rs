@@ -240,3 +240,107 @@ pub struct PreparedBackupData {
     pub estimated_bytes: u64,
     pub warnings: Vec<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_backup_includes_default_all_false() {
+        let inc = BackupIncludes::default();
+        assert!(!inc.settings && !inc.text_history && !inc.image_history);
+        assert!(!inc.image_blobs && !inc.api_keys && !inc.recordings);
+    }
+
+    #[test]
+    fn test_backup_includes_camel_case_serde() {
+        let inc = BackupIncludes {
+            settings: true,
+            text_history: false,
+            image_history: true,
+            image_blobs: false,
+            api_keys: false,
+            recordings: true,
+        };
+        let v: serde_json::Value = serde_json::to_value(&inc).unwrap();
+        assert_eq!(v["settings"], true);
+        assert_eq!(v["textHistory"], false);
+        assert_eq!(v["imageHistory"], true);
+        assert_eq!(v["recordings"], true);
+    }
+
+    #[test]
+    fn test_backup_manifest_serde_roundtrip() {
+        let manifest = BackupManifest {
+            backup_format_version: 1,
+            app_name: "fuyun".to_string(),
+            app_version: "0.8.31".to_string(),
+            created_at: 12345,
+            platform: "windows".to_string(),
+            includes: BackupIncludes::default(),
+            stats: BackupStats::default(),
+            checksums: HashMap::from([("file".to_string(), "abc".to_string())]),
+        };
+        let json = serde_json::to_string(&manifest).unwrap();
+        let back: BackupManifest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.app_name, "fuyun");
+        assert_eq!(back.backup_format_version, 1);
+        assert_eq!(back.checksums["file"], "abc");
+    }
+
+    #[test]
+    fn test_backup_restore_request_defaults() {
+        // 未提供可选字段时：createRollbackPoint=true, restoreStrategy=merge
+        let req: BackupRestoreRequest = serde_json::from_str(
+            r#"{"packagePath":"p","mode":"full","restoreSettings":true,"restoreTextHistory":true,"restoreImageHistory":true}"#,
+        )
+            .unwrap();
+        assert_eq!(req.package_path, "p");
+        assert_eq!(req.mode, "full");
+        assert!(req.restore_settings);
+        assert!(req.create_rollback_point);
+        assert_eq!(req.restore_strategy, "merge");
+    }
+
+    #[test]
+    fn test_backup_restore_request_explicit_values() {
+        let req: BackupRestoreRequest = serde_json::from_str(
+            r#"{"packagePath":"p","mode":"full","restoreSettings":false,"restoreTextHistory":false,"restoreImageHistory":false,"createRollbackPoint":false,"restoreStrategy":"overwrite"}"#,
+        )
+            .unwrap();
+        assert!(!req.create_rollback_point);
+        assert_eq!(req.restore_strategy, "overwrite");
+        assert!(!req.restore_settings);
+    }
+
+    #[test]
+    fn test_backup_image_history_file_serde() {
+        let f = BackupImageHistoryFile {
+            items: vec![BackupImageHistoryItem {
+                id: "i1".to_string(),
+                width: 100,
+                height: 50,
+                blob_path: "blobs/i1.png".to_string(),
+            }],
+            categories: HashMap::from([("i1".to_string(), "工作".to_string())]),
+            category_list: vec!["工作".to_string()],
+            image_tags: HashMap::new(),
+            pinned_items: vec![],
+        };
+        let v: serde_json::Value = serde_json::to_value(&f).unwrap();
+        assert_eq!(v["items"][0]["id"], "i1");
+        assert_eq!(v["items"][0]["blobPath"], "blobs/i1.png");
+        assert_eq!(v["categoryList"][0], "工作");
+        assert_eq!(v["categories"]["i1"], "工作");
+    }
+
+    #[test]
+    fn test_backup_defaults_all_empty() {
+        let preview = BackupExportPreviewResponse::default();
+        assert!(!preview.success);
+        assert!(preview.data.warnings.is_empty());
+
+        let result = BackupExportResultResponse::default();
+        assert_eq!(result.data.file_size_bytes, 0);
+    }
+}

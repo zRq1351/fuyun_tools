@@ -1620,3 +1620,55 @@ pub async fn image_window_blur(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_image_item_id_keeps_alphanumeric() {
+        assert_eq!(sanitize_image_item_id("abc123"), "abc123");
+        assert_eq!(sanitize_image_item_id("a_b-c"), "a_b-c");
+    }
+
+    #[test]
+    fn test_sanitize_image_item_id_replaces_illegal_chars() {
+        assert_eq!(sanitize_image_item_id("a/b\\c:d"), "a_b_c_d");
+        assert_eq!(sanitize_image_item_id("中文id"), "__id");
+        assert_eq!(sanitize_image_item_id("a b"), "a_b");
+    }
+
+    #[test]
+    fn test_sanitize_image_item_id_truncates() {
+        let long = "a".repeat(200);
+        assert_eq!(sanitize_image_item_id(&long).len(), 100);
+    }
+
+    #[test]
+    fn test_sanitize_image_item_id_empty_falls_back() {
+        // 空输入回退为 unknown
+        assert_eq!(sanitize_image_item_id(""), "unknown");
+        // 纯非法字符被替换后非空，不触发回退
+        assert_eq!(sanitize_image_item_id("///"), "___");
+    }
+
+    #[test]
+    fn test_default_history_page_limit() {
+        assert!(default_history_page_limit() > 0);
+    }
+
+    #[test]
+    fn test_default_image_page_limit() {
+        assert!(default_image_page_limit() > 0);
+    }
+
+    #[test]
+    fn test_is_importable_image_file_extensions() {
+        use std::path::Path;
+        assert!(is_importable_image_file(Path::new("a.png")));
+        assert!(is_importable_image_file(Path::new("a.JPG")));
+        assert!(is_importable_image_file(Path::new("a.webp")));
+        assert!(!is_importable_image_file(Path::new("a.txt")));
+        assert!(!is_importable_image_file(Path::new("a")));
+    }
+}

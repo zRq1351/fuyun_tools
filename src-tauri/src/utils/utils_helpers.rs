@@ -109,3 +109,137 @@ pub fn now_unix_ms_u64() -> u64 {
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_normalize_sha256_hex_accepts_lowercase() {
+        let raw = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        assert_eq!(normalize_sha256_hex(raw).as_deref(), Some(raw));
+    }
+
+    #[test]
+    fn test_normalize_sha256_hex_normalizes_uppercase_and_whitespace() {
+        let upper = "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF";
+        let normalized = normalize_sha256_hex(&format!("  {}  ", upper));
+        assert_eq!(normalized.as_deref(), Some(upper.to_ascii_lowercase().as_str()));
+    }
+
+    #[test]
+    fn test_normalize_sha256_hex_rejects_invalid() {
+        assert_eq!(normalize_sha256_hex(""), None);
+        assert_eq!(normalize_sha256_hex("short"), None);
+        assert_eq!(normalize_sha256_hex("g".repeat(64).as_str()), None); // 非 hex 字符
+        assert_eq!(normalize_sha256_hex("a".repeat(63).as_str()), None); // 长度不足
+    }
+
+    #[test]
+    fn test_split_download_url_without_hash() {
+        let (url, sha) = split_download_url_and_sha256("https://example.com/file.exe").unwrap();
+        assert_eq!(url, "https://example.com/file.exe");
+        assert!(sha.is_none());
+    }
+
+    #[test]
+    fn test_split_download_url_with_hash() {
+        let hash = "a".repeat(64);
+        let (url, sha) =
+            split_download_url_and_sha256(&format!("https://example.com/f.exe#sha256={}", hash))
+                .unwrap();
+        assert_eq!(url, "https://example.com/f.exe");
+        assert_eq!(sha.as_deref(), Some(hash.as_str()));
+    }
+
+    #[test]
+    fn test_split_download_url_empty_errors() {
+        assert!(split_download_url_and_sha256("").is_err());
+        assert!(split_download_url_and_sha256("   ").is_err());
+    }
+
+    #[test]
+    fn test_split_download_url_invalid_hash_errors() {
+        assert!(split_download_url_and_sha256("https://e.com/f.exe#sha256=xyz").is_err());
+    }
+
+    #[test]
+    fn test_compute_file_sha256_known_value() {
+        // 空文件 SHA-256 为已知常量 e3b0c442...
+        let dir = std::env::temp_dir().join("fyt_sha_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("empty.bin");
+        std::fs::write(&p, b"").unwrap();
+        assert_eq!(
+            compute_file_sha256(&p).unwrap(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+
+        // "abc" 的 SHA-256 已知值 ba7816bf...
+        let p2 = dir.join("abc.bin");
+        std::fs::write(&p2, b"abc").unwrap();
+        assert_eq!(
+            compute_file_sha256(&p2).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_compute_file_sha256_missing_file_errors() {
+        assert!(compute_file_sha256(&PathBuf::from("C:/no/such/file.bin")).is_err());
+    }
+
+    #[test]
+    fn test_verify_downloaded_exe_integrity_wrong_magic() {
+        let dir = std::env::temp_dir().join("fyt_verify_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("bad.exe");
+        std::fs::write(&p, b"not an exe").unwrap();
+        assert!(verify_downloaded_exe_integrity(&p, None).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_verify_downloaded_exe_integrity_ok_without_hash() {
+        let dir = std::env::temp_dir().join("fyt_verify_test2");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("ok.exe");
+        std::fs::write(&p, b"MZfakebody").unwrap();
+        assert!(verify_downloaded_exe_integrity(&p, None).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_verify_downloaded_exe_integrity_hash_mismatch() {
+        let dir = std::env::temp_dir().join("fyt_verify_test3");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("hash.exe");
+        std::fs::write(&p, b"MZhashbody").unwrap();
+        let wrong = "f".repeat(64);
+        assert!(verify_downloaded_exe_integrity(&p, Some(&wrong)).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_verify_downloaded_exe_integrity_hash_match() {
+        let dir = std::env::temp_dir().join("fyt_verify_test4");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("hash_ok.exe");
+        std::fs::write(&p, b"MZhashbody").unwrap();
+        let actual = compute_file_sha256(&p).unwrap();
+        assert!(verify_downloaded_exe_integrity(&p, Some(&actual)).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_now_unix_ms_monotonic() {
+        let a = now_unix_ms_u64();
+        let b = now_unix_ms_i64();
+        assert!(a > 0);
+        assert!(b > 0);
+        let c = now_unix_ms_u64();
+        assert!(c >= a);
+    }
+}

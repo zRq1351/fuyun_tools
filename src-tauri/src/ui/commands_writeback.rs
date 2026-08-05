@@ -674,3 +674,60 @@ pub(crate) fn emit_writeback_result(app: &AppHandle, result: &WriteBackExecution
         log::warn!("发送回写结果事件失败: {}", e);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::perf_metrics::PerfMetricSnapshot;
+
+    fn snapshot(key: &str, avg: f64, max: u64) -> PerfMetricSnapshot {
+        PerfMetricSnapshot {
+            key: key.to_string(),
+            label: String::new(),
+            category: String::new(),
+            sample_count: 1,
+            success_count: 1,
+            error_count: 0,
+            last_duration_ms: max,
+            avg_duration_ms: avg,
+            max_duration_ms: max,
+            last_status: "success".to_string(),
+            last_error: None,
+            last_recorded_at: 0,
+        }
+    }
+
+    #[test]
+    fn test_perf_metric_group_rank() {
+        assert_eq!(perf_metric_group_rank("交互"), 0);
+        assert_eq!(perf_metric_group_rank("回写"), 1);
+        assert_eq!(perf_metric_group_rank("图片"), 2);
+        assert_eq!(perf_metric_group_rank("截图"), 3);
+        assert_eq!(perf_metric_group_rank("录屏"), 4);
+        assert_eq!(perf_metric_group_rank("备份"), 5);
+        assert_eq!(perf_metric_group_rank("文本历史"), 6);
+        assert_eq!(perf_metric_group_rank("未知组"), 9);
+    }
+
+    #[test]
+    fn test_perf_metric_is_slow_default_thresholds() {
+        // 默认阈值 avg>=1500 或 max>=3000
+        assert!(perf_metric_is_slow(&snapshot("general", 1500.0, 100)));
+        assert!(perf_metric_is_slow(&snapshot("general", 100.0, 3000)));
+        assert!(!perf_metric_is_slow(&snapshot("general", 100.0, 500)));
+    }
+
+    #[test]
+    fn test_perf_metric_is_slow_first_chunk_thresholds() {
+        assert!(perf_metric_is_slow(&snapshot("first_chunk", 1200.0, 100)));
+        assert!(perf_metric_is_slow(&snapshot("first_chunk", 100.0, 2500)));
+        assert!(!perf_metric_is_slow(&snapshot("first_chunk", 100.0, 500)));
+    }
+
+    #[test]
+    fn test_perf_metric_is_slow_history_page_thresholds() {
+        assert!(perf_metric_is_slow(&snapshot("history_page", 900.0, 100)));
+        assert!(perf_metric_is_slow(&snapshot("wait_hidden", 100.0, 2000)));
+        assert!(!perf_metric_is_slow(&snapshot("history_page", 100.0, 500)));
+    }
+}

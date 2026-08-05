@@ -101,3 +101,91 @@ pub fn is_frontend_error_json(s: &str) -> bool {
         .map(|v| v.get("code").is_some())
         .unwrap_or(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::error::ErrorCode;
+    use crate::core::error_codes::AppErrorKind;
+
+    #[test]
+    fn test_to_frontend_error_json_has_code_and_message() {
+        let s = to_frontend_error_json(AppErrorKind::ClipboardItemNotFound);
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["code"], "E_CLIPBOARD_ITEM_NOT_FOUND");
+        assert_eq!(v["category"], "CLIPBOARD_ERROR");
+        assert_eq!(v["message"], "找不到目标项目");
+        assert!(v.get("details").is_none());
+        assert!(v.get("params").is_none());
+    }
+
+    #[test]
+    fn test_to_frontend_error_json_with_params() {
+        let s = to_frontend_error_json_with_params(
+            AppErrorKind::SettingsHotkeyConflict,
+            serde_json::json!({"key": "Alt+R"}),
+        );
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["code"], "E_SETTINGS_HOTKEY_CONFLICT");
+        assert_eq!(v["params"]["key"], "Alt+R");
+    }
+
+    #[test]
+    fn test_to_frontend_error_json_with_details() {
+        let s = to_frontend_error_json_with_details(
+            AppErrorKind::DatabaseError,
+            None,
+            "db locked".to_string(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["details"], "db locked");
+    }
+
+    #[test]
+    fn test_to_frontend_error_json_empty_details_omitted() {
+        let s = to_frontend_error_json_with_details(AppErrorKind::IoError, None, String::new());
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert!(v.get("details").is_none());
+    }
+
+    #[test]
+    fn test_app_error_to_frontend_json() {
+        let err = AppError::new(ErrorCode::SystemError, "系统出错");
+        let s = app_error_to_frontend_json(err);
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["code"], "E_SYSTEM_ERROR");
+        assert_eq!(v["category"], "SYSTEM_ERROR");
+        assert_eq!(v["message"], "系统出错");
+    }
+
+    #[test]
+    fn test_app_error_to_frontend_json_with_details() {
+        let err = AppError::new(ErrorCode::NetworkError, "网络错误").with_details("timeout");
+        let s = app_error_to_frontend_json(err);
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["details"], "timeout");
+    }
+
+    #[test]
+    fn test_is_frontend_error_json() {
+        assert!(is_frontend_error_json(&to_frontend_error_json(AppErrorKind::Unknown)));
+        assert!(!is_frontend_error_json("plain text"));
+        assert!(!is_frontend_error_json(""));
+        assert!(!is_frontend_error_json("{\"noCode\": 1}"));
+    }
+
+    #[test]
+    fn test_frontend_error_payload_serializes_camel_case() {
+        let payload = FrontendErrorPayload {
+            code: "E_TEST".to_string(),
+            category: "SYSTEM_ERROR".to_string(),
+            message: "msg".to_string(),
+            params: Some(serde_json::json!({"a": 1})),
+            details: None,
+        };
+        let s = serde_json::to_string(&payload).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["code"], "E_TEST");
+        assert!(v.get("details").is_none());
+    }
+}

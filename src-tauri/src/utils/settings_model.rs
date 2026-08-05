@@ -989,4 +989,44 @@ mod tests {
         let v2 = parse_migration_version("0.3.0").unwrap();
         assert!(v1 < v2);
     }
+
+    #[test]
+    fn test_all_features_default_disabled() {
+        // 所有功能默认关闭，用户需在设置中显式启用
+        assert!(!default_text_clipboard_enabled());
+        assert!(!default_image_clipboard_enabled());
+        assert!(!default_screenshot_enabled());
+        assert!(!default_recording_enabled());
+        assert!(!default_doc_manager_enabled());
+        assert!(!default_doc_manager_widget_enabled());
+        let settings = AppSettingsData::default();
+        assert!(!settings.recording_enabled);
+    }
+
+    #[test]
+    fn test_parse_real_settings_json_recording_enabled() {
+        // 直接从用户实际运行的 settings.json 反序列化，验证 recording_enabled 读取路径
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("debug")
+            .join("settings.json");
+        let contents = std::fs::read_to_string(&path).expect("读取 settings.json 失败");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&contents).expect("settings.json 不是合法 JSON");
+        let v = parsed.get("recording_enabled").expect("缺少 recording_enabled 字段");
+        assert_eq!(v, &serde_json::Value::Bool(true), "recording_enabled 应为 true");
+    }
+
+    #[test]
+    fn test_real_settings_json_deserializes_to_app_settings_data() {
+        // 验证实际 settings.json 能完整反序列化为 AppSettingsData（load_settings 的路径）
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("debug")
+            .join("settings.json");
+        let contents = std::fs::read_to_string(&path).expect("读取 settings.json 失败");
+        let settings: AppSettingsData = serde_json::from_str(&contents)
+            .expect("settings.json 反序列化为 AppSettingsData 失败");
+        assert!(settings.recording_enabled, "反序列化后 recording_enabled 应为 true");
+    }
 }

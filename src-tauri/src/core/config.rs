@@ -44,3 +44,57 @@ pub struct ProviderConfig {
     pub api_url: String,
     pub model_name: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_shortcuts_non_empty() {
+        assert!(!DEFAULT_TOGGLE_SHORTCUT.is_empty());
+        assert!(!DEFAULT_IMAGE_TOGGLE_SHORTCUT.is_empty());
+        assert!(!DEFAULT_SCREENSHOT_SHORTCUT.is_empty());
+        assert!(!DEFAULT_RECORDING_SHORTCUT.is_empty());
+        assert!(!DEFAULT_LAUNCHER_SHORTCUT.is_empty());
+        assert!(!DEFAULT_DOC_MANAGER_SHORTCUT.is_empty());
+    }
+
+    #[test]
+    fn test_recording_shortcut_is_alt_r() {
+        assert_eq!(DEFAULT_RECORDING_SHORTCUT, "Alt+R");
+    }
+
+    #[test]
+    fn test_provider_config_serde_roundtrip() {
+        let cfg = ProviderConfig {
+            api_url: "https://api.example.com".to_string(),
+            model_name: "model-x".to_string(),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: ProviderConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, cfg);
+    }
+
+    #[test]
+    fn test_provider_config_partial_eq() {
+        let a = ProviderConfig {
+            api_url: "u".to_string(),
+            model_name: "m".to_string(),
+        };
+        let b = a.clone();
+        assert_eq!(a, b);
+        assert_ne!(
+            a,
+            ProviderConfig {
+                api_url: "u2".to_string(),
+                model_name: "m".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_ctrl_key_defined() {
+        // 只要常量存在且可用即可
+        let _ = CTRL_KEY;
+    }
+}

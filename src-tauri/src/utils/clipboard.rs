@@ -1143,3 +1143,110 @@ fn apply_pin_order(history: &mut Vec<String>, pinned_items: &[String]) {
     history.extend(sorted_pinned);
     history.extend(unpinned_list);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stable_text_hash_deterministic() {
+        let a = stable_text_hash("hello world");
+        let b = stable_text_hash("hello world");
+        assert_eq!(a, b);
+        // 不同文本哈希不同（极小概率碰撞忽略）
+        assert_ne!(stable_text_hash("hello world"), stable_text_hash("hello worlD"));
+    }
+
+    #[test]
+    fn test_stable_text_hash_empty() {
+        // 空文本应有确定哈希，不 panic
+        let _ = stable_text_hash("");
+    }
+
+    #[test]
+    fn test_build_history_fingerprints() {
+        let history = vec!["a".to_string(), "bb".to_string(), "ccc".to_string()];
+        let fps = build_history_fingerprints(&history);
+        assert_eq!(fps.len(), 3);
+        // 长度指纹
+        assert_eq!(fps[0].0, 1);
+        assert_eq!(fps[1].0, 2);
+        assert_eq!(fps[2].0, 3);
+        // 哈希与 stable_text_hash 一致
+        assert_eq!(fps[0].1, stable_text_hash("a"));
+    }
+
+    #[test]
+    fn test_build_fingerprint_index_last_wins() {
+        let history = vec!["dup".to_string(), "other".to_string(), "dup".to_string()];
+        let fps = build_history_fingerprints(&history);
+        let index = build_fingerprint_index(&fps);
+        let dup_fp = (3, stable_text_hash("dup"));
+        // 重复内容：索引指向最后出现的位置
+        assert_eq!(index.get(&dup_fp), Some(&2));
+    }
+
+    #[test]
+    fn test_shrink_text_history_without_group_protection() {
+        let mut history = vec!["a".to_string(), "b".to_string(), "c".to_string(), "d".to_string()];
+        let mut categories = HashMap::new();
+        let pinned = vec![];
+        shrink_text_history_with_group_protection(
+            &mut history,
+            2,
+            &mut categories,
+            &pinned,
+            false,
+        );
+        assert_eq!(history, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn test_shrink_with_group_protection_keeps_categorized() {
+        let mut history = vec!["普通1".to_string(), "分类项".to_string(), "普通2".to_string()];
+        let mut categories = HashMap::new();
+        let cat_id = crate::utils::database::stable_history_item_id("分类项");
+        categories.insert(cat_id.clone(), "工作".to_string());
+        let pinned = vec![];
+
+        shrink_text_history_with_group_protection(&mut history, 1, &mut categories, &pinned, true);
+        // 只保留 1 条，优先移除未分类的（从尾部开始）
+        assert_eq!(history.len(), 1);
+        // 被保留的应是分类项（受保护）
+        assert_eq!(history[0], "分类项");
+        assert!(categories.contains_key(&cat_id));
+    }
+
+    #[test]
+    fn test_normalize_pinned_items_removes_orphans() {
+        let history = vec!["存在".to_string()];
+        let exist_id = crate::utils::database::stable_history_item_id("存在");
+        let mut pinned = vec![exist_id.clone(), "孤儿ID".to_string()];
+        normalize_pinned_items(&mut pinned, &history);
+        assert_eq!(pinned, vec![exist_id]);
+    }
+
+    #[test]
+    fn test_apply_pin_order_sorts_pinned_first() {
+        let mut history = vec!["普通A".to_string(), "置顶X".to_string(), "普通B".to_string(), "置顶Y".to_string()];
+        let id_x = crate::utils::database::stable_history_item_id("置顶X");
+        let id_y = crate::utils::database::stable_history_item_id("置顶Y");
+        let pinned = vec![id_x.clone(), id_y.clone()];
+
+        apply_pin_order(&mut history, &pinned);
+        // 置顶项按 pinned 顺序在前
+        assert_eq!(history[0], "置顶X");
+        assert_eq!(history[1], "置顶Y");
+        // 普通项在后（保持相对顺序）
+        assert_eq!(history[2], "普通A");
+        assert_eq!(history[3], "普通B");
+    }
+
+    #[test]
+    fn test_apply_pin_order_ignores_orphan_pins() {
+        let mut history = vec!["普通A".to_string()];
+        let pinned = vec!["不存在ID".to_string()];
+        apply_pin_order(&mut history, &pinned);
+        assert_eq!(history, vec!["普通A".to_string()]);
+    }
+}

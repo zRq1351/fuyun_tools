@@ -541,3 +541,81 @@ pub async fn stream_custom_prompt_text(
     )
     .await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::app_state::AppState;
+
+    #[test]
+    fn test_fill_prompt_template_all_placeholders() {
+        let template = "请把{source_language}翻译成{target_language}：{text}";
+        let out = fill_prompt_template(template, "你好", Some("中文"), "英文");
+        assert_eq!(out, "请把中文翻译成英文：你好");
+    }
+
+    #[test]
+    fn test_fill_prompt_template_default_source() {
+        let template = "源语言:{source_language}";
+        let out = fill_prompt_template(template, "x", None, "en");
+        assert_eq!(out, "源语言:自动识别");
+    }
+
+    #[test]
+    fn test_fill_prompt_template_missing_placeholder_untouched() {
+        let out = fill_prompt_template("没有占位符", "文本", None, "en");
+        assert_eq!(out, "没有占位符");
+    }
+
+    #[test]
+    fn test_ai_stream_kind_names() {
+        assert_eq!(AiStreamKind::Translation.kind_name(), "translation");
+        assert_eq!(AiStreamKind::Explanation.kind_name(), "explanation");
+        assert_eq!(
+            AiStreamKind::CustomPrompt("总结".to_string()).kind_name(),
+            "custom_prompt"
+        );
+    }
+
+    #[test]
+    fn test_ai_stream_kind_titles() {
+        assert_eq!(AiStreamKind::Translation.window_title(), "翻译结果");
+        assert_eq!(AiStreamKind::Explanation.window_title(), "解释结果");
+        assert_eq!(
+            AiStreamKind::CustomPrompt("总结".to_string()).window_title(),
+            "总结 结果"
+        );
+    }
+
+    #[test]
+    fn test_ai_stream_kind_display_names() {
+        assert_eq!(AiStreamKind::Translation.display_name(), "翻译");
+        assert_eq!(AiStreamKind::Explanation.display_name(), "解释");
+        assert_eq!(AiStreamKind::CustomPrompt("润色".to_string()).display_name(), "润色");
+    }
+
+    #[test]
+    fn test_next_and_active_operation() {
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let id = next_ai_operation_id(&state);
+        assert_eq!(id, 1);
+        let id2 = next_ai_operation_id(&state);
+        assert_eq!(id2, 2);
+
+        set_active_operation(&state, &AiStreamKind::Translation, id);
+        assert!(is_operation_active(&state, &AiStreamKind::Translation, id));
+        assert!(!is_operation_active(&state, &AiStreamKind::Translation, id2));
+        assert!(!is_operation_active(&state, &AiStreamKind::Explanation, id));
+    }
+
+    #[test]
+    fn test_next_ai_operation_id_wraps() {
+        let state = Arc::new(Mutex::new(AppState::default()));
+        {
+            let mut g = lock_arc_mutex(&state);
+            g.ai_request_seq = u64::MAX;
+        }
+        let id = next_ai_operation_id(&state);
+        assert_eq!(id, 0); // wrapping_add
+    }
+}

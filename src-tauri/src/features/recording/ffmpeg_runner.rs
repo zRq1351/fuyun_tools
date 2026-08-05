@@ -144,3 +144,134 @@ fn sanitize_output_filename(name: &str) -> String {
         cleaned
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_replaces_illegal_chars() {
+        assert_eq!(sanitize_output_filename("a<b>c:d"), "a_b_c_d");
+        assert_eq!(sanitize_output_filename("x|y?z*w"), "x_y_z_w");
+        assert_eq!(sanitize_output_filename("path\\to/file"), "path_to_file");
+        assert_eq!(sanitize_output_filename("quote\"name"), "quote_name");
+        assert_eq!(sanitize_output_filename("with\0null"), "with_null");
+        assert_eq!(sanitize_output_filename("tab\tchar"), "tab_char");
+    }
+
+    #[test]
+    fn test_sanitize_prevents_path_traversal() {
+        // 路径分隔符先被替换为 _，然后 .. 片段被替换为 _
+        assert_eq!(sanitize_output_filename("..\\..\\evil"), "____evil");
+        assert_eq!(sanitize_output_filename("a..b"), "a_b");
+        assert_eq!(sanitize_output_filename("../etc/passwd"), "__etc_passwd");
+        assert!(!sanitize_output_filename("../evil").contains(".."));
+    }
+
+    #[test]
+    fn test_sanitize_reserved_device_names() {
+        assert_eq!(sanitize_output_filename("CON"), "_CON");
+        assert_eq!(sanitize_output_filename("con.txt"), "_con.txt");
+        assert_eq!(sanitize_output_filename("NUL"), "_NUL");
+        assert_eq!(sanitize_output_filename("COM1"), "_COM1");
+        assert_eq!(sanitize_output_filename("LPT3.log"), "_LPT3.log");
+        assert_eq!(sanitize_output_filename("COM10"), "_COM10");
+    }
+
+    #[test]
+    fn test_sanitize_keeps_normal_names() {
+        assert_eq!(sanitize_output_filename("my_recording_2026"), "my_recording_2026");
+        assert_eq!(sanitize_output_filename("演示视频"), "演示视频");
+        assert_eq!(sanitize_output_filename("  spaced  "), "spaced");
+    }
+
+    #[test]
+    fn test_sanitize_empty_result() {
+        assert_eq!(sanitize_output_filename("///"), "___");
+        assert_eq!(sanitize_output_filename(""), "");
+    }
+
+    #[test]
+    fn test_is_valid_ffmpeg_file_rejects_missing() {
+        assert!(!is_valid_ffmpeg_file(Path::new("C:/definitely/not/exists/ffmpeg.exe")));
+    }
+
+    #[test]
+    fn test_is_valid_ffmpeg_file_rejects_small_file() {
+        let dir = std::env::temp_dir().join("fyt_test_ffmpeg");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("tiny.exe");
+        std::fs::write(&p, b"MZ").unwrap();
+        // 小于 1MB，即使有 MZ 头也应拒绝
+        assert!(!is_valid_ffmpeg_file(&p));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_is_valid_ffmpeg_file_rejects_wrong_magic() {
+        let dir = std::env::temp_dir().join("fyt_test_ffmpeg2");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("fake.exe");
+        // 构造 >1MB 但非 MZ 头的文件
+        let mut data = vec![0u8; 1024 * 1024 + 16];
+        data[0] = b'E';
+        data[1] = b'L';
+        std::fs::write(&p, &data).unwrap();
+        assert!(!is_valid_ffmpeg_file(&p));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_is_valid_ffmpeg_file_accepts_mz_large() {
+        let dir = std::env::temp_dir().join("fyt_test_ffmpeg3");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("real.exe");
+        let mut data = vec![0u8; 1024 * 1024 + 16];
+        data[0] = b'M';
+        data[1] = b'Z';
+        std::fs::write(&p, &data).unwrap();
+        assert!(is_valid_ffmpeg_file(&p));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_build_output_paths_placeholder_replacement() {
+        let dir = Path::new("C:/out");
+        let (tmp, final_path, session_id) = build_output_paths(dir, "rec_{date}_{time}_{type}");
+        assert!(session_id.starts_with("rec-"));
+        assert_eq!(tmp, dir.join(format!("{}.tmp.mp4", session_id)));
+        let name = final_path.file_name().unwrap().to_string_lossy().to_string();
+        assert!(name.ends_with(".mp4"));
+        assert!(!name.contains("tmp.mp4"));
+        assert!(name.contains("screen"));
+        // 日期格式 YYYYMMDD 出现在名称中
+        assert!(name.len() >= 8);
+    }
+
+    #[test]
+    fn test_build_output_paths_empty_template_falls_back() {
+        let dir = Path::new("C:/out");
+        // ".." 会被替换为 "_" 后仍非空，真正的空回退需要模板净化为空
+        // 用非法字符模板验证净化逻辑；空回退场景用纯分隔符验证文件名仍是时间戳
+        let (_, final_path, _) = build_output_paths(dir, "{date}");
+        let name = final_path.file_name().unwrap().to_string_lossy().to_string();
+        // 日期模板净化后应为 YYYYMMDD.mp4
+        assert!(name.ends_with(".mp4"));
+        let stem = name.trim_end_matches(".mp4");
+        assert_eq!(stem.len(), 8);
+        assert!(stem.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn test_candidate_paths_contains_default() {
+        let paths = candidate_paths();
+        assert!(paths.iter().any(|p| p == Path::new("ffmpeg.exe")));
+        assert!(paths.iter().any(|p| p == Path::new("ffmpeg")));
+        // FY_FFMPEG_PATH 前置
+        unsafe {
+            std::env::set_var("FY_FFMPEG_PATH", "C:/custom/ffmpeg.exe");
+        }
+        let paths2 = candidate_paths();
+        assert_eq!(paths2[0], PathBuf::from("C:/custom/ffmpeg.exe"));
+    }
+}

@@ -128,3 +128,98 @@ pub async fn recognize_image(png_bytes: &[u8], engine_type: OcrEngineType, app_h
 //     };
 // }
 // ```
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clean_ocr_text_empty() {
+        assert_eq!(clean_ocr_text(""), "");
+        assert_eq!(clean_ocr_text("   "), "   ");
+    }
+
+    #[test]
+    fn test_clean_ocr_text_chinese_removes_spaces() {
+        assert_eq!(clean_ocr_text("今天 天气 很好"), "今天天气很好");
+        assert_eq!(clean_ocr_text("中文 空格"), "中文空格");
+        assert_eq!(clean_ocr_text("　全角　空格　移除"), "全角空格移除");
+    }
+
+    #[test]
+    fn test_clean_ocr_text_english_normalizes_spaces() {
+        assert_eq!(clean_ocr_text("hello   world"), "hello world");
+        assert_eq!(clean_ocr_text("  leading and trailing  "), "leading and trailing");
+        assert_eq!(clean_ocr_text("single word"), "single word");
+    }
+
+    #[test]
+    fn test_clean_ocr_text_mixed_detects_majority() {
+        // 中文 4 字 vs "world" 5 字符：4/9 < 50% → 英文分支，规范化空格
+        assert_eq!(clean_ocr_text("你好 world 世界"), "你好 world 世界");
+        // 中文 4 字 vs 1 字符 "w"：4/5 > 50% → 中文分支，去空格
+        assert_eq!(clean_ocr_text("你好 w 世界"), "你好w世界");
+        // 英文占多数 → 规范化空格
+        assert_eq!(clean_ocr_text("hello 世界 world"), "hello 世界 world");
+    }
+
+    #[test]
+    fn test_clean_ocr_text_whitespace_only_returns_original() {
+        assert_eq!(clean_ocr_text("\n\t"), "\n\t");
+    }
+
+    #[test]
+    fn test_ocr_line_serde_skips_none_confidence() {
+        let line = OcrLine {
+            text: "hi".to_string(),
+            x0: 0.0,
+            y0: 1.0,
+            x1: 10.0,
+            y1: 20.0,
+            confidence: None,
+        };
+        let v: serde_json::Value = serde_json::to_value(&line).unwrap();
+        assert_eq!(v["text"], "hi");
+        assert!(v.get("confidence").is_none());
+
+        let line2 = OcrLine {
+            confidence: Some(0.95),
+            ..line
+        };
+        let v2: serde_json::Value = serde_json::to_value(&line2).unwrap();
+        assert_eq!(v2["x0"], 0.0);
+        assert_eq!(v2["y1"], 20.0);
+        let conf = v2["confidence"].as_f64().unwrap();
+        assert!((conf - 0.95).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_ocr_result_serde() {
+        let paragraph = OcrParagraph {
+            text: "第一段".to_string(),
+            x0: 0.0,
+            y0: 0.0,
+            x1: 100.0,
+            y1: 20.0,
+            lines: vec![OcrLine {
+                text: "第一段".to_string(),
+                x0: 0.0,
+                y0: 0.0,
+                x1: 100.0,
+                y1: 20.0,
+                confidence: None,
+            }],
+        };
+        let result = OcrResult {
+            paragraphs: vec![paragraph],
+        };
+        let v: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(v["paragraphs"].as_array().unwrap().len(), 1);
+        assert_eq!(v["paragraphs"][0]["text"], "第一段");
+    }
+
+    #[test]
+    fn test_ocr_engine_type_default() {
+        assert!(matches!(OcrEngineType::default(), OcrEngineType::OcrRs));
+    }
+}

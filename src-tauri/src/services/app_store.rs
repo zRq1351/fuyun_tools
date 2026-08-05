@@ -343,6 +343,68 @@ fn is_windows_system_path(_target: &str) -> bool {
     false
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_system_app_by_title() {
+        assert!(is_system_app("记事本", "C:/some/path/app.exe"));
+        assert!(is_system_app("Windows PowerShell", "C:/ps/powershell.exe"));
+        assert!(is_system_app("计算器", "C:/calc/calc.exe"));
+        assert!(is_system_app("任务管理器", "C:/tm/tm.exe"));
+        assert!(is_system_app("Microsoft Edge", "C:/edge/msedge.exe"));
+    }
+
+    #[test]
+    fn test_is_system_app_by_path_pattern() {
+        assert!(is_system_app(
+            "任意应用",
+            "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Accessories\\calc.exe"
+        ));
+        assert!(is_system_app(
+            "管理工具",
+            "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Administrative Tools\\diskmgmt.exe"
+        ));
+    }
+
+    #[test]
+    fn test_is_system_app_rejects_normal_app() {
+        assert!(!is_system_app("Visual Studio Code", "C:/Program Files/VSCode/code.exe"));
+        assert!(!is_system_app("Chrome", "C:/Program Files/Google/Chrome/chrome.exe"));
+        assert!(!is_system_app("", ""));
+    }
+
+    #[test]
+    fn test_is_windows_system_path() {
+        // 默认 windir 为 C:\Windows
+        assert!(is_windows_system_path("C:\\Windows\\System32\\cmd.exe"));
+        assert!(is_windows_system_path("c:\\windows\\notepad.exe"));
+        assert!(!is_windows_system_path("D:\\Program Files\\app\\app.exe"));
+        assert!(!is_windows_system_path(""));
+    }
+
+    #[test]
+    fn test_is_microsoft_related_target() {
+        assert!(is_microsoft_related_target("https://learn.microsoft.com/dotnet"));
+        assert!(is_microsoft_related_target("C:\\Program Files\\Microsoft Visual Studio\\v1"));
+        assert!(is_microsoft_related_target("C:\\Windows Kits\\10\\bin"));
+        assert!(!is_microsoft_related_target("C:\\Program Files\\JetBrains\\idea.exe"));
+        assert!(!is_microsoft_related_target(""));
+    }
+
+    #[test]
+    fn test_is_microsoft_company_exe_missing_file_returns_false() {
+        // 不存在的文件无法读取版本信息，应返回 false 而非 panic
+        assert!(!is_microsoft_company_exe("C:/definitely/not/exists/none.exe"));
+    }
+
+    #[test]
+    fn test_is_microsoft_app_non_existent_path() {
+        assert!(!is_microsoft_app("C:/Program Files/SomeApp/app.exe"));
+    }
+}
+
 pub async fn scan_and_save_apps() -> Result<AppStore, String> {
     // Clear the in-memory cache before scanning
     crate::services::app_scanner::clear_app_cache();
