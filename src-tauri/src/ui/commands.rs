@@ -311,21 +311,20 @@ pub(crate) fn register_mic_toggle_shortcut(
     hot_key: &str,
 ) -> Result<(), String> {
     let app_clone = app.clone();
+    // PTT 事件串行队列：消除 Pressed/Released 并发顺序不确定（#14）
+    let (mic_event_tx, mic_event_rx) = std::sync::mpsc::channel::<bool>();
+    {
+        let app_handle_inner = app_clone.clone();
+        std::thread::spawn(move || {
+            while let Ok(enable) = mic_event_rx.recv() {
+                toggle_microphone_from_shortcut(app_handle_inner.clone(), enable);
+            }
+        });
+    }
     app.global_shortcut()
         .on_shortcut(hot_key, move |_app, _shortcut, event| {
-            let app_handle_inner = app_clone.clone();
-            match event.state {
-                ShortcutState::Pressed => {
-                    tauri::async_runtime::spawn(async move {
-                        toggle_microphone_from_shortcut(app_handle_inner, true).await;
-                    });
-                }
-                ShortcutState::Released => {
-                    tauri::async_runtime::spawn(async move {
-                        toggle_microphone_from_shortcut(app_handle_inner, false).await;
-                    });
-                }
-            }
+            // 按到达顺序入队，由单一消费线程串行执行（#14）
+            let _ = mic_event_tx.send(event.state == ShortcutState::Pressed);
         })
         .map_err(|e| frontend_error_kind_params(AppErrorKind::ClipboardHotkeyRegisterFailed, serde_json::json!({"key": hot_key}), e.to_string()))?;
     Ok(())
@@ -1000,9 +999,17 @@ pub async fn save_app_settings(
             let effective_hot_key = effective_key(&hot_key, &settings.hot_key);
             let effective_image_hot_key = effective_key(&image_hot_key, &settings.image_hot_key);
             let effective_screenshot_hot_key = effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
+            let effective_mic_toggle_hot_key = effective_key(
+                &recording_mic_toggle_hot_key,
+                &settings.recording_mic_toggle_hot_key,
+            );
+            let effective_launcher_hot_key =
+                effective_key(&launcher_hot_key, &settings.launcher_hot_key);
             if recording_hot_key_val == &effective_hot_key
                 || recording_hot_key_val == &effective_image_hot_key
                 || recording_hot_key_val == &effective_screenshot_hot_key
+                || recording_hot_key_val == &effective_mic_toggle_hot_key
+                || recording_hot_key_val == &effective_launcher_hot_key
             {
                 return Err(frontend_error_kind(
                     AppErrorKind::SettingsHotkeysIdentical,
@@ -1112,21 +1119,23 @@ pub async fn save_app_settings(
             if settings.recording_enabled {
                 let app_handle_for_mic = app.clone();
                 let old_mic_key_for_rollback = old_mic_toggle_hot_key.clone();
+                // PTT 事件串行队列：消除 Pressed/Released 并发顺序不确定（#14）
+                let (mic_event_tx, mic_event_rx) = std::sync::mpsc::channel::<bool>();
+                {
+                    let app_handle_inner = app_handle_for_mic.clone();
+                    std::thread::spawn(move || {
+                        while let Ok(enable) = mic_event_rx.recv() {
+                            toggle_microphone_from_shortcut(app_handle_inner.clone(), enable);
+                        }
+                    });
+                }
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     mic_toggle_hot_key_val.as_str(),
-                    move |_app, _shortcut, event| {
-                        let app_handle_inner = app_handle_for_mic.clone();
-                        match event.state {
-                            ShortcutState::Pressed => {
-                                tauri::async_runtime::spawn(async move {
-                                    toggle_microphone_from_shortcut(app_handle_inner, true).await;
-                                });
-                            }
-                            ShortcutState::Released => {
-                                tauri::async_runtime::spawn(async move {
-                                    toggle_microphone_from_shortcut(app_handle_inner, false).await;
-                                });
-                            }
+                    {
+                        let tx = mic_event_tx.clone();
+                        move |_app, _shortcut, event| {
+                            // 按到达顺序入队，由单一消费线程串行执行（#14）
+                            let _ = tx.send(event.state == ShortcutState::Pressed);
                         }
                     },
                 ) {
@@ -1135,22 +1144,12 @@ pub async fn save_app_settings(
                         mic_toggle_hot_key_val,
                         e
                     );
-                    let app_handle_for_rollback = app.clone();
                     if let Err(e2) = app.global_shortcut().on_shortcut(
                         old_mic_key_for_rollback.as_str(),
-                        move |_app, _shortcut, event| {
-                            let app_handle_inner = app_handle_for_rollback.clone();
-                            match event.state {
-                                ShortcutState::Pressed => {
-                                    tauri::async_runtime::spawn(async move {
-                                        toggle_microphone_from_shortcut(app_handle_inner, true).await;
-                                    });
-                                }
-                                ShortcutState::Released => {
-                                    tauri::async_runtime::spawn(async move {
-                                        toggle_microphone_from_shortcut(app_handle_inner, false).await;
-                                    });
-                                }
+                        {
+                            let tx = mic_event_tx.clone();
+                            move |_app, _shortcut, event| {
+                                let _ = tx.send(event.state == ShortcutState::Pressed);
                             }
                         },
                     ) {

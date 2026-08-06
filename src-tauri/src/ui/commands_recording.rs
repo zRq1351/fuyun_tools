@@ -13,7 +13,7 @@ use crate::ui::window_manager::show_overlay_window_by_label;
 use crate::utils::utils_helpers::{
     load_settings, verify_downloaded_exe_integrity,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// ffmpeg 下载进行中标志，防止并发下载互相破坏临时文件
 static FFMPEG_DOWNLOAD_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
@@ -149,17 +149,21 @@ fn validate_download_url_policy(url: &str, expected_sha256: Option<&str>) -> Res
 
 #[tauri::command]
 pub async fn check_recording_ffmpeg() -> Result<RecordingFfmpegStatus, String> {
-    let ffmpeg_path = resolve_ffmpeg_path().unwrap_or(get_preferred_install_ffmpeg_path()?);
-    let bin_dir = ffmpeg_path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or(get_software_bin_dir()?);
-    Ok(RecordingFfmpegStatus {
-        exists: is_valid_ffmpeg_file(&ffmpeg_path),
-        ffmpeg_path: ffmpeg_path.to_string_lossy().to_string(),
-        bin_dir: bin_dir.to_string_lossy().to_string(),
-        download_url: get_default_ffmpeg_download_url(),
+    // resolve_ffmpeg_path 可能 spawn 子进程探测，放入 blocking 线程（#40）
+    run_blocking_command(|| {
+        let ffmpeg_path = resolve_ffmpeg_path().unwrap_or(get_preferred_install_ffmpeg_path()?);
+        let bin_dir = ffmpeg_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or(get_software_bin_dir()?);
+        Ok(RecordingFfmpegStatus {
+            exists: is_valid_ffmpeg_file(&ffmpeg_path),
+            ffmpeg_path: ffmpeg_path.to_string_lossy().to_string(),
+            bin_dir: bin_dir.to_string_lossy().to_string(),
+            download_url: get_default_ffmpeg_download_url(),
+        })
     })
+    .await
 }
 
 #[tauri::command]
@@ -167,35 +171,53 @@ pub async fn download_recording_ffmpeg(
     download_url: Option<String>,
     app: AppHandle,
 ) -> Result<RecordingFfmpegStatus, String> {
+    // 录制中替换 ffmpeg 会破坏正在写入的管道且 rename 必失败（#39）
+    {
+        let app_state = app.state::<Arc<Mutex<SharedAppState>>>();
+        let state_guard = lock_arc_mutex(app_state.inner());
+        let rt = lock_arc_mutex(&state_guard.recording_runtime);
+        use crate::features::recording::state::RecordingPhase;
+        if matches!(rt.phase, RecordingPhase::Recording | RecordingPhase::Paused) {
+            return Err("录制进行中，无法替换 ffmpeg 文件，请停止录制后重试".to_string());
+        }
+    }
     // 并发下载保护：重复点击/多处触发共用同一临时文件会互相破坏
     if FFMPEG_DOWNLOAD_IN_PROGRESS.swap(true, Ordering::AcqRel) {
         return Err("ffmpeg 正在下载中，请稍后再试".to_string());
     }
-    struct DownloadGuard;
+    struct DownloadGuard {
+        tmp_path: PathBuf,
+    }
     impl Drop for DownloadGuard {
         fn drop(&mut self) {
             FFMPEG_DOWNLOAD_IN_PROGRESS.store(false, Ordering::Release);
+            // 任何失败路径统一清理临时文件，避免残留（#38）
+            let _ = fs::remove_file(&self.tmp_path);
         }
     }
-    let _download_guard = DownloadGuard;
 
     let ffmpeg_path = get_preferred_install_ffmpeg_path()?;
     let bin_dir = ffmpeg_path
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or(get_software_bin_dir()?);
+    let tmp_path = ffmpeg_path.with_extension("exe.tmp");
+    if tmp_path.exists() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+    let _download_guard = DownloadGuard {
+        tmp_path: tmp_path.clone(),
+    };
+
     let raw_url = download_url
         .map(|x| x.trim().to_string())
         .filter(|x| !x.is_empty())
         .unwrap_or_else(get_default_ffmpeg_download_url);
     let (url, expected_sha256) = split_download_url_and_sha256(&raw_url)?;
     validate_download_url_policy(&url, expected_sha256.as_deref())?;
-    fs::create_dir_all(&bin_dir).map_err(|e| format!("创建目录失败: {}", e))?;
-
-    let tmp_path = ffmpeg_path.with_extension("exe.tmp");
-    if tmp_path.exists() {
-        let _ = fs::remove_file(&tmp_path);
-    }
+    tokio::fs::create_dir_all(&bin_dir)
+        .await
+        .map_err(|e| format!("创建目录失败: {}", e))?;
 
     if let Err(e) = app.emit(
         "recording-ffmpeg-download-progress",
@@ -265,22 +287,31 @@ pub async fn download_recording_ffmpeg(
         .await
         .map_err(|e| format!("刷新下载文件失败: {}", e))?;
 
-    let metadata = fs::metadata(&tmp_path).map_err(|e| format!("读取下载文件失败: {}", e))?;
+    let metadata = tokio::fs::metadata(&tmp_path)
+        .await
+        .map_err(|e| format!("读取下载文件失败: {}", e))?;
     if metadata.len() == 0 {
-        let _ = fs::remove_file(&tmp_path);
         return Err("下载结果为空文件，请重试".to_string());
     }
-    verify_downloaded_exe_integrity(&tmp_path, expected_sha256.as_deref()).inspect_err(|_| {
-        let _ = fs::remove_file(&tmp_path);
-    })?;
-    fs::rename(&tmp_path, &ffmpeg_path)
-        .or_else(|_| {
-            if ffmpeg_path.exists() {
-                let _ = fs::remove_file(&ffmpeg_path);
-            }
-            fs::rename(&tmp_path, &ffmpeg_path)
-        })
-        .map_err(|e| format!("写入 ffmpeg 文件失败: {}", e))?;
+    // 完整性校验为同步大文件读取，放入 blocking 线程避免占用 async worker（#50）
+    tauri::async_runtime::spawn_blocking({
+        let tmp_path = tmp_path.clone();
+        let expected_sha256 = expected_sha256.clone();
+        move || verify_downloaded_exe_integrity(&tmp_path, expected_sha256.as_deref())
+    })
+    .await
+    .map_err(|e| format!("校验下载文件失败: {}", e))??;
+    if tokio::fs::rename(&tmp_path, &ffmpeg_path)
+        .await
+        .is_err()
+    {
+        if ffmpeg_path.exists() {
+            let _ = tokio::fs::remove_file(&ffmpeg_path).await;
+        }
+        tokio::fs::rename(&tmp_path, &ffmpeg_path)
+            .await
+            .map_err(|e| format!("写入 ffmpeg 文件失败: {}", e))?;
+    }
 
     if let Err(e) = app.emit(
         "recording-ffmpeg-download-progress",
@@ -760,7 +791,30 @@ pub async fn run_recording_regression(
     .await
 }
 
+/// 录屏快捷键防抖与互斥（所有入口共用，含设置页重注册与前端命令）（#12/#13/#43）
+pub(crate) static RECORDING_SHORTCUT_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+pub(crate) static RECORDING_SHORTCUT_LAST_TRIGGER_MS: AtomicU64 = AtomicU64::new(0);
+pub(crate) const RECORDING_SHORTCUT_MIN_INTERVAL_MS: u64 = 300;
+
+struct RecordingShortcutGuard;
+impl Drop for RecordingShortcutGuard {
+    fn drop(&mut self) {
+        RECORDING_SHORTCUT_IN_FLIGHT.store(false, Ordering::Release);
+    }
+}
+
 pub async fn toggle_recording_from_shortcut(app: AppHandle) {
+    // 防抖 + 互斥：panic/取消时 guard 兜底释放锁，避免快捷键永久失效（#13）
+    let now_ms = crate::utils::utils_helpers::now_unix_ms_u64();
+    let last_ms = RECORDING_SHORTCUT_LAST_TRIGGER_MS.load(Ordering::Relaxed);
+    if last_ms > 0 && now_ms.saturating_sub(last_ms) < RECORDING_SHORTCUT_MIN_INTERVAL_MS {
+        return;
+    }
+    if RECORDING_SHORTCUT_IN_FLIGHT.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let _guard = RecordingShortcutGuard;
+    RECORDING_SHORTCUT_LAST_TRIGGER_MS.store(now_ms, Ordering::Release);
     if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
         let is_visible = window.is_visible().unwrap_or(false);
         if is_visible {
@@ -773,6 +827,11 @@ pub async fn toggle_recording_from_shortcut(app: AppHandle) {
                 log::warn!("设置录屏工具栏大小失败: {}", e);
             }
             move_window_top_center(&window, Some(target_width));
+            // 快捷键路径也需同步 content_protected 设置（#42）
+            let content_protected = load_settings()
+                .map(|settings| settings.recording_toolbar_content_protected)
+                .unwrap_or(false);
+            let _ = window.set_content_protected(content_protected);
             if let Err(e) = show_overlay_window_by_label(&app, "recording_toolbar", true) {
                 log::warn!("显示录屏工具栏失败: {}", e);
             }
@@ -785,7 +844,7 @@ pub async fn toggle_recording_from_shortcut(app: AppHandle) {
 
 /// 切换麦克风状态的辅助函数（供快捷键调用）
 /// `enable`: true=按下快捷键（启用麦克风），false=松开快捷键（禁用麦克风）
-pub async fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
+pub fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
     use crate::features::recording::recorder_service;
 
     let key_state = if enable { "按下" } else { "释放" };

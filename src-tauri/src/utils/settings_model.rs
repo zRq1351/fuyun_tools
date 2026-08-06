@@ -810,8 +810,13 @@ impl AppSettingsData {
         if !self.screenshot_enabled {
             log::info!("截图功能保持禁用");
         }
-        if self.recording_hot_key.is_empty() {
+        if self.recording_hot_key.is_empty() || !self.recording_hot_key.contains('+') {
             self.recording_hot_key = default_recording_hot_key();
+        }
+        if self.recording_mic_toggle_hot_key.is_empty()
+            || !self.recording_mic_toggle_hot_key.contains('+')
+        {
+            self.recording_mic_toggle_hot_key = default_recording_mic_toggle_hot_key();
         }
         if self.recording_default_fps == 0 || self.recording_default_fps > 120 {
             self.recording_default_fps = default_recording_default_fps();
@@ -834,7 +839,7 @@ impl AppSettingsData {
         if self.recording_file_name_template.trim().is_empty() {
             self.recording_file_name_template = default_recording_file_name_template();
         }
-        if self.recording_ffmpeg_download_url.trim().is_empty() {
+        if !self.recording_ffmpeg_download_url.trim().starts_with("https://") {
             self.recording_ffmpeg_download_url = default_recording_ffmpeg_download_url();
         }
         if self.recording_window_audio_sync_advance_ms > 500 {

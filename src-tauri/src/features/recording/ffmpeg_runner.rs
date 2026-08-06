@@ -7,6 +7,12 @@ use std::process::Command;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+/// 同毫秒并发调用时生成唯一后缀，避免 session_id/临时文件碰撞（#48）
+static SESSION_ID_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// PATH 裸名探测结果缓存（会话内 PATH 不变；下载到固定目录不影响 PATH 探测）
+static BARE_PROBE_RESULT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
 fn suppress_console_window(command: &mut Command) -> &mut Command {
     #[cfg(target_os = "windows")]
     {
@@ -71,9 +77,13 @@ pub fn resolve_ffmpeg_path() -> Result<PathBuf, String> {
     for path in candidate_paths() {
         checked.push(path.to_string_lossy().to_string());
         if path == Path::new("ffmpeg") || path == Path::new("ffmpeg.exe") {
-            let mut probe = Command::new(&path);
-            suppress_console_window(&mut probe);
-            if probe.arg("-version").output().is_ok() {
+            // PATH 裸名探测结果缓存：会话内 PATH 不变，避免每次解析都 spawn 子进程（#49）
+            let found = *BARE_PROBE_RESULT.get_or_init(|| {
+                let mut probe = Command::new(&path);
+                suppress_console_window(&mut probe);
+                probe.arg("-version").output().is_ok()
+            });
+            if found {
                 return Ok(path);
             }
             continue;
@@ -94,7 +104,9 @@ pub fn build_output_paths(output_dir: &Path, naming_template: &str) -> (PathBuf,
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let session_id = format!("rec-{}", timestamp_ms);
+    // 同毫秒并发调用生成唯一后缀，避免 session_id/临时文件碰撞（#48）
+    let seq = SESSION_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 1_000_000;
+    let session_id = format!("rec-{}-{:06}", timestamp_ms, seq);
     let final_name = naming_template
         .replace("{timestamp}", &timestamp_ms.to_string())
         .replace("{date}", &now.format("%Y%m%d").to_string())
@@ -131,13 +143,14 @@ fn sanitize_output_filename(name: &str) -> String {
     // Windows 保留设备名（含扩展名前缀，如 CON.txt）
     let stem = cleaned.split('.').next().unwrap_or("").trim();
     let upper = stem.to_ascii_uppercase();
+    // Windows 仅保留 CON/PRN/AUX/NUL 与 COM1-9/LPT1-9（不含 COM10+）；
+    // 不可用 starts_with 前缀匹配，否则 command/company/lpt_log 等被误判（#17）
     let reserved = matches!(
         upper.as_str(),
         "CON" | "PRN" | "AUX" | "NUL"
             | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
             | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
-    ) || upper.starts_with("COM")
-        || upper.starts_with("LPT");
+    );
     if reserved {
         format!("_{}", cleaned)
     } else {
@@ -175,7 +188,9 @@ mod tests {
         assert_eq!(sanitize_output_filename("NUL"), "_NUL");
         assert_eq!(sanitize_output_filename("COM1"), "_COM1");
         assert_eq!(sanitize_output_filename("LPT3.log"), "_LPT3.log");
-        assert_eq!(sanitize_output_filename("COM10"), "_COM10");
+        assert_eq!(sanitize_output_filename("COM10"), "COM10");
+        assert_eq!(sanitize_output_filename("command"), "command");
+        assert_eq!(sanitize_output_filename("lpt_log"), "lpt_log");
     }
 
     #[test]

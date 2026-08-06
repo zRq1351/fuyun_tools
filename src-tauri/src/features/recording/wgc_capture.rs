@@ -200,6 +200,9 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                 raw_timestamp = 0;
             } else {
                 raw_timestamp -= first_ts;
+                if raw_timestamp < 0 {
+                    raw_timestamp = 0;
+                }
             }
 
             let frame_w = frame.width() as usize;
@@ -209,7 +212,18 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
             // 获取帧的原始像素数据和行步长
             // raw_buffer 包含行 padding，计算 stride = total_len / height
             let raw_pixels = buffer.as_raw_buffer();
-            let stride = if frame_h > 0 { raw_pixels.len() / frame_h } else { frame_w * 4 };
+            let stride = if frame_h > 0 && raw_pixels.len() % frame_h == 0 {
+                raw_pixels.len() / frame_h
+            } else if frame_h > 0 {
+                log::warn!(
+                    "WGC 帧缓冲行数不能整除，跳过本帧: len={} h={}",
+                    raw_pixels.len(),
+                    frame_h
+                );
+                return Ok(());
+            } else {
+                frame_w * 4
+            };
             
             let target_w = self.flags.width as usize;
             let target_h = self.flags.height as usize;
@@ -228,19 +242,15 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
             if frame_w == target_w && frame_h == target_h {
                 // 尺寸匹配：单次遍历完成 nopadding + 垂直翻转
                 let row_bytes = target_w * 4;
-                // 额外安全检查：确保目标缓冲区足够大
-                debug_assert!(
-                    resized.len() >= target_w * target_h * 4,
-                    "resized缓冲区太小: {} < {}",
-                    resized.len(),
-                    target_w * target_h * 4
-                );
-                debug_assert!(
-                    raw_pixels.len() >= stride * frame_h,
-                    "源缓冲区太小: {} < {}",
-                    raw_pixels.len(),
-                    stride * frame_h
-                );
+                // 运行时检查（release 下 debug_assert 无效）：缓冲不足时跳过本帧（#45）
+                if resized.len() < target_w * target_h * 4 {
+                    log::warn!("WGC resized 缓冲区不足，跳过本帧");
+                    return Ok(());
+                }
+                if raw_pixels.len() < stride * frame_h {
+                    log::warn!("WGC 源缓冲区不足，跳过本帧");
+                    return Ok(());
+                }
                 // SAFETY: resized 已预分配为 target_w * target_h * 4，
                 // raw_pixels 来自 WGC 帧缓冲区，保证至少有 stride * frame_h 字节
                 unsafe {
@@ -310,6 +320,15 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
         }
         self.flags.stop_flag.store(true, Ordering::SeqCst);
         Ok(())
+    }
+}
+
+impl Drop for WgcCaptureHandler {
+    fn drop(&mut self) {
+        // 兜底：任何路径离开时若 encoder 未 finish，主动收尾容器（#9）
+        if let Some(encoder) = self.encoder.take() {
+            let _ = encoder.finish();
+        }
     }
 }
 

@@ -328,6 +328,9 @@ const recordRegionWidth = ref(1280);
 const recordRegionHeight = ref(720);
 const regionSelectionReady = ref(false);
 let isPickingRegion = false;
+let componentUnmounted = false;
+// 进入区域选择前的目标模式，取消选区时回退（#16）
+const targetModeBeforeRegionPick = ref('screen');
 const inlineNotice = ref("");
 const inlineNoticeType = ref("error");
 let inlineNoticeTimer = null;
@@ -351,7 +354,11 @@ const PRESET_CONFIG = {
 
 function onPresetChange(val) {
   qualityPreset.value = val;
-  if (val === 'custom') return;
+  if (val === 'custom') {
+    // 切到 custom 也要持久化 preset，避免重载后 preset 与参数不一致（#35）
+    AISettingsService.saveSettings({ recordingQualityPreset: val }).catch(() => {});
+    return;
+  }
   const cfg = PRESET_CONFIG[val];
   fps.value = cfg.fps;
   videoBitrateKbps.value = cfg.videoBitrateKbps;
@@ -471,7 +478,16 @@ const measureCapsuleContentHeight = () => {
   return Math.ceil(barPadding + shellH + wrapperGap + wrapperBorder + panelH + 4);
 };
 
+// 并发互斥：多个 watch 同时触发时串行执行最后一次，避免 resize 竞态抖动（#36）
+let capsuleLayoutRunning = false;
+let capsuleLayoutQueued = false;
+
 const syncCapsuleLayout = async () => {
+  if (capsuleLayoutRunning) {
+    capsuleLayoutQueued = true;
+    return;
+  }
+  capsuleLayoutRunning = true;
   try {
     if (capsuleSettingsVisible.value) {
       await nextTick();
@@ -481,6 +497,7 @@ const syncCapsuleLayout = async () => {
       // Closing: Two-phase approach
       // Phase 1: Keep window width at 400px and height at targetHeight (keepWidth=true, openOverlay=true)
       // The CSS will animate .bar width and height. The window remains large so no clipping.
+      await nextTick();
       const targetHeight = measureCapsuleContentHeight();
       await RecordingService.resizeToolbar(false, true, true, "capsule", false, targetHeight, null, true);
 
@@ -493,6 +510,12 @@ const syncCapsuleLayout = async () => {
       }
     }
   } catch (_e) {
+  } finally {
+    capsuleLayoutRunning = false;
+    if (capsuleLayoutQueued) {
+      capsuleLayoutQueued = false;
+      void syncCapsuleLayout();
+    }
   }
 };
 
@@ -602,6 +625,7 @@ const onTargetModeClick = (mode) => {
     clearInlineNotice();
   }
   if (mode === "region") {
+    targetModeBeforeRegionPick.value = prevMode || 'screen';
     void pickRecordingRegion();
   } else if (mode === "window") {
     void refreshRecordableWindows();
@@ -632,6 +656,12 @@ const loadLastTarget = () => {
     const raw = localStorage.getItem('recording_last_target');
     if (raw) {
       const { type, id } = JSON.parse(raw);
+      // 持久化的目标可能已失效（窗口已关闭等）：缺少必要 id 时视为无效（#53）
+      if (type === 'window' && !id) {
+        lastTargetType.value = '';
+        lastTargetId.value = '';
+        return;
+      }
       lastTargetType.value = type || '';
       lastTargetId.value = id || '';
     }
@@ -676,7 +706,7 @@ const toggleRecordingState = async () => {
         showInlineNotice(t('recordingToolbar.selectWindowFirst'), "warning");
         return;
       }
-      if (recordTargetType.value === "region" && (recordRegionWidth.value <= 0 || recordRegionHeight.value <= 0)) {
+      if (recordTargetType.value === "region" && (!regionSelectionReady.value || recordRegionWidth.value <= 0 || recordRegionHeight.value <= 0)) {
         autoCollapseAfterStartPending = false;
         showInlineNotice(t('recordingToolbar.regionSizeInvalid'), "warning");
         return;
@@ -712,6 +742,7 @@ const toggleRecordingState = async () => {
       countdownActive.value = false;
       if (countdownCancelled) {
         autoCollapseAfterStartPending = false;
+        isMicMuted.value = false;
         return;
       }
       await RecordingService.start({
@@ -777,7 +808,7 @@ const toggleCapsuleSettings = () => {
 };
 
 const closeCapsule = async () => {
-  const isRecording = rawRecordingState.value === "recording" || rawRecordingState.value === "paused" || rawRecordingState.value === "starting";
+  const isRecording = rawRecordingState.value === "recording" || rawRecordingState.value === "paused" || rawRecordingState.value === "starting" || rawRecordingState.value === "stopping";
   if (isRecording) {
     showInlineNotice(t('recordingToolbar.recordingInProgressCloseHint'), "warning");
     return;
@@ -789,7 +820,7 @@ const closeCapsule = async () => {
   }
 };
 
-let isTogglingMic = ref(false);
+const isTogglingMic = ref(false);
 const toggleMicState = async () => {
   if (!canToggleMic.value || isBusy.value || isTogglingMic.value) return;
   isTogglingMic.value = true;
@@ -902,6 +933,7 @@ const onMicrophoneDeviceChange = async (deviceId) => {
   try {
     const prevCapture = captureMicrophone.value;
     const prevId = microphoneDeviceId.value;
+    const prevMuted = isMicMuted.value;
     const id = String(deviceId || "");
     const nextCapture = id.length > 0;
     const nextId = nextCapture ? id : null;
@@ -929,6 +961,7 @@ const onMicrophoneDeviceChange = async (deviceId) => {
       } catch (e) {
         captureMicrophone.value = prevCapture;
         microphoneDeviceId.value = prevId;
+        isMicMuted.value = prevMuted;
         // 切换失败可能已停止旧采集线程，尝试恢复原设备，避免后端静默停音
         try {
           await RecordingService.updateAudioCapture({
@@ -1123,8 +1156,8 @@ onMounted(async () => {
     listen("recording-finished", async (event) => {
       const payload = event.payload || {};
       const finishedSessionId = payload.sessionId ? String(payload.sessionId) : null;
-      // 忽略旧会话的完成事件：停止后立即开始新录制时，后台合并完成事件不应冲掉新会话 UI
-      if (finishedSessionId && state.sessionId && finishedSessionId !== state.sessionId) {
+      // 忽略旧会话/无会话的完成事件：有进行中会话时，无 sessionId 或 sessionId 不匹配都不应清 UI（#31）
+      if (state.sessionId && (!finishedSessionId || finishedSessionId !== state.sessionId)) {
         return;
       }
       state.state = "idle";
@@ -1186,18 +1219,15 @@ onMounted(async () => {
       }
       await new Promise(resolve => setTimeout(resolve, 50));
       capsuleSettingsVisible.value = true;
-      await nextTick();
-
-      try {
-        const targetHeight = measureCapsuleContentHeight();
-        await RecordingService.resizeToolbar(false, true, false, "capsule", true, targetHeight, null);
-      } catch (e) {
-        console.error("展开录制工具栏失败:", e);
-      }
+      // 由 watch(capsuleSettingsVisible) → syncCapsuleLayout 统一处理布局，避免双重 resize 参数冲突（#32）
     }),
     listen("screenshot-reset", () => {
       if (wasHiddenForRegionPick) {
         wasHiddenForRegionPick = false;
+        if (recordTargetType.value === "region" && !regionSelectionReady.value) {
+          // 取消选区：回退到进入 region 前的目标模式，避免以默认坐标录制错误区域（#16）
+          recordTargetType.value = targetModeBeforeRegionPick.value === 'window' ? 'window' : 'screen';
+        }
         try {
           getCurrentWindow().show().catch(() => {
           });
@@ -1230,6 +1260,10 @@ onMounted(async () => {
     listen("recording-mic-key-released", () => {
       isMicMuted.value = true;
     }),
+    listen("recording-exit-blocked", () => {
+      // 应用退出被录屏阻止：提示用户先停止录制（#52）
+      showInlineNotice(t('recordingToolbar.recordingInProgressCloseHint'), "warning");
+    }),
   ]);
 
   // 倒计时期间窗口被隐藏（快捷键/关闭按钮）时取消开始，避免录制在无 UI 状态下进行
@@ -1240,6 +1274,10 @@ onMounted(async () => {
         }
       })
       .then((fn) => {
+        if (componentUnmounted) {
+          fn();
+          return;
+        }
         unlistenVisibility = fn;
       })
       .catch((err) => {
@@ -1319,6 +1357,7 @@ watch(currentRecordingState, (next) => {
 });
 
 onBeforeUnmount(() => {
+  componentUnmounted = true;
   countdownCancelled = true;
   if (countdownAbortController) {
     countdownAbortController.abort();

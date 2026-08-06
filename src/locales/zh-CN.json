@@ -681,7 +681,8 @@
     "micToggledByShortcut": "麦克风已{action}（快捷键）",
     "openRegionFailed": "打开区域框选失败: {error}",
     "regionCoordinate": "左上({x1}, {y1}) 右下({x2}, {y2})",
-    "clickToDismiss": "点击关闭提示"
+    "clickToDismiss": "点击关闭提示",
+    "recordingInProgressCloseHint": "录制进行中，请先停止录制"
   },
   "textPreview": {
     "dragWindow": "拖动窗口",

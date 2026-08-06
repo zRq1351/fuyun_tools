@@ -680,7 +680,8 @@
     "micToggledByShortcut": "Microphone {action} (shortcut)",
     "openRegionFailed": "Failed to open region selection: {error}",
     "regionCoordinate": "Top-Left({x1}, {y1}) Bottom-Right({x2}, {y2})",
-    "clickToDismiss": "Click to dismiss"
+    "clickToDismiss": "Click to dismiss",
+    "recordingInProgressCloseHint": "Recording in progress, stop the recording first"
   },
   "textPreview": {
     "dragWindow": "Drag Window",

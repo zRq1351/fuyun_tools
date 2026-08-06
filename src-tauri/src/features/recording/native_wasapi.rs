@@ -35,6 +35,15 @@ pub struct WasapiFfmpegHandle {
     pub ffmpeg_child: Arc<Mutex<Option<ChildGuard>>>,
 }
 
+impl WasapiFfmpegHandle {
+    pub fn stop(self) {
+        self.stop_flag.store(true, Ordering::SeqCst);
+        if let Some(join) = self.join {
+            let _ = join.join();
+        }
+    }
+}
+
 pub struct ChildGuard(pub Child);
 
 impl Drop for ChildGuard {
@@ -52,6 +61,11 @@ fn pick_device_by_key(
     devices: impl IntoIterator<Item = cpal::Device>,
     key: &str,
 ) -> Option<cpal::Device> {
+    // 兼容 "{描述}_{索引}" 与纯描述：索引漂移（插拔）时剥离索引按描述回退匹配（#15）
+    let base = match key.rsplit_once('_') {
+        Some((desc, idx)) if !idx.is_empty() && idx.chars().all(|c| c.is_ascii_digit()) => desc,
+        _ => key,
+    };
     let mut exact: Option<cpal::Device> = None;
     for (i, d) in devices.into_iter().enumerate() {
         if let Ok(desc) = d.description() {
@@ -59,7 +73,7 @@ fn pick_device_by_key(
             if format!("{}_{}", desc, i) == key {
                 return Some(d);
             }
-            if desc == key && exact.is_none() {
+            if desc == base && exact.is_none() {
                 exact = Some(d);
             }
         }
@@ -87,9 +101,6 @@ fn now_ms() -> u64 {
         })
 }
 
-/// 全局音频写入错误计数器（每个录音会话重置）
-static AUDIO_WRITE_ERR_COUNT: AtomicBool = AtomicBool::new(false);
-
 /// 通用化音频写入回调：将任意 cpal 采样格式转为 i16 写入 WAV，受 enabled/pause 标志控制。
 /// 标签（label）用于错误日志区分系统音频/麦克风。
 macro_rules! audio_write_loop {
@@ -97,6 +108,7 @@ macro_rules! audio_write_loop {
         let writer = $writer_cb.clone();
         let enabled = $enabled_cb.clone();
         let pause = $pause_cb.clone();
+        let err_logged = Arc::new(AtomicBool::new(false));
         move |data: &[$sample_type], _| {
             if let Ok(mut guard) = writer.lock() {
                 if let Some(w) = guard.as_mut() {
@@ -104,7 +116,7 @@ macro_rules! audio_write_loop {
                         && !pause.load(Ordering::SeqCst);
                     for &v in data {
                         let s: i16 = if active { v.to_sample::<i16>() } else { 0 };
-                        write_sample_or_log!(w, s, $label);
+                        write_sample_or_log!(w, s, $label, err_logged);
                     }
                 }
             }
@@ -112,15 +124,39 @@ macro_rules! audio_write_loop {
     }};
 }
 
-/// 写入音频采样，失败时记录日志（避免日志洪水，仅记录前几次错误）
+/// 写入音频采样，失败时记录日志（避免日志洪水，每个流仅记录一次错误）
 macro_rules! write_sample_or_log {
-    ($writer:expr, $sample:expr, $context:expr) => {
+    ($writer:expr, $sample:expr, $context:expr, $err_logged:expr) => {
         if let Err(e) = $writer.write_sample($sample) {
-            if !AUDIO_WRITE_ERR_COUNT.swap(true, Ordering::Relaxed) {
+            if !$err_logged.swap(true, Ordering::Relaxed) {
                 log::error!("音频写入失败({}): {}", $context, e);
             }
         }
     };
+}
+
+/// AAC 路径输入回调：将任意 cpal 采样格式统一转 F32 写入 FFmpeg stdin（保持 f32le 输入），
+/// 通道满时丢弃本缓冲而非阻塞实时回调（#1/#8）
+macro_rules! aac_input_callback {
+    ($tx_cb:expr, $enabled_cb:expr, $pause_cb:expr, $sample_type:ty) => {{
+        let tx_cb = $tx_cb.clone();
+        let enabled_cb = $enabled_cb.clone();
+        let pause_cb = $pause_cb.clone();
+        move |data: &[$sample_type], _| {
+            let enabled = enabled_cb.load(Ordering::SeqCst) && !pause_cb.load(Ordering::SeqCst);
+            let mut buffer = Vec::with_capacity(data.len() * 4);
+            if enabled {
+                for &sample in data {
+                    buffer.extend_from_slice(&sample.to_sample::<f32>().to_le_bytes());
+                }
+            } else {
+                buffer.resize(data.len() * 4, 0);
+            }
+            if tx_cb.try_send(buffer).is_err() {
+                // 通道满（FFmpeg stdin 写慢）：丢弃本缓冲，回调绝不阻塞（#8）
+            }
+        }
+    }};
 }
 
 impl WasapiCaptureHandle {
@@ -140,7 +176,7 @@ fn capture_process_loopback_to_wav(
     recording_pause_flag: Arc<AtomicBool>,
     startup_tx: Option<mpsc::Sender<(u32, Result<(), String>)>>,
 ) -> Result<(), String> {
-    AUDIO_WRITE_ERR_COUNT.store(false, Ordering::Relaxed);
+    let err_logged = Arc::new(AtomicBool::new(false));
     let run = || -> Result<(), String> {
         COM_INIT.call_once(|| {
             let _ = initialize_mta();
@@ -245,7 +281,7 @@ fn capture_process_loopback_to_wav(
                     } else {
                         0
                     };
-                    write_sample_or_log!(writer, out, "进程音频");
+                    write_sample_or_log!(writer, out, "进程音频", err_logged);
                     actual_total_samples += 1;
                 }
             }
@@ -257,9 +293,9 @@ fn capture_process_loopback_to_wav(
                 if expected_total_samples > actual_total_samples {
                     let padding_needed = expected_total_samples - actual_total_samples;
 
-                    if padding_needed > 4800 {
+                    if padding_needed > 480 {
                         for _ in 0..padding_needed {
-                            write_sample_or_log!(writer, 0i16, "进程音频静音填充");
+                            write_sample_or_log!(writer, 0i16, "进程音频静音填充", err_logged);
                         }
                         actual_total_samples += padding_needed;
                     }
@@ -529,7 +565,7 @@ fn visible_window_process_titles() -> HashMap<u32, String> {
     let mut map = HashMap::new();
     if let Ok(windows) = crate::features::screenshot::window_detect::get_window_list() {
         for w in windows {
-            let hwnd_str = w.hwnd.trim_start_matches("0x");
+            let hwnd_str = w.hwnd.trim_start_matches("0x").trim_start_matches("0X");
             if let Ok(hwnd_val) = usize::from_str_radix(hwnd_str, 16) {
                 let hwnd = windows::Win32::Foundation::HWND(hwnd_val as *mut core::ffi::c_void);
                 let mut pid: u32 = 0;
@@ -556,7 +592,6 @@ pub fn start_system_loopback_wav_with_device(
     enabled_flag: Arc<AtomicBool>,
     recording_pause_flag: Arc<AtomicBool>,
 ) -> Result<WasapiCaptureHandle, String> {
-    AUDIO_WRITE_ERR_COUNT.store(false, Ordering::Relaxed);
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
     let thread_output = output_path.clone();
@@ -568,15 +603,16 @@ pub fn start_system_loopback_wav_with_device(
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
-            let device = thread_device_key
-                .as_ref()
-                .and_then(|key| {
-                    host.output_devices()
-                        .ok()
-                        .and_then(|devs| pick_device_by_key(devs, key))
-                })
-                .or_else(|| host.default_output_device())
-                .ok_or_else(|| "未找到输出设备".to_string())?;
+            let device = match thread_device_key.as_ref() {
+                Some(key) => host
+                    .output_devices()
+                    .ok()
+                    .and_then(|devs| pick_device_by_key(devs, key))
+                    .ok_or_else(|| format!("未找到输出设备: {}", key))?,
+                None => host
+                    .default_output_device()
+                    .ok_or_else(|| "未找到输出设备".to_string())?,
+            };
 
             let mut sample_format = CpalSampleFormat::F32;
             let mut config: StreamConfig = StreamConfig {
@@ -584,11 +620,18 @@ pub fn start_system_loopback_wav_with_device(
                 sample_rate: 48_000,
                 buffer_size: cpal::BufferSize::Default,
             };
-            if let Ok(mut supported) = device.supported_input_configs() {
-                if let Some(s) = supported.next() {
-                    let s = s.with_max_sample_rate();
-                    sample_format = s.sample_format();
-                    config = s.config();
+            if let Ok(supported) = device.supported_input_configs() {
+                let mut best: Option<(i64, CpalSampleFormat, StreamConfig)> = None;
+                for c in supported {
+                    let rate = c.max_sample_rate();
+                    let dist = (rate as i64 - 48_000).abs();
+                    if best.as_ref().map(|(d, _, _)| dist < *d).unwrap_or(true) {
+                        best = Some((dist, c.sample_format(), c.with_max_sample_rate().config()));
+                    }
+                }
+                if let Some((_, fmt, cfg)) = best {
+                    sample_format = fmt;
+                    config = cfg;
                 } else if let Ok(def) = device.default_output_config() {
                     sample_format = def.sample_format();
                     let defc = def.config();
@@ -745,7 +788,6 @@ pub fn start_microphone_wav_with_device(
     enabled_flag: Arc<AtomicBool>,
     recording_pause_flag: Arc<AtomicBool>,
 ) -> Result<WasapiCaptureHandle, String> {
-    AUDIO_WRITE_ERR_COUNT.store(false, Ordering::Relaxed);
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
     let thread_output = output_path.clone();
@@ -756,15 +798,16 @@ pub fn start_microphone_wav_with_device(
         let run = || -> Result<(), String> {
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
-            let device = thread_device_key
-                .as_ref()
-                .and_then(|key| {
-                    host.input_devices()
-                        .ok()
-                        .and_then(|devs| pick_device_by_key(devs, key))
-                })
-                .or_else(|| host.default_input_device())
-                .ok_or_else(|| "未找到输入设备".to_string())?;
+            let device = match thread_device_key.as_ref() {
+                Some(key) => host
+                    .input_devices()
+                    .ok()
+                    .and_then(|devs| pick_device_by_key(devs, key))
+                    .ok_or_else(|| format!("未找到输入设备: {}", key))?,
+                None => host
+                    .default_input_device()
+                    .ok_or_else(|| "未找到输入设备".to_string())?,
+            };
 
             let mut sample_format = CpalSampleFormat::F32;
             let mut config: StreamConfig = StreamConfig {
@@ -772,11 +815,18 @@ pub fn start_microphone_wav_with_device(
                 sample_rate: 48_000,
                 buffer_size: cpal::BufferSize::Default,
             };
-            if let Ok(mut supported) = device.supported_input_configs() {
-                if let Some(s) = supported.next() {
-                    let s = s.with_max_sample_rate();
-                    sample_format = s.sample_format();
-                    config = s.config();
+            if let Ok(supported) = device.supported_input_configs() {
+                let mut best: Option<(i64, CpalSampleFormat, StreamConfig)> = None;
+                for c in supported {
+                    let rate = c.max_sample_rate();
+                    let dist = (rate as i64 - 48_000).abs();
+                    if best.as_ref().map(|(d, _, _)| dist < *d).unwrap_or(true) {
+                        best = Some((dist, c.sample_format(), c.with_max_sample_rate().config()));
+                    }
+                }
+                if let Some((_, fmt, cfg)) = best {
+                    sample_format = fmt;
+                    config = cfg;
                 } else if let Ok(def) = device.default_input_config() {
                     sample_format = def.sample_format();
                     let defc = def.config();
@@ -868,8 +918,8 @@ pub fn start_microphone_wav_with_device(
             }
 
             log::info!("收到麦克风停止信号，填充1s静音数据以确保音频完全覆盖...");
-            // 按实际采样率/声道数填充 1s
-            let tail_samples = (config.sample_rate as usize) * (config.channels as usize);
+            // 按实际采样率/声道数填充 2s（与系统路径一致，多出静音由播放器自然忽略）
+            let tail_samples = (config.sample_rate as usize) * (config.channels as usize) * 2;
             if let Ok(mut guard) = writer.lock() {
                 if let Some(w) = guard.as_mut() {
                     for _ in 0..tail_samples {
@@ -928,7 +978,6 @@ pub fn start_system_loopback_aac_with_device(
     recording_pause_flag: Arc<AtomicBool>,
     audio_bitrate_kbps: Option<u32>,
 ) -> Result<WasapiFfmpegHandle, String> {
-    AUDIO_WRITE_ERR_COUNT.store(false, Ordering::Relaxed);
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
     let thread_output = output_path.clone();
@@ -942,6 +991,43 @@ pub fn start_system_loopback_aac_with_device(
             let ffmpeg_path = crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path()
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
+            // 设备探测提前到 FFmpeg 启动之前：AAC 输入参数需跟随设备实际能力（#1）
+            let host = cpal::host_from_id(cpal::HostId::Wasapi)
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+
+            let device = match thread_device_key.as_ref() {
+                Some(key) => host
+                    .output_devices()
+                    .ok()
+                    .and_then(|devs| pick_device_by_key(devs, key))
+                    .ok_or_else(|| format!("未找到输出设备: {}", key))?,
+                None => host
+                    .default_output_device()
+                    .ok_or_else(|| "未找到输出设备".to_string())?,
+            };
+
+            // 探测设备支持的输入配置：采样率/声道跟随设备，避免硬编码 48k/2ch 导致启动失败（#1）
+            let mut sample_format = CpalSampleFormat::F32;
+            let mut config: StreamConfig = StreamConfig {
+                channels: 2,
+                sample_rate: 48_000,
+                buffer_size: cpal::BufferSize::Default,
+            };
+            if let Ok(supported) = device.supported_input_configs() {
+                let mut best: Option<(i64, CpalSampleFormat, StreamConfig)> = None;
+                for c in supported {
+                    let rate = c.max_sample_rate();
+                    let dist = (rate as i64 - 48_000).abs();
+                    if best.as_ref().map(|(d, _, _)| dist < *d).unwrap_or(true) {
+                        best = Some((dist, c.sample_format(), c.with_max_sample_rate().config()));
+                    }
+                }
+                if let Some((_, fmt, cfg)) = best {
+                    sample_format = fmt;
+                    config = cfg;
+                }
+            }
+
             let mut ffmpeg_cmd = Command::new(&ffmpeg_path);
             #[cfg(target_os = "windows")]
             {
@@ -951,20 +1037,23 @@ pub fn start_system_loopback_aac_with_device(
             }
 
             let effective_bitrate = audio_bitrate_kbps.unwrap_or(128).clamp(32, 512);
+            let ar_arg = config.sample_rate.to_string();
+            let ac_arg = config.channels.to_string();
+            let bitrate_arg = format!("{}k", effective_bitrate);
             ffmpeg_cmd
                 .args([
                     "-f",
                     "f32le",
                     "-ar",
-                    "48000",
+                    ar_arg.as_str(),
                     "-ac",
-                    "2",
+                    ac_arg.as_str(),
                     "-i",
                     "-",
                     "-c:a",
                     "aac",
                     "-b:a",
-                    &format!("{}k", effective_bitrate),
+                    bitrate_arg.as_str(),
                     "-profile:a",
                     "aac_low",
                     "-y",
@@ -979,9 +1068,9 @@ pub fn start_system_loopback_aac_with_device(
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
             let stdin = child.stdin.take().ok_or("无法获取 FFmpeg stdin")?;
-            // H1 修复：消费 FFmpeg stderr 防止管道满导致挂起
-            if let Some(stderr) = child.stderr.take() {
-                std::thread::spawn(move || {
+            // H1 修复：消费 FFmpeg stderr 防止管道满导致挂起（#57）
+            let stderr_join = if let Some(stderr) = child.stderr.take() {
+                Some(std::thread::spawn(move || {
                     use std::io::BufRead;
                     let reader = std::io::BufReader::new(stderr);
                     for line in reader.lines() {
@@ -993,8 +1082,10 @@ pub fn start_system_loopback_aac_with_device(
                             _ => {}
                         }
                     }
-                });
-            }
+                }))
+            } else {
+                None
+            };
 
             {
                 if let Ok(mut guard) = thread_ffmpeg.lock() {
@@ -1007,94 +1098,61 @@ pub fn start_system_loopback_aac_with_device(
                 thread_output.file_name()
             );
 
-            let host = cpal::host_from_id(cpal::HostId::Wasapi)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
-
-            let device = thread_device_key
-                .as_ref()
-                .and_then(|key| {
-                    host.output_devices()
-                        .ok()
-                        .and_then(|devs| pick_device_by_key(devs, key))
-                })
-                .or_else(|| host.default_output_device())
-                .ok_or_else(|| "未找到输出设备".to_string())?;
-
-            let config: StreamConfig = StreamConfig {
-                channels: 2,
-                sample_rate: 48_000,
-                buffer_size: cpal::BufferSize::Default,
-            };
-
             // H2 修复：使用有界通道防止音频缓冲区无限累积导致 OOM
             let (tx_audio, rx_audio) = std::sync::mpsc::sync_channel::<Vec<u8>>(200);
-            let (tx_pool, rx_pool) = std::sync::mpsc::sync_channel::<Vec<u8>>(200);
-            for _ in 0..50 {
-                let _ = tx_pool.send(Vec::with_capacity(4096));
-            }
 
             let mut writer_opt = Some(std::io::BufWriter::new(stdin));
             let writer_thread = std::thread::spawn(move || {
-                while let Ok(mut data) = rx_audio.recv() {
+                while let Ok(data) = rx_audio.recv() {
                     if data.is_empty() {
                         break;
                     }
                     if let Some(writer) = writer_opt.as_mut() {
                         if let Err(e) = writer.write_all(&data) {
                             log::error!("FFmpeg stdin 写入失败，停止音频采集: {}", e);
-                            let _ = tx_pool.send(data);
                             break;
                         }
                         if let Err(e) = writer.flush() {
                             log::error!("FFmpeg stdin flush 失败，停止音频采集: {}", e);
-                            let _ = tx_pool.send(data);
                             break;
                         }
                     }
-                    data.clear();
-                    let _ = tx_pool.send(data);
                 }
                 if let Some(writer) = writer_opt.take() {
                     drop(writer);
                 }
             });
 
-            let tx_cb = tx_audio.clone();
-            let enabled_cb = enabled_flag.clone();
-            let pause_cb = recording_pause_flag.clone();
-
-            log::info!(
-                "WASAPI+FFmpeg线程启动: {:?}, enabled={}, pause={}",
-                thread_output.file_name(),
-                enabled_flag.load(Ordering::SeqCst),
-                recording_pause_flag.load(Ordering::SeqCst)
-            );
-
             let err_fn = |err| eprintln!("WASAPI 捕获错误: {}", err);
 
-            let stream = device
-                .build_input_stream(
-                    &config,
-                    move |data: &[f32], _| {
-                        let enabled =
-                            enabled_cb.load(Ordering::SeqCst) && !pause_cb.load(Ordering::SeqCst);
-                        let mut buffer = rx_pool
-                            .try_recv()
-                            .unwrap_or_else(|_| Vec::with_capacity(data.len() * 4));
-                        buffer.clear();
-                        if enabled {
-                            for &sample in data {
-                                buffer.extend_from_slice(&sample.to_le_bytes());
-                            }
-                        } else {
-                            buffer.resize(data.len() * 4, 0);
-                        }
-                        let _ = tx_cb.send(buffer);
-                    },
-                    err_fn,
-                    Some(Duration::from_millis(10)),
-                )
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            // 按探测到的设备采样格式分发回调，统一转 F32 写入 FFmpeg（#1）
+            let stream = match sample_format {
+                CpalSampleFormat::F32 => device.build_input_stream(&config,
+                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, f32),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::I16 => device.build_input_stream(&config,
+                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, i16),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::U16 => device.build_input_stream(&config,
+                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, u16),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::I8 => device.build_input_stream(&config,
+                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, i8),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::U8 => device.build_input_stream(&config,
+                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, u8),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::I32 => device.build_input_stream(&config,
+                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, i32),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::U32 => device.build_input_stream(&config,
+                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, u32),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::F64 => device.build_input_stream(&config,
+                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, f64),
+                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                _ => return Err(AppErrorKind::InternalError.to_frontend_json()),
+            };
 
             stream
                 .play()
@@ -1111,13 +1169,18 @@ pub fn start_system_loopback_aac_with_device(
             drop(stream);
             log::info!("WASAPI 流已停止");
 
+            // 填充尾部静音，与 WAV 路径行为一致（#27）
+            let tail_frames = (config.sample_rate as usize) * (config.channels as usize);
+            let mut silence = Vec::with_capacity(tail_frames * 4);
+            silence.resize(tail_frames * 4, 0u8);
+            let _ = tx_audio.send(silence);
             let _ = tx_audio.send(Vec::new());
             let _ = writer_thread.join();
 
             log::info!("等待 FFmpeg AAC 编码完成...");
             if let Ok(mut guard) = thread_ffmpeg.lock() {
                 if let Some(ref mut child) = *guard {
-                    for _ in 0..1000 {
+                    for _ in 0..3000 {
                         match child.0.try_wait() {
                             Ok(Some(status)) => {
                                 log::info!(
@@ -1143,6 +1206,9 @@ pub fn start_system_loopback_aac_with_device(
                         let _ = child.0.kill();
                     }
                 }
+            }
+            if let Some(join) = stderr_join {
+                let _ = join.join();
             }
 
             // 🔧 验证输出文件：检查 AAC 文件是否有效

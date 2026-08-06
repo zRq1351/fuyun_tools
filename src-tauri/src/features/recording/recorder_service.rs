@@ -64,21 +64,42 @@ fn suppress_console_window(command: &mut Command) -> &mut Command {
 }
 
 /// 等待线程退出（每 10ms 轮询，最多 max_iters 次）。
-/// 无论是否超时都会 join——绝不泄漏 JoinHandle。
 fn join_thread_with_timeout<T>(join: std::thread::JoinHandle<T>, name: &str, max_iters: u32) {
-    let mut exited = false;
     for _ in 0..max_iters {
         if join.is_finished() {
-            exited = true;
-            break;
+            let _ = join.join();
+            return;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    if exited {
-        let _ = join.join();
-    } else {
-        log::warn!("{} 线程超时 ({:.1}s)，强制等待退出...", name, max_iters as f64 * 0.01);
-        let _ = join.join();
+    // 超时：放弃等待（JoinHandle drop 后线程自动分离），避免调用方永久阻塞（#7）
+    log::warn!(
+        "{} 线程超时 ({:.1}s)，放弃等待（线程转为后台运行）",
+        name,
+        max_iters as f64 * 0.01
+    );
+}
+
+/// 原子替换 dst 为 src：先把 dst 改名备份，成功后再删除备份。
+/// Windows 下 rename 不覆盖目标，直接"先删后 rename"在 rename 失败时会丢失原文件（#2/#3）。
+fn replace_file_atomically(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    if !dst.exists() {
+        return fs::rename(src, dst);
+    }
+    let mut bak_os = dst.as_os_str().to_os_string();
+    bak_os.push(".bak");
+    let bak = PathBuf::from(bak_os);
+    fs::rename(dst, &bak)?;
+    match fs::rename(src, dst) {
+        Ok(()) => {
+            let _ = fs::remove_file(&bak);
+            Ok(())
+        }
+        Err(e) => {
+            // 恢复原文件，避免成片丢失
+            let _ = fs::rename(&bak, dst);
+            Err(e)
+        }
     }
 }
 
@@ -439,10 +460,7 @@ fn trim_video_initial_frames(
         log::warn!("视频过短（裁剪结果为 0 字节），跳过灰帧裁剪");
         return Ok(());
     }
-    if video_path.exists() {
-        let _ = fs::remove_file(video_path);
-    }
-    fs::rename(&trimmed_path, video_path).map_err(|e| {
+    replace_file_atomically(&trimmed_path, video_path).map_err(|e| {
         AppError::new(ErrorCode::IoError, "重命名裁剪文件失败").with_details(e.to_string())
     })?;
     log::info!("✅ 已裁剪视频开头 {:.3}s 灰色帧", trim_seconds);
@@ -852,6 +870,10 @@ fn merge_audio_fast(
                 .arg(video_path)
                 .arg("-i")
                 .arg(audio_path)
+                .arg("-map")
+                .arg("0:v:0")
+                .arg("-map")
+                .arg("1:a:0")
                 .arg("-c:v")
                 .arg("copy")
                 .arg("-c:a")
@@ -881,11 +903,8 @@ fn merge_audio_fast(
 
             if retry_output.status.success() {
                 log::info!("✅ AAC 重编码回退成功");
-                if video_path.exists() {
-                    let _ = fs::remove_file(video_path);
-                }
-                fs::rename(&merged_path, video_path).map_err(|e| {
-                    let _ = fs::remove_file(&merged_path);
+                replace_file_atomically(&merged_path, video_path).map_err(|e| {
+                    // 不再删除 merged_path：rename 失败时保留合并产物以便恢复
                     record_perf_metric(
                         "recording.audio_merge",
                         "录屏快速音频合并耗时(重编码回退)",
@@ -937,10 +956,7 @@ fn merge_audio_fast(
         return Err(AppError::new(ErrorCode::SystemError, "快速音频合并失败").with_details(details));
     }
 
-    if video_path.exists() {
-        let _ = fs::remove_file(video_path);
-    }
-    fs::rename(&merged_path, video_path).map_err(|e| {
+    replace_file_atomically(&merged_path, video_path).map_err(|e| {
         record_perf_metric(
             "recording.audio_merge",
             "录屏快速音频合并耗时",
@@ -1406,8 +1422,8 @@ fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             let is_stale_pattern = file_name.ends_with(".tmp.mp4")
                 || file_name.contains("_aligned.tmp.")
-                || file_name.contains(".sys.")
-                || file_name.contains(".mic.");
+                || file_name.contains(".sys.wav")
+                || file_name.contains(".mic.wav");
             if !is_stale_pattern {
                 continue;
             }
@@ -1596,6 +1612,9 @@ fn spawn_stats_loop(
                             let _ = fs::remove_file(tmp);
                         }
                         emit_error = Some((RECORDING_PROCESS_EXITED, err_msg, session_id.clone()));
+                        // 与"无画面看门狗"一致：触发自动收尾，回收音频线程，避免持续泄漏（#6）
+                        runtime.auto_stop_requested = true;
+                        auto_stop_session_id = session_id.clone();
                     }
                 }
             }
@@ -2566,9 +2585,12 @@ pub fn stop_recording(
     //     let _ = fs::remove_file(path);
     // }
 
-    // 只清理窗口视频片段（已经在同步阶段使用完毕）
-    for path in window_video_segments {
-        let _ = fs::remove_file(path);
+    // 只清理窗口视频片段（已经在同步阶段使用完毕）；
+    // concat 失败时保留分段，避免用户失去手动恢复可能（#4）
+    if fatal_error.is_none() {
+        for path in window_video_segments {
+            let _ = fs::remove_file(path);
+        }
     }
 
     let mut output_path_for_result: Option<String> = None;
@@ -2921,6 +2943,11 @@ pub fn pause_recording(
                 log::warn!("FFmpeg 暂停时未能在 10 秒内退出，强制结束并丢弃当前片段");
                 let _ = process.kill();
                 let _ = process.wait();
+                // 被 kill 的片段未写 moov 不可播放：从列表移除并删除，避免后续 concat 失败（#5）
+                if let Some(last) = runtime.window_video_segments.pop() {
+                    let _ = fs::remove_file(&last);
+                }
+                runtime.video_segment_started_at = None;
             }
         }
         if let Some(flag) = runtime.recording_pause_flag.as_ref() {
@@ -3056,13 +3083,15 @@ pub fn resume_recording(
                 "当前状态不允许恢复",
             ));
         }
-        // 暂存暂停累计时长，等待阶段验证通过后再正式写入
+        // 立即把暂停区间累计到 runtime：若后续 stop/cancel 插入，暂停时长也不会丢失（#18）
         let take_paused_at = runtime.paused_at_instant.take();
-        let pending_paused_ms = runtime.paused_total_ms.saturating_add(
-            take_paused_at.map(|t| t.elapsed().as_millis() as u64).unwrap_or(0),
-        );
-        // 使用暂存值（在最终阶段验证后再写入 runtime）
-        let paused_total_ms = take_paused_at.map(|_| pending_paused_ms).unwrap_or(runtime.paused_total_ms);
+        if let Some(t) = take_paused_at {
+            runtime.paused_total_ms = runtime
+                .paused_total_ms
+                .saturating_add(t.elapsed().as_millis() as u64);
+        }
+        let pending_paused_ms = runtime.paused_total_ms;
+        let paused_total_ms = pending_paused_ms;
         let output_dir = runtime
             .output_path_tmp
             .as_ref()
@@ -3551,11 +3580,21 @@ pub fn open_recording_folder(
     #[cfg(target_os = "windows")]
     {
         let now_ms = now_unix_ms() as u64;
-        let last_ms = LAST_OPEN_FOLDER_MS.load(Ordering::Relaxed);
-        if last_ms > 0 && now_ms.saturating_sub(last_ms) < 1200 {
-            return Ok(());
+        let mut last_ms = LAST_OPEN_FOLDER_MS.load(Ordering::Relaxed);
+        loop {
+            if last_ms > 0 && now_ms.saturating_sub(last_ms) < 1200 {
+                return Ok(());
+            }
+            match LAST_OPEN_FOLDER_MS.compare_exchange(
+                last_ms,
+                now_ms,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(current) => last_ms = current,
+            }
         }
-        LAST_OPEN_FOLDER_MS.store(now_ms, Ordering::Relaxed);
         let output_dir = {
             let state_guard = lock_arc_mutex(&state_arc);
             resolve_output_dir(&state_guard, None)?

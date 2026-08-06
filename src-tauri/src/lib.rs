@@ -44,20 +44,13 @@ use crate::ui::window_manager::{
     show_clipboard_window, show_doc_manager_widget_window,
     show_image_clipboard_window, show_standard_window_by_label,
 };
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
-static RECORDING_SHORTCUT_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
-static RECORDING_SHORTCUT_LAST_TRIGGER_MS: AtomicU64 = AtomicU64::new(0);
-const RECORDING_SHORTCUT_MIN_INTERVAL_MS: u64 = 300;
 static BACKUP_SCHEDULER_STOP: AtomicBool = AtomicBool::new(false);
-
-fn now_unix_ms_u64() -> u64 {
-    crate::utils::utils_helpers::now_unix_ms_u64()
-}
 
 fn start_auto_backup_scheduler(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     thread::spawn(move || {
@@ -145,6 +138,11 @@ fn cleanup_stale_screenshot_boot_files() {
 /// 清理启动时遗留的录屏临时文件
 /// 防止崩溃后 .tmp.mp4 / .sys.* / .mic.* 文件累积
 fn cleanup_stale_recording_tmp_files() {
+    // 只清理本次清理开始之前就存在的临时文件，避免删除正在写入的新录制（#10）
+    let cleanup_threshold_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(u64::MAX);
     let mut dir = match std::env::current_exe() {
         Ok(p) => p,
         Err(_) => return,
@@ -165,13 +163,23 @@ fn cleanup_stale_recording_tmp_files() {
                 Some(n) => n,
                 None => continue,
             };
+            // 临时音频段为 {session_id}.sys.{n}.wav / .mic.{n}.wav（session_id 前缀），
+            // 用 .sys.wav/.mic.wav 后缀匹配，避免误删用户模板含 .sys./.mic. 的成稿（#11）
             let is_tmp = name.ends_with(".tmp.mp4")
                 || name.contains("_aligned.tmp.")
-                || name.contains(".sys.")
-                || name.contains(".mic.");
+                || name.contains(".sys.wav")
+                || name.contains(".mic.wav");
             if is_tmp {
-                let _ = std::fs::remove_file(&path);
-                count += 1;
+                let mtime_ms = std::fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(u64::MAX);
+                if mtime_ms < cleanup_threshold_ms {
+                    let _ = std::fs::remove_file(&path);
+                    count += 1;
+                }
             }
         }
         if count > 0 {
@@ -371,23 +379,10 @@ pub fn run() {
                     recording_hot_key.as_str(),
                     move |_app, _shortcut, event| {
                         if let ShortcutState::Pressed = event.state {
-                            let now_ms = now_unix_ms_u64();
-                            let last_ms =
-                                RECORDING_SHORTCUT_LAST_TRIGGER_MS.load(Ordering::Relaxed);
-                            if last_ms > 0
-                                && now_ms.saturating_sub(last_ms)
-                                    < RECORDING_SHORTCUT_MIN_INTERVAL_MS
-                            {
-                                return;
-                            }
-                            if RECORDING_SHORTCUT_IN_FLIGHT.swap(true, Ordering::AcqRel) {
-                                return;
-                            }
-                            RECORDING_SHORTCUT_LAST_TRIGGER_MS.store(now_ms, Ordering::Release);
+                            // 防抖与互斥已下沉到 toggle_recording_from_shortcut 入口（#12/#13/#43）
                             let app_handle_inner = app_handle_clone_recording.clone();
                             tauri::async_runtime::spawn(async move {
                                 toggle_recording_from_shortcut(app_handle_inner).await;
-                                RECORDING_SHORTCUT_IN_FLIGHT.store(false, Ordering::Release);
                             });
                         }
                     },
@@ -400,24 +395,21 @@ pub fn run() {
             // 注册麦克风快捷键（按住开启，松开关闭）
             let app_handle_clone_mic = app_handle.clone();
             if recording_enabled {
+                // PTT 事件串行队列：消除 Pressed/Released 并发顺序不确定（#14）
+                let (mic_event_tx, mic_event_rx) = std::sync::mpsc::channel::<bool>();
+                {
+                    let app_handle_inner = app_handle_clone_mic.clone();
+                    std::thread::spawn(move || {
+                        while let Ok(enable) = mic_event_rx.recv() {
+                            toggle_microphone_from_shortcut(app_handle_inner.clone(), enable);
+                        }
+                    });
+                }
                 if let Err(e) = app.global_shortcut().on_shortcut(
                     recording_mic_toggle_hot_key.as_str(),
                     move |_app, _shortcut, event| {
-                        let app_handle_inner = app_handle_clone_mic.clone();
-                        match event.state {
-                            ShortcutState::Pressed => {
-                                // 按下快捷键：开启麦克风
-                                tauri::async_runtime::spawn(async move {
-                                    toggle_microphone_from_shortcut(app_handle_inner, true).await;
-                                });
-                            }
-                            ShortcutState::Released => {
-                                // 松开快捷键：关闭麦克风
-                                tauri::async_runtime::spawn(async move {
-                                    toggle_microphone_from_shortcut(app_handle_inner, false).await;
-                                });
-                            }
-                        }
+                        // 按到达顺序入队，由单一消费线程串行执行（#14）
+                        let _ = mic_event_tx.send(event.state == ShortcutState::Pressed);
                     },
                 ) {
                     log::warn!(
@@ -807,6 +799,10 @@ pub fn run() {
                         if has_active_recording {
                             log::warn!("录屏进行中，阻止应用退出");
                             api.prevent_exit();
+                            // 通知前端展示提示，避免静默阻止（#52）
+                            if let Err(e) = app_handle.emit("recording-exit-blocked", ()) {
+                                log::warn!("发送退出阻止通知失败: {}", e);
+                            }
                         }
                     }
                     tauri::RunEvent::Exit => {
