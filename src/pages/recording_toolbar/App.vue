@@ -694,7 +694,15 @@ const toggleRecordingState = async () => {
       recordingFeatureEnabled.value = settings.recording_enabled === true;
     } catch (_e) {
     }
-    if (!recordingFeatureEnabled.value) return;
+    if (!recordingFeatureEnabled.value) {
+      // 功能停用时点击引导到设置页的录屏标签开启，而不是静默无反应
+      try {
+        await invoke('open_settings_window', {tab: 'recording', reason: 'enable_recording'});
+      } catch (e) {
+        console.error('打开录屏设置失败:', e);
+      }
+      return;
+    }
   }
   try {
     const prevRawState = rawRecordingState.value;
