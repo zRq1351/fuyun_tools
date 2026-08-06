@@ -125,7 +125,7 @@ fn split_download_url_and_sha256(raw: &str) -> Result<(String, Option<String>), 
 fn is_trusted_download_host(host: &str) -> bool {
     matches!(
         host,
-        "gitee.com" | "github.com" | "objects.githubusercontent.com" | "aka.ms"
+        "gitee.com" | "github.com" | "objects.githubusercontent.com"
     )
 }
 
@@ -187,12 +187,15 @@ pub async fn download_recording_ffmpeg(
     }
     struct DownloadGuard {
         tmp_path: PathBuf,
+        success: bool,
     }
     impl Drop for DownloadGuard {
         fn drop(&mut self) {
             FFMPEG_DOWNLOAD_IN_PROGRESS.store(false, Ordering::Release);
-            // 任何失败路径统一清理临时文件，避免残留（#38）
-            let _ = fs::remove_file(&self.tmp_path);
+            // 仅在失败路径清理临时文件；成功时文件已 rename 到目标路径（P2-2）
+            if !self.success {
+                let _ = fs::remove_file(&self.tmp_path);
+            }
         }
     }
 
@@ -205,8 +208,9 @@ pub async fn download_recording_ffmpeg(
     if tmp_path.exists() {
         let _ = fs::remove_file(&tmp_path);
     }
-    let _download_guard = DownloadGuard {
+    let mut download_guard = DownloadGuard {
         tmp_path: tmp_path.clone(),
+        success: false,
     };
 
     let raw_url = download_url
@@ -312,6 +316,7 @@ pub async fn download_recording_ffmpeg(
             .await
             .map_err(|e| format!("写入 ffmpeg 文件失败: {}", e))?;
     }
+    download_guard.success = true;
 
     if let Err(e) = app.emit(
         "recording-ffmpeg-download-progress",
@@ -955,7 +960,7 @@ mod tests {
         assert!(is_trusted_download_host("gitee.com"));
         assert!(is_trusted_download_host("github.com"));
         assert!(is_trusted_download_host("objects.githubusercontent.com"));
-        assert!(is_trusted_download_host("aka.ms"));
+        assert!(!is_trusted_download_host("aka.ms"));
         assert!(!is_trusted_download_host("evil.example.com"));
         assert!(!is_trusted_download_host(""));
     }

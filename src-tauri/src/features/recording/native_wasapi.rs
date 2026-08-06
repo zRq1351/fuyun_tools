@@ -237,6 +237,8 @@ fn capture_process_loopback_to_wav(
         if blockalign == 0 {
             return Err(format!("无效的 blockalign: 0 (pid={})", process_id));
         }
+        // 队列上限：防止音频回调堆积导致 OOM（P2-3）
+        const MAX_QUEUE_BYTES: usize = 2 * 1024 * 1024;
         audio_client
             .start_stream()
             .map_err(|e| format!("启动进程 loopback 失败(pid={}): {}", process_id, e))?;
@@ -275,6 +277,12 @@ fn capture_process_loopback_to_wav(
             }
             let enabled =
                 enabled_flag.load(Ordering::SeqCst) && !recording_pause_flag.load(Ordering::SeqCst);
+
+            // 队列防 OOM：消费落后时丢弃旧数据（P2-3）
+            if queue.len() > MAX_QUEUE_BYTES {
+                let drain_bytes = queue.len().saturating_sub(MAX_QUEUE_BYTES / 2);
+                queue.drain(..drain_bytes);
+            }
 
             let slices = queue.as_slices();
             let mut processed = 0;
@@ -594,6 +602,65 @@ fn visible_window_process_titles() -> HashMap<u32, String> {
     HashMap::new()
 }
 
+/// 选择设备最佳配置：探测支持的输入格式，优先 48kHz；后备默认配置。（P2-7）
+fn select_best_device_config(
+    device: &cpal::Device,
+    default_channels: u16,
+    use_input: bool,
+) -> (CpalSampleFormat, StreamConfig) {
+    let mut sample_format = CpalSampleFormat::F32;
+    let mut config = StreamConfig {
+        channels: default_channels,
+        sample_rate: 48_000,
+        buffer_size: cpal::BufferSize::Default,
+    };
+    if let Ok(supported) = device.supported_input_configs() {
+        let mut best: Option<(i64, CpalSampleFormat, StreamConfig)> = None;
+        for c in supported {
+            let rate = c.max_sample_rate();
+            let dist = (rate as i64 - 48_000).abs();
+            if best.as_ref().map(|(d, _, _)| dist < *d).unwrap_or(true) {
+                best = Some((dist, c.sample_format(), c.with_max_sample_rate().config()));
+            }
+        }
+        if let Some((_, fmt, cfg)) = best {
+            sample_format = fmt;
+            config = cfg;
+        } else {
+            let default = if use_input {
+                device.default_input_config()
+            } else {
+                device.default_output_config()
+            };
+            if let Ok(def) = default {
+                sample_format = def.sample_format();
+                let defc = def.config();
+                config = StreamConfig {
+                    channels: defc.channels,
+                    sample_rate: defc.sample_rate,
+                    buffer_size: cpal::BufferSize::Default,
+                };
+            }
+        }
+    } else {
+        let default = if use_input {
+            device.default_input_config()
+        } else {
+            device.default_output_config()
+        };
+        if let Ok(def) = default {
+            sample_format = def.sample_format();
+            let defc = def.config();
+            config = StreamConfig {
+                channels: defc.channels,
+                sample_rate: defc.sample_rate,
+                buffer_size: cpal::BufferSize::Default,
+            };
+        }
+    }
+    (sample_format, config)
+}
+
 pub fn start_system_loopback_wav_with_device(
     device_desc_key: Option<String>,
     output_path: PathBuf,
@@ -622,42 +689,7 @@ pub fn start_system_loopback_wav_with_device(
                     .ok_or_else(|| "未找到输出设备".to_string())?,
             };
 
-            let mut sample_format = CpalSampleFormat::F32;
-            let mut config: StreamConfig = StreamConfig {
-                channels: 2,
-                sample_rate: 48_000,
-                buffer_size: cpal::BufferSize::Default,
-            };
-            if let Ok(supported) = device.supported_input_configs() {
-                let mut best: Option<(i64, CpalSampleFormat, StreamConfig)> = None;
-                for c in supported {
-                    let rate = c.max_sample_rate();
-                    let dist = (rate as i64 - 48_000).abs();
-                    if best.as_ref().map(|(d, _, _)| dist < *d).unwrap_or(true) {
-                        best = Some((dist, c.sample_format(), c.with_max_sample_rate().config()));
-                    }
-                }
-                if let Some((_, fmt, cfg)) = best {
-                    sample_format = fmt;
-                    config = cfg;
-                } else if let Ok(def) = device.default_output_config() {
-                    sample_format = def.sample_format();
-                    let defc = def.config();
-                    config = StreamConfig {
-                        channels: defc.channels,
-                        sample_rate: defc.sample_rate,
-                        buffer_size: cpal::BufferSize::Default,
-                    };
-                }
-            } else if let Ok(def) = device.default_output_config() {
-                sample_format = def.sample_format();
-                let defc = def.config();
-                config = StreamConfig {
-                    channels: defc.channels,
-                    sample_rate: defc.sample_rate,
-                    buffer_size: cpal::BufferSize::Default,
-                };
-            }
+            let (sample_format, config) = select_best_device_config(&device, 2, false);
             let spec = hound::WavSpec {
                 channels: config.channels,
                 sample_rate: config.sample_rate,
@@ -817,42 +849,7 @@ pub fn start_microphone_wav_with_device(
                     .ok_or_else(|| "未找到输入设备".to_string())?,
             };
 
-            let mut sample_format = CpalSampleFormat::F32;
-            let mut config: StreamConfig = StreamConfig {
-                channels: 1,
-                sample_rate: 48_000,
-                buffer_size: cpal::BufferSize::Default,
-            };
-            if let Ok(supported) = device.supported_input_configs() {
-                let mut best: Option<(i64, CpalSampleFormat, StreamConfig)> = None;
-                for c in supported {
-                    let rate = c.max_sample_rate();
-                    let dist = (rate as i64 - 48_000).abs();
-                    if best.as_ref().map(|(d, _, _)| dist < *d).unwrap_or(true) {
-                        best = Some((dist, c.sample_format(), c.with_max_sample_rate().config()));
-                    }
-                }
-                if let Some((_, fmt, cfg)) = best {
-                    sample_format = fmt;
-                    config = cfg;
-                } else if let Ok(def) = device.default_input_config() {
-                    sample_format = def.sample_format();
-                    let defc = def.config();
-                    config = StreamConfig {
-                        channels: defc.channels,
-                        sample_rate: defc.sample_rate,
-                        buffer_size: cpal::BufferSize::Default,
-                    };
-                }
-            } else if let Ok(def) = device.default_input_config() {
-                sample_format = def.sample_format();
-                let defc = def.config();
-                config = StreamConfig {
-                    channels: defc.channels,
-                    sample_rate: defc.sample_rate,
-                    buffer_size: cpal::BufferSize::Default,
-                };
-            }
+            let (sample_format, config) = select_best_device_config(&device, 1, true);
 
             let spec = hound::WavSpec {
                 channels: config.channels,
@@ -1015,42 +1012,7 @@ pub fn start_system_loopback_aac_with_device(
             };
 
             // 探测设备支持的输入配置：采样率/声道跟随设备，避免硬编码 48k/2ch 导致启动失败（#1）
-            let mut sample_format = CpalSampleFormat::F32;
-            let mut config: StreamConfig = StreamConfig {
-                channels: 2,
-                sample_rate: 48_000,
-                buffer_size: cpal::BufferSize::Default,
-            };
-            if let Ok(supported) = device.supported_input_configs() {
-                let mut best: Option<(i64, CpalSampleFormat, StreamConfig)> = None;
-                for c in supported {
-                    let rate = c.max_sample_rate();
-                    let dist = (rate as i64 - 48_000).abs();
-                    if best.as_ref().map(|(d, _, _)| dist < *d).unwrap_or(true) {
-                        best = Some((dist, c.sample_format(), c.with_max_sample_rate().config()));
-                    }
-                }
-                if let Some((_, fmt, cfg)) = best {
-                    sample_format = fmt;
-                    config = cfg;
-                } else if let Ok(def) = device.default_output_config() {
-                    sample_format = def.sample_format();
-                    let defc = def.config();
-                    config = StreamConfig {
-                        channels: defc.channels,
-                        sample_rate: defc.sample_rate,
-                        buffer_size: cpal::BufferSize::Default,
-                    };
-                }
-            } else if let Ok(def) = device.default_output_config() {
-                sample_format = def.sample_format();
-                let defc = def.config();
-                config = StreamConfig {
-                    channels: defc.channels,
-                    sample_rate: defc.sample_rate,
-                    buffer_size: cpal::BufferSize::Default,
-                };
-            }
+            let (sample_format, config) = select_best_device_config(&device, 2, false);
 
             let mut ffmpeg_cmd = Command::new(&ffmpeg_path);
             #[cfg(target_os = "windows")]

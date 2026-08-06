@@ -38,6 +38,7 @@ impl RecordingPhase {
 }
 
 pub struct RecordingRuntime {
+    // --- 录制阶段与基础元信息 ---
     pub phase: RecordingPhase,
     pub session_id: Option<String>,
     pub started_at_ms: i64,
@@ -59,17 +60,23 @@ pub struct RecordingRuntime {
     pub target_id: String,
     pub capture_cursor: bool,
     pub process: Option<Child>,
+
+    // --- WGC 窗口捕获 ---
     pub wgc_stop_flag: Option<Arc<AtomicBool>>,
     pub wgc_pause_flag: Option<Arc<AtomicBool>>,
     pub wgc_first_frame_elapsed_ms: Option<Arc<AtomicU64>>,
     pub wgc_audio_sync_advance_ms: u64,
     pub ffmpeg_start_delay_ms: u64,
     pub wgc_thread: Option<JoinHandle<Result<(), String>>>,
+
+    // --- 录制暂停/分段 ---
     pub recording_pause_flag: Option<Arc<AtomicBool>>,
     pub window_video_segments: Vec<PathBuf>,
     pub window_segment_index: usize,
     /// 当前视频分段开始时间，用于看门狗判断分段存在时长（避免恢复后立即误判无画面）
     pub video_segment_started_at: Option<Instant>,
+
+    // --- 系统音频 ---
     pub system_audio_wav_path: Option<PathBuf>,
     pub system_audio_stop_flag: Option<Arc<AtomicBool>>,
     pub system_audio_threads: Vec<JoinHandle<()>>,
@@ -79,6 +86,8 @@ pub struct RecordingRuntime {
     pub system_audio_ever_enabled: bool,
     pub system_audio_stream_start_ms: Option<u64>,
     pub system_audio_segments: Vec<AudioSegment>,
+
+    // --- 麦克风 ---
     pub mic_audio_wav_path: Option<PathBuf>,
     pub mic_audio_stop_flag: Option<Arc<AtomicBool>>,
     pub mic_audio_thread: Option<JoinHandle<()>>,
@@ -87,6 +96,8 @@ pub struct RecordingRuntime {
     pub mic_audio_ever_enabled: bool,
     pub mic_audio_stream_start_ms: Option<u64>,
     pub mic_audio_segments: Vec<AudioSegment>,
+
+    // --- FFmpeg 诊断 ---
     pub ffmpeg_stderr_tail: VecDeque<String>,
 }
 
@@ -194,8 +205,8 @@ impl RecordingRuntime {
             if wgc_exited {
                 let _ = join.join();
             } else {
-                log::warn!("reset_to_idle: WGC 线程超时，强制等待退出...");
-                let _ = join.join();
+                log::warn!("reset_to_idle: WGC 线程超时，放弃等待（线程转为后台运行）");
+                // 不 join：JoinHandle drop 后线程自动分离，避免永久阻塞调用方（P1-1）
             }
         }
         for join in self.system_audio_threads.drain(..) {
@@ -210,8 +221,8 @@ impl RecordingRuntime {
             if exited {
                 let _ = join.join();
             } else {
-                log::warn!("reset_to_idle: 系统音频线程超时，强制等待退出...");
-                let _ = join.join();
+                log::warn!("reset_to_idle: 系统音频线程超时，放弃等待（线程转为后台运行）");
+                // 不 join：JoinHandle drop 后线程自动分离（P1-1）
             }
         }
         if let Some(join) = self.mic_audio_thread.take() {
@@ -226,8 +237,8 @@ impl RecordingRuntime {
             if exited {
                 let _ = join.join();
             } else {
-                log::warn!("reset_to_idle: 麦克风音频线程超时，强制等待退出...");
-                let _ = join.join();
+                log::warn!("reset_to_idle: 麦克风音频线程超时，放弃等待（线程转为后台运行）");
+                // 不 join：JoinHandle drop 后线程自动分离（P1-1）
             }
         }
         self.phase = RecordingPhase::Idle;

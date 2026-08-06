@@ -47,6 +47,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
 };
 
+// ====================================================================
+//  录制常量
+// ====================================================================
+
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 static LAST_OPEN_FOLDER_MS: AtomicU64 = AtomicU64::new(0);
@@ -64,20 +68,20 @@ fn suppress_console_window(command: &mut Command) -> &mut Command {
 }
 
 /// 等待线程退出（每 10ms 轮询，最多 max_iters 次）。
-fn join_thread_with_timeout<T>(join: std::thread::JoinHandle<T>, name: &str, max_iters: u32) {
+fn join_thread_with_timeout<T>(join: std::thread::JoinHandle<T>, name: &str, max_iters: u32) -> bool {
     for _ in 0..max_iters {
         if join.is_finished() {
             let _ = join.join();
-            return;
+            return true;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    // 超时：放弃等待（JoinHandle drop 后线程自动分离），避免调用方永久阻塞（#7）
     log::warn!(
         "{} 线程超时 ({:.1}s)，放弃等待（线程转为后台运行）",
         name,
         max_iters as f64 * 0.01
     );
+    false
 }
 
 /// 原子替换 dst 为 src：先把 dst 改名备份，成功后再删除备份。
@@ -105,6 +109,10 @@ fn replace_file_atomically(src: &std::path::Path, dst: &std::path::Path) -> std:
     }
 }
 
+// ====================================================================
+//  运行时状态管理
+// ====================================================================
+
 fn normalize_runtime_state(runtime: &mut crate::features::recording::state::RecordingRuntime) {
     if let Some(process) = runtime.process.as_mut() {
         if let Ok(Some(status)) = process.try_wait() {
@@ -129,13 +137,13 @@ fn normalize_runtime_state(runtime: &mut crate::features::recording::state::Reco
             }
             let sys_threads = std::mem::take(&mut runtime.system_audio_threads);
             for join in sys_threads {
-                join_thread_with_timeout(join, "normalize 系统音频", 500);
+                let _ = join_thread_with_timeout(join, "normalize 系统音频", 500);
             }
             if let Some(flag) = runtime.mic_audio_stop_flag.take() {
                 flag.store(true, Ordering::SeqCst);
             }
             if let Some(join) = runtime.mic_audio_thread.take() {
-                join_thread_with_timeout(join, "normalize 麦克风音频", 500);
+                let _ = join_thread_with_timeout(join, "normalize 麦克风音频", 500);
             }
             log::warn!("normalize_runtime_state: 已停止残留音频线程");
         }
@@ -366,6 +374,10 @@ fn build_window_segment_path(
     output_dir.join(format!("{}.video.{}.tmp.mp4", session_id, segment_index))
 }
 
+// ====================================================================
+//  视频片段处理（拼接/裁剪/重命名）
+// ====================================================================
+
 fn concat_video_segments(
     ffmpeg_path: &std::path::Path,
     segments: &[PathBuf],
@@ -385,8 +397,8 @@ fn concat_video_segments(
         AppError::new(ErrorCode::IoError, "创建视频拼接列表失败").with_details(e.to_string())
     })?;
     for seg in segments {
-        let seg_path = seg.to_string_lossy().replace('\'', "'\\''");
-        let line = format!("file '{}'\n", seg_path);
+        let seg_path = seg.to_string_lossy();
+        let line = format!("file {}\n", seg_path);
         if let Err(e) = list_file.write_all(line.as_bytes()) {
             drop(list_file);
             let _ = fs::remove_file(&list_path);
@@ -468,6 +480,10 @@ fn trim_video_initial_frames(
     log::info!("✅ 已裁剪视频开头 {:.3}s 灰色帧", trim_seconds);
     Ok(())
 }
+
+// ====================================================================
+//  音频合并与混音
+// ====================================================================
 
 /// 纯音频多片段合并：将多个音频片段（含 adelay）合并为单个 AAC，不涉及视频
 /// 用于替代 filter_complex 慢速路径中的视频参与步骤
@@ -1194,6 +1210,10 @@ fn build_window_capture_unavailable_error(details: &str) -> AppError {
         .with_details(build_window_capture_unavailable_details(details))
 }
 
+// ====================================================================
+//  音频设备捕获管理
+// ====================================================================
+
 fn ensure_system_audio_capture_started(
     app: &AppHandle,
     runtime: &mut crate::features::recording::state::RecordingRuntime,
@@ -1521,6 +1541,10 @@ fn parse_kbits_after(line: &str, marker: &str) -> Option<u32> {
     }
 }
 
+// ====================================================================
+//  FFmpeg 进程监控与诊断
+// ====================================================================
+
 fn spawn_stderr_parser(
     app: AppHandle,
     runtime_arc: Arc<Mutex<crate::features::recording::state::RecordingRuntime>>,
@@ -1839,6 +1863,10 @@ fn spawn_ffmpeg_video_segment(
     Ok((child, stderr))
 }
 
+// ====================================================================
+//  录制控制 API — start / stop / cancel / pause / resume
+// ====================================================================
+
 pub fn start_recording(
     app: &AppHandle,
     state_arc: Arc<Mutex<SharedAppState>>,
@@ -2123,12 +2151,16 @@ pub fn start_recording(
                 true,
             ) {
                 Ok(()) => log::info!("✅ 系统音频捕获启动成功"),
-                Err(e) => log::error!("❌ 系统音频捕获启动失败: {}", e),
+                Err(e) => {
+                    log::error!("❌ 系统音频捕获启动失败: {}", e);
+                    runtime.last_error = Some(format!("系统音频未录制: {}", e));
+                }
             }
         }
         if capture_microphone {
             if let Err(e) = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true) {
                 log::error!("麦克风捕获启动失败: {}", e);
+                runtime.last_error = Some(format!("麦克风未录制: {}", e));
             }
         }
         runtime.process = child_opt;
@@ -2530,8 +2562,15 @@ pub fn stop_recording(
     // 🔧 等待音频线程退出（停止信号已在前面设置）
     log::info!("🔧 等待系统音频线程退出...");
     let sys_audio_join_start = std::time::Instant::now();
+    let mut sys_audio_timed_out = false;
     for join in system_audio_threads {
-        join_thread_with_timeout(join, "stop 系统音频", 500);
+        if !join_thread_with_timeout(join, "stop 系统音频", 500) {
+            sys_audio_timed_out = true;
+        }
+    }
+    if sys_audio_timed_out {
+        log::warn!("系统音频线程超时，跳过系统音频合并以避免使用不完整文件");
+        sys_segments.clear();
     }
     let sys_audio_elapsed = sys_audio_join_start.elapsed().as_millis();
     if sys_audio_elapsed > 100 {
@@ -2543,7 +2582,10 @@ pub fn stop_recording(
     log::info!("🔧 等待麦克风音频线程退出...");
     let mic_audio_join_start = std::time::Instant::now();
     if let Some(join) = mic_audio_thread {
-        join_thread_with_timeout(join, "stop 麦克风音频", 500);
+        if !join_thread_with_timeout(join, "stop 麦克风音频", 500) {
+            log::warn!("麦克风音频线程超时，跳过麦克风音频合并以避免使用不完整文件");
+            mic_segments.clear();
+        }
     }
     let mic_audio_elapsed = mic_audio_join_start.elapsed().as_millis();
     if mic_audio_elapsed > 100 {
@@ -2876,19 +2918,19 @@ pub fn cancel_recording(
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
     if let Some(join) = wgc_thread {
-        join_thread_with_timeout(join, "cancel WGC", 500);
+        let _ = join_thread_with_timeout(join, "cancel WGC", 500);
     }
     if let Some(flag) = system_audio_stop_flag.as_ref() {
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
     for join in system_audio_threads {
-        join_thread_with_timeout(join, "cancel 系统音频", 500);
+        let _ = join_thread_with_timeout(join, "cancel 系统音频", 500);
     }
     if let Some(flag) = mic_audio_stop_flag.as_ref() {
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
     if let Some(join) = mic_audio_thread {
-        join_thread_with_timeout(join, "cancel 麦克风音频", 500);
+        let _ = join_thread_with_timeout(join, "cancel 麦克风音频", 500);
     }
     for path in cleanup_paths {
         let _ = fs::remove_file(path);
@@ -2972,13 +3014,13 @@ pub fn pause_recording(
         flag.store(true, Ordering::SeqCst);
     }
     for join in system_audio_threads {
-        join_thread_with_timeout(join, "pause 系统音频", 500);
+        let _ = join_thread_with_timeout(join, "pause 系统音频", 500);
     }
     if let Some(flag) = mic_audio_stop_flag.as_ref() {
         flag.store(true, Ordering::SeqCst);
     }
     if let Some(join) = mic_audio_thread {
-        join_thread_with_timeout(join, "pause 麦克风音频", 500);
+        let _ = join_thread_with_timeout(join, "pause 麦克风音频", 500);
     }
 
     if target_type == "window" {
@@ -3207,7 +3249,7 @@ pub fn resume_recording(
             handle
                 .stop_flag
                 .store(true, std::sync::atomic::Ordering::SeqCst);
-            join_thread_with_timeout(handle.join, "resume 回滚 WGC", 500);
+            let _ = join_thread_with_timeout(handle.join, "resume 回滚 WGC", 500);
         }
         let _ = fs::remove_file(&next_segment_path);
         return Err(AppError::new(
@@ -3404,13 +3446,13 @@ pub fn update_audio_capture(
         flag.store(true, Ordering::SeqCst);
     }
     for join in system_audio_threads {
-        join_thread_with_timeout(join, "update_audio 系统音频", 500);
+        let _ = join_thread_with_timeout(join, "update_audio 系统音频", 500);
     }
     if let Some(flag) = mic_audio_stop_flag.as_ref() {
         flag.store(true, Ordering::SeqCst);
     }
     if let Some(join) = mic_audio_thread {
-        join_thread_with_timeout(join, "update_audio 麦克风音频", 500);
+        let _ = join_thread_with_timeout(join, "update_audio 麦克风音频", 500);
     }
     let mut runtime = lock_arc_mutex(&runtime_arc);
     if runtime.phase != RecordingPhase::Recording && runtime.phase != RecordingPhase::Paused {

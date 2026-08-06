@@ -284,7 +284,11 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                     }
                 }
             } else {
-                // 通用路径：缩放 + nopadding + flip
+                // 通用路径：缩放 + nopadding + flip（P2-4: 预计算 X 映射表消除内层除法）
+                let mut x_lut: Vec<usize> = Vec::with_capacity(target_w);
+                for x in 0..target_w {
+                    x_lut.push((x * frame_w) / target_w);
+                }
                 unsafe {
                     let src_ptr = raw_pixels.as_ptr();
                     let dst_ptr = resized.as_mut_ptr();
@@ -293,8 +297,7 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                         let dst_y = target_h - 1 - y;
                         let src_row_base = src_y * stride;
                         let dst_row_base = dst_y * target_w * 4;
-                        for x in 0..target_w {
-                            let src_x = (x * frame_w) / target_w;
+                        for (x, &src_x) in x_lut.iter().enumerate() {
                             let src_offset = src_row_base + src_x * 4;
                             let dst_offset = dst_row_base + x * 4;
                             std::ptr::copy_nonoverlapping(
