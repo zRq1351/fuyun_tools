@@ -163,12 +163,14 @@ fn cleanup_stale_recording_tmp_files() {
                 Some(n) => n,
                 None => continue,
             };
-            // 临时音频段为 {session_id}.sys.{n}.wav / .mic.{n}.wav（session_id 前缀），
-            // 用 .sys.wav/.mic.wav 后缀匹配，避免误删用户模板含 .sys./.mic. 的成稿（#11）
+            // 临时音频段为 {session_id}.sys.{n}.wav/.aac 或 .mic.{n}.wav（session_id 前缀），
+            // 用 .sys./.mic. + 扩展名组合匹配，避免误删用户模板含 .sys./.mic. 的成稿（#11/#N5）
             let is_tmp = name.ends_with(".tmp.mp4")
                 || name.contains("_aligned.tmp.")
                 || name.contains(".sys.wav")
-                || name.contains(".mic.wav");
+                || name.contains(".mic.wav")
+                || name.contains(".sys.aac")
+                || name.contains(".mic.aac");
             if is_tmp {
                 let mtime_ms = std::fs::metadata(&path)
                     .and_then(|m| m.modified())

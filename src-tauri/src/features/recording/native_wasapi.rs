@@ -67,18 +67,24 @@ fn pick_device_by_key(
         _ => key,
     };
     let mut exact: Option<cpal::Device> = None;
+    let mut base_match: Option<cpal::Device> = None;
     for (i, d) in devices.into_iter().enumerate() {
         if let Ok(desc) = d.description() {
             let desc = desc.to_string();
             if format!("{}_{}", desc, i) == key {
                 return Some(d);
             }
-            if desc == base && exact.is_none() {
-                exact = Some(d);
+            // key 整体作为描述匹配：优先于剥离索引的 base，避免误伤
+            // "描述本身以 _数字 结尾"的设备（如 Speaker_2）（N1）
+            if desc == key && exact.is_none() {
+                exact = Some(d.clone());
+            }
+            if desc == base && base_match.is_none() {
+                base_match = Some(d);
             }
         }
     }
-    exact
+    exact.or(base_match)
 }
 
 #[derive(Debug, Clone)]
@@ -136,7 +142,9 @@ macro_rules! write_sample_or_log {
 }
 
 /// AAC 路径输入回调：将任意 cpal 采样格式统一转 F32 写入 FFmpeg stdin（保持 f32le 输入），
-/// 通道满时丢弃本缓冲而非阻塞实时回调（#1/#8）
+/// 通道满时丢弃本缓冲而非阻塞实时回调（#1/#8）。
+/// 说明：未恢复对象池（#8 修复时移除）——每 10ms 回调分配一个 ~4KB Vec，
+/// 分配器开销可忽略；恢复共享池需在实时回调中加 Mutex，违背"回调不阻塞"初衷（N6）。
 macro_rules! aac_input_callback {
     ($tx_cb:expr, $enabled_cb:expr, $pause_cb:expr, $sample_type:ty) => {{
         let tx_cb = $tx_cb.clone();
@@ -1025,7 +1033,23 @@ pub fn start_system_loopback_aac_with_device(
                 if let Some((_, fmt, cfg)) = best {
                     sample_format = fmt;
                     config = cfg;
+                } else if let Ok(def) = device.default_output_config() {
+                    sample_format = def.sample_format();
+                    let defc = def.config();
+                    config = StreamConfig {
+                        channels: defc.channels,
+                        sample_rate: defc.sample_rate,
+                        buffer_size: cpal::BufferSize::Default,
+                    };
                 }
+            } else if let Ok(def) = device.default_output_config() {
+                sample_format = def.sample_format();
+                let defc = def.config();
+                config = StreamConfig {
+                    channels: defc.channels,
+                    sample_rate: defc.sample_rate,
+                    buffer_size: cpal::BufferSize::Default,
+                };
             }
 
             let mut ffmpeg_cmd = Command::new(&ffmpeg_path);
@@ -1169,8 +1193,8 @@ pub fn start_system_loopback_aac_with_device(
             drop(stream);
             log::info!("WASAPI 流已停止");
 
-            // 填充尾部静音，与 WAV 路径行为一致（#27）
-            let tail_frames = (config.sample_rate as usize) * (config.channels as usize);
+            // 填充尾部静音，与 WAV 系统路径一致：2s（#27/#N3）
+            let tail_frames = (config.sample_rate as usize) * (config.channels as usize) * 2;
             let mut silence = Vec::with_capacity(tail_frames * 4);
             silence.resize(tail_frames * 4, 0u8);
             let _ = tx_audio.send(silence);

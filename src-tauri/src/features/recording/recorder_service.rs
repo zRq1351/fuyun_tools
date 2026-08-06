@@ -89,6 +89,8 @@ fn replace_file_atomically(src: &std::path::Path, dst: &std::path::Path) -> std:
     let mut bak_os = dst.as_os_str().to_os_string();
     bak_os.push(".bak");
     let bak = PathBuf::from(bak_os);
+    // Windows rename 不覆盖目标：先清理可能的上次残留，避免二次替换失败（N4）
+    let _ = fs::remove_file(&bak);
     fs::rename(dst, &bak)?;
     match fs::rename(src, dst) {
         Ok(()) => {
@@ -1423,7 +1425,9 @@ fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
             let is_stale_pattern = file_name.ends_with(".tmp.mp4")
                 || file_name.contains("_aligned.tmp.")
                 || file_name.contains(".sys.wav")
-                || file_name.contains(".mic.wav");
+                || file_name.contains(".mic.wav")
+                || file_name.contains(".sys.aac")
+                || file_name.contains(".mic.aac");
             if !is_stale_pattern {
                 continue;
             }

@@ -1005,11 +1005,14 @@ pub async fn save_app_settings(
             );
             let effective_launcher_hot_key =
                 effective_key(&launcher_hot_key, &settings.launcher_hot_key);
+            let effective_doc_manager_hot_key =
+                effective_key(&doc_manager_hot_key, &settings.doc_manager_hot_key);
             if recording_hot_key_val == &effective_hot_key
                 || recording_hot_key_val == &effective_image_hot_key
                 || recording_hot_key_val == &effective_screenshot_hot_key
                 || recording_hot_key_val == &effective_mic_toggle_hot_key
                 || recording_hot_key_val == &effective_launcher_hot_key
+                || recording_hot_key_val == &effective_doc_manager_hot_key
             {
                 return Err(frontend_error_kind(
                     AppErrorKind::SettingsHotkeysIdentical,
@@ -1074,11 +1077,17 @@ pub async fn save_app_settings(
             let effective_image_hot_key = effective_key(&image_hot_key, &settings.image_hot_key);
             let effective_screenshot_hot_key = effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
             let effective_recording_hot_key = effective_key(&recording_hot_key, &settings.recording_hot_key);
+            let effective_launcher_hot_key =
+                effective_key(&launcher_hot_key, &settings.launcher_hot_key);
+            let effective_doc_manager_hot_key =
+                effective_key(&doc_manager_hot_key, &settings.doc_manager_hot_key);
 
             if mic_toggle_hot_key_val == &effective_hot_key
                 || mic_toggle_hot_key_val == &effective_image_hot_key
                 || mic_toggle_hot_key_val == &effective_screenshot_hot_key
                 || mic_toggle_hot_key_val == &effective_recording_hot_key
+                || mic_toggle_hot_key_val == &effective_launcher_hot_key
+                || mic_toggle_hot_key_val == &effective_doc_manager_hot_key
             {
                 return Err(frontend_error_kind(
                     AppErrorKind::SettingsHotkeysIdentical,
@@ -1181,12 +1190,15 @@ pub async fn save_app_settings(
             let effective_screenshot_hot_key = effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
             let effective_recording_hot_key = effective_key(&recording_hot_key, &settings.recording_hot_key);
             let effective_mic_toggle_hot_key = effective_key(&recording_mic_toggle_hot_key, &settings.recording_mic_toggle_hot_key);
+            let effective_doc_manager_hot_key =
+                effective_key(&doc_manager_hot_key, &settings.doc_manager_hot_key);
 
             if launcher_hot_key_val == &effective_hot_key
                 || launcher_hot_key_val == &effective_image_hot_key
                 || launcher_hot_key_val == &effective_screenshot_hot_key
                 || launcher_hot_key_val == &effective_recording_hot_key
                 || launcher_hot_key_val == &effective_mic_toggle_hot_key
+                || launcher_hot_key_val == &effective_doc_manager_hot_key
             {
                 return Err(frontend_error_kind(
                     AppErrorKind::SettingsHotkeysIdentical,
