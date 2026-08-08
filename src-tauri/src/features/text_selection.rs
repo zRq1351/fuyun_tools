@@ -297,6 +297,12 @@ fn get_selected_text_windows(
     app_handle: &AppHandle,
     clipboard_manager: Arc<Mutex<ClipboardManager>>,
 ) -> Option<String> {
+    // 完全排除终端窗口：终端划词体验差（Ctrl+C 是中断、右键复制会破坏选区），
+    // 直接不进入复制/剪贴板捕获流程，避免打扰用户
+    if is_terminal_foreground_window() {
+        log::info!("前台窗口为终端类应用，跳过划词文本捕获");
+        return None;
+    }
     let state_manager = app_handle.state::<Arc<Mutex<SharedAppState>>>();
     let _processing_guard = SelectionProcessingGuard::acquire(state_manager.inner().clone())?;
 
