@@ -252,6 +252,28 @@ fn now_unix_ms() -> i64 {
     crate::utils::utils_helpers::now_unix_ms_i64()
 }
 
+/// 根据采集线程回传的流启动时刻（unix ms）换算录制时间轴上的分段起点。
+/// 流实际出声发生在 ACK 之前，若在 ACK 之后才读 elapsed 会把分段整体放晚，
+/// 导致该段音频相对视频滞后（音画不同步）。流启动时间越精确，分段边界越准。
+fn derive_audio_segment_start_ms(
+    runtime: &crate::features::recording::state::RecordingRuntime,
+    stream_start_unix_ms: Option<u64>,
+) -> u64 {
+    let elapsed_now_ms = runtime.snapshot().elapsed_ms;
+    match stream_start_unix_ms {
+        Some(start_unix) => {
+            let now_ms_i64 = now_unix_ms();
+            let age_ms = if now_ms_i64 > 0 && (now_ms_i64 as u64) >= start_unix {
+                (now_ms_i64 as u64) - start_unix
+            } else {
+                0
+            };
+            elapsed_now_ms.saturating_sub(age_ms)
+        }
+        None => elapsed_now_ms,
+    }
+}
+
 fn parse_region_target(target_id: &str) -> Option<(i32, i32, u32, u32)> {
     let parts: Vec<&str> = target_id.split(',').map(|s| s.trim()).collect();
     if parts.len() != 4 {
@@ -311,6 +333,18 @@ fn normalize_region_to_virtual_screen(
     height: u32,
 ) -> Option<(i32, i32, u32, u32)> {
     Some((x, y, width.max(1), height.max(1)))
+}
+
+/// 停止采集时为活动音频分段标记终点（仅标记未设终点的最后一个分段）。
+/// 每个分段只标记一次（第一个 end_ms 为 None 的段），合并阶段据此裁剪尾部，
+/// 避免 2s 静音填充 + 采集管队列残留与后续分段重叠（声音叠加）或超出视频时长。
+fn mark_active_segment_end(
+    segments: &mut [crate::features::recording::state::AudioSegment],
+    end_ms: u64,
+) {
+    if let Some(seg) = segments.iter_mut().rev().find(|s| s.end_ms.is_none()) {
+        seg.end_ms = Some(end_ms);
+    }
 }
 
 fn push_stderr_tail(runtime: &mut crate::features::recording::state::RecordingRuntime, line: &str) {
@@ -487,17 +521,56 @@ fn trim_video_initial_frames(
 
 /// 纯音频多片段合并：将多个音频片段（含 adelay）合并为单个 AAC，不涉及视频
 /// 用于替代 filter_complex 慢速路径中的视频参与步骤
+fn make_silent_aac(
+    ffmpeg_path: &std::path::Path,
+    output_path: &std::path::Path,
+    duration_ms: u64,
+) -> Result<bool, String> {
+    let mut cmd = Command::new(ffmpeg_path);
+    suppress_console_window(&mut cmd);
+    cmd.arg("-hide_banner").arg("-loglevel").arg("warning").arg("-y")
+        .arg("-f").arg("lavfi")
+        .arg("-i").arg("anullsrc=r=48000:cl=stereo")
+        .arg("-t").arg(format!("{:.3}", duration_ms as f64 / 1000.0))
+        .arg("-c:a").arg("aac")
+        .arg(output_path);
+    let output = cmd
+        .output()
+        .map_err(|e| format!("启动静音占位音频生成失败: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        log::warn!("静音占位音频生成失败: {}", stderr);
+        return Ok(false);
+    }
+    Ok(true)
+}
+
 fn merge_audio_segments_only(
     ffmpeg_path: &std::path::Path,
     segments: &[crate::features::recording::state::AudioSegment],
     output_path: &std::path::Path,
     audio_bitrate_kbps: u32,
 ) -> Result<(), String> {
+    // 过滤掉因剪辑点/校正后有效时长为 0 的分段（如整段落在视频起点之前）
+    let segments = segments
+        .iter()
+        .filter(|s| s.end_ms.map(|e| e.saturating_sub(s.start_ms) > 0).unwrap_or(true))
+        .collect::<Vec<_>>();
     if segments.is_empty() {
-        return Err("没有可合并的音频片段".to_string());
+        // 输入非空但全部被裁为 0 时长（极短开关音频/整段落在起点前）：
+        // 生成静音占位 AAC，避免下游流复制合并步骤因缺少对齐文件而失败
+        let dummy = make_silent_aac(ffmpeg_path, output_path, 200)?;
+        if !dummy {
+            return Err("没有可合并的音频片段".to_string());
+        }
+        return Ok(());
     }
-    // 单片段无延迟：直接复制（AAC）或重编码（WAV）
-    if segments.len() == 1 && segments[0].start_ms == 0 && segments[0].trim_start_ms == 0 {
+    // 单片段无延迟且未打终点：直接复制（AAC）或重编码（WAV）
+    if segments.len() == 1
+        && segments[0].start_ms == 0
+        && segments[0].trim_start_ms == 0
+        && segments[0].end_ms.is_none()
+    {
         let seg = &segments[0];
         let is_aac = seg.path.extension()
             .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
@@ -522,12 +595,15 @@ fn merge_audio_segments_only(
         cmd.arg("-i").arg(&seg.path);
 
         let label = format!("a{}", idx);
-        filter_parts.push(format!(
-            "[{i}:a]adelay={d}|{d}[{l}]",
-            i = idx,
-            d = seg.start_ms,
-            l = label
-        ));
+        // 已打终点的分段：先归零时间戳再用 atrim 裁剪到终点，
+        // 去除 2s 静音填充与采集队列残留，避免与后续分段重叠（声音叠加）
+        let mut chain = format!("[{i}:a]asetpts=PTS-STARTPTS", i = idx);
+        if let Some(end_ms) = seg.end_ms {
+            let keep_s = end_ms.saturating_sub(seg.start_ms) as f64 / 1000.0;
+            chain.push_str(&format!(",atrim=end={:.6}", keep_s));
+        }
+        chain.push_str(&format!(",asetpts=PTS-STARTPTS,adelay={d}|{d}[{l}]", d = seg.start_ms, l = label));
+        filter_parts.push(chain);
         labels.push(format!("[{}]", label));
     }
 
@@ -617,7 +693,7 @@ fn merge_system_audio_into_video(
 
         if system_segments.len() == 1 && mic_segments.is_empty() {
             let seg = &system_segments[0];
-            if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.path.exists() {
+            if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.end_ms.is_none() && seg.path.exists() {
                 let is_aac = seg.path.extension()
                     .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
                     .unwrap_or(false);
@@ -637,7 +713,7 @@ fn merge_system_audio_into_video(
         }
         if mic_segments.len() == 1 && system_segments.is_empty() {
             let seg = &mic_segments[0];
-            if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.path.exists() {
+            if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.end_ms.is_none() && seg.path.exists() {
                 // 麦克风 WAV 文件仍需 FFmpeg 验证（cpal 写入可能因 I/O 中断损坏）
                 if validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
                     log::info!(
@@ -1256,14 +1332,15 @@ fn ensure_system_audio_capture_started(
         );
         return match first_try {
             Ok(handle) => {
+                let stream_start_ms = handle.stream_start_unix_ms;
                 runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
                 runtime.system_audio_threads = handle.joins;
-                // 与 AAC 路径一致：设备初始化完成后重读 start_ms，避免音频段整体偏早
-                let actual_start_ms = runtime.snapshot().elapsed_ms;
+                // 用采集线程回传的精确流启动时刻对齐时间轴，避免音频段整体偏早/偏晚
+                let actual_start_ms = derive_audio_segment_start_ms(&runtime, stream_start_ms);
                 runtime.system_audio_stream_start_ms = Some(actual_start_ms);
                 for p in output_paths {
                     runtime.system_audio_segments.push(
-                        crate::features::recording::state::AudioSegment { path: p, start_ms: actual_start_ms, trim_start_ms: 0 },
+                        crate::features::recording::state::AudioSegment { path: p, start_ms: actual_start_ms, trim_start_ms: 0, end_ms: None },
                     );
                 }
                 Ok(())
@@ -1310,16 +1387,17 @@ fn ensure_system_audio_capture_started(
     };
     match start_result {
         Ok(handle) => {
+            let stream_start_ms = handle.stream_start_unix_ms;
             runtime.system_audio_wav_path = Some(sys_aac);
             runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
             runtime.system_audio_threads = handle.join.into_iter().collect();
-            // 重新采集 start_ms，以反映设备初始化/回退的实际延迟
-            let actual_start_ms = runtime.snapshot().elapsed_ms;
+            // 用采集线程回传的精确流启动时刻对齐时间轴（含设备初始化/回退的实际延迟）
+            let actual_start_ms = derive_audio_segment_start_ms(&runtime, stream_start_ms);
             runtime.system_audio_stream_start_ms = Some(actual_start_ms);
             if let Some(path) = runtime.system_audio_wav_path.clone() {
                 runtime
-                        .system_audio_segments
-                    .push(crate::features::recording::state::AudioSegment { path, start_ms: actual_start_ms, trim_start_ms: 0 });
+                    .system_audio_segments
+                    .push(crate::features::recording::state::AudioSegment { path, start_ms: actual_start_ms, trim_start_ms: 0, end_ms: None });
             } else {
                 return Err(AppErrorKind::InternalError.to_frontend_json());
             }
@@ -1380,16 +1458,17 @@ fn ensure_mic_capture_started(
     };
     match start_result {
         Ok(handle) => {
+            let stream_start_ms = handle.stream_start_unix_ms;
             runtime.mic_audio_wav_path = Some(mic_wav);
             runtime.mic_audio_stop_flag = Some(handle.stop_flag.clone());
             runtime.mic_audio_thread = handle.joins.into_iter().next();
-            // 与系统音频路径一致：设备初始化完成后重读 start_ms，避免麦克风相对系统音频提前
-            let actual_start_ms = runtime.snapshot().elapsed_ms;
+            // 用采集线程回传的精确流启动时刻对齐时间轴，避免麦克风相对系统音频提前/滞后
+            let actual_start_ms = derive_audio_segment_start_ms(&runtime, stream_start_ms);
             runtime.mic_audio_stream_start_ms = Some(actual_start_ms);
             if let Some(path) = runtime.mic_audio_wav_path.clone() {
                 runtime
                     .mic_audio_segments
-                    .push(crate::features::recording::state::AudioSegment { path, start_ms: actual_start_ms, trim_start_ms: 0 });
+                    .push(crate::features::recording::state::AudioSegment { path, start_ms: actual_start_ms, trim_start_ms: 0, end_ms: None });
             } else {
                 return Err(AppErrorKind::InternalError.to_frontend_json());
             }
@@ -2448,11 +2527,19 @@ pub fn stop_recording(
             let safety_margin = if anchor_ms > 200 { 0 } else { wgc_audio_sync_advance_ms.min(20) };
             let calibrated_anchor_ms = anchor_ms.saturating_add(safety_margin);
             for seg in &mut sys_segments {
-                if seg.start_ms < calibrated_anchor_ms {
-                    seg.trim_start_ms = calibrated_anchor_ms - seg.start_ms;
+                let orig_start_ms = seg.start_ms;
+                if let Some(end_ms) = seg.end_ms.as_mut() {
+                    *end_ms = if *end_ms > calibrated_anchor_ms {
+                        *end_ms - calibrated_anchor_ms
+                    } else {
+                        0
+                    };
+                }
+                if orig_start_ms < calibrated_anchor_ms {
+                    seg.trim_start_ms = calibrated_anchor_ms - orig_start_ms;
                     seg.start_ms = 0;
                 } else {
-                    seg.start_ms = seg.start_ms - calibrated_anchor_ms;
+                    seg.start_ms = orig_start_ms - calibrated_anchor_ms;
                     seg.trim_start_ms = 0;
                 }
             }
@@ -2491,11 +2578,19 @@ pub fn stop_recording(
             effective_delay
         );
         for seg in &mut sys_segments {
-            if seg.start_ms < effective_delay {
-                seg.trim_start_ms = effective_delay - seg.start_ms;
+            let orig_start_ms = seg.start_ms;
+            if let Some(end_ms) = seg.end_ms.as_mut() {
+                *end_ms = if *end_ms > effective_delay {
+                    *end_ms - effective_delay
+                } else {
+                    0
+                };
+            }
+            if orig_start_ms < effective_delay {
+                seg.trim_start_ms = effective_delay - orig_start_ms;
                 seg.start_ms = 0;
             } else {
-                seg.start_ms = seg.start_ms - effective_delay;
+                seg.start_ms = orig_start_ms - effective_delay;
                 seg.trim_start_ms = 0;
             }
         }
@@ -2999,6 +3094,10 @@ pub fn pause_recording(
         if let Some(flag) = runtime.recording_pause_flag.as_ref() {
             flag.store(true, Ordering::SeqCst);
         }
+        // 暂停会停止音频采集：给活动分段打终点，避免 2s 尾部静音填充与恢复后的分段重叠
+        let pause_elapsed_ms = runtime.snapshot().elapsed_ms;
+        mark_active_segment_end(&mut runtime.system_audio_segments, pause_elapsed_ms);
+        mark_active_segment_end(&mut runtime.mic_audio_segments, pause_elapsed_ms);
         (
             runtime.session_id.clone(),
             runtime.target_type.clone(),
@@ -3415,6 +3514,8 @@ pub fn update_audio_capture(
         let mut system_audio_stop_flag = None;
         let mut system_audio_threads: Vec<std::thread::JoinHandle<()>> = Vec::new();
         if (sys_device_changed || !should_enable_sys) && !runtime.system_audio_threads.is_empty() {
+            // 先给活动分段打终点，避免 2s 尾部静音填充与后续分段的真实内容重叠（声音叠加）
+            mark_active_segment_end(&mut runtime.system_audio_segments, elapsed_now_ms);
             system_audio_stop_flag = runtime.system_audio_stop_flag.take();
             system_audio_threads = std::mem::take(&mut runtime.system_audio_threads);
             runtime.system_audio_wav_path = None;
@@ -3422,6 +3523,7 @@ pub fn update_audio_capture(
         let mut mic_audio_stop_flag = None;
         let mut mic_audio_thread = None;
         if (mic_device_changed || !should_enable_mic) && runtime.mic_audio_thread.is_some() {
+            mark_active_segment_end(&mut runtime.mic_audio_segments, elapsed_now_ms);
             mic_audio_stop_flag = runtime.mic_audio_stop_flag.take();
             mic_audio_thread = runtime.mic_audio_thread.take();
             runtime.mic_audio_wav_path = None;
@@ -3568,6 +3670,26 @@ pub fn run_recording_regression(
         resume_recording(app, state_arc.clone())?;
         steps.push("resume_recording:ok".to_string());
         thread::sleep(Duration::from_millis(1200));
+
+        // 回归新场景：录制中途多次开关系统音频/麦克风，验证分段打点与尾部裁剪（无声音叠加重叠）
+        update_audio_capture(app, state_arc.clone(), Some(true), None, Some(false), None)?;
+        steps.push("enable_system_audio:ok".to_string());
+        thread::sleep(Duration::from_millis(800));
+        update_audio_capture(app, state_arc.clone(), Some(false), None, Some(false), None)?;
+        steps.push("disable_system_audio:ok".to_string());
+        thread::sleep(Duration::from_millis(800));
+        update_audio_capture(app, state_arc.clone(), Some(false), None, Some(true), None)?;
+        steps.push("enable_mic:ok".to_string());
+        thread::sleep(Duration::from_millis(800));
+        update_audio_capture(app, state_arc.clone(), Some(true), None, Some(false), None)?;
+        steps.push("enable_system_audio_again:ok".to_string());
+        thread::sleep(Duration::from_millis(800));
+        update_audio_capture(app, state_arc.clone(), Some(true), None, Some(true), None)?;
+        steps.push("enable_mic_again:ok".to_string());
+        thread::sleep(Duration::from_millis(1000));
+        update_audio_capture(app, state_arc.clone(), Some(false), None, Some(false), None)?;
+        steps.push("disable_all_audio:ok".to_string());
+        thread::sleep(Duration::from_millis(600));
 
         let result = stop_recording(
             app,

@@ -25,6 +25,8 @@ pub struct WasapiCaptureHandle {
     pub stop_flag: Arc<AtomicBool>,
     pub joins: Vec<std::thread::JoinHandle<()>>,
     pub output_path: PathBuf,
+    /// 采集流实际开始出声的时刻（unix ms），用于精确对齐分段时间轴
+    pub stream_start_unix_ms: Option<u64>,
 }
 
 // 🔧 方案A：FFmpeg 实时 AAC 编码句柄
@@ -33,6 +35,8 @@ pub struct WasapiFfmpegHandle {
     pub join: Option<std::thread::JoinHandle<()>>,
     pub output_path: PathBuf,
     pub ffmpeg_child: Arc<Mutex<Option<ChildGuard>>>,
+    /// 采集流实际开始出声的时刻（unix ms），用于精确对齐分段时间轴
+    pub stream_start_unix_ms: Option<u64>,
 }
 
 impl WasapiFfmpegHandle {
@@ -182,7 +186,7 @@ fn capture_process_loopback_to_wav(
     stop_flag: Arc<AtomicBool>,
     enabled_flag: Arc<AtomicBool>,
     recording_pause_flag: Arc<AtomicBool>,
-    startup_tx: Option<mpsc::Sender<(u32, Result<(), String>)>>,
+    startup_tx: Option<mpsc::Sender<(u32, Result<u64, String>)>>,
 ) -> Result<(), String> {
     let err_logged = Arc::new(AtomicBool::new(false));
     let run = || -> Result<(), String> {
@@ -243,7 +247,7 @@ fn capture_process_loopback_to_wav(
             .start_stream()
             .map_err(|e| format!("启动进程 loopback 失败(pid={}): {}", process_id, e))?;
         if let Some(tx) = startup_tx.as_ref() {
-            let _ = tx.send((process_id, Ok(())));
+            let _ = tx.send((process_id, Ok(now_ms())));
         }
 
         let mut active_time_ns: u64 = 0;
@@ -391,7 +395,7 @@ pub fn start_process_loopback_wavs(
     let thread_enabled = enabled_flag.clone();
     let thread_pause = recording_pause_flag.clone();
     let process_count = process_ids.len();
-    let (startup_tx, startup_rx) = mpsc::channel::<(u32, Result<(), String>)>();
+    let (startup_tx, startup_rx) = mpsc::channel::<(u32, Result<u64, String>)>();
     let mut workers = Vec::new();
     for (pid, path) in process_ids.into_iter().zip(output_paths) {
         let worker_stop = thread_stop.clone();
@@ -442,10 +446,14 @@ pub fn start_process_loopback_wavs(
     }
     drop(startup_tx);
     let mut startup_errors = Vec::new();
+    let mut stream_start_unix_ms: Option<u64> = None;
     for _ in 0..process_count {
         match startup_rx.recv_timeout(Duration::from_secs(3)) {
-            Ok((pid, Ok(()))) => {
+            Ok((pid, Ok(start_unix))) => {
                 log::info!("进程音频采集启动成功(pid={})", pid);
+                if stream_start_unix_ms.is_none() {
+                    stream_start_unix_ms = Some(start_unix);
+                }
             }
             Ok((pid, Err(e))) => {
                 startup_errors.push(format!("pid={}: {}", pid, e));
@@ -474,6 +482,7 @@ pub fn start_process_loopback_wavs(
         stop_flag,
         joins: workers,
         output_path: PathBuf::from(""),
+        stream_start_unix_ms,
     })
 }
 
@@ -671,10 +680,10 @@ pub fn start_system_loopback_wav_with_device(
     let thread_stop_flag = stop_flag.clone();
     let thread_output = output_path.clone();
     let thread_device_key = device_desc_key.clone();
-    let (tx, rx) = mpsc::channel::<Result<(), String>>();
+    let (tx, rx) = mpsc::channel::<Result<u64, String>>();
 
     let handle = std::thread::spawn(move || {
-        let run = || -> Result<(), String> {
+        let run = || -> Result<u64, String> {
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
@@ -755,7 +764,7 @@ pub fn start_system_loopback_wav_with_device(
             stream
                 .play()
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
-            let _ = tx.send(Ok(()));
+            let _ = tx.send(Ok(now_ms()));
 
             while !thread_stop_flag.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(10));
@@ -795,20 +804,21 @@ pub fn start_system_loopback_wav_with_device(
                 ),
             }
 
-            Ok(())
+            Ok(now_ms())
         };
         if let Err(e) = run() {
             let _ = tx.send(Err(e));
         }
     });
 
-    rx.recv_timeout(Duration::from_secs(2))
+    let stream_start_unix_ms = rx.recv_timeout(Duration::from_secs(2))
         .map_err(|_| "启动 WASAPI 捕获超时".to_string())??;
 
     Ok(WasapiCaptureHandle {
         stop_flag,
         joins: vec![handle],
         output_path,
+        stream_start_unix_ms: Some(stream_start_unix_ms),
     })
 }
 
@@ -832,10 +842,10 @@ pub fn start_microphone_wav_with_device(
     let thread_stop_flag = stop_flag.clone();
     let thread_output = output_path.clone();
     let thread_device_key = device_desc_key.clone();
-    let (tx, rx) = mpsc::channel::<Result<(), String>>();
+    let (tx, rx) = mpsc::channel::<Result<u64, String>>();
 
     let handle = std::thread::spawn(move || {
-        let run = || -> Result<(), String> {
+        let run = || -> Result<u64, String> {
             let host = cpal::host_from_id(cpal::HostId::Wasapi)
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
             let device = match thread_device_key.as_ref() {
@@ -916,7 +926,7 @@ pub fn start_microphone_wav_with_device(
             stream
                 .play()
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
-            let _ = tx.send(Ok(()));
+            let _ = tx.send(Ok(now_ms()));
 
             while !thread_stop_flag.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(10));
@@ -958,20 +968,21 @@ pub fn start_microphone_wav_with_device(
                 ),
             }
 
-            Ok(())
+            Ok(now_ms())
         };
         if let Err(e) = run() {
             let _ = tx.send(Err(e));
         }
     });
 
-    rx.recv_timeout(Duration::from_secs(2))
+    let stream_start_unix_ms = rx.recv_timeout(Duration::from_secs(2))
         .map_err(|_| "启动 WASAPI 麦克风捕获超时".to_string())??;
 
     Ok(WasapiCaptureHandle {
         stop_flag,
         joins: vec![handle],
         output_path,
+        stream_start_unix_ms: Some(stream_start_unix_ms),
     })
 }
 
@@ -989,10 +1000,10 @@ pub fn start_system_loopback_aac_with_device(
     let thread_device_key = device_desc_key.clone();
     let ffmpeg_child = Arc::new(Mutex::new(None::<ChildGuard>));
     let thread_ffmpeg = ffmpeg_child.clone();
-    let (tx, rx) = mpsc::channel::<Result<(), String>>();
+    let (tx, rx) = mpsc::channel::<Result<u64, String>>();
 
     let handle = std::thread::spawn(move || {
-        let run = || -> Result<(), String> {
+        let run = || -> Result<u64, String> {
             let ffmpeg_path = crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path()
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
@@ -1143,7 +1154,7 @@ pub fn start_system_loopback_aac_with_device(
             stream
                 .play()
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
-            let _ = tx.send(Ok(()));
+            let _ = tx.send(Ok(now_ms()));
 
             while !thread_stop_flag.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(10));
@@ -1224,14 +1235,14 @@ pub fn start_system_loopback_aac_with_device(
                 }
             }
 
-            Ok(())
+            Ok(now_ms())
         };
         if let Err(e) = run() {
             let _ = tx.send(Err(e));
         }
     });
 
-    rx.recv_timeout(Duration::from_secs(2))
+    let stream_start_unix_ms = rx.recv_timeout(Duration::from_secs(2))
         .map_err(|_| "启动 WASAPI+FFmpeg 捕获超时".to_string())??;
 
     Ok(WasapiFfmpegHandle {
@@ -1239,5 +1250,6 @@ pub fn start_system_loopback_aac_with_device(
         join: Some(handle),
         output_path,
         ffmpeg_child,
+        stream_start_unix_ms: Some(stream_start_unix_ms),
     })
 }

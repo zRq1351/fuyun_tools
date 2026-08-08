@@ -10,8 +10,14 @@ use std::time::Instant;
 #[derive(Debug, Clone)]
 pub struct AudioSegment {
     pub path: PathBuf,
+    /// 该分段内容在录制时间轴上的起点（校准后）
     pub start_ms: u64,
+    /// 文件内需要裁剪掉的头部时长（ms）
     pub trim_start_ms: u64,
+    /// 该分段在录制时间轴上的终点（校准后）；None 表示持续到录制结束
+    /// 中途开关音频/暂停时会打点，合并阶段据此裁剪尾部（2s 静音填充 + 队列残留），
+    /// 避免相邻分段重叠导致声音叠加
+    pub end_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
