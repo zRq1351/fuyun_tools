@@ -8,35 +8,48 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 #[cfg(target_os = "windows")]
-fn send_copy_combination(vk: u16) -> bool {
+fn send_copy_combination(vk: u16, with_shift: bool) -> bool {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+        VIRTUAL_KEY,
     };
-    use windows::Win32::UI::Input::KeyboardAndMouse::VK_CONTROL;
 
     unsafe {
         let ctrl_was_pressed = crate::features::mouse_listener::is_ctrl_pressed_by_os();
-        let mut inputs = std::mem::zeroed::<[INPUT; 4]>();
-        let mut count = 0;
+        let mut inputs: Vec<INPUT> = Vec::with_capacity(8);
 
-        if !ctrl_was_pressed {
-            inputs[count] = INPUT {
+        // 终端场景需要 Shift+Ctrl+C（VK_SHIFT=0x10），其余保持 Ctrl 组合
+        if with_shift {
+            inputs.push(INPUT {
                 r#type: INPUT_KEYBOARD,
                 Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
                     ki: KEYBDINPUT {
-                        wVk: VK_CONTROL,
+                        wVk: VIRTUAL_KEY(0x10),
                         wScan: 0,
                         dwFlags: KEYBD_EVENT_FLAGS(0),
                         time: 0,
                         dwExtraInfo: 0,
                     },
                 },
-            };
-            count += 1;
+            });
+        }
+        if !ctrl_was_pressed {
+            inputs.push(INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(0x11),
+                        wScan: 0,
+                        dwFlags: KEYBD_EVENT_FLAGS(0),
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            });
         }
 
-        let vkey = windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk);
-        inputs[count] = INPUT {
+        let vkey = VIRTUAL_KEY(vk);
+        inputs.push(INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
                 ki: KEYBDINPUT {
@@ -47,9 +60,8 @@ fn send_copy_combination(vk: u16) -> bool {
                     dwExtraInfo: 0,
                 },
             },
-        };
-        count += 1;
-        inputs[count] = INPUT {
+        });
+        inputs.push(INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
                 ki: KEYBDINPUT {
@@ -60,26 +72,38 @@ fn send_copy_combination(vk: u16) -> bool {
                     dwExtraInfo: 0,
                 },
             },
-        };
-        count += 1;
+        });
 
         if !ctrl_was_pressed {
-            inputs[count] = INPUT {
+            inputs.push(INPUT {
                 r#type: INPUT_KEYBOARD,
                 Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
                     ki: KEYBDINPUT {
-                        wVk: VK_CONTROL,
+                        wVk: VIRTUAL_KEY(0x11),
                         wScan: 0,
                         dwFlags: KEYEVENTF_KEYUP,
                         time: 0,
                         dwExtraInfo: 0,
                     },
                 },
-            };
-            count += 1;
+            });
+        }
+        if with_shift {
+            inputs.push(INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(0x10),
+                        wScan: 0,
+                        dwFlags: KEYEVENTF_KEYUP,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            });
         }
 
-        let result = SendInput(&inputs[..count], std::mem::size_of::<INPUT>() as i32);
+        let result = SendInput(&inputs, std::mem::size_of::<INPUT>() as _);
         if result == 0 {
             log::error!("SendInput 失败");
             return false;
@@ -87,10 +111,14 @@ fn send_copy_combination(vk: u16) -> bool {
 
         // If the user is physically holding Ctrl but we didn't press it,
         // the copy might not have worked. But we don't corrupt their state.
-        let key_name = if vk == 0x43 { "C" } else { "Insert" };
+        let combo = match (vk, with_shift) {
+            (0x43, false) => "Ctrl+C".to_string(),
+            (0x43, true) => "Ctrl+Shift+C".to_string(),
+            _ => "Ctrl+Insert".to_string(),
+        };
         log::info!(
-            "已通过 SendInput 发送 Ctrl+{} (ctrl_was_pressed: {})",
-            key_name,
+            "已通过 SendInput 发送 {} (ctrl_was_pressed: {})",
+            combo,
             ctrl_was_pressed
         );
         true
@@ -98,7 +126,81 @@ fn send_copy_combination(vk: u16) -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn send_copy_combination(_vk: u16) -> bool {
+fn send_copy_combination(_vk: u16, _with_shift: bool) -> bool {
+    false
+}
+
+/// 终端类应用名单：其 Ctrl+C 是"中断/中止"语义而不是复制，
+/// 模拟复制键必须改用 Ctrl+Shift+C（Windows Terminal / conhost 的复制快捷键）
+#[cfg(target_os = "windows")]
+const TERMINAL_APP_EXES: &[&str] = &[
+    "windowsterminal.exe",
+    "windowsterminalpreview.exe",
+    "openconsole.exe",
+    "conhost.exe",
+    "mintty.exe",
+    "mintty-2.exe",
+    "wezterm-gui.exe",
+    "alacritty.exe",
+    "kitty.exe",
+    "hyper.exe",
+    "tabby.exe",
+    "fluentterminal.app.exe",
+    "conemu64.exe",
+    "conemu.exe",
+];
+
+/// 判断前台窗口是否属于终端类应用
+#[cfg(target_os = "windows")]
+fn is_terminal_foreground_window() -> bool {
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.is_invalid() {
+        return false;
+    }
+    let mut pid: u32 = 0;
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    }
+    if pid == 0 {
+        return false;
+    }
+    let handle = match unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
+    let mut buffer = vec![0u16; 1024];
+    let mut size = buffer.len() as u32;
+    let ok = unsafe {
+        QueryFullProcessImageNameW(
+            handle,
+            windows::Win32::System::Threading::PROCESS_NAME_FORMAT(0),
+            PWSTR(buffer.as_mut_ptr()),
+            &mut size,
+        )
+    };
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+    if ok.is_err() || size == 0 {
+        return false;
+    }
+    let full_path = String::from_utf16_lossy(&buffer[..size as usize]);
+    let exe_name = std::path::Path::new(&full_path)
+        .file_name()
+        .map(|f| f.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    TERMINAL_APP_EXES.contains(&exe_name.as_str())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_terminal_foreground_window() -> bool {
     false
 }
 
@@ -236,10 +338,23 @@ fn get_selected_text_windows(
             sequence_before_copy,
         );
     } else {
-        for vk in [VK_INSERT, VK_C] {
-            if !send_copy_combination(vk) {
+        // 终端类应用 Ctrl+C 是"中断"语义（会误发中断/中止信号），必须改用 Ctrl+Shift+C；
+        // 其余应用保持 Ctrl+Insert → Ctrl+C 的原有组合
+        let is_terminal = is_terminal_foreground_window();
+        let combos: &[(u16, bool)] = if is_terminal {
+            &[(VK_C, true), (VK_INSERT, false)]
+        } else {
+            &[(VK_INSERT, false), (VK_C, false)]
+        };
+        for (vk, with_shift) in combos {
+            if !send_copy_combination(*vk, *with_shift) {
                 continue;
             }
+            let combo_name = match (*vk, *with_shift) {
+                (VK_C, true) => "Ctrl+Shift+C",
+                (VK_C, false) => "Ctrl+C",
+                _ => "Ctrl+Insert",
+            };
             // 短等待检测剪贴板序列号变化，命中则进入完整等待读取
             let short_deadline = std::time::Instant::now() + Duration::from_millis(150);
             let mut seq_changed = false;
@@ -255,10 +370,7 @@ fn get_selected_text_windows(
                 thread::sleep(Duration::from_millis(10));
             }
             if !seq_changed {
-                log::debug!(
-                    "Ctrl+{} 未触发剪贴板变化，尝试下一组合",
-                    if vk == VK_C { "C" } else { "Insert" }
-                );
+                log::debug!("{} 未触发剪贴板变化，尝试下一组合", combo_name);
                 continue;
             }
             new_content = wait_for_clipboard_update(
