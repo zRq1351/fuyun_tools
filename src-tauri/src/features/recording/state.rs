@@ -3,9 +3,13 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Instant;
+
+/// 音频设备错误槽位：采集线程 err_fn 写入一次错误信息，
+/// stats_loop 读取后清空并向前端上报 AUDIO_DEVICE_LOST（原生 WASAPI 路径无 stderr 可解析）。
+pub type AudioDeviceErrorSlot = Arc<Mutex<Option<String>>>;
 
 #[derive(Debug, Clone)]
 pub struct AudioSegment {
@@ -18,6 +22,19 @@ pub struct AudioSegment {
     /// 中途开关音频/暂停时会打点，合并阶段据此裁剪尾部（2s 静音填充 + 队列残留），
     /// 避免相邻分段重叠导致声音叠加
     pub end_ms: Option<u64>,
+}
+
+/// 视频分段元数据：除文件路径外，记录其在有效录制时钟（扣除暂停后的 U 时钟）上的起点，
+/// 以及 WGC 首帧锚点（相对分段创建时刻的毫秒数）。停止合并阶段据此对音频分段
+/// 按所属分段周期精确校正时间轴——修复窗口录制暂停/恢复后全局锚点误用导致的音画失步。
+#[derive(Debug, Clone)]
+pub struct WindowVideoSegment {
+    pub path: PathBuf,
+    /// 该分段创建时刻在 U 时钟上的位置（首个分段为 0）
+    pub u_start_ms: u64,
+    /// WGC 首帧锚点的原子槽位（读取即得毫秒值）；非 WGC 分段为 None。
+    /// 持有 Arc 而非快照值：锚点在首帧到达时才写入，停止时可读到最终值。
+    pub first_frame_anchor: Option<Arc<AtomicU64>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,7 +94,7 @@ pub struct RecordingRuntime {
 
     // --- 录制暂停/分段 ---
     pub recording_pause_flag: Option<Arc<AtomicBool>>,
-    pub window_video_segments: Vec<PathBuf>,
+    pub window_video_segments: Vec<WindowVideoSegment>,
     pub window_segment_index: usize,
     /// 当前视频分段开始时间，用于看门狗判断分段存在时长（避免恢复后立即误判无画面）
     pub video_segment_started_at: Option<Instant>,
@@ -102,6 +119,10 @@ pub struct RecordingRuntime {
     pub mic_audio_ever_enabled: bool,
     pub mic_audio_stream_start_ms: Option<u64>,
     pub mic_audio_segments: Vec<AudioSegment>,
+
+    // --- 原生音频采集设备错误槽位（cpal err_fn 写入，stats_loop 读取后上报并清空）---
+    pub system_audio_error_slot: Option<AudioDeviceErrorSlot>,
+    pub mic_audio_error_slot: Option<AudioDeviceErrorSlot>,
 
     // --- FFmpeg 诊断 ---
     pub ffmpeg_stderr_tail: VecDeque<String>,
@@ -158,6 +179,8 @@ impl Default for RecordingRuntime {
             mic_audio_ever_enabled: false,
             mic_audio_stream_start_ms: None,
             mic_audio_segments: Vec::new(),
+            system_audio_error_slot: None,
+            mic_audio_error_slot: None,
             ffmpeg_stderr_tail: VecDeque::new(),
         }
     }
@@ -295,6 +318,8 @@ impl RecordingRuntime {
         self.mic_audio_ever_enabled = false;
         self.mic_audio_stream_start_ms = None;
         self.mic_audio_segments.clear();
+        self.system_audio_error_slot = None;
+        self.mic_audio_error_slot = None;
         self.ffmpeg_stderr_tail.clear();
     }
 }
@@ -400,7 +425,11 @@ mod tests {
         rt.output_path_final = Some(PathBuf::from("f.mp4"));
         rt.target_type = "window".to_string();
         rt.target_id = "hwnd1".to_string();
-        rt.window_video_segments = vec![PathBuf::from("seg.mp4")];
+        rt.window_video_segments = vec![crate::features::recording::state::WindowVideoSegment {
+            path: PathBuf::from("seg.mp4"),
+            u_start_ms: 0,
+            first_frame_anchor: None,
+        }];
         rt.system_audio_process_ids = vec![1, 2];
         rt.ffmpeg_stderr_tail = VecDeque::from(vec!["line".to_string()]);
 

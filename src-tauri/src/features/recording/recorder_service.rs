@@ -337,13 +337,113 @@ fn normalize_region_to_virtual_screen(
 
 /// 停止采集时为活动音频分段标记终点（仅标记未设终点的最后一个分段）。
 /// 每个分段只标记一次（第一个 end_ms 为 None 的段），合并阶段据此裁剪尾部，
-/// 避免 2s 静音填充 + 采集管队列残留与后续分段重叠（声音叠加）或超出视频时长。
+/// 避免 2s 静音填充 + 采集队列残留与后续分段重叠（声音叠加）或超出视频时长。
 fn mark_active_segment_end(
     segments: &mut [crate::features::recording::state::AudioSegment],
     end_ms: u64,
 ) {
     if let Some(seg) = segments.iter_mut().rev().find(|s| s.end_ms.is_none()) {
         seg.end_ms = Some(end_ms);
+    }
+}
+
+/// 将音频分段整体前移 offset_ms（单锚点全局校正，与历史行为一致）。
+fn shift_audio_segments_global(
+    segments: &mut [crate::features::recording::state::AudioSegment],
+    offset_ms: u64,
+) {
+    for seg in segments.iter_mut() {
+        if seg.start_ms < offset_ms {
+            seg.trim_start_ms = seg.trim_start_ms.saturating_add(offset_ms - seg.start_ms);
+            seg.start_ms = 0;
+        } else {
+            seg.start_ms -= offset_ms;
+            seg.trim_start_ms = 0;
+        }
+        if let Some(end_ms) = seg.end_ms.as_mut() {
+            *end_ms = end_ms.saturating_sub(offset_ms);
+        }
+    }
+}
+
+/// 计算窗口录制各视频分段的 U→拼接时间轴 偏移表 δ_k：
+/// 位于第 k 个分段 U 区间 [S_k, E_k) 的音频事件，其拼接后位置 = U − δ_k。
+/// 推导：第 k 段编码时长 D_k ≈ (E_k − S_k) − A_k（WGC 首帧到达前不产出画面），
+/// 第 k 段内容的拼接起点 B_k = Σ_{j<k} D_j，故 V(u) = B_k + (u − S_k − A_k)。
+/// last_calibrated_anchor 为停止时实时读取的末段锚点（含安全裕量），
+/// total_u_ms 为录制结束时 U 时钟值（末段右边界 E_N）。
+fn compute_window_segment_shifts(
+    segments_meta: &[crate::features::recording::state::WindowVideoSegment],
+    last_calibrated_anchor: u64,
+    total_u_ms: u64,
+) -> Vec<u64> {
+    let mut shifts = Vec::with_capacity(segments_meta.len());
+    let mut base_ms = 0u64;
+    for (k, seg) in segments_meta.iter().enumerate() {
+        let s_k = seg.u_start_ms;
+        let e_k = segments_meta
+            .get(k + 1)
+            .map(|n| n.u_start_ms)
+            .unwrap_or(total_u_ms)
+            .max(s_k);
+        let raw_anchor = seg
+            .first_frame_anchor
+            .as_ref()
+            .map(|a| a.load(Ordering::Relaxed))
+            .unwrap_or(0);
+        // 末段以停止时实时读到的值为准；u64::MAX 表示该段从未出帧，按 0 处理避免负时长
+        let a_k = if k + 1 == segments_meta.len() && raw_anchor != u64::MAX {
+            last_calibrated_anchor
+        } else if raw_anchor == u64::MAX {
+            0
+        } else {
+            raw_anchor
+        };
+        let d_k = e_k.saturating_sub(s_k).saturating_sub(a_k);
+        shifts.push(s_k.saturating_add(a_k).saturating_sub(base_ms));
+        base_ms = base_ms.saturating_add(d_k);
+    }
+    shifts
+}
+
+/// 找到 U 位置所属的视频分段序号（最后一个 u_start <= pos 的段；早于首段归 0）
+fn find_window_cycle_index(
+    segments_meta: &[crate::features::recording::state::WindowVideoSegment],
+    u_pos: u64,
+) -> usize {
+    let mut idx = 0usize;
+    for (k, seg) in segments_meta.iter().enumerate() {
+        if seg.u_start_ms <= u_pos {
+            idx = k;
+        } else {
+            break;
+        }
+    }
+    idx
+}
+
+/// 按音频分段所属视频分段的偏移量校准其时间轴（多段窗口录制）
+fn apply_window_cycle_shifts(
+    segments: &mut [crate::features::recording::state::AudioSegment],
+    segments_meta: &[crate::features::recording::state::WindowVideoSegment],
+    shifts: &[u64],
+) {
+    if segments_meta.is_empty() || shifts.len() != segments_meta.len() {
+        return;
+    }
+    for seg in segments.iter_mut() {
+        let idx = find_window_cycle_index(segments_meta, seg.start_ms);
+        let delta = shifts[idx];
+        if seg.start_ms < delta {
+            seg.trim_start_ms = seg.trim_start_ms.saturating_add(delta - seg.start_ms);
+            seg.start_ms = 0;
+        } else {
+            seg.start_ms -= delta;
+            seg.trim_start_ms = 0;
+        }
+        if let Some(end_ms) = seg.end_ms.as_mut() {
+            *end_ms = end_ms.saturating_sub(delta);
+        }
     }
 }
 
@@ -1309,6 +1409,10 @@ fn ensure_system_audio_capture_started(
     }
     let enabled_flag = runtime.system_audio_enabled_flag.clone().unwrap();
     let pause_flag = runtime.recording_pause_flag.clone().unwrap();
+    // 设备错误槽位：采集线程 err_fn 写入、stats_loop 周期读取上报（原生路径无 stderr 可解析）
+    let error_slot: crate::features::recording::state::AudioDeviceErrorSlot =
+        Arc::new(std::sync::Mutex::new(None));
+    runtime.system_audio_error_slot = Some(error_slot.clone());
     let seg_idx = runtime.system_audio_segments.len();
     if !runtime.system_audio_process_ids.is_empty() {
         let process_ids = runtime.system_audio_process_ids.clone();
@@ -1329,6 +1433,7 @@ fn ensure_system_audio_capture_started(
             output_paths.clone(),
             enabled_flag.clone(),
             pause_flag.clone(),
+            error_slot.clone(),
         );
         return match first_try {
             Ok(handle) => {
@@ -1366,6 +1471,7 @@ fn ensure_system_audio_capture_started(
         enabled_flag.clone(),
         pause_flag.clone(),
         Some(runtime.audio_bitrate_kbps.max(32)),
+        error_slot.clone(),
     );
     let start_result = match first_try {
         Ok(h) => Ok(h),
@@ -1378,6 +1484,7 @@ fn ensure_system_audio_capture_started(
                     enabled_flag,
                     pause_flag,
                     Some(runtime.audio_bitrate_kbps.max(32)),
+                    error_slot,
                 )
                 .map_err(|second_err| format!("{}；回退默认设备失败: {}", first_err, second_err))
             } else {
@@ -1430,6 +1537,10 @@ fn ensure_mic_capture_started(
     }
     let enabled_flag = runtime.mic_audio_enabled_flag.clone().unwrap();
     let pause_flag = runtime.recording_pause_flag.clone().unwrap();
+    // 设备错误槽位：采集线程 err_fn 写入、stats_loop 周期读取上报
+    let error_slot: crate::features::recording::state::AudioDeviceErrorSlot =
+        Arc::new(std::sync::Mutex::new(None));
+    runtime.mic_audio_error_slot = Some(error_slot.clone());
     let seg_idx = runtime.mic_audio_segments.len();
     let mic_wav = if seg_idx == 0 {
         output_dir.join(format!("{}.mic.wav", session_id))
@@ -1441,13 +1552,14 @@ fn ensure_mic_capture_started(
         mic_wav.clone(),
         enabled_flag.clone(),
         pause_flag.clone(),
+        error_slot.clone(),
     );
     let start_result = match first_try {
         Ok(h) => Ok(h),
         Err(first_err) => {
             if runtime.mic_audio_device_id.is_some() {
                 runtime.mic_audio_device_id = None;
-                start_microphone_wav_with_device(None, mic_wav.clone(), enabled_flag, pause_flag)
+                start_microphone_wav_with_device(None, mic_wav.clone(), enabled_flag, pause_flag, error_slot)
                     .map_err(|second_err| {
                         format!("{}；回退默认设备失败: {}", first_err, second_err)
                     })
@@ -1743,7 +1855,7 @@ fn spawn_stats_loop(
                     }
                 } else if let Some(current_seg) = runtime.window_video_segments.last() {
                     // FFmpeg 模式下，如果超过 4 秒文件依然是 0 字节，说明没录进任何有效视频帧
-                    if fs::metadata(current_seg).map(|m| m.len()).unwrap_or(0) == 0 {
+                    if fs::metadata(&current_seg.path).map(|m| m.len()).unwrap_or(0) == 0 {
                         no_video_frames = true;
                     }
                 }
@@ -1758,6 +1870,40 @@ fn spawn_stats_loop(
                     let err_msg = format!("未捕获到有效视频帧；{}", details);
                     runtime.last_error = Some(err_msg.clone());
                     emit_error = Some(("VALIDATION_ERROR", err_msg, session_id.clone()));
+                }
+            }
+
+            // 原生音频采集的设备错误上报：cpal err_fn 写入槽位，此处消费并转发给前端
+            let mut device_error_msg: Option<String> = None;
+            if let Some(slot) = runtime.mic_audio_error_slot.as_ref() {
+                if let Ok(mut guard) = slot.lock() {
+                    if guard.is_some() {
+                        device_error_msg = guard.take();
+                    }
+                }
+            }
+            if device_error_msg.is_none() {
+                if let Some(slot) = runtime.system_audio_error_slot.as_ref() {
+                    if let Ok(mut guard) = slot.lock() {
+                        if guard.is_some() {
+                            device_error_msg = guard.take();
+                        }
+                    }
+                }
+            }
+            if let Some(msg) = device_error_msg.as_ref() {
+                runtime.last_error = Some(msg.clone());
+                if emit_error.is_none()
+                    && matches!(
+                        runtime.phase,
+                        RecordingPhase::Recording | RecordingPhase::Paused
+                    )
+                {
+                    emit_error = Some((
+                        AUDIO_DEVICE_LOST,
+                        format!("音频设备错误: {}", msg),
+                        session_id.clone(),
+                    ));
                 }
             }
 
@@ -2217,7 +2363,17 @@ pub fn start_recording(
         runtime.window_video_segments.clear();
         runtime.window_segment_index = 0;
         if let Some(seg_path) = window_segment_path.as_ref() {
-            runtime.window_video_segments.push(seg_path.clone());
+            let seg0_u_start_ms = runtime.snapshot().elapsed_ms;
+            runtime
+                .window_video_segments
+                .push(crate::features::recording::state::WindowVideoSegment {
+                    path: seg_path.clone(),
+                    // 首个分段从 U 时钟 0 开始（started_instant 刚设置，elapsed≈0）
+                    u_start_ms: seg0_u_start_ms,
+                    first_frame_anchor: window_wgc_handle
+                        .as_ref()
+                        .map(|h| h.first_frame_elapsed_ms.clone()),
+                });
         }
         // 系统音频关闭时不占用 loopback 设备；重新开启时再创建新音频分段并在合成阶段按 start_ms 对齐。
         if capture_system_audio {
@@ -2300,6 +2456,15 @@ pub fn stop_recording(
         let mut runtime = lock_arc_mutex(&runtime_arc);
         let allow_auto_stop_finalize =
             runtime.phase == RecordingPhase::Stopping && runtime.auto_stop_requested;
+        if runtime.phase == RecordingPhase::Stopping && !allow_auto_stop_finalize {
+            // 已有停止流程在途（手动重复点击，或自动停止收尾已接管并复位 auto_stop 标志）。
+            // 直接幂等拒绝：此时句柄已被在途流程 take，若放行会拿到空句柄集继续后处理，
+            // 并触发命令层兜底 cancel 把在途流程的 runtime 强制重置（duration=0/重复事件）。
+            return Err(AppError::new(
+                ErrorCode::ValidationError,
+                "录制正在停止中，请勿重复操作",
+            ));
+        }
         if runtime.phase != RecordingPhase::Recording
             && runtime.phase != RecordingPhase::Paused
             && !allow_auto_stop_finalize
@@ -2526,38 +2691,41 @@ pub fn stop_recording(
             // 当 anchor_ms 较大（>200ms）时，说明系统延迟本身已足够，不需要额外裕量
             let safety_margin = if anchor_ms > 200 { 0 } else { wgc_audio_sync_advance_ms.min(20) };
             let calibrated_anchor_ms = anchor_ms.saturating_add(safety_margin);
-            for seg in &mut sys_segments {
-                let orig_start_ms = seg.start_ms;
-                if let Some(end_ms) = seg.end_ms.as_mut() {
-                    *end_ms = if *end_ms > calibrated_anchor_ms {
-                        *end_ms - calibrated_anchor_ms
-                    } else {
-                        0
-                    };
-                }
-                if orig_start_ms < calibrated_anchor_ms {
-                    seg.trim_start_ms = calibrated_anchor_ms - orig_start_ms;
-                    seg.start_ms = 0;
-                } else {
-                    seg.start_ms = orig_start_ms - calibrated_anchor_ms;
-                    seg.trim_start_ms = 0;
-                }
+            // 多段窗口录制（暂停/恢复产生多个 WGC 分段）时，每段有自己的首帧锚点，
+            // 全局单锚点会把末段锚点误用于所有音频分段 → 音画失步；
+            // 此时按分段周期分别计算 U→拼接时间轴的偏移。
+            let per_cycle = window_video_segments.len() > 1
+                && window_video_segments
+                .iter()
+                .any(|s| s.first_frame_anchor.is_some());
+            if per_cycle {
+                let total_u_ms = {
+                    let rt = lock_arc_mutex(&runtime_arc);
+                    rt.snapshot().elapsed_ms
+                };
+                let shifts = compute_window_segment_shifts(
+                    &window_video_segments,
+                    calibrated_anchor_ms,
+                    total_u_ms,
+                );
+                apply_window_cycle_shifts(&mut sys_segments, &window_video_segments, &shifts);
+                apply_window_cycle_shifts(&mut mic_segments, &window_video_segments, &shifts);
+                log::info!(
+                    "应用 WGC 分段周期校正: segments={}, shifts={:?}, calibrated_last_anchor={}ms",
+                    window_video_segments.len(),
+                    shifts,
+                    calibrated_anchor_ms
+                );
+            } else {
+                shift_audio_segments_global(&mut sys_segments, calibrated_anchor_ms);
+                shift_audio_segments_global(&mut mic_segments, calibrated_anchor_ms);
+                log::info!(
+                    "应用 WGC 首帧锚点校正: anchor_ms={}, safety_margin={}, calibrated_anchor_ms={}",
+                    anchor_ms,
+                    safety_margin,
+                    calibrated_anchor_ms
+                );
             }
-            for seg in &mut mic_segments {
-                if seg.start_ms < calibrated_anchor_ms {
-                    seg.trim_start_ms = calibrated_anchor_ms - seg.start_ms;
-                    seg.start_ms = 0;
-                } else {
-                    seg.start_ms = seg.start_ms - calibrated_anchor_ms;
-                    seg.trim_start_ms = 0;
-                }
-            }
-            log::info!(
-                "应用 WGC 首帧锚点校正: anchor_ms={}, safety_margin={}, calibrated_anchor_ms={}",
-                anchor_ms,
-                safety_margin,
-                calibrated_anchor_ms
-            );
         } else if let Some(details) = pending_window_capture_unavailable_details.take() {
             fatal_error = Some(build_window_capture_unavailable_error(&details));
         }
@@ -2611,8 +2779,9 @@ pub fn stop_recording(
 
         if !window_video_segments.is_empty() && fatal_error.is_none() {
             log::info!("🔧 合并视频片段...");
-            if let Err(e) = concat_video_segments(&ffmpeg_path, &window_video_segments, output_tmp)
-            {
+            let seg_paths: Vec<PathBuf> =
+                window_video_segments.iter().map(|s| s.path.clone()).collect();
+            if let Err(e) = concat_video_segments(&ffmpeg_path, &seg_paths, output_tmp) {
                 fatal_error = Some(e);
             }
         } else if fatal_error.is_none() && window_video_segments.is_empty() {
@@ -2729,8 +2898,8 @@ pub fn stop_recording(
     // 只清理窗口视频片段（已经在同步阶段使用完毕）；
     // concat 失败时保留分段，避免用户失去手动恢复可能（#4）
     if fatal_error.is_none() {
-        for path in window_video_segments {
-            let _ = fs::remove_file(path);
+        for seg in window_video_segments {
+            let _ = fs::remove_file(&seg.path);
         }
     }
 
@@ -2976,7 +3145,7 @@ pub fn cancel_recording(
             cleanup_paths.insert(seg.path);
         }
         for seg in std::mem::take(&mut runtime.window_video_segments) {
-            cleanup_paths.insert(seg);
+            cleanup_paths.insert(seg.path);
         }
         (
             process,
@@ -3086,7 +3255,7 @@ pub fn pause_recording(
                 let _ = process.wait();
                 // 被 kill 的片段未写 moov 不可播放：从列表移除并删除，避免后续 concat 失败（#5）
                 if let Some(last) = runtime.window_video_segments.pop() {
-                    let _ = fs::remove_file(&last);
+                    let _ = fs::remove_file(&last.path);
                 }
                 runtime.video_segment_started_at = None;
             }
@@ -3219,24 +3388,20 @@ pub fn resume_recording(
         fps,
         video_bitrate_kbps,
         capture_cursor,
-        pending_paused_total_ms,
     ) = {
-        let mut runtime = lock_arc_mutex(&runtime_arc);
+        let runtime = lock_arc_mutex(&runtime_arc);
         if runtime.phase != RecordingPhase::Paused {
             return Err(AppError::new(
                 ErrorCode::ValidationError,
                 "当前状态不允许恢复",
             ));
         }
-        // 立即把暂停区间累计到 runtime：若后续 stop/cancel 插入，暂停时长也不会丢失（#18）
-        let take_paused_at = runtime.paused_at_instant.take();
-        if let Some(t) = take_paused_at {
-            runtime.paused_total_ms = runtime
-                .paused_total_ms
-                .saturating_add(t.elapsed().as_millis() as u64);
-        }
-        let pending_paused_ms = runtime.paused_total_ms;
-        let paused_total_ms = pending_paused_ms;
+        // 只读快照：暂停时长的消费与 pause 标志的清除统一推迟到资源创建成功后的提交块。
+        // 原实现提前消费，若随后视频源创建失败（如暂停期间目标窗口被关闭），会留下
+        // phase=Paused 但 paused_at_instant=None 的损坏状态——计时器在“已暂停”下继续走，
+        // 且重试成功后两次尝试之间的死区间被计入有效时长（成片音画失步、时长虚增）。
+        // 若此期间 stop/cancel 插入：stop 收尾时会补记剩余暂停时长（见 stop_recording），
+        // 暂停时长同样不会丢失。
         let output_dir = runtime
             .output_path_tmp
             .as_ref()
@@ -3253,9 +3418,6 @@ pub fn resume_recording(
             .as_ref()
             .map(|f| f.load(Ordering::SeqCst))
             .unwrap_or(false);
-        if let Some(flag) = runtime.recording_pause_flag.as_ref() {
-            flag.store(false, Ordering::SeqCst);
-        }
         let is_window_target = runtime.target_type == "window";
         let target_id = runtime.target_id.clone();
         let next_segment_index = runtime.window_segment_index.saturating_add(1);
@@ -3266,7 +3428,7 @@ pub fn resume_recording(
         let capture_cursor = runtime.capture_cursor;
         log::info!(
             "恢复录制: paused_total_ms={}, elapsed_ms={}",
-            paused_total_ms,
+            runtime.paused_total_ms,
             runtime.snapshot().elapsed_ms
         );
         (
@@ -3281,7 +3443,6 @@ pub fn resume_recording(
             fps,
             video_bitrate_kbps,
             capture_cursor,
-            paused_total_ms,
         )
     };
     // 校验状态：必须在创建任何资源之前完成，避免线程泄漏
@@ -3356,17 +3517,34 @@ pub fn resume_recording(
             "录制状态已变化，请刷新状态后重试",
         ));
     }
-    // 阶段验证通过后，正式写入暂停累计时长（避免竞态导致时间膨胀）
-    runtime.paused_total_ms = pending_paused_total_ms;
-    // 恢复录制时 FFmpeg 延迟清零：新的视频分段与音频缓存同时启动，无需额外校正
-    runtime.ffmpeg_start_delay_ms = 0;
+    // 阶段验证通过后，正式提交：消费暂停时长、清除暂停门控、写入分段元数据。
+    // 此前任何失败路径都不会破坏 Paused 状态的一致性。
+    let resume_u_start_ms;
+    {
+        // 消费剩余暂停区间（若 stop/cancel 已插入则走上方回滚分支，不会到达此处）
+        if let Some(paused_at) = runtime.paused_at_instant.take() {
+            runtime.paused_total_ms = runtime
+                .paused_total_ms
+                .saturating_add(paused_at.elapsed().as_millis() as u64);
+        }
+        if let Some(flag) = runtime.recording_pause_flag.as_ref() {
+            flag.store(false, Ordering::SeqCst);
+        }
+        // 恢复录制时 FFmpeg 延迟清零：新的视频分段与音频缓存同时启动，无需额外校正
+        runtime.ffmpeg_start_delay_ms = 0;
+        resume_u_start_ms = runtime.snapshot().elapsed_ms;
+    }
 
     // 如果是非窗口录制，记录新分段
     if !is_window_target {
         runtime.window_segment_index = next_segment_index;
-        runtime
-            .window_video_segments
-            .push(next_segment_path.clone());
+        runtime.window_video_segments.push(
+            crate::features::recording::state::WindowVideoSegment {
+                path: next_segment_path.clone(),
+                u_start_ms: resume_u_start_ms,
+                first_frame_anchor: None,
+            },
+        );
         runtime.video_segment_started_at = Some(std::time::Instant::now());
         if let Some((child, stderr)) = ffmpeg_process {
             runtime.process = Some(child);
@@ -3381,11 +3559,18 @@ pub fn resume_recording(
 
     if let Some(handle) = window_handle {
         runtime.window_segment_index = next_segment_index;
-        runtime.window_video_segments.push(next_segment_path);
+        runtime.window_video_segments.push(
+            crate::features::recording::state::WindowVideoSegment {
+                path: next_segment_path,
+                u_start_ms: resume_u_start_ms,
+                first_frame_anchor: Some(handle.first_frame_elapsed_ms.clone()),
+            },
+        );
         runtime.video_segment_started_at = Some(std::time::Instant::now());
         runtime.wgc_stop_flag = Some(handle.stop_flag);
         runtime.wgc_pause_flag = Some(handle.pause_flag);
         // 恢复录制时替换首帧计数：旧计数属于已停止的上一分段，保留会导致看门狗无法检测新分段无画面
+        // （各分段的锚点已随 WindowVideoSegment 元数据保留，停止合并阶段按周期分别校正）
         runtime.wgc_first_frame_elapsed_ms = Some(handle.first_frame_elapsed_ms.clone());
         runtime.wgc_thread = Some(handle.join);
     }
@@ -3576,20 +3761,37 @@ pub fn update_audio_capture(
     if !should_enable_mic {
         runtime.mic_audio_stream_start_ms = None;
     }
+    // 暂停状态下不启动采集线程：此时 U 时钟已冻结而音频文件按墙钟持续写入（暂停期为静音），
+    // 若此刻建分段，其内容会横跨恢复点，合并定位将整体滞后剩余暂停时长。
+    // 仅更新 enabled_flag，恢复录制时由 should_restore_* 分支以正确的时间轴拉起。
+    let is_paused = runtime.phase == RecordingPhase::Paused;
     if should_enable_sys && runtime.system_audio_threads.is_empty() {
-        ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, true)
+        if is_paused {
+            log::info!("暂停期间开启系统音频：将在恢复录制时启动采集");
+        } else {
+            ensure_system_audio_capture_started(
+                app,
+                &mut runtime,
+                &output_dir,
+                &session_id,
+                true,
+            )
             .map_err(|e| {
                 AppError::new(ErrorCode::SystemError, AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
                     .with_details(e)
             })?;
+        }
     }
     if should_enable_mic && runtime.mic_audio_thread.is_none() {
-        ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true).map_err(
-            |e| {
-                AppError::new(ErrorCode::SystemError, AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
-                    .with_details(e)
-            },
-        )?;
+        if is_paused {
+            log::info!("暂停期间开启麦克风：将在恢复录制时启动采集");
+        } else {
+            ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true)
+                .map_err(|e| {
+                    AppError::new(ErrorCode::SystemError, AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
+                        .with_details(e)
+                })?;
+        }
     }
     Ok(())
 }
@@ -3778,5 +3980,84 @@ pub fn open_recording_folder(
                     .with_details(e.to_string())
             })?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod calibration_tests {
+    use super::*;
+    use crate::features::recording::state::{AudioSegment, WindowVideoSegment};
+    use std::path::PathBuf;
+    use std::sync::atomic::AtomicU64;
+
+    fn meta(path: &str, u_start: u64, anchor_val: Option<u64>) -> WindowVideoSegment {
+        WindowVideoSegment {
+            path: PathBuf::from(path),
+            u_start_ms: u_start,
+            first_frame_anchor: anchor_val.map(|v| Arc::new(AtomicU64::new(v))),
+        }
+    }
+
+    fn audio(path: &str, start: u64, trim: u64, end: Option<u64>) -> AudioSegment {
+        AudioSegment {
+            path: PathBuf::from(path),
+            start_ms: start,
+            trim_start_ms: trim,
+            end_ms: end,
+        }
+    }
+
+    #[test]
+    fn single_segment_matches_legacy_global_shift() {
+        // 单分段窗口录制：行为与旧全局锚点校正完全一致
+        let metas = vec![meta("s0", 0, Some(120))];
+        let shifts = compute_window_segment_shifts(&metas, 130, 10_000);
+        assert_eq!(shifts, vec![130]);
+    }
+
+    #[test]
+    fn two_segments_per_cycle_alignment() {
+        // 暂停/恢复产生两段：S0=0/A1=100；S1=5000/A2 原始 150（停止时实测校准为 160，含安全裕量）；总长 9000
+        let metas = vec![meta("s0", 0, Some(100)), meta("s1", 5000, Some(150))];
+        let shifts = compute_window_segment_shifts(&metas, 160, 9_000);
+        // D0=(5000-0)-100=4900 → δ0=0+100-0
+        // B1=4900 → δ1=5000+160-4900（末段以实时校准值为准）
+        assert_eq!(shifts, vec![100, 260]);
+
+        let mut segments = vec![
+            audio("a0", 1000, 0, None),
+            audio("a1", 5200, 0, Some(8000)),
+        ];
+        apply_window_cycle_shifts(&mut segments, &metas, &shifts);
+        // 第 0 周期：与全局校正一致
+        assert_eq!(segments[0].start_ms, 900);
+        // 第 1 周期按自身锚点校正：5200-260=4940；视频第 1 段内容起始于拼接位置 B1=4900，
+        // 对应真实 U 起点 5000+150=5150 → 旧实现错用 δ0=130 会得到 5070，偏差 170ms；
+        // 新实现 4940 与视频内容位置一致（差值即安全裕量 10ms，与单段行为相同）
+        assert_eq!(segments[1].start_ms, 4940);
+        assert_eq!(segments[1].end_ms, Some(7740));
+    }
+
+    #[test]
+    fn position_before_delta_becomes_trim() {
+        let metas = vec![meta("s0", 0, Some(300))];
+        let shifts = compute_window_segment_shifts(&metas, 300, 5_000);
+        let mut segments = vec![audio("a", 100, 40, Some(2000))];
+        apply_window_cycle_shifts(&mut segments, &metas, &shifts);
+        assert_eq!(segments[0].start_ms, 0);
+        assert_eq!(segments[0].trim_start_ms, 240); // 40 + (300-100)
+        assert_eq!(segments[0].end_ms, Some(1700));
+    }
+
+    #[test]
+    fn never_frame_anchor_treated_as_zero() {
+        // 首段从未出帧（u64::MAX，如窗口最小化）按 0 处理，避免负时长导致偏移错乱
+        let metas = vec![
+            meta("s0", 0, Some(u64::MAX)),
+            meta("s1", 3000, Some(80)),
+        ];
+        let shifts = compute_window_segment_shifts(&metas, 90, 6_000);
+        // k0: A=0 → D0=3000, δ0=0；k1(末段): A=90 → D1=2910, δ1=3000+90-3000
+        assert_eq!(shifts, vec![0, 90]);
     }
 }

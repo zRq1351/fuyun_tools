@@ -1,4 +1,5 @@
 use crate::core::error_codes::AppErrorKind;
+use crate::features::recording::state::AudioDeviceErrorSlot;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat as CpalSampleFormat, StreamConfig};
 use hound::SampleFormat;
@@ -55,6 +56,23 @@ impl Drop for ChildGuard {
         if let Ok(None) = self.0.try_wait() {
             let _ = self.0.kill();
             let _ = self.0.wait();
+        }
+    }
+}
+
+/// 构造 cpal 错误回调：向 stderr 打印的同时，把首个错误写入槽位，
+/// 由 stats_loop 周期读取并向用户上报 AUDIO_DEVICE_LOST（原生采集路径无 ffmpeg stderr 可解析）。
+fn device_err_fn(
+    err_slot: &AudioDeviceErrorSlot,
+    label: &'static str,
+) -> impl FnMut(cpal::StreamError) + Send + 'static {
+    let slot = err_slot.clone();
+    move |err| {
+        eprintln!("WASAPI {}捕获错误: {}", label, err);
+        if let Ok(mut guard) = slot.lock() {
+            if guard.is_none() {
+                *guard = Some(format!("{}: {}", label, err));
+            }
         }
     }
 }
@@ -187,6 +205,7 @@ fn capture_process_loopback_to_wav(
     enabled_flag: Arc<AtomicBool>,
     recording_pause_flag: Arc<AtomicBool>,
     startup_tx: Option<mpsc::Sender<(u32, Result<u64, String>)>>,
+    error_slot: AudioDeviceErrorSlot,
 ) -> Result<(), String> {
     let err_logged = Arc::new(AtomicBool::new(false));
     let run = || -> Result<(), String> {
@@ -236,8 +255,13 @@ fn capture_process_loopback_to_wav(
                 output_path.file_name()
             );
         }
+        // 从 writer 就绪到采集循环结束的整段可能失败的路径统一收口：
+        // 无论成败都会执行下方 stop_stream + finalize，保证 WAV 头长度字段被补全。
+        // 修复：此前中途出错（目标进程退出/设备失效）提前返回会跳过 finalize，
+        // 产出头部尺寸停留在占位值的分段，合并阶段可能无法解码。
         let mut queue = std::collections::VecDeque::<u8>::new();
         let blockalign = desired_format.get_blockalign() as usize;
+        let capture_result: Result<(), String> = (|| -> Result<(), String> {
         if blockalign == 0 {
             return Err(format!("无效的 blockalign: 0 (pid={})", process_id));
         }
@@ -328,6 +352,9 @@ fn capture_process_loopback_to_wav(
             }
         }
 
+            Ok(())
+        })();
+
         log::info!(
             "进程音频采集循环结束(pid={}), stop_flag={}",
             process_id,
@@ -354,6 +381,8 @@ fn capture_process_loopback_to_wav(
             log::error!("进程音频文件完成失败(pid={}): {}", process_id, e);
             format!("完成进程音频文件失败(pid={}): {}", process_id, e)
         })?;
+        // 文件已完整收尾后再上抛采集阶段的真实结果
+        capture_result?;
 
         match std::fs::metadata(&output_path) {
             Ok(meta) => log::info!(
@@ -374,6 +403,12 @@ fn capture_process_loopback_to_wav(
     };
     let result = run();
     if let Err(err) = &result {
+        // 写入设备错误槽位：录制中途进程退出/采集失败时让用户可见，而非静默丢音轨
+        if let Ok(mut guard) = error_slot.lock() {
+            if guard.is_none() {
+                *guard = Some(format!("进程(pid={})音频采集中断: {}", process_id, err));
+            }
+        }
         if let Some(tx) = startup_tx {
             let _ = tx.send((process_id, Err(err.clone())));
         }
@@ -386,6 +421,7 @@ pub fn start_process_loopback_wavs(
     output_paths: Vec<PathBuf>,
     enabled_flag: Arc<AtomicBool>,
     recording_pause_flag: Arc<AtomicBool>,
+    device_error_slot: AudioDeviceErrorSlot,
 ) -> Result<WasapiCaptureHandle, String> {
     if process_ids.is_empty() || process_ids.len() != output_paths.len() {
         return Err(AppErrorKind::InternalError.to_frontend_json());
@@ -403,6 +439,7 @@ pub fn start_process_loopback_wavs(
         let worker_pause = thread_pause.clone();
         let worker_startup_tx = startup_tx.clone();
         let worker_path = path.clone();
+        let worker_error_slot = device_error_slot.clone();
         workers.push(std::thread::spawn(move || {
             if let Err(e) = capture_process_loopback_to_wav(
                 pid,
@@ -411,6 +448,7 @@ pub fn start_process_loopback_wavs(
                 worker_enabled,
                 worker_pause,
                 Some(worker_startup_tx),
+                worker_error_slot,
             ) {
                 log::error!("进程音频采集线程异常退出(pid={}): {}", pid, e);
 
@@ -837,6 +875,7 @@ pub fn start_microphone_wav_with_device(
     output_path: PathBuf,
     enabled_flag: Arc<AtomicBool>,
     recording_pause_flag: Arc<AtomicBool>,
+    device_error_slot: AudioDeviceErrorSlot,
 ) -> Result<WasapiCaptureHandle, String> {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
@@ -882,7 +921,7 @@ pub fn start_microphone_wav_with_device(
                 recording_pause_flag.load(Ordering::SeqCst)
             );
 
-            let err_fn = |err| eprintln!("WASAPI 麦克风捕获错误: {}", err);
+            let err_fn = device_err_fn(&device_error_slot, "麦克风");
 
             match std::fs::metadata(&thread_output) {
                 Ok(meta) => log::info!(
@@ -993,6 +1032,7 @@ pub fn start_system_loopback_aac_with_device(
     enabled_flag: Arc<AtomicBool>,
     recording_pause_flag: Arc<AtomicBool>,
     audio_bitrate_kbps: Option<u32>,
+    device_error_slot: AudioDeviceErrorSlot,
 ) -> Result<WasapiFfmpegHandle, String> {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
@@ -1120,7 +1160,7 @@ pub fn start_system_loopback_aac_with_device(
                 }
             });
 
-            let err_fn = |err| eprintln!("WASAPI 捕获错误: {}", err);
+            let err_fn = device_err_fn(&device_error_slot, "系统音频");
 
             // 按探测到的设备采样格式分发回调，统一转 F32 写入 FFmpeg（#1）
             let stream = match sample_format {

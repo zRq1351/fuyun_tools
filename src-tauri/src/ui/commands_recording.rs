@@ -1,4 +1,5 @@
 use crate::core::app_state::AppState as SharedAppState;
+use crate::core::error::ErrorCode;
 use crate::core::error_codes::AppErrorKind;
 use crate::core::frontend_error::app_error_to_frontend_json;
 use crate::core::perf_metrics::record_perf_metric;
@@ -441,6 +442,13 @@ pub async fn stop_recording(
                 Ok(result)
             }
             Err(stop_err) => {
+                // 状态类失败（重复停止/正在停止中/会话已变化）不兜底 cancel：
+                // 此时录制要么已被在途流程接管收尾，要么已结束，
+                // 误跑 cancel 会把在途流程的 runtime 强制重置（duration=0/重复事件/误删文件）。
+                if matches!(stop_err.code, ErrorCode::ValidationError) {
+                    log::warn!("stop_recording 状态类失败，跳过兜底清理: {}", stop_err.message);
+                    return Err(app_error_to_frontend_json(stop_err));
+                }
                 let fallback_req = SessionRequest {
                     session_id: request.session_id.clone(),
                 };
@@ -554,7 +562,10 @@ pub async fn update_recording_audio_capture(
 pub async fn get_recording_state(
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<RecordingRuntimeState, String> {
-    Ok(recorder_service::get_recording_state(state.inner().clone()))
+    // start_recording 会长时间持有 runtime 锁（音频设备启动最坏可达数秒），
+    // 该阻塞锁必须放到阻塞线程池执行，避免挂住异步运行时的工作线程
+    let state_arc = state.inner().clone();
+    run_blocking_command(move || Ok(recorder_service::get_recording_state(state_arc))).await
 }
 
 #[tauri::command]
