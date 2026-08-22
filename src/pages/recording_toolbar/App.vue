@@ -119,6 +119,23 @@
               </button>
             </div>
           </div>
+            <div v-if="recordTargetType === 'screen' && recordingMonitors.length > 1" class="toolbar-settings-row">
+              <span class="toolbar-settings-label">{{ t('recordingToolbar.targetMonitor') }}</span>
+              <el-select
+                  v-model="recordTargetMonitorId"
+                  :disabled="!canEditRecordingConfig"
+                  :placeholder="t('recordingToolbar.selectMonitor')"
+                  popper-class="recording-toolbar-select-popper"
+                  size="small"
+              >
+                <el-option
+                    v-for="m in recordingMonitors"
+                    :key="m.index"
+                    :label="formatMonitorLabel(m)"
+                    :value="'mon=' + m.index"
+                />
+              </el-select>
+            </div>
           <div v-if="recordTargetType === 'window'" class="toolbar-settings-row">
             <span class="toolbar-settings-label">{{ t('recordingToolbar.targetWindow') }}</span>
             <el-select
@@ -322,6 +339,8 @@ const systemAudioProcessIds = ref([]);
 const recordTargetType = ref("screen");
 const recordTargetWindowId = ref("");
 const recordableWindows = ref([]);
+const recordingMonitors = ref([]);
+const recordTargetMonitorId = ref("mon=0");
 const recordRegionX = ref(0);
 const recordRegionY = ref(0);
 const recordRegionWidth = ref(1280);
@@ -723,7 +742,10 @@ const toggleRecordingState = async () => {
           ? recordTargetWindowId.value
           : recordTargetType.value === "region"
               ? `${Math.round(recordRegionX.value)},${Math.round(recordRegionY.value)},${Math.max(1, Math.round(recordRegionWidth.value))},${Math.max(1, Math.round(recordRegionHeight.value))}`
-              : "";
+              : recordTargetType.value === "screen" && recordingMonitors.value.length > 1
+                  // 多屏必须显式指定目标屏（后端对未指定会拒绝）
+                  ? (recordTargetMonitorId.value || "mon=0")
+                  : "";
       const selectedWindow =
           recordTargetType.value === "window"
               ? recordableWindows.value.find((w) => (w.hwnd || w.title) === recordTargetWindowId.value) || null
@@ -1033,6 +1055,28 @@ const refreshAudioProcesses = async () => {
       .filter((v) => pidSet.has(v));
 };
 
+const refreshRecordableMonitors = async () => {
+  try {
+    const monitors = await RecordingService.listMonitors();
+    const list = Array.isArray(monitors) ? monitors : [];
+    recordingMonitors.value = list;
+    if (list.length === 0) return;
+    const exists = list.some((m) => `mon=${m.index}` === recordTargetMonitorId.value);
+    if (!exists) {
+      // 默认选主屏，其次第一块
+      const primary = list.find((m) => m.isPrimary) || list[0];
+      recordTargetMonitorId.value = `mon=${primary.index}`;
+    }
+  } catch (_e) {
+  }
+};
+
+const formatMonitorLabel = (m) => {
+  const primaryMark = m.isPrimary ? "★ " : "";
+  const size = m.width && m.height ? ` · ${m.width}×${m.height}` : "";
+  return `${primaryMark}${m.name || t('recordingToolbar.monitorFallbackName', {n: (Number(m.index) || 0) + 1})}${size}`;
+};
+
 const refreshRecordableWindows = async () => {
   const windowRes = await RecordingService.listWindows();
   if (!windowRes?.success || !Array.isArray(windowRes.windows)) {
@@ -1044,8 +1088,13 @@ const refreshRecordableWindows = async () => {
     recordTargetWindowId.value = "";
     return;
   }
+  const previousSelection = String(recordTargetWindowId.value || "");
+  if (!previousSelection) {
+    // 尚未选择过窗口（如刚切换到窗口模式）：保持占位符即可，不算"已失效"
+    return;
+  }
   const exists = nextWindows.some(
-      (w) => (w.hwnd || w.title) === recordTargetWindowId.value,
+      (w) => (w.hwnd || w.title) === previousSelection,
   );
   if (!exists) {
     recordTargetWindowId.value = "";
@@ -1058,6 +1107,7 @@ const refreshRecordableWindows = async () => {
 const refreshAllDropdownOptions = async () => {
   await Promise.allSettled([
     refreshRecordableWindows(),
+    refreshRecordableMonitors(),
     refreshSystemOutputDevices(),
     refreshMicrophoneDevices(),
     refreshAudioProcesses(),

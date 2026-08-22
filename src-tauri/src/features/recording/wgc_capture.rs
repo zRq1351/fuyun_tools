@@ -36,6 +36,50 @@ pub struct WgcCropRect {
     pub height: u32,
 }
 
+/// 暂停期间的 PTS 间隙补偿：成片时间轴必须排除暂停区间。
+/// 帧 时间戳来自 QPC（SystemRelativeTime），暂停期间的墙钟流逝要从后续帧
+/// 时间戳中整体扣除——这样整个录制会话只产生一个连续的视频时间轴，
+/// 不存在分段拼接边界，音画对齐不再依赖任何跨段校准。
+///
+/// 时间单位与 `Frame::timestamp().Duration` 一致（100ns）。
+#[derive(Debug, Default)]
+struct PtsGapCompensator {
+    /// 累计需要扣除的暂停时长（100ns 单位）
+    paused_total: i64,
+    /// 当前（或最近一次）暂停的开始时刻；None 表示当前不在暂停中
+    pause_entered_at: Option<std::time::Instant>,
+}
+
+impl PtsGapCompensator {
+    fn on_pause_start(&mut self, now: std::time::Instant) {
+        // 幂等：重复的 start（标志抖动）不覆盖第一次进入时刻
+        if self.pause_entered_at.is_none() {
+            self.pause_entered_at = Some(now);
+        }
+    }
+
+    /// 结束一次暂停，返回本次新增的暂停时长（100ns 单位）；未在暂停中返回 0
+    fn on_pause_end(&mut self, now: std::time::Instant) -> i64 {
+        match self.pause_entered_at.take() {
+            Some(entered) => {
+                let gap_100ns = now.duration_since(entered).as_nanos() as i64 / 100;
+                self.paused_total += gap_100ns;
+                gap_100ns
+            }
+            None => 0,
+        }
+    }
+
+    fn is_paused(&self) -> bool {
+        self.pause_entered_at.is_some()
+    }
+
+    /// 将原始 QPC 帧时间戳映射到排除暂停区间的输出时间轴
+    fn adjust(&self, raw_ts: i64) -> i64 {
+        raw_ts - self.paused_total
+    }
+}
+
 fn is_border_config_unsupported(details: &str) -> bool {
     let lower = details.to_lowercase();
     lower.contains("borderconfigunsupported")
@@ -166,6 +210,8 @@ struct WgcCaptureHandler {
     flags: WgcCaptureFlags,
     /// 缓存的输出帧缓冲区，避免每帧重新分配
     resized_cache: Vec<u8>,
+    /// 暂停 PTS 间隙补偿（软暂停：会话不销毁，输出时间轴排除暂停区间）
+    pts_gap: PtsGapCompensator,
 }
 
 impl GraphicsCaptureApiHandler for WgcCaptureHandler {
@@ -188,6 +234,7 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
             encoder: Some(encoder),
             resized_cache: vec![0u8; target_pixels * 4],
             flags: ctx.flags,
+            pts_gap: PtsGapCompensator::default(),
         })
     }
 
@@ -196,7 +243,17 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
         frame: &mut Frame,
         _capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
-        if self.flags.pause_flag.load(Ordering::Relaxed) {
+        // 软暂停状态机：进入/退出暂停时维护 PTS 补偿（幂等，标志抖动安全）
+        let paused_now = self.flags.pause_flag.load(Ordering::Relaxed);
+        match (self.pts_gap.is_paused(), paused_now) {
+            (false, true) => self.pts_gap.on_pause_start(std::time::Instant::now()),
+            (true, false) => {
+                self.pts_gap.on_pause_end(std::time::Instant::now());
+            }
+            _ => {}
+        }
+        if paused_now {
+            // 暂停期间丢弃帧：编码器保持存活，恢复后时间戳经补偿无缝衔接
             return Ok(());
         }
         if self.flags.first_frame_elapsed_ms.load(Ordering::Relaxed) == u64::MAX {
@@ -218,6 +275,10 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                     raw_timestamp = 0;
                 }
             }
+
+            // 排除暂停区间：恢复后的帧时间戳整体左移累计暂停时长，
+            // 使输出时间轴与"有效录制时钟(U)"一致（暂停不占成片时长）
+            raw_timestamp = self.pts_gap.adjust(raw_timestamp).max(0);
 
             let frame_w = frame.width() as usize;
             let frame_h = frame.height() as usize;
@@ -431,7 +492,9 @@ where
             } else {
                 return Ok(());
             }
-            thread::sleep(Duration::from_millis(100));
+            // 20ms 轮询：停止信号到实际停采之间的尾帧写入量与该间隔成正比，
+            // 过长会在每个暂停边界留下可感知的尾部偏差（校准已用容器实测时长兜底）
+            thread::sleep(Duration::from_millis(20));
         }
     })
 }
@@ -507,19 +570,53 @@ fn draw_border_setting_for(prefer_default: bool) -> DrawBorderSettings {
 /// 枚举显示器并返回 (索引, 虚拟屏幕原点x, 原点y, 宽, 高)
 #[cfg(target_os = "windows")]
 pub fn enumerate_monitors_with_rects() -> Vec<(usize, i32, i32, u32, u32)> {
+    enumerate_monitor_infos()
+        .into_iter()
+        .map(|m| (m.index, m.x, m.y, m.width, m.height))
+        .collect()
+}
+
+/// 枚举显示器详细信息（含名称/主屏标记），供前端目标选择使用
+#[cfg(target_os = "windows")]
+pub fn enumerate_monitor_infos() -> Vec<WgcMonitorInfo> {
     let mut out = Vec::new();
     let monitors = match Monitor::enumerate() {
         Ok(v) => v,
         Err(_) => return out,
     };
     for (idx, m) in monitors.into_iter().enumerate() {
-        if let Some((x, y)) = monitor_origin(&m) {
-            if let (Ok(w), Ok(h)) = (m.width(), m.height()) {
-                out.push((idx, x, y, w, h));
-            }
-        }
+        let Some((x, y)) = monitor_origin(&m) else {
+            continue;
+        };
+        let Ok(w) = m.width() else { continue };
+        let Ok(h) = m.height() else { continue };
+        let name = m
+            .name()
+            .map(|s| s.trim().to_string())
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("Display {}", idx + 1));
+        out.push(WgcMonitorInfo {
+            index: idx,
+            x,
+            y,
+            width: w,
+            height: h,
+            name,
+        });
     }
     out
+}
+
+/// 显示器枚举信息（虚拟屏幕坐标系）
+#[derive(Debug, Clone)]
+pub struct WgcMonitorInfo {
+    pub index: usize,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub name: String,
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -690,4 +787,47 @@ pub fn start_monitor_capture_to_mp4(
         first_frame_elapsed_ms,
         join,
     })
+}
+
+#[cfg(test)]
+mod pts_gap_tests {
+    use super::PtsGapCompensator;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn gap_accumulates_across_cycles_and_adjusts() {
+        let mut c = PtsGapCompensator::default();
+        let t0 = Instant::now();
+        c.on_pause_start(t0);
+        assert!(c.is_paused());
+        c.on_pause_start(t0); // 幂等：标志抖动不覆盖首次进入时刻
+        let added = c.on_pause_end(t0 + Duration::from_millis(500));
+        assert_eq!(added, 5_000_000); // 500ms = 5×10⁶ × 100ns
+        assert!(!c.is_paused());
+        c.on_pause_start(t0 + Duration::from_millis(600));
+        c.on_pause_end(t0 + Duration::from_millis(1100));
+        // 累计暂停 1000ms = 10⁷ × 100ns，需从原始时间戳中扣除
+        assert_eq!(c.adjust(20_000_000), 20_000_000 - 10_000_000);
+    }
+
+    #[test]
+    fn end_without_start_is_noop() {
+        let mut c = PtsGapCompensator::default();
+        assert_eq!(c.on_pause_end(Instant::now()), 0);
+        assert_eq!(c.adjust(123), 123);
+    }
+
+    #[test]
+    fn timestamps_stay_monotonic_after_gap() {
+        let mut c = PtsGapCompensator::default();
+        // 暂停前最后帧 1.0s；精确暂停 300ms；恢复后首帧原始 QPC 1.4s
+        let before = c.adjust(10_000_000);
+        let t0 = Instant::now();
+        c.on_pause_start(t0);
+        c.on_pause_end(t0 + Duration::from_millis(300));
+        let after = c.adjust(14_000_000);
+        // 补偿后恢复帧落在 1.1s：与暂停前内容无缝衔接且保持单调
+        assert_eq!(after, 11_000_000);
+        assert!(after > before);
+    }
 }

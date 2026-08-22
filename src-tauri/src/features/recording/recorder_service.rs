@@ -18,15 +18,17 @@ use crate::features::recording::native_wasapi::{
 };
 use crate::features::recording::state::RecordingPhase;
 use crate::features::recording::types::{
-    AudioInputDevice, AudioProcessItem, RecordingRegressionReport, RecordingRuntimeState,
-    RecordingSessionInfo, RecordingStopResult, SessionRequest, StartRecordingRequest,
+    AudioInputDevice, AudioProcessItem, RecordingMonitorItem, RecordingRegressionReport,
+    RecordingRuntimeState, RecordingSessionInfo, RecordingStopResult, SessionRequest,
+    StartRecordingRequest,
 };
 use crate::features::recording::wgc_capture::{
     bootstrap_force_default_border_from_settings,
-    bootstrap_force_default_dirty_region_from_settings, enumerate_monitors_with_rects,
-    is_force_default_border_enabled, is_force_default_dirty_region_enabled,
-    is_item_convert_failed, monitor_count, pick_monitor_and_local_rect,
-    start_monitor_capture_to_mp4, start_window_capture_to_mp4, validate_window_capture_target,
+    bootstrap_force_default_dirty_region_from_settings, enumerate_monitor_infos,
+    enumerate_monitors_with_rects, is_force_default_border_enabled,
+    is_force_default_dirty_region_enabled, is_item_convert_failed, monitor_count,
+    pick_monitor_and_local_rect, start_monitor_capture_to_mp4, start_window_capture_to_mp4,
+    validate_window_capture_target,
 };
 use crate::sync::{lock_arc_mutex, Mutex};
 use crate::utils::system_utils::save_settings;
@@ -57,8 +59,10 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 static LAST_OPEN_FOLDER_MS: AtomicU64 = AtomicU64::new(0);
 const VIDEO_IO_RETRY_DELAYS_MS: [u64; 5] = [60, 120, 240, 480, 800];
 
-/// 非窗口录制开头灰色帧的裁剪时长（ms），音频校准需同步补偿该值
-const GRAY_FRAME_TRIM_MS: u64 = 300;
+/// 片头黑帧探测窗口（秒）：只解码开头一小段，开销可忽略
+const BLACK_LEAD_DETECT_WINDOW_S: f64 = 2.0;
+/// 探测到的片头黑段短于该值时不裁剪（避免为几十毫秒的抖动动文件）
+const MIN_BLACK_LEAD_TRIM_MS: u64 = 80;
 
 fn suppress_console_window(command: &mut Command) -> &mut Command {
     #[cfg(target_os = "windows")]
@@ -325,20 +329,21 @@ fn parse_wgc_monitor_target(
     }
 }
 
+/// 解析 screen 模式显式指定的显示器目标："mon=N" / "monitor=N"（大小写不敏感）；未指定返回 None
+fn parse_screen_explicit_monitor(target_id: &str) -> Option<usize> {
+    let raw = target_id.trim().to_lowercase();
+    let value = raw
+        .strip_prefix("mon=")
+        .or_else(|| raw.strip_prefix("monitor="))?;
+    value.trim().parse::<usize>().ok()
+}
+
 #[cfg(target_os = "windows")]
 fn resolve_wgc_monitor_start_params(
     target_type: &str,
     target_id: &str,
 ) -> Option<(usize, Option<(u32, u32, u32, u32)>)> {
     match target_type {
-        // 单屏系统才走 WGC 显示器捕获；多屏保持 gdigrab 虚拟屏拼接语义不变
-        "screen" | "display" => {
-            if monitor_count() == 1 {
-                Some((0, None))
-            } else {
-                None
-            }
-        }
         "region" => {
             let rect = parse_region_target(target_id)?;
             let normalized = normalize_region_to_virtual_screen(rect.0, rect.1, rect.2, rect.3)?;
@@ -436,12 +441,15 @@ fn shift_audio_segments_global(
 
 /// 计算窗口录制各视频分段的 U→拼接时间轴 偏移表 δ_k：
 /// 位于第 k 个分段 U 区间 [S_k, E_k) 的音频事件，其拼接后位置 = U − δ_k。
-/// 推导：第 k 段编码时长 D_k ≈ (E_k − S_k) − A_k（WGC 首帧到达前不产出画面），
-/// 第 k 段内容的拼接起点 B_k = Σ_{j<k} D_j，故 V(u) = B_k + (u − S_k − A_k)。
+/// 分段时长优先使用容器实测值（measured_durations_ms）——模型推算值
+/// (E_k−S_k)−A_k 不含停止信号轮询/编码器收尾的尾部延迟，每个暂停边界
+/// 会累积 0~150ms 偏差，多次暂停后表现为渐进音画失步。
+/// 推导：第 k 段内容的拼接起点 B_k = Σ_{j<k} D_k，故 V(u) = B_k + (u − S_k − A_k)。
 /// last_calibrated_anchor 为停止时实时读取的末段锚点（含安全裕量），
 /// total_u_ms 为录制结束时 U 时钟值（末段右边界 E_N）。
 fn compute_window_segment_shifts(
     segments_meta: &[crate::features::recording::state::WindowVideoSegment],
+    measured_durations_ms: &[Option<u64>],
     last_calibrated_anchor: u64,
     total_u_ms: u64,
 ) -> Vec<u64> {
@@ -454,6 +462,7 @@ fn compute_window_segment_shifts(
             .map(|n| n.u_start_ms)
             .unwrap_or(total_u_ms)
             .max(s_k);
+        let span = e_k.saturating_sub(s_k);
         let raw_anchor = seg
             .first_frame_anchor
             .as_ref()
@@ -467,11 +476,54 @@ fn compute_window_segment_shifts(
         } else {
             raw_anchor
         };
-        let d_k = e_k.saturating_sub(s_k).saturating_sub(a_k);
+        // 时长来源：容器实测（含尾部收尾的真实长度）优先；探测失败回退模型推算。
+        // 实测值做合理性钳制：不可能比 U 跨度长出太多（防止损坏头导致后续偏移爆炸）。
+        let d_k = match measured_durations_ms.get(k).copied().flatten() {
+            Some(d) => d.min(span.saturating_add(500)),
+            None => span.saturating_sub(a_k),
+        };
         shifts.push(s_k.saturating_add(a_k).saturating_sub(base_ms));
         base_ms = base_ms.saturating_add(d_k);
     }
     shifts
+}
+
+/// 用 ffmpeg 读取视频容器的总时长（毫秒）。
+/// 不带输出参数调用会让 ffmpeg 在打印输入信息后立即退出——只解析头部，毫秒级开销；
+/// 解析失败返回 None（调用方回退模型推算）。
+fn probe_video_duration_ms(ffmpeg_path: &std::path::Path, video_path: &PathBuf) -> Option<u64> {
+    let mut cmd = Command::new(ffmpeg_path);
+    suppress_console_window(&mut cmd);
+    cmd.arg("-hide_banner")
+        .arg("-nostats")
+        .arg("-i")
+        .arg(video_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let output = cmd.output().ok()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    parse_duration_from_ffmpeg_stderr(&stderr)
+}
+
+/// 从 ffmpeg 的输入信息输出中解析 "Duration: HH:MM:SS.frac" 为毫秒
+fn parse_duration_from_ffmpeg_stderr(stderr: &str) -> Option<u64> {
+    let idx = stderr.find("Duration:")?;
+    let rest = &stderr[idx + "Duration:".len()..];
+    // 格式形如 " 00:00:01.96,"
+    let time_part = rest.split(',').next()?.trim();
+    let mut parts = time_part.split(':');
+    let hours: u64 = parts.next()?.trim().parse().ok()?;
+    let minutes: u64 = parts.next()?.trim().parse().ok()?;
+    let seconds_raw = parts.next()?.trim();
+    let mut sec_parts = seconds_raw.split('.');
+    let seconds: u64 = sec_parts.next()?.parse().ok()?;
+    let frac = sec_parts.next().unwrap_or("");
+    let frac_digits: String = frac.chars().take_while(|c| c.is_ascii_digit()).collect();
+    // 右补齐到毫秒："9"→900ms、"96"→960ms
+    let padded = format!("{:0<3}", frac_digits);
+    let frac_ms: u64 = padded.get(..3).unwrap_or("0").parse().unwrap_or(0);
+    Some((hours * 3600 + minutes * 60 + seconds).saturating_mul(1000).saturating_add(frac_ms))
 }
 
 /// 找到 U 位置所属的视频分段序号（最后一个 u_start <= pos 的段；早于首段归 0）
@@ -580,6 +632,15 @@ fn build_window_segment_path(
 //  视频片段处理（拼接/裁剪/重命名）
 // ====================================================================
 
+/// 生成 ffmpeg concat 清单条目：单引号包裹 + 反斜杠转正斜杠。
+/// concat demuxer 会把未引用路径中的反斜杠当作转义符吞掉
+/// （Windows 下 `D:\a\b` 被读成 `D:ab` 导致拼接失败），必须引用并转换；
+/// 引用的单引号字符串内的字面单引号按 ffmpeg 规则写成 '\''。
+fn build_concat_entry(path: &std::path::Path) -> String {
+    let forward = path.to_string_lossy().replace('\\', "/");
+    format!("file '{}'\n", forward.replace('\'', "'\\''"))
+}
+
 fn concat_video_segments(
     ffmpeg_path: &std::path::Path,
     segments: &[PathBuf],
@@ -599,8 +660,7 @@ fn concat_video_segments(
         AppError::new(ErrorCode::IoError, "创建视频拼接列表失败").with_details(e.to_string())
     })?;
     for seg in segments {
-        let seg_path = seg.to_string_lossy();
-        let line = format!("file {}\n", seg_path);
+        let line = build_concat_entry(seg);
         if let Err(e) = list_file.write_all(line.as_bytes()) {
             drop(list_file);
             let _ = fs::remove_file(&list_path);
@@ -634,6 +694,59 @@ fn concat_video_segments(
         return Err(AppError::new(ErrorCode::SystemError, "视频拼接失败").with_details(stderr));
     }
     Ok(())
+}
+
+/// 从 blackdetect 输出解析片头黑段时长：
+/// 仅当第一条黑段从 0 附近开始（≤50ms 容差）时返回其毫秒长度；否则 None。
+fn parse_black_lead_ms_from_blackdetect(stderr: &str) -> Option<u64> {
+    for line in stderr.lines() {
+        let Some(pos) = line.find("black_start:") else {
+            continue;
+        };
+        let rest = &line[pos..];
+        let start = parse_f64_after(rest, "black_start:")?;
+        if start > 0.05 {
+            // 第一条黑段不从片头开始 → 无片头黑帧
+            return None;
+        }
+        let duration = parse_f64_after(rest, "black_duration:").unwrap_or(0.0);
+        return if duration > 0.0 {
+            Some((duration * 1000.0).round() as u64)
+        } else {
+            None
+        };
+    }
+    None
+}
+
+/// 探测视频片头是否存在黑帧段及其时长（仅解码开头窗口，开销可忽略）。
+/// 返回 Some(ms) 表示应裁剪的片头黑帧毫秒数；None 表示无需裁剪或探测失败（保守不裁）。
+fn detect_black_lead_ms(
+    ffmpeg_path: &std::path::Path,
+    video_path: &PathBuf,
+) -> Option<u64> {
+    let mut cmd = Command::new(ffmpeg_path);
+    suppress_console_window(&mut cmd);
+    cmd.arg("-hide_banner")
+        .arg("-nostats")
+        .arg("-t")
+        .arg(format!("{:.3}", BLACK_LEAD_DETECT_WINDOW_S))
+        .arg("-i")
+        .arg(video_path)
+        .args([
+            "-vf",
+            "blackdetect=d=0.04:pic_th=0.98:pix_th=0.12",
+            "-an",
+            "-f",
+            "null",
+            "-",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let output = cmd.output().ok()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    parse_black_lead_ms_from_blackdetect(&stderr)
 }
 
 /// 裁剪视频开头的灰色帧（gdigrab 初始化时可能产生）
@@ -1691,6 +1804,29 @@ pub fn list_audio_process_items() -> Result<Vec<AudioProcessItem>, AppError> {
         .collect::<Vec<_>>())
 }
 
+/// 枚举可录制的显示器（多屏时前端展示选择列表）
+pub fn list_recording_monitors() -> Result<Vec<RecordingMonitorItem>, AppError> {
+    #[cfg(target_os = "windows")]
+    {
+        Ok(enumerate_monitor_infos()
+            .into_iter()
+            .map(|m| RecordingMonitorItem {
+                index: m.index as u32,
+                name: m.name,
+                x: m.x,
+                y: m.y,
+                width: m.width,
+                height: m.height,
+                is_primary: m.x == 0 && m.y == 0,
+            })
+            .collect::<Vec<_>>())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(Vec::new())
+    }
+}
+
 fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
     let threshold = SystemTime::now() - Duration::from_secs(24 * 3600);
     if let Ok(entries) = fs::read_dir(output_dir) {
@@ -1776,6 +1912,24 @@ fn parse_u64_after(line: &str, marker: &str) -> Option<u64> {
     } else {
         buf.parse::<u64>().ok()
     }
+}
+
+/// 提取 marker 之后的第一个十进制小数（用于解析 blackdetect 的秒值）
+fn parse_f64_after(line: &str, marker: &str) -> Option<f64> {
+    let idx = line.find(marker)?;
+    let s = &line[idx + marker.len()..];
+    let mut buf = String::new();
+    for ch in s.chars() {
+        if ch.is_ascii_digit() || ch == '.' {
+            buf.push(ch);
+        } else if !buf.is_empty() {
+            break;
+        }
+    }
+    if buf.is_empty() {
+        return None;
+    }
+    buf.parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 fn parse_kbits_after(line: &str, marker: &str) -> Option<u32> {
@@ -2349,15 +2503,43 @@ pub fn start_recording(
             }
         }
 
-        // 单屏全屏/区域 → WGC 显示器捕获：硬件编码、无 gdigrab 初始化灰帧问题，
-        // 且分段携带首帧锚点 → 暂停/恢复自动获得按周期的 A/V 校准。
-        // 多屏全屏保持 gdigrab 虚拟屏拼接语义；任何失败均回退 gdigrab 原路径。
+        // 全屏（WGC 显示器捕获：硬件编码、分段携带首帧锚点）与区域（显示器+裁剪）路由。
+        // 多屏时全屏必须显式指定目标屏（target_id="mon=N"），避免静默改变录制范围。
+        // 任何 WGC 启动失败均回退 gdigrab 原路径。
         if matches!(target_type.as_str(), "screen" | "region") && !force_ffmpeg_fallback {
-            if target_type == "screen" && monitor_count() != 1 {
-                log::info!("多屏环境保持 gdigrab 虚拟屏拼接语义，跳过 WGC 显示器捕获");
-            } else if let Some((mon_index, crop_local)) =
-                resolve_wgc_monitor_start_params(&target_type, &target_id)
-            {
+            #[cfg(target_os = "windows")]
+            let monitor_start: Option<(usize, Option<(u32, u32, u32, u32)>)> =
+                if target_type == "screen" {
+                    match parse_screen_explicit_monitor(&target_id) {
+                        Some(idx) => {
+                            if idx < monitor_count() {
+                                Some((idx, None))
+                            } else {
+                                return Err(rollback_starting(
+                                    "指定的录制屏幕不存在",
+                                    format!("mon={}，检测到 {} 块屏幕", idx, monitor_count()),
+                                ));
+                            }
+                        }
+                        None => {
+                            if monitor_count() > 1 {
+                                return Err(rollback_starting(
+                                    "检测到多个显示器，请先在录屏工具条中选择要录制的屏幕",
+                                    format!("monitors={}", monitor_count()),
+                                ));
+                            } else {
+                                // 单屏（或枚举失败交由 gdigrab 兜底）
+                                (monitor_count() == 1).then_some((0usize, None))
+                            }
+                        }
+                    }
+                } else {
+                    resolve_wgc_monitor_start_params(&target_type, &target_id)
+                };
+            #[cfg(not(target_os = "windows"))]
+            let monitor_start: Option<(usize, Option<(u32, u32, u32, u32)>)> = None;
+
+            if let Some((mon_index, crop_local)) = monitor_start {
                 let first_segment_path = build_window_segment_path(&output_dir, &session_id, 0);
                 match start_monitor_capture_to_mp4(
                     mon_index,
@@ -2815,16 +2997,23 @@ pub fn stop_recording(
                     let rt = lock_arc_mutex(&runtime_arc);
                     rt.snapshot().elapsed_ms
                 };
+                // 容器实测各分段时长：消除停止轮询/编码器收尾尾差在暂停边界的累积误差
+                let measured: Vec<Option<u64>> = window_video_segments
+                    .iter()
+                    .map(|s| probe_video_duration_ms(&ffmpeg_path, &s.path))
+                    .collect();
                 let shifts = compute_window_segment_shifts(
                     &window_video_segments,
+                    &measured,
                     calibrated_anchor_ms,
                     total_u_ms,
                 );
                 apply_window_cycle_shifts(&mut sys_segments, &window_video_segments, &shifts);
                 apply_window_cycle_shifts(&mut mic_segments, &window_video_segments, &shifts);
                 log::info!(
-                    "应用 WGC 分段周期校正: segments={}, shifts={:?}, calibrated_last_anchor={}ms",
-                    window_video_segments.len(),
+                    "应用 WGC 分段周期校正: segments={:?}, measured={:?}, shifts={:?}, calibrated_last_anchor={}ms",
+                    window_video_segments.iter().map(|s| s.u_start_ms).collect::<Vec<_>>(),
+                    measured,
                     shifts,
                     calibrated_anchor_ms
                 );
@@ -2845,16 +3034,36 @@ pub fn stop_recording(
         fatal_error = Some(build_window_capture_unavailable_error(&details));
     }
 
+    // FFmpeg/gdigrab 录制：先探测片头是否存在黑帧段（gdigrab 初始化遗留）。
+    // 现代 ffmpeg 通常无黑帧 → 探测结果为 0，既不再盲删开头 300ms 真实内容，
+    // 音频补偿也同步使用实测值，避免固定常量引入的音画偏移。
+    let measured_black_lead_ms: u64 = if !is_wgc_target(&target_type) && fatal_error.is_none() {
+        match output_tmp.as_ref().and_then(|p| detect_black_lead_ms(&ffmpeg_path, p)) {
+            Some(ms) if ms >= MIN_BLACK_LEAD_TRIM_MS => {
+                log::info!("探测到片头黑帧 {}ms，将裁剪并同步音频补偿", ms);
+                ms
+            }
+            _ => {
+                log::info!("片头未检测到黑帧，跳过灰头裁剪");
+                0
+            }
+        }
+    } else {
+        0
+    };
+
     // FFmpeg/gdigrab 录制 A/V 同步校正：测量 FFmpeg 进程启动相对于录制原点的延迟
     // 类似 WGC 的 first_frame_elapsed_ms 机制，消除音频提前 10~50ms 的固有偏差
-    // 注意：非窗口视频尾部会裁剪开头 GRAY_FRAME_TRIM_MS 的灰色帧，视频时间线整体前移，
-    // 音频侧需同步多扣 GRAY_FRAME_TRIM_MS，否则音频相对视频滞后约 0.3s
-    if !is_wgc_target(&target_type) && (ffmpeg_start_delay_ms > 0 || GRAY_FRAME_TRIM_MS > 0) {
-        let effective_delay = ffmpeg_start_delay_ms.saturating_add(GRAY_FRAME_TRIM_MS);
+    // 注意：若探测到片头黑帧并将在后处理中裁掉，视频时间线整体前移该时长，
+    // 音频侧需同步多扣实测黑帧时长，否则音频相对视频滞后
+    if !is_wgc_target(&target_type)
+        && (ffmpeg_start_delay_ms > 0 || measured_black_lead_ms > 0)
+    {
+        let effective_delay = ffmpeg_start_delay_ms.saturating_add(measured_black_lead_ms);
         log::info!(
             "应用 FFmpeg 启动延迟校正: ffmpeg_delay={}ms, trim_compensation={}ms, effective={}ms",
             ffmpeg_start_delay_ms,
-            GRAY_FRAME_TRIM_MS,
+            measured_black_lead_ms,
             effective_delay
         );
         for seg in &mut sys_segments {
@@ -2904,18 +3113,21 @@ pub fn stop_recording(
             ));
         }
 
-        // 🔧 非窗口录制（gdigrab）时，裁剪视频开头的灰色帧
-        // gdigrab 初始化时前几帧可能是灰色/黑色的，裁剪掉前 0.3 秒
-        // （音频校准已按 GRAY_FRAME_TRIM_MS 同步补偿）
-        if fatal_error.is_none() && !is_wgc_target(&target_type) {
-            log::info!("🔧 裁剪 gdigrab 初始化灰色帧...");
+        // 🔧 非窗口录制（gdigrab）且探测到片头黑帧时才裁剪（实测值），
+        // 现代 ffmpeg 无黑帧 → 不再盲删开头 300ms 真实内容
+        // （音频校准已按实测黑帧时长同步补偿）
+        if fatal_error.is_none()
+            && !is_wgc_target(&target_type)
+            && measured_black_lead_ms >= MIN_BLACK_LEAD_TRIM_MS
+        {
+            log::info!("🔧 裁剪 gdigrab 片头黑帧 {}ms...", measured_black_lead_ms);
             if let Err(e) = trim_video_initial_frames(
                 &ffmpeg_path,
                 output_tmp,
-                GRAY_FRAME_TRIM_MS as f64 / 1000.0,
+                measured_black_lead_ms as f64 / 1000.0,
             ) {
                 // 裁剪失败不影响主流程，只记录警告
-                log::warn!("裁剪灰色帧失败（不影响视频保存）: {}", e);
+                log::warn!("裁剪片头黑帧失败（不影响视频保存）: {}", e);
             }
         }
 
@@ -3334,6 +3546,7 @@ pub fn pause_recording(
         system_audio_threads,
         mic_audio_stop_flag,
         mic_audio_thread,
+        wgc_soft_pause,
     ) = {
         let mut runtime = lock_arc_mutex(&runtime_arc);
         if runtime.phase != RecordingPhase::Recording {
@@ -3342,7 +3555,16 @@ pub fn pause_recording(
                 "当前状态不允许暂停",
             ));
         }
-        if is_wgc_target(&runtime.target_type) {
+        // WGC 目标优先走软暂停：编码会话保持存活，仅停送帧；
+        // PTS 间隙由捕获回调内的补偿器扣除，成片时间轴不含暂停区间。
+        // 结构上消除了分段边界 → 不存在跨段音画累积误差。
+        // 会话句柄缺失（异常态）时退回硬停止，恢复时走分段重建+按周期校准兜底。
+        let soft_pause = is_wgc_target(&runtime.target_type) && runtime.wgc_pause_flag.is_some();
+        if soft_pause {
+            if let Some(flag) = runtime.wgc_pause_flag.as_ref() {
+                flag.store(true, Ordering::SeqCst);
+            }
+        } else if is_wgc_target(&runtime.target_type) {
             if let Some(flag) = runtime.wgc_stop_flag.as_ref() {
                 flag.store(true, Ordering::SeqCst);
             }
@@ -3382,11 +3604,13 @@ pub fn pause_recording(
         (
             runtime.session_id.clone(),
             runtime.target_type.clone(),
-            runtime.wgc_thread.take(),
+            // 软暂停：线程留在 runtime 中继续存活（不 join）
+            if soft_pause { None } else { runtime.wgc_thread.take() },
             runtime.system_audio_stop_flag.take(),
             runtime.system_audio_threads.drain(..).collect::<Vec<_>>(),
             runtime.mic_audio_stop_flag.take(),
             runtime.mic_audio_thread.take(),
+            soft_pause,
         )
     };
 
@@ -3456,8 +3680,13 @@ pub fn pause_recording(
                 "录制状态已变化，无法暂停",
             ));
         }
-        runtime.wgc_stop_flag = None;
-        runtime.wgc_pause_flag = None;
+        if wgc_soft_pause {
+            // 软暂停：保留 stop_flag（终停/取消仍需）与 pause_flag=true（恢复时清除），
+            // 编码会话与线程继续存活——这是"无分段边界"的关键
+        } else {
+            runtime.wgc_stop_flag = None;
+            runtime.wgc_pause_flag = None;
+        }
         runtime.system_audio_wav_path = None;
         runtime.system_audio_stream_start_ms = None;
         runtime.mic_audio_wav_path = None;
@@ -3490,6 +3719,7 @@ pub fn resume_recording(
     };
     let (
         wgc_resume_kind,
+        wgc_soft_resume,
         target_id,
         output_dir,
         session_id_for_audio,
@@ -3530,7 +3760,16 @@ pub fn resume_recording(
             .as_ref()
             .map(|f| f.load(Ordering::SeqCst))
             .unwrap_or(false);
-        // WGC 托管类型（window/wgc_screen/wgc_region）：恢复时按类型重建对应采集源
+        // WGC 托管类型（window/wgc_screen/wgc_region）：恢复时优先软恢复——
+        // 若编码会话仍存活（软暂停），直接唤醒，不产生新分段/新边界；
+        // 会话已死亡（如暂停期间目标窗口被关闭）才走硬重建（新分段+按周期校准兜底）
+        let wgc_soft_resume = is_wgc_target(&runtime.target_type)
+            && runtime
+            .wgc_thread
+            .as_ref()
+            .map(|t| !t.is_finished())
+            .unwrap_or(false)
+            && runtime.wgc_pause_flag.is_some();
         let wgc_resume_kind = if is_wgc_target(&runtime.target_type) {
             Some(runtime.target_type.clone())
         } else {
@@ -3550,6 +3789,7 @@ pub fn resume_recording(
         );
         (
             wgc_resume_kind,
+            wgc_soft_resume,
             target_id,
             output_dir,
             session_id_for_audio,
@@ -3573,7 +3813,10 @@ pub fn resume_recording(
         }
     }
 
-    let window_handle = if let Some(kind) = wgc_resume_kind.as_deref() {
+    // 软恢复：会话存活时跳过资源创建（不新建分段/编码器），仅唤醒暂停中的回调
+    let window_handle = if wgc_soft_resume {
+        None
+    } else if let Some(kind) = wgc_resume_kind.as_deref() {
         Some(
             match kind {
                 "wgc_screen" | "wgc_region" => {
@@ -3616,7 +3859,10 @@ pub fn resume_recording(
         None
     };
 
-    let ffmpeg_process = if wgc_resume_kind.is_none() {
+    let ffmpeg_process = if wgc_soft_resume {
+        // 软恢复不创建任何新视频源
+        None
+    } else if wgc_resume_kind.is_none() {
         let ffmpeg_path = resolve_ffmpeg_path().map_err(|e| {
             AppError::new(ErrorCode::SystemError, "恢复录制失败: 找不到 ffmpeg").with_details(e)
         })?;
@@ -3671,8 +3917,16 @@ pub fn resume_recording(
         if let Some(flag) = runtime.recording_pause_flag.as_ref() {
             flag.store(false, Ordering::SeqCst);
         }
-        // 恢复录制时 FFmpeg 延迟清零：新的视频分段与音频缓存同时启动，无需额外校正
-        runtime.ffmpeg_start_delay_ms = 0;
+        if wgc_soft_resume {
+            // 软恢复：唤醒同一 WGC 会话——回调内结束 PTS 补偿窗口，
+            // 后续帧时间戳无缝衔接，成片仍只有一条连续时间轴（无新分段/无边界）
+            if let Some(flag) = runtime.wgc_pause_flag.as_ref() {
+                flag.store(false, Ordering::SeqCst);
+            }
+        } else {
+            // 恢复录制时 FFmpeg 延迟清零：新的视频分段与音频缓存同时启动，无需额外校正
+            runtime.ffmpeg_start_delay_ms = 0;
+        }
         resume_u_start_ms = runtime.snapshot().elapsed_ms;
     }
 
@@ -3984,7 +4238,8 @@ pub fn run_recording_regression(
             state_arc.clone(),
             StartRecordingRequest {
                 target_type: Some("display".to_string()),
-                target_id: None,
+                // 显式指定主屏：多屏环境下 screen 模式必须给出目标屏
+                target_id: Some("mon=0".to_string()),
                 target_x: None,
                 target_y: None,
                 target_width: None,
@@ -4152,7 +4407,7 @@ mod calibration_tests {
     fn single_segment_matches_legacy_global_shift() {
         // 单分段窗口录制：行为与旧全局锚点校正完全一致
         let metas = vec![meta("s0", 0, Some(120))];
-        let shifts = compute_window_segment_shifts(&metas, 130, 10_000);
+        let shifts = compute_window_segment_shifts(&metas, &[None], 130, 10_000);
         assert_eq!(shifts, vec![130]);
     }
 
@@ -4160,7 +4415,7 @@ mod calibration_tests {
     fn two_segments_per_cycle_alignment() {
         // 暂停/恢复产生两段：S0=0/A1=100；S1=5000/A2 原始 150（停止时实测校准为 160，含安全裕量）；总长 9000
         let metas = vec![meta("s0", 0, Some(100)), meta("s1", 5000, Some(150))];
-        let shifts = compute_window_segment_shifts(&metas, 160, 9_000);
+        let shifts = compute_window_segment_shifts(&metas, &[None, None], 160, 9_000);
         // D0=(5000-0)-100=4900 → δ0=0+100-0
         // B1=4900 → δ1=5000+160-4900（末段以实时校准值为准）
         assert_eq!(shifts, vec![100, 260]);
@@ -4182,7 +4437,7 @@ mod calibration_tests {
     #[test]
     fn position_before_delta_becomes_trim() {
         let metas = vec![meta("s0", 0, Some(300))];
-        let shifts = compute_window_segment_shifts(&metas, 300, 5_000);
+        let shifts = compute_window_segment_shifts(&metas, &[None], 300, 5_000);
         let mut segments = vec![audio("a", 100, 40, Some(2000))];
         apply_window_cycle_shifts(&mut segments, &metas, &shifts);
         assert_eq!(segments[0].start_ms, 0);
@@ -4197,9 +4452,56 @@ mod calibration_tests {
             meta("s0", 0, Some(u64::MAX)),
             meta("s1", 3000, Some(80)),
         ];
-        let shifts = compute_window_segment_shifts(&metas, 90, 6_000);
+        let shifts = compute_window_segment_shifts(&metas, &[None, None], 90, 6_000);
         // k0: A=0 → D0=3000, δ0=0；k1(末段): A=90 → D1=2910, δ1=3000+90-3000
         assert_eq!(shifts, vec![0, 90]);
+    }
+
+    #[test]
+    fn measured_durations_eliminate_pause_tail_drift() {
+        // 三段录制（两次暂停）：停止轮询/编码器收尾让每段实际比模型多出 ε。
+        // 容器实测时长包含 ε；若仍用模型推算（None 回退），ε 会在拼接位置逐段累积。
+        let metas = vec![
+            meta("s0", 0, Some(100)),
+            meta("s1", 5000, Some(150)),
+            meta("s2", 9000, Some(120)),
+        ];
+        // 模型值：D0=4900、D1=3850；实测：D0 含 +80ms 尾差、D1 含 +70ms、D2 探测失败回退模型
+        let measured = vec![Some(4980u64), Some(3920u64), None];
+        let shifts =
+            compute_window_segment_shifts(&metas, &measured, 130, 12_000);
+        // δ0=0+100-0=100
+        // B1=实测D0=4980 → δ1=5000+150-4980=170
+        // B2=4980+实测D1=8900 → δ2=9000+130(末段实时校准)-8900=230
+        assert_eq!(shifts, vec![100, 170, 230]);
+
+        // 对齐验证：第 1 周期内容真实 U 起点 = S1+A1 = 5150，
+        // 校正后 5150-170 = 4980 == 实测 B1 ✓（模型推算会得到 5070，滞后 90ms）
+        let mut segments = vec![audio("a1", 5150, 0, None)];
+        apply_window_cycle_shifts(&mut segments, &metas, &shifts);
+        assert_eq!(segments[0].start_ms, 4980);
+
+        // 全部探测失败时回退模型推算（旧行为）
+        let fallback = compute_window_segment_shifts(
+            &metas,
+            &[None, None, None],
+            130,
+            12_000,
+        );
+        assert_eq!(fallback[1], 5000 + 150 - 4900);
+    }
+
+    #[test]
+    fn probe_duration_parser_handles_duration_line() {
+        let stderr = "Input #0, mp4, from 'x.mp4':\n  Duration: 00:00:01.96, start: 0.000000, bitrate: 1234 kb/s\n";
+        assert_eq!(parse_duration_from_ffmpeg_stderr(stderr), Some(1960));
+        let stderr_nofrac =
+            "Input #0:\n  Duration: 00:01:02, start: 0.000000\n";
+        assert_eq!(parse_duration_from_ffmpeg_stderr(stderr_nofrac), Some(62_000));
+        let stderr2 = "Input #0:\n  Duration: N/A, start: -0.5\n";
+        assert_eq!(parse_duration_from_ffmpeg_stderr(stderr2), None);
+        let stderr3 = "At least one output file must be specified";
+        assert_eq!(parse_duration_from_ffmpeg_stderr(stderr3), None);
     }
 
     #[test]
@@ -4242,5 +4544,43 @@ mod calibration_tests {
         assert_eq!((w, h), (220, 600)); // 1920-1700=220
         // 区域不与任何显示器相交
         assert_eq!(pick_monitor_and_local_rect((5000, 5000, 10, 10), &monitors), None);
+    }
+
+    #[test]
+    fn parse_screen_explicit_monitor_variants() {
+        assert_eq!(parse_screen_explicit_monitor("mon=1"), Some(1));
+        assert_eq!(parse_screen_explicit_monitor("MONITOR=2"), Some(2));
+        assert_eq!(parse_screen_explicit_monitor(" mon=0 "), Some(0));
+        assert_eq!(parse_screen_explicit_monitor(""), None);
+        assert_eq!(parse_screen_explicit_monitor("mon="), None);
+        assert_eq!(parse_screen_explicit_monitor("desktop"), None);
+    }
+
+    #[test]
+    fn parse_blackdetect_lead_variants() {
+        // 片头黑段：返回毫秒
+        let s = "[blackdetect @ 0x7f] black_start:0 black_end:0.288 black_duration:0.288";
+        assert_eq!(parse_black_lead_ms_from_blackdetect(s), Some(288));
+        // 黑段不从片头开始 → 无片头黑帧
+        let s2 = "[blackdetect @ 0x7f] black_start:1.2 black_end:1.5 black_duration:0.3";
+        assert_eq!(parse_black_lead_ms_from_blackdetect(s2), None);
+        // 完全无黑帧输出
+        assert_eq!(parse_black_lead_ms_from_blackdetect("frame= 12 fps=0.0\n"), None);
+        // 极短黑段：解析器忠实返回原始值，是否够裁剪阈值由调用方（MIN_BLACK_LEAD_TRIM_MS）判定
+        let s3 = "[blackdetect @ 0x7f] black_start:0 black_end:0.02 black_duration:0.02";
+        assert_eq!(parse_black_lead_ms_from_blackdetect(s3), Some(20));
+    }
+
+    #[test]
+    fn concat_entry_handles_windows_paths_and_quotes() {
+        // Windows 反斜杠路径：必须转正斜杠并加单引号，否则被 concat demuxer 吞掉
+        let p = PathBuf::from(r"D:\workspace\fuyun_tools\rec.video.0.tmp.mp4");
+        assert_eq!(
+            build_concat_entry(&p),
+            "file 'D:/workspace/fuyun_tools/rec.video.0.tmp.mp4'\n"
+        );
+        // 字面单引号按 ffmpeg 规则转义
+        let q = PathBuf::from("/tmp/it's.mp4");
+        assert_eq!(build_concat_entry(&q), "file '/tmp/it'\\''s.mp4'\n");
     }
 }

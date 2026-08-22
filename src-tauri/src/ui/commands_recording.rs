@@ -6,8 +6,9 @@ use crate::core::perf_metrics::record_perf_metric;
 use crate::features::recording::ffmpeg_runner::{is_valid_ffmpeg_file, resolve_ffmpeg_path};
 use crate::features::recording::recorder_service;
 use crate::features::recording::types::{
-    AudioInputDevice, AudioProcessItem, RecordingRegressionReport, RecordingRuntimeState,
-    RecordingSessionInfo, RecordingStopResult, SessionRequest, StartRecordingRequest,
+    AudioInputDevice, AudioProcessItem, RecordingMonitorItem, RecordingRegressionReport,
+    RecordingRuntimeState, RecordingSessionInfo, RecordingStopResult, SessionRequest,
+    StartRecordingRequest,
 };
 use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::window_manager::show_overlay_window_by_label;
@@ -591,6 +592,13 @@ pub async fn list_recording_system_output_devices(
 #[tauri::command]
 pub async fn list_recording_audio_processes() -> Result<Vec<AudioProcessItem>, String> {
     recorder_service::list_audio_process_items().map_err(app_error_to_frontend_json)
+}
+
+/// 枚举可录制显示器（多屏时前端供用户选择全屏录制目标）
+#[tauri::command]
+pub async fn list_recording_monitors() -> Result<Vec<RecordingMonitorItem>, String> {
+    run_blocking_command(move || recorder_service::list_recording_monitors().map_err(app_error_to_frontend_json))
+        .await
 }
 // input device listing & capability/installer commands removed in native WASAPI mode
 

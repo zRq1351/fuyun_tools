@@ -72,6 +72,22 @@ pub struct AudioProcessItem {
     pub name: String,
 }
 
+/// 可选录制显示器（多屏时供用户指定全屏录制的目标屏）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingMonitorItem {
+    pub index: u32,
+    /// 显示器名称/设备描述
+    pub name: String,
+    /// 虚拟屏幕坐标（用于前端标注相对位置）
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    /// 是否主屏（虚拟屏幕原点所在）
+    pub is_primary: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordingInputDeviceList {
