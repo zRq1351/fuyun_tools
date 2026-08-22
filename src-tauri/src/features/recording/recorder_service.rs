@@ -2139,16 +2139,44 @@ fn spawn_stats_loop(
                         && phase != RecordingPhase::Stopping
                     {
                         let err_msg = build_exit_error_with_stderr(status.to_string(), &runtime);
-                        runtime.last_error = Some(err_msg.clone());
-                        runtime.phase = RecordingPhase::Error;
-                        phase = RecordingPhase::Error;
-                        if let Some(tmp) = runtime.output_path_tmp.clone() {
-                            let _ = fs::remove_file(tmp);
+                        // 崩溃抢救：多分段录制时，除最后一段（未写 moov 不可播）外，
+                        // 前面的分段都是完整可播的——剔除末段后仍走正常收尾保留已录内容。
+                        // 单段录制无内容可保，维持原有丢弃+Error 行为。
+                        let salvageable =
+                            runtime.window_video_segments.len() > 1;
+                        if salvageable {
+                            log::warn!(
+                                "FFmpeg 进程异常退出，执行分段抢救：保留 {}-1 段",
+                                runtime.window_video_segments.len()
+                            );
+                            if let Some(last) = runtime.window_video_segments.pop() {
+                                let _ = fs::remove_file(&last.path);
+                            }
+                            runtime.auto_stop_requested = true;
+                            runtime.phase = RecordingPhase::Stopping;
+                            phase = RecordingPhase::Stopping;
+                            auto_stop_session_id = session_id.clone();
+                            let salvage_msg = format!(
+                                "录制进程异常退出，已保留前 {} 段内容：{}",
+                                runtime.window_video_segments.len(),
+                                err_msg
+                            );
+                            runtime.last_error = Some(salvage_msg.clone());
+                            emit_error =
+                                Some((RECORDING_PROCESS_EXITED, salvage_msg, session_id.clone()));
+                        } else {
+                            runtime.last_error = Some(err_msg.clone());
+                            runtime.phase = RecordingPhase::Error;
+                            phase = RecordingPhase::Error;
+                            if let Some(tmp) = runtime.output_path_tmp.clone() {
+                                let _ = fs::remove_file(tmp);
+                            }
+                            emit_error =
+                                Some((RECORDING_PROCESS_EXITED, err_msg, session_id.clone()));
+                            // 与"无画面看门狗"一致：触发自动收尾，回收音频线程，避免持续泄漏（#6）
+                            runtime.auto_stop_requested = true;
+                            auto_stop_session_id = session_id.clone();
                         }
-                        emit_error = Some((RECORDING_PROCESS_EXITED, err_msg, session_id.clone()));
-                        // 与"无画面看门狗"一致：触发自动收尾，回收音频线程，避免持续泄漏（#6）
-                        runtime.auto_stop_requested = true;
-                        auto_stop_session_id = session_id.clone();
                     }
                 }
             }
@@ -3713,6 +3741,12 @@ pub fn pause_recording(
         if let Some(flag) = runtime.recording_pause_flag.as_ref() {
             flag.store(true, Ordering::SeqCst);
         }
+        // ⏱ U 时钟必须在"视频源停止指令置位"的同一瞬间冻结：
+        // 三种视频源（WGC 软暂停丢帧 / WGC 硬停止 / ffmpeg q 退出）的有效画面
+        // 都截止于本时刻附近；若延迟到音频线程 join 之后才冻结（旧实现），
+        // 视频侧补偿器多扣除的 join 墙钟不会被 U 计入 → 每次暂停产生
+        // 系统性音画偏移并随次数累积。恢复侧消费 paused_at 的既有逻辑无需改动。
+        runtime.paused_at_instant = Some(std::time::Instant::now());
         // 暂停会停止音频采集：给活动分段打终点，避免 2s 尾部静音填充与恢复后的分段重叠
         let pause_elapsed_ms = runtime.snapshot().elapsed_ms;
         mark_active_segment_end(&mut runtime.system_audio_segments, pause_elapsed_ms);
@@ -3798,7 +3832,9 @@ pub fn pause_recording(
         }
         if wgc_soft_pause {
             // 软暂停：保留 stop_flag（终停/取消仍需）与 pause_flag=true（恢复时清除），
-            // 编码会话与线程继续存活——这是"无分段边界"的关键
+            // 编码会话与线程继续存活——这是"无分段边界"的关键。
+            // paused_at_instant 已在置位瞬间冻结，此处不得重设（否则 U 冻结点后移，
+            // 与视频补偿器的 V-gap 起点错位 → 系统性音画偏移）
         } else {
             runtime.wgc_stop_flag = None;
             runtime.wgc_pause_flag = None;
@@ -3813,7 +3849,7 @@ pub fn pause_recording(
         // AudioSegment 结构体仅含 PathBuf + 2个u64，内存开销极小
 
         runtime.phase = RecordingPhase::Paused;
-        runtime.paused_at_instant = Some(std::time::Instant::now());
+        // paused_at_instant 已在置位瞬间冻结（T0），此处仅读取冻结后的时长
         runtime.snapshot().elapsed_ms
     };
     emit_recording_state_changed(

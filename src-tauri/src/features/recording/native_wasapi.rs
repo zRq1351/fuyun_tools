@@ -988,9 +988,25 @@ pub fn start_microphone_wav_with_device(
 
             drop(stream);
 
+            let mut finalize_failed = false;
             if let Ok(mut guard) = writer.lock() {
                 if let Some(w) = guard.take() {
-                    let _ = w.finalize();
+                    if let Err(e) = w.finalize() {
+                        finalize_failed = true;
+                        log::error!("WAV 头补全失败(麦克风): {}", e);
+                    }
+                }
+            }
+
+            // 磁盘写失败上报（同系统音频路径：finalize + 最终尺寸为可靠信号）
+            let final_size = std::fs::metadata(&thread_output).map(|m| m.len()).unwrap_or(0);
+            if finalize_failed || final_size <= 44 {
+                if let Ok(mut guard) = device_error_slot.lock() {
+                    if guard.is_none() {
+                        *guard = Some(format!(
+                            "麦克风音频数据写入失败（磁盘空间或 IO 异常）: finalize_failed={finalize_failed}, size={final_size}"
+                        ));
+                    }
                 }
             }
 
@@ -1139,6 +1155,9 @@ pub fn start_system_loopback_aac_with_device(
             let (tx_audio, rx_audio) = std::sync::mpsc::sync_channel::<Vec<u8>>(200);
 
             let mut writer_opt = Some(std::io::BufWriter::new(stdin));
+            // stdin 写入失败标志：磁盘/管道故障时用户此前无感知，停止后经槽位上报
+            let stdin_write_failed = Arc::new(AtomicBool::new(false));
+            let thread_write_failed = stdin_write_failed.clone();
             let writer_thread = std::thread::spawn(move || {
                 while let Ok(data) = rx_audio.recv() {
                     if data.is_empty() {
@@ -1147,10 +1166,12 @@ pub fn start_system_loopback_aac_with_device(
                     if let Some(writer) = writer_opt.as_mut() {
                         if let Err(e) = writer.write_all(&data) {
                             log::error!("FFmpeg stdin 写入失败，停止音频采集: {}", e);
+                            thread_write_failed.store(true, Ordering::SeqCst);
                             break;
                         }
                         if let Err(e) = writer.flush() {
                             log::error!("FFmpeg stdin flush 失败，停止音频采集: {}", e);
+                            thread_write_failed.store(true, Ordering::SeqCst);
                             break;
                         }
                     }
@@ -1265,8 +1286,25 @@ pub fn start_system_loopback_aac_with_device(
                             size
                         );
                     }
+                    // 磁盘/管道写失败或产物过小：经槽位上报，用户不再无感知
+                    if stdin_write_failed.load(Ordering::SeqCst) || size < 1024 {
+                        if let Ok(mut guard) = device_error_slot.lock() {
+                            if guard.is_none() {
+                                *guard = Some(format!(
+                                    "系统音频数据写入失败（磁盘空间或 IO 异常）: stdin_write_failed={}, size={size}",
+                                    stdin_write_failed.load(Ordering::SeqCst)
+                                ));
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
+                    if let Ok(mut guard) = device_error_slot.lock() {
+                        if guard.is_none() && stdin_write_failed.load(Ordering::SeqCst) {
+                            *guard =
+                                Some("系统音频数据写入失败（磁盘空间或 IO 异常）: 输出文件缺失".to_string());
+                        }
+                    }
                     log::warn!(
                         "❌ FFmpeg AAC 输出文件不存在: {:?}, {}",
                         thread_output.file_name(),
