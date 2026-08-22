@@ -3178,65 +3178,10 @@ pub fn stop_recording(
         fatal_error = Some(build_window_capture_unavailable_error(&details));
     }
 
-    // FFmpeg/gdigrab 录制：先探测片头是否存在黑帧段（gdigrab 初始化遗留）。
-    // 现代 ffmpeg 通常无黑帧 → 探测结果为 0，既不再盲删开头 300ms 真实内容，
-    // 音频补偿也同步使用实测值，避免固定常量引入的音画偏移。
-    let measured_black_lead_ms: u64 = if !is_wgc_target(&target_type) && fatal_error.is_none() {
-        match output_tmp.as_ref().and_then(|p| detect_black_lead_ms(&ffmpeg_path, p)) {
-            Some(ms) if ms >= MIN_BLACK_LEAD_TRIM_MS => {
-                log::info!("探测到片头黑帧 {}ms，将裁剪并同步音频补偿", ms);
-                ms
-            }
-            _ => {
-                log::info!("片头未检测到黑帧，跳过灰头裁剪");
-                0
-            }
-        }
-    } else {
-        0
-    };
-
-    // FFmpeg/gdigrab 录制 A/V 同步校正：测量 FFmpeg 进程启动相对于录制原点的延迟
-    // 类似 WGC 的 first_frame_elapsed_ms 机制，消除音频提前 10~50ms 的固有偏差
-    // 注意：若探测到片头黑帧并将在后处理中裁掉，视频时间线整体前移该时长，
-    // 音频侧需同步多扣实测黑帧时长，否则音频相对视频滞后
-    if !is_wgc_target(&target_type)
-        && (ffmpeg_start_delay_ms > 0 || measured_black_lead_ms > 0)
-    {
-        let effective_delay = ffmpeg_start_delay_ms.saturating_add(measured_black_lead_ms);
-        log::info!(
-            "应用 FFmpeg 启动延迟校正: ffmpeg_delay={}ms, trim_compensation={}ms, effective={}ms",
-            ffmpeg_start_delay_ms,
-            measured_black_lead_ms,
-            effective_delay
-        );
-        for seg in &mut sys_segments {
-            let orig_start_ms = seg.start_ms;
-            if let Some(end_ms) = seg.end_ms.as_mut() {
-                *end_ms = if *end_ms > effective_delay {
-                    *end_ms - effective_delay
-                } else {
-                    0
-                };
-            }
-            if orig_start_ms < effective_delay {
-                seg.trim_start_ms = effective_delay - orig_start_ms;
-                seg.start_ms = 0;
-            } else {
-                seg.start_ms = orig_start_ms - effective_delay;
-                seg.trim_start_ms = 0;
-            }
-        }
-        for seg in &mut mic_segments {
-            if seg.start_ms < effective_delay {
-                seg.trim_start_ms = effective_delay - seg.start_ms;
-                seg.start_ms = 0;
-            } else {
-                seg.start_ms = seg.start_ms - effective_delay;
-                seg.trim_start_ms = 0;
-            }
-        }
-    }
+    // FFmpeg/gdigrab 录制：片头黑帧探测在"拼接出真实文件之后"进行（见后处理块）。
+    // ⚠️ 不可前移：output_tmp 由 concat/rename 在后处理中物化，提前探测永远扑空
+    //   （回归教训：接线顺序错误曾使探测/裁剪/补偿整体静默失效）。
+    let mut measured_black_lead_ms: u64 = 0;
 
     if let (Some(output_tmp), Some(output_final)) = (output_tmp.as_ref(), output_final.as_mut()) {
         log::info!("🔧 开始视频后处理...");
@@ -3255,6 +3200,62 @@ pub fn stop_recording(
                 ErrorCode::ValidationError,
                 "录制时间过短，未生成视频文件",
             ));
+        }
+
+        // 🔧 片头黑帧探测（在真实拼接产物上执行）+ 音频补偿 + 条件裁剪。
+        // 现代 ffmpeg 无黑帧 → 探测为 0，不删任何内容；旧构建有黑帧 → 按实测值
+        // 裁剪并同步补偿音频（替代已废弃的 300ms 盲裁常量）。
+        if fatal_error.is_none() && !is_wgc_target(&target_type) {
+            measured_black_lead_ms = match detect_black_lead_ms(&ffmpeg_path, output_tmp) {
+                Some(ms) if ms >= MIN_BLACK_LEAD_TRIM_MS => {
+                    log::info!("探测到片头黑帧 {}ms，将裁剪并同步音频补偿", ms);
+                    ms
+                }
+                _ => {
+                    log::info!("片头未检测到黑帧，跳过灰头裁剪");
+                    0
+                }
+            };
+        }
+
+        // FFmpeg/gdigrab 录制 A/V 同步校正：进程启动延迟 + 实测黑帧时长。
+        // 若黑帧将被裁掉，视频时间线整体前移该时长，音频需同步多扣，否则滞后。
+        if !is_wgc_target(&target_type)
+            && (ffmpeg_start_delay_ms > 0 || measured_black_lead_ms > 0)
+        {
+            let effective_delay = ffmpeg_start_delay_ms.saturating_add(measured_black_lead_ms);
+            log::info!(
+                "应用 FFmpeg 启动延迟校正: ffmpeg_delay={}ms, trim_compensation={}ms, effective={}ms",
+                ffmpeg_start_delay_ms,
+                measured_black_lead_ms,
+                effective_delay
+            );
+            for seg in &mut sys_segments {
+                let orig_start_ms = seg.start_ms;
+                if let Some(end_ms) = seg.end_ms.as_mut() {
+                    *end_ms = if *end_ms > effective_delay {
+                        *end_ms - effective_delay
+                    } else {
+                        0
+                    };
+                }
+                if orig_start_ms < effective_delay {
+                    seg.trim_start_ms = effective_delay - orig_start_ms;
+                    seg.start_ms = 0;
+                } else {
+                    seg.start_ms = orig_start_ms - effective_delay;
+                    seg.trim_start_ms = 0;
+                }
+            }
+            for seg in &mut mic_segments {
+                if seg.start_ms < effective_delay {
+                    seg.trim_start_ms = effective_delay - seg.start_ms;
+                    seg.start_ms = 0;
+                } else {
+                    seg.start_ms = seg.start_ms - effective_delay;
+                    seg.trim_start_ms = 0;
+                }
+            }
         }
 
         // 🔧 非窗口录制（gdigrab）且探测到片头黑帧时才裁剪（实测值），
