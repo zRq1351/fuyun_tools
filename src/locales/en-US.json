@@ -627,6 +627,7 @@
     "targetMonitor": "Record Screen",
     "selectMonitor": "Select Screen",
     "monitorFallbackName": "Display {n}",
+    "deviceFallbackNotice": "{kind} device unavailable, switched to default",
     "targetWindow": "Target Window",
     "selectWindow": "Select Window",
     "systemAudio": "System Audio",

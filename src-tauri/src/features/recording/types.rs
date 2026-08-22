@@ -46,6 +46,10 @@ pub struct RecordingRuntimeState {
     pub dropped_video_frames: u64,
     pub audio_buffer_level_ms: u32,
     pub last_error: Option<String>,
+    /// 实际生效的麦克风设备（启动失败回退默认后与用户偏好不同，供前端同步显示）
+    pub effective_mic_device_id: Option<String>,
+    /// 实际生效的系统声输出设备（同上）
+    pub effective_system_audio_device_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -174,6 +178,8 @@ mod tests {
             dropped_video_frames: 1,
             audio_buffer_level_ms: 2,
             last_error: Some("err".to_string()),
+            effective_mic_device_id: Some("mic-x".to_string()),
+            effective_system_audio_device_id: None,
         };
         let v: serde_json::Value = serde_json::to_value(&st).unwrap();
         assert_eq!(v["state"], "recording");
@@ -181,6 +187,12 @@ mod tests {
         assert_eq!(v["droppedVideoFrames"], 1);
         assert_eq!(v["audioBufferLevelMs"], 2);
         assert_eq!(v["lastError"], "err");
+        // 生效设备字段：camelCase 序列化
+        assert_eq!(v["effectiveMicDeviceId"], "mic-x");
+        assert_eq!(
+            v["effectiveSystemAudioDeviceId"],
+            serde_json::Value::Null
+        );
 
         // None 字段序列化为 null
         let st2 = RecordingRuntimeState {

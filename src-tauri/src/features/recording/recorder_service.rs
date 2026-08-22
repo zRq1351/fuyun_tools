@@ -8,8 +8,9 @@ use crate::features::recording::error_codes::{
     RECORDING_START_FAILED,
 };
 use crate::features::recording::events::{
-    emit_recording_audio_merging, emit_recording_device_list, emit_recording_error,
-    emit_recording_finished, emit_recording_state_changed, emit_recording_stats_updated,
+    emit_recording_audio_merging, emit_recording_device_list, emit_recording_effective_audio_device,
+    emit_recording_error, emit_recording_finished, emit_recording_state_changed,
+    emit_recording_stats_updated,
 };
 use crate::features::recording::ffmpeg_runner::{build_output_paths, resolve_ffmpeg_path};
 use crate::features::recording::native_wasapi::{
@@ -63,6 +64,9 @@ const VIDEO_IO_RETRY_DELAYS_MS: [u64; 5] = [60, 120, 240, 480, 800];
 const BLACK_LEAD_DETECT_WINDOW_S: f64 = 2.0;
 /// 探测到的片头黑段短于该值时不裁剪（避免为几十毫秒的抖动动文件）
 const MIN_BLACK_LEAD_TRIM_MS: u64 = 80;
+/// 回归自测的音/视频轨时长差容忍值：暂停边界若存在累积失步，两轨时长会发散，
+/// 该断言可在端到端层面拦截此类回归（此前缺失，正是音画失步溜过验证的原因之一）
+const AV_DURATION_TOLERANCE_MS: i64 = 120;
 
 fn suppress_console_window(command: &mut Command) -> &mut Command {
     #[cfg(target_os = "windows")]
@@ -639,6 +643,84 @@ fn build_window_segment_path(
 fn build_concat_entry(path: &std::path::Path) -> String {
     let forward = path.to_string_lossy().replace('\\', "/");
     format!("file '{}'\n", forward.replace('\'', "'\\''"))
+}
+
+/// 定位与 ffmpeg 同目录的 ffprobe（流级时长探测的快路径）；不存在返回 None。
+/// 注意：精简版发行包可能只带 ffmpeg，此时走 ffmpeg 解码兜底。
+fn resolve_ffprobe_path(ffmpeg_path: &std::path::Path) -> Option<PathBuf> {
+    let probe = ffmpeg_path.parent()?.join("ffprobe.exe");
+    probe.is_file().then_some(probe)
+}
+
+/// "HH:MM:SS.frac" → 毫秒
+fn parse_hms_to_ms(s: &str) -> Option<u64> {
+    let mut parts = s.trim().split(':');
+    let hours: u64 = parts.next()?.trim().parse().ok()?;
+    let minutes: u64 = parts.next()?.trim().parse().ok()?;
+    let seconds_raw = parts.next()?.trim();
+    let mut sec_parts = seconds_raw.split('.');
+    let seconds: u64 = sec_parts.next()?.parse().ok()?;
+    let frac_digits: String = sec_parts
+        .next()
+        .unwrap_or("")
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    let padded = format!("{:0<3}", frac_digits);
+    let frac_ms: u64 = padded.get(..3).unwrap_or("0").parse().unwrap_or(0);
+    Some((hours * 3600 + minutes * 60 + seconds).saturating_mul(1000).saturating_add(frac_ms))
+}
+
+/// 探测指定流的时长（毫秒）。spec 形如 "v:0" / "a:0"。
+/// 快路径用 ffprobe；缺失时用 ffmpeg 把该流解码到 null 并取最后一次进度行的 time=
+/// （音频解码极快，视频为 regression 短样本可接受）。
+fn probe_stream_duration_ms(
+    ffmpeg_path: &std::path::Path,
+    media: &PathBuf,
+    spec: &str,
+) -> Option<u64> {
+    if let Some(ffprobe_path) = resolve_ffprobe_path(ffmpeg_path) {
+        if let Ok(output) = Command::new(&ffprobe_path)
+            .args(["-v", "error", "-select_streams", spec, "-show_entries", "stream=duration", "-of", "csv=p=0"])
+            .arg(media)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let first = stdout.lines().next()?.trim();
+            if !first.is_empty() && first != "N/A" {
+                if let Ok(seconds) = first.parse::<f64>() {
+                    return Some((seconds * 1000.0).round() as u64);
+                }
+            }
+        }
+    }
+    // ffmpeg 解码兜底
+    let map = if spec.starts_with('v') { "0:v:0" } else { "0:a:0" };
+    let output = Command::new(ffmpeg_path)
+        .arg("-hide_banner")
+        .arg("-nostats")
+        .arg("-i")
+        .arg(media)
+        .args(["-map", map, "-f", "null", "-"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .ok()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut last_ms: Option<u64> = None;
+    for line in stderr.lines() {
+        if let Some(pos) = line.find("time=") {
+            let value = line[pos + "time=".len()..].split_whitespace().next().unwrap_or("");
+            if let Some(ms) = parse_hms_to_ms(value) {
+                last_ms = Some(ms);
+            }
+        }
+    }
+    last_ms
 }
 
 fn concat_video_segments(
@@ -1646,6 +1728,7 @@ fn ensure_system_audio_capture_started(
     };
 
     let sys_aac = sys_wav.with_extension("aac");
+    let mut system_fell_back_to_default = false;
     let first_try = start_system_loopback_aac_with_device(
         runtime.system_audio_device_id.clone(),
         sys_aac.clone(),
@@ -1659,6 +1742,7 @@ fn ensure_system_audio_capture_started(
         Err(first_err) => {
             if runtime.system_audio_device_id.is_some() {
                 runtime.system_audio_device_id = None;
+                system_fell_back_to_default = true;
                 start_system_loopback_aac_with_device(
                     None,
                     sys_aac.clone(),
@@ -1675,6 +1759,10 @@ fn ensure_system_audio_capture_started(
     };
     match start_result {
         Ok(handle) => {
+            if system_fell_back_to_default {
+                // 通知前端实际生效设备已变为默认：消除双侧状态脱节
+                emit_recording_effective_audio_device(app, Some(session_id), "system", None);
+            }
             let stream_start_ms = handle.stream_start_unix_ms;
             runtime.system_audio_wav_path = Some(sys_aac);
             runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
@@ -1728,6 +1816,7 @@ fn ensure_mic_capture_started(
     } else {
         output_dir.join(format!("{}.mic.{}.wav", session_id, seg_idx))
     };
+    let mut mic_fell_back_to_default = false;
     let first_try = start_microphone_wav_with_device(
         runtime.mic_audio_device_id.clone(),
         mic_wav.clone(),
@@ -1740,6 +1829,7 @@ fn ensure_mic_capture_started(
         Err(first_err) => {
             if runtime.mic_audio_device_id.is_some() {
                 runtime.mic_audio_device_id = None;
+                mic_fell_back_to_default = true;
                 start_microphone_wav_with_device(None, mic_wav.clone(), enabled_flag, pause_flag, error_slot)
                     .map_err(|second_err| {
                         format!("{}；回退默认设备失败: {}", first_err, second_err)
@@ -1751,6 +1841,9 @@ fn ensure_mic_capture_started(
     };
     match start_result {
         Ok(handle) => {
+            if mic_fell_back_to_default {
+                emit_recording_effective_audio_device(app, Some(session_id), "mic", None);
+            }
             let stream_start_ms = handle.stream_start_unix_ms;
             runtime.mic_audio_wav_path = Some(mic_wav);
             runtime.mic_audio_stop_flag = Some(handle.stop_flag.clone());
@@ -2057,6 +2150,28 @@ fn spawn_stats_loop(
                         runtime.auto_stop_requested = true;
                         auto_stop_session_id = session_id.clone();
                     }
+                }
+            }
+
+            // WGC 会话意外死亡检测：目标窗口关闭/受保护内容/驱动重置会让捕获会话自行结束
+            // （on_closed 或监控线程发现会话结束且非我方请求）。若不处理：视频停在最后一帧、
+            // 音频继续录、状态机停在 Recording，用户无感知。与 ffmpeg 进程退出的处理对称；
+            // 仅认 session_closed 标志，避免与暂停硬回退路径的 stop_flag 时序竞态。
+            if phase == RecordingPhase::Recording && emit_error.is_none() {
+                let session_dead = runtime
+                    .wgc_session_closed
+                    .as_ref()
+                    .map(|f| f.load(Ordering::SeqCst))
+                    .unwrap_or(false);
+                if session_dead {
+                    runtime.auto_stop_requested = true;
+                    runtime.phase = RecordingPhase::Stopping;
+                    phase = RecordingPhase::Stopping;
+                    auto_stop_session_id = session_id.clone();
+                    let err_msg =
+                        "画面捕获会话已结束（目标窗口关闭或系统限制），正在保存已录制内容".to_string();
+                    runtime.last_error = Some(err_msg.clone());
+                    emit_error = Some((RECORDING_PROCESS_EXITED, err_msg, session_id.clone()));
                 }
             }
 
@@ -2696,6 +2811,7 @@ pub fn start_recording(
         if let Some(handle) = window_wgc_handle {
             runtime.wgc_stop_flag = Some(handle.stop_flag);
             runtime.wgc_pause_flag = Some(handle.pause_flag);
+            runtime.wgc_session_closed = Some(handle.session_closed.clone());
             runtime.wgc_first_frame_elapsed_ms = Some(handle.first_frame_elapsed_ms);
             runtime.wgc_thread = Some(handle.join);
         }
@@ -3964,6 +4080,7 @@ pub fn resume_recording(
         runtime.video_segment_started_at = Some(std::time::Instant::now());
         runtime.wgc_stop_flag = Some(handle.stop_flag);
         runtime.wgc_pause_flag = Some(handle.pause_flag);
+        runtime.wgc_session_closed = Some(handle.session_closed.clone());
         // 恢复录制时替换首帧计数：旧计数属于已停止的上一分段，保留会导致看门狗无法检测新分段无画面
         // （各分段的锚点已随 WindowVideoSegment 元数据保留，停止合并阶段按周期分别校正）
         runtime.wgc_first_frame_elapsed_ms = Some(handle.first_frame_elapsed_ms.clone());
@@ -4261,6 +4378,12 @@ pub fn run_recording_regression(
         steps.push("start_recording:ok".to_string());
         thread::sleep(Duration::from_millis(1200));
 
+        // 先开启系统声再暂停：确保音频分段覆盖暂停边界——
+        // 此前音频在暂停之后才启用，"边界+音频"组合未被回归覆盖，
+        // 正是音画失步曾溜过验证的盲区
+        update_audio_capture(app, state_arc.clone(), Some(true), None, Some(false), None)?;
+        steps.push("enable_system_audio:ok".to_string());
+
         pause_recording(app, state_arc.clone())?;
         steps.push("pause_recording:ok".to_string());
         thread::sleep(Duration::from_millis(700));
@@ -4270,9 +4393,6 @@ pub fn run_recording_regression(
         thread::sleep(Duration::from_millis(1200));
 
         // 回归新场景：录制中途多次开关系统音频/麦克风，验证分段打点与尾部裁剪（无声音叠加重叠）
-        update_audio_capture(app, state_arc.clone(), Some(true), None, Some(false), None)?;
-        steps.push("enable_system_audio:ok".to_string());
-        thread::sleep(Duration::from_millis(800));
         update_audio_capture(app, state_arc.clone(), Some(false), None, Some(false), None)?;
         steps.push("disable_system_audio:ok".to_string());
         thread::sleep(Duration::from_millis(800));
@@ -4310,6 +4430,36 @@ pub fn run_recording_regression(
             ));
         }
         steps.push("verify_output_file:ok".to_string());
+
+        // ✅ A/V 时长一致性守卫：暂停边界若存在累积失步，音/视频轨时长会发散。
+        // 端到端层面的断言——此前缺失这条线，正是音画失步曾溜过验证的原因之一。
+        match resolve_ffmpeg_path() {
+            Ok(ffmpeg_path) => {
+                // probe_stream_duration_ms 内部优先用同目录 ffprobe，缺失时 ffmpeg 解码兜底
+                {
+                    let video_ms =
+                        probe_stream_duration_ms(&ffmpeg_path, &output, "v:0");
+                    let audio_ms =
+                        probe_stream_duration_ms(&ffmpeg_path, &output, "a:0");
+                    match (video_ms, audio_ms) {
+                        (Some(v), Some(a)) => {
+                            let diff = (v as i64 - a as i64).abs();
+                            steps.push(format!("av_duration_delta:{diff}ms"));
+                            if diff > AV_DURATION_TOLERANCE_MS {
+                                return Err(AppError::new(
+                                    ErrorCode::ValidationError,
+                                    format!(
+                                        "回归验证失败：音/视频轨时长偏差 {diff}ms 超过容差 {AV_DURATION_TOLERANCE_MS}ms（video={v}ms audio={a}ms）"
+                                    ),
+                                ));
+                            }
+                        }
+                        _ => steps.push("av_duration_guard:skipped(no-audio-track)".to_string()),
+                    }
+                }
+            }
+            Err(_) => steps.push("av_duration_guard:no-ffmpeg".to_string()),
+        }
 
         Ok(RecordingRegressionReport {
             success: true,

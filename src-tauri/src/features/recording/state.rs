@@ -91,6 +91,9 @@ pub struct RecordingRuntime {
     pub wgc_audio_sync_advance_ms: u64,
     pub ffmpeg_start_delay_ms: u64,
     pub wgc_thread: Option<JoinHandle<Result<(), String>>>,
+    /// WGC 会话意外结束标志（on_closed/编码失败）：stats_loop 检测后自动收尾并上报，
+    /// 否则视频提前结束而音频继续录，用户无感知（与 ffmpeg 进程退出的处理对齐）
+    pub wgc_session_closed: Option<Arc<AtomicBool>>,
 
     // --- 录制暂停/分段 ---
     pub recording_pause_flag: Option<Arc<AtomicBool>>,
@@ -157,6 +160,7 @@ impl Default for RecordingRuntime {
             wgc_first_frame_elapsed_ms: None,
             wgc_audio_sync_advance_ms: 80,
             ffmpeg_start_delay_ms: 0,
+            wgc_session_closed: None,
             wgc_thread: None,
             recording_pause_flag: None,
             window_video_segments: Vec::new(),
@@ -206,6 +210,9 @@ impl RecordingRuntime {
             dropped_video_frames: self.dropped_video_frames,
             audio_buffer_level_ms: self.audio_buffer_level_ms,
             last_error: self.last_error.clone(),
+            // 暴露实际生效的设备（含启动失败回退默认后的结果），供前端同步显示
+            effective_mic_device_id: self.mic_audio_device_id.clone(),
+            effective_system_audio_device_id: self.system_audio_device_id.clone(),
         }
     }
 
@@ -296,6 +303,7 @@ impl RecordingRuntime {
         self.wgc_first_frame_elapsed_ms = None;
         self.wgc_audio_sync_advance_ms = 80;
         self.ffmpeg_start_delay_ms = 0;
+        self.wgc_session_closed = None;
         self.wgc_thread = None;
         self.recording_pause_flag = None;
         self.window_video_segments.clear();

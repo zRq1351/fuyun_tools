@@ -857,11 +857,10 @@ const toggleMicState = async () => {
   try {
     if (!canToggleMic.value) return;
     const newMutedState = !isMicMuted.value;
+    // 纯开关意图：不携带设备 ID——避免把可能过期的本地选择重新断言给后端
+    // （后端启动失败会回退默认设备，本地值可能与实际生效设备脱节）
     await RecordingService.updateAudioCapture({
-      captureSystemAudio: captureSystemAudio.value,
-      systemAudioDeviceId: systemOutputId.value || "",
       captureMicrophone: !newMutedState,
-      microphoneDeviceId: microphoneDeviceId.value || "",
     });
     isMicMuted.value = newMutedState;
     showInlineNotice(newMutedState ? t('recordingToolbar.micTemporarilyOff') : t('recordingToolbar.micReenabled'), "warning");
@@ -1209,6 +1208,19 @@ onMounted(async () => {
       }
       if (nextState !== "starting" && nextState !== "recording") {
         autoCollapseAfterStartPending = false;
+      }
+    }),
+    listen("recording-effective-audio-device", (event) => {
+      // 后端实际生效设备与本地选择脱节时（启动失败回退默认）同步并提示，
+      // 防止后续静音切换把过期 ID 重新断言给后端
+      const payload = event.payload || {};
+      const effectiveId = payload.effectiveDeviceId || null;
+      if (payload.kind === "mic") {
+        microphoneDeviceId.value = effectiveId;
+        showInlineNotice(t('recordingToolbar.deviceFallbackNotice', {kind: t('recordingToolbar.mic')}), "warning");
+      } else if (payload.kind === "system") {
+        systemOutputId.value = effectiveId;
+        showInlineNotice(t('recordingToolbar.deviceFallbackNotice', {kind: t('recordingToolbar.systemAudio')}), "warning");
       }
     }),
     listen("recording-finished", async (event) => {

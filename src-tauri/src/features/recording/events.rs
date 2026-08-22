@@ -91,3 +91,22 @@ pub fn emit_recording_audio_merging(
         log::warn!("emit_recording_audio_merging 失败: {}", e);
     }
 }
+
+/// 通知前端"实际生效的音频设备已变化"。
+/// 触发场景：用户指定的设备打开失败、后端回退默认设备——
+/// 前端据此同步本地选择并提示，消除双侧状态脱节（否则静音切换会重新断言过期 ID）。
+pub fn emit_recording_effective_audio_device(
+    app: &AppHandle,
+    session_id: Option<&str>,
+    kind: &str,           // "mic" | "system"
+    effective_device_id: Option<&str>, // None = 默认设备
+) {
+    let payload = json!({
+        "sessionId": session_id,
+        "kind": kind,
+        "effectiveDeviceId": effective_device_id
+    });
+    if let Err(e) = app.emit("recording-effective-audio-device", payload) {
+        log::warn!("emit_recording_effective_audio_device 失败: {}", e);
+    }
+}

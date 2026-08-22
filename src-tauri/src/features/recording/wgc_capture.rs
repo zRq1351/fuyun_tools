@@ -185,6 +185,8 @@ pub fn is_force_default_dirty_region_enabled() -> bool {
 pub struct WgcCaptureHandle {
     pub stop_flag: Arc<AtomicBool>,
     pub pause_flag: Arc<AtomicBool>,
+    /// 会话意外结束标志（见 WgcCaptureFlags.session_closed）
+    pub session_closed: Arc<AtomicBool>,
     pub first_frame_elapsed_ms: Arc<AtomicU64>,
     pub join: JoinHandle<Result<(), String>>,
 }
@@ -193,6 +195,10 @@ pub struct WgcCaptureHandle {
 struct WgcCaptureFlags {
     stop_flag: Arc<AtomicBool>,
     pause_flag: Arc<AtomicBool>,
+    /// 会话意外结束标志：on_closed（目标窗口关闭/系统拒绝/驱动重置）时置位。
+    /// 与 stop_flag 的区别：stop_flag 是"我们主动要求停止"，此标志是"会话自己死了"，
+    /// stats_loop 据此区分并上报错误（否则视频提前结束、音频继续录，用户无感知）。
+    session_closed: Arc<AtomicBool>,
     capture_origin_instant: std::time::Instant,
     first_frame_elapsed_ms: Arc<AtomicU64>,
     first_frame_timestamp: Arc<std::sync::atomic::AtomicI64>,
@@ -390,6 +396,8 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
     }
 
     fn on_closed(&mut self) -> Result<(), Self::Error> {
+        // 先标记会话死亡再收尾编码器：stats_loop 需要区分"主动停止"与"会话意外结束"
+        self.flags.session_closed.store(true, Ordering::SeqCst);
         if let Some(encoder) = self.encoder.take() {
             encoder.finish().map_err(|e| e.to_string())?;
         }
@@ -431,6 +439,7 @@ where
     F: Fn(DirtyRegionSettings) -> Result<Settings<WgcCaptureFlags, T>, String> + Send + 'static,
 {
     let stop_flag_for_thread = flags.stop_flag.clone();
+    let session_closed_for_thread = flags.session_closed.clone();
     thread::spawn(move || {
         let mut dirty_region_setting = if WGC_FORCE_DEFAULT_DIRTY_REGION.load(Ordering::Relaxed) {
             DirtyRegionSettings::Default
@@ -483,6 +492,10 @@ where
             }
             if let Some(control) = control_opt.as_ref() {
                 if control.is_finished() {
+                    // 会话在未请求停止的情况下自行结束（编码失败等）：标记意外死亡供上层上报
+                    if !stop_flag_for_thread.load(Ordering::SeqCst) {
+                        session_closed_for_thread.store(true, Ordering::SeqCst);
+                    }
                     if let Some(control) = control_opt.take() {
                         return control
                             .wait()
@@ -517,11 +530,13 @@ pub fn start_window_capture_to_mp4(
     let target_id = target_id.trim().to_string();
     let stop_flag = Arc::new(AtomicBool::new(false));
     let pause_flag = Arc::new(AtomicBool::new(false));
+    let session_closed = Arc::new(AtomicBool::new(false));
     let first_frame_elapsed_ms = Arc::new(AtomicU64::new(u64::MAX));
     let first_frame_timestamp = Arc::new(std::sync::atomic::AtomicI64::new(i64::MAX));
     let flags = WgcCaptureFlags {
         stop_flag: stop_flag.clone(),
         pause_flag: pause_flag.clone(),
+        session_closed: session_closed.clone(),
         capture_origin_instant,
         first_frame_elapsed_ms: first_frame_elapsed_ms.clone(),
         first_frame_timestamp,
@@ -553,6 +568,7 @@ pub fn start_window_capture_to_mp4(
     Ok(WgcCaptureHandle {
         stop_flag,
         pause_flag,
+        session_closed,
         first_frame_elapsed_ms,
         join,
     })
@@ -743,11 +759,13 @@ pub fn start_monitor_capture_to_mp4(
     };
     let stop_flag = Arc::new(AtomicBool::new(false));
     let pause_flag = Arc::new(AtomicBool::new(false));
+    let session_closed = Arc::new(AtomicBool::new(false));
     let first_frame_elapsed_ms = Arc::new(AtomicU64::new(u64::MAX));
     let first_frame_timestamp = Arc::new(std::sync::atomic::AtomicI64::new(i64::MAX));
     let flags = WgcCaptureFlags {
         stop_flag: stop_flag.clone(),
         pause_flag: pause_flag.clone(),
+        session_closed: session_closed.clone(),
         capture_origin_instant,
         first_frame_elapsed_ms: first_frame_elapsed_ms.clone(),
         first_frame_timestamp,
@@ -784,6 +802,7 @@ pub fn start_monitor_capture_to_mp4(
     Ok(WgcCaptureHandle {
         stop_flag,
         pause_flag,
+        session_closed,
         first_frame_elapsed_ms,
         join,
     })

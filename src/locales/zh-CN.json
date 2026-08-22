@@ -628,6 +628,7 @@
     "targetMonitor": "录制屏幕",
     "selectMonitor": "选择屏幕",
     "monitorFallbackName": "显示器 {n}",
+    "deviceFallbackNotice": "{kind}设备不可用，已切换到默认设备",
     "targetWindow": "目标窗口",
     "selectWindow": "选择窗口",
     "systemAudio": "系统音频",
