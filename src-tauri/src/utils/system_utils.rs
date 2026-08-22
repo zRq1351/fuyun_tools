@@ -138,7 +138,6 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
         save_settings(&settings)?;
     }
     
-    let _provider_key = settings.ai_provider.to_string();
     Ok(settings)
 }
 

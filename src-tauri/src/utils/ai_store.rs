@@ -208,19 +208,6 @@ pub async fn get_all_providers() -> HashMap<String, ProviderConfigFull> {
     map
 }
 
-/// 向后兼容：只存 Key，保持 settings_model 旧 API 可用
-pub async fn set_api_key(provider_key: &str, api_key: &str) -> Result<(), String> {
-    ensure_schema().await;
-    let pool = get_pool().await;
-    let existing: Option<(String, String, String)> = sqlx::query_as(
-        "SELECT api_url, model_name, encrypted_api_key FROM provider_configs WHERE provider_key = ?1"
-    ).bind(provider_key).fetch_optional(pool).await.ok().flatten();
-    let (url, model) = existing
-        .map(|(u, m, _)| (u, m))
-        .unwrap_or_default();
-    save_provider_config(provider_key, &url, &model, api_key).await
-}
-
 pub async fn get_api_key(provider_key: &str) -> Result<String, String> {
     get_provider_config(provider_key).await
         .map(|c| c.api_key)
@@ -259,8 +246,21 @@ pub async fn migrate_from_old() {
         save_provider_config(key, &cfg.api_url, &cfg.model_name, &api_key).await.ok();
     }
 
-    if !settings.ai_provider.is_empty() {
-        set_current_provider(&settings.ai_provider).await.ok();
+    // ai_provider 字段已从 AppSettingsData 移除，直接读原始 JSON 以兼容旧版 settings.json
+    let legacy_provider = crate::utils::system_utils::read_text_with_backup(
+        &crate::utils::system_utils::get_settings_file_path(),
+    )
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+        .and_then(|value| {
+            value
+                .get("ai_provider")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default();
+    if !legacy_provider.is_empty() {
+        set_current_provider(&legacy_provider).await.ok();
     }
 
     if !old_providers.is_empty() {

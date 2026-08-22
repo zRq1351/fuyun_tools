@@ -117,8 +117,6 @@ pub struct AppSettingsData {
     #[serde(default = "default_dev_force_ffmpeg_window_capture")]
     pub dev_force_ffmpeg_window_capture: bool,
     #[serde(default)] // 已迁移到 ai_config.db，仅保留用于旧数据反序列化
-    pub ai_provider: String,
-    #[serde(default)] // 已迁移到 ai_config.db，仅保留用于旧数据反序列化
     pub provider_configs: HashMap<String, ProviderConfig>,
     #[serde(default = "default_selection_enabled")]
     pub selection_enabled: bool,
@@ -203,7 +201,6 @@ impl Default for AppSettingsData {
             recording_wgc_force_default_dirty_region:
                 default_recording_wgc_force_default_dirty_region(),
             dev_force_ffmpeg_window_capture: default_dev_force_ffmpeg_window_capture(),
-            ai_provider: "deepseek".to_string(),
             provider_configs: HashMap::new(),
             selection_enabled: true,
             selection_modifier_key: default_selection_modifier_key(),
@@ -474,69 +471,6 @@ fn parse_migration_version(raw: &str) -> Option<MigrationVersion> {
 }
 
 impl AppSettingsData {
-    pub async fn set_provider_api_key(
-        &mut self,
-        provider_key: &str,
-        api_key: &str,
-    ) -> Result<(), String> {
-        crate::utils::ai_store::set_api_key(provider_key, api_key).await
-    }
-
-    pub async fn get_provider_api_key(&self, provider_key: &str) -> Result<String, String> {
-        crate::utils::ai_store::get_api_key(provider_key).await
-    }
-
-    pub async fn save_current_provider_config(&mut self, api_key: &str) -> Result<(), String> {
-        let provider_key = self.ai_provider.clone();
-        self.set_provider_api_key(&provider_key, api_key).await?;
-        Ok(())
-    }
-
-    pub async fn load_provider_config_to_current(
-        &mut self,
-        provider_name: &str,
-    ) -> Result<ProviderConfig, String> {
-        let provider_key = provider_name.to_string();
-        let config_copy = if let Some(config) = self.provider_configs.get(&provider_key) {
-            config.clone()
-        } else {
-            let (default_url, default_model) = match provider_name {
-                "deepseek" => (
-                    "https://api.deepseek.com/v1".to_string(),
-                    "deepseek-chat".to_string(),
-                ),
-                "qwen" => (
-                    "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
-                    "qwen-plus".to_string(),
-                ),
-                "xiaomimimo" => (
-                    "https://api.xiaomimimo.com/v1".to_string(),
-                    "mimo-v2-flash".to_string(),
-                ),
-                _ => (String::new(), String::new()),
-            };
-            ProviderConfig {
-                api_url: default_url,
-                model_name: default_model,
-            }
-        };
-        let _ = self.get_provider_api_key(&provider_key).await;
-        self.ai_provider = provider_name.to_string();
-        if self.provider_configs.contains_key(&provider_key) {
-            if let Some(decrypted_config) = self.provider_configs.get(&provider_key) {
-                Ok(decrypted_config.clone())
-            } else {
-                Ok(config_copy)
-            }
-        } else {
-            Ok(config_copy)
-        }
-    }
-
-    pub fn get_current_provider_config(&self) -> Option<&ProviderConfig> {
-        self.provider_configs.get(&self.ai_provider)
-    }
-
     fn is_valid_css_color(value: &str) -> bool {
         let trimmed = value.trim();
         if trimmed.is_empty() {
@@ -687,31 +621,6 @@ impl AppSettingsData {
         }
 
         Ok(())
-    }
-
-    pub async fn get_masked_api_key(&self) -> String {
-        match self.get_provider_api_key(&self.ai_provider).await {
-            Ok(api_key) => {
-                if api_key.is_empty() {
-                    return String::new();
-                }
-                let chars: Vec<char> = api_key.chars().collect();
-                let len = chars.len();
-                if len <= 16 {
-                    return "*".repeat(len.min(30));
-                }
-                let prefix_len = 8.min(len);
-                let suffix_len = 8.min(len.saturating_sub(prefix_len));
-                let prefix: String = chars.iter().take(prefix_len).collect();
-                let suffix: String = chars
-                    .iter()
-                    .skip(len.saturating_sub(suffix_len))
-                    .take(suffix_len)
-                    .collect();
-                format!("{}{}{}", prefix, "*".repeat(30), suffix)
-            }
-            Err(_) => String::new(),
-        }
     }
 
     pub fn migrate_from_old(&mut self) {
