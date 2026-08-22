@@ -23,9 +23,10 @@ use crate::features::recording::types::{
 };
 use crate::features::recording::wgc_capture::{
     bootstrap_force_default_border_from_settings,
-    bootstrap_force_default_dirty_region_from_settings, is_force_default_border_enabled,
-    is_force_default_dirty_region_enabled, is_item_convert_failed, start_window_capture_to_mp4,
-    validate_window_capture_target,
+    bootstrap_force_default_dirty_region_from_settings, enumerate_monitors_with_rects,
+    is_force_default_border_enabled, is_force_default_dirty_region_enabled,
+    is_item_convert_failed, monitor_count, pick_monitor_and_local_rect,
+    start_monitor_capture_to_mp4, start_window_capture_to_mp4, validate_window_capture_target,
 };
 use crate::sync::{lock_arc_mutex, Mutex};
 use crate::utils::system_utils::save_settings;
@@ -287,6 +288,73 @@ fn parse_region_target(target_id: &str) -> Option<(i32, i32, u32, u32)> {
         return None;
     }
     Some((x, y, width, height))
+}
+
+/// WGC 托管目标（窗口/单屏/区域）统一判定：这些模式的视频由 WGC 线程产出，
+/// 暂停/恢复/停止走 WGC 语义而非 ffmpeg 进程语义。
+fn is_wgc_target(target_type: &str) -> bool {
+    matches!(target_type, "window" | "wgc_screen" | "wgc_region")
+}
+
+/// 解析显示器目标编码：
+/// - "wgc_screen" + "mon=0" → (0, None)
+/// - "wgc_region" + "mon=1,crop=100,200,800,600" → (1, Some((100,200,800,600)))，局部非负坐标
+fn parse_wgc_monitor_target(
+    target_type: &str,
+    target_id: &str,
+) -> Option<(usize, Option<(u32, u32, u32, u32)>)> {
+    if target_type != "wgc_screen" && target_type != "wgc_region" {
+        return None;
+    }
+    let (mon_part, rest) = match target_id.trim().split_once(',') {
+        Some((m, r)) => (m, Some(r)),
+        None => (target_id.trim(), None),
+    };
+    let index = mon_part.strip_prefix("mon=")?.trim().parse::<usize>().ok()?;
+    match (target_type, rest) {
+        ("wgc_screen", None) => Some((index, None)),
+        ("wgc_region", Some(rest)) => {
+            let crop = rest.trim().strip_prefix("crop=")?;
+            let (x, y, w, h) = parse_region_target(crop)?;
+            if x < 0 || y < 0 {
+                return None;
+            }
+            Some((index, Some((x as u32, y as u32, w, h))))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_wgc_monitor_start_params(
+    target_type: &str,
+    target_id: &str,
+) -> Option<(usize, Option<(u32, u32, u32, u32)>)> {
+    match target_type {
+        // 单屏系统才走 WGC 显示器捕获；多屏保持 gdigrab 虚拟屏拼接语义不变
+        "screen" | "display" => {
+            if monitor_count() == 1 {
+                Some((0, None))
+            } else {
+                None
+            }
+        }
+        "region" => {
+            let rect = parse_region_target(target_id)?;
+            let normalized = normalize_region_to_virtual_screen(rect.0, rect.1, rect.2, rect.3)?;
+            pick_monitor_and_local_rect(normalized, &enumerate_monitors_with_rects())
+                .map(|(idx, lx, ly, w, h)| (idx, Some((lx, ly, w, h))))
+        }
+        _ => parse_wgc_monitor_target(target_type, target_id),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn resolve_wgc_monitor_start_params(
+    _target_type: &str,
+    _target_id: &str,
+) -> Option<(usize, Option<(u32, u32, u32, u32)>)> {
+    None
 }
 
 #[cfg(target_os = "windows")]
@@ -1847,7 +1915,7 @@ fn spawn_stats_loop(
                 && emit_error.is_none()
             {
                 let mut no_video_frames = false;
-                if runtime.target_type == "window" {
+                if is_wgc_target(&runtime.target_type) {
                     if let Some(first_frame) = runtime.wgc_first_frame_elapsed_ms.as_ref() {
                         if first_frame.load(Ordering::Relaxed) == u64::MAX {
                             no_video_frames = true;
@@ -2190,6 +2258,10 @@ pub fn start_recording(
             .clone()
             .unwrap_or_else(|| "screen".to_string())
             .to_lowercase();
+        // 回归自测使用的别名，统一为全屏语义
+        if target_type == "display" {
+            target_type = "screen".to_string();
+        }
         let mut target_id = request.target_id.clone().unwrap_or_default();
         // 统一录制时钟起点：必须早于视频采集与音频采集启动，避免后续音频延迟估算偏小导致 A/V 不同步。
         let capture_origin_unix_ms = now_unix_ms();
@@ -2209,6 +2281,11 @@ pub fn start_recording(
             "-y".into(),
         ];
 
+        #[cfg(debug_assertions)]
+        let force_ffmpeg_fallback = settings_snapshot.dev_force_ffmpeg_window_capture;
+        #[cfg(not(debug_assertions))]
+        let force_ffmpeg_fallback = false;
+
         // 第一次尝试处理 window，如果命中 WGC 不支持的内容，降级到 gdigrab 的窗口模式
         if target_type == "window" {
             if target_id.trim().is_empty() {
@@ -2220,11 +2297,6 @@ pub fn start_recording(
             if let Err(e) = validate_window_capture_target(target_id.trim()) {
                 return Err(rollback_starting("当前窗口不可录制", e));
             }
-
-            #[cfg(debug_assertions)]
-            let force_ffmpeg_fallback = settings_snapshot.dev_force_ffmpeg_window_capture;
-            #[cfg(not(debug_assertions))]
-            let force_ffmpeg_fallback = false;
 
             if force_ffmpeg_fallback {
                 log::warn!("开发模式：强制将 WGC 窗口录制降级为 GDI/FFmpeg 窗口录制");
@@ -2277,7 +2349,47 @@ pub fn start_recording(
             }
         }
 
-        let (child_opt, stderr_opt) = if target_type != "window" {
+        // 单屏全屏/区域 → WGC 显示器捕获：硬件编码、无 gdigrab 初始化灰帧问题，
+        // 且分段携带首帧锚点 → 暂停/恢复自动获得按周期的 A/V 校准。
+        // 多屏全屏保持 gdigrab 虚拟屏拼接语义；任何失败均回退 gdigrab 原路径。
+        if matches!(target_type.as_str(), "screen" | "region") && !force_ffmpeg_fallback {
+            if target_type == "screen" && monitor_count() != 1 {
+                log::info!("多屏环境保持 gdigrab 虚拟屏拼接语义，跳过 WGC 显示器捕获");
+            } else if let Some((mon_index, crop_local)) =
+                resolve_wgc_monitor_start_params(&target_type, &target_id)
+            {
+                let first_segment_path = build_window_segment_path(&output_dir, &session_id, 0);
+                match start_monitor_capture_to_mp4(
+                    mon_index,
+                    crop_local,
+                    first_segment_path.clone(),
+                    fps,
+                    video_bitrate,
+                    capture_cursor,
+                    capture_origin_instant,
+                ) {
+                    Ok(handle) => {
+                        window_wgc_handle = Some(handle);
+                        window_segment_path = Some(first_segment_path);
+                        let mut new_id = format!("mon={}", mon_index);
+                        if let Some(c) = crop_local {
+                            new_id.push_str(&format!(",crop={},{},{},{}", c.0, c.1, c.2, c.3));
+                        }
+                        target_type = if crop_local.is_some() {
+                            "wgc_region".to_string()
+                        } else {
+                            "wgc_screen".to_string()
+                        };
+                        target_id = new_id;
+                    }
+                    Err(e) => {
+                        log::warn!("WGC 显示器捕获启动失败({})，回退 gdigrab", e);
+                    }
+                }
+            }
+        }
+
+        let (child_opt, stderr_opt) = if !is_wgc_target(&target_type) {
             let first_segment_path = build_window_segment_path(&output_dir, &session_id, 0);
             match spawn_ffmpeg_video_segment(
                 &ffmpeg_path,
@@ -2309,7 +2421,7 @@ pub fn start_recording(
         runtime.paused_at_instant = None;
         runtime.paused_total_ms = 0;
         // 记录 FFmpeg 启动延迟（仅对非窗口录制有意义）
-        runtime.ffmpeg_start_delay_ms = if target_type != "window" {
+        runtime.ffmpeg_start_delay_ms = if !is_wgc_target(&target_type) {
             ffmpeg_spawned_at.duration_since(capture_origin_instant).as_millis() as u64
         } else {
             0
@@ -2566,8 +2678,8 @@ pub fn stop_recording(
     // 关键修复：根据录制类型采用不同的停止顺序，确保音频录制到视频完全停止的时刻
     // 问题：音频提前停止导致视频最后一段没有声音
 
-    if target_type == "window" {
-        // 窗口录制（WGC）：先停止WGC线程，再停止音频
+    if is_wgc_target(&target_type) {
+        // WGC 托管录制（窗口/单屏/区域）：先停止WGC线程，再停止音频
         log::info!("🔧 窗口录制：首先停止WGC线程...");
         if let Some(join) = wgc_thread {
             let mut wgc_exited = false;
@@ -2737,7 +2849,7 @@ pub fn stop_recording(
     // 类似 WGC 的 first_frame_elapsed_ms 机制，消除音频提前 10~50ms 的固有偏差
     // 注意：非窗口视频尾部会裁剪开头 GRAY_FRAME_TRIM_MS 的灰色帧，视频时间线整体前移，
     // 音频侧需同步多扣 GRAY_FRAME_TRIM_MS，否则音频相对视频滞后约 0.3s
-    if target_type != "window" && (ffmpeg_start_delay_ms > 0 || GRAY_FRAME_TRIM_MS > 0) {
+    if !is_wgc_target(&target_type) && (ffmpeg_start_delay_ms > 0 || GRAY_FRAME_TRIM_MS > 0) {
         let effective_delay = ffmpeg_start_delay_ms.saturating_add(GRAY_FRAME_TRIM_MS);
         log::info!(
             "应用 FFmpeg 启动延迟校正: ffmpeg_delay={}ms, trim_compensation={}ms, effective={}ms",
@@ -2795,7 +2907,7 @@ pub fn stop_recording(
         // 🔧 非窗口录制（gdigrab）时，裁剪视频开头的灰色帧
         // gdigrab 初始化时前几帧可能是灰色/黑色的，裁剪掉前 0.3 秒
         // （音频校准已按 GRAY_FRAME_TRIM_MS 同步补偿）
-        if fatal_error.is_none() && target_type != "window" {
+        if fatal_error.is_none() && !is_wgc_target(&target_type) {
             log::info!("🔧 裁剪 gdigrab 初始化灰色帧...");
             if let Err(e) = trim_video_initial_frames(
                 &ffmpeg_path,
@@ -3230,7 +3342,7 @@ pub fn pause_recording(
                 "当前状态不允许暂停",
             ));
         }
-        if runtime.target_type == "window" {
+        if is_wgc_target(&runtime.target_type) {
             if let Some(flag) = runtime.wgc_stop_flag.as_ref() {
                 flag.store(true, Ordering::SeqCst);
             }
@@ -3291,7 +3403,7 @@ pub fn pause_recording(
         let _ = join_thread_with_timeout(join, "pause 麦克风音频", 500);
     }
 
-    if target_type == "window" {
+    if is_wgc_target(&target_type) {
         if let Some(join) = wgc_thread {
             let mut wgc_exited = false;
             for _ in 0..500 {
@@ -3377,7 +3489,7 @@ pub fn resume_recording(
         state_guard.recording_runtime.clone()
     };
     let (
-        is_window_target,
+        wgc_resume_kind,
         target_id,
         output_dir,
         session_id_for_audio,
@@ -3418,7 +3530,12 @@ pub fn resume_recording(
             .as_ref()
             .map(|f| f.load(Ordering::SeqCst))
             .unwrap_or(false);
-        let is_window_target = runtime.target_type == "window";
+        // WGC 托管类型（window/wgc_screen/wgc_region）：恢复时按类型重建对应采集源
+        let wgc_resume_kind = if is_wgc_target(&runtime.target_type) {
+            Some(runtime.target_type.clone())
+        } else {
+            None
+        };
         let target_id = runtime.target_id.clone();
         let next_segment_index = runtime.window_segment_index.saturating_add(1);
         let next_segment_path =
@@ -3432,7 +3549,7 @@ pub fn resume_recording(
             runtime.snapshot().elapsed_ms
         );
         (
-            is_window_target,
+            wgc_resume_kind,
             target_id,
             output_dir,
             session_id_for_audio,
@@ -3456,26 +3573,50 @@ pub fn resume_recording(
         }
     }
 
-    let window_handle = if is_window_target {
+    let window_handle = if let Some(kind) = wgc_resume_kind.as_deref() {
         Some(
-            start_window_capture_to_mp4(
-                target_id.as_str(),
-                next_segment_path.clone(),
-                fps,
-                video_bitrate_kbps,
-                capture_cursor,
-                std::time::Instant::now(),
-                is_force_default_border_enabled(),
-            )
-            .map_err(|e| {
-                AppError::new(ErrorCode::SystemError, "恢复窗口录制失败").with_details(e)
-            })?,
+            match kind {
+                "wgc_screen" | "wgc_region" => {
+                    let (mon_index, crop_local) =
+                        parse_wgc_monitor_target(kind, &target_id).ok_or_else(|| {
+                            AppError::new(
+                                ErrorCode::SystemError,
+                                "恢复显示器录制失败：目标参数无效",
+                            )
+                                .with_details(format!("target_type={} target_id={}", kind, target_id))
+                        })?;
+                    start_monitor_capture_to_mp4(
+                        mon_index,
+                        crop_local,
+                        next_segment_path.clone(),
+                        fps,
+                        video_bitrate_kbps,
+                        capture_cursor,
+                        std::time::Instant::now(),
+                    )
+                        .map_err(|e| {
+                            AppError::new(ErrorCode::SystemError, "恢复显示器录制失败").with_details(e)
+                        })?
+                }
+                _ => start_window_capture_to_mp4(
+                    target_id.as_str(),
+                    next_segment_path.clone(),
+                    fps,
+                    video_bitrate_kbps,
+                    capture_cursor,
+                    std::time::Instant::now(),
+                    is_force_default_border_enabled(),
+                )
+                    .map_err(|e| {
+                        AppError::new(ErrorCode::SystemError, "恢复窗口录制失败").with_details(e)
+                    })?,
+            },
         )
     } else {
         None
     };
 
-    let ffmpeg_process = if !is_window_target {
+    let ffmpeg_process = if wgc_resume_kind.is_none() {
         let ffmpeg_path = resolve_ffmpeg_path().map_err(|e| {
             AppError::new(ErrorCode::SystemError, "恢复录制失败: 找不到 ffmpeg").with_details(e)
         })?;
@@ -3535,8 +3676,8 @@ pub fn resume_recording(
         resume_u_start_ms = runtime.snapshot().elapsed_ms;
     }
 
-    // 如果是非窗口录制，记录新分段
-    if !is_window_target {
+    // 如果是非 WGC 录制（gdigrab），记录新分段
+    if wgc_resume_kind.is_none() {
         runtime.window_segment_index = next_segment_index;
         runtime.window_video_segments.push(
             crate::features::recording::state::WindowVideoSegment {
@@ -4059,5 +4200,47 @@ mod calibration_tests {
         let shifts = compute_window_segment_shifts(&metas, 90, 6_000);
         // k0: A=0 → D0=3000, δ0=0；k1(末段): A=90 → D1=2910, δ1=3000+90-3000
         assert_eq!(shifts, vec![0, 90]);
+    }
+
+    #[test]
+    fn parse_wgc_monitor_target_formats() {
+        assert_eq!(
+            parse_wgc_monitor_target("wgc_screen", "mon=0"),
+            Some((0, None))
+        );
+        assert_eq!(
+            parse_wgc_monitor_target("wgc_region", "mon=2,crop=100,200,800,600"),
+            Some((2, Some((100u32, 200u32, 800u32, 600u32))))
+        );
+        // 非法形态
+        assert_eq!(parse_wgc_monitor_target("window", "mon=0"), None);
+        assert_eq!(parse_wgc_monitor_target("wgc_screen", ""), None);
+        assert_eq!(parse_wgc_monitor_target("wgc_screen", "mon=x"), None);
+        assert_eq!(
+            parse_wgc_monitor_target("wgc_region", "mon=0,crop=-1,0,10,10"),
+            None // 局部坐标必须非负
+        );
+        assert_eq!(parse_wgc_monitor_target("wgc_region", "mon=0"), None); // 缺 crop
+    }
+
+    #[test]
+    fn pick_monitor_selects_max_overlap_and_clamps() {
+        let monitors = vec![
+            (0usize, 0i32, 0i32, 1920u32, 1080u32),
+            (1usize, -1920i32, 0i32, 1920u32, 1080u32),
+        ];
+        // 区域完全在左侧屏（负坐标）
+        let picked = pick_monitor_and_local_rect((-1800, 100, 400, 300), &monitors);
+        assert_eq!(picked, Some((1, 120, 100, 400, 300)));
+        // 区域跨两屏：取重叠面积更大的右侧屏，并裁剪到其范围内
+        let picked = pick_monitor_and_local_rect((1700, 0, 800, 600), &monitors);
+        assert!(picked.is_some());
+        let (idx, lx, ly, w, h) = picked.unwrap();
+        assert_eq!(idx, 0);
+        assert_eq!((lx, ly), (1700, 0));
+        assert!(lx + w <= 1920 && ly + h <= 1080);
+        assert_eq!((w, h), (220, 600)); // 1920-1700=220
+        // 区域不与任何显示器相交
+        assert_eq!(pick_monitor_and_local_rect((5000, 5000, 10, 10), &monitors), None);
     }
 }
