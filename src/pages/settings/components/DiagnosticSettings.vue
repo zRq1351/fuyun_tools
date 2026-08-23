@@ -3,6 +3,24 @@
     <el-card class="overview-card" shadow="never">
       <template #header>
         <div class="card-header">
+          <span>{{ $t('settings.diagnostic.logging') }}</span>
+        </div>
+      </template>
+      <div class="logging-row">
+        <div class="logging-text">
+          <div class="item-title">{{ $t('settings.diagnostic.loggingEnabled') }}</div>
+          <div class="form-hint">{{ $t('settings.diagnostic.loggingHint') }}</div>
+        </div>
+        <el-switch
+            :model-value="loggingEnabled"
+            @update:model-value="(val) => emit('toggleLogging', val)"
+        />
+      </div>
+    </el-card>
+
+    <el-card class="overview-card" shadow="never">
+      <template #header>
+        <div class="card-header">
           <span>{{ $t('settings.diagnostic.healthOverview') }}</span>
           <el-button :loading="loading" @click="loadDiagnostics">{{
               $t('settings.diagnostic.refreshDiagnosis')
@@ -84,7 +102,11 @@ import {DiagnosticService} from '../../../services/ipc'
 
 const {t} = useI18n()
 
-const emit = defineEmits(['navigate'])
+const emit = defineEmits(['navigate', 'toggleLogging'])
+
+defineProps({
+  loggingEnabled: {type: Boolean, default: false}
+})
 
 const overview = reactive({
   overallStatus: 'unknown',
@@ -217,6 +239,23 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 16px;
   align-items: flex-start;
+}
+
+.logging-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.logging-text {
+  flex: 1;
+}
+
+.form-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fy-text-muted);
 }
 
 .overview-grid {

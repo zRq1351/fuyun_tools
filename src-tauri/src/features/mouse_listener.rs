@@ -25,7 +25,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetCursorInfo, GetMessageW, LoadCursorW,
+    CallNextHookEx, DispatchMessageW, GetCursorInfo, GetMessageW, LoadCursorW, HHOOK,
     PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, CURSORINFO,
     HC_ACTION, IDC_IBEAM, KBDLLHOOKSTRUCT, KBDLLHOOKSTRUCT_FLAGS, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL,
     WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_QUIT,
@@ -71,6 +71,18 @@ static GLOBAL_STATE: LazyLock<GlobalState> = LazyLock::new(|| GlobalState {
 static LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 static LISTENER_ENABLED: AtomicBool = AtomicBool::new(true);
 static INPUT_SOURCE_RUNNING: AtomicBool = AtomicBool::new(false);
+/// 键鼠钩子是否已成功安装（看门狗据此判断输入源健康状态）
+#[cfg(target_os = "windows")]
+static HOOKS_INSTALLED: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "windows")]
+static WATCHDOG_STARTED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "windows")]
+const WATCHDOG_CHECK_INTERVAL_MS: u64 = 3000;
+#[cfg(target_os = "windows")]
+const WATCHDOG_RESTART_BACKOFF_START_MS: u64 = 5000;
+#[cfg(target_os = "windows")]
+const WATCHDOG_RESTART_BACKOFF_MAX_MS: u64 = 60_000;
 
 #[derive(Debug, Clone, Copy)]
 enum HookEvent {
@@ -92,6 +104,31 @@ fn hook_event_sender() -> &'static StdMutex<Option<Sender<HookEvent>>> {
 
 #[cfg(target_os = "windows")]
 static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
+
+/// 钩子句柄的 RAII 守卫：无论线程正常退出还是 panic 展开，都保证
+/// 卸载钩子、清理事件发送端并复位运行状态标志，避免句柄泄漏与状态卡死。
+#[cfg(target_os = "windows")]
+struct HookHandlesGuard {
+    keyboard_hook: HHOOK,
+    mouse_hook: HHOOK,
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for HookHandlesGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = UnhookWindowsHookEx(self.keyboard_hook);
+            let _ = UnhookWindowsHookEx(self.mouse_hook);
+        }
+        if let Ok(mut guard) = hook_event_sender().lock() {
+            *guard = None;
+        }
+        HOOKS_INSTALLED.store(false, Ordering::SeqCst);
+        INPUT_SOURCE_RUNNING.store(false, Ordering::SeqCst);
+        HOOK_THREAD_ID.store(0, Ordering::SeqCst);
+        log::info!("划词低级键鼠 Hook 已停止");
+    }
+}
 
 fn notify_detection_pending() {
     let (lock, cvar) = &*GLOBAL_STATE.detection_notify;
@@ -398,7 +435,8 @@ fn wait_detection_pending(timeout: Duration) {
 fn start_input_listener_source(app_handle: AppHandle, state: Arc<Mutex<SharedAppState>>) {
     #[cfg(target_os = "windows")]
     {
-        start_windows_hook_listener(app_handle, state);
+        start_windows_hook_listener(app_handle.clone(), state.clone());
+        start_hook_watchdog(app_handle, state);
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -537,31 +575,32 @@ fn start_windows_hook_listener(app_handle: AppHandle, state: Arc<Mutex<SharedApp
             SetWindowsHookExW(WH_KEYBOARD_LL, Some(low_level_keyboard_proc), Some(module.into()), 0);
         let mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), Some(module.into()), 0);
 
-        if keyboard_hook.is_err() || mouse_hook.is_err() {
-            if let Ok(hook) = keyboard_hook {
-                let _ = UnhookWindowsHookEx(hook);
+        let hooks_guard = match (keyboard_hook, mouse_hook) {
+            (Ok(kb), Ok(mouse)) => HookHandlesGuard {
+                keyboard_hook: kb,
+                mouse_hook: mouse,
+            },
+            (kb_result, mouse_result) => {
+                // 安装失败：释放已成功安装的钩子并复位状态（此时尚无可依赖的 RAII 守卫）
+                if let Ok(hook) = kb_result {
+                    let _ = UnhookWindowsHookEx(hook);
+                }
+                if let Ok(hook) = mouse_result {
+                    let _ = UnhookWindowsHookEx(hook);
+                }
+                if let Ok(mut guard) = hook_event_sender().lock() {
+                    *guard = None;
+                }
+                INPUT_SOURCE_RUNNING.store(false, Ordering::SeqCst);
+                HOOK_THREAD_ID.store(0, Ordering::SeqCst);
+                log::error!("安装划词低级键鼠 Hook 失败");
+                return;
             }
-            if let Ok(hook) = mouse_hook {
-                let _ = UnhookWindowsHookEx(hook);
-            }
-            if let Ok(mut guard) = hook_event_sender().lock() {
-                *guard = None;
-            }
-            INPUT_SOURCE_RUNNING.store(false, Ordering::SeqCst);
-            HOOK_THREAD_ID.store(0, Ordering::SeqCst);
-            log::error!("安装划词低级键鼠 Hook 失败");
-            return;
-        }
-        let keyboard_hook = match keyboard_hook {
-            Ok(h) => h,
-            Err(_) => return,
         };
-        let mouse_hook = match mouse_hook {
-            Ok(h) => h,
-            Err(_) => return,
-        };
+        let _hooks_guard = hooks_guard;
 
         log::info!("划词低级键鼠 Hook 已启动");
+        HOOKS_INSTALLED.store(true, Ordering::SeqCst);
         let mut msg: MSG = std::mem::zeroed();
         loop {
             let ret = GetMessageW(&mut msg, None, 0, 0);
@@ -575,18 +614,19 @@ fn start_windows_hook_listener(app_handle: AppHandle, state: Arc<Mutex<SharedApp
             DispatchMessageW(&msg);
 
             while let Ok(event) = rx.try_recv() {
-                handle_hook_event(event, &state, &app_handle);
+                // 业务逻辑 panic 不允许击穿消息循环，否则整个监听线程会静默死亡
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    handle_hook_event(event, &state, &app_handle);
+                }));
+                if result.is_err() {
+                    log::error!(
+                        "handle_hook_event 处理事件 {:?} 时发生 panic，已拦截以保持监听线程存活",
+                        event
+                    );
+                }
             }
         }
-
-        let _ = UnhookWindowsHookEx(keyboard_hook);
-        let _ = UnhookWindowsHookEx(mouse_hook);
-        if let Ok(mut guard) = hook_event_sender().lock() {
-            *guard = None;
-        }
-        INPUT_SOURCE_RUNNING.store(false, Ordering::SeqCst);
-        HOOK_THREAD_ID.store(0, Ordering::SeqCst);
-        log::info!("划词低级键鼠 Hook 已停止");
+        // 正常退出与异常展开均由 _hooks_guard 的 Drop 统一卸载钩子并复位状态
     });
 }
 
@@ -598,6 +638,52 @@ fn stop_windows_hook_listener() {
             let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
         }
     }
+}
+
+/// 看门狗：周期检查划词输入源健康状态。
+/// 监听器处于启用状态但钩子未安装（线程异常退出或安装失败）时自动重启，
+/// 连续失败按指数退避（5s → 60s 封顶），避免持续失败时刷屏重试。
+#[cfg(target_os = "windows")]
+fn start_hook_watchdog(app_handle: AppHandle, state: Arc<Mutex<SharedAppState>>) {
+    if WATCHDOG_STARTED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    thread::spawn(move || {
+        let check_interval = Duration::from_millis(WATCHDOG_CHECK_INTERVAL_MS);
+        let backoff_start = Duration::from_millis(WATCHDOG_RESTART_BACKOFF_START_MS);
+        let backoff_max = Duration::from_millis(WATCHDOG_RESTART_BACKOFF_MAX_MS);
+        let mut next_backoff = backoff_start;
+        let mut last_restart: Option<std::time::Instant> = None;
+        log::info!("划词 Hook 看门狗已启动");
+        loop {
+            thread::sleep(check_interval);
+            // 用户主动停用时不恢复；此时复位退避，便于下次启用时尽快响应
+            if !LISTENER_ENABLED.load(Ordering::SeqCst) {
+                next_backoff = backoff_start;
+                last_restart = None;
+                continue;
+            }
+            if HOOKS_INSTALLED.load(Ordering::SeqCst) {
+                next_backoff = backoff_start;
+                last_restart = None;
+                continue;
+            }
+            // 已启用但钩子未就绪：可能是启动中，也可能是异常退出，按退避节奏尝试重启
+            if let Some(last) = last_restart {
+                if last.elapsed() < next_backoff {
+                    continue;
+                }
+                next_backoff = std::cmp::min(next_backoff * 2, backoff_max);
+            }
+            log::warn!("划词监听已启用但输入钩子未运行，看门狗尝试恢复");
+            last_restart = Some(std::time::Instant::now());
+            start_windows_hook_listener(app_handle.clone(), state.clone());
+        }
+    });
 }
 
 /// 设置划词监听器启用状态
@@ -786,87 +872,93 @@ impl MouseListener {
                 continue;
             }
 
-            {
-                if capture::is_screenshot_in_progress() {
-                    continue;
-                }
-
-                let (selection_enabled, should_skip_detection) = {
-                    let state_guard = lock_arc_mutex(&detection_state);
-                    (
-                        state_guard.settings.selection_enabled,
-                        state_guard.is_visible
-                            || state_guard.is_image_visible
-                            || state_guard.is_processing_selection
-                            || state_guard.is_updating_clipboard,
-                    )
-                };
-
-                if !selection_enabled {
-                    continue;
-                }
-
-                if should_skip_detection {
-                    continue;
-                }
-
-                let clipboard_manager = {
-                    let state_guard = lock_arc_mutex(&detection_state);
-                    state_guard.clipboard_manager.clone()
-                };
-
-                if let Some(text) = perform_text_selection_detection(
-                    &detection_thread_app_handle,
-                    clipboard_manager,
-                ) {
-                    if !text.trim().is_empty() && is_valid_selection(&text) {
-                        log::info!("检测到有效的选中文本: '{}'", text);
-                        let app_handle_clone = detection_thread_app_handle.clone();
-                        let text_clone = text.clone();
-                        let anchor_pos = {
-                            let pos_guard = lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
-                            *pos_guard
-                        };
-                        let should_debounce = {
-                            let mut last_emit_guard =
-                                lock_arc_mutex(&GLOBAL_STATE.last_toolbar_emit);
-                            let now = std::time::Instant::now();
-                            let should_skip = if let Some((last_text, last_anchor, last_time)) =
-                                last_emit_guard.as_ref()
-                            {
-                                (last_anchor.0 - anchor_pos.0).abs() <= 6
-                                    && (last_anchor.1 - anchor_pos.1).abs() <= 6
-                                    && *last_text == text
-                                    && now.duration_since(*last_time) <= Duration::from_millis(300)
-                            } else {
-                                false
-                            };
-                            if !should_skip {
-                                *last_emit_guard = Some((text.clone(), anchor_pos, now));
-                            }
-                            should_skip
-                        };
-                        if should_debounce {
-                            log::info!("命中划词工具栏去抖策略，跳过重复弹窗");
-                            continue;
-                        }
-
-                        tauri::async_runtime::spawn(async move {
-                            log::info!("准备调用 show_selection_toolbar_impl");
-                            show_selection_toolbar_impl(
-                                app_handle_clone,
-                                text_clone,
-                                Some(anchor_pos),
-                            );
-                            log::info!("已调用 show_selection_toolbar_impl");
-                        });
-                    }
-                }
+            // 检测逻辑 panic 不允许击穿主控循环，否则划词检测将静默死亡
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_detection_cycle(&detection_thread_app_handle, &detection_state);
+            }));
+            if result.is_err() {
+                log::error!("划词检测线程处理中发生 panic，已拦截以保持线程存活");
+                thread::sleep(Duration::from_millis(50));
             }
         });
         start_input_listener_source(app_handle, state);
 
         log::info!("划词监听主控线程已启动");
+    }
+}
+
+/// 执行一轮划词检测（原主控循环体，函数内的 `return` 等价于循环中的 `continue`）
+fn run_detection_cycle(app_handle: &AppHandle, state: &Arc<Mutex<SharedAppState>>) {
+    if capture::is_screenshot_in_progress() {
+        return;
+    }
+
+    let (selection_enabled, should_skip_detection) = {
+        let state_guard = lock_arc_mutex(state);
+        (
+            state_guard.settings.selection_enabled,
+            state_guard.is_visible
+                || state_guard.is_image_visible
+                || state_guard.is_processing_selection
+                || state_guard.is_updating_clipboard,
+        )
+    };
+
+    if !selection_enabled {
+        return;
+    }
+
+    if should_skip_detection {
+        return;
+    }
+
+    let clipboard_manager = {
+        let state_guard = lock_arc_mutex(state);
+        state_guard.clipboard_manager.clone()
+    };
+
+    if let Some(text) = perform_text_selection_detection(app_handle, clipboard_manager) {
+        if !text.trim().is_empty() && is_valid_selection(&text) {
+            log::info!("检测到有效的选中文本: '{}'", text);
+            let app_handle_clone = app_handle.clone();
+            let text_clone = text.clone();
+            let anchor_pos = {
+                let pos_guard = lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
+                *pos_guard
+            };
+            let should_debounce = {
+                let mut last_emit_guard = lock_arc_mutex(&GLOBAL_STATE.last_toolbar_emit);
+                let now = std::time::Instant::now();
+                let should_skip = if let Some((last_text, last_anchor, last_time)) =
+                    last_emit_guard.as_ref()
+                {
+                    (last_anchor.0 - anchor_pos.0).abs() <= 6
+                        && (last_anchor.1 - anchor_pos.1).abs() <= 6
+                        && *last_text == text
+                        && now.duration_since(*last_time) <= Duration::from_millis(300)
+                } else {
+                    false
+                };
+                if !should_skip {
+                    *last_emit_guard = Some((text.clone(), anchor_pos, now));
+                }
+                should_skip
+            };
+            if should_debounce {
+                log::info!("命中划词工具栏去抖策略，跳过重复弹窗");
+                return;
+            }
+
+            tauri::async_runtime::spawn(async move {
+                log::info!("准备调用 show_selection_toolbar_impl");
+                show_selection_toolbar_impl(
+                    app_handle_clone,
+                    text_clone,
+                    Some(anchor_pos),
+                );
+                log::info!("已调用 show_selection_toolbar_impl");
+            });
+        }
     }
 }
 

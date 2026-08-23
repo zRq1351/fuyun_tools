@@ -199,6 +199,9 @@ pub fn run() {
         cleanup_stale_recording_tmp_files();
     });
     let initial_state = AppState::default();
+    // 日志开关与旧日志清理需在插件注册前按已保存设置初始化
+    core::logger::set_logging_enabled(initial_state.settings.logging_enabled);
+    core::logger::cleanup_old_logs();
     let state_arc = Arc::new(Mutex::new(initial_state));
 
     let builder = tauri::Builder::default()
@@ -767,8 +770,8 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());
 
-    // 仅调试模式启用日志插件；发布版不注册，避免任何日志落盘
-    #[cfg(debug_assertions)]
+    // 开发与发布版均注册日志插件并落盘，保证线上问题可诊断；
+    // 是否写入由设置 logging_enabled 控制（已在启动时初始化，运行期切换即时生效）
     let builder = builder.plugin(core::logger::build_logger().build());
 
     let app = builder

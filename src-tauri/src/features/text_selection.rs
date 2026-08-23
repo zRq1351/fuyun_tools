@@ -576,6 +576,31 @@ fn get_clipboard_sequence_number() -> u32 {
     0
 }
 
+/// 恢复剪贴板时的重试等待（毫秒）：其他进程可能短暂占用剪贴板导致写入失败
+const CLIPBOARD_RESTORE_RETRY_DELAYS_MS: &[u64] = &[30, 80];
+
+/// 带重试的剪贴板恢复操作：最多尝试 1 + 重试次数 次，全部失败才返回错误
+fn restore_clipboard_with_retry<T, E: std::fmt::Display>(
+    desc: &str,
+    mut op: impl FnMut() -> Result<T, E>,
+) -> Result<T, E> {
+    let mut attempt = 0usize;
+    loop {
+        match op() {
+            Ok(value) => return Ok(value),
+            Err(e) if attempt < CLIPBOARD_RESTORE_RETRY_DELAYS_MS.len() => {
+                log::warn!("{}第{}次失败，将重试: {}", desc, attempt + 1, e);
+                thread::sleep(Duration::from_millis(CLIPBOARD_RESTORE_RETRY_DELAYS_MS[attempt]));
+                attempt += 1;
+            }
+            Err(e) => {
+                log::error!("{}重试 {} 次后仍失败: {}", desc, attempt, e);
+                return Err(e);
+            }
+        }
+    }
+}
+
 fn restore_clipboard_snapshot(
     clipboard_manager: &Arc<Mutex<ClipboardManager>>,
     app_handle: &AppHandle,
@@ -599,13 +624,14 @@ fn restore_clipboard_snapshot(
 
     match snapshot {
         ClipboardSnapshot::Text(original_content) => {
-            let result = {
+            let result = restore_clipboard_with_retry("恢复文本剪贴板内容", || {
                 let manager = lock_arc_mutex(clipboard_manager);
                 manager.set_clipboard_content(app_handle, original_content)
-            };
-            match result {
-                Ok(()) => log::debug!("已恢复原始文本剪贴板内容"),
-                Err(e) => log::error!("恢复文本剪贴板内容失败: {}", e),
+            });
+            if let Err(e) = result {
+                log::error!("恢复文本剪贴板内容最终失败: {}", e);
+            } else {
+                log::debug!("已恢复原始文本剪贴板内容");
             }
         }
         ClipboardSnapshot::Image {
@@ -614,20 +640,24 @@ fn restore_clipboard_snapshot(
             height,
         } => {
             let image = Image::new_owned(rgba.clone(), *width, *height);
-            let result =
+            let result = restore_clipboard_with_retry("恢复图片剪贴板内容", || {
                 crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
                     app_handle.clipboard().write_image(&image)
-                });
-            match result {
-                Ok(()) => log::debug!("已恢复原始图片剪贴板内容"),
-                Err(e) => log::error!("恢复图片剪贴板内容失败: {}", e),
+                })
+            });
+            if let Err(e) = result {
+                log::error!("恢复图片剪贴板内容最终失败: {}", e);
+            } else {
+                log::debug!("已恢复原始图片剪贴板内容");
             }
         }
         ClipboardSnapshot::Empty => {
             // 空快照：若剪贴板仍是我们捕获的选中文本，清空以恢复空态
             if still_holds_captured_text {
-                let result = crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
-                    app_handle.clipboard().write_text("")
+                let result = restore_clipboard_with_retry("清空剪贴板（恢复空态）", || {
+                    crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
+                        app_handle.clipboard().write_text("")
+                    })
                 });
                 match result {
                     Ok(()) => log::debug!("已清空剪贴板，恢复空态"),

@@ -619,6 +619,7 @@ pub async fn save_app_settings(
     selection_web_search_enabled: Option<bool>,
     selection_web_search_engine: Option<String>,
     grouped_items_protected_from_limit: Option<bool>,
+    logging_enabled: Option<bool>,
     translation_prompt_template: Option<String>,
     explanation_prompt_template: Option<String>,
     image_fill_verify_mode: Option<String>,
@@ -749,6 +750,9 @@ pub async fn save_app_settings(
     }
     if let Some(val) = grouped_items_protected_from_limit {
         settings.grouped_items_protected_from_limit = val;
+    }
+    if let Some(val) = logging_enabled {
+        settings.logging_enabled = val;
     }
     if let Some(val) = translation_prompt_template {
         settings.translation_prompt_template = if val.trim().is_empty() {
@@ -1619,6 +1623,8 @@ pub async fn save_app_settings(
     save_settings(&settings)
         .map_err(|e| frontend_error_kind(AppErrorKind::SettingsSaveFailed, e))?;
     set_image_fill_verify_mode(&settings.image_fill_verify_mode);
+    // 日志开关即时生效，无需重启
+    crate::core::logger::set_logging_enabled(settings.logging_enabled);
 
     let selection_enabled = settings.selection_enabled;
     let text_clipboard_feature_enabled = settings.text_clipboard_enabled;

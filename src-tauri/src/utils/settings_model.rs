@@ -154,6 +154,9 @@ pub struct AppSettingsData {
     pub backup_last_run_status: String,
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// 是否将运行日志写入 logs 目录（诊断用途）；内容可能包含选中文本，用户可关闭
+    #[serde(default = "default_logging_enabled")]
+    pub logging_enabled: bool,
 }
 
 impl Default for AppSettingsData {
@@ -220,8 +223,13 @@ impl Default for AppSettingsData {
             backup_last_run_at: 0,
             backup_last_run_status: default_backup_last_run_status(),
             theme: default_theme(),
+            logging_enabled: default_logging_enabled(),
         }
     }
+}
+
+fn default_logging_enabled() -> bool {
+    true
 }
 
 fn default_selection_enabled() -> bool {

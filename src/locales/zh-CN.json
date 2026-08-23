@@ -359,6 +359,9 @@
       "autoBackupFailed": "自动备份失败：{error}"
     },
     "diagnostic": {
+      "logging": "日志记录",
+      "loggingEnabled": "启用日志落盘",
+      "loggingHint": "开启后运行日志写入安装目录的 logs 文件夹（保留最近 10 个），便于问题诊断；关闭后立即停止写入。注意：日志可能包含你划词选中的文本内容，请按需开启。",
       "healthOverview": "健康总览",
       "refreshDiagnosis": "刷新诊断",
       "overallStatus": "整体状态",

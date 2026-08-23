@@ -117,7 +117,11 @@
             <BackupSettings/>
           </div>
           <div v-else-if="activeTab === 'diagnostic'">
-            <DiagnosticSettings @navigate="handleNavigateTab"/>
+            <DiagnosticSettings
+                :logging-enabled="form.loggingEnabled"
+                @navigate="handleNavigateTab"
+                @toggle-logging="handleLoggingToggle"
+            />
           </div>
 
           <div v-else-if="isDevMode && activeTab === 'developer'">
@@ -361,7 +365,8 @@ const form = reactive({
   launcherHotKey: 'Alt+Q',
   docManagerEnabled: false,
   docManagerHotKey: 'Ctrl+Shift+D',
-  docManagerWidgetEnabled: false
+  docManagerWidgetEnabled: false,
+  loggingEnabled: true
 })
 
 const autoSaveText = computed(() => {
@@ -381,6 +386,11 @@ const handleNavigateTab = (tab) => {
   if (typeof tab === 'string' && sections.value.some((section) => section.key === tab)) {
     activeTab.value = tab
   }
+}
+
+// 日志开关：写入 form 后由深度 watch 自动保存，Rust 侧保存后即时生效
+const handleLoggingToggle = (val) => {
+  form.loggingEnabled = val
 }
 
 const buildFormSnapshot = () => ({
@@ -428,7 +438,8 @@ const buildFormSnapshot = () => ({
   launcherHotKey: form.launcherHotKey,
   docManagerEnabled: form.docManagerEnabled,
   docManagerHotKey: form.docManagerHotKey,
-  docManagerWidgetEnabled: form.docManagerWidgetEnabled
+  docManagerWidgetEnabled: form.docManagerWidgetEnabled,
+  loggingEnabled: form.loggingEnabled
 })
 
 // 保存初始状态快照
@@ -585,6 +596,9 @@ const getChangedFields = (snapshot = buildFormSnapshot()) => {
   }
   if (source.docManagerWidgetEnabled !== initial.docManagerWidgetEnabled) {
     changedFields.docManagerWidgetEnabled = source.docManagerWidgetEnabled
+  }
+  if (source.loggingEnabled !== initial.loggingEnabled) {
+    changedFields.loggingEnabled = source.loggingEnabled
   }
 
   return Object.keys(changedFields).length > 0 ? changedFields : null
@@ -1018,6 +1032,7 @@ onMounted(async () => {
     form.docManagerEnabled = settings.doc_manager_enabled === true
     form.docManagerHotKey = settings.doc_manager_hot_key || 'Ctrl+Shift+D'
     form.docManagerWidgetEnabled = settings.doc_manager_widget_enabled === true
+    form.loggingEnabled = settings.logging_enabled !== false
 
     if (aiSettingsRef.value) {
       aiSettingsRef.value.applyCurrentProviderConfig(settings)

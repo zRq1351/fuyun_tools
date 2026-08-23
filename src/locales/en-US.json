@@ -358,6 +358,9 @@
       "autoBackupFailed": "Auto-backup failed: {error}"
     },
     "diagnostic": {
+      "logging": "Logging",
+      "loggingEnabled": "Enable log to disk",
+      "loggingHint": "When enabled, runtime logs are written to the logs folder next to the app (last 10 files kept) for troubleshooting; disabling stops writing immediately. Note: logs may contain text you selected, enable as needed.",
       "healthOverview": "Health Overview",
       "refreshDiagnosis": "Refresh Diagnosis",
       "overallStatus": "Overall Status",
