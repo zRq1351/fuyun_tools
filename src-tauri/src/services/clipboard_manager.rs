@@ -110,7 +110,7 @@ pub fn add_to_clipboard_history(
     };
 
     if allow {
-        log::info!("检测到划词期间的手动复制，允许添加到历史记录");
+        log::debug!("检测到划词期间的手动复制，允许添加到历史记录");
         // Clear flag outside lock to avoid potential deadlock
         crate::features::text_selection::clear_manual_copy_flag();
     }

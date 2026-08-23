@@ -309,7 +309,7 @@ fn handle_hook_event(
                             
             if is_drag || is_double_click {
                 if is_double_click {
-                    log::info!("检测到双击/三击操作");
+                    log::debug!("检测到双击/三击操作");
                 }
 
                 let is_alt = is_alt_pressed_by_os();
@@ -340,7 +340,7 @@ fn handle_hook_event(
                             || state_guard.is_updating_clipboard
                     };
                     if app_busy_or_visible {
-                        log::info!("当前应用窗口可见或正在处理回填，跳过划词检测触发");
+                        log::debug!("当前应用窗口可见或正在处理回填，跳过划词检测触发");
                         return;
                     }
                     let last_processed =
@@ -353,13 +353,13 @@ fn handle_hook_event(
                         }
                         GLOBAL_STATE.needs_detection.store(true, Ordering::SeqCst);
                         notify_detection_pending();
-                        log::info!("设置划词检测标志");
+                        log::debug!("设置划词检测标志");
                         *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) = up_time;
                     } else {
-                        log::info!("操作过于频繁，跳过此次检测");
+                        log::debug!("操作过于频繁，跳过此次检测");
                     }
                 } else {
-                    log::info!("辅助键条件不满足或未见文本光标，忽略此次点击");
+                    log::debug!("辅助键条件不满足或未见文本光标，忽略此次点击");
                 }
             } else {
                 log::debug!("不满足划词或双击条件，跳过");
@@ -838,7 +838,7 @@ pub fn reset_ctrl_key_state() {
     if let Err(e) = crate::ui::window_manager::force_release_ctrl_key() {
         log::warn!("重置Ctrl状态时物理释放失败: {}", e);
     }
-    log::info!("已重置Ctrl键状态");
+    log::debug!("已重置Ctrl键状态");
 }
 
 /// 跨平台鼠标监听器
@@ -919,7 +919,7 @@ fn run_detection_cycle(app_handle: &AppHandle, state: &Arc<Mutex<SharedAppState>
 
     if let Some(text) = perform_text_selection_detection(app_handle, clipboard_manager) {
         if !text.trim().is_empty() && is_valid_selection(&text) {
-            log::info!("检测到有效的选中文本: '{}'", text);
+            log::debug!("检测到有效的选中文本: '{}'", text);
             let app_handle_clone = app_handle.clone();
             let text_clone = text.clone();
             let anchor_pos = {
@@ -945,18 +945,18 @@ fn run_detection_cycle(app_handle: &AppHandle, state: &Arc<Mutex<SharedAppState>
                 should_skip
             };
             if should_debounce {
-                log::info!("命中划词工具栏去抖策略，跳过重复弹窗");
+                log::debug!("命中划词工具栏去抖策略，跳过重复弹窗");
                 return;
             }
 
             tauri::async_runtime::spawn(async move {
-                log::info!("准备调用 show_selection_toolbar_impl");
+                log::debug!("准备调用 show_selection_toolbar_impl");
                 show_selection_toolbar_impl(
                     app_handle_clone,
                     text_clone,
                     Some(anchor_pos),
                 );
-                log::info!("已调用 show_selection_toolbar_impl");
+                log::debug!("已调用 show_selection_toolbar_impl");
             });
         }
     }
@@ -967,15 +967,15 @@ fn perform_text_selection_detection(
     app_handle: &AppHandle,
     clipboard_manager: Arc<Mutex<ClipboardManager>>,
 ) -> Option<String> {
-    log::info!("开始执行划词检测");
+    log::debug!("开始执行划词检测");
 
     match get_selected_text(app_handle, clipboard_manager) {
         Some(text) if !text.trim().is_empty() => {
-            log::info!("成功获取选中文本: '{}'", text);
+            log::debug!("成功获取选中文本: '{}'", text);
             Some(text)
         }
         _ => {
-            log::info!("未能获取选中文本或文本为空");
+            log::debug!("未能获取选中文本或文本为空");
             None
         }
     }
@@ -1077,14 +1077,15 @@ pub fn is_foreground_window_console() -> bool {
 
             for indicator in console_indicators.iter() {
                 if title.contains(indicator) || class.contains(indicator) {
-                    log::warn!("检测到命令行/终端窗口: {} (class: {})", title, class);
+                    // 常规判定路径（前台为终端时每次划词手势都会触发），debug 级
+                    log::debug!("检测到命令行/终端窗口: {} (class: {})", title, class);
                     return true;
                 }
             }
 
             for class_indicator in console_classes.iter() {
                 if class.contains(class_indicator) {
-                    log::warn!("检测到命令行/终端窗口类: {} (title: {})", class, title);
+                    log::debug!("检测到命令行/终端窗口类: {} (title: {})", class, title);
                     return true;
                 }
             }
@@ -1098,7 +1099,7 @@ fn get_selected_text(
     app_handle: &AppHandle,
     clipboard_manager: Arc<Mutex<ClipboardManager>>,
 ) -> Option<String> {
-    log::info!("开始获取选中文本（模拟复制）");
+    log::debug!("开始获取选中文本（模拟复制）");
 
     use crate::features::text_selection::get_selected_text_with_app;
     get_selected_text_with_app(app_handle, clipboard_manager)
@@ -1109,31 +1110,31 @@ fn is_valid_selection(text: &str) -> bool {
     let trimmed = text.trim();
 
     if trimmed.is_empty() {
-        log::info!("检测到空文本，跳过");
+        log::debug!("检测到空文本，跳过");
         return false;
     }
 
     if is_phone_number(trimmed) {
-        log::info!("检测到可能是电话号码的选择: {}", trimmed);
+        log::debug!("检测到可能是电话号码的选择: {}", trimmed);
         return false;
     }
 
     if is_email_address(trimmed) {
-        log::info!("检测到可能是邮箱地址的选择: {}", trimmed);
+        log::debug!("检测到可能是邮箱地址的选择: {}", trimmed);
         return false;
     }
 
     if is_url(trimmed) {
-        log::info!("检测到可能是URL的选择: {}", trimmed);
+        log::debug!("检测到可能是URL的选择: {}", trimmed);
         return false;
     }
 
     if is_error_text(trimmed) {
-        log::info!("检测到错误文本: {}", trimmed);
+        log::debug!("检测到错误文本: {}", trimmed);
         return false;
     }
 
-    log::info!("文本通过所有验证，认为是有效的选中文本: {}", trimmed);
+    log::debug!("文本通过所有验证，认为是有效的选中文本: {}", trimmed);
     true
 }
 

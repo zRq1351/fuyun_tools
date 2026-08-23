@@ -959,7 +959,7 @@ impl ImageClipboardManager {
                         ) {
                             log::error!("增量同步图片位置失败: {}", e);
                         } else {
-                            log::info!("复用图片已增量移动到顶部: item_id={}", moved_item_id);
+                            log::debug!("复用图片已增量移动到顶部: item_id={}", moved_item_id);
                         }
                         return;
                     }
@@ -1065,7 +1065,7 @@ impl ImageClipboardManager {
             pending.remove(&task_back.item_id);
         }
         if queue_result.is_ok() {
-            log::info!(
+            log::debug!(
                 "准备增量保存图片到数据库: item_id={}, 总数={}",
                 id,
                 item_ids_snapshot.len()
@@ -1080,7 +1080,7 @@ impl ImageClipboardManager {
             } else {
                 log::warn!("未能定位新增图片项的持久化快照: item_id={}", id);
             }
-            log::info!("图片数据库保存完成: item_id={}", id);
+            log::debug!("图片数据库保存完成: item_id={}", id);
         }
         for removed_id in removed_ids_after_insert {
             if let Err(e) = image_store::delete_category(&removed_id) {
@@ -1986,7 +1986,7 @@ impl ImageClipboardManager {
 
             if new_budget != current_budget {
                 dynamic_memory_budget.store(new_budget, Ordering::Relaxed);
-                log::info!(
+                log::debug!(
                     "动态调整内存预算: {}MB -> {}MB",
                     current_budget / (1024 * 1024),
                     new_budget / (1024 * 1024)
@@ -2026,7 +2026,7 @@ impl ImageClipboardManager {
         self.prune_full_res_cache_access_by_history(&history);
 
         let current_usage = self.current_memory_usage.load(Ordering::Relaxed);
-        log::info!(
+        log::debug!(
             "强制内存清理完成，当前使用: {}MB",
             current_usage / (1024 * 1024)
         );
@@ -2368,7 +2368,7 @@ fn read_image_blob(path: &str, width: u32, height: u32) -> Result<Vec<u8>, Strin
         .unwrap_or(0);
 
     if file_size > LARGE_IMAGE_THRESHOLD {
-        log::info!(
+        log::debug!(
             "检测到大图片文件 ({}MB)，启用分块处理优化",
             file_size / (1024 * 1024)
         );
@@ -2413,7 +2413,8 @@ fn read_large_image_blob_chunked(path: &str, width: u32, height: u32) -> Result<
         bytes.extend_from_slice(&chunk[..bytes_read]);
 
         if bytes.len() > LARGE_IMAGE_THRESHOLD * 2 {
-            log::warn!(
+            // 属预期路径（大文件分块读取），debug 级避免刷屏
+            log::debug!(
                 "图片文件过大 ({}MB)，可能影响性能",
                 bytes.len() / (1024 * 1024)
             );

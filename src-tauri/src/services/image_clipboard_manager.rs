@@ -83,7 +83,7 @@ fn maybe_log_queue_metrics() {
     let high_watermark = IMAGE_QUEUE_METRICS
         .queue_len_high_watermark
         .load(Ordering::Relaxed);
-    log::info!(
+    log::debug!(
         "[队列指标] 入队={}, 出队={}, 满队丢弃={}, 重复丢弃={}, 截图丢弃={}, 平均排队等待={:.1}ms, 队列高水位={}",
         enqueued,
         dequeued,
@@ -162,7 +162,7 @@ fn matches_recent_sample(width: u32, height: u32, rgba: &[u8]) -> bool {
     {
         if *recent_width == width && *recent_height == height {
             if recent_sample == &sample {
-                log::info!(
+                log::debug!(
                     "[重复检查] 图片 {}x{} 与最近第 {} 张图片采样命中，继续执行强签名校验",
                     width,
                     height,
@@ -214,7 +214,7 @@ fn process_pending_queue(
         IMAGE_QUEUE_METRICS
             .queue_wait_ms_total
             .fetch_add(wait_ms, Ordering::Relaxed);
-        log::info!(
+                log::debug!(
             "[处理线程-{}] 图片出队: {}x{}, 队列等待={}ms",
             worker_id,
             task.width,
@@ -226,7 +226,7 @@ fn process_pending_queue(
             IMAGE_QUEUE_METRICS
                 .dropped_screenshot
                 .fetch_add(1, Ordering::Relaxed);
-            log::info!(
+            log::debug!(
                 "[处理线程-{}] 截图进行中，跳过图片任务: {}x{}",
                 worker_id,
                 task.width,
@@ -244,7 +244,7 @@ fn process_pending_queue(
             );
         }
 
-        log::info!(
+                log::debug!(
             "[处理线程-{}] 开始处理图片任务: {}x{}",
             worker_id,
             task.width,
@@ -285,7 +285,7 @@ fn process_pending_queue(
                 .cloned()
                 .or_else(|| history_preview.first().cloned())
         };
-        log::info!(
+                log::debug!(
             "[处理线程-{}] 图片处理成功: {}x{}",
             worker_id,
             width,
@@ -312,7 +312,7 @@ fn process_pending_queue(
             state_guard.image_history_dirty = true;
         }
 
-        log::info!("[处理线程-{}] 图片处理流程完成", worker_id);
+                log::debug!("[处理线程-{}] 图片处理流程完成", worker_id);
         maybe_log_queue_metrics();
             }
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -350,11 +350,11 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
     IMAGE_POLLER.start(
         move || {
             // on_event: 检测到剪贴板唤醒事件时处理图片
-            log::info!("[监听线程] 收到剪贴板变化事件");
+            log::debug!("[监听线程] 收到剪贴板变化事件");
             let image = ImageClipboardManager::read_clipboard_images_rgba(&app_for_event);
             match image {
                 Ok(images) => {
-                    log::info!("[监听线程] 成功读取 {} 张图片", images.len());
+                    log::debug!("[监听线程] 成功读取 {} 张图片", images.len());
                     let senders = IMAGE_WORKER_SENDERS
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -382,7 +382,7 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                         match tx.try_send(task) {
                             Ok(_) => {
                                 IMAGE_QUEUE_METRICS.enqueued.fetch_add(1, Ordering::Relaxed);
-                                log::info!(
+                                log::debug!(
                                     "[监听线程] 图片已分发给处理线程-{}: {}x{}",
                                     worker_idx + 1,
                                     width,
@@ -412,7 +412,8 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
                     maybe_log_queue_metrics();
                 }
                 Err(e) => {
-                    log::warn!("[监听线程] 读取剪贴板图片失败: {}", e);
+                    // 剪贴板为文本等非图片内容时读取必然失败，属常规路径
+                    log::debug!("[监听线程] 读取剪贴板图片失败: {}", e);
                 }
             }
         },

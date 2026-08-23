@@ -1328,7 +1328,7 @@ fn execute_ctrl_v_with_safety(enigo: &mut enigo::Enigo) -> Result<(), String> {
 
     release_ctrl_key_once(enigo)?;
 
-    log::info!("已发送 Ctrl+V 模拟按键");
+    log::debug!("已发送 Ctrl+V 模拟按键");
     Ok(())
 }
 

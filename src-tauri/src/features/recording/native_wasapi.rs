@@ -242,7 +242,7 @@ fn capture_process_loopback_to_wav(
             .map_err(|e| format!("初始化 WAV 写入器失败(pid={}): {}", process_id, e))?;
 
         if let Ok(meta) = std::fs::metadata(&output_path) {
-            log::info!(
+            log::debug!(
                 "进程音频文件创建成功(pid={}): {:?}, 大小: {} bytes",
                 process_id,
                 output_path.file_name(),
@@ -355,14 +355,14 @@ fn capture_process_loopback_to_wav(
             Ok(())
         })();
 
-        log::info!(
+        log::debug!(
             "进程音频采集循环结束(pid={}), stop_flag={}",
             process_id,
             stop_flag.load(Ordering::SeqCst)
         );
 
         if let Ok(meta) = std::fs::metadata(&output_path) {
-            log::info!(
+            log::debug!(
                 "进程音频文件在循环退出后存在(pid={}): {:?}, 大小: {} bytes",
                 process_id,
                 output_path.file_name(),
@@ -385,7 +385,7 @@ fn capture_process_loopback_to_wav(
         capture_result?;
 
         match std::fs::metadata(&output_path) {
-            Ok(meta) => log::info!(
+            Ok(meta) => log::debug!(
                 "进程音频文件最终状态(pid={}): {:?}, 大小: {} bytes",
                 process_id,
                 output_path.file_name(),
@@ -465,10 +465,10 @@ pub fn start_process_loopback_wavs(
                     ),
                 }
             } else {
-                log::info!("进程音频采集线程正常退出(pid={})", pid);
+                log::debug!("进程音频采集线程正常退出(pid={})", pid);
 
                 match std::fs::metadata(&worker_path) {
-                    Ok(meta) => log::info!(
+                    Ok(meta) => log::debug!(
                         "进程音频线程正常退出后文件存在: {:?}, 大小: {} bytes",
                         worker_path.file_name(),
                         meta.len()
@@ -488,7 +488,7 @@ pub fn start_process_loopback_wavs(
     for _ in 0..process_count {
         match startup_rx.recv_timeout(Duration::from_secs(3)) {
             Ok((pid, Ok(start_unix))) => {
-                log::info!("进程音频采集启动成功(pid={})", pid);
+                log::debug!("进程音频采集启动成功(pid={})", pid);
                 if stream_start_unix_ms.is_none() {
                     stream_start_unix_ms = Some(start_unix);
                 }
@@ -751,7 +751,7 @@ pub fn start_system_loopback_wav_with_device(
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
             let writer = Arc::new(Mutex::new(Some(writer)));
 
-            log::info!(
+            log::debug!(
                 "WASAPI音频线程启动: {:?}, enabled={}, pause={}",
                 thread_output.file_name(),
                 enabled_flag.load(Ordering::SeqCst),
@@ -761,7 +761,7 @@ pub fn start_system_loopback_wav_with_device(
             let err_fn = |err| eprintln!("WASAPI 捕获错误: {}", err);
 
             match std::fs::metadata(&thread_output) {
-                Ok(meta) => log::info!(
+                Ok(meta) => log::debug!(
                     "WASAPI音频文件创建成功: {:?}, 大小: {} bytes",
                     thread_output.file_name(),
                     meta.len()
@@ -808,7 +808,7 @@ pub fn start_system_loopback_wav_with_device(
                 std::thread::sleep(Duration::from_millis(10));
             }
 
-            log::info!("收到停止信号，填充2s静音数据以确保音频完全覆盖视频最后一段...");
+            log::debug!("收到停止信号，填充2s静音数据以确保音频完全覆盖视频最后一段...");
             // 按实际采样率/声道数填充 2s，避免 44.1k/96k 设备填充时长偏差
             let tail_samples = (config.sample_rate as usize) * (config.channels as usize) * 2;
             if let Ok(mut guard) = writer.lock() {
@@ -830,7 +830,7 @@ pub fn start_system_loopback_wav_with_device(
             }
 
             match std::fs::metadata(&thread_output) {
-                Ok(meta) => log::info!(
+                Ok(meta) => log::debug!(
                     "✅ WASAPI音频文件最终大小: {:?}, {} bytes",
                     thread_output.file_name(),
                     meta.len()
@@ -914,7 +914,7 @@ pub fn start_microphone_wav_with_device(
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
             let writer = Arc::new(Mutex::new(Some(writer)));
 
-            log::info!(
+            log::debug!(
                 "WASAPI麦克风线程启动: {:?}, enabled={}, pause={}",
                 thread_output.file_name(),
                 enabled_flag.load(Ordering::SeqCst),
@@ -924,7 +924,7 @@ pub fn start_microphone_wav_with_device(
             let err_fn = device_err_fn(&device_error_slot, "麦克风");
 
             match std::fs::metadata(&thread_output) {
-                Ok(meta) => log::info!(
+                Ok(meta) => log::debug!(
                     "WASAPI麦克风文件创建成功: {:?}, 大小: {} bytes",
                     thread_output.file_name(),
                     meta.len()
@@ -971,7 +971,7 @@ pub fn start_microphone_wav_with_device(
                 std::thread::sleep(Duration::from_millis(10));
             }
 
-            log::info!("收到麦克风停止信号，填充1s静音数据以确保音频完全覆盖...");
+            log::debug!("收到麦克风停止信号，填充1s静音数据以确保音频完全覆盖...");
             // 按实际采样率/声道数填充 2s（与系统路径一致，多出静音由播放器自然忽略）
             let tail_samples = (config.sample_rate as usize) * (config.channels as usize) * 2;
             if let Ok(mut guard) = writer.lock() {
@@ -1011,7 +1011,7 @@ pub fn start_microphone_wav_with_device(
             }
 
             match std::fs::metadata(&thread_output) {
-                Ok(meta) => log::info!(
+                Ok(meta) => log::debug!(
                     "✅ WASAPI麦克风文件最终大小: {:?}, {} bytes",
                     thread_output.file_name(),
                     meta.len()
@@ -1222,10 +1222,10 @@ pub fn start_system_loopback_aac_with_device(
             }
 
             let stop_start = std::time::Instant::now();
-            log::info!("收到系统音频停止信号，关闭FFmpeg输入流...");
+            log::debug!("收到系统音频停止信号，关闭FFmpeg输入流...");
 
             drop(stream);
-            log::info!("WASAPI 流已停止");
+            log::debug!("WASAPI 流已停止");
 
             // 填充尾部静音，与 WAV 系统路径一致：2s（#27/#N3）
             let tail_frames = (config.sample_rate as usize) * (config.channels as usize) * 2;
@@ -1235,7 +1235,7 @@ pub fn start_system_loopback_aac_with_device(
             let _ = tx_audio.send(Vec::new());
             let _ = writer_thread.join();
 
-            log::info!("等待 FFmpeg AAC 编码完成...");
+            log::debug!("等待 FFmpeg AAC 编码完成...");
             if let Ok(mut guard) = thread_ffmpeg.lock() {
                 if let Some(ref mut child) = *guard {
                     for _ in 0..3000 {
@@ -1280,7 +1280,7 @@ pub fn start_system_loopback_aac_with_device(
                             size
                         );
                     } else {
-                        log::info!(
+                        log::debug!(
                             "✅ FFmpeg AAC 输出文件: {:?}, {} bytes",
                             thread_output.file_name(),
                             size

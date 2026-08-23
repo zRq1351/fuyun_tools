@@ -343,7 +343,7 @@ pub async fn show_selection_toolbar_with_text(
         return Ok(());
     }
     let content = trimmed.to_string();
-    log::info!(
+    log::debug!(
         "show_selection_toolbar_with_text: len={}, x={}, y={}",
         content.chars().count(),
         x,
@@ -1793,7 +1793,7 @@ pub async fn test_ai_connection(
 pub async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
     match app.clipboard().write_text(text) {
         Ok(()) => {
-            log::info!("文本已复制到剪贴板");
+            log::debug!("文本已复制到剪贴板");
             Ok(())
         }
         Err(e) => {

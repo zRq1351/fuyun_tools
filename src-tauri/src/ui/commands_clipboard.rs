@@ -551,7 +551,7 @@ pub(crate) fn execute_remove_clipboard_item(
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    log::info!("删除剪贴板项目: {}", item_id);
+    log::debug!("删除剪贴板项目: {}", item_id);
     let manager_arc = get_clipboard_manager_arc(&state);
     with_updating_clipboard(&state, || -> Result<(), String> {
         let removed_item = {

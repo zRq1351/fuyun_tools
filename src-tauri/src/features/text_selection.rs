@@ -116,7 +116,7 @@ fn send_copy_combination(vk: u16, with_shift: bool) -> bool {
             (0x43, true) => "Ctrl+Shift+C".to_string(),
             _ => "Ctrl+Insert".to_string(),
         };
-        log::info!(
+        log::debug!(
             "已通过 SendInput 发送 {} (ctrl_was_pressed: {})",
             combo,
             ctrl_was_pressed
@@ -300,7 +300,7 @@ fn get_selected_text_windows(
     // 完全排除终端窗口：终端划词体验差（Ctrl+C 是中断、右键复制会破坏选区），
     // 直接不进入复制/剪贴板捕获流程，避免打扰用户
     if is_terminal_foreground_window() {
-        log::info!("前台窗口为终端类应用，跳过划词文本捕获");
+        log::debug!("前台窗口为终端类应用，跳过划词文本捕获");
         return None;
     }
     let state_manager = app_handle.state::<Arc<Mutex<SharedAppState>>>();
@@ -336,7 +336,7 @@ fn get_selected_text_windows(
     const VK_INSERT: u16 = 0x2D;
     let mut new_content: Option<String> = None;
     if user_copying {
-        log::info!("检测到用户正在按 Ctrl 键，跳过模拟复制，等待用户手动复制");
+        log::debug!("检测到用户正在按 Ctrl 键，跳过模拟复制，等待用户手动复制");
         new_content = wait_for_clipboard_update(
             &clipboard_manager,
             app_handle,
@@ -402,10 +402,10 @@ fn get_selected_text_windows(
     if new_content.is_none() && !sequence_changed {
         log::debug!("未捕获到新内容且剪贴板序列号未改变，无需恢复，避免覆盖非文本/图片格式");
     } else if is_manual_copy {
-        log::info!("检测到手动 Ctrl+C，跳过剪贴板快照恢复，并主动记录到历史");
+        log::debug!("检测到手动 Ctrl+C，跳过剪贴板快照恢复，并主动记录到历史");
         // 如果 new_content 为空，但序列号变了，说明剪贴板确实有变化，再尝试读取一次
         let content_to_record = if new_content.is_none() && sequence_changed {
-            log::info!("手动 Ctrl+C 导致序列号变化但未捕获内容，尝试再次读取");
+            log::debug!("手动 Ctrl+C 导致序列号变化但未捕获内容，尝试再次读取");
             get_current_clipboard_content_with_manager(&clipboard_manager, app_handle)
         } else {
             new_content.clone()
@@ -415,7 +415,7 @@ fn get_selected_text_windows(
             if !text.trim().is_empty() {
                 let manager = lock_arc_mutex(&clipboard_manager);
                 manager.add_to_history(text.clone());
-                log::info!("已记录手动 Ctrl+C 的文本到历史，长度: {}", text.len());
+                log::debug!("已记录手动 Ctrl+C 的文本到历史，长度: {}", text.len());
             }
         }
     } else {
@@ -430,11 +430,11 @@ fn get_selected_text_windows(
 
     match &new_content {
         Some(content) => {
-            log::info!("成功捕获选中文本，长度: {}", content.len());
+            log::debug!("成功捕获选中文本，长度: {}", content.len());
             new_content
         }
         None => {
-            log::warn!("未能捕获选中文本");
+            log::debug!("未能捕获选中文本");
             None
         }
     }
@@ -503,7 +503,7 @@ fn wait_for_clipboard_update(
     let mut consecutive_unchanged = 0u32; // 连续未变化计数，用于提前退出
     let wake_rx = subscribe_clipboard_wake_events();
 
-    log::info!("使用事件优先+轮询兜底检测模式");
+    log::debug!("使用事件优先+轮询兜底检测模式");
 
     while start_time.elapsed() < CAPTURE_RETRY_MAX_DURATION {
         attempts += 1;
@@ -540,7 +540,7 @@ fn wait_for_clipboard_update(
         if let Some(ref current) = current_content {
             if let Some(ref original) = original_content {
                 if current != original || sequence_changed {
-                    log::info!(
+                    log::debug!(
                         "第{}次尝试成功捕获内容，耗时: {:?}",
                         attempts,
                         start_time.elapsed()
@@ -548,7 +548,7 @@ fn wait_for_clipboard_update(
                     return current_content;
                 }
             } else if !current.is_empty() {
-                log::info!(
+                log::debug!(
                     "第{}次尝试成功捕获新内容，耗时: {:?}",
                     attempts,
                     start_time.elapsed()
@@ -618,7 +618,7 @@ fn restore_clipboard_snapshot(
         log::debug!("未捕获到有效文本内容，直接恢复原始剪贴板");
         // 即使未捕获到有效文本，如果是因为复制了文件或图片导致剪贴板改变，也应恢复
     } else if !still_holds_captured_text {
-        log::info!("检测到剪贴板在捕获后被用户更改，已放弃恢复原始内容以避免覆盖用户操作");
+        log::debug!("检测到剪贴板在捕获后被用户更改，已放弃恢复原始内容以避免覆盖用户操作");
         return;
     }
 
@@ -667,7 +667,7 @@ fn restore_clipboard_snapshot(
             }
             // 当前剪贴板有内容且不是我们捕获的文本（captured_content为None），
             // 说明用户在捕获期间手动修改了剪贴板，不应覆盖
-            log::info!("检测到空快照但剪贴板已有用户内容，跳过恢复以避免覆盖");
+            log::debug!("检测到空快照但剪贴板已有用户内容，跳过恢复以避免覆盖");
         }
     }
 }

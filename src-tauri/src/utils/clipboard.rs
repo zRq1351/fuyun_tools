@@ -265,7 +265,7 @@ impl ClipboardManager {
 
         match result {
             Ok(()) => {
-                log::info!("成功设置剪贴板内容");
+                log::debug!("成功设置剪贴板内容");
                 Ok(())
             }
             Err(e) => {
@@ -556,8 +556,8 @@ impl ClipboardManager {
         if let Some((replace_index, comparison)) =
             find_best_replacement_candidate(&content, candidate_history, similarity_threshold)
         {
-            log::info!("检测到相似版本，正在处理: {}", comparison.reason);
-            log::info!(
+            log::debug!("检测到相似版本，正在处理: {}", comparison.reason);
+            log::debug!(
                 "相似度: {:.4}, 完整性: {:?}",
                 comparison.similarity_score,
                 comparison.new_completeness
@@ -567,11 +567,11 @@ impl ClipboardManager {
             {
                 let complete_version = history.remove(replace_index);
                 history.insert(0, complete_version);
-                log::info!("已将完整版本移动到最前面");
+                log::debug!("已将完整版本移动到最前面");
             } else {
                 history.remove(replace_index);
                 history.insert(0, content.clone());
-                log::info!("已用完整版本替换不完整版本");
+                log::debug!("已用完整版本替换不完整版本");
             }
         } else {
             log::debug!("未找到相似版本，直接添加");
@@ -927,7 +927,7 @@ impl ClipboardManager {
                 normalize_pinned_items(&mut pinned_items, &history);
                 apply_pin_order(&mut history, &pinned_items);
                 self.history_cache_dirty.store(true, Ordering::Relaxed);
-                log::info!("set_pinned_async: 回滚完成: item_id={}", item_id);
+                log::debug!("set_pinned_async: 回滚完成: item_id={}", item_id);
             }
         }
 

@@ -874,7 +874,7 @@ fn trim_video_initial_frames(
     replace_file_atomically(&trimmed_path, video_path).map_err(|e| {
         AppError::new(ErrorCode::IoError, "重命名裁剪文件失败").with_details(e.to_string())
     })?;
-    log::info!("✅ 已裁剪视频开头 {:.3}s 灰色帧", trim_seconds);
+    log::debug!("✅ 已裁剪视频开头 {:.3}s 灰色帧", trim_seconds);
     Ok(())
 }
 
@@ -1062,7 +1062,7 @@ fn merge_system_audio_into_video(
                     .unwrap_or(false);
                 // AAC 文件由 FFmpeg pipe 产生，100% 有效，跳过完整解码验证（仅做文件大小检查）
                 if is_aac || validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
-                    log::info!(
+                    log::debug!(
                         "快速路径：单个系统音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
                         seg.start_ms,
                         seg.trim_start_ms
@@ -1079,7 +1079,7 @@ fn merge_system_audio_into_video(
             if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.end_ms.is_none() && seg.path.exists() {
                 // 麦克风 WAV 文件仍需 FFmpeg 验证（cpal 写入可能因 I/O 中断损坏）
                 if validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
-                    log::info!(
+                    log::debug!(
                         "快速路径：单个麦克风音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
                         seg.start_ms,
                         seg.trim_start_ms
@@ -1163,7 +1163,7 @@ fn merge_system_audio_into_video(
     let output_dir = video_path.parent()
         .ok_or_else(|| AppError::new(ErrorCode::SystemError, "无法获取输出目录"))?;
     if has_system && has_mic {
-        log::info!(
+        log::debug!(
             "🔧 双音源合并: sys={} 段, mic={} 段, 先分别对齐再 amix 混音",
             valid_system.len(),
             valid_mic.len()
@@ -1204,10 +1204,10 @@ fn merge_system_audio_into_video(
     let sys_aligned = output_dir.join("sys_aligned.tmp.aac");
     if has_system {
         let seg_count = valid_system.len();
-        log::info!("🔧 两步合并 Step 1: 预合并 {} 个系统音频片段", seg_count);
+        log::debug!("🔧 两步合并 Step 1: 预合并 {} 个系统音频片段", seg_count);
         merge_audio_segments_only(ffmpeg_path, &valid_system, &sys_aligned, audio_bitrate_kbps)
             .map_err(|e| AppError::new(ErrorCode::SystemError, "系统音频预合并失败").with_details(e))?;
-        log::info!("🔧 两步合并 Step 2: 系统音频流复制合并到视频");
+        log::debug!("🔧 两步合并 Step 2: 系统音频流复制合并到视频");
         merge_audio_fast(ffmpeg_path, video_path, &sys_aligned, false, audio_bitrate_kbps)?;
         let _ = fs::remove_file(&sys_aligned);
     }
@@ -1215,16 +1215,16 @@ fn merge_system_audio_into_video(
     let mic_aligned = output_dir.join("mic_aligned.tmp.aac");
     if has_mic {
         let seg_count = valid_mic.len();
-        log::info!("🔧 两步合并 Step 1: 预合并 {} 个麦克风音频片段", seg_count);
+        log::debug!("🔧 两步合并 Step 1: 预合并 {} 个麦克风音频片段", seg_count);
         merge_audio_segments_only(ffmpeg_path, &valid_mic, &mic_aligned, audio_bitrate_kbps)
             .map_err(|e| AppError::new(ErrorCode::SystemError, "麦克风音频预合并失败").with_details(e))?;
-        log::info!("🔧 两步合并 Step 2: 麦克风音频流复制合并到视频");
+        log::debug!("🔧 两步合并 Step 2: 麦克风音频流复制合并到视频");
         merge_audio_fast(ffmpeg_path, video_path, &mic_aligned, false, audio_bitrate_kbps)?;
         let _ = fs::remove_file(&mic_aligned);
     }
 
     let elapsed_ms = started_at.elapsed().as_millis();
-    log::info!("✅ 音频合并完成（两步法），耗时: {}ms ({:.1}s)", elapsed_ms, elapsed_ms as f64 / 1000.0);
+    log::debug!("✅ 音频合并完成（两步法），耗时: {}ms ({:.1}s)", elapsed_ms, elapsed_ms as f64 / 1000.0);
     if elapsed_ms > 5000 {
         log::warn!("⚠️ 音频合并耗时较长({}ms)", elapsed_ms);
     }
@@ -1359,7 +1359,7 @@ fn merge_audio_fast(
             })?;
 
             if retry_output.status.success() {
-                log::info!("✅ AAC 重编码回退成功");
+                log::debug!("✅ AAC 重编码回退成功");
                 replace_file_atomically(&merged_path, video_path).map_err(|e| {
                     // 不再删除 merged_path：rename 失败时保留合并产物以便恢复
                     record_perf_metric(
@@ -1380,7 +1380,7 @@ fn merge_audio_fast(
                     None,
                 );
                 let elapsed_ms = started_at.elapsed().as_millis();
-                log::info!(
+                log::debug!(
                     "✅ 快速音频合并完成（AAC重编码回退），耗时: {}ms",
                     elapsed_ms
                 );
@@ -1438,7 +1438,7 @@ fn merge_audio_fast(
     } else {
         "WAV→AAC重编码"
     };
-    log::info!(
+    log::debug!(
         "✅ 快速音频合并完成，耗时: {}ms ({})",
         elapsed_ms,
         operation
@@ -1956,7 +1956,7 @@ fn cleanup_stale_tmp_files(output_dir: &PathBuf) {
             if let Err(e) = fs::remove_file(&path) {
                 log::warn!("清理过期临时文件失败: {:?} - {}", path, e);
             } else {
-                log::info!("已清理过期临时文件: {:?}", path);
+                log::debug!("已清理过期临时文件: {:?}", path);
             }
         }
     }
@@ -2814,7 +2814,7 @@ pub fn start_recording(
         }
         // 系统音频关闭时不占用 loopback 设备；重新开启时再创建新音频分段并在合成阶段按 start_ms 对齐。
         if capture_system_audio {
-            log::info!("🔧 尝试启动系统音频捕获...");
+            log::debug!("🔧 尝试启动系统音频捕获...");
             match ensure_system_audio_capture_started(
                 app,
                 &mut runtime,
@@ -2822,7 +2822,7 @@ pub fn start_recording(
                 &session_id,
                 true,
             ) {
-                Ok(()) => log::info!("✅ 系统音频捕获启动成功"),
+                Ok(()) => log::debug!("✅ 系统音频捕获启动成功"),
                 Err(e) => {
                     log::error!("❌ 系统音频捕获启动失败: {}", e);
                     runtime.last_error = Some(format!("系统音频未录制: {}", e));
@@ -3006,7 +3006,7 @@ pub fn stop_recording(
 
     if is_wgc_target(&target_type) {
         // WGC 托管录制（窗口/单屏/区域）：先停止WGC线程，再停止音频
-        log::info!("🔧 窗口录制：首先停止WGC线程...");
+        log::debug!("🔧 窗口录制：首先停止WGC线程...");
         if let Some(join) = wgc_thread {
             let mut wgc_exited = false;
             for _ in 0..500 {
@@ -3020,7 +3020,7 @@ pub fn stop_recording(
             if wgc_exited {
                 match join.join() {
                     Ok(Ok(())) => {
-                        log::info!("✅ WGC线程已退出");
+                        log::debug!("✅ WGC线程已退出");
                     }
                     Ok(Err(e)) => {
                         if is_benign_wgc_stop_error(&e) {
@@ -3051,17 +3051,17 @@ pub fn stop_recording(
         persist_wgc_capture_fallback_if_needed(&state_arc);
 
         // WGC线程已停止，现在停止音频
-        log::info!("🔧 WGC已停止，现在设置音频停止信号...");
+        log::debug!("🔧 WGC已停止，现在设置音频停止信号...");
         if let Some(flag) = system_audio_stop_flag.as_ref() {
             flag.store(true, std::sync::atomic::Ordering::SeqCst);
         }
         if let Some(flag) = mic_audio_stop_flag.as_ref() {
             flag.store(true, std::sync::atomic::Ordering::SeqCst);
         }
-        log::info!("✅ 音频停止信号已设置");
+        log::debug!("✅ 音频停止信号已设置");
     } else {
         // 非窗口录制（FFmpeg）：同时停止视频和音频，避免音频冗余
-        log::info!("🔧 非窗口录制：同时发送音视频停止信号...");
+        log::debug!("🔧 非窗口录制：同时发送音视频停止信号...");
 
         // 1. 首先发送音频停止信号（音频线程会继续录制2秒以确保覆盖）
         if let Some(flag) = system_audio_stop_flag.as_ref() {
@@ -3070,7 +3070,7 @@ pub fn stop_recording(
         if let Some(flag) = mic_audio_stop_flag.as_ref() {
             flag.store(true, std::sync::atomic::Ordering::SeqCst);
         }
-        log::info!("✅ 音频停止信号已设置");
+        log::debug!("✅ 音频停止信号已设置");
 
         // 2. 然后停止FFmpeg进程
         if let Some(process) = process.as_mut() {
@@ -3081,7 +3081,7 @@ pub fn stop_recording(
         }
 
         // 3. 等待FFmpeg进程退出（需要时间处理最后一帧并写入文件）
-        log::info!("🔧 等待视频录制进程退出...");
+        log::debug!("🔧 等待视频录制进程退出...");
         let video_exit_start = std::time::Instant::now();
         let mut video_exited = false;
         if let Some(process) = process.as_mut() {
@@ -3154,7 +3154,7 @@ pub fn stop_recording(
                 );
                 apply_window_cycle_shifts(&mut sys_segments, &window_video_segments, &shifts);
                 apply_window_cycle_shifts(&mut mic_segments, &window_video_segments, &shifts);
-                log::info!(
+                log::debug!(
                     "应用 WGC 分段周期校正: segments={:?}, measured={:?}, shifts={:?}, calibrated_last_anchor={}ms",
                     window_video_segments.iter().map(|s| s.u_start_ms).collect::<Vec<_>>(),
                     measured,
@@ -3164,7 +3164,7 @@ pub fn stop_recording(
             } else {
                 shift_audio_segments_global(&mut sys_segments, calibrated_anchor_ms);
                 shift_audio_segments_global(&mut mic_segments, calibrated_anchor_ms);
-                log::info!(
+                log::debug!(
                     "应用 WGC 首帧锚点校正: anchor_ms={}, safety_margin={}, calibrated_anchor_ms={}",
                     anchor_ms,
                     safety_margin,
@@ -3184,11 +3184,11 @@ pub fn stop_recording(
     let mut measured_black_lead_ms: u64 = 0;
 
     if let (Some(output_tmp), Some(output_final)) = (output_tmp.as_ref(), output_final.as_mut()) {
-        log::info!("🔧 开始视频后处理...");
+        log::debug!("🔧 开始视频后处理...");
         let video_post_start = std::time::Instant::now();
 
         if !window_video_segments.is_empty() && fatal_error.is_none() {
-            log::info!("🔧 合并视频片段...");
+            log::debug!("🔧 合并视频片段...");
             let seg_paths: Vec<PathBuf> =
                 window_video_segments.iter().map(|s| s.path.clone()).collect();
             if let Err(e) = concat_video_segments(&ffmpeg_path, &seg_paths, output_tmp) {
@@ -3208,11 +3208,11 @@ pub fn stop_recording(
         if fatal_error.is_none() && !is_wgc_target(&target_type) {
             measured_black_lead_ms = match detect_black_lead_ms(&ffmpeg_path, output_tmp) {
                 Some(ms) if ms >= MIN_BLACK_LEAD_TRIM_MS => {
-                    log::info!("探测到片头黑帧 {}ms，将裁剪并同步音频补偿", ms);
+                    log::debug!("探测到片头黑帧 {}ms，将裁剪并同步音频补偿", ms);
                     ms
                 }
                 _ => {
-                    log::info!("片头未检测到黑帧，跳过灰头裁剪");
+                    log::debug!("片头未检测到黑帧，跳过灰头裁剪");
                     0
                 }
             };
@@ -3224,7 +3224,7 @@ pub fn stop_recording(
             && (ffmpeg_start_delay_ms > 0 || measured_black_lead_ms > 0)
         {
             let effective_delay = ffmpeg_start_delay_ms.saturating_add(measured_black_lead_ms);
-            log::info!(
+            log::debug!(
                 "应用 FFmpeg 启动延迟校正: ffmpeg_delay={}ms, trim_compensation={}ms, effective={}ms",
                 ffmpeg_start_delay_ms,
                 measured_black_lead_ms,
@@ -3265,7 +3265,7 @@ pub fn stop_recording(
             && !is_wgc_target(&target_type)
             && measured_black_lead_ms >= MIN_BLACK_LEAD_TRIM_MS
         {
-            log::info!("🔧 裁剪 gdigrab 片头黑帧 {}ms...", measured_black_lead_ms);
+            log::debug!("🔧 裁剪 gdigrab 片头黑帧 {}ms...", measured_black_lead_ms);
             if let Err(e) = trim_video_initial_frames(
                 &ffmpeg_path,
                 output_tmp,
@@ -3277,14 +3277,14 @@ pub fn stop_recording(
         }
 
         if fatal_error.is_none() {
-            log::info!("🔧 重命名输出文件...");
+            log::debug!("🔧 重命名输出文件...");
             match rename_to_final_output(output_tmp, output_final) {
                 Ok(actual_path) => *output_final = actual_path,
                 Err(e) => fatal_error = Some(e),
             }
         }
 
-        log::info!(
+        log::debug!(
             "✅ 视频后处理完成，耗时: {}ms",
             video_post_start.elapsed().as_millis()
         );
@@ -3293,7 +3293,7 @@ pub fn stop_recording(
     }
 
     // 🔧 等待音频线程退出（停止信号已在前面设置）
-    log::info!("🔧 等待系统音频线程退出...");
+    log::debug!("🔧 等待系统音频线程退出...");
     let sys_audio_join_start = std::time::Instant::now();
     let mut sys_audio_timed_out = false;
     for join in system_audio_threads {
@@ -3307,12 +3307,12 @@ pub fn stop_recording(
     }
     let sys_audio_elapsed = sys_audio_join_start.elapsed().as_millis();
     if sys_audio_elapsed > 100 {
-        log::info!("✅ 系统音频线程已退出，join耗时: {}ms", sys_audio_elapsed);
+        log::debug!("✅ 系统音频线程已退出，join耗时: {}ms", sys_audio_elapsed);
     } else {
         log::debug!("✅ 系统音频线程已退出，join耗时: {}ms", sys_audio_elapsed);
     }
 
-    log::info!("🔧 等待麦克风音频线程退出...");
+    log::debug!("🔧 等待麦克风音频线程退出...");
     let mic_audio_join_start = std::time::Instant::now();
     if let Some(join) = mic_audio_thread {
         if !join_thread_with_timeout(join, "stop 麦克风音频", 500) {
@@ -3322,7 +3322,7 @@ pub fn stop_recording(
     }
     let mic_audio_elapsed = mic_audio_join_start.elapsed().as_millis();
     if mic_audio_elapsed > 100 {
-        log::info!("✅ 麦克风音频线程已退出，join耗时: {}ms", mic_audio_elapsed);
+        log::debug!("✅ 麦克风音频线程已退出，join耗时: {}ms", mic_audio_elapsed);
     } else {
         log::debug!("✅ 麦克风音频线程已退出，join耗时: {}ms", mic_audio_elapsed);
     }
@@ -3470,7 +3470,7 @@ pub fn stop_recording(
                 // ✅ 添加诊断日志：检查文件是否存在
                 match std::fs::metadata(path) {
                     Ok(meta) => {
-                        log::info!(
+                        log::debug!(
                             "准备清理音频片段: {:?}, 大小: {} bytes",
                             path.file_name(),
                             meta.len()
@@ -3497,7 +3497,7 @@ pub fn stop_recording(
                     }
                 }
             }
-            log::info!(
+            log::debug!(
                 "已清理 {}/{} 个音频片段文件 ({} 个不存在)",
                 cleaned_count,
                 audio_segment_paths_vec.len(),

@@ -872,7 +872,7 @@ pub fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
     use crate::features::recording::recorder_service;
 
     let key_state = if enable { "按下" } else { "释放" };
-    log::info!("麦克风快捷键{}（目标状态：{}）", key_state, enable);
+    log::debug!("麦克风快捷键{}（目标状态：{}）", key_state, enable);
 
     let state_arc = {
         let app_state = app.state::<Arc<Mutex<SharedAppState>>>();
@@ -924,7 +924,7 @@ pub fn toggle_microphone_from_shortcut(app: AppHandle, enable: bool) {
         }
     }
 
-    log::info!(
+    log::debug!(
         "快捷键操作：麦克风{}，系统音频状态: {} (线程存在: {})",
         if enable { "启用" } else { "禁用" },
         sys_audio_enabled,
