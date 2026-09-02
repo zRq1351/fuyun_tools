@@ -231,17 +231,26 @@ export function useUpdater(currentVersion) {
         checkUpdate,
         /**
          * 静默检查更新（不弹窗），返回 { version, body } 或 null
+         * 添加重试机制以应对网络波动
          */
-        silentCheck: async () => {
-            try {
-                const update = await check()
-                if (update && isNewerThan(update.version, currentVersion)) {
-                    return {version: update.version, body: update.body}
+        silentCheck: async (maxRetries = 2, retryDelay = 1000) => {
+            for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                try {
+                    const update = await check()
+                    if (update && isNewerThan(update.version, currentVersion)) {
+                        return {version: update.version, body: update.body}
+                    }
+                    return null
+                } catch (error) {
+                    // 最后一次尝试失败时返回 null
+                    if (attempt === maxRetries) {
+                        return null
+                    }
+                    // 等待后重试
+                    await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)))
                 }
-                return null
-            } catch {
-                return null
             }
+            return null
         }
     }
 }
