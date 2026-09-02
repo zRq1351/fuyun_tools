@@ -957,7 +957,8 @@
     "saveTagsFailed": "保存标签失败",
     "saveNotesFailed": "保存备注失败",
     "mergeModeLabel": "合并模式（保留现有记录）",
-    "overwriteModeLabel": "覆盖模式（完全替换数据）"
+    "overwriteModeLabel": "覆盖模式（完全替换数据）",
+    "reorderFailed": "排序失败: {error}"
   },
   "errorHandler": {
     "configError": "{context}: 配置错误 - {message}",

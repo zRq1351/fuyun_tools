@@ -956,7 +956,8 @@
     "saveTagsFailed": "Failed to save tags",
     "saveNotesFailed": "Failed to save notes",
     "mergeModeLabel": "Merge (keep existing records)",
-    "overwriteModeLabel": "Overwrite (replace all data)"
+    "overwriteModeLabel": "Overwrite (replace all data)",
+    "reorderFailed": "Reorder failed: {error}"
   },
   "errorHandler": {
     "configError": "{context}: Configuration error - {message}",

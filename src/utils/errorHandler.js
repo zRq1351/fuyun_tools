@@ -57,7 +57,13 @@ export function handleAppError(error, context = 'Operation failed') {
     const i18n = getI18nInstance()
     const t = i18n && i18n.global ? i18n.global.t.bind(i18n.global) : (key, params) => key
 
-    const raw = typeof error === 'string' ? error : String(error || '')
+    // 优先使用 ipcInvoke 包装的 originalError，保留原始错误格式
+    let raw
+    if (error && typeof error === 'object' && error.originalError !== undefined) {
+        raw = typeof error.originalError === 'string' ? error.originalError : String(error.originalError || '')
+    } else {
+        raw = typeof error === 'string' ? error : String(error || '')
+    }
     console.error(`[${context}]`, raw)
 
     // Try new JSON format first
@@ -157,17 +163,23 @@ export function parseErrorMessage(raw) {
     const t = i18n && i18n.global ? i18n.global.t.bind(i18n.global) : (key, params) => key
     if (!raw) return ''
 
-    const jsonError = parseFrontendErrorJson(raw)
+    // 优先使用 ipcInvoke 包装的 originalError
+    let actualRaw = raw
+    if (raw && typeof raw === 'object' && raw.originalError !== undefined) {
+        actualRaw = typeof raw.originalError === 'string' ? raw.originalError : String(raw.originalError || '')
+    }
+
+    const jsonError = parseFrontendErrorJson(actualRaw)
     if (jsonError) {
         const i18nKey = `errorCodes.${jsonError.code}`
         const translated = t(i18nKey, jsonError.params || {})
-        return translated === i18nKey ? (jsonError.message || raw) : translated
+        return translated === i18nKey ? (jsonError.message || actualRaw) : translated
     }
 
-    const legacy = parseLegacyError(raw)
+    const legacy = parseLegacyError(actualRaw)
     if (legacy) {
         return legacy.message
     }
 
-    return raw
+    return actualRaw
 }

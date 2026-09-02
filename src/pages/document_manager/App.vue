@@ -1295,7 +1295,12 @@ function initRootSortable() {
         reordered.splice(newIndex, 0, moved)
         roots.value = reordered
         const ids = roots.value.map(r => r.id)
-        await DocumentService.reorderRoots(ids)
+        try {
+          await DocumentService.reorderRoots(ids)
+        } catch (e) {
+          ElMessage.error(t('documentManager.reorderFailed', {error: e}))
+          roots.value = [...roots.value]
+        }
       }
     }
   })
@@ -1332,7 +1337,12 @@ function initCatSortable() {
         reordered.splice(newIndex, 0, moved)
         categories.value = reordered
         const ids = categories.value.map(c => c.id)
-        await DocumentService.reorderCategories(ids)
+        try {
+          await DocumentService.reorderCategories(ids)
+        } catch (e) {
+          ElMessage.error(t('documentManager.reorderFailed', {error: e}))
+          categories.value = [...categories.value]
+        }
       }
     }
   })
@@ -1378,7 +1388,12 @@ function initFileSortable() {
         reordered.splice(newIndex, 0, moved)
         items.value = reordered
         const ids = items.value.map(f => f.id)
-        await DocumentService.reorderFiles(ids)
+        try {
+          await DocumentService.reorderFiles(ids)
+        } catch (e) {
+          ElMessage.error(t('documentManager.reorderFailed', {error: e}))
+          items.value = [...items.value]
+        }
       }
     }
   })

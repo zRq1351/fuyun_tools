@@ -545,6 +545,7 @@ const handleContainerMouseDown = (event) => {
   const target = event.target
   if (isAddingCategory.value && target instanceof Element && !target.closest('.category-input')) {
     cancelCreateCategory()
+    return
   }
   if (target instanceof Element && target.closest('.clipboard-ai-select-popper')) {
     return
