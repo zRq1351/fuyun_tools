@@ -727,7 +727,7 @@ pub async fn save_app_settings(
     if let Some(val) = doc_manager_widget_enabled {
         let old = settings.doc_manager_widget_enabled;
         settings.doc_manager_widget_enabled = val;
-        if val && !old {
+        if val && !old && settings.doc_manager_enabled {
             let _ = crate::ui::window_manager::show_doc_manager_widget_window(&app);
         } else if !val && old {
             let _ = crate::ui::window_manager::hide_doc_manager_widget_window(&app);
@@ -1728,6 +1728,7 @@ pub async fn save_app_settings(
         let _ = ensure_window_for_label(&app, "document_manager");
     } else {
         destroy_window_by_label(&app, "document_manager");
+        let _ = crate::ui::window_manager::hide_doc_manager_widget_window(&app);
     }
     if let Some(content_protected) = recording_toolbar_content_protected {
         if let Some(window) = app.get_webview_window("recording_toolbar") {

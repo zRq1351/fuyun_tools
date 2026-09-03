@@ -274,7 +274,8 @@
       "categoryTagDesc": "自定义分类目录和标签，双击打开文件，一键在资源管理器中定位",
       "shortcutReset": "已恢复文档管理快捷键默认值: {shortcut}",
       "widgetEnabled": "桌面小部件",
-      "widgetHint": "在桌面右上角显示文档管理小部件，按分类展示文档"
+      "widgetHint": "在桌面右上角显示文档管理小部件，按分类展示文档",
+      "widgetDisabledHint": "请先启用文档管理功能"
     },
     "ai": {
       "serviceConnection": "服务连接",

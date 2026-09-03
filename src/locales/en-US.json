@@ -273,7 +273,8 @@
       "categoryTagDesc": "Custom categories and tags. Double-click to open files, one-click locate in Explorer",
       "shortcutReset": "Reset document manager hotkey to default: {shortcut}",
       "widgetEnabled": "Desktop Widget",
-      "widgetHint": "Show document manager widget at top-right corner of desktop"
+      "widgetHint": "Show document manager widget at top-right corner of desktop",
+      "widgetDisabledHint": "Please enable the document manager feature first"
     },
     "ai": {
       "serviceConnection": "Service Connection",

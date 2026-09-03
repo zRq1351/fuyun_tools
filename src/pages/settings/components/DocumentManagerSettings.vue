@@ -43,10 +43,12 @@
 
       <el-form-item :label="$t('settings.docManager.widgetEnabled')">
         <el-switch
+            :disabled="!form.docManagerEnabled"
             :model-value="form.docManagerWidgetEnabled"
             @update:model-value="onWidgetToggle"
         />
-        <div class="form-hint">{{ $t('settings.docManager.widgetHint') }}</div>
+        <div v-if="!form.docManagerEnabled" class="form-hint">{{ $t('settings.docManager.widgetDisabledHint') }}</div>
+        <div v-else class="form-hint">{{ $t('settings.docManager.widgetHint') }}</div>
       </el-form-item>
     </el-card>
 
