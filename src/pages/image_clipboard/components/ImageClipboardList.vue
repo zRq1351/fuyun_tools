@@ -166,20 +166,23 @@ const initSortable = () => {
     chosenClass: 'sortable-chosen',
     dragClass: 'sortable-drag',
     fallbackClass: 'sortable-fallback',
-    fallbackTolerance: 3,
     fallbackOnBody: true,
+    fallbackTolerance: 3,
     swapThreshold: 0.65,
+    scroll: true,
+    scrollSensitivity: 60,
+    scrollSpeed: 15,
     onStart: () => {
       setTimeout(() => {
         const el = document.querySelector('.sortable-fallback')
         if (!el) return
         const move = (e) => {
-          el.style.left = (e.clientX - el.offsetWidth / 2) + 'px';
+          el.style.left = (e.clientX - el.offsetWidth / 2) + 'px'
           el.style.top = (e.clientY - el.offsetHeight / 2) + 'px'
         }
         document.addEventListener('mousemove', move)
         document.addEventListener('mouseup', function up() {
-          document.removeEventListener('mousemove', move);
+          document.removeEventListener('mousemove', move)
           document.removeEventListener('mouseup', up)
         })
       }, 50)
@@ -655,10 +658,6 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
   cursor: grab;
 }
 
-.sortable-item:active {
-  cursor: grabbing;
-}
-
 .sortable-ghost {
   opacity: 0.4;
   background: var(--fy-accent-bg) !important;
@@ -683,7 +682,6 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
   border: 2px solid var(--fy-accent) !important;
   border-radius: var(--fy-radius-md);
   box-shadow: var(--fy-shadow-lg);
-  cursor: grabbing !important;
   pointer-events: none;
   position: fixed !important;
   z-index: 9999 !important;
