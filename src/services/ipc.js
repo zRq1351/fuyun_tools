@@ -58,6 +58,8 @@ export const IPC_COMMANDS = {
     REMOVE_IMAGE_CLIPBOARD_ITEM_BY_ID: 'remove_image_clipboard_item_by_id',
     PROMOTE_IMAGE_CLIPBOARD_ITEM_BY_ID: 'promote_image_clipboard_item_by_id',
     CLEAR_IMAGE_HISTORY: 'clear_image_history',
+    REORDER_TEXT_CLIPBOARD_ITEMS: 'reorder_text_clipboard_items',
+    REORDER_IMAGE_CLIPBOARD_ITEMS: 'reorder_image_clipboard_items',
     IMPORT_IMAGE_FILES: 'import_image_files',
     COUNT_IMPORT_IMAGE_FILES: 'count_import_image_files',
     SELECT_AND_FILL_IMAGE_BY_ID: 'select_and_fill_image_by_id',
@@ -240,6 +242,7 @@ export const ClipboardService = {
     setItemPinned: (itemId, pinned) => ipcInvoke(IPC_COMMANDS.SET_CLIPBOARD_ITEM_PINNED, { itemId, pinned }),
     promoteItem: (itemId) => ipcInvoke(IPC_COMMANDS.PROMOTE_CLIPBOARD_ITEM, { itemId }),
     clearHistory: (mode) => ipcInvoke(IPC_COMMANDS.CLEAR_TEXT_HISTORY, {mode}),
+    reorderItems: (itemIds) => ipcInvoke(IPC_COMMANDS.REORDER_TEXT_CLIPBOARD_ITEMS, {request: {itemIds}}),
 
     /**
      * 选择并填充内容
@@ -277,6 +280,7 @@ export const ImageClipboardService = {
         ipcInvoke(IPC_COMMANDS.PROMOTE_IMAGE_CLIPBOARD_ITEM_BY_ID, {request: {itemId}}),
     setItemPinned: (itemId, pinned) => ipcInvoke(IPC_COMMANDS.SET_IMAGE_ITEM_PINNED, {itemId, pinned}),
     clearHistory: (mode) => ipcInvoke(IPC_COMMANDS.CLEAR_IMAGE_HISTORY, {mode}),
+    reorderItems: (itemIds) => ipcInvoke(IPC_COMMANDS.REORDER_IMAGE_CLIPBOARD_ITEMS, {request: {itemIds}}),
     importImageFiles: (paths) => ipcInvoke(IPC_COMMANDS.IMPORT_IMAGE_FILES, {paths}),
     countImportImageFiles: (paths) => ipcInvoke(IPC_COMMANDS.COUNT_IMPORT_IMAGE_FILES, {paths}),
     selectAndFillById: (itemId, opId) =>

@@ -26,6 +26,19 @@
         </el-icon>
       </template>
     </el-input>
+    <button
+        :class="{ active: isReorderMode }"
+        :title="isReorderMode ? $t('clipboard.finishReorder') : $t('clipboard.reorder')"
+        class="reorder-btn"
+        type="button"
+        @click.stop
+        @mousedown.stop="handleToggleReorder"
+    >
+      <el-icon :size="14">
+        <Sort v-if="!isReorderMode"/>
+        <Check v-else/>
+      </el-icon>
+    </button>
     <div class="category-nav">
       <div
           :class="{ active: categoryFilter === '全部' }"
@@ -75,7 +88,7 @@
 </template>
 
 <script setup>
-import {ArrowDown, ArrowRight, Close, Plus, Rank, Search} from '@element-plus/icons-vue'
+import {ArrowDown, ArrowRight, Check, Close, Plus, Rank, Search, Sort} from '@element-plus/icons-vue'
 import {computed} from 'vue'
 import {useI18n} from 'vue-i18n'
 
@@ -120,10 +133,14 @@ const props = defineProps({
   createCategoryText: {
     type: String,
     default: ''
+  },
+  isReorderMode: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emit = defineEmits(['update:searchKeyword', 'update:categoryFilter', 'update:newCategoryName'])
+const emit = defineEmits(['update:searchKeyword', 'update:categoryFilter', 'update:newCategoryName', 'toggle-reorder'])
 
 const searchKeyword = computed({
   get: () => props.searchKeyword,
@@ -163,6 +180,10 @@ const handleToggleAiSettings = () => {
   if (typeof props.toggleAiSettings === 'function') {
     props.toggleAiSettings()
   }
+}
+
+const handleToggleReorder = () => {
+  emit('toggle-reorder')
 }
 </script>
 
@@ -354,5 +375,30 @@ const handleToggleAiSettings = () => {
 .category-pill:hover .category-remove {
   background: var(--fy-danger);
   color: var(--fy-text-primary);
+}
+
+.reorder-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--fy-radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--fy-text-muted);
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: all var(--fy-duration-normal) var(--fy-ease-out);
+}
+
+.reorder-btn:hover {
+  color: var(--fy-accent);
+  background: var(--fy-accent-bg);
+}
+
+.reorder-btn.active {
+  color: var(--fy-accent);
+  background: var(--fy-accent-bg);
 }
 </style>

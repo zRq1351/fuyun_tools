@@ -8,7 +8,7 @@ use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands_screenshot::open_screenshot_editor;
 use crate::ui::commands_writeback::{
     begin_fill_sequence, interrupt_image_fill_flow, interrupt_text_fill_flow,
-    schedule_image_promote_to_top, spawn_fill_task,
+    spawn_fill_task,
     FillKind,
 };
 use crate::ui::window_manager::{
@@ -18,7 +18,6 @@ use crate::ui::window_manager::{
 };
 use crate::utils::clipboard::ClipboardManager;
 use crate::utils::image_clipboard::{
-    is_fast_fill_verify_mode_enabled,
     ImageClipboardManager, ImageHistoryPageData, ImageHistoryPreviewItem,
 };
 use crate::utils::utils_helpers::{
@@ -511,7 +510,7 @@ pub(crate) fn execute_select_and_fill_text(
 
     let item_content = {
         let manager = lock_arc_mutex(&manager_arc);
-        manager.promote_to_top(&item_id).map_err(|e| {
+        manager.get_item_content(&item_id).map_err(|e| {
             frontend_error_kind(AppErrorKind::ClipboardItemNotFound, e)
         })?
     };
@@ -815,17 +814,10 @@ pub(crate) fn execute_select_and_fill_image_by_id(
         operation_id,
         move |app_handle, state_ref| {
             let prepare_started_at = std::time::Instant::now();
-            let fast_mode = is_fast_fill_verify_mode_enabled();
             let image = {
                 let _ = state_ref;
                 let manager = lock_arc_mutex(&manager_arc);
-                if fast_mode {
-                    manager.promote_to_top_in_memory_by_id(&item_id)?;
-                    manager.get_image_by_index_for_fill(0)?
-                } else {
-                    manager.promote_to_top_by_id(&item_id)?;
-                    manager.get_image_by_index_for_fill(0)?
-                }
+                manager.get_image_by_id_for_fill(&item_id)?
             };
             record_perf_metric(
                 "image.fill_prepare",
@@ -843,9 +835,6 @@ pub(crate) fn execute_select_and_fill_image_by_id(
                 }),
             ) {
                 log::warn!("发送图片项置顶事件失败: {}", e);
-            }
-            if fast_mode {
-                schedule_image_promote_to_top(state_ref.clone(), item_id.clone());
             }
             Ok(())
         },
@@ -1618,6 +1607,39 @@ pub async fn image_window_blur(
         let state_clone = state.inner().clone();
         hide_image_clipboard_window(app, state_clone);
     }
+    Ok(())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderRequest {
+    item_ids: Vec<String>,
+}
+
+/// 重排文字剪贴板项目顺序
+#[tauri::command]
+pub async fn reorder_text_clipboard_items(
+    request: ReorderRequest,
+    _state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    crate::utils::database::reorder_history_items_async(&request.item_ids).await
+}
+
+/// 重排图片剪贴板项目顺序
+#[tauri::command]
+pub async fn reorder_image_clipboard_items(
+    request: ReorderRequest,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let manager_arc = get_image_clipboard_manager_arc(state.inner());
+    let manager = {
+        let guard = lock_arc_mutex(&manager_arc);
+        guard.clone()
+    };
+    manager.reorder_items_async(&request.item_ids).await?;
+    let state_clone = state.inner().clone();
+    emit_image_history_payload(&app, state_clone);
     Ok(())
 }
 

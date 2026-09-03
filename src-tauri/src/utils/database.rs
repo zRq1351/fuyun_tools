@@ -462,6 +462,11 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
         .execute(&mut *conn)
         .await;
 
+    // 添加 position 字段用于排序
+    let _ = sqlx::query("ALTER TABLE history_items ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+        .execute(&mut *conn)
+        .await;
+
     Ok(())
 }
 
@@ -567,17 +572,19 @@ fn resolve_history_sort(sort_by: Option<String>, sort_order: Option<String>) -> 
         .to_lowercase();
     match (by.as_str(), order.as_str()) {
         ("pinnedfirst", "asc") | ("pinned_first", "asc") =>
-            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at ASC, hi.updated_at ASC, hi.id ASC",
+            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at ASC, hi.position ASC, hi.id ASC",
         ("pinnedfirst", _) | ("pinned_first", _) =>
-            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at DESC, hi.updated_at DESC, hi.id DESC",
-        ("updatedat", "asc") | ("updated_at", "asc") => "hi.updated_at ASC, hi.id ASC",
-        ("updatedat", _) | ("updated_at", _) => "hi.updated_at DESC, hi.id DESC",
+            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at DESC, hi.position ASC, hi.id ASC",
+        ("position", "asc") => "hi.position ASC, hi.id ASC",
+        ("position", _) => "hi.position ASC, hi.id ASC",
+        ("updatedat", "asc") | ("updated_at", "asc") => "hi.position ASC, hi.updated_at ASC, hi.id ASC",
+        ("updatedat", _) | ("updated_at", _) => "hi.position ASC, hi.updated_at DESC, hi.id DESC",
         ("createdat", "asc") | ("created_at", "asc") => "hi.created_at ASC, hi.id ASC",
         ("createdat", _) | ("created_at", _) => "hi.created_at DESC, hi.id DESC",
         ("id", "asc") => "hi.id ASC",
         ("id", _) => "hi.id DESC",
-        _ if order == "asc" => "hi.updated_at ASC, hi.id ASC",
-        _ => "hi.updated_at DESC, hi.id DESC",
+        _ if order == "asc" => "hi.position ASC, hi.updated_at ASC, hi.id ASC",
+        _ => "hi.position ASC, hi.updated_at DESC, hi.id DESC",
     }
 }
 
@@ -1242,6 +1249,29 @@ pub async fn save_pinned_items_order_async(pinned_items: &[String]) -> Result<()
                 .await
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         }
+    }
+
+    tx.commit()
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    Ok(())
+}
+
+/// 重排历史记录顺序（按 item_ids 向量顺序重建 position）
+pub async fn reorder_history_items_async(item_ids: &[String]) -> Result<(), String> {
+    let mut conn = open_history_db_async().await?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+
+    for (idx, item_id) in item_ids.iter().enumerate() {
+        sqlx::query("UPDATE history_items SET position = ? WHERE item_id = ?")
+            .bind(idx as i64)
+            .bind(item_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     }
 
     tx.commit()

@@ -780,6 +780,18 @@ impl ClipboardManager {
         }
     }
 
+    pub fn get_item_content(&self, item_id: &str) -> Result<String, String> {
+        let history = lock_arc_mutex(&self.history);
+        let index = self
+            .find_index_by_id_with_lock(&history, item_id)
+            .ok_or_else(|| AppErrorKind::ClipboardItemNotFound.to_frontend_json())?;
+
+        if index >= history.len() {
+            return Err(AppErrorKind::SystemIndexOutOfRange.to_frontend_json());
+        }
+        Ok(history[index].clone())
+    }
+
     pub fn promote_to_top(&self, item_id: &str) -> Result<String, String> {
         let item = {
             let mut history = lock_arc_mutex(&self.history);

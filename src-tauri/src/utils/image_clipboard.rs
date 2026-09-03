@@ -1367,6 +1367,34 @@ impl ImageClipboardManager {
         tauri::async_runtime::block_on(self.clear_history_by_mode_async(mode))
     }
 
+    /// 重排图片项目顺序
+    pub async fn reorder_items_async(&self, item_ids: &[String]) -> Result<(), String> {
+        // 更新内存中的顺序
+        {
+            let mut history = lock_arc_mutex(&self.history);
+            let id_set: HashSet<String> = item_ids.iter().cloned().collect();
+            // 过滤出存在的项目，按新顺序排列
+            let mut reordered: Vec<_> = item_ids
+                .iter()
+                .filter(|id| history.iter().any(|item| &item.id == *id))
+                .filter_map(|id| history.iter().find(|item| &item.id == id).cloned())
+                .collect();
+            // 添加未在 item_ids 中的项目（保留在末尾）
+            for item in history.iter() {
+                if !id_set.contains(&item.id) {
+                    reordered.push(item.clone());
+                }
+            }
+            *history = reordered;
+        }
+        // 持久化到数据库
+        let all_ids: Vec<String> = {
+            let history = lock_arc_mutex(&self.history);
+            history.iter().map(|item| item.id.clone()).collect()
+        };
+        image_store::sync_item_positions_async(&all_ids).await
+    }
+
     pub async fn clear_history_by_mode_async(&self, mode: &str) -> Result<usize, String> {
         let (removed_paths, removed_ids, should_clear_all) = {
             let history = lock_arc_mutex(&self.history);

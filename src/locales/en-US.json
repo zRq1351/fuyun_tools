@@ -535,7 +535,9 @@
     "offsetUp": "Move Up",
     "loadMore": "Load More",
     "loading": "Loading",
-    "cyclePageSize": "Cycle page size (currently {size} per page)"
+    "cyclePageSize": "Cycle page size (currently {size} per page)",
+    "reorder": "Reorder",
+    "finishReorder": "Finish Reorder"
   },
   "imageClipboard": {
     "search": "Search category/tags",
@@ -568,7 +570,9 @@
     "allLoaded": "All {total} items loaded",
     "loading": "Loading",
     "loadMore": "Load More",
-    "cyclePageSize": "Cycle page size (currently {size} per page)"
+    "cyclePageSize": "Cycle page size (currently {size} per page)",
+    "reorder": "Reorder",
+    "finishReorder": "Finish Reorder"
   },
   "launcher": {
     "listView": "List View",

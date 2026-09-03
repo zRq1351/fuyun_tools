@@ -582,6 +582,8 @@ pub fn run() {
             recognize_image_ocr,
             clear_text_history,
             clear_image_history,
+            reorder_text_clipboard_items,
+            reorder_image_clipboard_items,
             count_import_image_files,
             import_image_files,
             get_clipboard_bottom_offset,

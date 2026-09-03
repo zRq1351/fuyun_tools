@@ -18,6 +18,8 @@
         :start-create-category="startCreateCategory"
         :start-window-offset-drag="startWindowOffsetDrag"
         :show-ai-toggle="false"
+        :is-reorder-mode="isReorderMode"
+        @toggle-reorder="toggleReorderMode"
     />
     <div v-if="isLoadingPage && filteredHistory.length === 0" class="loading-state">
       <el-icon :size="24" class="is-loading">
@@ -53,6 +55,8 @@
         :show-context-menu="showContextMenu"
         :visible-history="filteredHistory"
         :total-count="totalCount"
+        :is-reorder-mode="isReorderMode"
+        :on-reorder="handleReorder"
         @load-more-intent="handleLoadMoreIntent"
     />
 
@@ -190,6 +194,7 @@ let warmupBatchTimer = null
 let warmupBatchInFlight = null
 const isCtrlKeyPressed = ref(false)
 const loadMoreIntent = ref(false)
+const isReorderMode = ref(false)
 const prefetchedPage = ref(null)
 const isPrefetchingPage = ref(false)
 let prefetchRequestSeq = 0
@@ -677,6 +682,28 @@ const cyclePageSize = async () => {
   localStorage.setItem('image_history_page_size', String(next))
   clearPrefetchedPage()
   await syncHistory()
+}
+
+const toggleReorderMode = () => {
+  isReorderMode.value = !isReorderMode.value
+  if (!isReorderMode.value) {
+    saveReorder()
+  }
+}
+
+let reorderedEntries = null
+
+const handleReorder = (newList) => {
+  reorderedEntries = newList
+}
+
+const saveReorder = async () => {
+  try {
+    const itemIds = (reorderedEntries || filteredHistory.value).map(item => item.item.id)
+    await ImageClipboardService.reorderItems(itemIds)
+  } catch (error) {
+    console.error('保存排序失败:', error)
+  }
 }
 
 const enforcePreviewCacheSize = () => {

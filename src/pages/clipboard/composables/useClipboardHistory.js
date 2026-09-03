@@ -650,6 +650,14 @@ export function useClipboardHistory(pinnedItems = ref([])) {
         bumpFilterDataRevision()
     }
 
+    const reorderItems = (newOrder) => {
+        pagedHistory.value = newOrder.map((entry, idx) => ({
+            ...entry,
+            position: idx + 1
+        }))
+        bumpFilterDataRevision()
+    }
+
     return {
         replaceLocalById,
         selectedItemId,
@@ -678,6 +686,7 @@ export function useClipboardHistory(pinnedItems = ref([])) {
         bumpFilterDataRevision,
         setItemCategoryLocal,
         removeItemCategoryLocal,
-        rebuildCategorySearchIndex
+        rebuildCategorySearchIndex,
+        reorderItems
     }
 }

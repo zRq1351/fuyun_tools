@@ -25,6 +25,8 @@
         :explanation-target-language="explanationTargetLanguage"
         :create-category-text="$t('clipboard.createCategory')"
         :search-placeholder="$t('clipboard.search')"
+        :is-reorder-mode="isReorderMode"
+        @toggle-reorder="toggleReorderMode"
     />
     <div v-show="!isAiSettingsCollapsed" class="ai-quick-panel-wrap" @click.stop @mousedown.stop>
       <div class="ai-quick-panel">
@@ -97,6 +99,8 @@
         :has-more="hasMore"
         :is-loading-page="isLoadingPage"
         :total-count="totalCount"
+        :is-reorder-mode="isReorderMode"
+        :on-reorder="handleReorder"
         @load-more-intent="handleLoadMoreIntent"
         @preview="handlePreview"
         :visible-history="visibleHistory"
@@ -268,7 +272,8 @@ const {
   bumpFilterDataRevision,
   setItemCategoryLocal,
   removeItemCategoryLocal,
-  rebuildCategorySearchIndex
+  rebuildCategorySearchIndex,
+  reorderItems
 } = useClipboardHistory(pinnedItems)
 
 const {
@@ -297,6 +302,26 @@ const {
 } = useWindowOffset()
 
 const isItemPinned = (id) => pinnedItems.value.includes(id)
+
+const isReorderMode = ref(false)
+const toggleReorderMode = () => {
+  isReorderMode.value = !isReorderMode.value
+  if (!isReorderMode.value) {
+    // 退出排序模式时保存排序结果
+    saveReorder()
+  }
+}
+const handleReorder = (newList) => {
+  reorderItems(newList)
+}
+const saveReorder = async () => {
+  try {
+    const itemIds = visibleHistory.value.map(item => item.id)
+    await ClipboardService.reorderItems(itemIds)
+  } catch (error) {
+    console.error('保存排序失败:', error)
+  }
+}
 
 const promoteItem = async (id) => {
   const shouldPin = !isItemPinned(id)

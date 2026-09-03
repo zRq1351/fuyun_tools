@@ -1,6 +1,30 @@
 <template>
   <div ref="contentRef" class="content">
-    <div ref="stageRef" class="carousel-stage" @mousedown="onStageMouseDown" @click="onStageClick">
+    <div v-if="isReorderMode" ref="sortableRef" class="sortable-grid">
+      <div
+          v-for="(entry, idx) in props.visibleHistory"
+          :id="'image-item-' + entry.item.id"
+          :key="entry.item.id"
+          class="clipboard-item sortable-item"
+      >
+        <div class="item-header">
+          <span class="item-index">{{ idx + 1 }}</span>
+          <span class="item-category">{{ translateCategory(entry.category) }}</span>
+          <div v-if="entry.pinned" class="item-pinned-dot"></div>
+        </div>
+        <div class="item-content">
+          <img :src="getPreviewDataUrl(entry.item)" alt="" class="image-preview" decoding="async"
+               draggable="false" @dragstart.prevent/>
+        </div>
+        <div v-if="entry.tags && entry.tags.length" class="tag-wrap">
+          <div class="tag-chip-list">
+            <span v-for="tag in entry.tags" :key="`${entry.item.id}-${tag}`" class="tag-chip">#{{ tag }}</span>
+          </div>
+        </div>
+        <div class="image-meta">{{ entry.item.width }} × {{ entry.item.height }}</div>
+      </div>
+    </div>
+    <div v-else ref="stageRef" class="carousel-stage" @click="onStageClick" @mousedown="onStageMouseDown">
       <button
           v-if="displayIndex > 0"
           class="nav-arrow nav-prev"
@@ -70,9 +94,10 @@
 </template>
 
 <script setup>
-import {computed, onBeforeUnmount, onMounted, ref, watch} from 'vue'
+import {computed, onBeforeUnmount, onMounted, ref, watch, nextTick} from 'vue'
 import {Close, Download, FullScreen, Loading, Star} from '@element-plus/icons-vue'
 import {useI18n} from 'vue-i18n'
+import Sortable from 'sortablejs'
 
 const {t} = useI18n()
 
@@ -107,14 +132,77 @@ const props = defineProps({
   getPreviewDataUrl: {type: Function, required: true},
   hasMore: {type: Boolean, default: false},
   isLoadingPage: {type: Boolean, default: false},
-  totalCount: {type: Number, default: 0}
+  totalCount: {type: Number, default: 0},
+  isReorderMode: {type: Boolean, default: false},
+  onReorder: {type: Function, default: null}
 })
 const emit = defineEmits(['load-more-intent'])
 
 const contentRef = ref(null)
 const stageRef = ref(null)
+const sortableRef = ref(null)
 const containerWidth = ref(800)
 let resizeObserver = null
+let sortableInstance = null
+
+// Sort mode: initialize SortableJS when entering reorder mode
+watch(() => props.isReorderMode, async (newVal) => {
+  if (newVal) {
+    await nextTick()
+    initSortable()
+  } else {
+    destroySortable()
+  }
+})
+
+const initSortable = () => {
+  if (!sortableRef.value || sortableInstance) return
+  sortableInstance = Sortable.create(sortableRef.value, {
+    animation: 200,
+    forceFallback: true,
+    delay: 500,
+    delayOnTouchOnly: true,
+    ghostClass: 'sortable-ghost',
+    chosenClass: 'sortable-chosen',
+    dragClass: 'sortable-drag',
+    fallbackClass: 'sortable-fallback',
+    fallbackTolerance: 3,
+    fallbackOnBody: true,
+    swapThreshold: 0.65,
+    onStart: () => {
+      setTimeout(() => {
+        const el = document.querySelector('.sortable-fallback')
+        if (!el) return
+        const move = (e) => {
+          el.style.left = (e.clientX - el.offsetWidth / 2) + 'px';
+          el.style.top = (e.clientY - el.offsetHeight / 2) + 'px'
+        }
+        document.addEventListener('mousemove', move)
+        document.addEventListener('mouseup', function up() {
+          document.removeEventListener('mousemove', move);
+          document.removeEventListener('mouseup', up)
+        })
+      }, 50)
+    },
+    onEnd: (evt) => {
+      if (evt.oldIndex !== evt.newIndex) {
+        const list = [...props.visibleHistory]
+        const [moved] = list.splice(evt.oldIndex, 1)
+        list.splice(evt.newIndex, 0, moved)
+        if (typeof props.onReorder === 'function') {
+          props.onReorder(list)
+        }
+      }
+    }
+  })
+}
+
+const destroySortable = () => {
+  if (sortableInstance) {
+    sortableInstance.destroy()
+    sortableInstance = null
+  }
+}
 
 // --- Scroll state ---
 const scrollPos = ref(0)
@@ -433,8 +521,8 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
   left: 0;
   display: flex;
   flex-direction: column;
-  width: 300px;
-  height: 280px;
+  width: 260px;
+  height: 250px;
   white-space: normal;
   background: var(--fy-glass-bg);
   border: 0.5px solid var(--fy-glass-border);
@@ -549,4 +637,56 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
 }
 .load-more-text { font-size: 12px; }
 .load-more-text:hover { color: var(--fy-accent); }
+
+.sortable-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  padding: 12px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.sortable-item {
+  position: relative !important;
+  transform: none !important;
+  opacity: 1 !important;
+  z-index: auto !important;
+  cursor: grab;
+}
+
+.sortable-item:active {
+  cursor: grabbing;
+}
+
+.sortable-ghost {
+  opacity: 0.4;
+  background: var(--fy-accent-bg) !important;
+  border: 2px dashed var(--fy-accent) !important;
+}
+
+.sortable-chosen {
+  opacity: 1 !important;
+  transform: scale(1.05);
+  box-shadow: var(--fy-shadow);
+  z-index: 10;
+  border-color: var(--fy-accent) !important;
+}
+
+.sortable-drag {
+  opacity: 0.3;
+}
+
+.sortable-fallback {
+  opacity: 0.95 !important;
+  background: var(--fy-bg-primary) !important;
+  border: 2px solid var(--fy-accent) !important;
+  border-radius: var(--fy-radius-md);
+  box-shadow: var(--fy-shadow-lg);
+  cursor: grabbing !important;
+  pointer-events: none;
+  position: fixed !important;
+  z-index: 9999 !important;
+  overflow: hidden;
+}
 </style>

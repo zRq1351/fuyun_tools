@@ -1044,7 +1044,7 @@ pub async fn load_history_page_async(
         .map(|v| v.trim().to_lowercase())
         .filter(|v| !v.is_empty());
     let pinned_flag = if pinned_only { 1_i64 } else { 0_i64 };
-    let order = match sort_order.as_deref() {
+    let _order = match sort_order.as_deref() {
         Some("desc") | Some("DESC") => "DESC",
         _ => "ASC",
     };
@@ -1056,12 +1056,11 @@ pub async fn load_history_page_async(
         format!(
             "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC,
              CASE WHEN p.item_id IS NOT NULL THEN COALESCE(p.position, 2147483647) END ASC,
-             CASE WHEN p.item_id IS NULL THEN hi.position END {},
-             hi.item_id {}",
-            order, order
+             hi.position ASC,
+             hi.item_id ASC"
         )
     } else {
-        format!("hi.position {}, hi.item_id {}", order, order)
+        format!("hi.position ASC, hi.item_id ASC")
     };
     let keyword_like = keyword_filter.as_ref().map(|v| format!("%{}%", v));
     let effective_limit = limit.clamp(1, 200);
