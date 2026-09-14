@@ -768,6 +768,8 @@ pub fn run() {
             // 主题命令
             get_theme,
             set_theme,
+            get_locale,
+            set_locale,
         ])
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());

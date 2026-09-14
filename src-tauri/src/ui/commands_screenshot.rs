@@ -31,6 +31,7 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_positioner::WindowExt;
 
 /// 截图会话数据，前端通过 `get_screenshot_data` IPC 主动拉取
+#[derive(Clone)]
 struct ScreenshotSession {
     image_path: PathBuf,
     width: u32,
@@ -48,12 +49,20 @@ fn screenshot_session_store() -> &'static std::sync::Mutex<Option<ScreenshotSess
     SCREENSHOT_SESSION.get_or_init(|| std::sync::Mutex::new(None))
 }
 
+/// 清空当前截图会话（关闭编辑器/开始新会话前调用）
+pub(crate) fn clear_screenshot_session() {
+    if let Ok(mut guard) = screenshot_session_store().lock() {
+        *guard = None;
+    }
+}
+
 #[tauri::command]
 pub async fn get_screenshot_data() -> Result<serde_json::Value, String> {
-    let mut guard = screenshot_session_store()
+    let guard = screenshot_session_store()
         .lock()
         .map_err(|e| format!("锁获取失败: {}", e))?;
-    match guard.take() {
+    // clone 而非 take：webview 重载/二次拉取仍可恢复会话
+    match guard.as_ref() {
         Some(session) => Ok(serde_json::json!({
             "success": true,
             "image_path": session.image_path,
@@ -344,8 +353,23 @@ pub async fn recognize_image_ocr(
         }
     };
 
-    match crate::services::ocr_engine::recognize_image(&png_bytes, engine_type, &_app).await {
-        Ok(result) => {
+    // 整体超时：避免 OCR 引擎/系统 API 卡死导致 IPC 永不返回
+    let ocr_future = crate::services::ocr_engine::recognize_image(&png_bytes, engine_type, &_app);
+    match tokio::time::timeout(std::time::Duration::from_secs(60), ocr_future).await {
+        Err(_) => {
+            record_perf_metric(
+                "ocr.recognize",
+                "OCR识别耗时",
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some("timeout".to_string()),
+            );
+            Ok(serde_json::json!({
+                "success": false,
+                "error": "OCR 识别超时（60 秒）"
+            }))
+        }
+        Ok(Ok(result)) => {
             record_perf_metric(
                 "ocr.recognize",
                 "OCR识别耗时",
@@ -358,7 +382,7 @@ pub async fn recognize_image_ocr(
                 "paragraphs": result.paragraphs
             }))
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             record_perf_metric(
                 "ocr.recognize",
                 "OCR识别耗时",
@@ -1387,6 +1411,7 @@ window.__SCREENSHOT_BOOT__.pendingMode = null;",
     }
     cleanup_all_screenshot_boot_images();
     features::screenshot::capture::set_screenshot_in_progress(false);
+    clear_screenshot_session();
 
     Ok(())
 }

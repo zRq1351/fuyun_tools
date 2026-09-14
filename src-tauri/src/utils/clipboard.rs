@@ -535,6 +535,7 @@ impl ClipboardManager {
                 exact_index_cache.clear();
                 exact_index_cache.put(content_hash, 0);
                 *fingerprints = build_history_fingerprints(&history);
+                { let mut idx = self.fingerprint_index.lock(); *idx = build_fingerprint_index(&fingerprints); }
                 self.history_cache_dirty.store(false, Ordering::Relaxed);
                 return;
             }
@@ -604,6 +605,7 @@ impl ClipboardManager {
             exact_index_cache.put(stable_text_hash(first), 0);
         }
         *fingerprints = build_history_fingerprints(&history);
+        { let mut idx = self.fingerprint_index.lock(); *idx = build_fingerprint_index(&fingerprints); }
         self.history_cache_dirty.store(false, Ordering::Relaxed);
     }
 

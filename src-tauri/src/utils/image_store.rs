@@ -893,12 +893,12 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
             .try_get(3)
             .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
         items.push(ImageHistoryItem {
-            id: id.clone(),
+            signature: crate::utils::image_clipboard::extract_signature_from_item_id(&id),
+            id,
             width: width.max(0) as u32,
             height: height.max(0) as u32,
             image_path,
             rgba_bytes: Vec::new(),
-            signature: id,
             lazy_load: true,
             cached_signature: None,
         });

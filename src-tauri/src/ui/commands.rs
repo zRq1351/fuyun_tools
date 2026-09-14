@@ -478,10 +478,17 @@ pub async fn get_ai_settings(state: State<'_, Arc<Mutex<SharedAppState>>>) -> Re
     let providers = crate::utils::ai_store::get_all_providers().await;
     let mut provider_configs_map = serde_json::Map::new();
     for (key, cfg) in &providers {
+        // 只回掩码，避免明文密钥进入 webview；保存路径已识别 "********" 为不更新
+        let masked_key = if cfg.api_key.is_empty() {
+            String::new()
+        } else {
+            "********".to_string()
+        };
         provider_configs_map.insert(key.clone(), serde_json::json!({
             "api_url": cfg.api_url,
             "model_name": cfg.model_name,
-            "api_key": cfg.api_key,
+            "api_key": masked_key,
+            "api_key_set": !cfg.api_key.is_empty(),
         }));
     }
 
@@ -945,14 +952,23 @@ pub async fn save_app_settings(
         if screenshot_hot_key_val != &settings.screenshot_hot_key {
             let effective_hot_key = effective_key(&hot_key, &settings.hot_key);
             let effective_image_hot_key = effective_key(&image_hot_key, &settings.image_hot_key);
+            let effective_recording = effective_key(&recording_hot_key, &settings.recording_hot_key);
+            let effective_mic =
+                effective_key(&recording_mic_toggle_hot_key, &settings.recording_mic_toggle_hot_key);
+            let effective_launcher = effective_key(&launcher_hot_key, &settings.launcher_hot_key);
+            let effective_doc = effective_key(&doc_manager_hot_key, &settings.doc_manager_hot_key);
             if screenshot_hot_key_val == &effective_hot_key
                 || screenshot_hot_key_val == &effective_image_hot_key
+                || screenshot_hot_key_val == &effective_recording
+                || screenshot_hot_key_val == &effective_mic
+                || screenshot_hot_key_val == &effective_launcher
+                || screenshot_hot_key_val == &effective_doc
             {
                 return Err(frontend_error_kind(
                     AppErrorKind::SettingsHotkeysIdentical,
                     format!(
-                        "hot_key={}, image_hot_key={}, screenshot_hot_key={}",
-                        effective_hot_key, effective_image_hot_key, screenshot_hot_key_val
+                        "screenshot_hot_key={} 与剪贴板/录屏/麦克风/启动器/文档快捷键冲突",
+                        screenshot_hot_key_val
                     ),
                 ));
             }
@@ -1740,6 +1756,178 @@ pub async fn save_app_settings(
     Ok(())
 }
 
+/// 备份恢复后把 settings.json 的变更同步到运行时：
+/// 热键注销/重注册、监听启停、窗口创建/销毁（与 save_app_settings 尾部逻辑对齐）
+pub(crate) fn apply_runtime_after_settings_restore(
+    app: &AppHandle,
+    state: &Arc<Mutex<SharedAppState>>,
+) {
+    use crate::ui::commands_clipboard::{
+        register_image_shortcut, register_screenshot_shortcut, register_text_shortcut,
+    };
+
+    let settings = {
+        let guard = lock_arc_mutex(state);
+        guard.settings.clone()
+    };
+    let (text_enabled, image_enabled, screenshot_enabled, recording_enabled, selection_enabled, launcher_enabled, doc_enabled) = (
+        settings.text_clipboard_enabled,
+        settings.image_clipboard_enabled,
+        settings.screenshot_enabled,
+        settings.recording_enabled,
+        settings.selection_enabled,
+        settings.launcher_enabled,
+        settings.doc_manager_enabled,
+    );
+
+    // 先注销全部已知热键，再按新设置注册
+    for key in [
+        settings.hot_key.as_str(),
+        settings.image_hot_key.as_str(),
+        settings.screenshot_hot_key.as_str(),
+        settings.recording_hot_key.as_str(),
+        settings.recording_mic_toggle_hot_key.as_str(),
+        settings.launcher_hot_key.as_str(),
+        settings.doc_manager_hot_key.as_str(),
+    ] {
+        if !key.is_empty() {
+            if let Err(e) = app.global_shortcut().unregister(key) {
+                log::debug!("恢复设置时注销快捷键 '{}' 失败(可能未注册): {}", key, e);
+            }
+        }
+    }
+
+    if text_enabled {
+        if let Err(e) = register_text_shortcut(app, state.clone(), &settings.hot_key) {
+            log::warn!("恢复设置后注册文字剪贴板快捷键失败: {}", e);
+        }
+    }
+    if image_enabled {
+        if let Err(e) = register_image_shortcut(app, state.clone(), &settings.image_hot_key) {
+            log::warn!("恢复设置后注册图片剪贴板快捷键失败: {}", e);
+        }
+    }
+    if screenshot_enabled {
+        if let Err(e) = register_screenshot_shortcut(app, &settings.screenshot_hot_key) {
+            log::warn!("恢复设置后注册截图快捷键失败: {}", e);
+        }
+    }
+    if recording_enabled {
+        if let Err(e) = register_recording_shortcut(app, state.clone(), &settings.recording_hot_key) {
+            log::warn!("恢复设置后注册录屏快捷键失败: {}", e);
+        }
+        if !settings.recording_mic_toggle_hot_key.is_empty() {
+            if let Err(e) = register_mic_toggle_shortcut(
+                app,
+                state.clone(),
+                &settings.recording_mic_toggle_hot_key,
+            ) {
+                log::warn!("恢复设置后注册麦克风切换快捷键失败: {}", e);
+            }
+        }
+    }
+    if launcher_enabled {
+        let app_handle = app.clone();
+        let launcher_key = settings.launcher_hot_key.clone();
+        if let Err(e) = app.global_shortcut().on_shortcut(
+            launcher_key.as_str(),
+            move |_app, _shortcut, event| {
+                if let ShortcutState::Pressed = event.state {
+                    let app_handle_inner = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = crate::ui::commands_launcher::show_launcher(app_handle_inner)
+                            .await
+                        {
+                            log::error!("切换启动器失败: {}", e);
+                        }
+                    });
+                }
+            },
+        ) {
+            log::warn!("恢复设置后注册启动器快捷键失败: {}", e);
+        }
+    }
+    if doc_enabled {
+        let app_handle = app.clone();
+        let doc_key = settings.doc_manager_hot_key.clone();
+        if let Err(e) = app.global_shortcut().on_shortcut(
+            doc_key.as_str(),
+            move |_app, _shortcut, event| {
+                if let ShortcutState::Pressed = event.state {
+                    let app_handle_inner = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = show_standard_window_by_label(
+                            &app_handle_inner,
+                            "document_manager",
+                        ) {
+                            log::error!("显示文档管理器窗口失败: {}", e);
+                        }
+                    });
+                }
+            },
+        ) {
+            log::warn!("恢复设置后注册文档管理快捷键失败: {}", e);
+        }
+    }
+
+    features::mouse_listener::set_selection_listener_enabled(
+        app.clone(),
+        state.clone(),
+        selection_enabled,
+    );
+    set_clipboard_listener_enabled(app.clone(), state.clone(), text_enabled);
+    set_image_clipboard_listener_enabled(app.clone(), state.clone(), image_enabled);
+
+    if screenshot_enabled {
+        let _ = ensure_window_for_label(app, "screenshot");
+        let _ = ensure_window_for_label(app, "longshot_toolbar");
+        let _ = ensure_window_for_label(app, "longshot_border");
+    } else {
+        destroy_window_by_label(app, "screenshot");
+        destroy_window_by_label(app, "longshot_toolbar");
+        destroy_window_by_label(app, "longshot_border");
+    }
+    if recording_enabled {
+        let _ = ensure_window_for_label(app, "recording_toolbar");
+    } else {
+        destroy_window_by_label(app, "recording_toolbar");
+    }
+    if text_enabled {
+        let _ = ensure_window_for_label(app, "clipboard");
+        let _ = ensure_window_for_label(app, "text_preview");
+    } else {
+        destroy_window_by_label(app, "clipboard");
+        destroy_window_by_label(app, "text_preview");
+    }
+    if image_enabled {
+        let _ = ensure_window_for_label(app, "image_clipboard");
+        let _ = ensure_window_for_label(app, "image_preview");
+    } else {
+        destroy_window_by_label(app, "image_clipboard");
+        destroy_window_by_label(app, "image_preview");
+    }
+    if selection_enabled {
+        let _ = ensure_window_for_label(app, "selection_toolbar");
+    } else {
+        destroy_window_by_label(app, "selection_toolbar");
+    }
+    if launcher_enabled {
+        let _ = ensure_window_for_label(app, "launcher");
+    } else {
+        destroy_window_by_label(app, "launcher");
+    }
+    if doc_enabled {
+        let _ = ensure_window_for_label(app, "document_manager");
+    } else {
+        destroy_window_by_label(app, "document_manager");
+        let _ = crate::ui::window_manager::hide_doc_manager_widget_window(app);
+    }
+
+    crate::core::logger::set_logging_enabled(settings.logging_enabled);
+    set_image_fill_verify_mode(&settings.image_fill_verify_mode);
+    log::info!("备份恢复后运行时配置已重新应用");
+}
+
 #[tauri::command]
 pub async fn test_ai_connection(
     ai_provider: Option<String>,
@@ -2100,6 +2288,26 @@ pub async fn get_theme() -> Result<String, String> {
 pub async fn set_theme(theme: String) -> Result<(), String> {
     let mut settings = load_settings().map_err(|e| e.to_string())?;
     settings.theme = theme;
+    save_settings(&settings).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 获取界面语言
+#[tauri::command]
+pub async fn get_locale() -> Result<String, String> {
+    let settings = load_settings().map_err(|e| e.to_string())?;
+    Ok(settings.locale)
+}
+
+/// 设置界面语言
+#[tauri::command]
+pub async fn set_locale(locale: String) -> Result<(), String> {
+    let allowed = ["", "zh-CN", "en-US"];
+    if !allowed.contains(&locale.as_str()) {
+        return Err(format!("不支持的语言: {}", locale));
+    }
+    let mut settings = load_settings().map_err(|e| e.to_string())?;
+    settings.locale = locale;
     save_settings(&settings).map_err(|e| e.to_string())?;
     Ok(())
 }

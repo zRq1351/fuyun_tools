@@ -1,9 +1,9 @@
 use crate::core::error_codes::AppErrorKind;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::RECT;
@@ -36,48 +36,69 @@ pub struct WgcCropRect {
     pub height: u32,
 }
 
-/// 暂停期间的 PTS 间隙补偿：成片时间轴必须排除暂停区间。
-/// 帧 时间戳来自 QPC（SystemRelativeTime），暂停期间的墙钟流逝要从后续帧
-/// 时间戳中整体扣除——这样整个录制会话只产生一个连续的视频时间轴，
-/// 不存在分段拼接边界，音画对齐不再依赖任何跨段校准。
-///
-/// 时间单位与 `Frame::timestamp().Duration` 一致（100ns）。
+/// 暂停时间轴：由旁路线程采样 pause_flag 维护，避免“暂停期间无帧”时 on_frame_arrived 无法感知
 #[derive(Debug, Default)]
-struct PtsGapCompensator {
-    /// 累计需要扣除的暂停时长（100ns 单位）
-    paused_total: i64,
-    /// 当前（或最近一次）暂停的开始时刻；None 表示当前不在暂停中
-    pause_entered_at: Option<std::time::Instant>,
+struct PauseTimeline {
+    /// 已闭合暂停累计（100ns）
+    total_100ns: Mutex<i64>,
+    /// 当前未闭合暂停的开始时刻；None 表示未在暂停
+    open_since: Mutex<Option<Instant>>,
 }
 
-impl PtsGapCompensator {
-    fn on_pause_start(&mut self, now: std::time::Instant) {
-        // 幂等：重复的 start（标志抖动）不覆盖第一次进入时刻
-        if self.pause_entered_at.is_none() {
-            self.pause_entered_at = Some(now);
-        }
-    }
-
-    /// 结束一次暂停，返回本次新增的暂停时长（100ns 单位）；未在暂停中返回 0
-    fn on_pause_end(&mut self, now: std::time::Instant) -> i64 {
-        match self.pause_entered_at.take() {
-            Some(entered) => {
-                let gap_100ns = now.duration_since(entered).as_nanos() as i64 / 100;
-                self.paused_total += gap_100ns;
-                gap_100ns
+impl PauseTimeline {
+    fn mark_pause_edge(&self, paused_now: bool) {
+        let mut open = self.open_since.lock().unwrap_or_else(|e| e.into_inner());
+        match (*open, paused_now) {
+            (None, true) => *open = Some(Instant::now()),
+            (Some(entered), false) => {
+                let gap = entered.elapsed().as_nanos() as i64 / 100;
+                let mut total = self.total_100ns.lock().unwrap_or_else(|e| e.into_inner());
+                *total += gap;
+                *open = None;
             }
-            None => 0,
+            _ => {}
         }
     }
 
-    fn is_paused(&self) -> bool {
-        self.pause_entered_at.is_some()
+    fn effective_paused_total_100ns(&self) -> i64 {
+        let total = *self.total_100ns.lock().unwrap_or_else(|e| e.into_inner());
+        let open = *self.open_since.lock().unwrap_or_else(|e| e.into_inner());
+        match open {
+            Some(entered) => total + (entered.elapsed().as_nanos() as i64 / 100),
+            None => total,
+        }
     }
 
-    /// 将原始 QPC 帧时间戳映射到排除暂停区间的输出时间轴
-    fn adjust(&self, raw_ts: i64) -> i64 {
-        raw_ts - self.paused_total
+    #[allow(dead_code)] // 单测使用
+    fn is_open(&self) -> bool {
+        self.open_since
+            .lock()
+            .map(|g| g.is_some())
+            .unwrap_or(false)
     }
+}
+
+fn spawn_pause_timeline_watcher(
+    pause_flag: Arc<AtomicBool>,
+    stop_flag: Arc<AtomicBool>,
+    timeline: Arc<PauseTimeline>,
+) {
+    thread::spawn(move || {
+        let mut last = pause_flag.load(Ordering::Relaxed);
+        timeline.mark_pause_edge(last);
+        while !stop_flag.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(20));
+            let now = pause_flag.load(Ordering::Relaxed);
+            if now != last {
+                timeline.mark_pause_edge(now);
+                last = now;
+            }
+        }
+        // 退出时闭合未结束的暂停
+        if last {
+            timeline.mark_pause_edge(false);
+        }
+    });
 }
 
 fn is_border_config_unsupported(details: &str) -> bool {
@@ -209,6 +230,8 @@ struct WgcCaptureFlags {
     output_path: String,
     fps: u32,
     bitrate_bps: u32,
+    /// 旁路维护的暂停时间轴（无帧时也能正确补偿）
+    pause_timeline: Arc<PauseTimeline>,
 }
 
 struct WgcCaptureHandler {
@@ -216,8 +239,6 @@ struct WgcCaptureHandler {
     flags: WgcCaptureFlags,
     /// 缓存的输出帧缓冲区，避免每帧重新分配
     resized_cache: Vec<u8>,
-    /// 暂停 PTS 间隙补偿（软暂停：会话不销毁，输出时间轴排除暂停区间）
-    pts_gap: PtsGapCompensator,
 }
 
 impl GraphicsCaptureApiHandler for WgcCaptureHandler {
@@ -240,7 +261,6 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
             encoder: Some(encoder),
             resized_cache: vec![0u8; target_pixels * 4],
             flags: ctx.flags,
-            pts_gap: PtsGapCompensator::default(),
         })
     }
 
@@ -249,17 +269,8 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
         frame: &mut Frame,
         _capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
-        // 软暂停状态机：进入/退出暂停时维护 PTS 补偿（幂等，标志抖动安全）
-        let paused_now = self.flags.pause_flag.load(Ordering::Relaxed);
-        match (self.pts_gap.is_paused(), paused_now) {
-            (false, true) => self.pts_gap.on_pause_start(std::time::Instant::now()),
-            (true, false) => {
-                self.pts_gap.on_pause_end(std::time::Instant::now());
-            }
-            _ => {}
-        }
-        if paused_now {
-            // 暂停期间丢弃帧：编码器保持存活，恢复后时间戳经补偿无缝衔接
+        // 暂停期间丢弃帧；时间轴由旁路 PauseTimeline 补偿，无需依赖本回调观察暂停边沿
+        if self.flags.pause_flag.load(Ordering::Relaxed) {
             return Ok(());
         }
         if self.flags.first_frame_elapsed_ms.load(Ordering::Relaxed) == u64::MAX {
@@ -270,7 +281,7 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
         }
         if let Some(encoder) = self.encoder.as_mut() {
             let mut raw_timestamp = frame.timestamp().map_err(|e| e.to_string())?.Duration;
-            
+
             let first_ts = self.flags.first_frame_timestamp.load(Ordering::Relaxed);
             if first_ts == i64::MAX {
                 self.flags.first_frame_timestamp.store(raw_timestamp, Ordering::Relaxed);
@@ -282,9 +293,8 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                 }
             }
 
-            // 排除暂停区间：恢复后的帧时间戳整体左移累计暂停时长，
-            // 使输出时间轴与"有效录制时钟(U)"一致（暂停不占成片时长）
-            raw_timestamp = self.pts_gap.adjust(raw_timestamp).max(0);
+            // 排除暂停区间：旁路线程累计的暂停墙钟时长整体左移
+            raw_timestamp = (raw_timestamp - self.flags.pause_timeline.effective_paused_total_100ns()).max(0);
 
             let frame_w = frame.width() as usize;
             let frame_h = frame.height() as usize;
@@ -532,7 +542,13 @@ pub fn start_window_capture_to_mp4(
     let pause_flag = Arc::new(AtomicBool::new(false));
     let session_closed = Arc::new(AtomicBool::new(false));
     let first_frame_elapsed_ms = Arc::new(AtomicU64::new(u64::MAX));
-    let first_frame_timestamp = Arc::new(std::sync::atomic::AtomicI64::new(i64::MAX));
+    let first_frame_timestamp = Arc::new(AtomicI64::new(i64::MAX));
+    let pause_timeline = Arc::new(PauseTimeline::default());
+    spawn_pause_timeline_watcher(
+        pause_flag.clone(),
+        stop_flag.clone(),
+        pause_timeline.clone(),
+    );
     let flags = WgcCaptureFlags {
         stop_flag: stop_flag.clone(),
         pause_flag: pause_flag.clone(),
@@ -546,6 +562,7 @@ pub fn start_window_capture_to_mp4(
         output_path: output_path.to_string_lossy().to_string(),
         fps: fps.max(1),
         bitrate_bps: video_bitrate_kbps.saturating_mul(1000),
+        pause_timeline,
     };
     let cursor_setting = if capture_cursor {
         CursorCaptureSettings::WithCursor
@@ -761,7 +778,13 @@ pub fn start_monitor_capture_to_mp4(
     let pause_flag = Arc::new(AtomicBool::new(false));
     let session_closed = Arc::new(AtomicBool::new(false));
     let first_frame_elapsed_ms = Arc::new(AtomicU64::new(u64::MAX));
-    let first_frame_timestamp = Arc::new(std::sync::atomic::AtomicI64::new(i64::MAX));
+    let first_frame_timestamp = Arc::new(AtomicI64::new(i64::MAX));
+    let pause_timeline = Arc::new(PauseTimeline::default());
+    spawn_pause_timeline_watcher(
+        pause_flag.clone(),
+        stop_flag.clone(),
+        pause_timeline.clone(),
+    );
     let flags = WgcCaptureFlags {
         stop_flag: stop_flag.clone(),
         pause_flag: pause_flag.clone(),
@@ -775,6 +798,7 @@ pub fn start_monitor_capture_to_mp4(
         output_path: output_path.to_string_lossy().to_string(),
         fps: fps.max(1),
         bitrate_bps: video_bitrate_kbps.saturating_mul(1000),
+        pause_timeline,
     };
     let cursor_setting = if capture_cursor {
         CursorCaptureSettings::WithCursor
@@ -810,43 +834,42 @@ pub fn start_monitor_capture_to_mp4(
 
 #[cfg(test)]
 mod pts_gap_tests {
-    use super::PtsGapCompensator;
-    use std::time::{Duration, Instant};
+    use super::PauseTimeline;
+    use std::thread;
+    use std::time::Duration;
 
     #[test]
-    fn gap_accumulates_across_cycles_and_adjusts() {
-        let mut c = PtsGapCompensator::default();
-        let t0 = Instant::now();
-        c.on_pause_start(t0);
-        assert!(c.is_paused());
-        c.on_pause_start(t0); // 幂等：标志抖动不覆盖首次进入时刻
-        let added = c.on_pause_end(t0 + Duration::from_millis(500));
-        assert_eq!(added, 5_000_000); // 500ms = 5×10⁶ × 100ns
-        assert!(!c.is_paused());
-        c.on_pause_start(t0 + Duration::from_millis(600));
-        c.on_pause_end(t0 + Duration::from_millis(1100));
-        // 累计暂停 1000ms = 10⁷ × 100ns，需从原始时间戳中扣除
-        assert_eq!(c.adjust(20_000_000), 20_000_000 - 10_000_000);
+    fn pause_timeline_accumulates_closed_pauses() {
+        let t = PauseTimeline::default();
+        t.mark_pause_edge(true);
+        assert!(t.is_open());
+        thread::sleep(Duration::from_millis(50));
+        t.mark_pause_edge(false);
+        assert!(!t.is_open());
+        let total = t.effective_paused_total_100ns();
+        assert!(total >= 400_000, "total={}", total);
     }
 
     #[test]
-    fn end_without_start_is_noop() {
-        let mut c = PtsGapCompensator::default();
-        assert_eq!(c.on_pause_end(Instant::now()), 0);
-        assert_eq!(c.adjust(123), 123);
+    fn open_pause_counts_toward_effective_total() {
+        let t = PauseTimeline::default();
+        assert_eq!(t.effective_paused_total_100ns(), 0);
+        t.mark_pause_edge(true);
+        thread::sleep(Duration::from_millis(30));
+        assert!(t.effective_paused_total_100ns() > 0);
+        t.mark_pause_edge(false);
+        assert!(!t.is_open());
     }
 
     #[test]
-    fn timestamps_stay_monotonic_after_gap() {
-        let mut c = PtsGapCompensator::default();
-        // 暂停前最后帧 1.0s；精确暂停 300ms；恢复后首帧原始 QPC 1.4s
-        let before = c.adjust(10_000_000);
-        let t0 = Instant::now();
-        c.on_pause_start(t0);
-        c.on_pause_end(t0 + Duration::from_millis(300));
-        let after = c.adjust(14_000_000);
-        // 补偿后恢复帧落在 1.1s：与暂停前内容无缝衔接且保持单调
-        assert_eq!(after, 11_000_000);
-        assert!(after > before);
+    fn double_start_is_idempotent() {
+        let t = PauseTimeline::default();
+        t.mark_pause_edge(true);
+        thread::sleep(Duration::from_millis(20));
+        t.mark_pause_edge(true);
+        thread::sleep(Duration::from_millis(20));
+        t.mark_pause_edge(false);
+        let total = t.effective_paused_total_100ns();
+        assert!(total >= 300_000 && total < 10_000_000, "total={}", total);
     }
 }

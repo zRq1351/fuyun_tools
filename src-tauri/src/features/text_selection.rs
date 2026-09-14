@@ -301,10 +301,18 @@ fn get_selected_text_windows(
     // 直接不进入复制/剪贴板捕获流程，避免打扰用户
     if is_terminal_foreground_window() {
         log::debug!("前台窗口为终端类应用，跳过划词文本捕获");
+        // 提前返回前清理 Ctrl+C 允许标志，避免泄漏到后续无关剪贴板事件
+        clear_manual_copy_flag();
         return None;
     }
     let state_manager = app_handle.state::<Arc<Mutex<SharedAppState>>>();
-    let _processing_guard = SelectionProcessingGuard::acquire(state_manager.inner().clone())?;
+    let _processing_guard = match SelectionProcessingGuard::acquire(state_manager.inner().clone()) {
+        Some(g) => g,
+        None => {
+            clear_manual_copy_flag();
+            return None;
+        }
+    };
 
     let start_time = now_unix_ms_u64();
 
@@ -344,14 +352,8 @@ fn get_selected_text_windows(
             sequence_before_copy,
         );
     } else {
-        // 终端类应用 Ctrl+C 是"中断"语义（会误发中断/中止信号），必须改用 Ctrl+Shift+C；
-        // 其余应用保持 Ctrl+Insert → Ctrl+C 的原有组合
-        let is_terminal = is_terminal_foreground_window();
-        let combos: &[(u16, bool)] = if is_terminal {
-            &[(VK_C, true), (VK_INSERT, false)]
-        } else {
-            &[(VK_INSERT, false), (VK_C, false)]
-        };
+        // 终端窗口已在入口提前返回，此处只处理非终端：Ctrl+Insert → Ctrl+C
+        let combos: &[(u16, bool)] = &[(VK_INSERT, false), (VK_C, false)];
         for (vk, with_shift) in combos {
             if !send_copy_combination(*vk, *with_shift) {
                 continue;
@@ -484,7 +486,7 @@ fn get_current_clipboard_content_with_manager(
     };
 
     match &content {
-        Some(text) => log::debug!("从剪贴板读取内容: {}", text),
+        Some(text) => log::debug!("从剪贴板读取内容: len={}", text.len()),
         None => log::debug!("剪贴板中没有文本内容"),
     }
 

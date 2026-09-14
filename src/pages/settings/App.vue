@@ -238,6 +238,8 @@ const isInitializing = ref(true)
 const isAutoSaving = ref(false)
 const suppressNextAutoSave = ref(false)
 const autoSaveState = ref('idle')
+// 设置加载失败时禁止自动保存，避免把表单默认值写回后端
+const settingsLoadFailed = ref(false)
 const updateAvailable = ref(null) // { version: string } 或 null
 const {silentCheck} = useUpdater(currentVersion)
 // 保存初始状态用于差异比较
@@ -324,10 +326,11 @@ const form = reactive({
   textMaxItems: 100,
   imageMaxItems: 100,
   imageDiskLimitMb: 2048,
-  textClipboardEnabled: true,
-  imageClipboardEnabled: true,
-  screenshotEnabled: true,
-  recordingEnabled: true,
+  // 与后端 serde default 对齐，避免加载失败后 autosave 把功能全部打开
+  textClipboardEnabled: false,
+  imageClipboardEnabled: false,
+  screenshotEnabled: false,
+  recordingEnabled: false,
   groupedItemsProtectedFromLimit: true,
   toggleShortcut: '',
   imageToggleShortcut: '',
@@ -352,7 +355,7 @@ const form = reactive({
   apiUrl: '',
   modelName: '',
   apiKey: '',
-  selectionEnabled: true,
+  selectionEnabled: false,
   selectionModifierKey: '',
   selectionCustomPrompts: [],
   selectionWebSearchEnabled: true,
@@ -628,6 +631,10 @@ const persistSettings = async (
   if (isInitializing.value) {
     return
   }
+  if (settingsLoadFailed.value) {
+    autoSaveState.value = 'error'
+    return
+  }
   if (isAutoSaving.value) {
     pendingPersistSnapshot = snapshot
     pendingPersistVersion = Math.max(pendingPersistVersion, persistVersion)
@@ -789,7 +796,12 @@ const persistSettings = async (
     let raw
     let errorCode = null
     let errorParams
-      if (typeof error === 'object' && error !== null) {
+      // 优先使用 ipcInvoke 包装的 originalError，保留后端 E_* JSON 格式
+      if (error && typeof error === 'object' && error.originalError !== undefined) {
+        raw = typeof error.originalError === 'string'
+          ? error.originalError
+          : String(error.originalError || '')
+      } else if (typeof error === 'object' && error !== null) {
         raw = error.message || JSON.stringify(error)
       } else {
         raw = String(error || '')
@@ -1050,6 +1062,7 @@ onMounted(async () => {
   } catch (error) {
     ElMessage.error(t('settings.loadSettingsFailed', {error}))
     autoSaveState.value = 'error'
+    settingsLoadFailed.value = true
   } finally {
 
     saveInitialFormState()

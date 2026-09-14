@@ -1051,6 +1051,13 @@ fn merge_system_audio_into_video(
     audio_bitrate_kbps: u32,
 ) -> Result<(), AppError> {
     let started_at = Instant::now();
+    // 同进程内快速重启录制时，固定临时文件名会互踩；加 pid+seq 前缀隔离
+    static MERGE_TEMP_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let merge_prefix = format!(
+        "merge_{}_{}",
+        std::process::id(),
+        MERGE_TEMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
     let expected_system_count = system_segments.len();
     let expected_mic_count = mic_segments.len();
 
@@ -1168,9 +1175,9 @@ fn merge_system_audio_into_video(
             valid_system.len(),
             valid_mic.len()
         );
-        let sys_aligned = output_dir.join("sys_aligned.tmp.aac");
-        let mic_aligned = output_dir.join("mic_aligned.tmp.aac");
-        let mixed = output_dir.join("mixed.tmp.aac");
+        let sys_aligned = output_dir.join(format!("{merge_prefix}.sys_aligned.tmp.aac"));
+        let mic_aligned = output_dir.join(format!("{merge_prefix}.mic_aligned.tmp.aac"));
+        let mixed = output_dir.join(format!("{merge_prefix}.mixed.tmp.aac"));
         if let Err(e) =
             merge_audio_segments_only(ffmpeg_path, &valid_system, &sys_aligned, audio_bitrate_kbps)
         {
@@ -1201,7 +1208,7 @@ fn merge_system_audio_into_video(
     // 🔧 两步合并：先纯音频合并（快速），再流复制合并视频（快速）
     // 替代原先的 filter_complex 全路径（视频参与滤镜 → 重编码 → 慢）
 
-    let sys_aligned = output_dir.join("sys_aligned.tmp.aac");
+    let sys_aligned = output_dir.join(format!("{merge_prefix}.sys_aligned.tmp.aac"));
     if has_system {
         let seg_count = valid_system.len();
         log::debug!("🔧 两步合并 Step 1: 预合并 {} 个系统音频片段", seg_count);
@@ -1212,7 +1219,7 @@ fn merge_system_audio_into_video(
         let _ = fs::remove_file(&sys_aligned);
     }
 
-    let mic_aligned = output_dir.join("mic_aligned.tmp.aac");
+    let mic_aligned = output_dir.join(format!("{merge_prefix}.mic_aligned.tmp.aac"));
     if has_mic {
         let seg_count = valid_mic.len();
         log::debug!("🔧 两步合并 Step 1: 预合并 {} 个麦克风音频片段", seg_count);
@@ -2097,6 +2104,7 @@ fn spawn_stats_loop(
     app: AppHandle,
     state_arc: Arc<Mutex<SharedAppState>>,
     runtime_arc: Arc<Mutex<crate::features::recording::state::RecordingRuntime>>,
+    owned_session_id: String,
 ) {
     thread::spawn(move || loop {
         let mut emit_error: Option<(&'static str, String, Option<String>)> = None;
@@ -2112,6 +2120,10 @@ fn spawn_stats_loop(
             elapsed_ms,
         ) = {
             let mut runtime = lock_arc_mutex(&runtime_arc);
+            // session 绑定：停止后快速重启时旧循环不得继续监控新会话
+            if runtime.session_id.as_deref() != Some(owned_session_id.as_str()) {
+                break;
+            }
             let snapshot = runtime.snapshot();
             let mut phase = runtime.phase;
             let session_id = runtime.session_id.clone();
@@ -2850,7 +2862,12 @@ pub fn start_recording(
         if let Some(stderr) = stderr_opt {
             spawn_stderr_parser(app.clone(), runtime_arc.clone(), session_id.clone(), stderr);
         }
-        spawn_stats_loop(app.clone(), state_arc.clone(), runtime_arc.clone());
+        spawn_stats_loop(
+            app.clone(),
+            state_arc.clone(),
+            runtime_arc.clone(),
+            session_id.clone(),
+        );
 
         Ok(RecordingSessionInfo {
             session_id,

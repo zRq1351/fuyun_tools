@@ -487,6 +487,7 @@ pub async fn preview_backup_package(
 
 #[tauri::command]
 pub async fn restore_backup_package(
+    app: tauri::AppHandle,
     request: BackupRestoreRequest,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<BackupRestoreResultResponse, String> {
@@ -517,6 +518,8 @@ pub async fn restore_backup_package(
             return Err(error);
         }
     };
+    // 恢复 settings 后同步热键/监听/窗口，避免需重启才生效
+    crate::ui::commands::apply_runtime_after_settings_restore(&app, state.inner());
     cleanup_dir(&result.extracted_dir);
     if let Some(rollback_dir) = &result.rollback_dir {
         cleanup_dir(rollback_dir);

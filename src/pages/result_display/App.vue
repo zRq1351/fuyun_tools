@@ -363,6 +363,12 @@ onMounted(async () => {
       // 验证窗口标签，只处理当前窗口的事件
       if (data && data.windowLabel && data.windowLabel !== currentWindowLabel.value) return
       if (data && data.type && data.type !== mode.value) return
+      // 与后端 operation_id 对齐，后续 result-update 的 generation 校验才生效
+      if (typeof data.opId === 'number' && Number.isFinite(data.opId)) {
+        streamGeneration = data.opId
+      } else {
+        streamGeneration++
+      }
       resultText.value = ''
       shouldAutoFollow.value = true
       isWaitingResult.value = true
@@ -377,7 +383,14 @@ onMounted(async () => {
       // 代际校验：丢弃过期流的结果
       if (typeof data.generation === 'number' && data.generation !== streamGeneration) return
       if (data.content) {
-        resultText.value += data.content
+        // 防止异常长流撑爆内存/UI
+        const MAX_RESULT_CHARS = 200_000
+        if (resultText.value.length < MAX_RESULT_CHARS) {
+          const remain = MAX_RESULT_CHARS - resultText.value.length
+          resultText.value += data.content.length > remain
+            ? data.content.slice(0, remain) + '\n…（内容过长已截断）'
+            : data.content
+        }
         const elapsed = Date.now() - loadingStartedAt.value
         if (isWaitingResult.value && elapsed < 280) {
           if (waitingTimeout) clearTimeout(waitingTimeout)

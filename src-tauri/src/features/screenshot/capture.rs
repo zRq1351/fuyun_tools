@@ -55,6 +55,11 @@ pub fn take_allow_image_clipboard_once() -> bool {
     SCREENSHOT_ALLOW_IMAGE_CLIPBOARD_ONCE.swap(false, Ordering::SeqCst)
 }
 
+/// 窥探 allow-once 标志，不消费（供 on_poll 预检，真正消费放在 on_event）
+pub fn peek_allow_image_clipboard_once() -> bool {
+    SCREENSHOT_ALLOW_IMAGE_CLIPBOARD_ONCE.load(Ordering::SeqCst)
+}
+
 fn resolve_virtual_screen_bounds(
     screens: &[screenshots::Screen],
 ) -> Result<(i32, i32, u32, u32), String> {

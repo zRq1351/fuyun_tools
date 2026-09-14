@@ -556,6 +556,21 @@ fn scan_dir(
     allowed: &std::collections::HashSet<&str>,
     recursive: bool,
 ) -> Result<(), String> {
+    scan_dir_depth(dir, files, allowed, recursive, 0)
+}
+
+const MAX_SCAN_DEPTH: usize = 32;
+
+fn scan_dir_depth(
+    dir: &Path,
+    files: &mut Vec<ScannedFile>,
+    allowed: &std::collections::HashSet<&str>,
+    recursive: bool,
+    depth: usize,
+) -> Result<(), String> {
+    if depth > MAX_SCAN_DEPTH {
+        return Ok(());
+    }
     let entries = fs::read_dir(dir).map_err(|e| format!("读取目录失败: {}", e))?;
     for entry in entries {
         let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
@@ -591,10 +606,32 @@ fn scan_dir(
                 });
             }
         } else if path.is_dir() && recursive {
-            scan_dir(&path, files, allowed, recursive)?;
+            // 跳过 junction/symlink，避免 OneDrive/开发者联接环导致栈溢出
+            if is_reparse_point_or_symlink(&path) {
+                continue;
+            }
+            scan_dir_depth(&path, files, allowed, recursive, depth + 1)?;
         }
     }
     Ok(())
+}
+
+fn is_reparse_point_or_symlink(path: &Path) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        if let Ok(meta) = fs::symlink_metadata(path) {
+            return meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+        }
+        false
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        fs::symlink_metadata(path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+    }
 }
 
 #[derive(serde::Serialize)]

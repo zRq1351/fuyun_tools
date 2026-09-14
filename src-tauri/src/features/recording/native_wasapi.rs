@@ -117,7 +117,6 @@ pub struct AudioProcessInfo {
 
 static AUDIO_RECENT_ACTIVITY: std::sync::OnceLock<Mutex<HashMap<u32, u64>>> =
     std::sync::OnceLock::new();
-static COM_INIT: std::sync::Once = std::sync::Once::new();
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -158,6 +157,25 @@ macro_rules! write_sample_or_log {
         if let Err(e) = $writer.write_sample($sample) {
             if !$err_logged.swap(true, Ordering::Relaxed) {
                 log::error!("音频写入失败({}): {}", $context, e);
+            }
+        }
+    };
+}
+
+/// 写入音频采样，失败时同时写入 error_slot（录制中途经 stats_loop 上报）
+macro_rules! write_sample_to_error_slot {
+    ($writer:expr, $sample:expr, $context:expr, $err_logged:expr, $err_slot:expr) => {
+        if let Err(e) = $writer.write_sample($sample) {
+            if !$err_logged.swap(true, Ordering::Relaxed) {
+                log::error!("音频写入失败({}): {}", $context, e);
+                if let Ok(mut guard) = $err_slot.lock() {
+                    if guard.is_none() {
+                        *guard = Some(format!(
+                            "音频写入失败({}，可能磁盘已满): {}",
+                            $context, e
+                        ));
+                    }
+                }
             }
         }
     };
@@ -209,9 +227,8 @@ fn capture_process_loopback_to_wav(
 ) -> Result<(), String> {
     let err_logged = Arc::new(AtomicBool::new(false));
     let run = || -> Result<(), String> {
-        COM_INIT.call_once(|| {
-            let _ = initialize_mta();
-        });
+        // 每个采集线程都必须初始化 COM，不能只 Once 一次
+        let _ = initialize_mta();
         let desired_format = WaveFormat::new(32, 32, &SampleType::Float, 48000, 2, None);
         let mut audio_client = AudioClient::new_application_loopback_client(process_id, true)
             .map_err(|e| format!("创建进程 loopback 客户端失败(pid={}): {}", process_id, e))?;
@@ -325,7 +342,7 @@ fn capture_process_loopback_to_wav(
                     } else {
                         0
                     };
-                    write_sample_or_log!(writer, out, "进程音频", err_logged);
+                    write_sample_to_error_slot!(writer, out, "进程音频", err_logged, error_slot);
                     actual_total_samples += 1;
                 }
             }
@@ -339,7 +356,7 @@ fn capture_process_loopback_to_wav(
 
                     if padding_needed > 480 {
                         for _ in 0..padding_needed {
-                            write_sample_or_log!(writer, 0i16, "进程音频静音填充", err_logged);
+                            write_sample_to_error_slot!(writer, 0i16, "进程音频静音填充", err_logged, error_slot);
                         }
                         actual_total_samples += padding_needed;
                     }
@@ -1119,6 +1136,8 @@ pub fn start_system_loopback_aac_with_device(
             let mut child = ffmpeg_cmd
                 .spawn()
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            // 与视频 ffmpeg 一致：进程级 kill-on-close，避免主进程被强杀后 orphan
+            crate::features::recording::job_object::assign_to_global_job_object(&child);
 
             let stdin = child.stdin.take().ok_or("无法获取 FFmpeg stdin")?;
             // H1 修复：消费 FFmpeg stderr 防止管道满导致挂起（#57）
@@ -1158,6 +1177,7 @@ pub fn start_system_loopback_aac_with_device(
             // stdin 写入失败标志：磁盘/管道故障时用户此前无感知，停止后经槽位上报
             let stdin_write_failed = Arc::new(AtomicBool::new(false));
             let thread_write_failed = stdin_write_failed.clone();
+            let writer_error_slot = device_error_slot.clone();
             let writer_thread = std::thread::spawn(move || {
                 while let Ok(data) = rx_audio.recv() {
                     if data.is_empty() {
@@ -1167,11 +1187,28 @@ pub fn start_system_loopback_aac_with_device(
                         if let Err(e) = writer.write_all(&data) {
                             log::error!("FFmpeg stdin 写入失败，停止音频采集: {}", e);
                             thread_write_failed.store(true, Ordering::SeqCst);
+                            // 录制中途立刻上报，不等到 stop
+                            if let Ok(mut guard) = writer_error_slot.lock() {
+                                if guard.is_none() {
+                                    *guard = Some(format!(
+                                        "系统音频写入失败（磁盘空间或 IO 异常）: {}",
+                                        e
+                                    ));
+                                }
+                            }
                             break;
                         }
                         if let Err(e) = writer.flush() {
                             log::error!("FFmpeg stdin flush 失败，停止音频采集: {}", e);
                             thread_write_failed.store(true, Ordering::SeqCst);
+                            if let Ok(mut guard) = writer_error_slot.lock() {
+                                if guard.is_none() {
+                                    *guard = Some(format!(
+                                        "系统音频写入失败（磁盘空间或 IO 异常）: {}",
+                                        e
+                                    ));
+                                }
+                            }
                             break;
                         }
                     }
@@ -1228,11 +1265,42 @@ pub fn start_system_loopback_aac_with_device(
             log::debug!("WASAPI 流已停止");
 
             // 填充尾部静音，与 WAV 系统路径一致：2s（#27/#N3）
+            // 用 try_send + 超时：编码器/磁盘卡住时不能永久阻塞 stop 路径
             let tail_frames = (config.sample_rate as usize) * (config.channels as usize) * 2;
             let mut silence = Vec::with_capacity(tail_frames * 4);
             silence.resize(tail_frames * 4, 0u8);
-            let _ = tx_audio.send(silence);
-            let _ = tx_audio.send(Vec::new());
+            let send_deadline = std::time::Instant::now() + Duration::from_millis(3000);
+            let mut sent_silence = false;
+            let mut sent_close = false;
+            while std::time::Instant::now() < send_deadline && !(sent_silence && sent_close) {
+                if !sent_silence {
+                    match tx_audio.try_send(silence.clone()) {
+                        Ok(_) => sent_silence = true,
+                        Err(mpsc::TrySendError::Full(_)) => {
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(mpsc::TrySendError::Disconnected(_)) => {
+                            sent_silence = true;
+                            sent_close = true;
+                            break;
+                        }
+                    }
+                } else if !sent_close {
+                    match tx_audio.try_send(Vec::new()) {
+                        Ok(_) => sent_close = true,
+                        Err(mpsc::TrySendError::Full(_)) => {
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(mpsc::TrySendError::Disconnected(_)) => {
+                            sent_close = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if !(sent_silence && sent_close) {
+                log::warn!("AAC 停止路径发送静音/关闭信号超时，跳过尾部填充");
+            }
             let _ = writer_thread.join();
 
             log::debug!("等待 FFmpeg AAC 编码完成...");

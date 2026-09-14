@@ -630,7 +630,7 @@ mod tests {
     fn test_get_system_resources_returns_snapshot() {
         let res = get_system_resources();
         // 不校验具体数值，只保证结构可用且 timestamp 非 0
-        assert!(res.timestamp > 0 || res.total_memory_mb >= 0);
+        assert!(res.timestamp > 0);
         // 两次调用应命中缓存，结构一致
         let res2 = get_system_resources();
         assert_eq!(res.timestamp, res2.timestamp);

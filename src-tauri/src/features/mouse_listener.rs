@@ -919,7 +919,7 @@ fn run_detection_cycle(app_handle: &AppHandle, state: &Arc<Mutex<SharedAppState>
 
     if let Some(text) = perform_text_selection_detection(app_handle, clipboard_manager) {
         if !text.trim().is_empty() && is_valid_selection(&text) {
-            log::debug!("检测到有效的选中文本: '{}'", text);
+            log::debug!("检测到有效的选中文本: len={}", text.len());
             let app_handle_clone = app_handle.clone();
             let text_clone = text.clone();
             let anchor_pos = {
@@ -971,7 +971,7 @@ fn perform_text_selection_detection(
 
     match get_selected_text(app_handle, clipboard_manager) {
         Some(text) if !text.trim().is_empty() => {
-            log::debug!("成功获取选中文本: '{}'", text);
+            log::debug!("成功获取选中文本: len={}", text.len());
             Some(text)
         }
         _ => {
@@ -1134,7 +1134,7 @@ fn is_valid_selection(text: &str) -> bool {
         return false;
     }
 
-    log::debug!("文本通过所有验证，认为是有效的选中文本: {}", trimmed);
+    log::debug!("文本通过所有验证，认为是有效的选中文本: len={}", trimmed.len());
     true
 }
 

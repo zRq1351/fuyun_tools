@@ -482,12 +482,12 @@ async fn restore_image_history(
                 .map_err(|e| format!("恢复图片文件失败 {}: {}", source.display(), e))?;
         }
         let history_item = ImageHistoryItem {
+            signature: crate::utils::image_clipboard::extract_signature_from_item_id(&item.id),
             id: item.id.clone(),
             width: item.width,
             height: item.height,
             image_path: target.to_string_lossy().to_string(),
             rgba_bytes: Vec::new(),
-            signature: item.id.clone(),
             lazy_load: true,
             cached_signature: None,
         };

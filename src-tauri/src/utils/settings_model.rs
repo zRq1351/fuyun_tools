@@ -154,6 +154,9 @@ pub struct AppSettingsData {
     pub backup_last_run_status: String,
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// 界面语言（zh-CN / en-US）；空字符串表示跟随系统/浏览器
+    #[serde(default)]
+    pub locale: String,
     /// 是否将运行日志写入 logs 目录（诊断用途）；内容可能包含选中文本，用户可关闭
     #[serde(default = "default_logging_enabled")]
     pub logging_enabled: bool,
@@ -223,6 +226,7 @@ impl Default for AppSettingsData {
             backup_last_run_at: 0,
             backup_last_run_status: default_backup_last_run_status(),
             theme: default_theme(),
+            locale: String::new(),
             logging_enabled: default_logging_enabled(),
         }
     }
@@ -678,11 +682,7 @@ impl AppSettingsData {
     }
 
     fn ensure_basic_config_integrity(&mut self) {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        static INTEGRITY_CHECKED: AtomicBool = AtomicBool::new(false);
-        if INTEGRITY_CHECKED.swap(true, Ordering::Relaxed) {
-            return;
-        }
+        // 每次加载都做幂等修复：备份恢复/会话中重载后也需校验，不能只跑一次
         log::info!("开始确保基础配置完整性");
         log::debug!("迁移前 max_items: {}", self.max_items);
         if self.max_items < 10 || self.max_items > 1000 {

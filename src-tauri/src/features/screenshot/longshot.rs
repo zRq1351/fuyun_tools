@@ -172,18 +172,6 @@ mod fallback {
 
         #[test]
         fn test_fallback_functions_return_disabled_error() {
-            let request = StartManualLongshotRequest {
-                region: LongshotRegion {
-                    x: 0,
-                    y: 0,
-                    width: 10,
-                    height: 10,
-                },
-                fps: 10,
-                min_confidence: 0.82,
-                max_duration_sec: 90,
-                preview_interval_ms: 300,
-            };
             // 需要 AppHandle 的函数无法在单测中构造，此处仅测不依赖 AppHandle 的
             assert!(active_manual_longshot_session_id().is_none());
             assert!(get_last_manual_longshot_failure().is_none());

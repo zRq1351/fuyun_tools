@@ -414,14 +414,21 @@ impl ImageClipboardManager {
         let signature_index = build_signature_index(&history_data.items);
         let pending_images = Arc::new(Mutex::new(HashMap::new()));
         let (persist_tx, persist_rx) = sync_channel::<PersistTask>(IMAGE_PERSIST_QUEUE_SIZE);
-        start_image_persist_worker(persist_rx, pending_images.clone());
+        let history = Arc::new(Mutex::new(history_data.items));
+        let signature_index_dirty = Arc::new(AtomicBool::new(false));
+        start_image_persist_worker(
+            persist_rx,
+            pending_images.clone(),
+            history.clone(),
+            signature_index_dirty.clone(),
+        );
         let full_res_lru_capacity = max_items
             .max(IMAGE_FULL_RES_CACHE_KEEP_RECENT)
             .clamp(1, IMAGE_FULL_RES_LRU_MAX_CAPACITY);
         let manager = Self {
-            history: Arc::new(Mutex::new(history_data.items)),
+            history,
             signature_index: Arc::new(Mutex::new(signature_index)),
-            signature_index_dirty: Arc::new(AtomicBool::new(false)),
+            signature_index_dirty,
             categories: Arc::new(Mutex::new(history_data.categories)),
             category_list: Arc::new(Mutex::new(history_data.category_list)),
             image_tags: Arc::new(Mutex::new(history_data.image_tags)),
@@ -1674,6 +1681,7 @@ impl ImageClipboardManager {
         app_handle: &tauri::AppHandle,
         image: &Image<'_>,
     ) -> Result<(), String> {
+        use crate::services::clipboard_access_guard::with_clipboard_access_lock;
         use tauri_plugin_clipboard_manager::ClipboardExt;
         let mut last_error = String::new();
 
@@ -1686,33 +1694,36 @@ impl ImageClipboardManager {
             vec![3u64, 6, 10, 16, 24]
         };
 
-        for (attempt, delay_ms) in retry_delays.iter().enumerate() {
-            match app_handle.clipboard().write_image(image) {
-                Ok(_) => {
-                    if is_fast_fill_verify_mode() || is_large_image {
-                        return Ok(());
-                    }
-
-                    std::thread::sleep(Duration::from_millis(3));
-                    if let Ok(read_back) = app_handle.clipboard().read_image() {
-                        if read_back.width() > 0
-                            && read_back.height() > 0
-                            && !read_back.rgba().is_empty()
-                        {
+        // 与文本/读图路径共用访问锁，避免与轮询并发交错 Win32 剪贴板
+        with_clipboard_access_lock(|| {
+            for (attempt, delay_ms) in retry_delays.iter().enumerate() {
+                match app_handle.clipboard().write_image(image) {
+                    Ok(_) => {
+                        if is_fast_fill_verify_mode() || is_large_image {
                             return Ok(());
                         }
+
+                        std::thread::sleep(Duration::from_millis(3));
+                        if let Ok(read_back) = app_handle.clipboard().read_image() {
+                            if read_back.width() > 0
+                                && read_back.height() > 0
+                                && !read_back.rgba().is_empty()
+                            {
+                                return Ok(());
+                            }
+                        }
+                        last_error = "写入后校验失败：剪贴板位图尚未稳定".to_string();
                     }
-                    last_error = "写入后校验失败：剪贴板位图尚未稳定".to_string();
+                    Err(e) => {
+                        last_error = e.to_string();
+                    }
                 }
-                Err(e) => {
-                    last_error = e.to_string();
+                if attempt < retry_delays.len() - 1 {
+                    std::thread::sleep(Duration::from_millis(*delay_ms));
                 }
             }
-            if attempt < retry_delays.len() - 1 {
-                std::thread::sleep(Duration::from_millis(*delay_ms));
-            }
-        }
-        Err(AppErrorKind::SystemWriteClipboardFailed.to_frontend_json_with_details(format!("{}", last_error)))
+            Err(AppErrorKind::SystemWriteClipboardFailed.to_frontend_json_with_details(format!("{}", last_error)))
+        })
     }
 
     pub fn save_history_on_exit(&self) -> Result<(), String> {
@@ -2287,6 +2298,18 @@ fn generate_item_id(signature: &str) -> String {
     format!("img_{}_{}", millis, signature)
 }
 
+/// 从 item_id（`img_{millis}_{signature}`）解析内容签名；解析失败时回退整段 id
+pub(crate) fn extract_signature_from_item_id(id: &str) -> String {
+    if let Some(rest) = id.strip_prefix("img_") {
+        if let Some((_millis, sig)) = rest.rsplit_once('_') {
+            if !sig.is_empty() && sig.chars().all(|c| c.is_ascii_hexdigit()) {
+                return sig.to_string();
+            }
+        }
+    }
+    id.to_string()
+}
+
 fn get_image_blobs_dir() -> PathBuf {
     let mut dir = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
     dir.pop();
@@ -2296,12 +2319,7 @@ fn get_image_blobs_dir() -> PathBuf {
 
 fn image_blob_path(item_id: &str, ext: &str) -> PathBuf {
     let mut path = get_image_blobs_dir();
-    let suffix = ext.trim().trim_start_matches('.').to_lowercase();
-    let final_ext = if suffix.is_empty() {
-        "png".to_string()
-    } else {
-        suffix
-    };
+    let final_ext = sanitize_image_ext(ext);
     path.push(format!("{}.{}", item_id, final_ext));
     path
 }
@@ -2309,6 +2327,8 @@ fn image_blob_path(item_id: &str, ext: &str) -> PathBuf {
 fn start_image_persist_worker(
     persist_rx: std::sync::mpsc::Receiver<PersistTask>,
     pending_images: Arc<Mutex<HashMap<String, PendingImageData>>>,
+    history: Arc<Mutex<Vec<ImageHistoryItem>>>,
+    signature_index_dirty: Arc<AtomicBool>,
 ) {
     std::thread::spawn(move || {
         while let Ok(task) = persist_rx.recv() {
@@ -2324,7 +2344,13 @@ fn start_image_persist_worker(
                 )
             };
             if let Err(e) = persist_result {
-                log::error!("异步落盘图片失败: {}", e);
+                log::error!("异步落盘图片失败，从历史移除 {}: {}", task.item_id, e);
+                // 落盘失败：从内存历史移除，避免 UI 显示无法打开的空项
+                {
+                    let mut hist = lock_arc_mutex(&history);
+                    hist.retain(|item| item.id != task.item_id);
+                }
+                signature_index_dirty.store(true, Ordering::SeqCst);
             }
             let mut pending = lock_arc_mutex(&pending_images);
             pending.remove(&task.item_id);
@@ -2758,6 +2784,21 @@ fn parse_data_url_image(text: &str) -> Option<(Vec<u8>, u32, u32, Option<(Vec<u8
     Some((rgba8.into_raw(), width, height, Some((bytes, source_ext))))
 }
 
+/// 仅允许常见安全图片扩展名，防止 data-URL 路径穿越写到 blobs 目录外
+fn sanitize_image_ext(ext: &str) -> String {
+    let suffix = ext.trim().trim_start_matches('.').to_lowercase();
+    match suffix.as_str() {
+        "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" => {
+            if suffix == "jpeg" {
+                "jpg".to_string()
+            } else {
+                suffix
+            }
+        }
+        _ => "png".to_string(),
+    }
+}
+
 fn parse_image_ext_from_data_url_meta(meta: &str) -> Option<String> {
     let normalized = meta.trim().to_lowercase();
     let prefix = "data:image/";
@@ -2772,7 +2813,11 @@ fn parse_image_ext_from_data_url_meta(meta: &str) -> Option<String> {
     Some(match ext {
         "jpeg" => "jpg".to_string(),
         "svg+xml" => "png".to_string(),
-        other => other.to_string(),
+        // 拒绝 ../../../、空格、非字母数字等，落到 png
+        other if other.chars().all(|c| c.is_ascii_alphanumeric() || c == '+') => {
+            sanitize_image_ext(other)
+        }
+        _ => "png".to_string(),
     })
 }
 
@@ -3003,5 +3048,46 @@ fn read_images_from_windows_file_clipboard() -> Vec<ClipboardImagePayload> {
             index += 1;
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_image_ext_whitelist() {
+        assert_eq!(sanitize_image_ext("png"), "png");
+        assert_eq!(sanitize_image_ext("JPEG"), "jpg");
+        assert_eq!(sanitize_image_ext(".jpg"), "jpg");
+        assert_eq!(sanitize_image_ext("../evil"), "png");
+        assert_eq!(sanitize_image_ext("a/b\\c"), "png");
+        assert_eq!(sanitize_image_ext(""), "png");
+    }
+
+    #[test]
+    fn test_parse_image_ext_from_data_url_rejects_traversal() {
+        let evil = parse_image_ext_from_data_url_meta("data:image/../../../evil;base64,AAAA");
+        assert_eq!(evil.as_deref(), Some("png"));
+        let ok = parse_image_ext_from_data_url_meta("data:image/jpeg;base64,AAAA");
+        assert_eq!(ok.as_deref(), Some("jpg"));
+    }
+
+    #[test]
+    fn test_image_blob_path_stays_in_blobs_dir() {
+        let path = image_blob_path("img_1_abc", "../../../evil");
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        assert_eq!(name, "img_1_abc.png");
+        assert!(path.parent().unwrap().ends_with("image_history_blobs"));
+    }
+
+    #[test]
+    fn test_extract_signature_from_item_id() {
+        assert_eq!(
+            extract_signature_from_item_id("img_1700000000000_deadbeefcafebabe"),
+            "deadbeefcafebabe"
+        );
+        assert_eq!(extract_signature_from_item_id("legacy_id"), "legacy_id");
+        assert_eq!(extract_signature_from_item_id("img_123_"), "img_123_");
     }
 }

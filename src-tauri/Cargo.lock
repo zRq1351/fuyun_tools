@@ -2158,6 +2158,7 @@ dependencies = [
  "chrono",
  "cpal",
  "dirs 6.0.0",
+ "encoding_rs",
  "enigo",
  "fs_extra",
  "futures-util",

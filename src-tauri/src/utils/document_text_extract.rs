@@ -34,7 +34,21 @@ pub fn extract_file_content(path: &Path, ext: &str) -> String {
 fn extract_plain_text(path: &Path) -> String {
     let Ok(meta) = fs::metadata(path) else { return String::new() };
     if meta.len() > MAX_CONTENT_BYTES { return String::new() }
-    fs::read_to_string(path).unwrap_or_default()
+    let Ok(bytes) = fs::read(path) else { return String::new() };
+    decode_text_bytes(&bytes)
+}
+
+/// UTF-8 优先；失败则按 GB18030（兼容 GBK）解码，适配中文 Windows 常见编码
+fn decode_text_bytes(bytes: &[u8]) -> String {
+    // UTF-8 BOM
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        return String::from_utf8_lossy(&bytes[3..]).into_owned();
+    }
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+    let (cow, _, _) = encoding_rs::GB18030.decode(bytes);
+    cow.into_owned()
 }
 
 fn extract_docx(path: &Path) -> String {
@@ -45,10 +59,14 @@ fn extract_xlsx(path: &Path) -> String {
     let Ok(file) = fs::File::open(path) else { return String::new() };
     let Ok(mut archive) = zip::ZipArchive::new(file) else { return String::new() };
 
-    let mut shared_strings = String::new();
+    let mut shared_strings_xml = String::new();
     if let Ok(mut f) = archive.by_name("xl/sharedStrings.xml") {
-        let _ = f.read_to_string(&mut shared_strings);
+        let _ = f.read_to_string(&mut shared_strings_xml);
     }
+    let shared: Vec<String> = XML_T_TEXT_RE
+        .captures_iter(&shared_strings_xml)
+        .filter_map(|cap| cap.get(1).map(|m| decode_xml_entities(m.as_str())))
+        .collect();
 
     let mut text = String::new();
     for i in 1.. {
@@ -56,23 +74,81 @@ fn extract_xlsx(path: &Path) -> String {
         let Ok(mut f) = archive.by_name(&name) else { break };
         let mut xml = String::new();
         let _ = f.read_to_string(&mut xml);
-        text.push_str(&strip_xml(&xml));
+        text.push_str(&extract_xlsx_sheet_text(&xml, &shared));
+        text.push(' ');
     }
 
-    // Replace shared string references with actual text
-    if !shared_strings.is_empty() {
-        let strings: Vec<&str> = XML_T_TEXT_RE
-            .captures_iter(&shared_strings)
-            .filter_map(|cap| cap.get(1).map(|m| m.as_str()))
-            .collect();
-        // Re-add shared strings at the end for searchability
-        for s in strings {
+    // 兜底：整表共享串仍拼上，保证全文检索可命中
+    if !shared.is_empty() {
+        for s in &shared {
             text.push(' ');
             text.push_str(s);
         }
     }
 
     collapse_ws(&text)
+}
+
+/// 从 worksheet XML 提取单元格文本：t="s" 时按索引查共享串，t="inlineStr" 取 <t>，其余取 <v>
+fn extract_xlsx_sheet_text(xml: &str, shared: &[String]) -> String {
+    static CELL_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"(?s)<c\b[^>]*t="([^"]*)"[^>]*>(.*?)</c>"#).unwrap());
+    static CELL_NO_T_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?s)<c\b[^>]*>(.*?)</c>").unwrap());
+    static V_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<v>(.*?)</v>").unwrap());
+    static T_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<t[^>]*>(.*?)</t>").unwrap());
+
+    let mut out = String::new();
+    for cap in CELL_RE.captures_iter(xml) {
+        let cell_type = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        let body = cap.get(2).map(|m| m.as_str()).unwrap_or("");
+        if cell_type == "s" {
+            if let Some(v) = V_RE.captures(body).and_then(|c| c.get(1)) {
+                if let Ok(idx) = v.as_str().trim().parse::<usize>() {
+                    if let Some(s) = shared.get(idx) {
+                        out.push_str(s);
+                        out.push(' ');
+                    }
+                }
+            }
+        } else if cell_type == "inlineStr" {
+            for t in T_RE.captures_iter(body) {
+                if let Some(m) = t.get(1) {
+                    out.push_str(&decode_xml_entities(m.as_str()));
+                    out.push(' ');
+                }
+            }
+        } else if let Some(v) = V_RE.captures(body).and_then(|c| c.get(1)) {
+            let raw = decode_xml_entities(v.as_str());
+            if !raw.trim().is_empty() {
+                out.push_str(&raw);
+                out.push(' ');
+            }
+        }
+    }
+    // 无 t 属性的单元格（数字等）
+    for cap in CELL_NO_T_RE.captures_iter(xml) {
+        let body = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        if body.contains("t=\"") {
+            continue;
+        }
+        if let Some(v) = V_RE.captures(body).and_then(|c| c.get(1)) {
+            let raw = decode_xml_entities(v.as_str());
+            if !raw.trim().is_empty() {
+                out.push_str(&raw);
+                out.push(' ');
+            }
+        }
+    }
+    out
+}
+
+fn decode_xml_entities(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 fn extract_pptx(path: &Path) -> String {
@@ -110,4 +186,46 @@ fn strip_xml(xml: &str) -> String {
 
 fn collapse_ws(s: &str) -> String {
     WS_RE.replace_all(s.trim(), " ").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decode_utf8() {
+        let s = decode_text_bytes("你好世界".as_bytes());
+        assert_eq!(s, "你好世界");
+    }
+
+    #[test]
+    fn test_decode_utf8_bom() {
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice("hello".as_bytes());
+        assert_eq!(decode_text_bytes(&bytes), "hello");
+    }
+
+    #[test]
+    fn test_decode_gbk_chinese() {
+        // "你好" in GBK
+        let gbk: &[u8] = &[0xC4, 0xE3, 0xBA, 0xC3];
+        assert_eq!(decode_text_bytes(gbk), "你好");
+    }
+
+    #[test]
+    fn test_xlsx_shared_string_mapping() {
+        let shared = vec!["项目".to_string(), "预算".to_string(), "OK".to_string()];
+        let xml = r#"<worksheet>
+            <c t="s"><v>0</v></c>
+            <c t="s"><v>2</v></c>
+            <c t="inlineStr"><is><t>行内</t></is></c>
+            <c t="n"><v>42</v></c>
+        </worksheet>"#;
+        let text = extract_xlsx_sheet_text(xml, &shared);
+        assert!(text.contains("项目"));
+        assert!(text.contains("OK"));
+        assert!(text.contains("行内"));
+        assert!(text.contains("42"));
+        assert!(!text.contains("预算"));
+    }
 }

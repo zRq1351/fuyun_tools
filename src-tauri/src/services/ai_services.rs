@@ -366,7 +366,9 @@ async fn execute_stream_request(
                 let payload = serde_json::json!({
                     "type": kind.kind_name(),
                     "content": content_chunk,
-                    "windowLabel": window_label
+                    "windowLabel": window_label,
+                    // 代际：与前端 streamGeneration/请求 opId 对齐，丢弃旧流残包
+                    "generation": operation_id,
                 });
                 if let Err(e) = window.emit("result-update", payload) {
                     log::error!("更新{}结果窗口失败: {}", kind.display_name(), e);
@@ -460,7 +462,8 @@ async fn execute_stream_request(
                     serde_json::json!({
                         "type": kind.kind_name(),
                         "content": error_msg.clone(),
-                        "windowLabel": window_label
+                        "windowLabel": window_label,
+                        "generation": operation_id
                     }),
                 ) {
                     log::warn!("发送AI错误结果事件失败: {}", e);

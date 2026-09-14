@@ -12,14 +12,15 @@ use tauri_plugin_positioner::{Position, WindowExt};
 #[cfg(target_os = "windows")]
 use windows::core::BOOL;
 #[cfg(target_os = "windows")]
-use windows::Win32::Foundation::{HWND, RECT};
+use windows::Win32::Foundation::{HWND, POINT, RECT};
+#[cfg(target_os = "windows")]
+use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Threading::GetCurrentProcessId;
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     keybd_event, KEYEVENTF_KEYUP, VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
 };
-#[cfg(target_os = "windows")]
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, GetForegroundWindow, GetSystemMetrics, GetWindowTextW,
@@ -199,7 +200,14 @@ pub fn show_overlay_window_by_label(
     label: &str,
     focus: bool,
 ) -> Result<(), String> {
-    ensure_window_for_label(app_handle, label)?;
+    ensure_window_for_label(app_handle, label).map_err(|e| {
+        // 区分「功能禁用」与「窗口不存在」，便于诊断
+        if e.contains("功能已禁用") {
+            e
+        } else {
+            format!("窗口不存在: {}", label)
+        }
+    })?;
     let window = app_handle
         .get_webview_window(label)
         .ok_or_else(|| format!("窗口不存在: {}", label))?;
@@ -705,7 +713,13 @@ pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
         let monitor_position = monitor.position();
         let screen_size = monitor.size();
         let scale_factor = monitor.scale_factor();
-        let taskbar_safe_offset = get_taskbar_safe_offset() + bottom_offset.max(0);
+        // 多显示器：按目标显示器工作区计算任务栏安全边距，而非主屏 SPI_GETWORKAREA
+        let taskbar_safe_offset = get_taskbar_safe_offset_for_monitor(
+            monitor_position.x,
+            monitor_position.y,
+            screen_size.width as i32,
+            screen_size.height as i32,
+        ) + bottom_offset.max(0);
 
         // 使用逻辑宽度（物理宽度 / 缩放因子）
         let window_width = (screen_size.width as f64 / scale_factor) as u32;
@@ -723,14 +737,42 @@ pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
 }
 
 /// 获取任务栏安全偏移量（物理像素）
+/// 根据目标显示器矩形查询该显示器 work area，兼容多屏/不同任务栏位置
 #[cfg(target_os = "windows")]
-fn get_taskbar_safe_offset() -> i32 {
+fn get_taskbar_safe_offset_for_monitor(
+    mon_x: i32,
+    mon_y: i32,
+    mon_w: i32,
+    mon_h: i32,
+) -> i32 {
     unsafe {
+        let center = POINT {
+            x: mon_x + mon_w / 2,
+            y: mon_y + mon_h / 2,
+        };
+        let hmon = MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST);
+        let mut mi = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(hmon, &mut mi).as_bool() {
+            // 任务栏在底部：monitor.bottom - work.bottom；在顶部：work.top - monitor.top
+            let bottom_inset = mi.rcMonitor.bottom - mi.rcWork.bottom;
+            let top_inset = mi.rcWork.top - mi.rcMonitor.top;
+            return bottom_inset.max(top_inset).max(0) + CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN;
+        }
+        // 回退：主屏 work area
         let mut work_area: RECT = std::mem::zeroed();
-        if SystemParametersInfoW(SPI_GETWORKAREA, 0, Some(&mut work_area as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)).is_ok() {
+        if SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            Some(&mut work_area as *mut _ as *mut _),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+        .is_ok()
+        {
             let screen_height = GetSystemMetrics(SM_CYSCREEN);
-            // Tauri 是 per-monitor DPI-aware，SPI_GETWORKAREA 返回物理像素
-            return (screen_height - work_area.bottom).max(0);
+            return (screen_height - work_area.bottom).max(0) + CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN;
         }
     }
     CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN
@@ -738,7 +780,12 @@ fn get_taskbar_safe_offset() -> i32 {
 
 /// 获取任务栏安全偏移量
 #[cfg(not(target_os = "windows"))]
-fn get_taskbar_safe_offset() -> i32 {
+fn get_taskbar_safe_offset_for_monitor(
+    _mon_x: i32,
+    _mon_y: i32,
+    _mon_w: i32,
+    _mon_h: i32,
+) -> i32 {
     CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN
 }
 
@@ -1086,7 +1133,7 @@ pub fn ensure_window_for_label(app: &AppHandle, label: &str) -> Result<(), Strin
         return Ok(());
     }
     if !is_window_feature_enabled(app, label) {
-        return Ok(());
+        return Err(format!("功能已禁用，无法创建窗口: {}", label));
     }
     match label {
         "clipboard" => { ensure_clipboard_window(app)?; }

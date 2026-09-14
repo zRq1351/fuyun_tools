@@ -393,16 +393,7 @@ const captureCursor = ref(true);
 const captureToolbar = ref(true);
 
 const state = reactive({state: "idle", sessionId: null, elapsedMs: 0});
-let unlistenStateChanged = null;
-let unlistenRecordingFinished = null;
-let unlistenRecordingError = null;
-let unlistenForceCompact = null;
-let unlistenRecordingRegionSelected = null;
-let unlistenScreenshotReset = null;
-let unlistenAudioMerging = null;  // ✅ 新增：监听音频合并事件
-let unlistenMicToggled = null;  // ✅ 新增：监听麦克风切换事件
-let unlistenMicKeyPressed = null;  // ✅ 新增：监听麦克风按键按下事件
-let unlistenMicKeyReleased = null;  // ✅ 新增：监听麦克风按键释放事件
+let unlistenTauriFns = [];
 let unlistenVisibility = null;
 let keepSettingsOpenUntilTs = 0;
 let autoCollapseAfterStartPending = false;
@@ -1354,28 +1345,15 @@ onMounted(async () => {
         console.error("注册窗口可见性监听失败:", err);
       });
 
-  const [stateChangedResult, recordingFinishedResult, recordingErrorResult, forceCompactResult, recordingRegionSelectedResult, screenshotResetResult, audioMergingResult, micToggledResult, micKeyPressedResult, micKeyReleasedResult] = listenerResults;
-
-  if (stateChangedResult.status === "fulfilled") unlistenStateChanged = stateChangedResult.value;
-  else console.error("注册 recording-state-changed 监听器失败:", stateChangedResult.reason);
-  if (recordingFinishedResult.status === "fulfilled") unlistenRecordingFinished = recordingFinishedResult.value;
-  else console.error("注册 recording-finished 监听器失败:", recordingFinishedResult.reason);
-  if (recordingErrorResult.status === "fulfilled") unlistenRecordingError = recordingErrorResult.value;
-  else console.error("注册 recording-error 监听器失败:", recordingErrorResult.reason);
-  if (forceCompactResult.status === "fulfilled") unlistenForceCompact = forceCompactResult.value;
-  else console.error("注册 recording-toolbar-force-compact 监听器失败:", forceCompactResult.reason);
-  if (recordingRegionSelectedResult.status === "fulfilled") unlistenRecordingRegionSelected = recordingRegionSelectedResult.value;
-  else console.error("注册 recording-region-selected 监听器失败:", recordingRegionSelectedResult.reason);
-  if (screenshotResetResult.status === "fulfilled") unlistenScreenshotReset = screenshotResetResult.value;
-  else console.error("注册 screenshot-reset 监听器失败:", screenshotResetResult.reason);
-  if (audioMergingResult.status === "fulfilled") unlistenAudioMerging = audioMergingResult.value;
-  else console.error("注册 recording-audio-merging 监听器失败:", audioMergingResult.reason);
-  if (micToggledResult.status === "fulfilled") unlistenMicToggled = micToggledResult.value;
-  else console.error("注册 recording-mic-toggled 监听器失败:", micToggledResult.reason);
-  if (micKeyPressedResult.status === "fulfilled") unlistenMicKeyPressed = micKeyPressedResult.value;
-  else console.error("注册 recording-mic-key-pressed 监听器失败:", micKeyPressedResult.reason);
-  if (micKeyReleasedResult.status === "fulfilled") unlistenMicKeyReleased = micKeyReleasedResult.value;
-  else console.error("注册 recording-mic-key-released 监听器失败:", micKeyReleasedResult.reason);
+  // 统一收集全部 unlisten，避免遗漏导致监听泄漏
+  unlistenTauriFns = listenerResults
+    .filter((r) => r.status === "fulfilled")
+    .map((r) => r.value);
+  listenerResults.forEach((r, idx) => {
+    if (r.status !== "fulfilled") {
+      console.error(`注册 Tauri 监听器 #${idx} 失败:`, r.reason);
+    }
+  });
   try {
     const settings = await AISettingsService.getSettings();
     recordingFeatureEnabled.value = settings.recording_enabled === true;
@@ -1443,16 +1421,10 @@ onBeforeUnmount(() => {
   }
   window.removeEventListener("blur", onWindowBlur);
   window.removeEventListener("resize", onWindowViewportChanged);
-  if (unlistenStateChanged) unlistenStateChanged();
-  if (unlistenRecordingFinished) unlistenRecordingFinished();
-  if (unlistenRecordingError) unlistenRecordingError();
-  if (unlistenForceCompact) unlistenForceCompact();
-  if (unlistenRecordingRegionSelected) unlistenRecordingRegionSelected();
-  if (unlistenScreenshotReset) unlistenScreenshotReset();
-  if (unlistenAudioMerging) unlistenAudioMerging();
-  if (unlistenMicToggled) unlistenMicToggled();
-  if (unlistenMicKeyPressed) unlistenMicKeyPressed();
-  if (unlistenMicKeyReleased) unlistenMicKeyReleased();
+  for (const fn of unlistenTauriFns) {
+    try { fn(); } catch (_e) { /* ignore */ }
+  }
+  unlistenTauriFns = [];
   if (unlistenVisibility) unlistenVisibility();
 });
 </script>

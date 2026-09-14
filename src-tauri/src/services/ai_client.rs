@@ -144,21 +144,24 @@ impl AIClient {
         })
     }
 
-    /// 发送聊天完成请求
+    /// 发送聊天完成请求（带整体超时，防止网络黑洞导致无限等待）
     pub async fn chat_completion(
         &self,
         request: &ChatCompletionRequest,
     ) -> AppResult<ChatCompletionResponse> {
         let openai_request = self.build_chat_request(request, false)?;
 
-        let response = self
-            .client
-            .chat()
-            .create(openai_request)
-            .await
-            .map_err(|e| {
-                AppError::new(ErrorCode::NetworkError, "请求发送失败").with_details(e.to_string())
-            })?;
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            self.client.chat().create(openai_request),
+        )
+        .await
+        .map_err(|_| {
+            AppError::new(ErrorCode::NetworkError, "AI 请求超时").with_details("等待响应超过 60 秒")
+        })?
+        .map_err(|e| {
+            AppError::new(ErrorCode::NetworkError, "请求发送失败").with_details(e.to_string())
+        })?;
 
         let chat_response = ChatCompletionResponse {
             id: Some(response.id.clone()),
@@ -197,14 +200,18 @@ impl AIClient {
     {
         let openai_request = self.build_chat_request(request, true)?;
 
-        let mut stream = self
-            .client
-            .chat()
-            .create_stream(openai_request)
-            .await
-            .map_err(|e| {
-                AppError::new(ErrorCode::NetworkError, "请求发送失败").with_details(e.to_string())
-            })?;
+        let mut stream = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            self.client.chat().create_stream(openai_request),
+        )
+        .await
+        .map_err(|_| {
+            AppError::new(ErrorCode::NetworkError, "流式请求建立超时")
+                .with_details("等待流式响应头超过 30 秒")
+        })?
+        .map_err(|e| {
+            AppError::new(ErrorCode::NetworkError, "请求发送失败").with_details(e.to_string())
+        })?;
 
         use futures_util::StreamExt;
         let chunk_timeout = std::time::Duration::from_secs(30);

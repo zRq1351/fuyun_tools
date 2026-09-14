@@ -4,7 +4,7 @@ use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands_clipboard::recompute_selection_related_flags;
 use crate::utils::image_clipboard::is_fast_fill_verify_mode_enabled;
 use serde::Serialize;
-use std::sync::mpsc::{self, Receiver, Sender};
+
 use std::sync::Mutex as StdMutex;
 use std::sync::{Arc, OnceLock};
 use std::thread;
@@ -174,8 +174,6 @@ pub(crate) fn finish_fill_if_latest(state: &Arc<Mutex<SharedAppState>>, kind: Fi
     }
 }
 
-static IMAGE_PROMOTE_SENDER: OnceLock<Sender<String>> = OnceLock::new();
-
 pub(crate) fn interrupt_text_fill_flow(state: &Arc<Mutex<SharedAppState>>) {
     let mut state_guard = lock_arc_mutex(state);
     state_guard.text_fill_seq = state_guard.text_fill_seq.wrapping_add(1);
@@ -188,36 +186,6 @@ pub(crate) fn interrupt_image_fill_flow(state: &Arc<Mutex<SharedAppState>>) {
     state_guard.image_fill_seq = state_guard.image_fill_seq.wrapping_add(1);
     state_guard.is_image_writeback_active = false;
     recompute_selection_related_flags(&mut state_guard);
-}
-
-fn image_promote_worker(state: Arc<Mutex<SharedAppState>>, rx: Receiver<String>) {
-    while let Ok(mut item_id) = rx.recv() {
-        while let Ok(latest_item_id) = rx.try_recv() {
-            item_id = latest_item_id;
-        }
-        let manager_arc = {
-            let state_guard = lock_arc_mutex(&state);
-            state_guard.image_clipboard_manager.clone()
-        };
-        let manager = lock_arc_mutex(&manager_arc);
-        if let Err(e) = manager.promote_to_top_by_id(&item_id) {
-            log::warn!("极速模式异步置顶图片失败: {}", e);
-        } else {
-            manager.sync_positions_to_store();
-        }
-    }
-}
-
-pub(crate) fn schedule_image_promote_to_top(state: Arc<Mutex<SharedAppState>>, item_id: String) {
-    let sender = IMAGE_PROMOTE_SENDER.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<String>();
-        let state_for_worker = state.clone();
-        thread::spawn(move || image_promote_worker(state_for_worker, rx));
-        tx
-    });
-    if let Err(e) = sender.send(item_id) {
-        log::warn!("提交极速模式异步置顶任务失败: {}", e);
-    }
 }
 
 fn wait_for_fill_window_hidden(

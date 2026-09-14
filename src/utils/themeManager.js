@@ -16,6 +16,8 @@ const THEME_LABELS = {
     'eye-care': '护眼'
 }
 let themeSaveSeq = 0
+// 有在途 set_theme 时禁止 fetchTheme 用旧后端值覆盖本地
+let pendingThemeSave = false
 
 /**
  * 获取当前主题（从后端异步读取，同步回退到 localStorage）
@@ -24,6 +26,10 @@ export async function fetchTheme() {
     try {
         const theme = await invoke('get_theme')
         if (THEMES.includes(theme)) {
+            // 本地刚改过、后端可能尚未写完：不覆盖
+            if (pendingThemeSave || themeSaveSeq > 0) {
+                return getTheme()
+            }
             localStorage.setItem(THEME_KEY, theme)
             return theme
         }
@@ -55,11 +61,18 @@ export function setTheme(theme) {
     applyTheme(theme)
     // 带重试的后端保存（序列号防止过期主题覆盖新主题）
     const seq = ++themeSaveSeq
+    pendingThemeSave = true
     const saveWithRetry = (retries = 2) => {
-        invoke('set_theme', {theme}).catch(err => {
+        invoke('set_theme', {theme}).then(() => {
+            if (seq === themeSaveSeq) {
+                pendingThemeSave = false
+            }
+        }).catch(err => {
             console.warn('[ThemeManager] 保存主题到后端失败:', err)
             if (retries > 0 && seq === themeSaveSeq) {
                 setTimeout(() => saveWithRetry(retries - 1), 1000)
+            } else if (seq === themeSaveSeq) {
+                pendingThemeSave = false
             }
         })
     }

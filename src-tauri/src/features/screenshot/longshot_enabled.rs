@@ -730,8 +730,14 @@ fn run_longshot_worker_inner(
         if stdout.read_exact(&mut frame_buf).is_err() {
             break;
         }
-        let frame_color = frame_from_bgr_bytes(&frame_buf, frame_height as i32)?;
-        let frame_gray = to_gray_mat(&frame_color)?;
+        let Ok(frame_color) = frame_from_bgr_bytes(&frame_buf, frame_height as i32) else {
+            consecutive_drops = consecutive_drops.saturating_add(1);
+            continue;
+        };
+        let Ok(frame_gray) = to_gray_mat(&frame_color) else {
+            consecutive_drops = consecutive_drops.saturating_add(1);
+            continue;
+        };
 
         if stitched_segments.is_empty() {
             stitched_segments.push(frame_color.try_clone().map_err(to_cv_err)?);
@@ -770,7 +776,11 @@ fn run_longshot_worker_inner(
             continue;
         };
 
-        let estimate = estimate_overlap(prev, &frame_gray)?;
+        // 单帧估计失败：丢弃该帧继续滚动，不终止整次长截图
+        let Ok(estimate) = estimate_overlap(prev, &frame_gray) else {
+            consecutive_drops = consecutive_drops.saturating_add(1);
+            continue;
+        };
         let adaptive_min_conf = if consecutive_drops >= 10 {
             (request.min_confidence * 0.55).clamp(0.35, 0.95)
         } else if consecutive_drops >= 6 {
@@ -912,13 +922,20 @@ fn run_longshot_worker_inner(
 
     if ended_by_finishing {
         if let Ok(final_frame_color) = capture_single_bgr_frame(request) {
-            let final_frame_gray = to_gray_mat(&final_frame_color)?;
-            if let Some(prev) = anchor_frame.as_ref() {
-                let moved = frames_mean_absdiff(prev, &final_frame_gray)
+            // 收尾帧失败不应丢弃已拼接内容：降级为跳过收尾帧
+            let final_frame_gray = match to_gray_mat(&final_frame_color) {
+                Ok(g) => Some(g),
+                Err(e) => {
+                    log::warn!("长截图收尾帧转灰度失败，跳过收尾帧: {}", e);
+                    None
+                }
+            };
+            if let (Some(prev), Some(final_frame_gray)) = (anchor_frame.as_ref(), final_frame_gray.as_ref()) {
+                let moved = frames_mean_absdiff(prev, final_frame_gray)
                     .map(|v| v > 1.2)
                     .unwrap_or(true);
                 if moved {
-                    let force_estimate = estimate_overlap(prev, &final_frame_gray).ok();
+                    let force_estimate = estimate_overlap(prev, final_frame_gray).ok();
                     let overlap_rows = force_estimate
                         .as_ref()
                         .map(|e| e.overlap_rows)
@@ -1447,9 +1464,8 @@ fn mat_to_preview_base64(
 }
 
 fn build_longshot_result_image_path(session_id: u64) -> Result<std::path::PathBuf, String> {
-    let mut dir = std::env::current_exe().map_err(|e| format!("获取程序目录失败: {}", e))?;
-    dir.pop();
-    dir.push("screenshot_boot");
+    // 与普通截图 boot 图一致：写入临时目录，避免 Program Files 等只读安装目录写失败
+    let dir = std::env::temp_dir().join("fuyun_tools").join("screenshot_boot");
     fs::create_dir_all(&dir).map_err(|e| format!("创建长截图结果目录失败: {}", e))?;
     Ok(dir.join(format!("longshot_result_{}.png", session_id)))
 }

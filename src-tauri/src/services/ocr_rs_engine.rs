@@ -57,8 +57,8 @@ pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHan
     // 确保引擎已初始化（首次加载模型，后续跳过）
     ensure_engine(app_handle)?;
 
-    // 执行 OCR（在阻塞线程中运行）
-    let result = tokio::task::spawn_blocking(move || -> Result<Vec<OcrParagraph>, String> {
+    // 执行 OCR（在阻塞线程中运行；带超时避免引擎卡死占用全局 Mutex）
+    let blocking = tokio::task::spawn_blocking(move || -> Result<Vec<OcrParagraph>, String> {
         let cache = ENGINE_CACHE.get().ok_or("引擎缓存未初始化")?;
         let guard = cache.lock().unwrap_or_else(|e| e.into_inner());
         let engine = guard.as_ref().ok_or("引擎未初始化")?;
@@ -66,12 +66,12 @@ pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHan
         // 执行识别
         let ocr_results = engine.recognize(&img)
             .map_err(|e| format!("OCR识别失败: {}", e))?;
-        
+
         log::info!("检测到 {} 个文本区域", ocr_results.len());
-        
+
         // 转换为我们的格式
         let mut lines = Vec::new();
-        
+
         for result in ocr_results {
             let bbox = &result.bbox;
             let text = result.text.clone();
@@ -100,13 +100,16 @@ pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHan
         let paragraphs = merge_lines_to_paragraphs(lines);
         
         Ok(paragraphs)
-    })
-    .await
-    .map_err(|e| format!("任务执行失败: {}", e))?
-    .map_err(|e| format!("OCR处理失败: {}", e))?;
-    
+    });
+
+    let result = tokio::time::timeout(std::time::Duration::from_secs(55), blocking)
+        .await
+        .map_err(|_| "OCR 识别超时（55 秒）".to_string())?
+        .map_err(|e| format!("任务执行失败: {}", e))?
+        .map_err(|e| format!("OCR处理失败: {}", e))?;
+
     log::info!("ocr-rs 识别完成，检测到 {} 个段落", result.len());
-    
+
     Ok(result)
 }
 

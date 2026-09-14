@@ -109,10 +109,7 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
     if !should_emit {
         return;
     }
-    let manager = {
-        let guard = manager_arc.lock().unwrap();
-        guard.clone()
-    };
+    let manager = manager_arc.lock().unwrap();
     let payload = serde_json::json!({
         "history": manager.get_history_preview(),
         "categories": manager.get_categories(),
@@ -272,7 +269,6 @@ fn process_pending_queue(
                     continue;
                 }
             };
-            let manager = manager.clone();
             manager.add_rgba_image_with_source_blob(rgba, width, height, source_blob);
             let history_preview = manager.get_history_preview();
             let pinned_set = manager
@@ -426,7 +422,9 @@ pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<Ap
             if state_guard.is_updating_clipboard || state_guard.is_processing_selection {
                 return false;
             }
-            if capture::is_screenshot_in_progress() && !capture::take_allow_image_clipboard_once() {
+            if capture::is_screenshot_in_progress()
+                && !capture::peek_allow_image_clipboard_once()
+            {
                 return false;
             }
             true

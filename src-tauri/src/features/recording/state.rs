@@ -297,7 +297,11 @@ impl RecordingRuntime {
         self.target_type = "screen".to_string();
         self.target_id.clear();
         self.capture_cursor = true;
-        self.process = None;
+        // Drop(Child) 在 Windows 上不会终止进程：先 kill/wait 再置空，防 orphan ffmpeg
+        if let Some(mut child) = self.process.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
         self.wgc_stop_flag = None;
         self.wgc_pause_flag = None;
         self.wgc_first_frame_elapsed_ms = None;

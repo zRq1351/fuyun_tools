@@ -291,6 +291,33 @@ fn shell_execute_open(_path: &str, _args: Option<&str>) -> Result<(), String> {
     Err(AppErrorKind::LauncherNotWindows.to_frontend_json())
 }
 
+/// 按 Windows 规则拆分命令行参数：尊重引号，支持 `\"` 转义
+fn split_windows_command_args(arguments: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = arguments.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => in_quotes = !in_quotes,
+            '\\' if in_quotes && chars.peek() == Some(&'"') => {
+                chars.next();
+                current.push('"');
+            }
+            c if c.is_whitespace() && !in_quotes => {
+                if !current.is_empty() {
+                    args.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
+}
+
 /// 启动应用程序（统一入口，支持可选参数）
 pub fn launch_app_with_optional_args(path: &str, args: Option<&str>) -> Result<(), String> {
     let args_desc = match args {
@@ -320,7 +347,7 @@ pub fn launch_app_with_optional_args(path: &str, args: Option<&str>) -> Result<(
             command.creation_flags(CREATE_NO_WINDOW);
 
             if let Some(arguments) = args {
-                for arg in arguments.split_whitespace() {
+                for arg in split_windows_command_args(arguments) {
                     command.arg(arg);
                 }
             }
@@ -341,7 +368,7 @@ pub fn launch_app_with_optional_args(path: &str, args: Option<&str>) -> Result<(
             let mut command = std::process::Command::new(path);
 
             if let Some(arguments) = args {
-                for arg in arguments.split_whitespace() {
+                for arg in split_windows_command_args(arguments) {
                     command.arg(arg);
                 }
             }
@@ -379,4 +406,30 @@ pub fn open_file(path: &str) -> Result<(), String> {
 
 pub fn batch_extract_icons(paths: &[String]) -> std::collections::HashMap<String, String> {
     icon_extractor::batch_extract_icons(paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_windows_command_args_quoted_path() {
+        let args = split_windows_command_args(r#""C:\Program Files\My App\run.exe" -f "D:\my data\a.txt""#);
+        assert_eq!(args.len(), 3);
+        assert_eq!(args[0], r"C:\Program Files\My App\run.exe");
+        assert_eq!(args[1], "-f");
+        assert_eq!(args[2], r"D:\my data\a.txt");
+    }
+
+    #[test]
+    fn test_split_windows_command_args_simple() {
+        let args = split_windows_command_args("-a 1 -b 2");
+        assert_eq!(args, vec!["-a", "1", "-b", "2"]);
+    }
+
+    #[test]
+    fn test_split_windows_command_args_escaped_quote() {
+        let args = split_windows_command_args(r#"say "he said \"hi\" now""#);
+        assert_eq!(args, vec!["say", "he said \"hi\" now"]);
+    }
 }
