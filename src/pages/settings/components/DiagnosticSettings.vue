@@ -193,19 +193,34 @@ const handleAction = async (action) => {
   }
 }
 
+let unlistenOverlayLifecycle = null
+let unlistenWritebackResult = null
+let refreshTimer = null
+let disposed = false
+
 onMounted(async () => {
   await loadDiagnostics()
-  unlistenOverlayLifecycle = await listen('overlay-window-lifecycle', (event) => {
+  if (disposed) return
+  const overlayUnlisten = await listen('overlay-window-lifecycle', (event) => {
     const payload = event.payload || {}
     scheduleRefresh(t('settings.diagnostic.overlayLifecycle', {reason: `${String(payload.label || 'unknown')} / ${String(payload.action || 'unknown')}`}))
   })
-  unlistenWritebackResult = await listen('writeback-result', (event) => {
+  const writebackUnlisten = await listen('writeback-result', (event) => {
     const payload = event.payload || {}
     scheduleRefresh(t('settings.diagnostic.writebackLink', {reason: `${String(payload.source || 'unknown')} / ${payload.success ? 'success' : 'failed'}`}))
   })
+  // 竞态：await 期间可能已卸载
+  if (disposed) {
+    overlayUnlisten?.()
+    writebackUnlisten?.()
+    return
+  }
+  unlistenOverlayLifecycle = overlayUnlisten
+  unlistenWritebackResult = writebackUnlisten
 })
 
 onUnmounted(() => {
+  disposed = true
   if (typeof unlistenOverlayLifecycle === 'function') {
     unlistenOverlayLifecycle()
     unlistenOverlayLifecycle = null

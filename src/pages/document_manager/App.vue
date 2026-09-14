@@ -1031,14 +1031,21 @@ watch(rootFilter, () => {
   loadFiles()
 })
 
+let categoryLoadSeq = 0
 watch(importRootId, async (rid) => {
   importCategoryId.value = null
-  importCategories.value = rid ? (await DocumentService.getCategories(rid) || []) : []
+  const seq = ++categoryLoadSeq
+  const list = rid ? (await DocumentService.getCategories(rid) || []) : []
+  if (seq !== categoryLoadSeq) return
+  importCategories.value = list
 })
 
 watch(scanImportRootId, async (rid) => {
   scanCategoryId.value = null
-  scanCategories.value = rid ? (await DocumentService.getCategories(rid) || []) : []
+  const seq = ++categoryLoadSeq
+  const list = rid ? (await DocumentService.getCategories(rid) || []) : []
+  if (seq !== categoryLoadSeq) return
+  scanCategories.value = list
 })
 
 let searchTimer = null

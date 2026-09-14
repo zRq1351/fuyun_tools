@@ -154,9 +154,10 @@ const onMouseEnter = async () => {
     const currentVersion = ++stateVersion
     isAnimating = true // 设置动画锁
 
+    // catch 里也要能恢复样式，故提到 try 外
+    const miniIcon = document.querySelector('.mini-icon')
     try {
       // 先隐藏魔法棒
-      const miniIcon = document.querySelector('.mini-icon')
       if (miniIcon) {
         miniIcon.style.opacity = '0'
         miniIcon.style.pointerEvents = 'none'

@@ -39,14 +39,15 @@ export function setLocale(locale) {
     window.dispatchEvent(new CustomEvent('locale-change', {detail: {locale}}))
 }
 
-/** 从后端同步语言；本地有在途保存时不覆盖 */
+/** 从后端同步语言；本地有在途保存时不覆盖，并返回本地值 */
 export async function fetchLocale() {
     try {
         const backendLocale = await invoke('get_locale')
         if (SUPPORTED_LOCALES.includes(backendLocale)) {
-            if (!pendingLocaleSave && localeSaveSeq === 0) {
-                localStorage.setItem(LOCALE_KEY, backendLocale)
+            if (pendingLocaleSave || localeSaveSeq > 0) {
+                return getLocale()
             }
+            localStorage.setItem(LOCALE_KEY, backendLocale)
             return backendLocale || getLocale()
         }
     } catch (e) {

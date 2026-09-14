@@ -146,32 +146,51 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
 #[cfg(target_os = "windows")]
 pub fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
     use windows::core::{Interface, PCWSTR};
-    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER, STGM};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+        STGM,
+    };
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
     use std::os::windows::ffi::OsStrExt;
 
+    // 工作线程可能未初始化 COM：CoInitializeEx 失败时仍尝试（可能已在 MTA）
     unsafe {
-        let shell_link: IShellLinkW =
-            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
-        let persist_file: windows::Win32::System::Com::IPersistFile = shell_link.cast().ok()?;
+        let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let need_uninit = hr.is_ok();
+        let result = (|| -> Option<String> {
+            let shell_link: IShellLinkW =
+                CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+            let persist_file: windows::Win32::System::Com::IPersistFile = shell_link.cast().ok()?;
 
-        let wide_path: Vec<u16> = std::ffi::OsStr::new(lnk_path)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
+            let wide_path: Vec<u16> = std::ffi::OsStr::new(lnk_path)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
 
-        persist_file
-            .Load(PCWSTR(wide_path.as_ptr()), STGM(0))
-            .ok()?;
+            persist_file
+                .Load(PCWSTR(wide_path.as_ptr()), STGM(0))
+                .ok()?;
 
-        let mut buffer = vec![0u16; 260];
-        shell_link.GetPath(&mut buffer, std::ptr::null_mut(), 0).ok()?;
+            // 超长路径：先 32K 缓冲，失败再退 MAX_PATH
+            let mut buffer = vec![0u16; 32 * 1024];
+            if shell_link
+                .GetPath(&mut buffer, std::ptr::null_mut(), 0)
+                .is_err()
+            {
+                buffer.resize(260, 0);
+                shell_link.GetPath(&mut buffer, std::ptr::null_mut(), 0).ok()?;
+            }
 
-        let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
-        if len == 0 {
-            return None;
+            let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+            if len == 0 {
+                return None;
+            }
+            Some(String::from_utf16_lossy(&buffer[..len]))
+        })();
+        if need_uninit {
+            CoUninitialize();
         }
-        Some(String::from_utf16_lossy(&buffer[..len]))
+        result
     }
 }
 

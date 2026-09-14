@@ -2017,25 +2017,27 @@ pub async fn copy_and_paste_text(
         });
     }
     let clipboard_started_at = std::time::Instant::now();
-    app.clipboard().write_text(text).map_err(|e| {
-        let error = frontend_error_kind(AppErrorKind::ClipboardCopyTextFailed, e.to_string());
-        record_writeback_stage_metric(
-            "结果窗",
-            "write_clipboard",
-            "结果窗回写写入剪贴板耗时",
-            clipboard_started_at.elapsed().as_millis() as u64,
-            false,
-            Some(error.clone()),
-        );
-        record_writeback_stage_metric(
-            "结果窗",
-            "total",
-            "结果窗回写总耗时",
-            started_at.elapsed().as_millis() as u64,
-            false,
-            Some(error.clone()),
-        );
-        error
+    crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
+        app.clipboard().write_text(text).map_err(|e| {
+            let error = frontend_error_kind(AppErrorKind::ClipboardCopyTextFailed, e.to_string());
+            record_writeback_stage_metric(
+                "结果窗",
+                "write_clipboard",
+                "结果窗回写写入剪贴板耗时",
+                clipboard_started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            );
+            record_writeback_stage_metric(
+                "结果窗",
+                "total",
+                "结果窗回写总耗时",
+                started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            );
+            error
+        })
     })?;
     record_writeback_stage_metric(
         "结果窗",

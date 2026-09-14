@@ -1077,6 +1077,8 @@ pub fn start_system_loopback_aac_with_device(
 
     let handle = std::thread::spawn(move || {
         let run = || -> Result<u64, String> {
+            // AAC 采集线程同样需要 COM MTA
+            let _ = initialize_mta();
             let ffmpeg_path = crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path()
                 .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
@@ -1388,8 +1390,18 @@ pub fn start_system_loopback_aac_with_device(
         }
     });
 
-    let stream_start_unix_ms = rx.recv_timeout(Duration::from_secs(2))
-        .map_err(|_| "启动 WASAPI+FFmpeg 捕获超时".to_string())??;
+    let stream_start_unix_ms = match rx.recv_timeout(Duration::from_secs(2)) {
+        Ok(Ok(ms)) => ms,
+        Ok(Err(e)) => {
+            // 启动失败：置 stop 让工作线程退出
+            stop_flag.store(true, Ordering::SeqCst);
+            return Err(e);
+        }
+        Err(_) => {
+            stop_flag.store(true, Ordering::SeqCst);
+            return Err("启动 WASAPI+FFmpeg 捕获超时".to_string());
+        }
+    };
 
     Ok(WasapiFfmpegHandle {
         stop_flag,

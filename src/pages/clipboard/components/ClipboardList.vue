@@ -546,6 +546,9 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   stageRef.value?.removeEventListener('wheel', onWheel)
+  // 拖拽中卸载时清理 document 级监听
+  document.removeEventListener('mousemove', onStageMouseMove)
+  document.removeEventListener('mouseup', onStageMouseUp)
   stopInertia()
   stopNavRepeat()
 })

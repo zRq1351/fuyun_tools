@@ -636,11 +636,17 @@ const persistSettings = async (
     return
   }
   if (isAutoSaving.value) {
-    pendingPersistSnapshot = snapshot
+    // 合并快照：不要用 null 覆盖已有 pending，也不要丢掉新变更
+    if (snapshot) {
+      pendingPersistSnapshot = snapshot
+    }
     pendingPersistVersion = Math.max(pendingPersistVersion, persistVersion)
     return
   }
-
+  if (!snapshot) {
+    // 防抖定时器与 in-flight finally 竞态：无快照时跳过
+    return
+  }
 
   const changedFields = getChangedFields(snapshot)
 
@@ -1203,12 +1209,16 @@ watch(form, () => {
 }, {deep: true})
 
 onBeforeUnmount(() => {
-  // 窗口关闭前，立即冲刷未保存的更改，防止 450ms 防抖窗口内数据丢失
-  if (pendingPersistSnapshot) {
+  // 窗口关闭前冲刷未保存更改：
+  // - 空闲：立刻 persist
+  // - 在途：把最新表单写入 pending，供 in-flight finally 的重试带上
+  if (isAutoSaving.value) {
+    pendingPersistSnapshot = buildFormSnapshot()
+    pendingPersistVersion = formMutationVersion
+  } else if (pendingPersistSnapshot) {
     const snapshot = pendingPersistSnapshot
     pendingPersistSnapshot = null
     pendingPersistVersion = 0
-    // 使用同步方式保存（不等待，窗口即将关闭）
     void persistSettings(true, snapshot, formMutationVersion)
   }
   if (saveTimer) {

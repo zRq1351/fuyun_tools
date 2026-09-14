@@ -765,6 +765,10 @@ pub async fn pin_screenshot_on_screen(
 
 #[tauri::command]
 pub async fn close_pinned_image_window(label: String, app: AppHandle) -> Result<(), String> {
+    // 仅允许销毁贴图窗口，防止误传 label 关掉核心窗口
+    if !label.starts_with("pinned_image") {
+        return Err(format!("拒绝关闭非贴图窗口: {}", label));
+    }
     if let Some(window) = app.get_webview_window(&label) {
         // destroy 而非 close：close 会被 overlay 生命周期 prevent_close 拦截成隐藏，窗口永远不销毁导致贴图上限永久封顶
         let _ = window.destroy();

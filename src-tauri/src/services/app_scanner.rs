@@ -159,18 +159,54 @@ fn scan_dir_flat(
     category: &str,
     category_map: &mut std::collections::HashMap<String, Vec<LauncherItem>>,
 ) {
+    scan_dir_flat_depth(dir, category, category_map, 0)
+}
+
+const MAX_LAUNCHER_SCAN_DEPTH: usize = 16;
+
+fn scan_dir_flat_depth(
+    dir: &Path,
+    category: &str,
+    category_map: &mut std::collections::HashMap<String, Vec<LauncherItem>>,
+    depth: usize,
+) {
+    if depth > MAX_LAUNCHER_SCAN_DEPTH {
+        return;
+    }
     let Ok(entries) = std::fs::read_dir(dir) else { return };
 
     for entry in entries.flatten() {
         let path = entry.path();
 
         if path.is_dir() {
-            scan_dir_flat(&path, category, category_map);
+            // 跳过 junction/symlink，避免开始菜单联接环导致栈溢出
+            if is_reparse_point(&path) {
+                continue;
+            }
+            scan_dir_flat_depth(&path, category, category_map, depth + 1);
         } else if path.extension().is_some_and(|e| e == "lnk") {
             if let Some(item) = parse_shortcut(&path, category) {
                 category_map.entry(category.to_string()).or_default().push(item);
             }
         }
+    }
+}
+
+fn is_reparse_point(path: &Path) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        if let Ok(meta) = std::fs::symlink_metadata(path) {
+            return meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+        }
+        false
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::fs::symlink_metadata(path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
     }
 }
 

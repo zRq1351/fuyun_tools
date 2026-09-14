@@ -161,7 +161,7 @@ export function useLauncherSearch() {
                         console.warn(t('launcher.unknownCustomAction'), action)
                 }
             } else if (cmdType.CopyText) {
-                await invoke('copy_to_clipboard', {text: cmdType.CopyText.text})
+                await invoke('copy_text', {text: cmdType.CopyText.text})
             } else if (cmdType.RunProgram) {
                 if (!cmdType.RunProgram.path) {
                     throw new Error(t('launcher.emptyProgramPath'))

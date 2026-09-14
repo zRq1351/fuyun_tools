@@ -139,13 +139,13 @@ pub fn is_fast_fill_verify_mode_enabled() -> bool {
 
 /// 获取异步生成的预览（全局访问）
 pub fn get_async_preview(item_id: &str) -> Option<(u32, u32, String)> {
-    let generator = PREVIEW_GENERATOR.lock().unwrap();
+    let generator = PREVIEW_GENERATOR.lock().unwrap_or_else(|never| match never {});
     generator.get_preview(item_id)
 }
 
 /// 检查预览是否已就绪（全局访问）
 pub fn is_preview_ready(item_id: &str) -> bool {
-    let generator = PREVIEW_GENERATOR.lock().unwrap();
+    let generator = PREVIEW_GENERATOR.lock().unwrap_or_else(|never| match never {});
     generator.get_preview(item_id).is_some()
 }
 
@@ -177,7 +177,7 @@ static PREVIEW_GENERATOR: LazyLock<Arc<Mutex<PreviewGenerator>>> =
 
 /// 带 AppHandle 的预览生成器初始化
 pub fn init_preview_generator_with_app_handle(app_handle: tauri::AppHandle) {
-    let mut generator = PREVIEW_GENERATOR.lock().unwrap();
+    let mut generator = PREVIEW_GENERATOR.lock().unwrap_or_else(|never| match never {});
     *generator = PreviewGenerator::new(Some(app_handle));
 }
 
@@ -1039,7 +1039,7 @@ impl ImageClipboardManager {
                 width,
                 height,
             };
-            let generator = PREVIEW_GENERATOR.lock().unwrap();
+            let generator = PREVIEW_GENERATOR.lock().unwrap_or_else(|never| match never {});
             generator.submit_task(preview_task);
             log::debug!("已提交异步预览生成任务: {} ({}x{})", id, width, height);
         }
