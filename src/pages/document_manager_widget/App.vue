@@ -1,7 +1,23 @@
 <template>
-  <div class="dmw-root">
-    <div class="dmw-container" @mouseleave="onContainerMouseLeave">
-      <div class="dmw-header" @mousedown.left.prevent="handleHeaderDrag">
+  <div class="dmw-root" @mouseenter="onDockHover" @mousemove="onDockHover">
+    <div
+        v-show="!expanded"
+        class="dmw-dock"
+    >
+      <div class="dmw-dock-icon">
+        <el-icon :size="14">
+          <FolderOpened/>
+        </el-icon>
+      </div>
+    </div>
+
+    <div
+        v-show="expanded"
+        class="dmw-container"
+        @mouseenter="cancelCollapse"
+        @mouseleave="onContainerMouseLeave"
+    >
+      <div class="dmw-header">
         <div class="dmw-header-left">
           <el-icon :size="14">
             <FolderOpened/>
@@ -14,12 +30,12 @@
           <span class="dmw-stat">{{ formatSize(stats?.totalSize) }}</span>
         </div>
         <div class="dmw-header-actions">
-          <button :title="t('common.refresh')" class="dmw-btn-icon" @click="refreshData" @mousedown.stop>
+          <button :title="t('common.refresh')" class="dmw-btn-icon" @click="refreshData">
             <el-icon :size="13">
               <Refresh/>
             </el-icon>
           </button>
-          <button :title="t('common.settings')" class="dmw-btn-icon" @click="openFullManager" @mousedown.stop>
+          <button :title="t('common.settings')" class="dmw-btn-icon" @click="openFullManager">
             <el-icon :size="13">
               <Setting/>
             </el-icon>
@@ -33,8 +49,7 @@
         </el-icon>
       </div>
       <template v-else>
-        <div ref="rootScrollRef" class="dmw-roots" @mousedown="onDragStart($event, rootScrollRef)"
-             @mouseenter="onRootsMouseEnter">
+        <div ref="rootScrollRef" class="dmw-roots" @mousedown="onDragStart($event, rootScrollRef)">
           <div
               v-for="root in roots"
               :key="root.id"
@@ -47,8 +62,7 @@
             <span class="dmw-root-name">{{ root.name }}</span>
           </div>
         </div>
-        <div ref="catScrollRef" class="dmw-categories" @mousedown="onDragStart($event, catScrollRef)"
-             @mouseenter="onCategoriesMouseEnter">
+        <div ref="catScrollRef" class="dmw-categories" @mousedown="onDragStart($event, catScrollRef)">
           <div
               v-for="cat in categories"
               :key="cat.id"
@@ -83,7 +97,7 @@
           </div>
         </div>
 
-        <div v-show="hovered" class="dmw-files">
+        <div class="dmw-files">
           <div v-if="displayFiles.length === 0" class="dmw-empty">
             {{ t('documentManager.noDocs') }}
           </div>
@@ -122,7 +136,6 @@
 <script setup>
 import {computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch} from 'vue'
 import {useI18n} from 'vue-i18n'
-import {useWindowDrag} from '../../composables/useWindowDrag'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {LogicalSize, PhysicalPosition} from '@tauri-apps/api/dpi'
 import {currentMonitor} from '@tauri-apps/api/window'
@@ -135,7 +148,6 @@ import {
 } from '@element-plus/icons-vue'
 
 const {t} = useI18n()
-const {startDrag} = useWindowDrag()
 const appWindow = getCurrentWebviewWindow()
 
 const stats = ref(null)
@@ -146,7 +158,17 @@ const allFiles = ref([])
 const selectedCategoryId = ref(null)
 const loading = ref(true)
 const refreshing = ref(false)
-const hovered = ref(false)
+const expanded = ref(false)
+
+const EXPANDED_W = 380
+// 收起只显示图标，窗口略大于图标便于贴边命中
+const COLLAPSED_W = 36
+const COLLAPSED_H = 48
+
+let dockAnim = false
+let expandTimer = null
+let collapseTimer = null
+let leaveGuardUntil = 0
 const rootScrollRef = ref(null)
 const catScrollRef = ref(null)
 const ctxMenuShow = ref(false)
@@ -285,7 +307,56 @@ watch(displayFiles, (files) => {
   if (exts.length > 0) loadFileIcons(exts)
 }, {immediate: true})
 
+async function pinTopRight(width, height) {
+  try {
+    try {
+      await appWindow.setAlwaysOnTop(false)
+    } catch {
+    }
+    await appWindow.setSize(new LogicalSize(width, height))
+    const mon = await currentMonitor()
+    if (!mon) return
+    // 贴死右上角（0 内缩）；收起态再让窗口往屏幕外多压 1px，保证最边缘像素可命中
+    const size = await appWindow.outerSize()
+    let nx = mon.position.x + mon.size.width - size.width
+    let ny = mon.position.y
+    if (!expanded.value) {
+      nx += 1
+      ny -= 1
+    }
+    await appWindow.setPosition(new PhysicalPosition(nx, ny))
+  } catch (e) {
+    console.error('调整小部件窗口大小失败:', e)
+  }
+}
+
+function cancelCollapse() {
+  if (collapseTimer) {
+    clearTimeout(collapseTimer)
+    collapseTimer = null
+  }
+}
+
+function onDockHover() {
+  cancelCollapse()
+  if (!expanded.value) expandDock()
+}
+
+async function onContainerMouseLeave() {
+  // 主逻辑由系统光标轮询负责；DOM leave 仅作补充延迟收起
+  if (dockAnim) return
+  if (collapseTimer) clearTimeout(collapseTimer)
+  collapseTimer = setTimeout(() => {
+    collapseTimer = null
+    if (!dockAnim) collapseDock()
+  }, 400)
+}
+
 async function resizeToFitContent() {
+  if (!expanded.value) {
+    await pinTopRight(COLLAPSED_W, COLLAPSED_H)
+    return
+  }
   await nextTick()
   await new Promise(r => setTimeout(r, 0))
   const container = document.querySelector('.dmw-container')
@@ -302,11 +373,54 @@ async function resizeToFitContent() {
   const screenHeight = window.screen?.availHeight ?? window.innerHeight
   const maxH = Math.max(Math.round(screenHeight / 2), 80)
   const h = Math.min(total, maxH)
+  await pinTopRight(EXPANDED_W, h)
+}
+
+async function expandDock() {
+  if (expanded.value || dockAnim) return
+  cancelCollapse()
+  if (expandTimer) return
+  expandTimer = setTimeout(async () => {
+    expandTimer = null
+    if (expanded.value || dockAnim) return
+    dockAnim = true
+    // resize 会误触发 leave，先打开保护；leave 事件本身仍会被排队收起
+    leaveGuardUntil = Date.now() + 350
+    try {
+      expanded.value = true
+      await nextTick()
+      await resizeToFitContent()
+      leaveGuardUntil = Date.now() + 350
+    } finally {
+      dockAnim = false
+    }
+  }, 0)
+}
+
+async function collapseDock() {
+  if (!expanded.value) return
+  if (ctxMenuShow.value || dialogOpen.value) return
+  if (expandTimer) {
+    clearTimeout(expandTimer)
+    expandTimer = null
+  }
+  if (dockAnim) {
+    if (collapseTimer) clearTimeout(collapseTimer)
+    collapseTimer = setTimeout(() => {
+      collapseTimer = null
+      collapseDock()
+    }, 80)
+    return
+  }
+  dockAnim = true
+  leaveGuardUntil = Date.now() + 200
   try {
-    await appWindow.setSize(new LogicalSize(380, h))
-    await snapWindowPosition()
-  } catch (e) {
-    console.error('调整小部件窗口大小失败:', e)
+    expanded.value = false
+    await nextTick()
+    await pinTopRight(COLLAPSED_W, COLLAPSED_H)
+    leaveGuardUntil = Date.now() + 200
+  } finally {
+    dockAnim = false
   }
 }
 
@@ -404,7 +518,7 @@ async function importDroppedFiles(paths, catId) {
     } else if (catId === -1) {
       selectedCategoryId.value = -1
     }
-    hovered.value = true
+    expanded.value = true
     await nextTick()
     await resizeToFitContent()
     if (result?.errors?.length) {
@@ -454,29 +568,9 @@ async function loadDataForRoot(rootId) {
   }
 }
 
-async function onRootsMouseEnter() {
-  hovered.value = true
-  await nextTick()
-  await resizeToFitContent()
-}
-
-async function onCategoriesMouseEnter() {
-  hovered.value = true
-  await nextTick()
-  await resizeToFitContent()
-}
-
-async function onContainerMouseLeave() {
-  if (ctxMenuShow.value || dialogOpen.value) return
-  hovered.value = false
-  await nextTick()
-  await resizeToFitContent()
-}
-
 async function selectRoot(id) {
   if (selectedRootId.value === id) return
   selectedRootId.value = id
-  hovered.value = true
   await loadDataForRoot(id)
   await nextTick()
   await resizeToFitContent()
@@ -511,7 +605,7 @@ async function refreshData() {
   if (!selectedRootId.value) return
   loading.value = true
   await loadDataForRoot(selectedRootId.value)
-  hovered.value = true
+  expanded.value = true
   await nextTick()
   await resizeToFitContent()
   loading.value = false
@@ -552,127 +646,49 @@ async function deleteFile(file) {
   }
 }
 
-let dragState = null
-
-function onWinDragMove(e) {
-  if (!dragState) return
-  const {startX, startY, startSX, startSY, mx, my, mw, mh, sw, sh, dpr} = dragState
-  dragState._px = Math.round(Math.max(mx, Math.min(startX + (e.screenX - startSX) * dpr, mx + mw - sw)))
-  dragState._py = Math.round(Math.max(my, Math.min(startY + (e.screenY - startSY) * dpr, my + mh - sh)))
-  if (!dragState._raf) {
-    dragState._raf = requestAnimationFrame(applyWinDrag)
-  }
-}
-
-function applyWinDrag() {
-  if (!dragState) return
-  dragState._raf = null
-  const x = dragState._px, y = dragState._py
-  if (x !== dragState._lx || y !== dragState._ly) {
-    dragState._lx = x;
-    dragState._ly = y
-    appWindow.setPosition(new PhysicalPosition(x, y)).catch(() => {
-    })
-  }
-}
-
-async function onWinDragUp() {
-  if (dragState?._raf) {
-    cancelAnimationFrame(dragState._raf);
-    dragState._raf = null
-  }
-  document.removeEventListener('mousemove', onWinDragMove)
-  document.removeEventListener('mouseup', onWinDragUp)
-  if (dragState) {
-    const x = dragState._px, y = dragState._py
-    dragState = null
-    if (x !== undefined) {
-      await appWindow.setPosition(new PhysicalPosition(x, y))
-    }
-    await snapWindowPosition()
-  }
-}
-
-async function handleHeaderDrag(e) {
-  const dpr = window.devicePixelRatio || 1
-  const [pos, mon] = await Promise.all([appWindow.outerPosition(), currentMonitor()])
-  if (!mon) {
-    await startDrag();
-    return
-  }
-  const {x: mx, y: my} = mon.position
-  const {width: mw, height: mh} = mon.size
-  const size = await appWindow.outerSize()
-  dragState = {
-    startX: pos.x,
-    startY: pos.y,
-    startSX: e.screenX,
-    startSY: e.screenY,
-    mx,
-    my,
-    mw,
-    mh,
-    sw: size.width,
-    sh: size.height,
-    dpr,
-    _lx: pos.x,
-    _ly: pos.y,
-    _px: pos.x,
-    _py: pos.y,
-    _raf: null
-  }
-  document.addEventListener('mousemove', onWinDragMove)
-  document.addEventListener('mouseup', onWinDragUp)
-}
-
-async function snapWindowPosition() {
-  try {
-    const monitor = await currentMonitor()
-    if (!monitor) return
-    const {x: mx, y: my} = monitor.position
-    const {width: mw, height: mh} = monitor.size
-    const pos = await appWindow.outerPosition()
-    const size = await appWindow.outerSize()
-
-    const SNAP = 20
-    let nx = pos.x
-    let ny = pos.y
-
-    if (Math.abs(pos.x - mx) < SNAP) nx = mx
-    else if (Math.abs(pos.x + size.width - (mx + mw)) < SNAP) nx = mx + mw - size.width
-    if (Math.abs(pos.y - my) < SNAP) ny = my
-    else if (Math.abs(pos.y + size.height - (my + mh)) < SNAP) ny = my + mh - size.height
-
-    nx = Math.max(mx, Math.min(nx, mx + mw - size.width))
-    ny = Math.max(my, Math.min(ny, my + mh - size.height))
-
-    if (nx !== pos.x || ny !== pos.y) {
-      await appWindow.setPosition(new PhysicalPosition(nx, ny))
-    }
-  } catch (e) {
-    console.error('吸附失败:', e)
-  }
-}
-
 let unlistenData = null
 let unlistenDragDrop = null
 let refreshTimer = null
+let cursorPollTimer = null
 
 function onWindowBlur() {
-  onDragEnd()
-  if (dragState) {
-    document.removeEventListener('mousemove', onWinDragMove)
-    document.removeEventListener('mouseup', onWinDragUp)
-    dragState = null
-  }
-  hovered.value = false
-  nextTick().then(() => resizeToFitContent())
+  // 系统光标轮询会负责收起；blur 时不要立刻收，避免贴边误伤
   import('element-plus').then(({ElMessageBox}) => ElMessageBox.close()).catch(() => {
   })
 }
 
+async function pollCursorDock() {
+  if (dockAnim || ctxMenuShow.value || dialogOpen.value) return
+  try {
+    const {invoke} = await import('@tauri-apps/api/core')
+    const [cx, cy] = await invoke('get_physical_cursor_position')
+    const [pos, size] = await Promise.all([
+      appWindow.outerPosition(),
+      appWindow.outerSize(),
+    ])
+    if (!expanded.value) {
+      // 收起条在窗口右上角：光标进入窗口附近（含贴屏幕边）即展开
+      const m = 8
+      const inHot = cx >= pos.x - m && cx <= pos.x + size.width + m
+          && cy >= pos.y - m && cy <= pos.y + size.height + m
+      if (inHot) expandDock()
+    } else {
+      // 展开面板：光标离开窗口外扩 16px 才收起
+      const m = 16
+      const outside = cx < pos.x - m || cx > pos.x + size.width + m
+          || cy < pos.y - m || cy > pos.y + size.height + m
+      if (outside) collapseDock()
+    }
+  } catch {
+  }
+}
+
 onMounted(async () => {
   window.addEventListener('blur', onWindowBlur)
+  try {
+    await appWindow.setAlwaysOnTop(false)
+  } catch {
+  }
 
   const {getCurrentWebview} = await import('@tauri-apps/api/webview')
   unlistenDragDrop = await getCurrentWebview().onDragDropEvent((event) => {
@@ -721,7 +737,9 @@ onMounted(async () => {
     } catch (e) {
       console.error('刷新文档数据失败:', e)
     }
-    await resizeToFitContent()
+    if (expanded.value && !dockAnim) {
+      await resizeToFitContent()
+    }
   })
 
   // 后端尚无 doc-widget-refresh 事件源，改为定时刷新保持数据同步
@@ -735,8 +753,13 @@ onMounted(async () => {
     } finally {
       refreshing.value = false
     }
-    await resizeToFitContent()
+    if (expanded.value && !dockAnim) {
+      await resizeToFitContent()
+    }
   }, 5000)
+
+  // 系统光标轮询：贴屏幕边也能可靠展开/收起
+  cursorPollTimer = window.setInterval(pollCursorDock, 60)
 })
 
 onBeforeUnmount(() => {
@@ -747,6 +770,18 @@ onBeforeUnmount(() => {
   if (refreshTimer) {
     clearInterval(refreshTimer)
     refreshTimer = null
+  }
+  if (cursorPollTimer) {
+    clearInterval(cursorPollTimer)
+    cursorPollTimer = null
+  }
+  if (expandTimer) {
+    clearTimeout(expandTimer)
+    expandTimer = null
+  }
+  if (collapseTimer) {
+    clearTimeout(collapseTimer)
+    collapseTimer = null
   }
 })
 
@@ -762,17 +797,51 @@ onBeforeUnmount(() => {
   font-size: var(--fy-text-base, 13px);
   color: var(--fy-text-primary, #e8ecf4);
   user-select: none;
+  pointer-events: auto;
+}
+
+.dmw-dock {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: auto;
+  width: 28px;
+  height: 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--fy-glass-bg);
+  border: 1px solid var(--fy-glass-border);
+  border-radius: 0 0 0 var(--fy-radius-xl);
+  box-shadow: var(--fy-glass-shadow);
+  backdrop-filter: var(--fy-glass-blur);
+  -webkit-backdrop-filter: var(--fy-glass-blur);
+  user-select: none;
+  pointer-events: auto;
+}
+
+.dmw-dock-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--fy-radius-sm);
+  background: var(--fy-accent-bg);
+  color: var(--fy-accent);
+  flex-shrink: 0;
 }
 
 .dmw-container {
   position: fixed;
   top: 0;
-  right: 0;
-  width: 380px;
-  max-height: 100vh;
+  left: 0;
+  width: 100%;
+  height: 100%;
   background: var(--fy-glass-bg);
   border: 1px solid var(--fy-glass-border);
-  border-radius: var(--fy-radius-xl);
+  border-radius: 0 0 0 var(--fy-radius-xl);
   box-shadow: var(--fy-glass-shadow);
   backdrop-filter: var(--fy-glass-blur);
   -webkit-backdrop-filter: var(--fy-glass-blur);
@@ -786,7 +855,6 @@ onBeforeUnmount(() => {
   align-items: center;
   padding: 10px 12px;
   gap: 8px;
-  cursor: move;
   border-bottom: 1px solid var(--fy-border-light);
   flex-shrink: 0;
 }

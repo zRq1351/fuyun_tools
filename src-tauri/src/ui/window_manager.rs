@@ -1061,15 +1061,19 @@ fn ensure_doc_manager_widget_window(app: &AppHandle) -> Result<tauri::WebviewWin
         .shadow(false)
         .transparent(true)
         .skip_taskbar(true)
-        .inner_size(380.0, 460.0)
+        // 不置顶：只作为桌面层悬浮栏，不遮挡其它应用窗口
+        .always_on_top(false)
+        .inner_size(36.0, 48.0)
         .build()
         .map_err(|e| format!("创建文档管理小部件窗口失败: {}", e))?;
     bind_overlay_window_events(&window, app.clone(), label);
+    let _ = window.set_always_on_top(false);
     Ok(window)
 }
 
 pub fn show_doc_manager_widget_window(app: &AppHandle) -> Result<(), String> {
     let window = ensure_doc_manager_widget_window(app)?;
+    let _ = window.set_always_on_top(false);
     position_widget_to_top_right(&window)?;
     if let Ok(true) = window.is_visible() {
         let _ = window.set_focus();
@@ -1087,7 +1091,6 @@ pub fn hide_doc_manager_widget_window(app: &AppHandle) -> Result<(), String> {
 }
 
 fn position_widget_to_top_right(window: &tauri::WebviewWindow) -> Result<(), String> {
-    let logical_w = 380.0;
     let margin = 0.0;
     let monitor = window.current_monitor()
         .map_err(|e| e.to_string())?
@@ -1096,13 +1099,29 @@ fn position_widget_to_top_right(window: &tauri::WebviewWindow) -> Result<(), Str
     let mpos = monitor.position();
     let msize = monitor.size();
     let current_size = window.outer_size().map_err(|e| e.to_string())?;
-    let logical_h = current_size.height as f64 / scale;
-    window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(logical_w, logical_h)))
-        .map_err(|e| format!("set_size: {}", e))?;
-    let px = mpos.x + msize.width as i32 - (logical_w * scale) as i32 - (margin * scale) as i32;
+    let px = mpos.x + msize.width as i32 - current_size.width as i32 - (margin * scale) as i32;
     let py = mpos.y + (margin * scale) as i32;
     window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: px, y: py }))
         .map_err(|e| format!("set_position: {}", e))
+}
+
+/// 系统光标物理坐标，用于贴边悬浮栏不依赖 DOM 鼠标事件
+#[tauri::command]
+pub fn get_physical_cursor_position() -> Result<(i32, i32), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        let mut pt = POINT::default();
+        unsafe {
+            GetCursorPos(&mut pt).map_err(|e| format!("GetCursorPos: {}", e))?;
+        }
+        Ok((pt.x, pt.y))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("unsupported platform".into())
+    }
 }
 
 pub(crate) fn is_window_feature_enabled(app: &AppHandle, label: &str) -> bool {

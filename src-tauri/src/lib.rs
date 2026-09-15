@@ -40,7 +40,7 @@ use crate::ui::commands_vc_runtime::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{
     bind_overlay_window_events, bind_standard_window_close_to_hide,
-    ensure_window_for_label,
+    ensure_window_for_label, get_physical_cursor_position,
     show_clipboard_window, show_doc_manager_widget_window,
     show_image_clipboard_window, show_standard_window_by_label,
 };
@@ -640,6 +640,7 @@ pub fn run() {
             check_previews_ready,
             copy_image_clipboard_item_to_directory,
             get_clipboard_full_snapshot,
+            get_physical_cursor_position,
             // 截图相关命令
             start_screenshot,
             get_screenshot_data,
