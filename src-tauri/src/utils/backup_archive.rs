@@ -170,6 +170,7 @@ pub fn extract_package_to_dir(package_path: &Path, target_dir: &Path) -> Result<
             continue;
         }
         let uncompressed_size = zipped.size();
+        // 声明过大直接拒绝；实际写入仍按字节计数防 size bomb
         if uncompressed_size > MAX_SINGLE_FILE_SIZE {
             return Err(format!(
                 "备份包中文件过大: {} (最大允许 {}MB)",
@@ -177,19 +178,38 @@ pub fn extract_package_to_dir(package_path: &Path, target_dir: &Path) -> Result<
                 MAX_SINGLE_FILE_SIZE / 1024 / 1024
             ));
         }
-        total_extracted += uncompressed_size;
-        if total_extracted > MAX_TOTAL_EXTRACTED_SIZE {
-            return Err(format!(
-                "备份包解压后总大小超过限制 (最大允许 {}GB)",
-                MAX_TOTAL_EXTRACTED_SIZE / 1024 / 1024 / 1024
-            ));
-        }
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("创建解压父目录失败: {}", e))?;
         }
         let mut output =
             File::create(&output_path).map_err(|e| format!("创建解压文件失败: {}", e))?;
-        std::io::copy(&mut zipped, &mut output).map_err(|e| format!("写入解压文件失败: {}", e))?;
+        // 不信任 zip 头声明大小：按实际写入字节计数，防 size bomb
+        let mut written: u64 = 0;
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            let n = std::io::Read::read(&mut zipped, &mut buf)
+                .map_err(|e| format!("读取解压数据失败: {}", e))?;
+            if n == 0 {
+                break;
+            }
+            written += n as u64;
+            if written > MAX_SINGLE_FILE_SIZE {
+                return Err(format!(
+                    "备份包中文件实际解压过大: {} (最大允许 {}MB)",
+                    zipped.name(),
+                    MAX_SINGLE_FILE_SIZE / 1024 / 1024
+                ));
+            }
+            total_extracted += n as u64;
+            if total_extracted > MAX_TOTAL_EXTRACTED_SIZE {
+                return Err(format!(
+                    "备份包实际解压总大小超过限制 (最大允许 {}GB)",
+                    MAX_TOTAL_EXTRACTED_SIZE / 1024 / 1024 / 1024
+                ));
+            }
+            std::io::Write::write_all(&mut output, &buf[..n])
+                .map_err(|e| format!("写入解压文件失败: {}", e))?;
+        }
     }
     Ok(())
 }

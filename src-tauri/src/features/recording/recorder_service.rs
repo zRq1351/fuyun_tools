@@ -2899,8 +2899,10 @@ pub fn stop_recording(
         ffmpeg_start_delay_ms,
         system_audio_stop_flag,
         system_audio_threads,
+        system_audio_enabled_flag,
         mic_audio_stop_flag,
         mic_audio_thread,
+        mic_audio_enabled_flag,
         output_tmp,
         mut output_final,
         mut sys_segments,
@@ -2965,8 +2967,10 @@ pub fn stop_recording(
         runtime.wgc_stop_flag = None;
         let system_audio_stop_flag = runtime.system_audio_stop_flag.take();
         let system_audio_threads = std::mem::take(&mut runtime.system_audio_threads);
+        let system_audio_enabled_flag = runtime.system_audio_enabled_flag.clone();
         let mic_audio_stop_flag = runtime.mic_audio_stop_flag.take();
         let mic_audio_thread = runtime.mic_audio_thread.take();
+        let mic_audio_enabled_flag = runtime.mic_audio_enabled_flag.clone();
         let output_tmp = runtime.output_path_tmp.take();
         let output_final = runtime.output_path_final.take();
         let mut taken_sys_segments = std::mem::take(&mut runtime.system_audio_segments);
@@ -3000,8 +3004,10 @@ pub fn stop_recording(
             ffmpeg_start_delay_ms,
             system_audio_stop_flag,
             system_audio_threads,
+            system_audio_enabled_flag,
             mic_audio_stop_flag,
             mic_audio_thread,
+            mic_audio_enabled_flag,
             output_tmp,
             output_final,
             sys_segments,
@@ -3320,6 +3326,10 @@ pub fn stop_recording(
     }
     if sys_audio_timed_out {
         log::warn!("系统音频线程超时，跳过系统音频合并以避免使用不完整文件");
+        // 强制关闭写入开关：detached 线程最多再写当前缓冲，随后停笔
+        if let Some(flag) = system_audio_enabled_flag.as_ref() {
+            flag.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
         sys_segments.clear();
     }
     let sys_audio_elapsed = sys_audio_join_start.elapsed().as_millis();
@@ -3334,6 +3344,9 @@ pub fn stop_recording(
     if let Some(join) = mic_audio_thread {
         if !join_thread_with_timeout(join, "stop 麦克风音频", 500) {
             log::warn!("麦克风音频线程超时，跳过麦克风音频合并以避免使用不完整文件");
+            if let Some(flag) = mic_audio_enabled_flag.as_ref() {
+                flag.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
             mic_segments.clear();
         }
     }

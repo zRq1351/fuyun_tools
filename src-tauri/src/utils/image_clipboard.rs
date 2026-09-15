@@ -138,15 +138,25 @@ pub fn is_fast_fill_verify_mode_enabled() -> bool {
 }
 
 /// 获取异步生成的预览（全局访问）
+/// 缓存与 DB I/O 分开持锁，避免全局预览锁被 SQLite 阻塞
 pub fn get_async_preview(item_id: &str) -> Option<(u32, u32, String)> {
-    let generator = PREVIEW_GENERATOR.lock().unwrap_or_else(|never| match never {});
-    generator.get_preview(item_id)
+    {
+        let generator = PREVIEW_GENERATOR.lock().unwrap_or_else(|never| match never {});
+        if let Some(preview) = generator.peek_cache(item_id) {
+            return Some(preview);
+        }
+    }
+    if let Ok(Some(preview)) = image_store::load_async_preview(item_id) {
+        let generator = PREVIEW_GENERATOR.lock().unwrap_or_else(|never| match never {});
+        generator.put_cache(item_id.to_string(), preview.clone());
+        return Some(preview);
+    }
+    None
 }
 
 /// 检查预览是否已就绪（全局访问）
 pub fn is_preview_ready(item_id: &str) -> bool {
-    let generator = PREVIEW_GENERATOR.lock().unwrap_or_else(|never| match never {});
-    generator.get_preview(item_id).is_some()
+    get_async_preview(item_id).is_some()
 }
 
 #[derive(Clone)]
@@ -268,21 +278,19 @@ impl PreviewGenerator {
         }
     }
 
-    /// 获取异步生成的预览（优先从内存缓存，其次从数据库）
-    pub fn get_preview(&self, item_id: &str) -> Option<(u32, u32, String)> {
-        if let Some(preview) = self.preview_cache.lock().unwrap().get(item_id) {
-            return Some(preview.clone());
-        }
+    fn peek_cache(&self, item_id: &str) -> Option<(u32, u32, String)> {
+        self.preview_cache
+            .lock()
+            .unwrap_or_else(|never| match never {})
+            .get(item_id)
+            .cloned()
+    }
 
-        if let Ok(Some(preview)) = image_store::load_async_preview(item_id) {
-            self.preview_cache
-                .lock()
-                .unwrap()
-                .put(item_id.to_string(), preview.clone());
-            return Some(preview);
-        }
-
-        None
+    fn put_cache(&self, item_id: String, preview: (u32, u32, String)) {
+        self.preview_cache
+            .lock()
+            .unwrap_or_else(|never| match never {})
+            .put(item_id, preview);
     }
 }
 

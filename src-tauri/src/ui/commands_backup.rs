@@ -496,6 +496,11 @@ pub async fn restore_backup_package(
         .get_or_init(|| tauri::async_runtime::Mutex::new(()))
         .lock()
         .await;
+    // 恢复前快照运行时设置，供 apply 时注销旧热键
+    let previous_settings = {
+        let guard = crate::sync::lock_arc_mutex(state.inner());
+        guard.settings.clone()
+    };
     let result = match execute_restore_backup_package(state.inner().clone(), request).await {
         Ok(value) => {
             record_perf_metric(
@@ -519,7 +524,11 @@ pub async fn restore_backup_package(
         }
     };
     // 恢复 settings 后同步热键/监听/窗口，避免需重启才生效
-    crate::ui::commands::apply_runtime_after_settings_restore(&app, state.inner());
+    crate::ui::commands::apply_runtime_after_settings_restore(
+        &app,
+        state.inner(),
+        &previous_settings,
+    );
     cleanup_dir(&result.extracted_dir);
     if let Some(rollback_dir) = &result.rollback_dir {
         cleanup_dir(rollback_dir);

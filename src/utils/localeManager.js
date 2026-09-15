@@ -44,7 +44,7 @@ export async function fetchLocale() {
     try {
         const backendLocale = await invoke('get_locale')
         if (SUPPORTED_LOCALES.includes(backendLocale)) {
-            if (pendingLocaleSave || localeSaveSeq > 0) {
+            if (pendingLocaleSave) {
                 return getLocale()
             }
             localStorage.setItem(LOCALE_KEY, backendLocale)

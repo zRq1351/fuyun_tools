@@ -764,12 +764,14 @@ const persistSettings = async (
               }
           )
         } catch {
-          // 取消禁用：还原开关状态，不保存本次变更
+          // 取消禁用：还原开关，但**继续保存同批次其余字段**
           form.recordingEnabled = true
           snapshot.recordingEnabled = true
           delete changedFields.recordingEnabled
-          autoSaveState.value = 'idle'
-          return
+          if (!changedFields || Object.keys(changedFields).length === 0) {
+            autoSaveState.value = 'idle'
+            return
+          }
         }
       }
     }
@@ -833,6 +835,18 @@ const persistSettings = async (
         activeTab.value = 'screenshot'
       } else {
         activeTab.value = 'clipboard'
+      }
+      // 回滚失败的热键字段，避免 dirty 永久循环
+      const init = initialFormState.value
+      if (init) {
+        form.toggleShortcut = init.toggleShortcut
+        form.imageToggleShortcut = init.imageToggleShortcut
+        form.screenshotToggleShortcut = init.screenshotToggleShortcut
+        form.recordingToggleShortcut = init.recordingToggleShortcut
+        form.recordingMicToggleShortcut = init.recordingMicToggleShortcut
+        form.launcherHotKey = init.launcherHotKey
+        form.docManagerHotKey = init.docManagerHotKey
+        saveInitialFormState()
       }
     } else if (!errorCode && (raw.includes('快捷键被占用') || raw.includes('shortcut') || raw.includes('hotkey'))) {
         shortcutConflictMessage.value = raw.replace(/^Error:\s*/i, '')

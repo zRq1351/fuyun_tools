@@ -361,6 +361,10 @@ async fn execute_stream_request(
                 );
                 return false;
             }
+            if !crate::ui::window_manager::is_safe_result_window_label(&window_label) {
+                log::warn!("AI 流拒绝向非结果窗口发送: {}", window_label);
+                return false;
+            }
             // 使用新创建的窗口标签发送更新事件
             if let Some(window) = app.get_webview_window(&window_label) {
                 let payload = serde_json::json!({

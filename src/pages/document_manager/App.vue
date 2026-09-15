@@ -939,7 +939,9 @@ async function loadData() {
   })
 }
 
+let loadFilesSeq = 0
 async function loadFiles(preserveSelection) {
+  const seq = ++loadFilesSeq
   loading.value = true
   try {
     const r = await DocumentService.getPage({
@@ -948,15 +950,20 @@ async function loadFiles(preserveSelection) {
       keyword: searchKeyword.value || null,
       fileExt: fileExtFilter.value || null,
     })
+    if (seq !== loadFilesSeq) return
     items.value = r.items || []
     total.value = Number(r.total) || 0
     if (!preserveSelection || !items.value.find(i => i.id === selectedId.value)) {
       selectedId.value = null
     }
   } catch (e) {
-    ElMessage.error(t('documentManager.loadFileListFailed'))
+    if (seq === loadFilesSeq) {
+      ElMessage.error(t('documentManager.loadFileListFailed'))
+    }
   } finally {
-    loading.value = false
+    if (seq === loadFilesSeq) {
+      loading.value = false
+    }
   }
   await nextTick()
   initFileSortable()

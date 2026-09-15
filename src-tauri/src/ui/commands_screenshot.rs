@@ -763,12 +763,16 @@ pub async fn pin_screenshot_on_screen(
     Ok(serde_json::json!({ "success": true, "label": label }))
 }
 
+fn require_pinned_image_label(label: &str) -> Result<(), String> {
+    if !label.starts_with("pinned_image") {
+        return Err(format!("拒绝操作非贴图窗口: {}", label));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn close_pinned_image_window(label: String, app: AppHandle) -> Result<(), String> {
-    // 仅允许销毁贴图窗口，防止误传 label 关掉核心窗口
-    if !label.starts_with("pinned_image") {
-        return Err(format!("拒绝关闭非贴图窗口: {}", label));
-    }
+    require_pinned_image_label(&label)?;
     if let Some(window) = app.get_webview_window(&label) {
         // destroy 而非 close：close 会被 overlay 生命周期 prevent_close 拦截成隐藏，窗口永远不销毁导致贴图上限永久封顶
         let _ = window.destroy();
@@ -781,6 +785,7 @@ pub async fn get_pinned_image_window_position(
     label: String,
     app: AppHandle,
 ) -> Result<serde_json::Value, String> {
+    require_pinned_image_label(&label)?;
     if let Some(window) = app.get_webview_window(&label) {
         if let Ok(pos) = window.outer_position() {
             return Ok(serde_json::json!({
@@ -802,6 +807,7 @@ pub async fn move_pinned_image_window(
     y: i32,
     app: AppHandle,
 ) -> Result<(), String> {
+    require_pinned_image_label(&label)?;
     if let Some(window) = app.get_webview_window(&label) {
         let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
     }

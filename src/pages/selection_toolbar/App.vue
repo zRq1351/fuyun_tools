@@ -175,7 +175,14 @@ const onMouseEnter = async () => {
 
     const factor = await appWindow.scaleFactor()
       const physicalPos = await appWindow.outerPosition()
-      if (stateVersion !== currentVersion) return
+      if (stateVersion !== currentVersion) {
+        // 版本过期：必须恢复魔法棒内联样式，否则永久隐形
+        if (miniIcon) {
+          miniIcon.style.removeProperty('opacity')
+          miniIcon.style.removeProperty('pointer-events')
+        }
+        return
+      }
 
       // 保存当前的缩小状态位置，以便后续精准恢复，防止窗口漂移
       shrunkPhysicalX = physicalPos.x
@@ -216,7 +223,13 @@ const onMouseEnter = async () => {
 
       // 等待窗口调整完成后，再显示工具栏
       await new Promise(resolve => setTimeout(resolve, 50))
-      if (stateVersion !== currentVersion) return
+      if (stateVersion !== currentVersion) {
+        if (miniIcon) {
+          miniIcon.style.removeProperty('opacity')
+          miniIcon.style.removeProperty('pointer-events')
+        }
+        return
+      }
 
       // 恢复魔法棒的CSS状态并显示工具栏
       if (miniIcon) {
@@ -490,7 +503,8 @@ const handleTranslate = async () => {
     const ready = await ensureSelectionAiConfigured()
     if (!ready) return
     await WindowService.selectionToolbarBlur()
-    await AIService.streamTranslate(text, t('selectionToolbar.autoDetect'), t('selectionToolbar.simplifiedChinese'))
+    // 使用规范语言名，避免 i18n 文案随界面语言变化
+    await AIService.streamTranslate(text, '自动识别', '简体中文')
   }, t('selectionToolbar.translateFailed'))
 }
 
@@ -499,7 +513,7 @@ const handleExplain = async () => {
     const ready = await ensureSelectionAiConfigured()
     if (!ready) return
     await WindowService.selectionToolbarBlur()
-    await AIService.streamExplain(text, t('selectionToolbar.chinese'))
+    await AIService.streamExplain(text, '简体中文')
   }, t('selectionToolbar.explainFailed'))
 }
 

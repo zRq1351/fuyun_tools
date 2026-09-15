@@ -293,11 +293,15 @@ impl Drop for UpdatingClipboardGuard {
 
 pub(crate) fn set_updating_clipboard(state: &Arc<Mutex<SharedAppState>>, updating: bool) {
     let mut state_guard = lock_arc_mutex(state);
-    if !updating {
+    if updating {
+        // 显式置位，让轮询在删除+回填窗口期内跳过
+        state_guard.is_updating_clipboard = true;
+        state_guard.is_processing_selection = true;
+    } else {
         state_guard.is_text_writeback_active = false;
         state_guard.is_image_writeback_active = false;
+        recompute_selection_related_flags(&mut state_guard);
     }
-    recompute_selection_related_flags(&mut state_guard);
 }
 
 pub(crate) fn get_clipboard_manager_arc(state: &Arc<Mutex<SharedAppState>>) -> Arc<Mutex<ClipboardManager>> {
@@ -827,11 +831,17 @@ pub(crate) fn execute_select_and_fill_image_by_id(
                 None,
             );
             ImageClipboardManager::write_clipboard_image(app_handle, &image)?;
+            // 与文字回填一致：置顶到历史最前，而不是真正 pin
+            {
+                let manager = lock_arc_mutex(&manager_arc);
+                if let Err(e) = manager.promote_to_top_by_id(&item_id) {
+                    log::warn!("图片回填后置顶失败: {}", e);
+                }
+            }
             if let Err(e) = app_handle.emit(
-                "image-item-pinned",
+                "image-history-item-promoted",
                 serde_json::json!({
                     "itemId": item_id,
-                    "pinned": true,
                 }),
             ) {
                 log::warn!("发送图片项置顶事件失败: {}", e);

@@ -27,7 +27,7 @@ export async function fetchTheme() {
         const theme = await invoke('get_theme')
         if (THEMES.includes(theme)) {
             // 本地刚改过、后端可能尚未写完：不覆盖
-            if (pendingThemeSave || themeSaveSeq > 0) {
+            if (pendingThemeSave) {
                 return getTheme()
             }
             localStorage.setItem(THEME_KEY, theme)

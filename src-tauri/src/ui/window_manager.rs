@@ -1508,6 +1508,14 @@ fn try_restore_foreground_target(_target: &ForegroundTargetSnapshot) -> bool {
     false
 }
 
+/// 结果窗口 label 白名单：防止前端把 AI 流/eval 打到 settings 等核心窗口
+pub fn is_safe_result_window_label(label: &str) -> bool {
+    let lower = label.to_ascii_lowercase();
+    lower.starts_with("result_display")
+        || lower.starts_with("result_")
+        || lower.starts_with("ai_result")
+}
+
 /// 显示结果窗口
 pub async fn show_result_window(
     title: String,
@@ -1522,7 +1530,9 @@ pub async fn show_result_window(
 
     // 如果提供了现有窗口标签，尝试复用该窗口
     if let Some(ref label) = existing_window_label {
-        if let Some(window) = app.get_webview_window(label) {
+        if !is_safe_result_window_label(label) {
+            log::warn!("拒绝向非结果窗口注入数据: {}", label);
+        } else if let Some(window) = app.get_webview_window(label) {
             // 窗口存在，发送清理事件让它重新加载内容
             let _ = window.emit(
                 "result-clean",

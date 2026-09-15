@@ -646,6 +646,7 @@ pub async fn save_app_settings(
     recording_file_name_template: Option<String>,
     recording_ffmpeg_download_url: Option<String>,
     recording_window_audio_sync_advance_ms: Option<u32>,
+    dev_force_ffmpeg_window_capture: Option<bool>,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
@@ -842,6 +843,9 @@ pub async fn save_app_settings(
     if let Some(val) = recording_window_audio_sync_advance_ms {
         settings.recording_window_audio_sync_advance_ms = val.clamp(0, 500);
     }
+    if let Some(val) = dev_force_ffmpeg_window_capture {
+        settings.dev_force_ffmpeg_window_capture = val;
+    }
 
     if let Some(ref hot_key_val) = hot_key {
         if hot_key_val.is_empty() {
@@ -852,6 +856,19 @@ pub async fn save_app_settings(
         }
 
         if hot_key_val != &settings.hot_key {
+            // 与其它功能已存储热键比对（即使功能当前禁用，键串仍可能冲突）
+            if hot_key_val == &settings.image_hot_key
+                || hot_key_val == &settings.screenshot_hot_key
+                || hot_key_val == &settings.recording_hot_key
+                || hot_key_val == &settings.recording_mic_toggle_hot_key
+                || hot_key_val == &settings.launcher_hot_key
+                || hot_key_val == &settings.doc_manager_hot_key
+            {
+                return Err(frontend_error_kind(
+                    AppErrorKind::SettingsHotkeysIdentical,
+                    format!("hot_key={} 与其它功能快捷键相同", hot_key_val),
+                ));
+            }
             if settings.text_clipboard_enabled
                 && app.global_shortcut().is_registered(hot_key_val.as_str())
             {
@@ -1265,7 +1282,7 @@ pub async fn save_app_settings(
                         if let ShortcutState::Pressed = event.state {
                             let app_handle = app_handle_for_launcher.clone();
                             tauri::async_runtime::spawn(async move {
-                                let _ = crate::ui::commands_launcher::show_launcher(app_handle).await;
+                                let _ = crate::ui::commands_launcher::toggle_launcher(app_handle).await;
                             });
                         }
                     },
@@ -1282,7 +1299,7 @@ pub async fn save_app_settings(
                             if let ShortcutState::Pressed = event.state {
                                 let app_handle = app_handle_for_rollback.clone();
                                 tauri::async_runtime::spawn(async move {
-                                    let _ = crate::ui::commands_launcher::show_launcher(app_handle).await;
+                                    let _ = crate::ui::commands_launcher::toggle_launcher(app_handle).await;
                                 });
                             }
                         },
@@ -1508,7 +1525,7 @@ pub async fn save_app_settings(
                             if let ShortcutState::Pressed = event.state {
                                 let app_handle = app_handle_for_launcher.clone();
                                 tauri::async_runtime::spawn(async move {
-                                    let _ = crate::ui::commands_launcher::show_launcher(app_handle).await;
+                                    let _ = crate::ui::commands_launcher::toggle_launcher(app_handle).await;
                                 });
                             }
                         },
@@ -1532,7 +1549,7 @@ pub async fn save_app_settings(
                             if let ShortcutState::Pressed = event.state {
                                 let app_handle = app_handle_for_launcher.clone();
                                 tauri::async_runtime::spawn(async move {
-                                    let _ = crate::ui::commands_launcher::show_launcher(app_handle).await;
+                                    let _ = crate::ui::commands_launcher::toggle_launcher(app_handle).await;
                                 });
                             }
                         },
@@ -1556,7 +1573,7 @@ pub async fn save_app_settings(
                         if let ShortcutState::Pressed = event.state {
                             let app_handle = app_handle_for_launcher.clone();
                             tauri::async_runtime::spawn(async move {
-                                let _ = crate::ui::commands_launcher::show_launcher(app_handle).await;
+                                let _ = crate::ui::commands_launcher::toggle_launcher(app_handle).await;
                             });
                         }
                     },
@@ -1758,9 +1775,11 @@ pub async fn save_app_settings(
 
 /// 备份恢复后把 settings.json 的变更同步到运行时：
 /// 热键注销/重注册、监听启停、窗口创建/销毁（与 save_app_settings 尾部逻辑对齐）
+/// `previous_settings`：恢复前的运行时设置，用于注销**旧**热键（否则 ghost 热键残留）
 pub(crate) fn apply_runtime_after_settings_restore(
     app: &AppHandle,
     state: &Arc<Mutex<SharedAppState>>,
+    previous_settings: &crate::utils::settings_model::AppSettingsData,
 ) {
     use crate::ui::commands_clipboard::{
         register_image_shortcut, register_screenshot_shortcut, register_text_shortcut,
@@ -1780,20 +1799,31 @@ pub(crate) fn apply_runtime_after_settings_restore(
         settings.doc_manager_enabled,
     );
 
-    // 先注销全部已知热键，再按新设置注册
+    // 注销恢复前在 OS 上仍生效的旧键 + 恢复后可能冲突的新键
+    let mut keys_to_unregister: Vec<String> = Vec::new();
     for key in [
-        settings.hot_key.as_str(),
-        settings.image_hot_key.as_str(),
-        settings.screenshot_hot_key.as_str(),
-        settings.recording_hot_key.as_str(),
-        settings.recording_mic_toggle_hot_key.as_str(),
-        settings.launcher_hot_key.as_str(),
-        settings.doc_manager_hot_key.as_str(),
+        &previous_settings.hot_key,
+        &previous_settings.image_hot_key,
+        &previous_settings.screenshot_hot_key,
+        &previous_settings.recording_hot_key,
+        &previous_settings.recording_mic_toggle_hot_key,
+        &previous_settings.launcher_hot_key,
+        &previous_settings.doc_manager_hot_key,
+        &settings.hot_key,
+        &settings.image_hot_key,
+        &settings.screenshot_hot_key,
+        &settings.recording_hot_key,
+        &settings.recording_mic_toggle_hot_key,
+        &settings.launcher_hot_key,
+        &settings.doc_manager_hot_key,
     ] {
-        if !key.is_empty() {
-            if let Err(e) = app.global_shortcut().unregister(key) {
-                log::debug!("恢复设置时注销快捷键 '{}' 失败(可能未注册): {}", key, e);
-            }
+        if !key.is_empty() && !keys_to_unregister.iter().any(|k| k == key) {
+            keys_to_unregister.push(key.clone());
+        }
+    }
+    for key in &keys_to_unregister {
+        if let Err(e) = app.global_shortcut().unregister(key.as_str()) {
+            log::debug!("恢复设置时注销快捷键 '{}' 失败(可能未注册): {}", key, e);
         }
     }
 
@@ -1835,7 +1865,8 @@ pub(crate) fn apply_runtime_after_settings_restore(
                 if let ShortcutState::Pressed = event.state {
                     let app_handle_inner = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
-                        if let Err(e) = crate::ui::commands_launcher::show_launcher(app_handle_inner)
+                        // 与启动时注册一致：toggle 而非 show
+                        if let Err(e) = crate::ui::commands_launcher::toggle_launcher(app_handle_inner)
                             .await
                         {
                             log::error!("切换启动器失败: {}", e);
@@ -1980,18 +2011,20 @@ pub async fn test_ai_connection(
 
 #[tauri::command]
 pub async fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
-    match app.clipboard().write_text(text) {
-        Ok(()) => {
-            log::debug!("文本已复制到剪贴板");
-            Ok(())
+    crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
+        match app.clipboard().write_text(text) {
+            Ok(()) => {
+                log::debug!("文本已复制到剪贴板");
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg =
+                    frontend_error_kind(AppErrorKind::ClipboardCopyTextFailed, e.to_string());
+                log::error!("{}", error_msg);
+                Err(error_msg)
+            }
         }
-        Err(e) => {
-            let error_msg =
-                frontend_error_kind(AppErrorKind::ClipboardCopyTextFailed, e.to_string());
-            log::error!("{}", error_msg);
-            Err(error_msg)
-        }
-    }
+    })
 }
 
 #[tauri::command]
@@ -2223,11 +2256,16 @@ pub async fn show_clipboard_window_command(app: AppHandle, state: State<'_, Arc<
     Ok(())
 }
 
-/// 开始截图
+/// 开始截图（打开编辑器，与全局热键同路径）
 #[tauri::command]
-pub async fn start_screenshot_command(state: State<'_, Arc<Mutex<SharedAppState>>>) -> Result<(), String> {
-    let _ = crate::ui::commands_screenshot::start_screenshot(state).await;
-    Ok(())
+pub async fn start_screenshot_command(
+    app: AppHandle,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
+    if !crate::ui::commands_clipboard::is_screenshot_feature_enabled(state.inner()) {
+        return Err("截图功能已停用".to_string());
+    }
+    crate::ui::commands_screenshot::open_screenshot_editor(app, None).await
 }
 
 /// 切换录屏状态

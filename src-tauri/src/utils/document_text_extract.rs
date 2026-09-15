@@ -16,6 +16,34 @@ const TEXT_EXTS: &[&str] = &[
 ];
 
 const MAX_CONTENT_BYTES: u64 = 2 * 1024 * 1024; // 2MB
+const MAX_OFFICE_XML_BYTES: u64 = 8 * 1024 * 1024; // 单条 XML 解压上限，防 zip bomb
+
+fn read_zip_entry_limited(
+    archive: &mut zip::ZipArchive<fs::File>,
+    entry_name: &str,
+) -> Option<String> {
+    let mut f = archive.by_name(entry_name).ok()?;
+    let mut xml = String::new();
+    // 限制读取量：by_name 后 f.size() 仍是声明值，按实际读取截断
+    let mut buf = String::new();
+    let mut total = 0u64;
+    let mut chunk = [0u8; 8 * 1024];
+    loop {
+        let n = f.read(&mut chunk).ok()?;
+        if n == 0 {
+            break;
+        }
+        total += n as u64;
+        if total > MAX_OFFICE_XML_BYTES {
+            log::warn!("Office XML 条目过大已截断: {}", entry_name);
+            break;
+        }
+        // 原始字节追加到临时 Vec 更安全，但这里用 lossy 读入 String 仅作搜索摘要
+        buf.push_str(&String::from_utf8_lossy(&chunk[..n]));
+    }
+    xml.push_str(&buf);
+    Some(xml)
+}
 
 pub fn extract_file_content(path: &Path, ext: &str) -> String {
     let ext_lower = ext.to_lowercase();
@@ -60,8 +88,8 @@ fn extract_xlsx(path: &Path) -> String {
     let Ok(mut archive) = zip::ZipArchive::new(file) else { return String::new() };
 
     let mut shared_strings_xml = String::new();
-    if let Ok(mut f) = archive.by_name("xl/sharedStrings.xml") {
-        let _ = f.read_to_string(&mut shared_strings_xml);
+    if let Some(s) = read_zip_entry_limited(&mut archive, "xl/sharedStrings.xml") {
+        shared_strings_xml = s;
     }
     let shared: Vec<String> = XML_T_TEXT_RE
         .captures_iter(&shared_strings_xml)
@@ -71,9 +99,7 @@ fn extract_xlsx(path: &Path) -> String {
     let mut text = String::new();
     for i in 1.. {
         let name = format!("xl/worksheets/sheet{}.xml", i);
-        let Ok(mut f) = archive.by_name(&name) else { break };
-        let mut xml = String::new();
-        let _ = f.read_to_string(&mut xml);
+        let Some(xml) = read_zip_entry_limited(&mut archive, &name) else { break };
         text.push_str(&extract_xlsx_sheet_text(&xml, &shared));
         text.push(' ');
     }
@@ -158,9 +184,7 @@ fn extract_pptx(path: &Path) -> String {
     let mut text = String::new();
     for i in 1.. {
         let name = format!("ppt/slides/slide{}.xml", i);
-        let Ok(mut f) = archive.by_name(&name) else { break };
-        let mut xml = String::new();
-        let _ = f.read_to_string(&mut xml);
+        let Some(xml) = read_zip_entry_limited(&mut archive, &name) else { break };
         text.push_str(&strip_xml(&xml));
     }
 
@@ -170,9 +194,9 @@ fn extract_pptx(path: &Path) -> String {
 fn extract_office_xml(path: &Path, entry_name: &str) -> String {
     let Ok(file) = fs::File::open(path) else { return String::new() };
     let Ok(mut archive) = zip::ZipArchive::new(file) else { return String::new() };
-    let Ok(mut f) = archive.by_name(entry_name) else { return String::new() };
-    let mut xml = String::new();
-    let _ = f.read_to_string(&mut xml);
+    let Some(xml) = read_zip_entry_limited(&mut archive, entry_name) else {
+        return String::new();
+    };
     collapse_ws(&strip_xml(&xml))
 }
 

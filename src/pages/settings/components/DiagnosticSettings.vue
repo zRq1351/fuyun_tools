@@ -118,9 +118,7 @@ const overview = reactive({
 const items = ref([])
 const loading = ref(false)
 const lastActionMessage = ref('')
-let unlistenOverlayLifecycle = null
-let unlistenWritebackResult = null
-let refreshTimer = null
+// unlisten / refreshTimer / disposed 在下方 onMounted 前声明（勿重复 let）
 
 const statusType = (status) => {
   if (status === 'healthy') return 'success'

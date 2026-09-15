@@ -1000,6 +1000,16 @@ pub async fn atomic_move_doc(
         .await?
         .ok_or(AppErrorKind::DocumentFileNotFound.to_frontend_json())?;
 
+    // 记录本事务内已发生的磁盘移动，任一后续失败时逆序回滚，避免 DB 回滚后文件停在新路径
+    let mut file_moves: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let rollback_moves = |moves: &mut Vec<(PathBuf, PathBuf)>| {
+        for (from, to) in moves.drain(..).rev() {
+            if let Err(e) = safe_move_file(&to, &from) {
+                log::warn!("回移文件失败: {} -> {}: {}", to.display(), from.display(), e);
+            }
+        }
+    };
+
     let effective_root_id = new_root_id.unwrap_or(doc.root_id);
     if effective_root_id != doc.root_id {
         let new_root = get_doc_root_by_id_in_tx(&mut tx, effective_root_id)
@@ -1044,6 +1054,7 @@ pub async fn atomic_move_doc(
                     let _ = fs::remove_file(&dest);
                     AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
                 })?;
+                file_moves.push((old_path.to_path_buf(), dest.clone()));
                 let new_managed = dest.to_string_lossy().to_string();
                 if let Err(e) = sqlx::query("UPDATE document_files SET root_id = ?1, managed_path = ?2 WHERE id = ?3")
                     .bind(effective_root_id)
@@ -1053,9 +1064,7 @@ pub async fn atomic_move_doc(
                     .await
                 {
                     // 文件已移动但 DB 更新失败：把文件移回原位，避免 DB/磁盘不一致
-                    if let Err(rollback_err) = safe_move_file(&dest, old_path) {
-                        log::warn!("回移文件失败（DB 已回滚）: {} -> {}: {}", dest.display(), old_path.display(), rollback_err);
-                    }
+                    rollback_moves(&mut file_moves);
                     return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
                 }
             } else {
@@ -1087,7 +1096,10 @@ pub async fn atomic_move_doc(
                 .bind(id)
                 .fetch_optional(&mut *tx)
                 .await
-                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                    .map_err(|e| {
+                        rollback_moves(&mut file_moves);
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?;
 
                 if let Some(row) = row {
                     let storage_mode: String = row.try_get(0).unwrap_or_default();
@@ -1102,7 +1114,10 @@ pub async fn atomic_move_doc(
                                 .bind(cid)
                                 .fetch_optional(&mut *tx)
                                 .await
-                                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
+                                .map_err(|e| {
+                                    rollback_moves(&mut file_moves);
+                                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                                })?
                                 .unwrap_or_default()
                         };
                         let old_path = Path::new(&old_managed);
@@ -1113,20 +1128,34 @@ pub async fn atomic_move_doc(
                             } else {
                                 Path::new(&root_path).join(&new_cat_name)
                             };
-                            fs::create_dir_all(&target_dir).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                            // 根目录+分类同时变更时，上一阶段可能已移到目标目录，避免二次移动改名成 "(1)"
+                            let already_in_target = old_path.parent().map(|p| p == target_dir).unwrap_or(false);
+                            if !already_in_target {
+                            fs::create_dir_all(&target_dir).map_err(|e| {
+                                rollback_moves(&mut file_moves);
+                                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                            })?;
                             let new_name = resolve_unused_filename(
                                 &target_dir,
                                 Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name),
                                 Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or(""),
                             );
                             let dest = target_dir.join(&new_name);
-                            safe_move_file(old_path, &dest)?;
-                            sqlx::query("UPDATE document_files SET managed_path = ?1 WHERE id = ?2")
+                            safe_move_file(old_path, &dest).map_err(|e| {
+                                rollback_moves(&mut file_moves);
+                                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                            })?;
+                            file_moves.push((old_path.to_path_buf(), dest.clone()));
+                            if let Err(e) = sqlx::query("UPDATE document_files SET managed_path = ?1 WHERE id = ?2")
                                 .bind(dest.to_string_lossy().to_string())
                                 .bind(id)
                                 .execute(&mut *tx)
                                 .await
-                                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                            {
+                                rollback_moves(&mut file_moves);
+                                return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
+                            }
+                            }
                         }
                     }
                 }
@@ -1136,19 +1165,29 @@ pub async fn atomic_move_doc(
                     .bind(id)
                     .execute(&mut *tx)
                     .await
-                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                    .map_err(|e| {
+                        rollback_moves(&mut file_moves);
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?;
             } else {
                 sqlx::query("UPDATE document_files SET category_id = ?1 WHERE id = ?2")
                     .bind(cid)
                     .bind(id)
                     .execute(&mut *tx)
                     .await
-                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                    .map_err(|e| {
+                        rollback_moves(&mut file_moves);
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?;
             }
         }
     }
 
-    tx.commit().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
+    tx.commit().await.map_err(|e| {
+        // 事务提交失败：DB 未变，磁盘文件必须回到原路径
+        rollback_moves(&mut file_moves);
+        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+    })
 }
 
 async fn get_doc_file_in_tx(tx: &mut sqlx::Transaction<'_, Sqlite>, id: i64) -> Result<Option<DocFile>, String> {

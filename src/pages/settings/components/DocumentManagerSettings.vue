@@ -136,6 +136,7 @@ const resetDocManagerShortcut = () => {
 }
 
 const onWidgetToggle = async (val) => {
+  const prev = props.form.docManagerWidgetEnabled
   props.form.docManagerWidgetEnabled = val
   try {
     const {invoke} = await import('@tauri-apps/api/core')
@@ -146,6 +147,8 @@ const onWidgetToggle = async (val) => {
     }
   } catch (e) {
     console.error('切换文档管理小部件失败:', e)
+    // IPC 失败回滚表单，避免 autosave 把错误状态落盘
+    props.form.docManagerWidgetEnabled = prev
   }
 }
 </script>

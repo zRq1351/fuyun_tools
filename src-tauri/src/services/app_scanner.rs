@@ -354,6 +354,19 @@ fn split_windows_command_args(arguments: &str) -> Vec<String> {
     args
 }
 
+/// 可执行/快捷方式扩展名白名单：限制 Command::new 直接 spawn 的目标类型
+fn is_allowed_launch_extension(path: &str) -> bool {
+    const ALLOWED: &[&str] = &["exe", "com", "bat", "cmd", "lnk", "msc"];
+    Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            let lower = e.to_lowercase();
+            ALLOWED.contains(&lower.as_str())
+        })
+        .unwrap_or(false)
+}
+
 /// 启动应用程序（统一入口，支持可选参数）
 pub fn launch_app_with_optional_args(path: &str, args: Option<&str>) -> Result<(), String> {
     let args_desc = match args {
@@ -367,8 +380,14 @@ pub fn launch_app_with_optional_args(path: &str, args: Option<&str>) -> Result<(
         log::error!("[launch_app] 文件不存在: {}", path);
         return Err(format!("文件不存在: {}", path));
     }
-
+    // 非快捷方式：限制可执行扩展名，降低任意进程启动面
     let is_shortcut = path.to_lowercase().ends_with(".lnk");
+    if !is_shortcut && !is_allowed_launch_extension(path) {
+        return Err(format!(
+            "不支持的启动类型: {}",
+            path_buf.extension().and_then(|e| e.to_str()).unwrap_or("")
+        ));
+    }
 
     if is_shortcut {
         log::info!("[launch_app] 检测到快捷方式，使用 ShellExecute 启动");
