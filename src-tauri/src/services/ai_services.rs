@@ -4,9 +4,7 @@ use crate::core::error_codes::AppErrorKind;
 use crate::core::perf_metrics::record_perf_metric;
 use crate::services::ai_client::{AIClient, AIConfig};
 use crate::sync::{lock_arc_mutex, Mutex};
-use crate::ui::window_manager::{
-    hide_selection_toolbar_impl, show_result_window,
-};
+use crate::ui::window_manager::{hide_selection_toolbar_impl, show_result_window};
 use crate::utils::utils_helpers::{
     default_explanation_prompt_template, default_translation_prompt_template,
 };
@@ -23,7 +21,9 @@ static CACHED_AI_CLIENT: LazyLock<Mutex<Option<CachedAiClient>>> =
 
 /// 强制清除 AI 客户端缓存，下次请求会重新从凭据管理器读取 API Key 并创建新客户端
 pub fn invalidate_ai_client_cache() {
-    let mut cache = CACHED_AI_CLIENT.lock().unwrap_or_else(|never| match never {});
+    let mut cache = CACHED_AI_CLIENT
+        .lock()
+        .unwrap_or_else(|never| match never {});
     *cache = None;
     log::info!("AI客户端缓存已强制清除");
 }
@@ -59,9 +59,19 @@ async fn build_ai_config(_state: &Arc<Mutex<SharedAppState>>) -> AppResult<AICon
         return Err(AppErrorKind::AiApiKeyNotConfigured.to_app_error());
     }
     let mask = if config.api_key.chars().count() > 6 {
-        let tail: String = config.api_key.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+        let tail: String = config
+            .api_key
+            .chars()
+            .rev()
+            .take(4)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
         format!("***{}", tail)
-    } else { "***".to_string() };
+    } else {
+        "***".to_string()
+    };
     log::info!("提供商 {} 配置验证通过，密钥: {}", provider_key, mask);
 
     Ok(AIConfig {
@@ -72,12 +82,16 @@ async fn build_ai_config(_state: &Arc<Mutex<SharedAppState>>) -> AppResult<AICon
 }
 
 /// 获取或创建AI客户端（配置不变时复用缓存的客户端）
-pub async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> AppResult<Arc<AIClient>> {
+pub async fn get_or_create_ai_client(
+    state: Arc<Mutex<SharedAppState>>,
+) -> AppResult<Arc<AIClient>> {
     let current_config = build_ai_config(&state).await?;
 
     // 检查缓存的客户端是否仍然有效（比较 Arc 内的配置值）
     {
-        let cache = CACHED_AI_CLIENT.lock().unwrap_or_else(|never| match never {});
+        let cache = CACHED_AI_CLIENT
+            .lock()
+            .unwrap_or_else(|never| match never {});
         if let Some((cached_config, cached_client)) = cache.as_ref() {
             if cached_config.api_key == current_config.api_key
                 && cached_config.base_url == current_config.base_url
@@ -86,25 +100,28 @@ pub async fn get_or_create_ai_client(state: Arc<Mutex<SharedAppState>>) -> AppRe
                 log::info!("AI客户端缓存命中，复用已有连接");
                 return Ok(Arc::clone(cached_client));
             }
-            log::info!("AI客户端配置变更，创建新连接 (key变更={}, url变更={}, model变更={})",
+            log::info!(
+                "AI客户端配置变更，创建新连接 (key变更={}, url变更={}, model变更={})",
                 cached_config.api_key != current_config.api_key,
                 cached_config.base_url != current_config.base_url,
-                cached_config.model != current_config.model);
+                cached_config.model != current_config.model
+            );
         } else {
             log::info!("AI客户端缓存为空，首次创建");
         }
     }
 
     // 配置已变更，创建新客户端并包装为 Arc
-    let client = AIClient::new(current_config.clone()).map_err(|e| {
-        AppErrorKind::AiClientInitFailed.to_app_error_with_details(e.to_string())
-    })?;
+    let client = AIClient::new(current_config.clone())
+        .map_err(|e| AppErrorKind::AiClientInitFailed.to_app_error_with_details(e.to_string()))?;
     let client = Arc::new(client);
     let config = Arc::new(current_config);
 
     // 更新缓存
     {
-        let mut cache = CACHED_AI_CLIENT.lock().unwrap_or_else(|never| match never {});
+        let mut cache = CACHED_AI_CLIENT
+            .lock()
+            .unwrap_or_else(|never| match never {});
         *cache = Some((config, Arc::clone(&client)));
     }
 
@@ -163,7 +180,11 @@ impl AiStreamKind {
     }
 }
 
-fn set_active_operation(state: &Arc<Mutex<SharedAppState>>, kind: &AiStreamKind, operation_id: u64) {
+fn set_active_operation(
+    state: &Arc<Mutex<SharedAppState>>,
+    kind: &AiStreamKind,
+    operation_id: u64,
+) {
     let mut state_guard = lock_arc_mutex(state);
     match kind {
         AiStreamKind::Translation => state_guard.active_translation_op_id = operation_id,
@@ -253,9 +274,13 @@ async fn execute_stream_request(
         match &kind {
             AiStreamKind::Translation => state_guard.settings.translation_prompt_template.clone(),
             AiStreamKind::Explanation => state_guard.settings.explanation_prompt_template.clone(),
-            AiStreamKind::CustomPrompt(name) => {
-                state_guard.settings.selection_custom_prompts.iter().find(|p| &p.name == name).map(|p| p.prompt.clone()).unwrap_or_default()
-            }
+            AiStreamKind::CustomPrompt(name) => state_guard
+                .settings
+                .selection_custom_prompts
+                .iter()
+                .find(|p| &p.name == name)
+                .map(|p| p.prompt.clone())
+                .unwrap_or_default(),
         }
     };
 
@@ -554,7 +579,9 @@ pub async fn stream_custom_prompt_text(
         StreamExecutionRequest {
             text: request.text,
             source_language: None,
-            target_language: request.target_language.unwrap_or_else(|| "中文".to_string()),
+            target_language: request
+                .target_language
+                .unwrap_or_else(|| "中文".to_string()),
             scene_hint: request.scene_hint,
             op_id: request.op_id,
             window_label: request.window_label,
@@ -614,7 +641,10 @@ mod tests {
     fn test_ai_stream_kind_display_names() {
         assert_eq!(AiStreamKind::Translation.display_name(), "翻译");
         assert_eq!(AiStreamKind::Explanation.display_name(), "解释");
-        assert_eq!(AiStreamKind::CustomPrompt("润色".to_string()).display_name(), "润色");
+        assert_eq!(
+            AiStreamKind::CustomPrompt("润色".to_string()).display_name(),
+            "润色"
+        );
     }
 
     #[test]
@@ -627,7 +657,11 @@ mod tests {
 
         set_active_operation(&state, &AiStreamKind::Translation, id);
         assert!(is_operation_active(&state, &AiStreamKind::Translation, id));
-        assert!(!is_operation_active(&state, &AiStreamKind::Translation, id2));
+        assert!(!is_operation_active(
+            &state,
+            &AiStreamKind::Translation,
+            id2
+        ));
         assert!(!is_operation_active(&state, &AiStreamKind::Explanation, id));
     }
 

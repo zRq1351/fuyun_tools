@@ -98,7 +98,7 @@ pub fn emit_recording_audio_merging(
 pub fn emit_recording_effective_audio_device(
     app: &AppHandle,
     session_id: Option<&str>,
-    kind: &str,           // "mic" | "system"
+    kind: &str,                        // "mic" | "system"
     effective_device_id: Option<&str>, // None = 默认设备
 ) {
     let payload = json!({

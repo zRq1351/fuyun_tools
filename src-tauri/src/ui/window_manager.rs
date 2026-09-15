@@ -14,7 +14,9 @@ use windows::core::BOOL;
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 #[cfg(target_os = "windows")]
-use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Threading::GetCurrentProcessId;
 #[cfg(target_os = "windows")]
@@ -23,11 +25,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, GetForegroundWindow, GetSystemMetrics,
-    GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
-    SetForegroundWindow, ShowWindow,
-    SystemParametersInfoW, SM_CYSCREEN, SPI_GETWORKAREA,
-    SW_RESTORE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    BringWindowToTop, GetForegroundWindow, GetSystemMetrics, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindow, SetForegroundWindow, ShowWindow,
+    SystemParametersInfoW, SM_CYSCREEN, SPI_GETWORKAREA, SW_RESTORE,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
 };
 
 pub static ENIGO_INSTANCE: LazyLock<Arc<Mutex<Option<enigo::Enigo>>>> =
@@ -83,10 +84,10 @@ fn emit_overlay_window_lifecycle(app_handle: &AppHandle, label: &str, action: &s
             occurred_at: now_ms(),
         };
         guard.last_overlay_lifecycle = Some(record.clone());
-    guard.overlay_lifecycle_history.push_back(record);
-    if guard.overlay_lifecycle_history.len() > 6 {
-        guard.overlay_lifecycle_history.pop_front();
-    }
+        guard.overlay_lifecycle_history.push_back(record);
+        if guard.overlay_lifecycle_history.len() > 6 {
+            guard.overlay_lifecycle_history.pop_front();
+        }
     }
     if let Err(e) = app_handle.emit(
         "overlay-window-lifecycle",
@@ -143,13 +144,12 @@ pub fn bind_overlay_window_events(
     let window_clone = window.clone();
     // 判断是否为结果窗口（翻译/解释/自定义提示词）
     let is_result_window = label.starts_with("result_");
-    
+
     window.on_window_event(move |event| match event {
-        tauri::WindowEvent::CloseRequested { api, .. }
-        if !is_result_window => {
-                api.prevent_close();
-                hide_overlay_window(&app_handle, &label, &window_clone);
-            }
+        tauri::WindowEvent::CloseRequested { api, .. } if !is_result_window => {
+            api.prevent_close();
+            hide_overlay_window(&app_handle, &label, &window_clone);
+        }
         tauri::WindowEvent::Destroyed => {
             let (should_clear, visibility_cleared) = app_handle
                 .try_state::<Arc<Mutex<AppState>>>()
@@ -160,8 +160,14 @@ pub fn bind_overlay_window_events(
                         guard.active_overlay_window = None;
                     }
                     let cleared = match label.as_str() {
-                        "clipboard" => { guard.is_visible = false; true }
-                        "image_clipboard" => { guard.is_image_visible = false; true }
+                        "clipboard" => {
+                            guard.is_visible = false;
+                            true
+                        }
+                        "image_clipboard" => {
+                            guard.is_image_visible = false;
+                            true
+                        }
                         _ => false,
                     };
                     let record = OverlayLifecycleRecord {
@@ -284,9 +290,9 @@ fn release_ctrl_key_winapi() {}
 
 pub fn release_ctrl_key_with_fallback(enigo: &mut enigo::Enigo) -> Result<(), String> {
     use enigo::{Direction, Keyboard};
-    let enigo_result = enigo
-        .key(CTRL_KEY, Direction::Release)
-        .map_err(|e| AppErrorKind::SelectionCtrlReleaseFailed.to_frontend_json_with_details(format!("{}", e)));
+    let enigo_result = enigo.key(CTRL_KEY, Direction::Release).map_err(|e| {
+        AppErrorKind::SelectionCtrlReleaseFailed.to_frontend_json_with_details(format!("{}", e))
+    });
     // Windows 下额外补发通用/左右 Ctrl 的 keyup，尽量消除偶发“Ctrl 卡住”。
     release_ctrl_key_winapi();
     enigo_result
@@ -535,7 +541,9 @@ fn hide_clipboard_window_impl(
 /// 隐藏剪贴板窗口
 pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     hide_clipboard_window_impl(
-        app_handle, state, "clipboard",
+        app_handle,
+        state,
+        "clipboard",
         |s| s.is_visible,
         |s, v| s.is_visible = v,
         |s, v| s.selected_index = v,
@@ -544,7 +552,9 @@ pub fn hide_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>)
 
 pub fn hide_image_clipboard_window(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
     hide_clipboard_window_impl(
-        app_handle, state, "image_clipboard",
+        app_handle,
+        state,
+        "image_clipboard",
         |s| s.is_image_visible,
         |s, v| s.is_image_visible = v,
         |s, v| s.image_selected_index = v,
@@ -594,7 +604,8 @@ pub fn wait_for_window_hidden(
         }
         let elapsed = start.elapsed();
         if elapsed >= timeout {
-            return Err(AppErrorKind::SelectionWaitHideTimeout.to_frontend_json_with_details(window_label.to_string()));
+            return Err(AppErrorKind::SelectionWaitHideTimeout
+                .to_frontend_json_with_details(window_label.to_string()));
         }
         let remain = timeout.saturating_sub(elapsed);
         let wait_dur = std::cmp::min(remain, Duration::from_millis(80));
@@ -646,9 +657,7 @@ pub fn show_image_preview_window(
     let _ = show_overlay_window(&app_handle, "image_preview", &window, true);
     let _ = app_handle.emit("show-image-preview", payload.clone());
     if let Ok(payload_str) = serde_json::to_string(&payload) {
-        let script = format!(
-            "window.__IMAGE_PREVIEW_PAYLOAD__ = {payload_str};"
-        );
+        let script = format!("window.__IMAGE_PREVIEW_PAYLOAD__ = {payload_str};");
         let _ = window.eval(&script);
     }
     Ok(())
@@ -665,7 +674,10 @@ fn prepare_image_preview_window(window: &tauri::WebviewWindow) -> Result<(), Str
         preview_height = preview_height.max(520).min(monitor_size.height);
         let target_x = monitor_pos.x + ((monitor_size.width - preview_width) / 2) as i32;
         let target_y = monitor_pos.y + ((monitor_size.height - preview_height) / 2) as i32;
-        let _ = window.set_size(tauri::LogicalSize::new(preview_width as f64 / scale, preview_height as f64 / scale));
+        let _ = window.set_size(tauri::LogicalSize::new(
+            preview_width as f64 / scale,
+            preview_height as f64 / scale,
+        ));
         let _ = window.set_position(tauri::PhysicalPosition::new(target_x, target_y));
     }
     Ok(())
@@ -683,7 +695,7 @@ pub fn show_text_preview_window(
     item_id: Option<String>,
 ) -> Result<(), String> {
     let window = ensure_text_preview_window(&app_handle)?;
-    
+
     prepare_image_preview_window(&window)?;
 
     let payload = serde_json::json!({
@@ -694,9 +706,7 @@ pub fn show_text_preview_window(
     let _ = show_overlay_window(&app_handle, "text_preview", &window, true);
     let _ = app_handle.emit("show-text-preview", payload.clone());
     if let Ok(payload_str) = serde_json::to_string(&payload) {
-        let script = format!(
-            "window.__TEXT_PREVIEW_PAYLOAD__ = {payload_str};"
-        );
+        let script = format!("window.__TEXT_PREVIEW_PAYLOAD__ = {payload_str};");
         let _ = window.eval(&script);
     }
     Ok(())
@@ -740,12 +750,7 @@ pub fn set_window_position(window: &tauri::WebviewWindow, bottom_offset: i32) {
 /// 获取任务栏安全偏移量（物理像素）
 /// 根据目标显示器矩形查询该显示器 work area，兼容多屏/不同任务栏位置
 #[cfg(target_os = "windows")]
-fn get_taskbar_safe_offset_for_monitor(
-    mon_x: i32,
-    mon_y: i32,
-    mon_w: i32,
-    mon_h: i32,
-) -> i32 {
+fn get_taskbar_safe_offset_for_monitor(mon_x: i32, mon_y: i32, mon_w: i32, mon_h: i32) -> i32 {
     unsafe {
         let center = POINT {
             x: mon_x + mon_w / 2,
@@ -773,7 +778,8 @@ fn get_taskbar_safe_offset_for_monitor(
         .is_ok()
         {
             let screen_height = GetSystemMetrics(SM_CYSCREEN);
-            return (screen_height - work_area.bottom).max(0) + CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN;
+            return (screen_height - work_area.bottom).max(0)
+                + CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN;
         }
     }
     CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN
@@ -781,12 +787,7 @@ fn get_taskbar_safe_offset_for_monitor(
 
 /// 获取任务栏安全偏移量
 #[cfg(not(target_os = "windows"))]
-fn get_taskbar_safe_offset_for_monitor(
-    _mon_x: i32,
-    _mon_y: i32,
-    _mon_w: i32,
-    _mon_h: i32,
-) -> i32 {
+fn get_taskbar_safe_offset_for_monitor(_mon_x: i32, _mon_y: i32, _mon_w: i32, _mon_h: i32) -> i32 {
     CLIPBOARD_WINDOW_BOTTOM_EXTRA_MARGIN
 }
 
@@ -802,20 +803,17 @@ pub fn ensure_overlay_window(
     if let Some(existing) = app.get_webview_window(label) {
         return Ok((existing, false));
     }
-    let mut builder = tauri::WebviewWindowBuilder::new(
-        app,
-        label,
-        tauri::WebviewUrl::App(html_file.into()),
-    )
-    .title(title)
-    .visible(false)
-    .resizable(false)
-    .decorations(false)
-    .shadow(false)
-    .transparent(true)
-    .always_on_top(true)
-        .skip_taskbar(true)
-        .accept_first_mouse(true);
+    let mut builder =
+        tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App(html_file.into()))
+            .title(title)
+            .visible(false)
+            .resizable(false)
+            .decorations(false)
+            .shadow(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .accept_first_mouse(true);
 
     if let Some((w, h)) = inner_size {
         builder = builder.inner_size(w, h);
@@ -1090,7 +1088,8 @@ pub fn hide_doc_manager_widget_window(app: &AppHandle) -> Result<(), String> {
 
 fn position_widget_to_top_right(window: &tauri::WebviewWindow) -> Result<(), String> {
     let margin = 0.0;
-    let monitor = window.current_monitor()
+    let monitor = window
+        .current_monitor()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "No monitor found".to_string())?;
     let scale = monitor.scale_factor();
@@ -1099,7 +1098,11 @@ fn position_widget_to_top_right(window: &tauri::WebviewWindow) -> Result<(), Str
     let current_size = window.outer_size().map_err(|e| e.to_string())?;
     let px = mpos.x + msize.width as i32 - current_size.width as i32 - (margin * scale) as i32;
     let py = mpos.y + (margin * scale) as i32;
-    window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: px, y: py }))
+    window
+        .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: px,
+            y: py,
+        }))
         .map_err(|e| format!("set_position: {}", e))
 }
 
@@ -1153,29 +1156,57 @@ pub fn ensure_window_for_label(app: &AppHandle, label: &str) -> Result<(), Strin
         return Err(format!("功能已禁用，无法创建窗口: {}", label));
     }
     match label {
-        "clipboard" => { ensure_clipboard_window(app)?; }
-        "image_clipboard" => { ensure_image_clipboard_window(app)?; }
-        "launcher" => { ensure_launcher_window(app)?; }
-        "screenshot" => { ensure_screenshot_window(app)?; }
-        "image_preview" => { ensure_image_preview_window(app)?; }
-        "text_preview" => { ensure_text_preview_window(app)?; }
-        "document_manager" => { ensure_document_manager_window(app)?; }
-        "document_manager_widget" => { ensure_doc_manager_widget_window(app)?; }
-        "selection_toolbar" => { ensure_selection_toolbar_window(app)?; }
-        "recording_toolbar"
-        if app.get_webview_window(label).is_none() => {
-                let (_, _) = ensure_overlay_window(app, label, "recording_toolbar.html", "录屏工具栏", Some((530.0, 64.0)))?;
-            }
-        "longshot_toolbar"
-        if app.get_webview_window(label).is_none() => {
-                let (window, _) = ensure_overlay_window(app, label, "longshot_toolbar.html", "长截图工具栏", Some((320.0, 180.0)))?;
-                let _ = window.set_content_protected(true);
-            }
-        "longshot_border"
-        if app.get_webview_window(label).is_none() => {
-                let (window, _) = ensure_overlay_window(app, label, "longshot_border.html", "长截图边框", None)?;
-                let _ = window.set_content_protected(true);
-            }
+        "clipboard" => {
+            ensure_clipboard_window(app)?;
+        }
+        "image_clipboard" => {
+            ensure_image_clipboard_window(app)?;
+        }
+        "launcher" => {
+            ensure_launcher_window(app)?;
+        }
+        "screenshot" => {
+            ensure_screenshot_window(app)?;
+        }
+        "image_preview" => {
+            ensure_image_preview_window(app)?;
+        }
+        "text_preview" => {
+            ensure_text_preview_window(app)?;
+        }
+        "document_manager" => {
+            ensure_document_manager_window(app)?;
+        }
+        "document_manager_widget" => {
+            ensure_doc_manager_widget_window(app)?;
+        }
+        "selection_toolbar" => {
+            ensure_selection_toolbar_window(app)?;
+        }
+        "recording_toolbar" if app.get_webview_window(label).is_none() => {
+            let (_, _) = ensure_overlay_window(
+                app,
+                label,
+                "recording_toolbar.html",
+                "录屏工具栏",
+                Some((530.0, 64.0)),
+            )?;
+        }
+        "longshot_toolbar" if app.get_webview_window(label).is_none() => {
+            let (window, _) = ensure_overlay_window(
+                app,
+                label,
+                "longshot_toolbar.html",
+                "长截图工具栏",
+                Some((320.0, 180.0)),
+            )?;
+            let _ = window.set_content_protected(true);
+        }
+        "longshot_border" if app.get_webview_window(label).is_none() => {
+            let (window, _) =
+                ensure_overlay_window(app, label, "longshot_border.html", "长截图边框", None)?;
+            let _ = window.set_content_protected(true);
+        }
         _ => {}
     }
     Ok(())

@@ -71,10 +71,7 @@ impl PauseTimeline {
 
     #[allow(dead_code)] // 单测使用
     fn is_open(&self) -> bool {
-        self.open_since
-            .lock()
-            .map(|g| g.is_some())
-            .unwrap_or(false)
+        self.open_since.lock().map(|g| g.is_some()).unwrap_or(false)
     }
 }
 
@@ -284,7 +281,9 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
 
             let first_ts = self.flags.first_frame_timestamp.load(Ordering::Relaxed);
             if first_ts == i64::MAX {
-                self.flags.first_frame_timestamp.store(raw_timestamp, Ordering::Relaxed);
+                self.flags
+                    .first_frame_timestamp
+                    .store(raw_timestamp, Ordering::Relaxed);
                 raw_timestamp = 0;
             } else {
                 raw_timestamp -= first_ts;
@@ -294,7 +293,8 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
             }
 
             // 排除暂停区间：旁路线程累计的暂停墙钟时长整体左移
-            raw_timestamp = (raw_timestamp - self.flags.pause_timeline.effective_paused_total_100ns()).max(0);
+            raw_timestamp =
+                (raw_timestamp - self.flags.pause_timeline.effective_paused_total_100ns()).max(0);
 
             let frame_w = frame.width() as usize;
             let frame_h = frame.height() as usize;
@@ -337,8 +337,13 @@ impl GraphicsCaptureApiHandler for WgcCaptureHandler {
                 || src_w == 0
                 || src_h == 0
             {
-                log::warn!("WGC 帧缓冲区大小不足，跳过本帧: raw={} required={} {}x{}",
-                    raw_pixels.len(), required_src_size, src_w, src_h);
+                log::warn!(
+                    "WGC 帧缓冲区大小不足，跳过本帧: raw={} required={} {}x{}",
+                    raw_pixels.len(),
+                    required_src_size,
+                    src_w,
+                    src_h
+                );
                 return Ok(());
             }
 
@@ -457,8 +462,7 @@ where
             DirtyRegionSettings::ReportAndRender
         };
         let start_capture = |dirty_region_setting: DirtyRegionSettings| -> Result<_, String> {
-            let settings =
-                make_settings(dirty_region_setting)?;
+            let settings = make_settings(dirty_region_setting)?;
             WgcCaptureHandler::start_free_threaded(settings).map_err(|e| format!("{:?}", e))
         };
         let control = match start_capture(dirty_region_setting) {
@@ -806,23 +810,20 @@ pub fn start_monitor_capture_to_mp4(
         CursorCaptureSettings::WithoutCursor
     };
     // 显示器无边框概念，固定走 Default 分支以规避部分驱动的 WithoutBorder 兼容问题
-    let join = spawn_wgc_thread(
-        flags.clone(),
-        move |dirty| {
-            let monitor = Monitor::from_index(monitor_index)
-                .map_err(|e| format!("枚举显示器失败(index={}): {:?}", monitor_index, e))?;
-            Ok(Settings::new(
-                monitor,
-                cursor_setting,
-                draw_border_setting_for(true),
-                SecondaryWindowSettings::Default,
-                MinimumUpdateIntervalSettings::Default,
-                dirty,
-                ColorFormat::Bgra8,
-                flags.clone(),
-            ))
-        },
-    );
+    let join = spawn_wgc_thread(flags.clone(), move |dirty| {
+        let monitor = Monitor::from_index(monitor_index)
+            .map_err(|e| format!("枚举显示器失败(index={}): {:?}", monitor_index, e))?;
+        Ok(Settings::new(
+            monitor,
+            cursor_setting,
+            draw_border_setting_for(true),
+            SecondaryWindowSettings::Default,
+            MinimumUpdateIntervalSettings::Default,
+            dirty,
+            ColorFormat::Bgra8,
+            flags.clone(),
+        ))
+    });
     Ok(WgcCaptureHandle {
         stop_flag,
         pause_flag,

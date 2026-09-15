@@ -189,10 +189,7 @@ mod tests {
         assert_eq!(v["lastError"], "err");
         // 生效设备字段：camelCase 序列化
         assert_eq!(v["effectiveMicDeviceId"], "mic-x");
-        assert_eq!(
-            v["effectiveSystemAudioDeviceId"],
-            serde_json::Value::Null
-        );
+        assert_eq!(v["effectiveSystemAudioDeviceId"], serde_json::Value::Null);
 
         // None 字段序列化为 null
         let st2 = RecordingRuntimeState {

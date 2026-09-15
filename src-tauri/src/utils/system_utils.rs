@@ -80,7 +80,8 @@ pub fn read_text_with_backup(path: &Path) -> Result<String, String> {
         Err(primary_error) => {
             let backup_path = get_backup_file_path(path);
             if !backup_path.exists() {
-                return Err(AppErrorKind::IoError.to_frontend_json_with_details(format!("{}", primary_error)));
+                return Err(AppErrorKind::IoError
+                    .to_frontend_json_with_details(format!("{}", primary_error)));
             }
 
             let backup_content = fs::read_to_string(&backup_path).map_err(|e| {
@@ -133,11 +134,13 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
     // 使用静态标志防止并发调用时重复保存和日志
     use std::sync::atomic::{AtomicBool, Ordering};
     static SAVED_ONCE: AtomicBool = AtomicBool::new(false);
-    if (old_version != settings.version || fields_added) && !SAVED_ONCE.swap(true, Ordering::Relaxed) {
+    if (old_version != settings.version || fields_added)
+        && !SAVED_ONCE.swap(true, Ordering::Relaxed)
+    {
         log::info!("配置已更新或补全缺失字段，保存到文件");
         save_settings(&settings)?;
     }
-    
+
     Ok(settings)
 }
 
@@ -145,13 +148,13 @@ pub fn load_settings() -> Result<AppSettingsData, String> {
 /// Much faster than spawning PowerShell — no process overhead.
 #[cfg(target_os = "windows")]
 pub fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
     use windows::core::{Interface, PCWSTR};
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
-        STGM,
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_MULTITHREADED, STGM,
     };
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
-    use std::os::windows::ffi::OsStrExt;
 
     // 工作线程可能未初始化 COM：CoInitializeEx 失败时仍尝试（可能已在 MTA）
     unsafe {
@@ -178,7 +181,9 @@ pub fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
                 .is_err()
             {
                 buffer.resize(260, 0);
-                shell_link.GetPath(&mut buffer, std::ptr::null_mut(), 0).ok()?;
+                shell_link
+                    .GetPath(&mut buffer, std::ptr::null_mut(), 0)
+                    .ok()?;
             }
 
             let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());

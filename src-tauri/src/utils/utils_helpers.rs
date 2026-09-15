@@ -3,8 +3,7 @@ pub use crate::utils::database::{
     ClipboardHistoryData, ClipboardHistoryPageData, ClipboardHistoryPageItem,
 };
 pub use crate::utils::settings_model::{
-    default_explanation_prompt_template, default_translation_prompt_template,
-    AppSettingsData,
+    default_explanation_prompt_template, default_translation_prompt_template, AppSettingsData,
 };
 pub use crate::utils::system_utils::{
     atomic_write_with_backup, get_default_app_version, get_logs_dir_path, get_settings_file_path,
@@ -125,7 +124,10 @@ mod tests {
     fn test_normalize_sha256_hex_normalizes_uppercase_and_whitespace() {
         let upper = "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF";
         let normalized = normalize_sha256_hex(&format!("  {}  ", upper));
-        assert_eq!(normalized.as_deref(), Some(upper.to_ascii_lowercase().as_str()));
+        assert_eq!(
+            normalized.as_deref(),
+            Some(upper.to_ascii_lowercase().as_str())
+        );
     }
 
     #[test]

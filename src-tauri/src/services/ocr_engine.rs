@@ -39,12 +39,15 @@ pub fn clean_ocr_text(text: &str) -> String {
     }
 
     // 检测是否主要为中文（中文字符占比超过50%）
-    let chinese_count = text.chars().filter(|c| {
-        let cp = *c as u32;
-        (0x4E00..=0x9FFF).contains(&cp) ||  // CJK统一汉字
+    let chinese_count = text
+        .chars()
+        .filter(|c| {
+            let cp = *c as u32;
+            (0x4E00..=0x9FFF).contains(&cp) ||  // CJK统一汉字
             (0x3400..=0x4DBF).contains(&cp) ||  // CJK扩展A
-            (0x20000..=0x2A6DF).contains(&cp)   // CJK扩展B
-    }).count();
+                (0x20000..=0x2A6DF).contains(&cp) // CJK扩展B
+        })
+        .count();
 
     let total_chars = text.chars().filter(|c| !c.is_whitespace()).count();
 
@@ -80,8 +83,7 @@ pub fn clean_ocr_text(text: &str) -> String {
 }
 
 /// OCR 引擎类型
-#[derive(Clone, Debug)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub enum OcrEngineType {
     /// Windows 原生 OCR（快速，中等准确率）
     WindowsNative,
@@ -90,9 +92,12 @@ pub enum OcrEngineType {
     OcrRs,
 }
 
-
 /// 统一的 OCR 识别接口
-pub async fn recognize_image(png_bytes: &[u8], engine_type: OcrEngineType, app_handle: &tauri::AppHandle) -> Result<OcrResult, String> {
+pub async fn recognize_image(
+    png_bytes: &[u8],
+    engine_type: OcrEngineType,
+    app_handle: &tauri::AppHandle,
+) -> Result<OcrResult, String> {
     match engine_type {
         OcrEngineType::WindowsNative => {
             log::debug!("使用 Windows 原生 OCR 引擎");
@@ -100,7 +105,9 @@ pub async fn recognize_image(png_bytes: &[u8], engine_type: OcrEngineType, app_h
         }
         OcrEngineType::OcrRs => {
             log::info!("使用 ocr-rs (Rust) 引擎");
-            let paragraphs = crate::services::ocr_rs_engine::recognize_with_ocr_rs(png_bytes, app_handle).await?;
+            let paragraphs =
+                crate::services::ocr_rs_engine::recognize_with_ocr_rs(png_bytes, app_handle)
+                    .await?;
             Ok(OcrResult { paragraphs })
         }
     }
@@ -108,7 +115,7 @@ pub async fn recognize_image(png_bytes: &[u8], engine_type: OcrEngineType, app_h
 
 // TODO: PaddleOCR 集成
 // 当 rust-paddle-ocr 发布到 crates.io 后，可以启用此功能
-// 
+//
 // 使用示例：
 // ```rust
 // use lazy_static::lazy_static;
@@ -146,7 +153,10 @@ mod tests {
     #[test]
     fn test_clean_ocr_text_english_normalizes_spaces() {
         assert_eq!(clean_ocr_text("hello   world"), "hello world");
-        assert_eq!(clean_ocr_text("  leading and trailing  "), "leading and trailing");
+        assert_eq!(
+            clean_ocr_text("  leading and trailing  "),
+            "leading and trailing"
+        );
         assert_eq!(clean_ocr_text("single word"), "single word");
     }
 

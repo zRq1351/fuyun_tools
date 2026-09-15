@@ -147,9 +147,28 @@ fn sanitize_output_filename(name: &str) -> String {
     // 不可用 starts_with 前缀匹配，否则 command/company/lpt_log 等被误判（#17）
     let reserved = matches!(
         upper.as_str(),
-        "CON" | "PRN" | "AUX" | "NUL"
-            | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
-            | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
     );
     if reserved {
         format!("_{}", cleaned)
@@ -195,7 +214,10 @@ mod tests {
 
     #[test]
     fn test_sanitize_keeps_normal_names() {
-        assert_eq!(sanitize_output_filename("my_recording_2026"), "my_recording_2026");
+        assert_eq!(
+            sanitize_output_filename("my_recording_2026"),
+            "my_recording_2026"
+        );
         assert_eq!(sanitize_output_filename("演示视频"), "演示视频");
         assert_eq!(sanitize_output_filename("  spaced  "), "spaced");
     }
@@ -208,7 +230,9 @@ mod tests {
 
     #[test]
     fn test_is_valid_ffmpeg_file_rejects_missing() {
-        assert!(!is_valid_ffmpeg_file(Path::new("C:/definitely/not/exists/ffmpeg.exe")));
+        assert!(!is_valid_ffmpeg_file(Path::new(
+            "C:/definitely/not/exists/ffmpeg.exe"
+        )));
     }
 
     #[test]
@@ -255,7 +279,11 @@ mod tests {
         let (tmp, final_path, session_id) = build_output_paths(dir, "rec_{date}_{time}_{type}");
         assert!(session_id.starts_with("rec-"));
         assert_eq!(tmp, dir.join(format!("{}.tmp.mp4", session_id)));
-        let name = final_path.file_name().unwrap().to_string_lossy().to_string();
+        let name = final_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         assert!(name.ends_with(".mp4"));
         assert!(!name.contains("tmp.mp4"));
         assert!(name.contains("screen"));
@@ -269,7 +297,11 @@ mod tests {
         // ".." 会被替换为 "_" 后仍非空，真正的空回退需要模板净化为空
         // 用非法字符模板验证净化逻辑；空回退场景用纯分隔符验证文件名仍是时间戳
         let (_, final_path, _) = build_output_paths(dir, "{date}");
-        let name = final_path.file_name().unwrap().to_string_lossy().to_string();
+        let name = final_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         // 日期模板净化后应为 YYYYMMDD.mp4
         assert!(name.ends_with(".mp4"));
         let stem = name.trim_end_matches(".mp4");

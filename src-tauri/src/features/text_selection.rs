@@ -210,8 +210,8 @@ const CAPTURE_RETRY_MAX_DURATION: Duration = Duration::from_millis(600);
 const CAPTURE_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
 use crate::core::app_state::AppState as SharedAppState;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use crate::utils::utils_helpers::now_unix_ms_u64;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::image::Image;
 use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -329,7 +329,8 @@ fn get_selected_text_windows(
     let mut user_copying = false;
     while std::time::Instant::now() < deadline {
         if crate::features::mouse_listener::is_ctrl_pressed_by_os()
-            || crate::features::mouse_listener::is_any_ctrl_pressed() {
+            || crate::features::mouse_listener::is_any_ctrl_pressed()
+        {
             user_copying = true;
             break;
         }
@@ -412,7 +413,7 @@ fn get_selected_text_windows(
         } else {
             new_content.clone()
         };
-        
+
         if let Some(ref text) = content_to_record {
             if !text.trim().is_empty() {
                 let manager = lock_arc_mutex(&clipboard_manager);
@@ -592,7 +593,9 @@ fn restore_clipboard_with_retry<T, E: std::fmt::Display>(
             Ok(value) => return Ok(value),
             Err(e) if attempt < CLIPBOARD_RESTORE_RETRY_DELAYS_MS.len() => {
                 log::warn!("{}第{}次失败，将重试: {}", desc, attempt + 1, e);
-                thread::sleep(Duration::from_millis(CLIPBOARD_RESTORE_RETRY_DELAYS_MS[attempt]));
+                thread::sleep(Duration::from_millis(
+                    CLIPBOARD_RESTORE_RETRY_DELAYS_MS[attempt],
+                ));
                 attempt += 1;
             }
             Err(e) => {
@@ -656,11 +659,12 @@ fn restore_clipboard_snapshot(
         ClipboardSnapshot::Empty => {
             // 空快照：若剪贴板仍是我们捕获的选中文本，清空以恢复空态
             if still_holds_captured_text {
-                let result = restore_clipboard_with_retry("清空剪贴板（恢复空态）", || {
-                    crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
-                        app_handle.clipboard().write_text("")
-                    })
-                });
+                let result =
+                    restore_clipboard_with_retry("清空剪贴板（恢复空态）", || {
+                        crate::services::clipboard_access_guard::with_clipboard_access_lock(|| {
+                            app_handle.clipboard().write_text("")
+                        })
+                    });
                 match result {
                     Ok(()) => log::debug!("已清空剪贴板，恢复空态"),
                     Err(e) => log::warn!("清空剪贴板失败（恢复空态）: {}", e),

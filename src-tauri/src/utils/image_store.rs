@@ -1,9 +1,14 @@
-use super::db_utils::{reset_temp_text_table, fill_temp_text_table, reset_temp_position_table, fill_temp_position_table};
+use super::db_utils::{
+    fill_temp_position_table, fill_temp_text_table, reset_temp_position_table,
+    reset_temp_text_table,
+};
 use crate::core::error_codes::AppErrorKind;
 use crate::utils::image_clipboard::{
     ImageHistoryData, ImageHistoryItem, ImageHistoryPageData, ImageHistoryPageItem,
 };
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous};
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
+};
 use sqlx::{Row, SqliteConnection};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -42,7 +47,9 @@ async fn load_category_list_cached(conn: &mut SqliteConnection) -> Result<Vec<St
         sqlx::query("SELECT category FROM image_category_list ORDER BY position ASC")
             .fetch_all(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+            })?;
     let category_list = category_rows
         .into_iter()
         .filter_map(|row| row.try_get::<String, _>(0).ok())
@@ -70,10 +77,9 @@ fn image_store_options(db_path: &PathBuf) -> SqliteConnectOptions {
 }
 
 async fn exec(conn: &mut SqliteConnection, sql: &str) -> Result<(), String> {
-    sqlx::query(sql)
-        .execute(conn)
-        .await
-        .map_err(|e| AppErrorKind::ImageStoreInitFailed.to_frontend_json_with_details(format!("{}", e)))?;
+    sqlx::query(sql).execute(conn).await.map_err(|e| {
+        AppErrorKind::ImageStoreInitFailed.to_frontend_json_with_details(format!("{}", e))
+    })?;
     Ok(())
 }
 
@@ -207,14 +213,18 @@ async fn get_pool() -> Result<Arc<SqlitePool>, String> {
 
     let db_path = get_image_store_db_path();
     if let Some(parent) = db_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        fs::create_dir_all(parent).map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
     }
 
     let pool = SqlitePoolOptions::new()
         .max_connections(3)
         .connect_with(image_store_options(&db_path))
         .await
-        .map_err(|e| AppErrorKind::ImageStorePoolFailed.to_frontend_json_with_details(format!("{}", e)))?;
+        .map_err(|e| {
+            AppErrorKind::ImageStorePoolFailed.to_frontend_json_with_details(format!("{}", e))
+        })?;
 
     let pool_arc = Arc::new(pool);
 
@@ -236,7 +246,7 @@ async fn get_pool() -> Result<Arc<SqlitePool>, String> {
 
 fn block_on_result<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        return handle.block_on(future)
+        return handle.block_on(future);
     }
     tauri::async_runtime::block_on(future)
 }
@@ -271,7 +281,9 @@ pub async fn upsert_item_async(item: &ImageHistoryItem, position: usize) -> Resu
     .bind(&item.image_path)
     .execute(pool.as_ref())
     .await
-        .map_err(|e| AppErrorKind::ImageStoreWriteFailed.to_frontend_json_with_details(format!("{}", e)))?;
+        .map_err(|e| {
+            AppErrorKind::ImageStoreWriteFailed.to_frontend_json_with_details(format!("{}", e))
+        })?;
     Ok(())
 }
 
@@ -282,7 +294,9 @@ pub async fn item_exists_async(item_id: &str) -> Result<bool, String> {
             .bind(item_id)
             .fetch_optional(pool.as_ref())
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?
             .is_some();
     Ok(exists)
 }
@@ -331,7 +345,9 @@ pub async fn delete_items_bulk_async(item_ids: &[String]) -> Result<(), String> 
     )
     .execute(&mut *tx)
     .await
-        .map_err(|e| AppErrorKind::ImageStoreBatchDeleteFailed.to_frontend_json_with_details(format!("{}", e)))?;
+        .map_err(|e| {
+            AppErrorKind::ImageStoreBatchDeleteFailed.to_frontend_json_with_details(format!("{}", e))
+        })?;
     sqlx::query(
         "
         DELETE FROM image_categories
@@ -605,7 +621,9 @@ pub async fn sync_tags_for_item_async(item_id: &str, tags: &[String]) -> Result<
             .bind(position as i64)
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     }
     tx.commit()
         .await
@@ -633,10 +651,9 @@ pub fn sync_category_list_order(categories: &[String]) -> Result<(), String> {
 pub async fn sync_category_list_order_async(categories: &[String]) -> Result<(), String> {
     {
         let pool = get_pool().await?;
-        let mut tx = pool
-            .begin()
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        let mut tx = pool.begin().await.map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
         reset_temp_position_table(&mut tx, "temp_target_image_category_list", "category").await?;
         fill_temp_position_table(
             &mut tx,
@@ -695,9 +712,9 @@ pub async fn sync_category_list_order_async(categories: &[String]) -> Result<(),
         .execute(&mut *tx)
         .await
             .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-        tx.commit()
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        tx.commit().await.map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
         invalidate_category_list_cache();
         Ok(())
     }
@@ -862,7 +879,9 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
         )
         .fetch_all(conn.as_mut())
         .await
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?
+            .map_err(|e| {
+                AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+            })?
     } else {
         sqlx::query(
             "
@@ -877,22 +896,24 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
         )
         .fetch_all(conn.as_mut())
         .await
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?
+            .map_err(|e| {
+                AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+            })?
     };
     let mut items = Vec::new();
     for row in item_rows {
-        let id: String = row
-            .try_get(0)
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
-        let width: i64 = row
-            .try_get(1)
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
-        let height: i64 = row
-            .try_get(2)
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
-        let image_path: String = row
-            .try_get(3)
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
+        let id: String = row.try_get(0).map_err(|e| {
+            AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+        })?;
+        let width: i64 = row.try_get(1).map_err(|e| {
+            AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+        })?;
+        let height: i64 = row.try_get(2).map_err(|e| {
+            AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+        })?;
+        let image_path: String = row.try_get(3).map_err(|e| {
+            AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+        })?;
         items.push(ImageHistoryItem {
             signature: crate::utils::image_clipboard::extract_signature_from_item_id(&id),
             id,
@@ -909,14 +930,16 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
     let category_rows = sqlx::query("SELECT item_id, category FROM image_categories")
         .fetch_all(conn.as_mut())
         .await
-        .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
+        .map_err(|e| {
+            AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+        })?;
     for row in category_rows {
-        let item_id: String = row
-            .try_get(0)
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
-        let category: String = row
-            .try_get(1)
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
+        let item_id: String = row.try_get(0).map_err(|e| {
+            AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+        })?;
+        let category: String = row.try_get(1).map_err(|e| {
+            AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+        })?;
         categories.insert(item_id, category);
     }
 
@@ -942,20 +965,24 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
         sqlx::query("SELECT item_id, tag FROM image_tags ORDER BY item_id, position ASC")
             .fetch_all(conn.as_mut())
             .await
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?
+            .map_err(|e| {
+                AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+            })?
     } else {
         sqlx::query("SELECT item_id, tag FROM image_tags")
             .fetch_all(conn.as_mut())
             .await
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?
+            .map_err(|e| {
+                AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+            })?
     };
     for row in tag_rows {
-        let item_id: String = row
-            .try_get(0)
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
-        let tag: String = row
-            .try_get(1)
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
+        let item_id: String = row.try_get(0).map_err(|e| {
+            AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+        })?;
+        let tag: String = row.try_get(1).map_err(|e| {
+            AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+        })?;
         image_tags.entry(item_id).or_default().push(tag);
     }
 
@@ -982,13 +1009,17 @@ pub async fn load_all_data_async() -> Result<ImageHistoryData, String> {
         sqlx::query("SELECT item_id FROM image_pinned ORDER BY position ASC")
             .fetch_all(conn.as_mut())
             .await
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?
+            .map_err(|e| {
+                AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+            })?
     } else {
         // 没有 position 列,不排序
         sqlx::query("SELECT item_id FROM image_pinned")
             .fetch_all(conn.as_mut())
             .await
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?
+            .map_err(|e| {
+                AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+            })?
     };
     let pinned_items = pinned_rows
         .into_iter()
@@ -1057,7 +1088,8 @@ pub async fn load_history_page_async(
         "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC,
              CASE WHEN p.item_id IS NOT NULL THEN COALESCE(p.position, 2147483647) END ASC,
              hi.position ASC,
-             hi.item_id ASC".to_string()
+             hi.item_id ASC"
+            .to_string()
     } else {
         "hi.position ASC, hi.item_id ASC".to_string()
     };
@@ -1143,7 +1175,9 @@ pub async fn load_history_page_async(
         .bind(offset as i64)
         .fetch_all(conn.as_mut())
         .await
-        .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
+        .map_err(|e| {
+            AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+        })?;
     let items = rows
         .into_iter()
         .take(effective_limit)
@@ -1191,7 +1225,9 @@ pub fn has_any_data() -> Result<bool, String> {
         let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM image_items")
             .fetch_one(pool.as_ref())
             .await
-            .map_err(|e| AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::ImageStoreReadFailed.to_frontend_json_with_details(format!("{}", e))
+            })?;
         Ok(total > 0)
     })
 }
@@ -1264,15 +1300,15 @@ pub async fn load_async_preview_async(item_id: &str) -> Result<Option<(u32, u32,
 
     match row {
         Some(row) => {
-            let preview_width: i64 = row
-                .try_get(0)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-            let preview_height: i64 = row
-                .try_get(1)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-            let preview_base64: String = row
-                .try_get(2)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            let preview_width: i64 = row.try_get(0).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
+            let preview_height: i64 = row.try_get(1).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
+            let preview_base64: String = row.try_get(2).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
             Ok(Some((
                 preview_width.max(0) as u32,
                 preview_height.max(0) as u32,
@@ -1401,7 +1437,9 @@ pub async fn merge_pinned_items_async(item_ids: &[String]) -> Result<(), String>
             .bind(position)
             .execute(conn.as_mut())
             .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
             position += 1;
         }
     } else {
@@ -1415,7 +1453,9 @@ pub async fn merge_pinned_items_async(item_ids: &[String]) -> Result<(), String>
                 .bind(item_id)
                 .execute(conn.as_mut())
                 .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
         }
     }
 
@@ -1525,12 +1565,11 @@ mod tests {
             .await
             .unwrap();
 
-        let row: (i64, String) = sqlx::query_as(
-            "SELECT width, image_path FROM image_items WHERE item_id = 'img001'",
-        )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let row: (i64, String) =
+            sqlx::query_as("SELECT width, image_path FROM image_items WHERE item_id = 'img001'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(row.0, 200);
         assert_eq!(row.1, "/new.png");
     }
@@ -1546,10 +1585,11 @@ mod tests {
             .await
             .unwrap();
 
-        let cat: String = sqlx::query_scalar("SELECT category FROM image_categories WHERE item_id = 'img001'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let cat: String =
+            sqlx::query_scalar("SELECT category FROM image_categories WHERE item_id = 'img001'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(cat, "截图");
 
         sqlx::query(
@@ -1562,20 +1602,22 @@ mod tests {
             .await
             .unwrap();
 
-        let cat: String = sqlx::query_scalar("SELECT category FROM image_categories WHERE item_id = 'img001'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let cat: String =
+            sqlx::query_scalar("SELECT category FROM image_categories WHERE item_id = 'img001'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(cat, "照片");
 
         sqlx::query("DELETE FROM image_categories WHERE item_id = 'img001'")
             .execute(&pool)
             .await
             .unwrap();
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM image_categories WHERE item_id = 'img001'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM image_categories WHERE item_id = 'img001'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(count, 0);
     }
 
@@ -1643,12 +1685,11 @@ mod tests {
             .await
             .unwrap();
 
-        let result: Vec<String> = sqlx::query_scalar(
-            "SELECT item_id FROM image_pinned ORDER BY position ASC",
-        )
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let result: Vec<String> =
+            sqlx::query_scalar("SELECT item_id FROM image_pinned ORDER BY position ASC")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert_eq!(result, vec!["img001", "img002"]);
 
         sqlx::query("UPDATE image_pinned SET position = 10 WHERE item_id = 'img001'")
@@ -1656,12 +1697,11 @@ mod tests {
             .await
             .unwrap();
 
-        let result: Vec<String> = sqlx::query_scalar(
-            "SELECT item_id FROM image_pinned ORDER BY position ASC",
-        )
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let result: Vec<String> =
+            sqlx::query_scalar("SELECT item_id FROM image_pinned ORDER BY position ASC")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert_eq!(result, vec!["img002", "img001"]);
     }
 
@@ -1679,15 +1719,17 @@ mod tests {
                 .unwrap();
         }
 
-        let result: Vec<String> = sqlx::query_scalar(
-            "SELECT category FROM image_category_list ORDER BY position ASC",
-        )
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let result: Vec<String> =
+            sqlx::query_scalar("SELECT category FROM image_category_list ORDER BY position ASC")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert_eq!(result, vec!["风景", "人物", "建筑"]);
 
-        sqlx::query("DELETE FROM image_category_list").execute(&pool).await.unwrap();
+        sqlx::query("DELETE FROM image_category_list")
+            .execute(&pool)
+            .await
+            .unwrap();
         let new_order = vec!["建筑", "风景", "人物"];
         for (pos, cat) in new_order.iter().enumerate() {
             sqlx::query("INSERT INTO image_category_list (position, category) VALUES (?1, ?2)")
@@ -1698,12 +1740,11 @@ mod tests {
                 .unwrap();
         }
 
-        let result: Vec<String> = sqlx::query_scalar(
-            "SELECT category FROM image_category_list ORDER BY position ASC",
-        )
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let result: Vec<String> =
+            sqlx::query_scalar("SELECT category FROM image_category_list ORDER BY position ASC")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert_eq!(result, vec!["建筑", "风景", "人物"]);
     }
 
@@ -1738,19 +1779,34 @@ mod tests {
         let to_delete = vec!["img00", "img02", "img04", "img06", "img08"];
         for id in &to_delete {
             sqlx::query("DELETE FROM image_items WHERE item_id = ?1")
-                .bind(id).execute(&pool).await.unwrap();
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
             sqlx::query("DELETE FROM image_categories WHERE item_id = ?1")
-                .bind(id).execute(&pool).await.unwrap();
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
             sqlx::query("DELETE FROM image_tags WHERE item_id = ?1")
-                .bind(id).execute(&pool).await.unwrap();
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
         }
 
         let item_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM image_items")
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         let cat_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM image_categories")
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         let tag_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM image_tags")
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
 
         assert_eq!(item_count, 5);
         assert_eq!(cat_count, 5);

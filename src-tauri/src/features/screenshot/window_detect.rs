@@ -77,10 +77,13 @@ fn is_system_or_invalid_process(process_name: &str) -> bool {
 #[cfg(target_os = "windows")]
 fn get_window_process_name(hwnd: windows::Win32::Foundation::HWND) -> Option<String> {
     use std::path::Path;
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION};
-    use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
     use windows::core::PWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 
     let mut pid: u32 = 0;
     unsafe {
@@ -97,7 +100,14 @@ fn get_window_process_name(hwnd: windows::Win32::Foundation::HWND) -> Option<Str
 
     let mut buffer = vec![0u16; 1024];
     let mut size = buffer.len() as u32;
-    let ok = unsafe { QueryFullProcessImageNameW(handle, PROCESS_NAME_FORMAT(0), PWSTR(buffer.as_mut_ptr()), &mut size) };
+    let ok = unsafe {
+        QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_FORMAT(0),
+            PWSTR(buffer.as_mut_ptr()),
+            &mut size,
+        )
+    };
     unsafe {
         let _ = CloseHandle(handle);
     }
@@ -133,10 +143,7 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
 
     let mut windows = Vec::new();
 
-    unsafe extern "system" fn enum_callback(
-        hwnd: HWND,
-        lparam: LPARAM,
-    ) -> BOOL {
+    unsafe extern "system" fn enum_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let Some(mut windows_ptr) = NonNull::new(lparam.0 as *mut Vec<WindowInfo>) else {
             return BOOL(0);
         };

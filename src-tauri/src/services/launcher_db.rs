@@ -33,7 +33,8 @@ async fn get_launcher_db_pool() -> Result<&'static SqlitePool, String> {
         .get_or_try_init(|| async {
             let db_path = get_launcher_db_path();
             if let Some(parent) = db_path.parent() {
-                fs::create_dir_all(parent).map_err(|e| format!("创建启动器数据库目录失败: {}", e))?;
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("创建启动器数据库目录失败: {}", e))?;
             }
             let pool = SqlitePoolOptions::new()
                 .max_connections(3)
@@ -167,7 +168,9 @@ pub async fn set_config_value(key: &str, value: &str) -> Result<(), String> {
 
 pub async fn load_categories() -> Result<Vec<CategoryRow>, String> {
     let mut conn = open_launcher_db_conn().await?;
-    let rows = sqlx::query("SELECT id, name, icon, position FROM launcher_categories ORDER BY position ASC, id ASC")
+    let rows = sqlx::query(
+        "SELECT id, name, icon, position FROM launcher_categories ORDER BY position ASC, id ASC",
+    )
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| format!("读取分类列表失败: {}", e))?;
@@ -185,13 +188,16 @@ pub async fn load_categories() -> Result<Vec<CategoryRow>, String> {
 pub async fn load_category_app_ids(category_id: &str) -> Result<Vec<String>, String> {
     let mut conn = open_launcher_db_conn().await?;
     let rows = sqlx::query(
-        "SELECT app_id FROM launcher_category_apps WHERE category_id = ? ORDER BY position ASC"
+        "SELECT app_id FROM launcher_category_apps WHERE category_id = ? ORDER BY position ASC",
     )
     .bind(category_id)
     .fetch_all(&mut *conn)
     .await
     .map_err(|e| format!("读取分类应用失败: {}", e))?;
-    Ok(rows.into_iter().map(|r| r.get::<String, _>("app_id")).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| r.get::<String, _>("app_id"))
+        .collect())
 }
 
 /// 一次性加载所有分类及其应用ID（避免N+1查询）
@@ -203,7 +209,7 @@ pub async fn load_all_categories_with_app_ids() -> Result<Vec<(CategoryRow, Vec<
 
     // 加载所有分类-应用映射
     let rows = sqlx::query(
-        "SELECT category_id, app_id FROM launcher_category_apps ORDER BY category_id, position ASC"
+        "SELECT category_id, app_id FROM launcher_category_apps ORDER BY category_id, position ASC",
     )
         .fetch_all(&mut *conn)
         .await
@@ -227,10 +233,15 @@ pub async fn load_all_categories_with_app_ids() -> Result<Vec<(CategoryRow, Vec<
         .collect())
 }
 
-pub async fn upsert_category(id: &str, name: &str, icon: &str, position: i32) -> Result<(), String> {
+pub async fn upsert_category(
+    id: &str,
+    name: &str,
+    icon: &str,
+    position: i32,
+) -> Result<(), String> {
     let mut conn = open_launcher_db_conn().await?;
     sqlx::query(
-        "INSERT OR REPLACE INTO launcher_categories (id, name, icon, position) VALUES (?, ?, ?, ?)"
+        "INSERT OR REPLACE INTO launcher_categories (id, name, icon, position) VALUES (?, ?, ?, ?)",
     )
     .bind(id)
     .bind(name)
@@ -244,7 +255,10 @@ pub async fn upsert_category(id: &str, name: &str, icon: &str, position: i32) ->
 
 pub async fn delete_category(category_id: &str) -> Result<(), String> {
     let mut conn = open_launcher_db_conn().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("开启事务失败: {}", e))?;
     sqlx::query("DELETE FROM launcher_categories WHERE id = ?")
         .bind(category_id)
         .execute(&mut *tx)
@@ -255,7 +269,9 @@ pub async fn delete_category(category_id: &str) -> Result<(), String> {
         .execute(&mut *tx)
         .await
         .map_err(|e| format!("删除分类应用关联失败: {}", e))?;
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 
@@ -283,7 +299,10 @@ pub async fn update_category_icon(category_id: &str, icon: &str) -> Result<(), S
 
 pub async fn sync_category_positions(ids: &[String]) -> Result<(), String> {
     let mut conn = open_launcher_db_conn().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("开启事务失败: {}", e))?;
     for (i, id) in ids.iter().enumerate() {
         sqlx::query("UPDATE launcher_categories SET position = ? WHERE id = ?")
             .bind(i as i32)
@@ -292,13 +311,18 @@ pub async fn sync_category_positions(ids: &[String]) -> Result<(), String> {
             .await
             .map_err(|e| format!("更新分类排序失败: {}", e))?;
     }
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 
 pub async fn sync_category_apps(category_id: &str, app_ids: &[String]) -> Result<(), String> {
     let mut conn = open_launcher_db_conn().await?;
-    let mut tx = conn.begin().await.map_err(|e| format!("开启事务失败: {}", e))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| format!("开启事务失败: {}", e))?;
 
     sqlx::query("DELETE FROM launcher_category_apps WHERE category_id = ?")
         .bind(category_id)
@@ -307,7 +331,7 @@ pub async fn sync_category_apps(category_id: &str, app_ids: &[String]) -> Result
         .map_err(|e| format!("清空分类应用关联失败: {}", e))?;
     for (i, app_id) in app_ids.iter().enumerate() {
         sqlx::query(
-            "INSERT INTO launcher_category_apps (category_id, app_id, position) VALUES (?, ?, ?)"
+            "INSERT INTO launcher_category_apps (category_id, app_id, position) VALUES (?, ?, ?)",
         )
         .bind(category_id)
         .bind(app_id)
@@ -317,7 +341,9 @@ pub async fn sync_category_apps(category_id: &str, app_ids: &[String]) -> Result
         .map_err(|e| format!("保存分类应用关联失败: {}", e))?;
     }
 
-    tx.commit().await.map_err(|e| format!("提交事务失败: {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
 
@@ -331,14 +357,19 @@ pub async fn load_app_category_map() -> Result<Vec<(String, String)>, String> {
         .map_err(|e| format!("读取应用分类映射失败: {}", e))?;
     Ok(rows
         .into_iter()
-        .map(|r| (r.get::<String, _>("app_id"), r.get::<String, _>("category_id")))
+        .map(|r| {
+            (
+                r.get::<String, _>("app_id"),
+                r.get::<String, _>("category_id"),
+            )
+        })
         .collect())
 }
 
 pub async fn set_app_category_map(app_id: &str, category_id: &str) -> Result<(), String> {
     let mut conn = open_launcher_db_conn().await?;
     sqlx::query(
-        "INSERT OR REPLACE INTO launcher_app_category_map (app_id, category_id) VALUES (?, ?)"
+        "INSERT OR REPLACE INTO launcher_app_category_map (app_id, category_id) VALUES (?, ?)",
     )
     .bind(app_id)
     .bind(category_id)
@@ -496,7 +527,9 @@ pub async fn toggle_custom_command_enabled(command_id: &str) -> Result<(), Strin
 pub async fn check_prefix_exists(prefix: &str, exclude_id: Option<&str>) -> Result<bool, String> {
     let mut conn = open_launcher_db_conn().await?;
     let row = if let Some(ex_id) = exclude_id {
-        sqlx::query("SELECT COUNT(*) as cnt FROM launcher_custom_commands WHERE prefix = ? AND id != ?")
+        sqlx::query(
+            "SELECT COUNT(*) as cnt FROM launcher_custom_commands WHERE prefix = ? AND id != ?",
+        )
             .bind(prefix)
             .bind(ex_id)
             .fetch_one(&mut *conn)

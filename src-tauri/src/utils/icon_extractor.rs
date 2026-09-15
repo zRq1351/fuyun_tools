@@ -1,7 +1,7 @@
+use crate::utils::system_utils::resolve_lnk_target;
+use base64::Engine;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
-use base64::Engine;
-use crate::utils::system_utils::resolve_lnk_target;
 
 const SHGFI_ICON: u32 = 0x000000100;
 const SHGFI_LARGEICON: u32 = 0x000000000;
@@ -43,8 +43,8 @@ fn extract_icon_from_shell(
         .collect();
 
     unsafe {
-        use winapi::um::winuser::{DestroyIcon, GetIconInfo, ICONINFO};
         use winapi::um::wingdi::*;
+        use winapi::um::winuser::{DestroyIcon, GetIconInfo, ICONINFO};
 
         let mut shell_info: SHFILEINFOW = std::mem::zeroed();
         let result = SHGetFileInfoW(
@@ -93,12 +93,26 @@ fn extract_icon_from_shell(
         let mut mask_buffer: Vec<u8> = vec![0u8; (width * height * 4) as usize];
 
         if !icon_info.hbmColor.is_null() {
-            GetDIBits(hdc, icon_info.hbmColor, 0, height as u32,
-                color_buffer.as_mut_ptr() as *mut _, &mut bitmap_info, DIB_RGB_COLORS);
+            GetDIBits(
+                hdc,
+                icon_info.hbmColor,
+                0,
+                height as u32,
+                color_buffer.as_mut_ptr() as *mut _,
+                &mut bitmap_info,
+                DIB_RGB_COLORS,
+            );
         }
         if !icon_info.hbmMask.is_null() {
-            GetDIBits(hdc, icon_info.hbmMask, 0, height as u32,
-                mask_buffer.as_mut_ptr() as *mut _, &mut bitmap_info, DIB_RGB_COLORS);
+            GetDIBits(
+                hdc,
+                icon_info.hbmMask,
+                0,
+                height as u32,
+                mask_buffer.as_mut_ptr() as *mut _,
+                &mut bitmap_info,
+                DIB_RGB_COLORS,
+            );
         }
 
         let has_alpha = color_buffer.chunks_exact(4).any(|c| c[3] != 0);
@@ -113,7 +127,11 @@ fn extract_icon_from_shell(
                 color_buffer[ci + 3]
             } else {
                 let mask_byte = mask_buffer[ci];
-                if mask_byte == 0 { 255 } else { 0 }
+                if mask_byte == 0 {
+                    255
+                } else {
+                    0
+                }
             };
             final_buffer.extend_from_slice(&[r, g, b, a]);
         }
@@ -125,7 +143,12 @@ fn extract_icon_from_shell(
             use image::ImageEncoder;
             let encoder = image::codecs::png::PngEncoder::new(&mut png_data);
             if encoder
-                .write_image(img.as_raw(), width as u32, height as u32, image::ColorType::Rgba8.into())
+                .write_image(
+                    img.as_raw(),
+                    width as u32,
+                    height as u32,
+                    image::ColorType::Rgba8.into(),
+                )
                 .is_err()
             {
                 return None;
@@ -141,12 +164,16 @@ fn extract_icon_from_shell(
 unsafe fn detect_native_icon_size(icon_info: &winapi::um::winuser::ICONINFO) -> (i32, i32) {
     use winapi::um::wingdi::{GetObjectW, BITMAP};
     let get_w = |hbm: winapi::shared::windef::HBITMAP| -> i32 {
-        if hbm.is_null() { return 0; }
+        if hbm.is_null() {
+            return 0;
+        }
         let mut bm: BITMAP = std::mem::zeroed();
         let size = std::mem::size_of::<BITMAP>() as i32;
         if GetObjectW(hbm as *mut _, size, &mut bm as *mut _ as *mut _) != 0 {
             bm.bmWidth
-        } else { 0 }
+        } else {
+            0
+        }
     };
     (get_w(icon_info.hbmColor), get_w(icon_info.hbmMask))
 }
@@ -189,8 +216,8 @@ unsafe fn cleanup(
     icon_info: &winapi::um::winuser::ICONINFO,
     hdc: winapi::shared::windef::HDC,
 ) {
-    use winapi::um::winuser::DestroyIcon;
     use winapi::um::wingdi::{DeleteDC, DeleteObject};
+    use winapi::um::winuser::DestroyIcon;
 
     DeleteDC(hdc);
     if !icon_info.hbmColor.is_null() {

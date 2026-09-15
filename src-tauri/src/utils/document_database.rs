@@ -140,15 +140,16 @@ async fn delete_doc_file_internal(
             .bind(id)
             .fetch_optional(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
 
-    let affected_imports: Vec<i64> = sqlx::query_scalar(
-        "SELECT import_id FROM document_import_items WHERE doc_file_id = ?1"
-    )
-    .bind(id)
-    .fetch_all(&mut *conn)
-    .await
-    .unwrap_or_default();
+    let affected_imports: Vec<i64> =
+        sqlx::query_scalar("SELECT import_id FROM document_import_items WHERE doc_file_id = ?1")
+            .bind(id)
+            .fetch_all(&mut *conn)
+            .await
+            .unwrap_or_default();
 
     sqlx::query("DELETE FROM document_files WHERE id = ?1")
         .bind(id)
@@ -162,19 +163,20 @@ async fn delete_doc_file_internal(
         .await;
 
     for import_id in &affected_imports {
-        let _ = sqlx::query("DELETE FROM document_import_items WHERE import_id = ?1 AND doc_file_id = ?2")
+        let _ = sqlx::query(
+            "DELETE FROM document_import_items WHERE import_id = ?1 AND doc_file_id = ?2",
+        )
             .bind(import_id)
             .bind(id)
             .execute(&mut *conn)
             .await;
 
-        let remaining: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM document_import_items WHERE import_id = ?1"
-        )
-        .bind(import_id)
-        .fetch_one(&mut *conn)
-        .await
-        .unwrap_or(0);
+        let remaining: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM document_import_items WHERE import_id = ?1")
+                .bind(import_id)
+                .fetch_one(&mut *conn)
+                .await
+                .unwrap_or(0);
 
         if remaining == 0 {
             let _ = sqlx::query("DELETE FROM document_imports WHERE id = ?1")
@@ -198,25 +200,30 @@ async fn get_docs_db_pool() -> Result<&'static SqlitePool, String> {
         .get_or_try_init(|| async {
             let db_path = get_docs_db_path();
             if let Some(parent) = db_path.parent() {
-                fs::create_dir_all(parent).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                fs::create_dir_all(parent).map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
             }
             let pool = SqlitePoolOptions::new()
                 .max_connections(3)
                 .connect_with(create_db_options(&db_path))
                 .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
 
-            let mut conn = pool
-                .acquire()
-                .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            let mut conn = pool.acquire().await.map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
 
             // 启用外键约束
             sqlx::query("PRAGMA foreign_keys = ON")
                 .execute(&mut *conn)
                 .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-            
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
+
             ensure_docs_db_schema(&mut conn).await?;
 
             Ok(pool)
@@ -289,15 +296,31 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_doc_files_root_id ON document_files(root_id)")
-        .execute(&mut *conn).await.ok();
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_doc_files_category_id ON document_files(category_id)")
-        .execute(&mut *conn).await.ok();
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_doc_files_added_at ON document_files(added_at DESC)")
-        .execute(&mut *conn).await.ok();
+        .execute(&mut *conn)
+        .await
+        .ok();
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_doc_files_category_id ON document_files(category_id)",
+    )
+        .execute(&mut *conn)
+        .await
+        .ok();
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_doc_files_added_at ON document_files(added_at DESC)",
+    )
+        .execute(&mut *conn)
+        .await
+        .ok();
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_doc_files_file_ext ON document_files(file_ext)")
-        .execute(&mut *conn).await.ok();
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_doc_files_file_hash ON document_files(file_hash, root_id)")
-        .execute(&mut *conn).await.ok();
+        .execute(&mut *conn)
+        .await
+        .ok();
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_doc_files_file_hash ON document_files(file_hash, root_id)",
+    )
+        .execute(&mut *conn)
+        .await
+        .ok();
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS document_imports (
@@ -329,8 +352,12 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     .await
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_import_items_import_id ON document_import_items(import_id)")
-        .execute(&mut *conn).await.ok();
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_import_items_import_id ON document_import_items(import_id)",
+    )
+        .execute(&mut *conn)
+        .await
+        .ok();
 
     sqlx::query(
         "CREATE VIRTUAL TABLE IF NOT EXISTS document_files_fts USING fts5(
@@ -384,10 +411,11 @@ pub async fn add_doc_root(name: &str, root_path: &str) -> Result<DocRoot, String
     let mut conn = open_docs_db().await?;
     let now = now_unix_ms();
 
-    let max_pos: i64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(position), -1) FROM document_roots")
-        .fetch_one(&mut *conn)
-        .await
-        .unwrap_or(-1);
+    let max_pos: i64 =
+        sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(position), -1) FROM document_roots")
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap_or(-1);
 
     sqlx::query("INSERT INTO document_roots (name, root_path, created_at, position) VALUES (?1, ?2, ?3, ?4)")
         .bind(name)
@@ -435,7 +463,10 @@ pub async fn get_doc_roots() -> Result<Vec<DocRoot>, String> {
 
 pub async fn reorder_doc_roots(ids: Vec<i64>) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
-    let mut tx = conn.begin().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     // 使用批量更新替代逐条更新
     for (idx, id) in ids.iter().enumerate() {
@@ -444,18 +475,20 @@ pub async fn reorder_doc_roots(ids: Vec<i64>) -> Result<(), String> {
             .bind(*id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     }
 
-    tx.commit().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
+    tx.commit()
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 pub async fn remove_doc_root(id: i64) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
 
-    let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM document_files WHERE root_id = ?1"
-    )
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM document_files WHERE root_id = ?1")
         .bind(id)
         .fetch_one(&mut *conn)
         .await
@@ -477,7 +510,9 @@ pub async fn remove_doc_root(id: i64) -> Result<(), String> {
             .bind(id)
             .fetch_all(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
         for crow in &cat_rows {
             let cat_name: String = crow.try_get(0).unwrap_or_default();
             let dir = Path::new(&root_path).join(&cat_name);
@@ -504,10 +539,17 @@ pub async fn remove_doc_root(id: i64) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn add_doc_category(name: &str, icon: &str, color: &str, root_id: i64) -> Result<DocCategory, String> {
+pub async fn add_doc_category(
+    name: &str,
+    icon: &str,
+    color: &str,
+    root_id: i64,
+) -> Result<DocCategory, String> {
     let mut conn = open_docs_db().await?;
 
-    let max_pos: i64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(position), -1) FROM document_categories WHERE root_id = ?1")
+    let max_pos: i64 = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(MAX(position), -1) FROM document_categories WHERE root_id = ?1",
+    )
         .bind(root_id)
         .fetch_one(&mut *conn)
         .await
@@ -568,13 +610,14 @@ pub async fn get_doc_categories(root_id: Option<i64>) -> Result<Vec<DocCategory>
 pub async fn remove_doc_category(id: i64) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
 
-    let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM document_files WHERE category_id = ?1"
-    )
-        .bind(id)
-        .fetch_one(&mut *conn)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM document_files WHERE category_id = ?1")
+            .bind(id)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
 
     if count.0 > 0 {
         return Err(AppErrorKind::DocumentCategoryHasFiles.to_frontend_json());
@@ -608,7 +651,12 @@ pub async fn remove_doc_category(id: i64) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn update_managed_path_prefix(old_prefix: &str, new_prefix: &str, root_id: i64, category_id: i64) -> Result<(), String> {
+pub async fn update_managed_path_prefix(
+    old_prefix: &str,
+    new_prefix: &str,
+    root_id: i64,
+    category_id: i64,
+) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
     sqlx::query(
         "UPDATE document_files SET managed_path = ?2 || SUBSTR(managed_path, LENGTH(?1) + 1) WHERE root_id = ?3 AND category_id = ?4 AND storage_mode = 'repo' AND managed_path LIKE (?1 || '%')"
@@ -625,11 +673,14 @@ pub async fn update_managed_path_prefix(old_prefix: &str, new_prefix: &str, root
 
 pub async fn rename_doc_category(id: i64, name: &str) -> Result<String, String> {
     let mut conn = open_docs_db().await?;
-    let old_name: String = sqlx::query_scalar::<_, String>("SELECT name FROM document_categories WHERE id = ?1")
-        .bind(id)
-        .fetch_one(&mut *conn)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let old_name: String =
+        sqlx::query_scalar::<_, String>("SELECT name FROM document_categories WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
 
     sqlx::query("UPDATE document_categories SET name = ?1 WHERE id = ?2")
         .bind(name)
@@ -654,7 +705,9 @@ pub async fn reorder_doc_categories(ids: Vec<i64>) -> Result<(), String> {
             .bind(*id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     }
 
     tx.commit()
@@ -743,7 +796,9 @@ pub async fn update_doc_file_meta(
     notes: Option<&str>,
 ) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
-    let mut tx = conn.begin().await
+    let mut tx = conn
+        .begin()
+        .await
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let cat_change = category_id.is_some();
@@ -757,7 +812,7 @@ pub async fn update_doc_file_meta(
             "SELECT df.storage_mode, df.managed_path, dr.root_path, df.category_id
              FROM document_files df
              JOIN document_roots dr ON df.root_id = dr.id
-             WHERE df.id = ?1"
+             WHERE df.id = ?1",
         )
         .bind(id)
             .fetch_optional(&mut *tx)
@@ -771,18 +826,25 @@ pub async fn update_doc_file_meta(
             let old_cat_id: Option<i64> = row.try_get(3).unwrap_or(None);
             let new_cid = match category_id {
                 Some(id) => id,
-                None => return Err(AppErrorKind::InternalError.to_frontend_json_with_details("category_id is required".to_string())),
+                None => {
+                    return Err(AppErrorKind::InternalError
+                        .to_frontend_json_with_details("category_id is required".to_string()))
+                }
             };
 
             if storage_mode == "repo" && !old_managed.is_empty() && old_cat_id != Some(new_cid) {
                 new_cat_name = if new_cid == -1 {
                     String::new()
                 } else {
-                    sqlx::query_scalar::<_, String>("SELECT name FROM document_categories WHERE id = ?1")
+                    sqlx::query_scalar::<_, String>(
+                        "SELECT name FROM document_categories WHERE id = ?1",
+                    )
                         .bind(new_cid)
                         .fetch_optional(&mut *tx)
                         .await
-                        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
+                        .map_err(|e| {
+                            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                        })?
                         .unwrap_or_default()
                 };
                 needs_move = true;
@@ -796,14 +858,18 @@ pub async fn update_doc_file_meta(
             .bind(id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
 
         sqlx::query("UPDATE document_files_fts SET title = ?1 WHERE rowid = ?2")
             .bind(t)
             .bind(id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     }
 
     if let Some(cid) = category_id {
@@ -812,14 +878,18 @@ pub async fn update_doc_file_meta(
                 .bind(id)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
         } else {
             sqlx::query("UPDATE document_files SET category_id = ?1 WHERE id = ?2")
                 .bind(cid)
                 .bind(id)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
         }
     }
 
@@ -829,14 +899,18 @@ pub async fn update_doc_file_meta(
             .bind(id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
 
         sqlx::query("UPDATE document_files_fts SET tags = ?1 WHERE rowid = ?2")
             .bind(tg)
             .bind(id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     }
 
     if let Some(n) = notes {
@@ -845,14 +919,18 @@ pub async fn update_doc_file_meta(
             .bind(id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
 
         sqlx::query("UPDATE document_files_fts SET notes = ?1 WHERE rowid = ?2")
             .bind(n)
             .bind(id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     }
 
     if needs_move {
@@ -864,28 +942,49 @@ pub async fn update_doc_file_meta(
             } else {
                 Path::new(&root_path).join(&new_cat_name)
             };
-            fs::create_dir_all(&target_dir).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-            let new_name = resolve_unused_filename(&target_dir,
-                Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name),
-                Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or(""));
+            fs::create_dir_all(&target_dir).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
+            let new_name = resolve_unused_filename(
+                &target_dir,
+                Path::new(file_name)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(file_name),
+                Path::new(file_name)
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(""),
+            );
             let dest = target_dir.join(&new_name);
-            safe_move_file(old_path, &dest).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            safe_move_file(old_path, &dest).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
             let new_managed = dest.to_string_lossy().to_string();
             if let Err(e) = sqlx::query("UPDATE document_files SET managed_path = ?1 WHERE id = ?2")
                 .bind(&new_managed)
                 .bind(id)
                 .execute(&mut *tx)
-                .await {
+                .await
+            {
                 let _ = tx.rollback().await;
                 if let Err(e) = safe_move_file(&dest, old_path) {
-                    log::error!("回滚文件移动失败: {} -> {}: {}", dest.display(), old_path.display(), e);
+                    log::error!(
+                        "回滚文件移动失败: {} -> {}: {}",
+                        dest.display(),
+                        old_path.display(),
+                        e
+                    );
                 }
-                return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
+                return Err(
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                );
             }
         }
     }
 
-    tx.commit().await
+    tx.commit()
+        .await
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(())
 }
@@ -934,8 +1033,9 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
                 Path::new(&new_root.root_path).to_path_buf()
             };
 
-            fs::create_dir_all(&target_dir)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            fs::create_dir_all(&target_dir).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
 
             let new_path = resolve_unused_filename(&target_dir, file_name, &doc.file_ext);
             let dest = target_dir.join(&new_path);
@@ -943,31 +1043,35 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
 
             // 先移动文件，再更新数据库
             // 如果文件移动成功但数据库更新失败，可回滚文件
-            safe_move_file(old_path, &dest)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            safe_move_file(old_path, &dest).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
 
             {
-                let mut tx = conn.begin().await
-                    .map_err(|e| {
-                        // 数据库事务开启失败，回滚文件移动
-                        let _ = safe_move_file(&dest, old_path);
-                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
-                    })?;
-                if let Err(e) = sqlx::query("UPDATE document_files SET managed_path = ?1, root_id = ?2 WHERE id = ?3")
+                let mut tx = conn.begin().await.map_err(|e| {
+                    // 数据库事务开启失败，回滚文件移动
+                    let _ = safe_move_file(&dest, old_path);
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
+                if let Err(e) = sqlx::query(
+                    "UPDATE document_files SET managed_path = ?1, root_id = ?2 WHERE id = ?3",
+                )
                     .bind(&new_managed_path)
                     .bind(new_root_id)
                     .bind(id)
                     .execute(&mut *tx)
-                    .await {
+                    .await
+                {
                     let _ = tx.rollback().await;
                     let _ = safe_move_file(&dest, old_path);
-                    return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
-                }
-                tx.commit().await
-                    .map_err(|e| {
-                        let _ = safe_move_file(&dest, old_path);
+                    return Err(
                         AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
-                    })?;
+                    );
+                }
+                tx.commit().await.map_err(|e| {
+                    let _ = safe_move_file(&dest, old_path);
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
             }
         } else {
             sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
@@ -975,7 +1079,9 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
                 .bind(id)
                 .execute(&mut *conn)
                 .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
         }
     } else {
         sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
@@ -983,7 +1089,9 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
             .bind(id)
             .execute(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     }
 
     Ok(())
@@ -995,7 +1103,10 @@ pub async fn atomic_move_doc(
     new_category_id: Option<i64>,
 ) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
-    let mut tx = conn.begin().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let doc = get_doc_file_in_tx(&mut tx, id)
         .await?
@@ -1006,7 +1117,12 @@ pub async fn atomic_move_doc(
     let rollback_moves = |moves: &mut Vec<(PathBuf, PathBuf)>| {
         for (from, to) in moves.drain(..).rev() {
             if let Err(e) = safe_move_file(&to, &from) {
-                log::warn!("回移文件失败: {} -> {}: {}", to.display(), from.display(), e);
+                log::warn!(
+                    "回移文件失败: {} -> {}: {}",
+                    to.display(),
+                    from.display(),
+                    e
+                );
             }
         }
     };
@@ -1028,11 +1144,16 @@ pub async fn atomic_move_doc(
                     if cid == -1 {
                         String::new()
                     } else {
-                        sqlx::query_scalar::<_, String>("SELECT name FROM document_categories WHERE id = ?1")
+                        sqlx::query_scalar::<_, String>(
+                            "SELECT name FROM document_categories WHERE id = ?1",
+                        )
                             .bind(cid)
                             .fetch_optional(&mut *tx)
                             .await
-                            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
+                            .map_err(|e| {
+                                AppErrorKind::InternalError
+                                    .to_frontend_json_with_details(format!("{}", e))
+                            })?
                             .unwrap_or_default()
                     }
                 } else {
@@ -1043,11 +1164,19 @@ pub async fn atomic_move_doc(
                 } else {
                     Path::new(&new_root.root_path).join(&target_cat_name)
                 };
-                fs::create_dir_all(&target_dir).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                fs::create_dir_all(&target_dir).map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
                 let new_name = resolve_unused_filename(
                     &target_dir,
-                    Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name),
-                    Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or(""),
+                    Path::new(file_name)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(file_name),
+                    Path::new(file_name)
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(""),
                 );
                 let dest = target_dir.join(&new_name);
                 safe_move_file(old_path, &dest).map_err(|e| {
@@ -1057,7 +1186,9 @@ pub async fn atomic_move_doc(
                 })?;
                 file_moves.push((old_path.to_path_buf(), dest.clone()));
                 let new_managed = dest.to_string_lossy().to_string();
-                if let Err(e) = sqlx::query("UPDATE document_files SET root_id = ?1, managed_path = ?2 WHERE id = ?3")
+                if let Err(e) = sqlx::query(
+                    "UPDATE document_files SET root_id = ?1, managed_path = ?2 WHERE id = ?3",
+                )
                     .bind(effective_root_id)
                     .bind(&new_managed)
                     .bind(id)
@@ -1066,7 +1197,9 @@ pub async fn atomic_move_doc(
                 {
                     // 文件已移动但 DB 更新失败：把文件移回原位，避免 DB/磁盘不一致
                     rollback_moves(&mut file_moves);
-                    return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
+                    return Err(
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    );
                 }
             } else {
                 sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
@@ -1074,7 +1207,9 @@ pub async fn atomic_move_doc(
                     .bind(id)
                     .execute(&mut *tx)
                     .await
-                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?;
             }
         } else {
             sqlx::query("UPDATE document_files SET root_id = ?1 WHERE id = ?2")
@@ -1082,7 +1217,9 @@ pub async fn atomic_move_doc(
                 .bind(id)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
         }
     }
 
@@ -1092,7 +1229,7 @@ pub async fn atomic_move_doc(
                 let row = sqlx::query(
                     "SELECT df.storage_mode, df.managed_path, dr.root_path
                      FROM document_files df JOIN document_roots dr ON df.root_id = dr.id
-                     WHERE df.id = ?1"
+                     WHERE df.id = ?1",
                 )
                 .bind(id)
                 .fetch_optional(&mut *tx)
@@ -1111,51 +1248,67 @@ pub async fn atomic_move_doc(
                         let new_cat_name = if cid == -1 {
                             String::new()
                         } else {
-                            sqlx::query_scalar::<_, String>("SELECT name FROM document_categories WHERE id = ?1")
+                            sqlx::query_scalar::<_, String>(
+                                "SELECT name FROM document_categories WHERE id = ?1",
+                            )
                                 .bind(cid)
                                 .fetch_optional(&mut *tx)
                                 .await
                                 .map_err(|e| {
                                     rollback_moves(&mut file_moves);
-                                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                                    AppErrorKind::InternalError
+                                        .to_frontend_json_with_details(format!("{}", e))
                                 })?
                                 .unwrap_or_default()
                         };
                         let old_path = Path::new(&old_managed);
                         if old_path.exists() {
-                            let file_name = old_path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                            let file_name =
+                                old_path.file_name().and_then(|s| s.to_str()).unwrap_or("");
                             let target_dir = if new_cat_name.is_empty() {
                                 Path::new(&root_path).to_path_buf()
                             } else {
                                 Path::new(&root_path).join(&new_cat_name)
                             };
                             // 根目录+分类同时变更时，上一阶段可能已移到目标目录，避免二次移动改名成 "(1)"
-                            let already_in_target = old_path.parent().map(|p| p == target_dir).unwrap_or(false);
+                            let already_in_target =
+                                old_path.parent().map(|p| p == target_dir).unwrap_or(false);
                             if !already_in_target {
-                            fs::create_dir_all(&target_dir).map_err(|e| {
-                                rollback_moves(&mut file_moves);
-                                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
-                            })?;
-                            let new_name = resolve_unused_filename(
-                                &target_dir,
-                                Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name),
-                                Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or(""),
-                            );
-                            let dest = target_dir.join(&new_name);
-                            safe_move_file(old_path, &dest).map_err(|e| {
-                                rollback_moves(&mut file_moves);
-                                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
-                            })?;
-                            file_moves.push((old_path.to_path_buf(), dest.clone()));
-                            if let Err(e) = sqlx::query("UPDATE document_files SET managed_path = ?1 WHERE id = ?2")
+                                fs::create_dir_all(&target_dir).map_err(|e| {
+                                    rollback_moves(&mut file_moves);
+                                    AppErrorKind::InternalError
+                                        .to_frontend_json_with_details(format!("{}", e))
+                                })?;
+                                let new_name = resolve_unused_filename(
+                                    &target_dir,
+                                    Path::new(file_name)
+                                        .file_stem()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or(file_name),
+                                    Path::new(file_name)
+                                        .extension()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or(""),
+                                );
+                                let dest = target_dir.join(&new_name);
+                                safe_move_file(old_path, &dest).map_err(|e| {
+                                    rollback_moves(&mut file_moves);
+                                    AppErrorKind::InternalError
+                                        .to_frontend_json_with_details(e.to_string())
+                                })?;
+                                file_moves.push((old_path.to_path_buf(), dest.clone()));
+                                if let Err(e) = sqlx::query(
+                                    "UPDATE document_files SET managed_path = ?1 WHERE id = ?2",
+                                )
                                 .bind(dest.to_string_lossy().to_string())
                                 .bind(id)
                                 .execute(&mut *tx)
                                 .await
-                            {
-                                rollback_moves(&mut file_moves);
-                                return Err(AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)));
-                            }
+                                {
+                                    rollback_moves(&mut file_moves);
+                                    return Err(AppErrorKind::InternalError
+                                        .to_frontend_json_with_details(format!("{}", e)));
+                                }
                             }
                         }
                     }
@@ -1191,7 +1344,10 @@ pub async fn atomic_move_doc(
     })
 }
 
-async fn get_doc_file_in_tx(tx: &mut sqlx::Transaction<'_, Sqlite>, id: i64) -> Result<Option<DocFile>, String> {
+async fn get_doc_file_in_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    id: i64,
+) -> Result<Option<DocFile>, String> {
     let row = sqlx::query(
         "SELECT df.id, df.root_id, df.title, df.file_name, df.file_ext, df.file_size, df.file_hash,
                 df.category_id, c.name as category_name, df.tags, df.notes, df.content_text,
@@ -1207,12 +1363,18 @@ async fn get_doc_file_in_tx(tx: &mut sqlx::Transaction<'_, Sqlite>, id: i64) -> 
     Ok(row.as_ref().map(row_to_doc_file))
 }
 
-async fn get_doc_root_by_id_in_tx(tx: &mut sqlx::Transaction<'_, Sqlite>, id: i64) -> Result<Option<DocRoot>, String> {
-    let row = sqlx::query("SELECT id, name, root_path, created_at FROM document_roots WHERE id = ?1")
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+async fn get_doc_root_by_id_in_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    id: i64,
+) -> Result<Option<DocRoot>, String> {
+    let row =
+        sqlx::query("SELECT id, name, root_path, created_at FROM document_roots WHERE id = ?1")
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     Ok(row.map(|r| DocRoot {
         id: r.try_get::<i64, _>(0).unwrap_or(0),
         name: r.try_get::<String, _>(1).unwrap_or_default(),
@@ -1223,25 +1385,35 @@ async fn get_doc_root_by_id_in_tx(tx: &mut sqlx::Transaction<'_, Sqlite>, id: i6
 
 pub async fn reorder_doc_files(ids: Vec<i64>) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
-    let mut tx = conn.begin().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     for (idx, id) in ids.iter().enumerate() {
         sqlx::query::<Sqlite>("UPDATE document_files SET sort_order = ?1 WHERE id = ?2")
             .bind(idx as i64)
             .bind(*id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     }
-    tx.commit().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
+    tx.commit()
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 pub async fn get_doc_root_by_id(id: i64) -> Result<Option<DocRoot>, String> {
     let mut conn = open_docs_db().await?;
-    let row = sqlx::query("SELECT id, name, root_path, created_at FROM document_roots WHERE id = ?1")
-        .bind(id)
-        .fetch_optional(&mut *conn)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let row =
+        sqlx::query("SELECT id, name, root_path, created_at FROM document_roots WHERE id = ?1")
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
 
     Ok(row.map(|r| DocRoot {
         id: r.try_get::<i64, _>(0).unwrap_or(0),
@@ -1301,7 +1473,11 @@ pub async fn mark_doc_missing(id: i64) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn doc_exists_by_hash(file_hash: &str, root_id: i64, category_id: Option<i64>) -> Result<bool, String> {
+pub async fn doc_exists_by_hash(
+    file_hash: &str,
+    root_id: i64,
+    category_id: Option<i64>,
+) -> Result<bool, String> {
     let mut conn = open_docs_db().await?;
     let count: i64 = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM document_files WHERE file_hash = ?1 AND root_id = ?2 AND (?3 IS NULL AND category_id IS NULL OR category_id = ?3) AND is_missing = 0",
@@ -1368,7 +1544,10 @@ pub async fn get_doc_page(
     let fts_query = if has_cjk {
         None
     } else {
-        keyword_val.as_ref().map(|k| build_fts_query_space(k)).filter(|q| !q.is_empty())
+        keyword_val
+            .as_ref()
+            .map(|k| build_fts_query_space(k))
+            .filter(|q| !q.is_empty())
     };
     let fts_enabled = is_fts_enabled(&mut conn).await?;
 
@@ -1380,7 +1559,8 @@ pub async fn get_doc_page(
          df.category_id, c.name as category_name, df.tags, df.notes, df.content_text,
          df.source_path, df.managed_path, df.storage_mode, df.is_missing, df.added_at, df.file_modified, df.visit_count";
 
-    let base_filter = "WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
+    let base_filter =
+        "WHERE (?1 IS NULL OR (?1 = -1 AND df.category_id IS NULL) OR df.category_id = ?1)
          AND (?2 IS NULL OR df.root_id = ?2)
          AND (?3 IS NULL OR LOWER(df.file_ext) = ?3)";
 
@@ -1423,7 +1603,9 @@ pub async fn get_doc_page(
             .bind(&extra_param)
             .fetch_one(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?
     } else {
         sqlx::query_scalar::<_, i64>(&count_sql)
             .bind(category_id)
@@ -1431,7 +1613,9 @@ pub async fn get_doc_page(
             .bind(file_ext.as_deref().filter(|v| !v.is_empty()))
             .fetch_one(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?
     };
 
     let rows = if has_extra {
@@ -1444,7 +1628,9 @@ pub async fn get_doc_page(
             .bind(offset)
             .fetch_all(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?
     } else {
         sqlx::query::<Sqlite>(&list_sql)
             .bind(category_id)
@@ -1454,7 +1640,9 @@ pub async fn get_doc_page(
             .bind(offset)
             .fetch_all(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?
     };
 
     let items: Vec<DocFile> = rows.iter().map(row_to_doc_file).collect();
@@ -1525,16 +1713,22 @@ pub async fn get_doc_stats(root_id: Option<i64>) -> Result<DocStats, String> {
 }
 
 pub fn compute_file_hash(path: &std::path::Path) -> Result<String, String> {
-    let meta = fs::metadata(path).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let meta = fs::metadata(path)
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let file_size = meta.len();
-    let mut file = fs::File::open(path).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let mut file = fs::File::open(path)
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let mut hasher = xxhash_rust::xxh3::Xxh3::new();
     let mut buf = [0u8; 65536];
     let max_hash_bytes: u64 = 10 * 1024 * 1024;
     let mut read_total: u64 = 0;
     loop {
-        let n = file.read(&mut buf).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-        if n == 0 { break; }
+        let n = file.read(&mut buf).map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
+        if n == 0 {
+            break;
+        }
         hasher.update(&buf[..n]);
         read_total += n as u64;
         if read_total >= max_hash_bytes && file_size > max_hash_bytes {
@@ -1567,10 +1761,15 @@ pub fn resolve_unused_filename(dir: &std::path::Path, base_name: &str, ext: &str
             return name;
         }
     }
-    format!("{} ({}).{}", base_name, std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs(), ext)
+    format!(
+        "{} ({}).{}",
+        base_name,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        ext
+    )
 }
 
 pub async fn create_import_history(
@@ -1602,7 +1801,12 @@ pub async fn create_import_history(
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
-pub async fn link_import_item(import_id: i64, doc_file_id: i64, source_path: &str, managed_path: &str) -> Result<(), String> {
+pub async fn link_import_item(
+    import_id: i64,
+    doc_file_id: i64,
+    source_path: &str,
+    managed_path: &str,
+) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
     sqlx::query::<Sqlite>(
         "INSERT OR IGNORE INTO document_import_items (import_id, doc_file_id, source_path, managed_path) VALUES (?1, ?2, ?3, ?4)",
@@ -1630,17 +1834,20 @@ pub async fn get_import_history(limit: i64) -> Result<Vec<ImportHistory>, String
     .fetch_all(&mut *conn)
     .await
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-    Ok(rows.iter().map(|r| ImportHistory {
-        id: r.try_get::<i64, _>(0).unwrap_or(0),
-        root_id: r.try_get::<i64, _>(1).unwrap_or(0),
-        category_id: r.try_get::<Option<i64>, _>(2).unwrap_or(None),
-        category_name: r.try_get::<Option<String>, _>(3).unwrap_or(None),
-        storage_mode: r.try_get::<String, _>(4).unwrap_or_default(),
-        source_dir: r.try_get::<String, _>(5).unwrap_or_default(),
-        target_dir: r.try_get::<String, _>(6).unwrap_or_default(),
-        file_count: r.try_get::<i64, _>(7).unwrap_or(0),
-        created_at: r.try_get::<i64, _>(8).unwrap_or(0),
-    }).collect())
+    Ok(rows
+        .iter()
+        .map(|r| ImportHistory {
+            id: r.try_get::<i64, _>(0).unwrap_or(0),
+            root_id: r.try_get::<i64, _>(1).unwrap_or(0),
+            category_id: r.try_get::<Option<i64>, _>(2).unwrap_or(None),
+            category_name: r.try_get::<Option<String>, _>(3).unwrap_or(None),
+            storage_mode: r.try_get::<String, _>(4).unwrap_or_default(),
+            source_dir: r.try_get::<String, _>(5).unwrap_or_default(),
+            target_dir: r.try_get::<String, _>(6).unwrap_or_default(),
+            file_count: r.try_get::<i64, _>(7).unwrap_or(0),
+            created_at: r.try_get::<i64, _>(8).unwrap_or(0),
+        })
+        .collect())
 }
 
 pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
@@ -1715,7 +1922,10 @@ pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
 
 pub async fn undo_import_item(import_id: i64, doc_file_id: i64) -> Result<(), String> {
     let mut conn = open_docs_db().await?;
-    let mut tx = conn.begin().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let item = sqlx::query::<Sqlite>(
         "SELECT dii.source_path, COALESCE(df.managed_path, dii.managed_path) as managed_path, di.storage_mode
@@ -1742,31 +1952,57 @@ pub async fn undo_import_item(import_id: i64, doc_file_id: i64) -> Result<(), St
             if let Some(parent) = source_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            safe_move_file(managed_path, source_path)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            safe_move_file(managed_path, source_path).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
         }
     }
 
     sqlx::query::<Sqlite>("DELETE FROM document_files WHERE id = ?1")
-        .bind(doc_file_id).execute(&mut *tx).await.ok();
+        .bind(doc_file_id)
+        .execute(&mut *tx)
+        .await
+        .ok();
     sqlx::query::<Sqlite>("DELETE FROM document_files_fts WHERE rowid = ?1")
-        .bind(doc_file_id).execute(&mut *tx).await.ok();
-    sqlx::query::<Sqlite>("DELETE FROM document_import_items WHERE import_id = ?1 AND doc_file_id = ?2")
-        .bind(import_id).bind(doc_file_id).execute(&mut *tx).await.ok();
+        .bind(doc_file_id)
+        .execute(&mut *tx)
+        .await
+        .ok();
+    sqlx::query::<Sqlite>(
+        "DELETE FROM document_import_items WHERE import_id = ?1 AND doc_file_id = ?2",
+    )
+        .bind(import_id)
+        .bind(doc_file_id)
+        .execute(&mut *tx)
+        .await
+        .ok();
 
     let remaining: i64 = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM document_import_items WHERE import_id = ?1"
-    ).bind(import_id).fetch_one(&mut *tx).await.unwrap_or(0);
+        "SELECT COUNT(*) FROM document_import_items WHERE import_id = ?1",
+    )
+        .bind(import_id)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap_or(0);
 
     if remaining == 0 {
         sqlx::query::<Sqlite>("DELETE FROM document_imports WHERE id = ?1")
-            .bind(import_id).execute(&mut *tx).await.ok();
+            .bind(import_id)
+            .execute(&mut *tx)
+            .await
+            .ok();
     } else {
         sqlx::query::<Sqlite>("UPDATE document_imports SET file_count = ?1 WHERE id = ?2")
-            .bind(remaining).bind(import_id).execute(&mut *tx).await.ok();
+            .bind(remaining)
+            .bind(import_id)
+            .execute(&mut *tx)
+            .await
+            .ok();
     }
 
-    tx.commit().await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
+    tx.commit()
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
 pub async fn get_import_files(import_id: i64) -> Result<Vec<ImportFileItem>, String> {
@@ -1782,12 +2018,15 @@ pub async fn get_import_files(import_id: i64) -> Result<Vec<ImportFileItem>, Str
     .fetch_all(&mut *conn)
     .await
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-    Ok(rows.iter().map(|r| ImportFileItem {
-        doc_file_id: r.try_get::<i64, _>(0).unwrap_or(0),
-        file_name: r.try_get::<String, _>(1).unwrap_or_default(),
-        source_path: r.try_get::<String, _>(2).unwrap_or_default(),
-        managed_path: r.try_get::<String, _>(3).unwrap_or_default(),
-    }).collect())
+    Ok(rows
+        .iter()
+        .map(|r| ImportFileItem {
+            doc_file_id: r.try_get::<i64, _>(0).unwrap_or(0),
+            file_name: r.try_get::<String, _>(1).unwrap_or_default(),
+            source_path: r.try_get::<String, _>(2).unwrap_or_default(),
+            managed_path: r.try_get::<String, _>(3).unwrap_or_default(),
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -2333,11 +2572,12 @@ mod tests {
         }
 
         // 验证导入记录
-        let imports: Vec<i64> = sqlx::query_scalar("SELECT file_count FROM document_imports WHERE id = ?1")
-            .bind(import_id)
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let imports: Vec<i64> =
+            sqlx::query_scalar("SELECT file_count FROM document_imports WHERE id = ?1")
+                .bind(import_id)
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert_eq!(imports, vec![3]);
 
         // 验证关联文件

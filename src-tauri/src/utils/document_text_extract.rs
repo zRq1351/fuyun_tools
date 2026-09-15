@@ -9,10 +9,10 @@ static WS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
 static XML_T_TEXT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<t[^>]*>(.*?)</t>").unwrap());
 
 const TEXT_EXTS: &[&str] = &[
-    "txt", "md", "csv", "log", "json", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf",
-    "py", "js", "ts", "jsx", "tsx", "java", "go", "rs", "c", "cpp", "h", "hpp", "cs",
-    "php", "rb", "swift", "kt", "scala", "sql", "sh", "bat", "ps1", "lua",
-    "html", "htm", "css", "scss", "less", "vue", "svelte", "r", "zig",
+    "txt", "md", "csv", "log", "json", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf", "py",
+    "js", "ts", "jsx", "tsx", "java", "go", "rs", "c", "cpp", "h", "hpp", "cs", "php", "rb",
+    "swift", "kt", "scala", "sql", "sh", "bat", "ps1", "lua", "html", "htm", "css", "scss", "less",
+    "vue", "svelte", "r", "zig",
 ];
 
 const MAX_CONTENT_BYTES: u64 = 2 * 1024 * 1024; // 2MB
@@ -60,9 +60,15 @@ pub fn extract_file_content(path: &Path, ext: &str) -> String {
 }
 
 fn extract_plain_text(path: &Path) -> String {
-    let Ok(meta) = fs::metadata(path) else { return String::new() };
-    if meta.len() > MAX_CONTENT_BYTES { return String::new() }
-    let Ok(bytes) = fs::read(path) else { return String::new() };
+    let Ok(meta) = fs::metadata(path) else {
+        return String::new();
+    };
+    if meta.len() > MAX_CONTENT_BYTES {
+        return String::new();
+    }
+    let Ok(bytes) = fs::read(path) else {
+        return String::new();
+    };
     decode_text_bytes(&bytes)
 }
 
@@ -84,8 +90,12 @@ fn extract_docx(path: &Path) -> String {
 }
 
 fn extract_xlsx(path: &Path) -> String {
-    let Ok(file) = fs::File::open(path) else { return String::new() };
-    let Ok(mut archive) = zip::ZipArchive::new(file) else { return String::new() };
+    let Ok(file) = fs::File::open(path) else {
+        return String::new();
+    };
+    let Ok(mut archive) = zip::ZipArchive::new(file) else {
+        return String::new();
+    };
 
     let mut shared_strings_xml = String::new();
     if let Some(s) = read_zip_entry_limited(&mut archive, "xl/sharedStrings.xml") {
@@ -99,7 +109,9 @@ fn extract_xlsx(path: &Path) -> String {
     let mut text = String::new();
     for i in 1.. {
         let name = format!("xl/worksheets/sheet{}.xml", i);
-        let Some(xml) = read_zip_entry_limited(&mut archive, &name) else { break };
+        let Some(xml) = read_zip_entry_limited(&mut archive, &name) else {
+            break;
+        };
         text.push_str(&extract_xlsx_sheet_text(&xml, &shared));
         text.push(' ');
     }
@@ -178,13 +190,19 @@ fn decode_xml_entities(s: &str) -> String {
 }
 
 fn extract_pptx(path: &Path) -> String {
-    let Ok(file) = fs::File::open(path) else { return String::new() };
-    let Ok(mut archive) = zip::ZipArchive::new(file) else { return String::new() };
+    let Ok(file) = fs::File::open(path) else {
+        return String::new();
+    };
+    let Ok(mut archive) = zip::ZipArchive::new(file) else {
+        return String::new();
+    };
 
     let mut text = String::new();
     for i in 1.. {
         let name = format!("ppt/slides/slide{}.xml", i);
-        let Some(xml) = read_zip_entry_limited(&mut archive, &name) else { break };
+        let Some(xml) = read_zip_entry_limited(&mut archive, &name) else {
+            break;
+        };
         text.push_str(&strip_xml(&xml));
     }
 
@@ -192,8 +210,12 @@ fn extract_pptx(path: &Path) -> String {
 }
 
 fn extract_office_xml(path: &Path, entry_name: &str) -> String {
-    let Ok(file) = fs::File::open(path) else { return String::new() };
-    let Ok(mut archive) = zip::ZipArchive::new(file) else { return String::new() };
+    let Ok(file) = fs::File::open(path) else {
+        return String::new();
+    };
+    let Ok(mut archive) = zip::ZipArchive::new(file) else {
+        return String::new();
+    };
     let Some(xml) = read_zip_entry_limited(&mut archive, entry_name) else {
         return String::new();
     };

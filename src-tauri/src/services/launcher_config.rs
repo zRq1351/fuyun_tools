@@ -156,8 +156,12 @@ impl Default for LauncherConfig {
 
 /// 首次启动时从旧 JSON 文件迁移数据到 SQLite
 async fn try_migrate_old_data() {
-    let Ok(is_empty) = launcher_db::is_db_empty().await else { return };
-    if !is_empty { return }
+    let Ok(is_empty) = launcher_db::is_db_empty().await else {
+        return;
+    };
+    if !is_empty {
+        return;
+    }
 
     let exe_dir = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let launcher_dir = exe_dir.parent().unwrap_or(&exe_dir).join("launcher");
@@ -183,7 +187,8 @@ async fn try_migrate_old_data() {
                     command_type: CustomCommandType::to_json(&cmd.command_type),
                     enabled: cmd.enabled,
                     created_at: cmd.created_at,
-                }).await;
+                })
+                    .await;
             }
             // 迁移成功后删除旧文件
             let _ = std::fs::remove_file(&config_path);
@@ -193,20 +198,37 @@ async fn try_migrate_old_data() {
     let apps_path = launcher_dir.join("apps.json");
     if let Ok(content) = std::fs::read_to_string(&apps_path) {
         #[derive(serde::Deserialize)]
-        struct OldAppStore { apps: Vec<OldApp>, last_scan: i64 }
+        struct OldAppStore {
+            apps: Vec<OldApp>,
+            last_scan: i64,
+        }
         #[derive(serde::Deserialize)]
         struct OldApp {
-            id: String, title: String, path: String, category: String,
-            app_type: String, icon_base64: Option<String>, action: String, sort_order: i32,
+            id: String,
+            title: String,
+            path: String,
+            category: String,
+            app_type: String,
+            icon_base64: Option<String>,
+            action: String,
+            sort_order: i32,
         }
         if let Ok(store) = serde_json::from_str::<OldAppStore>(&content) {
-            let app_rows: Vec<launcher_db::AppRow> = store.apps.iter().map(|a| launcher_db::AppRow {
-                id: a.id.clone(), title: a.title.clone(), path: a.path.clone(),
-                category: a.category.clone(), app_type: a.app_type.clone(),
-                icon_base64: a.icon_base64.clone(), action: a.action.clone(),
-                sort_order: a.sort_order,
-                source: "scan".to_string(),
-            }).collect();
+            let app_rows: Vec<launcher_db::AppRow> = store
+                .apps
+                .iter()
+                .map(|a| launcher_db::AppRow {
+                    id: a.id.clone(),
+                    title: a.title.clone(),
+                    path: a.path.clone(),
+                    category: a.category.clone(),
+                    app_type: a.app_type.clone(),
+                    icon_base64: a.icon_base64.clone(),
+                    action: a.action.clone(),
+                    sort_order: a.sort_order,
+                    source: "scan".to_string(),
+                })
+                .collect();
             let _ = launcher_db::replace_scan_apps(&app_rows).await;
             if store.last_scan > 0 {
                 let _ = launcher_db::set_meta("last_scan", &store.last_scan.to_string()).await;
@@ -217,8 +239,12 @@ async fn try_migrate_old_data() {
 }
 
 async fn ensure_default_categories() {
-    let Ok(cats) = launcher_db::load_categories().await else { return };
-    if !cats.is_empty() { return }
+    let Ok(cats) = launcher_db::load_categories().await else {
+        return;
+    };
+    if !cats.is_empty() {
+        return;
+    }
 
     let defaults = [
         ("default_media", "影音娱乐", "VideoCamera"),
@@ -247,7 +273,7 @@ pub async fn load_launcher_config() -> LauncherConfig {
     let categories_with_apps = launcher_db::load_all_categories_with_app_ids()
         .await
         .unwrap_or_default();
-    
+
     let mut categories = Vec::new();
     for (cr, app_ids) in categories_with_apps {
         categories.push(LauncherCategory {
@@ -258,7 +284,9 @@ pub async fn load_launcher_config() -> LauncherConfig {
         });
     }
 
-    let map_entries = launcher_db::load_app_category_map().await.unwrap_or_default();
+    let map_entries = launcher_db::load_app_category_map()
+        .await
+        .unwrap_or_default();
     let mut app_category_map = HashMap::new();
     for (app_id, cat_id) in map_entries {
         app_category_map.insert(app_id, cat_id);
@@ -288,7 +316,11 @@ pub async fn add_category(name: String, icon: String) -> Result<LauncherConfig, 
 
 pub async fn remove_category(category_id: String) -> Result<LauncherConfig, String> {
     let mut config = load_launcher_config().await;
-    config.categories.iter().find(|c| c.id == category_id).ok_or("分类不存在".to_string())?;
+    config
+        .categories
+        .iter()
+        .find(|c| c.id == category_id)
+        .ok_or("分类不存在".to_string())?;
     config.categories.retain(|c| c.id != category_id);
     config.app_category_map.retain(|_, v| v != &category_id);
     launcher_db::delete_category(&category_id).await?;
@@ -296,7 +328,10 @@ pub async fn remove_category(category_id: String) -> Result<LauncherConfig, Stri
     Ok(config)
 }
 
-pub async fn rename_category(category_id: String, new_name: String) -> Result<LauncherConfig, String> {
+pub async fn rename_category(
+    category_id: String,
+    new_name: String,
+) -> Result<LauncherConfig, String> {
     launcher_db::update_category_name(&category_id, &new_name).await?;
     let mut config = load_launcher_config().await;
     if let Some(cat) = config.categories.iter_mut().find(|c| c.id == category_id) {
@@ -305,7 +340,10 @@ pub async fn rename_category(category_id: String, new_name: String) -> Result<La
     Ok(config)
 }
 
-pub async fn set_app_category(app_id: String, category_id: String) -> Result<LauncherConfig, String> {
+pub async fn set_app_category(
+    app_id: String,
+    category_id: String,
+) -> Result<LauncherConfig, String> {
     if category_id.is_empty() {
         launcher_db::remove_app_category_map(&app_id).await?;
     } else {
@@ -340,7 +378,10 @@ pub async fn reorder_categories(category_ids: Vec<String>) -> Result<LauncherCon
     Ok(config)
 }
 
-pub async fn update_category_icon(category_id: String, icon: String) -> Result<LauncherConfig, String> {
+pub async fn update_category_icon(
+    category_id: String,
+    icon: String,
+) -> Result<LauncherConfig, String> {
     launcher_db::update_category_icon(&category_id, &icon).await?;
     let mut config = load_launcher_config().await;
     if let Some(cat) = config.categories.iter_mut().find(|c| c.id == category_id) {
@@ -360,7 +401,8 @@ pub async fn add_custom_command(
     let created_at = chrono::Local::now().timestamp();
 
     if launcher_db::check_prefix_exists(&prefix, None).await? {
-        return Err(AppErrorKind::LauncherCommandPrefixExists.to_frontend_json_with_details(prefix.to_string()));
+        return Err(AppErrorKind::LauncherCommandPrefixExists
+            .to_frontend_json_with_details(prefix.to_string()));
     }
 
     launcher_db::insert_custom_command(&launcher_db::CustomCommandRow {
@@ -372,7 +414,8 @@ pub async fn add_custom_command(
         command_type: command_type.to_json(),
         enabled: true,
         created_at,
-    }).await?;
+    })
+        .await?;
 
     let mut config = load_launcher_config().await;
     config.custom_commands.push(CustomCommand {
@@ -411,7 +454,8 @@ pub async fn update_custom_command(
 
     if let Some(ref p) = prefix {
         if launcher_db::check_prefix_exists(p, Some(&command_id)).await? {
-            return Err(AppErrorKind::LauncherCommandPrefixExists.to_frontend_json_with_details(p.to_string()));
+            return Err(AppErrorKind::LauncherCommandPrefixExists
+                .to_frontend_json_with_details(p.to_string()));
         }
     }
 
@@ -425,15 +469,32 @@ pub async fn update_custom_command(
         icon.as_deref(),
         ct_json.as_deref(),
         enabled,
-    ).await?;
+    )
+        .await?;
 
-    if let Some(cmd) = config.custom_commands.iter_mut().find(|c| c.id == command_id) {
-        if let Some(ref p) = prefix { cmd.prefix = p.clone(); }
-        if let Some(ref t) = title { cmd.title = t.clone(); }
-        if let Some(ref d) = description { cmd.description = Some(d.clone()); }
-        if let Some(ref i) = icon { cmd.icon = i.clone(); }
-        if let Some(ct) = command_type { cmd.command_type = ct; }
-        if let Some(e) = enabled { cmd.enabled = e; }
+    if let Some(cmd) = config
+        .custom_commands
+        .iter_mut()
+        .find(|c| c.id == command_id)
+    {
+        if let Some(ref p) = prefix {
+            cmd.prefix = p.clone();
+        }
+        if let Some(ref t) = title {
+            cmd.title = t.clone();
+        }
+        if let Some(ref d) = description {
+            cmd.description = Some(d.clone());
+        }
+        if let Some(ref i) = icon {
+            cmd.icon = i.clone();
+        }
+        if let Some(ct) = command_type {
+            cmd.command_type = ct;
+        }
+        if let Some(e) = enabled {
+            cmd.enabled = e;
+        }
     }
 
     Ok(config)
@@ -445,23 +506,34 @@ pub async fn toggle_custom_command(command_id: String) -> Result<LauncherConfig,
         return Err(AppErrorKind::LauncherCommandNotFound.to_frontend_json());
     }
     launcher_db::toggle_custom_command_enabled(&command_id).await?;
-    if let Some(cmd) = config.custom_commands.iter_mut().find(|c| c.id == command_id) {
+    if let Some(cmd) = config
+        .custom_commands
+        .iter_mut()
+        .find(|c| c.id == command_id)
+    {
         cmd.enabled = !cmd.enabled;
     }
     Ok(config)
 }
 
 async fn load_custom_commands_from_db() -> Vec<CustomCommand> {
-    let rows = launcher_db::load_custom_commands().await.unwrap_or_default();
-    rows.into_iter().map(|r| CustomCommand {
-        id: r.id,
-        prefix: r.prefix,
-        title: r.title,
-        description: r.description,
-        icon: r.icon,
-        command_type: CustomCommandType::from_json(&r.command_type)
-            .unwrap_or(CustomCommandType::ExecuteAction { action: "".to_string() }),
-        enabled: r.enabled,
-        created_at: r.created_at,
-    }).collect()
+    let rows = launcher_db::load_custom_commands()
+        .await
+        .unwrap_or_default();
+    rows.into_iter()
+        .map(|r| CustomCommand {
+            id: r.id,
+            prefix: r.prefix,
+            title: r.title,
+            description: r.description,
+            icon: r.icon,
+            command_type: CustomCommandType::from_json(&r.command_type).unwrap_or(
+                CustomCommandType::ExecuteAction {
+                    action: "".to_string(),
+                },
+            ),
+            enabled: r.enabled,
+            created_at: r.created_at,
+        })
+        .collect()
 }

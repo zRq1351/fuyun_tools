@@ -141,13 +141,17 @@ pub fn is_fast_fill_verify_mode_enabled() -> bool {
 /// 缓存与 DB I/O 分开持锁，避免全局预览锁被 SQLite 阻塞
 pub fn get_async_preview(item_id: &str) -> Option<(u32, u32, String)> {
     {
-        let generator = PREVIEW_GENERATOR.lock().unwrap_or_else(|never| match never {});
+        let generator = PREVIEW_GENERATOR
+            .lock()
+            .unwrap_or_else(|never| match never {});
         if let Some(preview) = generator.peek_cache(item_id) {
             return Some(preview);
         }
     }
     if let Ok(Some(preview)) = image_store::load_async_preview(item_id) {
-        let generator = PREVIEW_GENERATOR.lock().unwrap_or_else(|never| match never {});
+        let generator = PREVIEW_GENERATOR
+            .lock()
+            .unwrap_or_else(|never| match never {});
         generator.put_cache(item_id.to_string(), preview.clone());
         return Some(preview);
     }
@@ -187,7 +191,9 @@ static PREVIEW_GENERATOR: LazyLock<Arc<Mutex<PreviewGenerator>>> =
 
 /// 带 AppHandle 的预览生成器初始化
 pub fn init_preview_generator_with_app_handle(app_handle: tauri::AppHandle) {
-    let mut generator = PREVIEW_GENERATOR.lock().unwrap_or_else(|never| match never {});
+    let mut generator = PREVIEW_GENERATOR
+        .lock()
+        .unwrap_or_else(|never| match never {});
     *generator = PreviewGenerator::new(Some(app_handle));
 }
 
@@ -455,7 +461,7 @@ impl ImageClipboardManager {
 
             current_memory_usage: Arc::new(AtomicU64::new(0)),
             dynamic_memory_budget: Arc::new(AtomicU64::new(
-                calculate_initial_memory_budget() as u64,
+                calculate_initial_memory_budget() as u64
             )),
             last_memory_check: Arc::new(AtomicU64::new(0)),
         };
@@ -1050,7 +1056,9 @@ impl ImageClipboardManager {
                 width,
                 height,
             };
-            let generator = PREVIEW_GENERATOR.lock().unwrap_or_else(|never| match never {});
+            let generator = PREVIEW_GENERATOR
+                .lock()
+                .unwrap_or_else(|never| match never {});
             generator.submit_task(preview_task);
             log::debug!("已提交异步预览生成任务: {} ({}x{})", id, width, height);
         }
@@ -1160,7 +1168,9 @@ impl ImageClipboardManager {
         let manager = self.clone();
         tauri::async_runtime::spawn_blocking(move || manager.import_local_image_paths(paths))
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?
     }
 
     pub fn remove_from_history(&self, index: usize) -> Result<RemovedImageInfo, String> {
@@ -1185,7 +1195,13 @@ impl ImageClipboardManager {
                 pinned_items.retain(|id| id != &removed.id);
                 pinned_items.clone()
             };
-            (removed.id, removed.image_path, removed.signature, ids, pinned_snapshot)
+            (
+                removed.id,
+                removed.image_path,
+                removed.signature,
+                ids,
+                pinned_snapshot,
+            )
         };
 
         crate::services::image_clipboard_manager::clear_recent_samples();
@@ -1215,13 +1231,14 @@ impl ImageClipboardManager {
         if let Err(e) = image_store::sync_item_positions(&item_ids_after_remove) {
             log::error!("同步图片位置失败: {}", e);
         }
-        Ok(RemovedImageInfo { id: removed_id, image_path: removed_path, signature: removed_signature })
+        Ok(RemovedImageInfo {
+            id: removed_id,
+            image_path: removed_path,
+            signature: removed_signature,
+        })
     }
 
-    pub fn remove_from_history_by_id(
-        &self,
-        item_id: &str,
-    ) -> Result<RemovedImageInfo, String> {
+    pub fn remove_from_history_by_id(&self, item_id: &str) -> Result<RemovedImageInfo, String> {
         let index = {
             let history = lock_arc_mutex(&self.history);
             history
@@ -1515,9 +1532,10 @@ impl ImageClipboardManager {
     pub fn get_image_by_index(&self, index: usize) -> Result<Image<'static>, String> {
         let (bytes, width, height) = {
             let mut history = lock_arc_mutex(&self.history);
-            let item = history
-                .get_mut(index)
-                .ok_or_else(|| AppErrorKind::SystemIndexOutOfRange.to_frontend_json_with_details(format!("{}", index)))?;
+            let item = history.get_mut(index).ok_or_else(|| {
+                AppErrorKind::SystemIndexOutOfRange
+                    .to_frontend_json_with_details(format!("{}", index))
+            })?;
             if item.rgba_bytes.is_empty() {
                 item.rgba_bytes = self.read_item_rgba(item)?;
             }
@@ -1534,9 +1552,10 @@ impl ImageClipboardManager {
     pub fn get_image_by_index_for_fill(&self, index: usize) -> Result<Image<'static>, String> {
         let (bytes, width, height) = {
             let mut history = lock_arc_mutex(&self.history);
-            let item = history
-                .get_mut(index)
-                .ok_or_else(|| AppErrorKind::SystemIndexOutOfRange.to_frontend_json_with_details(format!("{}", index)))?;
+            let item = history.get_mut(index).ok_or_else(|| {
+                AppErrorKind::SystemIndexOutOfRange
+                    .to_frontend_json_with_details(format!("{}", index))
+            })?;
             if item.rgba_bytes.is_empty() {
                 item.rgba_bytes = self.read_item_rgba(item)?;
             }
@@ -1563,9 +1582,9 @@ impl ImageClipboardManager {
 
     pub fn warmup_image_by_index(&self, index: usize) -> Result<(), String> {
         let mut history = lock_arc_mutex(&self.history);
-        let item = history
-            .get_mut(index)
-            .ok_or_else(|| AppErrorKind::SystemIndexOutOfRange.to_frontend_json_with_details(format!("{}", index)))?;
+        let item = history.get_mut(index).ok_or_else(|| {
+            AppErrorKind::SystemIndexOutOfRange.to_frontend_json_with_details(format!("{}", index))
+        })?;
         if item.rgba_bytes.is_empty() {
             item.rgba_bytes = self.read_item_rgba(item)?;
         }
@@ -1587,9 +1606,9 @@ impl ImageClipboardManager {
 
     pub fn get_preview_window_payload_by_index(&self, index: usize) -> Result<String, String> {
         let mut history = lock_arc_mutex(&self.history);
-        let item = history
-            .get_mut(index)
-            .ok_or_else(|| AppErrorKind::SystemIndexOutOfRange.to_frontend_json_with_details(format!("{}", index)))?;
+        let item = history.get_mut(index).ok_or_else(|| {
+            AppErrorKind::SystemIndexOutOfRange.to_frontend_json_with_details(format!("{}", index))
+        })?;
         let payload = self.read_item_png_base64(item)?;
         self.enforce_full_res_cache_budget_lru(&mut history);
         Ok(payload)
@@ -1597,9 +1616,9 @@ impl ImageClipboardManager {
 
     pub fn get_preview_image_path_by_index(&self, index: usize) -> Result<String, String> {
         let history = lock_arc_mutex(&self.history);
-        let item = history
-            .get(index)
-            .ok_or_else(|| AppErrorKind::SystemIndexOutOfRange.to_frontend_json_with_details(format!("{}", index)))?;
+        let item = history.get(index).ok_or_else(|| {
+            AppErrorKind::SystemIndexOutOfRange.to_frontend_json_with_details(format!("{}", index))
+        })?;
         Ok(item.image_path.clone())
     }
 
@@ -1733,7 +1752,8 @@ impl ImageClipboardManager {
                     std::thread::sleep(Duration::from_millis(*delay_ms));
                 }
             }
-            Err(AppErrorKind::SystemWriteClipboardFailed.to_frontend_json_with_details(last_error.to_string()))
+            Err(AppErrorKind::SystemWriteClipboardFailed
+                .to_frontend_json_with_details(last_error.to_string()))
         })
     }
 
@@ -2344,8 +2364,9 @@ fn start_image_persist_worker(
     std::thread::spawn(move || {
         while let Ok(task) = persist_rx.recv() {
             let persist_result = if let Some(encoded_bytes) = task.encoded_bytes.as_ref() {
-                atomic_write_with_backup(Path::new(&task.image_path), encoded_bytes)
-                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))
+                atomic_write_with_backup(Path::new(&task.image_path), encoded_bytes).map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+                })
             } else {
                 persist_generated_image_to_path(
                     &task.image_path,
@@ -2376,7 +2397,8 @@ fn persist_generated_image_to_path(
     height: u32,
 ) -> Result<(), String> {
     let dir = get_image_blobs_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let ext = Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
@@ -2440,11 +2462,13 @@ fn read_image_blob(path: &str, width: u32, height: u32) -> Result<Vec<u8>, Strin
         return read_large_image_blob_chunked(path, width, height);
     }
 
-    let bytes = std::fs::read(path).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let bytes = std::fs::read(path)
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     if bytes.is_empty() {
         return Err(AppErrorKind::SystemImageDataEmpty.to_frontend_json());
     }
-    let decoded = image::load_from_memory(&bytes).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let decoded = image::load_from_memory(&bytes)
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let rgba = decoded.to_rgba8();
     if rgba.width() != width || rgba.height() != height {
         return Err(format!(
@@ -2462,16 +2486,17 @@ fn read_image_blob(path: &str, width: u32, height: u32) -> Result<Vec<u8>, Strin
 fn read_large_image_blob_chunked(path: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
     use std::io::Read;
 
-    let file = std::fs::File::open(path).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let file = std::fs::File::open(path)
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let mut reader = std::io::BufReader::new(file);
 
     let mut bytes = Vec::new();
     let mut chunk = vec![0u8; IMAGE_CHUNK_SIZE];
 
     loop {
-        let bytes_read = reader
-            .read(&mut chunk)
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        let bytes_read = reader.read(&mut chunk).map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
         if bytes_read == 0 {
             break;
         }
@@ -2490,7 +2515,8 @@ fn read_large_image_blob_chunked(path: &str, width: u32, height: u32) -> Result<
         return Err(AppErrorKind::SystemImageDataEmpty.to_frontend_json());
     }
 
-    let decoded = image::load_from_memory(&bytes).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let decoded = image::load_from_memory(&bytes)
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let rgba = decoded.to_rgba8();
 
     if rgba.width() != width || rgba.height() != height {
@@ -2514,7 +2540,8 @@ fn read_image_png_base64(path: &str) -> Result<String, String> {
             return Ok(cached_payload);
         }
     }
-    let bytes = std::fs::read(path).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let bytes = std::fs::read(path)
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     if bytes.is_empty() {
         return Err(AppErrorKind::SystemImageDataEmpty.to_frontend_json());
     }
@@ -2746,9 +2773,7 @@ type ImageSourceBytes = (Vec<u8>, String);
 type DecodedImagePayload = (Vec<u8>, u32, u32, Option<ImageSourceBytes>);
 type LocalImageImport = (Vec<u8>, u32, u32, Vec<u8>, String);
 
-fn parse_image_from_text_payload(
-    text: &str,
-) -> Option<DecodedImagePayload> {
+fn parse_image_from_text_payload(text: &str) -> Option<DecodedImagePayload> {
     if let Some(payload) = parse_data_url_image(text) {
         return Some(payload);
     }
@@ -2874,9 +2899,10 @@ fn looks_like_image_file_path(path: &str) -> bool {
 }
 
 fn read_local_image_for_import(path: &str) -> Result<LocalImageImport, String> {
-    let source_bytes = std::fs::read(path).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-    let dyn_img =
-        image::load_from_memory(&source_bytes).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let source_bytes = std::fs::read(path)
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let dyn_img = image::load_from_memory(&source_bytes)
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let rgba8 = dyn_img.to_rgba8();
     let (width, height) = rgba8.dimensions();
     let rgba = rgba8.into_raw();
@@ -3038,17 +3064,29 @@ fn read_images_from_windows_file_clipboard() -> Vec<ClipboardImagePayload> {
         if handle.is_null() {
             return Vec::new();
         }
-        let count = DragQueryFileW(windows::Win32::UI::Shell::HDROP(handle as *mut _), 0xFFFFFFFF, None);
+        let count = DragQueryFileW(
+            windows::Win32::UI::Shell::HDROP(handle as *mut _),
+            0xFFFFFFFF,
+            None,
+        );
         if count == 0 {
             return Vec::new();
         }
         let mut result: Vec<ClipboardImagePayload> = Vec::new();
         let mut index = 0;
         while index < count {
-            let len = DragQueryFileW(windows::Win32::UI::Shell::HDROP(handle as *mut _), index, None);
+            let len = DragQueryFileW(
+                windows::Win32::UI::Shell::HDROP(handle as *mut _),
+                index,
+                None,
+            );
             if len > 0 {
                 let mut buf = vec![0u16; (len + 1) as usize];
-                let written = DragQueryFileW(windows::Win32::UI::Shell::HDROP(handle as *mut _), index, Some(&mut buf));
+                let written = DragQueryFileW(
+                    windows::Win32::UI::Shell::HDROP(handle as *mut _),
+                    index,
+                    Some(&mut buf),
+                );
                 if written > 0 {
                     let path = String::from_utf16_lossy(&buf[..written as usize]);
                     if looks_like_image_file_path(&path) {

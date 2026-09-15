@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::core::error::ErrorCode;
+use serde::{Deserialize, Serialize};
 
 /// 机器可读的错误码标识
 /// 前端根据此错误码查找对应的 i18n 翻译
@@ -200,18 +200,32 @@ impl AppErrorKind {
             Self::SettingsHotkeyConflict => "快捷键被占用",
             Self::SettingsHotkeysIdentical => "快捷键不能相同",
             Self::SettingsRecordingFpsRange => "recording_default_fps必须在1-120之间",
-            Self::SettingsRecordingVideoBitrateRange => "recording_default_video_bitrate_kbps必须在500-50000之间",
-            Self::SettingsRecordingAudioBitrateRange => "recording_default_audio_bitrate_kbps必须在32-512之间",
-            Self::SettingsRecordingMaxDurationRange => "recording_max_duration_minutes必须在1-1440之间",
+            Self::SettingsRecordingVideoBitrateRange => {
+                "recording_default_video_bitrate_kbps必须在500-50000之间"
+            }
+            Self::SettingsRecordingAudioBitrateRange => {
+                "recording_default_audio_bitrate_kbps必须在32-512之间"
+            }
+            Self::SettingsRecordingMaxDurationRange => {
+                "recording_max_duration_minutes必须在1-1440之间"
+            }
             Self::SettingsRecordingFileNameEmpty => "recording_file_name_template不能为空",
             Self::SettingsRecordingFfmpegUrlEmpty => "recording_ffmpeg_download_url不能为空",
-            Self::SettingsRecordingFfmpegUrlNotHttps => "recording_ffmpeg_download_url必须以https://开头",
-            Self::SettingsRecordingAudioSyncRange => "recording_window_audio_sync_advance_ms必须在0-500之间",
+            Self::SettingsRecordingFfmpegUrlNotHttps => {
+                "recording_ffmpeg_download_url必须以https://开头"
+            }
+            Self::SettingsRecordingAudioSyncRange => {
+                "recording_window_audio_sync_advance_ms必须在0-500之间"
+            }
             Self::SettingsClipboardBottomOffsetRange => "clipboard_bottom_offset必须在0-400之间",
             Self::SettingsTranslationPromptEmpty => "翻译提示模板不能为空",
             Self::SettingsExplanationPromptEmpty => "解释提示模板不能为空",
-            Self::SettingsTranslationPromptMissingPlaceholder => "翻译提示模板必须包含{text}和{target_language}占位符",
-            Self::SettingsExplanationPromptMissingPlaceholder => "解释提示模板必须包含{text}和{target_language}占位符",
+            Self::SettingsTranslationPromptMissingPlaceholder => {
+                "翻译提示模板必须包含{text}和{target_language}占位符"
+            }
+            Self::SettingsExplanationPromptMissingPlaceholder => {
+                "解释提示模板必须包含{text}和{target_language}占位符"
+            }
             Self::SettingsProviderNameEmpty => "提供商名称不能为空",
             Self::SettingsSaveProviderFailed => "保存提供商配置失败",
             Self::SettingsSaveFailed => "保存设置失败",
@@ -299,7 +313,9 @@ impl AppErrorKind {
             Self::BackupDeleteOutsideDir => "禁止删除备份目录之外的文件",
 
             Self::DocumentDirHasFiles => "该目录下存在文件，请先将文件删除或移至其他目录后再删除",
-            Self::DocumentCategoryHasFiles => "该分类下存在文件，请先将文件移至其他分类或取消分类后再删除",
+            Self::DocumentCategoryHasFiles => {
+                "该分类下存在文件，请先将文件移至其他分类或取消分类后再删除"
+            }
             Self::DocumentPathNotDir => "路径不是一个目录",
             Self::DocumentCategoryNameEmpty => "分类名称不能为空",
             Self::DocumentCategoryNameInvalidChar => "分类名称包含无效字符",
@@ -354,7 +370,9 @@ impl AppErrorKind {
     pub fn category(&self) -> ErrorCode {
         use crate::core::error::ErrorCode;
         match self {
-            Self::Unknown | Self::InternalError | Self::TaskExecutionFailed => ErrorCode::SystemError,
+            Self::Unknown | Self::InternalError | Self::TaskExecutionFailed => {
+                ErrorCode::SystemError
+            }
             Self::SettingsMaxItemsRange
             | Self::SettingsTextMaxItemsRange
             | Self::SettingsImageMaxItemsRange
@@ -482,8 +500,9 @@ impl AppErrorKind {
             | Self::SelectionImageClipboardDisabled
             | Self::SelectionCtrlReleaseFailed
             | Self::SelectionWaitHideTimeout => ErrorCode::SystemError,
-            Self::VcRuntimeDownloadUrlEmpty
-            | Self::VcRuntimeDownloadUrlSha256Invalid => ErrorCode::ValidationError,
+            Self::VcRuntimeDownloadUrlEmpty | Self::VcRuntimeDownloadUrlSha256Invalid => {
+                ErrorCode::ValidationError
+            }
             Self::ImageStoreReadFailed
             | Self::ImageStoreWriteFailed
             | Self::ImageStoreInitFailed
@@ -518,8 +537,12 @@ impl AppErrorKind {
     }
 
     /// 转换为带详情的 AppError
-    pub fn to_app_error_with_details(&self, details: impl Into<String>) -> crate::core::error::AppError {
-        crate::core::error::AppError::new(self.category(), self.default_message()).with_details(details)
+    pub fn to_app_error_with_details(
+        &self,
+        details: impl Into<String>,
+    ) -> crate::core::error::AppError {
+        crate::core::error::AppError::new(self.category(), self.default_message())
+            .with_details(details)
     }
 
     /// 直接转换为前端 JSON 错误字符串
@@ -548,63 +571,155 @@ mod tests {
     fn all_error_kinds() -> Vec<AppErrorKind> {
         use AppErrorKind::*;
         vec![
-            Unknown, InternalError, TaskExecutionFailed,
-            SettingsMaxItemsRange, SettingsTextMaxItemsRange, SettingsImageMaxItemsRange,
-            SettingsImageDiskLimitRange, SettingsImageFillVerifyModeInvalid,
-            SettingsHotkeyFormatInvalid, SettingsHotkeyEmpty, SettingsHotkeyConflict,
-            SettingsHotkeysIdentical, SettingsRecordingFpsRange,
-            SettingsRecordingVideoBitrateRange, SettingsRecordingAudioBitrateRange,
-            SettingsRecordingMaxDurationRange, SettingsRecordingFileNameEmpty,
-            SettingsRecordingFfmpegUrlEmpty, SettingsRecordingFfmpegUrlNotHttps,
-            SettingsRecordingAudioSyncRange, SettingsClipboardBottomOffsetRange,
-            SettingsTranslationPromptEmpty, SettingsExplanationPromptEmpty,
+            Unknown,
+            InternalError,
+            TaskExecutionFailed,
+            SettingsMaxItemsRange,
+            SettingsTextMaxItemsRange,
+            SettingsImageMaxItemsRange,
+            SettingsImageDiskLimitRange,
+            SettingsImageFillVerifyModeInvalid,
+            SettingsHotkeyFormatInvalid,
+            SettingsHotkeyEmpty,
+            SettingsHotkeyConflict,
+            SettingsHotkeysIdentical,
+            SettingsRecordingFpsRange,
+            SettingsRecordingVideoBitrateRange,
+            SettingsRecordingAudioBitrateRange,
+            SettingsRecordingMaxDurationRange,
+            SettingsRecordingFileNameEmpty,
+            SettingsRecordingFfmpegUrlEmpty,
+            SettingsRecordingFfmpegUrlNotHttps,
+            SettingsRecordingAudioSyncRange,
+            SettingsClipboardBottomOffsetRange,
+            SettingsTranslationPromptEmpty,
+            SettingsExplanationPromptEmpty,
             SettingsTranslationPromptMissingPlaceholder,
-            SettingsExplanationPromptMissingPlaceholder, SettingsProviderNameEmpty,
-            SettingsSaveProviderFailed, SettingsSaveFailed, SettingsValidationFailed,
-            SettingsApiKeySaveFailed, SettingsApiKeyGetFailed,
-            SettingsCredentialCreateFailed, SettingsLocalKeyNotFound,
-            AiNotConfigured, AiProviderNotFound, AiApiUrlEmpty, AiModelNameEmpty,
-            AiApiUrlInvalid, AiApiKeyNotConfigured, AiKeychainReadFailed,
-            AiClientInitFailed, AiConnectionTestFailed, AiConnectionTestNoResponse, AiTextEmpty,
-            ClipboardHotkeyRegisterFailed, ClipboardCategoryAddFailed,
-            ClipboardCategoryRemoveFailed, ClipboardCategorySetFailed,
-            ClipboardDeleteTextFailed, ClipboardDeleteImageFailed, ClipboardItemNotFound,
-            ClipboardPinFailed, ClipboardPinImageFailed, ClipboardWarmupFailed,
-            ClipboardPreviewPathFailed, ClipboardPreviewShowFailed, ClipboardImagePathEmpty,
-            ClipboardImageFileNotFound, ClipboardImageFormatUnsupported, ClipboardSetTagsFailed,
-            ClipboardUpdateContentFailed, ClipboardSetPinFailed, ClipboardCleanTextFailed,
-            ClipboardCleanImageFailed, ClipboardNoFilesSelected, ClipboardNoImagesFound,
-            ClipboardNoImagesImported, ClipboardImportFailed, ClipboardCopyTextFailed,
+            SettingsExplanationPromptMissingPlaceholder,
+            SettingsProviderNameEmpty,
+            SettingsSaveProviderFailed,
+            SettingsSaveFailed,
+            SettingsValidationFailed,
+            SettingsApiKeySaveFailed,
+            SettingsApiKeyGetFailed,
+            SettingsCredentialCreateFailed,
+            SettingsLocalKeyNotFound,
+            AiNotConfigured,
+            AiProviderNotFound,
+            AiApiUrlEmpty,
+            AiModelNameEmpty,
+            AiApiUrlInvalid,
+            AiApiKeyNotConfigured,
+            AiKeychainReadFailed,
+            AiClientInitFailed,
+            AiConnectionTestFailed,
+            AiConnectionTestNoResponse,
+            AiTextEmpty,
+            ClipboardHotkeyRegisterFailed,
+            ClipboardCategoryAddFailed,
+            ClipboardCategoryRemoveFailed,
+            ClipboardCategorySetFailed,
+            ClipboardDeleteTextFailed,
+            ClipboardDeleteImageFailed,
+            ClipboardItemNotFound,
+            ClipboardPinFailed,
+            ClipboardPinImageFailed,
+            ClipboardWarmupFailed,
+            ClipboardPreviewPathFailed,
+            ClipboardPreviewShowFailed,
+            ClipboardImagePathEmpty,
+            ClipboardImageFileNotFound,
+            ClipboardImageFormatUnsupported,
+            ClipboardSetTagsFailed,
+            ClipboardUpdateContentFailed,
+            ClipboardSetPinFailed,
+            ClipboardCleanTextFailed,
+            ClipboardCleanImageFailed,
+            ClipboardNoFilesSelected,
+            ClipboardNoImagesFound,
+            ClipboardNoImagesImported,
+            ClipboardImportFailed,
+            ClipboardCopyTextFailed,
             ClipboardAutoPasteFailed,
-            ScreenshotSourceFileNotFound, ScreenshotTargetDirEmpty, ScreenshotSavePathEmpty,
-            ScreenshotUnsupportedOperation, ScreenshotFeatureDisabled, ScreenshotFailed,
-            ScreenshotWriteSourceFailed, ScreenshotCreateWindowFailed,
-            ScreenshotLongshotStatusFailed, LongshotAreaTooSmall, LongshotAlreadyRunning,
-            LongshotSessionNotFound, LongshotSessionIdMismatch, LongshotNoValidCapture,
-            LongshotNoSegments, LongshotResultEmpty, LongshotFrameTooSmall,
-            LongshotAreaTooLarge, LongshotDependencyMissing, LongshotFfmpegReadFailed,
-            LongshotCancelled, LongshotTimeout,
-            RecordingFeatureDisabled, RecordingFfmpegNotFound, RecordingStartFailed,
-            RecordingStopFailed, RecordingPauseFailed, RecordingResumeFailed,
-            RecordingWindowInvalid, RecordingWindowInvisible, RecordingWindowMinimized,
-            BackupDirNotConfigured, BackupDirNotSet, BackupInvalidFile, BackupDeleteOutsideDir,
-            DocumentDirHasFiles, DocumentCategoryHasFiles, DocumentPathNotDir,
-            DocumentCategoryNameEmpty, DocumentCategoryNameInvalidChar, DocumentFileNotFound,
-            DocumentMoveFailed, DocumentDeleteFailed, DocumentRenameFailed, DocumentScanFailed,
-            DocumentImportFailed, DocumentDetectionFailed, DocumentDirNotFound,
-            LauncherStartupFailed, LauncherCommandPrefixExists, LauncherCommandNotFound,
-            LauncherShortcutNotFound, LauncherShortcutResolveFailed, LauncherAppDirFailed,
+            ScreenshotSourceFileNotFound,
+            ScreenshotTargetDirEmpty,
+            ScreenshotSavePathEmpty,
+            ScreenshotUnsupportedOperation,
+            ScreenshotFeatureDisabled,
+            ScreenshotFailed,
+            ScreenshotWriteSourceFailed,
+            ScreenshotCreateWindowFailed,
+            ScreenshotLongshotStatusFailed,
+            LongshotAreaTooSmall,
+            LongshotAlreadyRunning,
+            LongshotSessionNotFound,
+            LongshotSessionIdMismatch,
+            LongshotNoValidCapture,
+            LongshotNoSegments,
+            LongshotResultEmpty,
+            LongshotFrameTooSmall,
+            LongshotAreaTooLarge,
+            LongshotDependencyMissing,
+            LongshotFfmpegReadFailed,
+            LongshotCancelled,
+            LongshotTimeout,
+            RecordingFeatureDisabled,
+            RecordingFfmpegNotFound,
+            RecordingStartFailed,
+            RecordingStopFailed,
+            RecordingPauseFailed,
+            RecordingResumeFailed,
+            RecordingWindowInvalid,
+            RecordingWindowInvisible,
+            RecordingWindowMinimized,
+            BackupDirNotConfigured,
+            BackupDirNotSet,
+            BackupInvalidFile,
+            BackupDeleteOutsideDir,
+            DocumentDirHasFiles,
+            DocumentCategoryHasFiles,
+            DocumentPathNotDir,
+            DocumentCategoryNameEmpty,
+            DocumentCategoryNameInvalidChar,
+            DocumentFileNotFound,
+            DocumentMoveFailed,
+            DocumentDeleteFailed,
+            DocumentRenameFailed,
+            DocumentScanFailed,
+            DocumentImportFailed,
+            DocumentDetectionFailed,
+            DocumentDirNotFound,
+            LauncherStartupFailed,
+            LauncherCommandPrefixExists,
+            LauncherCommandNotFound,
+            LauncherShortcutNotFound,
+            LauncherShortcutResolveFailed,
+            LauncherAppDirFailed,
             LauncherNotWindows,
-            SelectionFeatureDisabled, SelectionClipboardDisabled,
-            SelectionImageClipboardDisabled, SelectionCtrlReleaseFailed,
+            SelectionFeatureDisabled,
+            SelectionClipboardDisabled,
+            SelectionImageClipboardDisabled,
+            SelectionCtrlReleaseFailed,
             SelectionWaitHideTimeout,
-            VcRuntimeDownloadUrlEmpty, VcRuntimeDownloadUrlSha256Invalid,
-            ImageStoreReadFailed, ImageStoreWriteFailed, ImageStoreInitFailed,
-            ImageStorePoolFailed, ImageStoreBatchDeleteFailed, DatabaseTargetNotFound,
-            DatabaseError, IoError, JsonError,
-            SystemImageDataEmpty, SystemLocalImageEmpty, SystemIndexOutOfRange,
-            SystemUnsupportedCleanMode, SystemPreviewGenerating, SystemWebImageNoData,
-            SystemClipboardNotBitmap, SystemWriteClipboardFailed,
+            VcRuntimeDownloadUrlEmpty,
+            VcRuntimeDownloadUrlSha256Invalid,
+            ImageStoreReadFailed,
+            ImageStoreWriteFailed,
+            ImageStoreInitFailed,
+            ImageStorePoolFailed,
+            ImageStoreBatchDeleteFailed,
+            DatabaseTargetNotFound,
+            DatabaseError,
+            IoError,
+            JsonError,
+            SystemImageDataEmpty,
+            SystemLocalImageEmpty,
+            SystemIndexOutOfRange,
+            SystemUnsupportedCleanMode,
+            SystemPreviewGenerating,
+            SystemWebImageNoData,
+            SystemClipboardNotBitmap,
+            SystemWriteClipboardFailed,
         ]
     }
 
@@ -625,7 +740,8 @@ mod tests {
             let key = kind.to_key();
             assert!(!key.is_empty(), "错误码 {} 的 key 为空", kind.to_key());
             assert!(
-                key.chars().all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit()),
+                key.chars()
+                    .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit()),
                 "key 格式不是 SCREAMING_SNAKE_CASE: {}",
                 key
             );
@@ -679,14 +795,35 @@ mod tests {
 
     #[test]
     fn test_specific_category_spot_checks() {
-        assert_eq!(AppErrorKind::SettingsHotkeyConflict.category(), ErrorCode::ValidationError);
-        assert_eq!(AppErrorKind::AiNotConfigured.category(), ErrorCode::ConfigError);
-        assert_eq!(AppErrorKind::AiConnectionTestFailed.category(), ErrorCode::NetworkError);
-        assert_eq!(AppErrorKind::ClipboardItemNotFound.category(), ErrorCode::ClipboardError);
-        assert_eq!(AppErrorKind::ScreenshotFailed.category(), ErrorCode::SystemError);
+        assert_eq!(
+            AppErrorKind::SettingsHotkeyConflict.category(),
+            ErrorCode::ValidationError
+        );
+        assert_eq!(
+            AppErrorKind::AiNotConfigured.category(),
+            ErrorCode::ConfigError
+        );
+        assert_eq!(
+            AppErrorKind::AiConnectionTestFailed.category(),
+            ErrorCode::NetworkError
+        );
+        assert_eq!(
+            AppErrorKind::ClipboardItemNotFound.category(),
+            ErrorCode::ClipboardError
+        );
+        assert_eq!(
+            AppErrorKind::ScreenshotFailed.category(),
+            ErrorCode::SystemError
+        );
         assert_eq!(AppErrorKind::IoError.category(), ErrorCode::IoError);
-        assert_eq!(AppErrorKind::RecordingFeatureDisabled.category(), ErrorCode::SystemError);
-        assert_eq!(AppErrorKind::BackupDirNotConfigured.category(), ErrorCode::ConfigError);
+        assert_eq!(
+            AppErrorKind::RecordingFeatureDisabled.category(),
+            ErrorCode::SystemError
+        );
+        assert_eq!(
+            AppErrorKind::BackupDirNotConfigured.category(),
+            ErrorCode::ConfigError
+        );
     }
 
     #[test]
@@ -696,8 +833,7 @@ mod tests {
         assert_eq!(err.message, "复制文本失败");
         assert!(err.details.is_none());
 
-        let err2 = AppErrorKind::DatabaseError
-            .to_app_error_with_details("locked");
+        let err2 = AppErrorKind::DatabaseError.to_app_error_with_details("locked");
         assert_eq!(err2.details.as_deref(), Some("locked"));
     }
 }

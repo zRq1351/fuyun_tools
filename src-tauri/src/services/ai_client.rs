@@ -217,28 +217,26 @@ impl AIClient {
         let chunk_timeout = std::time::Duration::from_secs(30);
         loop {
             match tokio::time::timeout(chunk_timeout, stream.next()).await {
-                Ok(Some(result)) => {
-                    match result {
-                        Ok(response) => {
-                            for choice in response.choices {
-                                if let Some(content) = choice.delta.content {
-                                    if !content.is_empty() && !callback(content) {
-                                        return Ok(());
-                                    }
+                Ok(Some(result)) => match result {
+                    Ok(response) => {
+                        for choice in response.choices {
+                            if let Some(content) = choice.delta.content {
+                                if !content.is_empty() && !callback(content) {
+                                    return Ok(());
                                 }
-                                if let Some(finish_reason) = choice.finish_reason {
-                                    if format!("{:?}", finish_reason) == "Stop" {
-                                        return Ok(());
-                                    }
+                            }
+                            if let Some(finish_reason) = choice.finish_reason {
+                                if format!("{:?}", finish_reason) == "Stop" {
+                                    return Ok(());
                                 }
                             }
                         }
-                        Err(e) => {
-                            return Err(AppError::new(ErrorCode::NetworkError, "流式响应错误")
-                                .with_details(e.to_string()));
-                        }
                     }
-                }
+                    Err(e) => {
+                        return Err(AppError::new(ErrorCode::NetworkError, "流式响应错误")
+                            .with_details(e.to_string()));
+                    }
+                },
                 Ok(None) => {
                     return Ok(());
                 }

@@ -341,7 +341,9 @@ mod tests {
 
     #[test]
     fn test_rgba_to_png_bytes_valid() {
-        let rgba = vec![255u8, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255];
+        let rgba = vec![
+            255u8, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+        ];
         let png = rgba_to_png_bytes(&rgba, 2, 2).unwrap();
         // PNG 签名: 89 50 4E 47
         assert_eq!(&png[0..4], b"\x89PNG");

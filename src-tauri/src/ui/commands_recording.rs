@@ -12,9 +12,7 @@ use crate::features::recording::types::{
 };
 use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::window_manager::show_overlay_window_by_label;
-use crate::utils::utils_helpers::{
-    load_settings, verify_downloaded_exe_integrity,
-};
+use crate::utils::utils_helpers::{load_settings, verify_downloaded_exe_integrity};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// ffmpeg 下载进行中标志，防止并发下载互相破坏临时文件
@@ -306,10 +304,7 @@ pub async fn download_recording_ffmpeg(
     })
     .await
     .map_err(|e| format!("校验下载文件失败: {}", e))??;
-    if tokio::fs::rename(&tmp_path, &ffmpeg_path)
-        .await
-        .is_err()
-    {
+    if tokio::fs::rename(&tmp_path, &ffmpeg_path).await.is_err() {
         if ffmpeg_path.exists() {
             let _ = tokio::fs::remove_file(&ffmpeg_path).await;
         }
@@ -373,7 +368,11 @@ fn ensure_recording_toolbar_window(
         return Err(AppErrorKind::RecordingFeatureDisabled.to_frontend_json());
     }
     let (window, is_new) = crate::ui::window_manager::ensure_overlay_window(
-        app, "recording_toolbar", "recording_toolbar.html", "", Some((530.0, 64.0)),
+        app,
+        "recording_toolbar",
+        "recording_toolbar.html",
+        "",
+        Some((530.0, 64.0)),
     )?;
 
     if is_new {
@@ -446,7 +445,10 @@ pub async fn stop_recording(
                 // 此时录制要么已被在途流程接管收尾，要么已结束，
                 // 误跑 cancel 会把在途流程的 runtime 强制重置（duration=0/重复事件/误删文件）。
                 if matches!(stop_err.code, ErrorCode::ValidationError) {
-                    log::warn!("stop_recording 状态类失败，跳过兜底清理: {}", stop_err.message);
+                    log::warn!(
+                        "stop_recording 状态类失败，跳过兜底清理: {}",
+                        stop_err.message
+                    );
                     return Err(app_error_to_frontend_json(stop_err));
                 }
                 let fallback_req = SessionRequest {
@@ -596,7 +598,9 @@ pub async fn list_recording_audio_processes() -> Result<Vec<AudioProcessItem>, S
 /// 枚举可录制显示器（多屏时前端供用户选择全屏录制目标）
 #[tauri::command]
 pub async fn list_recording_monitors() -> Result<Vec<RecordingMonitorItem>, String> {
-    run_blocking_command(move || recorder_service::list_recording_monitors().map_err(app_error_to_frontend_json))
+    run_blocking_command(move || {
+        recorder_service::list_recording_monitors().map_err(app_error_to_frontend_json)
+    })
         .await
 }
 // input device listing & capability/installer commands removed in native WASAPI mode
@@ -684,7 +688,7 @@ pub async fn resize_recording_toolbar(
         };
         (530, h)
     };
-    
+
     // If keep_width is true, preserve the current window width
     let final_width = if request.keep_width {
         prev_size
@@ -694,7 +698,7 @@ pub async fn resize_recording_toolbar(
     } else {
         width_logical
     };
-    
+
     let target_size = tauri::LogicalSize::new(final_width as f64, height_logical as f64);
     let need_resize = prev_size
         .as_ref()
@@ -740,8 +744,10 @@ pub async fn resize_recording_toolbar(
             }
 
             if let Ok(hwnd) = window.hwnd() {
-                use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER};
-                
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+                };
+
                 let mut flags = SWP_NOZORDER | SWP_NOACTIVATE;
                 if new_x.is_none() {
                     flags |= SWP_NOMOVE;
@@ -749,18 +755,30 @@ pub async fn resize_recording_toolbar(
                 if !need_resize {
                     flags |= SWP_NOSIZE;
                 }
-                
+
                 let x = new_x.unwrap_or(0);
                 let y = new_y.unwrap_or(0);
-                
+
                 let hwnd_v062 = windows::Win32::Foundation::HWND(hwnd.0);
-                
+
                 unsafe {
-                    let _ = SetWindowPos(hwnd_v062, Some(HWND_TOP), x, y, physical_width, physical_height, flags);
+                    let _ = SetWindowPos(
+                        hwnd_v062,
+                        Some(HWND_TOP),
+                        x,
+                        y,
+                        physical_width,
+                        physical_height,
+                        flags,
+                    );
                 }
             } else {
                 // Fallback to Tauri methods
-                let base_logical = if is_capsule_layout || request.compact_mode { 226.0 } else { final_width as f64 };
+                let base_logical = if is_capsule_layout || request.compact_mode {
+                    226.0
+                } else {
+                    final_width as f64
+                };
                 if request.recenter && is_shrinking {
                     move_window_top_center(&window, Some(base_logical));
                 }
@@ -778,7 +796,11 @@ pub async fn resize_recording_toolbar(
     {
         // When shrinking, move the window first to align its left edge closer to the new center
         // This reduces the horizontal jump when the right edge is later shrunk by set_size
-        let base_logical = if is_capsule_layout || request.compact_mode { 226.0 } else { final_width as f64 };
+        let base_logical = if is_capsule_layout || request.compact_mode {
+            226.0
+        } else {
+            final_width as f64
+        };
         if request.recenter && is_shrinking {
             move_window_top_center(&window, Some(base_logical));
         }
@@ -841,7 +863,9 @@ pub async fn toggle_recording_from_shortcut(app: AppHandle) {
     if let Ok((window, _created)) = ensure_recording_toolbar_window(&app) {
         let is_visible = window.is_visible().unwrap_or(false);
         if is_visible {
-            if let Err(e) = crate::ui::window_manager::hide_overlay_window_by_label(&app, "recording_toolbar") {
+            if let Err(e) =
+                crate::ui::window_manager::hide_overlay_window_by_label(&app, "recording_toolbar")
+            {
                 log::warn!("隐藏录屏工具栏失败: {}", e);
             }
         } else {
@@ -985,7 +1009,10 @@ mod tests {
 
     #[test]
     fn test_validate_download_url_policy_rejects_http() {
-        let err = validate_download_url_policy("http://gitee.com/ffmpeg.exe", Some("a".repeat(64).as_str()))
+        let err = validate_download_url_policy(
+            "http://gitee.com/ffmpeg.exe",
+            Some("a".repeat(64).as_str()),
+        )
             .unwrap_err();
         assert!(err.contains("HTTPS"));
     }

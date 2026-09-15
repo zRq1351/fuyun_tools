@@ -1,15 +1,13 @@
+use crate::core::error_codes::AppErrorKind;
 use futures_util::StreamExt;
 use std::fs;
 use std::path::PathBuf;
-use crate::core::error_codes::AppErrorKind;
 #[cfg(debug_assertions)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
 
-use crate::utils::utils_helpers::{
-    normalize_sha256_hex, verify_downloaded_exe_integrity,
-};
+use crate::utils::utils_helpers::{normalize_sha256_hex, verify_downloaded_exe_integrity};
 
 #[cfg(debug_assertions)]
 static VC_RUNTIME_FORCE_MISSING: AtomicBool = AtomicBool::new(false);

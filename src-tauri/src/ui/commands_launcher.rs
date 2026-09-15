@@ -26,7 +26,10 @@ pub struct SearchResult {
 
 /// 搜索启动器项目（应用、文件、命令等）
 #[tauri::command]
-pub async fn search_launcher_items(query: String, limit: usize) -> Result<Vec<SearchResult>, String> {
+pub async fn search_launcher_items(
+    query: String,
+    limit: usize,
+) -> Result<Vec<SearchResult>, String> {
     let mut results = Vec::new();
 
     let apps = app_scanner::search_apps(&query, limit);
@@ -66,7 +69,9 @@ pub async fn scan_and_save_apps() -> Result<Vec<app_store::StoredApp>, String> {
 
 /// 批量提取应用图标
 #[tauri::command]
-pub async fn batch_extract_icons(paths: Vec<String>) -> Result<std::collections::HashMap<String, String>, String> {
+pub async fn batch_extract_icons(
+    paths: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
     let icons = tokio::task::spawn_blocking(move || app_scanner::batch_extract_icons(&paths))
         .await
         .map_err(|e| format!("图标提取任务失败: {}", e))?;
@@ -77,7 +82,11 @@ pub async fn batch_extract_icons(paths: Vec<String>) -> Result<std::collections:
 /// 启动应用程序（带存在性检测）
 #[tauri::command]
 pub async fn launch_app(_app_id: String, path: String) -> Result<(), String> {
-    log::info!("[launch_app command] 收到请求, app_id: {}, path: {}", _app_id, path);
+    log::info!(
+        "[launch_app command] 收到请求, app_id: {}, path: {}",
+        _app_id,
+        path
+    );
     if !std::path::Path::new(&path).exists() {
         log::error!("[launch_app command] APP_NOT_FOUND: {}", path);
         return Err("APP_NOT_FOUND".to_string());
@@ -87,7 +96,11 @@ pub async fn launch_app(_app_id: String, path: String) -> Result<(), String> {
 
 /// 启动应用程序并传递参数
 #[tauri::command]
-pub async fn launch_app_with_args(_app_id: String, path: String, args: Option<String>) -> Result<(), String> {
+pub async fn launch_app_with_args(
+    _app_id: String,
+    path: String,
+    args: Option<String>,
+) -> Result<(), String> {
     if !std::path::Path::new(&path).exists() {
         return Err("APP_NOT_FOUND".to_string());
     }
@@ -114,43 +127,61 @@ pub async fn get_launcher_config() -> Result<launcher_config::LauncherConfig, St
 
 /// 添加自定义分类
 #[tauri::command]
-pub async fn add_launcher_category(name: String, icon: String) -> Result<launcher_config::LauncherConfig, String> {
+pub async fn add_launcher_category(
+    name: String,
+    icon: String,
+) -> Result<launcher_config::LauncherConfig, String> {
     launcher_config::add_category(name, icon).await
 }
 
 /// 删除自定义分类
 #[tauri::command]
-pub async fn remove_launcher_category(category_id: String) -> Result<launcher_config::LauncherConfig, String> {
+pub async fn remove_launcher_category(
+    category_id: String,
+) -> Result<launcher_config::LauncherConfig, String> {
     launcher_config::remove_category(category_id).await
 }
 
 /// 重命名分类
 #[tauri::command]
-pub async fn rename_launcher_category(category_id: String, new_name: String) -> Result<launcher_config::LauncherConfig, String> {
+pub async fn rename_launcher_category(
+    category_id: String,
+    new_name: String,
+) -> Result<launcher_config::LauncherConfig, String> {
     launcher_config::rename_category(category_id, new_name).await
 }
 
 /// 设置应用分类
 #[tauri::command]
-pub async fn set_app_category(app_id: String, category_id: String) -> Result<launcher_config::LauncherConfig, String> {
+pub async fn set_app_category(
+    app_id: String,
+    category_id: String,
+) -> Result<launcher_config::LauncherConfig, String> {
     launcher_config::set_app_category(app_id, category_id).await
 }
 
 /// 设置视图模式
 #[tauri::command]
-pub async fn set_launcher_view_mode(mode: String) -> Result<launcher_config::LauncherConfig, String> {
+pub async fn set_launcher_view_mode(
+    mode: String,
+) -> Result<launcher_config::LauncherConfig, String> {
     launcher_config::set_view_mode(mode).await
 }
 
 /// 重新排序分类
 #[tauri::command]
-pub async fn reorder_categories(category_ids: Vec<String>) -> Result<launcher_config::LauncherConfig, String> {
+pub async fn reorder_categories(
+    category_ids: Vec<String>,
+) -> Result<launcher_config::LauncherConfig, String> {
     launcher_config::reorder_categories(category_ids).await
 }
 
 /// 更新分类图标
 #[tauri::command]
-pub async fn update_category_icon(category_id: String, icon: String) -> Result<launcher_config::LauncherConfig, String> {
+pub async fn update_category_icon(
+    category_id: String,
+    icon: String,
+) -> Result<launcher_config::LauncherConfig, String> {
     launcher_config::update_category_icon(category_id, icon).await
 }
 
@@ -168,7 +199,9 @@ pub async fn add_custom_command(
 
 /// 删除自定义命令
 #[tauri::command]
-pub async fn remove_custom_command(command_id: String) -> Result<launcher_config::LauncherConfig, String> {
+pub async fn remove_custom_command(
+    command_id: String,
+) -> Result<launcher_config::LauncherConfig, String> {
     launcher_config::remove_custom_command(command_id).await
 }
 
@@ -183,12 +216,23 @@ pub async fn update_custom_command(
     command_type: Option<launcher_config::CustomCommandType>,
     enabled: Option<bool>,
 ) -> Result<launcher_config::LauncherConfig, String> {
-    launcher_config::update_custom_command(command_id, prefix, title, description, icon, command_type, enabled).await
+    launcher_config::update_custom_command(
+        command_id,
+        prefix,
+        title,
+        description,
+        icon,
+        command_type,
+        enabled,
+    )
+        .await
 }
 
 /// 切换自定义命令启用状态
 #[tauri::command]
-pub async fn toggle_custom_command(command_id: String) -> Result<launcher_config::LauncherConfig, String> {
+pub async fn toggle_custom_command(
+    command_id: String,
+) -> Result<launcher_config::LauncherConfig, String> {
     launcher_config::toggle_custom_command(command_id).await
 }
 
@@ -196,25 +240,25 @@ pub async fn toggle_custom_command(command_id: String) -> Result<launcher_config
 #[tauri::command]
 pub async fn show_launcher(app: AppHandle) -> Result<(), String> {
     use tauri::LogicalPosition;
-    
+
     show_overlay_window_by_label(&app, "launcher", true)?;
-    
+
     if let Some(window) = app.get_webview_window("launcher") {
         if let Ok(Some(monitor)) = window.primary_monitor() {
             let screen_size = monitor.size();
             let scale_factor = monitor.scale_factor();
-            
+
             let screen_width = screen_size.width as f64 / scale_factor;
             let screen_height = screen_size.height as f64 / scale_factor;
-            
+
             let x = (screen_width - WINDOW_WIDTH) / 2.0;
             let y = screen_height * 0.25;
-            
+
             let position = LogicalPosition::new(x, y);
             window.set_position(position).map_err(|e| e.to_string())?;
         }
     }
-    
+
     app.emit("show-launcher", ()).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -234,7 +278,7 @@ pub async fn resize_launcher(app: AppHandle, height: f64) -> Result<(), String> 
         let current_pos = window.outer_position().ok();
         let size = LogicalSize::new(WINDOW_WIDTH, height);
         window.set_size(size).map_err(|e| e.to_string())?;
-        
+
         if let Some(pos) = current_pos {
             window.set_position(pos).map_err(|e| e.to_string())?;
         }
@@ -274,8 +318,7 @@ pub async fn open_app_directory(app: AppHandle, path: String) -> Result<(), Stri
     }
 
     let target_dir = if path.to_lowercase().ends_with(".lnk") {
-        let target = app_store::resolve_lnk_target(&path)
-            .unwrap_or_default();
+        let target = app_store::resolve_lnk_target(&path).unwrap_or_default();
         if target.is_empty() {
             return Err(AppErrorKind::LauncherShortcutResolveFailed.to_frontend_json());
         }
@@ -302,7 +345,10 @@ pub async fn open_app_directory(app: AppHandle, path: String) -> Result<(), Stri
 /// 手动添加应用
 #[tauri::command]
 pub async fn add_manual_app(title: String, path: String) -> Result<app_store::StoredApp, String> {
-    let id = format!("manual_{}", title.to_lowercase().replace([' ', '.', '\\', '/'], "_"));
+    let id = format!(
+        "manual_{}",
+        title.to_lowercase().replace([' ', '.', '\\', '/'], "_")
+    );
 
     app_store::add_manual_app(&id, &title, &path).await
 }

@@ -158,12 +158,20 @@ pub(crate) fn begin_fill_sequence(state: &Arc<Mutex<SharedAppState>>, kind: Fill
     }
 }
 
-pub(crate) fn is_fill_latest(state: &Arc<Mutex<SharedAppState>>, kind: FillKind, fill_seq: u64) -> bool {
+pub(crate) fn is_fill_latest(
+    state: &Arc<Mutex<SharedAppState>>,
+    kind: FillKind,
+    fill_seq: u64,
+) -> bool {
     let guard = lock_arc_mutex(state);
     kind.current_seq(&guard) == fill_seq
 }
 
-pub(crate) fn finish_fill_if_latest(state: &Arc<Mutex<SharedAppState>>, kind: FillKind, fill_seq: u64) {
+pub(crate) fn finish_fill_if_latest(
+    state: &Arc<Mutex<SharedAppState>>,
+    kind: FillKind,
+    fill_seq: u64,
+) {
     let mut guard = lock_arc_mutex(state);
     if kind.current_seq(&guard) == fill_seq {
         match kind {

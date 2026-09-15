@@ -7,8 +7,7 @@ use crate::services::image_clipboard_manager::emit_image_history_payload;
 use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands_screenshot::open_screenshot_editor;
 use crate::ui::commands_writeback::{
-    begin_fill_sequence, interrupt_image_fill_flow, interrupt_text_fill_flow,
-    spawn_fill_task,
+    begin_fill_sequence, interrupt_image_fill_flow, interrupt_text_fill_flow, spawn_fill_task,
     FillKind,
 };
 use crate::ui::window_manager::{
@@ -179,7 +178,8 @@ pub async fn open_image_preview_window_by_id(
     let state_arc = state.inner().clone();
     run_blocking("打开图片预览", move || {
         execute_open_image_preview_window_by_id(request.item_id, state_arc, app)
-    }).await
+    })
+        .await
 }
 
 pub(crate) fn is_screenshot_feature_enabled(state: &Arc<Mutex<SharedAppState>>) -> bool {
@@ -272,10 +272,15 @@ pub(crate) fn register_screenshot_shortcut(app: &AppHandle, hot_key: &str) -> Re
                 });
             }
         })
-        .map_err(|e| frontend_error_kind_params(AppErrorKind::ClipboardHotkeyRegisterFailed, serde_json::json!({"key": hot_key}), e.to_string()))?;
+        .map_err(|e| {
+            frontend_error_kind_params(
+                AppErrorKind::ClipboardHotkeyRegisterFailed,
+                serde_json::json!({"key": hot_key}),
+                e.to_string(),
+            )
+        })?;
     Ok(())
 }
-
 
 /// RAII guard：确保 panic 时也能重置 is_updating_clipboard 标志
 /// 保存进入时两个 writeback 标志的先前值并在 drop 时恢复，
@@ -304,7 +309,9 @@ pub(crate) fn set_updating_clipboard(state: &Arc<Mutex<SharedAppState>>, updatin
     }
 }
 
-pub(crate) fn get_clipboard_manager_arc(state: &Arc<Mutex<SharedAppState>>) -> Arc<Mutex<ClipboardManager>> {
+pub(crate) fn get_clipboard_manager_arc(
+    state: &Arc<Mutex<SharedAppState>>,
+) -> Arc<Mutex<ClipboardManager>> {
     let state_guard = lock_arc_mutex(state);
     state_guard.clipboard_manager.clone()
 }
@@ -317,31 +324,61 @@ pub(crate) fn get_image_clipboard_manager_arc(
 }
 
 trait CategoryOps: Clone + Send + 'static {
-    fn set_category_async(&self, item_id: String, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send;
-    fn remove_category_async(&self, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send;
-    fn add_category_async(&self, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send;
+    fn set_category_async(
+        &self,
+        item_id: String,
+        category: String,
+    ) -> impl std::future::Future<Output=Result<(), String>> + Send;
+    fn remove_category_async(
+        &self,
+        category: String,
+    ) -> impl std::future::Future<Output=Result<(), String>> + Send;
+    fn add_category_async(
+        &self,
+        category: String,
+    ) -> impl std::future::Future<Output=Result<(), String>> + Send;
 }
 
 impl CategoryOps for ClipboardManager {
-    fn set_category_async(&self, item_id: String, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send {
+    fn set_category_async(
+        &self,
+        item_id: String,
+        category: String,
+    ) -> impl std::future::Future<Output=Result<(), String>> + Send {
         ClipboardManager::set_category_async(self, item_id, category)
     }
-    fn remove_category_async(&self, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send {
+    fn remove_category_async(
+        &self,
+        category: String,
+    ) -> impl std::future::Future<Output=Result<(), String>> + Send {
         ClipboardManager::remove_category_async(self, category)
     }
-    fn add_category_async(&self, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send {
+    fn add_category_async(
+        &self,
+        category: String,
+    ) -> impl std::future::Future<Output=Result<(), String>> + Send {
         ClipboardManager::add_category_async(self, category)
     }
 }
 
 impl CategoryOps for ImageClipboardManager {
-    fn set_category_async(&self, item_id: String, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send {
+    fn set_category_async(
+        &self,
+        item_id: String,
+        category: String,
+    ) -> impl std::future::Future<Output=Result<(), String>> + Send {
         ImageClipboardManager::set_category_async(self, item_id, category)
     }
-    fn remove_category_async(&self, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send {
+    fn remove_category_async(
+        &self,
+        category: String,
+    ) -> impl std::future::Future<Output=Result<(), String>> + Send {
         ImageClipboardManager::remove_category_async(self, category)
     }
-    fn add_category_async(&self, category: String) -> impl std::future::Future<Output = Result<(), String>> + Send {
+    fn add_category_async(
+        &self,
+        category: String,
+    ) -> impl std::future::Future<Output=Result<(), String>> + Send {
         ImageClipboardManager::add_category_async(self, category)
     }
 }
@@ -356,9 +393,10 @@ async fn category_set<M: CategoryOps>(
         let guard = lock_arc_mutex(&manager_arc);
         guard.clone()
     };
-    manager.set_category_async(item_id, category).await.map_err(|e| {
-        frontend_error_kind(AppErrorKind::ClipboardCategorySetFailed, e)
-    })
+    manager
+        .set_category_async(item_id, category)
+        .await
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardCategorySetFailed, e))
 }
 
 async fn category_remove<M: CategoryOps>(
@@ -370,9 +408,10 @@ async fn category_remove<M: CategoryOps>(
         let guard = lock_arc_mutex(&manager_arc);
         guard.clone()
     };
-    manager.remove_category_async(category).await.map_err(|e| {
-        frontend_error_kind(AppErrorKind::ClipboardCategoryRemoveFailed, e)
-    })
+    manager
+        .remove_category_async(category)
+        .await
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardCategoryRemoveFailed, e))
 }
 
 async fn category_add<M: CategoryOps>(
@@ -384,9 +423,10 @@ async fn category_add<M: CategoryOps>(
         let guard = lock_arc_mutex(&manager_arc);
         guard.clone()
     };
-    manager.add_category_async(category).await.map_err(|e| {
-        frontend_error_kind(AppErrorKind::ClipboardCategoryAddFailed, e)
-    })
+    manager
+        .add_category_async(category)
+        .await
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardCategoryAddFailed, e))
 }
 
 pub(crate) fn frontend_error(
@@ -424,7 +464,10 @@ where
 {
     match tauri::async_runtime::spawn_blocking(task).await {
         Ok(result) => result,
-        Err(join_err) => Err(frontend_error_kind(AppErrorKind::TaskExecutionFailed, join_err.to_string())),
+        Err(join_err) => Err(frontend_error_kind(
+            AppErrorKind::TaskExecutionFailed,
+            join_err.to_string(),
+        )),
     }
 }
 
@@ -438,7 +481,10 @@ where
     // 记录进入前的 writeback 标志，drop 时恢复（不清除并发在途的填充标志）
     let prev = {
         let guard = lock_arc_mutex(state);
-        (guard.is_text_writeback_active, guard.is_image_writeback_active)
+        (
+            guard.is_text_writeback_active,
+            guard.is_image_writeback_active,
+        )
     };
     set_updating_clipboard(state, true);
     let _guard = UpdatingClipboardGuard(state.clone(), prev.0, prev.1);
@@ -514,9 +560,9 @@ pub(crate) fn execute_select_and_fill_text(
 
     let item_content = {
         let manager = lock_arc_mutex(&manager_arc);
-        manager.get_item_content(&item_id).map_err(|e| {
-            frontend_error_kind(AppErrorKind::ClipboardItemNotFound, e)
-        })?
+        manager
+            .get_item_content(&item_id)
+            .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardItemNotFound, e))?
     };
 
     hide_clipboard_window(app.clone(), state.clone());
@@ -580,7 +626,8 @@ pub(crate) fn execute_open_image_preview_window_by_id(
     let manager_arc = get_image_clipboard_manager_arc(&state);
     let image_path = {
         let manager = lock_arc_mutex(&manager_arc);
-        manager.get_preview_image_path_by_id(&item_id)
+        manager
+            .get_preview_image_path_by_id(&item_id)
             .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardPreviewPathFailed, e))?
     };
     let preview_path = ensure_preview_image_path_for_asset(&item_id, &image_path)
@@ -589,7 +636,10 @@ pub(crate) fn execute_open_image_preview_window_by_id(
         .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardPreviewShowFailed, e))
 }
 
-pub(crate) fn ensure_preview_image_path_for_asset(item_id: &str, image_path: &str) -> Result<String, String> {
+pub(crate) fn ensure_preview_image_path_for_asset(
+    item_id: &str,
+    image_path: &str,
+) -> Result<String, String> {
     let started_at = std::time::Instant::now();
     let trimmed = image_path.trim();
     if trimmed.is_empty() {
@@ -605,7 +655,11 @@ pub(crate) fn ensure_preview_image_path_for_asset(item_id: &str, image_path: &st
     }
     let source_path = PathBuf::from(trimmed);
     if !source_path.exists() {
-        let error = frontend_error_kind_params(AppErrorKind::ClipboardImageFileNotFound, serde_json::json!({"path": trimmed}), trimmed);
+        let error = frontend_error_kind_params(
+            AppErrorKind::ClipboardImageFileNotFound,
+            serde_json::json!({"path": trimmed}),
+            trimmed,
+        );
         record_perf_metric(
             "image.preview_asset_path",
             "图片预览路径准备耗时",
@@ -644,7 +698,11 @@ pub(crate) fn ensure_preview_image_path_for_asset(item_id: &str, image_path: &st
         .unwrap_or_default();
     let allowed_ext = ["png", "jpg", "jpeg", "webp", "bmp", "gif"];
     if !allowed_ext.contains(&ext.as_str()) {
-        let error = frontend_error_kind_params(AppErrorKind::ClipboardImageFormatUnsupported, serde_json::json!({"ext": ext}), ext);
+        let error = frontend_error_kind_params(
+            AppErrorKind::ClipboardImageFormatUnsupported,
+            serde_json::json!({"ext": ext}),
+            ext,
+        );
         record_perf_metric(
             "image.preview_asset_path",
             "图片预览路径准备耗时",
@@ -996,7 +1054,13 @@ pub async fn set_item_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    category_set(get_clipboard_manager_arc(state.inner()), item_id, category, "文本").await
+    category_set(
+        get_clipboard_manager_arc(state.inner()),
+        item_id,
+        category,
+        "文本",
+    )
+        .await
 }
 
 #[tauri::command]
@@ -1057,7 +1121,8 @@ pub async fn warmup_image_clipboard_item_by_id(
     let state_arc = state.inner().clone();
     run_blocking("预热图片", move || {
         execute_warmup_image_clipboard_item_by_id(request.item_id, state_arc)
-    }).await
+    })
+        .await
 }
 
 const WARMUP_BATCH_MAX: usize = 20;
@@ -1102,7 +1167,13 @@ pub async fn set_image_item_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    category_set(get_image_clipboard_manager_arc(state.inner()), item_id, category, "图片").await
+    category_set(
+        get_image_clipboard_manager_arc(state.inner()),
+        item_id,
+        category,
+        "图片",
+    )
+        .await
 }
 
 #[tauri::command]
@@ -1110,7 +1181,12 @@ pub async fn remove_image_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    category_remove(get_image_clipboard_manager_arc(state.inner()), category, "图片").await
+    category_remove(
+        get_image_clipboard_manager_arc(state.inner()),
+        category,
+        "图片",
+    )
+        .await
 }
 
 #[tauri::command]
@@ -1124,9 +1200,10 @@ pub async fn set_image_item_tags(
         let guard = lock_arc_mutex(&manager_arc);
         guard.clone()
     };
-    manager.set_tags_async(item_id, tags).await.map_err(|e| {
-        frontend_error_kind(AppErrorKind::ClipboardSetTagsFailed, e)
-    })
+    manager
+        .set_tags_async(item_id, tags)
+        .await
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardSetTagsFailed, e))
 }
 
 #[tauri::command]
@@ -1145,17 +1222,18 @@ pub async fn update_text_item(
     let result = manager
         .update_item_content(&item_id, new_content.clone())
         .await
-        .map_err(|e| {
-            frontend_error_kind(AppErrorKind::ClipboardUpdateContentFailed, e)
-        });
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardUpdateContentFailed, e));
 
     if result.is_ok() {
         let new_item_id = crate::utils::database::stable_history_item_id(&new_content);
-        if let Err(e) = app.emit("text-item-replaced", serde_json::json!({
-            "old_id": item_id,
-            "new_id": new_item_id,
-            "new_content": new_content
-        })) {
+        if let Err(e) = app.emit(
+            "text-item-replaced",
+            serde_json::json!({
+                "old_id": item_id,
+                "new_id": new_item_id,
+                "new_content": new_content
+            }),
+        ) {
             log::warn!("发送文字项替换事件失败: {}", e);
         }
     }
@@ -1200,9 +1278,7 @@ pub async fn set_image_item_pinned(
     manager
         .set_pinned_async(item_id, pinned)
         .await
-        .map_err(|e| {
-            frontend_error_kind(AppErrorKind::ClipboardSetPinFailed, e)
-        })
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardSetPinFailed, e))
 }
 
 #[tauri::command]
@@ -1219,9 +1295,7 @@ pub async fn promote_clipboard_item(
         .promote_to_top_async(&item_id)
         .await
         .map(|item| crate::utils::database::stable_history_item_id(&item))
-        .map_err(|e| {
-            frontend_error_kind(AppErrorKind::ClipboardPinFailed, e)
-        })
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardPinFailed, e))
 }
 
 #[tauri::command]
@@ -1232,7 +1306,8 @@ pub async fn promote_image_clipboard_item_by_id(
     let state_arc = state.inner().clone();
     run_blocking("置顶图片", move || {
         execute_promote_image_clipboard_item_by_id(request.item_id, state_arc)
-    }).await
+    })
+        .await
 }
 
 #[tauri::command]
@@ -1248,9 +1323,7 @@ pub async fn clear_text_history(
     manager
         .clear_history_by_mode_async(mode.as_str())
         .await
-        .map_err(|e| {
-            frontend_error_kind(AppErrorKind::ClipboardCleanTextFailed, e)
-        })
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardCleanTextFailed, e))
 }
 
 #[tauri::command]
@@ -1267,9 +1340,7 @@ pub async fn clear_image_history(
     let removed = manager
         .clear_history_by_mode_async(mode.as_str())
         .await
-        .map_err(|e| {
-            frontend_error_kind(AppErrorKind::ClipboardCleanImageFailed, e)
-        })?;
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardCleanImageFailed, e))?;
 
     let is_visible = {
         let mut state_guard = lock_arc_mutex(state.inner());
@@ -1443,7 +1514,11 @@ pub(crate) fn collect_images_from_dir(dir: &Path, out: &mut Vec<String>) -> Resu
 
 const MAX_IMPORT_DIR_DEPTH: u32 = 10;
 
-fn collect_images_from_dir_inner(dir: &Path, out: &mut Vec<String>, depth: u32) -> Result<(), String> {
+fn collect_images_from_dir_inner(
+    dir: &Path,
+    out: &mut Vec<String>,
+    depth: u32,
+) -> Result<(), String> {
     if depth >= MAX_IMPORT_DIR_DEPTH {
         return Ok(());
     }
@@ -1452,8 +1527,8 @@ fn collect_images_from_dir_inner(dir: &Path, out: &mut Vec<String>, depth: u32) 
         let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
         let path = entry.path();
         // 使用symlink_metadata避免跟随符号链接，防止无限递归
-        let metadata = fs::symlink_metadata(&path)
-            .map_err(|e| format!("读取文件元数据失败: {}", e))?;
+        let metadata =
+            fs::symlink_metadata(&path).map_err(|e| format!("读取文件元数据失败: {}", e))?;
         if metadata.file_type().is_symlink() {
             continue;
         }
@@ -1489,7 +1564,12 @@ pub async fn add_image_category(
     category: String,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
-    category_add(get_image_clipboard_manager_arc(state.inner()), category, "图片").await
+    category_add(
+        get_image_clipboard_manager_arc(state.inner()),
+        category,
+        "图片",
+    )
+        .await
 }
 
 #[tauri::command]
@@ -1549,7 +1629,8 @@ pub async fn select_and_fill(
     let state_arc = state.inner().clone();
     run_blocking("文本回填", move || {
         execute_select_and_fill_text(request, state_arc, app)
-    }).await
+    })
+        .await
 }
 
 #[tauri::command]
@@ -1561,7 +1642,8 @@ pub async fn remove_clipboard_item(
     let state_arc = state.inner().clone();
     run_blocking("删除文本历史", move || {
         execute_remove_clipboard_item(item_id, state_arc, app)
-    }).await
+    })
+        .await
 }
 
 #[tauri::command]
@@ -1573,7 +1655,8 @@ pub async fn remove_image_clipboard_item_by_id(
     let state_arc = state.inner().clone();
     run_blocking("删除图片历史", move || {
         execute_remove_image_clipboard_item_by_id(item_id, state_arc, app)
-    }).await
+    })
+        .await
 }
 
 #[tauri::command]
@@ -1585,7 +1668,8 @@ pub async fn select_and_fill_image_by_id(
     let state_arc = state.inner().clone();
     run_blocking("图片回填", move || {
         execute_select_and_fill_image_by_id(request, state_arc, app)
-    }).await
+    })
+        .await
 }
 
 #[tauri::command]

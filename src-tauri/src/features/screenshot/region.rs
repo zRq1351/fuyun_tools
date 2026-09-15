@@ -240,7 +240,8 @@ mod tests {
 
     #[test]
     fn test_screenshot_result_with_saved_path() {
-        let res = ScreenshotResult::success(100, 100, None).with_saved_path("C:/shot.png".to_string());
+        let res =
+            ScreenshotResult::success(100, 100, None).with_saved_path("C:/shot.png".to_string());
         assert_eq!(res.saved_path.as_deref(), Some("C:/shot.png"));
     }
 }

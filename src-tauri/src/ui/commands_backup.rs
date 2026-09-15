@@ -44,7 +44,8 @@ pub(crate) fn detect_video_hw_accel_encoder(ffmpeg_path: &std::path::Path) -> Op
     }
 
     // 启动子进程并设置超时（10秒）
-    let mut child = cmd.stdout(std::process::Stdio::piped())
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
         .ok()?;
@@ -225,8 +226,9 @@ pub(crate) fn backup_frequency_interval_ms(frequency: &str) -> Option<i64> {
     }
 }
 
-
-pub(crate) fn list_backup_history_items(target_dir: &Path) -> Result<Vec<BackupHistoryItem>, String> {
+pub(crate) fn list_backup_history_items(
+    target_dir: &Path,
+) -> Result<Vec<BackupHistoryItem>, String> {
     if !target_dir.exists() {
         return Ok(Vec::new());
     }
@@ -288,15 +290,17 @@ async fn export_backup_internal(
     state: &Arc<Mutex<SharedAppState>>,
 ) -> Result<BackupExportResultData, String> {
     let prepare_started_at = std::time::Instant::now();
-    let prepared = build_prepared_backup_data(state).await.inspect_err(|error| {
-        record_perf_metric(
-            "backup.export_stage.prepare_data",
-            "备份导出准备数据耗时",
-            prepare_started_at.elapsed().as_millis() as u64,
-            false,
-            Some(error.clone()),
-        );
-    })?;
+    let prepared = build_prepared_backup_data(state)
+        .await
+        .inspect_err(|error| {
+            record_perf_metric(
+                "backup.export_stage.prepare_data",
+                "备份导出准备数据耗时",
+                prepare_started_at.elapsed().as_millis() as u64,
+                false,
+                Some(error.clone()),
+            );
+        })?;
     record_perf_metric(
         "backup.export_stage.prepare_data",
         "备份导出准备数据耗时",
@@ -576,7 +580,10 @@ pub async fn delete_backup_history_item(
 ) -> Result<(), String> {
     let settings = current_backup_settings()?;
     if settings.target_dir.trim().is_empty() {
-        return Err(frontend_error_kind(AppErrorKind::BackupDirNotConfigured, "backup target dir is empty"));
+        return Err(frontend_error_kind(
+            AppErrorKind::BackupDirNotConfigured,
+            "backup target dir is empty",
+        ));
     }
     let path = PathBuf::from(request.file_path);
     if !path
@@ -585,7 +592,10 @@ pub async fn delete_backup_history_item(
         .map(|name| name.ends_with(".fytbk.zip"))
         .unwrap_or(false)
     {
-        return Err(frontend_error_kind(AppErrorKind::BackupInvalidFile, "invalid file extension"));
+        return Err(frontend_error_kind(
+            AppErrorKind::BackupInvalidFile,
+            "invalid file extension",
+        ));
     }
     let target_dir = PathBuf::from(settings.target_dir);
     let canonical_target_dir = target_dir
@@ -598,7 +608,10 @@ pub async fn delete_backup_history_item(
         .canonicalize()
         .map_err(|e| format!("读取备份文件路径失败: {}", e))?;
     if !canonical_path.starts_with(&canonical_target_dir) {
-        return Err(frontend_error_kind(AppErrorKind::BackupDeleteOutsideDir, "path outside backup dir"));
+        return Err(frontend_error_kind(
+            AppErrorKind::BackupDeleteOutsideDir,
+            "path outside backup dir",
+        ));
     }
     fs::remove_file(&canonical_path).map_err(|e| format!("删除备份文件失败: {}", e))?;
     Ok(())
@@ -615,7 +628,10 @@ pub async fn run_manual_backup(
         .await;
     let settings = current_backup_settings()?;
     if settings.target_dir.trim().is_empty() {
-        return Err(frontend_error_kind(AppErrorKind::BackupDirNotSet, "backup target dir not configured"));
+        return Err(frontend_error_kind(
+            AppErrorKind::BackupDirNotSet,
+            "backup target dir not configured",
+        ));
     }
     let target_path = Path::new(&settings.target_dir).join(default_backup_file_name());
     let response = match export_backup_internal(&target_path, state.inner()).await {
@@ -672,7 +688,10 @@ pub async fn run_auto_backup_tick(state: Arc<Mutex<SharedAppState>>) -> Result<b
         raw_settings.backup_last_run_at = now_unix_ms() as i64;
         raw_settings.backup_last_run_status = "misconfigured".to_string();
         save_settings(&raw_settings)?;
-        return Err(frontend_error_kind(AppErrorKind::BackupDirNotConfigured, "auto backup target dir not configured"));
+        return Err(frontend_error_kind(
+            AppErrorKind::BackupDirNotConfigured,
+            "auto backup target dir not configured",
+        ));
     }
 
     let now_ms = now_unix_ms() as i64;
@@ -728,17 +747,19 @@ pub async fn run_auto_backup_tick(state: Arc<Mutex<SharedAppState>>) -> Result<b
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::fs;
     use std::path::PathBuf;
-    use super::*;
 
     /// 创建临时测试目录
     fn create_test_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("fuyun_test_backup_{}",
-                                                    std::time::SystemTime::now()
-                                                        .duration_since(std::time::UNIX_EPOCH)
-                                                        .unwrap()
-                                                        .as_nanos()));
+        let dir = std::env::temp_dir().join(format!(
+            "fuyun_test_backup_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -767,7 +788,10 @@ mod tests {
         fs::write(&backup_file, "test").unwrap();
 
         // 构造一个包含 .. 的路径
-        let malicious_path = test_dir.join("..").join(test_dir.file_name().unwrap()).join("backup_2024.fytbk.zip");
+        let malicious_path = test_dir
+            .join("..")
+            .join(test_dir.file_name().unwrap())
+            .join("backup_2024.fytbk.zip");
 
         // 模拟路径检查逻辑
         let canonical_target_dir = test_dir.canonicalize().unwrap();

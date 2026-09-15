@@ -5,14 +5,18 @@ use crate::core::perf_metrics::{record_perf_metric, timed_sync};
 use crate::features;
 use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands::{
-    bind_screenshot_window_lifecycle,
-    cleanup_all_screenshot_boot_images,
-    now_unix_ms, replace_screenshot_boot_image_path, write_screenshot_boot_image,
-    ManualLongshotSessionRequest, NEXT_PINNED_IMAGE_WINDOW_ID,
-    NEXT_SCREENSHOT_SESSION_ID, SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW,
+    bind_screenshot_window_lifecycle, cleanup_all_screenshot_boot_images, now_unix_ms,
+    replace_screenshot_boot_image_path, write_screenshot_boot_image, ManualLongshotSessionRequest,
+    NEXT_PINNED_IMAGE_WINDOW_ID, NEXT_SCREENSHOT_SESSION_ID,
+    SCREENSHOT_LIFECYCLE_BOUND_FOR_BOOT_WINDOW,
 };
-use crate::ui::commands_clipboard::{frontend_error, frontend_error_kind, frontend_error_kind_params, get_image_clipboard_manager_arc, is_screenshot_feature_enabled};
-use crate::ui::commands_screenshot_render::{export_screenshot_image, render_screenshot_image, ScreenshotExportRequest};
+use crate::ui::commands_clipboard::{
+    frontend_error, frontend_error_kind, frontend_error_kind_params,
+    get_image_clipboard_manager_arc, is_screenshot_feature_enabled,
+};
+use crate::ui::commands_screenshot_render::{
+    export_screenshot_image, render_screenshot_image, ScreenshotExportRequest,
+};
 use crate::ui::window_manager::{
     bind_overlay_window_events, ensure_window_for_label, focus_overlay_window_by_label,
     hide_overlay_window_by_label, show_overlay_window_by_label,
@@ -88,7 +92,9 @@ pub async fn resize_selection_toolbar(
     if let Some(window) = app.get_webview_window("selection_toolbar") {
         #[cfg(target_os = "windows")]
         {
-            use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
+            use windows::Win32::UI::WindowsAndMessaging::{
+                SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER,
+            };
             if let Ok(hwnd) = window.hwnd() {
                 unsafe {
                     let _ = SetWindowPos(
@@ -127,7 +133,10 @@ pub async fn copy_image_clipboard_item_to_directory(
 
         let source = PathBuf::from(&source_path);
         if !source.exists() {
-            return Err(frontend_error_kind(AppErrorKind::ScreenshotSourceFileNotFound, source_path));
+            return Err(frontend_error_kind(
+                AppErrorKind::ScreenshotSourceFileNotFound,
+                source_path,
+            ));
         }
         let file_name = source
             .file_name()
@@ -138,11 +147,17 @@ pub async fn copy_image_clipboard_item_to_directory(
 
         let target_dir = PathBuf::from(target_directory.trim());
         if target_dir.as_os_str().is_empty() {
-            return Err(frontend_error_kind(AppErrorKind::ScreenshotTargetDirEmpty, ""));
+            return Err(frontend_error_kind(
+                AppErrorKind::ScreenshotTargetDirEmpty,
+                "",
+            ));
         }
 
         // 防御性路径校验：拒绝包含 ".." 的路径（路径穿越攻击防护）
-        if target_dir.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        if target_dir
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             return Err("不允许的路径：包含路径遍历".to_string());
         }
 
@@ -159,7 +174,10 @@ pub async fn copy_image_clipboard_item_to_directory(
 
         let mut target_path = target_dir.join(&file_name);
         // 防御性路径校验：拼接后的最终路径也不允许包含 ".."（防止文件名注入路径穿越）
-        if target_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        if target_path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             return Err("不允许的路径：包含路径遍历".to_string());
         }
         if target_path.exists() {
@@ -208,8 +226,14 @@ pub async fn start_screenshot(
     match capture::capture_full_screen() {
         Ok((rgba, width, height, origin_x, origin_y)) => {
             let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
-            let (image_path, png_data) = write_screenshot_boot_image(&rgba, width, height, session_id)
-                .map_err(|e| frontend_error_kind_params(AppErrorKind::ScreenshotWriteSourceFailed, serde_json::json!({"error": e}), e))?;
+            let (image_path, png_data) =
+                write_screenshot_boot_image(&rgba, width, height, session_id).map_err(|e| {
+                    frontend_error_kind_params(
+                        AppErrorKind::ScreenshotWriteSourceFailed,
+                        serde_json::json!({"error": e}),
+                        e,
+                    )
+                })?;
             use base64::Engine;
             let png_base64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
 
@@ -473,9 +497,9 @@ pub async fn choose_screenshot_save_path(app: AppHandle) -> Result<serde_json::V
             let _ = tx.send(result);
         });
 
-    let selected_path_result = tauri::async_runtime::spawn_blocking(move || {
-        rx.recv_timeout(Duration::from_secs(30))
-    }).await;
+    let selected_path_result =
+        tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(Duration::from_secs(30)))
+            .await;
 
     if let Some(window) = screenshot_window.as_ref() {
         let _ = window.set_always_on_top(true);
@@ -510,13 +534,19 @@ pub async fn save_screenshot_to_path(
     use base64::Engine;
 
     if output_path.trim().is_empty() {
-        return Err(frontend_error_kind(AppErrorKind::ScreenshotSavePathEmpty, ""));
+        return Err(frontend_error_kind(
+            AppErrorKind::ScreenshotSavePathEmpty,
+            "",
+        ));
     }
 
     let target_path = PathBuf::from(&output_path);
 
     // 防御性路径校验：拒绝包含 ".." 的路径（路径穿越攻击防护）
-    if target_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+    if target_path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
         return Err("不允许的路径：包含路径遍历".to_string());
     }
 
@@ -547,7 +577,10 @@ pub async fn export_screenshot_to_path(
 
     // 防御性路径校验：拒绝包含 ".." 的路径（路径穿越攻击防护）
     let target = PathBuf::from(&output_path);
-    if target.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+    if target
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
         return Err("不允许的路径：包含路径遍历".to_string());
     }
 
@@ -647,12 +680,11 @@ pub async fn save_screenshot(
             let _ = tx.send(result);
         });
 
-    let selected_path = tauri::async_runtime::spawn_blocking(move || {
-        rx.recv_timeout(Duration::from_secs(30))
-    })
-        .await
-        .map_err(|e| format!("等待保存对话框结果失败: {}", e))?
-        .map_err(|e| format!("接收保存对话框结果失败: {}", e))??;
+    let selected_path =
+        tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(Duration::from_secs(30)))
+            .await
+            .map_err(|e| format!("等待保存对话框结果失败: {}", e))?
+            .map_err(|e| format!("接收保存对话框结果失败: {}", e))??;
 
     let Some(path_buf) = selected_path else {
         log::info!("用户取消保存");
@@ -670,7 +702,10 @@ pub async fn save_screenshot(
         }));
     };
     // 防御性路径校验：拒绝包含 ".." 的路径（路径穿越攻击防护）
-    if path_buf.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+    if path_buf
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
         return Err("路径包含非法字符".to_string());
     }
 
@@ -708,7 +743,8 @@ pub async fn pin_screenshot_on_screen(
 ) -> Result<serde_json::Value, String> {
     // 限制贴图窗口数量，防止资源耗尽
     const MAX_PINNED_WINDOWS: usize = 20;
-    let existing_count = app.webview_windows()
+    let existing_count = app
+        .webview_windows()
         .keys()
         .filter(|k| k.starts_with("pinned_image_"))
         .count();
@@ -751,8 +787,14 @@ pub async fn pin_screenshot_on_screen(
 
     let window_clone = window.clone();
     let _ = window_clone.set_resizable(true);
-    let _ = window_clone.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: x as i32, y: y as i32 }));
-    let _ = window_clone.set_size(tauri::Size::Physical(tauri::PhysicalSize { width: width as u32, height: height as u32 }));
+    let _ = window_clone.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+        x: x as i32,
+        y: y as i32,
+    }));
+    let _ = window_clone.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+        width: width as u32,
+        height: height as u32,
+    }));
     let _ = show_overlay_window_by_label(&app, &label, false);
     let script = format!(
         "window.__PINNED_IMAGE_PAYLOAD__ = {}; window.dispatchEvent(new CustomEvent('pinned-image-data', {{ detail: {} }}));",
@@ -876,7 +918,11 @@ fn set_screenshot_window_visibility_internal(app: &AppHandle, visible: bool) -> 
 
 fn ensure_longshot_toolbar_window(app: &AppHandle) -> Result<(tauri::WebviewWindow, bool), String> {
     let (window, is_new) = crate::ui::window_manager::ensure_overlay_window(
-        app, "longshot_toolbar", "longshot_toolbar.html", "长截图工具栏", Some((320.0, 180.0)),
+        app,
+        "longshot_toolbar",
+        "longshot_toolbar.html",
+        "长截图工具栏",
+        Some((320.0, 180.0)),
     )?;
     if is_new {
         let _ = window.set_content_protected(true);
@@ -886,7 +932,11 @@ fn ensure_longshot_toolbar_window(app: &AppHandle) -> Result<(tauri::WebviewWind
 
 fn ensure_longshot_border_window(app: &AppHandle) -> Result<(tauri::WebviewWindow, bool), String> {
     let (window, is_new) = crate::ui::window_manager::ensure_overlay_window(
-        app, "longshot_border", "longshot_border.html", "长截图边框", None,
+        app,
+        "longshot_border",
+        "longshot_border.html",
+        "长截图边框",
+        None,
     )?;
     if is_new {
         let _ = window.set_content_protected(true);
@@ -1173,7 +1223,12 @@ pub async fn longshot_toolbar_action(action: String, app: AppHandle) -> Result<(
             let _ = set_screenshot_window_visibility_internal(&app, true);
             return Ok(());
         }
-        _ => return Err(frontend_error_kind(AppErrorKind::ScreenshotUnsupportedOperation, action)),
+        _ => {
+            return Err(frontend_error_kind(
+                AppErrorKind::ScreenshotUnsupportedOperation,
+                action,
+            ))
+        }
     }
     Ok(())
 }
@@ -1311,14 +1366,18 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
                 false,
                 Some(e.to_string()),
             );
-            return Err(frontend_error_kind_params(AppErrorKind::ScreenshotFailed, serde_json::json!({"error": e.to_string()}), e.to_string()));
+            return Err(frontend_error_kind_params(
+                AppErrorKind::ScreenshotFailed,
+                serde_json::json!({"error": e.to_string()}),
+                e.to_string(),
+            ));
         }
     };
 
     let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
 
-    let (image_path, _png_data) =
-        write_screenshot_boot_image(&rgba, width, height, session_id).inspect_err(|e| {
+    let (image_path, _png_data) = write_screenshot_boot_image(&rgba, width, height, session_id)
+        .inspect_err(|e| {
             capture::set_screenshot_in_progress(false);
             record_perf_metric(
                 "screenshot.open_prepare",
@@ -1363,10 +1422,13 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
         y: origin_y,
     }));
     // 通知前端：截图会话已就绪，前端通过 get_screenshot_data IPC 拉取数据
-    let _ = app.emit("screenshot-session-ready", serde_json::json!({
-        "session_id": session_id,
-        "mode": selection_mode
-    }));
+    let _ = app.emit(
+        "screenshot-session-ready",
+        serde_json::json!({
+            "session_id": session_id,
+            "mode": selection_mode
+        }),
+    );
 
     capture::set_screenshot_in_progress(false);
     record_perf_metric(

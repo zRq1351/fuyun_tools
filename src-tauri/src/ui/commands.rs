@@ -13,7 +13,10 @@ use crate::ui::commands_recording::{
     toggle_microphone_from_shortcut, toggle_recording_from_shortcut,
 };
 use crate::ui::commands_screenshot::close_screenshot_window;
-use crate::ui::commands_writeback::{emit_writeback_phase, emit_writeback_result, record_writeback_stage_metric, simulate_paste_with_retry, WriteBackExecutionResult};
+use crate::ui::commands_writeback::{
+    emit_writeback_phase, emit_writeback_result, record_writeback_stage_metric,
+    simulate_paste_with_retry, WriteBackExecutionResult,
+};
 use crate::ui::tray_menu::open_settings;
 use crate::ui::window_manager::{
     bind_overlay_window_events, destroy_window_by_label, ensure_window_for_label,
@@ -54,7 +57,8 @@ pub(crate) static COPY_PASTE_DEDUP_HIT_COUNT: AtomicU64 = AtomicU64::new(0);
 pub(crate) static COPY_PASTE_DEDUP_REQUEST_ID_HIT_COUNT: AtomicU64 = AtomicU64::new(0);
 pub(crate) static COPY_PASTE_DEDUP_TEXT_HASH_HIT_COUNT: AtomicU64 = AtomicU64::new(0);
 pub(crate) static COPY_PASTE_DEDUP_LOG_COUNT: AtomicU64 = AtomicU64::new(0);
-pub(crate) static COPY_PASTE_DEDUP_WINDOW_STATS: OnceLock<StdMutex<DedupWindowStats>> = OnceLock::new();
+pub(crate) static COPY_PASTE_DEDUP_WINDOW_STATS: OnceLock<StdMutex<DedupWindowStats>> =
+    OnceLock::new();
 pub(crate) static AUTO_BACKUP_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 pub(crate) static BACKUP_JOB_MUTEX: OnceLock<tauri::async_runtime::Mutex<()>> = OnceLock::new();
 static SETTINGS_SAVE_MUTEX: OnceLock<tauri::async_runtime::Mutex<()>> = OnceLock::new();
@@ -71,7 +75,6 @@ pub(crate) struct DedupWindowStats {
     pub(crate) hits: u64,
     pub(crate) last_hit_at_ms: u64,
 }
-
 
 pub(crate) fn calc_text_hash(text: &str) -> u64 {
     xxh3_64(text.as_bytes())
@@ -116,7 +119,9 @@ pub(crate) fn cleanup_all_screenshot_boot_images() {
 }
 
 pub(crate) fn build_screenshot_boot_image_path(session_id: u64) -> Result<PathBuf, String> {
-    let dir = std::env::temp_dir().join("fuyun_tools").join("screenshot_boot");
+    let dir = std::env::temp_dir()
+        .join("fuyun_tools")
+        .join("screenshot_boot");
     fs::create_dir_all(&dir).map_err(|e| format!("创建截图临时目录失败: {}", e))?;
     Ok(dir.join(format!("screenshot_boot_{}.png", session_id)))
 }
@@ -133,7 +138,6 @@ pub(crate) fn write_screenshot_boot_image(
     replace_screenshot_boot_image_path(Some(path.clone()));
     Ok((path, png_data))
 }
-
 
 pub(crate) fn is_duplicate_copy_paste_request(text: &str, request_id: Option<&str>) -> bool {
     COPY_PASTE_DEDUP_TOTAL_REQUESTS.fetch_add(1, Ordering::Relaxed);
@@ -256,7 +260,6 @@ pub(crate) fn bind_screenshot_window_lifecycle(window: &tauri::WebviewWindow, ap
     });
 }
 
-
 #[tauri::command]
 pub async fn selection_toolbar_blur(app: AppHandle) -> Result<(), String> {
     if let Err(e) = hide_overlay_window_by_label(&app, "selection_toolbar") {
@@ -299,7 +302,13 @@ pub(crate) fn register_recording_shortcut(
                 });
             }
         })
-        .map_err(|e| frontend_error_kind_params(AppErrorKind::ClipboardHotkeyRegisterFailed, serde_json::json!({"key": hot_key}), e.to_string()))?;
+        .map_err(|e| {
+            frontend_error_kind_params(
+                AppErrorKind::ClipboardHotkeyRegisterFailed,
+                serde_json::json!({"key": hot_key}),
+                e.to_string(),
+            )
+        })?;
     Ok(())
 }
 
@@ -326,7 +335,13 @@ pub(crate) fn register_mic_toggle_shortcut(
             // 按到达顺序入队，由单一消费线程串行执行（#14）
             let _ = mic_event_tx.send(event.state == ShortcutState::Pressed);
         })
-        .map_err(|e| frontend_error_kind_params(AppErrorKind::ClipboardHotkeyRegisterFailed, serde_json::json!({"key": hot_key}), e.to_string()))?;
+        .map_err(|e| {
+            frontend_error_kind_params(
+                AppErrorKind::ClipboardHotkeyRegisterFailed,
+                serde_json::json!({"key": hot_key}),
+                e.to_string(),
+            )
+        })?;
     Ok(())
 }
 
@@ -440,10 +455,7 @@ pub async fn show_ocr_text_window(
     };
     target_x = target_x.clamp(min_x, max_x.max(min_x));
 
-    if let Err(e) = window.set_size(tauri::LogicalSize::new(
-        logical_width.max(1.0),
-        240.0,
-    )) {
+    if let Err(e) = window.set_size(tauri::LogicalSize::new(logical_width.max(1.0), 240.0)) {
         log::warn!("设置OCR文本窗口大小失败: {}", e);
     }
     if let Err(e) = window.set_always_on_top(true) {
@@ -467,7 +479,9 @@ pub async fn show_ocr_text_window(
 }
 
 #[tauri::command]
-pub async fn get_ai_settings(state: State<'_, Arc<Mutex<SharedAppState>>>) -> Result<serde_json::Value, String> {
+pub async fn get_ai_settings(
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<serde_json::Value, String> {
     let settings = {
         let state_guard = lock_arc_mutex(state.inner());
         state_guard.settings.clone()
@@ -484,17 +498,26 @@ pub async fn get_ai_settings(state: State<'_, Arc<Mutex<SharedAppState>>>) -> Re
         } else {
             "********".to_string()
         };
-        provider_configs_map.insert(key.clone(), serde_json::json!({
-            "api_url": cfg.api_url,
-            "model_name": cfg.model_name,
-            "api_key": masked_key,
-            "api_key_set": !cfg.api_key.is_empty(),
-        }));
+        provider_configs_map.insert(
+            key.clone(),
+            serde_json::json!({
+                "api_url": cfg.api_url,
+                "model_name": cfg.model_name,
+                "api_key": masked_key,
+                "api_key_set": !cfg.api_key.is_empty(),
+            }),
+        );
     }
 
     if let Some(obj) = settings_json.as_object_mut() {
-        obj.insert("ai_provider".to_string(), serde_json::Value::String(crate::utils::ai_store::get_current_provider().await));
-        obj.insert("provider_configs".to_string(), serde_json::Value::Object(provider_configs_map));
+        obj.insert(
+            "ai_provider".to_string(),
+            serde_json::Value::String(crate::utils::ai_store::get_current_provider().await),
+        );
+        obj.insert(
+            "provider_configs".to_string(),
+            serde_json::Value::Object(provider_configs_map),
+        );
     }
 
     Ok(settings_json)
@@ -520,7 +543,8 @@ pub async fn get_image_storage_metrics(
     let metrics = manager.get_storage_metrics();
     serde_json::to_value(metrics).map_err(|e| {
         to_frontend_error_string(
-            AppErrorKind::InternalError.to_app_error()
+            AppErrorKind::InternalError
+                .to_app_error()
                 .with_details(e.to_string()),
         )
     })
@@ -537,7 +561,8 @@ pub async fn get_copy_paste_dedup_debug_state() -> Result<serde_json::Value, Str
 pub async fn get_image_persist_queue_metrics() -> Result<serde_json::Value, String> {
     serde_json::to_value(get_image_persist_queue_metrics_snapshot()).map_err(|e| {
         to_frontend_error_string(
-            AppErrorKind::InternalError.to_app_error()
+            AppErrorKind::InternalError
+                .to_app_error()
                 .with_details(e.to_string()),
         )
     })
@@ -888,9 +913,17 @@ pub async fn save_app_settings(
                 );
             }
             if settings.text_clipboard_enabled {
-                if let Err(e) = register_text_shortcut(&app, state.inner().clone(), hot_key_val.as_str()) {
-                    log::warn!("注册新文字窗口快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", hot_key_val, e);
-                    if let Err(e2) = register_text_shortcut(&app, state.inner().clone(), old_hot_key.as_str()) {
+                if let Err(e) =
+                    register_text_shortcut(&app, state.inner().clone(), hot_key_val.as_str())
+                {
+                    log::warn!(
+                        "注册新文字窗口快捷键 '{}' 失败, 尝试恢复旧快捷键: {}",
+                        hot_key_val,
+                        e
+                    );
+                    if let Err(e2) =
+                        register_text_shortcut(&app, state.inner().clone(), old_hot_key.as_str())
+                    {
                         log::error!("恢复旧文字窗口快捷键 '{}' 也失败: {}", old_hot_key, e2);
                     }
                     return Err(e);
@@ -930,7 +963,9 @@ pub async fn save_app_settings(
             }
 
             if settings.image_clipboard_enabled
-                && app.global_shortcut().is_registered(image_hot_key_val.as_str())
+                && app
+                .global_shortcut()
+                .is_registered(image_hot_key_val.as_str())
             {
                 return Err(frontend_error_kind_params(
                     AppErrorKind::SettingsHotkeyConflict,
@@ -947,10 +982,24 @@ pub async fn save_app_settings(
                 );
             }
             if settings.image_clipboard_enabled {
-                if let Err(e) = register_image_shortcut(&app, state.inner().clone(), image_hot_key_val.as_str()) {
-                    log::warn!("注册新图片窗口快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", image_hot_key_val, e);
-                    if let Err(e2) = register_image_shortcut(&app, state.inner().clone(), old_image_hot_key.as_str()) {
-                        log::error!("恢复旧图片窗口快捷键 '{}' 也失败: {}", old_image_hot_key, e2);
+                if let Err(e) =
+                    register_image_shortcut(&app, state.inner().clone(), image_hot_key_val.as_str())
+                {
+                    log::warn!(
+                        "注册新图片窗口快捷键 '{}' 失败, 尝试恢复旧快捷键: {}",
+                        image_hot_key_val,
+                        e
+                    );
+                    if let Err(e2) = register_image_shortcut(
+                        &app,
+                        state.inner().clone(),
+                        old_image_hot_key.as_str(),
+                    ) {
+                        log::error!(
+                            "恢复旧图片窗口快捷键 '{}' 也失败: {}",
+                            old_image_hot_key,
+                            e2
+                        );
                     }
                     return Err(e);
                 }
@@ -970,9 +1019,12 @@ pub async fn save_app_settings(
         if screenshot_hot_key_val != &settings.screenshot_hot_key {
             let effective_hot_key = effective_key(&hot_key, &settings.hot_key);
             let effective_image_hot_key = effective_key(&image_hot_key, &settings.image_hot_key);
-            let effective_recording = effective_key(&recording_hot_key, &settings.recording_hot_key);
-            let effective_mic =
-                effective_key(&recording_mic_toggle_hot_key, &settings.recording_mic_toggle_hot_key);
+            let effective_recording =
+                effective_key(&recording_hot_key, &settings.recording_hot_key);
+            let effective_mic = effective_key(
+                &recording_mic_toggle_hot_key,
+                &settings.recording_mic_toggle_hot_key,
+            );
             let effective_launcher = effective_key(&launcher_hot_key, &settings.launcher_hot_key);
             let effective_doc = effective_key(&doc_manager_hot_key, &settings.doc_manager_hot_key);
             if screenshot_hot_key_val == &effective_hot_key
@@ -1014,10 +1066,21 @@ pub async fn save_app_settings(
                 );
             }
             if settings.screenshot_enabled {
-                if let Err(e) = register_screenshot_shortcut(&app, screenshot_hot_key_val.as_str()) {
-                    log::warn!("注册新截图快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", screenshot_hot_key_val, e);
-                    if let Err(e2) = register_screenshot_shortcut(&app, old_screenshot_hot_key.as_str()) {
-                        log::error!("恢复旧截图快捷键 '{}' 也失败: {}", old_screenshot_hot_key, e2);
+                if let Err(e) = register_screenshot_shortcut(&app, screenshot_hot_key_val.as_str())
+                {
+                    log::warn!(
+                        "注册新截图快捷键 '{}' 失败, 尝试恢复旧快捷键: {}",
+                        screenshot_hot_key_val,
+                        e
+                    );
+                    if let Err(e2) =
+                        register_screenshot_shortcut(&app, old_screenshot_hot_key.as_str())
+                    {
+                        log::error!(
+                            "恢复旧截图快捷键 '{}' 也失败: {}",
+                            old_screenshot_hot_key,
+                            e2
+                        );
                     }
                     return Err(e);
                 }
@@ -1036,7 +1099,8 @@ pub async fn save_app_settings(
         if recording_hot_key_val != &settings.recording_hot_key {
             let effective_hot_key = effective_key(&hot_key, &settings.hot_key);
             let effective_image_hot_key = effective_key(&image_hot_key, &settings.image_hot_key);
-            let effective_screenshot_hot_key = effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
+            let effective_screenshot_hot_key =
+                effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
             let effective_mic_toggle_hot_key = effective_key(
                 &recording_mic_toggle_hot_key,
                 &settings.recording_mic_toggle_hot_key,
@@ -1092,9 +1156,21 @@ pub async fn save_app_settings(
                     state.inner().clone(),
                     recording_hot_key_val.as_str(),
                 ) {
-                    log::warn!("注册新录屏快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", recording_hot_key_val, e);
-                    if let Err(e2) = register_recording_shortcut(&app, state.inner().clone(), old_recording_hot_key.as_str()) {
-                        log::error!("恢复旧录屏快捷键 '{}' 也失败: {}", old_recording_hot_key, e2);
+                    log::warn!(
+                        "注册新录屏快捷键 '{}' 失败, 尝试恢复旧快捷键: {}",
+                        recording_hot_key_val,
+                        e
+                    );
+                    if let Err(e2) = register_recording_shortcut(
+                        &app,
+                        state.inner().clone(),
+                        old_recording_hot_key.as_str(),
+                    ) {
+                        log::error!(
+                            "恢复旧录屏快捷键 '{}' 也失败: {}",
+                            old_recording_hot_key,
+                            e2
+                        );
                     }
                     return Err(e);
                 }
@@ -1113,8 +1189,10 @@ pub async fn save_app_settings(
         if mic_toggle_hot_key_val != &settings.recording_mic_toggle_hot_key {
             let effective_hot_key = effective_key(&hot_key, &settings.hot_key);
             let effective_image_hot_key = effective_key(&image_hot_key, &settings.image_hot_key);
-            let effective_screenshot_hot_key = effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
-            let effective_recording_hot_key = effective_key(&recording_hot_key, &settings.recording_hot_key);
+            let effective_screenshot_hot_key =
+                effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
+            let effective_recording_hot_key =
+                effective_key(&recording_hot_key, &settings.recording_hot_key);
             let effective_launcher_hot_key =
                 effective_key(&launcher_hot_key, &settings.launcher_hot_key);
             let effective_doc_manager_hot_key =
@@ -1176,31 +1254,35 @@ pub async fn save_app_settings(
                         }
                     });
                 }
-                if let Err(e) = app.global_shortcut().on_shortcut(
-                    mic_toggle_hot_key_val.as_str(),
-                    {
-                        let tx = mic_event_tx.clone();
-                        move |_app, _shortcut, event| {
-                            // 按到达顺序入队，由单一消费线程串行执行（#14）
-                            let _ = tx.send(event.state == ShortcutState::Pressed);
-                        }
-                    },
-                ) {
+                if let Err(e) =
+                    app.global_shortcut()
+                        .on_shortcut(mic_toggle_hot_key_val.as_str(), {
+                            let tx = mic_event_tx.clone();
+                            move |_app, _shortcut, event| {
+                                // 按到达顺序入队，由单一消费线程串行执行（#14）
+                                let _ = tx.send(event.state == ShortcutState::Pressed);
+                            }
+                        })
+                {
                     log::warn!(
                         "注册麦克风切换快捷键 '{}' 失败, 尝试恢复旧快捷键: {}",
                         mic_toggle_hot_key_val,
                         e
                     );
-                    if let Err(e2) = app.global_shortcut().on_shortcut(
-                        old_mic_key_for_rollback.as_str(),
-                        {
-                            let tx = mic_event_tx.clone();
-                            move |_app, _shortcut, event| {
-                                let _ = tx.send(event.state == ShortcutState::Pressed);
-                            }
-                        },
-                    ) {
-                        log::error!("恢复旧麦克风切换快捷键 '{}' 也失败: {}", old_mic_key_for_rollback, e2);
+                    if let Err(e2) =
+                        app.global_shortcut()
+                            .on_shortcut(old_mic_key_for_rollback.as_str(), {
+                                let tx = mic_event_tx.clone();
+                                move |_app, _shortcut, event| {
+                                    let _ = tx.send(event.state == ShortcutState::Pressed);
+                                }
+                            })
+                    {
+                        log::error!(
+                            "恢复旧麦克风切换快捷键 '{}' 也失败: {}",
+                            old_mic_key_for_rollback,
+                            e2
+                        );
                     }
                     return Err(frontend_error_kind_params(
                         AppErrorKind::ClipboardHotkeyRegisterFailed,
@@ -1225,9 +1307,14 @@ pub async fn save_app_settings(
         if launcher_hot_key_val != &settings.launcher_hot_key {
             let effective_hot_key = effective_key(&hot_key, &settings.hot_key);
             let effective_image_hot_key = effective_key(&image_hot_key, &settings.image_hot_key);
-            let effective_screenshot_hot_key = effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
-            let effective_recording_hot_key = effective_key(&recording_hot_key, &settings.recording_hot_key);
-            let effective_mic_toggle_hot_key = effective_key(&recording_mic_toggle_hot_key, &settings.recording_mic_toggle_hot_key);
+            let effective_screenshot_hot_key =
+                effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
+            let effective_recording_hot_key =
+                effective_key(&recording_hot_key, &settings.recording_hot_key);
+            let effective_mic_toggle_hot_key = effective_key(
+                &recording_mic_toggle_hot_key,
+                &settings.recording_mic_toggle_hot_key,
+            );
             let effective_doc_manager_hot_key =
                 effective_key(&doc_manager_hot_key, &settings.doc_manager_hot_key);
 
@@ -1283,7 +1370,8 @@ pub async fn save_app_settings(
                         if let ShortcutState::Pressed = event.state {
                             let app_handle = app_handle_for_launcher.clone();
                             tauri::async_runtime::spawn(async move {
-                                let _ = crate::ui::commands_launcher::toggle_launcher(app_handle).await;
+                                let _ =
+                                    crate::ui::commands_launcher::toggle_launcher(app_handle).await;
                             });
                         }
                     },
@@ -1300,12 +1388,18 @@ pub async fn save_app_settings(
                             if let ShortcutState::Pressed = event.state {
                                 let app_handle = app_handle_for_rollback.clone();
                                 tauri::async_runtime::spawn(async move {
-                                    let _ = crate::ui::commands_launcher::toggle_launcher(app_handle).await;
+                                    let _ =
+                                        crate::ui::commands_launcher::toggle_launcher(app_handle)
+                                            .await;
                                 });
                             }
                         },
                     ) {
-                        log::error!("恢复旧启动器快捷键 '{}' 也失败: {}", old_launcher_key_for_rollback, e2);
+                        log::error!(
+                            "恢复旧启动器快捷键 '{}' 也失败: {}",
+                            old_launcher_key_for_rollback,
+                            e2
+                        );
                     }
                     return Err(frontend_error_kind_params(
                         AppErrorKind::ClipboardHotkeyRegisterFailed,
@@ -1329,10 +1423,16 @@ pub async fn save_app_settings(
         if doc_manager_hot_key_val != &settings.doc_manager_hot_key {
             let effective_hot_key = effective_key(&hot_key, &settings.hot_key);
             let effective_image_hot_key = effective_key(&image_hot_key, &settings.image_hot_key);
-            let effective_screenshot_hot_key = effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
-            let effective_recording_hot_key = effective_key(&recording_hot_key, &settings.recording_hot_key);
-            let effective_mic_toggle_hot_key = effective_key(&recording_mic_toggle_hot_key, &settings.recording_mic_toggle_hot_key);
-            let effective_launcher_hot_key = effective_key(&launcher_hot_key, &settings.launcher_hot_key);
+            let effective_screenshot_hot_key =
+                effective_key(&screenshot_hot_key, &settings.screenshot_hot_key);
+            let effective_recording_hot_key =
+                effective_key(&recording_hot_key, &settings.recording_hot_key);
+            let effective_mic_toggle_hot_key = effective_key(
+                &recording_mic_toggle_hot_key,
+                &settings.recording_mic_toggle_hot_key,
+            );
+            let effective_launcher_hot_key =
+                effective_key(&launcher_hot_key, &settings.launcher_hot_key);
 
             if doc_manager_hot_key_val == &effective_hot_key
                 || doc_manager_hot_key_val == &effective_image_hot_key
@@ -1343,11 +1443,17 @@ pub async fn save_app_settings(
             {
                 return Err(frontend_error_kind(
                     AppErrorKind::SettingsHotkeysIdentical,
-                    format!("doc_manager_hot_key={} conflicts with existing shortcut", doc_manager_hot_key_val),
+                    format!(
+                        "doc_manager_hot_key={} conflicts with existing shortcut",
+                        doc_manager_hot_key_val
+                    ),
                 ));
             }
 
-            if app.global_shortcut().is_registered(doc_manager_hot_key_val.as_str()) {
+            if app
+                .global_shortcut()
+                .is_registered(doc_manager_hot_key_val.as_str())
+            {
                 return Err(frontend_error_kind_params(
                     AppErrorKind::SettingsHotkeyConflict,
                     serde_json::json!({"key": doc_manager_hot_key_val}),
@@ -1356,8 +1462,15 @@ pub async fn save_app_settings(
             }
 
             let old_doc_manager_hot_key = settings.doc_manager_hot_key.clone();
-            if let Err(e) = app.global_shortcut().unregister(old_doc_manager_hot_key.as_str()) {
-                log::warn!("注销旧文档管理快捷键 '{}' 失败: {}", old_doc_manager_hot_key, e);
+            if let Err(e) = app
+                .global_shortcut()
+                .unregister(old_doc_manager_hot_key.as_str())
+            {
+                log::warn!(
+                    "注销旧文档管理快捷键 '{}' 失败: {}",
+                    old_doc_manager_hot_key,
+                    e
+                );
             }
             if settings.doc_manager_enabled {
                 let app_handle_for_doc = app.clone();
@@ -1366,21 +1479,35 @@ pub async fn save_app_settings(
                     doc_manager_hot_key_val.as_str(),
                     move |_app, _shortcut, event| {
                         if let ShortcutState::Pressed = event.state {
-                            let _ = crate::ui::window_manager::show_standard_window_by_label(&app_handle_for_doc, "document_manager");
+                            let _ = crate::ui::window_manager::show_standard_window_by_label(
+                                &app_handle_for_doc,
+                                "document_manager",
+                            );
                         }
                     },
                 ) {
-                    log::warn!("注册文档管理快捷键 '{}' 失败, 尝试恢复旧快捷键: {}", doc_manager_hot_key_val, e);
+                    log::warn!(
+                        "注册文档管理快捷键 '{}' 失败, 尝试恢复旧快捷键: {}",
+                        doc_manager_hot_key_val,
+                        e
+                    );
                     let app_handle_for_rollback = app.clone();
                     if let Err(e2) = app.global_shortcut().on_shortcut(
                         old_doc_key_for_rollback.as_str(),
                         move |_app, _shortcut, event| {
                             if let ShortcutState::Pressed = event.state {
-                                let _ = crate::ui::window_manager::show_standard_window_by_label(&app_handle_for_rollback, "document_manager");
+                                let _ = crate::ui::window_manager::show_standard_window_by_label(
+                                    &app_handle_for_rollback,
+                                    "document_manager",
+                                );
                             }
                         },
                     ) {
-                        log::error!("恢复旧文档管理快捷键 '{}' 也失败: {}", old_doc_key_for_rollback, e2);
+                        log::error!(
+                            "恢复旧文档管理快捷键 '{}' 也失败: {}",
+                            old_doc_key_for_rollback,
+                            e2
+                        );
                     }
                     return Err(frontend_error_kind_params(
                         AppErrorKind::ClipboardHotkeyRegisterFailed,
@@ -1442,8 +1569,8 @@ pub async fn save_app_settings(
                 log::warn!(
                     "注销截图快捷键 '{}' 失败: {}",
                     settings.screenshot_hot_key,
-                e
-            );
+                    e
+                );
             }
         }
     }
@@ -1526,16 +1653,14 @@ pub async fn save_app_settings(
                             if let ShortcutState::Pressed = event.state {
                                 let app_handle = app_handle_for_launcher.clone();
                                 tauri::async_runtime::spawn(async move {
-                                    let _ = crate::ui::commands_launcher::toggle_launcher(app_handle).await;
+                                    let _ =
+                                        crate::ui::commands_launcher::toggle_launcher(app_handle)
+                                            .await;
                                 });
                             }
                         },
                     ) {
-                        log::warn!(
-                            "注册启动器快捷键 '{}' 失败: {}",
-                            new_hot_key,
-                            e
-                        );
+                        log::warn!("注册启动器快捷键 '{}' 失败: {}", new_hot_key, e);
                     }
                     settings.launcher_hot_key = launcher_hot_key_val.clone();
                 } else if !app
@@ -1550,7 +1675,9 @@ pub async fn save_app_settings(
                             if let ShortcutState::Pressed = event.state {
                                 let app_handle = app_handle_for_launcher.clone();
                                 tauri::async_runtime::spawn(async move {
-                                    let _ = crate::ui::commands_launcher::toggle_launcher(app_handle).await;
+                                    let _ =
+                                        crate::ui::commands_launcher::toggle_launcher(app_handle)
+                                            .await;
                                 });
                             }
                         },
@@ -1574,7 +1701,8 @@ pub async fn save_app_settings(
                         if let ShortcutState::Pressed = event.state {
                             let app_handle = app_handle_for_launcher.clone();
                             tauri::async_runtime::spawn(async move {
-                                let _ = crate::ui::commands_launcher::toggle_launcher(app_handle).await;
+                                let _ =
+                                    crate::ui::commands_launcher::toggle_launcher(app_handle).await;
                             });
                         }
                     },
@@ -1605,7 +1733,8 @@ pub async fn save_app_settings(
                 "ai_provider is empty",
             ));
         }
-        crate::utils::ai_store::set_current_provider(ai_provider_val).await
+        crate::utils::ai_store::set_current_provider(ai_provider_val)
+            .await
             .map_err(|e| frontend_error_kind(AppErrorKind::SettingsSaveFailed, e))?;
     }
 
@@ -1643,7 +1772,13 @@ pub async fn save_app_settings(
         }
 
         if changed {
-            crate::utils::ai_store::save_provider_config(&provider_key, &config.api_url, &config.model_name, &config.api_key).await
+            crate::utils::ai_store::save_provider_config(
+                &provider_key,
+                &config.api_url,
+                &config.model_name,
+                &config.api_key,
+            )
+                .await
                 .map_err(|e| frontend_error_kind(AppErrorKind::SettingsSaveProviderFailed, e))?;
         }
     }
@@ -1790,7 +1925,15 @@ pub(crate) fn apply_runtime_after_settings_restore(
         let guard = lock_arc_mutex(state);
         guard.settings.clone()
     };
-    let (text_enabled, image_enabled, screenshot_enabled, recording_enabled, selection_enabled, launcher_enabled, doc_enabled) = (
+    let (
+        text_enabled,
+        image_enabled,
+        screenshot_enabled,
+        recording_enabled,
+        selection_enabled,
+        launcher_enabled,
+        doc_enabled,
+    ) = (
         settings.text_clipboard_enabled,
         settings.image_clipboard_enabled,
         settings.screenshot_enabled,
@@ -1844,7 +1987,8 @@ pub(crate) fn apply_runtime_after_settings_restore(
         }
     }
     if recording_enabled {
-        if let Err(e) = register_recording_shortcut(app, state.clone(), &settings.recording_hot_key) {
+        if let Err(e) = register_recording_shortcut(app, state.clone(), &settings.recording_hot_key)
+        {
             log::warn!("恢复设置后注册录屏快捷键失败: {}", e);
         }
         if !settings.recording_mic_toggle_hot_key.is_empty() {
@@ -1867,8 +2011,8 @@ pub(crate) fn apply_runtime_after_settings_restore(
                     let app_handle_inner = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
                         // 与启动时注册一致：toggle 而非 show
-                        if let Err(e) = crate::ui::commands_launcher::toggle_launcher(app_handle_inner)
-                            .await
+                        if let Err(e) =
+                            crate::ui::commands_launcher::toggle_launcher(app_handle_inner).await
                         {
                             log::error!("切换启动器失败: {}", e);
                         }
@@ -1882,22 +2026,21 @@ pub(crate) fn apply_runtime_after_settings_restore(
     if doc_enabled {
         let app_handle = app.clone();
         let doc_key = settings.doc_manager_hot_key.clone();
-        if let Err(e) = app.global_shortcut().on_shortcut(
-            doc_key.as_str(),
-            move |_app, _shortcut, event| {
-                if let ShortcutState::Pressed = event.state {
-                    let app_handle_inner = app_handle.clone();
-                    tauri::async_runtime::spawn(async move {
-                        if let Err(e) = show_standard_window_by_label(
-                            &app_handle_inner,
-                            "document_manager",
-                        ) {
-                            log::error!("显示文档管理器窗口失败: {}", e);
-                        }
-                    });
-                }
-            },
-        ) {
+        if let Err(e) =
+            app.global_shortcut()
+                .on_shortcut(doc_key.as_str(), move |_app, _shortcut, event| {
+                    if let ShortcutState::Pressed = event.state {
+                        let app_handle_inner = app_handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) =
+                                show_standard_window_by_label(&app_handle_inner, "document_manager")
+                            {
+                                log::error!("显示文档管理器窗口失败: {}", e);
+                            }
+                        });
+                    }
+                })
+        {
             log::warn!("恢复设置后注册文档管理快捷键失败: {}", e);
         }
     }
@@ -1976,7 +2119,12 @@ pub async fn test_ai_connection(
         };
         match crate::utils::ai_store::get_api_key(&provider).await {
             Ok(key) if !key.is_empty() => real_api_key = key,
-            _ => return Err(frontend_error_kind(AppErrorKind::SettingsLocalKeyNotFound, "real api key not found")),
+            _ => {
+                return Err(frontend_error_kind(
+                    AppErrorKind::SettingsLocalKeyNotFound,
+                    "real api key not found",
+                ))
+            }
         }
     }
 
@@ -2090,12 +2238,7 @@ pub async fn copy_and_paste_text(
         simulate_paste_with_retry(&app_for_paste, "结果窗", None, started_at, false, None)
     })
     .await
-    .map_err(|e| {
-        frontend_error_kind(
-            AppErrorKind::TaskExecutionFailed,
-            e.to_string(),
-        )
-    })?;
+        .map_err(|e| frontend_error_kind(AppErrorKind::TaskExecutionFailed, e.to_string()))?;
     match paste_result {
         Ok(result) => {
             record_writeback_stage_metric(
@@ -2166,10 +2309,14 @@ pub async fn remove_ai_provider(
     _state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
     if provider.is_empty() {
-        return Err(frontend_error_kind(AppErrorKind::SettingsProviderNameEmpty, "provider is empty"));
+        return Err(frontend_error_kind(
+            AppErrorKind::SettingsProviderNameEmpty,
+            "provider is empty",
+        ));
     }
 
-    crate::utils::ai_store::remove_provider(&provider).await
+    crate::utils::ai_store::remove_provider(&provider)
+        .await
         .map_err(|e| frontend_error_kind(AppErrorKind::AiProviderNotFound, e))?;
 
     let current = crate::utils::ai_store::get_current_provider().await;
@@ -2223,19 +2370,12 @@ pub async fn check_previews_ready(
         Ok(results)
     })
     .await
-    .map_err(|e| {
-        frontend_error_kind(
-            AppErrorKind::TaskExecutionFailed,
-            e.to_string(),
-        )
-    })?
+        .map_err(|e| frontend_error_kind(AppErrorKind::TaskExecutionFailed, e.to_string()))?
 }
-
 
 // ========================================
 // 备份系统
 // ========================================
-
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2251,7 +2391,10 @@ pub async fn show_standard_window_command(app: AppHandle, label: String) -> Resu
 
 /// 显示剪贴板窗口
 #[tauri::command]
-pub async fn show_clipboard_window_command(app: AppHandle, state: State<'_, Arc<Mutex<SharedAppState>>>) -> Result<(), String> {
+pub async fn show_clipboard_window_command(
+    app: AppHandle,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
     let state_arc = state.inner().clone();
     crate::ui::window_manager::show_clipboard_window(app, state_arc);
     Ok(())
@@ -2271,7 +2414,10 @@ pub async fn start_screenshot_command(
 
 /// 切换录屏状态
 #[tauri::command]
-pub async fn toggle_recording_command(app: AppHandle, _state: State<'_, Arc<Mutex<SharedAppState>>>) -> Result<(), String> {
+pub async fn toggle_recording_command(
+    app: AppHandle,
+    _state: State<'_, Arc<Mutex<SharedAppState>>>,
+) -> Result<(), String> {
     use crate::ui::commands_recording::toggle_recording_from_shortcut;
     toggle_recording_from_shortcut(app).await;
     Ok(())
@@ -2295,7 +2441,10 @@ pub async fn get_perf_summary() -> Result<crate::core::perf_metrics::PerfSummary
 
 /// 按类别获取性能指标
 #[tauri::command]
-pub async fn get_metrics_by_category() -> Result<std::collections::BTreeMap<String, Vec<crate::core::perf_metrics::PerfMetricSnapshot>>, String> {
+pub async fn get_metrics_by_category() -> Result<
+    std::collections::BTreeMap<String, Vec<crate::core::perf_metrics::PerfMetricSnapshot>>,
+    String,
+> {
     Ok(crate::core::perf_metrics::get_metrics_by_category())
 }
 
@@ -2313,7 +2462,8 @@ pub async fn get_memory_metrics() -> Result<Vec<crate::core::perf_metrics::PerfM
 
 /// 获取IPC延迟指标
 #[tauri::command]
-pub async fn get_ipc_metrics() -> Result<Vec<crate::core::perf_metrics::PerfMetricSnapshot>, String> {
+pub async fn get_ipc_metrics() -> Result<Vec<crate::core::perf_metrics::PerfMetricSnapshot>, String>
+{
     Ok(crate::core::perf_metrics::get_ipc_metrics())
 }
 
@@ -2364,7 +2514,10 @@ mod tests {
 
     #[test]
     fn test_effective_key_uses_new_value() {
-        assert_eq!(effective_key(&Some("Ctrl+K".to_string()), "Alt+R"), "Ctrl+K");
+        assert_eq!(
+            effective_key(&Some("Ctrl+K".to_string()), "Alt+R"),
+            "Ctrl+K"
+        );
     }
 
     #[test]

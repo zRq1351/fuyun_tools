@@ -1,4 +1,4 @@
-use crate::services::ocr_engine::{OcrLine, OcrParagraph, OcrResult, clean_ocr_text};
+use crate::services::ocr_engine::{clean_ocr_text, OcrLine, OcrParagraph, OcrResult};
 
 #[cfg(target_os = "windows")]
 pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<OcrResult, String> {
@@ -12,67 +12,75 @@ pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<OcrResult, String> 
     fn preprocess_png_bytes(input: &[u8]) -> Result<Vec<u8>, String> {
         let image =
             image::load_from_memory(input).map_err(|e| format!("OCR 预处理加载图片失败: {}", e))?;
-        
+
         // 策略1：适度放大（2倍），平衡清晰度和性能
         let target_w = (image.width().max(1) * 2).min(4096);
         let target_h = (image.height().max(1) * 2).min(4096);
         let resized = image.resize_exact(target_w, target_h, FilterType::Lanczos3);
-        
+
         // 转换为灰度图
         let grayscale = resized.grayscale();
-        
+
         // 增强对比度：使用直方图均衡化的简化版本
         let mut rgba = grayscale.to_rgba8();
-        
+
         // 计算最小和最大像素值用于对比度拉伸
         let mut min_val = 255u8;
         let mut max_val = 0u8;
         for px in rgba.pixels() {
             let v = px[0];
-            if v < min_val { min_val = v; }
-            if v > max_val { max_val = v; }
+            if v < min_val {
+                min_val = v;
+            }
+            if v > max_val {
+                max_val = v;
+            }
         }
-        
+
         // 对比度拉伸：将[min_val, max_val]映射到[0, 255]
-        let range = if max_val > min_val { max_val - min_val } else { 1 };
+        let range = if max_val > min_val {
+            max_val - min_val
+        } else {
+            1
+        };
         for px in rgba.pixels_mut() {
             let v = px[0];
             // 对比度拉伸
             let stretched = ((v as u32 - min_val as u32) * 255 / range as u32) as u8;
-            
+
             // 自适应二值化：根据局部统计调整阈值
             // 对于较暗的图片使用较低阈值，较亮的图片使用较高阈值
             let threshold = if stretched < 128 { 140 } else { 168 };
             let nv = if stretched < threshold { 0 } else { 255 };
-            
+
             px[0] = nv;
             px[1] = nv;
             px[2] = nv;
             px[3] = 255;
         }
-        
+
         let mut out = Vec::new();
         DynamicImage::ImageRgba8(rgba)
             .write_to(&mut std::io::Cursor::new(&mut out), ImageFormat::Png)
             .map_err(|e| format!("OCR 预处理编码失败: {}", e))?;
         Ok(out)
     }
-    
+
     /// 轻度预处理：仅放大和灰度化，不进行二值化
     /// 适用于已经清晰的图片
     fn preprocess_png_bytes_light(input: &[u8]) -> Result<Vec<u8>, String> {
-        let image =
-            image::load_from_memory(input).map_err(|e| format!("OCR 轻度预处理加载图片失败: {}", e))?;
-        
+        let image = image::load_from_memory(input)
+            .map_err(|e| format!("OCR 轻度预处理加载图片失败: {}", e))?;
+
         // 仅放大1.5倍，保持更多细节
         let target_w = (image.width().max(1) * 3 / 2).min(4096);
         let target_h = (image.height().max(1) * 3 / 2).min(4096);
         let resized = image.resize_exact(target_w, target_h, FilterType::Lanczos3);
-        
+
         // 转换为灰度图但不二值化
         let grayscale = resized.grayscale();
         let rgba = grayscale.to_rgba8();
-        
+
         let mut out = Vec::new();
         DynamicImage::ImageRgba8(rgba)
             .write_to(&mut std::io::Cursor::new(&mut out), ImageFormat::Png)
@@ -226,13 +234,25 @@ pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<OcrResult, String> 
                 let base_score = chars + lines * 8;
 
                 // 质量奖励：更长连续文本通常质量更高
-                let quality_bonus = if chars > 50 { 20 } else if chars > 20 { 10 } else { 0 };
+                let quality_bonus = if chars > 50 {
+                    20
+                } else if chars > 20 {
+                    10
+                } else {
+                    0
+                };
 
                 // 惩罚：如果行数太多但字符很少，可能是识别错误
                 // 使用 saturating_sub 防止下溢到负值（usize 不能为负）
-                let penalty = if lines > 0 && chars / lines < 3 { lines * 5 } else { 0 };
+                let penalty = if lines > 0 && chars / lines < 3 {
+                    lines * 5
+                } else {
+                    0
+                };
 
-                base_score.saturating_add(quality_bonus).saturating_sub(penalty)
+                base_score
+                    .saturating_add(quality_bonus)
+                    .saturating_sub(penalty)
             })
             .sum()
     }
@@ -277,10 +297,12 @@ pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<OcrResult, String> 
     // 如果原图效果不佳，在后台线程中执行耗时的图像增强
     let png_bytes_owned = png_bytes.to_vec();
     let png_bytes_clone1 = png_bytes_owned.clone();
-    let enhanced_task = tokio::task::spawn_blocking(move || preprocess_png_bytes(&png_bytes_clone1).ok());
-    
+    let enhanced_task =
+        tokio::task::spawn_blocking(move || preprocess_png_bytes(&png_bytes_clone1).ok());
+
     let png_bytes_clone2 = png_bytes_owned.clone();
-    let light_enhanced_task = tokio::task::spawn_blocking(move || preprocess_png_bytes_light(&png_bytes_clone2).ok());
+    let light_enhanced_task =
+        tokio::task::spawn_blocking(move || preprocess_png_bytes_light(&png_bytes_clone2).ok());
 
     let enhanced_png = enhanced_task.await.unwrap_or(None);
     let light_enhanced_png = light_enhanced_task.await.unwrap_or(None);
@@ -293,7 +315,7 @@ pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<OcrResult, String> 
         attempts.push((enhanced.as_slice(), Some("en-US"), "enhanced-en"));
         attempts.push((enhanced.as_slice(), None, "enhanced-auto"));
     }
-    
+
     // 轻度增强版本（保留更多细节）
     if let Some(light) = light_enhanced_png.as_ref() {
         attempts.push((light.as_slice(), Some("zh-Hans"), "light-zh"));

@@ -168,7 +168,11 @@ impl ClipboardManager {
                 // 通知等待的线程保存已完成
                 // 仅当没有新的脏数据时才标记完成，否则循环继续处理
                 let mut state = lock.lock();
-                if state.history_dirty || state.categories_dirty || state.pinned_dirty || state.clear_all {
+                if state.history_dirty
+                    || state.categories_dirty
+                    || state.pinned_dirty
+                    || state.clear_all
+                {
                     // save_history_on_exit 在我们做 I/O 期间设置了新的脏标记
                     // 不设置 save_completed，让循环继续处理新数据
                 } else {
@@ -269,7 +273,8 @@ impl ClipboardManager {
                 Ok(())
             }
             Err(e) => {
-                let error_msg = AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e));
+                let error_msg =
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e));
                 log::error!("{}", error_msg);
                 Err(error_msg)
             }
@@ -490,7 +495,10 @@ impl ClipboardManager {
                     exact_index_cache.clear();
                     exact_index_cache.put(content_hash, 0);
                     *fingerprints = build_history_fingerprints(&history);
-                    { let mut idx = self.fingerprint_index.lock(); *idx = build_fingerprint_index(&fingerprints); }
+                    {
+                        let mut idx = self.fingerprint_index.lock();
+                        *idx = build_fingerprint_index(&fingerprints);
+                    }
                     self.history_cache_dirty.store(false, Ordering::Relaxed);
                     return;
                 }
@@ -503,13 +511,19 @@ impl ClipboardManager {
             let cache_dirty = self.history_cache_dirty.load(Ordering::Relaxed);
             if cache_dirty || fingerprints.len() != history.len() {
                 *fingerprints = build_history_fingerprints(&history);
-                { let mut idx = self.fingerprint_index.lock(); *idx = build_fingerprint_index(&fingerprints); }
+                {
+                    let mut idx = self.fingerprint_index.lock();
+                    *idx = build_fingerprint_index(&fingerprints);
+                }
                 self.history_cache_dirty.store(false, Ordering::Relaxed);
             }
-            let candidate_idx = self.fingerprint_index.lock().get(&(content_len, content_hash)).copied();
-            if let Some(exact_index) = candidate_idx.filter(|&idx| {
-                history.get(idx).is_some_and(|item| item == &content)
-            })
+            let candidate_idx = self
+                .fingerprint_index
+                .lock()
+                .get(&(content_len, content_hash))
+                .copied();
+            if let Some(exact_index) =
+                candidate_idx.filter(|&idx| history.get(idx).is_some_and(|item| item == &content))
             {
                 // 在指纹索引中找到，移动到最前面
                 if exact_index != 0 {
@@ -535,7 +549,10 @@ impl ClipboardManager {
                 exact_index_cache.clear();
                 exact_index_cache.put(content_hash, 0);
                 *fingerprints = build_history_fingerprints(&history);
-                { let mut idx = self.fingerprint_index.lock(); *idx = build_fingerprint_index(&fingerprints); }
+                {
+                    let mut idx = self.fingerprint_index.lock();
+                    *idx = build_fingerprint_index(&fingerprints);
+                }
                 self.history_cache_dirty.store(false, Ordering::Relaxed);
                 return;
             }
@@ -605,11 +622,18 @@ impl ClipboardManager {
             exact_index_cache.put(stable_text_hash(first), 0);
         }
         *fingerprints = build_history_fingerprints(&history);
-        { let mut idx = self.fingerprint_index.lock(); *idx = build_fingerprint_index(&fingerprints); }
+        {
+            let mut idx = self.fingerprint_index.lock();
+            *idx = build_fingerprint_index(&fingerprints);
+        }
         self.history_cache_dirty.store(false, Ordering::Relaxed);
     }
 
-    pub async fn update_item_content(&self, old_item_id: &str, new_content: String) -> Result<(), String> {
+    pub async fn update_item_content(
+        &self,
+        old_item_id: &str,
+        new_content: String,
+    ) -> Result<(), String> {
         let new_item_id = crate::utils::database::stable_history_item_id(&new_content);
 
         // === 阶段一：持有 history 锁，原子完成所有内存状态修改 ===
@@ -641,7 +665,8 @@ impl ClipboardManager {
 
             // 同步更新 pinned_items 内存状态
             let mut pinned_items = lock_arc_mutex(&self.pinned_items);
-            let was_pinned = if let Some(pos) = pinned_items.iter().position(|id| id == old_item_id) {
+            let was_pinned = if let Some(pos) = pinned_items.iter().position(|id| id == old_item_id)
+            {
                 pinned_items[pos] = new_item_id.clone();
                 true
             } else {
@@ -923,7 +948,12 @@ impl ClipboardManager {
         };
 
         if let Err(ref e) = db_result {
-            log::warn!("set_pinned_async: 数据库操作失败，执行回滚: item_id={}, pinned={}, error={}", item_id, pinned, e);
+            log::warn!(
+                "set_pinned_async: 数据库操作失败，执行回滚: item_id={}, pinned={}, error={}",
+                item_id,
+                pinned,
+                e
+            );
             let mut history = lock_arc_mutex(&self.history);
             let exists = history.iter().any(|existing| {
                 crate::utils::database::stable_history_item_id(existing) == item_id
@@ -1137,10 +1167,7 @@ fn apply_pin_order(history: &mut Vec<String>, pinned_items: &[String]) {
 
     // Bug修复 (B1): 清理 pinned_items 中不在 history 中的孤立条目
     if !pinned_set.is_empty() {
-        log::debug!(
-            "apply_pin_order: 清理 {} 个孤立置顶条目",
-            pinned_set.len()
-        );
+        log::debug!("apply_pin_order: 清理 {} 个孤立置顶条目", pinned_set.len());
     }
 
     let mut pinned_map: HashMap<String, String> = pinned_list
@@ -1168,7 +1195,10 @@ mod tests {
         let b = stable_text_hash("hello world");
         assert_eq!(a, b);
         // 不同文本哈希不同（极小概率碰撞忽略）
-        assert_ne!(stable_text_hash("hello world"), stable_text_hash("hello worlD"));
+        assert_ne!(
+            stable_text_hash("hello world"),
+            stable_text_hash("hello worlD")
+        );
     }
 
     #[test]
@@ -1202,22 +1232,25 @@ mod tests {
 
     #[test]
     fn test_shrink_text_history_without_group_protection() {
-        let mut history = vec!["a".to_string(), "b".to_string(), "c".to_string(), "d".to_string()];
+        let mut history = vec![
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+            "d".to_string(),
+        ];
         let mut categories = HashMap::new();
         let pinned = vec![];
-        shrink_text_history_with_group_protection(
-            &mut history,
-            2,
-            &mut categories,
-            &pinned,
-            false,
-        );
+        shrink_text_history_with_group_protection(&mut history, 2, &mut categories, &pinned, false);
         assert_eq!(history, vec!["a".to_string(), "b".to_string()]);
     }
 
     #[test]
     fn test_shrink_with_group_protection_keeps_categorized() {
-        let mut history = vec!["普通1".to_string(), "分类项".to_string(), "普通2".to_string()];
+        let mut history = vec![
+            "普通1".to_string(),
+            "分类项".to_string(),
+            "普通2".to_string(),
+        ];
         let mut categories = HashMap::new();
         let cat_id = crate::utils::database::stable_history_item_id("分类项");
         categories.insert(cat_id.clone(), "工作".to_string());
@@ -1242,7 +1275,12 @@ mod tests {
 
     #[test]
     fn test_apply_pin_order_sorts_pinned_first() {
-        let mut history = vec!["普通A".to_string(), "置顶X".to_string(), "普通B".to_string(), "置顶Y".to_string()];
+        let mut history = vec![
+            "普通A".to_string(),
+            "置顶X".to_string(),
+            "普通B".to_string(),
+            "置顶Y".to_string(),
+        ];
         let id_x = crate::utils::database::stable_history_item_id("置顶X");
         let id_y = crate::utils::database::stable_history_item_id("置顶Y");
         let pinned = vec![id_x.clone(), id_y.clone()];

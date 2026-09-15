@@ -1,5 +1,5 @@
-use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread;
 use std::time::Duration;
 
@@ -185,13 +185,12 @@ impl WindowsClipboardEventBackend {
         };
         use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
         use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-        use windows::Win32::UI::WindowsAndMessaging::{
-            CreateWindowExW, DefWindowProcW, DestroyWindow,
-            DispatchMessageW, GetMessageW, PostMessageW, PostQuitMessage, RegisterClassW,
-            TranslateMessage, MSG, WM_CLIPBOARDUPDATE,
-            WM_CLOSE, WM_DESTROY, WM_NCDESTROY, WNDCLASSW,
-        };
         use windows::Win32::UI::WindowsAndMessaging::HWND_MESSAGE;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
+            PostMessageW, PostQuitMessage, RegisterClassW, TranslateMessage, MSG,
+            WM_CLIPBOARDUPDATE, WM_CLOSE, WM_DESTROY, WM_NCDESTROY, WNDCLASSW,
+        };
 
         let (event_tx, event_rx) = mpsc::channel::<()>();
         let (ready_tx, ready_rx) = mpsc::channel::<bool>();
@@ -213,7 +212,9 @@ impl WindowsClipboardEventBackend {
                     fn drop(&mut self) {
                         unsafe {
                             if self.listener_added {
-                                let _ = winapi::um::winuser::RemoveClipboardFormatListener(self.hwnd.0 as *mut winapi::shared::windef::HWND__);
+                                let _ = winapi::um::winuser::RemoveClipboardFormatListener(
+                                    self.hwnd.0 as *mut winapi::shared::windef::HWND__,
+                                );
                             }
                             if !self.hwnd.0.is_null() {
                                 let _ = DestroyWindow(self.hwnd);
@@ -302,7 +303,10 @@ impl WindowsClipboardEventBackend {
                     }
                 };
                 // Bug修复 (B10): 使用 RAII 保护窗口资源
-                let mut window_guard = WindowGuard { hwnd, listener_added: false };
+                let mut window_guard = WindowGuard {
+                    hwnd,
+                    listener_added: false,
+                };
                 hwnd_holder_for_thread.store(hwnd.0 as isize, Ordering::Release);
                 log::info!("剪贴板消息窗口创建成功: hwnd={}", hwnd.0 as isize);
                 if cancelled_for_thread.load(Ordering::Acquire) {
@@ -322,7 +326,10 @@ impl WindowsClipboardEventBackend {
                     }
                 }
 
-                if winapi::um::winuser::AddClipboardFormatListener(hwnd.0 as *mut winapi::shared::windef::HWND__) == 0 {
+                if winapi::um::winuser::AddClipboardFormatListener(
+                    hwnd.0 as *mut winapi::shared::windef::HWND__,
+                ) == 0
+                {
                     log::error!("AddClipboardFormatListener 注册失败");
                     let _ = ready_tx.send(false);
                     {
@@ -378,7 +385,12 @@ impl WindowsClipboardEventBackend {
                 let hwnd = hwnd_holder.load(Ordering::Acquire);
                 if hwnd != 0 {
                     unsafe {
-                        let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_CLOSE, WPARAM(0), LPARAM(0));
+                        let _ = PostMessageW(
+                            Some(HWND(hwnd as *mut _)),
+                            WM_CLOSE,
+                            WPARAM(0),
+                            LPARAM(0),
+                        );
                     }
                 }
                 None

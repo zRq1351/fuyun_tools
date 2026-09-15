@@ -5,14 +5,12 @@ use crate::services::launcher_db;
 pub use crate::utils::system_utils::resolve_lnk_target;
 
 #[cfg(target_os = "windows")]
+use std::os::windows::ffi::OsStrExt;
+#[cfg(target_os = "windows")]
 use windows::{
     core::PCWSTR,
-    Win32::Storage::FileSystem::{
-        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
-    }
+    Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW},
 };
-#[cfg(target_os = "windows")]
-use std::os::windows::ffi::OsStrExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredApp {
@@ -222,7 +220,6 @@ fn is_microsoft_app(target: &str) -> bool {
 #[cfg(not(target_os = "windows"))]
 fn is_microsoft_app(_target: &str) -> bool {
     false
-
 }
 
 #[cfg(target_os = "windows")]
@@ -329,11 +326,10 @@ fn is_microsoft_company_exe(target: &str) -> bool {
             return false;
         }
 
-        let company_name =
-            String::from_utf16_lossy(std::slice::from_raw_parts(
-                value_ptr as *const u16,
-                value_len.saturating_sub(1) as usize,
-            ));
+        let company_name = String::from_utf16_lossy(std::slice::from_raw_parts(
+            value_ptr as *const u16,
+            value_len.saturating_sub(1) as usize,
+        ));
         company_name.to_lowercase().contains("microsoft")
     }
 }
@@ -370,8 +366,14 @@ mod tests {
 
     #[test]
     fn test_is_system_app_rejects_normal_app() {
-        assert!(!is_system_app("Visual Studio Code", "C:/Program Files/VSCode/code.exe"));
-        assert!(!is_system_app("Chrome", "C:/Program Files/Google/Chrome/chrome.exe"));
+        assert!(!is_system_app(
+            "Visual Studio Code",
+            "C:/Program Files/VSCode/code.exe"
+        ));
+        assert!(!is_system_app(
+            "Chrome",
+            "C:/Program Files/Google/Chrome/chrome.exe"
+        ));
         assert!(!is_system_app("", ""));
     }
 
@@ -386,17 +388,25 @@ mod tests {
 
     #[test]
     fn test_is_microsoft_related_target() {
-        assert!(is_microsoft_related_target("https://learn.microsoft.com/dotnet"));
-        assert!(is_microsoft_related_target("C:\\Program Files\\Microsoft Visual Studio\\v1"));
+        assert!(is_microsoft_related_target(
+            "https://learn.microsoft.com/dotnet"
+        ));
+        assert!(is_microsoft_related_target(
+            "C:\\Program Files\\Microsoft Visual Studio\\v1"
+        ));
         assert!(is_microsoft_related_target("C:\\Windows Kits\\10\\bin"));
-        assert!(!is_microsoft_related_target("C:\\Program Files\\JetBrains\\idea.exe"));
+        assert!(!is_microsoft_related_target(
+            "C:\\Program Files\\JetBrains\\idea.exe"
+        ));
         assert!(!is_microsoft_related_target(""));
     }
 
     #[test]
     fn test_is_microsoft_company_exe_missing_file_returns_false() {
         // 不存在的文件无法读取版本信息，应返回 false 而非 panic
-        assert!(!is_microsoft_company_exe("C:/definitely/not/exists/none.exe"));
+        assert!(!is_microsoft_company_exe(
+            "C:/definitely/not/exists/none.exe"
+        ));
     }
 
     #[test]
@@ -408,7 +418,7 @@ mod tests {
 pub async fn scan_and_save_apps() -> Result<AppStore, String> {
     // Clear the in-memory cache before scanning
     crate::services::app_scanner::clear_app_cache();
-    
+
     let categories = crate::services::app_scanner::scan_apps_by_category();
     let mut apps = Vec::new();
 

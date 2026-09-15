@@ -33,7 +33,10 @@ pub fn to_frontend_error_json(kind: AppErrorKind) -> String {
         details: None,
     };
     serde_json::to_string(&payload).unwrap_or_else(|_| {
-        format!(r#"{{"code":"E_UNKNOWN","category":"SYSTEM_ERROR","message":"{}"}}"#, kind.default_message())
+        format!(
+            r#"{{"code":"E_UNKNOWN","category":"SYSTEM_ERROR","message":"{}"}}"#,
+            kind.default_message()
+        )
     })
 }
 
@@ -50,7 +53,10 @@ pub fn to_frontend_error_json_with_params(kind: AppErrorKind, params: serde_json
         details: None,
     };
     serde_json::to_string(&payload).unwrap_or_else(|_| {
-        format!(r#"{{"code":"E_UNKNOWN","category":"SYSTEM_ERROR","message":"{}"}}"#, kind.default_message())
+        format!(
+            r#"{{"code":"E_UNKNOWN","category":"SYSTEM_ERROR","message":"{}"}}"#,
+            kind.default_message()
+        )
     })
 }
 
@@ -68,10 +74,17 @@ pub fn to_frontend_error_json_with_details(
         category,
         message,
         params,
-        details: if details.is_empty() { None } else { Some(details) },
+        details: if details.is_empty() {
+            None
+        } else {
+            Some(details)
+        },
     };
     serde_json::to_string(&payload).unwrap_or_else(|_| {
-        format!(r#"{{"code":"E_UNKNOWN","category":"SYSTEM_ERROR","message":"{}"}}"#, kind.default_message())
+        format!(
+            r#"{{"code":"E_UNKNOWN","category":"SYSTEM_ERROR","message":"{}"}}"#,
+            kind.default_message()
+        )
     })
 }
 
@@ -89,9 +102,8 @@ pub fn app_error_to_frontend_json(err: AppError) -> String {
         params: None,
         details,
     };
-    serde_json::to_string(&payload).unwrap_or_else(|_| {
-        crate::core::error::to_frontend_error_string(err_clone)
-    })
+    serde_json::to_string(&payload)
+        .unwrap_or_else(|_| crate::core::error::to_frontend_error_string(err_clone))
 }
 
 /// 检查字符串是否为有效的前端错误 JSON
@@ -168,7 +180,9 @@ mod tests {
 
     #[test]
     fn test_is_frontend_error_json() {
-        assert!(is_frontend_error_json(&to_frontend_error_json(AppErrorKind::Unknown)));
+        assert!(is_frontend_error_json(&to_frontend_error_json(
+            AppErrorKind::Unknown
+        )));
         assert!(!is_frontend_error_json("plain text"));
         assert!(!is_frontend_error_json(""));
         assert!(!is_frontend_error_json("{\"noCode\": 1}"));

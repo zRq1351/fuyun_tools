@@ -471,10 +471,7 @@ fn parse_migration_version(raw: &str) -> Option<MigrationVersion> {
         .split_once('-')
         .map(|(left, _)| left)
         .unwrap_or(trimmed);
-    let core = core
-        .split_once('+')
-        .map(|(left, _)| left)
-        .unwrap_or(core);
+    let core = core.split_once('+').map(|(left, _)| left).unwrap_or(core);
     let mut parts = core.split('.');
     let major = parts.next()?.parse::<u32>().ok()?;
     let minor = parts.next().unwrap_or("0").parse::<u32>().ok()?;
@@ -505,9 +502,7 @@ impl AppSettingsData {
             return inner
                 .split(&[',', ' ', '\t'][..])
                 .filter(|s| !s.is_empty())
-                .all(|s| {
-                    s.chars().all(|c| c.is_ascii_digit() || c == '.')
-                });
+                .all(|s| s.chars().all(|c| c.is_ascii_digit() || c == '.'));
         }
         false
     }
@@ -606,14 +601,18 @@ impl AppSettingsData {
                 .translation_prompt_template
                 .contains("{target_language}")
         {
-            return Err(AppErrorKind::SettingsTranslationPromptMissingPlaceholder.to_frontend_json());
+            return Err(
+                AppErrorKind::SettingsTranslationPromptMissingPlaceholder.to_frontend_json()
+            );
         }
         if !self.explanation_prompt_template.contains("{text}")
             || !self
                 .explanation_prompt_template
                 .contains("{target_language}")
         {
-            return Err(AppErrorKind::SettingsExplanationPromptMissingPlaceholder.to_frontend_json());
+            return Err(
+                AppErrorKind::SettingsExplanationPromptMissingPlaceholder.to_frontend_json()
+            );
         }
 
         for prompt in &self.selection_custom_prompts {
@@ -755,7 +754,11 @@ impl AppSettingsData {
         if self.recording_file_name_template.trim().is_empty() {
             self.recording_file_name_template = default_recording_file_name_template();
         }
-        if !self.recording_ffmpeg_download_url.trim().starts_with("https://") {
+        if !self
+            .recording_ffmpeg_download_url
+            .trim()
+            .starts_with("https://")
+        {
             self.recording_ffmpeg_download_url = default_recording_ffmpeg_download_url();
         }
         if self.recording_window_audio_sync_advance_ms > 500 {
@@ -791,7 +794,7 @@ impl AppSettingsData {
 #[cfg(windows)]
 pub fn write_windows_credential(target: &str, value: &str) -> Result<(), String> {
     use windows::Win32::Security::Credentials::{
-        CredWriteW, CREDENTIALW, CRED_TYPE_GENERIC, CRED_PERSIST_LOCAL_MACHINE,
+        CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
     };
     let target_wide: Vec<u16> = target.encode_utf16().chain(Some(0)).collect();
     let value_wide: Vec<u16> = value.encode_utf16().collect();
@@ -805,16 +808,15 @@ pub fn write_windows_credential(target: &str, value: &str) -> Result<(), String>
         ..Default::default()
     };
     unsafe {
-        CredWriteW(&credential, 0)
-            .map_err(|e| format!("CredWriteW failed: {e}"))?;
+        CredWriteW(&credential, 0).map_err(|e| format!("CredWriteW failed: {e}"))?;
     }
     Ok(())
 }
 
 #[cfg(windows)]
 pub fn read_windows_credential(target: &str) -> Result<String, String> {
-    use windows::Win32::Security::Credentials::{CredReadW, CREDENTIALW, CRED_TYPE_GENERIC};
     use windows::core::PWSTR;
+    use windows::Win32::Security::Credentials::{CredReadW, CREDENTIALW, CRED_TYPE_GENERIC};
     let target_wide: Vec<u16> = target.encode_utf16().chain(Some(0)).collect();
     let mut pcred: *mut CREDENTIALW = std::ptr::null_mut();
     unsafe {
@@ -840,8 +842,8 @@ pub fn read_windows_credential(target: &str) -> Result<String, String> {
 
 #[cfg(windows)]
 pub fn delete_windows_credential(target: &str) {
-    use windows::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
     use windows::core::PWSTR;
+    use windows::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
     let target_wide: Vec<u16> = target.encode_utf16().chain(Some(0)).collect();
     unsafe {
         let _ = CredDeleteW(
@@ -939,8 +941,14 @@ mod tests {
         let contents = std::fs::read_to_string(&path).expect("读取 settings.json 失败");
         let parsed: serde_json::Value =
             serde_json::from_str(&contents).expect("settings.json 不是合法 JSON");
-        let v = parsed.get("recording_enabled").expect("缺少 recording_enabled 字段");
-        assert_eq!(v, &serde_json::Value::Bool(true), "recording_enabled 应为 true");
+        let v = parsed
+            .get("recording_enabled")
+            .expect("缺少 recording_enabled 字段");
+        assert_eq!(
+            v,
+            &serde_json::Value::Bool(true),
+            "recording_enabled 应为 true"
+        );
     }
 
     #[test]
@@ -951,8 +959,11 @@ mod tests {
             .join("debug")
             .join("settings.json");
         let contents = std::fs::read_to_string(&path).expect("读取 settings.json 失败");
-        let settings: AppSettingsData = serde_json::from_str(&contents)
-            .expect("settings.json 反序列化为 AppSettingsData 失败");
-        assert!(settings.recording_enabled, "反序列化后 recording_enabled 应为 true");
+        let settings: AppSettingsData =
+            serde_json::from_str(&contents).expect("settings.json 反序列化为 AppSettingsData 失败");
+        assert!(
+            settings.recording_enabled,
+            "反序列化后 recording_enabled 应为 true"
+        );
     }
 }

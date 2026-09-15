@@ -39,7 +39,11 @@ impl ClipboardPoller {
         }
 
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
-        if let Ok(mut guard) = self.stop_tx.get_or_init(|| std::sync::Mutex::new(None)).lock() {
+        if let Ok(mut guard) = self
+            .stop_tx
+            .get_or_init(|| std::sync::Mutex::new(None))
+            .lock()
+        {
             *guard = Some(stop_tx);
         }
 
@@ -102,7 +106,11 @@ impl ClipboardPoller {
 
     /// 停止监听线程
     pub fn stop(&self) {
-        if let Ok(mut guard) = self.stop_tx.get_or_init(|| std::sync::Mutex::new(None)).lock() {
+        if let Ok(mut guard) = self
+            .stop_tx
+            .get_or_init(|| std::sync::Mutex::new(None))
+            .lock()
+        {
             if let Some(tx) = guard.take() {
                 let _ = tx.send(());
             }

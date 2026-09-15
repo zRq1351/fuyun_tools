@@ -84,7 +84,7 @@ pub async fn reset_temp_text_table(
 ) -> Result<(), String> {
     validate_identifier(table_name)?;
     validate_identifier(column_name)?;
-    
+
     let create_sql = format!(
         "CREATE TEMP TABLE IF NOT EXISTS {} ({} TEXT PRIMARY KEY)",
         table_name, column_name
@@ -112,7 +112,7 @@ pub async fn fill_temp_text_table(
 ) -> Result<(), String> {
     validate_identifier(table_name)?;
     validate_identifier(column_name)?;
-    
+
     if values.is_empty() {
         return Ok(());
     }
@@ -125,10 +125,9 @@ pub async fn fill_temp_text_table(
             b.push_bind(val);
         });
         let query = query_builder.build();
-        query
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        query.execute(&mut **tx).await.map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
     }
     Ok(())
 }
@@ -141,7 +140,7 @@ pub async fn reset_temp_position_table(
 ) -> Result<(), String> {
     validate_identifier(table_name)?;
     validate_identifier(key_column)?;
-    
+
     let create_sql = format!(
         "CREATE TEMP TABLE IF NOT EXISTS {} ({} TEXT PRIMARY KEY, position INTEGER NOT NULL)",
         table_name, key_column
@@ -169,7 +168,7 @@ pub async fn fill_temp_position_table(
 ) -> Result<(), String> {
     validate_identifier(table_name)?;
     validate_identifier(key_column)?;
-    
+
     if values.is_empty() {
         return Ok(());
     }
@@ -184,10 +183,9 @@ pub async fn fill_temp_position_table(
                 .push_bind((chunk_idx * chunk_size + i) as i64);
         });
         let query = query_builder.build();
-        query
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        query.execute(&mut **tx).await.map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
     }
     Ok(())
 }
@@ -207,11 +205,7 @@ pub fn create_db_options(db_path: &PathBuf) -> sqlx::sqlite::SqliteConnectOption
 /// 注意：使用字节偏移进行截取，对纯 ASCII 文本精确，
 /// 对多字节 UTF-8（如中文）截取位置可能不是精确的字符边界，
 /// 但 adjust_to_char_boundary 确保不会 panic。
-pub fn build_keyword_snippet(
-    content: &str,
-    keyword: &str,
-    max_len: usize,
-) -> String {
+pub fn build_keyword_snippet(content: &str, keyword: &str, max_len: usize) -> String {
     if keyword.is_empty() || content.is_empty() {
         let truncated = if content.len() > max_len {
             let end = adjust_to_char_boundary(content, max_len);
@@ -245,10 +239,7 @@ pub fn build_keyword_snippet(
 }
 
 /// 生成搜索关键词的上下文摘要片段（使用默认最大长度 108）
-pub fn build_keyword_snippet_default(
-    content: &str,
-    keyword: &str,
-) -> String {
+pub fn build_keyword_snippet_default(content: &str, keyword: &str) -> String {
     build_keyword_snippet(content, keyword, 108)
 }
 

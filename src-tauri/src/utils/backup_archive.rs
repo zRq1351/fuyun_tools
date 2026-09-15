@@ -517,16 +517,19 @@ mod tests {
         let tmp = create_backup_temp_dir().unwrap();
         fs::write(tmp.join("data.json"), "test").unwrap();
         let checksums = compute_checksums(&tmp).unwrap();
-        let result = validate_manifest_checksums(&tmp, &BackupManifest {
-            backup_format_version: 1,
-            app_name: "test".into(),
-            app_version: "1.0".into(),
-            created_at: 0,
-            platform: "test".into(),
-            includes: Default::default(),
-            stats: Default::default(),
-            checksums,
-        });
+        let result = validate_manifest_checksums(
+            &tmp,
+            &BackupManifest {
+                backup_format_version: 1,
+                app_name: "test".into(),
+                app_version: "1.0".into(),
+                created_at: 0,
+                platform: "test".into(),
+                includes: Default::default(),
+                stats: Default::default(),
+                checksums,
+            },
+        );
         assert!(result.is_ok());
         let _ = fs::remove_dir_all(&tmp);
     }
@@ -536,17 +539,23 @@ mod tests {
         let tmp = create_backup_temp_dir().unwrap();
         fs::write(tmp.join("data.json"), "test").unwrap();
         let mut bad_checksums = std::collections::HashMap::new();
-        bad_checksums.insert("data.json".to_string(), "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_string());
-        let result = validate_manifest_checksums(&tmp, &BackupManifest {
-            backup_format_version: 1,
-            app_name: "test".into(),
-            app_version: "1.0".into(),
-            created_at: 0,
-            platform: "test".into(),
-            includes: Default::default(),
-            stats: Default::default(),
-            checksums: bad_checksums,
-        });
+        bad_checksums.insert(
+            "data.json".to_string(),
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+        );
+        let result = validate_manifest_checksums(
+            &tmp,
+            &BackupManifest {
+                backup_format_version: 1,
+                app_name: "test".into(),
+                app_version: "1.0".into(),
+                created_at: 0,
+                platform: "test".into(),
+                includes: Default::default(),
+                stats: Default::default(),
+                checksums: bad_checksums,
+            },
+        );
         assert!(result.is_err());
         let _ = fs::remove_dir_all(&tmp);
     }
@@ -562,12 +571,17 @@ mod tests {
 
         // 创建测试文件结构
         fs::create_dir_all(source_dir.join("settings")).unwrap();
-        fs::write(source_dir.join("settings/settings.json"), r#"{"hot_key":"Ctrl+V"}"#).unwrap();
+        fs::write(
+            source_dir.join("settings/settings.json"),
+            r#"{"hot_key":"Ctrl+V"}"#,
+        )
+            .unwrap();
         fs::create_dir_all(source_dir.join("text_history")).unwrap();
         fs::write(
             source_dir.join("text_history/history.json"),
             r#"{"items":["hello","world"],"categories":{},"category_list":[],"pinned_items":[]}"#,
-        ).unwrap();
+        )
+            .unwrap();
         fs::write(source_dir.join("manifest.json"), r#"{"version":1}"#).unwrap();
 
         // 打包

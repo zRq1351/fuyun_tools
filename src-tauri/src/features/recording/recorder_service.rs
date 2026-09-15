@@ -8,9 +8,9 @@ use crate::features::recording::error_codes::{
     RECORDING_START_FAILED,
 };
 use crate::features::recording::events::{
-    emit_recording_audio_merging, emit_recording_device_list, emit_recording_effective_audio_device,
-    emit_recording_error, emit_recording_finished, emit_recording_state_changed,
-    emit_recording_stats_updated,
+    emit_recording_audio_merging, emit_recording_device_list,
+    emit_recording_effective_audio_device, emit_recording_error, emit_recording_finished,
+    emit_recording_state_changed, emit_recording_stats_updated,
 };
 use crate::features::recording::ffmpeg_runner::{build_output_paths, resolve_ffmpeg_path};
 use crate::features::recording::native_wasapi::{
@@ -77,7 +77,11 @@ fn suppress_console_window(command: &mut Command) -> &mut Command {
 }
 
 /// 等待线程退出（每 10ms 轮询，最多 max_iters 次）。
-fn join_thread_with_timeout<T>(join: std::thread::JoinHandle<T>, name: &str, max_iters: u32) -> bool {
+fn join_thread_with_timeout<T>(
+    join: std::thread::JoinHandle<T>,
+    name: &str,
+    max_iters: u32,
+) -> bool {
     for _ in 0..max_iters {
         if join.is_finished() {
             let _ = join.join();
@@ -135,8 +139,8 @@ fn normalize_runtime_state(runtime: &mut crate::features::recording::state::Reco
         .as_ref()
         .map(|t| !t.is_finished())
         .unwrap_or(false);
-    let audio_running = !runtime.system_audio_threads.is_empty()
-        || runtime.mic_audio_thread.is_some();
+    let audio_running =
+        !runtime.system_audio_threads.is_empty() || runtime.mic_audio_thread.is_some();
     if runtime.process.is_none() && !wgc_running {
         if audio_running {
             // 视频链路已结束但音频线程仍在运行（如 ffmpeg 崩溃进入 Error）：
@@ -224,7 +228,10 @@ fn finalize_auto_stop_recording(
                 matches!(rt.phase, RecordingPhase::Idle | RecordingPhase::Stopping)
             };
             if already_finalizing {
-                log::warn!("自动停止收尾时录制已被其他流程处理，跳过兜底清理: {}", stop_msg);
+                log::warn!(
+                    "自动停止收尾时录制已被其他流程处理，跳过兜底清理: {}",
+                    stop_msg
+                );
                 return;
             }
             match cancel_recording(app, state_arc, request) {
@@ -309,10 +316,7 @@ fn is_wgc_target(target_type: &str) -> bool {
 /// - "wgc_region" + "mon=1,crop=100,200,800,600" → (1, Some((100,200,800,600)))，局部非负坐标
 type WgcMonitorTarget = Option<(usize, Option<(u32, u32, u32, u32)>)>;
 
-fn parse_wgc_monitor_target(
-    target_type: &str,
-    target_id: &str,
-) -> WgcMonitorTarget {
+fn parse_wgc_monitor_target(target_type: &str, target_id: &str) -> WgcMonitorTarget {
     if target_type != "wgc_screen" && target_type != "wgc_region" {
         return None;
     }
@@ -320,7 +324,11 @@ fn parse_wgc_monitor_target(
         Some((m, r)) => (m, Some(r)),
         None => (target_id.trim(), None),
     };
-    let index = mon_part.strip_prefix("mon=")?.trim().parse::<usize>().ok()?;
+    let index = mon_part
+        .strip_prefix("mon=")?
+        .trim()
+        .parse::<usize>()
+        .ok()?;
     match (target_type, rest) {
         ("wgc_screen", None) => Some((index, None)),
         ("wgc_region", Some(rest)) => {
@@ -345,10 +353,7 @@ fn parse_screen_explicit_monitor(target_id: &str) -> Option<usize> {
 }
 
 #[cfg(target_os = "windows")]
-fn resolve_wgc_monitor_start_params(
-    target_type: &str,
-    target_id: &str,
-) -> WgcMonitorTarget {
+fn resolve_wgc_monitor_start_params(target_type: &str, target_id: &str) -> WgcMonitorTarget {
     match target_type {
         "region" => {
             let rect = parse_region_target(target_id)?;
@@ -529,7 +534,11 @@ fn parse_duration_from_ffmpeg_stderr(stderr: &str) -> Option<u64> {
     // 右补齐到毫秒："9"→900ms、"96"→960ms
     let padded = format!("{:0<3}", frac_digits);
     let frac_ms: u64 = padded.get(..3).unwrap_or("0").parse().unwrap_or(0);
-    Some((hours * 3600 + minutes * 60 + seconds).saturating_mul(1000).saturating_add(frac_ms))
+    Some(
+        (hours * 3600 + minutes * 60 + seconds)
+            .saturating_mul(1000)
+            .saturating_add(frac_ms),
+    )
 }
 
 /// 找到 U 位置所属的视频分段序号（最后一个 u_start <= pos 的段；早于首段归 0）
@@ -620,8 +629,12 @@ fn resolve_output_dir(
     if !state.settings.recording_output_dir.trim().is_empty() {
         return Ok(PathBuf::from(state.settings.recording_output_dir.trim()));
     }
-    let mut base = std::env::current_exe()
-        .map_err(|e| AppError::new(ErrorCode::IoError, AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))))?;
+    let mut base = std::env::current_exe().map_err(|e| {
+        AppError::new(
+            ErrorCode::IoError,
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)),
+        )
+    })?;
     let _ = base.pop();
     Ok(base.join("recordings"))
 }
@@ -670,7 +683,11 @@ fn parse_hms_to_ms(s: &str) -> Option<u64> {
         .collect();
     let padded = format!("{:0<3}", frac_digits);
     let frac_ms: u64 = padded.get(..3).unwrap_or("0").parse().unwrap_or(0);
-    Some((hours * 3600 + minutes * 60 + seconds).saturating_mul(1000).saturating_add(frac_ms))
+    Some(
+        (hours * 3600 + minutes * 60 + seconds)
+            .saturating_mul(1000)
+            .saturating_add(frac_ms),
+    )
 }
 
 /// 探测指定流的时长（毫秒）。spec 形如 "v:0" / "a:0"。
@@ -683,7 +700,16 @@ fn probe_stream_duration_ms(
 ) -> Option<u64> {
     if let Some(ffprobe_path) = resolve_ffprobe_path(ffmpeg_path) {
         if let Ok(output) = Command::new(&ffprobe_path)
-            .args(["-v", "error", "-select_streams", spec, "-show_entries", "stream=duration", "-of", "csv=p=0"])
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                spec,
+                "-show_entries",
+                "stream=duration",
+                "-of",
+                "csv=p=0",
+            ])
             .arg(media)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -700,7 +726,11 @@ fn probe_stream_duration_ms(
         }
     }
     // ffmpeg 解码兜底
-    let map = if spec.starts_with('v') { "0:v:0" } else { "0:a:0" };
+    let map = if spec.starts_with('v') {
+        "0:v:0"
+    } else {
+        "0:a:0"
+    };
     let output = Command::new(ffmpeg_path)
         .arg("-hide_banner")
         .arg("-nostats")
@@ -716,7 +746,10 @@ fn probe_stream_duration_ms(
     let mut last_ms: Option<u64> = None;
     for line in stderr.lines() {
         if let Some(pos) = line.find("time=") {
-            let value = line[pos + "time=".len()..].split_whitespace().next().unwrap_or("");
+            let value = line[pos + "time=".len()..]
+                .split_whitespace()
+                .next()
+                .unwrap_or("");
             if let Some(ms) = parse_hms_to_ms(value) {
                 last_ms = Some(ms);
             }
@@ -748,7 +781,8 @@ fn concat_video_segments(
         if let Err(e) = list_file.write_all(line.as_bytes()) {
             drop(list_file);
             let _ = fs::remove_file(&list_path);
-            return Err(AppError::new(ErrorCode::IoError, "写入视频拼接列表失败").with_details(e.to_string()));
+            return Err(AppError::new(ErrorCode::IoError, "写入视频拼接列表失败")
+                .with_details(e.to_string()));
         }
     }
     let mut cmd = Command::new(ffmpeg_path);
@@ -769,10 +803,9 @@ fn concat_video_segments(
         .arg(output_path)
         .output();
     let _ = fs::remove_file(&list_path);
-    let output = output_result
-        .map_err(|e| {
-            AppError::new(ErrorCode::SystemError, "执行视频拼接失败").with_details(e.to_string())
-        })?;
+    let output = output_result.map_err(|e| {
+        AppError::new(ErrorCode::SystemError, "执行视频拼接失败").with_details(e.to_string())
+    })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(AppError::new(ErrorCode::SystemError, "视频拼接失败").with_details(stderr));
@@ -805,10 +838,7 @@ fn parse_black_lead_ms_from_blackdetect(stderr: &str) -> Option<u64> {
 
 /// 探测视频片头是否存在黑帧段及其时长（仅解码开头窗口，开销可忽略）。
 /// 返回 Some(ms) 表示应裁剪的片头黑帧毫秒数；None 表示无需裁剪或探测失败（保守不裁）。
-fn detect_black_lead_ms(
-    ffmpeg_path: &std::path::Path,
-    video_path: &PathBuf,
-) -> Option<u64> {
+fn detect_black_lead_ms(ffmpeg_path: &std::path::Path, video_path: &PathBuf) -> Option<u64> {
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
     cmd.arg("-hide_banner")
@@ -893,11 +923,18 @@ fn make_silent_aac(
 ) -> Result<bool, String> {
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
-    cmd.arg("-hide_banner").arg("-loglevel").arg("warning").arg("-y")
-        .arg("-f").arg("lavfi")
-        .arg("-i").arg("anullsrc=r=48000:cl=stereo")
-        .arg("-t").arg(format!("{:.3}", duration_ms as f64 / 1000.0))
-        .arg("-c:a").arg("aac")
+    cmd.arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("warning")
+        .arg("-y")
+        .arg("-f")
+        .arg("lavfi")
+        .arg("-i")
+        .arg("anullsrc=r=48000:cl=stereo")
+        .arg("-t")
+        .arg(format!("{:.3}", duration_ms as f64 / 1000.0))
+        .arg("-c:a")
+        .arg("aac")
         .arg(output_path);
     let output = cmd
         .output()
@@ -919,7 +956,11 @@ fn merge_audio_segments_only(
     // 过滤掉因剪辑点/校正后有效时长为 0 的分段（如整段落在视频起点之前）
     let segments = segments
         .iter()
-        .filter(|s| s.end_ms.map(|e| e.saturating_sub(s.start_ms) > 0).unwrap_or(true))
+        .filter(|s| {
+            s.end_ms
+                .map(|e| e.saturating_sub(s.start_ms) > 0)
+                .unwrap_or(true)
+        })
         .collect::<Vec<_>>();
     if segments.is_empty() {
         // 输入非空但全部被裁为 0 时长（极短开关音频/整段落在起点前）：
@@ -937,7 +978,9 @@ fn merge_audio_segments_only(
         && segments[0].end_ms.is_none()
     {
         let seg = &segments[0];
-        let is_aac = seg.path.extension()
+        let is_aac = seg
+            .path
+            .extension()
             .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
             .unwrap_or(false);
         if is_aac {
@@ -949,13 +992,20 @@ fn merge_audio_segments_only(
 
     let mut cmd = Command::new(ffmpeg_path);
     suppress_console_window(&mut cmd);
-    cmd.arg("-hide_banner").arg("-loglevel").arg("warning").arg("-y");
+    cmd.arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("warning")
+        .arg("-y");
 
     let mut labels: Vec<String> = Vec::new();
     let mut filter_parts: Vec<String> = Vec::new();
     for (idx, seg) in segments.iter().enumerate() {
         if seg.trim_start_ms > 0 {
-            cmd.arg("-ss").arg(format!("{}.{:03}", seg.trim_start_ms / 1000, seg.trim_start_ms % 1000));
+            cmd.arg("-ss").arg(format!(
+                "{}.{:03}",
+                seg.trim_start_ms / 1000,
+                seg.trim_start_ms % 1000
+            ));
         }
         cmd.arg("-i").arg(&seg.path);
 
@@ -967,7 +1017,11 @@ fn merge_audio_segments_only(
             let keep_s = end_ms.saturating_sub(seg.start_ms) as f64 / 1000.0;
             chain.push_str(&format!(",atrim=end={:.6}", keep_s));
         }
-        chain.push_str(&format!(",asetpts=PTS-STARTPTS,adelay={d}|{d}[{l}]", d = seg.start_ms, l = label));
+        chain.push_str(&format!(
+            ",asetpts=PTS-STARTPTS,adelay={d}|{d}[{l}]",
+            d = seg.start_ms,
+            l = label
+        ));
         filter_parts.push(chain);
         labels.push(format!("[{}]", label));
     }
@@ -982,13 +1036,18 @@ fn merge_audio_segments_only(
         ));
     }
 
-    cmd.arg("-filter_complex").arg(filter_parts.join(";"))
-        .arg("-map").arg("[aout]")
-        .arg("-c:a").arg("aac")
-        .arg("-b:a").arg(format!("{}k", audio_bitrate_kbps.max(32)))
+    cmd.arg("-filter_complex")
+        .arg(filter_parts.join(";"))
+        .arg("-map")
+        .arg("[aout]")
+        .arg("-c:a")
+        .arg("aac")
+        .arg("-b:a")
+        .arg(format!("{}k", audio_bitrate_kbps.max(32)))
         .arg(output_path);
 
-    let output = cmd.output()
+    let output = cmd
+        .output()
         .map_err(|e| format!("启动纯音频合并失败: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -1063,43 +1122,59 @@ fn merge_system_audio_into_video(
     let expected_system_count = system_segments.len();
     let expected_mic_count = mic_segments.len();
 
-        if system_segments.len() == 1 && mic_segments.is_empty() {
-            let seg = &system_segments[0];
-            if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.end_ms.is_none() && seg.path.exists() {
-                let is_aac = seg.path.extension()
-                    .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
-                    .unwrap_or(false);
-                // AAC 文件由 FFmpeg pipe 产生，100% 有效，跳过完整解码验证（仅做文件大小检查）
-                if is_aac || validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
-                    log::debug!(
-                        "快速路径：单个系统音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
-                        seg.start_ms,
-                        seg.trim_start_ms
-                    );
-                    return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false, audio_bitrate_kbps);
-                } else {
-                    log::warn!("快速路径：系统音频文件验证失败，跳过音频合并");
-                    return Ok(());
-                }
+    if system_segments.len() == 1 && mic_segments.is_empty() {
+        let seg = &system_segments[0];
+        if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.end_ms.is_none() && seg.path.exists()
+        {
+            let is_aac = seg
+                .path
+                .extension()
+                .map(|ext| ext.to_string_lossy().to_lowercase() == "aac")
+                .unwrap_or(false);
+            // AAC 文件由 FFmpeg pipe 产生，100% 有效，跳过完整解码验证（仅做文件大小检查）
+            if is_aac || validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
+                log::debug!(
+                    "快速路径：单个系统音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
+                    seg.start_ms,
+                    seg.trim_start_ms
+                );
+                return merge_audio_fast(
+                    ffmpeg_path,
+                    video_path,
+                    &seg.path,
+                    false,
+                    audio_bitrate_kbps,
+                );
+            } else {
+                log::warn!("快速路径：系统音频文件验证失败，跳过音频合并");
+                return Ok(());
             }
         }
-        if mic_segments.len() == 1 && system_segments.is_empty() {
-            let seg = &mic_segments[0];
-            if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.end_ms.is_none() && seg.path.exists() {
-                // 麦克风 WAV 文件仍需 FFmpeg 验证（cpal 写入可能因 I/O 中断损坏）
-                if validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
-                    log::debug!(
-                        "快速路径：单个麦克风音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
-                        seg.start_ms,
-                        seg.trim_start_ms
-                    );
-                    return merge_audio_fast(ffmpeg_path, video_path, &seg.path, false, audio_bitrate_kbps);
-                } else {
-                    log::warn!("快速路径：麦克风音频文件验证失败，跳过音频合并");
-                    return Ok(());
-                }
+    }
+    if mic_segments.len() == 1 && system_segments.is_empty() {
+        let seg = &mic_segments[0];
+        if seg.start_ms < 100 && seg.trim_start_ms == 0 && seg.end_ms.is_none() && seg.path.exists()
+        {
+            // 麦克风 WAV 文件仍需 FFmpeg 验证（cpal 写入可能因 I/O 中断损坏）
+            if validate_audio_file_with_ffmpeg(ffmpeg_path, &seg.path) {
+                log::debug!(
+                    "快速路径：单个麦克风音频片段(start_ms={}, trim_start_ms={})，使用流复制模式",
+                    seg.start_ms,
+                    seg.trim_start_ms
+                );
+                return merge_audio_fast(
+                    ffmpeg_path,
+                    video_path,
+                    &seg.path,
+                    false,
+                    audio_bitrate_kbps,
+                );
+            } else {
+                log::warn!("快速路径：麦克风音频文件验证失败，跳过音频合并");
+                return Ok(());
             }
         }
+    }
 
     let is_valid_audio_segment = |seg: &crate::features::recording::state::AudioSegment| {
         if !seg.path.exists() {
@@ -1169,7 +1244,8 @@ fn merge_system_audio_into_video(
     }
     // 🔧 双音源（sys+mic）：分别对齐合并后 amix 混音，再单次写入视频
     // 两步法对双音源不适用：第二次 merge_audio_fast 的 -map 会替换第一次写入的音频轨，导致系统音频丢失
-    let output_dir = video_path.parent()
+    let output_dir = video_path
+        .parent()
         .ok_or_else(|| AppError::new(ErrorCode::SystemError, "无法获取输出目录"))?;
     if has_system && has_mic {
         log::debug!(
@@ -1185,9 +1261,7 @@ fn merge_system_audio_into_video(
         {
             let _ = fs::remove_file(&sys_aligned);
             let _ = fs::remove_file(&mic_aligned);
-            return Err(
-                AppError::new(ErrorCode::SystemError, "系统音频预合并失败").with_details(e)
-            );
+            return Err(AppError::new(ErrorCode::SystemError, "系统音频预合并失败").with_details(e));
         }
         if let Err(e) =
             merge_audio_segments_only(ffmpeg_path, &valid_mic, &mic_aligned, audio_bitrate_kbps)
@@ -1195,11 +1269,16 @@ fn merge_system_audio_into_video(
             let _ = fs::remove_file(&sys_aligned);
             let _ = fs::remove_file(&mic_aligned);
             return Err(
-                AppError::new(ErrorCode::SystemError, "麦克风音频预合并失败").with_details(e)
+                AppError::new(ErrorCode::SystemError, "麦克风音频预合并失败").with_details(e),
             );
         }
-        let mix_result =
-            mix_audio_files(ffmpeg_path, &sys_aligned, &mic_aligned, &mixed, audio_bitrate_kbps);
+        let mix_result = mix_audio_files(
+            ffmpeg_path,
+            &sys_aligned,
+            &mic_aligned,
+            &mixed,
+            audio_bitrate_kbps,
+        );
         let _ = fs::remove_file(&sys_aligned);
         let _ = fs::remove_file(&mic_aligned);
         mix_result?;
@@ -1215,9 +1294,17 @@ fn merge_system_audio_into_video(
         let seg_count = valid_system.len();
         log::debug!("🔧 两步合并 Step 1: 预合并 {} 个系统音频片段", seg_count);
         merge_audio_segments_only(ffmpeg_path, &valid_system, &sys_aligned, audio_bitrate_kbps)
-            .map_err(|e| AppError::new(ErrorCode::SystemError, "系统音频预合并失败").with_details(e))?;
+            .map_err(|e| {
+                AppError::new(ErrorCode::SystemError, "系统音频预合并失败").with_details(e)
+            })?;
         log::debug!("🔧 两步合并 Step 2: 系统音频流复制合并到视频");
-        merge_audio_fast(ffmpeg_path, video_path, &sys_aligned, false, audio_bitrate_kbps)?;
+        merge_audio_fast(
+            ffmpeg_path,
+            video_path,
+            &sys_aligned,
+            false,
+            audio_bitrate_kbps,
+        )?;
         let _ = fs::remove_file(&sys_aligned);
     }
 
@@ -1226,14 +1313,26 @@ fn merge_system_audio_into_video(
         let seg_count = valid_mic.len();
         log::debug!("🔧 两步合并 Step 1: 预合并 {} 个麦克风音频片段", seg_count);
         merge_audio_segments_only(ffmpeg_path, &valid_mic, &mic_aligned, audio_bitrate_kbps)
-            .map_err(|e| AppError::new(ErrorCode::SystemError, "麦克风音频预合并失败").with_details(e))?;
+            .map_err(|e| {
+                AppError::new(ErrorCode::SystemError, "麦克风音频预合并失败").with_details(e)
+            })?;
         log::debug!("🔧 两步合并 Step 2: 麦克风音频流复制合并到视频");
-        merge_audio_fast(ffmpeg_path, video_path, &mic_aligned, false, audio_bitrate_kbps)?;
+        merge_audio_fast(
+            ffmpeg_path,
+            video_path,
+            &mic_aligned,
+            false,
+            audio_bitrate_kbps,
+        )?;
         let _ = fs::remove_file(&mic_aligned);
     }
 
     let elapsed_ms = started_at.elapsed().as_millis();
-    log::debug!("✅ 音频合并完成（两步法），耗时: {}ms ({:.1}s)", elapsed_ms, elapsed_ms as f64 / 1000.0);
+    log::debug!(
+        "✅ 音频合并完成（两步法），耗时: {}ms ({:.1}s)",
+        elapsed_ms,
+        elapsed_ms as f64 / 1000.0
+    );
     if elapsed_ms > 5000 {
         log::warn!("⚠️ 音频合并耗时较长({}ms)", elapsed_ms);
     }
@@ -1277,8 +1376,10 @@ fn merge_audio_fast(
         .arg(video_path)
         .arg("-i")
         .arg(audio_path)
-        .arg("-map").arg("0:v:0")
-        .arg("-map").arg("1:a:0")
+        .arg("-map")
+        .arg("0:v:0")
+        .arg("-map")
+        .arg("1:a:0")
         .arg("-c:v")
         .arg("copy")
         .arg("-c:a")
@@ -1288,9 +1389,7 @@ fn merge_audio_fast(
         cmd.arg("-b:a")
             .arg(format!("{}k", audio_bitrate_kbps.max(32)));
     }
-    cmd.arg("-movflags")
-        .arg("+faststart")
-        .arg(&merged_path);
+    cmd.arg("-movflags").arg("+faststart").arg(&merged_path);
 
     let child = cmd
         .stdin(Stdio::null())
@@ -1319,10 +1418,7 @@ fn merge_audio_fast(
         // 🔧 AAC 流复制失败时，回退到重编码模式重试一次
         // 常见场景：AAC 文件格式不完整/损坏，流复制无法处理但重编码可以恢复
         if is_aac {
-            log::warn!(
-                "⚠️ AAC 流复制失败，尝试重编码回退: {}",
-                details
-            );
+            log::warn!("⚠️ AAC 流复制失败，尝试重编码回退: {}", details);
             let _ = fs::remove_file(&merged_path);
 
             let mut retry_cmd = Command::new(ffmpeg_path);
@@ -1405,10 +1501,16 @@ fn merge_audio_fast(
                     "录屏快速音频合并耗时",
                     started_at.elapsed().as_millis() as u64,
                     false,
-                    Some(format!("流复制失败:{}；重编码回退失败:{}", details, retry_stderr)),
+                    Some(format!(
+                        "流复制失败:{}；重编码回退失败:{}",
+                        details, retry_stderr
+                    )),
                 );
                 return Err(AppError::new(ErrorCode::SystemError, "快速音频合并失败")
-                    .with_details(format!("流复制失败:{}；重编码回退失败:{}", details, retry_stderr)));
+                    .with_details(format!(
+                        "流复制失败:{}；重编码回退失败:{}",
+                        details, retry_stderr
+                    )));
             }
         }
 
@@ -1560,7 +1662,10 @@ fn rename_recording_output_with_retry(
 }
 
 /// 将临时文件重命名为最终输出；目标已存在时追加序号 (1)/(2)…，避免静默覆盖历史录制
-fn rename_to_final_output(output_tmp: &std::path::Path, output_final: &std::path::Path) -> Result<PathBuf, AppError> {
+fn rename_to_final_output(
+    output_tmp: &std::path::Path,
+    output_final: &std::path::Path,
+) -> Result<PathBuf, AppError> {
     let target = if !output_final.exists() {
         output_final.to_path_buf()
     } else {
@@ -1717,7 +1822,12 @@ fn ensure_system_audio_capture_started(
                 runtime.system_audio_stream_start_ms = Some(actual_start_ms);
                 for p in output_paths {
                     runtime.system_audio_segments.push(
-                        crate::features::recording::state::AudioSegment { path: p, start_ms: actual_start_ms, trim_start_ms: 0, end_ms: None },
+                        crate::features::recording::state::AudioSegment {
+                            path: p,
+                            start_ms: actual_start_ms,
+                            trim_start_ms: 0,
+                            end_ms: None,
+                        },
                     );
                 }
                 Ok(())
@@ -1780,9 +1890,14 @@ fn ensure_system_audio_capture_started(
             let actual_start_ms = derive_audio_segment_start_ms(runtime, stream_start_ms);
             runtime.system_audio_stream_start_ms = Some(actual_start_ms);
             if let Some(path) = runtime.system_audio_wav_path.clone() {
-                runtime
-                    .system_audio_segments
-                    .push(crate::features::recording::state::AudioSegment { path, start_ms: actual_start_ms, trim_start_ms: 0, end_ms: None });
+                runtime.system_audio_segments.push(
+                    crate::features::recording::state::AudioSegment {
+                        path,
+                        start_ms: actual_start_ms,
+                        trim_start_ms: 0,
+                        end_ms: None,
+                    },
+                );
             } else {
                 return Err(AppErrorKind::InternalError.to_frontend_json());
             }
@@ -1839,10 +1954,14 @@ fn ensure_mic_capture_started(
             if runtime.mic_audio_device_id.is_some() {
                 runtime.mic_audio_device_id = None;
                 mic_fell_back_to_default = true;
-                start_microphone_wav_with_device(None, mic_wav.clone(), enabled_flag, pause_flag, error_slot)
-                    .map_err(|second_err| {
-                        format!("{}；回退默认设备失败: {}", first_err, second_err)
-                    })
+                start_microphone_wav_with_device(
+                    None,
+                    mic_wav.clone(),
+                    enabled_flag,
+                    pause_flag,
+                    error_slot,
+                )
+                    .map_err(|second_err| format!("{}；回退默认设备失败: {}", first_err, second_err))
             } else {
                 Err(first_err)
             }
@@ -1863,7 +1982,12 @@ fn ensure_mic_capture_started(
             if let Some(path) = runtime.mic_audio_wav_path.clone() {
                 runtime
                     .mic_audio_segments
-                    .push(crate::features::recording::state::AudioSegment { path, start_ms: actual_start_ms, trim_start_ms: 0, end_ms: None });
+                    .push(crate::features::recording::state::AudioSegment {
+                        path,
+                        start_ms: actual_start_ms,
+                        trim_start_ms: 0,
+                        end_ms: None,
+                    });
             } else {
                 return Err(AppErrorKind::InternalError.to_frontend_json());
             }
@@ -2156,8 +2280,7 @@ fn spawn_stats_loop(
                         // 崩溃抢救：多分段录制时，除最后一段（未写 moov 不可播）外，
                         // 前面的分段都是完整可播的——剔除末段后仍走正常收尾保留已录内容。
                         // 单段录制无内容可保，维持原有丢弃+Error 行为。
-                        let salvageable =
-                            runtime.window_video_segments.len() > 1;
+                        let salvageable = runtime.window_video_segments.len() > 1;
                         if salvageable {
                             log::warn!(
                                 "FFmpeg 进程异常退出，执行分段抢救：保留 {}-1 段",
@@ -2211,20 +2334,19 @@ fn spawn_stats_loop(
                     phase = RecordingPhase::Stopping;
                     auto_stop_session_id = session_id.clone();
                     let err_msg =
-                        "画面捕获会话已结束（目标窗口关闭或系统限制），正在保存已录制内容".to_string();
+                        "画面捕获会话已结束（目标窗口关闭或系统限制），正在保存已录制内容"
+                            .to_string();
                     runtime.last_error = Some(err_msg.clone());
                     emit_error = Some((RECORDING_PROCESS_EXITED, err_msg, session_id.clone()));
                 }
             }
 
             // 无画面看门狗：提前拦截“死黑屏/没内容”的假录制状态
-            let segment_age_ms = runtime.video_segment_started_at
+            let segment_age_ms = runtime
+                .video_segment_started_at
                 .map(|t| t.elapsed().as_millis() as u64)
                 .unwrap_or(u64::MAX);
-            if phase == RecordingPhase::Recording
-                && segment_age_ms > 4000
-                && emit_error.is_none()
-            {
+            if phase == RecordingPhase::Recording && segment_age_ms > 4000 && emit_error.is_none() {
                 let mut no_video_frames = false;
                 if is_wgc_target(&runtime.target_type) {
                     if let Some(first_frame) = runtime.wgc_first_frame_elapsed_ms.as_ref() {
@@ -2234,7 +2356,11 @@ fn spawn_stats_loop(
                     }
                 } else if let Some(current_seg) = runtime.window_video_segments.last() {
                     // FFmpeg 模式下，如果超过 4 秒文件依然是 0 字节，说明没录进任何有效视频帧
-                    if fs::metadata(&current_seg.path).map(|m| m.len()).unwrap_or(0) == 0 {
+                    if fs::metadata(&current_seg.path)
+                        .map(|m| m.len())
+                        .unwrap_or(0)
+                        == 0
+                    {
                         no_video_frames = true;
                     }
                 }
@@ -2428,12 +2554,12 @@ fn spawn_ffmpeg_video_segment(
         "-pix_fmt".to_string(),
         "yuv420p".to_string(),
         "-r".to_string(),
-        format!("{}", fps),           // 输出帧率
+        format!("{}", fps), // 输出帧率
         "-g".to_string(),
-        format!("{}", fps),           // GOP 大小 = 帧率，每秒一个关键帧
+        format!("{}", fps), // GOP 大小 = 帧率，每秒一个关键帧
         "-b:v".to_string(),
         format!("{}k", video_bitrate),
-        "-movflags".to_string(),      // moov atom 前置，改善预览体验
+        "-movflags".to_string(), // moov atom 前置，改善预览体验
         "+faststart".to_string(),
     ]);
     args.push("-an".to_string());
@@ -2454,14 +2580,11 @@ fn spawn_ffmpeg_video_segment(
     // 🔧 将录制进程绑定到 Job Object 以确保随主进程退出
     crate::features::recording::job_object::assign_to_global_job_object(&child);
 
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| {
-            let _ = child.kill();
-            let _ = child.wait();
-            AppError::new(ErrorCode::SystemError, "获取录制进程 stderr 失败")
-        })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        let _ = child.kill();
+        let _ = child.wait();
+        AppError::new(ErrorCode::SystemError, "获取录制进程 stderr 失败")
+    })?;
 
     Ok((child, stderr))
 }
@@ -2537,7 +2660,8 @@ pub fn start_recording(
             AppError::new(ErrorCode::IoError, "创建录制目录失败").with_details(e.to_string())
         })?;
         cleanup_stale_tmp_files(&output_dir);
-        let (tmp_path, final_path, session_id) = build_output_paths(&output_dir, &settings_snapshot.recording_file_name_template);
+        let (tmp_path, final_path, session_id) =
+            build_output_paths(&output_dir, &settings_snapshot.recording_file_name_template);
         let mut runtime = lock_arc_mutex(&runtime_arc);
         normalize_runtime_state(&mut runtime);
         if matches!(
@@ -2664,34 +2788,33 @@ pub fn start_recording(
         // 任何 WGC 启动失败均回退 gdigrab 原路径。
         if matches!(target_type.as_str(), "screen" | "region") && !force_ffmpeg_fallback {
             #[cfg(target_os = "windows")]
-            let monitor_start: WgcMonitorTarget =
-                if target_type == "screen" {
-                    match parse_screen_explicit_monitor(&target_id) {
-                        Some(idx) => {
-                            if idx < monitor_count() {
-                                Some((idx, None))
-                            } else {
-                                return Err(rollback_starting(
-                                    "指定的录制屏幕不存在",
-                                    format!("mon={}，检测到 {} 块屏幕", idx, monitor_count()),
-                                ));
-                            }
-                        }
-                        None => {
-                            if monitor_count() > 1 {
-                                return Err(rollback_starting(
-                                    "检测到多个显示器，请先在录屏工具条中选择要录制的屏幕",
-                                    format!("monitors={}", monitor_count()),
-                                ));
-                            } else {
-                                // 单屏（或枚举失败交由 gdigrab 兜底）
-                                (monitor_count() == 1).then_some((0usize, None))
-                            }
+            let monitor_start: WgcMonitorTarget = if target_type == "screen" {
+                match parse_screen_explicit_monitor(&target_id) {
+                    Some(idx) => {
+                        if idx < monitor_count() {
+                            Some((idx, None))
+                        } else {
+                            return Err(rollback_starting(
+                                "指定的录制屏幕不存在",
+                                format!("mon={}，检测到 {} 块屏幕", idx, monitor_count()),
+                            ));
                         }
                     }
-                } else {
-                    resolve_wgc_monitor_start_params(&target_type, &target_id)
-                };
+                    None => {
+                        if monitor_count() > 1 {
+                            return Err(rollback_starting(
+                                "检测到多个显示器，请先在录屏工具条中选择要录制的屏幕",
+                                format!("monitors={}", monitor_count()),
+                            ));
+                        } else {
+                            // 单屏（或枚举失败交由 gdigrab 兜底）
+                            (monitor_count() == 1).then_some((0usize, None))
+                        }
+                    }
+                }
+            } else {
+                resolve_wgc_monitor_start_params(&target_type, &target_id)
+            };
             #[cfg(not(target_os = "windows"))]
             let monitor_start: Option<(usize, Option<(u32, u32, u32, u32)>)> = None;
 
@@ -2760,7 +2883,9 @@ pub fn start_recording(
         runtime.paused_total_ms = 0;
         // 记录 FFmpeg 启动延迟（仅对非窗口录制有意义）
         runtime.ffmpeg_start_delay_ms = if !is_wgc_target(&target_type) {
-            ffmpeg_spawned_at.duration_since(capture_origin_instant).as_millis() as u64
+            ffmpeg_spawned_at
+                .duration_since(capture_origin_instant)
+                .as_millis() as u64
         } else {
             0
         };
@@ -2814,16 +2939,16 @@ pub fn start_recording(
         runtime.window_segment_index = 0;
         if let Some(seg_path) = window_segment_path.as_ref() {
             let seg0_u_start_ms = runtime.snapshot().elapsed_ms;
-            runtime
-                .window_video_segments
-                .push(crate::features::recording::state::WindowVideoSegment {
+            runtime.window_video_segments.push(
+                crate::features::recording::state::WindowVideoSegment {
                     path: seg_path.clone(),
                     // 首个分段从 U 时钟 0 开始（started_instant 刚设置，elapsed≈0）
                     u_start_ms: seg0_u_start_ms,
                     first_frame_anchor: window_wgc_handle
                         .as_ref()
                         .map(|h| h.first_frame_elapsed_ms.clone()),
-                });
+                },
+            );
         }
         // 系统音频关闭时不占用 loopback 设备；重新开启时再创建新音频分段并在合成阶段按 start_ms 对齐。
         if capture_system_audio {
@@ -2843,7 +2968,9 @@ pub fn start_recording(
             }
         }
         if capture_microphone {
-            if let Err(e) = ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true) {
+            if let Err(e) =
+                ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true)
+            {
                 log::error!("麦克风捕获启动失败: {}", e);
                 runtime.last_error = Some(format!("麦克风未录制: {}", e));
             }
@@ -3151,7 +3278,11 @@ pub fn stop_recording(
             // anchor_ms 已经是从录制开始到首帧的实际经过时间，直接作为校正值
             // wgc_audio_sync_advance_ms 仅作为额外的安全裕量（可选）
             // 当 anchor_ms 较大（>200ms）时，说明系统延迟本身已足够，不需要额外裕量
-            let safety_margin = if anchor_ms > 200 { 0 } else { wgc_audio_sync_advance_ms.min(20) };
+            let safety_margin = if anchor_ms > 200 {
+                0
+            } else {
+                wgc_audio_sync_advance_ms.min(20)
+            };
             let calibrated_anchor_ms = anchor_ms.saturating_add(safety_margin);
             // 多段窗口录制（暂停/恢复产生多个 WGC 分段）时，每段有自己的首帧锚点，
             // 全局单锚点会把末段锚点误用于所有音频分段 → 音画失步；
@@ -3213,8 +3344,10 @@ pub fn stop_recording(
 
         if !window_video_segments.is_empty() && fatal_error.is_none() {
             log::debug!("🔧 合并视频片段...");
-            let seg_paths: Vec<PathBuf> =
-                window_video_segments.iter().map(|s| s.path.clone()).collect();
+            let seg_paths: Vec<PathBuf> = window_video_segments
+                .iter()
+                .map(|s| s.path.clone())
+                .collect();
             if let Err(e) = concat_video_segments(&ffmpeg_path, &seg_paths, output_tmp) {
                 fatal_error = Some(e);
             }
@@ -3244,8 +3377,7 @@ pub fn stop_recording(
 
         // FFmpeg/gdigrab 录制 A/V 同步校正：进程启动延迟 + 实测黑帧时长。
         // 若黑帧将被裁掉，视频时间线整体前移该时长，音频需同步多扣，否则滞后。
-        if !is_wgc_target(&target_type)
-            && (ffmpeg_start_delay_ms > 0 || measured_black_lead_ms > 0)
+        if !is_wgc_target(&target_type) && (ffmpeg_start_delay_ms > 0 || measured_black_lead_ms > 0)
         {
             let effective_delay = ffmpeg_start_delay_ms.saturating_add(measured_black_lead_ms);
             log::debug!(
@@ -3775,7 +3907,11 @@ pub fn pause_recording(
             runtime.session_id.clone(),
             runtime.target_type.clone(),
             // 软暂停：线程留在 runtime 中继续存活（不 join）
-            if soft_pause { None } else { runtime.wgc_thread.take() },
+            if soft_pause {
+                None
+            } else {
+                runtime.wgc_thread.take()
+            },
             runtime.system_audio_stop_flag.take(),
             runtime.system_audio_threads.drain(..).collect::<Vec<_>>(),
             runtime.mic_audio_stop_flag.take(),
@@ -3989,44 +4125,39 @@ pub fn resume_recording(
     let window_handle = if wgc_soft_resume {
         None
     } else if let Some(kind) = wgc_resume_kind.as_deref() {
-        Some(
-            match kind {
-                "wgc_screen" | "wgc_region" => {
-                    let (mon_index, crop_local) =
-                        parse_wgc_monitor_target(kind, &target_id).ok_or_else(|| {
-                            AppError::new(
-                                ErrorCode::SystemError,
-                                "恢复显示器录制失败：目标参数无效",
-                            )
-                                .with_details(format!("target_type={} target_id={}", kind, target_id))
-                        })?;
-                    start_monitor_capture_to_mp4(
-                        mon_index,
-                        crop_local,
-                        next_segment_path.clone(),
-                        fps,
-                        video_bitrate_kbps,
-                        capture_cursor,
-                        std::time::Instant::now(),
-                    )
-                        .map_err(|e| {
-                            AppError::new(ErrorCode::SystemError, "恢复显示器录制失败").with_details(e)
-                        })?
-                }
-                _ => start_window_capture_to_mp4(
-                    target_id.as_str(),
+        Some(match kind {
+            "wgc_screen" | "wgc_region" => {
+                let (mon_index, crop_local) = parse_wgc_monitor_target(kind, &target_id)
+                    .ok_or_else(|| {
+                        AppError::new(ErrorCode::SystemError, "恢复显示器录制失败：目标参数无效")
+                            .with_details(format!("target_type={} target_id={}", kind, target_id))
+                    })?;
+                start_monitor_capture_to_mp4(
+                    mon_index,
+                    crop_local,
                     next_segment_path.clone(),
                     fps,
                     video_bitrate_kbps,
                     capture_cursor,
                     std::time::Instant::now(),
-                    is_force_default_border_enabled(),
                 )
                     .map_err(|e| {
-                        AppError::new(ErrorCode::SystemError, "恢复窗口录制失败").with_details(e)
-                    })?,
-            },
-        )
+                        AppError::new(ErrorCode::SystemError, "恢复显示器录制失败").with_details(e)
+                    })?
+            }
+            _ => start_window_capture_to_mp4(
+                target_id.as_str(),
+                next_segment_path.clone(),
+                fps,
+                video_bitrate_kbps,
+                capture_cursor,
+                std::time::Instant::now(),
+                is_force_default_border_enabled(),
+            )
+                .map_err(|e| {
+                    AppError::new(ErrorCode::SystemError, "恢复窗口录制失败").with_details(e)
+                })?,
+        })
     } else {
         None
     };
@@ -4105,13 +4236,13 @@ pub fn resume_recording(
     // 如果是非 WGC 录制（gdigrab），记录新分段
     if wgc_resume_kind.is_none() {
         runtime.window_segment_index = next_segment_index;
-        runtime.window_video_segments.push(
-            crate::features::recording::state::WindowVideoSegment {
+        runtime
+            .window_video_segments
+            .push(crate::features::recording::state::WindowVideoSegment {
                 path: next_segment_path.clone(),
                 u_start_ms: resume_u_start_ms,
                 first_frame_anchor: None,
-            },
-        );
+            });
         runtime.video_segment_started_at = Some(std::time::Instant::now());
         if let Some((child, stderr)) = ffmpeg_process {
             runtime.process = Some(child);
@@ -4126,13 +4257,13 @@ pub fn resume_recording(
 
     if let Some(handle) = window_handle {
         runtime.window_segment_index = next_segment_index;
-        runtime.window_video_segments.push(
-            crate::features::recording::state::WindowVideoSegment {
+        runtime
+            .window_video_segments
+            .push(crate::features::recording::state::WindowVideoSegment {
                 path: next_segment_path,
                 u_start_ms: resume_u_start_ms,
                 first_frame_anchor: Some(handle.first_frame_elapsed_ms.clone()),
-            },
-        );
+            });
         runtime.video_segment_started_at = Some(std::time::Instant::now());
         runtime.wgc_stop_flag = Some(handle.stop_flag);
         runtime.wgc_pause_flag = Some(handle.pause_flag);
@@ -4154,13 +4285,9 @@ pub fn resume_recording(
         }
     }
     if should_restore_mic_audio && runtime.mic_audio_thread.is_none() {
-        if let Err(e) = ensure_mic_capture_started(
-            app,
-            &mut runtime,
-            &output_dir,
-            &session_id_for_audio,
-            false,
-        ) {
+        if let Err(e) =
+            ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id_for_audio, false)
+        {
             log::error!("恢复麦克风捕获失败: {}", e);
         }
     }
@@ -4337,28 +4464,29 @@ pub fn update_audio_capture(
         if is_paused {
             log::info!("暂停期间开启系统音频：将在恢复录制时启动采集");
         } else {
-            ensure_system_audio_capture_started(
-                app,
-                &mut runtime,
-                &output_dir,
-                &session_id,
-                true,
-            )
-            .map_err(|e| {
-                AppError::new(ErrorCode::SystemError, AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))
+            ensure_system_audio_capture_started(app, &mut runtime, &output_dir, &session_id, true)
+                .map_err(|e| {
+                    AppError::new(
+                        ErrorCode::SystemError,
+                        AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()),
+                    )
                     .with_details(e)
-            })?;
+                })?;
         }
     }
     if should_enable_mic && runtime.mic_audio_thread.is_none() {
         if is_paused {
             log::info!("暂停期间开启麦克风：将在恢复录制时启动采集");
         } else {
-            ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true)
-                .map_err(|e| {
-                    AppError::new(ErrorCode::SystemError, AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))
+            ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true).map_err(
+                |e| {
+                    AppError::new(
+                        ErrorCode::SystemError,
+                        AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()),
+                    )
                         .with_details(e)
-                })?;
+                },
+            )?;
         }
     }
     Ok(())
@@ -4493,10 +4621,8 @@ pub fn run_recording_regression(
             Ok(ffmpeg_path) => {
                 // probe_stream_duration_ms 内部优先用同目录 ffprobe，缺失时 ffmpeg 解码兜底
                 {
-                    let video_ms =
-                        probe_stream_duration_ms(&ffmpeg_path, &output, "v:0");
-                    let audio_ms =
-                        probe_stream_duration_ms(&ffmpeg_path, &output, "a:0");
+                    let video_ms = probe_stream_duration_ms(&ffmpeg_path, &output, "v:0");
+                    let audio_ms = probe_stream_duration_ms(&ffmpeg_path, &output, "a:0");
                     match (video_ms, audio_ms) {
                         (Some(v), Some(a)) => {
                             let diff = (v as i64 - a as i64).abs();
@@ -4626,10 +4752,7 @@ mod calibration_tests {
         // B1=4900 → δ1=5000+160-4900（末段以实时校准值为准）
         assert_eq!(shifts, vec![100, 260]);
 
-        let mut segments = vec![
-            audio("a0", 1000, 0, None),
-            audio("a1", 5200, 0, Some(8000)),
-        ];
+        let mut segments = vec![audio("a0", 1000, 0, None), audio("a1", 5200, 0, Some(8000))];
         apply_window_cycle_shifts(&mut segments, &metas, &shifts);
         // 第 0 周期：与全局校正一致
         assert_eq!(segments[0].start_ms, 900);
@@ -4654,10 +4777,7 @@ mod calibration_tests {
     #[test]
     fn never_frame_anchor_treated_as_zero() {
         // 首段从未出帧（u64::MAX，如窗口最小化）按 0 处理，避免负时长导致偏移错乱
-        let metas = vec![
-            meta("s0", 0, Some(u64::MAX)),
-            meta("s1", 3000, Some(80)),
-        ];
+        let metas = vec![meta("s0", 0, Some(u64::MAX)), meta("s1", 3000, Some(80))];
         let shifts = compute_window_segment_shifts(&metas, &[None, None], 90, 6_000);
         // k0: A=0 → D0=3000, δ0=0；k1(末段): A=90 → D1=2910, δ1=3000+90-3000
         assert_eq!(shifts, vec![0, 90]);
@@ -4674,8 +4794,7 @@ mod calibration_tests {
         ];
         // 模型值：D0=4900、D1=3850；实测：D0 含 +80ms 尾差、D1 含 +70ms、D2 探测失败回退模型
         let measured = vec![Some(4980u64), Some(3920u64), None];
-        let shifts =
-            compute_window_segment_shifts(&metas, &measured, 130, 12_000);
+        let shifts = compute_window_segment_shifts(&metas, &measured, 130, 12_000);
         // δ0=0+100-0=100
         // B1=实测D0=4980 → δ1=5000+150-4980=170
         // B2=4980+实测D1=8900 → δ2=9000+130(末段实时校准)-8900=230
@@ -4688,12 +4807,7 @@ mod calibration_tests {
         assert_eq!(segments[0].start_ms, 4980);
 
         // 全部探测失败时回退模型推算（旧行为）
-        let fallback = compute_window_segment_shifts(
-            &metas,
-            &[None, None, None],
-            130,
-            12_000,
-        );
+        let fallback = compute_window_segment_shifts(&metas, &[None, None, None], 130, 12_000);
         assert_eq!(fallback[1], 5000 + 150 - 4900);
     }
 
@@ -4701,9 +4815,11 @@ mod calibration_tests {
     fn probe_duration_parser_handles_duration_line() {
         let stderr = "Input #0, mp4, from 'x.mp4':\n  Duration: 00:00:01.96, start: 0.000000, bitrate: 1234 kb/s\n";
         assert_eq!(parse_duration_from_ffmpeg_stderr(stderr), Some(1960));
-        let stderr_nofrac =
-            "Input #0:\n  Duration: 00:01:02, start: 0.000000\n";
-        assert_eq!(parse_duration_from_ffmpeg_stderr(stderr_nofrac), Some(62_000));
+        let stderr_nofrac = "Input #0:\n  Duration: 00:01:02, start: 0.000000\n";
+        assert_eq!(
+            parse_duration_from_ffmpeg_stderr(stderr_nofrac),
+            Some(62_000)
+        );
         let stderr2 = "Input #0:\n  Duration: N/A, start: -0.5\n";
         assert_eq!(parse_duration_from_ffmpeg_stderr(stderr2), None);
         let stderr3 = "At least one output file must be specified";
@@ -4749,7 +4865,10 @@ mod calibration_tests {
         assert!(lx + w <= 1920 && ly + h <= 1080);
         assert_eq!((w, h), (220, 600)); // 1920-1700=220
         // 区域不与任何显示器相交
-        assert_eq!(pick_monitor_and_local_rect((5000, 5000, 10, 10), &monitors), None);
+        assert_eq!(
+            pick_monitor_and_local_rect((5000, 5000, 10, 10), &monitors),
+            None
+        );
     }
 
     #[test]
@@ -4771,7 +4890,10 @@ mod calibration_tests {
         let s2 = "[blackdetect @ 0x7f] black_start:1.2 black_end:1.5 black_duration:0.3";
         assert_eq!(parse_black_lead_ms_from_blackdetect(s2), None);
         // 完全无黑帧输出
-        assert_eq!(parse_black_lead_ms_from_blackdetect("frame= 12 fps=0.0\n"), None);
+        assert_eq!(
+            parse_black_lead_ms_from_blackdetect("frame= 12 fps=0.0\n"),
+            None
+        );
         // 极短黑段：解析器忠实返回原始值，是否够裁剪阈值由调用方（MIN_BLACK_LEAD_TRIM_MS）判定
         let s3 = "[blackdetect @ 0x7f] black_start:0 black_end:0.02 black_duration:0.02";
         assert_eq!(parse_black_lead_ms_from_blackdetect(s3), Some(20));

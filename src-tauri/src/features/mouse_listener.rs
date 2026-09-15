@@ -25,9 +25,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetCursorInfo, GetMessageW, LoadCursorW, HHOOK,
-    PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, CURSORINFO,
-    HC_ACTION, IDC_IBEAM, KBDLLHOOKSTRUCT, KBDLLHOOKSTRUCT_FLAGS, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL,
+    CallNextHookEx, DispatchMessageW, GetCursorInfo, GetMessageW, LoadCursorW, PostThreadMessageW,
+    SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, CURSORINFO, HC_ACTION, HHOOK,
+    IDC_IBEAM, KBDLLHOOKSTRUCT, KBDLLHOOKSTRUCT_FLAGS, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL,
     WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_QUIT,
     WM_SYSKEYDOWN, WM_SYSKEYUP, WM_USER,
 };
@@ -182,7 +182,7 @@ fn handle_hook_event(
             }
             handle_selection_toolbar_autoclose(listener_app_handle, Some((last_x, last_y)));
             log::debug!("检测到鼠标左键按下 at ({}, {})", last_x, last_y);
-            
+
             let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
             *state_guard = MouseActionState::MouseDown(last_x, last_y, current_time);
         }
@@ -194,7 +194,7 @@ fn handle_hook_event(
             log::debug!("检测到鼠标左键释放 at ({}, {})", last_x, last_y);
             let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
             let prev_state = std::mem::replace(&mut *state_guard, MouseActionState::Idle);
-            
+
             // 处理从 MouseDown 或 Dragging 状态转换
             let (down_x, down_y, down_time, has_seen_ibeam, mut positions) = match prev_state {
                 MouseActionState::MouseDown(x, y, t) => {
@@ -211,7 +211,7 @@ fn handle_hook_event(
                 }
                 _ => return,
             };
-            
+
             let up_time = current_time;
             *state_guard = MouseActionState::MouseUp(last_x, last_y, up_time);
             let distance = calculate_distance(down_x, down_y, last_x, last_y);
@@ -237,13 +237,13 @@ fn handle_hook_event(
                 *lock_arc_mutex(&GLOBAL_STATE.last_click) = None;
                 false
             };
-            
+
             // 提前获取 modifier_key 用于智能判断
             let modifier_key = {
                 let state_guard = lock_arc_mutex(listener_state);
                 state_guard.settings.selection_modifier_key.clone()
             };
-                            
+
             // 智能判断是否为划词操作
             let is_likely_text_selection = if modifier_key.is_empty() {
                 if is_drag {
@@ -255,9 +255,10 @@ fn handle_hook_event(
                     } else {
                         // 完全没见过 IBEAM，根据轨迹特征判断
                         let feature_linear = check_linear_movement(positions.make_contiguous());
-                        
+
                         let feature_horizontal = {
-                            if let (Some(first), Some(last)) = (positions.front(), positions.back()) {
+                            if let (Some(first), Some(last)) = (positions.front(), positions.back())
+                            {
                                 let dx = (last.0 - first.0).abs() as f64;
                                 let dy = (last.1 - first.1).abs() as f64;
                                 dx > dy * 0.3 && dx > 10.0
@@ -265,7 +266,7 @@ fn handle_hook_event(
                                 false
                             }
                         };
-                        
+
                         let feature_speed = {
                             let total_distance = distance;
                             let duration_ms = duration.as_millis() as f64;
@@ -276,19 +277,21 @@ fn handle_hook_event(
                                 false
                             }
                         };
-                        
+
                         // 综合评分：至少满足2个特征才认为是划词
-                        let score = [
-                            feature_linear,
-                            feature_horizontal,
-                            feature_speed
-                        ].iter().filter(|&&x| x).count();
-                        
+                        let score = [feature_linear, feature_horizontal, feature_speed]
+                            .iter()
+                            .filter(|&&x| x)
+                            .count();
+
                         if score >= 2 {
                             log::debug!("拖拽操作通过综合判断 (得分: {}/3)，判定为划词", score);
                             true
                         } else {
-                            log::debug!("拖拽操作未通过综合判断 (得分: {}/3)，可能是窗口/滚动操作", score);
+                            log::debug!(
+                                "拖拽操作未通过综合判断 (得分: {}/3)，可能是窗口/滚动操作",
+                                score
+                            );
                             false
                         }
                     }
@@ -306,7 +309,7 @@ fn handle_hook_event(
                 // 有修饰键，信任用户意图
                 true
             };
-                            
+
             if is_drag || is_double_click {
                 if is_double_click {
                     log::debug!("检测到双击/三击操作");
@@ -343,12 +346,10 @@ fn handle_hook_event(
                         log::debug!("当前应用窗口可见或正在处理回填，跳过划词检测触发");
                         return;
                     }
-                    let last_processed =
-                        { *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) };
+                    let last_processed = { *lock_arc_mutex(&GLOBAL_STATE.last_processed_time) };
                     if up_time.duration_since(last_processed) > Duration::from_millis(100) {
                         {
-                            let mut pos_guard =
-                                lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
+                            let mut pos_guard = lock_arc_mutex(&GLOBAL_STATE.detection_anchor_pos);
                             *pos_guard = (last_x, last_y);
                         }
                         GLOBAL_STATE.needs_detection.store(true, Ordering::SeqCst);
@@ -369,7 +370,7 @@ fn handle_hook_event(
             if let Ok(mut pos_guard) = GLOBAL_STATE.last_mouse_pos.try_lock() {
                 *pos_guard = (mouse_x, mouse_y);
             }
-            
+
             // 在拖拽过程中监测光标类型和轨迹
             let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
             match *state_guard {
@@ -383,15 +384,20 @@ fn handle_hook_event(
                         deque.push_back((start_x, start_y));
                         deque.push_back((mouse_x, mouse_y));
                         *state_guard = MouseActionState::Dragging(
-                            start_x, start_y, start_time, is_ibeam,
-                            deque
+                            start_x, start_y, start_time, is_ibeam, deque,
                         );
                         if is_ibeam {
                             log::debug!("开始拖拽并检测到文本输入型光标");
                         }
                     }
                 }
-                MouseActionState::Dragging(start_x, start_y, start_time, has_seen_ibeam, ref mut positions) => {
+                MouseActionState::Dragging(
+                    start_x,
+                    start_y,
+                    start_time,
+                    has_seen_ibeam,
+                    ref mut positions,
+                ) => {
                     // 已经在拖拽过程中，持续监测（原地操作避免克隆开销）
                     positions.push_back((mouse_x, mouse_y));
 
@@ -409,7 +415,8 @@ fn handle_hook_event(
 
                     // Take positions out, then put them back in the new state
                     let pos = std::mem::take(positions);
-                    *state_guard = MouseActionState::Dragging(start_x, start_y, start_time, ibeam_flag, pos);
+                    *state_guard =
+                        MouseActionState::Dragging(start_x, start_y, start_time, ibeam_flag, pos);
                 }
                 _ => {}
             }
@@ -462,7 +469,8 @@ unsafe extern "system" fn low_level_keyboard_proc(
         if code == HC_ACTION as i32 {
             let keyboard = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
             // 忽略注入的按键事件（如 Enigo 模拟的 Ctrl+C），只响应真实的物理按键
-            let is_injected = (keyboard.flags & KBDLLHOOKSTRUCT_FLAGS(0x10)) != KBDLLHOOKSTRUCT_FLAGS(0);
+            let is_injected =
+                (keyboard.flags & KBDLLHOOKSTRUCT_FLAGS(0x10)) != KBDLLHOOKSTRUCT_FLAGS(0);
             let is_our_keyup = keyboard.dwExtraInfo == 0x46555955;
 
             if !is_injected && !is_our_keyup {
@@ -472,9 +480,11 @@ unsafe extern "system" fn low_level_keyboard_proc(
                             Some(HookEvent::CtrlLeftPress)
                         } else if keyboard.vkCode == VK_RCONTROL.0 as u32 {
                             Some(HookEvent::CtrlRightPress)
-                        } else if keyboard.vkCode == 0x43 { // 'C' key
+                        } else if keyboard.vkCode == 0x43 {
+                            // 'C' key
                             Some(HookEvent::CPress)
-                        } else if keyboard.vkCode == 0x2D { // Insert key
+                        } else if keyboard.vkCode == 0x2D {
+                            // Insert key
                             Some(HookEvent::InsertPress)
                         } else {
                             None
@@ -497,7 +507,8 @@ unsafe extern "system" fn low_level_keyboard_proc(
                             let _ = tx.send(event);
                             let thread_id = HOOK_THREAD_ID.load(Ordering::SeqCst);
                             if thread_id != 0 {
-                                let _ = PostThreadMessageW(thread_id, WM_USER, WPARAM(0), LPARAM(0));
+                                let _ =
+                                    PostThreadMessageW(thread_id, WM_USER, WPARAM(0), LPARAM(0));
                             }
                         }
                     }
@@ -522,7 +533,7 @@ unsafe extern "system" fn low_level_mouse_proc(
             let mouse = &*(lparam.0 as *const MSLLHOOKSTRUCT);
             // 忽略注入的鼠标事件
             let is_injected = (mouse.flags & 0x01) != 0;
-            
+
             if !is_injected {
                 let x = mouse.pt.x;
                 let y = mouse.pt.y;
@@ -538,7 +549,8 @@ unsafe extern "system" fn low_level_mouse_proc(
                             let _ = tx.send(event);
                             let thread_id = HOOK_THREAD_ID.load(Ordering::SeqCst);
                             if thread_id != 0 {
-                                let _ = PostThreadMessageW(thread_id, WM_USER, WPARAM(0), LPARAM(0));
+                                let _ =
+                                    PostThreadMessageW(thread_id, WM_USER, WPARAM(0), LPARAM(0));
                             }
                         }
                     }
@@ -571,9 +583,18 @@ fn start_windows_hook_listener(app_handle: AppHandle, state: Arc<Mutex<SharedApp
         }
 
         let module = GetModuleHandleW(None).unwrap_or_default();
-        let keyboard_hook =
-            SetWindowsHookExW(WH_KEYBOARD_LL, Some(low_level_keyboard_proc), Some(module.into()), 0);
-        let mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), Some(module.into()), 0);
+        let keyboard_hook = SetWindowsHookExW(
+            WH_KEYBOARD_LL,
+            Some(low_level_keyboard_proc),
+            Some(module.into()),
+            0,
+        );
+        let mouse_hook = SetWindowsHookExW(
+            WH_MOUSE_LL,
+            Some(low_level_mouse_proc),
+            Some(module.into()),
+            0,
+        );
 
         let hooks_guard = match (keyboard_hook, mouse_hook) {
             (Ok(kb), Ok(mouse)) => HookHandlesGuard {
@@ -750,7 +771,7 @@ fn is_cursor_ibeam() -> bool {
             log::warn!("GetCursorInfo 调用失败");
             return false;
         }
-        
+
         // 获取系统标准的 IBEAM 光标句柄
         let ibeam_cursor = match LoadCursorW(None, IDC_IBEAM) {
             Ok(h) => h,
@@ -759,15 +780,18 @@ fn is_cursor_ibeam() -> bool {
                 return false;
             }
         };
-        
+
         // 比较当前光标与 IBEAM 光标
         let is_ibeam = cursor_info.hCursor == ibeam_cursor;
-        
+
         if !is_ibeam {
-            log::debug!("当前光标不是文本输入型 (IBEAM)，hCursor={:?}, IBEAM={:?}", 
-                       cursor_info.hCursor, ibeam_cursor);
+            log::debug!(
+                "当前光标不是文本输入型 (IBEAM)，hCursor={:?}, IBEAM={:?}",
+                cursor_info.hCursor,
+                ibeam_cursor
+            );
         }
-        
+
         is_ibeam
     }
 }
@@ -788,26 +812,29 @@ fn check_linear_movement(positions: &[(i32, i32)]) -> bool {
         // 两个点总是"线性"的，配合距离阈值使用
         return true;
     }
-    
+
     // 使用最小二乘法拟合直线，计算 R² 值
     let n = positions.len() as f64;
     let sum_x: f64 = positions.iter().map(|(x, _)| *x as f64).sum();
     let sum_y: f64 = positions.iter().map(|(_, y)| *y as f64).sum();
-    let sum_xy: f64 = positions.iter().map(|(x, y)| (*x as f64) * (*y as f64)).sum();
+    let sum_xy: f64 = positions
+        .iter()
+        .map(|(x, y)| (*x as f64) * (*y as f64))
+        .sum();
     let sum_x2: f64 = positions.iter().map(|(x, _)| (*x as f64).powi(2)).sum();
     let sum_y2: f64 = positions.iter().map(|(_, y)| (*y as f64).powi(2)).sum();
-    
+
     // 计算相关系数 r
     let numerator = n * sum_xy - sum_x * sum_y;
     let denominator = ((n * sum_x2 - sum_x.powi(2)) * (n * sum_y2 - sum_y.powi(2))).sqrt();
-    
+
     if denominator < 1e-10 {
         return false;
     }
-    
+
     let r = numerator / denominator;
     let r_squared = r * r;
-    
+
     // R² > 0.9 认为是线性运动
     r_squared > 0.9
 }
@@ -929,16 +956,15 @@ fn run_detection_cycle(app_handle: &AppHandle, state: &Arc<Mutex<SharedAppState>
             let should_debounce = {
                 let mut last_emit_guard = lock_arc_mutex(&GLOBAL_STATE.last_toolbar_emit);
                 let now = std::time::Instant::now();
-                let should_skip = if let Some((last_text, last_anchor, last_time)) =
-                    last_emit_guard.as_ref()
-                {
-                    (last_anchor.0 - anchor_pos.0).abs() <= 6
-                        && (last_anchor.1 - anchor_pos.1).abs() <= 6
-                        && *last_text == text
-                        && now.duration_since(*last_time) <= Duration::from_millis(300)
-                } else {
-                    false
-                };
+                let should_skip =
+                    if let Some((last_text, last_anchor, last_time)) = last_emit_guard.as_ref() {
+                        (last_anchor.0 - anchor_pos.0).abs() <= 6
+                            && (last_anchor.1 - anchor_pos.1).abs() <= 6
+                            && *last_text == text
+                            && now.duration_since(*last_time) <= Duration::from_millis(300)
+                    } else {
+                        false
+                    };
                 if !should_skip {
                     *last_emit_guard = Some((text.clone(), anchor_pos, now));
                 }
@@ -951,11 +977,7 @@ fn run_detection_cycle(app_handle: &AppHandle, state: &Arc<Mutex<SharedAppState>
 
             tauri::async_runtime::spawn(async move {
                 log::debug!("准备调用 show_selection_toolbar_impl");
-                show_selection_toolbar_impl(
-                    app_handle_clone,
-                    text_clone,
-                    Some(anchor_pos),
-                );
+                show_selection_toolbar_impl(app_handle_clone, text_clone, Some(anchor_pos));
                 log::debug!("已调用 show_selection_toolbar_impl");
             });
         }
@@ -1013,7 +1035,9 @@ pub fn is_foreground_window_console() -> bool {
     {
         #[cfg(target_os = "windows")]
         unsafe {
-            use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow, GetWindowTextW};
+            use windows::Win32::UI::WindowsAndMessaging::{
+                GetClassNameW, GetForegroundWindow, GetWindowTextW,
+            };
 
             let hwnd = GetForegroundWindow();
             if hwnd.0.is_null() {
@@ -1021,15 +1045,13 @@ pub fn is_foreground_window_console() -> bool {
             }
 
             let mut title_buffer = [0u16; 512];
-            let title_len =
-                GetWindowTextW(hwnd, &mut title_buffer);
+            let title_len = GetWindowTextW(hwnd, &mut title_buffer);
             if title_len == 0 {
                 return false;
             }
 
             let mut class_buffer = [0u16; 256];
-            let class_len =
-                GetClassNameW(hwnd, &mut class_buffer);
+            let class_len = GetClassNameW(hwnd, &mut class_buffer);
             if class_len == 0 {
                 return false;
             }
@@ -1134,7 +1156,10 @@ fn is_valid_selection(text: &str) -> bool {
         return false;
     }
 
-    log::debug!("文本通过所有验证，认为是有效的选中文本: len={}", trimmed.len());
+    log::debug!(
+        "文本通过所有验证，认为是有效的选中文本: len={}",
+        trimmed.len()
+    );
     true
 }
 
@@ -1168,7 +1193,8 @@ static PHONE_REGEXES: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
         r"^\(\d{3}\)\s*\d{3}-\d{4}$",
         r"^\+1\s*\d{3}\s*\d{3}\s*\d{4}$",
     ];
-    patterns.iter()
+    patterns
+        .iter()
         .filter_map(|p| regex::Regex::new(p).ok())
         .collect()
 });
@@ -1179,9 +1205,8 @@ static EMAIL_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
 });
 
 /// 预编译的URL正则表达式
-static URL_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"^https?://[^\s/$.?#].\S*$|^www\.\S+$").unwrap()
-});
+static URL_REGEX: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^https?://[^\s/$.?#].\S*$|^www\.\S+$").unwrap());
 
 /// 检查是否为电话号码
 fn is_phone_number(text: &str) -> bool {

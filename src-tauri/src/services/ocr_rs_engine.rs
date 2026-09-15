@@ -1,4 +1,4 @@
-use crate::services::ocr_engine::{OcrLine, OcrParagraph, clean_ocr_text};
+use crate::services::ocr_engine::{clean_ocr_text, OcrLine, OcrParagraph};
 use ocr_rs::{OcrEngine, OcrEngineConfig};
 use std::sync::{Mutex, OnceLock};
 
@@ -17,7 +17,9 @@ fn ensure_engine(app_handle: &tauri::AppHandle) -> Result<(), String> {
 
 fn init_ocr_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {
     use tauri::Manager;
-    let resource_dir = app_handle.path().resource_dir()
+    let resource_dir = app_handle
+        .path()
+        .resource_dir()
         .map_err(|e| format!("获取资源目录失败: {}", e))?;
 
     let det_model = resource_dir.join("models").join("PP-OCRv5_mobile_det.mnn");
@@ -34,8 +36,7 @@ fn init_ocr_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {
         return Err(format!("字符集文件不存在: {:?}", charset));
     }
 
-    let config = OcrEngineConfig::fast()
-        .with_min_result_confidence(0.5);
+    let config = OcrEngineConfig::fast().with_min_result_confidence(0.5);
 
     OcrEngine::new(
         det_model.to_str().ok_or("检测模型路径无效")?,
@@ -47,12 +48,14 @@ fn init_ocr_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {
 }
 
 /// 使用 ocr-rs 进行 OCR 识别（使用缓存的引擎）
-pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHandle) -> Result<Vec<OcrParagraph>, String> {
+pub async fn recognize_with_ocr_rs(
+    image_data: &[u8],
+    app_handle: &tauri::AppHandle,
+) -> Result<Vec<OcrParagraph>, String> {
     log::info!("开始 OCR 识别（使用缓存引擎）...");
 
     // 加载图片
-    let img = image::load_from_memory(image_data)
-        .map_err(|e| format!("图片加载失败: {}", e))?;
+    let img = image::load_from_memory(image_data).map_err(|e| format!("图片加载失败: {}", e))?;
 
     // 确保引擎已初始化（首次加载模型，后续跳过）
     ensure_engine(app_handle)?;
@@ -64,7 +67,8 @@ pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHan
         let engine = guard.as_ref().ok_or("引擎未初始化")?;
 
         // 执行识别
-        let ocr_results = engine.recognize(&img)
+        let ocr_results = engine
+            .recognize(&img)
             .map_err(|e| format!("OCR识别失败: {}", e))?;
 
         log::info!("检测到 {} 个文本区域", ocr_results.len());
@@ -78,7 +82,7 @@ pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHan
             if text.trim().is_empty() {
                 continue;
             }
-            
+
             lines.push(OcrLine {
                 text: clean_ocr_text(&text),
                 x0: bbox.rect.left() as f64,
@@ -88,7 +92,7 @@ pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHan
                 confidence: Some(result.confidence),
             });
         }
-        
+
         if lines.is_empty() {
             return Ok(Vec::new());
         }
@@ -98,7 +102,7 @@ pub async fn recognize_with_ocr_rs(image_data: &[u8], app_handle: &tauri::AppHan
 
         // 将相近的行合并为段落
         let paragraphs = merge_lines_to_paragraphs(lines);
-        
+
         Ok(paragraphs)
     });
 
@@ -192,7 +196,11 @@ mod tests {
     #[test]
     fn test_merge_close_lines_into_one_paragraph() {
         // 与段落首行 y 比较：10→25 差距 15 < 20 合并；40-10=30 >= 20 拆段
-        let lines = vec![line("第一行", 10.0), line("第二行", 25.0), line("第三行", 40.0)];
+        let lines = vec![
+            line("第一行", 10.0),
+            line("第二行", 25.0),
+            line("第三行", 40.0),
+        ];
         let paragraphs = merge_lines_to_paragraphs(lines);
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "第一行\n第二行");

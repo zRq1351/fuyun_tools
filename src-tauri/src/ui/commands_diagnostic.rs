@@ -2,14 +2,16 @@ use crate::core::app_state::AppState as SharedAppState;
 use crate::core::perf_metrics::{get_perf_metrics_snapshot, reset_perf_metrics};
 use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands::{
-    get_copy_paste_dedup_debug_state_value, now_unix_ms,
-    COPY_PASTE_DEDUP_HIT_COUNT, COPY_PASTE_DEDUP_LOG_COUNT,
-    COPY_PASTE_DEDUP_REQUEST_ID_HIT_COUNT, COPY_PASTE_DEDUP_TEXT_HASH_HIT_COUNT,
-    COPY_PASTE_DEDUP_TOTAL_REQUESTS, COPY_PASTE_DEDUP_WINDOW_STATS,
+    get_copy_paste_dedup_debug_state_value, now_unix_ms, COPY_PASTE_DEDUP_HIT_COUNT,
+    COPY_PASTE_DEDUP_LOG_COUNT, COPY_PASTE_DEDUP_REQUEST_ID_HIT_COUNT,
+    COPY_PASTE_DEDUP_TEXT_HASH_HIT_COUNT, COPY_PASTE_DEDUP_TOTAL_REQUESTS,
+    COPY_PASTE_DEDUP_WINDOW_STATS,
 };
 use crate::ui::commands_backup::detect_video_hw_accel_encoder;
 use crate::ui::commands_vc_runtime::check_vc_runtime_dependencies;
-use crate::ui::commands_writeback::{last_writeback_result, perf_metric_group_label, perf_metric_group_rank, perf_metric_is_slow};
+use crate::ui::commands_writeback::{
+    last_writeback_result, perf_metric_group_label, perf_metric_group_rank, perf_metric_is_slow,
+};
 use crate::utils::image_clipboard::get_image_persist_queue_metrics_snapshot;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -949,5 +951,3 @@ pub async fn run_diagnostic_action(
         _ => Err(format!("不支持的诊断动作: {}", request.action_key)),
     }
 }
-
-

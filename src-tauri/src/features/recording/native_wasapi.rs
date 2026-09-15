@@ -139,8 +139,7 @@ macro_rules! audio_write_loop {
         move |data: &[$sample_type], _| {
             if let Ok(mut guard) = writer.lock() {
                 if let Some(w) = guard.as_mut() {
-                    let active = enabled.load(Ordering::SeqCst)
-                        && !pause.load(Ordering::SeqCst);
+                    let active = enabled.load(Ordering::SeqCst) && !pause.load(Ordering::SeqCst);
                     for &v in data {
                         let s: i16 = if active { v.to_sample::<i16>() } else { 0 };
                         write_sample_or_log!(w, s, $label, err_logged);
@@ -279,95 +278,107 @@ fn capture_process_loopback_to_wav(
         let mut queue = std::collections::VecDeque::<u8>::new();
         let blockalign = desired_format.get_blockalign() as usize;
         let capture_result: Result<(), String> = (|| -> Result<(), String> {
-        if blockalign == 0 {
-            return Err(format!("无效的 blockalign: 0 (pid={})", process_id));
-        }
-        // 队列上限：防止音频回调堆积导致 OOM（P2-3）
-        const MAX_QUEUE_BYTES: usize = 2 * 1024 * 1024;
-        audio_client
-            .start_stream()
-            .map_err(|e| format!("启动进程 loopback 失败(pid={}): {}", process_id, e))?;
-        if let Some(tx) = startup_tx.as_ref() {
-            let _ = tx.send((process_id, Ok(now_ms())));
-        }
-
-        let mut active_time_ns: u64 = 0;
-        let mut last_loop_time = std::time::Instant::now();
-        let mut actual_total_samples: u64 = 0;
-
-        while !stop_flag.load(Ordering::SeqCst) {
-            let now = std::time::Instant::now();
-            let dt_ns = now.duration_since(last_loop_time).as_nanos() as u64;
-            last_loop_time = now;
-
-            let is_paused = recording_pause_flag.load(Ordering::SeqCst);
-            if !is_paused {
-                active_time_ns += dt_ns;
+            if blockalign == 0 {
+                return Err(format!("无效的 blockalign: 0 (pid={})", process_id));
+            }
+            // 队列上限：防止音频回调堆积导致 OOM（P2-3）
+            const MAX_QUEUE_BYTES: usize = 2 * 1024 * 1024;
+            audio_client
+                .start_stream()
+                .map_err(|e| format!("启动进程 loopback 失败(pid={}): {}", process_id, e))?;
+            if let Some(tx) = startup_tx.as_ref() {
+                let _ = tx.send((process_id, Ok(now_ms())));
             }
 
-            let new_frames = capture_client
-                .get_next_packet_size()
-                .map_err(|e| {
-                    log::warn!("进程音频包大小读取失败(pid={}): {}", process_id, e);
-                    format!("读取进程音频包大小失败(pid={}): {}", process_id, e)
-                })?
-                .unwrap_or(0);
-            if new_frames > 0 {
-                capture_client
-                    .read_from_device_to_deque(&mut queue)
-                    .map_err(|e| {
-                        log::warn!("进程音频数据读取失败(pid={}): {}", process_id, e);
-                        format!("读取进程音频数据失败(pid={}): {}", process_id, e)
-                    })?;
-            }
-            let enabled =
-                enabled_flag.load(Ordering::SeqCst) && !recording_pause_flag.load(Ordering::SeqCst);
+            let mut active_time_ns: u64 = 0;
+            let mut last_loop_time = std::time::Instant::now();
+            let mut actual_total_samples: u64 = 0;
 
-            // 队列防 OOM：消费落后时丢弃旧数据（P2-3）
-            if queue.len() > MAX_QUEUE_BYTES {
-                let drain_bytes = queue.len().saturating_sub(MAX_QUEUE_BYTES / 2);
-                queue.drain(..drain_bytes);
-            }
+            while !stop_flag.load(Ordering::SeqCst) {
+                let now = std::time::Instant::now();
+                let dt_ns = now.duration_since(last_loop_time).as_nanos() as u64;
+                last_loop_time = now;
 
-            let slices = queue.as_slices();
-            let mut processed = 0;
-
-            for slice in &[slices.0, slices.1] {
-                let chunks = slice.chunks_exact(4);
-                processed += chunks.len() * 4;
-                for chunk in chunks {
-                    let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                    let out = if enabled {
-                        (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16
-                    } else {
-                        0
-                    };
-                    write_sample_to_error_slot!(writer, out, "进程音频", err_logged, error_slot);
-                    actual_total_samples += 1;
+                let is_paused = recording_pause_flag.load(Ordering::SeqCst);
+                if !is_paused {
+                    active_time_ns += dt_ns;
                 }
-            }
-            queue.drain(..processed);
 
-            if !is_paused {
-                let expected_total_samples =
-                    ((active_time_ns as f64 / 1_000_000_000.0) * 48000.0) as u64 * 2;
-                if expected_total_samples > actual_total_samples {
-                    let padding_needed = expected_total_samples - actual_total_samples;
+                let new_frames = capture_client
+                    .get_next_packet_size()
+                    .map_err(|e| {
+                        log::warn!("进程音频包大小读取失败(pid={}): {}", process_id, e);
+                        format!("读取进程音频包大小失败(pid={}): {}", process_id, e)
+                    })?
+                    .unwrap_or(0);
+                if new_frames > 0 {
+                    capture_client
+                        .read_from_device_to_deque(&mut queue)
+                        .map_err(|e| {
+                            log::warn!("进程音频数据读取失败(pid={}): {}", process_id, e);
+                            format!("读取进程音频数据失败(pid={}): {}", process_id, e)
+                        })?;
+                }
+                let enabled = enabled_flag.load(Ordering::SeqCst)
+                    && !recording_pause_flag.load(Ordering::SeqCst);
 
-                    if padding_needed > 480 {
-                        for _ in 0..padding_needed {
-                            write_sample_to_error_slot!(writer, 0i16, "进程音频静音填充", err_logged, error_slot);
-                        }
-                        actual_total_samples += padding_needed;
+                // 队列防 OOM：消费落后时丢弃旧数据（P2-3）
+                if queue.len() > MAX_QUEUE_BYTES {
+                    let drain_bytes = queue.len().saturating_sub(MAX_QUEUE_BYTES / 2);
+                    queue.drain(..drain_bytes);
+                }
+
+                let slices = queue.as_slices();
+                let mut processed = 0;
+
+                for slice in &[slices.0, slices.1] {
+                    let chunks = slice.chunks_exact(4);
+                    processed += chunks.len() * 4;
+                    for chunk in chunks {
+                        let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                        let out = if enabled {
+                            (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16
+                        } else {
+                            0
+                        };
+                        write_sample_to_error_slot!(
+                            writer,
+                            out,
+                            "进程音频",
+                            err_logged,
+                            error_slot
+                        );
+                        actual_total_samples += 1;
                     }
                 }
-            }
+                queue.drain(..processed);
 
-            if event.wait_for_event(50).is_err() {
-                log::warn!("进程音频事件等待失败(pid={})，继续尝试...", process_id);
-                std::thread::sleep(Duration::from_millis(10));
+                if !is_paused {
+                    let expected_total_samples =
+                        ((active_time_ns as f64 / 1_000_000_000.0) * 48000.0) as u64 * 2;
+                    if expected_total_samples > actual_total_samples {
+                        let padding_needed = expected_total_samples - actual_total_samples;
+
+                        if padding_needed > 480 {
+                            for _ in 0..padding_needed {
+                                write_sample_to_error_slot!(
+                                    writer,
+                                    0i16,
+                                    "进程音频静音填充",
+                                    err_logged,
+                                    error_slot
+                                );
+                            }
+                            actual_total_samples += padding_needed;
+                        }
+                    }
+                }
+
+                if event.wait_for_event(50).is_err() {
+                    log::warn!("进程音频事件等待失败(pid={})，继续尝试...", process_id);
+                    std::thread::sleep(Duration::from_millis(10));
+                }
             }
-        }
 
             Ok(())
         })();
@@ -739,8 +750,9 @@ pub fn start_system_loopback_wav_with_device(
 
     let handle = std::thread::spawn(move || {
         let run = || -> Result<u64, String> {
-            let host = cpal::host_from_id(cpal::HostId::Wasapi)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            let host = cpal::host_from_id(cpal::HostId::Wasapi).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
 
             let device = match thread_device_key.as_ref() {
                 Some(key) => host
@@ -761,11 +773,13 @@ pub fn start_system_loopback_wav_with_device(
                 sample_format: SampleFormat::Int,
             };
 
-            let file = std::fs::File::create(&thread_output)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            let file = std::fs::File::create(&thread_output).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
             let buf_writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
-            let writer = hound::WavWriter::new(buf_writer, spec)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            let writer = hound::WavWriter::new(buf_writer, spec).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
             let writer = Arc::new(Mutex::new(Some(writer)));
 
             log::debug!(
@@ -790,35 +804,127 @@ pub fn start_system_loopback_wav_with_device(
                 ),
             }
             let stream = match sample_format {
-                CpalSampleFormat::F32 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统F32", f32),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::I16 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统I16", i16),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::U16 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统U16", u16),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::I8 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统I8", i8),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::U8 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统U8", u8),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::I32 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统I32", i32),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::U32 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统U32", u32),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::F64 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统F64", f64),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::F32 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "系统F32",
+                            f32
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::I16 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "系统I16",
+                            i16
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::U16 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "系统U16",
+                            u16
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::I8 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统I8", i8),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::U8 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(writer, enabled_flag, recording_pause_flag, "系统U8", u8),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::I32 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "系统I32",
+                            i32
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::U32 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "系统U32",
+                            u32
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::F64 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "系统F64",
+                            f64
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
                 _ => return Err(AppErrorKind::InternalError.to_frontend_json()),
             };
-            stream
-                .play()
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            stream.play().map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
             let _ = tx.send(Ok(now_ms()));
 
             while !thread_stop_flag.load(Ordering::SeqCst) {
@@ -866,7 +972,8 @@ pub fn start_system_loopback_wav_with_device(
         }
     });
 
-    let stream_start_unix_ms = rx.recv_timeout(Duration::from_secs(2))
+    let stream_start_unix_ms = rx
+        .recv_timeout(Duration::from_secs(2))
         .map_err(|_| "启动 WASAPI 捕获超时".to_string())??;
 
     Ok(WasapiCaptureHandle {
@@ -902,8 +1009,9 @@ pub fn start_microphone_wav_with_device(
 
     let handle = std::thread::spawn(move || {
         let run = || -> Result<u64, String> {
-            let host = cpal::host_from_id(cpal::HostId::Wasapi)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            let host = cpal::host_from_id(cpal::HostId::Wasapi).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
             let device = match thread_device_key.as_ref() {
                 Some(key) => host
                     .input_devices()
@@ -924,11 +1032,13 @@ pub fn start_microphone_wav_with_device(
                 sample_format: SampleFormat::Int,
             };
 
-            let file = std::fs::File::create(&thread_output)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            let file = std::fs::File::create(&thread_output).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
             let buf_writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
-            let writer = hound::WavWriter::new(buf_writer, spec)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            let writer = hound::WavWriter::new(buf_writer, spec).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
             let writer = Arc::new(Mutex::new(Some(writer)));
 
             log::debug!(
@@ -953,35 +1063,139 @@ pub fn start_microphone_wav_with_device(
                 ),
             }
             let stream = match sample_format {
-                CpalSampleFormat::F32 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风F32", f32),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::I16 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风I16", i16),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::U16 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风U16", u16),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::I8 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风I8", i8),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::U8 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风U8", u8),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::I32 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风I32", i32),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::U32 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风U32", u32),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::F64 => device.build_input_stream(&config,
-                    audio_write_loop!(writer, enabled_flag, recording_pause_flag, "麦克风F64", f64),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::F32 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "麦克风F32",
+                            f32
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::I16 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "麦克风I16",
+                            i16
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::U16 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "麦克风U16",
+                            u16
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::I8 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "麦克风I8",
+                            i8
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::U8 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "麦克风U8",
+                            u8
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::I32 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "麦克风I32",
+                            i32
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::U32 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "麦克风U32",
+                            u32
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::F64 => device
+                    .build_input_stream(
+                        &config,
+                        audio_write_loop!(
+                            writer,
+                            enabled_flag,
+                            recording_pause_flag,
+                            "麦克风F64",
+                            f64
+                        ),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
                 _ => return Err(AppErrorKind::InternalError.to_frontend_json()),
             };
-            stream
-                .play()
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            stream.play().map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
             let _ = tx.send(Ok(now_ms()));
 
             while !thread_stop_flag.load(Ordering::SeqCst) {
@@ -1016,7 +1230,9 @@ pub fn start_microphone_wav_with_device(
             }
 
             // 磁盘写失败上报（同系统音频路径：finalize + 最终尺寸为可靠信号）
-            let final_size = std::fs::metadata(&thread_output).map(|m| m.len()).unwrap_or(0);
+            let final_size = std::fs::metadata(&thread_output)
+                .map(|m| m.len())
+                .unwrap_or(0);
             if finalize_failed || final_size <= 44 {
                 if let Ok(mut guard) = device_error_slot.lock() {
                     if guard.is_none() {
@@ -1047,7 +1263,8 @@ pub fn start_microphone_wav_with_device(
         }
     });
 
-    let stream_start_unix_ms = rx.recv_timeout(Duration::from_secs(2))
+    let stream_start_unix_ms = rx
+        .recv_timeout(Duration::from_secs(2))
         .map_err(|_| "启动 WASAPI 麦克风捕获超时".to_string())??;
 
     Ok(WasapiCaptureHandle {
@@ -1080,11 +1297,14 @@ pub fn start_system_loopback_aac_with_device(
             // AAC 采集线程同样需要 COM MTA
             let _ = initialize_mta();
             let ffmpeg_path = crate::features::recording::ffmpeg_runner::resolve_ffmpeg_path()
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+                })?;
 
             // 设备探测提前到 FFmpeg 启动之前：AAC 输入参数需跟随设备实际能力（#1）
-            let host = cpal::host_from_id(cpal::HostId::Wasapi)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            let host = cpal::host_from_id(cpal::HostId::Wasapi).map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
 
             let device = match thread_device_key.as_ref() {
                 Some(key) => host
@@ -1135,15 +1355,16 @@ pub fn start_system_loopback_aac_with_device(
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
 
-            let mut child = ffmpeg_cmd
-                .spawn()
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            let mut child = ffmpeg_cmd.spawn().map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
             // 与视频 ffmpeg 一致：进程级 kill-on-close，避免主进程被强杀后 orphan
             crate::features::recording::job_object::assign_to_global_job_object(&child);
 
             let stdin = child.stdin.take().ok_or("无法获取 FFmpeg stdin")?;
             // H1 修复：消费 FFmpeg stderr 防止管道满导致挂起（#57）
-            let stderr_join = child.stderr.take().map(|stderr| std::thread::spawn(move || {
+            let stderr_join = child.stderr.take().map(|stderr| {
+                std::thread::spawn(move || {
                     use std::io::BufRead;
                     let reader = std::io::BufReader::new(stderr);
                     for line in reader.lines() {
@@ -1155,7 +1376,8 @@ pub fn start_system_loopback_aac_with_device(
                             _ => {}
                         }
                     }
-            }));
+                })
+            });
 
             {
                 if let Ok(mut guard) = thread_ffmpeg.lock() {
@@ -1220,36 +1442,92 @@ pub fn start_system_loopback_aac_with_device(
 
             // 按探测到的设备采样格式分发回调，统一转 F32 写入 FFmpeg（#1）
             let stream = match sample_format {
-                CpalSampleFormat::F32 => device.build_input_stream(&config,
-                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, f32),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::I16 => device.build_input_stream(&config,
-                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, i16),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::U16 => device.build_input_stream(&config,
-                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, u16),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::I8 => device.build_input_stream(&config,
-                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, i8),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::U8 => device.build_input_stream(&config,
-                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, u8),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::I32 => device.build_input_stream(&config,
-                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, i32),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::U32 => device.build_input_stream(&config,
-                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, u32),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
-                CpalSampleFormat::F64 => device.build_input_stream(&config,
-                    aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, f64),
-                    err_fn, Some(Duration::from_millis(10))).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?,
+                CpalSampleFormat::F32 => device
+                    .build_input_stream(
+                        &config,
+                        aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, f32),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::I16 => device
+                    .build_input_stream(
+                        &config,
+                        aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, i16),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::U16 => device
+                    .build_input_stream(
+                        &config,
+                        aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, u16),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::I8 => device
+                    .build_input_stream(
+                        &config,
+                        aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, i8),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::U8 => device
+                    .build_input_stream(
+                        &config,
+                        aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, u8),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::I32 => device
+                    .build_input_stream(
+                        &config,
+                        aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, i32),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::U32 => device
+                    .build_input_stream(
+                        &config,
+                        aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, u32),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
+                CpalSampleFormat::F64 => device
+                    .build_input_stream(
+                        &config,
+                        aac_input_callback!(tx_audio, enabled_flag, recording_pause_flag, f64),
+                        err_fn,
+                        Some(Duration::from_millis(10)),
+                    )
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?,
                 _ => return Err(AppErrorKind::InternalError.to_frontend_json()),
             };
 
-            stream
-                .play()
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
+            stream.play().map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
+            })?;
             let _ = tx.send(Ok(now_ms()));
 
             while !thread_stop_flag.load(Ordering::SeqCst) {
@@ -1366,8 +1644,10 @@ pub fn start_system_loopback_aac_with_device(
                 Err(e) => {
                     if let Ok(mut guard) = device_error_slot.lock() {
                         if guard.is_none() && stdin_write_failed.load(Ordering::SeqCst) {
-                            *guard =
-                                Some("系统音频数据写入失败（磁盘空间或 IO 异常）: 输出文件缺失".to_string());
+                            *guard = Some(
+                                "系统音频数据写入失败（磁盘空间或 IO 异常）: 输出文件缺失"
+                                    .to_string(),
+                            );
                         }
                     }
                     log::warn!(

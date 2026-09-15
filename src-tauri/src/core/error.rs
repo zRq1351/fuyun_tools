@@ -240,7 +240,8 @@ mod tests {
 
     #[test]
     fn test_to_frontend_error_string_with_details() {
-        let err = AppError::new(ErrorCode::ClipboardError, "剪贴板失败").with_details("detail line1\n\ndetail line2");
+        let err = AppError::new(ErrorCode::ClipboardError, "剪贴板失败")
+            .with_details("detail line1\n\ndetail line2");
         let s = to_frontend_error_string(err);
         assert!(s.starts_with("[CLIPBOARD_ERROR] 剪贴板失败；"));
         assert!(s.contains("detail line1"));

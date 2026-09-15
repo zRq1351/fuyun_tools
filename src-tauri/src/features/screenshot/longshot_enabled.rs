@@ -272,15 +272,15 @@ pub fn start_manual_longshot(
     request.max_duration_sec = request.max_duration_sec.clamp(10, 300);
     request.preview_interval_ms = request.preview_interval_ms.clamp(120, 1000);
 
-    let mut slot = runtime_slot()
-        .lock()
-        .map_err(|e| AppErrorKind::LongshotSessionNotFound.to_frontend_json_with_details(format!("锁获取失败: {}", e)))?;
+    let mut slot = runtime_slot().lock().map_err(|e| {
+        AppErrorKind::LongshotSessionNotFound
+            .to_frontend_json_with_details(format!("锁获取失败: {}", e))
+    })?;
     if let Some(existing) = slot.as_ref() {
-        let status = existing
-            .control
-            .status
-            .lock()
-            .map_err(|e| AppErrorKind::LongshotSessionNotFound.to_frontend_json_with_details(format!("锁获取失败: {}", e)))?;
+        let status = existing.control.status.lock().map_err(|e| {
+            AppErrorKind::LongshotSessionNotFound
+                .to_frontend_json_with_details(format!("锁获取失败: {}", e))
+        })?;
         if status.state == "running"
             || status.state == "paused"
             || status.state == "finishing"
@@ -389,9 +389,10 @@ pub fn resume_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), Str
 }
 
 pub fn cancel_manual_longshot(session_id: u64, app: AppHandle) -> Result<(), String> {
-    let mut slot = runtime_slot()
-        .lock()
-        .map_err(|e| AppErrorKind::LongshotSessionNotFound.to_frontend_json_with_details(format!("锁获取失败: {}", e)))?;
+    let mut slot = runtime_slot().lock().map_err(|e| {
+        AppErrorKind::LongshotSessionNotFound
+            .to_frontend_json_with_details(format!("锁获取失败: {}", e))
+    })?;
     let Some(runtime) = slot.as_mut() else {
         return Err(AppErrorKind::LongshotSessionNotFound.to_frontend_json());
     };
@@ -454,9 +455,10 @@ pub fn finish_manual_longshot(
     session_id: u64,
     app: AppHandle,
 ) -> Result<ManualLongshotFinishResult, String> {
-    let mut slot = runtime_slot()
-        .lock()
-        .map_err(|e| AppErrorKind::LongshotSessionNotFound.to_frontend_json_with_details(format!("锁获取失败: {}", e)))?;
+    let mut slot = runtime_slot().lock().map_err(|e| {
+        AppErrorKind::LongshotSessionNotFound
+            .to_frontend_json_with_details(format!("锁获取失败: {}", e))
+    })?;
     let Some(mut runtime) = slot.take() else {
         return Err(AppErrorKind::LongshotSessionNotFound.to_frontend_json());
     };
@@ -558,9 +560,10 @@ fn with_runtime<T, F>(session_id: u64, f: F) -> Result<T, String>
 where
     F: FnOnce(&ManualLongshotRuntime) -> Result<T, String>,
 {
-    let slot = runtime_slot()
-        .lock()
-        .map_err(|e| AppErrorKind::LongshotSessionNotFound.to_frontend_json_with_details(format!("锁获取失败: {}", e)))?;
+    let slot = runtime_slot().lock().map_err(|e| {
+        AppErrorKind::LongshotSessionNotFound
+            .to_frontend_json_with_details(format!("锁获取失败: {}", e))
+    })?;
     let Some(runtime) = slot.as_ref() else {
         return Err(AppErrorKind::LongshotSessionNotFound.to_frontend_json());
     };
@@ -930,7 +933,9 @@ fn run_longshot_worker_inner(
                     None
                 }
             };
-            if let (Some(prev), Some(final_frame_gray)) = (anchor_frame.as_ref(), final_frame_gray.as_ref()) {
+            if let (Some(prev), Some(final_frame_gray)) =
+                (anchor_frame.as_ref(), final_frame_gray.as_ref())
+            {
                 let moved = frames_mean_absdiff(prev, final_frame_gray)
                     .map(|v| v > 1.2)
                     .unwrap_or(true);
@@ -1073,7 +1078,12 @@ fn capture_single_bgr_frame(request: &StartManualLongshotRequest) -> Result<Mat,
         .read_exact(&mut frame_buf)
         .map_err(|e| format!("收尾抓取读取最终帧失败: {}", e))?;
     // 仅当 PID 仍属于本进程时才清零，避免误清新会话的 PID
-    let _ = FFMPEG_CHILD_PID.compare_exchange(child.id() as u64, 0, Ordering::AcqRel, Ordering::Relaxed);
+    let _ = FFMPEG_CHILD_PID.compare_exchange(
+        child.id() as u64,
+        0,
+        Ordering::AcqRel,
+        Ordering::Relaxed,
+    );
     if let Err(e) = child.kill() {
         log::warn!("长截图收尾 FFmpeg 进程终止失败: {}", e);
     }
@@ -1465,7 +1475,9 @@ fn mat_to_preview_base64(
 
 fn build_longshot_result_image_path(session_id: u64) -> Result<std::path::PathBuf, String> {
     // 与普通截图 boot 图一致：写入临时目录，避免 Program Files 等只读安装目录写失败
-    let dir = std::env::temp_dir().join("fuyun_tools").join("screenshot_boot");
+    let dir = std::env::temp_dir()
+        .join("fuyun_tools")
+        .join("screenshot_boot");
     fs::create_dir_all(&dir).map_err(|e| format!("创建长截图结果目录失败: {}", e))?;
     Ok(dir.join(format!("longshot_result_{}.png", session_id)))
 }

@@ -1,8 +1,8 @@
+use aes_gcm::aead::rand_core::RngCore;
 use aes_gcm::{
     aead::{Aead, KeyInit, OsRng},
-    Aes256Gcm, AeadCore, Key, Nonce,
+    AeadCore, Aes256Gcm, Key, Nonce,
 };
-use aes_gcm::aead::rand_core::RngCore;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
@@ -18,7 +18,9 @@ const AI_KEY_CRED_TARGET: &str = "fuyun_tools/ai_encryption_key";
 
 fn db_path() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-    exe.parent().unwrap_or_else(|| std::path::Path::new(".")).join("ai_config.db")
+    exe.parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("ai_config.db")
 }
 
 async fn get_pool() -> &'static SqlitePool {
@@ -95,7 +97,9 @@ async fn generate_and_store_key(pool: &sqlx::SqlitePool) -> [u8; 32] {
     let mut key_bytes = [0u8; 32];
     OsRng.fill_bytes(&mut key_bytes);
     if store_key_in_credential_manager(&key_bytes)
-        && load_key_from_credential_manager().map(|k| k == key_bytes).unwrap_or(false)
+        && load_key_from_credential_manager()
+        .map(|k| k == key_bytes)
+        .unwrap_or(false)
     {
         // 确保 DB 中不再残留明文密钥
         let _ = sqlx::query("DELETE FROM ai_meta WHERE key = 'encryption_key'")
@@ -139,7 +143,9 @@ async fn ensure_cipher() -> &'static Aes256Gcm {
                             log::info!("AI 加密密钥已从 ai_config.db 迁移到 Windows 凭据管理器");
                         }
                         _ => {
-                            log::warn!("凭据管理器回读校验失败，保留 ai_config.db 中的密钥作为后备");
+                            log::warn!(
+                                "凭据管理器回读校验失败，保留 ai_config.db 中的密钥作为后备"
+                            );
                         }
                     }
                 }
@@ -185,13 +191,20 @@ async fn encrypt(plain: &str) -> Result<String, String> {
 }
 
 async fn decrypt(encoded: &str) -> Result<String, String> {
-    if encoded.is_empty() { return Ok(String::new()); }
+    if encoded.is_empty() {
+        return Ok(String::new());
+    }
     let cipher = ensure_cipher().await;
     let combined = base64::engine::general_purpose::STANDARD
-        .decode(encoded).map_err(|e| format!("base64: {e}"))?;
-    if combined.len() < 12 { return Err("too short".into()); }
+        .decode(encoded)
+        .map_err(|e| format!("base64: {e}"))?;
+    if combined.len() < 12 {
+        return Err("too short".into());
+    }
     let nonce = Nonce::from_slice(&combined[..12]);
-    let plain = cipher.decrypt(nonce, &combined[12..]).map_err(|e| format!("decrypt: {e}"))?;
+    let plain = cipher
+        .decrypt(nonce, &combined[12..])
+        .map_err(|e| format!("decrypt: {e}"))?;
     String::from_utf8(plain).map_err(|e| format!("utf8: {e}"))
 }
 
@@ -207,8 +220,10 @@ pub async fn get_current_provider() -> String {
     ensure_schema().await;
     let pool = get_pool().await;
     sqlx::query_scalar("SELECT value FROM ai_settings WHERE key = 'ai_provider'")
-        .fetch_optional(pool).await
-        .ok().flatten()
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
         .unwrap_or_default()
 }
 
@@ -216,7 +231,9 @@ pub async fn set_current_provider(key: &str) -> Result<(), String> {
     ensure_schema().await;
     let pool = get_pool().await;
     sqlx::query("INSERT OR REPLACE INTO ai_settings (key, value) VALUES ('ai_provider', ?1)")
-        .bind(key).execute(pool).await
+        .bind(key)
+        .execute(pool)
+        .await
         .map_err(|e| format!("save ai_provider: {e}"))?;
     Ok(())
 }
@@ -252,7 +269,12 @@ pub async fn get_provider_config(provider_key: &str) -> Option<ProviderConfigFul
     }
 }
 
-pub async fn save_provider_config(key: &str, api_url: &str, model_name: &str, api_key: &str) -> Result<(), String> {
+pub async fn save_provider_config(
+    key: &str,
+    api_url: &str,
+    model_name: &str,
+    api_key: &str,
+) -> Result<(), String> {
     ensure_schema().await;
     let pool = get_pool().await;
     let encrypted = if api_key.is_empty() {
@@ -276,7 +298,9 @@ pub async fn remove_provider(provider_key: &str) -> Result<(), String> {
     ensure_schema().await;
     let pool = get_pool().await;
     sqlx::query("DELETE FROM provider_configs WHERE provider_key = ?1")
-        .bind(provider_key).execute(pool).await
+        .bind(provider_key)
+        .execute(pool)
+        .await
         .map_err(|e| format!("remove provider: {e}"))?;
     Ok(())
 }
@@ -285,18 +309,28 @@ pub async fn get_all_providers() -> HashMap<String, ProviderConfigFull> {
     ensure_schema().await;
     let pool = get_pool().await;
     let rows: Vec<(String, String, String, String)> = sqlx::query_as(
-        "SELECT provider_key, api_url, model_name, encrypted_api_key FROM provider_configs"
+        "SELECT provider_key, api_url, model_name, encrypted_api_key FROM provider_configs",
     )
-        .fetch_all(pool).await.unwrap_or_default();
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
     let mut map = HashMap::new();
     for (k, u, m, ek) in rows {
-        map.insert(k, ProviderConfigFull { api_url: u, model_name: m, api_key: decrypt(&ek).await.unwrap_or_default() });
+        map.insert(
+            k,
+            ProviderConfigFull {
+                api_url: u,
+                model_name: m,
+                api_key: decrypt(&ek).await.unwrap_or_default(),
+            },
+        );
     }
     map
 }
 
 pub async fn get_api_key(provider_key: &str) -> Result<String, String> {
-    get_provider_config(provider_key).await
+    get_provider_config(provider_key)
+        .await
         .map(|c| c.api_key)
         .ok_or_else(|| "provider not found".to_string())
 }
@@ -307,9 +341,11 @@ pub async fn migrate_from_old() {
     ensure_schema().await;
     let pool = get_pool().await;
 
-    let has_providers: bool = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM provider_configs"
-    ).fetch_one(pool).await.map(|c| c > 0).unwrap_or(false);
+    let has_providers: bool = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM provider_configs")
+        .fetch_one(pool)
+        .await
+        .map(|c| c > 0)
+        .unwrap_or(false);
 
     if has_providers {
         return;
@@ -334,7 +370,8 @@ pub async fn migrate_from_old() {
         }
         // 先落库成功再删凭据，避免写库失败导致密钥永久丢失
         match save_provider_config(key, &cfg.api_url, &cfg.model_name, &api_key).await {
-            Ok(()) => {
+            Ok(()) =>
+                {
                 #[cfg(windows)]
                 if let Some(target) = cred_target {
                     crate::utils::settings_model::delete_windows_credential(&target);
@@ -364,6 +401,9 @@ pub async fn migrate_from_old() {
     }
 
     if !old_providers.is_empty() {
-        log::info!("AI 配置已从旧 settings.json 迁移（{} 个提供商）", old_providers.len());
+        log::info!(
+            "AI 配置已从旧 settings.json 迁移（{} 个提供商）",
+            old_providers.len()
+        );
     }
 }

@@ -206,15 +206,17 @@ pub async fn restore_backup_package(
                     );
                 }
                 let rebuild_started_at = Instant::now();
-                rebuild_runtime_managers(&state).await.inspect_err(|error| {
-                    record_backup_restore_stage_metric(
-                        "rebuild_runtime",
-                        "备份恢复重建运行时耗时",
-                        rebuild_started_at.elapsed().as_millis() as u64,
-                        false,
-                        Some(error.clone()),
-                    );
-                })?;
+                rebuild_runtime_managers(&state)
+                    .await
+                    .inspect_err(|error| {
+                        record_backup_restore_stage_metric(
+                            "rebuild_runtime",
+                            "备份恢复重建运行时耗时",
+                            rebuild_started_at.elapsed().as_millis() as u64,
+                            false,
+                            Some(error.clone()),
+                        );
+                    })?;
                 record_backup_restore_stage_metric(
                     "rebuild_runtime",
                     "备份恢复重建运行时耗时",
@@ -458,7 +460,11 @@ async fn restore_image_history(
             .and_then(|ext| ext.to_str())
             .unwrap_or("png");
         // 校验 id 防止写入穿越（blob_path 已校验，item.id 拼接目标名同样需要校验）
-        if item.id.contains("..") || item.id.contains('/') || item.id.contains('\\') || item.id.contains(':') {
+        if item.id.contains("..")
+            || item.id.contains('/')
+            || item.id.contains('\\')
+            || item.id.contains(':')
+        {
             log::warn!("跳过包含非法 id 的图片条目: {}", item.id);
             continue;
         }

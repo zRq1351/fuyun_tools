@@ -101,12 +101,7 @@ pub(crate) fn toggle_hotkey(
             register_fn(app, hot_key)?;
         }
     } else if let Err(e) = app.global_shortcut().unregister(hot_key) {
-        log::warn!(
-            "注销{}快捷键 '{}' 失败: {}",
-            feature_name,
-            hot_key,
-            e
-        );
+        log::warn!("注销{}快捷键 '{}' 失败: {}", feature_name, hot_key, e);
     }
     Ok(())
 }

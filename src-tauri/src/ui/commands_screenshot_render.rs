@@ -587,7 +587,9 @@ fn render_shape_item_for_longshot(
     }
 }
 
-pub(super) fn render_screenshot_image(request: &ScreenshotExportRequest) -> Result<RgbaImage, String> {
+pub(super) fn render_screenshot_image(
+    request: &ScreenshotExportRequest,
+) -> Result<RgbaImage, String> {
     if request.source_image_path.trim().is_empty() {
         return Err("缺少源图路径".to_string());
     }
@@ -596,16 +598,21 @@ pub(super) fn render_screenshot_image(request: &ScreenshotExportRequest) -> Resu
         .to_rgba8();
     let dpr = request.device_pixel_ratio.unwrap_or(1.0).max(0.1);
     // 裁剪与绘制统一使用钳制后的选区原点，避免多屏负原点时绘制偏移与裁剪不一致
-    let selection = request.selection.as_ref().map(|s| ScreenshotExportSelection {
-        x: s.x.max(0.0),
-        y: s.y.max(0.0),
-        width: s.width,
-        height: s.height,
-    });
+    let selection = request
+        .selection
+        .as_ref()
+        .map(|s| ScreenshotExportSelection {
+            x: s.x.max(0.0),
+            y: s.y.max(0.0),
+            width: s.width,
+            height: s.height,
+        });
     let mut canvas = if request.is_longshot {
         source.clone()
     } else {
-        let sel = selection.as_ref().ok_or_else(|| "缺少裁剪区域".to_string())?;
+        let sel = selection
+            .as_ref()
+            .ok_or_else(|| "缺少裁剪区域".to_string())?;
         let (crop_x, crop_y, crop_w, crop_h) = clamp_crop_rect(&source, sel, dpr);
         imageops::crop_imm(&source, crop_x, crop_y, crop_w, crop_h).to_image()
     };

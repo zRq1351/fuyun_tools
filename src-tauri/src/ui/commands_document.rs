@@ -1,8 +1,8 @@
 use crate::core::error_codes::AppErrorKind;
+use crate::sync::Mutex;
 use crate::utils::document_database;
 use crate::utils::document_text_extract;
 use crate::utils::icon_extractor;
-use crate::sync::Mutex;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,15 +12,20 @@ use tauri::AppHandle;
 use tokio::task;
 
 #[tauri::command]
-pub async fn add_doc_root(name: String, root_path: String) -> Result<document_database::DocRoot, String> {
+pub async fn add_doc_root(
+    name: String,
+    root_path: String,
+) -> Result<document_database::DocRoot, String> {
     let path = Path::new(&root_path);
     // Validate name and path to prevent path traversal and empty values
     if name.trim().is_empty() {
-        return Err(AppErrorKind::InternalError.to_frontend_json_with_details(
-            "名称不能为空".to_string(),
-        ));
+        return Err(
+            AppErrorKind::InternalError.to_frontend_json_with_details("名称不能为空".to_string())
+        );
     }
-    let canonical = path.canonicalize().map_err(|e| format!("路径无效: {}", e))?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| format!("路径无效: {}", e))?;
     fs::create_dir_all(&canonical).map_err(|e| format!("创建目录失败: {}", e))?;
     if !canonical.is_dir() {
         return Err(AppErrorKind::DocumentPathNotDir.to_frontend_json());
@@ -45,7 +50,8 @@ fn validate_category_name(name: &str) -> Result<(), String> {
     for ch in name.chars() {
         match ch {
             '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => {
-                return Err(AppErrorKind::DocumentCategoryNameInvalidChar.to_frontend_json_with_details(format!("{}", ch)));
+                return Err(AppErrorKind::DocumentCategoryNameInvalidChar
+                    .to_frontend_json_with_details(format!("{}", ch)));
             }
             _ => {}
         }
@@ -54,10 +60,17 @@ fn validate_category_name(name: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn add_doc_category(name: String, icon: Option<String>, color: Option<String>, root_id: i64) -> Result<document_database::DocCategory, String> {
+pub async fn add_doc_category(
+    name: String,
+    icon: Option<String>,
+    color: Option<String>,
+    root_id: i64,
+) -> Result<document_database::DocCategory, String> {
     let name_trim = name.trim();
     validate_category_name(name_trim)?;
-    let root = document_database::get_doc_root_by_id(root_id).await?.ok_or("根目录不存在".to_string())?;
+    let root = document_database::get_doc_root_by_id(root_id)
+        .await?
+        .ok_or("根目录不存在".to_string())?;
     // 先创建目录（幂等），失败时不再写 DB，避免孤儿分类记录
     fs::create_dir_all(Path::new(&root.root_path).join(name_trim))
         .map_err(|e| format!("创建分类目录失败: {}", e))?;
@@ -66,12 +79,15 @@ pub async fn add_doc_category(name: String, icon: Option<String>, color: Option<
         &icon.unwrap_or_else(|| "folder".to_string()),
         &color.unwrap_or_else(|| "#409EFF".to_string()),
         root_id,
-    ).await?;
+    )
+        .await?;
     Ok(result)
 }
 
 #[tauri::command]
-pub async fn get_doc_categories(root_id: Option<i64>) -> Result<Vec<document_database::DocCategory>, String> {
+pub async fn get_doc_categories(
+    root_id: Option<i64>,
+) -> Result<Vec<document_database::DocCategory>, String> {
     document_database::get_doc_categories(root_id).await
 }
 
@@ -84,8 +100,14 @@ pub async fn remove_doc_category(id: i64) -> Result<(), String> {
 pub async fn rename_doc_category(id: i64, name: String) -> Result<(), String> {
     let name_trim = name.trim();
     validate_category_name(name_trim)?;
-    let cat = document_database::get_doc_categories(None).await?.into_iter().find(|c| c.id == id).ok_or("分类不存在".to_string())?;
-    let root = document_database::get_doc_root_by_id(cat.root_id).await?.ok_or("根目录不存在".to_string())?;
+    let cat = document_database::get_doc_categories(None)
+        .await?
+        .into_iter()
+        .find(|c| c.id == id)
+        .ok_or("分类不存在".to_string())?;
+    let root = document_database::get_doc_root_by_id(cat.root_id)
+        .await?
+        .ok_or("根目录不存在".to_string())?;
     let old_dir = Path::new(&root.root_path).join(&cat.name);
     let new_dir = Path::new(&root.root_path).join(name_trim);
     if old_dir.exists() && old_dir != new_dir {
@@ -93,18 +115,25 @@ pub async fn rename_doc_category(id: i64, name: String) -> Result<(), String> {
         let _old_name = document_database::rename_doc_category(id, name_trim).await?;
         let old_prefix = old_dir.to_string_lossy().to_string();
         let new_prefix = new_dir.to_string_lossy().to_string();
-        document_database::update_managed_path_prefix(&old_prefix, &new_prefix, root.id, id).await?;
+        document_database::update_managed_path_prefix(&old_prefix, &new_prefix, root.id, id)
+            .await?;
         if let Err(e) = document_database::safe_move_file(&old_dir, &new_dir) {
             // 目录移动失败：回滚数据库重命名与前缀更新，保持 DB/磁盘一致
             if let Err(rollback_err) = document_database::rename_doc_category(id, &cat.name).await {
                 log::error!("回滚分类重命名失败: {}", rollback_err);
             }
             if let Err(rollback_err) =
-                document_database::update_managed_path_prefix(&new_prefix, &old_prefix, root.id, id).await
+                document_database::update_managed_path_prefix(&new_prefix, &old_prefix, root.id, id)
+                    .await
             {
                 log::error!("回滚 managed_path 前缀失败: {}", rollback_err);
             }
-            log::error!("分类目录重命名失败（已回滚数据库）: {} -> {}: {}", old_dir.display(), new_dir.display(), e);
+            log::error!(
+                "分类目录重命名失败（已回滚数据库）: {} -> {}: {}",
+                old_dir.display(),
+                new_dir.display(),
+                e
+            );
             return Err(format!("重命名目录失败: {}", e));
         }
     } else {
@@ -162,7 +191,10 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
 
     let category_name = if let Some(cid) = request.category_id {
         let cats = document_database::get_doc_categories(None).await?;
-        cats.iter().find(|c| c.id == cid).map(|c| c.name.clone()).unwrap_or_else(|| "未分类".to_string())
+        cats.iter()
+            .find(|c| c.id == cid)
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| "未分类".to_string())
     } else {
         "未分类".to_string()
     };
@@ -185,7 +217,10 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
     for file_path_str in &request.paths {
         let src = Path::new(file_path_str);
         if !src.exists() {
-            errors.push(AppErrorKind::DocumentFileNotFound.to_frontend_json_with_details(file_path_str.to_string()));
+            errors.push(
+                AppErrorKind::DocumentFileNotFound
+                    .to_frontend_json_with_details(file_path_str.to_string()),
+            );
             continue;
         }
         if !src.is_file() {
@@ -214,7 +249,13 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
         let file_hash = document_database::compute_file_hash(src).unwrap_or_default();
 
         if !file_hash.is_empty() {
-            if let Ok(true) = document_database::doc_exists_by_hash(&file_hash, request.root_id, request.category_id).await {
+            if let Ok(true) = document_database::doc_exists_by_hash(
+                &file_hash,
+                request.root_id,
+                request.category_id,
+            )
+                .await
+            {
                 errors.push(format!("文件已存在（重复）: {}", file_path_str));
                 continue;
             }
@@ -235,14 +276,27 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
             let dest = dir.join(&name);
             (name, dest.to_string_lossy().to_string(), true, Some(dest))
         } else {
-            (src.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string(), src_path.clone(), false, None)
+            (
+                src.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string(),
+                src_path.clone(),
+                false,
+                None,
+            )
         };
 
         let src_for_extract = src_path.clone();
         let ext_for_extract = file_ext.clone();
         let content_text = match task::spawn_blocking(move || {
-            document_text_extract::extract_file_content(Path::new(&src_for_extract), &ext_for_extract)
-        }).await {
+            document_text_extract::extract_file_content(
+                Path::new(&src_for_extract),
+                &ext_for_extract,
+            )
+        })
+            .await
+        {
             Ok(text) => text,
             Err(e) => {
                 let msg = if e.is_panic() {
@@ -257,16 +311,30 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
         };
 
         match document_database::insert_doc_file(
-            request.root_id, &resolved_name, &file_ext, file_size, &file_hash,
-            request.category_id, &tags, &src_path, &managed_path_val,
-            &request.storage_mode, file_modified, &content_text,
-        ).await {
+            request.root_id,
+            &resolved_name,
+            &file_ext,
+            file_size,
+            &file_hash,
+            request.category_id,
+            &tags,
+            &src_path,
+            &managed_path_val,
+            &request.storage_mode,
+            file_modified,
+            &content_text,
+        )
+            .await
+        {
             Ok(id) => {
                 if need_move {
                     let dest = match dest_dir_clone.as_ref() {
                         Some(d) => d,
                         None => {
-                            log::error!("dest_dir 未设置但 need_move 为 true，跳过文件移动: {}", file_name);
+                            log::error!(
+                                "dest_dir 未设置但 need_move 为 true，跳过文件移动: {}",
+                                file_name
+                            );
                             errors.push(format!("内部错误：目标目录未设置 {}", file_name));
                             continue;
                         }
@@ -303,10 +371,19 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
             &source_dir,
             &target_dir,
             success_ids.len() as i64,
-        ).await {
+        )
+            .await
+        {
             for (doc_id, src, managed) in &success_ids {
-                if let Err(e) = document_database::link_import_item(import_id, *doc_id, src, managed).await {
-                    log::warn!("关联导入项失败 (import_id={}, doc_id={}): {}", import_id, doc_id, e);
+                if let Err(e) =
+                    document_database::link_import_item(import_id, *doc_id, src, managed).await
+                {
+                    log::warn!(
+                        "关联导入项失败 (import_id={}, doc_id={}): {}",
+                        import_id,
+                        doc_id,
+                        e
+                    );
                 }
             }
         }
@@ -316,7 +393,9 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
 }
 
 #[tauri::command]
-pub async fn get_import_history(limit: Option<i64>) -> Result<Vec<document_database::ImportHistory>, String> {
+pub async fn get_import_history(
+    limit: Option<i64>,
+) -> Result<Vec<document_database::ImportHistory>, String> {
     document_database::get_import_history(limit.unwrap_or(20)).await
 }
 
@@ -331,7 +410,9 @@ pub async fn undo_import_item(import_id: i64, doc_file_id: i64) -> Result<(), St
 }
 
 #[tauri::command]
-pub async fn get_import_files(import_id: i64) -> Result<Vec<document_database::ImportFileItem>, String> {
+pub async fn get_import_files(
+    import_id: i64,
+) -> Result<Vec<document_database::ImportFileItem>, String> {
     document_database::get_import_files(import_id).await
 }
 
@@ -353,7 +434,9 @@ fn default_page_limit() -> i64 {
 }
 
 #[tauri::command]
-pub async fn get_doc_page(request: DocPageRequest) -> Result<document_database::DocPageData, String> {
+pub async fn get_doc_page(
+    request: DocPageRequest,
+) -> Result<document_database::DocPageData, String> {
     document_database::get_doc_page(
         request.offset,
         request.limit,
@@ -361,7 +444,8 @@ pub async fn get_doc_page(request: DocPageRequest) -> Result<document_database::
         request.root_id,
         request.keyword,
         request.file_ext,
-    ).await
+    )
+        .await
 }
 
 #[derive(serde::Deserialize)]
@@ -382,7 +466,8 @@ pub async fn update_doc_meta(request: UpdateDocMetaRequest) -> Result<(), String
         request.category_id,
         request.tags.as_deref(),
         request.notes.as_deref(),
-    ).await
+    )
+        .await
 }
 
 #[derive(serde::Deserialize)]
@@ -441,11 +526,8 @@ pub struct AtomicMoveRequest {
 
 #[tauri::command]
 pub async fn atomic_move_doc(request: AtomicMoveRequest) -> Result<(), String> {
-    document_database::atomic_move_doc(
-        request.id,
-        request.new_root_id,
-        request.new_category_id,
-    ).await
+    document_database::atomic_move_doc(request.id, request.new_root_id, request.new_category_id)
+        .await
 }
 
 #[tauri::command]
@@ -462,7 +544,8 @@ pub async fn open_doc(_app_handle: AppHandle, id: i64) -> Result<(), String> {
     let path = Path::new(&doc.managed_path);
     if !path.exists() {
         let _ = document_database::mark_doc_missing(id).await;
-        return Err(AppErrorKind::DocumentFileNotFound.to_frontend_json_with_details(doc.managed_path.to_string()));
+        return Err(AppErrorKind::DocumentFileNotFound
+            .to_frontend_json_with_details(doc.managed_path.to_string()));
     }
 
     document_database::increment_visit_count(id).await.ok();
@@ -529,10 +612,9 @@ pub async fn scan_folder(path: String, recursive: Option<bool>) -> Result<ScanRe
 
     let text_exts = [
         "txt", "md", "csv", "log", "json", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf",
-        "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt",
-        "py", "js", "ts", "jsx", "tsx", "java", "go", "rs", "c", "cpp", "h", "hpp", "cs",
-        "php", "rb", "swift", "kt", "scala", "sql", "sh", "bat", "ps1", "lua",
-        "html", "htm", "css", "scss", "less", "vue", "svelte", "r", "zig",
+        "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "py", "js", "ts", "jsx", "tsx", "java",
+        "go", "rs", "c", "cpp", "h", "hpp", "cs", "php", "rb", "swift", "kt", "scala", "sql", "sh",
+        "bat", "ps1", "lua", "html", "htm", "css", "scss", "less", "vue", "svelte", "r", "zig",
         "png", "jpg", "jpeg", "gif", "bmp", "webp", "svg",
     ];
 
@@ -656,10 +738,9 @@ pub async fn detect_orphan_files(root_id: Option<i64>) -> Result<Vec<OrphanFiles
 
     let text_exts = [
         "txt", "md", "csv", "log", "json", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf",
-        "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt",
-        "py", "js", "ts", "jsx", "tsx", "java", "go", "rs", "c", "cpp", "h", "hpp", "cs",
-        "php", "rb", "swift", "kt", "scala", "sql", "sh", "bat", "ps1", "lua",
-        "html", "htm", "css", "scss", "less", "vue", "svelte", "r", "zig",
+        "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "py", "js", "ts", "jsx", "tsx", "java",
+        "go", "rs", "c", "cpp", "h", "hpp", "cs", "php", "rb", "swift", "kt", "scala", "sql", "sh",
+        "bat", "ps1", "lua", "html", "htm", "css", "scss", "less", "vue", "svelte", "r", "zig",
         "png", "jpg", "jpeg", "gif", "bmp", "webp", "svg",
     ];
     let allowed: std::collections::HashSet<&str> = text_exts.iter().copied().collect();

@@ -1077,10 +1077,7 @@ mod tests {
 
     #[test]
     fn completeness_both_empty() {
-        assert_eq!(
-            detect_text_completeness("", ""),
-            TextCompleteness::Unknown
-        );
+        assert_eq!(detect_text_completeness("", ""), TextCompleteness::Unknown);
     }
 
     #[test]

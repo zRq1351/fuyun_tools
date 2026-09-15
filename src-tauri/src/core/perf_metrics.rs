@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 #[cfg(target_os = "windows")]
-use sysinfo::{System, Pid};
+use sysinfo::{Pid, System};
 
 /// 缓存的系统资源快照，避免每次查询都重建 System
 struct CachedSystemResources {
@@ -198,14 +198,7 @@ pub fn record_perf_metric(
     success: bool,
     error: Option<String>,
 ) {
-    record_perf_metric_with_category(
-        key,
-        label,
-        PerfCategory::Other,
-        duration_ms,
-        success,
-        error,
-    );
+    record_perf_metric_with_category(key, label, PerfCategory::Other, duration_ms, success, error);
 }
 
 pub fn get_perf_metrics_snapshot() -> Vec<PerfMetricSnapshot> {
@@ -360,14 +353,7 @@ pub fn record_startup_timing(label: &str, duration_ms: u64) {
 
 /// Record a memory usage metric
 pub fn record_memory_usage(label: &str, memory_mb: u64) {
-    record_perf_metric_with_category(
-        "memory",
-        label,
-        PerfCategory::Memory,
-        memory_mb,
-        true,
-        None,
-    );
+    record_perf_metric_with_category("memory", label, PerfCategory::Memory, memory_mb, true, None);
 }
 
 /// Record a CPU usage metric
@@ -385,14 +371,7 @@ pub fn record_cpu_usage(label: &str, cpu_percent: f64) {
 
 /// Record an IPC response latency metric
 pub fn record_ipc_latency(label: &str, duration_ms: u64, success: bool, error: Option<String>) {
-    record_perf_metric_with_category(
-        "ipc",
-        label,
-        PerfCategory::Ipc,
-        duration_ms,
-        success,
-        error,
-    );
+    record_perf_metric_with_category("ipc", label, PerfCategory::Ipc, duration_ms, success, error);
 }
 
 /// Get metrics grouped by category
@@ -442,18 +421,29 @@ pub fn get_perf_summary() -> PerfSummary {
     let total_samples: u64 = metrics.iter().map(|m| m.sample_count).sum();
     let total_errors: u64 = metrics.iter().map(|m| m.error_count).sum();
     let avg_duration: f64 = {
-        let (total_weighted, total_samples_dur) = metrics.iter()
-            .fold((0.0, 0u64), |(w_sum, s_sum), m| {
-                (w_sum + m.avg_duration_ms * m.sample_count as f64, s_sum + m.sample_count)
+        let (total_weighted, total_samples_dur) =
+            metrics.iter().fold((0.0, 0u64), |(w_sum, s_sum), m| {
+                (
+                    w_sum + m.avg_duration_ms * m.sample_count as f64,
+                    s_sum + m.sample_count,
+                )
             });
-        if total_samples_dur > 0 { total_weighted / total_samples_dur as f64 } else { 0.0 }
+        if total_samples_dur > 0 {
+            total_weighted / total_samples_dur as f64
+        } else {
+            0.0
+        }
     };
 
     let startup_metrics = get_startup_metrics();
     let avg_startup_ms = if startup_metrics.is_empty() {
         0.0
     } else {
-        startup_metrics.iter().map(|m| m.avg_duration_ms).sum::<f64>() / startup_metrics.len() as f64
+        startup_metrics
+            .iter()
+            .map(|m| m.avg_duration_ms)
+            .sum::<f64>()
+            / startup_metrics.len() as f64
     };
 
     let ipc_metrics = get_ipc_metrics();
@@ -577,7 +567,14 @@ mod tests {
         reset_perf_metrics();
         record_perf_metric_with_category("s", "启动", PerfCategory::Startup, 10, true, None);
         record_perf_metric_with_category("m", "内存", PerfCategory::Memory, 5, true, None);
-        record_perf_metric_with_category("i", "IPC", PerfCategory::Ipc, 3, false, Some("e".to_string()));
+        record_perf_metric_with_category(
+            "i",
+            "IPC",
+            PerfCategory::Ipc,
+            3,
+            false,
+            Some("e".to_string()),
+        );
 
         assert_eq!(get_startup_metrics().len(), 1);
         assert_eq!(get_memory_metrics().len(), 1);
@@ -605,7 +602,14 @@ mod tests {
         let _guard = lock_store();
         reset_perf_metrics();
         record_perf_metric_with_category("a", "A", PerfCategory::Startup, 10, true, None);
-        record_perf_metric_with_category("b", "B", PerfCategory::Ipc, 20, false, Some("x".to_string()));
+        record_perf_metric_with_category(
+            "b",
+            "B",
+            PerfCategory::Ipc,
+            20,
+            false,
+            Some("x".to_string()),
+        );
 
         let summary = get_perf_summary();
         assert_eq!(summary.total_metrics, 2);

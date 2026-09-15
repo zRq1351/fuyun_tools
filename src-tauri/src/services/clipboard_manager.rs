@@ -27,7 +27,8 @@ static CLIPBOARD_LISTENER_RUNNING: AtomicBool = AtomicBool::new(false);
 static CLIPBOARD_STOP_TX: OnceLock<std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>> =
     OnceLock::new();
 
-static POLLER: ClipboardPoller = ClipboardPoller::new(&CLIPBOARD_LISTENER_RUNNING, &CLIPBOARD_STOP_TX);
+static POLLER: ClipboardPoller =
+    ClipboardPoller::new(&CLIPBOARD_LISTENER_RUNNING, &CLIPBOARD_STOP_TX);
 
 /// 启动剪贴板监听器
 pub fn start_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
@@ -93,8 +94,8 @@ pub fn add_to_clipboard_history(
     let (manager_arc, should_emit, allow) = {
         let state_guard = lock_arc_mutex(&state);
         let is_processing = state_guard.is_processing_selection;
-        let allow = is_processing
-            && crate::features::text_selection::should_allow_clipboard_listener();
+        let allow =
+            is_processing && crate::features::text_selection::should_allow_clipboard_listener();
 
         // Skip if processing selection and manual copy not detected
         if is_processing && !allow {

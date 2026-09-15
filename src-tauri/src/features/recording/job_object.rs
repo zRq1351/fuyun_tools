@@ -33,7 +33,10 @@ fn global_job_object() -> HANDLE {
                 std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
             );
             if result.is_err() {
-                log::error!("SetInformationJobObject 失败: {}", std::io::Error::last_os_error());
+                log::error!(
+                    "SetInformationJobObject 失败: {}",
+                    std::io::Error::last_os_error()
+                );
                 let _ = CloseHandle(job_handle);
                 return HANDLE(std::ptr::null_mut());
             }

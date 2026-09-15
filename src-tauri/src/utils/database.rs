@@ -60,7 +60,10 @@ pub fn stable_history_item_id(content: &str) -> String {
     format!("{:016x}", xxh3_64(content.as_bytes()))
 }
 
-use super::db_utils::{reset_temp_text_table, fill_temp_text_table, build_fts_query_and, build_keyword_snippet_default as build_keyword_snippet, create_db_options};
+use super::db_utils::{
+    build_fts_query_and, build_keyword_snippet_default as build_keyword_snippet, create_db_options,
+    fill_temp_text_table, reset_temp_text_table,
+};
 
 async fn bulk_upsert_history_items(
     tx: &mut Transaction<'_, Sqlite>,
@@ -82,10 +85,9 @@ async fn bulk_upsert_history_items(
         qb.push_values(chunk, |mut b, (id, c, ts)| {
             b.push_bind(id).push_bind(c).push_bind(*ts);
         });
-        qb.build()
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        qb.build().execute(&mut **tx).await.map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
     }
 
     sqlx::query("
@@ -130,17 +132,21 @@ async fn bulk_upsert_categories(
         qb.push_values(chunk, |mut b, (item_id, category)| {
             b.push_bind(item_id).push_bind(category);
         });
-        qb.build()
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        qb.build().execute(&mut **tx).await.map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
     }
 
-    sqlx::query("
+    sqlx::query(
+        "
         INSERT INTO categories(category, item_id)
         SELECT category, item_id FROM temp_upsert_categories
         ON CONFLICT(item_id) DO UPDATE SET category = excluded.category
-    ").execute(&mut **tx).await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    ",
+    )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(())
 }
@@ -152,8 +158,7 @@ async fn bulk_upsert_category_list(
     if categories.is_empty() {
         return Ok(());
     }
-    let mut qb: QueryBuilder<Sqlite> =
-        QueryBuilder::new("INSERT INTO category_list(category) ");
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("INSERT INTO category_list(category) ");
     qb.push_values(categories, |mut b, category| {
         b.push_bind(category);
     });
@@ -185,17 +190,21 @@ async fn bulk_upsert_pinned_items(
         qb.push_values(chunk, |mut b, (item_id, pinned_at)| {
             b.push_bind(item_id).push_bind(*pinned_at);
         });
-        qb.build()
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        qb.build().execute(&mut **tx).await.map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
     }
 
-    sqlx::query("
+    sqlx::query(
+        "
         INSERT INTO pinned_items(pinned_at, item_id)
         SELECT pinned_at, item_id FROM temp_upsert_pinned
         ON CONFLICT(item_id) DO UPDATE SET pinned_at = excluded.pinned_at
-    ").execute(&mut **tx).await.map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    ",
+    )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     Ok(())
 }
@@ -205,18 +214,21 @@ async fn get_history_db_pool() -> Result<&'static SqlitePool, String> {
         .get_or_try_init(|| async {
             let db_path = get_history_db_path();
             if let Some(parent) = db_path.parent() {
-                fs::create_dir_all(parent).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                fs::create_dir_all(parent).map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
             }
             let pool = SqlitePoolOptions::new()
                 .max_connections(3)
                 .connect_with(create_db_options(&db_path))
                 .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
 
-            let mut conn = pool
-                .acquire()
-                .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            let mut conn = pool.acquire().await.map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
             ensure_history_db_schema_async(&mut conn).await?;
 
             Ok(pool)
@@ -402,23 +414,19 @@ async fn ensure_history_db_schema_async(conn: &mut SqliteConnection) -> Result<(
     .await;
 
     // P2 性能优化：先清理 FTS 孤儿记录（廉价操作），仅在必要时才重建索引
-    let fts_row_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM history_items_fts"
-    )
-    .fetch_one(&mut *conn)
-    .await
-    .unwrap_or(0);
+    let fts_row_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM history_items_fts")
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap_or(0);
 
-    let history_row_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM history_items"
-    )
-    .fetch_one(&mut *conn)
-    .await
-    .unwrap_or(0);
+    let history_row_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM history_items")
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap_or(0);
 
     // 无条件清理孤儿记录（DELETE 子查询非常廉价）
     let _ = sqlx::query(
-        "DELETE FROM history_items_fts WHERE rowid NOT IN (SELECT id FROM history_items)"
+        "DELETE FROM history_items_fts WHERE rowid NOT IN (SELECT id FROM history_items)",
     )
     .execute(&mut *conn)
     .await;
@@ -528,12 +536,12 @@ async fn load_history_data_from_sqlite_async() -> Result<Option<ClipboardHistory
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let mut categories = HashMap::new();
     for row in category_rows {
-        let item_id: String = row
-            .try_get(0)
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-        let category: String = row
-            .try_get(1)
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        let item_id: String = row.try_get(0).map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
+        let category: String = row.try_get(1).map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
         categories.insert(item_id, category);
     }
 
@@ -590,7 +598,7 @@ fn resolve_history_sort(sort_by: Option<String>, sort_order: Option<String>) -> 
 
 fn block_on_result<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        return handle.block_on(future)
+        return handle.block_on(future);
     }
     tauri::async_runtime::block_on(future)
 }
@@ -673,7 +681,9 @@ pub async fn load_history_page_data_async(
             .bind(fts_keyword.as_deref())
             .fetch_one(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
 
         let data_query_sql = format!(
             "
@@ -711,7 +721,9 @@ pub async fn load_history_page_data_async(
             .bind(offset_i64)
             .fetch_all(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
         let items = rows
             .into_iter()
             .map(|row| {
@@ -751,7 +763,9 @@ pub async fn load_history_page_data_async(
             .bind(keyword_filter.as_deref())
             .fetch_one(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
 
         let data_query_sql = format!(
             "
@@ -782,7 +796,9 @@ pub async fn load_history_page_data_async(
             .bind(offset_i64)
             .fetch_all(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
         let items = rows
             .into_iter()
             .map(|row| {
@@ -887,18 +903,24 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         sqlx::query("DELETE FROM history_items")
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
         let _ = sqlx::query("DELETE FROM history_items_fts")
             .execute(&mut *tx)
             .await;
         sqlx::query("DELETE FROM categories")
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
         sqlx::query("DELETE FROM pinned_items")
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     } else {
         reset_temp_text_table(&mut tx, "temp_desired_history_item_ids", "item_id").await?;
         fill_temp_text_table(
@@ -970,7 +992,9 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         .await;
     }
 
-    let categories_to_upsert: Vec<(String, String)> = data.categories.iter()
+    let categories_to_upsert: Vec<(String, String)> = data
+        .categories
+        .iter()
         .filter(|(item_id, _)| desired_item_id_set.contains(item_id.as_str()))
         .map(|(item_id, category)| (item_id.clone(), category.clone()))
         .collect();
@@ -982,7 +1006,10 @@ pub async fn save_history_data_snapshot_async(data: &ClipboardHistoryData) -> Re
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     bulk_upsert_category_list(&mut tx, &data.category_list).await?;
 
-    let pinned_to_upsert: Vec<(String, i64)> = data.pinned_items.iter().enumerate()
+    let pinned_to_upsert: Vec<(String, i64)> = data
+        .pinned_items
+        .iter()
+        .enumerate()
         .filter(|(_, item_id)| desired_item_id_set.contains(item_id.as_str()))
         .map(|(idx, item_id)| (item_id.clone(), now_ms - (idx as i64)))
         .collect();
@@ -1035,18 +1062,24 @@ pub async fn save_history_items_only_async(items: &[String]) -> Result<(), Strin
         sqlx::query("DELETE FROM history_items")
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
         let _ = sqlx::query("DELETE FROM history_items_fts")
             .execute(&mut *tx)
             .await;
         sqlx::query("DELETE FROM categories")
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
         sqlx::query("DELETE FROM pinned_items")
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     } else {
         reset_temp_text_table(&mut tx, "temp_desired_history_item_ids", "item_id").await?;
         fill_temp_text_table(
@@ -1150,17 +1183,15 @@ pub async fn save_categories_state_async(
 
     // 使用 UPSERT 替代 DELETE + INSERT
     for chunk in categories.iter().collect::<Vec<_>>().chunks(500) {
-        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
-            "INSERT INTO categories(category, item_id) ",
-        );
+        let mut qb: QueryBuilder<Sqlite> =
+            QueryBuilder::new("INSERT INTO categories(category, item_id) ");
         qb.push_values(chunk.iter(), |mut b, (item_id, category)| {
             b.push_bind(category.as_str()).push_bind(item_id.as_str());
         });
         qb.push(" ON CONFLICT(item_id) DO UPDATE SET category = excluded.category");
-        qb.build()
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        qb.build().execute(&mut *tx).await.map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
     }
 
     // 清理不再需要的分类映射
@@ -1169,33 +1200,39 @@ pub async fn save_categories_state_async(
         sqlx::query("CREATE TEMP TABLE IF NOT EXISTS _valid_cat_ids (item_id TEXT PRIMARY KEY)")
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
         let category_ids: Vec<&str> = categories.keys().map(|s| s.as_str()).collect();
         for chunk in category_ids.chunks(500) {
-            let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
-                "INSERT OR IGNORE INTO _valid_cat_ids(item_id) ",
-            );
+            let mut qb: QueryBuilder<Sqlite> =
+                QueryBuilder::new("INSERT OR IGNORE INTO _valid_cat_ids(item_id) ");
             qb.push_values(chunk.iter(), |mut b, id| {
                 b.push_bind(*id);
             });
-            qb.build()
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            qb.build().execute(&mut *tx).await.map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
         }
-        sqlx::query("DELETE FROM categories WHERE item_id NOT IN (SELECT item_id FROM _valid_cat_ids)")
+        sqlx::query(
+            "DELETE FROM categories WHERE item_id NOT IN (SELECT item_id FROM _valid_cat_ids)",
+        )
             .execute(&mut *tx)
             .await
             .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
         sqlx::query("DROP TABLE _valid_cat_ids")
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     } else {
         sqlx::query("DELETE FROM categories")
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     }
 
     // 分类列表仍使用 DELETE + INSERT（列表通常很小）
@@ -1209,7 +1246,9 @@ pub async fn save_categories_state_async(
             .bind(category)
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     }
 
     tx.commit()
@@ -1237,17 +1276,13 @@ pub async fn save_pinned_items_order_async(pinned_items: &[String]) -> Result<()
         for chunk in pinned_items.chunks(500) {
             let mut qb: QueryBuilder<Sqlite> =
                 QueryBuilder::new("INSERT INTO pinned_items(pinned_at, item_id) ");
-            qb.push_values(
-                chunk.iter().enumerate(),
-                |mut b, (idx, item_id)| {
-                    let pinned_at = base_ts + (pinned_items.len().saturating_sub(idx) as i64);
-                    b.push_bind(pinned_at).push_bind(item_id);
-                },
-            );
-            qb.build()
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            qb.push_values(chunk.iter().enumerate(), |mut b, (idx, item_id)| {
+                let pinned_at = base_ts + (pinned_items.len().saturating_sub(idx) as i64);
+                b.push_bind(pinned_at).push_bind(item_id);
+            });
+            qb.build().execute(&mut *tx).await.map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
         }
     }
 
@@ -1271,7 +1306,9 @@ pub async fn reorder_history_items_async(item_ids: &[String]) -> Result<(), Stri
             .bind(item_id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
     }
 
     tx.commit()
@@ -1290,7 +1327,9 @@ pub async fn pin_item(item_id: &str) -> Result<(), String> {
             .bind(item_id)
             .fetch_one(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
 
     if !exists {
         return Err(AppErrorKind::DatabaseTargetNotFound.to_frontend_json());
@@ -1331,7 +1370,9 @@ pub async fn set_item_category(item_id: &str, category: &str) -> Result<(), Stri
             .bind(item_id)
             .fetch_one(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
 
     if exists {
         sqlx::query(
@@ -1451,10 +1492,9 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
         qb.push_values(chunk, |mut b, (id, c, ts)| {
             b.push_bind(c).push_bind(id).push_bind(*ts).push_bind(*ts);
         });
-        qb.build()
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        qb.build().execute(&mut *tx).await.map_err(|e| {
+            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+        })?;
     }
 
     log::info!("合并文本历史: 新增 {} 条记录", new_count);
@@ -1469,14 +1509,18 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
             .bind(item_id)
             .execute(&mut *tx)
             .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
         } else {
             sqlx::query("INSERT OR IGNORE INTO categories(category, item_id) VALUES(?1, ?2)")
                 .bind(category)
                 .bind(item_id)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
         }
     }
 
@@ -1484,7 +1528,9 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
         sqlx::query_scalar::<_, String>("SELECT category FROM category_list")
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?
             .into_iter()
             .collect();
 
@@ -1494,7 +1540,9 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
                 .bind(category)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
         }
     }
 
@@ -1518,7 +1566,9 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
             sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(position) FROM pinned_items")
                 .fetch_one(&mut *tx)
                 .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?
                 .unwrap_or(-1);
 
         let mut position = current_max_position + 1;
@@ -1537,7 +1587,9 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
             .bind(position)
             .execute(&mut *tx)
             .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
             position += 1;
         }
     } else {
@@ -1552,7 +1604,9 @@ pub async fn merge_history_data_async(data: &ClipboardHistoryData) -> Result<(),
                 .bind(item_id)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| {
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
         }
     }
 
@@ -1625,7 +1679,8 @@ mod tests {
 
     #[test]
     fn sort_pinned_first_desc() {
-        let clause = resolve_history_sort(Some("pinned_first".to_string()), Some("desc".to_string()));
+        let clause =
+            resolve_history_sort(Some("pinned_first".to_string()), Some("desc".to_string()));
         assert!(clause.contains("pinned_at DESC"));
     }
 
@@ -1839,8 +1894,8 @@ mod tests {
     // 集成测试：真实 SQLite 数据库操作
     // ===================================================================
 
-    use sqlx::sqlite::SqlitePoolOptions;
     use crate::utils::db_utils::adjust_to_char_boundary;
+    use sqlx::sqlite::SqlitePoolOptions;
 
     async fn create_test_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
@@ -2099,10 +2154,11 @@ mod tests {
             .await
             .unwrap();
 
-        let pinned: Vec<String> = sqlx::query_scalar("SELECT item_id FROM pinned_items ORDER BY pinned_at DESC")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let pinned: Vec<String> =
+            sqlx::query_scalar("SELECT item_id FROM pinned_items ORDER BY pinned_at DESC")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert_eq!(pinned, vec!["item3", "item1"]);
 
         // 取消置顶 item1
@@ -2112,10 +2168,11 @@ mod tests {
             .await
             .unwrap();
 
-        let pinned: Vec<String> = sqlx::query_scalar("SELECT item_id FROM pinned_items ORDER BY pinned_at DESC")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let pinned: Vec<String> =
+            sqlx::query_scalar("SELECT item_id FROM pinned_items ORDER BY pinned_at DESC")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert_eq!(pinned, vec!["item3"]);
     }
 
@@ -2146,11 +2203,13 @@ mod tests {
             sqlx::query(
                 "INSERT INTO history_items_fts(rowid, item_id, content) VALUES (?1, ?2, ?3)",
             )
-                .bind(sqlx::query_scalar::<_, i64>("SELECT id FROM history_items WHERE item_id = ?1")
+                .bind(
+                    sqlx::query_scalar::<_, i64>("SELECT id FROM history_items WHERE item_id = ?1")
                     .bind(id)
                     .fetch_one(&pool)
                     .await
-                    .unwrap())
+                        .unwrap(),
+                )
                 .bind(id)
                 .bind(content)
                 .execute(&pool)
@@ -2196,9 +2255,7 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query(
-            "INSERT INTO history_items_fts(rowid, item_id, content) VALUES (?1, ?2, ?3)",
-        )
+        sqlx::query("INSERT INTO history_items_fts(rowid, item_id, content) VALUES (?1, ?2, ?3)")
             .bind(1i64)
             .bind("s1")
             .bind("test(value) with +special-chars:ok")
@@ -2295,10 +2352,11 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1, "事务回滚后应该只有 1 条记录");
 
-        let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history_items WHERE item_id = 'roll1'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let exists: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM history_items WHERE item_id = 'roll1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(exists, 0, "回滚的记录不应该存在");
     }
 
@@ -2378,10 +2436,11 @@ mod tests {
             .unwrap();
 
         // 验证
-        let row: (String,) = sqlx::query_as("SELECT content FROM history_items WHERE item_id = 'item_a'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let row: (String,) =
+            sqlx::query_as("SELECT content FROM history_items WHERE item_id = 'item_a'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(row.0, "a_updated", "UPSERT 应该更新已有记录");
 
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history_items")
@@ -2404,10 +2463,11 @@ mod tests {
                 .unwrap();
         }
 
-        let cats: Vec<String> = sqlx::query_scalar("SELECT category FROM category_list ORDER BY id ASC")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let cats: Vec<String> =
+            sqlx::query_scalar("SELECT category FROM category_list ORDER BY id ASC")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert_eq!(cats, vec!["工作", "生活", "学习"]);
 
         // 重复添加不报错
@@ -2430,10 +2490,11 @@ mod tests {
             .await
             .unwrap();
 
-        let cats: Vec<String> = sqlx::query_scalar("SELECT category FROM category_list ORDER BY id ASC")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let cats: Vec<String> =
+            sqlx::query_scalar("SELECT category FROM category_list ORDER BY id ASC")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert_eq!(cats, vec!["工作", "学习"]);
     }
 
@@ -2548,12 +2609,11 @@ mod tests {
         assert_eq!(results, vec!["fts05"]);
 
         // 验证幽灵记录已清除
-        let ghost: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM history_items_fts WHERE item_id = 'ghost'",
-        )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let ghost: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM history_items_fts WHERE item_id = 'ghost'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(ghost, 0, "幽灵 FTS 记录应被清除");
     }
 
@@ -2595,7 +2655,9 @@ mod tests {
 
         // 2. 清理不在列表中的记录
         let desired_ids: Vec<String> = items.iter().map(|(id, _, _)| id.clone()).collect();
-        sqlx::query("DELETE FROM history_items WHERE item_id NOT IN (SELECT value FROM json_each(?1))")
+        sqlx::query(
+            "DELETE FROM history_items WHERE item_id NOT IN (SELECT value FROM json_each(?1))",
+        )
             .bind(serde_json::to_string(&desired_ids).unwrap())
             .execute(&mut *tx)
             .await
@@ -2615,7 +2677,10 @@ mod tests {
         }
 
         // 4. 同步分类列表
-        sqlx::query("DELETE FROM category_list").execute(&mut *tx).await.unwrap();
+        sqlx::query("DELETE FROM category_list")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
         for cat in &category_list {
             sqlx::query("INSERT INTO category_list(category) VALUES(?)")
                 .bind(cat)
@@ -2625,7 +2690,10 @@ mod tests {
         }
 
         // 5. 同步置顶
-        sqlx::query("DELETE FROM pinned_items").execute(&mut *tx).await.unwrap();
+        sqlx::query("DELETE FROM pinned_items")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
         for (idx, item_id) in pinned.iter().enumerate() {
             sqlx::query("INSERT INTO pinned_items(pinned_at, item_id) VALUES(?1, ?2)")
                 .bind(now - idx as i64)
@@ -2650,27 +2718,38 @@ mod tests {
 
         // 历史记录数量
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history_items")
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(count, 3);
 
         // 分类数量
         let cat_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM categories")
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(cat_count, 2);
 
         // 分类列表
-        let cats: Vec<String> = sqlx::query_scalar("SELECT category FROM category_list ORDER BY id")
-            .fetch_all(&pool).await.unwrap();
+        let cats: Vec<String> =
+            sqlx::query_scalar("SELECT category FROM category_list ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert_eq!(cats, vec!["工作", "生活"]);
 
         // 置顶
         let pinned_ids: Vec<String> = sqlx::query_scalar("SELECT item_id FROM pinned_items")
-            .fetch_all(&pool).await.unwrap();
+            .fetch_all(&pool)
+            .await
+            .unwrap();
         assert_eq!(pinned_ids, vec!["item_a"]);
 
         // FTS 索引一致
         let fts_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history_items_fts")
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(fts_count, 3, "FTS 应该与 history_items 行数一致");
     }
 
@@ -2723,13 +2802,17 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 for _ in 0..10 {
                     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history_items")
-                        .fetch_one(pool.as_ref()).await.unwrap();
+                        .fetch_one(pool.as_ref())
+                        .await
+                        .unwrap();
                     assert!(count >= 50, "读取时至少有基础数据: {}", count);
 
                     let _rows: Vec<String> = sqlx::query_scalar(
-                        "SELECT content FROM history_items ORDER BY updated_at DESC LIMIT 5"
+                        "SELECT content FROM history_items ORDER BY updated_at DESC LIMIT 5",
                     )
-                        .fetch_all(pool.as_ref()).await.unwrap();
+                        .fetch_all(pool.as_ref())
+                        .await
+                        .unwrap();
                 }
             }));
         }
@@ -2740,7 +2823,9 @@ mod tests {
 
         // 最终验证：50 基础 + 100 写入 = 150
         let final_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history_items")
-            .fetch_one(pool.as_ref()).await.unwrap();
+            .fetch_one(pool.as_ref())
+            .await
+            .unwrap();
         assert_eq!(final_count, 150, "并发读写后数据完整");
     }
 
@@ -2777,16 +2862,19 @@ mod tests {
                 .unwrap();
 
             // 验证能正确读回
-            let row: (String,) = sqlx::query_as("SELECT content FROM history_items WHERE item_id = ?1")
-                .bind(&item_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+            let row: (String,) =
+                sqlx::query_as("SELECT content FROM history_items WHERE item_id = ?1")
+                    .bind(&item_id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
             assert_eq!(row.0, *content, "内容应该完整保留: {}", item_id);
         }
 
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history_items")
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(count, special_contents.len() as i64);
     }
 
@@ -2812,23 +2900,38 @@ mod tests {
                 .execute(&pool).await.unwrap();
 
             let row_id: i64 = sqlx::query_scalar("SELECT id FROM history_items WHERE item_id = ?1")
-                .bind(id).fetch_one(&pool).await.unwrap();
-            sqlx::query("INSERT INTO history_items_fts(rowid, item_id, content) VALUES (?1, ?2, ?3)")
-                .bind(row_id).bind(id).bind(content)
-                .execute(&pool).await.unwrap();
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO history_items_fts(rowid, item_id, content) VALUES (?1, ?2, ?3)",
+            )
+                .bind(row_id)
+                .bind(id)
+                .bind(content)
+                .execute(&pool)
+                .await
+                .unwrap();
         }
 
         // 搜索 "hello"
         let results: Vec<String> = sqlx::query_scalar(
             "SELECT item_id FROM history_items_fts WHERE history_items_fts MATCH '\"hello\"*'",
-        ).fetch_all(&pool).await.unwrap();
+        )
+            .fetch_all(&pool)
+            .await
+            .unwrap();
         assert!(results.contains(&"en1".to_string()));
         assert!(!results.contains(&"en2".to_string()));
 
         // 搜索 "rust"
         let results: Vec<String> = sqlx::query_scalar(
             "SELECT item_id FROM history_items_fts WHERE history_items_fts MATCH '\"rust\"*'",
-        ).fetch_all(&pool).await.unwrap();
+        )
+            .fetch_all(&pool)
+            .await
+            .unwrap();
         assert!(results.contains(&"en2".to_string()));
     }
 
@@ -2853,17 +2956,26 @@ mod tests {
         let to_delete = vec!["del00", "del05", "del10", "del15", "del19"];
         for id in &to_delete {
             sqlx::query("DELETE FROM history_items WHERE item_id = ?1")
-                .bind(id).execute(&pool).await.unwrap();
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
         }
 
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history_items")
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(count, 15, "应该删除 5 条，剩余 15 条");
 
         // 验证删除的确实不存在
         for id in &to_delete {
-            let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history_items WHERE item_id = ?1")
-                .bind(id).fetch_one(&pool).await.unwrap();
+            let exists: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM history_items WHERE item_id = ?1")
+                    .bind(id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
             assert_eq!(exists, 0, "{} 应该已删除", id);
         }
     }
@@ -2881,17 +2993,29 @@ mod tests {
 
         // 设置分类
         sqlx::query("INSERT INTO categories(category, item_id) VALUES(?1, ?2)")
-            .bind("工作").bind("item1")
-            .execute(&pool).await.unwrap();
+            .bind("工作")
+            .bind("item1")
+            .execute(&pool)
+            .await
+            .unwrap();
 
         // 删除分类列表中的"工作"
         sqlx::query("DELETE FROM category_list WHERE category = '工作'")
-            .execute(&pool).await.unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
 
         // 验证：categories 表中的映射仍然存在（非级联删除）
-        let cat: Option<String> = sqlx::query_scalar("SELECT category FROM categories WHERE item_id = 'item1'")
-            .fetch_optional(&pool).await.unwrap();
-        assert_eq!(cat, Some("工作".to_string()), "删除分类列表不应影响分类映射");
+        let cat: Option<String> =
+            sqlx::query_scalar("SELECT category FROM categories WHERE item_id = 'item1'")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            cat,
+            Some("工作".to_string()),
+            "删除分类列表不应影响分类映射"
+        );
     }
 
     #[tokio::test]
@@ -2914,28 +3038,39 @@ mod tests {
             sqlx::query("INSERT INTO pinned_items(pinned_at, item_id) VALUES(?1, ?2)")
                 .bind(now + 100 - idx as i64)
                 .bind(id)
-                .execute(&pool).await.unwrap();
+                .execute(&pool)
+                .await
+                .unwrap();
         }
 
         // 按 pinned_at DESC 查询应该保持插入顺序
-        let result: Vec<String> = sqlx::query_scalar(
-            "SELECT item_id FROM pinned_items ORDER BY pinned_at DESC"
-        ).fetch_all(&pool).await.unwrap();
+        let result: Vec<String> =
+            sqlx::query_scalar("SELECT item_id FROM pinned_items ORDER BY pinned_at DESC")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert_eq!(result, vec!["ord3", "ord1", "ord4"]);
 
         // 重新排序：删除后按新顺序插入
-        sqlx::query("DELETE FROM pinned_items").execute(&pool).await.unwrap();
+        sqlx::query("DELETE FROM pinned_items")
+            .execute(&pool)
+            .await
+            .unwrap();
         let new_order = vec!["ord4", "ord1", "ord3"];
         for (idx, id) in new_order.iter().enumerate() {
             sqlx::query("INSERT INTO pinned_items(pinned_at, item_id) VALUES(?1, ?2)")
                 .bind(now + 200 - idx as i64)
                 .bind(id)
-                .execute(&pool).await.unwrap();
+                .execute(&pool)
+                .await
+                .unwrap();
         }
 
-        let result: Vec<String> = sqlx::query_scalar(
-            "SELECT item_id FROM pinned_items ORDER BY pinned_at DESC"
-        ).fetch_all(&pool).await.unwrap();
+        let result: Vec<String> =
+            sqlx::query_scalar("SELECT item_id FROM pinned_items ORDER BY pinned_at DESC")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert_eq!(result, vec!["ord4", "ord1", "ord3"]);
     }
 }

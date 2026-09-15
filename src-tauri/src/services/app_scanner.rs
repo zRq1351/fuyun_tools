@@ -65,13 +65,20 @@ pub fn scan_apps_by_category() -> Vec<AppCategory> {
     let start_menu = std::env::var("PROGRAMDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(r"C:\ProgramData"))
-        .join("Microsoft").join("Windows").join("Start Menu").join("Programs");
+        .join("Microsoft")
+        .join("Windows")
+        .join("Start Menu")
+        .join("Programs");
     if start_menu.exists() {
         scan_dir_by_category(&start_menu, "其他", &mut category_map);
     }
 
     if let Some(app_data) = dirs::data_dir() {
-        let user_menu = app_data.join("Microsoft").join("Windows").join("Start Menu").join("Programs");
+        let user_menu = app_data
+            .join("Microsoft")
+            .join("Windows")
+            .join("Start Menu")
+            .join("Programs");
         if user_menu.exists() {
             scan_dir_by_category(&user_menu, "其他", &mut category_map);
         }
@@ -113,7 +120,11 @@ pub fn get_cached_apps() -> Vec<LauncherItem> {
             // Return cached data if available and fresh
             if let Ok(elapsed) = cached.last_scan_time.elapsed() {
                 if elapsed.as_secs() < 300 {
-                    return cached.categories.iter().flat_map(|c| c.apps.clone()).collect();
+                    return cached
+                        .categories
+                        .iter()
+                        .flat_map(|c| c.apps.clone())
+                        .collect();
                 }
             }
         }
@@ -128,7 +139,9 @@ fn scan_dir_by_category(
     default_category: &str,
     category_map: &mut std::collections::HashMap<String, Vec<LauncherItem>>,
 ) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -140,7 +153,13 @@ fn scan_dir_by_category(
                 .unwrap_or(default_category)
                 .to_string();
 
-            let skip_folders = ["启动", "Startup", "Maintenance", "Windows 系统", "Windows System"];
+            let skip_folders = [
+                "启动",
+                "Startup",
+                "Maintenance",
+                "Windows 系统",
+                "Windows System",
+            ];
             if skip_folders.iter().any(|s| folder_name.contains(s)) {
                 continue;
             }
@@ -148,7 +167,10 @@ fn scan_dir_by_category(
             scan_dir_flat(&path, &folder_name, category_map);
         } else if path.extension().is_some_and(|e| e == "lnk") {
             if let Some(item) = parse_shortcut(&path, default_category) {
-                category_map.entry(default_category.to_string()).or_default().push(item);
+                category_map
+                    .entry(default_category.to_string())
+                    .or_default()
+                    .push(item);
             }
         }
     }
@@ -173,7 +195,9 @@ fn scan_dir_flat_depth(
     if depth > MAX_LAUNCHER_SCAN_DEPTH {
         return;
     }
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -186,7 +210,10 @@ fn scan_dir_flat_depth(
             scan_dir_flat_depth(&path, category, category_map, depth + 1);
         } else if path.extension().is_some_and(|e| e == "lnk") {
             if let Some(item) = parse_shortcut(&path, category) {
-                category_map.entry(category.to_string()).or_default().push(item);
+                category_map
+                    .entry(category.to_string())
+                    .or_default()
+                    .push(item);
             }
         }
     }
@@ -223,7 +250,10 @@ fn parse_shortcut(path: &Path, category: &str) -> Option<LauncherItem> {
         .replace(' ', "_");
 
     let hidden = ["卸载", "Uninstall", "帮助", "Help", "readme", "说明"];
-    if hidden.iter().any(|p| file_name.to_lowercase().contains(&p.to_lowercase())) {
+    if hidden
+        .iter()
+        .any(|p| file_name.to_lowercase().contains(&p.to_lowercase()))
+    {
         return None;
     }
 
@@ -280,10 +310,10 @@ pub fn search_apps(query: &str, limit: usize) -> Vec<LauncherItem> {
 #[cfg(target_os = "windows")]
 fn shell_execute_open(path: &str, args: Option<&str>) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{HINSTANCE, HWND};
     use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SHELLEXECUTEINFOW};
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
-    use windows::Win32::Foundation::{HINSTANCE, HWND};
-    use windows::core::PCWSTR;
 
     let wide_path: Vec<u16> = std::ffi::OsStr::new(path)
         .encode_wide()
@@ -299,7 +329,8 @@ fn shell_execute_open(path: &str, args: Option<&str>) -> Result<(), String> {
             .collect()
     });
 
-    let args_ptr = args_vec.as_ref()
+    let args_ptr = args_vec
+        .as_ref()
         .map_or(PCWSTR::null(), |v| PCWSTR(v.as_ptr()));
 
     let mut sei = SHELLEXECUTEINFOW {
@@ -376,7 +407,7 @@ pub fn launch_app_with_optional_args(path: &str, args: Option<&str>) -> Result<(
         _ => String::new(),
     };
     log::info!("[launch_app] 尝试启动程序: {}{}", path, args_desc);
-    
+
     let path_buf = PathBuf::from(path);
     if !path_buf.exists() {
         log::error!("[launch_app] 文件不存在: {}", path);
@@ -416,7 +447,8 @@ pub fn launch_app_with_optional_args(path: &str, args: Option<&str>) -> Result<(
                 }
                 Err(e) => {
                     log::error!("[launch_app] 启动失败: {}", e);
-                    Err(AppErrorKind::LauncherStartupFailed.to_frontend_json_with_details(format!("{}", e)))
+                    Err(AppErrorKind::LauncherStartupFailed
+                        .to_frontend_json_with_details(format!("{}", e)))
                 }
             }
         }
@@ -437,7 +469,8 @@ pub fn launch_app_with_optional_args(path: &str, args: Option<&str>) -> Result<(
                 }
                 Err(e) => {
                     log::error!("[launch_app] 启动失败: {}", e);
-                    Err(AppErrorKind::LauncherStartupFailed.to_frontend_json_with_details(format!("{}", e)))
+                    Err(AppErrorKind::LauncherStartupFailed
+                        .to_frontend_json_with_details(format!("{}", e)))
                 }
             }
         }
@@ -471,7 +504,9 @@ mod tests {
 
     #[test]
     fn test_split_windows_command_args_quoted_path() {
-        let args = split_windows_command_args(r#""C:\Program Files\My App\run.exe" -f "D:\my data\a.txt""#);
+        let args = split_windows_command_args(
+            r#""C:\Program Files\My App\run.exe" -f "D:\my data\a.txt""#,
+        );
         assert_eq!(args.len(), 3);
         assert_eq!(args[0], r"C:\Program Files\My App\run.exe");
         assert_eq!(args[1], "-f");
