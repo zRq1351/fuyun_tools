@@ -4,6 +4,7 @@ use crate::core::error_codes::AppErrorKind;
 use crate::sync::{lock_arc_mutex, Mutex};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use std::collections::HashMap;
 use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex};
 use std::thread;
 use std::time::Duration;
@@ -40,6 +41,7 @@ pub fn destroy_window_by_label(app: &AppHandle, label: &str) {
     if let Some(window) = app.get_webview_window(label) {
         log::info!("[窗口销毁] 强制销毁: {}", label);
         let _ = window.destroy();
+        clear_hidden_since(label);
         if let Some(state) = app.try_state::<Arc<Mutex<AppState>>>() {
             let mut guard = lock_arc_mutex(state.inner());
             if guard.active_overlay_window.as_deref() == Some(label) {
@@ -54,6 +56,93 @@ pub fn destroy_window_by_label(app: &AppHandle, label: &str) {
     } else {
         log::warn!("[窗口销毁] 未找到窗口: {}", label);
     }
+}
+
+// ===== 闲置窗口销毁（降低 WebView2 常驻内存） =====
+
+fn hidden_since_map() -> &'static StdMutex<HashMap<String, std::time::Instant>> {
+    static MAP: LazyLock<StdMutex<HashMap<String, std::time::Instant>>> =
+        LazyLock::new(|| StdMutex::new(HashMap::new()));
+    &MAP
+}
+
+fn mark_hidden_since(label: &str) {
+    let mut map = hidden_since_map()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    map.insert(label.to_string(), std::time::Instant::now());
+}
+
+fn clear_hidden_since(label: &str) {
+    let mut map = hidden_since_map()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    map.remove(label);
+}
+
+/// 可闲置销毁的功能窗口（settings 常驻，不销毁）
+fn idle_gc_eligible(label: &str) -> bool {
+    matches!(
+        label,
+        "clipboard"
+            | "text_preview"
+            | "image_clipboard"
+            | "image_preview"
+            | "screenshot"
+            | "longshot_toolbar"
+            | "longshot_border"
+            | "recording_toolbar"
+            | "launcher"
+            | "document_manager"
+            | "document_manager_widget"
+            | "selection_toolbar"
+    )
+}
+
+fn idle_gc_ttl(label: &str) -> std::time::Duration {
+    match label {
+        // 会话型工具条：用完较快回收
+        "longshot_toolbar" | "longshot_border" | "selection_toolbar" | "recording_toolbar" => {
+            std::time::Duration::from_secs(120)
+        }
+        // 高频但可重建
+        "clipboard" | "image_clipboard" => std::time::Duration::from_secs(300),
+        _ => std::time::Duration::from_secs(180),
+    }
+}
+
+/// 启动后台扫描：隐藏且闲置超时的功能窗口将被 destroy，再次使用时懒创建
+pub fn start_idle_window_gc(app_handle: AppHandle) {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            let now = std::time::Instant::now();
+            let expired: Vec<String> = {
+                let map = hidden_since_map()
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
+                map.iter()
+                    .filter(|(label, since)| {
+                        idle_gc_eligible(label)
+                            && now.duration_since(**since) >= idle_gc_ttl(label)
+                    })
+                    .map(|(label, _)| label.clone())
+                    .collect()
+            };
+            for label in expired {
+                let Some(window) = app_handle.get_webview_window(&label) else {
+                    clear_hidden_since(&label);
+                    continue;
+                };
+                // 仍可见则不销毁
+                if matches!(window.is_visible(), Ok(true)) {
+                    clear_hidden_since(&label);
+                    continue;
+                }
+                destroy_window_by_label(&app_handle, &label);
+            }
+        }
+    });
 }
 
 fn notify_window_visibility_changed() {
@@ -107,6 +196,7 @@ fn show_overlay_window(
     window: &tauri::WebviewWindow,
     focus: bool,
 ) -> bool {
+    clear_hidden_since(label);
     if window.show().is_err() {
         return false;
     }
@@ -122,6 +212,7 @@ fn show_overlay_window(
 
 fn hide_overlay_window(app_handle: &AppHandle, label: &str, window: &tauri::WebviewWindow) {
     let _ = window.hide();
+    mark_hidden_since(label);
     let should_clear = app_handle
         .try_state::<Arc<Mutex<AppState>>>()
         .map(|state| {
@@ -246,16 +337,19 @@ pub fn focus_overlay_window_by_label(app_handle: &AppHandle, label: &str) -> Res
 
 pub fn bind_standard_window_close_to_hide(window: &tauri::WebviewWindow) {
     let window_clone = window.clone();
+    let label = window.label().to_string();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
             let _ = window_clone.hide();
+            mark_hidden_since(&label);
         }
     });
 }
 
 pub fn show_standard_window_by_label(app_handle: &AppHandle, label: &str) -> Result<(), String> {
     ensure_window_for_label(app_handle, label)?;
+    clear_hidden_since(label);
     let window = app_handle
         .get_webview_window(label)
         .ok_or_else(|| format!("窗口不存在: {}", label))?;
