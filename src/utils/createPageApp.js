@@ -57,11 +57,11 @@ export function createPageApp(rootComponent, options = {}) {
 
     initTheme()
 
-    watchThemeStorage((_theme) => {
+    watchThemeStorage((theme) => {
         // themeManager already calls applyTheme internally
     })
 
-    watchSystemTheme((_theme) => {
+    watchSystemTheme((theme) => {
         // themeManager already calls applyTheme internally
     })
 

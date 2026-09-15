@@ -1,102 +1,102 @@
 <template>
   <div class="toolbar">
     <div
-      :title="$t('clipboard.dragHint')"
-      class="window-offset-handle"
-      @mousedown.stop.prevent="startWindowOffsetDrag"
+        :title="$t('clipboard.dragHint')"
+        class="window-offset-handle"
+        @mousedown.stop.prevent="startWindowOffsetDrag"
     >
       <el-icon :size="14">
-        <Rank />
+        <Rank/>
       </el-icon>
     </div>
     <button
-      v-if="showAiToggle"
-      class="ai-toggle-btn"
-      type="button"
-      @click.stop
-      @mousedown.stop="handleToggleAiSettings"
+        v-if="showAiToggle"
+        class="ai-toggle-btn"
+        type="button"
+        @click.stop
+        @mousedown.stop="handleToggleAiSettings"
     >
       <el-icon
-        :size="14"
-        class="ai-toggle-arrow"
+          :size="14"
+          class="ai-toggle-arrow"
       >
-        <ArrowRight v-if="isAiSettingsCollapsed" />
-        <ArrowDown v-else />
+        <ArrowRight v-if="isAiSettingsCollapsed"/>
+        <ArrowDown v-else/>
       </el-icon>
     </button>
     <el-input
-      v-model="searchKeyword"
-      class="search-input"
-      clearable
-      :placeholder="searchPlaceholder || $t('clipboard.searchHistory')"
-      size="small"
+        v-model="searchKeyword"
+        class="search-input"
+        clearable
+        :placeholder="searchPlaceholder || $t('clipboard.searchHistory')"
+        size="small"
     >
       <template #prefix>
         <el-icon :size="14">
-          <Search />
+          <Search/>
         </el-icon>
       </template>
     </el-input>
     <button
-      :class="{ active: isReorderMode }"
-      :title="isReorderMode ? $t('clipboard.finishReorder') : $t('clipboard.reorder')"
-      class="reorder-btn"
-      type="button"
-      @click.stop
-      @mousedown.stop="handleToggleReorder"
+        :class="{ active: isReorderMode }"
+        :title="isReorderMode ? $t('clipboard.finishReorder') : $t('clipboard.reorder')"
+        class="reorder-btn"
+        type="button"
+        @click.stop
+        @mousedown.stop="handleToggleReorder"
     >
       <el-icon :size="14">
-        <Sort v-if="!isReorderMode" />
-        <Check v-else />
+        <Sort v-if="!isReorderMode"/>
+        <Check v-else/>
       </el-icon>
     </button>
     <div class="category-nav">
       <div
-        :class="{ active: categoryFilter === '全部' }"
-        class="category-pill"
-        @click="updateCategoryFilter('全部')"
+          :class="{ active: categoryFilter === '全部' }"
+          class="category-pill"
+          @click="updateCategoryFilter('全部')"
       >
         {{ $t('common.all') }}
       </div>
       <div
-        v-for="category in categories"
-        :key="category"
-        :class="{ active: categoryFilter === category }"
-        class="category-pill"
-        @click="updateCategoryFilter(category)"
-        @dragenter="handleDragEnter"
-        @dragleave="handleDragLeave"
-        @drop="handleDrop($event, category)"
-        @dragover.prevent="handleDragOver"
+          v-for="category in categories"
+          :key="category"
+          :class="{ active: categoryFilter === category }"
+          class="category-pill"
+          @click="updateCategoryFilter(category)"
+          @dragenter="handleDragEnter"
+          @dragleave="handleDragLeave"
+          @drop="handleDrop($event, category)"
+          @dragover.prevent="handleDragOver"
       >
         <span class="category-label">{{ translateCategory(category) }}</span>
         <span
-          v-if="canDeleteCategory(category)"
-          class="category-remove"
-          @click.stop="removeCategory(category)"
+            v-if="canDeleteCategory(category)"
+            class="category-remove"
+            @click.stop="removeCategory(category)"
         >
-          <el-icon :size="10"><Close /></el-icon>
+          <el-icon :size="10"><Close/></el-icon>
         </span>
       </div>
       <div
-        v-if="!isAddingCategory"
-        class="category-pill add-category"
-        @click="startCreateCategory"
+          v-if="!isAddingCategory"
+          class="category-pill add-category"
+          @click="startCreateCategory"
       >
         <el-icon :size="12">
-          <Plus />
+          <Plus/>
         </el-icon>
       </div>
       <el-input
-        v-else
-        ref="newCategoryInputRef"
-        v-model="newCategoryName"
-        class="category-input"
-        :placeholder="$t('clipboard.inputCategoryName')"
-        size="small"
-        @blur="confirmCreateCategory"
-        @keydown.enter.prevent="confirmCreateCategory"
-        @keydown.esc.prevent="cancelCreateCategory"
+          v-else
+          ref="newCategoryInputRef"
+          v-model="newCategoryName"
+          class="category-input"
+          :placeholder="$t('clipboard.inputCategoryName')"
+          size="small"
+          @blur="confirmCreateCategory"
+          @keydown.enter.prevent="confirmCreateCategory"
+          @keydown.esc.prevent="cancelCreateCategory"
       />
     </div>
   </div>

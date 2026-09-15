@@ -2,8 +2,6 @@ import {describe, it} from 'node:test'
 import assert from 'node:assert/strict'
 
 // ===== 模拟 Vue ref（用于测试 composable 纯逻辑） =====
-// 保留：部分测试通过该 stub 构造响应式对象
-// eslint-disable-next-line no-unused-vars
 function ref(value) {
     return {
         get value() {
@@ -256,7 +254,7 @@ describe('CategoryActions - runCategoryAssignment', () => {
                 await Promise.resolve(persist(itemKey, category))
             }
             return true
-        } catch {
+        } catch (error) {
             return false
         } finally {
             if (typeof onFinally === 'function') onFinally()

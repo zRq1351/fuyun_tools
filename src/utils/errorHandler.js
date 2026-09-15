@@ -55,7 +55,7 @@ export function parseLegacyError(raw) {
  */
 export function handleAppError(error, context = 'Operation failed') {
     const i18n = getI18nInstance()
-    const t = i18n && i18n.global ? i18n.global.t.bind(i18n.global) : (key, _params) => key
+    const t = i18n && i18n.global ? i18n.global.t.bind(i18n.global) : (key, params) => key
 
     // 优先使用 ipcInvoke 包装的 originalError，保留原始错误格式
     let raw
@@ -160,7 +160,7 @@ export function handleAppError(error, context = 'Operation failed') {
  */
 export function parseErrorMessage(raw) {
     const i18n = getI18nInstance()
-    const t = i18n && i18n.global ? i18n.global.t.bind(i18n.global) : (key, _params) => key
+    const t = i18n && i18n.global ? i18n.global.t.bind(i18n.global) : (key, params) => key
     if (!raw) return ''
 
     // 优先使用 ipcInvoke 包装的 originalError

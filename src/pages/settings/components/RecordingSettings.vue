@@ -1,11 +1,11 @@
 <template>
   <el-form
-    :model="form"
-    label-position="top"
+      :model="form"
+      label-position="top"
   >
     <el-card
-      class="setting-section-card compact-card"
-      shadow="never"
+        class="setting-section-card compact-card"
+        shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -18,11 +18,11 @@
         </div>
         <el-form-item :label="$t('settings.recording.enabled')">
           <el-switch
-            :active-text="pendingToggles.recording === 'disabling' ? $t('common.disabling') : $t('common.enable')"
-            :inactive-text="pendingToggles.recording === 'enabling' ? $t('common.enabling') : $t('common.disable')"
-            :loading="!!pendingToggles.recording"
-            :model-value="form.recordingEnabled"
-            @update:model-value="(val) => toggleFeature('recordingEnabled', val)"
+              :active-text="pendingToggles.recording === 'disabling' ? $t('common.disabling') : $t('common.enable')"
+              :inactive-text="pendingToggles.recording === 'enabling' ? $t('common.enabling') : $t('common.disable')"
+              :loading="!!pendingToggles.recording"
+              :model-value="form.recordingEnabled"
+              @update:model-value="(val) => toggleFeature('recordingEnabled', val)"
           />
           <div class="form-hint">
             {{ $t('settings.recording.disabledHint') }}
@@ -30,25 +30,25 @@
         </el-form-item>
         <el-form-item :label="$t('settings.recording.recordingHotkey')">
           <el-input
-            :class="{ recording: isRecordingHotkeyRecording }"
-            :model-value="recordingDisplayValue"
-            :placeholder="$t('settings.clipboard.shortcutExample')"
-            readonly
+              :class="{ recording: isRecordingHotkeyRecording }"
+              :model-value="recordingDisplayValue"
+              :placeholder="$t('settings.clipboard.shortcutExample')"
+              readonly
           >
             <template #append>
               <el-button-group>
                 <el-button
-                  :title="$t('settings.clipboard.modifyShortcut')"
-                  :type="isRecordingHotkeyRecording ? 'danger' : 'primary'"
-                  @click="toggleRecordingHotkey"
+                    :title="$t('settings.clipboard.modifyShortcut')"
+                    :type="isRecordingHotkeyRecording ? 'danger' : 'primary'"
+                    @click="toggleRecordingHotkey"
                 >
                   <el-icon>
-                    <component :is="isRecordingHotkeyRecording ? VideoPause : Edit" />
+                    <component :is="isRecordingHotkeyRecording ? VideoPause : Edit"/>
                   </el-icon>
                 </el-button>
                 <el-button
-                  :title="$t('settings.clipboard.resetShortcut')"
-                  @click="resetRecordingHotkey"
+                    :title="$t('settings.clipboard.resetShortcut')"
+                    @click="resetRecordingHotkey"
                 >
                   <el-icon><RefreshLeft /></el-icon>
                 </el-button>
@@ -58,25 +58,25 @@
         </el-form-item>
         <el-form-item :label="$t('settings.recording.micToggleHotkey')">
           <el-input
-            :class="{ recording: isMicToggleHotkeyRecording }"
-            :model-value="micToggleDisplayValue"
-            :placeholder="$t('settings.clipboard.shortcutExample')"
-            readonly
+              :class="{ recording: isMicToggleHotkeyRecording }"
+              :model-value="micToggleDisplayValue"
+              :placeholder="$t('settings.clipboard.shortcutExample')"
+              readonly
           >
             <template #append>
               <el-button-group>
                 <el-button
-                  :title="$t('settings.clipboard.modifyShortcut')"
-                  :type="isMicToggleHotkeyRecording ? 'danger' : 'primary'"
-                  @click="toggleMicToggleHotkey"
+                    :title="$t('settings.clipboard.modifyShortcut')"
+                    :type="isMicToggleHotkeyRecording ? 'danger' : 'primary'"
+                    @click="toggleMicToggleHotkey"
                 >
                   <el-icon>
-                    <component :is="isMicToggleHotkeyRecording ? VideoPause : Edit" />
+                    <component :is="isMicToggleHotkeyRecording ? VideoPause : Edit"/>
                   </el-icon>
                 </el-button>
                 <el-button
-                  :title="$t('settings.clipboard.resetShortcut')"
-                  @click="resetMicToggleHotkey"
+                    :title="$t('settings.clipboard.resetShortcut')"
+                    @click="resetMicToggleHotkey"
                 >
                   <el-icon><RefreshLeft /></el-icon>
                 </el-button>
@@ -96,10 +96,10 @@
         <div class="group-grid quality-grid">
           <el-form-item :label="$t('settings.recording.audioSync')">
             <el-input-number
-              v-model="form.recordingWindowAudioSyncAdvanceMs"
-              :max="500"
-              :min="0"
-              :step="5"
+                v-model="form.recordingWindowAudioSyncAdvanceMs"
+                :max="500"
+                :min="0"
+                :step="5"
             />
             <div class="form-hint">
               {{ $t('settings.recording.audioSyncHint') }}
@@ -107,9 +107,9 @@
           </el-form-item>
           <el-form-item :label="$t('settings.recording.maxDuration')">
             <el-input-number
-              v-model="form.recordingMaxDurationMinutes"
-              :max="1440"
-              :min="1"
+                v-model="form.recordingMaxDurationMinutes"
+                :max="1440"
+                :min="1"
             />
           </el-form-item>
         </div>
@@ -121,17 +121,17 @@
         </div>
         <el-form-item :label="$t('settings.recording.outputDir')">
           <el-input
-            v-model="effectiveOutputDirDisplay"
-            readonly
+              v-model="effectiveOutputDirDisplay"
+              readonly
           >
             <template #append>
               <el-tooltip
-                :content="$t('common.selectDir')"
-                placement="top"
+                  :content="$t('common.selectDir')"
+                  placement="top"
               >
                 <el-button @click="selectOutputDir">
                   <el-icon>
-                    <FolderOpened />
+                    <FolderOpened/>
                   </el-icon>
                 </el-button>
               </el-tooltip>
@@ -140,8 +140,8 @@
           <div class="form-hint">
             {{ $t('settings.recording.outputDirHint') }}
             <el-link
-              type="primary"
-              @click="openOutputDir"
+                type="primary"
+                @click="openOutputDir"
             >
               {{ $t('settings.recording.openDir') }}
             </el-link>
@@ -150,9 +150,9 @@
         <div class="switch-row">
           <el-form-item :label="$t('settings.recording.autoOpenDir')">
             <el-switch
-              v-model="form.recordingAutoOpenFolder"
-              :active-text="$t('common.open')"
-              :inactive-text="$t('common.close')"
+                v-model="form.recordingAutoOpenFolder"
+                :active-text="$t('common.open')"
+                :inactive-text="$t('common.close')"
             />
           </el-form-item>
         </div>
@@ -193,7 +193,7 @@ const toggleFeature = async (fieldName, value) => {
     return
   }
   pendingToggles.value = {...pendingToggles.value, [fieldName]: value ? 'enabling' : 'disabling'}
-  await props.onFeatureToggle(fieldName, value)
+  const ok = await props.onFeatureToggle(fieldName, value)
   pendingToggles.value = {...pendingToggles.value, [fieldName]: undefined}
 }
 

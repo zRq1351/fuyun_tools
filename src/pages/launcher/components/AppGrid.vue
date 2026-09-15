@@ -1,17 +1,17 @@
 <template>
   <div
-    class="app-grid-container"
-    @contextmenu.prevent
+      class="app-grid-container"
+      @contextmenu.prevent
   >
     <div
-      v-if="totalApps === 0"
-      class="empty-category-hint"
+        v-if="totalApps === 0"
+        class="empty-category-hint"
     >
       <el-icon
-        :size="40"
-        class="hint-icon"
+          :size="40"
+          class="hint-icon"
       >
-        <FolderAdd />
+        <FolderAdd/>
       </el-icon>
       <p>还没有为应用设置分类</p>
       <p class="hint-sub">
@@ -20,26 +20,26 @@
     </div>
     <!-- Categories Grid with Sortable -->
     <div
-      ref="categoriesContainer"
-      class="categories-grid"
+        ref="categoriesContainer"
+        class="categories-grid"
     >
       <div
-        v-for="(category, catIndex) in categories"
-        :key="category.name"
-        :data-index="catIndex"
-        class="category-box"
-        @click="expandCategory(category)"
+          v-for="(category, catIndex) in categories"
+          :key="category.name"
+          :data-index="catIndex"
+          class="category-box"
+          @click="expandCategory(category)"
       >
         <div class="category-header">
           <span class="category-name">{{ category.name }}</span>
           <div class="category-actions">
             <button
-              class="launch-all-btn"
-              title="启动所有应用"
-              @click.stop="launchAllApps(category)"
+                class="launch-all-btn"
+                title="启动所有应用"
+                @click.stop="launchAllApps(category)"
             >
               <el-icon :size="14">
-                <Monitor />
+                <Monitor/>
               </el-icon>
             </button>
             <span class="category-count">{{ category.apps.length }}</span>
@@ -47,35 +47,35 @@
         </div>
         <div class="category-apps">
           <div
-            v-for="app in category.apps.slice(0, 4)"
-            :key="app.id"
-            :class="{ 'ctx-anchor': ctxAnchorId === app.id }"
-            class="app-item"
-            @dblclick.stop="$emit('select', app)"
-            @contextmenu.prevent.stop="showContextMenu($event, app)"
+              v-for="app in category.apps.slice(0, 4)"
+              :key="app.id"
+              :class="{ 'ctx-anchor': ctxAnchorId === app.id }"
+              class="app-item"
+              @dblclick.stop="$emit('select', app)"
+              @contextmenu.prevent.stop="showContextMenu($event, app)"
           >
             <div class="app-icon">
               <img
-                v-if="app.icon_base64"
-                :src="app.icon_base64"
-                class="icon-img"
+                  v-if="app.icon_base64"
+                  :src="app.icon_base64"
+                  class="icon-img"
               >
               <el-icon
-                v-else
-                :size="24"
+                  v-else
+                  :size="24"
               >
-                <Monitor />
+                <Monitor/>
               </el-icon>
             </div>
             <div class="app-name">
               {{ app.title }}
             </div>
             <span
-              :class="app.source === 'manual' ? 'manual' : 'scan'"
-              class="app-source-badge"
+                :class="app.source === 'manual' ? 'manual' : 'scan'"
+                class="app-source-badge"
             >{{
-              app.source === 'manual' ? '手动' : '扫描'
-            }}</span>
+                app.source === 'manual' ? '手动' : '扫描'
+              }}</span>
           </div>
         </div>
       </div>
@@ -83,57 +83,57 @@
 
     <!-- Expanded Category Popup -->
     <div
-      v-if="expandedCategory"
-      class="expand-overlay"
-      @click.self="closeExpanded"
+        v-if="expandedCategory"
+        class="expand-overlay"
+        @click.self="closeExpanded"
     >
       <div class="expand-popup">
         <div class="expand-header">
           <span class="expand-title">{{ expandedCategory.name }}</span>
           <button
-            class="expand-close"
-            @click="closeExpanded"
+              class="expand-close"
+              @click="closeExpanded"
           >
             <el-icon :size="14">
-              <Close />
+              <Close/>
             </el-icon>
           </button>
         </div>
         <div
-          ref="appsContainer"
-          class="expand-apps"
+            ref="appsContainer"
+            class="expand-apps"
         >
           <div
-            v-for="app in expandedCategory.apps"
-            :key="app.id"
-            :data-app-id="app.id"
-            :class="{ 'ctx-anchor': ctxAnchorId === app.id }"
-            class="app-item sortable-app"
-            @dblclick.stop="$emit('select', app)"
-            @contextmenu.prevent.stop="showContextMenu($event, app)"
+              v-for="app in expandedCategory.apps"
+              :key="app.id"
+              :data-app-id="app.id"
+              :class="{ 'ctx-anchor': ctxAnchorId === app.id }"
+              class="app-item sortable-app"
+              @dblclick.stop="$emit('select', app)"
+              @contextmenu.prevent.stop="showContextMenu($event, app)"
           >
             <div class="app-icon">
               <img
-                v-if="app.icon_base64"
-                :src="app.icon_base64"
-                class="icon-img"
+                  v-if="app.icon_base64"
+                  :src="app.icon_base64"
+                  class="icon-img"
               >
               <el-icon
-                v-else
-                :size="24"
+                  v-else
+                  :size="24"
               >
-                <Monitor />
+                <Monitor/>
               </el-icon>
             </div>
             <div class="app-name">
               {{ app.title }}
             </div>
             <span
-              :class="app.source === 'manual' ? 'manual' : 'scan'"
-              class="app-source-badge"
+                :class="app.source === 'manual' ? 'manual' : 'scan'"
+                class="app-source-badge"
             >{{
-              app.source === 'manual' ? '手动' : '扫描'
-            }}</span>
+                app.source === 'manual' ? '手动' : '扫描'
+              }}</span>
           </div>
         </div>
       </div>
@@ -141,57 +141,57 @@
 
     <!-- Context Menu -->
     <ContextMenu
-      :show="ctxVisible"
-      :x="ctxX"
-      :y="ctxY"
-      @close="closeCtxMenu"
+        :show="ctxVisible"
+        :x="ctxX"
+        :y="ctxY"
+        @close="closeCtxMenu"
     >
       <div
-        class="context-menu-item"
-        @click="openApp(ctxApp)"
+          class="context-menu-item"
+          @click="openApp(ctxApp)"
       >
         <el-icon :size="14">
-          <Monitor />
+          <Monitor/>
         </el-icon>
         <span>{{ t('common.open') }}</span>
       </div>
       <div
-        class="context-menu-item"
-        @click="openAppDirectory(ctxApp)"
+          class="context-menu-item"
+          @click="openAppDirectory(ctxApp)"
       >
         <el-icon :size="14">
-          <FolderOpened />
+          <FolderOpened/>
         </el-icon>
         <span>打开应用目录</span>
       </div>
-      <div class="context-menu-divider" />
+      <div class="context-menu-divider"/>
       <div
-        v-if="ctxApp?.source === 'manual'"
-        class="context-menu-item"
-        @click="removeApp(ctxApp)"
+          v-if="ctxApp?.source === 'manual'"
+          class="context-menu-item"
+          @click="removeApp(ctxApp)"
       >
         <el-icon :size="14">
-          <Delete />
+          <Delete/>
         </el-icon>
         <span>{{ t('common.remove') }}应用</span>
       </div>
       <div
-        v-else
-        class="context-menu-item"
-        @click="removeFromCategory(ctxApp)"
+          v-else
+          class="context-menu-item"
+          @click="removeFromCategory(ctxApp)"
       >
         <el-icon :size="14">
-          <Close />
+          <Close/>
         </el-icon>
         <span>移出分类</span>
       </div>
-      <div class="context-menu-divider" />
+      <div class="context-menu-divider"/>
       <div
-        class="context-menu-item"
-        @click="showAddCommandDialogFn"
+          class="context-menu-item"
+          @click="showAddCommandDialogFn"
       >
         <el-icon :size="14">
-          <Star />
+          <Star/>
         </el-icon>
         <span>添加启动命令</span>
       </div>
@@ -199,8 +199,8 @@
 
     <!-- 添加命令对话框 -->
     <div
-      v-if="showCommandDialog"
-      class="dialog-overlay"
+        v-if="showCommandDialog"
+        class="dialog-overlay"
     >
       <div class="command-dialog">
         <div class="dialog-title">
@@ -208,9 +208,9 @@
         </div>
         <div class="app-info-preview">
           <img
-            v-if="ctxApp?.icon_base64"
-            :src="ctxApp.icon_base64"
-            class="preview-icon"
+              v-if="ctxApp?.icon_base64"
+              :src="ctxApp.icon_base64"
+              class="preview-icon"
           >
           <span class="preview-name">{{ ctxApp?.title }}</span>
         </div>
@@ -220,8 +220,8 @@
           <div class="prefix-input-wrapper">
             <span class="prefix-symbol">:</span>
             <input
-              v-model="commandForm.prefix"
-              class="prefix-input"
+                v-model="commandForm.prefix"
+                class="prefix-input"
             >
           </div>
           <span class="form-hint">输入前缀，用于快速搜索（自动添加 : 前缀）</span>
@@ -229,14 +229,14 @@
 
         <div class="dialog-actions">
           <button
-            class="dialog-btn cancel"
-            @click="closeCommandDialog"
+              class="dialog-btn cancel"
+              @click="closeCommandDialog"
           >
             {{ t('common.cancel') }}
           </button>
           <button
-            class="dialog-btn confirm"
-            @click="confirmAddCommand"
+              class="dialog-btn confirm"
+              @click="confirmAddCommand"
           >
             {{ t('common.ok') }}
           </button>
@@ -335,7 +335,7 @@ const initCategoriesSortable = () => {
     fallbackTolerance: 3,
     fallbackOnBody: true,
     swapThreshold: 0.65,
-    onStart: () => {
+    onStart: (evt) => {
       // 拖动开始时关闭展开的分类
       if (expandedCategory.value) {
         closeExpanded()
@@ -364,7 +364,7 @@ const initCategoriesSortable = () => {
     },
     onEnd: (evt) => {
       const {oldIndex, newIndex} = evt
-      if (__DEV_PANEL__) console.debug('Categories sortable onEnd:', {oldIndex, newIndex})
+      if (__DEV_PANEL__) console.log('Categories sortable onEnd:', {oldIndex, newIndex})
       if (oldIndex !== newIndex && oldIndex !== undefined && newIndex !== undefined) {
         emit('reorder-categories', oldIndex, newIndex)
       }
@@ -391,10 +391,10 @@ const initAppsSortable = () => {
     invertSwap: false,
     direction: 'vertical',
     scroll: false,
-    onMove: () => {
+    onMove: (evt) => {
       return true
     },
-    onStart: () => {
+    onStart: (evt) => {
       // 获取fallback元素并添加鼠标跟踪
       setTimeout(() => {
         appFallbackElement = document.querySelector('.app-fallback')
@@ -505,7 +505,7 @@ const removeApp = async (app) => {
   closeCtxMenu()
 }
 
-const _assignToCategory = async (app, categoryId) => {
+const assignToCategory = async (app, categoryId) => {
   if (!app || !app.id) return
   try {
     await invoke('set_app_category', {appId: app.id, categoryId})

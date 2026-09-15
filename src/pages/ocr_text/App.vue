@@ -1,20 +1,20 @@
 <template>
   <div
-    :class="['ocr-text-root', `theme-${currentTheme}`]"
-    @dblclick.left.stop.prevent="closeWindow"
+      :class="['ocr-text-root', `theme-${currentTheme}`]"
+      @dblclick.left.stop.prevent="closeWindow"
   >
     <div class="drag-handle-wrap">
       <div
-        class="drag-handle"
-        @mousedown.left.stop.prevent="startDrag"
+          class="drag-handle"
+          @mousedown.left.stop.prevent="startDrag"
       />
     </div>
     <textarea
-      v-model="text"
-      class="ocr-editor"
-      :placeholder="t('ocrText.noResult')"
-      spellcheck="false"
-      @dblclick.left.stop.prevent="closeWindow"
+        v-model="text"
+        class="ocr-editor"
+        :placeholder="t('ocrText.noResult')"
+        spellcheck="false"
+        @dblclick.left.stop.prevent="closeWindow"
     />
   </div>
 </template>

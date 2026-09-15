@@ -1,8 +1,8 @@
 <template>
   <el-form label-position="top">
     <el-card
-      class="setting-section-card"
-      shadow="never"
+        class="setting-section-card"
+        shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -11,8 +11,8 @@
       </template>
       <el-form-item>
         <el-button
-          size="small"
-          @click="refreshImageStorageMetrics"
+            size="small"
+            @click="refreshImageStorageMetrics"
         >
           {{
             $t('settings.developer.refreshUsage')
@@ -40,8 +40,8 @@
       </el-form-item>
     </el-card>
     <el-card
-      class="setting-section-card"
-      shadow="never"
+        class="setting-section-card"
+        shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -49,21 +49,21 @@
         </div>
       </template>
       <el-form-item :label="$t('settings.developer.forceMissing')">
-        <el-switch v-model="vcRuntimeDebug.forceMissing" />
+        <el-switch v-model="vcRuntimeDebug.forceMissing"/>
       </el-form-item>
       <el-form-item>
         <el-button
-          size="small"
-          type="primary"
-          @click="saveVcRuntimeDebugConfig"
+            size="small"
+            type="primary"
+            @click="saveVcRuntimeDebugConfig"
         >
           {{
             $t('settings.developer.saveConfig')
           }}
         </el-button>
         <el-button
-          size="small"
-          @click="refreshVcRuntimeDebugState"
+            size="small"
+            @click="refreshVcRuntimeDebugState"
         >
           {{
             $t('settings.developer.refreshStatus')
@@ -83,8 +83,8 @@
       </el-form-item>
     </el-card>
     <el-card
-      class="setting-section-card"
-      shadow="never"
+        class="setting-section-card"
+        shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -92,39 +92,39 @@
         </div>
       </template>
       <el-form-item :label="$t('settings.developer.dedupToggle')">
-        <el-switch v-model="dedupConfig.enabled" />
+        <el-switch v-model="dedupConfig.enabled"/>
       </el-form-item>
       <el-form-item :label="$t('settings.developer.dedupWindow')">
         <el-input-number
-          v-model="dedupConfig.windowMs"
-          :max="10000"
-          :min="50"
-          :step="50"
-          controls-position="right"
+            v-model="dedupConfig.windowMs"
+            :max="10000"
+            :min="50"
+            :step="50"
+            controls-position="right"
         />
       </el-form-item>
       <el-form-item :label="$t('settings.developer.logToggle')">
-        <el-switch v-model="dedupConfig.logEnabled" />
+        <el-switch v-model="dedupConfig.logEnabled"/>
       </el-form-item>
       <el-form-item>
         <el-button
-          size="small"
-          type="primary"
-          @click="saveDedupConfig"
+            size="small"
+            type="primary"
+            @click="saveDedupConfig"
         >
           {{
             $t('settings.developer.saveConfig')
           }}
         </el-button>
         <el-button
-          size="small"
-          @click="refreshDedupState"
+            size="small"
+            @click="refreshDedupState"
         >
           {{ $t('settings.developer.refreshStatus') }}
         </el-button>
         <el-button
-          size="small"
-          @click="resetDedupMetrics"
+            size="small"
+            @click="resetDedupMetrics"
         >
           {{ $t('settings.developer.resetCount') }}
         </el-button>
@@ -164,8 +164,8 @@
       </el-form-item>
     </el-card>
     <el-card
-      class="setting-section-card"
-      shadow="never"
+        class="setting-section-card"
+        shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -174,8 +174,8 @@
       </template>
       <el-form-item>
         <el-button
-          size="small"
-          @click="refreshImagePersistQueueMetrics"
+            size="small"
+            @click="refreshImagePersistQueueMetrics"
         >
           {{
             $t('settings.developer.refreshQueueMetrics')
@@ -217,8 +217,8 @@
       </el-form-item>
     </el-card>
     <el-card
-      class="setting-section-card"
-      shadow="never"
+        class="setting-section-card"
+        shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -227,8 +227,8 @@
       </template>
       <el-form-item :label="$t('settings.developer.forceWgcFail')">
         <el-switch
-          v-model="recordingDebug.forceFfmpegFallback"
-          @change="saveRecordingDebugConfig"
+            v-model="recordingDebug.forceFfmpegFallback"
+            @change="saveRecordingDebugConfig"
         />
         <div class="form-hint">
           {{ $t('settings.developer.forceWgcFailHint') }}

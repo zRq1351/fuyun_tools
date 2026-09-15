@@ -1,11 +1,11 @@
 <template>
   <el-form
-    :model="form"
-    label-position="top"
+      :model="form"
+      label-position="top"
   >
     <el-card
-      class="setting-section-card"
-      shadow="never"
+        class="setting-section-card"
+        shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -16,41 +16,41 @@
       <el-form-item :label="$t('settings.ai.provider')">
         <div style="display: flex; gap: 8px; width: 100%; margin-bottom: 8px;">
           <el-input
-            v-model="newProviderName"
-            :placeholder="$t('settings.ai.newProvider')"
-            style="flex:1"
-            @keyup.enter="addNewProvider"
+              v-model="newProviderName"
+              :placeholder="$t('settings.ai.newProvider')"
+              style="flex:1"
+              @keyup.enter="addNewProvider"
           />
           <el-button
-            :disabled="!newProviderName.trim()"
-            type="primary"
-            @click="addNewProvider"
+              :disabled="!newProviderName.trim()"
+              type="primary"
+              @click="addNewProvider"
           >
             {{ $t('settings.ai.add') }}
           </el-button>
         </div>
         <el-select
-          v-model="form.aiProvider"
-          :placeholder="$t('settings.ai.selectProvider')"
-          style="width: 100%"
-          @change="handleProviderChange"
+            v-model="form.aiProvider"
+            :placeholder="$t('settings.ai.selectProvider')"
+            style="width: 100%"
+            @change="handleProviderChange"
         >
           <el-option
-            v-for="p in providers"
-            :key="p.value"
-            :label="p.label"
-            :value="p.value"
+              v-for="p in providers"
+              :key="p.value"
+              :label="p.label"
+              :value="p.value"
           >
             <div class="provider-option-row">
               <span>{{ p.label }}</span>
               <el-button
-                class="provider-option-del"
-                link
-                type="danger"
-                @click.stop.prevent="removeProvider(p.value)"
+                  class="provider-option-del"
+                  link
+                  type="danger"
+                  @click.stop.prevent="removeProvider(p.value)"
               >
                 <el-icon>
-                  <CloseBold />
+                  <CloseBold/>
                 </el-icon>
               </el-button>
             </div>
@@ -60,16 +60,16 @@
 
       <el-form-item :label="$t('settings.ai.apiUrl')">
         <el-input
-          v-model="form.apiUrl"
-          :placeholder="$t('settings.ai.apiUrlPlaceholder')"
+            v-model="form.apiUrl"
+            :placeholder="$t('settings.ai.apiUrlPlaceholder')"
         >
           <template #append>
             <el-button
-              :loading="testingConnection"
-              @click="testConnection"
+                :loading="testingConnection"
+                @click="testConnection"
             >
               <el-icon>
-                <Connection />
+                <Connection/>
               </el-icon>
             </el-button>
           </template>
@@ -78,17 +78,17 @@
 
       <el-form-item :label="$t('settings.ai.modelName')">
         <el-input
-          v-model="form.modelName"
-          :placeholder="$t('settings.ai.modelNamePlaceholder')"
+            v-model="form.modelName"
+            :placeholder="$t('settings.ai.modelNamePlaceholder')"
         />
       </el-form-item>
 
       <el-form-item :label="$t('settings.ai.apiKey')">
         <el-input
-          v-model="form.apiKey"
-          :placeholder="$t('settings.ai.apiKeyPlaceholder')"
-          show-password
-          type="password"
+            v-model="form.apiKey"
+            :placeholder="$t('settings.ai.apiKeyPlaceholder')"
+            show-password
+            type="password"
         />
       </el-form-item>
     </el-card>
@@ -106,6 +106,7 @@ const {
   providers,
   testingConnection,
   newProviderName,
+  isRemovableProvider,
   loadAiProviders,
   addNewProvider,
   handleProviderChange,

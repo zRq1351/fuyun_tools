@@ -1,11 +1,11 @@
 <template>
   <el-form
-    :model="form"
-    label-position="top"
+      :model="form"
+      label-position="top"
   >
     <el-card
-      class="setting-section-card compact-card"
-      shadow="never"
+        class="setting-section-card compact-card"
+        shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -14,11 +14,11 @@
       </template>
       <el-form-item :label="$t('settings.launcher.enabled')">
         <el-switch
-          :active-text="pendingToggles.launcher === 'disabling' ? $t('common.disabling') : $t('common.enable')"
-          :inactive-text="pendingToggles.launcher === 'enabling' ? $t('common.enabling') : $t('common.close')"
-          :loading="!!pendingToggles.launcher"
-          :model-value="form.launcherEnabled"
-          @update:model-value="(val) => toggleFeature('launcherEnabled', val)"
+            :active-text="pendingToggles.launcher === 'disabling' ? $t('common.disabling') : $t('common.enable')"
+            :inactive-text="pendingToggles.launcher === 'enabling' ? $t('common.enabling') : $t('common.close')"
+            :loading="!!pendingToggles.launcher"
+            :model-value="form.launcherEnabled"
+            @update:model-value="(val) => toggleFeature('launcherEnabled', val)"
         />
         <div class="form-hint">
           {{ $t('settings.launcher.disabledHint') }}
@@ -27,28 +27,28 @@
 
       <el-form-item :label="$t('settings.launcher.launcherHotkey')">
         <el-input
-          :class="{ recording: isLauncherRecording }"
-          :model-value="launcherDisplayValue"
-          :placeholder="$t('settings.clipboard.shortcutExample')"
-          readonly
+            :class="{ recording: isLauncherRecording }"
+            :model-value="launcherDisplayValue"
+            :placeholder="$t('settings.clipboard.shortcutExample')"
+            readonly
         >
           <template #append>
             <el-button-group>
               <el-button
-                :title="$t('settings.clipboard.modifyShortcut')"
-                :type="isLauncherRecording ? 'danger' : 'primary'"
-                @click="toggleLauncherRecording"
+                  :title="$t('settings.clipboard.modifyShortcut')"
+                  :type="isLauncherRecording ? 'danger' : 'primary'"
+                  @click="toggleLauncherRecording"
               >
                 <el-icon>
-                  <component :is="isLauncherRecording ? VideoPause : Edit" />
+                  <component :is="isLauncherRecording ? VideoPause : Edit"/>
                 </el-icon>
               </el-button>
               <el-button
-                :title="$t('settings.clipboard.resetShortcut')"
-                @click="resetLauncherShortcut"
+                  :title="$t('settings.clipboard.resetShortcut')"
+                  @click="resetLauncherShortcut"
               >
                 <el-icon>
-                  <RefreshLeft />
+                  <RefreshLeft/>
                 </el-icon>
               </el-button>
             </el-button-group>
@@ -58,8 +58,8 @@
     </el-card>
 
     <el-card
-      class="setting-section-card"
-      shadow="never"
+        class="setting-section-card"
+        shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -69,7 +69,7 @@
       <div class="feature-list">
         <div class="feature-item">
           <el-icon>
-            <Search />
+            <Search/>
           </el-icon>
           <div class="feature-content">
             <div class="feature-title">
@@ -82,7 +82,7 @@
         </div>
         <div class="feature-item">
           <el-icon>
-            <Operation />
+            <Operation/>
           </el-icon>
           <div class="feature-content">
             <div class="feature-title">
@@ -95,7 +95,7 @@
         </div>
         <div class="feature-item">
           <el-icon>
-            <Key />
+            <Key/>
           </el-icon>
           <div class="feature-content">
             <div class="feature-title">
@@ -140,7 +140,7 @@ const toggleFeature = async (fieldName, value) => {
     return
   }
   pendingToggles.value = {...pendingToggles.value, [fieldName]: value ? 'enabling' : 'disabling'}
-  await props.onFeatureToggle(fieldName, value)
+  const ok = await props.onFeatureToggle(fieldName, value)
   pendingToggles.value = {...pendingToggles.value, [fieldName]: undefined}
 }
 

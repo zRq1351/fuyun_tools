@@ -1,30 +1,30 @@
 <template>
   <div
-    class="dmw-root"
-    @mouseenter="onDockHover"
-    @mousemove="onDockHover"
+      class="dmw-root"
+      @mouseenter="onDockHover"
+      @mousemove="onDockHover"
   >
     <div
-      v-show="!expanded"
-      class="dmw-dock"
+        v-show="!expanded"
+        class="dmw-dock"
     >
       <div class="dmw-dock-icon">
         <el-icon :size="14">
-          <FolderOpened />
+          <FolderOpened/>
         </el-icon>
       </div>
     </div>
 
     <div
-      v-show="expanded"
-      class="dmw-container"
-      @mouseenter="cancelCollapse"
-      @mouseleave="onContainerMouseLeave"
+        v-show="expanded"
+        class="dmw-container"
+        @mouseenter="cancelCollapse"
+        @mouseleave="onContainerMouseLeave"
     >
       <div class="dmw-header">
         <div class="dmw-header-left">
           <el-icon :size="14">
-            <FolderOpened />
+            <FolderOpened/>
           </el-icon>
           <span class="dmw-title">{{ t('settings.docManager.title') }}</span>
         </div>
@@ -35,73 +35,73 @@
         </div>
         <div class="dmw-header-actions">
           <button
-            :title="t('common.refresh')"
-            class="dmw-btn-icon"
-            @click="refreshData"
+              :title="t('common.refresh')"
+              class="dmw-btn-icon"
+              @click="refreshData"
           >
             <el-icon :size="13">
-              <Refresh />
+              <Refresh/>
             </el-icon>
           </button>
           <button
-            :title="t('common.settings')"
-            class="dmw-btn-icon"
-            @click="openFullManager"
+              :title="t('common.settings')"
+              class="dmw-btn-icon"
+              @click="openFullManager"
           >
             <el-icon :size="13">
-              <Setting />
+              <Setting/>
             </el-icon>
           </button>
         </div>
       </div>
 
       <div
-        v-if="loading"
-        class="dmw-loading"
+          v-if="loading"
+          class="dmw-loading"
       >
         <el-icon
-          :size="20"
-          class="is-loading"
+            :size="20"
+            class="is-loading"
         >
-          <Loading />
+          <Loading/>
         </el-icon>
       </div>
       <template v-else>
         <div
-          ref="rootScrollRef"
-          class="dmw-roots"
-          @mousedown="onDragStart($event, rootScrollRef)"
+            ref="rootScrollRef"
+            class="dmw-roots"
+            @mousedown="onDragStart($event, rootScrollRef)"
         >
           <div
-            v-for="root in roots"
-            :key="root.id"
-            :class="['dmw-root-tab', { active: selectedRootId === root.id }]"
-            @click="selectRoot(root.id)"
+              v-for="root in roots"
+              :key="root.id"
+              :class="['dmw-root-tab', { active: selectedRootId === root.id }]"
+              @click="selectRoot(root.id)"
           >
             <el-icon :size="13">
-              <Folder />
+              <Folder/>
             </el-icon>
             <span class="dmw-root-name">{{ root.name }}</span>
           </div>
         </div>
         <div
-          ref="catScrollRef"
-          class="dmw-categories"
-          @mousedown="onDragStart($event, catScrollRef)"
+            ref="catScrollRef"
+            class="dmw-categories"
+            @mousedown="onDragStart($event, catScrollRef)"
         >
           <div
-            v-for="cat in categories"
-            :key="cat.id"
-            :class="['dmw-cat-card', { active: selectedCategoryId === cat.id, 'drag-over': dragOverCatId === cat.id }]"
-            :data-cat-id="cat.id"
-            @mouseenter="onCatCardEnter(cat.id)"
+              v-for="cat in categories"
+              :key="cat.id"
+              :class="['dmw-cat-card', { active: selectedCategoryId === cat.id, 'drag-over': dragOverCatId === cat.id }]"
+              :data-cat-id="cat.id"
+              @mouseenter="onCatCardEnter(cat.id)"
           >
             <div
-              :style="{ background: cat.color + '22', color: cat.color }"
-              class="dmw-cat-icon"
+                :style="{ background: cat.color + '22', color: cat.color }"
+                class="dmw-cat-icon"
             >
               <el-icon :size="18">
-                <component :is="getCatIcon(cat.icon)" />
+                <component :is="getCatIcon(cat.icon)"/>
               </el-icon>
             </div>
             <div class="dmw-cat-info">
@@ -110,16 +110,16 @@
             </div>
           </div>
           <div
-            :class="['dmw-cat-card', { active: selectedCategoryId === -1, 'drag-over': dragOverCatId === -1 }]"
-            :data-cat-id="-1"
-            @mouseenter="onCatCardEnter(-1)"
+              :class="['dmw-cat-card', { active: selectedCategoryId === -1, 'drag-over': dragOverCatId === -1 }]"
+              :data-cat-id="-1"
+              @mouseenter="onCatCardEnter(-1)"
           >
             <div
-              :style="{ background: 'var(--fy-bg-hover)', color: 'var(--fy-text-muted)' }"
-              class="dmw-cat-icon"
+                :style="{ background: 'var(--fy-bg-hover)', color: 'var(--fy-text-muted)' }"
+                class="dmw-cat-icon"
             >
               <el-icon :size="18">
-                <Folder />
+                <Folder/>
               </el-icon>
             </div>
             <div class="dmw-cat-info">
@@ -131,30 +131,30 @@
 
         <div class="dmw-files">
           <div
-            v-if="displayFiles.length === 0"
-            class="dmw-empty"
+              v-if="displayFiles.length === 0"
+              class="dmw-empty"
           >
             {{ t('documentManager.noDocs') }}
           </div>
           <div
-            v-for="file in displayFiles"
-            :key="file.id"
-            :title="file.title || file.fileName"
-            :class="['dmw-file-item', { active: ctxMenuFile?.id === file.id }]"
-            @dblclick="openFile(file)"
-            @contextmenu.prevent="showFileMenu($event, file)"
+              v-for="file in displayFiles"
+              :key="file.id"
+              :title="file.title || file.fileName"
+              :class="['dmw-file-item', { active: ctxMenuFile?.id === file.id }]"
+              @dblclick="openFile(file)"
+              @contextmenu.prevent="showFileMenu($event, file)"
           >
             <img
-              v-if="fileIconCache[file.fileExt?.toLowerCase()]"
-              :src="fileIconCache[file.fileExt?.toLowerCase()]"
-              class="dmw-file-icon-img"
+                v-if="fileIconCache[file.fileExt?.toLowerCase()]"
+                :src="fileIconCache[file.fileExt?.toLowerCase()]"
+                class="dmw-file-icon-img"
             >
             <el-icon
-              v-else
-              :color="getFileColor(file.fileExt)"
-              :size="16"
+                v-else
+                :color="getFileColor(file.fileExt)"
+                :size="16"
             >
-              <component :is="getFileIcon(file.fileExt)" />
+              <component :is="getFileIcon(file.fileExt)"/>
             </el-icon>
             <span class="dmw-file-name">{{ file.title || file.fileName }}</span>
             <span class="dmw-file-size">{{ formatSize(file.fileSize) }}</span>
@@ -165,21 +165,21 @@
     </div>
 
     <ContextMenu
-      :show="ctxMenuShow"
-      :x="ctxMenuX"
-      :y="ctxMenuY"
-      @close="ctxMenuShow = false; ctxMenuFile = null"
+        :show="ctxMenuShow"
+        :x="ctxMenuX"
+        :y="ctxMenuY"
+        @close="ctxMenuShow = false; ctxMenuFile = null"
     >
       <div
-        class="context-menu-item"
-        @click="openFile(ctxMenuFile)"
+          class="context-menu-item"
+          @click="openFile(ctxMenuFile)"
       >
         {{ t('documentManager.open') }}
       </div>
-      <div class="context-menu-divider" />
+      <div class="context-menu-divider"/>
       <div
-        class="context-menu-item context-menu-item-danger"
-        @click="deleteFile(ctxMenuFile)"
+          class="context-menu-item context-menu-item-danger"
+          @click="deleteFile(ctxMenuFile)"
       >
         {{
           t('common.delete')
@@ -224,6 +224,7 @@ const COLLAPSED_H = 48
 let dockAnim = false
 let expandTimer = null
 let collapseTimer = null
+let leaveGuardUntil = 0
 const rootScrollRef = ref(null)
 const catScrollRef = ref(null)
 const ctxMenuShow = ref(false)
@@ -439,10 +440,12 @@ async function expandDock() {
     expandTimer = null
     if (expanded.value || dockAnim) return
     dockAnim = true
+    leaveGuardUntil = Date.now() + 350
     try {
       expanded.value = true
       await nextTick()
       await resizeToFitContent()
+      leaveGuardUntil = Date.now() + 350
     } finally {
       dockAnim = false
     }
@@ -465,10 +468,12 @@ async function collapseDock() {
     return
   }
   dockAnim = true
+  leaveGuardUntil = Date.now() + 200
   try {
     expanded.value = false
     await nextTick()
     await pinTopRight(COLLAPSED_W, COLLAPSED_H)
+    leaveGuardUntil = Date.now() + 200
   } finally {
     dockAnim = false
   }
@@ -524,7 +529,7 @@ async function importDroppedFiles(paths, catId) {
   dialogOpen.value = true
   try {
     const {ElMessageBox} = await import('element-plus')
-    await ElMessageBox.confirm(
+    const action = await ElMessageBox.confirm(
         '',
         t('documentManager.importMode'),
         {

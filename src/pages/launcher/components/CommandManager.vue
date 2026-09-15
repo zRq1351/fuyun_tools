@@ -1,19 +1,19 @@
 <template>
   <div
-    v-if="visible"
-    class="command-manager-overlay"
-    @click.self="$emit('close')"
+      v-if="visible"
+      class="command-manager-overlay"
+      @click.self="$emit('close')"
   >
     <div class="command-manager">
       <div class="manager-header">
         <span class="title">{{ t('launcher.manageCommands') }}</span>
         <button
-          :title="t('common.close')"
-          class="close-btn"
-          @click="$emit('close')"
+            :title="t('common.close')"
+            class="close-btn"
+            @click="$emit('close')"
         >
           <el-icon :size="14">
-            <Close />
+            <Close/>
           </el-icon>
         </button>
       </div>
@@ -24,14 +24,14 @@
 
       <div class="command-list">
         <div
-          v-if="commands.length === 0"
-          class="empty-state"
+            v-if="commands.length === 0"
+            class="empty-state"
         >
           <el-icon
-            :size="48"
-            color="var(--fy-text-muted)"
+              :size="48"
+              color="var(--fy-text-muted)"
           >
-            <Document />
+            <Document/>
           </el-icon>
           <p>暂无自定义命令</p>
           <p class="hint">
@@ -40,9 +40,9 @@
         </div>
 
         <div
-          v-for="cmd in commands"
-          :key="cmd.id"
-          class="command-item"
+            v-for="cmd in commands"
+            :key="cmd.id"
+            class="command-item"
         >
           <div class="command-info">
             <div class="command-prefix">
@@ -52,8 +52,8 @@
               {{ cmd.title }}
             </div>
             <div
-              v-if="cmd.description"
-              class="command-desc"
+                v-if="cmd.description"
+                class="command-desc"
             >
               {{ cmd.description }}
             </div>
@@ -64,28 +64,28 @@
           <div class="command-actions">
             <label class="toggle-switch">
               <input
-                :checked="cmd.enabled"
-                type="checkbox"
-                @change="toggleCommand(cmd)"
+                  :checked="cmd.enabled"
+                  type="checkbox"
+                  @change="toggleCommand(cmd)"
               >
-              <span class="slider" />
+              <span class="slider"/>
             </label>
             <button
-              :title="t('common.edit')"
-              class="action-btn edit"
-              @click="editCommand(cmd)"
+                :title="t('common.edit')"
+                class="action-btn edit"
+                @click="editCommand(cmd)"
             >
               <el-icon :size="14">
-                <Edit />
+                <Edit/>
               </el-icon>
             </button>
             <button
-              :title="t('common.delete')"
-              class="action-btn delete"
-              @click="deleteCommand(cmd)"
+                :title="t('common.delete')"
+                class="action-btn delete"
+                @click="deleteCommand(cmd)"
             >
               <el-icon :size="14">
-                <Delete />
+                <Delete/>
               </el-icon>
             </button>
           </div>
@@ -95,8 +95,8 @@
 
     <!-- 编辑命令对话框 -->
     <div
-      v-if="showEditDialog"
-      class="dialog-overlay"
+        v-if="showEditDialog"
+        class="dialog-overlay"
     >
       <div class="edit-dialog">
         <div class="dialog-title">
@@ -107,8 +107,8 @@
           <label>命令前缀</label>
           <div class="prefix-input-wrapper">
             <input
-              v-model="editForm.prefix"
-              class="form-input prefix-input"
+                v-model="editForm.prefix"
+                class="form-input prefix-input"
             >
             <span class="prefix-symbol">:</span>
           </div>
@@ -117,26 +117,26 @@
         <div class="form-group">
           <label>标题</label>
           <input
-            v-model="editForm.title"
-            class="form-input"
-            placeholder="命令标题"
+              v-model="editForm.title"
+              class="form-input"
+              placeholder="命令标题"
           >
         </div>
 
         <div class="form-group">
           <label>描述</label>
           <input
-            v-model="editForm.description"
-            class="form-input"
-            placeholder="可选描述"
+              v-model="editForm.description"
+              class="form-input"
+              placeholder="可选描述"
           >
         </div>
 
         <div class="form-group">
           <label class="checkbox-label">
             <input
-              v-model="editForm.enabled"
-              type="checkbox"
+                v-model="editForm.enabled"
+                type="checkbox"
             >
             <span>启用此命令</span>
           </label>
@@ -144,14 +144,14 @@
 
         <div class="dialog-actions">
           <button
-            class="dialog-btn cancel"
-            @click="closeEditDialog"
+              class="dialog-btn cancel"
+              @click="closeEditDialog"
           >
             {{ t('common.cancel') }}
           </button>
           <button
-            class="dialog-btn confirm"
-            @click="confirmEdit"
+              class="dialog-btn confirm"
+              @click="confirmEdit"
           >
             {{ t('common.save') }}
           </button>
@@ -225,7 +225,7 @@ const toggleCommand = async (cmd) => {
 
 // 删除命令
 const deleteCommand = async (cmd) => {
-  if (__DEV_PANEL__) console.debug('删除命令:', cmd.title, cmd.id)
+  if (__DEV_PANEL__) console.log('删除命令:', cmd.title, cmd.id)
 
   try {
     await invoke('remove_custom_command', {commandId: cmd.id})

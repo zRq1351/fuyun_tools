@@ -8,13 +8,13 @@
         <div class="header-actions">
           <span :class="['autosave-status', `autosave-${autoSaveState}`]">{{ autoSaveText }}</span>
           <el-dropdown
-            trigger="click"
-            @command="changeLocale"
+              trigger="click"
+              @command="changeLocale"
           >
             <el-button>
               <template #icon>
                 <el-icon>
-                  <icon-menu />
+                  <icon-menu/>
                 </el-icon>
               </template>
               {{ currentLocale === 'zh-CN' ? '中文' : 'EN' }}
@@ -31,12 +31,12 @@
             </template>
           </el-dropdown>
           <el-dropdown
-            trigger="click"
-            @command="changeTheme"
+              trigger="click"
+              @command="changeTheme"
           >
             <el-button>
               <template #icon>
-                <component :is="themeIcon" />
+                <component :is="themeIcon"/>
               </template>
               {{ themeLabel }}
             </el-button>
@@ -44,19 +44,19 @@
               <el-dropdown-menu>
                 <el-dropdown-item command="dark">
                   <el-icon>
-                    <Moon />
+                    <Moon/>
                   </el-icon>
                   {{ $t('theme.dark') }}
                 </el-dropdown-item>
                 <el-dropdown-item command="light">
                   <el-icon>
-                    <Sunny />
+                    <Sunny/>
                   </el-icon>
                   {{ $t('theme.light') }}
                 </el-dropdown-item>
                 <el-dropdown-item command="eye-care">
                   <el-icon>
-                    <View />
+                    <View/>
                   </el-icon>
                   {{ $t('theme.eyeCare') }}
                 </el-dropdown-item>
@@ -69,28 +69,28 @@
       <div class="settings-layout">
         <aside class="settings-nav">
           <button
-            v-for="section in sections"
-            :key="section.key"
-            :class="['section-nav-item', {active: activeTab === section.key}]"
-            @click="activeTab = section.key"
+              v-for="section in sections"
+              :key="section.key"
+              :class="['section-nav-item', {active: activeTab === section.key}]"
+              @click="activeTab = section.key"
           >
             <el-icon>
-              <component :is="section.icon" />
+              <component :is="section.icon"/>
             </el-icon>
             <span>{{ section.label }}</span>
             <span
-              v-if="section.key === 'about' && updateAvailable"
-              class="update-badge"
+                v-if="section.key === 'about' && updateAvailable"
+                class="update-badge"
             >v{{ updateAvailable.version }}</span>
           </button>
         </aside>
         <div class="content">
           <el-alert
-            v-if="shortcutConflictMessage"
-            :closable="false"
-            :title="shortcutConflictMessage"
-            show-icon
-            type="error"
+              v-if="shortcutConflictMessage"
+              :closable="false"
+              :title="shortcutConflictMessage"
+              show-icon
+              type="error"
           />
           <div class="content-header">
             <h2>{{ currentSection.label }}</h2>
@@ -98,70 +98,70 @@
           </div>
           <div v-if="activeTab === 'clipboard'">
             <ClipboardSettings
-              :form="form"
-              :on-feature-toggle="handleFeatureToggle"
+                :form="form"
+                :on-feature-toggle="handleFeatureToggle"
             />
           </div>
           <div v-else-if="activeTab === 'screenshot'">
             <ScreenshotSettings
-              :form="form"
-              :on-feature-toggle="handleFeatureToggle"
+                :form="form"
+                :on-feature-toggle="handleFeatureToggle"
             />
           </div>
           <div v-else-if="activeTab === 'recording'">
             <RecordingSettings
-              :form="form"
-              :on-feature-toggle="handleFeatureToggle"
+                :form="form"
+                :on-feature-toggle="handleFeatureToggle"
             />
           </div>
 
           <div v-else-if="activeTab === 'selection'">
             <SelectionSettings
-              :form="form"
-              :on-feature-toggle="handleFeatureToggle"
+                :form="form"
+                :on-feature-toggle="handleFeatureToggle"
             />
           </div>
 
           <div v-else-if="activeTab === 'launcher'">
             <LauncherSettings
-              :form="form"
-              :on-feature-toggle="handleFeatureToggle"
+                :form="form"
+                :on-feature-toggle="handleFeatureToggle"
             />
           </div>
 
           <div v-else-if="activeTab === 'doc_manager'">
             <DocumentManagerSettings
-              :form="form"
-              :on-feature-toggle="handleFeatureToggle"
+                :form="form"
+                :on-feature-toggle="handleFeatureToggle"
             />
           </div>
 
           <div v-else-if="activeTab === 'ai'">
             <AISettings
-              ref="aiSettingsRef"
-              :form="form"
+                ref="aiSettingsRef"
+                :form="form"
             />
           </div>
           <div v-else-if="activeTab === 'backup'">
-            <BackupSettings />
+            <BackupSettings/>
           </div>
           <div v-else-if="activeTab === 'diagnostic'">
             <DiagnosticSettings
-              :logging-enabled="form.loggingEnabled"
-              @navigate="handleNavigateTab"
-              @toggle-logging="handleLoggingToggle"
+                :logging-enabled="form.loggingEnabled"
+                @navigate="handleNavigateTab"
+                @toggle-logging="handleLoggingToggle"
             />
           </div>
 
           <div v-else-if="isDevMode && activeTab === 'developer'">
-            <DeveloperSettings />
+            <DeveloperSettings/>
           </div>
           <div v-else-if="activeTab === 'about'">
             <AboutSettings
-              :current-version="currentVersion"
-              :image-toggle-shortcut="form.imageToggleShortcut"
-              :screenshot-toggle-shortcut="form.screenshotToggleShortcut"
-              :toggle-shortcut="form.toggleShortcut"
+                :current-version="currentVersion"
+                :image-toggle-shortcut="form.imageToggleShortcut"
+                :screenshot-toggle-shortcut="form.screenshotToggleShortcut"
+                :toggle-shortcut="form.toggleShortcut"
             />
           </div>
         </div>
@@ -171,15 +171,15 @@
         <p>
           {{ $t('settings.needHelp') }}
           <el-link
-            type="primary"
-            @click="openExternal('https://github.com/zRq1351/fuyun_tools')"
+              type="primary"
+              @click="openExternal('https://github.com/zRq1351/fuyun_tools')"
           >
             {{ $t('settings.viewDocs') }}
           </el-link>
           |
           <el-link
-            type="primary"
-            @click="openExternal('https://github.com/zRq1351/fuyun_tools/issues')"
+              type="primary"
+              @click="openExternal('https://github.com/zRq1351/fuyun_tools/issues')"
           >
             {{ $t('settings.reportIssue') }}
           </el-link>
@@ -860,7 +860,7 @@ const persistSettings = async (
         } else if (parsed && parsed.message) {
           raw = parsed.message
         }
-      } catch {}
+      } catch (e) {}
 
     if (errorCode && (errorCode.includes('HOTKEY_CONFLICT') || errorCode.includes('HOTKEY_REGISTER'))) {
       shortcutConflictMessage.value = raw
@@ -1144,6 +1144,7 @@ const featureLabels = computed(() => ({
 
 const handleFeatureToggle = async (fieldName, newValue) => {
   const label = featureLabels.value[fieldName] || fieldName
+  const action = newValue ? t('common.enable') : t('common.disable')
   const actionVerb = newValue ? t('common.enabling') : t('common.disabling')
   const loading = ElLoading.service({
     lock: true,

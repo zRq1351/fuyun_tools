@@ -1,8 +1,8 @@
 <template>
   <div class="diagnostic-settings">
     <el-card
-      class="overview-card"
-      shadow="never"
+        class="overview-card"
+        shadow="never"
     >
       <template #header>
         <div class="card-header">
@@ -19,22 +19,22 @@
           </div>
         </div>
         <el-switch
-          :model-value="loggingEnabled"
-          @update:model-value="(val) => emit('toggleLogging', val)"
+            :model-value="loggingEnabled"
+            @update:model-value="(val) => emit('toggleLogging', val)"
         />
       </div>
     </el-card>
 
     <el-card
-      class="overview-card"
-      shadow="never"
+        class="overview-card"
+        shadow="never"
     >
       <template #header>
         <div class="card-header">
           <span>{{ $t('settings.diagnostic.healthOverview') }}</span>
           <el-button
-            :loading="loading"
-            @click="loadDiagnostics"
+              :loading="loading"
+              @click="loadDiagnostics"
           >
             {{
               $t('settings.diagnostic.refreshDiagnosis')
@@ -80,10 +80,10 @@
     </el-card>
 
     <el-card
-      v-for="item in items"
-      :key="item.key"
-      class="diagnostic-card"
-      shadow="never"
+        v-for="item in items"
+        :key="item.key"
+        class="diagnostic-card"
+        shadow="never"
     >
       <template #header>
         <div class="card-header">
@@ -103,8 +103,8 @@
 
       <ul class="detail-list">
         <li
-          v-for="detail in item.details"
-          :key="detail"
+            v-for="detail in item.details"
+            :key="detail"
         >
           {{ detail }}
         </li>
@@ -112,10 +112,10 @@
 
       <div class="action-row">
         <el-button
-          v-for="action in item.actions"
-          :key="action.key"
-          size="small"
-          @click="handleAction(action)"
+            v-for="action in item.actions"
+            :key="action.key"
+            size="small"
+            @click="handleAction(action)"
         >
           {{ action.label }}
         </el-button>
@@ -127,9 +127,9 @@
     </el-card>
 
     <el-card
-      v-if="lastActionMessage"
-      class="result-card"
-      shadow="never"
+        v-if="lastActionMessage"
+        class="result-card"
+        shadow="never"
     >
       <template #header>
         <span>{{ $t('settings.diagnostic.lastActionResult') }}</span>

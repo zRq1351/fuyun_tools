@@ -41,6 +41,8 @@ export function useClipboardHistory(pinnedItems = ref([])) {
         itemCategorySnapshot,
         keywordCategoryMatchCache,
         bumpFilterDataRevision,
+        removeCategoryIndexForItem,
+        applyCategoryIndexForItem,
         setItemCategoryLocal,
         removeItemCategoryLocal,
         rebuildCategorySearchIndex,
@@ -93,7 +95,7 @@ export function useClipboardHistory(pinnedItems = ref([])) {
             }))
     })
 
-    const updateSelection = (itemId, _shouldScroll = false, _contentRef = null, _visibleIndex = null) => {
+    const updateSelection = (itemId, shouldScroll = false, contentRef = null, visibleIndex = null) => {
         if (!itemId) return
         selectedItemId.value = itemId
     }

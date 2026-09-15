@@ -1,65 +1,65 @@
 <template>
   <div
-    v-if="visible"
-    class="category-manager-overlay"
-    @click.self="$emit('close')"
+      v-if="visible"
+      class="category-manager-overlay"
+      @click.self="$emit('close')"
   >
     <div class="category-manager">
       <div class="category-header">
         <span class="title">{{ t('launcher.manageCategories') }}</span>
         <button
-          class="add-btn"
-          @click="showAddDialog"
+            class="add-btn"
+            @click="showAddDialog"
         >
           <el-icon :size="14">
-            <Plus />
+            <Plus/>
           </el-icon>
         </button>
         <button
-          class="close-btn"
-          @click="$emit('close')"
+            class="close-btn"
+            @click="$emit('close')"
         >
           <el-icon :size="14">
-            <Close />
+            <Close/>
           </el-icon>
         </button>
       </div>
       <div
-        ref="categoryListRef"
-        class="category-list"
+          ref="categoryListRef"
+          class="category-list"
       >
         <div
-          v-for="category in categories"
-          :key="category.id"
-          :data-category-id="category.id"
-          class="category-item sortable-category"
+            v-for="category in categories"
+            :key="category.id"
+            :data-category-id="category.id"
+            class="category-item sortable-category"
         >
           <div
-            class="icon-selector"
-            @click="showIconPicker(category)"
+              class="icon-selector"
+              @click="showIconPicker(category)"
           >
             <el-icon :size="16">
-              <component :is="getIcon(category.icon)" />
+              <component :is="getIcon(category.icon)"/>
             </el-icon>
           </div>
           <span class="category-name">{{ category.name }}</span>
           <span class="category-count">{{ getCategoryCount(category.id) }}</span>
           <button
-            :title="t('common.rename')"
-            class="edit-btn"
-            @click="startEdit(category)"
+              :title="t('common.rename')"
+              class="edit-btn"
+              @click="startEdit(category)"
           >
             <el-icon :size="12">
-              <Edit />
+              <Edit/>
             </el-icon>
           </button>
           <button
-            :title="t('common.delete')"
-            class="delete-btn"
-            @click="handleDelete(category)"
+              :title="t('common.delete')"
+              class="delete-btn"
+              @click="handleDelete(category)"
           >
             <el-icon :size="12">
-              <Delete />
+              <Delete/>
             </el-icon>
           </button>
         </div>
@@ -67,9 +67,9 @@
 
       <!-- 图标选择器 -->
       <div
-        v-if="showIconPickerDialog"
-        class="dialog-overlay"
-        @click.self="closeIconPicker"
+          v-if="showIconPickerDialog"
+          class="dialog-overlay"
+          @click.self="closeIconPicker"
       >
         <div class="icon-picker-dialog">
           <div class="dialog-title">
@@ -77,21 +77,21 @@
           </div>
           <div class="icon-grid">
             <div
-              v-for="iconName in availableIcons"
-              :key="iconName"
-              :class="{ selected: currentEditingCategory?.icon === iconName }"
-              class="icon-option"
-              @click="selectIcon(iconName)"
+                v-for="iconName in availableIcons"
+                :key="iconName"
+                :class="{ selected: currentEditingCategory?.icon === iconName }"
+                class="icon-option"
+                @click="selectIcon(iconName)"
             >
               <el-icon :size="20">
-                <component :is="getIcon(iconName)" />
+                <component :is="getIcon(iconName)"/>
               </el-icon>
             </div>
           </div>
           <div class="dialog-actions">
             <button
-              class="dialog-btn cancel"
-              @click="closeIconPicker"
+                class="dialog-btn cancel"
+                @click="closeIconPicker"
             >
               {{ t('common.cancel') }}
             </button>
@@ -101,31 +101,31 @@
 
       <!-- 添加/重命名对话框 -->
       <div
-        v-if="showDialog"
-        class="dialog-overlay"
-        @click.self="cancelDialog"
+          v-if="showDialog"
+          class="dialog-overlay"
+          @click.self="cancelDialog"
       >
         <div class="dialog">
           <div class="dialog-title">
             {{ editingCategory ? t('common.rename') + '分类' : t('common.add') + '分类' }}
           </div>
           <input
-            ref="dialogInput"
-            v-model="dialogName"
-            class="dialog-input"
-            placeholder="输入分类名称"
-            @keydown.enter="confirmDialog"
+              ref="dialogInput"
+              v-model="dialogName"
+              class="dialog-input"
+              placeholder="输入分类名称"
+              @keydown.enter="confirmDialog"
           >
           <div class="dialog-actions">
             <button
-              class="dialog-btn cancel"
-              @click="cancelDialog"
+                class="dialog-btn cancel"
+                @click="cancelDialog"
             >
               {{ t('common.cancel') }}
             </button>
             <button
-              class="dialog-btn confirm"
-              @click="confirmDialog"
+                class="dialog-btn confirm"
+                @click="confirmDialog"
             >
               {{ t('common.ok') }}
             </button>
@@ -141,7 +141,7 @@ import {ref, nextTick, watch, onMounted, onBeforeUnmount} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {
   Plus, Close, Edit, Delete,
-  Grid
+  Monitor, Document, Setting, VideoCamera, Grid
 } from '@element-plus/icons-vue'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {invoke} from '@tauri-apps/api/core'
@@ -252,7 +252,7 @@ const initCategoriesSortable = () => {
     scroll: false,
     filter: '.icon-selector, .edit-btn, .delete-btn',
     preventOnFilter: false,
-    onStart: () => {
+    onStart: (evt) => {
       // 获取fallback元素并添加鼠标跟踪
       setTimeout(() => {
         const fallbackElement = document.querySelector('.category-fallback')

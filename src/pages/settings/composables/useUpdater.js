@@ -241,7 +241,7 @@ export function useUpdater(currentVersion) {
                         return {version: update.version, body: update.body}
                     }
                     return null
-                } catch {
+                } catch (error) {
                     // 最后一次尝试失败时返回 null
                     if (attempt === maxRetries) {
                         return null
