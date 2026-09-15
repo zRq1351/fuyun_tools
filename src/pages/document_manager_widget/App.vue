@@ -384,7 +384,6 @@ async function expandDock() {
     expandTimer = null
     if (expanded.value || dockAnim) return
     dockAnim = true
-    // resize 会误触发 leave，先打开保护；leave 事件本身仍会被排队收起
     leaveGuardUntil = Date.now() + 350
     try {
       expanded.value = true

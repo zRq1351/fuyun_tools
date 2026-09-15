@@ -23,9 +23,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, GetForegroundWindow, GetSystemMetrics, GetWindowTextW,
-    GetWindowThreadProcessId, IsIconic, IsWindow, SetForegroundWindow, ShowWindow,
-    SystemParametersInfoW, SM_CYSCREEN, SPI_GETWORKAREA, SW_RESTORE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    BringWindowToTop, GetForegroundWindow, GetSystemMetrics,
+    GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
+    SetForegroundWindow, ShowWindow,
+    SystemParametersInfoW, SM_CYSCREEN, SPI_GETWORKAREA,
+    SW_RESTORE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
 };
 
 pub static ENIGO_INSTANCE: LazyLock<Arc<Mutex<Option<enigo::Enigo>>>> =
@@ -1074,12 +1076,16 @@ fn ensure_doc_manager_widget_window(app: &AppHandle) -> Result<tauri::WebviewWin
 pub fn show_doc_manager_widget_window(app: &AppHandle) -> Result<(), String> {
     let window = ensure_doc_manager_widget_window(app)?;
     let _ = window.set_always_on_top(false);
-    position_widget_to_top_right(&window)?;
-    if let Ok(true) = window.is_visible() {
-        let _ = window.set_focus();
-        return Ok(());
+    if !matches!(window.is_visible(), Ok(true)) {
+        show_overlay_window(app, "document_manager_widget", &window, false);
     }
-    show_overlay_window(app, "document_manager_widget", &window, false);
+    position_widget_to_top_right(&window)?;
+    Ok(())
+}
+
+/// 保留命令占位：桌面层挂载与 WebView2 输入/坐标冲突，已停用
+#[tauri::command]
+pub fn set_doc_widget_desktop_attached(_attach: bool) -> Result<(), String> {
     Ok(())
 }
 
