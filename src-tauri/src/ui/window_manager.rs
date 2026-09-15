@@ -1063,7 +1063,6 @@ fn ensure_doc_manager_widget_window(app: &AppHandle) -> Result<tauri::WebviewWin
         .shadow(false)
         .transparent(true)
         .skip_taskbar(true)
-        // 不置顶：只作为桌面层悬浮栏，不遮挡其它应用窗口
         .always_on_top(false)
         .inner_size(36.0, 48.0)
         .build()
@@ -1080,12 +1079,6 @@ pub fn show_doc_manager_widget_window(app: &AppHandle) -> Result<(), String> {
         show_overlay_window(app, "document_manager_widget", &window, false);
     }
     position_widget_to_top_right(&window)?;
-    Ok(())
-}
-
-/// 保留命令占位：桌面层挂载与 WebView2 输入/坐标冲突，已停用
-#[tauri::command]
-pub fn set_doc_widget_desktop_attached(_attach: bool) -> Result<(), String> {
     Ok(())
 }
 

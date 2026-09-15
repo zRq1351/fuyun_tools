@@ -41,7 +41,6 @@ use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{
     bind_overlay_window_events, bind_standard_window_close_to_hide,
     ensure_window_for_label, get_physical_cursor_position,
-    set_doc_widget_desktop_attached,
     show_clipboard_window, show_doc_manager_widget_window,
     show_image_clipboard_window, show_standard_window_by_label,
 };
@@ -642,7 +641,6 @@ pub fn run() {
             copy_image_clipboard_item_to_directory,
             get_clipboard_full_snapshot,
             get_physical_cursor_position,
-            set_doc_widget_desktop_attached,
             // 截图相关命令
             start_screenshot,
             get_screenshot_data,
