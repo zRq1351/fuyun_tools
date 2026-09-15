@@ -94,7 +94,9 @@ fn load_key_from_credential_manager() -> Option<[u8; 32]> {
 async fn generate_and_store_key(pool: &sqlx::SqlitePool) -> [u8; 32] {
     let mut key_bytes = [0u8; 32];
     OsRng.fill_bytes(&mut key_bytes);
-    if store_key_in_credential_manager(&key_bytes) {
+    if store_key_in_credential_manager(&key_bytes)
+        && load_key_from_credential_manager().map(|k| k == key_bytes).unwrap_or(false)
+    {
         // 确保 DB 中不再残留明文密钥
         let _ = sqlx::query("DELETE FROM ai_meta WHERE key = 'encryption_key'")
             .execute(pool)
@@ -102,7 +104,7 @@ async fn generate_and_store_key(pool: &sqlx::SqlitePool) -> [u8; 32] {
         return key_bytes;
     }
     let k = base64::engine::general_purpose::STANDARD.encode(&key_bytes);
-    sqlx::query("INSERT OR IGNORE INTO ai_meta (key, value) VALUES ('encryption_key', ?1)")
+    sqlx::query("INSERT OR REPLACE INTO ai_meta (key, value) VALUES ('encryption_key', ?1)")
         .bind(&k)
         .execute(pool)
         .await
@@ -119,7 +121,7 @@ async fn ensure_cipher() -> &'static Aes256Gcm {
     if let Some(key_bytes) = load_key_from_credential_manager() {
         return CIPHER.get_or_init(|| Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key_bytes)));
     }
-    // 2) 旧版 ai_meta：迁出后删除
+    // 2) 旧版 ai_meta：迁出后**回读校验**再删，避免读凭据失败导致下次重新生成密钥
     let key_b64: Result<String, _> =
         sqlx::query_scalar("SELECT value FROM ai_meta WHERE key = 'encryption_key'")
             .fetch_one(pool)
@@ -128,21 +130,47 @@ async fn ensure_cipher() -> &'static Aes256Gcm {
         Ok(k) if !k.is_empty() => match decode_key_b64(&k) {
             Some(arr) => {
                 if store_key_in_credential_manager(&arr) {
-                    let _ = sqlx::query("DELETE FROM ai_meta WHERE key = 'encryption_key'")
-                        .execute(pool)
-                        .await;
-                    log::info!("AI 加密密钥已从 ai_config.db 迁移到 Windows 凭据管理器");
+                    // 回读校验，失败则保留 DB 密钥作后备
+                    match load_key_from_credential_manager() {
+                        Some(read_back) if read_back == arr => {
+                            let _ = sqlx::query("DELETE FROM ai_meta WHERE key = 'encryption_key'")
+                                .execute(pool)
+                                .await;
+                            log::info!("AI 加密密钥已从 ai_config.db 迁移到 Windows 凭据管理器");
+                        }
+                        _ => {
+                            log::warn!("凭据管理器回读校验失败，保留 ai_config.db 中的密钥作为后备");
+                        }
+                    }
                 }
                 arr
             }
             None => {
+                if has_any_encrypted_api_key(pool).await {
+                    log::error!("ai_meta 密钥损坏且无法恢复，已有 API Key 将无法解密，需重新配置");
+                }
                 log::warn!("ai_meta 中加密密钥损坏，已重新生成");
                 generate_and_store_key(pool).await
             }
         },
-        _ => generate_and_store_key(pool).await,
+        _ => {
+            if has_any_encrypted_api_key(pool).await {
+                log::error!("未找到加密密钥但库中已有密文，将生成新密钥（旧 API Key 需重新配置）");
+            }
+            generate_and_store_key(pool).await
+        }
     };
     CIPHER.get_or_init(|| Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key_bytes)))
+}
+
+async fn has_any_encrypted_api_key(pool: &sqlx::SqlitePool) -> bool {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM provider_configs WHERE encrypted_api_key IS NOT NULL AND encrypted_api_key != ''",
+    )
+        .fetch_one(pool)
+        .await
+        .map(|c| c > 0)
+        .unwrap_or(false)
 }
 
 async fn encrypt(plain: &str) -> Result<String, String> {
@@ -214,7 +242,10 @@ pub async fn get_provider_config(provider_key: &str) -> Option<ProviderConfigFul
         Some(ProviderConfigFull {
             api_url: u,
             model_name: m,
-            api_key: decrypt(&ek).await.unwrap_or_default(),
+            api_key: decrypt(&ek).await.unwrap_or_else(|e| {
+                log::error!("解密 provider {} 的 API key 失败: {}", provider_key, e);
+                String::new()
+            }),
         })
     } else {
         None

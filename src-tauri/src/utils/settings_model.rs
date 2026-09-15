@@ -682,13 +682,15 @@ impl AppSettingsData {
     }
 
     fn ensure_basic_config_integrity(&mut self) {
-        // 每次加载都做幂等修复：备份恢复/会话中重载后也需校验，不能只跑一次
-        log::info!("开始确保基础配置完整性");
-        log::debug!("迁移前 max_items: {}", self.max_items);
+        // 每次加载都做幂等修复：备份恢复/会话中重载后也需校验。
+        // 仅在真正改动时打 INFO，避免 load_settings 高频刷屏。
+        log::debug!("确保基础配置完整性");
+        let mut repaired = 0usize;
         if self.max_items < 10 || self.max_items > 1000 {
             let old_value = self.max_items;
             self.max_items = 50;
             log::info!("修复 max_items 从 {} 为默认值: 50", old_value);
+            repaired += 1;
         }
         if self.text_max_items == default_text_max_items()
             && self.image_max_items == default_image_max_items()
@@ -700,35 +702,33 @@ impl AppSettingsData {
         }
         if self.text_max_items < 10 || self.text_max_items > 1000 {
             self.text_max_items = default_text_max_items();
+            repaired += 1;
         }
         if self.image_max_items < 10 || self.image_max_items > 1000 {
             self.image_max_items = default_image_max_items();
+            repaired += 1;
         }
         if self.image_disk_limit_mb < 100 || self.image_disk_limit_mb > 102400 {
             self.image_disk_limit_mb = default_image_disk_limit_mb();
+            repaired += 1;
         }
         self.max_items = self.text_max_items;
         if self.hot_key.is_empty() {
             self.hot_key = DEFAULT_TOGGLE_SHORTCUT.to_string();
             log::info!("修复 hot_key 为默认值: {}", DEFAULT_TOGGLE_SHORTCUT);
-        }
-        if !self.text_clipboard_enabled {
-            log::info!("文字剪贴板功能保持禁用");
+            repaired += 1;
         }
         if self.image_hot_key.is_empty() {
             self.image_hot_key = default_image_hot_key();
-        }
-        if !self.image_clipboard_enabled {
-            log::info!("图片剪贴板功能保持禁用");
+            repaired += 1;
         }
         if self.screenshot_hot_key.is_empty() {
             self.screenshot_hot_key = default_screenshot_hot_key();
-        }
-        if !self.screenshot_enabled {
-            log::info!("截图功能保持禁用");
+            repaired += 1;
         }
         if self.recording_hot_key.is_empty() || !self.recording_hot_key.contains('+') {
             self.recording_hot_key = default_recording_hot_key();
+            repaired += 1;
         }
         if self.recording_mic_toggle_hot_key.is_empty()
             || !self.recording_mic_toggle_hot_key.contains('+')
@@ -774,6 +774,10 @@ impl AppSettingsData {
         }
         if self.image_fill_verify_mode != "strict" && self.image_fill_verify_mode != "fast" {
             self.image_fill_verify_mode = default_image_fill_verify_mode();
+            repaired += 1;
+        }
+        if repaired > 0 {
+            log::info!("配置完整性修复了 {} 项字段", repaired);
         }
         log::debug!(
             "迁移后 max_items: {}, text_max_items: {}, image_max_items: {}, image_disk_limit_mb: {}",
@@ -810,14 +814,15 @@ pub fn write_windows_credential(target: &str, value: &str) -> Result<(), String>
 
 #[cfg(windows)]
 pub fn read_windows_credential(target: &str) -> Result<String, String> {
-    use windows::Win32::Security::Credentials::{CredReadW, CREDENTIALW};
+    use windows::Win32::Security::Credentials::{CredReadW, CREDENTIALW, CRED_TYPE_GENERIC};
     use windows::core::PWSTR;
     let target_wide: Vec<u16> = target.encode_utf16().chain(Some(0)).collect();
     let mut pcred: *mut CREDENTIALW = std::ptr::null_mut();
     unsafe {
+        // Type 必须与写入时一致（CRED_TYPE_GENERIC），默认 0 会导致永远读不到
         CredReadW(
             PWSTR(target_wide.as_ptr() as *mut _),
-            CREDENTIALW::default().Type,
+            CRED_TYPE_GENERIC,
             Some(0),
             &mut pcred,
         )
@@ -836,13 +841,13 @@ pub fn read_windows_credential(target: &str) -> Result<String, String> {
 
 #[cfg(windows)]
 pub fn delete_windows_credential(target: &str) {
-    use windows::Win32::Security::Credentials::{CredDeleteW, CREDENTIALW};
+    use windows::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
     use windows::core::PWSTR;
     let target_wide: Vec<u16> = target.encode_utf16().chain(Some(0)).collect();
     unsafe {
         let _ = CredDeleteW(
             PWSTR(target_wide.as_ptr() as *mut _),
-            CREDENTIALW::default().Type,
+            CRED_TYPE_GENERIC,
             Some(0),
         );
     }

@@ -381,7 +381,19 @@ onMounted(async () => {
       if (data && data.windowLabel && data.windowLabel !== currentWindowLabel.value) return
       if (data && data.type && data.type !== mode.value) return
       // 代际校验：丢弃过期流的结果
-      if (typeof data.generation === 'number' && data.generation !== streamGeneration) return
+      // streamGeneration 初始为 0：若 result-clean 尚未到达（窗口刚建、监听稍慢），
+      // 应采用首包 generation，否则会丢掉整段输出、界面一直停在 loading
+      if (typeof data.generation === 'number') {
+        if (streamGeneration === 0) {
+          streamGeneration = data.generation
+        } else if (data.generation !== streamGeneration) {
+          return
+        }
+      }
+      if (data.done) {
+        isWaitingResult.value = false
+        return
+      }
       if (data.content) {
         // 防止异常长流撑爆内存/UI
         const MAX_RESULT_CHARS = 200_000

@@ -410,6 +410,21 @@ async fn execute_stream_request(
                     operation_id
                 );
             }
+            // 通知前端流已结束（含空结果），避免一直停在 loading
+            if crate::ui::window_manager::is_safe_result_window_label(&window_label) {
+                if let Some(window) = app.get_webview_window(&window_label) {
+                    let _ = window.emit(
+                        "result-update",
+                        serde_json::json!({
+                            "type": kind.kind_name(),
+                            "content": "",
+                            "windowLabel": window_label,
+                            "generation": operation_id,
+                            "done": true
+                        }),
+                    );
+                }
+            }
         }
         Err(e) => {
             let error_message = e.to_string();
