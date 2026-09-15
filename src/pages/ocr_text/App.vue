@@ -1,7 +1,13 @@
 <template>
-  <div :class="['ocr-text-root', `theme-${currentTheme}`]" @dblclick.left.stop.prevent="closeWindow">
+  <div
+      :class="['ocr-text-root', `theme-${currentTheme}`]"
+      @dblclick.left.stop.prevent="closeWindow"
+  >
     <div class="drag-handle-wrap">
-      <div class="drag-handle" @mousedown.left.stop.prevent="startDrag"></div>
+      <div
+          class="drag-handle"
+          @mousedown.left.stop.prevent="startDrag"
+      />
     </div>
     <textarea
         v-model="text"

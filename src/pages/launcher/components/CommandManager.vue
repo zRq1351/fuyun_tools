@@ -1,33 +1,65 @@
 <template>
-  <div v-if="visible" class="command-manager-overlay" @click.self="$emit('close')">
+  <div
+      v-if="visible"
+      class="command-manager-overlay"
+      @click.self="$emit('close')"
+  >
     <div class="command-manager">
       <div class="manager-header">
         <span class="title">{{ t('launcher.manageCommands') }}</span>
-        <button :title="t('common.close')" class="close-btn" @click="$emit('close')">
+        <button
+            :title="t('common.close')"
+            class="close-btn"
+            @click="$emit('close')"
+        >
           <el-icon :size="14">
             <Close/>
           </el-icon>
         </button>
       </div>
 
-      <div class="manager-hint">输入 <code>:+命令</code> 例如 <code>:vscode</code> 回车即可快速启动，右键应用可添加命令
+      <div class="manager-hint">
+        输入 <code>:+命令</code> 例如 <code>:vscode</code> 回车即可快速启动，右键应用可添加命令
       </div>
 
       <div class="command-list">
-        <div v-if="commands.length === 0" class="empty-state">
-          <el-icon :size="48" color="var(--fy-text-muted)">
+        <div
+            v-if="commands.length === 0"
+            class="empty-state"
+        >
+          <el-icon
+              :size="48"
+              color="var(--fy-text-muted)"
+          >
             <Document/>
           </el-icon>
           <p>暂无自定义命令</p>
-          <p class="hint">右键应用可添加启动命令</p>
+          <p class="hint">
+            右键应用可添加启动命令
+          </p>
         </div>
 
-        <div v-for="cmd in commands" :key="cmd.id" class="command-item">
+        <div
+            v-for="cmd in commands"
+            :key="cmd.id"
+            class="command-item"
+        >
           <div class="command-info">
-            <div class="command-prefix">{{ cmd.prefix }}</div>
-            <div class="command-title">{{ cmd.title }}</div>
-            <div v-if="cmd.description" class="command-desc">{{ cmd.description }}</div>
-            <div class="command-type">{{ getCommandTypeLabel(cmd.command_type) }}</div>
+            <div class="command-prefix">
+              {{ cmd.prefix }}
+            </div>
+            <div class="command-title">
+              {{ cmd.title }}
+            </div>
+            <div
+                v-if="cmd.description"
+                class="command-desc"
+            >
+              {{ cmd.description }}
+            </div>
+            <div class="command-type">
+              {{ getCommandTypeLabel(cmd.command_type) }}
+            </div>
           </div>
           <div class="command-actions">
             <label class="toggle-switch">
@@ -35,15 +67,23 @@
                   :checked="cmd.enabled"
                   type="checkbox"
                   @change="toggleCommand(cmd)"
-              />
-              <span class="slider"></span>
+              >
+              <span class="slider"/>
             </label>
-            <button :title="t('common.edit')" class="action-btn edit" @click="editCommand(cmd)">
+            <button
+                :title="t('common.edit')"
+                class="action-btn edit"
+                @click="editCommand(cmd)"
+            >
               <el-icon :size="14">
                 <Edit/>
               </el-icon>
             </button>
-            <button :title="t('common.delete')" class="action-btn delete" @click="deleteCommand(cmd)">
+            <button
+                :title="t('common.delete')"
+                class="action-btn delete"
+                @click="deleteCommand(cmd)"
+            >
               <el-icon :size="14">
                 <Delete/>
               </el-icon>
@@ -54,9 +94,14 @@
     </div>
 
     <!-- 编辑命令对话框 -->
-    <div v-if="showEditDialog" class="dialog-overlay">
+    <div
+        v-if="showEditDialog"
+        class="dialog-overlay"
+    >
       <div class="edit-dialog">
-        <div class="dialog-title">编辑命令</div>
+        <div class="dialog-title">
+          编辑命令
+        </div>
 
         <div class="form-group">
           <label>命令前缀</label>
@@ -64,7 +109,7 @@
             <input
                 v-model="editForm.prefix"
                 class="form-input prefix-input"
-            />
+            >
             <span class="prefix-symbol">:</span>
           </div>
         </div>
@@ -75,7 +120,7 @@
               v-model="editForm.title"
               class="form-input"
               placeholder="命令标题"
-          />
+          >
         </div>
 
         <div class="form-group">
@@ -84,19 +129,32 @@
               v-model="editForm.description"
               class="form-input"
               placeholder="可选描述"
-          />
+          >
         </div>
 
         <div class="form-group">
           <label class="checkbox-label">
-            <input v-model="editForm.enabled" type="checkbox"/>
+            <input
+                v-model="editForm.enabled"
+                type="checkbox"
+            >
             <span>启用此命令</span>
           </label>
         </div>
 
         <div class="dialog-actions">
-          <button class="dialog-btn cancel" @click="closeEditDialog">{{ t('common.cancel') }}</button>
-          <button class="dialog-btn confirm" @click="confirmEdit">{{ t('common.save') }}</button>
+          <button
+              class="dialog-btn cancel"
+              @click="closeEditDialog"
+          >
+            {{ t('common.cancel') }}
+          </button>
+          <button
+              class="dialog-btn confirm"
+              @click="confirmEdit"
+          >
+            {{ t('common.save') }}
+          </button>
         </div>
       </div>
     </div>

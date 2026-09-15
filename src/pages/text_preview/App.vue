@@ -1,33 +1,59 @@
 <template>
-  <div class="viewer-root" @click="requestClose">
+  <div
+      class="viewer-root"
+      @click="requestClose"
+  >
     <div
         class="viewer-drag-strip"
         data-tauri-drag-region
         @click.stop
-    ></div>
-    <div class="viewer-topbar" @click.stop>
+    />
+    <div
+        class="viewer-topbar"
+        @click.stop
+    >
       <div
           class="viewer-drag-icon"
           data-tauri-drag-region
           :title="t('textPreview.dragWindow')"
           @mousedown.left.stop.prevent="startWindowDrag"
       >
-        <GripHorizontal :size="16" :stroke-width="2" />
+        <GripHorizontal
+            :size="16"
+            :stroke-width="2"
+        />
       </div>
       <template v-if="!isEditing">
-        <button class="viewer-action-btn" @mousedown.left.stop.prevent @click.stop="startEdit">{{
+        <button
+            class="viewer-action-btn"
+            @mousedown.left.stop.prevent
+            @click.stop="startEdit"
+        >
+          {{
             t('textPreview.edit')
           }}
         </button>
-        <button class="viewer-action-btn" @mousedown.left.stop.prevent @click.stop="requestClose">
+        <button
+            class="viewer-action-btn"
+            @mousedown.left.stop.prevent
+            @click.stop="requestClose"
+        >
           {{ t('textPreview.close') }}
         </button>
       </template>
       <template v-else>
-        <button class="viewer-action-btn primary" @mousedown.left.stop.prevent @click.stop="saveEdit">
+        <button
+            class="viewer-action-btn primary"
+            @mousedown.left.stop.prevent
+            @click.stop="saveEdit"
+        >
           {{ t('textPreview.save') }}
         </button>
-        <button class="viewer-action-btn" @mousedown.left.stop.prevent @click.stop="cancelEdit">
+        <button
+            class="viewer-action-btn"
+            @mousedown.left.stop.prevent
+            @click.stop="cancelEdit"
+        >
           {{ t('textPreview.cancel') }}
         </button>
       </template>
@@ -39,12 +65,15 @@
       <div class="preview-content">
         <textarea
             v-if="isEditing"
+            ref="textareaRef"
             v-model="editableText"
             class="edit-textarea"
-            ref="textareaRef"
             spellcheck="false"
-        ></textarea>
-        <FormattedContent v-else :content="textContent" />
+        />
+        <FormattedContent
+            v-else
+            :content="textContent"
+        />
       </div>
     </div>
   </div>

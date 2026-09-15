@@ -1,56 +1,84 @@
 <template>
   <div class="container">
-    <div class="interactive-area" @mouseleave="onMouseLeave">
-      <div :class="{ 'active': !isHovered }" class="mini-icon"
-           data-tauri-drag-region
-           @mouseenter="onMouseEnter">
+    <div
+        class="interactive-area"
+        @mouseleave="onMouseLeave"
+    >
+      <div
+          :class="{ 'active': !isHovered }"
+          class="mini-icon"
+          data-tauri-drag-region
+          @mouseenter="onMouseEnter"
+      >
         <el-icon class="magic-icon">
           <magic-stick/>
         </el-icon>
       </div>
 
-      <div :class="{ 'active': isHovered }" class="toolbar">
-        <div :class="{ disabled: actionLoading }" class="toolbar-button translate-btn" @click="handleTranslate">
+      <div
+          :class="{ 'active': isHovered }"
+          class="toolbar"
+      >
+        <div
+            :class="{ disabled: actionLoading }"
+            class="toolbar-button translate-btn"
+            @click="handleTranslate"
+        >
           <el-icon class="btn-icon">
             <collection/>
           </el-icon>
           <span class="btn-text">{{ t('selectionToolbar.translate') }}</span>
         </div>
 
-        <div :class="{ disabled: actionLoading }" class="toolbar-button explain-btn" @click="handleExplain">
+        <div
+            :class="{ disabled: actionLoading }"
+            class="toolbar-button explain-btn"
+            @click="handleExplain"
+        >
           <el-icon class="btn-icon">
             <chat-line-round/>
           </el-icon>
           <span class="btn-text">{{ t('selectionToolbar.explain') }}</span>
         </div>
 
-        <div :class="{ disabled: actionLoading }" class="toolbar-button copy-btn" @click="handleCopy">
+        <div
+            :class="{ disabled: actionLoading }"
+            class="toolbar-button copy-btn"
+            @click="handleCopy"
+        >
           <el-icon class="btn-icon">
             <document-copy/>
           </el-icon>
           <span class="btn-text">{{ t('selectionToolbar.copy') }}</span>
         </div>
 
-        <div :class="{ disabled: actionLoading }" class="toolbar-button search-btn" @click="handleWebSearch">
+        <div
+            :class="{ disabled: actionLoading }"
+            class="toolbar-button search-btn"
+            @click="handleWebSearch"
+        >
           <el-icon class="btn-icon">
             <search/>
           </el-icon>
           <span class="btn-text">{{ t('selectionToolbar.search') }}</span>
         </div>
 
-        <div v-for="prompt in enabledCustomPrompts" :key="prompt.name"
-             :class="{ disabled: actionLoading }"
-             :style="{ color: prompt.color || 'var(--fy-text-muted)', background: parseBackground(prompt.bg_color) }"
-             class="toolbar-button custom-btn"
-             @click="handleCustomPrompt(prompt.name)">
+        <div
+            v-for="prompt in enabledCustomPrompts"
+            :key="prompt.name"
+            :class="{ disabled: actionLoading }"
+            :style="{ color: prompt.color || 'var(--fy-text-muted)', background: parseBackground(prompt.bg_color) }"
+            class="toolbar-button custom-btn"
+            @click="handleCustomPrompt(prompt.name)"
+        >
           <el-icon class="btn-icon">
             <component :is="getIconComponent(prompt.icon || 'Star')"/>
           </el-icon>
           <span class="btn-text">{{ prompt.name }}</span>
         </div>
       </div>
+    </div>
   </div>
-</div>
 </template>
 
 <script setup>

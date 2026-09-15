@@ -7,15 +7,31 @@
       {{ $t('settings.about.checkUpdate') }}
     </h3>
     <p>{{ $t('settings.about.currentVersion') }}<strong>{{ currentVersion }}</strong></p>
-    <el-button :loading="checkingUpdate" type="warning" @click="checkUpdate">
+    <el-button
+        :loading="checkingUpdate"
+        type="warning"
+        @click="checkUpdate"
+    >
       {{ $t('settings.about.checkUpdateBtn') }}
     </el-button>
-    <div v-if="updateStatus" :class="updateStatus.type" class="update-status">
+    <div
+        v-if="updateStatus"
+        :class="updateStatus.type"
+        class="update-status"
+    >
       {{ updateStatus.message }}
     </div>
-    <div v-if="showUpdateProgress" class="update-progress">
-      <el-progress :percentage="updateProgress" :status="updateProgress === 100 ? 'success' : ''"/>
-      <div class="progress-text">{{ $t('settings.about.updatingProgress', {progress: updateProgress}) }}</div>
+    <div
+        v-if="showUpdateProgress"
+        class="update-progress"
+    >
+      <el-progress
+          :percentage="updateProgress"
+          :status="updateProgress === 100 ? 'success' : ''"
+      />
+      <div class="progress-text">
+        {{ $t('settings.about.updatingProgress', {progress: updateProgress}) }}
+      </div>
     </div>
   </div>
 
@@ -39,12 +55,15 @@
       {{ $t('settings.about.features') }}
     </h3>
     <ul class="feature-list">
-      <li v-for="key in featureKeys" :key="key">
+      <li
+          v-for="key in featureKeys"
+          :key="key"
+      >
         <el-icon>
           <component :is="featureIcons[key]"/>
         </el-icon>
         <!-- eslint-disable-next-line vue/no-v-html -->
-        <span v-html="renderFeatureItem(key)"></span>
+        <span v-html="renderFeatureItem(key)"/>
       </li>
     </ul>
   </div>
@@ -58,14 +77,14 @@
     </h3>
     <!-- eslint-disable vue/no-v-html -->
     <ol class="usage-list">
-      <li v-html="renderUsageItem('settings.about.usage1', toggleShortcut, 'Ctrl+Shift+Z')"></li>
-      <li v-html="renderUsageItem('settings.about.usage2', imageToggleShortcut, 'Ctrl+Shift+X')"></li>
-      <li v-html="renderUsageItem('settings.about.usage3', screenshotToggleShortcut, 'Ctrl+Shift+S')"></li>
-      <li v-html="renderUsageItem('settings.about.usage4')"></li>
-      <li v-html="renderUsageItem('settings.about.usage5')"></li>
-      <li v-html="renderUsageItem('settings.about.usage6')"></li>
-      <li v-html="renderUsageItem('settings.about.usage7')"></li>
-      <li v-html="renderUsageItem('settings.about.usage8')"></li>
+      <li v-html="renderUsageItem('settings.about.usage1', toggleShortcut, 'Ctrl+Shift+Z')"/>
+      <li v-html="renderUsageItem('settings.about.usage2', imageToggleShortcut, 'Ctrl+Shift+X')"/>
+      <li v-html="renderUsageItem('settings.about.usage3', screenshotToggleShortcut, 'Ctrl+Shift+S')"/>
+      <li v-html="renderUsageItem('settings.about.usage4')"/>
+      <li v-html="renderUsageItem('settings.about.usage5')"/>
+      <li v-html="renderUsageItem('settings.about.usage6')"/>
+      <li v-html="renderUsageItem('settings.about.usage7')"/>
+      <li v-html="renderUsageItem('settings.about.usage8')"/>
     </ol>
   </div>
 

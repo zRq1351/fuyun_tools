@@ -1,8 +1,16 @@
 <template>
-  <el-form :model="form" label-position="top">
-    <el-card class="setting-section-card compact-card" shadow="never">
+  <el-form
+      :model="form"
+      label-position="top"
+  >
+    <el-card
+        class="setting-section-card compact-card"
+        shadow="never"
+    >
       <template #header>
-        <div class="section-title">{{ $t('settings.screenshot.title') }}</div>
+        <div class="section-title">
+          {{ $t('settings.screenshot.title') }}
+        </div>
       </template>
       <el-form-item :label="$t('settings.screenshot.enabled')">
         <el-switch
@@ -12,7 +20,9 @@
             :model-value="form.screenshotEnabled"
             @update:model-value="(val) => toggleFeature('screenshotEnabled', val)"
         />
-        <div class="form-hint">{{ $t('settings.screenshot.disabledHint') }}</div>
+        <div class="form-hint">
+          {{ $t('settings.screenshot.disabledHint') }}
+        </div>
       </el-form-item>
       <el-form-item :label="$t('settings.screenshot.openWindowHotkey')">
         <el-input
@@ -23,25 +33,42 @@
         >
           <template #append>
             <el-button-group>
-              <el-button :title="$t('settings.clipboard.modifyShortcut')" :type="isScreenshotRecording ? 'danger' : 'primary'"
-                         @click="toggleScreenshotRecording">
+              <el-button
+                  :title="$t('settings.clipboard.modifyShortcut')"
+                  :type="isScreenshotRecording ? 'danger' : 'primary'"
+                  @click="toggleScreenshotRecording"
+              >
                 <el-icon>
                   <component :is="isScreenshotRecording ? VideoPause : Edit"/>
                 </el-icon>
               </el-button>
-              <el-button :title="$t('settings.clipboard.resetShortcut')" @click="resetScreenshotRecording">
+              <el-button
+                  :title="$t('settings.clipboard.resetShortcut')"
+                  @click="resetScreenshotRecording"
+              >
                 <el-icon><RefreshLeft /></el-icon>
               </el-button>
             </el-button-group>
           </template>
         </el-input>
-        <div class="form-hint">{{ $t('settings.screenshot.hotkeyHint') }}</div>
+        <div class="form-hint">
+          {{ $t('settings.screenshot.hotkeyHint') }}
+        </div>
       </el-form-item>
       <el-form-item :label="$t('settings.screenshot.ocrEngine')">
-        <el-select v-model="form.ocrEngine" :placeholder="$t('settings.screenshot.ocrSelectPlaceholder')"
-                   style="width: 100%">
-          <el-option :label="$t('settings.screenshot.ocrNative')" value="windows-native"/>
-          <el-option :label="$t('settings.screenshot.ocrRs')" value="ocr-rs"/>
+        <el-select
+            v-model="form.ocrEngine"
+            :placeholder="$t('settings.screenshot.ocrSelectPlaceholder')"
+            style="width: 100%"
+        >
+          <el-option
+              :label="$t('settings.screenshot.ocrNative')"
+              value="windows-native"
+          />
+          <el-option
+              :label="$t('settings.screenshot.ocrRs')"
+              value="ocr-rs"
+          />
         </el-select>
         <div class="form-hint">
           <div>{{ $t('settings.screenshot.ocrNativeHint') }}</div>

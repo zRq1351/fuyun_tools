@@ -1,6 +1,13 @@
 <template>
-  <div ref="contentRef" class="content">
-    <div v-if="isReorderMode" ref="sortableRef" class="sortable-grid">
+  <div
+      ref="contentRef"
+      class="content"
+  >
+    <div
+        v-if="isReorderMode"
+        ref="sortableRef"
+        class="sortable-grid"
+    >
       <div
           v-for="(entry, idx) in props.visibleHistory"
           :id="'image-item-' + entry.item.id"
@@ -10,35 +17,63 @@
         <div class="item-header">
           <span class="item-index">{{ idx + 1 }}</span>
           <span class="item-category">{{ translateCategory(entry.category) }}</span>
-          <div v-if="entry.pinned" class="item-pinned-dot"></div>
+          <div
+              v-if="entry.pinned"
+              class="item-pinned-dot"
+          />
         </div>
         <div class="item-content">
-          <img :src="getPreviewDataUrl(entry.item)" alt="" class="image-preview" decoding="async"
-               draggable="false" @dragstart.prevent/>
+          <img
+              :src="getPreviewDataUrl(entry.item)"
+              alt=""
+              class="image-preview"
+              decoding="async"
+              draggable="false"
+              @dragstart.prevent
+          >
         </div>
-        <div v-if="entry.tags && entry.tags.length" class="tag-wrap">
+        <div
+            v-if="entry.tags && entry.tags.length"
+            class="tag-wrap"
+        >
           <div class="tag-chip-list">
-            <span v-for="tag in entry.tags" :key="`${entry.item.id}-${tag}`" class="tag-chip">#{{ tag }}</span>
+            <span
+                v-for="tag in entry.tags"
+                :key="`${entry.item.id}-${tag}`"
+                class="tag-chip"
+            >#{{ tag }}</span>
           </div>
         </div>
-        <div class="image-meta">{{ entry.item.width }} × {{ entry.item.height }}</div>
+        <div class="image-meta">
+          {{ entry.item.width }} × {{ entry.item.height }}
+        </div>
       </div>
     </div>
-    <div v-else ref="stageRef" class="carousel-stage" @click="onStageClick" @mousedown="onStageMouseDown">
+    <div
+        v-else
+        ref="stageRef"
+        class="carousel-stage"
+        @click="onStageClick"
+        @mousedown="onStageMouseDown"
+    >
       <button
           v-if="displayIndex > 0"
           class="nav-arrow nav-prev"
           @mousedown.stop="startNavRepeat(-1)"
           @mouseup.stop="stopNavRepeat"
           @mouseleave.stop="stopNavRepeat"
-      >‹</button>
+      >
+        ‹
+      </button>
       <button
           v-if="displayIndex < visibleHistory.length - 1"
           class="nav-arrow nav-next"
           @mousedown.stop="startNavRepeat(1)"
           @mouseup.stop="stopNavRepeat"
           @mouseleave.stop="stopNavRepeat"
-      >›</button>
+      >
+        ›
+      </button>
       <div
           v-for="entry in visibleCards"
           :id="'image-item-' + entry._index"
@@ -54,39 +89,85 @@
       >
         <div class="item-header">
           <span class="item-index">{{ entry._index + 1 }}/{{ totalCount || visibleHistory.length }}</span>
-          <span class="item-category" @click.stop>{{ translateCategory(entry.category) }}</span>
-          <div v-if="entry.pinned" class="item-pinned-dot"></div>
+          <span
+              class="item-category"
+              @click.stop
+          >{{ translateCategory(entry.category) }}</span>
+          <div
+              v-if="entry.pinned"
+              class="item-pinned-dot"
+          />
           <div class="item-actions">
-            <div class="action-btn" @click.stop="openFullscreen(entry.id)">
+            <div
+                class="action-btn"
+                @click.stop="openFullscreen(entry.id)"
+            >
               <FullScreen :size="9"/>
             </div>
-            <div class="action-btn" @click.stop="downloadItem(entry.id)">
+            <div
+                class="action-btn"
+                @click.stop="downloadItem(entry.id)"
+            >
               <Download :size="9"/>
             </div>
-            <div :class="{ active: entry.pinned }" class="action-btn" @click.stop="promoteItem(entry.id)">
+            <div
+                :class="{ active: entry.pinned }"
+                class="action-btn"
+                @click.stop="promoteItem(entry.id)"
+            >
               <Star :size="9"/>
             </div>
-            <div class="action-btn action-delete" @click.stop="deleteItem(entry.id, entry._index)">
+            <div
+                class="action-btn action-delete"
+                @click.stop="deleteItem(entry.id, entry._index)"
+            >
               <Close :size="9"/>
             </div>
           </div>
         </div>
         <div class="item-content">
-          <img :src="getPreviewDataUrl(entry.rawItem)" alt="" class="image-preview" decoding="async"
-               draggable="false" @dragstart.prevent/>
+          <img
+              :src="getPreviewDataUrl(entry.rawItem)"
+              alt=""
+              class="image-preview"
+              decoding="async"
+              draggable="false"
+              @dragstart.prevent
+          >
         </div>
-        <div v-if="entry.tags && entry.tags.length" class="tag-wrap">
+        <div
+            v-if="entry.tags && entry.tags.length"
+            class="tag-wrap"
+        >
           <div class="tag-chip-list">
-            <span v-for="tag in entry.tags" :key="`${entry.id}-${tag}`" class="tag-chip">#{{ tag }}</span>
+            <span
+                v-for="tag in entry.tags"
+                :key="`${entry.id}-${tag}`"
+                class="tag-chip"
+            >#{{ tag }}</span>
           </div>
         </div>
-        <div class="image-meta">{{ entry.rawItem.width }} × {{ entry.rawItem.height }}</div>
+        <div class="image-meta">
+          {{ entry.rawItem.width }} × {{ entry.rawItem.height }}
+        </div>
       </div>
     </div>
 
-    <div v-if="showLoadMoreHint" class="load-more-bar">
-      <el-icon v-if="isLoadingMore" :size="14" class="is-loading"><Loading/></el-icon>
-      <span class="load-more-text" @click="emit('load-more-intent')">
+    <div
+        v-if="showLoadMoreHint"
+        class="load-more-bar"
+    >
+      <el-icon
+          v-if="isLoadingMore"
+          :size="14"
+          class="is-loading"
+      >
+        <Loading/>
+      </el-icon>
+      <span
+          class="load-more-text"
+          @click="emit('load-more-intent')"
+      >
         {{ isLoadingMore ? $t('imageClipboard.loading') : $t('imageClipboard.loadMore') }}
       </span>
     </div>

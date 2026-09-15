@@ -1,6 +1,13 @@
 <template>
-  <div ref="contentRef" class="content">
-    <div v-if="isReorderMode" ref="sortableRef" class="sortable-grid">
+  <div
+      ref="contentRef"
+      class="content"
+  >
+    <div
+        v-if="isReorderMode"
+        ref="sortableRef"
+        class="sortable-grid"
+    >
       <div
           v-for="entry in props.visibleHistory"
           :id="'clipboard-item-' + entry.id"
@@ -12,28 +19,41 @@
               entry._index !== undefined ? entry._index + 1 : props.visibleHistory.indexOf(entry) + 1
             }}</span>
           <span class="item-category">{{ translateCategory(getItemCategory(entry.id)) }}</span>
-          <div v-if="isPinned(entry.id)" class="item-pinned-dot"></div>
+          <div
+              v-if="isPinned(entry.id)"
+              class="item-pinned-dot"
+          />
         </div>
         <div class="item-body">
           <FormattedContent :content="entry.content"/>
         </div>
       </div>
     </div>
-    <div v-else ref="stageRef" class="carousel-stage" @click="onStageClick" @mousedown="onStageMouseDown">
+    <div
+        v-else
+        ref="stageRef"
+        class="carousel-stage"
+        @click="onStageClick"
+        @mousedown="onStageMouseDown"
+    >
       <button
           v-if="selectedIndex > 0"
           class="nav-arrow nav-prev"
           @mousedown.stop="startNavRepeat(-1)"
           @mouseup.stop="stopNavRepeat"
           @mouseleave.stop="stopNavRepeat"
-      >‹</button>
+      >
+        ‹
+      </button>
       <button
           v-if="selectedIndex < stackItems.length - 1"
           class="nav-arrow nav-next"
           @mousedown.stop="startNavRepeat(1)"
           @mouseup.stop="stopNavRepeat"
           @mouseleave.stop="stopNavRepeat"
-      >›</button>
+      >
+        ›
+      </button>
       <div
           v-for="entry in visibleCards"
           :id="'clipboard-item-' + entry.id"
@@ -49,19 +69,39 @@
       >
         <div class="item-header">
           <span class="item-index">{{ entry._index + 1 }}/{{ totalCount || stackItems.length }}</span>
-          <span class="item-category" @click.stop>{{ translateCategory(getItemCategory(entry.id)) }}</span>
-          <div v-if="entry.pinned" class="item-pinned-dot"></div>
+          <span
+              class="item-category"
+              @click.stop
+          >{{ translateCategory(getItemCategory(entry.id)) }}</span>
+          <div
+              v-if="entry.pinned"
+              class="item-pinned-dot"
+          />
           <div class="item-actions">
-            <div v-if="isWebUrl(entry.content)" class="action-btn" @click.stop="openWebUrl(entry.content)">
+            <div
+                v-if="isWebUrl(entry.content)"
+                class="action-btn"
+                @click.stop="openWebUrl(entry.content)"
+            >
               <Link :size="9"/>
             </div>
-            <div class="action-btn" @click.stop="emit('preview', entry.content, entry.id)">
+            <div
+                class="action-btn"
+                @click.stop="emit('preview', entry.content, entry.id)"
+            >
               <View :size="9"/>
             </div>
-            <div :class="{ active: entry.pinned }" class="action-btn" @click.stop="promoteItem(entry.id)">
+            <div
+                :class="{ active: entry.pinned }"
+                class="action-btn"
+                @click.stop="promoteItem(entry.id)"
+            >
               <Star :size="9"/>
             </div>
-            <div class="action-btn action-delete" @click.stop="deleteItem(entry.id)">
+            <div
+                class="action-btn action-delete"
+                @click.stop="deleteItem(entry.id)"
+            >
               <Close :size="9"/>
             </div>
           </div>
@@ -69,18 +109,40 @@
         <div class="item-body">
           <FormattedContent :content="entry.content"/>
         </div>
-        <div v-if="entry.snippet" class="item-snippet">
-          <template v-for="(part, partIndex) in renderHighlightParts(entry.snippet)" :key="partIndex">
-            <mark v-if="part.hit" class="snippet-hit">{{ part.text }}</mark>
+        <div
+            v-if="entry.snippet"
+            class="item-snippet"
+        >
+          <template
+              v-for="(part, partIndex) in renderHighlightParts(entry.snippet)"
+              :key="partIndex"
+          >
+            <mark
+                v-if="part.hit"
+                class="snippet-hit"
+            >{{ part.text }}
+            </mark>
             <span v-else>{{ part.text }}</span>
           </template>
         </div>
       </div>
     </div>
 
-    <div v-if="showLoadMoreHint" class="load-more-bar">
-      <el-icon v-if="isLoadingMore" :size="14" class="is-loading"><Loading/></el-icon>
-      <span class="load-more-text" @click="emit('load-more-intent')">
+    <div
+        v-if="showLoadMoreHint"
+        class="load-more-bar"
+    >
+      <el-icon
+          v-if="isLoadingMore"
+          :size="14"
+          class="is-loading"
+      >
+        <Loading/>
+      </el-icon>
+      <span
+          class="load-more-text"
+          @click="emit('load-more-intent')"
+      >
         {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
       </span>
     </div>

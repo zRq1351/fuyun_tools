@@ -1,12 +1,12 @@
 <template>
   <div
       :class="['fy-editor', editorCursorClass]"
-       @mousedown="onMouseDown"
-       @mousemove="onMouseMove"
-       @mouseup="onMouseUp"
+      @mousedown="onMouseDown"
+      @mousemove="onMouseMove"
+      @mouseup="onMouseUp"
       @wheel.prevent="onMouseWheel"
-      @contextmenu.prevent="onContextMenu">
-
+      @contextmenu.prevent="onContextMenu"
+  >
     <!-- 底层截图 -->
     <img
         v-if="screenshotSrc && !longshotOverlayOnly"
@@ -14,7 +14,7 @@
         :class="['bg-image', { 'longshot-view-bg': longshotResultActive }]"
         :style="sceneLayerStyle"
         draggable="false"
-    />
+    >
 
     <!-- 绘制层 (全屏尺寸，缩放适配高DPI) -->
     <canvas
@@ -22,7 +22,7 @@
         ref="canvas"
         :style="sceneLayerStyle"
         class="draw-canvas"
-    ></canvas>
+    />
 
     <!-- 遮罩与选区层 -->
     <div
@@ -31,34 +31,68 @@
         class="mask-layer"
     >
       <!-- 智能窗口高亮 -->
-      <div v-if="highlightedWindow && state === 'idle'" ref="windowHighlightRef" class="window-highlight">
-        <div class="window-border"></div>
+      <div
+          v-if="highlightedWindow && state === 'idle'"
+          ref="windowHighlightRef"
+          class="window-highlight"
+      >
+        <div class="window-border"/>
       </div>
 
       <!-- 选区镂空及控制点 -->
-      <div v-if="hasSelection || state === 'selecting' || state === 'idle'"
-           ref="cutoutRef"
-           :class="{ 'is-active': state === 'selected', 'longshot-running': longshotOverlayOnly, 'picker-active': currentTool === 'picker' }"
-           class="cutout">
+      <div
+          v-if="hasSelection || state === 'selecting' || state === 'idle'"
+          ref="cutoutRef"
+          :class="{ 'is-active': state === 'selected', 'longshot-running': longshotOverlayOnly, 'picker-active': currentTool === 'picker' }"
+          class="cutout"
+      >
+        <div
+            :class="{ 'is-active': state !== 'drawing' }"
+            class="cutout-border"
+        />
 
-        <div :class="{ 'is-active': state !== 'drawing' }" class="cutout-border"></div>
-
-        <div v-if="(state === 'selecting' || state === 'resizing' || state === 'moving' || state === 'selected') && !longshotOverlayOnly"
-             :style="sizeInfoStyle"
-             class="size-info">
+        <div
+            v-if="(state === 'selecting' || state === 'resizing' || state === 'moving' || state === 'selected') && !longshotOverlayOnly"
+            :style="sizeInfoStyle"
+            class="size-info"
+        >
           {{ selectionInfoText }}
         </div>
 
         <!-- 8个调整控制点 -->
         <template v-if="hasSelection && state !== 'drawing' && currentTool === 'select' && !longshotOverlayOnly">
-          <div class="handle tl" @mousedown.stop="startResize('tl', $event)"></div>
-          <div class="handle tm" @mousedown.stop="startResize('tm', $event)"></div>
-          <div class="handle tr" @mousedown.stop="startResize('tr', $event)"></div>
-          <div class="handle ml" @mousedown.stop="startResize('ml', $event)"></div>
-          <div class="handle mr" @mousedown.stop="startResize('mr', $event)"></div>
-          <div class="handle bl" @mousedown.stop="startResize('bl', $event)"></div>
-          <div class="handle bm" @mousedown.stop="startResize('bm', $event)"></div>
-          <div class="handle br" @mousedown.stop="startResize('br', $event)"></div>
+          <div
+              class="handle tl"
+              @mousedown.stop="startResize('tl', $event)"
+          />
+          <div
+              class="handle tm"
+              @mousedown.stop="startResize('tm', $event)"
+          />
+          <div
+              class="handle tr"
+              @mousedown.stop="startResize('tr', $event)"
+          />
+          <div
+              class="handle ml"
+              @mousedown.stop="startResize('ml', $event)"
+          />
+          <div
+              class="handle mr"
+              @mousedown.stop="startResize('mr', $event)"
+          />
+          <div
+              class="handle bl"
+              @mousedown.stop="startResize('bl', $event)"
+          />
+          <div
+              class="handle bm"
+              @mousedown.stop="startResize('bm', $event)"
+          />
+          <div
+              class="handle br"
+              @mousedown.stop="startResize('br', $event)"
+          />
         </template>
       </div>
     </div>
@@ -69,14 +103,25 @@
         class="recording-region-confirm"
         @mousedown.stop
     >
-      <button :title="t('screenshot.confirmRegion')" class="region-icon-btn primary"
-              @click.stop="commitRecordingRegionSelection">
+      <button
+          :title="t('screenshot.confirmRegion')"
+          class="region-icon-btn primary"
+          @click.stop="commitRecordingRegionSelection"
+      >
         <Check class="tool-icon-wrap"/>
       </button>
-      <button :title="t('screenshot.reselect')" class="region-icon-btn" @click.stop="cancelSelection">
+      <button
+          :title="t('screenshot.reselect')"
+          class="region-icon-btn"
+          @click.stop="cancelSelection"
+      >
         <RefreshLeft class="tool-icon-wrap"/>
       </button>
-      <button :title="t('screenshot.cancel')" class="region-icon-btn danger" @click.stop="close">
+      <button
+          :title="t('screenshot.cancel')"
+          class="region-icon-btn danger"
+          @click.stop="close"
+      >
         <X class="tool-icon-wrap"/>
       </button>
     </div>
@@ -92,8 +137,14 @@
           :title="manualLongshotRunning ? t('screenshot.pauseLongshot') : t('screenshot.startLongshot')"
           @click.stop="toggleManualLongshotRunning"
       >
-        <span v-if="manualLongshotRunning" style="font-size: 12px;">||</span>
-        <span v-else style="font-size: 12px;">▶</span>
+        <span
+            v-if="manualLongshotRunning"
+            style="font-size: 12px;"
+        >||</span>
+        <span
+            v-else
+            style="font-size: 12px;"
+        >▶</span>
       </button>
       <button
           class="region-icon-btn"
@@ -103,11 +154,18 @@
       >
         <Check class="tool-icon-wrap"/>
       </button>
-      <button :title="t('screenshot.reselect')" class="region-icon-btn" @click.stop="cancelSelection">
+      <button
+          :title="t('screenshot.reselect')"
+          class="region-icon-btn"
+          @click.stop="cancelSelection"
+      >
         <RefreshLeft class="tool-icon-wrap"/>
       </button>
-      <button :title="t('screenshot.cancelLongshot')" class="region-icon-btn danger"
-              @click.stop="cancelManualLongshotCapture(true)">
+      <button
+          :title="t('screenshot.cancelLongshot')"
+          class="region-icon-btn danger"
+          @click.stop="cancelManualLongshotCapture(true)"
+      >
         <X class="tool-icon-wrap"/>
       </button>
     </div>
@@ -119,7 +177,11 @@
       {{ manualLongshotHint }}
     </div>
 
-    <div v-if="captureReadyError" class="capture-ready-error-toast" @mousedown.stop>
+    <div
+        v-if="captureReadyError"
+        class="capture-ready-error-toast"
+        @mousedown.stop
+    >
       {{ captureReadyError }}
     </div>
 
@@ -128,96 +190,207 @@
         :class="['export-route-indicator', exportRouteIndicator.kind]"
         @mousedown.stop
     >
-      <div class="export-route-title">{{ t('screenshot.currentLinkStatus') }}</div>
-      <div v-for="item in exportRouteIndicator.items" :key="item.key" class="export-route-detail">
+      <div class="export-route-title">
+        {{ t('screenshot.currentLinkStatus') }}
+      </div>
+      <div
+          v-for="item in exportRouteIndicator.items"
+          :key="item.key"
+          class="export-route-detail"
+      >
         {{ item.label }}：{{ item.value }}
       </div>
     </div>
 
     <!-- 浮动工具栏 -->
-    <div v-if="regionSelectMode === 'screenshot' && hasSelection && (state === 'selected' || state === 'drawing')"
-         ref="floatingToolbarRef"
-         class="floating-toolbar"
-         @mousedown.stop>
-
+    <div
+        v-if="regionSelectMode === 'screenshot' && hasSelection && (state === 'selected' || state === 'drawing')"
+        ref="floatingToolbarRef"
+        class="floating-toolbar"
+        @mousedown.stop
+    >
       <div class="tools-row primary-tools">
-        <button v-for="tool in drawingTools" :key="tool.id"
-                :class="{ active: currentTool === tool.id }" :title="t(tool.name)"
-                class="tool-btn" @click="setTool(tool.id)">
-          <component :is="tool.icon" class="tool-icon-wrap"/>
+        <button
+            v-for="tool in drawingTools"
+            :key="tool.id"
+            :class="{ active: currentTool === tool.id }"
+            :title="t(tool.name)"
+            class="tool-btn"
+            @click="setTool(tool.id)"
+        >
+          <component
+              :is="tool.icon"
+              class="tool-icon-wrap"
+          />
         </button>
 
-        <div class="divider"></div>
+        <div class="divider"/>
         <button
             :disabled="manualLongshotAvailability.status !== 'available' && manualLongshotAvailability.status !== 'busy'"
             :title="manualLongshotButtonTitle"
             class="tool-btn"
             @click="enterManualLongshotMode"
         >
-          <svg aria-hidden="true" class="tool-icon-wrap" fill="none" viewBox="0 0 16 16">
-            <path d="M8 1.5 L6.2 3.3 M8 1.5 L9.8 3.3 M8 1.5 V5" stroke="currentColor" stroke-linecap="round"
-                  stroke-linejoin="round" stroke-width="1.4"/>
-            <rect height="7" rx="1.6" stroke="currentColor" stroke-width="1.4" width="8" x="4" y="4.5"/>
-            <path d="M8 14.5 L6.2 12.7 M8 14.5 L9.8 12.7 M8 11 V14.5" stroke="currentColor" stroke-linecap="round"
-                  stroke-linejoin="round" stroke-width="1.4"/>
+          <svg
+              aria-hidden="true"
+              class="tool-icon-wrap"
+              fill="none"
+              viewBox="0 0 16 16"
+          >
+            <path
+                d="M8 1.5 L6.2 3.3 M8 1.5 L9.8 3.3 M8 1.5 V5"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.4"
+            />
+            <rect
+                height="7"
+                rx="1.6"
+                stroke="currentColor"
+                stroke-width="1.4"
+                width="8"
+                x="4"
+                y="4.5"
+            />
+            <path
+                d="M8 14.5 L6.2 12.7 M8 14.5 L9.8 12.7 M8 11 V14.5"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.4"
+            />
           </svg>
         </button>
 
-        <div class="divider"></div>
+        <div class="divider"/>
 
-        <button :disabled="historyIndex <= 0" :title="t('screenshot.undo')" class="tool-btn" @click="undo">
+        <button
+            :disabled="historyIndex <= 0"
+            :title="t('screenshot.undo')"
+            class="tool-btn"
+            @click="undo"
+        >
           <RefreshLeft class="tool-icon-wrap"/>
         </button>
-        <button :disabled="historyIndex >= history.length - 1" :title="t('screenshot.redo')" class="tool-btn"
-                @click="redo">
+        <button
+            :disabled="historyIndex >= history.length - 1"
+            :title="t('screenshot.redo')"
+            class="tool-btn"
+            @click="redo"
+        >
           <RefreshRight class="tool-icon-wrap"/>
         </button>
 
-        <div class="divider"></div>
+        <div class="divider"/>
 
-        <button :disabled="!canExport" :title="t('screenshot.copyToClipboard')" class="tool-btn"
-                @click="copyToClipboardLinked">
+        <button
+            :disabled="!canExport"
+            :title="t('screenshot.copyToClipboard')"
+            class="tool-btn"
+            @click="copyToClipboardLinked"
+        >
           <DocumentCopy class="tool-icon-wrap"/>
         </button>
-        <button :disabled="!canExport" :title="t('screenshot.saveFile')" class="tool-btn" @click="saveAndClose">
+        <button
+            :disabled="!canExport"
+            :title="t('screenshot.saveFile')"
+            class="tool-btn"
+            @click="saveAndClose"
+        >
           <Download class="tool-icon-wrap"/>
         </button>
-        <button :disabled="!canExport" :title="t('screenshot.pinToScreen')" class="tool-btn"
-                @click="pinToScreenAndClose">
+        <button
+            :disabled="!canExport"
+            :title="t('screenshot.pinToScreen')"
+            class="tool-btn"
+            @click="pinToScreenAndClose"
+        >
           <Pin class="tool-icon-wrap"/>
         </button>
-        <button :title="t('screenshot.cancelSelection')" class="tool-btn danger" @click="cancelSelection">
+        <button
+            :title="t('screenshot.cancelSelection')"
+            class="tool-btn danger"
+            @click="cancelSelection"
+        >
           <X class="tool-icon-wrap"/>
         </button>
-        <button :disabled="!canExport" :title="t('screenshot.finishAndCopy')" class="tool-btn confirm"
-                @click="completeAndCopyUnlinked">
+        <button
+            :disabled="!canExport"
+            :title="t('screenshot.finishAndCopy')"
+            class="tool-btn confirm"
+            @click="completeAndCopyUnlinked"
+        >
           <Check class="tool-icon-wrap"/>
         </button>
       </div>
 
       <!-- 二级属性栏 -->
-      <div v-if="currentTool !== 'select' && currentTool !== 'picker'" class="tools-row secondary-tools">
-        <input v-model="currentColor" :title="t('screenshot.textColor')" class="color-picker" type="color"
-               @input="syncEditingTextStyle"/>
-        <input v-model="lineWidth" :title="t('screenshot.lineWidth')" class="line-slider" max="20" min="1" type="range"
-               @input="syncEditingTextStyle"/>
+      <div
+          v-if="currentTool !== 'select' && currentTool !== 'picker'"
+          class="tools-row secondary-tools"
+      >
+        <input
+            v-model="currentColor"
+            :title="t('screenshot.textColor')"
+            class="color-picker"
+            type="color"
+            @input="syncEditingTextStyle"
+        >
+        <input
+            v-model="lineWidth"
+            :title="t('screenshot.lineWidth')"
+            class="line-slider"
+            max="20"
+            min="1"
+            type="range"
+            @input="syncEditingTextStyle"
+        >
         <template v-if="currentTool === 'text'">
-          <select v-model="textStyle.fontFamily" :title="t('screenshot.font')" class="text-style-select"
-                  @change="syncEditingTextStyle">
-            <option v-for="font in fontFamilies" :key="font" :value="font">{{ font }}</option>
+          <select
+              v-model="textStyle.fontFamily"
+              :title="t('screenshot.font')"
+              class="text-style-select"
+              @change="syncEditingTextStyle"
+          >
+            <option
+                v-for="font in fontFamilies"
+                :key="font"
+                :value="font"
+            >
+              {{ font }}
+            </option>
           </select>
-          <button :class="{ active: textStyle.bold }" :title="t('screenshot.bold')" class="tool-btn mini"
-                  @click="toggleTextBold">B
+          <button
+              :class="{ active: textStyle.bold }"
+              :title="t('screenshot.bold')"
+              class="tool-btn mini"
+              @click="toggleTextBold"
+          >
+            B
           </button>
-          <button :class="{ active: textStyle.stroke }" :title="t('screenshot.stroke')" class="tool-btn mini"
-                  @click="toggleTextStroke">
+          <button
+              :class="{ active: textStyle.stroke }"
+              :title="t('screenshot.stroke')"
+              class="tool-btn mini"
+              @click="toggleTextStroke"
+          >
             描
           </button>
-          <input v-if="textStyle.stroke" v-model="textStyle.strokeColor" :title="t('screenshot.strokeColor')"
-                 class="color-picker mini-picker"
-                 type="color" @input="syncEditingTextStyle"/>
-          <button :class="{ active: textStyle.shadow }" :title="t('screenshot.shadow')" class="tool-btn mini"
-                  @click="toggleTextShadow">
+          <input
+              v-if="textStyle.stroke"
+              v-model="textStyle.strokeColor"
+              :title="t('screenshot.strokeColor')"
+              class="color-picker mini-picker"
+              type="color"
+              @input="syncEditingTextStyle"
+          >
+          <button
+              :class="{ active: textStyle.shadow }"
+              :title="t('screenshot.shadow')"
+              class="tool-btn mini"
+              @click="toggleTextShadow"
+          >
             影
           </button>
         </template>
@@ -225,12 +398,26 @@
     </div>
 
     <!-- 取色器放大镜 -->
-    <div v-if="currentTool === 'picker' && pickColor" ref="pickerInfoRef" class="color-picker-info">
-      <canvas ref="pickerMagnifierCanvasRef" class="picker-magnifier"></canvas>
+    <div
+        v-if="currentTool === 'picker' && pickColor"
+        ref="pickerInfoRef"
+        class="color-picker-info"
+    >
+      <canvas
+          ref="pickerMagnifierCanvasRef"
+          class="picker-magnifier"
+      />
       <div class="picker-meta">
-        <div :style="{ backgroundColor: pickColor }" class="picker-swatch"></div>
-        <div class="picker-value">{{ pickerDisplayValue }}</div>
-        <div class="picker-hint">{{ pickerCopyHint }}</div>
+        <div
+            :style="{ backgroundColor: pickColor }"
+            class="picker-swatch"
+        />
+        <div class="picker-value">
+          {{ pickerDisplayValue }}
+        </div>
+        <div class="picker-hint">
+          {{ pickerCopyHint }}
+        </div>
       </div>
     </div>
 
@@ -243,10 +430,16 @@
         @mousedown.stop="startDragShapeItem(shape.id, $event)"
     >
       <template v-if="shape.type === 'rect'">
-        <div :style="getShapeStrokeStyle(shape)" class="shape-rect"></div>
+        <div
+            :style="getShapeStrokeStyle(shape)"
+            class="shape-rect"
+        />
       </template>
       <template v-else-if="shape.type === 'circle'">
-        <div :style="getShapeStrokeStyle(shape)" class="shape-circle"></div>
+        <div
+            :style="getShapeStrokeStyle(shape)"
+            class="shape-circle"
+        />
       </template>
       <template v-else>
         <svg
@@ -286,34 +479,58 @@
         </svg>
       </template>
       <template v-if="selectedShapeId === shape.id && (shape.type === 'rect' || shape.type === 'circle')">
-        <div class="shape-resize-handle tl" @mousedown.stop="startResizeShapeItem(shape.id, 'tl', $event)"></div>
-        <div class="shape-resize-handle tm" @mousedown.stop="startResizeShapeItem(shape.id, 'tm', $event)"></div>
-        <div class="shape-resize-handle tr" @mousedown.stop="startResizeShapeItem(shape.id, 'tr', $event)"></div>
-        <div class="shape-resize-handle ml" @mousedown.stop="startResizeShapeItem(shape.id, 'ml', $event)"></div>
-        <div class="shape-resize-handle mr" @mousedown.stop="startResizeShapeItem(shape.id, 'mr', $event)"></div>
-        <div class="shape-resize-handle bl" @mousedown.stop="startResizeShapeItem(shape.id, 'bl', $event)"></div>
-        <div class="shape-resize-handle bm" @mousedown.stop="startResizeShapeItem(shape.id, 'bm', $event)"></div>
-        <div class="shape-resize-handle br" @mousedown.stop="startResizeShapeItem(shape.id, 'br', $event)"></div>
+        <div
+            class="shape-resize-handle tl"
+            @mousedown.stop="startResizeShapeItem(shape.id, 'tl', $event)"
+        />
+        <div
+            class="shape-resize-handle tm"
+            @mousedown.stop="startResizeShapeItem(shape.id, 'tm', $event)"
+        />
+        <div
+            class="shape-resize-handle tr"
+            @mousedown.stop="startResizeShapeItem(shape.id, 'tr', $event)"
+        />
+        <div
+            class="shape-resize-handle ml"
+            @mousedown.stop="startResizeShapeItem(shape.id, 'ml', $event)"
+        />
+        <div
+            class="shape-resize-handle mr"
+            @mousedown.stop="startResizeShapeItem(shape.id, 'mr', $event)"
+        />
+        <div
+            class="shape-resize-handle bl"
+            @mousedown.stop="startResizeShapeItem(shape.id, 'bl', $event)"
+        />
+        <div
+            class="shape-resize-handle bm"
+            @mousedown.stop="startResizeShapeItem(shape.id, 'bm', $event)"
+        />
+        <div
+            class="shape-resize-handle br"
+            @mousedown.stop="startResizeShapeItem(shape.id, 'br', $event)"
+        />
       </template>
       <template v-if="selectedShapeId === shape.id && (shape.type === 'line' || shape.type === 'arrow')">
         <div
             :style="getShapePointHandleStyle(shape.x1, shape.y1)"
             class="shape-point-handle"
             @mousedown.stop="startAdjustLineEndpoint(shape.id, 'start', $event)"
-        ></div>
+        />
         <div
             :style="getShapePointHandleStyle(shape.x2, shape.y2)"
             class="shape-point-handle"
             @mousedown.stop="startAdjustLineEndpoint(shape.id, 'end', $event)"
-        ></div>
+        />
       </template>
     </div>
 
     <div
         v-for="item in textItems"
         :key="item.id"
-        :class="{ editing: editingTextId === item.id, selected: selectedTextId === item.id }"
         :ref="(el) => setTextOverlayRef(el, item.id)"
+        :class="{ editing: editingTextId === item.id, selected: selectedTextId === item.id }"
         class="text-overlay-item"
         @mousedown.stop="startDragTextItem(item.id, $event)"
         @dblclick.stop="startEditTextItem(item)"
@@ -326,12 +543,16 @@
           @blur="finishInlineEdit"
           @input="onInlineTextInput(item, $event)"
           @keydown.stop="handleInlineEditorKeydown($event)"
-      ></div>
+      />
       <template v-else>
-        <div v-for="(line, index) in item.text.split('\n')" :key="`${item.id}-${index}`">{{ line }}</div>
+        <div
+            v-for="(line, index) in item.text.split('\n')"
+            :key="`${item.id}-${index}`"
+        >
+          {{ line }}
+        </div>
       </template>
     </div>
-
   </div>
 </template>
 

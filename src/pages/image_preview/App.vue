@@ -1,22 +1,39 @@
 <template>
-  <div class="viewer-root" @click="requestClose">
+  <div
+      class="viewer-root"
+      @click="requestClose"
+  >
     <div
         class="viewer-drag-strip"
         data-tauri-drag-region
         @click.stop
         @mousedown.left="startWindowDrag"
-    ></div>
-    <div class="viewer-topbar" @click.stop>
+    />
+    <div
+        class="viewer-topbar"
+        @click.stop
+    >
       <div
           class="viewer-drag-icon"
           data-tauri-drag-region
           title="拖动窗口"
           @mousedown.left.stop.prevent="startWindowDrag"
       >
-        <GripHorizontal :size="16" :stroke-width="2" />
+        <GripHorizontal
+            :size="16"
+            :stroke-width="2"
+        />
       </div>
-      <div class="viewer-zoom">{{ zoomPercent }}</div>
-      <button class="viewer-close" @mousedown.left.stop.prevent @click.stop="requestClose(true)">关闭</button>
+      <div class="viewer-zoom">
+        {{ zoomPercent }}
+      </div>
+      <button
+          class="viewer-close"
+          @mousedown.left.stop.prevent
+          @click.stop="requestClose(true)"
+      >
+        关闭
+      </button>
     </div>
     <div
         :class="['viewer-card', animationState, {'is-dragging': isDragging}]"
@@ -34,14 +51,24 @@
           @dblclick.stop.prevent="resetViewTransform"
           @error="onImageError"
           @load="onImageLoaded"
-      />
+      >
     </div>
-    <div v-if="!isImageReady && !loadErrorMessage" class="viewer-loading viewer-loading-overlay">
-      <div class="viewer-loading-spinner"></div>
-      <div class="viewer-loading-text">正在加载图片...</div>
+    <div
+        v-if="!isImageReady && !loadErrorMessage"
+        class="viewer-loading viewer-loading-overlay"
+    >
+      <div class="viewer-loading-spinner"/>
+      <div class="viewer-loading-text">
+        正在加载图片...
+      </div>
     </div>
-    <div v-if="isImageReady && loadErrorMessage" class="viewer-loading viewer-loading-overlay viewer-error">
-      <div class="viewer-loading-text">{{ loadErrorMessage }}</div>
+    <div
+        v-if="isImageReady && loadErrorMessage"
+        class="viewer-loading viewer-loading-overlay viewer-error"
+    >
+      <div class="viewer-loading-text">
+        {{ loadErrorMessage }}
+      </div>
     </div>
   </div>
 </template>

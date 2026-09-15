@@ -1,52 +1,79 @@
 <template>
   <el-form label-position="top">
-    <el-card class="setting-section-card" shadow="never">
+    <el-card
+        class="setting-section-card"
+        shadow="never"
+    >
       <template #header>
-        <div class="section-title">{{ $t('settings.developer.clipboardStorage') }}</div>
+        <div class="section-title">
+          {{ $t('settings.developer.clipboardStorage') }}
+        </div>
       </template>
       <el-form-item>
-        <el-button size="small" @click="refreshImageStorageMetrics">{{
+        <el-button
+            size="small"
+            @click="refreshImageStorageMetrics"
+        >
+          {{
             $t('settings.developer.refreshUsage')
           }}
         </el-button>
       </el-form-item>
       <el-form-item>
         <div class="metrics-card">
-          <div class="metrics-line">{{ $t('settings.developer.memoryCache') }}
+          <div class="metrics-line">
+            {{ $t('settings.developer.memoryCache') }}
             {{ formatBytes(imageStorageMetrics.memory_bytes) }} /
             {{ formatBytes(imageStorageMetrics.memory_budget_bytes) }}
           </div>
-          <div class="metrics-line">{{ $t('settings.developer.diskUsage') }}
+          <div class="metrics-line">
+            {{ $t('settings.developer.diskUsage') }}
             {{ formatBytes(imageStorageMetrics.disk_bytes) }} /
             {{ formatBytes(imageStorageMetrics.disk_limit_bytes) }}
           </div>
-          <div class="metrics-line">{{ $t('settings.developer.imageEntries') }}
+          <div class="metrics-line">
+            {{ $t('settings.developer.imageEntries') }}
             {{ Number(imageStorageMetrics.item_count || 0) }} {{ $t('settings.developer.pinned') }}
             {{ Number(imageStorageMetrics.pinned_count || 0) }}
           </div>
         </div>
       </el-form-item>
     </el-card>
-    <el-card class="setting-section-card" shadow="never">
+    <el-card
+        class="setting-section-card"
+        shadow="never"
+    >
       <template #header>
-        <div class="section-title">{{ $t('settings.developer.vcRuntimeDebug') }}</div>
+        <div class="section-title">
+          {{ $t('settings.developer.vcRuntimeDebug') }}
+        </div>
       </template>
       <el-form-item :label="$t('settings.developer.forceMissing')">
         <el-switch v-model="vcRuntimeDebug.forceMissing"/>
       </el-form-item>
       <el-form-item>
-        <el-button size="small" type="primary" @click="saveVcRuntimeDebugConfig">{{
+        <el-button
+            size="small"
+            type="primary"
+            @click="saveVcRuntimeDebugConfig"
+        >
+          {{
             $t('settings.developer.saveConfig')
           }}
         </el-button>
-        <el-button size="small" @click="refreshVcRuntimeDebugState">{{
+        <el-button
+            size="small"
+            @click="refreshVcRuntimeDebugState"
+        >
+          {{
             $t('settings.developer.refreshStatus')
           }}
         </el-button>
       </el-form-item>
       <el-form-item>
         <div class="metrics-card">
-          <div class="metrics-line">{{
+          <div class="metrics-line">
+            {{
               $t('settings.developer.currentStatus')
             }}{{
               vcRuntimeDebug.forceMissing ? $t('settings.developer.forceMissingStatus') : $t('settings.developer.realDetection')
@@ -55,9 +82,14 @@
         </div>
       </el-form-item>
     </el-card>
-    <el-card class="setting-section-card" shadow="never">
+    <el-card
+        class="setting-section-card"
+        shadow="never"
+    >
       <template #header>
-        <div class="section-title">{{ $t('settings.developer.writebackDedup') }}</div>
+        <div class="section-title">
+          {{ $t('settings.developer.writebackDedup') }}
+        </div>
       </template>
       <el-form-item :label="$t('settings.developer.dedupToggle')">
         <el-switch v-model="dedupConfig.enabled"/>
@@ -75,74 +107,132 @@
         <el-switch v-model="dedupConfig.logEnabled"/>
       </el-form-item>
       <el-form-item>
-        <el-button size="small" type="primary" @click="saveDedupConfig">{{
+        <el-button
+            size="small"
+            type="primary"
+            @click="saveDedupConfig"
+        >
+          {{
             $t('settings.developer.saveConfig')
           }}
         </el-button>
-        <el-button size="small" @click="refreshDedupState">{{ $t('settings.developer.refreshStatus') }}</el-button>
-        <el-button size="small" @click="resetDedupMetrics">{{ $t('settings.developer.resetCount') }}</el-button>
+        <el-button
+            size="small"
+            @click="refreshDedupState"
+        >
+          {{ $t('settings.developer.refreshStatus') }}
+        </el-button>
+        <el-button
+            size="small"
+            @click="resetDedupMetrics"
+        >
+          {{ $t('settings.developer.resetCount') }}
+        </el-button>
       </el-form-item>
       <el-form-item>
         <div class="metrics-card">
-          <div class="metrics-line">{{ $t('settings.developer.totalRequests') }} {{ dedupMetrics.totalRequests }}</div>
-          <div class="metrics-line">{{ $t('settings.developer.totalHits') }} {{ dedupMetrics.dedupHits }}</div>
-          <div class="metrics-line">{{ $t('settings.developer.requestIdHits') }} {{ dedupMetrics.requestIdHits }}</div>
-          <div class="metrics-line">{{ $t('settings.developer.textHashHits') }} {{ dedupMetrics.textHashHits }}</div>
-          <div class="metrics-line">{{ $t('settings.developer.windowRequests') }} {{
+          <div class="metrics-line">
+            {{ $t('settings.developer.totalRequests') }} {{ dedupMetrics.totalRequests }}
+          </div>
+          <div class="metrics-line">
+            {{ $t('settings.developer.totalHits') }} {{ dedupMetrics.dedupHits }}
+          </div>
+          <div class="metrics-line">
+            {{ $t('settings.developer.requestIdHits') }} {{ dedupMetrics.requestIdHits }}
+          </div>
+          <div class="metrics-line">
+            {{ $t('settings.developer.textHashHits') }} {{ dedupMetrics.textHashHits }}
+          </div>
+          <div class="metrics-line">
+            {{ $t('settings.developer.windowRequests') }} {{
               dedupMetrics.windowRequests
             }}
           </div>
-          <div class="metrics-line">{{ $t('settings.developer.windowHits') }} {{ dedupMetrics.windowHits }}</div>
-          <div class="metrics-line">{{ $t('settings.developer.windowHitRate') }} {{ dedupMetrics.windowHitRate }}</div>
-          <div class="metrics-line">{{ $t('settings.developer.lastHitTime') }} {{ dedupMetrics.lastHitAt }}</div>
-          <div class="metrics-line">{{ $t('settings.developer.logCount') }} {{ dedupMetrics.logCount }}</div>
+          <div class="metrics-line">
+            {{ $t('settings.developer.windowHits') }} {{ dedupMetrics.windowHits }}
+          </div>
+          <div class="metrics-line">
+            {{ $t('settings.developer.windowHitRate') }} {{ dedupMetrics.windowHitRate }}
+          </div>
+          <div class="metrics-line">
+            {{ $t('settings.developer.lastHitTime') }} {{ dedupMetrics.lastHitAt }}
+          </div>
+          <div class="metrics-line">
+            {{ $t('settings.developer.logCount') }} {{ dedupMetrics.logCount }}
+          </div>
         </div>
       </el-form-item>
     </el-card>
-    <el-card class="setting-section-card" shadow="never">
+    <el-card
+        class="setting-section-card"
+        shadow="never"
+    >
       <template #header>
-        <div class="section-title">{{ $t('settings.developer.imageQueue') }}</div>
+        <div class="section-title">
+          {{ $t('settings.developer.imageQueue') }}
+        </div>
       </template>
       <el-form-item>
-        <el-button size="small" @click="refreshImagePersistQueueMetrics">{{
+        <el-button
+            size="small"
+            @click="refreshImagePersistQueueMetrics"
+        >
+          {{
             $t('settings.developer.refreshQueueMetrics')
           }}
         </el-button>
       </el-form-item>
       <el-form-item>
         <div class="metrics-card">
-          <div class="metrics-line">{{ $t('settings.developer.queueCapacity') }}
+          <div class="metrics-line">
+            {{ $t('settings.developer.queueCapacity') }}
             {{ Number(imagePersistQueueMetrics.queueSize || 0) }}
           </div>
-          <div class="metrics-line">{{ $t('settings.developer.sendTimeout') }}
+          <div class="metrics-line">
+            {{ $t('settings.developer.sendTimeout') }}
             {{ Number(imagePersistQueueMetrics.sendTimeoutMs || 0) }}ms
           </div>
-          <div class="metrics-line">{{ $t('settings.developer.retryInterval') }}
+          <div class="metrics-line">
+            {{ $t('settings.developer.retryInterval') }}
             {{ Number(imagePersistQueueMetrics.retryIntervalMs || 0) }}ms
           </div>
-          <div class="metrics-line">{{ $t('settings.developer.fullQueueCount') }}
+          <div class="metrics-line">
+            {{ $t('settings.developer.fullQueueCount') }}
             {{ Number(imagePersistQueueMetrics.fullCount || 0) }}
           </div>
-          <div class="metrics-line">{{ $t('settings.developer.timeoutDrop') }}
+          <div class="metrics-line">
+            {{ $t('settings.developer.timeoutDrop') }}
             {{ Number(imagePersistQueueMetrics.timeoutDropCount || 0) }}
           </div>
-          <div class="metrics-line">{{ $t('settings.developer.totalWait') }}
+          <div class="metrics-line">
+            {{ $t('settings.developer.totalWait') }}
             {{ Number(imagePersistQueueMetrics.waitMsTotal || 0) }}ms
           </div>
-          <div class="metrics-line">{{ $t('settings.developer.avgWait') }} {{
+          <div class="metrics-line">
+            {{ $t('settings.developer.avgWait') }} {{
               imagePersistQueueMetrics.avgWaitMs
             }}
           </div>
         </div>
       </el-form-item>
     </el-card>
-    <el-card class="setting-section-card" shadow="never">
+    <el-card
+        class="setting-section-card"
+        shadow="never"
+    >
       <template #header>
-        <div class="section-title">{{ $t('settings.developer.recordingDebug') }}</div>
+        <div class="section-title">
+          {{ $t('settings.developer.recordingDebug') }}
+        </div>
       </template>
       <el-form-item :label="$t('settings.developer.forceWgcFail')">
-        <el-switch v-model="recordingDebug.forceFfmpegFallback" @change="saveRecordingDebugConfig"/>
-        <div class="form-hint">{{ $t('settings.developer.forceWgcFailHint') }}</div>
+        <el-switch
+            v-model="recordingDebug.forceFfmpegFallback"
+            @change="saveRecordingDebugConfig"
+        />
+        <div class="form-hint">
+          {{ $t('settings.developer.forceWgcFailHint') }}
+        </div>
       </el-form-item>
     </el-card>
   </el-form>

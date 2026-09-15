@@ -1,6 +1,9 @@
 <template>
   <div class="diagnostic-settings">
-    <el-card class="overview-card" shadow="never">
+    <el-card
+        class="overview-card"
+        shadow="never"
+    >
       <template #header>
         <div class="card-header">
           <span>{{ $t('settings.diagnostic.logging') }}</span>
@@ -8,8 +11,12 @@
       </template>
       <div class="logging-row">
         <div class="logging-text">
-          <div class="item-title">{{ $t('settings.diagnostic.loggingEnabled') }}</div>
-          <div class="form-hint">{{ $t('settings.diagnostic.loggingHint') }}</div>
+          <div class="item-title">
+            {{ $t('settings.diagnostic.loggingEnabled') }}
+          </div>
+          <div class="form-hint">
+            {{ $t('settings.diagnostic.loggingHint') }}
+          </div>
         </div>
         <el-switch
             :model-value="loggingEnabled"
@@ -18,11 +25,18 @@
       </div>
     </el-card>
 
-    <el-card class="overview-card" shadow="never">
+    <el-card
+        class="overview-card"
+        shadow="never"
+    >
       <template #header>
         <div class="card-header">
           <span>{{ $t('settings.diagnostic.healthOverview') }}</span>
-          <el-button :loading="loading" @click="loadDiagnostics">{{
+          <el-button
+              :loading="loading"
+              @click="loadDiagnostics"
+          >
+            {{
               $t('settings.diagnostic.refreshDiagnosis')
             }}
           </el-button>
@@ -31,20 +45,36 @@
 
       <div class="overview-grid">
         <div class="overview-item">
-          <div class="overview-label">{{ $t('settings.diagnostic.overallStatus') }}</div>
-          <el-tag :type="statusType(overview.overallStatus)">{{ statusText(overview.overallStatus) }}</el-tag>
+          <div class="overview-label">
+            {{ $t('settings.diagnostic.overallStatus') }}
+          </div>
+          <el-tag :type="statusType(overview.overallStatus)">
+            {{ statusText(overview.overallStatus) }}
+          </el-tag>
         </div>
         <div class="overview-item">
-          <div class="overview-label">{{ $t('settings.diagnostic.errorItems') }}</div>
-          <div class="overview-value error">{{ overview.errorCount }}</div>
+          <div class="overview-label">
+            {{ $t('settings.diagnostic.errorItems') }}
+          </div>
+          <div class="overview-value error">
+            {{ overview.errorCount }}
+          </div>
         </div>
         <div class="overview-item">
-          <div class="overview-label">{{ $t('settings.diagnostic.warningItems') }}</div>
-          <div class="overview-value warning">{{ overview.warningCount }}</div>
+          <div class="overview-label">
+            {{ $t('settings.diagnostic.warningItems') }}
+          </div>
+          <div class="overview-value warning">
+            {{ overview.warningCount }}
+          </div>
         </div>
         <div class="overview-item">
-          <div class="overview-label">{{ $t('settings.diagnostic.lastCheck') }}</div>
-          <div class="overview-value small">{{ formatTimestamp(overview.checkedAt) }}</div>
+          <div class="overview-label">
+            {{ $t('settings.diagnostic.lastCheck') }}
+          </div>
+          <div class="overview-value small">
+            {{ formatTimestamp(overview.checkedAt) }}
+          </div>
         </div>
       </div>
     </el-card>
@@ -58,15 +88,26 @@
       <template #header>
         <div class="card-header">
           <div>
-            <div class="item-title">{{ item.title }}</div>
-            <div class="item-summary">{{ item.summary }}</div>
+            <div class="item-title">
+              {{ item.title }}
+            </div>
+            <div class="item-summary">
+              {{ item.summary }}
+            </div>
           </div>
-          <el-tag :type="statusType(item.status)">{{ statusText(item.status) }}</el-tag>
+          <el-tag :type="statusType(item.status)">
+            {{ statusText(item.status) }}
+          </el-tag>
         </div>
       </template>
 
       <ul class="detail-list">
-        <li v-for="detail in item.details" :key="detail">{{ detail }}</li>
+        <li
+            v-for="detail in item.details"
+            :key="detail"
+        >
+          {{ detail }}
+        </li>
       </ul>
 
       <div class="action-row">
@@ -80,10 +121,16 @@
         </el-button>
       </div>
 
-      <div class="checked-at">{{ $t('settings.diagnostic.lastRefresh') }}{{ formatTimestamp(item.lastCheckedAt) }}</div>
+      <div class="checked-at">
+        {{ $t('settings.diagnostic.lastRefresh') }}{{ formatTimestamp(item.lastCheckedAt) }}
+      </div>
     </el-card>
 
-    <el-card v-if="lastActionMessage" class="result-card" shadow="never">
+    <el-card
+        v-if="lastActionMessage"
+        class="result-card"
+        shadow="never"
+    >
       <template #header>
         <span>{{ $t('settings.diagnostic.lastActionResult') }}</span>
       </template>

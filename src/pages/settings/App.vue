@@ -1,13 +1,16 @@
 <template>
   <el-config-provider :locale="elLocale">
-  <div class="settings-container">
+    <div class="settings-container">
       <div class="header">
         <div class="header-title">
           <h1>{{ $t('settings.title') }}</h1>
         </div>
         <div class="header-actions">
           <span :class="['autosave-status', `autosave-${autoSaveState}`]">{{ autoSaveText }}</span>
-          <el-dropdown trigger="click" @command="changeLocale">
+          <el-dropdown
+              trigger="click"
+              @command="changeLocale"
+          >
             <el-button>
               <template #icon>
                 <el-icon>
@@ -27,7 +30,10 @@
               </el-dropdown-menu>
             </template>
           </el-dropdown>
-          <el-dropdown trigger="click" @command="changeTheme">
+          <el-dropdown
+              trigger="click"
+              @command="changeTheme"
+          >
             <el-button>
               <template #icon>
                 <component :is="themeIcon"/>
@@ -72,8 +78,10 @@
               <component :is="section.icon"/>
             </el-icon>
             <span>{{ section.label }}</span>
-            <span v-if="section.key === 'about' && updateAvailable"
-                  class="update-badge">v{{ updateAvailable.version }}</span>
+            <span
+                v-if="section.key === 'about' && updateAvailable"
+                class="update-badge"
+            >v{{ updateAvailable.version }}</span>
           </button>
         </aside>
         <div class="content">
@@ -89,29 +97,50 @@
             <p>{{ currentSection.description }}</p>
           </div>
           <div v-if="activeTab === 'clipboard'">
-            <ClipboardSettings :form="form" :on-feature-toggle="handleFeatureToggle"/>
+            <ClipboardSettings
+                :form="form"
+                :on-feature-toggle="handleFeatureToggle"
+            />
           </div>
           <div v-else-if="activeTab === 'screenshot'">
-            <ScreenshotSettings :form="form" :on-feature-toggle="handleFeatureToggle"/>
+            <ScreenshotSettings
+                :form="form"
+                :on-feature-toggle="handleFeatureToggle"
+            />
           </div>
           <div v-else-if="activeTab === 'recording'">
-            <RecordingSettings :form="form" :on-feature-toggle="handleFeatureToggle"/>
+            <RecordingSettings
+                :form="form"
+                :on-feature-toggle="handleFeatureToggle"
+            />
           </div>
 
           <div v-else-if="activeTab === 'selection'">
-            <SelectionSettings :form="form" :on-feature-toggle="handleFeatureToggle"/>
+            <SelectionSettings
+                :form="form"
+                :on-feature-toggle="handleFeatureToggle"
+            />
           </div>
 
           <div v-else-if="activeTab === 'launcher'">
-            <LauncherSettings :form="form" :on-feature-toggle="handleFeatureToggle"/>
+            <LauncherSettings
+                :form="form"
+                :on-feature-toggle="handleFeatureToggle"
+            />
           </div>
 
           <div v-else-if="activeTab === 'doc_manager'">
-            <DocumentManagerSettings :form="form" :on-feature-toggle="handleFeatureToggle"/>
+            <DocumentManagerSettings
+                :form="form"
+                :on-feature-toggle="handleFeatureToggle"
+            />
           </div>
 
           <div v-else-if="activeTab === 'ai'">
-            <AISettings ref="aiSettingsRef" :form="form"/>
+            <AISettings
+                ref="aiSettingsRef"
+                :form="form"
+            />
           </div>
           <div v-else-if="activeTab === 'backup'">
             <BackupSettings/>
@@ -141,17 +170,23 @@
       <div class="footer-links">
         <p>
           {{ $t('settings.needHelp') }}
-          <el-link type="primary" @click="openExternal('https://github.com/zRq1351/fuyun_tools')">
+          <el-link
+              type="primary"
+              @click="openExternal('https://github.com/zRq1351/fuyun_tools')"
+          >
             {{ $t('settings.viewDocs') }}
           </el-link>
           |
-          <el-link type="primary" @click="openExternal('https://github.com/zRq1351/fuyun_tools/issues')">
+          <el-link
+              type="primary"
+              @click="openExternal('https://github.com/zRq1351/fuyun_tools/issues')"
+          >
             {{ $t('settings.reportIssue') }}
           </el-link>
         </p>
         <p>{{ $t('settings.version') }} {{ currentVersion }} | &copy; {{ new Date().getFullYear() }} fuyun_tools</p>
       </div>
-  </div>
+    </div>
   </el-config-provider>
 </template>
 

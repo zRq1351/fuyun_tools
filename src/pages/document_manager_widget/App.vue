@@ -1,5 +1,9 @@
 <template>
-  <div class="dmw-root" @mouseenter="onDockHover" @mousemove="onDockHover">
+  <div
+      class="dmw-root"
+      @mouseenter="onDockHover"
+      @mousemove="onDockHover"
+  >
     <div
         v-show="!expanded"
         class="dmw-dock"
@@ -30,12 +34,20 @@
           <span class="dmw-stat">{{ formatSize(stats?.totalSize) }}</span>
         </div>
         <div class="dmw-header-actions">
-          <button :title="t('common.refresh')" class="dmw-btn-icon" @click="refreshData">
+          <button
+              :title="t('common.refresh')"
+              class="dmw-btn-icon"
+              @click="refreshData"
+          >
             <el-icon :size="13">
               <Refresh/>
             </el-icon>
           </button>
-          <button :title="t('common.settings')" class="dmw-btn-icon" @click="openFullManager">
+          <button
+              :title="t('common.settings')"
+              class="dmw-btn-icon"
+              @click="openFullManager"
+          >
             <el-icon :size="13">
               <Setting/>
             </el-icon>
@@ -43,13 +55,23 @@
         </div>
       </div>
 
-      <div v-if="loading" class="dmw-loading">
-        <el-icon :size="20" class="is-loading">
+      <div
+          v-if="loading"
+          class="dmw-loading"
+      >
+        <el-icon
+            :size="20"
+            class="is-loading"
+        >
           <Loading/>
         </el-icon>
       </div>
       <template v-else>
-        <div ref="rootScrollRef" class="dmw-roots" @mousedown="onDragStart($event, rootScrollRef)">
+        <div
+            ref="rootScrollRef"
+            class="dmw-roots"
+            @mousedown="onDragStart($event, rootScrollRef)"
+        >
           <div
               v-for="root in roots"
               :key="root.id"
@@ -62,7 +84,11 @@
             <span class="dmw-root-name">{{ root.name }}</span>
           </div>
         </div>
-        <div ref="catScrollRef" class="dmw-categories" @mousedown="onDragStart($event, catScrollRef)">
+        <div
+            ref="catScrollRef"
+            class="dmw-categories"
+            @mousedown="onDragStart($event, catScrollRef)"
+        >
           <div
               v-for="cat in categories"
               :key="cat.id"
@@ -70,7 +96,10 @@
               :data-cat-id="cat.id"
               @mouseenter="onCatCardEnter(cat.id)"
           >
-            <div :style="{ background: cat.color + '22', color: cat.color }" class="dmw-cat-icon">
+            <div
+                :style="{ background: cat.color + '22', color: cat.color }"
+                class="dmw-cat-icon"
+            >
               <el-icon :size="18">
                 <component :is="getCatIcon(cat.icon)"/>
               </el-icon>
@@ -85,7 +114,10 @@
               :data-cat-id="-1"
               @mouseenter="onCatCardEnter(-1)"
           >
-            <div :style="{ background: 'var(--fy-bg-hover)', color: 'var(--fy-text-muted)' }" class="dmw-cat-icon">
+            <div
+                :style="{ background: 'var(--fy-bg-hover)', color: 'var(--fy-text-muted)' }"
+                class="dmw-cat-icon"
+            >
               <el-icon :size="18">
                 <Folder/>
               </el-icon>
@@ -98,7 +130,10 @@
         </div>
 
         <div class="dmw-files">
-          <div v-if="displayFiles.length === 0" class="dmw-empty">
+          <div
+              v-if="displayFiles.length === 0"
+              class="dmw-empty"
+          >
             {{ t('documentManager.noDocs') }}
           </div>
           <div
@@ -109,9 +144,16 @@
               @dblclick="openFile(file)"
               @contextmenu.prevent="showFileMenu($event, file)"
           >
-            <img v-if="fileIconCache[file.fileExt?.toLowerCase()]" :src="fileIconCache[file.fileExt?.toLowerCase()]"
-                 class="dmw-file-icon-img"/>
-            <el-icon v-else :color="getFileColor(file.fileExt)" :size="16">
+            <img
+                v-if="fileIconCache[file.fileExt?.toLowerCase()]"
+                :src="fileIconCache[file.fileExt?.toLowerCase()]"
+                class="dmw-file-icon-img"
+            >
+            <el-icon
+                v-else
+                :color="getFileColor(file.fileExt)"
+                :size="16"
+            >
               <component :is="getFileIcon(file.fileExt)"/>
             </el-icon>
             <span class="dmw-file-name">{{ file.title || file.fileName }}</span>
@@ -122,10 +164,24 @@
       </template>
     </div>
 
-    <ContextMenu :show="ctxMenuShow" :x="ctxMenuX" :y="ctxMenuY" @close="ctxMenuShow = false; ctxMenuFile = null">
-      <div class="context-menu-item" @click="openFile(ctxMenuFile)">{{ t('documentManager.open') }}</div>
-      <div class="context-menu-divider"></div>
-      <div class="context-menu-item context-menu-item-danger" @click="deleteFile(ctxMenuFile)">{{
+    <ContextMenu
+        :show="ctxMenuShow"
+        :x="ctxMenuX"
+        :y="ctxMenuY"
+        @close="ctxMenuShow = false; ctxMenuFile = null"
+    >
+      <div
+          class="context-menu-item"
+          @click="openFile(ctxMenuFile)"
+      >
+        {{ t('documentManager.open') }}
+      </div>
+      <div class="context-menu-divider"/>
+      <div
+          class="context-menu-item context-menu-item-danger"
+          @click="deleteFile(ctxMenuFile)"
+      >
+        {{
           t('common.delete')
         }}
       </div>

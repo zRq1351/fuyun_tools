@@ -1,14 +1,25 @@
 <template>
   <div class="toolbar">
-    <div :title="$t('clipboard.dragHint')" class="window-offset-handle"
-         @mousedown.stop.prevent="startWindowOffsetDrag">
+    <div
+        :title="$t('clipboard.dragHint')"
+        class="window-offset-handle"
+        @mousedown.stop.prevent="startWindowOffsetDrag"
+    >
       <el-icon :size="14">
         <Rank/>
       </el-icon>
     </div>
-    <button v-if="showAiToggle" class="ai-toggle-btn" type="button" @click.stop
-            @mousedown.stop="handleToggleAiSettings">
-      <el-icon :size="14" class="ai-toggle-arrow">
+    <button
+        v-if="showAiToggle"
+        class="ai-toggle-btn"
+        type="button"
+        @click.stop
+        @mousedown.stop="handleToggleAiSettings"
+    >
+      <el-icon
+          :size="14"
+          class="ai-toggle-arrow"
+      >
         <ArrowRight v-if="isAiSettingsCollapsed"/>
         <ArrowDown v-else/>
       </el-icon>
@@ -67,7 +78,11 @@
           <el-icon :size="10"><Close/></el-icon>
         </span>
       </div>
-      <div v-if="!isAddingCategory" class="category-pill add-category" @click="startCreateCategory">
+      <div
+          v-if="!isAddingCategory"
+          class="category-pill add-category"
+          @click="startCreateCategory"
+      >
         <el-icon :size="12">
           <Plus/>
         </el-icon>

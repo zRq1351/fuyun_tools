@@ -1,87 +1,118 @@
 <template>
   <div
-        :class="{
-        'bar-collapsed-settings-open': capsuleSettingsVisible,
-      }"
-        class="bar bar-collapsed"
+      :class="{
+      'bar-collapsed-settings-open': capsuleSettingsVisible,
+    }"
+      class="bar bar-collapsed"
+  >
+    <div
+        :data-state="rawRecordingState"
+        class="collapsed-shell"
     >
-      <div
-          :data-state="rawRecordingState"
-          class="collapsed-shell"
-      >
-        <div class="collapsed-shell-row">
-          <div :title="t('recordingToolbar.dragToolbar')" class="drag-handle" @mousedown.stop.prevent="startWindowDrag">
-            <el-icon><GripVertical :size="13" :stroke-width="2.2"/></el-icon>
-          </div>
-          <button
-              :disabled="!canStop"
-              class="collapsed-stop-btn no-drag"
-              type="button"
-              @click.stop="stop"
-          >
-            <span class="collapsed-stop-icon"></span>
-          </button>
-          <div
-              :data-state="currentRecordingState"
-              :class="['collapsed-pill', { 'countdown-pill': countdownActive }]"
-              @click.stop="countdownActive ? (countdownCancelled = true) : toggleRecordingState()"
-          >
-            <span class="collapsed-pill-content">
-              <span v-if="countdownActive && !capsuleSettingsVisible" class="collapsed-countdown-num">{{ countdownValue }}</span>
-              <template v-else>
+      <div class="collapsed-shell-row">
+        <div
+            :title="t('recordingToolbar.dragToolbar')"
+            class="drag-handle"
+            @mousedown.stop.prevent="startWindowDrag"
+        >
+          <el-icon>
+            <GripVertical
+                :size="13"
+                :stroke-width="2.2"
+            />
+          </el-icon>
+        </div>
+        <button
+            :disabled="!canStop"
+            class="collapsed-stop-btn no-drag"
+            type="button"
+            @click.stop="stop"
+        >
+          <span class="collapsed-stop-icon"/>
+        </button>
+        <div
+            :class="['collapsed-pill', { 'countdown-pill': countdownActive }]"
+            :data-state="currentRecordingState"
+            @click.stop="countdownActive ? (countdownCancelled = true) : toggleRecordingState()"
+        >
+          <span class="collapsed-pill-content">
+            <span
+                v-if="countdownActive && !capsuleSettingsVisible"
+                class="collapsed-countdown-num"
+            >{{ countdownValue }}</span>
+            <template v-else>
               <span
                   v-if="currentRecordingState === 'recording'"
                   class="recording-dot"
-              ></span>
+              />
               <span
                   v-else-if="currentRecordingState === 'paused'"
                   class="recording-pause-square"
-              ></span>
+              />
               <span
                   v-else-if="currentRecordingState === 'idle'"
                   class="recording-ready-dot"
-              ></span>
+              />
               <span class="collapsed-pill-text">{{ collapsedDisplayText }}</span>
-              </template>
-            </span>
-          </div>
-          <button
-              class="collapsed-expand-btn no-drag"
-              type="button"
-              @click.stop="toggleCapsuleSettings"
-          >
-            <el-icon class="collapsed-expand-icon">
-              <Settings :size="13" :stroke-width="2.2"/>
-            </el-icon>
-          </button>
-          <button
-              :class="['collapsed-mic-toggle-btn', 'no-drag', { 'is-muted': isMicMuted || !canToggleMic, 'is-active': !isMicMuted && canToggleMic, 'is-disabled': !canToggleMic || !microphoneDeviceId }]"
-              :disabled="!canToggleMic || !microphoneDeviceId || isTogglingMic"
-              type="button"
-              @click.stop="toggleMicState"
-          >
-            <el-icon class="collapsed-mic-icon">
-              <component :is="isMicMuted || !canToggleMic ? MicOff : Mic" :size="13" :stroke-width="2.2"/>
-            </el-icon>
-          </button>
-          <button
-              class="collapsed-close-btn no-drag"
-              type="button"
-              @click.stop="closeCapsule"
-          >
-            ×
-          </button>
+            </template>
+          </span>
         </div>
-        <div class="capsule-settings-panel-wrapper" :class="{ 'is-open': capsuleSettingsVisible }">
-          <div class="capsule-settings-panel no-drag">
-            <div v-if="inlineNotice" :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
-                 :title="t('recordingToolbar.clickToDismiss')" @click="clearInlineNotice">
-              {{ inlineNotice }}
-              <span class="inline-notice-close">×</span>
-            </div>
+        <button
+            class="collapsed-expand-btn no-drag"
+            type="button"
+            @click.stop="toggleCapsuleSettings"
+        >
+          <el-icon class="collapsed-expand-icon">
+            <Settings
+                :size="13"
+                :stroke-width="2.2"
+            />
+          </el-icon>
+        </button>
+        <button
+            :class="['collapsed-mic-toggle-btn', 'no-drag', { 'is-muted': isMicMuted || !canToggleMic, 'is-active': !isMicMuted && canToggleMic, 'is-disabled': !canToggleMic || !microphoneDeviceId }]"
+            :disabled="!canToggleMic || !microphoneDeviceId || isTogglingMic"
+            type="button"
+            @click.stop="toggleMicState"
+        >
+          <el-icon class="collapsed-mic-icon">
+            <component
+                :is="isMicMuted || !canToggleMic ? MicOff : Mic"
+                :size="13"
+                :stroke-width="2.2"
+            />
+          </el-icon>
+        </button>
+        <button
+            class="collapsed-close-btn no-drag"
+            type="button"
+            @click.stop="closeCapsule"
+        >
+          ×
+        </button>
+      </div>
+      <div
+          :class="{ 'is-open': capsuleSettingsVisible }"
+          class="capsule-settings-panel-wrapper"
+      >
+        <div class="capsule-settings-panel no-drag">
+          <div
+              v-if="inlineNotice"
+              :class="['toolbar-inline-notice', `is-${inlineNoticeType}`]"
+              :title="t('recordingToolbar.clickToDismiss')"
+              @click="clearInlineNotice"
+          >
+            {{ inlineNotice }}
+            <span class="inline-notice-close">×</span>
+          </div>
           <div class="toolbar-settings-title-row">
-            <div class="toolbar-settings-title">{{ t('recordingToolbar.recordingSettings') }}</div>
-            <span v-if="recordTargetType === 'region'" class="target-region-meta">
+            <div class="toolbar-settings-title">
+              {{ t('recordingToolbar.recordingSettings') }}
+            </div>
+            <span
+                v-if="recordTargetType === 'region'"
+                class="target-region-meta"
+            >
               {{ regionCoordinateText }}
             </span>
           </div>
@@ -119,24 +150,30 @@
               </button>
             </div>
           </div>
-            <div v-if="recordTargetType === 'screen' && recordingMonitors.length > 1" class="toolbar-settings-row">
-              <span class="toolbar-settings-label">{{ t('recordingToolbar.targetMonitor') }}</span>
-              <el-select
-                  v-model="recordTargetMonitorId"
-                  :disabled="!canEditRecordingConfig"
-                  :placeholder="t('recordingToolbar.selectMonitor')"
-                  popper-class="recording-toolbar-select-popper"
-                  size="small"
-              >
-                <el-option
-                    v-for="m in recordingMonitors"
-                    :key="m.index"
-                    :label="formatMonitorLabel(m)"
-                    :value="'mon=' + m.index"
-                />
-              </el-select>
-            </div>
-          <div v-if="recordTargetType === 'window'" class="toolbar-settings-row">
+          <div
+              v-if="recordTargetType === 'screen' && recordingMonitors.length > 1"
+              class="toolbar-settings-row"
+          >
+            <span class="toolbar-settings-label">{{ t('recordingToolbar.targetMonitor') }}</span>
+            <el-select
+                v-model="recordTargetMonitorId"
+                :disabled="!canEditRecordingConfig"
+                :placeholder="t('recordingToolbar.selectMonitor')"
+                popper-class="recording-toolbar-select-popper"
+                size="small"
+            >
+              <el-option
+                  v-for="m in recordingMonitors"
+                  :key="m.index"
+                  :label="formatMonitorLabel(m)"
+                  :value="'mon=' + m.index"
+              />
+            </el-select>
+          </div>
+          <div
+              v-if="recordTargetType === 'window'"
+              class="toolbar-settings-row"
+          >
             <span class="toolbar-settings-label">{{ t('recordingToolbar.targetWindow') }}</span>
             <el-select
                 v-model="recordTargetWindowId"
@@ -166,7 +203,10 @@
                 @visible-change="onSystemAudioDropdownVisibleChange"
                 @change="onSystemAudioDeviceChange"
             >
-              <el-option :label="t('recordingToolbar.noSystemAudio')" value=""/>
+              <el-option
+                  :label="t('recordingToolbar.noSystemAudio')"
+                  value=""
+              />
               <el-option
                   v-for="item in systemOutputs"
                   :key="item.id"
@@ -175,7 +215,10 @@
               />
             </el-select>
           </div>
-          <div v-if="captureSystemAudio" class="toolbar-settings-row">
+          <div
+              v-if="captureSystemAudio"
+              class="toolbar-settings-row"
+          >
             <span class="toolbar-settings-label">{{ t('recordingToolbar.appAudio') }}</span>
             <el-select
                 v-model="systemAudioProcessIds"
@@ -208,7 +251,10 @@
                 @visible-change="onMicrophoneDropdownVisibleChange"
                 @change="onMicrophoneDeviceChange"
             >
-              <el-option :label="t('recordingToolbar.noMicrophone')" value=""/>
+              <el-option
+                  :label="t('recordingToolbar.noMicrophone')"
+                  value=""
+              />
               <el-option
                   v-for="item in microphones"
                   :key="item.id"
@@ -232,12 +278,12 @@
                 :disabled="!canEditRecordingConfig"
                 @change="onToolbarSettingChange('recordingCaptureCursor', $event)"
             />
-              <el-switch
-                  v-model="captureToolbar"
-                  :active-text="t('recordingToolbar.captureToolbar')"
-                  :disabled="!canEditRecordingConfig"
-                  @change="onToolbarSettingChange('recordingToolbarContentProtected', $event)"
-              />
+            <el-switch
+                v-model="captureToolbar"
+                :active-text="t('recordingToolbar.captureToolbar')"
+                :disabled="!canEditRecordingConfig"
+                @change="onToolbarSettingChange('recordingToolbarContentProtected', $event)"
+            />
           </div>
           <div class="toolbar-settings-row">
             <span class="toolbar-settings-label">{{ t('recordingToolbar.qualityPreset') }}</span>
@@ -248,10 +294,22 @@
                 style="width: 140px"
                 @change="onPresetChange"
             >
-              <el-option :label="t('recordingToolbar.presetSd')" value="sd" />
-              <el-option :label="t('recordingToolbar.presetHd')" value="hd" />
-              <el-option :label="t('recordingToolbar.presetFhd')" value="fhd" />
-              <el-option :label="t('recordingToolbar.presetCustom')" value="custom" />
+              <el-option
+                  :label="t('recordingToolbar.presetSd')"
+                  value="sd"
+              />
+              <el-option
+                  :label="t('recordingToolbar.presetHd')"
+                  value="hd"
+              />
+              <el-option
+                  :label="t('recordingToolbar.presetFhd')"
+                  value="fhd"
+              />
+              <el-option
+                  :label="t('recordingToolbar.presetCustom')"
+                  value="custom"
+              />
             </el-select>
           </div>
           <div class="toolbar-settings-row">
@@ -293,9 +351,15 @@
                 @change="onToolbarSettingChange('recordingDefaultAudioBitrateKbps', $event)"
             />
           </div>
-          <div v-if="countdownActive && capsuleSettingsVisible" class="countdown-panel-overlay" @click.stop="countdownCancelled = true">
+          <div
+              v-if="countdownActive && capsuleSettingsVisible"
+              class="countdown-panel-overlay"
+              @click.stop="countdownCancelled = true"
+          >
             <span class="countdown-in-panel-number">{{ countdownValue }}</span>
-            <div class="countdown-cancel-hint">{{ t('recordingToolbar.pressEscToCancel') }}</div>
+            <div class="countdown-cancel-hint">
+              {{ t('recordingToolbar.pressEscToCancel') }}
+            </div>
           </div>
         </div>
       </div>

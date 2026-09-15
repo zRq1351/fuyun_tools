@@ -17,8 +17,13 @@
         @focus="$emit('focus', $event)"
         @input="$emit('update:modelValue', $event.target.value); $emit('input', $event)"
         @keydown="$emit('keydown', $event)"
-    />
-    <div v-if="modelValue" class="clear-button" @click="handleClear" @mousedown.stop>
+    >
+    <div
+        v-if="modelValue"
+        class="clear-button"
+        @click="handleClear"
+        @mousedown.stop
+    >
       <el-icon>
         <Close/>
       </el-icon>

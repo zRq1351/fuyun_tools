@@ -1,32 +1,58 @@
 <template>
   <div class="backup-settings">
-    <el-card class="section-card" shadow="never">
+    <el-card
+        class="section-card"
+        shadow="never"
+    >
       <template #header>
         <div class="card-header">
           <span>{{ $t('settings.backup.manualBackup') }}</span>
-          <el-button :loading="loadingPreview" @click="loadExportPreview">{{
+          <el-button
+              :loading="loadingPreview"
+              @click="loadExportPreview"
+          >
+            {{
               $t('settings.backup.refreshPreview')
             }}
           </el-button>
         </div>
       </template>
 
-      <div v-if="preview" class="preview-grid">
+      <div
+          v-if="preview"
+          class="preview-grid"
+      >
         <div class="metric-item">
-          <div class="metric-label">{{ $t('settings.backup.textHistory') }}</div>
-          <div class="metric-value">{{ preview.stats.textItemCount }}</div>
+          <div class="metric-label">
+            {{ $t('settings.backup.textHistory') }}
+          </div>
+          <div class="metric-value">
+            {{ preview.stats.textItemCount }}
+          </div>
         </div>
         <div class="metric-item">
-          <div class="metric-label">{{ $t('settings.backup.imageHistory') }}</div>
-          <div class="metric-value">{{ preview.stats.imageItemCount }}</div>
+          <div class="metric-label">
+            {{ $t('settings.backup.imageHistory') }}
+          </div>
+          <div class="metric-value">
+            {{ preview.stats.imageItemCount }}
+          </div>
         </div>
         <div class="metric-item">
-          <div class="metric-label">{{ $t('settings.backup.imageFiles') }}</div>
-          <div class="metric-value">{{ preview.stats.imageBlobCount }}</div>
+          <div class="metric-label">
+            {{ $t('settings.backup.imageFiles') }}
+          </div>
+          <div class="metric-value">
+            {{ preview.stats.imageBlobCount }}
+          </div>
         </div>
         <div class="metric-item">
-          <div class="metric-label">{{ $t('settings.backup.estimatedSize') }}</div>
-          <div class="metric-value">{{ formatBytes(preview.estimatedBytes) }}</div>
+          <div class="metric-label">
+            {{ $t('settings.backup.estimatedSize') }}
+          </div>
+          <div class="metric-value">
+            {{ formatBytes(preview.estimatedBytes) }}
+          </div>
         </div>
       </div>
 
@@ -40,15 +66,27 @@
       />
 
       <div class="action-row">
-        <el-button :loading="exporting" type="primary" @click="exportBackup">{{
+        <el-button
+            :loading="exporting"
+            type="primary"
+            @click="exportBackup"
+        >
+          {{
             $t('settings.backup.exportBackup')
           }}
         </el-button>
-        <el-button :loading="manualBackupLoading" @click="runManualBackup">{{
+        <el-button
+            :loading="manualBackupLoading"
+            @click="runManualBackup"
+        >
+          {{
             $t('settings.backup.runAutoBackup')
           }}
         </el-button>
-        <el-button :loading="previewingPackage" @click="selectBackupPackage">
+        <el-button
+            :loading="previewingPackage"
+            @click="selectBackupPackage"
+        >
           {{ $t('settings.backup.selectBackupPreview') }}
         </el-button>
       </div>
@@ -62,11 +100,18 @@
       />
     </el-card>
 
-    <el-card class="section-card" shadow="never">
+    <el-card
+        class="section-card"
+        shadow="never"
+    >
       <template #header>
         <div class="card-header">
           <span>{{ $t('settings.backup.autoBackup') }}</span>
-          <el-button :loading="savingSettings" type="primary" @click="saveSettings">
+          <el-button
+              :loading="savingSettings"
+              type="primary"
+              @click="saveSettings"
+          >
             {{ $t('settings.backup.saveAutoBackup') }}
           </el-button>
         </div>
@@ -78,19 +123,37 @@
         </el-form-item>
         <el-form-item :label="$t('settings.backup.backupFrequency')">
           <el-select v-model="settings.frequency">
-            <el-option :label="$t('settings.backup.daily')" value="daily"/>
-            <el-option :label="$t('settings.backup.weekly')" value="weekly"/>
-            <el-option :label="$t('settings.backup.manualOnly')" value="manual"/>
+            <el-option
+                :label="$t('settings.backup.daily')"
+                value="daily"
+            />
+            <el-option
+                :label="$t('settings.backup.weekly')"
+                value="weekly"
+            />
+            <el-option
+                :label="$t('settings.backup.manualOnly')"
+                value="manual"
+            />
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('settings.backup.targetDir')">
           <div class="inline-row">
-            <el-input v-model="settings.targetDir" :placeholder="$t('settings.backup.selectBackupDir')"/>
-            <el-button @click="selectBackupDirectory">{{ $t('common.selectDir') }}</el-button>
+            <el-input
+                v-model="settings.targetDir"
+                :placeholder="$t('settings.backup.selectBackupDir')"
+            />
+            <el-button @click="selectBackupDirectory">
+              {{ $t('common.selectDir') }}
+            </el-button>
           </div>
         </el-form-item>
         <el-form-item :label="$t('settings.backup.retentionCount')">
-          <el-input-number v-model="settings.maxBackupCount" :max="50" :min="1"/>
+          <el-input-number
+              v-model="settings.maxBackupCount"
+              :max="50"
+              :min="1"
+          />
         </el-form-item>
       </el-form>
 
@@ -102,33 +165,65 @@
       </div>
     </el-card>
 
-    <el-card class="section-card" shadow="never">
+    <el-card
+        class="section-card"
+        shadow="never"
+    >
       <template #header>
         <div class="card-header">
           <span>{{ $t('settings.backup.backupPreview') }}</span>
-          <el-button :disabled="!packagePreview" :loading="restoring" type="danger" @click="restoreBackup">
+          <el-button
+              :disabled="!packagePreview"
+              :loading="restoring"
+              type="danger"
+              @click="restoreBackup"
+          >
             {{ $t('settings.backup.executeRestore') }}
           </el-button>
         </div>
       </template>
 
-      <div v-if="packagePath" class="status-text">{{ $t('settings.backup.currentBackup') }}{{ packagePath }}</div>
-      <div v-if="packagePreview" class="preview-grid">
+      <div
+          v-if="packagePath"
+          class="status-text"
+      >
+        {{ $t('settings.backup.currentBackup') }}{{ packagePath }}
+      </div>
+      <div
+          v-if="packagePreview"
+          class="preview-grid"
+      >
         <div class="metric-item">
-          <div class="metric-label">{{ $t('settings.backup.backupTime') }}</div>
-          <div class="metric-value small">{{ formatTimestamp(packagePreview.manifest.createdAt) }}</div>
+          <div class="metric-label">
+            {{ $t('settings.backup.backupTime') }}
+          </div>
+          <div class="metric-value small">
+            {{ formatTimestamp(packagePreview.manifest.createdAt) }}
+          </div>
         </div>
         <div class="metric-item">
-          <div class="metric-label">{{ $t('settings.backup.appVersion') }}</div>
-          <div class="metric-value">{{ packagePreview.manifest.appVersion }}</div>
+          <div class="metric-label">
+            {{ $t('settings.backup.appVersion') }}
+          </div>
+          <div class="metric-value">
+            {{ packagePreview.manifest.appVersion }}
+          </div>
         </div>
         <div class="metric-item">
-          <div class="metric-label">{{ $t('settings.backup.textHistory') }}</div>
-          <div class="metric-value">{{ packagePreview.stats.textItemCount }}</div>
+          <div class="metric-label">
+            {{ $t('settings.backup.textHistory') }}
+          </div>
+          <div class="metric-value">
+            {{ packagePreview.stats.textItemCount }}
+          </div>
         </div>
         <div class="metric-item">
-          <div class="metric-label">{{ $t('settings.backup.imageHistory') }}</div>
-          <div class="metric-value">{{ packagePreview.stats.imageItemCount }}</div>
+          <div class="metric-label">
+            {{ $t('settings.backup.imageHistory') }}
+          </div>
+          <div class="metric-value">
+            {{ packagePreview.stats.imageItemCount }}
+          </div>
         </div>
       </div>
 
@@ -141,36 +236,64 @@
           type="warning"
       />
 
-      <div v-if="packagePreview" class="restore-options">
+      <div
+          v-if="packagePreview"
+          class="restore-options"
+      >
         <el-radio-group v-model="restoreMode">
-          <el-radio-button label="full">{{ $t('settings.backup.fullRestore') }}</el-radio-button>
-          <el-radio-button label="partial">{{ $t('settings.backup.selectiveRestore') }}</el-radio-button>
+          <el-radio-button label="full">
+            {{ $t('settings.backup.fullRestore') }}
+          </el-radio-button>
+          <el-radio-button label="partial">
+            {{ $t('settings.backup.selectiveRestore') }}
+          </el-radio-button>
         </el-radio-group>
 
-        <div v-if="restoreMode === 'partial'" class="checkbox-group">
-          <el-checkbox v-model="restoreSettings" :disabled="!packagePreview.restoreOptions.canRestoreSettings">
+        <div
+            v-if="restoreMode === 'partial'"
+            class="checkbox-group"
+        >
+          <el-checkbox
+              v-model="restoreSettings"
+              :disabled="!packagePreview.restoreOptions.canRestoreSettings"
+          >
             {{ $t('settings.backup.restoreSettings') }}
           </el-checkbox>
-          <el-checkbox v-model="restoreTextHistory" :disabled="!packagePreview.restoreOptions.canRestoreTextHistory">
+          <el-checkbox
+              v-model="restoreTextHistory"
+              :disabled="!packagePreview.restoreOptions.canRestoreTextHistory"
+          >
             {{ $t('settings.backup.restoreTextHistory') }}
           </el-checkbox>
-          <el-checkbox v-model="restoreImageHistory" :disabled="!packagePreview.restoreOptions.canRestoreImageHistory">
+          <el-checkbox
+              v-model="restoreImageHistory"
+              :disabled="!packagePreview.restoreOptions.canRestoreImageHistory"
+          >
             {{ $t('settings.backup.restoreImageHistory') }}
           </el-checkbox>
         </div>
 
-        <div class="checkbox-group" style="margin-top: 12px;">
+        <div
+            class="checkbox-group"
+            style="margin-top: 12px;"
+        >
           <span style="color: var(--el-text-color-regular); font-size: 14px;">{{
               $t('settings.backup.restoreStrategy')
             }}</span>
           <el-radio-group v-model="restoreStrategy">
             <el-radio-button label="merge">
-              <el-tooltip :content="$t('settings.backup.mergeModeTooltip')" placement="top">
+              <el-tooltip
+                  :content="$t('settings.backup.mergeModeTooltip')"
+                  placement="top"
+              >
                 <span>{{ $t('settings.backup.mergeMode') }}</span>
               </el-tooltip>
             </el-radio-button>
             <el-radio-button label="overwrite">
-              <el-tooltip :content="$t('settings.backup.overwriteModeTooltip')" placement="top">
+              <el-tooltip
+                  :content="$t('settings.backup.overwriteModeTooltip')"
+                  placement="top"
+              >
                 <span>{{ $t('settings.backup.overwriteMode') }}</span>
               </el-tooltip>
             </el-radio-button>
@@ -179,27 +302,58 @@
       </div>
     </el-card>
 
-    <el-card class="section-card" shadow="never">
+    <el-card
+        class="section-card"
+        shadow="never"
+    >
       <template #header>
         <div class="card-header">
           <span>{{ $t('settings.backup.recentBackups') }}</span>
-          <el-button :loading="historyLoading" @click="loadHistory">{{ $t('settings.backup.refreshList') }}</el-button>
+          <el-button
+              :loading="historyLoading"
+              @click="loadHistory"
+          >
+            {{ $t('settings.backup.refreshList') }}
+          </el-button>
         </div>
       </template>
 
-      <el-empty v-if="!history.length" :description="$t('settings.backup.noBackupRecords')"/>
-      <div v-else class="history-list">
-        <div v-for="item in history" :key="item.filePath" class="history-item">
+      <el-empty
+          v-if="!history.length"
+          :description="$t('settings.backup.noBackupRecords')"
+      />
+      <div
+          v-else
+          class="history-list"
+      >
+        <div
+            v-for="item in history"
+            :key="item.filePath"
+            class="history-item"
+        >
           <div class="history-main">
-            <div class="history-name">{{ item.fileName }}</div>
-            <div class="history-meta">{{ formatTimestamp(item.createdAt) }} · {{
+            <div class="history-name">
+              {{ item.fileName }}
+            </div>
+            <div class="history-meta">
+              {{ formatTimestamp(item.createdAt) }} · {{
                 formatBytes(item.fileSizeBytes)
               }}
             </div>
           </div>
           <div class="history-actions">
-            <el-button size="small" @click="previewHistoryItem(item.filePath)">{{ $t('common.preview') }}</el-button>
-            <el-button size="small" type="danger" @click="removeHistoryItem(item.filePath)">{{
+            <el-button
+                size="small"
+                @click="previewHistoryItem(item.filePath)"
+            >
+              {{ $t('common.preview') }}
+            </el-button>
+            <el-button
+                size="small"
+                type="danger"
+                @click="removeHistoryItem(item.filePath)"
+            >
+              {{
                 $t('common.delete')
               }}
             </el-button>

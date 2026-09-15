@@ -2,9 +2,15 @@
   <div class="launcher-container">
     <!-- Element Plus 消息容器 -->
     <el-config-provider>
-      <div ref="launcherBoxRef" class="launcher-box">
-      <div class="search-wrapper" @mousedown="startDrag">
-        <SearchBox
+      <div
+          ref="launcherBoxRef"
+          class="launcher-box"
+      >
+        <div
+            class="search-wrapper"
+            @mousedown="startDrag"
+        >
+          <SearchBox
             ref="searchBoxRef"
             v-model="searchQuery"
             @blur="isFocused = false"
@@ -12,59 +18,91 @@
             @focus="isFocused = true"
             @input="handleSearch"
             @keydown="handleKeydown"
-        />
-        <div class="header-actions">
-          <button v-if="hasCategorizedApps && !searchQuery"
-                  :title="viewMode === 'category' ? t('launcher.listView') : t('launcher.categoryView')"
-                  class="mode-button"
-                  @click="toggleViewMode"
-                  @mousedown.stop>
-            <el-icon :size="14">
-              <Grid v-if="viewMode === 'list'"/>
-              <List v-else/>
-            </el-icon>
-          </button>
-          <button :class="{ spinning: isRefreshing }" :title="t('launcher.refreshApps')" class="mode-button"
-                  @click="handleRefresh"
-                  @mousedown.stop>
-            <el-icon :size="14">
-              <Refresh/>
-            </el-icon>
-          </button>
-          <button :title="t('launcher.manageCategories')" class="mode-button" @click="showCategoryManager = true"
-                  @mousedown.stop>
-            <el-icon :size="14">
-              <Setting/>
-            </el-icon>
-          </button>
-          <button :title="t('launcher.manageCommands')" class="mode-button" @click="showCommandManager = true"
-                  @mousedown.stop>
-            <el-icon :size="14">
-              <Tools/>
-            </el-icon>
-          </button>
-          <button :title="t('launcher.addApp')" class="mode-button" @click="showAddManualDialog = true" @mousedown.stop>
-            <el-icon :size="14">
-              <Plus/>
-            </el-icon>
-          </button>
-          <button class="close-button" @click="hideLauncher" @mousedown.stop>
-            <el-icon :size="16">
-              <Close/>
-            </el-icon>
-          </button>
+          />
+          <div class="header-actions">
+            <button
+                v-if="hasCategorizedApps && !searchQuery"
+                :title="viewMode === 'category' ? t('launcher.listView') : t('launcher.categoryView')"
+                class="mode-button"
+                @click="toggleViewMode"
+                @mousedown.stop
+            >
+              <el-icon :size="14">
+                <Grid v-if="viewMode === 'list'"/>
+                <List v-else/>
+              </el-icon>
+            </button>
+            <button
+                :class="{ spinning: isRefreshing }"
+                :title="t('launcher.refreshApps')"
+                class="mode-button"
+                @click="handleRefresh"
+                @mousedown.stop
+            >
+              <el-icon :size="14">
+                <Refresh/>
+              </el-icon>
+            </button>
+            <button
+                :title="t('launcher.manageCategories')"
+                class="mode-button"
+                @click="showCategoryManager = true"
+                @mousedown.stop
+            >
+              <el-icon :size="14">
+                <Setting/>
+              </el-icon>
+            </button>
+            <button
+                :title="t('launcher.manageCommands')"
+                class="mode-button"
+                @click="showCommandManager = true"
+                @mousedown.stop
+            >
+              <el-icon :size="14">
+                <Tools/>
+              </el-icon>
+            </button>
+            <button
+                :title="t('launcher.addApp')"
+                class="mode-button"
+                @click="showAddManualDialog = true"
+                @mousedown.stop
+            >
+              <el-icon :size="14">
+                <Plus/>
+              </el-icon>
+            </button>
+            <button
+                class="close-button"
+                @click="hideLauncher"
+                @mousedown.stop
+            >
+              <el-icon :size="16">
+                <Close/>
+              </el-icon>
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div v-if="isLoading" class="loading-state">
-        <el-icon :size="24" class="loading-icon">
-          <Loading/>
-        </el-icon>
-        <span>{{ t('launcher.scanning') }}</span>
-      </div>
+        <div
+            v-if="isLoading"
+            class="loading-state"
+        >
+          <el-icon
+              :size="24"
+              class="loading-icon"
+          >
+            <Loading/>
+          </el-icon>
+          <span>{{ t('launcher.scanning') }}</span>
+        </div>
 
-      <div v-else class="content-area">
-        <AppGrid
+        <div
+            v-else
+            class="content-area"
+        >
+          <AppGrid
             v-if="viewMode === 'category' && hasCategorizedApps"
             :categories="categorizedApps"
             :total-apps="totalCategorizedApps"
@@ -72,8 +110,8 @@
             @reorder-apps="handleReorderApps"
             @reorder-categories="handleReorderCategories"
             @category-changed="handleCategoryChanged"
-        />
-        <AppList
+          />
+          <AppList
             v-else
             :active-index="activeIndex"
             :apps="displayApps"
@@ -83,60 +121,97 @@
             @reorder="handleReorder"
             @select="handleSelect"
             @category-changed="handleCategoryChanged"
-        />
-        <div v-if="commandResults.length > 0" class="command-section">
-          <div class="command-header">{{ t('launcher.commands') }}</div>
+          />
           <div
+              v-if="commandResults.length > 0"
+              class="command-section"
+          >
+            <div class="command-header">
+              {{ t('launcher.commands') }}
+            </div>
+            <div
               v-for="(item, index) in commandResults"
               :key="item.id"
               :class="{ 'is-active': index === activeIndex }"
               class="command-item"
               @click="handleSelect(item)"
               @mouseenter="activeIndex = index"
-          >
-            <div class="command-prefix">{{ item.shortcut }}</div>
-            <div class="command-title">{{ item.title }}</div>
+            >
+              <div class="command-prefix">
+                {{ item.shortcut }}
+              </div>
+              <div class="command-title">
+                {{ item.title }}
+              </div>
+            </div>
           </div>
-        </div>
-        <CategoryManager
+          <CategoryManager
             :app-category-map="launcherConfig?.app_category_map || {}"
             :categories="launcherConfig?.categories || []"
             :visible="showCategoryManager"
             @close="showCategoryManager = false"
             @updated="handleCategoryUpdated"
-        />
-        <CommandManager
+          />
+          <CommandManager
             :visible="showCommandManager"
             @close="showCommandManager = false"
             @updated="handleCommandUpdated"
-        />
+          />
 
-        <!-- 手动添加应用对话框 -->
-        <div v-if="showAddManualDialog" class="dialog-overlay" @click.self="cancelAddManual">
-          <div class="manual-dialog">
-            <div class="dialog-title">{{ t('launcher.addAppTitle') }}</div>
-            <div class="form-group">
-              <label>{{ t('launcher.appName') }}</label>
-              <input v-model="manualForm.name" :placeholder="t('launcher.appNamePlaceholder')" class="form-input"/>
-            </div>
-            <div class="form-group">
-              <label>{{ t('launcher.appPath') }}</label>
-              <div class="file-input-row">
-                <input v-model="manualForm.path" :placeholder="t('launcher.appPathPlaceholder')" class="form-input"
-                       readonly/>
-                <button class="dialog-btn browse" @click="browseManualFile">{{ t('common.browse') }}</button>
+          <!-- 手动添加应用对话框 -->
+          <div
+              v-if="showAddManualDialog"
+              class="dialog-overlay"
+              @click.self="cancelAddManual"
+          >
+            <div class="manual-dialog">
+              <div class="dialog-title">
+                {{ t('launcher.addAppTitle') }}
               </div>
-            </div>
-            <div class="dialog-actions">
-              <button class="dialog-btn cancel" @click="cancelAddManual">{{ t('common.cancel') }}</button>
-              <button :disabled="!manualForm.name || !manualForm.path" class="dialog-btn confirm"
-                      @click="confirmAddManual">{{ t('common.ok') }}
-              </button>
+              <div class="form-group">
+                <label>{{ t('launcher.appName') }}</label>
+                <input
+                    v-model="manualForm.name"
+                    :placeholder="t('launcher.appNamePlaceholder')"
+                    class="form-input"
+                >
+              </div>
+              <div class="form-group">
+                <label>{{ t('launcher.appPath') }}</label>
+                <div class="file-input-row">
+                  <input
+                      v-model="manualForm.path"
+                      :placeholder="t('launcher.appPathPlaceholder')"
+                      class="form-input"
+                      readonly
+                  >
+                  <button
+                      class="dialog-btn browse"
+                      @click="browseManualFile"
+                  >
+                    {{ t('common.browse') }}
+                  </button>
+                </div>
+              </div>
+              <div class="dialog-actions">
+                <button
+                    class="dialog-btn cancel"
+                    @click="cancelAddManual"
+                >
+                  {{ t('common.cancel') }}
+                </button>
+                <button
+                    :disabled="!manualForm.name || !manualForm.path"
+                    class="dialog-btn confirm"
+                    @click="confirmAddManual"
+                >
+                  {{ t('common.ok') }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
     </el-config-provider>
   </div>
 </template>

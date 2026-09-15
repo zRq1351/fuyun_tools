@@ -1,8 +1,16 @@
 <template>
-  <el-form :model="form" label-position="top">
-    <el-card class="setting-section-card" shadow="never">
+  <el-form
+      :model="form"
+      label-position="top"
+  >
+    <el-card
+        class="setting-section-card"
+        shadow="never"
+    >
       <template #header>
-        <div class="section-title">{{ $t('settings.selection.title') }}</div>
+        <div class="section-title">
+          {{ $t('settings.selection.title') }}
+        </div>
       </template>
       <el-form-item :label="$t('settings.selection.enabled')">
         <el-switch
@@ -12,15 +20,28 @@
             :model-value="form.selectionEnabled"
             @update:model-value="(val) => toggleFeature('selectionEnabled', val)"
         />
-        <div class="form-hint">{{ $t('settings.selection.disabledHint') }}</div>
+        <div class="form-hint">
+          {{ $t('settings.selection.disabledHint') }}
+        </div>
       </el-form-item>
 
       <el-form-item :label="$t('settings.selection.modifierKey')">
-        <el-select v-model="form.selectionModifierKey" :placeholder="$t('settings.selection.selectModifier')">
-          <el-option :label="$t('settings.selection.modifierNone')" value=""/>
-          <el-option :label="$t('settings.selection.modifierCtrl')" value="Ctrl"/>
+        <el-select
+            v-model="form.selectionModifierKey"
+            :placeholder="$t('settings.selection.selectModifier')"
+        >
+          <el-option
+              :label="$t('settings.selection.modifierNone')"
+              value=""
+          />
+          <el-option
+              :label="$t('settings.selection.modifierCtrl')"
+              value="Ctrl"
+          />
         </el-select>
-        <div class="form-hint">{{ $t('settings.selection.modifierHint') }}</div>
+        <div class="form-hint">
+          {{ $t('settings.selection.modifierHint') }}
+        </div>
       </el-form-item>
 
       <el-form-item :label="$t('settings.selection.translationTemplate')">
@@ -31,9 +52,16 @@
             type="textarea"
         />
         <div class="form-actions">
-          <el-button size="small" @click="resetTranslationPromptTemplate">{{ $t('common.reset') }}</el-button>
+          <el-button
+              size="small"
+              @click="resetTranslationPromptTemplate"
+          >
+            {{ $t('common.reset') }}
+          </el-button>
         </div>
-        <div class="form-hint">{{ $t('settings.selection.translationTemplateHint') }}</div>
+        <div class="form-hint">
+          {{ $t('settings.selection.translationTemplateHint') }}
+        </div>
       </el-form-item>
 
       <el-form-item :label="$t('settings.selection.explanationTemplate')">
@@ -44,45 +72,98 @@
             type="textarea"
         />
         <div class="form-actions">
-          <el-button size="small" @click="resetExplanationPromptTemplate">{{ $t('common.reset') }}</el-button>
+          <el-button
+              size="small"
+              @click="resetExplanationPromptTemplate"
+          >
+            {{ $t('common.reset') }}
+          </el-button>
         </div>
-        <div class="form-hint">{{ $t('settings.selection.explanationTemplateHint') }}</div>
+        <div class="form-hint">
+          {{ $t('settings.selection.explanationTemplateHint') }}
+        </div>
       </el-form-item>
     </el-card>
 
-    <el-card class="setting-section-card" shadow="never">
+    <el-card
+        class="setting-section-card"
+        shadow="never"
+    >
       <template #header>
-        <div class="section-title">{{ $t('settings.selection.webSearch') }}</div>
+        <div class="section-title">
+          {{ $t('settings.selection.webSearch') }}
+        </div>
       </template>
       <el-form-item :label="$t('settings.selection.searchEngine')">
-        <el-select v-model="form.selectionWebSearchEngine"
-                   :placeholder="$t('settings.selection.searchEnginePlaceholder')">
-          <el-option label="Bing" value="bing" />
-          <el-option label="Google" value="google" />
-          <el-option label="Baidu" value="baidu" />
-          <el-option label="DuckDuckGo" value="duckduckgo" />
+        <el-select
+            v-model="form.selectionWebSearchEngine"
+            :placeholder="$t('settings.selection.searchEnginePlaceholder')"
+        >
+          <el-option
+              label="Bing"
+              value="bing"
+          />
+          <el-option
+              label="Google"
+              value="google"
+          />
+          <el-option
+              label="Baidu"
+              value="baidu"
+          />
+          <el-option
+              label="DuckDuckGo"
+              value="duckduckgo"
+          />
         </el-select>
-        <div class="form-hint">{{ $t('settings.selection.searchEngineHint') }}</div>
+        <div class="form-hint">
+          {{ $t('settings.selection.searchEngineHint') }}
+        </div>
       </el-form-item>
     </el-card>
 
-    <el-card class="setting-section-card" shadow="never">
+    <el-card
+        class="setting-section-card"
+        shadow="never"
+    >
       <template #header>
-        <div class="section-title">{{ $t('settings.selection.customAIButtons') }}</div>
+        <div class="section-title">
+          {{ $t('settings.selection.customAIButtons') }}
+        </div>
       </template>
-      <div class="form-hint" style="margin-bottom: 12px;">{{ $t('settings.selection.customAIHint') }}</div>
+      <div
+          class="form-hint"
+          style="margin-bottom: 12px;"
+      >
+        {{ $t('settings.selection.customAIHint') }}
+      </div>
 
-      <div v-for="(item, index) in form.selectionCustomPrompts" :key="index"
-           :class="{ disabled: !item.enabled }"
-           class="custom-prompt-item">
+      <div
+          v-for="(item, index) in form.selectionCustomPrompts"
+          :key="index"
+          :class="{ disabled: !item.enabled }"
+          class="custom-prompt-item"
+      >
         <div class="prompt-header">
-          <el-input v-model="item.name" :disabled="!item.enabled"
-                    :placeholder="$t('settings.selection.buttonNamePlaceholder')"
-                    style="width: 200px;"/>
+          <el-input
+              v-model="item.name"
+              :disabled="!item.enabled"
+              :placeholder="$t('settings.selection.buttonNamePlaceholder')"
+              style="width: 200px;"
+          />
           <div class="prompt-style-controls">
-            <el-popover :disabled="!item.enabled" :width="320" placement="bottom" trigger="click">
+            <el-popover
+                :disabled="!item.enabled"
+                :width="320"
+                placement="bottom"
+                trigger="click"
+            >
               <template #reference>
-                <el-button :disabled="!item.enabled" size="small" style="width: 120px;">
+                <el-button
+                    :disabled="!item.enabled"
+                    size="small"
+                    style="width: 120px;"
+                >
                   <el-icon>
                     <component :is="getIconComponent(item.icon || 'Star')"/>
                   </el-icon>
@@ -103,15 +184,29 @@
                 </div>
               </div>
             </el-popover>
-            <el-color-picker v-model="item.color" :disabled="!item.enabled" :predefine="colorPresets" show-alpha size="small"
-                             :title="$t('settings.selection.textColor')"/>
-            <el-color-picker v-model="item.bg_color" :disabled="!item.enabled" :predefine="bgColorPresets" show-alpha
-                             :title="$t('settings.selection.bgColor')" size="small"/>
+            <el-color-picker
+                v-model="item.color"
+                :disabled="!item.enabled"
+                :predefine="colorPresets"
+                :title="$t('settings.selection.textColor')"
+                show-alpha
+                size="small"
+            />
+            <el-color-picker
+                v-model="item.bg_color"
+                :disabled="!item.enabled"
+                :predefine="bgColorPresets"
+                :title="$t('settings.selection.bgColor')"
+                show-alpha
+                size="small"
+            />
 
             <!-- 实时预览 -->
             <div class="preview-button-wrapper">
-              <div :style="{ color: item.color || '#909399', background: parseBackground(item.bg_color), opacity: item.enabled ? 1 : 0.5 }"
-                   class="preview-button">
+              <div
+                  :style="{ color: item.color || '#909399', background: parseBackground(item.bg_color), opacity: item.enabled ? 1 : 0.5 }"
+                  class="preview-button"
+              >
                 <el-icon class="btn-icon">
                   <component :is="getIconComponent(item.icon || 'Star')"/>
                 </el-icon>
@@ -120,8 +215,16 @@
             </div>
           </div>
           <div class="prompt-actions">
-            <el-switch v-model="item.enabled" style="margin-right: 8px;"/>
-            <el-button link type="danger" @click="removeCustomPrompt(index)">{{
+            <el-switch
+                v-model="item.enabled"
+                style="margin-right: 8px;"
+            />
+            <el-button
+                link
+                type="danger"
+                @click="removeCustomPrompt(index)"
+            >
+              {{
                 $t('settings.selection.deleteButton')
               }}
             </el-button>
@@ -136,7 +239,10 @@
             :disabled="!item.enabled"
             @input="validatePrompt(item)"
         />
-        <div v-if="item.prompt && !item.prompt.includes('{text}')" class="prompt-warning">
+        <div
+            v-if="item.prompt && !item.prompt.includes('{text}')"
+            class="prompt-warning"
+        >
           <el-icon style="color: #E6A23C; margin-right: 4px;">
             <Warning/>
           </el-icon>
@@ -144,7 +250,12 @@
         </div>
       </div>
 
-      <el-button plain style="margin-top: 12px;" type="primary" @click="addCustomPrompt">
+      <el-button
+          plain
+          style="margin-top: 12px;"
+          type="primary"
+          @click="addCustomPrompt"
+      >
         {{ $t('settings.selection.addCustomButton') }}
       </el-button>
     </el-card>

@@ -1,14 +1,28 @@
 <template>
-  <div class="app-grid-container" @contextmenu.prevent>
-    <div v-if="totalApps === 0" class="empty-category-hint">
-      <el-icon :size="40" class="hint-icon">
+  <div
+      class="app-grid-container"
+      @contextmenu.prevent
+  >
+    <div
+        v-if="totalApps === 0"
+        class="empty-category-hint"
+    >
+      <el-icon
+          :size="40"
+          class="hint-icon"
+      >
         <FolderAdd/>
       </el-icon>
       <p>还没有为应用设置分类</p>
-      <p class="hint-sub">切换回列表视图，右键应用选择「添加到分类」即可归类</p>
+      <p class="hint-sub">
+        切换回列表视图，右键应用选择「添加到分类」即可归类
+      </p>
     </div>
     <!-- Categories Grid with Sortable -->
-    <div ref="categoriesContainer" class="categories-grid">
+    <div
+        ref="categoriesContainer"
+        class="categories-grid"
+    >
       <div
           v-for="(category, catIndex) in categories"
           :key="category.name"
@@ -41,13 +55,25 @@
               @contextmenu.prevent.stop="showContextMenu($event, app)"
           >
             <div class="app-icon">
-              <img v-if="app.icon_base64" :src="app.icon_base64" class="icon-img"/>
-              <el-icon v-else :size="24">
+              <img
+                  v-if="app.icon_base64"
+                  :src="app.icon_base64"
+                  class="icon-img"
+              >
+              <el-icon
+                  v-else
+                  :size="24"
+              >
                 <Monitor/>
               </el-icon>
             </div>
-            <div class="app-name">{{ app.title }}</div>
-            <span :class="app.source === 'manual' ? 'manual' : 'scan'" class="app-source-badge">{{
+            <div class="app-name">
+              {{ app.title }}
+            </div>
+            <span
+                :class="app.source === 'manual' ? 'manual' : 'scan'"
+                class="app-source-badge"
+            >{{
                 app.source === 'manual' ? '手动' : '扫描'
               }}</span>
           </div>
@@ -56,17 +82,27 @@
     </div>
 
     <!-- Expanded Category Popup -->
-    <div v-if="expandedCategory" class="expand-overlay" @click.self="closeExpanded">
+    <div
+        v-if="expandedCategory"
+        class="expand-overlay"
+        @click.self="closeExpanded"
+    >
       <div class="expand-popup">
         <div class="expand-header">
           <span class="expand-title">{{ expandedCategory.name }}</span>
-          <button class="expand-close" @click="closeExpanded">
+          <button
+              class="expand-close"
+              @click="closeExpanded"
+          >
             <el-icon :size="14">
               <Close/>
             </el-icon>
           </button>
         </div>
-        <div ref="appsContainer" class="expand-apps">
+        <div
+            ref="appsContainer"
+            class="expand-apps"
+        >
           <div
               v-for="app in expandedCategory.apps"
               :key="app.id"
@@ -77,13 +113,25 @@
               @contextmenu.prevent.stop="showContextMenu($event, app)"
           >
             <div class="app-icon">
-              <img v-if="app.icon_base64" :src="app.icon_base64" class="icon-img"/>
-              <el-icon v-else :size="24">
+              <img
+                  v-if="app.icon_base64"
+                  :src="app.icon_base64"
+                  class="icon-img"
+              >
+              <el-icon
+                  v-else
+                  :size="24"
+              >
                 <Monitor/>
               </el-icon>
             </div>
-            <div class="app-name">{{ app.title }}</div>
-            <span :class="app.source === 'manual' ? 'manual' : 'scan'" class="app-source-badge">{{
+            <div class="app-name">
+              {{ app.title }}
+            </div>
+            <span
+                :class="app.source === 'manual' ? 'manual' : 'scan'"
+                class="app-source-badge"
+            >{{
                 app.source === 'manual' ? '手动' : '扫描'
               }}</span>
           </div>
@@ -92,34 +140,56 @@
     </div>
 
     <!-- Context Menu -->
-    <ContextMenu :show="ctxVisible" :x="ctxX" :y="ctxY" @close="closeCtxMenu">
-      <div class="context-menu-item" @click="openApp(ctxApp)">
+    <ContextMenu
+        :show="ctxVisible"
+        :x="ctxX"
+        :y="ctxY"
+        @close="closeCtxMenu"
+    >
+      <div
+          class="context-menu-item"
+          @click="openApp(ctxApp)"
+      >
         <el-icon :size="14">
           <Monitor/>
         </el-icon>
         <span>{{ t('common.open') }}</span>
       </div>
-      <div class="context-menu-item" @click="openAppDirectory(ctxApp)">
+      <div
+          class="context-menu-item"
+          @click="openAppDirectory(ctxApp)"
+      >
         <el-icon :size="14">
           <FolderOpened/>
         </el-icon>
         <span>打开应用目录</span>
       </div>
-      <div class="context-menu-divider"></div>
-      <div v-if="ctxApp?.source === 'manual'" class="context-menu-item" @click="removeApp(ctxApp)">
+      <div class="context-menu-divider"/>
+      <div
+          v-if="ctxApp?.source === 'manual'"
+          class="context-menu-item"
+          @click="removeApp(ctxApp)"
+      >
         <el-icon :size="14">
           <Delete/>
         </el-icon>
         <span>{{ t('common.remove') }}应用</span>
       </div>
-      <div v-else class="context-menu-item" @click="removeFromCategory(ctxApp)">
+      <div
+          v-else
+          class="context-menu-item"
+          @click="removeFromCategory(ctxApp)"
+      >
         <el-icon :size="14">
           <Close/>
         </el-icon>
         <span>移出分类</span>
       </div>
-      <div class="context-menu-divider"></div>
-      <div class="context-menu-item" @click="showAddCommandDialogFn">
+      <div class="context-menu-divider"/>
+      <div
+          class="context-menu-item"
+          @click="showAddCommandDialogFn"
+      >
         <el-icon :size="14">
           <Star/>
         </el-icon>
@@ -128,11 +198,20 @@
     </ContextMenu>
 
     <!-- 添加命令对话框 -->
-    <div v-if="showCommandDialog" class="dialog-overlay">
+    <div
+        v-if="showCommandDialog"
+        class="dialog-overlay"
+    >
       <div class="command-dialog">
-        <div class="dialog-title">为应用添加启动命令</div>
+        <div class="dialog-title">
+          为应用添加启动命令
+        </div>
         <div class="app-info-preview">
-          <img v-if="ctxApp?.icon_base64" :src="ctxApp.icon_base64" class="preview-icon"/>
+          <img
+              v-if="ctxApp?.icon_base64"
+              :src="ctxApp.icon_base64"
+              class="preview-icon"
+          >
           <span class="preview-name">{{ ctxApp?.title }}</span>
         </div>
 
@@ -143,14 +222,24 @@
             <input
                 v-model="commandForm.prefix"
                 class="prefix-input"
-            />
+            >
           </div>
           <span class="form-hint">输入前缀，用于快速搜索（自动添加 : 前缀）</span>
         </div>
 
         <div class="dialog-actions">
-          <button class="dialog-btn cancel" @click="closeCommandDialog">{{ t('common.cancel') }}</button>
-          <button class="dialog-btn confirm" @click="confirmAddCommand">{{ t('common.ok') }}</button>
+          <button
+              class="dialog-btn cancel"
+              @click="closeCommandDialog"
+          >
+            {{ t('common.cancel') }}
+          </button>
+          <button
+              class="dialog-btn confirm"
+              @click="confirmAddCommand"
+          >
+            {{ t('common.ok') }}
+          </button>
         </div>
       </div>
     </div>

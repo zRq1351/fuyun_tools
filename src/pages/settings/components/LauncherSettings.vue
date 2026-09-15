@@ -1,8 +1,16 @@
 <template>
-  <el-form :model="form" label-position="top">
-    <el-card class="setting-section-card compact-card" shadow="never">
+  <el-form
+      :model="form"
+      label-position="top"
+  >
+    <el-card
+        class="setting-section-card compact-card"
+        shadow="never"
+    >
       <template #header>
-        <div class="section-title">{{ $t('settings.launcher.title') }}</div>
+        <div class="section-title">
+          {{ $t('settings.launcher.title') }}
+        </div>
       </template>
       <el-form-item :label="$t('settings.launcher.enabled')">
         <el-switch
@@ -12,7 +20,9 @@
             :model-value="form.launcherEnabled"
             @update:model-value="(val) => toggleFeature('launcherEnabled', val)"
         />
-        <div class="form-hint">{{ $t('settings.launcher.disabledHint') }}</div>
+        <div class="form-hint">
+          {{ $t('settings.launcher.disabledHint') }}
+        </div>
       </el-form-item>
 
       <el-form-item :label="$t('settings.launcher.launcherHotkey')">
@@ -24,14 +34,19 @@
         >
           <template #append>
             <el-button-group>
-              <el-button :title="$t('settings.clipboard.modifyShortcut')"
-                         :type="isLauncherRecording ? 'danger' : 'primary'"
-                         @click="toggleLauncherRecording">
+              <el-button
+                  :title="$t('settings.clipboard.modifyShortcut')"
+                  :type="isLauncherRecording ? 'danger' : 'primary'"
+                  @click="toggleLauncherRecording"
+              >
                 <el-icon>
                   <component :is="isLauncherRecording ? VideoPause : Edit"/>
                 </el-icon>
               </el-button>
-              <el-button :title="$t('settings.clipboard.resetShortcut')" @click="resetLauncherShortcut">
+              <el-button
+                  :title="$t('settings.clipboard.resetShortcut')"
+                  @click="resetLauncherShortcut"
+              >
                 <el-icon>
                   <RefreshLeft/>
                 </el-icon>
@@ -42,9 +57,14 @@
       </el-form-item>
     </el-card>
 
-    <el-card class="setting-section-card" shadow="never">
+    <el-card
+        class="setting-section-card"
+        shadow="never"
+    >
       <template #header>
-        <div class="section-title">{{ $t('settings.launcher.featureDesc') }}</div>
+        <div class="section-title">
+          {{ $t('settings.launcher.featureDesc') }}
+        </div>
       </template>
       <div class="feature-list">
         <div class="feature-item">
@@ -52,8 +72,12 @@
             <Search/>
           </el-icon>
           <div class="feature-content">
-            <div class="feature-title">{{ $t('settings.launcher.quickSearch') }}</div>
-            <div class="feature-desc">{{ $t('settings.launcher.quickSearchDesc') }}</div>
+            <div class="feature-title">
+              {{ $t('settings.launcher.quickSearch') }}
+            </div>
+            <div class="feature-desc">
+              {{ $t('settings.launcher.quickSearchDesc') }}
+            </div>
           </div>
         </div>
         <div class="feature-item">
@@ -61,8 +85,12 @@
             <Operation/>
           </el-icon>
           <div class="feature-content">
-            <div class="feature-title">{{ $t('settings.launcher.quickCommands') }}</div>
-            <div class="feature-desc">{{ $t('settings.launcher.quickCommandsDesc') }}</div>
+            <div class="feature-title">
+              {{ $t('settings.launcher.quickCommands') }}
+            </div>
+            <div class="feature-desc">
+              {{ $t('settings.launcher.quickCommandsDesc') }}
+            </div>
           </div>
         </div>
         <div class="feature-item">
@@ -70,8 +98,12 @@
             <Key/>
           </el-icon>
           <div class="feature-content">
-            <div class="feature-title">{{ $t('settings.launcher.keyboardNav') }}</div>
-            <div class="feature-desc">{{ $t('settings.launcher.keyboardNavDesc') }}</div>
+            <div class="feature-title">
+              {{ $t('settings.launcher.keyboardNav') }}
+            </div>
+            <div class="feature-desc">
+              {{ $t('settings.launcher.keyboardNavDesc') }}
+            </div>
           </div>
         </div>
       </div>

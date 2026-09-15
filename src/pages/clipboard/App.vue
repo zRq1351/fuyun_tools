@@ -28,54 +28,110 @@
         :is-reorder-mode="isReorderMode"
         @toggle-reorder="toggleReorderMode"
     />
-    <div v-show="!isAiSettingsCollapsed" class="ai-quick-panel-wrap" @click.stop @mousedown.stop>
+    <div
+        v-show="!isAiSettingsCollapsed"
+        class="ai-quick-panel-wrap"
+        @click.stop
+        @mousedown.stop
+    >
       <div class="ai-quick-panel">
         <div class="ai-quick-top">
-        <div class="ai-control-item ai-select-item">
-          <span class="ai-control-label">{{ $t('clipboard.translationTarget') }}</span>
-          <el-select
+          <div class="ai-control-item ai-select-item">
+            <span class="ai-control-label">{{ $t('clipboard.translationTarget') }}</span>
+            <el-select
               v-model="translationTargetLanguage"
               class="ai-select"
               size="small"
               popper-class="clipboard-ai-select-popper"
-          >
-            <el-option :label="$t('language.zhCN')" value="简体中文"/>
-            <el-option :label="$t('language.traditionalChinese')" value="繁体中文"/>
-            <el-option :label="$t('language.english')" value="英语"/>
-            <el-option :label="$t('language.japanese')" value="日语"/>
-            <el-option :label="$t('language.korean')" value="韩语"/>
-            <el-option :label="$t('language.french')" value="法语"/>
-            <el-option :label="$t('language.german')" value="德语"/>
-          </el-select>
-        </div>
-        <div class="ai-control-item ai-select-item">
-          <span class="ai-control-label">{{ $t('clipboard.explanationLang') }}</span>
-          <el-select
+            >
+              <el-option
+                  :label="$t('language.zhCN')"
+                  value="简体中文"
+              />
+              <el-option
+                  :label="$t('language.traditionalChinese')"
+                  value="繁体中文"
+              />
+              <el-option
+                  :label="$t('language.english')"
+                  value="英语"
+              />
+              <el-option
+                  :label="$t('language.japanese')"
+                  value="日语"
+              />
+              <el-option
+                  :label="$t('language.korean')"
+                  value="韩语"
+              />
+              <el-option
+                  :label="$t('language.french')"
+                  value="法语"
+              />
+              <el-option
+                  :label="$t('language.german')"
+                  value="德语"
+              />
+            </el-select>
+          </div>
+          <div class="ai-control-item ai-select-item">
+            <span class="ai-control-label">{{ $t('clipboard.explanationLang') }}</span>
+            <el-select
               v-model="explanationTargetLanguage"
               class="ai-select"
               size="small"
               popper-class="clipboard-ai-select-popper"
-          >
-            <el-option :label="$t('language.chinese')" value="中文"/>
-            <el-option :label="$t('language.englishDesc')" value="英文"/>
-            <el-option :label="$t('language.japaneseDesc')" value="日文"/>
-            <el-option :label="$t('language.koreanDesc')" value="韩文"/>
-          </el-select>
+            >
+              <el-option
+                  :label="$t('language.chinese')"
+                  value="中文"
+              />
+              <el-option
+                  :label="$t('language.englishDesc')"
+                  value="英文"
+              />
+              <el-option
+                  :label="$t('language.japaneseDesc')"
+                  value="日文"
+              />
+              <el-option
+                  :label="$t('language.koreanDesc')"
+                  value="韩文"
+              />
+            </el-select>
+          </div>
+          <div class="ai-shortcut-tip">
+            {{ $t('clipboard.shortcutTip') }}
+          </div>
         </div>
-          <div class="ai-shortcut-tip">{{ $t('clipboard.shortcutTip') }}</div>
-      </div>
       </div>
     </div>
 
-    <div v-if="visibleHistory.length === 0" class="empty-state">
-      <el-empty v-if="!isLoadingPage" :image-size="100">
+    <div
+        v-if="visibleHistory.length === 0"
+        class="empty-state"
+    >
+      <el-empty
+          v-if="!isLoadingPage"
+          :image-size="100"
+      >
         <template #description>
           <p>{{ $t('clipboard.noRecords') }}</p>
-          <p class="hint">{{ $t('clipboard.emptyHint') }}</p>
+          <p class="hint">
+            {{ $t('clipboard.emptyHint') }}
+          </p>
         </template>
       </el-empty>
-      <div v-else class="loading-state">
-        <el-icon class="is-loading" :size="40"><Loading /></el-icon>
+      <div
+          v-else
+          class="loading-state"
+      >
+        <el-icon
+            :size="40"
+            class="is-loading"
+        >
+          <Loading/>
+        </el-icon>
         <p>{{ $t('common.loading') }}</p>
       </div>
     </div>
@@ -101,16 +157,23 @@
         :total-count="totalCount"
         :is-reorder-mode="isReorderMode"
         :on-reorder="handleReorder"
+        :visible-history="visibleHistory"
         @load-more-intent="handleLoadMoreIntent"
         @preview="handlePreview"
-        :visible-history="visibleHistory"
     />
 
-    <div class="status-footer" @click.stop @mousedown.stop>
+    <div
+        class="status-footer"
+        @click.stop
+        @mousedown.stop
+    >
       <div class="status-text">
         <span class="status-label">{{ selectedStatusText }}</span>
         <span class="status-meta">{{ loadStatusText }}</span>
-        <span v-if="searchKeyword.trim()" class="status-meta">{{
+        <span
+            v-if="searchKeyword.trim()"
+            class="status-meta"
+        >{{
             $t('clipboard.hitCount', {count: keywordHitCount})
           }}</span>
         <div class="status-actions">
@@ -123,16 +186,24 @@
             {{ $t('clipboard.perPage', {size: pageSize}) }}
           </button>
 
-          <button :aria-label="$t('clipboard.backToStart')" :title="$t('clipboard.backToStart')"
-                  class="nav-action-btn icon-btn" type="button"
-                  @click="scrollToStart">
+          <button
+              :aria-label="$t('clipboard.backToStart')"
+              :title="$t('clipboard.backToStart')"
+              class="nav-action-btn icon-btn"
+              type="button"
+              @click="scrollToStart"
+          >
             <el-icon>
               <ArrowLeftBold/>
             </el-icon>
           </button>
-          <button :aria-label="$t('clipboard.scrollToEnd')" :title="$t('clipboard.scrollToEnd')"
-                  class="nav-action-btn icon-btn" type="button"
-                  @click="scrollToEnd">
+          <button
+              :aria-label="$t('clipboard.scrollToEnd')"
+              :title="$t('clipboard.scrollToEnd')"
+              class="nav-action-btn icon-btn"
+              type="button"
+              @click="scrollToEnd"
+          >
             <el-icon>
               <ArrowRightBold/>
             </el-icon>
@@ -150,17 +221,27 @@
         @click.stop
         @mousedown.stop
     >
-      <div class="context-menu-header">{{ $t('clipboard.aiShortcut') }}</div>
-      <div class="context-menu-item" @click="triggerAiFromContextMenu('translate')">
+      <div class="context-menu-header">
+        {{ $t('clipboard.aiShortcut') }}
+      </div>
+      <div
+          class="context-menu-item"
+          @click="triggerAiFromContextMenu('translate')"
+      >
         {{ $t('selectionToolbar.translate') }}
         <span class="shortcut-hint">T</span>
       </div>
-      <div class="context-menu-item" @click="triggerAiFromContextMenu('explain')">
+      <div
+          class="context-menu-item"
+          @click="triggerAiFromContextMenu('explain')"
+      >
         {{ $t('selectionToolbar.explain') }}
         <span class="shortcut-hint">E</span>
       </div>
-      <div class="context-menu-divider"></div>
-      <div class="context-menu-header">{{ $t('clipboard.addToCategory') }}</div>
+      <div class="context-menu-divider"/>
+      <div class="context-menu-header">
+        {{ $t('clipboard.addToCategory') }}
+      </div>
       <div
           v-for="category in categories"
           :key="category"
@@ -168,7 +249,10 @@
           @click="assignToCategory(category)"
       >
         {{ category }}
-        <el-icon v-if="getItemCategory(contextMenuItem) === category" class="check-icon">
+        <el-icon
+            v-if="getItemCategory(contextMenuItem) === category"
+            class="check-icon"
+        >
           <Check/>
         </el-icon>
       </div>

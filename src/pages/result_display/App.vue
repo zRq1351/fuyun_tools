@@ -1,22 +1,37 @@
 <template>
-  <div :class="['container', `theme-${currentTheme}`]" @mousedown.left="handleContainerMouseDown">
+  <div
+      :class="['container', `theme-${currentTheme}`]"
+      @mousedown.left="handleContainerMouseDown"
+  >
     <div class="window-titlebar">
       <div class="window-title">
         {{ mode === 'translation' ? t('resultDisplay.translationResult') : t('resultDisplay.explanationResult') }}
       </div>
       <div class="window-controls">
-        <button class="window-btn" @click.stop="minimizeWindow" @mousedown.stop>
+        <button
+            class="window-btn"
+            @click.stop="minimizeWindow"
+            @mousedown.stop
+        >
           <el-icon>
             <Minus/>
           </el-icon>
         </button>
-        <button class="window-btn" @click.stop="toggleWindowMaximize" @mousedown.stop>
+        <button
+            class="window-btn"
+            @click.stop="toggleWindowMaximize"
+            @mousedown.stop
+        >
           <el-icon>
             <CopyDocument v-if="isWindowMaximized"/>
             <FullScreen v-else/>
           </el-icon>
         </button>
-        <button class="window-btn window-btn-close" @click.stop="closeWindow" @mousedown.stop>
+        <button
+            class="window-btn window-btn-close"
+            @click.stop="closeWindow"
+            @mousedown.stop
+        >
           <el-icon>
             <CloseBold/>
           </el-icon>
@@ -24,29 +39,81 @@
       </div>
     </div>
     <div class="header">
-      <div v-if="mode === 'explanation'" class="control-group">
+      <div
+          v-if="mode === 'explanation'"
+          class="control-group"
+      >
         <span class="label">{{ t('resultDisplay.explainLang') }}</span>
-        <el-select v-model="explanationLanguage" class="lang-select" size="small" @change="handleLanguageChange">
-          <el-option :label="t('resultDisplay.chinese')" value="中文"/>
-          <el-option :label="t('resultDisplay.englishLang')" value="英文"/>
-          <el-option :label="t('resultDisplay.japaneseLang')" value="日文"/>
-          <el-option :label="t('resultDisplay.koreanLang')" value="韩文"/>
+        <el-select
+            v-model="explanationLanguage"
+            class="lang-select"
+            size="small"
+            @change="handleLanguageChange"
+        >
+          <el-option
+              :label="t('resultDisplay.chinese')"
+              value="中文"
+          />
+          <el-option
+              :label="t('resultDisplay.englishLang')"
+              value="英文"
+          />
+          <el-option
+              :label="t('resultDisplay.japaneseLang')"
+              value="日文"
+          />
+          <el-option
+              :label="t('resultDisplay.koreanLang')"
+              value="韩文"
+          />
         </el-select>
       </div>
 
-      <div v-if="mode === 'translation'" class="control-group">
+      <div
+          v-if="mode === 'translation'"
+          class="control-group"
+      >
         <span class="label">{{ t('resultDisplay.sourceText') }}</span>
         <span class="auto-source-tag">{{ t('resultDisplay.autoDetect') }}</span>
         <span class="arrow">→</span>
-        <el-select v-model="targetLanguage" class="lang-select" size="small" @change="handleLanguageChange">
-          <el-option :label="t('resultDisplay.simplifiedChinese')" value="简体中文"/>
-          <el-option :label="t('resultDisplay.traditionalChinese')" value="繁体中文"/>
-          <el-option :label="t('resultDisplay.english')" value="英语"/>
-          <el-option :label="t('resultDisplay.japanese')" value="日语"/>
-          <el-option :label="t('resultDisplay.korean')" value="韩语"/>
-          <el-option :label="t('resultDisplay.french')" value="法语"/>
-          <el-option :label="t('resultDisplay.german')" value="德语"/>
-          <el-option :label="t('resultDisplay.spanish')" value="西班牙语"/>
+        <el-select
+            v-model="targetLanguage"
+            class="lang-select"
+            size="small"
+            @change="handleLanguageChange"
+        >
+          <el-option
+              :label="t('resultDisplay.simplifiedChinese')"
+              value="简体中文"
+          />
+          <el-option
+              :label="t('resultDisplay.traditionalChinese')"
+              value="繁体中文"
+          />
+          <el-option
+              :label="t('resultDisplay.english')"
+              value="英语"
+          />
+          <el-option
+              :label="t('resultDisplay.japanese')"
+              value="日语"
+          />
+          <el-option
+              :label="t('resultDisplay.korean')"
+              value="韩语"
+          />
+          <el-option
+              :label="t('resultDisplay.french')"
+              value="法语"
+          />
+          <el-option
+              :label="t('resultDisplay.german')"
+              value="德语"
+          />
+          <el-option
+              :label="t('resultDisplay.spanish')"
+              value="西班牙语"
+          />
         </el-select>
       </div>
 
@@ -56,7 +123,10 @@
             :show-after="500"
             placement="bottom"
         >
-          <div class="icon-btn toggle-btn" @click="toggleOriginal">
+          <div
+              class="icon-btn toggle-btn"
+              @click="toggleOriginal"
+          >
             <el-icon>
               <Hide v-if="showOriginal"/>
               <View v-else/>
@@ -66,14 +136,20 @@
       </div>
     </div>
 
-    <div v-if="showOriginal" class="content-wrapper original-wrapper">
+    <div
+        v-if="showOriginal"
+        class="content-wrapper original-wrapper"
+    >
       <div class="content-actions">
         <el-tooltip
             :show-after="500"
             :content="t('resultDisplay.copySource')"
             placement="bottom"
         >
-          <div class="icon-btn action-btn copy-btn" @click="copyOriginalText">
+          <div
+              class="icon-btn action-btn copy-btn"
+              @click="copyOriginalText"
+          >
             <el-icon>
               <DocumentCopy/>
             </el-icon>
@@ -84,10 +160,10 @@
       <div
           ref="originalRef"
           class="content original-content"
-          v-html="originalHtml"
           @click="handleContentClick"
           @wheel.stop.prevent="handleContentWheel('original', $event)"
-      ></div>
+          v-html="originalHtml"
+      />
     </div>
 
     <div class="content-wrapper result-wrapper">
@@ -97,7 +173,10 @@
             :content="t('resultDisplay.copyResult')"
             placement="bottom"
         >
-          <div class="icon-btn action-btn copy-btn" @click="copyResultText">
+          <div
+              class="icon-btn action-btn copy-btn"
+              @click="copyResultText"
+          >
             <el-icon>
               <DocumentCopy/>
             </el-icon>
@@ -111,14 +190,17 @@
           @click="handleContentClick"
           @wheel.stop.prevent="handleContentWheel('result', $event)"
       >
-        <div v-if="isWaitingResult && !resultText" class="loading-wrap">
-          <span class="loading-dot"></span>
-          <span class="loading-dot"></span>
-          <span class="loading-dot"></span>
+        <div
+            v-if="isWaitingResult && !resultText"
+            class="loading-wrap"
+        >
+          <span class="loading-dot"/>
+          <span class="loading-dot"/>
+          <span class="loading-dot"/>
           <span class="loading-text">{{ t('resultDisplay.generating') }}</span>
         </div>
         <!-- eslint-disable-next-line vue/no-v-html -->
-        <div v-html="resultHtml"></div>
+        <div v-html="resultHtml"/>
       </div>
     </div>
   </div>

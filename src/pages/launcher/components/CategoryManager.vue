@@ -1,39 +1,63 @@
 <template>
-  <div v-if="visible" class="category-manager-overlay" @click.self="$emit('close')">
+  <div
+      v-if="visible"
+      class="category-manager-overlay"
+      @click.self="$emit('close')"
+  >
     <div class="category-manager">
       <div class="category-header">
         <span class="title">{{ t('launcher.manageCategories') }}</span>
-        <button class="add-btn" @click="showAddDialog">
+        <button
+            class="add-btn"
+            @click="showAddDialog"
+        >
           <el-icon :size="14">
             <Plus/>
           </el-icon>
         </button>
-        <button class="close-btn" @click="$emit('close')">
+        <button
+            class="close-btn"
+            @click="$emit('close')"
+        >
           <el-icon :size="14">
             <Close/>
           </el-icon>
         </button>
       </div>
-      <div ref="categoryListRef" class="category-list">
+      <div
+          ref="categoryListRef"
+          class="category-list"
+      >
         <div
             v-for="category in categories"
             :key="category.id"
             :data-category-id="category.id"
             class="category-item sortable-category"
         >
-          <div class="icon-selector" @click="showIconPicker(category)">
+          <div
+              class="icon-selector"
+              @click="showIconPicker(category)"
+          >
             <el-icon :size="16">
               <component :is="getIcon(category.icon)"/>
             </el-icon>
           </div>
           <span class="category-name">{{ category.name }}</span>
           <span class="category-count">{{ getCategoryCount(category.id) }}</span>
-          <button :title="t('common.rename')" class="edit-btn" @click="startEdit(category)">
+          <button
+              :title="t('common.rename')"
+              class="edit-btn"
+              @click="startEdit(category)"
+          >
             <el-icon :size="12">
               <Edit/>
             </el-icon>
           </button>
-          <button :title="t('common.delete')" class="delete-btn" @click="handleDelete(category)">
+          <button
+              :title="t('common.delete')"
+              class="delete-btn"
+              @click="handleDelete(category)"
+          >
             <el-icon :size="12">
               <Delete/>
             </el-icon>
@@ -42,9 +66,15 @@
       </div>
 
       <!-- 图标选择器 -->
-      <div v-if="showIconPickerDialog" class="dialog-overlay" @click.self="closeIconPicker">
+      <div
+          v-if="showIconPickerDialog"
+          class="dialog-overlay"
+          @click.self="closeIconPicker"
+      >
         <div class="icon-picker-dialog">
-          <div class="dialog-title">选择图标</div>
+          <div class="dialog-title">
+            选择图标
+          </div>
           <div class="icon-grid">
             <div
                 v-for="iconName in availableIcons"
@@ -59,25 +89,46 @@
             </div>
           </div>
           <div class="dialog-actions">
-            <button class="dialog-btn cancel" @click="closeIconPicker">{{ t('common.cancel') }}</button>
+            <button
+                class="dialog-btn cancel"
+                @click="closeIconPicker"
+            >
+              {{ t('common.cancel') }}
+            </button>
           </div>
         </div>
       </div>
 
       <!-- 添加/重命名对话框 -->
-      <div v-if="showDialog" class="dialog-overlay" @click.self="cancelDialog">
+      <div
+          v-if="showDialog"
+          class="dialog-overlay"
+          @click.self="cancelDialog"
+      >
         <div class="dialog">
-          <div class="dialog-title">{{ editingCategory ? t('common.rename') + '分类' : t('common.add') + '分类' }}</div>
+          <div class="dialog-title">
+            {{ editingCategory ? t('common.rename') + '分类' : t('common.add') + '分类' }}
+          </div>
           <input
               ref="dialogInput"
               v-model="dialogName"
               class="dialog-input"
               placeholder="输入分类名称"
               @keydown.enter="confirmDialog"
-          />
+          >
           <div class="dialog-actions">
-            <button class="dialog-btn cancel" @click="cancelDialog">{{ t('common.cancel') }}</button>
-            <button class="dialog-btn confirm" @click="confirmDialog">{{ t('common.ok') }}</button>
+            <button
+                class="dialog-btn cancel"
+                @click="cancelDialog"
+            >
+              {{ t('common.cancel') }}
+            </button>
+            <button
+                class="dialog-btn confirm"
+                @click="confirmDialog"
+            >
+              {{ t('common.ok') }}
+            </button>
           </div>
         </div>
       </div>

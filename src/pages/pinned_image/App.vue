@@ -1,14 +1,27 @@
 <template>
-  <div ref="rootRef" class="pinned-image-root"
-       @mousedown.left="handleRootMouseDown"
-       @dblclick.left.stop.prevent="closeWindow"
-       @contextmenu.prevent="handleContextMenu"
-       @click="closeCtxMenu">
-    <img v-if="imageSrc" ref="imageRef" :src="imageSrc" alt="" class="pinned-image" draggable="false"
-         @load="handleImageLoaded"/>
+  <div
+      ref="rootRef"
+      class="pinned-image-root"
+      @click="closeCtxMenu"
+      @mousedown.left="handleRootMouseDown"
+      @dblclick.left.stop.prevent="closeWindow"
+      @contextmenu.prevent="handleContextMenu"
+  >
+    <img
+        v-if="imageSrc"
+        ref="imageRef"
+        :src="imageSrc"
+        alt=""
+        class="pinned-image"
+        draggable="false"
+        @load="handleImageLoaded"
+    >
 
     <!-- 透明实况文本层 -->
-    <div v-if="!isRecognizing && ocrLines.length > 0 && sourceWidth > 0 && sourceHeight > 0" class="ocr-text-overlay">
+    <div
+        v-if="!isRecognizing && ocrLines.length > 0 && sourceWidth > 0 && sourceHeight > 0"
+        class="ocr-text-overlay"
+    >
       <span 
         v-for="item in ocrLines" 
         :key="item.id"
@@ -28,18 +41,45 @@
     </div>
 
     <!-- 扫描线动画 -->
-    <div v-if="ocrEnabled && isRecognizing" class="ocr-scanner"></div>
+    <div
+        v-if="ocrEnabled && isRecognizing"
+        class="ocr-scanner"
+    />
 
     <!-- 轻量级错误提示 -->
-    <div v-if="toastMessage" class="ocr-toast" :class="{'ocr-toast-error': toastIsError}">
+    <div
+        v-if="toastMessage"
+        :class="{'ocr-toast-error': toastIsError}"
+        class="ocr-toast"
+    >
       {{ toastMessage }}
     </div>
 
-    <ContextMenu :show="ctxMenuShow" :x="ctxMenuX" :y="ctxMenuY" @close="closeCtxMenu">
-      <div class="context-menu-item" @click="copyAllText">{{ t('pinnedImage.copyAllText') }}</div>
-      <div class="context-menu-item" @click="openTextWindow">{{ t('pinnedImage.viewInWindow') }}</div>
-      <div class="context-menu-divider"></div>
-      <div class="context-menu-item" @click="closeWindow">{{ t('pinnedImage.closePinned') }}</div>
+    <ContextMenu
+        :show="ctxMenuShow"
+        :x="ctxMenuX"
+        :y="ctxMenuY"
+        @close="closeCtxMenu"
+    >
+      <div
+          class="context-menu-item"
+          @click="copyAllText"
+      >
+        {{ t('pinnedImage.copyAllText') }}
+      </div>
+      <div
+          class="context-menu-item"
+          @click="openTextWindow"
+      >
+        {{ t('pinnedImage.viewInWindow') }}
+      </div>
+      <div class="context-menu-divider"/>
+      <div
+          class="context-menu-item"
+          @click="closeWindow"
+      >
+        {{ t('pinnedImage.closePinned') }}
+      </div>
     </ContextMenu>
   </div>
 </template>

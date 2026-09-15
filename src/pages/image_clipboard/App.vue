@@ -1,6 +1,12 @@
 <template>
-  <div ref="containerRef" class="container" tabindex="-1" @click="closeContextMenu" @keydown="handleKeydown"
-       @mousedown="handleContainerMouseDown">
+  <div
+      ref="containerRef"
+      class="container"
+      tabindex="-1"
+      @click="closeContextMenu"
+      @keydown="handleKeydown"
+      @mousedown="handleContainerMouseDown"
+  >
     <ClipboardToolbar
         v-model:category-filter="categoryFilter"
         v-model:new-category-name="newCategoryName"
@@ -21,17 +27,28 @@
         :is-reorder-mode="isReorderMode"
         @toggle-reorder="toggleReorderMode"
     />
-    <div v-if="isLoadingPage && filteredHistory.length === 0" class="loading-state">
-      <el-icon :size="24" class="is-loading">
+    <div
+        v-if="isLoadingPage && filteredHistory.length === 0"
+        class="loading-state"
+    >
+      <el-icon
+          :size="24"
+          class="is-loading"
+      >
         <Loading/>
       </el-icon>
       <span>{{ $t('clipboard.loading') }}</span>
     </div>
-    <div v-else-if="filteredHistory.length === 0" class="empty-state">
+    <div
+        v-else-if="filteredHistory.length === 0"
+        class="empty-state"
+    >
       <el-empty :image-size="100">
         <template #description>
           <p>{{ $t('imageClipboard.noRecords') }}</p>
-          <p class="hint">{{ $t('imageClipboard.emptyHint') }}</p>
+          <p class="hint">
+            {{ $t('imageClipboard.emptyHint') }}
+          </p>
         </template>
       </el-empty>
     </div>
@@ -60,7 +77,11 @@
         @load-more-intent="handleLoadMoreIntent"
     />
 
-    <div class="status-footer" @click.stop @mousedown.stop>
+    <div
+        class="status-footer"
+        @click.stop
+        @mousedown.stop
+    >
       <div class="status-text">
         <span class="status-label">{{ selectedStatusText }}</span>
         <span class="status-meta">{{ loadStatusText }}</span>
@@ -73,16 +94,24 @@
           >
             {{ $t('imageClipboard.perPage', {size: pageSize}) }}
           </button>
-          <button :aria-label="$t('imageClipboard.backToStart')" :title="$t('imageClipboard.backToStart')"
-                  class="nav-action-btn icon-btn" type="button"
-                  @click="scrollToStart">
+          <button
+              :aria-label="$t('imageClipboard.backToStart')"
+              :title="$t('imageClipboard.backToStart')"
+              class="nav-action-btn icon-btn"
+              type="button"
+              @click="scrollToStart"
+          >
             <el-icon>
               <ArrowLeftBold/>
             </el-icon>
           </button>
-          <button :aria-label="$t('imageClipboard.scrollToEnd')" :title="$t('imageClipboard.scrollToEnd')"
-                  class="nav-action-btn icon-btn" type="button"
-                  @click="scrollToEnd">
+          <button
+              :aria-label="$t('imageClipboard.scrollToEnd')"
+              :title="$t('imageClipboard.scrollToEnd')"
+              class="nav-action-btn icon-btn"
+              type="button"
+              @click="scrollToEnd"
+          >
             <el-icon>
               <ArrowRightBold/>
             </el-icon>
@@ -97,11 +126,16 @@
         class="context-menu"
         @click.stop
     >
-      <div class="context-menu-item" @click="editItemTags">
+      <div
+          class="context-menu-item"
+          @click="editItemTags"
+      >
         {{ $t('imageClipboard.editTags') }}
       </div>
-      <div class="context-menu-divider"></div>
-      <div class="context-menu-header">{{ $t('imageClipboard.addToCategory') }}</div>
+      <div class="context-menu-divider"/>
+      <div class="context-menu-header">
+        {{ $t('imageClipboard.addToCategory') }}
+      </div>
       <div
           v-for="category in categories"
           :key="category"
@@ -109,12 +143,14 @@
           @click="assignToCategory(category)"
       >
         {{ category }}
-        <el-icon v-if="getItemCategory(contextMenuItemId) === category" class="check-icon">
+        <el-icon
+            v-if="getItemCategory(contextMenuItemId) === category"
+            class="check-icon"
+        >
           <Check/>
         </el-icon>
       </div>
     </div>
-
   </div>
 </template>
 

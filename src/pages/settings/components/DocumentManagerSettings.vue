@@ -1,8 +1,16 @@
 <template>
-  <el-form :model="form" label-position="top">
-    <el-card class="setting-section-card compact-card" shadow="never">
+  <el-form
+      :model="form"
+      label-position="top"
+  >
+    <el-card
+        class="setting-section-card compact-card"
+        shadow="never"
+    >
       <template #header>
-        <div class="section-title">{{ $t('settings.docManager.title') }}</div>
+        <div class="section-title">
+          {{ $t('settings.docManager.title') }}
+        </div>
       </template>
       <el-form-item :label="$t('settings.docManager.enabled')">
         <el-switch
@@ -12,7 +20,9 @@
             :model-value="form.docManagerEnabled"
             @update:model-value="(val) => toggleFeature('docManagerEnabled', val)"
         />
-        <div class="form-hint">{{ $t('settings.docManager.disabledHint') }}</div>
+        <div class="form-hint">
+          {{ $t('settings.docManager.disabledHint') }}
+        </div>
       </el-form-item>
 
       <el-form-item :label="$t('settings.docManager.hotkey')">
@@ -24,14 +34,19 @@
         >
           <template #append>
             <el-button-group>
-              <el-button :title="$t('settings.clipboard.modifyShortcut')"
-                         :type="isDocManagerRecording ? 'danger' : 'primary'"
-                         @click="toggleDocManagerRecording">
+              <el-button
+                  :title="$t('settings.clipboard.modifyShortcut')"
+                  :type="isDocManagerRecording ? 'danger' : 'primary'"
+                  @click="toggleDocManagerRecording"
+              >
                 <el-icon>
                   <component :is="isDocManagerRecording ? VideoPause : Edit"/>
                 </el-icon>
               </el-button>
-              <el-button :title="$t('settings.clipboard.resetShortcut')" @click="resetDocManagerShortcut">
+              <el-button
+                  :title="$t('settings.clipboard.resetShortcut')"
+                  @click="resetDocManagerShortcut"
+              >
                 <el-icon>
                   <RefreshLeft/>
                 </el-icon>
@@ -47,14 +62,29 @@
             :model-value="form.docManagerWidgetEnabled"
             @update:model-value="onWidgetToggle"
         />
-        <div v-if="!form.docManagerEnabled" class="form-hint">{{ $t('settings.docManager.widgetDisabledHint') }}</div>
-        <div v-else class="form-hint">{{ $t('settings.docManager.widgetHint') }}</div>
+        <div
+            v-if="!form.docManagerEnabled"
+            class="form-hint"
+        >
+          {{ $t('settings.docManager.widgetDisabledHint') }}
+        </div>
+        <div
+            v-else
+            class="form-hint"
+        >
+          {{ $t('settings.docManager.widgetHint') }}
+        </div>
       </el-form-item>
     </el-card>
 
-    <el-card class="setting-section-card" shadow="never">
+    <el-card
+        class="setting-section-card"
+        shadow="never"
+    >
       <template #header>
-        <div class="section-title">{{ $t('settings.docManager.featureDesc') }}</div>
+        <div class="section-title">
+          {{ $t('settings.docManager.featureDesc') }}
+        </div>
       </template>
       <div class="feature-list">
         <div class="feature-item">
@@ -62,8 +92,12 @@
             <FolderAdd/>
           </el-icon>
           <div class="feature-content">
-            <div class="feature-title">{{ $t('settings.docManager.organize') }}</div>
-            <div class="feature-desc">{{ $t('settings.docManager.organizeDesc') }}</div>
+            <div class="feature-title">
+              {{ $t('settings.docManager.organize') }}
+            </div>
+            <div class="feature-desc">
+              {{ $t('settings.docManager.organizeDesc') }}
+            </div>
           </div>
         </div>
         <div class="feature-item">
@@ -71,8 +105,12 @@
             <Search/>
           </el-icon>
           <div class="feature-content">
-            <div class="feature-title">{{ $t('settings.docManager.fulltextSearch') }}</div>
-            <div class="feature-desc">{{ $t('settings.docManager.fulltextSearchDesc') }}</div>
+            <div class="feature-title">
+              {{ $t('settings.docManager.fulltextSearch') }}
+            </div>
+            <div class="feature-desc">
+              {{ $t('settings.docManager.fulltextSearchDesc') }}
+            </div>
           </div>
         </div>
         <div class="feature-item">
@@ -80,8 +118,12 @@
             <Collection/>
           </el-icon>
           <div class="feature-content">
-            <div class="feature-title">{{ $t('settings.docManager.categoryTag') }}</div>
-            <div class="feature-desc">{{ $t('settings.docManager.categoryTagDesc') }}</div>
+            <div class="feature-title">
+              {{ $t('settings.docManager.categoryTag') }}
+            </div>
+            <div class="feature-desc">
+              {{ $t('settings.docManager.categoryTagDesc') }}
+            </div>
           </div>
         </div>
       </div>
