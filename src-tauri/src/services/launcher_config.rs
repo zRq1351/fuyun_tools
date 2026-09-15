@@ -360,7 +360,7 @@ pub async fn add_custom_command(
     let created_at = chrono::Local::now().timestamp();
 
     if launcher_db::check_prefix_exists(&prefix, None).await? {
-        return Err(AppErrorKind::LauncherCommandPrefixExists.to_frontend_json_with_details(format!("{}", prefix)));
+        return Err(AppErrorKind::LauncherCommandPrefixExists.to_frontend_json_with_details(prefix.to_string()));
     }
 
     launcher_db::insert_custom_command(&launcher_db::CustomCommandRow {
@@ -411,7 +411,7 @@ pub async fn update_custom_command(
 
     if let Some(ref p) = prefix {
         if launcher_db::check_prefix_exists(p, Some(&command_id)).await? {
-            return Err(AppErrorKind::LauncherCommandPrefixExists.to_frontend_json_with_details(format!("{}", p)));
+            return Err(AppErrorKind::LauncherCommandPrefixExists.to_frontend_json_with_details(p.to_string()));
         }
     }
 

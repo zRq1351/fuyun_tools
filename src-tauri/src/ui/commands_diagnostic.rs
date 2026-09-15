@@ -184,9 +184,7 @@ pub(crate) async fn build_diagnostic_items_inner(
         .collect::<Vec<_>>();
     let perf_status = if perf_metrics.is_empty() {
         "unknown"
-    } else if !perf_error_items.is_empty() {
-        "warning"
-    } else if !perf_slow_items.is_empty() {
+    } else if !perf_error_items.is_empty() || !perf_slow_items.is_empty() {
         "warning"
     } else {
         "healthy"
@@ -282,9 +280,7 @@ pub(crate) async fn build_diagnostic_items_inner(
         .get("enabled")
         .and_then(|value| value.as_bool())
         .unwrap_or(true);
-    let dedup_status = if !dedup_enabled {
-        "warning"
-    } else if window_hit_rate > 0.8 {
+    let dedup_status = if !dedup_enabled || window_hit_rate > 0.8 {
         "warning"
     } else {
         "healthy"
@@ -710,7 +706,7 @@ pub(crate) async fn build_diagnostic_items_inner(
 pub async fn get_manual_longshot_availability() -> Result<ManualLongshotAvailability, String> {
     #[cfg(not(feature = "longshot-opencv"))]
     {
-        return Ok(ManualLongshotAvailability {
+        Ok(ManualLongshotAvailability {
             status: "unavailable_missing_dependency".to_string(),
             phase: "idle".to_string(),
             summary: "当前构建未启用长截图依赖".to_string(),
@@ -723,7 +719,7 @@ pub async fn get_manual_longshot_availability() -> Result<ManualLongshotAvailabi
             recent_failure_kind: None,
             recent_failure_message: None,
             recent_failure_at: None,
-        });
+        })
     }
 
     #[cfg(feature = "longshot-opencv")]

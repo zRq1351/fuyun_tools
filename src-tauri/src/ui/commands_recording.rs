@@ -269,11 +269,10 @@ pub async fn download_recording_ffmpeg(
             .map_err(|e| format!("写入临时文件失败: {}", e))?;
         downloaded_bytes = downloaded_bytes.saturating_add(chunk.len() as u64);
         let progress_percent = total_bytes.and_then(|total| {
-            if total == 0 {
-                None
-            } else {
-                Some(((downloaded_bytes.saturating_mul(100)) / total).min(100) as u8)
-            }
+            downloaded_bytes
+                .checked_mul(100)?
+                .checked_div(total)
+                .map(|p| p.min(100) as u8)
         });
         if let Err(e) = app.emit(
             "recording-ffmpeg-download-progress",

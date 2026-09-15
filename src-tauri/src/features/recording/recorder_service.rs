@@ -307,10 +307,12 @@ fn is_wgc_target(target_type: &str) -> bool {
 /// 解析显示器目标编码：
 /// - "wgc_screen" + "mon=0" → (0, None)
 /// - "wgc_region" + "mon=1,crop=100,200,800,600" → (1, Some((100,200,800,600)))，局部非负坐标
+type WgcMonitorTarget = Option<(usize, Option<(u32, u32, u32, u32)>)>;
+
 fn parse_wgc_monitor_target(
     target_type: &str,
     target_id: &str,
-) -> Option<(usize, Option<(u32, u32, u32, u32)>)> {
+) -> WgcMonitorTarget {
     if target_type != "wgc_screen" && target_type != "wgc_region" {
         return None;
     }
@@ -346,7 +348,7 @@ fn parse_screen_explicit_monitor(target_id: &str) -> Option<usize> {
 fn resolve_wgc_monitor_start_params(
     target_type: &str,
     target_id: &str,
-) -> Option<(usize, Option<(u32, u32, u32, u32)>)> {
+) -> WgcMonitorTarget {
     match target_type {
         "region" => {
             let rect = parse_region_target(target_id)?;
@@ -625,7 +627,7 @@ fn resolve_output_dir(
 }
 
 fn build_window_segment_path(
-    output_dir: &PathBuf,
+    output_dir: &std::path::Path,
     session_id: &str,
     segment_index: usize,
 ) -> PathBuf {
@@ -1536,8 +1538,8 @@ fn validate_video_input_for_merge(
 }
 
 fn rename_recording_output_with_retry(
-    output_tmp: &PathBuf,
-    output_final: &PathBuf,
+    output_tmp: &std::path::Path,
+    output_final: &std::path::Path,
 ) -> Result<(), AppError> {
     let mut last_err = String::new();
     for (idx, delay_ms) in VIDEO_IO_RETRY_DELAYS_MS.iter().enumerate() {
@@ -1558,9 +1560,9 @@ fn rename_recording_output_with_retry(
 }
 
 /// 将临时文件重命名为最终输出；目标已存在时追加序号 (1)/(2)…，避免静默覆盖历史录制
-fn rename_to_final_output(output_tmp: &PathBuf, output_final: &PathBuf) -> Result<PathBuf, AppError> {
+fn rename_to_final_output(output_tmp: &std::path::Path, output_final: &std::path::Path) -> Result<PathBuf, AppError> {
     let target = if !output_final.exists() {
-        output_final.clone()
+        output_final.to_path_buf()
     } else {
         let stem = output_final
             .file_stem()
@@ -1663,7 +1665,7 @@ fn build_window_capture_unavailable_error(details: &str) -> AppError {
 fn ensure_system_audio_capture_started(
     app: &AppHandle,
     runtime: &mut crate::features::recording::state::RecordingRuntime,
-    output_dir: &PathBuf,
+    output_dir: &std::path::Path,
     session_id: &str,
     emit_error_on_fail: bool,
 ) -> Result<(), String> {
@@ -1711,7 +1713,7 @@ fn ensure_system_audio_capture_started(
                 runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
                 runtime.system_audio_threads = handle.joins;
                 // 用采集线程回传的精确流启动时刻对齐时间轴，避免音频段整体偏早/偏晚
-                let actual_start_ms = derive_audio_segment_start_ms(&runtime, stream_start_ms);
+                let actual_start_ms = derive_audio_segment_start_ms(runtime, stream_start_ms);
                 runtime.system_audio_stream_start_ms = Some(actual_start_ms);
                 for p in output_paths {
                     runtime.system_audio_segments.push(
@@ -1775,7 +1777,7 @@ fn ensure_system_audio_capture_started(
             runtime.system_audio_stop_flag = Some(handle.stop_flag.clone());
             runtime.system_audio_threads = handle.join.into_iter().collect();
             // 用采集线程回传的精确流启动时刻对齐时间轴（含设备初始化/回退的实际延迟）
-            let actual_start_ms = derive_audio_segment_start_ms(&runtime, stream_start_ms);
+            let actual_start_ms = derive_audio_segment_start_ms(runtime, stream_start_ms);
             runtime.system_audio_stream_start_ms = Some(actual_start_ms);
             if let Some(path) = runtime.system_audio_wav_path.clone() {
                 runtime
@@ -1798,7 +1800,7 @@ fn ensure_system_audio_capture_started(
 fn ensure_mic_capture_started(
     app: &AppHandle,
     runtime: &mut crate::features::recording::state::RecordingRuntime,
-    output_dir: &PathBuf,
+    output_dir: &std::path::Path,
     session_id: &str,
     emit_error_on_fail: bool,
 ) -> Result<(), String> {
@@ -1856,7 +1858,7 @@ fn ensure_mic_capture_started(
             runtime.mic_audio_stop_flag = Some(handle.stop_flag.clone());
             runtime.mic_audio_thread = handle.joins.into_iter().next();
             // 用采集线程回传的精确流启动时刻对齐时间轴，避免麦克风相对系统音频提前/滞后
-            let actual_start_ms = derive_audio_segment_start_ms(&runtime, stream_start_ms);
+            let actual_start_ms = derive_audio_segment_start_ms(runtime, stream_start_ms);
             runtime.mic_audio_stream_start_ms = Some(actual_start_ms);
             if let Some(path) = runtime.mic_audio_wav_path.clone() {
                 runtime
@@ -2339,15 +2341,14 @@ fn spawn_ffmpeg_video_segment(
     fps: u32,
     capture_cursor: bool,
     video_bitrate: u32,
-    output_path: &PathBuf,
+    output_path: &std::path::Path,
 ) -> Result<(std::process::Child, std::process::ChildStderr), AppError> {
-    let mut args = Vec::new();
-
-    // 🔧 全局 flags：生成正确 PTS，丢弃损坏帧，增大输入缓冲防止初始帧丢失
-    args.push("-fflags".into());
-    args.push("+genpts+discardcorrupt".into());
-    args.push("-thread_queue_size".into());
-    args.push("1024".into());
+    let mut args = vec![
+        "-fflags".into(),
+        "+genpts+discardcorrupt".into(),
+        "-thread_queue_size".into(),
+        "1024".into(),
+    ];
 
     match target_type {
         "window" => {
@@ -2663,7 +2664,7 @@ pub fn start_recording(
         // 任何 WGC 启动失败均回退 gdigrab 原路径。
         if matches!(target_type.as_str(), "screen" | "region") && !force_ffmpeg_fallback {
             #[cfg(target_os = "windows")]
-            let monitor_start: Option<(usize, Option<(u32, u32, u32, u32)>)> =
+            let monitor_start: WgcMonitorTarget =
                 if target_type == "screen" {
                     match parse_screen_explicit_monitor(&target_id) {
                         Some(idx) => {
@@ -3256,11 +3257,7 @@ pub fn stop_recording(
             for seg in &mut sys_segments {
                 let orig_start_ms = seg.start_ms;
                 if let Some(end_ms) = seg.end_ms.as_mut() {
-                    *end_ms = if *end_ms > effective_delay {
-                        *end_ms - effective_delay
-                    } else {
-                        0
-                    };
+                    *end_ms = (*end_ms).saturating_sub(effective_delay);
                 }
                 if orig_start_ms < effective_delay {
                     seg.trim_start_ms = effective_delay - orig_start_ms;
@@ -3275,7 +3272,7 @@ pub fn stop_recording(
                     seg.trim_start_ms = effective_delay - seg.start_ms;
                     seg.start_ms = 0;
                 } else {
-                    seg.start_ms = seg.start_ms - effective_delay;
+                    seg.start_ms -= effective_delay;
                     seg.trim_start_ms = 0;
                 }
             }
@@ -3333,11 +3330,7 @@ pub fn stop_recording(
         sys_segments.clear();
     }
     let sys_audio_elapsed = sys_audio_join_start.elapsed().as_millis();
-    if sys_audio_elapsed > 100 {
-        log::debug!("✅ 系统音频线程已退出，join耗时: {}ms", sys_audio_elapsed);
-    } else {
-        log::debug!("✅ 系统音频线程已退出，join耗时: {}ms", sys_audio_elapsed);
-    }
+    log::debug!("✅ 系统音频线程已退出，join耗时: {}ms", sys_audio_elapsed);
 
     log::debug!("🔧 等待麦克风音频线程退出...");
     let mic_audio_join_start = std::time::Instant::now();
@@ -3351,11 +3344,7 @@ pub fn stop_recording(
         }
     }
     let mic_audio_elapsed = mic_audio_join_start.elapsed().as_millis();
-    if mic_audio_elapsed > 100 {
-        log::debug!("✅ 麦克风音频线程已退出，join耗时: {}ms", mic_audio_elapsed);
-    } else {
-        log::debug!("✅ 麦克风音频线程已退出，join耗时: {}ms", mic_audio_elapsed);
-    }
+    log::debug!("✅ 麦克风音频线程已退出，join耗时: {}ms", mic_audio_elapsed);
 
     // 🔧 记录总停止耗时
     let total_stop_ms = stop_started_at.elapsed().as_millis();
@@ -4356,7 +4345,7 @@ pub fn update_audio_capture(
                 true,
             )
             .map_err(|e| {
-                AppError::new(ErrorCode::SystemError, AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
+                AppError::new(ErrorCode::SystemError, AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))
                     .with_details(e)
             })?;
         }
@@ -4367,7 +4356,7 @@ pub fn update_audio_capture(
         } else {
             ensure_mic_capture_started(app, &mut runtime, &output_dir, &session_id, true)
                 .map_err(|e| {
-                    AppError::new(ErrorCode::SystemError, AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
+                    AppError::new(ErrorCode::SystemError, AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))
                         .with_details(e)
                 })?;
         }

@@ -17,7 +17,8 @@ use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// 缓存的AI客户端（当配置不变时复用），使用 Arc 避免每次命中时 clone 配置字符串
-static CACHED_AI_CLIENT: LazyLock<Mutex<Option<(Arc<AIConfig>, Arc<AIClient>)>>> =
+type CachedAiClient = (Arc<AIConfig>, Arc<AIClient>);
+static CACHED_AI_CLIENT: LazyLock<Mutex<Option<CachedAiClient>>> =
     LazyLock::new(|| Mutex::new(None));
 
 /// 强制清除 AI 客户端缓存，下次请求会重新从凭据管理器读取 API Key 并创建新客户端

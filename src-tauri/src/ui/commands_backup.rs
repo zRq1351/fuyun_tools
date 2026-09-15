@@ -259,7 +259,7 @@ pub(crate) fn list_backup_history_items(target_dir: &Path) -> Result<Vec<BackupH
             created_at,
         });
     }
-    items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    items.sort_by_key(|item| std::cmp::Reverse(item.created_at));
     Ok(items)
 }
 
@@ -288,7 +288,7 @@ async fn export_backup_internal(
     state: &Arc<Mutex<SharedAppState>>,
 ) -> Result<BackupExportResultData, String> {
     let prepare_started_at = std::time::Instant::now();
-    let prepared = build_prepared_backup_data(state).await.map_err(|error| {
+    let prepared = build_prepared_backup_data(state).await.inspect_err(|error| {
         record_perf_metric(
             "backup.export_stage.prepare_data",
             "备份导出准备数据耗时",
@@ -296,7 +296,6 @@ async fn export_backup_internal(
             false,
             Some(error.clone()),
         );
-        error
     })?;
     record_perf_metric(
         "backup.export_stage.prepare_data",

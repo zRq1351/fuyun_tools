@@ -61,7 +61,7 @@ static IMAGE_POLLER: ClipboardPoller = ClipboardPoller::new(&IMAGE_LISTENER_RUNN
 
 fn maybe_log_queue_metrics() {
     let enqueued = IMAGE_QUEUE_METRICS.enqueued.load(Ordering::Relaxed);
-    if enqueued == 0 || enqueued % 40 != 0 {
+    if enqueued == 0 || !enqueued.is_multiple_of(40) {
         return;
     }
     let dequeued = IMAGE_QUEUE_METRICS.dequeued.load(Ordering::Relaxed);
@@ -157,8 +157,8 @@ fn matches_recent_sample(width: u32, height: u32, rgba: &[u8]) -> bool {
     for (idx, (recent_width, recent_height, recent_sample)) in
         recent.iter().rev().take(3).enumerate()
     {
-        if *recent_width == width && *recent_height == height {
-            if recent_sample == &sample {
+        if *recent_width == width && *recent_height == height
+            && recent_sample == &sample {
                 log::debug!(
                     "[重复检查] 图片 {}x{} 与最近第 {} 张图片采样命中，继续执行强签名校验",
                     width,
@@ -167,7 +167,6 @@ fn matches_recent_sample(width: u32, height: u32, rgba: &[u8]) -> bool {
                 );
                 return true;
             }
-        }
     }
     log::debug!("[重复检查] 图片 {}x{} 未发现重复", width, height);
     false

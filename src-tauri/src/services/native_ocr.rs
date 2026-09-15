@@ -251,7 +251,7 @@ pub async fn recognize_png_bytes(png_bytes: &[u8]) -> Result<OcrResult, String> 
     ];
 
     for (lang, strategy_name) in original_attempts {
-        match run_windows_ocr(&png_bytes, lang).await {
+        match run_windows_ocr(png_bytes, lang).await {
             Ok(result) => {
                 let current_score = score(&result);
                 log::debug!("OCR策略 {} 得分: {}", strategy_name, current_score);

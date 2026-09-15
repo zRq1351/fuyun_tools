@@ -664,6 +664,7 @@ pub async fn reorder_doc_categories(ids: Vec<i64>) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_doc_file(
     root_id: i64,
     file_name: &str,
@@ -868,7 +869,7 @@ pub async fn update_doc_file_meta(
                 Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name),
                 Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or(""));
             let dest = target_dir.join(&new_name);
-            safe_move_file(old_path, &dest).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            safe_move_file(old_path, &dest).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
             let new_managed = dest.to_string_lossy().to_string();
             if let Err(e) = sqlx::query("UPDATE document_files SET managed_path = ?1 WHERE id = ?2")
                 .bind(&new_managed)
@@ -943,7 +944,7 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
             // 先移动文件，再更新数据库
             // 如果文件移动成功但数据库更新失败，可回滚文件
             safe_move_file(old_path, &dest)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
 
             {
                 let mut tx = conn.begin().await
@@ -1052,7 +1053,7 @@ pub async fn atomic_move_doc(
                 safe_move_file(old_path, &dest).map_err(|e| {
                     // 移动失败时清理可能残留的目标副本，保持源文件不变
                     let _ = fs::remove_file(&dest);
-                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
                 })?;
                 file_moves.push((old_path.to_path_buf(), dest.clone()));
                 let new_managed = dest.to_string_lossy().to_string();
@@ -1143,7 +1144,7 @@ pub async fn atomic_move_doc(
                             let dest = target_dir.join(&new_name);
                             safe_move_file(old_path, &dest).map_err(|e| {
                                 rollback_moves(&mut file_moves);
-                                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                                AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
                             })?;
                             file_moves.push((old_path.to_path_buf(), dest.clone()));
                             if let Err(e) = sqlx::query("UPDATE document_files SET managed_path = ?1 WHERE id = ?2")
@@ -1203,7 +1204,7 @@ async fn get_doc_file_in_tx(tx: &mut sqlx::Transaction<'_, Sqlite>, id: i64) -> 
     .fetch_optional(&mut **tx)
     .await
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
-    Ok(row.as_ref().map(|r| row_to_doc_file(r)))
+    Ok(row.as_ref().map(row_to_doc_file))
 }
 
 async fn get_doc_root_by_id_in_tx(tx: &mut sqlx::Transaction<'_, Sqlite>, id: i64) -> Result<Option<DocRoot>, String> {
@@ -1456,7 +1457,7 @@ pub async fn get_doc_page(
             .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?
     };
 
-    let items: Vec<DocFile> = rows.iter().map(|r| row_to_doc_file(r)).collect();
+    let items: Vec<DocFile> = rows.iter().map(row_to_doc_file).collect();
 
     Ok(DocPageData {
         total,
@@ -1742,7 +1743,7 @@ pub async fn undo_import_item(import_id: i64, doc_file_id: i64) -> Result<(), St
                 let _ = std::fs::create_dir_all(parent);
             }
             safe_move_file(managed_path, source_path)
-                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+                .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))?;
         }
     }
 

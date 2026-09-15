@@ -145,12 +145,11 @@ pub fn bind_overlay_window_events(
     let is_result_window = label.starts_with("result_");
     
     window.on_window_event(move |event| match event {
-        tauri::WindowEvent::CloseRequested { api, .. } => {
-            if !is_result_window {
+        tauri::WindowEvent::CloseRequested { api, .. }
+        if !is_result_window => {
                 api.prevent_close();
                 hide_overlay_window(&app_handle, &label, &window_clone);
             }
-        }
         tauri::WindowEvent::Destroyed => {
             let (should_clear, visibility_cleared) = app_handle
                 .try_state::<Arc<Mutex<AppState>>>()
@@ -1163,23 +1162,20 @@ pub fn ensure_window_for_label(app: &AppHandle, label: &str) -> Result<(), Strin
         "document_manager" => { ensure_document_manager_window(app)?; }
         "document_manager_widget" => { ensure_doc_manager_widget_window(app)?; }
         "selection_toolbar" => { ensure_selection_toolbar_window(app)?; }
-        "recording_toolbar" => {
-            if app.get_webview_window(label).is_none() {
+        "recording_toolbar"
+        if app.get_webview_window(label).is_none() => {
                 let (_, _) = ensure_overlay_window(app, label, "recording_toolbar.html", "录屏工具栏", Some((530.0, 64.0)))?;
             }
-        }
-        "longshot_toolbar" => {
-            if app.get_webview_window(label).is_none() {
+        "longshot_toolbar"
+        if app.get_webview_window(label).is_none() => {
                 let (window, _) = ensure_overlay_window(app, label, "longshot_toolbar.html", "长截图工具栏", Some((320.0, 180.0)))?;
                 let _ = window.set_content_protected(true);
             }
-        }
-        "longshot_border" => {
-            if app.get_webview_window(label).is_none() {
+        "longshot_border"
+        if app.get_webview_window(label).is_none() => {
                 let (window, _) = ensure_overlay_window(app, label, "longshot_border.html", "长截图边框", None)?;
                 let _ = window.set_content_protected(true);
             }
-        }
         _ => {}
     }
     Ok(())
@@ -1514,9 +1510,8 @@ fn try_restore_foreground_target(target: &ForegroundTargetSnapshot) -> bool {
         if IsIconic(hwnd) != BOOL(0) {
             let _ = ShowWindow(hwnd, SW_RESTORE);
         } else {
-            let _ = ShowWindow(hwnd, SW_RESTORE);
+            let _ = BringWindowToTop(hwnd);
         }
-        let _ = BringWindowToTop(hwnd);
         SetForegroundWindow(hwnd) != BOOL(0)
     }
 }

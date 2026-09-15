@@ -518,10 +518,11 @@ pub fn run() {
             emit_image_history_payload(app_handle, state_arc.clone());
 
             #[cfg(windows)]
-            if {
+            let res = {
                 let guard = lock_arc_mutex(&state_arc);
                 guard.settings.selection_enabled
-            } {
+            };
+            if res {
                 start_text_selection_listener(app_handle.clone(), state_arc.clone());
             }
 
@@ -537,7 +538,7 @@ pub fn run() {
             // document_manager 窗口由 show_standard_window 懒创建
 
             if doc_manager_widget_enabled && doc_manager_enabled {
-                if let Err(e) = show_doc_manager_widget_window(&app_handle) {
+                if let Err(e) = show_doc_manager_widget_window(app_handle) {
                     log::error!("显示文档管理小部件失败: {}", e);
                 }
             }

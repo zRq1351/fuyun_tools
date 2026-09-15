@@ -144,7 +144,7 @@ pub async fn restore_backup_package(
                     let started_at = Instant::now();
                     restore_settings(&state, &extracted_dir)
                         .await
-                        .map_err(|error| {
+                        .inspect_err(|error| {
                             record_backup_restore_stage_metric(
                                 "restore_settings",
                                 "备份恢复设置耗时",
@@ -152,7 +152,6 @@ pub async fn restore_backup_package(
                                 false,
                                 Some(error.clone()),
                             );
-                            error
                         })?;
                     record_backup_restore_stage_metric(
                         "restore_settings",
@@ -167,7 +166,7 @@ pub async fn restore_backup_package(
                     let strategy = request.restore_strategy.clone();
                     restore_text_history(&state, &extracted_dir, &strategy)
                         .await
-                        .map_err(|error| {
+                        .inspect_err(|error| {
                             record_backup_restore_stage_metric(
                                 "restore_text_history",
                                 "备份恢复文本历史耗时",
@@ -175,7 +174,6 @@ pub async fn restore_backup_package(
                                 false,
                                 Some(error.clone()),
                             );
-                            error
                         })?;
                     record_backup_restore_stage_metric(
                         "restore_text_history",
@@ -190,7 +188,7 @@ pub async fn restore_backup_package(
                     let strategy = request.restore_strategy.clone();
                     restore_image_history(&state, &extracted_dir, &strategy)
                         .await
-                        .map_err(|error| {
+                        .inspect_err(|error| {
                             record_backup_restore_stage_metric(
                                 "restore_image_history",
                                 "备份恢复图片历史耗时",
@@ -198,7 +196,6 @@ pub async fn restore_backup_package(
                                 false,
                                 Some(error.clone()),
                             );
-                            error
                         })?;
                     record_backup_restore_stage_metric(
                         "restore_image_history",
@@ -209,7 +206,7 @@ pub async fn restore_backup_package(
                     );
                 }
                 let rebuild_started_at = Instant::now();
-                rebuild_runtime_managers(&state).await.map_err(|error| {
+                rebuild_runtime_managers(&state).await.inspect_err(|error| {
                     record_backup_restore_stage_metric(
                         "rebuild_runtime",
                         "备份恢复重建运行时耗时",
@@ -217,7 +214,6 @@ pub async fn restore_backup_package(
                         false,
                         Some(error.clone()),
                     );
-                    error
                 })?;
                 record_backup_restore_stage_metric(
                     "rebuild_runtime",
@@ -519,7 +515,7 @@ async fn restore_image_history(
         }
 
         for category in &wrapper.category_list {
-            if let Err(_) = image_store::add_category_if_not_exists_async(category).await {}
+            let _ = image_store::add_category_if_not_exists_async(category).await;
         }
         for (item_id, tags) in &wrapper.image_tags {
             image_store::sync_tags_for_item_async(item_id, tags).await?;

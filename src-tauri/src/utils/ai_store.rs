@@ -103,7 +103,7 @@ async fn generate_and_store_key(pool: &sqlx::SqlitePool) -> [u8; 32] {
             .await;
         return key_bytes;
     }
-    let k = base64::engine::general_purpose::STANDARD.encode(&key_bytes);
+    let k = base64::engine::general_purpose::STANDARD.encode(key_bytes);
     sqlx::query("INSERT OR REPLACE INTO ai_meta (key, value) VALUES ('encryption_key', ?1)")
         .bind(&k)
         .execute(pool)

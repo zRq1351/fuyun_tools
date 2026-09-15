@@ -489,8 +489,7 @@ impl AppSettingsData {
             return true;
         }
         // hex: #RGB, #RRGGBB, #RRGGBBAA
-        if trimmed.starts_with('#') {
-            let hex = &trimmed[1..];
+        if let Some(hex) = trimmed.strip_prefix('#') {
             return (hex.len() == 3 || hex.len() == 6 || hex.len() == 8)
                 && hex.chars().all(|c| c.is_ascii_hexdigit());
         }
@@ -579,7 +578,7 @@ impl AppSettingsData {
             return Err(AppErrorKind::SettingsRecordingAudioSyncRange.to_frontend_json());
         }
 
-        for (_provider_name, config) in &self.provider_configs {
+        for config in self.provider_configs.values() {
             if !config.api_url.is_empty() {
                 let is_secure = config.api_url.starts_with("https://");
                 let is_localhost = config.api_url.starts_with("http://localhost")

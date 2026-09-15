@@ -142,7 +142,7 @@ fn get_windows_list_win32() -> Result<Vec<WindowInfo>, String> {
         };
         let windows = windows_ptr.as_mut();
 
-        if IsWindowVisible(hwnd).as_bool() == false {
+        if !IsWindowVisible(hwnd).as_bool() {
             return BOOL(1);
         }
 

@@ -41,7 +41,7 @@ impl PerfCategory {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "startup" => PerfCategory::Startup,
             "memory" => PerfCategory::Memory,
@@ -515,9 +515,9 @@ mod tests {
         ];
         for (cat, s) in cases {
             assert_eq!(cat.as_str(), s);
-            assert_eq!(PerfCategory::from_str(s), cat);
+            assert_eq!(PerfCategory::parse(s), cat);
         }
-        assert_eq!(PerfCategory::from_str("unknown_category"), PerfCategory::Other);
+        assert_eq!(PerfCategory::parse("unknown_category"), PerfCategory::Other);
     }
 
     #[test]

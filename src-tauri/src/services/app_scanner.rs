@@ -302,16 +302,18 @@ fn shell_execute_open(path: &str, args: Option<&str>) -> Result<(), String> {
     let args_ptr = args_vec.as_ref()
         .map_or(PCWSTR::null(), |v| PCWSTR(v.as_ptr()));
 
-    let mut sei = SHELLEXECUTEINFOW::default();
-    sei.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
-    sei.fMask = SEE_MASK_FLAG_NO_UI;
-    sei.hwnd = HWND::default();
-    sei.lpVerb = PCWSTR(wide_verb.as_ptr());
-    sei.lpFile = PCWSTR(wide_path.as_ptr());
-    sei.lpParameters = args_ptr;
-    sei.lpDirectory = PCWSTR::null();
-    sei.nShow = SW_SHOW.0;
-    sei.hInstApp = HINSTANCE::default();
+    let mut sei = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_FLAG_NO_UI,
+        hwnd: HWND::default(),
+        lpVerb: PCWSTR(wide_verb.as_ptr()),
+        lpFile: PCWSTR(wide_path.as_ptr()),
+        lpParameters: args_ptr,
+        lpDirectory: PCWSTR::null(),
+        nShow: SW_SHOW.0,
+        hInstApp: HINSTANCE::default(),
+        ..Default::default()
+    };
 
     let result = unsafe { ShellExecuteExW(&mut sei) };
     if result.is_ok() {

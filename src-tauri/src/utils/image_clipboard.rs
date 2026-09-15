@@ -82,7 +82,7 @@ fn push_persist_task_with_timeout(
                     Ok(_) => {
                         let waited = started_at.elapsed().as_millis() as u64;
                         IMAGE_PERSIST_QUEUE_WAIT_MS_TOTAL.fetch_add(waited, Ordering::Relaxed);
-                        if full_count % 50 == 0 {
+                        if full_count.is_multiple_of(50) {
                             let timeout_drop =
                                 IMAGE_PERSIST_QUEUE_TIMEOUT_DROP_COUNT.load(Ordering::Relaxed);
                             let wait_total =
@@ -191,10 +191,13 @@ pub fn init_preview_generator_with_app_handle(app_handle: tauri::AppHandle) {
     *generator = PreviewGenerator::new(Some(app_handle));
 }
 
+type PreviewCacheValue = (u32, u32, String);
+type PreviewCache = Arc<Mutex<LruCache<String, PreviewCacheValue>>>;
+
 struct PreviewGenerator {
     task_tx: SyncSender<PreviewGenerationTask>,
     _persist_tx: SyncSender<PreviewPersistTask>,
-    preview_cache: Arc<Mutex<LruCache<String, (u32, u32, String)>>>,
+    preview_cache: PreviewCache,
 }
 
 impl PreviewGenerator {
@@ -1730,7 +1733,7 @@ impl ImageClipboardManager {
                     std::thread::sleep(Duration::from_millis(*delay_ms));
                 }
             }
-            Err(AppErrorKind::SystemWriteClipboardFailed.to_frontend_json_with_details(format!("{}", last_error)))
+            Err(AppErrorKind::SystemWriteClipboardFailed.to_frontend_json_with_details(last_error.to_string()))
         })
     }
 
@@ -1886,7 +1889,7 @@ impl ImageClipboardManager {
         }
     }
 
-    fn enforce_full_res_cache_budget_lru(&self, history: &mut Vec<ImageHistoryItem>) {
+    fn enforce_full_res_cache_budget_lru(&self, history: &mut [ImageHistoryItem]) {
         let mut total = history.iter().fold(0usize, |acc, item| {
             acc.saturating_add(item.rgba_bytes.len())
         });
@@ -2342,7 +2345,7 @@ fn start_image_persist_worker(
         while let Ok(task) = persist_rx.recv() {
             let persist_result = if let Some(encoded_bytes) = task.encoded_bytes.as_ref() {
                 atomic_write_with_backup(Path::new(&task.image_path), encoded_bytes)
-                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
+                    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))
             } else {
                 persist_generated_image_to_path(
                     &task.image_path,
@@ -2385,7 +2388,7 @@ fn persist_generated_image_to_path(
         rgba_to_png_bytes_for_storage(rgba, width, height)?
     };
     atomic_write_with_backup(Path::new(path), &encoded)
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()))
 }
 
 fn rgba_to_lossless_webp_bytes(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
@@ -2739,9 +2742,13 @@ fn parse_local_image_path_from_text(text: &str) -> Option<String> {
     None
 }
 
+type ImageSourceBytes = (Vec<u8>, String);
+type DecodedImagePayload = (Vec<u8>, u32, u32, Option<ImageSourceBytes>);
+type LocalImageImport = (Vec<u8>, u32, u32, Vec<u8>, String);
+
 fn parse_image_from_text_payload(
     text: &str,
-) -> Option<(Vec<u8>, u32, u32, Option<(Vec<u8>, String)>)> {
+) -> Option<DecodedImagePayload> {
     if let Some(payload) = parse_data_url_image(text) {
         return Some(payload);
     }
@@ -2760,7 +2767,7 @@ fn parse_image_from_text_payload(
     None
 }
 
-fn parse_data_url_image(text: &str) -> Option<(Vec<u8>, u32, u32, Option<(Vec<u8>, String)>)> {
+fn parse_data_url_image(text: &str) -> Option<DecodedImagePayload> {
     let trimmed = text.trim();
     let data_url = if trimmed.starts_with("data:image/") {
         trimmed
@@ -2866,7 +2873,7 @@ fn looks_like_image_file_path(path: &str) -> bool {
         || lower.ends_with(".webp")
 }
 
-fn read_local_image_for_import(path: &str) -> Result<(Vec<u8>, u32, u32, Vec<u8>, String), String> {
+fn read_local_image_for_import(path: &str) -> Result<LocalImageImport, String> {
     let source_bytes = std::fs::read(path).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let dyn_img =
         image::load_from_memory(&source_bytes).map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;

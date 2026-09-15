@@ -8,7 +8,7 @@ const SHGFI_LARGEICON: u32 = 0x000000000;
 const SHGFI_USEFILEATTRIBUTES: u32 = 0x000000010;
 
 #[repr(C)]
-#[allow(non_snake_case)]
+#[allow(non_snake_case, clippy::upper_case_acronyms)]
 struct SHFILEINFOW {
     hIcon: *mut std::ffi::c_void,
     iIcon: i32,
@@ -118,10 +118,7 @@ fn extract_icon_from_shell(
             final_buffer.extend_from_slice(&[r, g, b, a]);
         }
 
-        let img = match image::RgbaImage::from_raw(width as u32, height as u32, final_buffer) {
-            Some(img) => img,
-            None => return None,
-        };
+        let img = image::RgbaImage::from_raw(width as u32, height as u32, final_buffer)?;
 
         let mut png_data = Vec::new();
         {

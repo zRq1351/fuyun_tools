@@ -185,7 +185,7 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
     for file_path_str in &request.paths {
         let src = Path::new(file_path_str);
         if !src.exists() {
-            errors.push(AppErrorKind::DocumentFileNotFound.to_frontend_json_with_details(format!("{}", file_path_str)));
+            errors.push(AppErrorKind::DocumentFileNotFound.to_frontend_json_with_details(file_path_str.to_string()));
             continue;
         }
         if !src.is_file() {
@@ -462,7 +462,7 @@ pub async fn open_doc(_app_handle: AppHandle, id: i64) -> Result<(), String> {
     let path = Path::new(&doc.managed_path);
     if !path.exists() {
         let _ = document_database::mark_doc_missing(id).await;
-        return Err(AppErrorKind::DocumentFileNotFound.to_frontend_json_with_details(format!("{}", doc.managed_path)));
+        return Err(AppErrorKind::DocumentFileNotFound.to_frontend_json_with_details(doc.managed_path.to_string()));
     }
 
     document_database::increment_visit_count(id).await.ok();

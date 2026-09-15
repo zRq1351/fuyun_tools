@@ -48,12 +48,12 @@ pub async fn check_vc_runtime_dependencies() -> Result<serde_json::Value, String
                 "forcedByDev": true
             }));
         }
-        return Ok(serde_json::json!({
+        Ok(serde_json::json!({
             "ok": missing.is_empty(),
             "missing": missing,
             "installUrl": "https://aka.ms/vs/17/release/vc_redist.x64.exe",
             "forcedByDev": false
-        }));
+        }))
     }
     #[cfg(not(windows))]
     {
@@ -181,11 +181,10 @@ pub async fn download_vc_runtime_installer(
                 .map_err(|e| format!("写入临时文件失败: {}", e))?;
             downloaded_bytes = downloaded_bytes.saturating_add(chunk.len() as u64);
             let progress_percent = total_bytes.and_then(|total| {
-                if total == 0 {
-                    None
-                } else {
-                    Some(((downloaded_bytes.saturating_mul(100)) / total).min(100) as u8)
-                }
+                downloaded_bytes
+                    .checked_mul(100)?
+                    .checked_div(total)
+                    .map(|p| p.min(100) as u8)
             });
             let _ = app.emit(
                 "vc-runtime-download-progress",
@@ -231,10 +230,10 @@ pub async fn download_vc_runtime_installer(
             },
         );
 
-        return Ok(serde_json::json!({
+        Ok(serde_json::json!({
             "installerPath": installer_path.to_string_lossy().to_string(),
             "downloadUrl": url
-        }));
+        }))
     }
     #[cfg(not(windows))]
     {
@@ -250,7 +249,7 @@ pub async fn open_vc_runtime_installer(installer_path: String) -> Result<(), Str
         std::process::Command::new(&path)
             .spawn()
             .map_err(|e| format!("启动安装程序失败: {}", e))?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(windows))]
     {
@@ -279,12 +278,12 @@ pub async fn install_vc_runtime_and_wait(
         let success = matches!(exit_code, 0 | 1638 | 3010);
         let cancelled = exit_code == 1602;
         let reboot_required = exit_code == 3010;
-        return Ok(serde_json::json!({
+        Ok(serde_json::json!({
             "success": success,
             "cancelled": cancelled,
             "rebootRequired": reboot_required,
             "exitCode": exit_code
-        }));
+        }))
     }
     #[cfg(not(windows))]
     {

@@ -15,11 +15,12 @@ use std::time::{Duration, Instant};
 
 /// 全局数据库连接池
 static DB_POOL: OnceLock<Arc<SqlitePool>> = OnceLock::new();
-static CATEGORY_LIST_CACHE: OnceLock<Arc<StdMutex<Option<(Instant, Vec<String>)>>>> =
-    OnceLock::new();
+type CategoryListCacheValue = (Instant, Vec<String>);
+type CategoryListCache = Arc<StdMutex<Option<CategoryListCacheValue>>>;
+static CATEGORY_LIST_CACHE: OnceLock<CategoryListCache> = OnceLock::new();
 const CATEGORY_LIST_CACHE_TTL: Duration = Duration::from_secs(2);
 
-fn get_category_list_cache() -> &'static Arc<StdMutex<Option<(Instant, Vec<String>)>>> {
+fn get_category_list_cache() -> &'static CategoryListCache {
     CATEGORY_LIST_CACHE.get_or_init(|| Arc::new(StdMutex::new(None)))
 }
 
@@ -1053,14 +1054,12 @@ pub async fn load_history_page_async(
         .map(|v| matches!(v, "pinnedFirst" | "pinned_first" | "pinnedfirst"))
         .unwrap_or(true);
     let order_clause = if pinned_first {
-        format!(
-            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC,
+        "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC,
              CASE WHEN p.item_id IS NOT NULL THEN COALESCE(p.position, 2147483647) END ASC,
              hi.position ASC,
-             hi.item_id ASC"
-        )
+             hi.item_id ASC".to_string()
     } else {
-        format!("hi.position ASC, hi.item_id ASC")
+        "hi.position ASC, hi.item_id ASC".to_string()
     };
     let keyword_like = keyword_filter.as_ref().map(|v| format!("%{}%", v));
     let effective_limit = limit.clamp(1, 200);

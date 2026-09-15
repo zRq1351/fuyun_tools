@@ -598,6 +598,7 @@ fn effective_key(new: &Option<String>, fallback: &str) -> String {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn save_app_settings(
     text_max_items: Option<usize>,
     image_max_items: Option<usize>,
@@ -2183,7 +2184,7 @@ pub async fn remove_ai_provider(
 #[tauri::command]
 pub async fn get_all_configured_providers() -> Result<Vec<(String, String)>, String> {
     let providers = crate::utils::ai_store::get_all_providers().await;
-    Ok(providers.into_iter().map(|(k, _)| (k.clone(), k)).collect())
+    Ok(providers.into_keys().map(|k| (k.clone(), k)).collect())
 }
 
 /// 获取图片预览（优先使用已生成的，否则尝试从异步缓存获取）

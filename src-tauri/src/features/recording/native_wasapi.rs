@@ -1143,8 +1143,7 @@ pub fn start_system_loopback_aac_with_device(
 
             let stdin = child.stdin.take().ok_or("无法获取 FFmpeg stdin")?;
             // H1 修复：消费 FFmpeg stderr 防止管道满导致挂起（#57）
-            let stderr_join = if let Some(stderr) = child.stderr.take() {
-                Some(std::thread::spawn(move || {
+            let stderr_join = child.stderr.take().map(|stderr| std::thread::spawn(move || {
                     use std::io::BufRead;
                     let reader = std::io::BufReader::new(stderr);
                     for line in reader.lines() {
@@ -1156,10 +1155,7 @@ pub fn start_system_loopback_aac_with_device(
                             _ => {}
                         }
                     }
-                }))
-            } else {
-                None
-            };
+            }));
 
             {
                 if let Ok(mut guard) = thread_ffmpeg.lock() {
@@ -1269,8 +1265,7 @@ pub fn start_system_loopback_aac_with_device(
             // 填充尾部静音，与 WAV 系统路径一致：2s（#27/#N3）
             // 用 try_send + 超时：编码器/磁盘卡住时不能永久阻塞 stop 路径
             let tail_frames = (config.sample_rate as usize) * (config.channels as usize) * 2;
-            let mut silence = Vec::with_capacity(tail_frames * 4);
-            silence.resize(tail_frames * 4, 0u8);
+            let silence = vec![0; tail_frames * 4];
             let send_deadline = std::time::Instant::now() + Duration::from_millis(3000);
             let mut sent_silence = false;
             let mut sent_close = false;

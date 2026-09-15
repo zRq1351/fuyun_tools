@@ -13,7 +13,7 @@ fn validate_identifier(name: &str) -> Result<(), String> {
         return Err(format!("Invalid identifier: {}", name));
     }
     // 防止纯数字开头（SQLite惯例）
-    if name.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+    if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         return Err(format!("Identifier cannot start with a digit: {}", name));
     }
     Ok(())
@@ -227,7 +227,7 @@ pub fn build_keyword_snippet(
 
     if let Some(pos) = lower_content.find(&lower_keyword) {
         let keyword_len = lower_keyword.len();
-        let start = if pos > 20 { pos - 20 } else { 0 };
+        let start = pos.saturating_sub(20);
         let end = std::cmp::min(content.len(), pos + keyword_len + 60);
 
         let start = adjust_to_char_boundary(content, start);

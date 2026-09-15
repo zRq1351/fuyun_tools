@@ -41,9 +41,9 @@ pub fn clean_ocr_text(text: &str) -> String {
     // 检测是否主要为中文（中文字符占比超过50%）
     let chinese_count = text.chars().filter(|c| {
         let cp = *c as u32;
-        (cp >= 0x4E00 && cp <= 0x9FFF) ||  // CJK统一汉字
-        (cp >= 0x3400 && cp <= 0x4DBF) ||  // CJK扩展A
-        (cp >= 0x20000 && cp <= 0x2A6DF)   // CJK扩展B
+        (0x4E00..=0x9FFF).contains(&cp) ||  // CJK统一汉字
+            (0x3400..=0x4DBF).contains(&cp) ||  // CJK扩展A
+            (0x20000..=0x2A6DF).contains(&cp)   // CJK扩展B
     }).count();
 
     let total_chars = text.chars().filter(|c| !c.is_whitespace()).count();
@@ -81,18 +81,15 @@ pub fn clean_ocr_text(text: &str) -> String {
 
 /// OCR 引擎类型
 #[derive(Clone, Debug)]
+#[derive(Default)]
 pub enum OcrEngineType {
     /// Windows 原生 OCR（快速，中等准确率）
     WindowsNative,
     /// ocr-rs 原生 Rust OCR（基于 PaddleOCR + MNN，高准确率）
+    #[default]
     OcrRs,
 }
 
-impl Default for OcrEngineType {
-    fn default() -> Self {
-        Self::OcrRs
-    }
-}
 
 /// 统一的 OCR 识别接口
 pub async fn recognize_image(png_bytes: &[u8], engine_type: OcrEngineType, app_handle: &tauri::AppHandle) -> Result<OcrResult, String> {

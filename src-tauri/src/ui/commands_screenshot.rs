@@ -92,7 +92,7 @@ pub async fn resize_selection_toolbar(
             if let Ok(hwnd) = window.hwnd() {
                 unsafe {
                     let _ = SetWindowPos(
-                        windows::Win32::Foundation::HWND(hwnd.0 as *mut core::ffi::c_void),
+                        windows::Win32::Foundation::HWND(hwnd.0),
                         None,
                         x,
                         y,
@@ -855,7 +855,7 @@ fn set_screenshot_window_passthrough_internal(
         .set_ignore_cursor_events(enabled)
         .map_err(|e| format!("设置截图窗口输入穿透失败: {}", e))?;
     if !enabled {
-        let _ = focus_overlay_window_by_label(&app, "screenshot");
+        let _ = focus_overlay_window_by_label(app, "screenshot");
     }
     Ok(())
 }
@@ -1318,7 +1318,7 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
     let session_id = NEXT_SCREENSHOT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
 
     let (image_path, _png_data) =
-        write_screenshot_boot_image(&rgba, width, height, session_id).map_err(|e| {
+        write_screenshot_boot_image(&rgba, width, height, session_id).inspect_err(|e| {
             capture::set_screenshot_in_progress(false);
             record_perf_metric(
                 "screenshot.open_prepare",
@@ -1327,7 +1327,6 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
                 false,
                 Some(e.clone()),
             );
-            e
         })?;
 
     // 存储会话数据

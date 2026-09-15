@@ -234,6 +234,7 @@ fn clamp_i32(value: i32, min_value: i32, max_value: i32) -> i32 {
     value.max(min_value).min(max_value)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_mosaic_at_image_point(
     target: &mut RgbaImage,
     source: &RgbaImage,
