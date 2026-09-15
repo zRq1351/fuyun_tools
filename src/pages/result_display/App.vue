@@ -1,7 +1,8 @@
 <template>
+  <!-- eslint-disable vue/no-v-html -->
   <div
-      :class="['container', `theme-${currentTheme}`]"
-      @mousedown.left="handleContainerMouseDown"
+    :class="['container', `theme-${currentTheme}`]"
+    @mousedown.left="handleContainerMouseDown"
   >
     <div class="window-titlebar">
       <div class="window-title">
@@ -9,127 +10,127 @@
       </div>
       <div class="window-controls">
         <button
-            class="window-btn"
-            @click.stop="minimizeWindow"
-            @mousedown.stop
+          class="window-btn"
+          @click.stop="minimizeWindow"
+          @mousedown.stop
         >
           <el-icon>
-            <Minus/>
+            <Minus />
           </el-icon>
         </button>
         <button
-            class="window-btn"
-            @click.stop="toggleWindowMaximize"
-            @mousedown.stop
+          class="window-btn"
+          @click.stop="toggleWindowMaximize"
+          @mousedown.stop
         >
           <el-icon>
-            <CopyDocument v-if="isWindowMaximized"/>
-            <FullScreen v-else/>
+            <CopyDocument v-if="isWindowMaximized" />
+            <FullScreen v-else />
           </el-icon>
         </button>
         <button
-            class="window-btn window-btn-close"
-            @click.stop="closeWindow"
-            @mousedown.stop
+          class="window-btn window-btn-close"
+          @click.stop="closeWindow"
+          @mousedown.stop
         >
           <el-icon>
-            <CloseBold/>
+            <CloseBold />
           </el-icon>
         </button>
       </div>
     </div>
     <div class="header">
       <div
-          v-if="mode === 'explanation'"
-          class="control-group"
+        v-if="mode === 'explanation'"
+        class="control-group"
       >
         <span class="label">{{ t('resultDisplay.explainLang') }}</span>
         <el-select
-            v-model="explanationLanguage"
-            class="lang-select"
-            size="small"
-            @change="handleLanguageChange"
+          v-model="explanationLanguage"
+          class="lang-select"
+          size="small"
+          @change="handleLanguageChange"
         >
           <el-option
-              :label="t('resultDisplay.chinese')"
-              value="中文"
+            :label="t('resultDisplay.chinese')"
+            value="中文"
           />
           <el-option
-              :label="t('resultDisplay.englishLang')"
-              value="英文"
+            :label="t('resultDisplay.englishLang')"
+            value="英文"
           />
           <el-option
-              :label="t('resultDisplay.japaneseLang')"
-              value="日文"
+            :label="t('resultDisplay.japaneseLang')"
+            value="日文"
           />
           <el-option
-              :label="t('resultDisplay.koreanLang')"
-              value="韩文"
+            :label="t('resultDisplay.koreanLang')"
+            value="韩文"
           />
         </el-select>
       </div>
 
       <div
-          v-if="mode === 'translation'"
-          class="control-group"
+        v-if="mode === 'translation'"
+        class="control-group"
       >
         <span class="label">{{ t('resultDisplay.sourceText') }}</span>
         <span class="auto-source-tag">{{ t('resultDisplay.autoDetect') }}</span>
         <span class="arrow">→</span>
         <el-select
-            v-model="targetLanguage"
-            class="lang-select"
-            size="small"
-            @change="handleLanguageChange"
+          v-model="targetLanguage"
+          class="lang-select"
+          size="small"
+          @change="handleLanguageChange"
         >
           <el-option
-              :label="t('resultDisplay.simplifiedChinese')"
-              value="简体中文"
+            :label="t('resultDisplay.simplifiedChinese')"
+            value="简体中文"
           />
           <el-option
-              :label="t('resultDisplay.traditionalChinese')"
-              value="繁体中文"
+            :label="t('resultDisplay.traditionalChinese')"
+            value="繁体中文"
           />
           <el-option
-              :label="t('resultDisplay.english')"
-              value="英语"
+            :label="t('resultDisplay.english')"
+            value="英语"
           />
           <el-option
-              :label="t('resultDisplay.japanese')"
-              value="日语"
+            :label="t('resultDisplay.japanese')"
+            value="日语"
           />
           <el-option
-              :label="t('resultDisplay.korean')"
-              value="韩语"
+            :label="t('resultDisplay.korean')"
+            value="韩语"
           />
           <el-option
-              :label="t('resultDisplay.french')"
-              value="法语"
+            :label="t('resultDisplay.french')"
+            value="法语"
           />
           <el-option
-              :label="t('resultDisplay.german')"
-              value="德语"
+            :label="t('resultDisplay.german')"
+            value="德语"
           />
           <el-option
-              :label="t('resultDisplay.spanish')"
-              value="西班牙语"
+            :label="t('resultDisplay.spanish')"
+            value="西班牙语"
           />
         </el-select>
       </div>
 
       <div class="right-controls">
         <el-tooltip
-            :content="showOriginal ? t('resultDisplay.hideSource') : t('resultDisplay.showSource')"
-            :show-after="500"
-            placement="bottom"
+          :content="showOriginal ? t('resultDisplay.hideSource') : t('resultDisplay.showSource')"
+          :show-after="500"
+          placement="bottom"
         >
           <div
-              class="icon-btn toggle-btn"
-              @click="toggleOriginal"
+            class="icon-btn toggle-btn"
+            @click="toggleOriginal"
           >
             <el-icon>
-              <Hide v-if="showOriginal"/>
-              <View v-else/>
+              <Hide v-if="showOriginal" />
+              <View v-else />
             </el-icon>
           </div>
         </el-tooltip>
@@ -137,70 +138,69 @@
     </div>
 
     <div
-        v-if="showOriginal"
-        class="content-wrapper original-wrapper"
+      v-if="showOriginal"
+      class="content-wrapper original-wrapper"
     >
       <div class="content-actions">
         <el-tooltip
-            :show-after="500"
-            :content="t('resultDisplay.copySource')"
-            placement="bottom"
+          :show-after="500"
+          :content="t('resultDisplay.copySource')"
+          placement="bottom"
         >
           <div
-              class="icon-btn action-btn copy-btn"
-              @click="copyOriginalText"
+            class="icon-btn action-btn copy-btn"
+            @click="copyOriginalText"
           >
             <el-icon>
-              <DocumentCopy/>
+              <DocumentCopy />
             </el-icon>
           </div>
         </el-tooltip>
       </div>
-      <!-- eslint-disable-next-line vue/no-v-html -->
       <div
-          ref="originalRef"
-          class="content original-content"
-          @click="handleContentClick"
-          @wheel.stop.prevent="handleContentWheel('original', $event)"
-          v-html="originalHtml"
+        ref="originalRef"
+        class="content original-content"
+        @click="handleContentClick"
+        @wheel.stop.prevent="handleContentWheel('original', $event)"
+        v-html="originalHtml"
       />
     </div>
 
     <div class="content-wrapper result-wrapper">
       <div class="content-actions">
         <el-tooltip
-            :show-after="500"
-            :content="t('resultDisplay.copyResult')"
-            placement="bottom"
+          :show-after="500"
+          :content="t('resultDisplay.copyResult')"
+          placement="bottom"
         >
           <div
-              class="icon-btn action-btn copy-btn"
-              @click="copyResultText"
+            class="icon-btn action-btn copy-btn"
+            @click="copyResultText"
           >
             <el-icon>
-              <DocumentCopy/>
+              <DocumentCopy />
             </el-icon>
           </div>
         </el-tooltip>
       </div>
       <div
-          ref="resultRef"
-          class="content result-content"
-          @scroll="handleResultScroll"
-          @click="handleContentClick"
-          @wheel.stop.prevent="handleContentWheel('result', $event)"
+        ref="resultRef"
+        class="content result-content"
+        @scroll="handleResultScroll"
+        @click="handleContentClick"
+        @wheel.stop.prevent="handleContentWheel('result', $event)"
       >
         <div
-            v-if="isWaitingResult && !resultText"
-            class="loading-wrap"
+          v-if="isWaitingResult && !resultText"
+          class="loading-wrap"
         >
-          <span class="loading-dot"/>
-          <span class="loading-dot"/>
-          <span class="loading-dot"/>
+          <span class="loading-dot" />
+          <span class="loading-dot" />
+          <span class="loading-dot" />
           <span class="loading-text">{{ t('resultDisplay.generating') }}</span>
         </div>
         <!-- eslint-disable-next-line vue/no-v-html -->
-        <div v-html="resultHtml"/>
+        <div v-html="resultHtml" />
       </div>
     </div>
   </div>

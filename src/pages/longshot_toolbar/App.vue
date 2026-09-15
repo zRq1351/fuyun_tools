@@ -1,79 +1,79 @@
 <template>
   <div class="panel">
     <div
-        class="header"
-        data-tauri-drag-region
+      class="header"
+      data-tauri-drag-region
     >
       <div
-          class="title"
-          data-tauri-drag-region
+        class="title"
+        data-tauri-drag-region
       >
         {{ titleText }}
       </div>
       <div class="actions no-drag">
         <button
-            :disabled="phase === 'finishing' || phase === 'canceling' || phase === 'failed'"
-            :title="paused ? t('longshot.continue') : t('longshot.pause')"
-            class="region-icon-btn"
-            @click="togglePause"
+          :disabled="phase === 'finishing' || phase === 'canceling' || phase === 'failed'"
+          :title="paused ? t('longshot.continue') : t('longshot.pause')"
+          class="region-icon-btn"
+          @click="togglePause"
         >
           <span
-              v-if="paused"
-              class="btn-icon"
+            v-if="paused"
+            class="btn-icon"
           >▶</span>
           <span
-              v-else
-              class="btn-icon"
+            v-else
+            class="btn-icon"
           >||</span>
         </button>
         <button
-            :disabled="phase === 'finishing' || phase === 'canceling' || phase === 'failed'"
-            :title="t('longshot.finish')"
-            class="region-icon-btn primary"
-            @click="finish"
+          :disabled="phase === 'finishing' || phase === 'canceling' || phase === 'failed'"
+          :title="t('longshot.finish')"
+          class="region-icon-btn primary"
+          @click="finish"
         >
-          <Check class="tool-icon-wrap"/>
+          <Check class="tool-icon-wrap" />
         </button>
         <button
-            :disabled="phase === 'canceling'"
-            :title="t('longshot.cancel')"
-            class="region-icon-btn danger"
-            @click="cancel"
+          :disabled="phase === 'canceling'"
+          :title="t('longshot.cancel')"
+          class="region-icon-btn danger"
+          @click="cancel"
         >
-          <X class="tool-icon-wrap"/>
+          <X class="tool-icon-wrap" />
         </button>
       </div>
     </div>
 
     <div
-        class="preview-wrap"
-        data-tauri-drag-region
+      class="preview-wrap"
+      data-tauri-drag-region
     >
       <img
-          v-if="previewSrc"
-          :src="previewSrc"
-          alt="longshot preview"
-          class="preview"
-          data-tauri-drag-region
-          draggable="false"
+        v-if="previewSrc"
+        :src="previewSrc"
+        alt="longshot preview"
+        class="preview"
+        data-tauri-drag-region
+        draggable="false"
       >
       <div
-          v-else
-          class="preview-empty"
-          data-tauri-drag-region
+        v-else
+        class="preview-empty"
+        data-tauri-drag-region
       >
         {{ t('longshot.waitPreview') }}
       </div>
       <div
-          v-if="previewSrc && viewportStyle"
-          :style="viewportStyle"
-          class="viewport-marker"
+        v-if="previewSrc && viewportStyle"
+        :style="viewportStyle"
+        class="viewport-marker"
       />
     </div>
 
     <div
-        class="meta"
-        data-tauri-drag-region
+      class="meta"
+      data-tauri-drag-region
     >
       {{ t('longshot.status') }} {{ phaseText }} ·
       {{ t('longshot.height') }} {{ stitchedHeight }} px · {{ t('longshot.frame') }} {{ frameCount }} ·

@@ -1,11 +1,11 @@
 <template>
   <el-form
-      :model="form"
-      label-position="top"
+    :model="form"
+    label-position="top"
   >
     <el-card
-        class="setting-section-card"
-        shadow="never"
+      class="setting-section-card"
+      shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -16,11 +16,11 @@
         <div class="group-grid cols-2">
           <el-form-item :label="$t('settings.clipboard.textEnabled')">
             <el-switch
-                :active-text="pendingToggles.textClipboard === 'disabling' ? $t('common.disabling') : $t('common.enable')"
-                :inactive-text="pendingToggles.textClipboard === 'enabling' ? $t('common.enabling') : $t('common.disable')"
-                :loading="!!pendingToggles.textClipboard"
-                :model-value="form.textClipboardEnabled"
-                @update:model-value="(val) => toggleFeature('textClipboardEnabled', val)"
+              :active-text="pendingToggles.textClipboard === 'disabling' ? $t('common.disabling') : $t('common.enable')"
+              :inactive-text="pendingToggles.textClipboard === 'enabling' ? $t('common.enabling') : $t('common.disable')"
+              :loading="!!pendingToggles.textClipboard"
+              :model-value="form.textClipboardEnabled"
+              @update:model-value="(val) => toggleFeature('textClipboardEnabled', val)"
             />
             <div class="form-hint">
               {{ $t('settings.clipboard.textDisabledHint') }}
@@ -28,11 +28,11 @@
           </el-form-item>
           <el-form-item :label="$t('settings.clipboard.imageEnabled')">
             <el-switch
-                :active-text="pendingToggles.imageClipboard === 'disabling' ? $t('common.disabling') : $t('common.enable')"
-                :inactive-text="pendingToggles.imageClipboard === 'enabling' ? $t('common.enabling') : $t('common.disable')"
-                :loading="!!pendingToggles.imageClipboard"
-                :model-value="form.imageClipboardEnabled"
-                @update:model-value="(val) => toggleFeature('imageClipboardEnabled', val)"
+              :active-text="pendingToggles.imageClipboard === 'disabling' ? $t('common.disabling') : $t('common.enable')"
+              :inactive-text="pendingToggles.imageClipboard === 'enabling' ? $t('common.enabling') : $t('common.disable')"
+              :loading="!!pendingToggles.imageClipboard"
+              :model-value="form.imageClipboardEnabled"
+              @update:model-value="(val) => toggleFeature('imageClipboardEnabled', val)"
             />
             <div class="form-hint">
               {{ $t('settings.clipboard.imageDisabledHint') }}
@@ -42,25 +42,25 @@
         <div class="group-grid cols-2">
           <el-form-item :label="$t('settings.clipboard.openTextWindow')">
             <el-input
-                :model-value="textDisplayValue"
-                :class="{ recording: isTextRecording }"
-                :placeholder="$t('settings.clipboard.shortcutExample')"
-                readonly
+              :model-value="textDisplayValue"
+              :class="{ recording: isTextRecording }"
+              :placeholder="$t('settings.clipboard.shortcutExample')"
+              readonly
             >
               <template #append>
                 <el-button-group>
                   <el-button
-                      :title="$t('settings.clipboard.modifyShortcut')"
-                      :type="isTextRecording ? 'danger' : 'primary'"
-                      @click="toggleTextRecording"
+                    :title="$t('settings.clipboard.modifyShortcut')"
+                    :type="isTextRecording ? 'danger' : 'primary'"
+                    @click="toggleTextRecording"
                   >
                     <el-icon>
-                      <component :is="isTextRecording ? VideoPause : Edit"/>
+                      <component :is="isTextRecording ? VideoPause : Edit" />
                     </el-icon>
                   </el-button>
                   <el-button
-                      :title="$t('settings.clipboard.resetShortcut')"
-                      @click="resetTextRecording"
+                    :title="$t('settings.clipboard.resetShortcut')"
+                    @click="resetTextRecording"
                   >
                     <el-icon><RefreshLeft /></el-icon>
                   </el-button>
@@ -70,25 +70,25 @@
           </el-form-item>
           <el-form-item :label="$t('settings.clipboard.openImageWindow')">
             <el-input
-                :model-value="imageDisplayValue"
-                :class="{ recording: isImageRecording }"
-                :placeholder="$t('settings.clipboard.shortcutExample')"
-                readonly
+              :model-value="imageDisplayValue"
+              :class="{ recording: isImageRecording }"
+              :placeholder="$t('settings.clipboard.shortcutExample')"
+              readonly
             >
               <template #append>
                 <el-button-group>
                   <el-button
-                      :title="$t('settings.clipboard.modifyShortcut')"
-                      :type="isImageRecording ? 'danger' : 'primary'"
-                      @click="toggleImageRecording"
+                    :title="$t('settings.clipboard.modifyShortcut')"
+                    :type="isImageRecording ? 'danger' : 'primary'"
+                    @click="toggleImageRecording"
                   >
                     <el-icon>
-                      <component :is="isImageRecording ? VideoPause : Edit"/>
+                      <component :is="isImageRecording ? VideoPause : Edit" />
                     </el-icon>
                   </el-button>
                   <el-button
-                      :title="$t('settings.clipboard.resetShortcut')"
-                      @click="resetImageRecording"
+                    :title="$t('settings.clipboard.resetShortcut')"
+                    @click="resetImageRecording"
                   >
                     <el-icon><RefreshLeft /></el-icon>
                   </el-button>
@@ -101,8 +101,8 @@
     </el-card>
 
     <el-card
-        class="setting-section-card"
-        shadow="never"
+      class="setting-section-card"
+      shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -113,9 +113,9 @@
         <div class="group-grid cols-3">
           <el-form-item :label="$t('settings.clipboard.textMaxItems')">
             <el-input-number
-                v-model="form.textMaxItems"
-                :max="1000"
-                :min="1"
+              v-model="form.textMaxItems"
+              :max="1000"
+              :min="1"
             />
             <div class="form-hint">
               {{ $t('settings.clipboard.textMaxHint') }}
@@ -123,9 +123,9 @@
           </el-form-item>
           <el-form-item :label="$t('settings.clipboard.imageMaxItems')">
             <el-input-number
-                v-model="form.imageMaxItems"
-                :max="1000"
-                :min="1"
+              v-model="form.imageMaxItems"
+              :max="1000"
+              :min="1"
             />
             <div class="form-hint">
               {{ $t('settings.clipboard.textMaxHint') }}
@@ -133,9 +133,9 @@
           </el-form-item>
           <el-form-item :label="$t('settings.clipboard.imageDiskLimit')">
             <el-input-number
-                v-model="form.imageDiskLimitMb"
-                :max="102400"
-                :min="100"
+              v-model="form.imageDiskLimitMb"
+              :max="102400"
+              :min="100"
             />
             <div class="form-hint">
               {{ $t('settings.clipboard.diskLimitHint') }}
@@ -146,12 +146,12 @@
           <el-form-item :label="$t('settings.clipboard.imageFillMode')">
             <el-select v-model="form.imageFillVerifyMode">
               <el-option
-                  :label="$t('settings.clipboard.fillStrict')"
-                  value="strict"
+                :label="$t('settings.clipboard.fillStrict')"
+                value="strict"
               />
               <el-option
-                  :label="$t('settings.clipboard.fillFast')"
-                  value="fast"
+                :label="$t('settings.clipboard.fillFast')"
+                value="fast"
               />
             </el-select>
             <div class="form-hint">
@@ -160,9 +160,9 @@
           </el-form-item>
           <el-form-item :label="$t('settings.clipboard.limitPolicy')">
             <el-switch
-                v-model="form.groupedItemsProtectedFromLimit"
-                :active-text="$t('settings.clipboard.limitUngrouped')"
-                :inactive-text="$t('settings.clipboard.limitAll')"
+              v-model="form.groupedItemsProtectedFromLimit"
+              :active-text="$t('settings.clipboard.limitUngrouped')"
+              :inactive-text="$t('settings.clipboard.limitAll')"
             />
             <div class="form-hint">
               {{ $t('settings.clipboard.limitPolicyHint') }}
@@ -173,8 +173,8 @@
     </el-card>
 
     <el-card
-        class="setting-section-card"
-        shadow="never"
+      class="setting-section-card"
+      shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -193,18 +193,18 @@
           </div>
           <div class="action-row">
             <el-button
-                class="action-button"
-                plain
-                type="primary"
-                @click="clearTextHistory('unclassified_unpinned')"
+              class="action-button"
+              plain
+              type="primary"
+              @click="clearTextHistory('unclassified_unpinned')"
             >
               {{ $t('settings.clipboard.conditionalClean') }}
             </el-button>
             <el-button
-                class="action-button"
-                plain
-                type="danger"
-                @click="clearTextHistory('all')"
+              class="action-button"
+              plain
+              type="danger"
+              @click="clearTextHistory('all')"
             >
               {{ $t('settings.clipboard.clearAll') }}
             </el-button>
@@ -221,18 +221,18 @@
           </div>
           <div class="action-row">
             <el-button
-                class="action-button"
-                plain
-                type="primary"
-                @click="clearImageHistory('untagged_unclassified_unpinned')"
+              class="action-button"
+              plain
+              type="primary"
+              @click="clearImageHistory('untagged_unclassified_unpinned')"
             >
               {{ $t('settings.clipboard.conditionalClean') }}
             </el-button>
             <el-button
-                class="action-button"
-                plain
-                type="danger"
-                @click="clearImageHistory('all')"
+              class="action-button"
+              plain
+              type="danger"
+              @click="clearImageHistory('all')"
             >
               {{ $t('settings.clipboard.clearAll') }}
             </el-button>
@@ -248,47 +248,47 @@
             </div>
           </div>
           <el-input
-              :model-value="importSourceDisplay"
-              class="import-source-input"
-              :placeholder="$t('settings.clipboard.noImportSource')"
-              readonly
+            :model-value="importSourceDisplay"
+            class="import-source-input"
+            :placeholder="$t('settings.clipboard.noImportSource')"
+            readonly
           >
             <template #prepend>
               <el-tooltip
-                  :content="$t('settings.clipboard.importFromFile')"
-                  placement="top"
+                :content="$t('settings.clipboard.importFromFile')"
+                placement="top"
               >
                 <el-button
-                    :loading="importingImages"
-                    class="import-icon-btn"
-                    @click="importImageFiles"
+                  :loading="importingImages"
+                  class="import-icon-btn"
+                  @click="importImageFiles"
                 >
                   <el-icon>
-                    <Picture/>
+                    <Picture />
                   </el-icon>
                 </el-button>
               </el-tooltip>
             </template>
             <template #append>
               <el-tooltip
-                  :content="$t('settings.clipboard.importFromDir')"
-                  placement="top"
+                :content="$t('settings.clipboard.importFromDir')"
+                placement="top"
               >
                 <el-button
-                    :loading="importingImages"
-                    class="import-icon-btn"
-                    @click="importImageFolders"
+                  :loading="importingImages"
+                  class="import-icon-btn"
+                  @click="importImageFolders"
                 >
                   <el-icon>
-                    <FolderOpened/>
+                    <FolderOpened />
                   </el-icon>
                 </el-button>
               </el-tooltip>
             </template>
           </el-input>
           <div
-              v-if="showImportProgressCard"
-              class="metrics-card"
+            v-if="showImportProgressCard"
+            class="metrics-card"
           >
             <div class="metrics-line">
               {{ $t('settings.clipboard.importProgress') }} {{ importProcessed }} /
@@ -299,9 +299,9 @@
               {{ importFailed }}
             </div>
             <el-progress
-                :percentage="importProgressPercent"
-                :stroke-width="12"
-                status="success"
+              :percentage="importProgressPercent"
+              :stroke-width="12"
+              status="success"
             />
           </div>
         </div>

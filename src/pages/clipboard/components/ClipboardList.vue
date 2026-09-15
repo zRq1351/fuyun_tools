@@ -1,125 +1,125 @@
 <template>
   <div
-      ref="contentRef"
-      class="content"
+    ref="contentRef"
+    class="content"
   >
     <div
-        v-if="isReorderMode"
-        ref="sortableRef"
-        class="sortable-grid"
+      v-if="isReorderMode"
+      ref="sortableRef"
+      class="sortable-grid"
     >
       <div
-          v-for="entry in props.visibleHistory"
-          :id="'clipboard-item-' + entry.id"
-          :key="entry.id"
-          class="clipboard-item sortable-item"
+        v-for="entry in props.visibleHistory"
+        :id="'clipboard-item-' + entry.id"
+        :key="entry.id"
+        class="clipboard-item sortable-item"
       >
         <div class="item-header">
           <span class="item-index">{{
-              entry._index !== undefined ? entry._index + 1 : props.visibleHistory.indexOf(entry) + 1
-            }}</span>
+            entry._index !== undefined ? entry._index + 1 : props.visibleHistory.indexOf(entry) + 1
+          }}</span>
           <span class="item-category">{{ translateCategory(getItemCategory(entry.id)) }}</span>
           <div
-              v-if="isPinned(entry.id)"
-              class="item-pinned-dot"
+            v-if="isPinned(entry.id)"
+            class="item-pinned-dot"
           />
         </div>
         <div class="item-body">
-          <FormattedContent :content="entry.content"/>
+          <FormattedContent :content="entry.content" />
         </div>
       </div>
     </div>
     <div
-        v-else
-        ref="stageRef"
-        class="carousel-stage"
-        @click="onStageClick"
-        @mousedown="onStageMouseDown"
+      v-else
+      ref="stageRef"
+      class="carousel-stage"
+      @click="onStageClick"
+      @mousedown="onStageMouseDown"
     >
       <button
-          v-if="selectedIndex > 0"
-          class="nav-arrow nav-prev"
-          @mousedown.stop="startNavRepeat(-1)"
-          @mouseup.stop="stopNavRepeat"
-          @mouseleave.stop="stopNavRepeat"
+        v-if="selectedIndex > 0"
+        class="nav-arrow nav-prev"
+        @mousedown.stop="startNavRepeat(-1)"
+        @mouseup.stop="stopNavRepeat"
+        @mouseleave.stop="stopNavRepeat"
       >
         ‹
       </button>
       <button
-          v-if="selectedIndex < stackItems.length - 1"
-          class="nav-arrow nav-next"
-          @mousedown.stop="startNavRepeat(1)"
-          @mouseup.stop="stopNavRepeat"
-          @mouseleave.stop="stopNavRepeat"
+        v-if="selectedIndex < stackItems.length - 1"
+        class="nav-arrow nav-next"
+        @mousedown.stop="startNavRepeat(1)"
+        @mouseup.stop="stopNavRepeat"
+        @mouseleave.stop="stopNavRepeat"
       >
         ›
       </button>
       <div
-          v-for="entry in visibleCards"
-          :id="'clipboard-item-' + entry.id"
-          :key="entry.id"
-          :class="{ selected: entry.id === selectedItemId, pinned: entry.pinned }"
-          :draggable="isCtrlKeyPressed"
-          :style="cardStyle(entry._index)"
-          class="clipboard-item"
-          @dblclick="handleDoubleClick(entry.id)"
-          @dragend="handleDragEnd"
-          @dragstart="handleItemDragStart($event, entry.id)"
-          @contextmenu.prevent="showContextMenu($event, entry.id, entry._index)"
+        v-for="entry in visibleCards"
+        :id="'clipboard-item-' + entry.id"
+        :key="entry.id"
+        :class="{ selected: entry.id === selectedItemId, pinned: entry.pinned }"
+        :draggable="isCtrlKeyPressed"
+        :style="cardStyle(entry._index)"
+        class="clipboard-item"
+        @dblclick="handleDoubleClick(entry.id)"
+        @dragend="handleDragEnd"
+        @dragstart="handleItemDragStart($event, entry.id)"
+        @contextmenu.prevent="showContextMenu($event, entry.id, entry._index)"
       >
         <div class="item-header">
           <span class="item-index">{{ entry._index + 1 }}/{{ totalCount || stackItems.length }}</span>
           <span
-              class="item-category"
-              @click.stop
+            class="item-category"
+            @click.stop
           >{{ translateCategory(getItemCategory(entry.id)) }}</span>
           <div
-              v-if="entry.pinned"
-              class="item-pinned-dot"
+            v-if="entry.pinned"
+            class="item-pinned-dot"
           />
           <div class="item-actions">
             <div
-                v-if="isWebUrl(entry.content)"
-                class="action-btn"
-                @click.stop="openWebUrl(entry.content)"
+              v-if="isWebUrl(entry.content)"
+              class="action-btn"
+              @click.stop="openWebUrl(entry.content)"
             >
-              <Link :size="9"/>
+              <Link :size="9" />
             </div>
             <div
-                class="action-btn"
-                @click.stop="emit('preview', entry.content, entry.id)"
+              class="action-btn"
+              @click.stop="emit('preview', entry.content, entry.id)"
             >
-              <View :size="9"/>
+              <View :size="9" />
             </div>
             <div
-                :class="{ active: entry.pinned }"
-                class="action-btn"
-                @click.stop="promoteItem(entry.id)"
+              :class="{ active: entry.pinned }"
+              class="action-btn"
+              @click.stop="promoteItem(entry.id)"
             >
-              <Star :size="9"/>
+              <Star :size="9" />
             </div>
             <div
-                class="action-btn action-delete"
-                @click.stop="deleteItem(entry.id)"
+              class="action-btn action-delete"
+              @click.stop="deleteItem(entry.id)"
             >
-              <Close :size="9"/>
+              <Close :size="9" />
             </div>
           </div>
         </div>
         <div class="item-body">
-          <FormattedContent :content="entry.content"/>
+          <FormattedContent :content="entry.content" />
         </div>
         <div
-            v-if="entry.snippet"
-            class="item-snippet"
+          v-if="entry.snippet"
+          class="item-snippet"
         >
           <template
-              v-for="(part, partIndex) in renderHighlightParts(entry.snippet)"
-              :key="partIndex"
+            v-for="(part, partIndex) in renderHighlightParts(entry.snippet)"
+            :key="partIndex"
           >
             <mark
-                v-if="part.hit"
-                class="snippet-hit"
+              v-if="part.hit"
+              class="snippet-hit"
             >{{ part.text }}
             </mark>
             <span v-else>{{ part.text }}</span>
@@ -129,19 +129,19 @@
     </div>
 
     <div
-        v-if="showLoadMoreHint"
-        class="load-more-bar"
+      v-if="showLoadMoreHint"
+      class="load-more-bar"
     >
       <el-icon
-          v-if="isLoadingMore"
-          :size="14"
-          class="is-loading"
+        v-if="isLoadingMore"
+        :size="14"
+        class="is-loading"
       >
-        <Loading/>
+        <Loading />
       </el-icon>
       <span
-          class="load-more-text"
-          @click="emit('load-more-intent')"
+        class="load-more-text"
+        @click="emit('load-more-intent')"
       >
         {{ isLoadingMore ? $t('clipboard.loading') : $t('clipboard.loadMore') }}
       </span>
@@ -266,7 +266,7 @@ const CARD_STEP = 76
 const VISIBLE_PAD = 6  // extra cards rendered on each side of viewport
 
 const stackItems = computed(() =>
-  props.visibleHistory.map((entry, index) => ({
+  props.visibleHistory.map((entry) => ({
     ...entry,
     snippet: entry.snippet || '',
     pinned: props.isPinned(entry.id),
@@ -373,7 +373,7 @@ const openWebUrl = async (v) => {
     const t = v.trim()
     const url = /^https?:\/\//i.test(t) ? t : /^www\./i.test(t) ? `https://${t}` : t
     await openExternalUrl(url)
-  } catch (e) { /* ignore */ }
+  } catch { /* ignore */ }
 }
 
 // --- Scroll / drag state ---
@@ -516,7 +516,7 @@ let inertiaId = null
 
 let skipNextClick = false
 
-const handleClick = (entryId) => {
+const _handleClick = (entryId) => {
   if (skipNextClick) { skipNextClick = false; return }
   const idx = props.visibleHistory.findIndex(e => e.id === entryId)
   if (idx >= 0) navigateTo(idx)

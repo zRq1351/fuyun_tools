@@ -1,70 +1,70 @@
 <template>
   <div
-      class="viewer-root"
-      @click="requestClose"
+    class="viewer-root"
+    @click="requestClose"
   >
     <div
-        class="viewer-drag-strip"
-        data-tauri-drag-region
-        @click.stop
-        @mousedown.left="startWindowDrag"
+      class="viewer-drag-strip"
+      data-tauri-drag-region
+      @click.stop
+      @mousedown.left="startWindowDrag"
     />
     <div
-        class="viewer-topbar"
-        @click.stop
+      class="viewer-topbar"
+      @click.stop
     >
       <div
-          class="viewer-drag-icon"
-          data-tauri-drag-region
-          title="拖动窗口"
-          @mousedown.left.stop.prevent="startWindowDrag"
+        class="viewer-drag-icon"
+        data-tauri-drag-region
+        title="拖动窗口"
+        @mousedown.left.stop.prevent="startWindowDrag"
       >
         <GripHorizontal
-            :size="16"
-            :stroke-width="2"
+          :size="16"
+          :stroke-width="2"
         />
       </div>
       <div class="viewer-zoom">
         {{ zoomPercent }}
       </div>
       <button
-          class="viewer-close"
-          @mousedown.left.stop.prevent
-          @click.stop="requestClose(true)"
+        class="viewer-close"
+        @mousedown.left.stop.prevent
+        @click.stop="requestClose(true)"
       >
         关闭
       </button>
     </div>
     <div
-        :class="['viewer-card', animationState, {'is-dragging': isDragging}]"
-        @click.stop
-        @mousedown.left.stop.prevent="startDrag"
-        @wheel.prevent.stop="handleWheel"
+      :class="['viewer-card', animationState, {'is-dragging': isDragging}]"
+      @click.stop
+      @mousedown.left.stop.prevent="startDrag"
+      @wheel.prevent.stop="handleWheel"
     >
       <img
-          v-if="imageUrl"
-          :class="{ 'viewer-image-hidden': !isImageReady }"
-          :src="imageUrl"
-          alt=""
-          class="viewer-image"
-          :style="imageTransformStyle"
-          @dblclick.stop.prevent="resetViewTransform"
-          @error="onImageError"
-          @load="onImageLoaded"
+        v-if="imageUrl"
+        :class="{ 'viewer-image-hidden': !isImageReady }"
+        :src="imageUrl"
+        alt=""
+        class="viewer-image"
+        :style="imageTransformStyle"
+        @dblclick.stop.prevent="resetViewTransform"
+        @error="onImageError"
+        @load="onImageLoaded"
       >
     </div>
     <div
-        v-if="!isImageReady && !loadErrorMessage"
-        class="viewer-loading viewer-loading-overlay"
+      v-if="!isImageReady && !loadErrorMessage"
+      class="viewer-loading viewer-loading-overlay"
     >
-      <div class="viewer-loading-spinner"/>
+      <div class="viewer-loading-spinner" />
       <div class="viewer-loading-text">
         正在加载图片...
       </div>
     </div>
     <div
-        v-if="isImageReady && loadErrorMessage"
-        class="viewer-loading viewer-loading-overlay viewer-error"
+      v-if="isImageReady && loadErrorMessage"
+      class="viewer-loading viewer-loading-overlay viewer-error"
     >
       <div class="viewer-loading-text">
         {{ loadErrorMessage }}
@@ -205,7 +205,7 @@ const closeWindowNow = async () => {
   })
   try {
     await ImageClipboardService.closePreviewWindow()
-  } catch (error) {
+  } catch {
     await currentWindow.hide()
   }
   animationState.value = 'closed'

@@ -2,32 +2,32 @@
   <div class="about-section">
     <h3>
       <el-icon>
-        <Refresh/>
+        <Refresh />
       </el-icon>
       {{ $t('settings.about.checkUpdate') }}
     </h3>
     <p>{{ $t('settings.about.currentVersion') }}<strong>{{ currentVersion }}</strong></p>
     <el-button
-        :loading="checkingUpdate"
-        type="warning"
-        @click="checkUpdate"
+      :loading="checkingUpdate"
+      type="warning"
+      @click="checkUpdate"
     >
       {{ $t('settings.about.checkUpdateBtn') }}
     </el-button>
     <div
-        v-if="updateStatus"
-        :class="updateStatus.type"
-        class="update-status"
+      v-if="updateStatus"
+      :class="updateStatus.type"
+      class="update-status"
     >
       {{ updateStatus.message }}
     </div>
     <div
-        v-if="showUpdateProgress"
-        class="update-progress"
+      v-if="showUpdateProgress"
+      class="update-progress"
     >
       <el-progress
-          :percentage="updateProgress"
-          :status="updateProgress === 100 ? 'success' : ''"
+        :percentage="updateProgress"
+        :status="updateProgress === 100 ? 'success' : ''"
       />
       <div class="progress-text">
         {{ $t('settings.about.updatingProgress', {progress: updateProgress}) }}
@@ -38,7 +38,7 @@
   <div class="about-section">
     <h3>
       <el-icon>
-        <InfoFilled/>
+        <InfoFilled />
       </el-icon>
       {{ $t('settings.about.softwareIntro') }}
     </h3>
@@ -50,20 +50,20 @@
   <div class="about-section">
     <h3>
       <el-icon>
-        <Star/>
+        <Star />
       </el-icon>
       {{ $t('settings.about.features') }}
     </h3>
     <ul class="feature-list">
       <li
-          v-for="key in featureKeys"
-          :key="key"
+        v-for="key in featureKeys"
+        :key="key"
       >
         <el-icon>
-          <component :is="featureIcons[key]"/>
+          <component :is="featureIcons[key]" />
         </el-icon>
         <!-- eslint-disable-next-line vue/no-v-html -->
-        <span v-html="renderFeatureItem(key)"/>
+        <span v-html="renderFeatureItem(key)" />
       </li>
     </ul>
   </div>
@@ -71,27 +71,27 @@
   <div class="about-section">
     <h3>
       <el-icon>
-        <Reading/>
+        <Reading />
       </el-icon>
       {{ $t('settings.about.usage') }}
     </h3>
     <!-- eslint-disable vue/no-v-html -->
     <ol class="usage-list">
-      <li v-html="renderUsageItem('settings.about.usage1', toggleShortcut, 'Ctrl+Shift+Z')"/>
-      <li v-html="renderUsageItem('settings.about.usage2', imageToggleShortcut, 'Ctrl+Shift+X')"/>
-      <li v-html="renderUsageItem('settings.about.usage3', screenshotToggleShortcut, 'Ctrl+Shift+S')"/>
-      <li v-html="renderUsageItem('settings.about.usage4')"/>
-      <li v-html="renderUsageItem('settings.about.usage5')"/>
-      <li v-html="renderUsageItem('settings.about.usage6')"/>
-      <li v-html="renderUsageItem('settings.about.usage7')"/>
-      <li v-html="renderUsageItem('settings.about.usage8')"/>
+      <li v-html="renderUsageItem('settings.about.usage1', toggleShortcut, 'Ctrl+Shift+Z')" />
+      <li v-html="renderUsageItem('settings.about.usage2', imageToggleShortcut, 'Ctrl+Shift+X')" />
+      <li v-html="renderUsageItem('settings.about.usage3', screenshotToggleShortcut, 'Ctrl+Shift+S')" />
+      <li v-html="renderUsageItem('settings.about.usage4')" />
+      <li v-html="renderUsageItem('settings.about.usage5')" />
+      <li v-html="renderUsageItem('settings.about.usage6')" />
+      <li v-html="renderUsageItem('settings.about.usage7')" />
+      <li v-html="renderUsageItem('settings.about.usage8')" />
     </ol>
   </div>
 
   <div class="about-section">
     <h3>
       <el-icon>
-        <Reading/>
+        <Reading />
       </el-icon>
       {{ $t('settings.about.license') }}
     </h3>

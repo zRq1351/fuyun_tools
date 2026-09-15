@@ -1,11 +1,11 @@
 <template>
   <el-form
-      :model="form"
-      label-position="top"
+    :model="form"
+    label-position="top"
   >
     <el-card
-        class="setting-section-card compact-card"
-        shadow="never"
+      class="setting-section-card compact-card"
+      shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -14,11 +14,11 @@
       </template>
       <el-form-item :label="$t('settings.screenshot.enabled')">
         <el-switch
-            :active-text="pendingToggles.screenshot === 'disabling' ? $t('common.disabling') : $t('common.enable')"
-            :inactive-text="pendingToggles.screenshot === 'enabling' ? $t('common.enabling') : $t('common.disable')"
-            :loading="!!pendingToggles.screenshot"
-            :model-value="form.screenshotEnabled"
-            @update:model-value="(val) => toggleFeature('screenshotEnabled', val)"
+          :active-text="pendingToggles.screenshot === 'disabling' ? $t('common.disabling') : $t('common.enable')"
+          :inactive-text="pendingToggles.screenshot === 'enabling' ? $t('common.enabling') : $t('common.disable')"
+          :loading="!!pendingToggles.screenshot"
+          :model-value="form.screenshotEnabled"
+          @update:model-value="(val) => toggleFeature('screenshotEnabled', val)"
         />
         <div class="form-hint">
           {{ $t('settings.screenshot.disabledHint') }}
@@ -26,25 +26,25 @@
       </el-form-item>
       <el-form-item :label="$t('settings.screenshot.openWindowHotkey')">
         <el-input
-            :class="{ recording: isScreenshotRecording }"
-            :model-value="screenshotDisplayValue"
-            :placeholder="$t('settings.clipboard.shortcutExample')"
-            readonly
+          :class="{ recording: isScreenshotRecording }"
+          :model-value="screenshotDisplayValue"
+          :placeholder="$t('settings.clipboard.shortcutExample')"
+          readonly
         >
           <template #append>
             <el-button-group>
               <el-button
-                  :title="$t('settings.clipboard.modifyShortcut')"
-                  :type="isScreenshotRecording ? 'danger' : 'primary'"
-                  @click="toggleScreenshotRecording"
+                :title="$t('settings.clipboard.modifyShortcut')"
+                :type="isScreenshotRecording ? 'danger' : 'primary'"
+                @click="toggleScreenshotRecording"
               >
                 <el-icon>
-                  <component :is="isScreenshotRecording ? VideoPause : Edit"/>
+                  <component :is="isScreenshotRecording ? VideoPause : Edit" />
                 </el-icon>
               </el-button>
               <el-button
-                  :title="$t('settings.clipboard.resetShortcut')"
-                  @click="resetScreenshotRecording"
+                :title="$t('settings.clipboard.resetShortcut')"
+                @click="resetScreenshotRecording"
               >
                 <el-icon><RefreshLeft /></el-icon>
               </el-button>
@@ -57,17 +57,17 @@
       </el-form-item>
       <el-form-item :label="$t('settings.screenshot.ocrEngine')">
         <el-select
-            v-model="form.ocrEngine"
-            :placeholder="$t('settings.screenshot.ocrSelectPlaceholder')"
-            style="width: 100%"
+          v-model="form.ocrEngine"
+          :placeholder="$t('settings.screenshot.ocrSelectPlaceholder')"
+          style="width: 100%"
         >
           <el-option
-              :label="$t('settings.screenshot.ocrNative')"
-              value="windows-native"
+            :label="$t('settings.screenshot.ocrNative')"
+            value="windows-native"
           />
           <el-option
-              :label="$t('settings.screenshot.ocrRs')"
-              value="ocr-rs"
+            :label="$t('settings.screenshot.ocrRs')"
+            value="ocr-rs"
           />
         </el-select>
         <div class="form-hint">
@@ -108,7 +108,7 @@ const toggleFeature = async (fieldName, value) => {
     return
   }
   pendingToggles.value = {...pendingToggles.value, [fieldName]: value ? 'enabling' : 'disabling'}
-  const ok = await props.onFeatureToggle(fieldName, value)
+  await props.onFeatureToggle(fieldName, value)
   pendingToggles.value = {...pendingToggles.value, [fieldName]: undefined}
 }
 

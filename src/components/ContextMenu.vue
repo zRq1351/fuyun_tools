@@ -1,14 +1,14 @@
 <template>
   <Teleport to="body">
     <div
-        v-if="show"
-        ref="menuRef"
-        :style="menuStyle"
-        class="context-menu"
-        @click.stop
-        @mouseover="activateItemOnHover"
+      v-if="show"
+      ref="menuRef"
+      :style="menuStyle"
+      class="context-menu"
+      @click.stop
+      @mouseover="activateItemOnHover"
     >
-      <slot/>
+      <slot />
     </div>
   </Teleport>
 </template>

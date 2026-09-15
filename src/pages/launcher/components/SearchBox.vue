@@ -2,30 +2,30 @@
   <div class="search-box-container">
     <div class="search-icon">
       <el-icon :size="20">
-        <Search/>
+        <Search />
       </el-icon>
     </div>
     <input
-        ref="inputRef"
-        :value="modelValue"
-        autocomplete="off"
-        class="search-input"
-        placeholder="搜索应用、文件或输入命令..."
-        spellcheck="false"
-        type="text"
-        @blur="$emit('blur', $event)"
-        @focus="$emit('focus', $event)"
-        @input="$emit('update:modelValue', $event.target.value); $emit('input', $event)"
-        @keydown="$emit('keydown', $event)"
+      ref="inputRef"
+      :value="modelValue"
+      autocomplete="off"
+      class="search-input"
+      placeholder="搜索应用、文件或输入命令..."
+      spellcheck="false"
+      type="text"
+      @blur="$emit('blur', $event)"
+      @focus="$emit('focus', $event)"
+      @input="$emit('update:modelValue', $event.target.value); $emit('input', $event)"
+      @keydown="$emit('keydown', $event)"
     >
     <div
-        v-if="modelValue"
-        class="clear-button"
-        @click="handleClear"
-        @mousedown.stop
+      v-if="modelValue"
+      class="clear-button"
+      @click="handleClear"
+      @mousedown.stop
     >
       <el-icon>
-        <Close/>
+        <Close />
       </el-icon>
     </div>
   </div>

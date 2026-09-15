@@ -2,6 +2,9 @@ import js from '@eslint/js'
 import pluginVue from 'eslint-plugin-vue'
 
 export default [
+    {
+        ignores: ['dist/**', 'node_modules/**', '*.html'],
+    },
     js.configs.recommended,
     ...pluginVue.configs['flat/recommended'],
     {
@@ -44,6 +47,9 @@ export default [
                 Node: 'readonly',
                 ClipboardItem: 'readonly',
                 ImageData: 'readonly',
+                ResizeObserver: 'readonly',
+                AbortController: 'readonly',
+                AbortSignal: 'readonly',
                 // Node.js globals (for Tauri/Vite)
                 __dirname: 'readonly',
                 __filename: 'readonly',
@@ -55,12 +61,35 @@ export default [
         },
         rules: {
             'vue/multi-word-component-names': 'off',
-            'no-unused-vars': ['warn', {argsIgnorePattern: '^_'}],
-            'no-console': ['warn', {allow: ['warn', 'error']}],
+            'no-unused-vars': ['warn', {
+                argsIgnorePattern: '^_',
+                caughtErrorsIgnorePattern: '^_',
+                varsIgnorePattern: '^_',
+                ignoreRestSiblings: true,
+            }],
+            'no-console': ['warn', {allow: ['warn', 'error', 'debug', 'info']}],
             'no-empty': ['warn', {allowEmptyCatch: true}],
         },
     },
     {
-        ignores: ['dist/**', 'node_modules/**', '*.html'],
+        // 设置页通过共享 form 对象收集字段，子组件直接写 form.xxx 是既有架构
+        files: ['pages/settings/**/*.vue'],
+        rules: {
+            'vue/no-mutating-props': 'off',
+        },
+    },
+    {
+        // 工具栏/剪贴板等组件大量函数 prop，默认值由父组件始终传入
+        files: [
+            'pages/clipboard/**/*.vue',
+            'pages/image_clipboard/**/*.vue',
+            'pages/launcher/**/*.vue',
+            'pages/recording_toolbar/**/*.vue',
+            'pages/document_manager_widget/**/*.vue',
+            'pages/screenshot/**/*.vue',
+        ],
+        rules: {
+            'vue/require-default-prop': 'off',
+        },
     },
 ]

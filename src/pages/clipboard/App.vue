@@ -1,38 +1,38 @@
 <template>
   <div
-      ref="containerRef"
-      class="container"
-      tabindex="-1"
-      @mousedown="handleContainerMouseDown"
+    ref="containerRef"
+    class="container"
+    tabindex="-1"
+    @mousedown="handleContainerMouseDown"
   >
     <ClipboardToolbar
-        v-model:category-filter="categoryFilter"
-        v-model:new-category-name="newCategoryName"
-        v-model:search-keyword="searchKeyword"
-        :can-delete-category="canDeleteCategory"
-        :cancel-create-category="cancelCreateCategory"
-        :categories="categories"
-        :confirm-create-category="confirmCreateCategory"
-        :handle-drop="handleDrop"
-        :is-adding-category="isAddingCategory"
-        :new-category-input-ref="newCategoryInputRef"
-        :remove-category="removeCategory"
-        :start-create-category="startCreateCategory"
-        :start-window-offset-drag="startWindowOffsetDrag"
-        :is-ai-settings-collapsed="isAiSettingsCollapsed"
-        :toggle-ai-settings="toggleAiSettings"
-        :translation-target-language="translationTargetLanguage"
-        :explanation-target-language="explanationTargetLanguage"
-        :create-category-text="$t('clipboard.createCategory')"
-        :search-placeholder="$t('clipboard.search')"
-        :is-reorder-mode="isReorderMode"
-        @toggle-reorder="toggleReorderMode"
+      v-model:category-filter="categoryFilter"
+      v-model:new-category-name="newCategoryName"
+      v-model:search-keyword="searchKeyword"
+      :can-delete-category="canDeleteCategory"
+      :cancel-create-category="cancelCreateCategory"
+      :categories="categories"
+      :confirm-create-category="confirmCreateCategory"
+      :handle-drop="handleDrop"
+      :is-adding-category="isAddingCategory"
+      :new-category-input-ref="newCategoryInputRef"
+      :remove-category="removeCategory"
+      :start-create-category="startCreateCategory"
+      :start-window-offset-drag="startWindowOffsetDrag"
+      :is-ai-settings-collapsed="isAiSettingsCollapsed"
+      :toggle-ai-settings="toggleAiSettings"
+      :translation-target-language="translationTargetLanguage"
+      :explanation-target-language="explanationTargetLanguage"
+      :create-category-text="$t('clipboard.createCategory')"
+      :search-placeholder="$t('clipboard.search')"
+      :is-reorder-mode="isReorderMode"
+      @toggle-reorder="toggleReorderMode"
     />
     <div
-        v-show="!isAiSettingsCollapsed"
-        class="ai-quick-panel-wrap"
-        @click.stop
-        @mousedown.stop
+      v-show="!isAiSettingsCollapsed"
+      class="ai-quick-panel-wrap"
+      @click.stop
+      @mousedown.stop
     >
       <div class="ai-quick-panel">
         <div class="ai-quick-top">
@@ -45,32 +45,32 @@
               popper-class="clipboard-ai-select-popper"
             >
               <el-option
-                  :label="$t('language.zhCN')"
-                  value="简体中文"
+                :label="$t('language.zhCN')"
+                value="简体中文"
               />
               <el-option
-                  :label="$t('language.traditionalChinese')"
-                  value="繁体中文"
+                :label="$t('language.traditionalChinese')"
+                value="繁体中文"
               />
               <el-option
-                  :label="$t('language.english')"
-                  value="英语"
+                :label="$t('language.english')"
+                value="英语"
               />
               <el-option
-                  :label="$t('language.japanese')"
-                  value="日语"
+                :label="$t('language.japanese')"
+                value="日语"
               />
               <el-option
-                  :label="$t('language.korean')"
-                  value="韩语"
+                :label="$t('language.korean')"
+                value="韩语"
               />
               <el-option
-                  :label="$t('language.french')"
-                  value="法语"
+                :label="$t('language.french')"
+                value="法语"
               />
               <el-option
-                  :label="$t('language.german')"
-                  value="德语"
+                :label="$t('language.german')"
+                value="德语"
               />
             </el-select>
           </div>
@@ -83,20 +83,20 @@
               popper-class="clipboard-ai-select-popper"
             >
               <el-option
-                  :label="$t('language.chinese')"
-                  value="中文"
+                :label="$t('language.chinese')"
+                value="中文"
               />
               <el-option
-                  :label="$t('language.englishDesc')"
-                  value="英文"
+                :label="$t('language.englishDesc')"
+                value="英文"
               />
               <el-option
-                  :label="$t('language.japaneseDesc')"
-                  value="日文"
+                :label="$t('language.japaneseDesc')"
+                value="日文"
               />
               <el-option
-                  :label="$t('language.koreanDesc')"
-                  value="韩文"
+                :label="$t('language.koreanDesc')"
+                value="韩文"
               />
             </el-select>
           </div>
@@ -108,12 +108,12 @@
     </div>
 
     <div
-        v-if="visibleHistory.length === 0"
-        class="empty-state"
+      v-if="visibleHistory.length === 0"
+      class="empty-state"
     >
       <el-empty
-          v-if="!isLoadingPage"
-          :image-size="100"
+        v-if="!isLoadingPage"
+        :image-size="100"
       >
         <template #description>
           <p>{{ $t('clipboard.noRecords') }}</p>
@@ -123,89 +123,89 @@
         </template>
       </el-empty>
       <div
-          v-else
-          class="loading-state"
+        v-else
+        class="loading-state"
       >
         <el-icon
-            :size="40"
-            class="is-loading"
+          :size="40"
+          class="is-loading"
         >
-          <Loading/>
+          <Loading />
         </el-icon>
         <p>{{ $t('common.loading') }}</p>
       </div>
     </div>
 
     <ClipboardList
-        v-else
-        ref="clipboardListRef"
-        class="history-list"
-        :highlight-keyword="searchKeyword"
-        :delete-item="originalDeleteItem"
-        :get-item-category="getItemCategory"
-        :handle-drag-end="handleDragEnd"
-        :handle-drag-start="handleDragStart"
-        :select-and-fill-direct="selectAndFillDirect"
-        :selected-item-id="selectedItemId"
-        :show-context-menu="showContextMenu"
-        :is-ctrl-key-pressed="isCtrlKeyPressed"
-        :is-pinned="isItemPinned"
-        :promote-item="promoteItem"
-        :update-selection="updateSelection"
-        :has-more="hasMore"
-        :is-loading-page="isLoadingPage"
-        :total-count="totalCount"
-        :is-reorder-mode="isReorderMode"
-        :on-reorder="handleReorder"
-        :visible-history="visibleHistory"
-        @load-more-intent="handleLoadMoreIntent"
-        @preview="handlePreview"
+      v-else
+      ref="clipboardListRef"
+      class="history-list"
+      :highlight-keyword="searchKeyword"
+      :delete-item="originalDeleteItem"
+      :get-item-category="getItemCategory"
+      :handle-drag-end="handleDragEnd"
+      :handle-drag-start="handleDragStart"
+      :select-and-fill-direct="selectAndFillDirect"
+      :selected-item-id="selectedItemId"
+      :show-context-menu="showContextMenu"
+      :is-ctrl-key-pressed="isCtrlKeyPressed"
+      :is-pinned="isItemPinned"
+      :promote-item="promoteItem"
+      :update-selection="updateSelection"
+      :has-more="hasMore"
+      :is-loading-page="isLoadingPage"
+      :total-count="totalCount"
+      :is-reorder-mode="isReorderMode"
+      :on-reorder="handleReorder"
+      :visible-history="visibleHistory"
+      @load-more-intent="handleLoadMoreIntent"
+      @preview="handlePreview"
     />
 
     <div
-        class="status-footer"
-        @click.stop
-        @mousedown.stop
+      class="status-footer"
+      @click.stop
+      @mousedown.stop
     >
       <div class="status-text">
         <span class="status-label">{{ selectedStatusText }}</span>
         <span class="status-meta">{{ loadStatusText }}</span>
         <span
-            v-if="searchKeyword.trim()"
-            class="status-meta"
+          v-if="searchKeyword.trim()"
+          class="status-meta"
         >{{
-            $t('clipboard.hitCount', {count: keywordHitCount})
-          }}</span>
+          $t('clipboard.hitCount', {count: keywordHitCount})
+        }}</span>
         <div class="status-actions">
           <button
-              :title="$t('clipboard.cyclePageSize', {size: pageSize})"
-              class="nav-action-btn"
-              type="button"
-              @click="cyclePageSize"
+            :title="$t('clipboard.cyclePageSize', {size: pageSize})"
+            class="nav-action-btn"
+            type="button"
+            @click="cyclePageSize"
           >
             {{ $t('clipboard.perPage', {size: pageSize}) }}
           </button>
 
           <button
-              :aria-label="$t('clipboard.backToStart')"
-              :title="$t('clipboard.backToStart')"
-              class="nav-action-btn icon-btn"
-              type="button"
-              @click="scrollToStart"
+            :aria-label="$t('clipboard.backToStart')"
+            :title="$t('clipboard.backToStart')"
+            class="nav-action-btn icon-btn"
+            type="button"
+            @click="scrollToStart"
           >
             <el-icon>
-              <ArrowLeftBold/>
+              <ArrowLeftBold />
             </el-icon>
           </button>
           <button
-              :aria-label="$t('clipboard.scrollToEnd')"
-              :title="$t('clipboard.scrollToEnd')"
-              class="nav-action-btn icon-btn"
-              type="button"
-              @click="scrollToEnd"
+            :aria-label="$t('clipboard.scrollToEnd')"
+            :title="$t('clipboard.scrollToEnd')"
+            class="nav-action-btn icon-btn"
+            type="button"
+            @click="scrollToEnd"
           >
             <el-icon>
-              <ArrowRightBold/>
+              <ArrowRightBold />
             </el-icon>
           </button>
         </div>
@@ -215,45 +215,45 @@
 
 
     <div
-        v-if="contextMenuVisible"
-        ref="contextMenuRef"
-        class="context-menu"
-        @click.stop
-        @mousedown.stop
+      v-if="contextMenuVisible"
+      ref="contextMenuRef"
+      class="context-menu"
+      @click.stop
+      @mousedown.stop
     >
       <div class="context-menu-header">
         {{ $t('clipboard.aiShortcut') }}
       </div>
       <div
-          class="context-menu-item"
-          @click="triggerAiFromContextMenu('translate')"
+        class="context-menu-item"
+        @click="triggerAiFromContextMenu('translate')"
       >
         {{ $t('selectionToolbar.translate') }}
         <span class="shortcut-hint">T</span>
       </div>
       <div
-          class="context-menu-item"
-          @click="triggerAiFromContextMenu('explain')"
+        class="context-menu-item"
+        @click="triggerAiFromContextMenu('explain')"
       >
         {{ $t('selectionToolbar.explain') }}
         <span class="shortcut-hint">E</span>
       </div>
-      <div class="context-menu-divider"/>
+      <div class="context-menu-divider" />
       <div class="context-menu-header">
         {{ $t('clipboard.addToCategory') }}
       </div>
       <div
-          v-for="category in categories"
-          :key="category"
-          class="context-menu-item"
-          @click="assignToCategory(category)"
+        v-for="category in categories"
+        :key="category"
+        class="context-menu-item"
+        @click="assignToCategory(category)"
       >
         {{ category }}
         <el-icon
-            v-if="getItemCategory(contextMenuItem) === category"
-            class="check-icon"
+          v-if="getItemCategory(contextMenuItem) === category"
+          class="check-icon"
         >
-          <Check/>
+          <Check />
         </el-icon>
       </div>
     </div>
@@ -343,7 +343,6 @@ const {
   updateSelection,
   deleteItem: originalDeleteItem,
   moveSelection,
-  resetAndReloadHistory,
   syncHistoryIncremental,
   loadMoreHistory,
   loadTailPage,
@@ -356,7 +355,6 @@ const {
   bumpFilterDataRevision,
   setItemCategoryLocal,
   removeItemCategoryLocal,
-  rebuildCategorySearchIndex,
   reorderItems
 } = useClipboardHistory(pinnedItems)
 
@@ -510,9 +508,7 @@ const init = async () => {
     unlistenShowWindow = await listen('show-window', (event) => {
       void showWindow(event.payload)
     })
-    unlistenHistoryPayloadUpdated = await listen('clipboard-history-payload-updated', (event) => {
-
-
+    unlistenHistoryPayloadUpdated = await listen('clipboard-history-payload-updated', () => {
       syncHistoryIncremental()
     })
     unlistenHistoryItemUpdated = await listen('clipboard-history-item-updated', (event) => {
@@ -640,7 +636,7 @@ const selectAndFillDirect = async (itemId) => {
   }
 }
 
-const showContextMenu = (event, itemId, index) => {
+const showContextMenu = (event, itemId) => {
   openContextMenu(event, itemId)
 }
 
@@ -898,8 +894,8 @@ watch([searchKeyword, categoryFilter], (newVals, oldVals) => {
   // Skip sync during category updates to avoid race conditions
   if (isUpdatingCategory.value) return
 
-  const [newSearch, newCategory] = newVals
-  const [oldSearch, oldCategory] = oldVals
+  const [newSearch] = newVals
+  const [oldSearch] = oldVals
 
   // Clear existing timer
   if (filterDebounceTimer) {

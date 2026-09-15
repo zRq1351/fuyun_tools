@@ -1,11 +1,11 @@
 <template>
   <el-form
-      :model="form"
-      label-position="top"
+    :model="form"
+    label-position="top"
   >
     <el-card
-        class="setting-section-card compact-card"
-        shadow="never"
+      class="setting-section-card compact-card"
+      shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -14,11 +14,11 @@
       </template>
       <el-form-item :label="$t('settings.docManager.enabled')">
         <el-switch
-            :active-text="pendingToggles.docManager === 'disabling' ? $t('common.disabling') : $t('common.enable')"
-            :inactive-text="pendingToggles.docManager === 'enabling' ? $t('common.enabling') : $t('common.close')"
-            :loading="!!pendingToggles.docManager"
-            :model-value="form.docManagerEnabled"
-            @update:model-value="(val) => toggleFeature('docManagerEnabled', val)"
+          :active-text="pendingToggles.docManager === 'disabling' ? $t('common.disabling') : $t('common.enable')"
+          :inactive-text="pendingToggles.docManager === 'enabling' ? $t('common.enabling') : $t('common.close')"
+          :loading="!!pendingToggles.docManager"
+          :model-value="form.docManagerEnabled"
+          @update:model-value="(val) => toggleFeature('docManagerEnabled', val)"
         />
         <div class="form-hint">
           {{ $t('settings.docManager.disabledHint') }}
@@ -27,28 +27,28 @@
 
       <el-form-item :label="$t('settings.docManager.hotkey')">
         <el-input
-            :class="{ recording: isDocManagerRecording }"
-            :model-value="docManagerDisplayValue"
-            :placeholder="$t('settings.clipboard.shortcutExample')"
-            readonly
+          :class="{ recording: isDocManagerRecording }"
+          :model-value="docManagerDisplayValue"
+          :placeholder="$t('settings.clipboard.shortcutExample')"
+          readonly
         >
           <template #append>
             <el-button-group>
               <el-button
-                  :title="$t('settings.clipboard.modifyShortcut')"
-                  :type="isDocManagerRecording ? 'danger' : 'primary'"
-                  @click="toggleDocManagerRecording"
+                :title="$t('settings.clipboard.modifyShortcut')"
+                :type="isDocManagerRecording ? 'danger' : 'primary'"
+                @click="toggleDocManagerRecording"
               >
                 <el-icon>
-                  <component :is="isDocManagerRecording ? VideoPause : Edit"/>
+                  <component :is="isDocManagerRecording ? VideoPause : Edit" />
                 </el-icon>
               </el-button>
               <el-button
-                  :title="$t('settings.clipboard.resetShortcut')"
-                  @click="resetDocManagerShortcut"
+                :title="$t('settings.clipboard.resetShortcut')"
+                @click="resetDocManagerShortcut"
               >
                 <el-icon>
-                  <RefreshLeft/>
+                  <RefreshLeft />
                 </el-icon>
               </el-button>
             </el-button-group>
@@ -58,19 +58,19 @@
 
       <el-form-item :label="$t('settings.docManager.widgetEnabled')">
         <el-switch
-            :disabled="!form.docManagerEnabled"
-            :model-value="form.docManagerWidgetEnabled"
-            @update:model-value="onWidgetToggle"
+          :disabled="!form.docManagerEnabled"
+          :model-value="form.docManagerWidgetEnabled"
+          @update:model-value="onWidgetToggle"
         />
         <div
-            v-if="!form.docManagerEnabled"
-            class="form-hint"
+          v-if="!form.docManagerEnabled"
+          class="form-hint"
         >
           {{ $t('settings.docManager.widgetDisabledHint') }}
         </div>
         <div
-            v-else
-            class="form-hint"
+          v-else
+          class="form-hint"
         >
           {{ $t('settings.docManager.widgetHint') }}
         </div>
@@ -78,8 +78,8 @@
     </el-card>
 
     <el-card
-        class="setting-section-card"
-        shadow="never"
+      class="setting-section-card"
+      shadow="never"
     >
       <template #header>
         <div class="section-title">
@@ -89,7 +89,7 @@
       <div class="feature-list">
         <div class="feature-item">
           <el-icon>
-            <FolderAdd/>
+            <FolderAdd />
           </el-icon>
           <div class="feature-content">
             <div class="feature-title">
@@ -102,7 +102,7 @@
         </div>
         <div class="feature-item">
           <el-icon>
-            <Search/>
+            <Search />
           </el-icon>
           <div class="feature-content">
             <div class="feature-title">
@@ -115,7 +115,7 @@
         </div>
         <div class="feature-item">
           <el-icon>
-            <Collection/>
+            <Collection />
           </el-icon>
           <div class="feature-content">
             <div class="feature-title">
@@ -160,7 +160,7 @@ const toggleFeature = async (fieldName, value) => {
     return
   }
   pendingToggles.value = {...pendingToggles.value, [fieldName]: value ? 'enabling' : 'disabling'}
-  const ok = await props.onFeatureToggle(fieldName, value)
+  await props.onFeatureToggle(fieldName, value)
   pendingToggles.value = {...pendingToggles.value, [fieldName]: undefined}
 }
 

@@ -20,7 +20,6 @@ export function useShortcutRecorder(form, fieldKey = 'toggleShortcut') {
         document.removeEventListener('keydown', handleKeyDown, true)
         if (recordedShortcut.value) {
             form[fieldKey] = recordedShortcut.value
-        } else {
         }
     }
 

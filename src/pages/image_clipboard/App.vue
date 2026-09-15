@@ -1,47 +1,47 @@
 <template>
   <div
-      ref="containerRef"
-      class="container"
-      tabindex="-1"
-      @click="closeContextMenu"
-      @keydown="handleKeydown"
-      @mousedown="handleContainerMouseDown"
+    ref="containerRef"
+    class="container"
+    tabindex="-1"
+    @click="closeContextMenu"
+    @keydown="handleKeydown"
+    @mousedown="handleContainerMouseDown"
   >
     <ClipboardToolbar
-        v-model:category-filter="categoryFilter"
-        v-model:new-category-name="newCategoryName"
-        v-model:search-keyword="searchKeyword"
-        :can-delete-category="canDeleteCategory"
-        :cancel-create-category="cancelCreateCategory"
-        :categories="categories"
-        :confirm-create-category="confirmCreateCategory"
-        :handle-drop="handleDrop"
-        :is-adding-category="isAddingCategory"
-        :new-category-input-ref="newCategoryInputRef"
-        :remove-category="removeCategory"
-        :create-category-text="$t('imageClipboard.createCategory')"
-        :search-placeholder="$t('imageClipboard.search')"
-        :start-create-category="startCreateCategory"
-        :start-window-offset-drag="startWindowOffsetDrag"
-        :show-ai-toggle="false"
-        :is-reorder-mode="isReorderMode"
-        @toggle-reorder="toggleReorderMode"
+      v-model:category-filter="categoryFilter"
+      v-model:new-category-name="newCategoryName"
+      v-model:search-keyword="searchKeyword"
+      :can-delete-category="canDeleteCategory"
+      :cancel-create-category="cancelCreateCategory"
+      :categories="categories"
+      :confirm-create-category="confirmCreateCategory"
+      :handle-drop="handleDrop"
+      :is-adding-category="isAddingCategory"
+      :new-category-input-ref="newCategoryInputRef"
+      :remove-category="removeCategory"
+      :create-category-text="$t('imageClipboard.createCategory')"
+      :search-placeholder="$t('imageClipboard.search')"
+      :start-create-category="startCreateCategory"
+      :start-window-offset-drag="startWindowOffsetDrag"
+      :show-ai-toggle="false"
+      :is-reorder-mode="isReorderMode"
+      @toggle-reorder="toggleReorderMode"
     />
     <div
-        v-if="isLoadingPage && filteredHistory.length === 0"
-        class="loading-state"
+      v-if="isLoadingPage && filteredHistory.length === 0"
+      class="loading-state"
     >
       <el-icon
-          :size="24"
-          class="is-loading"
+        :size="24"
+        class="is-loading"
       >
-        <Loading/>
+        <Loading />
       </el-icon>
       <span>{{ $t('clipboard.loading') }}</span>
     </div>
     <div
-        v-else-if="filteredHistory.length === 0"
-        class="empty-state"
+      v-else-if="filteredHistory.length === 0"
+      class="empty-state"
     >
       <el-empty :image-size="100">
         <template #description>
@@ -54,66 +54,66 @@
     </div>
 
     <ImageClipboardList
-        v-else
-        ref="imageListRef"
-        :delete-item="deleteItem"
-        :download-item="downloadItem"
-        :fill-by-id="fillById"
-        :get-preview-data-url="getPreviewDataUrl"
-        :handle-drag-end="handleDragEnd"
-        :handle-drag-start="handleDragStart"
-        :has-more="hasMore"
-        :is-ctrl-key-pressed="isCtrlKeyPressed"
-        :is-loading-page="isLoadingPage"
-        :open-fullscreen="openFullscreen"
-        :promote-item="promoteImageItem"
-        :select-by-index="selectByIndex"
-        :selected-index="selectedDisplayIndex"
-        :show-context-menu="showContextMenu"
-        :visible-history="filteredHistory"
-        :total-count="totalCount"
-        :is-reorder-mode="isReorderMode"
-        :on-reorder="handleReorder"
-        @load-more-intent="handleLoadMoreIntent"
+      v-else
+      ref="imageListRef"
+      :delete-item="deleteItem"
+      :download-item="downloadItem"
+      :fill-by-id="fillById"
+      :get-preview-data-url="getPreviewDataUrl"
+      :handle-drag-end="handleDragEnd"
+      :handle-drag-start="handleDragStart"
+      :has-more="hasMore"
+      :is-ctrl-key-pressed="isCtrlKeyPressed"
+      :is-loading-page="isLoadingPage"
+      :open-fullscreen="openFullscreen"
+      :promote-item="promoteImageItem"
+      :select-by-index="selectByIndex"
+      :selected-index="selectedDisplayIndex"
+      :show-context-menu="showContextMenu"
+      :visible-history="filteredHistory"
+      :total-count="totalCount"
+      :is-reorder-mode="isReorderMode"
+      :on-reorder="handleReorder"
+      @load-more-intent="handleLoadMoreIntent"
     />
 
     <div
-        class="status-footer"
-        @click.stop
-        @mousedown.stop
+      class="status-footer"
+      @click.stop
+      @mousedown.stop
     >
       <div class="status-text">
         <span class="status-label">{{ selectedStatusText }}</span>
         <span class="status-meta">{{ loadStatusText }}</span>
         <div class="status-actions">
           <button
-              :title="$t('imageClipboard.cyclePageSize', {size: pageSize})"
-              class="nav-action-btn"
-              type="button"
-              @click="cyclePageSize"
+            :title="$t('imageClipboard.cyclePageSize', {size: pageSize})"
+            class="nav-action-btn"
+            type="button"
+            @click="cyclePageSize"
           >
             {{ $t('imageClipboard.perPage', {size: pageSize}) }}
           </button>
           <button
-              :aria-label="$t('imageClipboard.backToStart')"
-              :title="$t('imageClipboard.backToStart')"
-              class="nav-action-btn icon-btn"
-              type="button"
-              @click="scrollToStart"
+            :aria-label="$t('imageClipboard.backToStart')"
+            :title="$t('imageClipboard.backToStart')"
+            class="nav-action-btn icon-btn"
+            type="button"
+            @click="scrollToStart"
           >
             <el-icon>
-              <ArrowLeftBold/>
+              <ArrowLeftBold />
             </el-icon>
           </button>
           <button
-              :aria-label="$t('imageClipboard.scrollToEnd')"
-              :title="$t('imageClipboard.scrollToEnd')"
-              class="nav-action-btn icon-btn"
-              type="button"
-              @click="scrollToEnd"
+            :aria-label="$t('imageClipboard.scrollToEnd')"
+            :title="$t('imageClipboard.scrollToEnd')"
+            class="nav-action-btn icon-btn"
+            type="button"
+            @click="scrollToEnd"
           >
             <el-icon>
-              <ArrowRightBold/>
+              <ArrowRightBold />
             </el-icon>
           </button>
         </div>
@@ -121,33 +121,33 @@
     </div>
 
     <div
-        v-if="contextMenuVisible"
-        ref="contextMenuRef"
-        class="context-menu"
-        @click.stop
+      v-if="contextMenuVisible"
+      ref="contextMenuRef"
+      class="context-menu"
+      @click.stop
     >
       <div
-          class="context-menu-item"
-          @click="editItemTags"
+        class="context-menu-item"
+        @click="editItemTags"
       >
         {{ $t('imageClipboard.editTags') }}
       </div>
-      <div class="context-menu-divider"/>
+      <div class="context-menu-divider" />
       <div class="context-menu-header">
         {{ $t('imageClipboard.addToCategory') }}
       </div>
       <div
-          v-for="category in categories"
-          :key="category"
-          class="context-menu-item"
-          @click="assignToCategory(category)"
+        v-for="category in categories"
+        :key="category"
+        class="context-menu-item"
+        @click="assignToCategory(category)"
       >
         {{ category }}
         <el-icon
-            v-if="getItemCategory(contextMenuItemId) === category"
-            class="check-icon"
+          v-if="getItemCategory(contextMenuItemId) === category"
+          class="check-icon"
         >
-          <Check/>
+          <Check />
         </el-icon>
       </div>
     </div>
@@ -237,7 +237,6 @@ let prefetchRequestSeq = 0
 let prefetchPromise = null
 
 const IMAGE_ITEM_UNIT = 76 // 与 ImageClipboardList 的 CARD_STEP 保持一致
-const IMAGE_PREVIEW_CACHE_MARGIN = 24
 const IMAGE_PREVIEW_CACHE_MAX_ITEMS = 300
 const ASYNC_PREVIEW_CACHE_MAX_ITEMS = 180
 const FILTER_CACHE_MAX_SIZE = 500
@@ -581,7 +580,7 @@ const loadTailPage = async () => {
   return true
 }
 
-const ensureKeyboardSelectionVisible = async () => {
+const _ensureKeyboardSelectionVisible = async () => {
   await nextTick()
   const container = contentRef.value
   if (!container) return
@@ -853,7 +852,7 @@ const pruneAsyncPreviewCache = (keepIds) => {
   enforceAsyncPreviewCacheSize()
 }
 
-const rgbaBase64ToPngDataUrl = (rgbaBase64, width, height) => {
+const _rgbaBase64ToPngDataUrl = (rgbaBase64, width, height) => {
   if (!rgbaBase64 || width <= 0 || height <= 0) return ''
   const expectedLen = width * height * 4
   try {
@@ -1305,7 +1304,7 @@ const removeCategory = async (category) => {
   }
 }
 
-const applyPayload = (data, options = {}) => {
+const _applyPayload = (data, options = {}) => {
   const {refocus = false} = options
   clearPrefetchedPage()
   history.value = Array.isArray(data.history) ? data.history : []
