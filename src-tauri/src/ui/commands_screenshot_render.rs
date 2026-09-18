@@ -297,7 +297,11 @@ fn render_normal_raster_commands(
     let crop_x = (selection.x * dpr).round() as i32;
     let crop_y = (selection.y * dpr).round() as i32;
     for command in &request.overlay_commands {
-        if command.points.len() < 2 {
+        let mut min_points = 2usize;
+        if command.raster_type == "mosaic" {
+            min_points = 1usize;
+        }
+        if command.points.len() < min_points {
             continue;
         }
         match command.raster_type.as_str() {
@@ -344,7 +348,11 @@ fn render_longshot_raster_commands(
     view_y: f32,
 ) {
     for command in &request.overlay_commands {
-        if command.points.len() < 2 {
+        let mut min_points = 2usize;
+        if command.raster_type == "mosaic" {
+            min_points = 1usize;
+        }
+        if command.points.len() < min_points {
             continue;
         }
         match command.raster_type.as_str() {

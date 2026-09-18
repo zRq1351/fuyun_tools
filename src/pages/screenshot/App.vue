@@ -1044,6 +1044,9 @@ function applyManualLongshotPhase(payload = {}) {
 
 let screenshotPixelCanvas = null
 let screenshotPixelCtx = null
+/** 无 CORS 污染的位图源（blob/createImageBitmap），马赛克/取色采样用 */
+let screenshotBitmap = null
+let screenshotPixelBlobLoadPromise = null
 let screenshotObjectUrl = ''
 const movingTextStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, id: 0})
 const movingShapeStart = reactive({x: 0, y: 0, itemX: 0, itemY: 0, id: 0})
@@ -1431,6 +1434,15 @@ function handleScreenshotReset() {
   pickColorRgb.value = ''
   pickerCopyHint.value = t('screenshot.pickerHint')
   screenshotPixelCanvas = null
+  screenshotPixelCtx = null
+  if (screenshotBitmap) {
+    try {
+      screenshotBitmap.close()
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  screenshotBitmap = null
   screenshotPixelCtx = null
   screenshotRequestInFlight.value = false
   screenshotRequestPromise = null
@@ -1873,13 +1885,15 @@ function loadImageFromSrc(src) {
     screenshotPixelCanvas.width = img.width
     screenshotPixelCanvas.height = img.height
     screenshotPixelCtx = screenshotPixelCanvas.getContext('2d')
+    let pixelReadable = false
     if (screenshotPixelCtx) {
       try {
         screenshotPixelCtx.drawImage(img, 0, 0)
+        // drawImage 对 asset:// 通常不抛错，但会 taint；必须用 getImageData 探测
+        screenshotPixelCtx.getImageData(0, 0, 1, 1)
+        pixelReadable = true
       } catch (_) {
-        // 跨域 taint 时回退：通过 fetch+blob 重新加载
-        loadScreenshotPixelFromBlob(src)
-        return
+        pixelReadable = false
       }
     }
     try {
@@ -1891,6 +1905,12 @@ function loadImageFromSrc(src) {
       initCanvas()
       isCaptureReady.value = Boolean(canvas.value && canvas.value.width > 0 && canvas.value.height > 0)
     })
+    if (!pixelReadable) {
+      // 异步重建无污染像素源，不阻塞预览显示
+      loadScreenshotPixelFromBlob(src, {reset: false}).catch((e) => {
+        console.error('重建截图像素源失败:', e)
+      })
+    }
   }
   img.onerror = () => {
     console.error('截图源图加载失败, src:', (src || '').substring(0, 100))
@@ -1899,28 +1919,89 @@ function loadImageFromSrc(src) {
   img.src = src
 }
 
-async function loadScreenshotPixelFromBlob(src) {
+function isPixelCtxReadable() {
+  if (!screenshotPixelCtx || !screenshotPixelCanvas) return false
   try {
-    const resp = await fetch(src)
-    const blob = await resp.blob()
-    const bitmap = await createImageBitmap(blob)
-    screenshotPixelCanvas = document.createElement('canvas')
-    screenshotPixelCanvas.width = bitmap.width
-    screenshotPixelCanvas.height = bitmap.height
-    screenshotPixelCtx = screenshotPixelCanvas.getContext('2d')
-    if (screenshotPixelCtx) {
-      screenshotPixelCtx.drawImage(bitmap, 0, 0)
-    }
-    bitmap.close()
-    resetAnnotationStateForNewImage()
-    nextTick(() => {
-      initCanvas()
-      isCaptureReady.value = Boolean(canvas.value && canvas.value.width > 0 && canvas.value.height > 0)
-    })
-  } catch (e) {
-    console.error('通过 blob 加载截图像素失败:', e)
-    isCaptureReady.value = false
+    screenshotPixelCtx.getImageData(0, 0, 1, 1)
+    return true
+  } catch (_) {
+    return false
   }
+}
+
+function readCleanPixelRegion(sx, sy, sw, sh) {
+  if (sw <= 0 || sh <= 0) return null
+  if (isPixelCtxReadable()) {
+    try {
+      return screenshotPixelCtx.getImageData(sx, sy, sw, sh)
+    } catch (_) {
+      /* fallthrough */
+    }
+  }
+  if (screenshotBitmap) {
+    try {
+      const tmp = document.createElement('canvas')
+      tmp.width = screenshotBitmap.width
+      tmp.height = screenshotBitmap.height
+      const tctx = tmp.getContext('2d')
+      if (!tctx) return null
+      tctx.drawImage(screenshotBitmap, 0, 0)
+      return tctx.getImageData(sx, sy, sw, sh)
+    } catch (err) {
+      console.warn('从 bitmap 读取像素失败:', err)
+    }
+  }
+  // 触发一次异步重建，后续笔触可恢复真彩色马赛克
+  const src = screenshotSrc.value
+  if (src && !screenshotPixelBlobLoadPromise) {
+    loadScreenshotPixelFromBlob(src, {reset: false}).catch(() => {})
+  }
+  return null
+}
+
+async function loadScreenshotPixelFromBlob(src, {reset = true} = {}) {
+  if (screenshotPixelBlobLoadPromise) {
+    return screenshotPixelBlobLoadPromise
+  }
+  screenshotPixelBlobLoadPromise = (async () => {
+    try {
+      const resp = await fetch(src)
+      const blob = await resp.blob()
+      const bitmap = await createImageBitmap(blob)
+      if (screenshotBitmap) {
+        try {
+          screenshotBitmap.close()
+        } catch (_) {
+          /* ignore */
+        }
+      }
+      screenshotBitmap = bitmap
+      screenshotPixelCanvas = document.createElement('canvas')
+      screenshotPixelCanvas.width = bitmap.width
+      screenshotPixelCanvas.height = bitmap.height
+      screenshotPixelCtx = screenshotPixelCanvas.getContext('2d')
+      if (screenshotPixelCtx) {
+        screenshotPixelCtx.drawImage(bitmap, 0, 0)
+      }
+      if (reset) {
+        resetAnnotationStateForNewImage()
+        nextTick(() => {
+          initCanvas()
+          isCaptureReady.value = Boolean(
+              canvas.value && canvas.value.width > 0 && canvas.value.height > 0
+          )
+        })
+      }
+    } catch (e) {
+      console.error('通过 blob 加载截图像素失败:', e)
+      if (reset) {
+        isCaptureReady.value = false
+      }
+    } finally {
+      screenshotPixelBlobLoadPromise = null
+    }
+  })()
+  return screenshotPixelBlobLoadPromise
 }
 
 function loadImageFromBase64(base64Data) {
@@ -2443,8 +2524,13 @@ function handleCanvasMouseMove(event) {
     ctx.stroke()
     activeRasterCommand?.points?.push({x, y})
   } else if (currentTool.value === 'mosaic') {
-    applyMosaicAtScenePoint(ctx, x, y, Number(mosaicSize.value) || 8)
+    // 先记点，再画：采样失败也不能丢掉命令，否则导出同样无马赛克
     activeRasterCommand?.points?.push({x, y})
+    try {
+      applyMosaicAtScenePoint(ctx, x, y, Number(mosaicSize.value) || 8)
+    } catch (err) {
+      console.warn('马赛克实时绘制失败:', err)
+    }
   } else if (SHAPE_TOOLS.includes(currentTool.value)) {
 
     const oldTransform = ctx.getTransform()
@@ -3107,12 +3193,28 @@ function pickColorAtScene(sceneX, sceneY) {
 
 function getMergedPixelColorAt(px, py) {
   const drawCanvas = canvas.value
-  if (!drawCanvas || !screenshotPixelCtx || !drawCanvas.width || !drawCanvas.height) return null
-  // px/py 是物理像素坐标，边界检查用截图画布（物理像素分辨率）
+  if (!drawCanvas || !drawCanvas.width || !drawCanvas.height) return null
   const pixelCanvas = screenshotPixelCanvas
   if (!pixelCanvas) return null
   if (px < 0 || py < 0 || px >= pixelCanvas.width || py >= pixelCanvas.height) return null
-  const baseData = screenshotPixelCtx.getImageData(px, py, 1, 1).data
+  let baseData = null
+  try {
+    if (screenshotPixelCtx && isPixelCtxReadable()) {
+      baseData = screenshotPixelCtx.getImageData(px, py, 1, 1).data
+    } else if (screenshotBitmap) {
+      const tmp = document.createElement('canvas')
+      tmp.width = 1
+      tmp.height = 1
+      const tctx = tmp.getContext('2d')
+      if (tctx) {
+        tctx.drawImage(screenshotBitmap, px, py, 1, 1, 0, 0, 1, 1)
+        baseData = tctx.getImageData(0, 0, 1, 1).data
+      }
+    }
+  } catch (_) {
+    baseData = null
+  }
+  if (!baseData) return null
   const drawCtx = drawCanvas.getContext('2d')
   if (!drawCtx) return {r: baseData[0], g: baseData[1], b: baseData[2]}
   // 叠加层标注画布使用 CSS 像素分辨率，坐标需缩放
@@ -3123,9 +3225,14 @@ function getMergedPixelColorAt(px, py) {
   }
   const oldTransform = drawCtx.getTransform()
   drawCtx.resetTransform()
-  const overlayData = drawCtx.getImageData(cpx, cpy, 1, 1).data
+  let overlayData = null
+  try {
+    overlayData = drawCtx.getImageData(cpx, cpy, 1, 1).data
+  } catch (_) {
+    overlayData = null
+  }
   drawCtx.setTransform(oldTransform)
-  if (overlayData[3] > 0) {
+  if (overlayData && overlayData[3] > 0) {
     return {r: overlayData[0], g: overlayData[1], b: overlayData[2]}
   }
   return {r: baseData[0], g: baseData[1], b: baseData[2]}
@@ -3235,71 +3342,109 @@ function clearOverlayCanvas(ctx) {
 }
 
 function applyMosaicAtScenePoint(ctx, x, y, strokeWidth) {
-  if (!screenshotImg.value) return
-  const size = strokeWidth * 3
-  let sampleSize = Math.max(1, Math.round(size * dpr))
-  let sampleX = x * dpr
-  let sampleY = y * dpr
-  let drawX = x
-  let drawY = y
-  let drawSize = size
-  let blockSize = Math.max(1, Math.round(6 * dpr))
+  // 与后端 apply_mosaic_at_image_point 同一算法，保证编辑器预览与导出一致：
+  // center = scene * dpr（全图像素坐标）；size = stroke*3*dpr；block = 6*dpr；块内取左上角采样色
+  const sourceCanvas = screenshotPixelCanvas
+  const sourceImg = screenshotImg.value
+  if (!sourceCanvas && !sourceImg) return
+
+  const stroke = Math.max(1, Number(strokeWidth) || 8)
+  let size
+  let blockSize
+  let centerX
+  let centerY
+  let srcW
+  let srcH
 
   if (longshotResultActive.value) {
-    const view = getLongshotImageViewportRect(
-        Math.max(1, Number(screenshotImg.value.width) || 1),
-        Math.max(1, Number(screenshotImg.value.height) || 1)
-    )
+    const imgW = sourceCanvas
+        ? sourceCanvas.width
+        : (sourceImg.naturalWidth || sourceImg.width || 1)
+    const imgH = sourceCanvas
+        ? sourceCanvas.height
+        : (sourceImg.naturalHeight || sourceImg.height || 1)
+    const view = getLongshotImageViewportRect(Math.max(1, imgW), Math.max(1, imgH))
     const imagePoint = sceneToImagePoint(x, y, view)
-    sampleSize = Math.max(1, Math.round(size / Math.max(0.0001, view.fit)))
-    blockSize = Math.max(1, Math.round(6 / Math.max(0.0001, view.fit)))
-    sampleX = imagePoint.x
-    sampleY = imagePoint.y
+    const scaleFactor = 1 / Math.max(0.0001, view.fit)
+    size = Math.max(1, Math.round(stroke * 3 * scaleFactor))
+    blockSize = Math.max(1, Math.round(6 * scaleFactor))
+    centerX = Math.round(imagePoint.x)
+    centerY = Math.round(imagePoint.y)
+    srcW = imgW
+    srcH = imgH
+  } else {
+    srcW = sourceCanvas
+        ? sourceCanvas.width
+        : (sourceImg.naturalWidth || sourceImg.width || 1)
+    srcH = sourceCanvas
+        ? sourceCanvas.height
+        : (sourceImg.naturalHeight || sourceImg.height || 1)
+    size = Math.max(1, Math.round(stroke * 3 * dpr))
+    blockSize = Math.max(1, Math.round(6 * dpr))
+    centerX = Math.round(x * dpr)
+    centerY = Math.round(y * dpr)
   }
 
-  const px = Math.round(sampleX)
-  const py = Math.round(sampleY)
-  const tempCanvas = document.createElement('canvas')
-  tempCanvas.width = sampleSize
-  tempCanvas.height = sampleSize
-  const tempCtx = tempCanvas.getContext('2d')
-  if (!tempCtx) return
-  tempCtx.drawImage(
-      screenshotImg.value,
-      px - sampleSize / 2, py - sampleSize / 2, sampleSize, sampleSize,
-      0, 0, sampleSize, sampleSize
-  )
-  const imageData = tempCtx.getImageData(0, 0, sampleSize, sampleSize)
-  const data = imageData.data
-  for (let i = 0; i < sampleSize; i += blockSize) {
-    for (let j = 0; j < sampleSize; j += blockSize) {
-      const pIdx = (j * sampleSize + i) * 4
-      if (pIdx >= data.length) continue
-      const r = data[pIdx]
-      const g = data[pIdx + 1]
-      const b = data[pIdx + 2]
-      for (let bi = 0; bi < blockSize && i + bi < sampleSize; bi++) {
-        for (let bj = 0; bj < blockSize && j + bj < sampleSize; bj++) {
-          const idx = ((j + bj) * sampleSize + (i + bi)) * 4
-          if (idx < data.length) {
-            data[idx] = r
-            data[idx + 1] = g
-            data[idx + 2] = b
-          }
+  const half = Math.floor(size / 2)
+  const out = document.createElement('canvas')
+  out.width = size
+  out.height = size
+  const outCtx = out.getContext('2d')
+  if (!outCtx) return
+  const imgData = outCtx.createImageData(size, size)
+  const data = imgData.data
+
+  // 与后端一致：在全图坐标采样块左上角，越界 clamp
+  const regionX = Math.max(0, centerX - half)
+  const regionY = Math.max(0, centerY - half)
+  const regionW = Math.min(srcW - regionX, size)
+  const regionH = Math.min(srcH - regionY, size)
+  // 必须用无 taint 的像素源；否则预览全灰，导出（后端读文件）却是真马赛克
+  const region = readCleanPixelRegion(regionX, regionY, regionW, regionH)
+
+  const sampleAt = (imgX, imgY) => {
+    const cx = Math.min(Math.max(imgX, 0), Math.max(0, srcW - 1))
+    const cy = Math.min(Math.max(imgY, 0), Math.max(0, srcH - 1))
+    if (!region) return [107, 107, 107]
+    const lx = cx - regionX
+    const ly = cy - regionY
+    if (lx < 0 || ly < 0 || lx >= region.width || ly >= region.height) {
+      return [107, 107, 107]
+    }
+    const idx = (ly * region.width + lx) * 4
+    return [region.data[idx], region.data[idx + 1], region.data[idx + 2]]
+  }
+
+  for (let blockY = 0; blockY < size; blockY += blockSize) {
+    for (let blockX = 0; blockX < size; blockX += blockSize) {
+      const srcX = centerX - half + blockX
+      const srcY = centerY - half + blockY
+      const [r, g, b] = sampleAt(srcX, srcY)
+      for (let by = 0; by < blockSize; by++) {
+        for (let bx = 0; bx < blockSize; bx++) {
+          const dx = blockX + bx
+          const dy = blockY + by
+          if (dx >= size || dy >= size) continue
+          const idx = (dy * size + dx) * 4
+          data[idx] = r
+          data[idx + 1] = g
+          data[idx + 2] = b
+          data[idx + 3] = 255
         }
       }
     }
   }
-  tempCtx.putImageData(imageData, 0, 0)
+  outCtx.putImageData(imgData, 0, 0)
+
+  // 预览绘制：物理尺寸 size 对应 CSS size/dpr（长截图为 scene 单位）
+  const drawCss = longshotResultActive.value ? size : size / dpr
   const oldSmoothing = ctx.imageSmoothingEnabled
   ctx.imageSmoothingEnabled = false
-  ctx.drawImage(
-      tempCanvas,
-      drawX - drawSize / 2,
-      drawY - drawSize / 2,
-      drawSize,
-      drawSize
-  )
+  try {
+    ctx.drawImage(out, x - drawCss / 2, y - drawCss / 2, drawCss, drawCss)
+  } catch (err) {
+    console.warn('马赛克绘制失败:', err)
+  }
   ctx.imageSmoothingEnabled = oldSmoothing
 }
 
@@ -3321,9 +3466,13 @@ function applyRasterCommand(ctx, command) {
     return
   }
   if (command.type === 'mosaic') {
-    if (!Array.isArray(command.points) || command.points.length < 2) return
+    if (!Array.isArray(command.points) || command.points.length < 1) return
     for (const point of command.points) {
-      applyMosaicAtScenePoint(ctx, point.x, point.y, command.lineWidth)
+      try {
+        applyMosaicAtScenePoint(ctx, point.x, point.y, command.lineWidth)
+      } catch (err) {
+        console.warn('马赛克重放失败:', err)
+      }
     }
   }
 }
@@ -3401,17 +3550,43 @@ function pruneHistoryWindowIfNeeded() {
 function commitActiveRasterCommand() {
   if (!activeRasterCommand) return false
   const pointCount = activeRasterCommand.points?.length || 0
-  const shouldCommit = pointCount >= 2
+  // 马赛克单点也应落盘（点击即打码）；笔刷仍需至少 2 点成线
+  const minPoints = activeRasterCommand.type === 'mosaic' ? 1 : 2
+  const shouldCommit = pointCount >= minPoints
   if (!shouldCommit) {
     activeRasterCommand = null
     return false
+  }
+  // 马赛克：按笔刷半径加密采样点，导出覆盖与预览笔触一致
+  let points = activeRasterCommand.points
+  if (activeRasterCommand.type === 'mosaic' && points.length >= 2) {
+    const stroke = Math.max(1, Number(activeRasterCommand.lineWidth) || 8)
+    const step = Math.max(2, stroke * 0.45)
+    const densified = [points[0]]
+    for (let i = 1; i < points.length; i++) {
+      const prev = densified[densified.length - 1]
+      const cur = points[i]
+      const dx = cur.x - prev.x
+      const dy = cur.y - prev.y
+      const dist = Math.hypot(dx, dy)
+      if (dist <= step) {
+        densified.push(cur)
+        continue
+      }
+      const n = Math.floor(dist / step)
+      for (let k = 1; k <= n; k++) {
+        densified.push({x: prev.x + (dx * k) / (n + 1), y: prev.y + (dy * k) / (n + 1)})
+      }
+      densified.push(cur)
+    }
+    points = densified
   }
   truncateFutureHistoryForMutation()
   overlayCommandLog.push({
     type: activeRasterCommand.type,
     color: activeRasterCommand.color,
     lineWidth: activeRasterCommand.lineWidth,
-    points: activeRasterCommand.points.map((point) => ({x: point.x, y: point.y}))
+    points: points.map((point) => ({x: point.x, y: point.y}))
   })
   activeRasterCommand = null
   return true
