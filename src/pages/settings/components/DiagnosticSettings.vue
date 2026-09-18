@@ -119,6 +119,12 @@
         <div class="overview-item">
           <div class="overview-label">{{ $t('settings.diagnostic.perfCpu') }}</div>
           <div class="overview-value">{{ (perf.system.cpuUsagePercent || 0).toFixed(1) }}%</div>
+          <div class="form-hint">{{ $t('settings.diagnostic.perfCpuSystemHint') }}</div>
+        </div>
+        <div class="overview-item">
+          <div class="overview-label">{{ $t('settings.diagnostic.perfProcessCpu') }}</div>
+          <div class="overview-value">{{ (perf.system.processCpuUsagePercent || 0).toFixed(1) }}%</div>
+          <div class="form-hint">{{ $t('settings.diagnostic.perfCpuProcessHint') }}</div>
         </div>
         <div class="overview-item">
           <div class="overview-label">{{ $t('settings.diagnostic.perfSamples') }}</div>
@@ -289,7 +295,8 @@ const perf = reactive({
     usedMemoryMb: 0,
     totalMemoryMb: 0,
     memoryUsagePercent: 0,
-    cpuUsagePercent: 0
+    cpuUsagePercent: 0,
+    processCpuUsagePercent: 0
   },
   sampleCount: 0,
   slowCount: 0,

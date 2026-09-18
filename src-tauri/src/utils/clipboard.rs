@@ -121,27 +121,28 @@ fn persist_clipboard_snapshot_sync(
     category_list: &[String],
     pinned_items: &[String],
 ) -> Result<(), String> {
-    tauri::async_runtime::block_on(async {
-        let mut errors = Vec::new();
-        if let Err(e) = crate::utils::database::save_history_items_only_async(items).await {
-            errors.push(format!("history: {e}"));
-        }
-        if let Err(e) = crate::utils::database::save_categories_state_async(categories, category_list)
-            .await
-        {
-            errors.push(format!("categories: {e}"));
-        }
-        if let Err(e) =
-            crate::utils::database::save_pinned_items_order_async(pinned_items).await
-        {
-            errors.push(format!("pinned: {e}"));
-        }
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors.join("; "))
-        }
-    })
+    persist_snapshot_with(
+        items,
+        categories,
+        category_list,
+        pinned_items,
+        |items| {
+            tauri::async_runtime::block_on(crate::utils::database::save_history_items_only_async(
+                items,
+            ))
+        },
+        |categories, category_list| {
+            tauri::async_runtime::block_on(crate::utils::database::save_categories_state_async(
+                categories,
+                category_list,
+            ))
+        },
+        |pinned| {
+            tauri::async_runtime::block_on(crate::utils::database::save_pinned_items_order_async(
+                pinned,
+            ))
+        },
+    )
 }
 
 const EXIT_SYNC_FALLBACK_TIMEOUT_SECS: u64 = 3;

@@ -12,6 +12,11 @@ use sysinfo::{Pid, System};
 struct CachedSystemResources {
     snapshot: SystemResourceSnapshot,
     last_refresh: Instant,
+    /// 复用同一 System 实例：CPU% 依赖两次 refresh 的差分，新建后只 refresh 一次会得到 0/100 假值
+    #[cfg(target_os = "windows")]
+    system: System,
+    #[cfg(target_os = "windows")]
+    cpu_baseline_ready: bool,
 }
 
 static CACHED_SYSTEM_RESOURCES: OnceLock<Mutex<CachedSystemResources>> = OnceLock::new();
@@ -78,7 +83,10 @@ pub struct SystemResourceSnapshot {
     pub used_memory_mb: u64,
     pub memory_usage_percent: f64,
     pub process_memory_mb: u64,
+    /// 全局系统 CPU（全部核心平均），与任务管理器「性能」页更接近
     pub cpu_usage_percent: f64,
+    /// 本进程 CPU（sysinfo，多核合计上限 100%×核数），与任务管理器进程列表更接近
+    pub process_cpu_usage_percent: f64,
     pub timestamp: u64,
 }
 
@@ -265,38 +273,43 @@ where
 /// 使用 2 秒缓存避免频繁创建 System 实例
 pub fn get_system_resources() -> SystemResourceSnapshot {
     let cache = CACHED_SYSTEM_RESOURCES.get_or_init(|| {
-        Mutex::new(CachedSystemResources {
-            snapshot: SystemResourceSnapshot::default(),
-            last_refresh: Instant::now() - SYSTEM_RESOURCE_CACHE_TTL * 2,
-        })
-    });
-
-    {
-        let cached = cache.lock();
-        if cached.last_refresh.elapsed() < SYSTEM_RESOURCE_CACHE_TTL {
-            return cached.snapshot.clone();
+        #[cfg(target_os = "windows")]
+        {
+            Mutex::new(CachedSystemResources {
+                snapshot: SystemResourceSnapshot::default(),
+                last_refresh: Instant::now() - SYSTEM_RESOURCE_CACHE_TTL * 2,
+                system: System::new(),
+                cpu_baseline_ready: false,
+            })
         }
-    }
-
-    let snapshot = get_system_resources_inner();
-
-    {
-        let mut cached = cache.lock();
-        cached.snapshot = snapshot.clone();
-        cached.last_refresh = Instant::now();
-    }
-
-    snapshot
-}
-
-fn get_system_resources_inner() -> SystemResourceSnapshot {
-    let timestamp = now_unix_ms();
+        #[cfg(not(target_os = "windows"))]
+        {
+            Mutex::new(CachedSystemResources {
+                snapshot: SystemResourceSnapshot::default(),
+                last_refresh: Instant::now() - SYSTEM_RESOURCE_CACHE_TTL * 2,
+            })
+        }
+    });
 
     #[cfg(target_os = "windows")]
     {
-        let mut sys = System::new();
-        sys.refresh_memory();
+        let mut cached = cache.lock();
+        if cached.last_refresh.elapsed() < SYSTEM_RESOURCE_CACHE_TTL && cached.cpu_baseline_ready {
+            return cached.snapshot.clone();
+        }
 
+        if !cached.cpu_baseline_ready {
+            // 首次仅建立 CPU/进程差分基线；本次 CPU 可能为 0，避免单次 refresh 的假 100%
+            cached.system.refresh_cpu_all();
+            cached
+                .system
+                .refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+            cached.cpu_baseline_ready = true;
+        }
+
+        let timestamp = now_unix_ms();
+        let sys = &mut cached.system;
+        sys.refresh_memory();
         let total_memory = sys.total_memory() / 1024 / 1024;
         let used_memory = sys.used_memory() / 1024 / 1024;
         let memory_usage = if total_memory > 0 {
@@ -305,37 +318,34 @@ fn get_system_resources_inner() -> SystemResourceSnapshot {
             0.0
         };
 
-        let process_memory = {
-            let pid = Pid::from_u32(process::id());
-            sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
-            sys.process(pid)
-                .map(|p| p.memory() / 1024 / 1024)
-                .unwrap_or(0)
-        };
+        let pid = Pid::from_u32(process::id());
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+        let (process_memory, process_cpu) = sys
+            .process(pid)
+            .map(|p| (p.memory() / 1024 / 1024, p.cpu_usage() as f64))
+            .unwrap_or((0, 0.0));
 
+        // TTL 间隔（≥2s）上的第二次 refresh，差分才有意义
         sys.refresh_cpu_all();
         let cpu_usage = sys.global_cpu_usage() as f64;
 
-        SystemResourceSnapshot {
+        let snapshot = SystemResourceSnapshot {
             total_memory_mb: total_memory,
             used_memory_mb: used_memory,
             memory_usage_percent: memory_usage,
             process_memory_mb: process_memory,
-            cpu_usage_percent: cpu_usage,
+            cpu_usage_percent: cpu_usage.clamp(0.0, 100.0),
+            process_cpu_usage_percent: process_cpu.max(0.0),
             timestamp,
-        }
+        };
+        cached.snapshot = snapshot.clone();
+        cached.last_refresh = Instant::now();
+        snapshot
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        SystemResourceSnapshot {
-            total_memory_mb: 0,
-            used_memory_mb: 0,
-            memory_usage_percent: 0.0,
-            process_memory_mb: 0,
-            cpu_usage_percent: 0.0,
-            timestamp,
-        }
+        SystemResourceSnapshot::default()
     }
 }
 
