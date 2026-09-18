@@ -51,6 +51,12 @@ pub(crate) struct ScreenshotExportShapeItem {
     pub(super) y2: Option<f32>,
     pub(super) color: String,
     pub(super) line_width: f32,
+    #[serde(default)]
+    pub(super) filled: Option<bool>,
+    #[serde(default)]
+    pub(super) fill_opacity: Option<f32>,
+    #[serde(default)]
+    pub(super) number: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -420,6 +426,175 @@ fn draw_circle_shape(
     }
 }
 
+/// 混合透明度（source-over）
+pub(crate) fn blend_rgba(dst: &mut Rgba<u8>, src: Rgba<u8>) {
+    let sa = src.0[3] as f32 / 255.0;
+    if sa <= 0.0 {
+        return;
+    }
+    if sa >= 1.0 {
+        *dst = src;
+        return;
+    }
+    let da = dst.0[3] as f32 / 255.0;
+    let out_a = sa + da * (1.0 - sa);
+    if out_a <= 0.0 {
+        *dst = Rgba([0, 0, 0, 0]);
+        return;
+    }
+    let mix = |s: u8, d: u8| -> u8 {
+        let v = (s as f32 * sa + d as f32 * da * (1.0 - sa)) / out_a;
+        v.round().clamp(0.0, 255.0) as u8
+    };
+    *dst = Rgba([
+        mix(src.0[0], dst.0[0]),
+        mix(src.0[1], dst.0[1]),
+        mix(src.0[2], dst.0[2]),
+        (out_a * 255.0).round().clamp(0.0, 255.0) as u8,
+    ]);
+}
+
+/// 计算填充色：在 stroke 颜色上应用 opacity（0-1）
+pub(crate) fn fill_color_with_opacity(color: Rgba<u8>, opacity: f32) -> Rgba<u8> {
+    let op = opacity.clamp(0.0, 1.0);
+    let alpha = (color.0[3] as f32 * op).round().clamp(0.0, 255.0) as u8;
+    Rgba([color.0[0], color.0[1], color.0[2], alpha])
+}
+
+fn blend_filled_rect(
+    canvas: &mut RgbaImage,
+    left: i32,
+    top: i32,
+    width: u32,
+    height: u32,
+    fill: Rgba<u8>,
+) {
+    if fill.0[3] == 0 {
+        return;
+    }
+    let dst_w = canvas.width() as i32;
+    let dst_h = canvas.height() as i32;
+    for py in top..top + height as i32 {
+        for px in left..left + width as i32 {
+            if px < 0 || py < 0 || px >= dst_w || py >= dst_h {
+                continue;
+            }
+            let dst = canvas.get_pixel_mut(px as u32, py as u32);
+            blend_rgba(dst, fill);
+        }
+    }
+}
+
+fn blend_filled_ellipse(
+    canvas: &mut RgbaImage,
+    cx: i32,
+    cy: i32,
+    rx: i32,
+    ry: i32,
+    fill: Rgba<u8>,
+) {
+    if fill.0[3] == 0 || rx <= 0 || ry <= 0 {
+        return;
+    }
+    let dst_w = canvas.width() as i32;
+    let dst_h = canvas.height() as i32;
+    let top = cy - ry;
+    let bottom = cy + ry;
+    let left = cx - rx;
+    let right = cx + rx;
+    for py in top..=bottom {
+        for px in left..=right {
+            if px < 0 || py < 0 || px >= dst_w || py >= dst_h {
+                continue;
+            }
+            let dx = (px - cx) as f32 / rx as f32;
+            let dy = (py - cy) as f32 / ry as f32;
+            if dx * dx + dy * dy > 1.0 {
+                continue;
+            }
+            let dst = canvas.get_pixel_mut(px as u32, py as u32);
+            blend_rgba(dst, fill);
+        }
+    }
+}
+
+fn draw_number_callout(
+    canvas: &mut RgbaImage,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    color: Rgba<u8>,
+    line_width: f32,
+    number: u32,
+    fill_opacity: f32,
+) -> Result<(), String> {
+    let left = x.round() as i32;
+    let top = y.round() as i32;
+    let w = width.max(2.0).round() as u32;
+    let h = height.max(2.0).round() as u32;
+    let cx = left + (w as i32) / 2;
+    let cy = top + (h as i32) / 2;
+    let rx = (w as i32 / 2).max(1);
+    let ry = (h as i32 / 2).max(1);
+    let fill = fill_color_with_opacity(color, fill_opacity.clamp(0.0, 1.0));
+    blend_filled_ellipse(canvas, cx, cy, rx, ry, fill);
+    draw_circle_shape(canvas, x, y, width, height, color, line_width);
+
+    let text = number.to_string();
+    let radius = (w.min(h) as f32) * 0.5;
+    let font_size = (radius * 0.9).max(8.0);
+    let font = load_font_for_text(Some("Arial"), &text)?;
+    let scale = ab_glyph::PxScale::from(font_size);
+    // ab_glyph + imageproc draw_text_mut: 以 (0,0) 为左上；按文本宽高居中
+    let glyph_count = text.chars().count() as f32;
+    let approx_w = glyph_count * font_size * 0.55;
+    let text_x = (cx as f32 - approx_w * 0.5).round() as i32;
+    let text_y = (cy as f32 - font_size * 0.55).round() as i32;
+    draw_text_mut(canvas, Rgba([255, 255, 255, 255]), text_x, text_y, scale, &font, &text);
+    Ok(())
+}
+
+fn shape_fill_params(item: &ScreenshotExportShapeItem) -> (bool, f32) {
+    let filled = item.filled.unwrap_or(false) || item.shape_type == "number";
+    let opacity = item.fill_opacity.unwrap_or(if item.shape_type == "number" {
+        1.0
+    } else {
+        0.35
+    });
+    (filled, opacity.clamp(0.0, 1.0))
+}
+
+fn apply_shape_fill(
+    canvas: &mut RgbaImage,
+    shape_type: &str,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    color: Rgba<u8>,
+    fill_opacity: f32,
+) {
+    let left = x.round() as i32;
+    let top = y.round() as i32;
+    let w = width.max(1.0).round() as u32;
+    let h = height.max(1.0).round() as u32;
+    let fill = fill_color_with_opacity(color, fill_opacity);
+    match shape_type {
+        "rect" => {
+            blend_filled_rect(canvas, left, top, w, h, fill);
+        }
+        "circle" | "number" => {
+            let cx = (x + width * 0.5).round() as i32;
+            let cy = (y + height * 0.5).round() as i32;
+            let rx = (width * 0.5).round().max(1.0) as i32;
+            let ry = (height * 0.5).round().max(1.0) as i32;
+            blend_filled_ellipse(canvas, cx, cy, rx, ry, fill);
+        }
+        _ => {}
+    }
+}
+
 fn draw_text_item(
     canvas: &mut RgbaImage,
     item: &ScreenshotExportTextItem,
@@ -488,9 +663,38 @@ fn render_normal_shapes(
         let width = item.width.max(1.0) * dpr;
         let height = item.height.max(1.0) * dpr;
         let line_width = item.line_width.max(1.0) * dpr;
+        let (filled, fill_opacity) = shape_fill_params(item);
+        if filled && item.shape_type != "number" {
+            apply_shape_fill(
+                canvas,
+                item.shape_type.as_str(),
+                x,
+                y,
+                width,
+                height,
+                color,
+                fill_opacity,
+            );
+        }
         match item.shape_type.as_str() {
             "rect" => draw_rect_shape(canvas, x, y, width, height, color, line_width),
             "circle" => draw_circle_shape(canvas, x, y, width, height, color, line_width),
+            "number" => {
+                let n = item.number.unwrap_or(0);
+                if let Err(e) = draw_number_callout(
+                    canvas,
+                    x,
+                    y,
+                    width,
+                    height,
+                    color,
+                    line_width,
+                    n,
+                    fill_opacity,
+                ) {
+                    log::warn!("绘制编号标注失败: {e}");
+                }
+            }
             "line" | "arrow" => {
                 let from = (
                     x + item.x1.unwrap_or(0.0) * dpr,
@@ -530,28 +734,34 @@ fn render_shape_item_for_longshot(
 ) {
     let color = parse_hex_color(&item.color);
     let line_width = (item.line_width / fit).max(1.0);
+    let (filled, fill_opacity) = shape_fill_params(item);
+    let (x1, y1) = longshot_scene_to_image(item.x, item.y, fit, view_x, view_y);
+    let (x2, y2) = longshot_scene_to_image(
+        item.x + item.width,
+        item.y + item.height,
+        fit,
+        view_x,
+        view_y,
+    );
+    let w = x2 - x1;
+    let h = y2 - y1;
+    if filled && item.shape_type != "number" {
+        apply_shape_fill(canvas, item.shape_type.as_str(), x1, y1, w, h, color, fill_opacity);
+    }
     match item.shape_type.as_str() {
         "rect" => {
-            let (x1, y1) = longshot_scene_to_image(item.x, item.y, fit, view_x, view_y);
-            let (x2, y2) = longshot_scene_to_image(
-                item.x + item.width,
-                item.y + item.height,
-                fit,
-                view_x,
-                view_y,
-            );
-            draw_rect_shape(canvas, x1, y1, x2 - x1, y2 - y1, color, line_width);
+            draw_rect_shape(canvas, x1, y1, w, h, color, line_width);
         }
         "circle" => {
-            let (x1, y1) = longshot_scene_to_image(item.x, item.y, fit, view_x, view_y);
-            let (x2, y2) = longshot_scene_to_image(
-                item.x + item.width,
-                item.y + item.height,
-                fit,
-                view_x,
-                view_y,
-            );
-            draw_circle_shape(canvas, x1, y1, x2 - x1, y2 - y1, color, line_width);
+            draw_circle_shape(canvas, x1, y1, w, h, color, line_width);
+        }
+        "number" => {
+            let n = item.number.unwrap_or(0);
+            if let Err(e) =
+                draw_number_callout(canvas, x1, y1, w, h, color, line_width, n, fill_opacity)
+            {
+                log::warn!("长截图绘制编号标注失败: {e}");
+            }
         }
         "line" | "arrow" => {
             let (from_x, from_y) = longshot_scene_to_image(
@@ -664,4 +874,75 @@ pub(super) fn export_screenshot_image(request: &ScreenshotExportRequest) -> Resu
         .save(&request.output_path)
         .map_err(|e| format!("写入导出图片失败: {}", e))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::Rgba;
+
+    #[test]
+    fn test_fill_color_with_opacity() {
+        let c = Rgba([255, 0, 0, 255]);
+        let half = fill_color_with_opacity(c, 0.5);
+        assert_eq!(half.0[0], 255);
+        assert!((half.0[3] as i32 - 128).abs() <= 1);
+        let zero = fill_color_with_opacity(c, 0.0);
+        assert_eq!(zero.0[3], 0);
+        let over = fill_color_with_opacity(c, 2.0);
+        assert_eq!(over.0[3], 255);
+    }
+
+    #[test]
+    fn test_blend_rgba_opaque_overwrites() {
+        let mut dst = Rgba([0, 0, 0, 255]);
+        blend_rgba(&mut dst, Rgba([10, 20, 30, 255]));
+        assert_eq!(dst.0, [10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn test_blend_rgba_half_alpha() {
+        let mut dst = Rgba([0, 0, 0, 255]);
+        blend_rgba(&mut dst, Rgba([255, 255, 255, 128]));
+        // 源白 50% 叠在黑上 → 约 127-128 灰
+        assert!(dst.0[0] > 100 && dst.0[0] < 160, "r={}", dst.0[0]);
+        assert_eq!(dst.0[0], dst.0[1]);
+        assert_eq!(dst.0[1], dst.0[2]);
+    }
+
+    #[test]
+    fn test_shape_fill_params_defaults() {
+        let mut item = ScreenshotExportShapeItem {
+            shape_type: "rect".to_string(),
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+            x1: None,
+            y1: None,
+            x2: None,
+            y2: None,
+            color: "#ff0000".to_string(),
+            line_width: 2.0,
+            filled: None,
+            fill_opacity: None,
+            number: None,
+        };
+        let (filled, op) = shape_fill_params(&item);
+        assert!(!filled);
+        assert!((op - 0.35).abs() < 0.001);
+
+        item.shape_type = "number".to_string();
+        item.number = Some(3);
+        let (filled, op) = shape_fill_params(&item);
+        assert!(filled);
+        assert!((op - 1.0).abs() < 0.001);
+
+        item.filled = Some(true);
+        item.fill_opacity = Some(0.8);
+        item.shape_type = "circle".to_string();
+        let (filled, op) = shape_fill_params(&item);
+        assert!(filled);
+        assert!((op - 0.8).abs() < 0.001);
+    }
 }

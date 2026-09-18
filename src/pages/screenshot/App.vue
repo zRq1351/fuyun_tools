@@ -325,9 +325,9 @@
         </button>
       </div>
 
-      <!-- 二级属性栏 -->
+      <!-- 二级属性栏：绘图工具激活，或选中可填充形状时 -->
       <div
-          v-if="currentTool !== 'select' && currentTool !== 'picker'"
+          v-if="showSecondaryTools"
           class="tools-row secondary-tools"
       >
         <input
@@ -346,6 +346,37 @@
             type="range"
             @input="syncEditingTextStyle"
         >
+        <template v-if="showMosaicSizeControl">
+          <input
+              v-model="mosaicSize"
+              :title="t('screenshot.mosaicSize')"
+              class="line-slider"
+              max="24"
+              min="2"
+              type="range"
+          >
+        </template>
+        <template v-if="showShapeFillControls">
+          <button
+              :class="{ active: fillControlsActive }"
+              :title="t('screenshot.fill')"
+              class="tool-btn mini"
+              @click="toggleShapeFill"
+          >
+            {{ t('screenshot.fill') }}
+          </button>
+          <input
+              v-if="fillControlsActive"
+              v-model="shapeFillOpacity"
+              :title="t('screenshot.fillOpacity')"
+              class="line-slider"
+              max="1"
+              min="0.05"
+              step="0.05"
+              type="range"
+              @change="onShapeFillOpacityInput"
+          >
+        </template>
         <template v-if="currentTool === 'text'">
           <select
               v-model="textStyle.fontFamily"
@@ -431,15 +462,31 @@
     >
       <template v-if="shape.type === 'rect'">
         <div
+            :style="getShapeFillStyle(shape)"
+            class="shape-fill"
+        />
+        <div
             :style="getShapeStrokeStyle(shape)"
             class="shape-rect"
         />
       </template>
       <template v-else-if="shape.type === 'circle'">
         <div
+            :style="getShapeFillStyle(shape)"
+            class="shape-fill shape-fill-circle"
+        />
+        <div
             :style="getShapeStrokeStyle(shape)"
             class="shape-circle"
         />
+      </template>
+      <template v-else-if="shape.type === 'number'">
+        <div
+            :style="getShapeNumberStyle(shape)"
+            class="shape-number"
+        >
+          {{ shape.n }}
+        </div>
       </template>
       <template v-else>
         <svg
@@ -478,7 +525,7 @@
           </template>
         </svg>
       </template>
-      <template v-if="selectedShapeId === shape.id && (shape.type === 'rect' || shape.type === 'circle')">
+      <template v-if="selectedShapeId === shape.id && (shape.type === 'rect' || shape.type === 'circle' || shape.type === 'number')">
         <div
             class="shape-resize-handle tl"
             @mousedown.stop="startResizeShapeItem(shape.id, 'tl', $event)"
@@ -568,6 +615,7 @@ import {
   Download,
   Edit,
   EditPen,
+  Flag,
   Grid,
   Minus,
   Pointer,
@@ -619,6 +667,13 @@ let currentDrawingSnapshot = null
 const currentTool = ref('select')
 const currentColor = ref('#ff0000')
 const lineWidth = ref(3)
+const shapeFillEnabled = ref(false)
+const shapeFillOpacity = ref(0.35)
+const mosaicSize = ref(8)
+const NUMBER_DEFAULT_RADIUS = 22
+const NUMBER_MIN_RADIUS = 14
+const SHAPE_TOOLS = ['line', 'arrow', 'rect', 'circle', 'number']
+const FILLABLE_SHAPE_TOOLS = ['rect', 'circle', 'number']
 const pickColor = ref('')
 const pickColorRgb = ref('')
 const pickerDisplayMode = ref('hex')
@@ -631,6 +686,102 @@ const editingTextId = ref(null)
 const selectedTextId = ref(null)
 const selectedShapeId = ref(null)
 const editingElementRef = ref(null)
+
+const showShapeFillControls = computed(() =>
+    FILLABLE_SHAPE_TOOLS.includes(currentTool.value) ||
+    FILLABLE_SHAPE_TOOLS.includes(String(shapeItems.value.find(s => s.id === selectedShapeId.value)?.type || ''))
+)
+const showMosaicSizeControl = computed(() => currentTool.value === 'mosaic')
+const selectedFillableShape = computed(() => {
+  const selected = shapeItems.value.find(s => s.id === selectedShapeId.value)
+  return selected && FILLABLE_SHAPE_TOOLS.includes(selected.type) ? selected : null
+})
+const showSecondaryTools = computed(() => {
+  if (currentTool.value !== 'select' && currentTool.value !== 'picker') return true
+  // 选中 rect/circle/number 时仍可改填充/透明度
+  return !!selectedFillableShape.value
+})
+const fillControlsActive = computed(() => {
+  if (selectedFillableShape.value) {
+    return !!selectedFillableShape.value.filled || selectedFillableShape.value.type === 'number'
+  }
+  return shapeFillEnabled.value || currentTool.value === 'number'
+})
+
+function applyShapeFillMutation(selected, filled, opacity) {
+  if (!selected) return
+  selected.filled = filled
+  selected.fillOpacity = filled ? opacity : 0
+  ensureShapeFillFields(selected)
+  appendVectorUpsertCommand('shape', selected)
+  saveToHistory()
+}
+
+function toggleShapeFill() {
+  const selected = selectedFillableShape.value
+  if (currentTool.value === 'number' || selected?.type === 'number') {
+    // 编号标注始终填充
+    return
+  }
+  if (selected) {
+    const nextFilled = !selected.filled
+    shapeFillEnabled.value = nextFilled
+    applyShapeFillMutation(
+        selected,
+        nextFilled,
+        nextFilled ? (Number(shapeFillOpacity.value) || 0.35) : 0
+    )
+    return
+  }
+  shapeFillEnabled.value = !shapeFillEnabled.value
+}
+
+function onShapeFillOpacityInput() {
+  const selected = selectedFillableShape.value
+  if (!selected || selected.type === 'number') return
+  if (!selected.filled) return
+  const op = Math.min(1, Math.max(0.05, Number(shapeFillOpacity.value) || 0.35))
+  selected.fillOpacity = op
+  appendVectorUpsertCommand('shape', selected)
+  saveToHistory()
+}
+
+function nextNumberCalloutIndex() {
+  let maxN = 0
+  for (const item of shapeItems.value) {
+    if (item.type === 'number' && Number(item.n) > maxN) {
+      maxN = Number(item.n)
+    }
+  }
+  return maxN + 1
+}
+
+function hexToRgba(hex, opacity) {
+  let h = String(hex || '#ff0000').replace('#', '')
+  if (h.length === 3) {
+    h = h.split('').map(c => c + c).join('')
+  }
+  const r = parseInt(h.slice(0, 2), 16) || 0
+  const g = parseInt(h.slice(2, 4), 16) || 0
+  const b = parseInt(h.slice(4, 6), 16) || 0
+  const a = Math.min(1, Math.max(0, Number(opacity) || 0))
+  return `rgba(${r}, ${g}, ${b}, ${a})`
+}
+
+function ensureShapeFillFields(item) {
+  if (!item) return item
+  if (item.type === 'number') {
+    item.filled = true
+    if (item.fillOpacity == null) item.fillOpacity = 1
+    if (item.n == null) item.n = nextNumberCalloutIndex()
+  } else if (item.filled == null) {
+    item.filled = false
+  }
+  if (item.fillOpacity == null) {
+    item.fillOpacity = item.filled ? 0.35 : 0
+  }
+  return item
+}
 const textOverlayRefMap = new Map()
 const editingBeforeText = ref('')
 const editingBeforeItem = ref(null)
@@ -708,6 +859,7 @@ const drawingTools = [
   {id: 'arrow', name: 'screenshot.arrow', icon: TopRight},
   {id: 'rect', name: 'screenshot.rectangle', icon: Square},
   {id: 'circle', name: 'screenshot.circle', icon: Circle},
+  {id: 'number', name: 'screenshot.numberCallout', icon: Flag},
   {id: 'text', name: 'screenshot.text', icon: Edit},
   {id: 'mosaic', name: 'screenshot.mosaic', icon: Grid},
   {id: 'picker', name: 'screenshot.colorPicker', icon: Brush}
@@ -1644,7 +1796,12 @@ function buildBackendExportRequest(outputPath) {
       x2: item.x2,
       y2: item.y2,
       color: item.color,
-      lineWidth: item.lineWidth
+      lineWidth: item.lineWidth,
+      filled: !!item.filled || item.type === 'number',
+      fillOpacity: item.fillOpacity != null
+          ? Number(item.fillOpacity)
+          : (item.type === 'number' ? 1 : (item.filled ? 0.35 : 0)),
+      number: item.type === 'number' ? Number(item.n) || 0 : undefined
     })),
     overlayCommands: overlayCommandLog.map((command) => ({
       type: command.type,
@@ -2259,11 +2416,12 @@ function handleCanvasMouseDown(event) {
     activeRasterCommand = {
       type: currentTool.value,
       color: currentColor.value,
-      lineWidth: Number(lineWidth.value) || 1,
+      lineWidth: currentTool.value === 'mosaic'
+          ? (Number(mosaicSize.value) || 8)
+          : (Number(lineWidth.value) || 1),
       points: [{x: drawStart.x, y: drawStart.y}]
     }
-  } else if (['line', 'arrow', 'rect', 'circle'].includes(currentTool.value)) {
-
+  } else if (SHAPE_TOOLS.includes(currentTool.value)) {
     currentDrawingSnapshot = ctx.getImageData(0, 0, canvas.value.width, canvas.value.height)
   }
 }
@@ -2285,9 +2443,9 @@ function handleCanvasMouseMove(event) {
     ctx.stroke()
     activeRasterCommand?.points?.push({x, y})
   } else if (currentTool.value === 'mosaic') {
-    applyMosaicAtScenePoint(ctx, x, y, Number(lineWidth.value) || 1)
+    applyMosaicAtScenePoint(ctx, x, y, Number(mosaicSize.value) || 8)
     activeRasterCommand?.points?.push({x, y})
-  } else if (['line', 'arrow', 'rect', 'circle'].includes(currentTool.value)) {
+  } else if (SHAPE_TOOLS.includes(currentTool.value)) {
 
     const oldTransform = ctx.getTransform()
     ctx.resetTransform()
@@ -2306,11 +2464,42 @@ function handleCanvasMouseMove(event) {
         drawArrowHead(ctx, drawStart.x, drawStart.y, x, y)
       }
     } else if (currentTool.value === 'rect') {
+      if (shapeFillEnabled.value) {
+        ctx.fillStyle = hexToRgba(currentColor.value, shapeFillOpacity.value)
+        const rx = Math.min(drawStart.x, x)
+        const ry = Math.min(drawStart.y, y)
+        const rw = Math.abs(x - drawStart.x)
+        const rh = Math.abs(y - drawStart.y)
+        ctx.fillRect(rx, ry, rw, rh)
+      }
       ctx.strokeRect(drawStart.x, drawStart.y, x - drawStart.x, y - drawStart.y)
-    } else if (currentTool.value === 'circle') {
-      const radius = Math.sqrt(Math.pow(x - drawStart.x, 2) + Math.pow(y - drawStart.y, 2))
-      ctx.arc(drawStart.x, drawStart.y, radius, 0, Math.PI * 2)
-      ctx.stroke()
+    } else if (currentTool.value === 'circle' || currentTool.value === 'number') {
+      const radius = currentTool.value === 'number'
+          ? Math.max(NUMBER_MIN_RADIUS, Math.sqrt(Math.pow(x - drawStart.x, 2) + Math.pow(y - drawStart.y, 2)))
+          : Math.sqrt(Math.pow(x - drawStart.x, 2) + Math.pow(y - drawStart.y, 2))
+      if (currentTool.value === 'number' || shapeFillEnabled.value) {
+        ctx.fillStyle = currentTool.value === 'number'
+            ? currentColor.value
+            : hexToRgba(currentColor.value, shapeFillOpacity.value)
+        ctx.arc(drawStart.x, drawStart.y, radius, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.beginPath()
+      }
+      if (currentTool.value === 'number') {
+        ctx.strokeStyle = currentColor.value
+        ctx.lineWidth = Math.max(2, lineWidth.value)
+        ctx.arc(drawStart.x, drawStart.y, radius, 0, Math.PI * 2)
+        ctx.stroke()
+        const previewN = nextNumberCalloutIndex()
+        ctx.fillStyle = '#ffffff'
+        ctx.font = `700 ${Math.max(10, radius * 0.9)}px Arial`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(String(previewN), drawStart.x, drawStart.y)
+      } else {
+        ctx.arc(drawStart.x, drawStart.y, radius, 0, Math.PI * 2)
+        ctx.stroke()
+      }
     }
   }
 }
@@ -2331,7 +2520,7 @@ function handleCanvasMouseUp(event) {
     return
   }
 
-  if (['line', 'arrow', 'rect', 'circle'].includes(currentTool.value)) {
+  if (SHAPE_TOOLS.includes(currentTool.value)) {
     if (currentDrawingSnapshot && ctx) {
       const oldTransform = ctx.getTransform()
       ctx.resetTransform()
@@ -2505,6 +2694,7 @@ function startDragShapeItem(id, event) {
   selectedTextId.value = null
   const item = shapeItems.value.find((entry) => entry.id === id)
   if (!item) return
+  syncFillControlsFromShape(item)
   const p = toScenePoint(event)
   movingShapeStart.x = p.x
   movingShapeStart.y = p.y
@@ -2515,12 +2705,26 @@ function startDragShapeItem(id, event) {
   state.value = 'shape-moving'
 }
 
+function syncFillControlsFromShape(item) {
+  if (!item || !FILLABLE_SHAPE_TOOLS.includes(item.type)) return
+  if (item.type === 'number') {
+    shapeFillEnabled.value = true
+    shapeFillOpacity.value = 1
+    return
+  }
+  shapeFillEnabled.value = !!item.filled
+  shapeFillOpacity.value = item.filled
+      ? (Number(item.fillOpacity) || 0.35)
+      : (Number(shapeFillOpacity.value) || 0.35)
+}
+
 function startResizeShapeItem(id, handle, event) {
   if (editingTextId.value !== null) return
   const item = shapeItems.value.find((entry) => entry.id === id)
-  if (!item || (item.type !== 'rect' && item.type !== 'circle')) return
+  if (!item || (item.type !== 'rect' && item.type !== 'circle' && item.type !== 'number')) return
   selectedShapeId.value = id
   selectedTextId.value = null
+  syncFillControlsFromShape(item)
   const p = toScenePoint(event)
   resizingShapeStart.x = p.x
   resizingShapeStart.y = p.y
@@ -2633,10 +2837,30 @@ function updateLineLikeShapeFromAbsolutePoints(item, startAbs, endAbs) {
 function createShapeItem(type, fromX, fromY, toX, toY) {
   const dx = toX - fromX
   const dy = toY - fromY
-  if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return
   const stroke = Math.max(1, Number(lineWidth.value) || 1)
+  if (type === 'number') {
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    const radius = dist < 4 ? NUMBER_DEFAULT_RADIUS : Math.max(NUMBER_MIN_RADIUS, dist)
+    const n = nextNumberCalloutIndex()
+    const item = ensureShapeFillFields({
+      id: shapeItemIdSeed++,
+      type,
+      n,
+      x: fromX - radius,
+      y: fromY - radius,
+      width: radius * 2,
+      height: radius * 2,
+      color: currentColor.value,
+      lineWidth: Math.max(2, stroke),
+      filled: true,
+      fillOpacity: 1
+    })
+    shapeItems.value.push(item)
+    return item
+  }
+  if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return
   if (type === 'rect') {
-    const item = {
+    const item = ensureShapeFillFields({
       id: shapeItemIdSeed++,
       type,
       x: Math.min(fromX, toX),
@@ -2644,14 +2868,16 @@ function createShapeItem(type, fromX, fromY, toX, toY) {
       width: Math.max(2, Math.abs(dx)),
       height: Math.max(2, Math.abs(dy)),
       color: currentColor.value,
-      lineWidth: stroke
-    }
+      lineWidth: stroke,
+      filled: shapeFillEnabled.value,
+      fillOpacity: shapeFillEnabled.value ? (Number(shapeFillOpacity.value) || 0.35) : 0
+    })
     shapeItems.value.push(item)
     return item
   }
   if (type === 'circle') {
     const radius = Math.sqrt(dx * dx + dy * dy)
-    const item = {
+    const item = ensureShapeFillFields({
       id: shapeItemIdSeed++,
       type,
       x: fromX - radius,
@@ -2659,8 +2885,10 @@ function createShapeItem(type, fromX, fromY, toX, toY) {
       width: Math.max(2, radius * 2),
       height: Math.max(2, radius * 2),
       color: currentColor.value,
-      lineWidth: stroke
-    }
+      lineWidth: stroke,
+      filled: shapeFillEnabled.value,
+      fillOpacity: shapeFillEnabled.value ? (Number(shapeFillOpacity.value) || 0.35) : 0
+    })
     shapeItems.value.push(item)
     return item
   }
@@ -2725,6 +2953,28 @@ function getShapeStrokeStyle(shape) {
   return {
     borderColor: shape.color,
     borderWidth: `${Math.max(1, shape.lineWidth * scale)}px`
+  }
+}
+
+function getShapeFillStyle(shape) {
+  if (!shape?.filled) return {display: 'none'}
+  return {
+    backgroundColor: hexToRgba(shape.color, shape.fillOpacity ?? 0.35)
+  }
+}
+
+function getShapeNumberStyle(shape) {
+  const scale = longshotResultActive.value ? longshotViewScale.value : 1
+  const w = Math.max(2, shape.width * scale)
+  const h = Math.max(2, shape.height * scale)
+  return {
+    width: `${w}px`,
+    height: `${h}px`,
+    backgroundColor: shape.color,
+    borderColor: shape.color,
+    borderWidth: `${Math.max(1, (shape.lineWidth || 2) * scale)}px`,
+    fontSize: `${Math.max(10, Math.min(w, h) * 0.45)}px`,
+    lineHeight: `${h}px`
   }
 }
 
@@ -2941,7 +3191,8 @@ function cloneTextItem(item) {
 }
 
 function cloneShapeItem(item) {
-  return item ? {...item} : null
+  if (!item) return null
+  return {...item}
 }
 
 function areFlatItemsEqual(a, b) {
@@ -3342,12 +3593,42 @@ function drawShapeItemsOnLongshotCanvas(ctx, view) {
     const w = item.width / view.fit
     const h = item.height / view.fit
     if (item.type === 'rect') {
+      if (item.filled) {
+        ctx.fillStyle = hexToRgba(item.color, item.fillOpacity ?? 0.35)
+        ctx.fillRect(x, y, w, h)
+      }
       ctx.strokeRect(x, y, w, h)
       continue
     }
-    if (item.type === 'circle') {
+    if (item.type === 'circle' || item.type === 'number') {
+      const cx = x + w / 2
+      const cy = y + h / 2
+      const rx = Math.abs(w / 2)
+      const ry = Math.abs(h / 2)
+      if (item.type === 'number' || item.filled) {
+        ctx.fillStyle = item.type === 'number'
+            ? item.color
+            : hexToRgba(item.color, item.fillOpacity ?? 0.35)
+        ctx.beginPath()
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      if (item.type === 'number') {
+        ctx.strokeStyle = item.color
+        ctx.lineWidth = Math.max(1, (item.lineWidth || 2) / Math.max(0.0001, view.fit))
+        ctx.beginPath()
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.fillStyle = '#ffffff'
+        const fontSize = Math.max(8, Math.min(w, h) * 0.48)
+        ctx.font = `700 ${fontSize}px Arial`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(String(item.n || ''), cx, cy)
+        continue
+      }
       ctx.beginPath()
-      ctx.ellipse(x + w / 2, y + h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2)
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
       ctx.stroke()
       continue
     }
@@ -3475,21 +3756,44 @@ function drawShapeItemToContext(ctx, item, cropLeft, cropTop) {
   ctx.lineWidth = item.lineWidth
   ctx.lineCap = 'round'
   if (item.type === 'rect') {
+    if (item.filled) {
+      ctx.fillStyle = hexToRgba(item.color, item.fillOpacity ?? 0.35)
+      ctx.fillRect(x, y, item.width, item.height)
+    }
     ctx.strokeRect(x, y, item.width, item.height)
     ctx.restore()
     return
   }
-  if (item.type === 'circle') {
+  if (item.type === 'circle' || item.type === 'number') {
+    const cx = x + item.width / 2
+    const cy = y + item.height / 2
+    const rx = item.width / 2
+    const ry = item.height / 2
+    if (item.type === 'number' || item.filled) {
+      ctx.fillStyle = item.type === 'number'
+          ? item.color
+          : hexToRgba(item.color, item.fillOpacity ?? 0.35)
+      ctx.beginPath()
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    if (item.type === 'number') {
+      ctx.strokeStyle = item.color
+      ctx.lineWidth = Math.max(2, item.lineWidth || 2)
+      ctx.beginPath()
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.fillStyle = '#ffffff'
+      const fontSize = Math.max(10, Math.min(item.width, item.height) * 0.48)
+      ctx.font = `700 ${fontSize}px Arial`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(String(item.n || ''), cx, cy)
+      ctx.restore()
+      return
+    }
     ctx.beginPath()
-    ctx.ellipse(
-        x + item.width / 2,
-        y + item.height / 2,
-        item.width / 2,
-        item.height / 2,
-        0,
-        0,
-        Math.PI * 2
-    )
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
     ctx.stroke()
     ctx.restore()
     return
@@ -4258,6 +4562,31 @@ function handleKeyDown(event) {
 
 .shape-circle {
   border-radius: 50%;
+}
+
+.shape-fill {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.shape-fill-circle {
+  border-radius: 50%;
+}
+
+.shape-number {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-style: solid;
+  border-radius: 50%;
+  box-sizing: border-box;
+  color: #fff;
+  font-weight: 700;
+  text-align: center;
+  font-family: Arial, 'Microsoft YaHei', sans-serif;
+  user-select: none;
+  pointer-events: none;
 }
 
 .shape-line-svg {
