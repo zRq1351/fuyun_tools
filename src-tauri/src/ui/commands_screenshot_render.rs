@@ -1,3 +1,4 @@
+use crate::ui::commands::ScreenshotExportGuard;
 use image::{imageops, Rgba, RgbaImage};
 use imageproc::drawing::{
     draw_filled_circle_mut, draw_hollow_ellipse_mut, draw_hollow_rect_mut, draw_text_mut,
@@ -590,8 +591,13 @@ fn render_shape_item_for_longshot(
 pub(super) fn render_screenshot_image(
     request: &ScreenshotExportRequest,
 ) -> Result<RgbaImage, String> {
+    // 统一在共享渲染入口持有 in-flight guard：export / png_data / copy_to_clipboard 全覆盖
+    let _export_guard = ScreenshotExportGuard::enter();
     if request.source_image_path.trim().is_empty() {
         return Err("缺少源图路径".to_string());
+    }
+    if !Path::new(&request.source_image_path).exists() {
+        return Err("源图已不存在（可能已被清理），请重新截图后再导出".to_string());
     }
     let source = image::open(&request.source_image_path)
         .map_err(|e| format!("读取源图失败: {}", e))?
@@ -649,6 +655,7 @@ pub(super) fn render_screenshot_image(
 }
 
 pub(super) fn export_screenshot_image(request: &ScreenshotExportRequest) -> Result<(), String> {
+    let _export_guard = ScreenshotExportGuard::enter();
     if request.output_path.trim().is_empty() {
         return Err("缺少导出目标路径".to_string());
     }

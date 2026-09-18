@@ -320,6 +320,7 @@ fn process_pending_queue(
 }
 
 pub fn start_image_clipboard_listener(app_handle: AppHandle, state: Arc<Mutex<AppState>>) {
+    crate::utils::image_clipboard::register_persist_drop_app(app_handle.clone());
     if IMAGE_WORKERS_STARTED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()

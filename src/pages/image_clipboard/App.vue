@@ -222,6 +222,7 @@ let unlistenHistoryItemAdded = null
 let unlistenPreviewReady = null
 let unlistenWritebackResult = null
 let unlistenImageQueueFull = null
+let unlistenImagePersistDrop = null
 let writebackErrorMsg = null
 let pendingHistorySync = false
 let historyUpdateTimer = null
@@ -1933,6 +1934,14 @@ onMounted(async () => {
     ElMessage.warning({message: msg, duration: 3000})
   })
 
+  unlistenImagePersistDrop = await listen('image-persist-drop', (event) => {
+    // 优先 i18n，payload.message 仅作兜底
+    const msg = t('imageClipboard.persistDrop')
+      || event?.payload?.message
+      || '图片持久化队列超时'
+    ElMessage.warning({message: msg, duration: 4000})
+  })
+
 
   unlistenPreviewReady = await listen('preview-ready', (event) => {
     const {itemId, previewUrl} = event.payload || {}
@@ -1999,6 +2008,10 @@ onBeforeUnmount(() => {
   if (unlistenImageQueueFull) {
     unlistenImageQueueFull()
     unlistenImageQueueFull = null
+  }
+  if (unlistenImagePersistDrop) {
+    unlistenImagePersistDrop()
+    unlistenImagePersistDrop = null
   }
   window.removeEventListener('keydown', handleWindowKeydown)
   window.removeEventListener('keyup', handleWindowKeyup)

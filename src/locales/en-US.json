@@ -573,7 +573,8 @@
     "loadMore": "Load More",
     "cyclePageSize": "Cycle page size (currently {size} per page)",
     "reorder": "Reorder",
-    "finishReorder": "Finish Reorder"
+    "finishReorder": "Finish Reorder",
+    "persistDrop": "Image persist queue timed out; some images may not have been saved"
   },
   "launcher": {
     "listView": "List View",

@@ -585,14 +585,14 @@ pub async fn export_screenshot_to_path(
     }
 
     tauri::async_runtime::spawn_blocking(move || export_screenshot_image(&request))
-        .await
-        .map_err(|e| format!("执行截图导出任务失败: {}", e))?
-        .map(|_| {
-            serde_json::json!({
-                "success": true,
-                "path": output_path
-            })
+    .await
+    .map_err(|e| format!("执行截图导出任务失败: {}", e))?
+    .map(|_| {
+        serde_json::json!({
+            "success": true,
+            "path": output_path
         })
+    })
 }
 
 #[tauri::command]
@@ -1480,7 +1480,10 @@ window.__SCREENSHOT_BOOT__.pendingMode = null;",
         let _ = app.emit("screenshot-reset", ());
         let _ = hide_overlay_window_by_label(&app, "screenshot");
     }
-    cleanup_all_screenshot_boot_images();
+    // cleanup 可能等待导出 drain，放到阻塞线程，避免卡住 tokio worker
+    tauri::async_runtime::spawn_blocking(|| {
+        cleanup_all_screenshot_boot_images();
+    });
     features::screenshot::capture::set_screenshot_in_progress(false);
     clear_screenshot_session();
 

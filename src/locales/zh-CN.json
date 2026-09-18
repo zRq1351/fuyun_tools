@@ -574,7 +574,8 @@
     "loadMore": "加载更多",
     "cyclePageSize": "切换分页大小（当前每页 {size} 条）",
     "reorder": "排序",
-    "finishReorder": "完成排序"
+    "finishReorder": "完成排序",
+    "persistDrop": "图片持久化队列超时，部分图片可能未入库"
   },
   "launcher": {
     "listView": "列表视图",

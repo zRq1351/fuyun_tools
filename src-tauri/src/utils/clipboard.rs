@@ -7,6 +7,7 @@ use parking_lot::Mutex as ParkingMutex;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -48,6 +49,102 @@ const BLOOM_FILTER_ERROR_RATE: f32 = 0.01; // 1% 误判率
 fn stable_text_hash(text: &str) -> u64 {
     xxh3_64(text.as_bytes())
 }
+
+/// 退出路径是否需要同步兜底落盘
+fn should_run_exit_sync_fallback(save_completed: bool) -> bool {
+    !save_completed
+}
+
+fn mark_persist_completed(state: &mut PersistState) {
+    state.history_dirty = false;
+    state.categories_dirty = false;
+    state.pinned_dirty = false;
+    state.save_completed = true;
+}
+
+/// 退出同步兜底已完成：persist 线程若仍持有更旧快照，须重写一次让最新数据胜出
+static EXIT_SYNC_COMPLETED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn exit_sync_completed() -> bool {
+    EXIT_SYNC_COMPLETED.load(Ordering::SeqCst)
+}
+
+/// 汇总三路落盘错误；成功返回 Ok
+fn combine_persist_errors(
+    history: Result<(), String>,
+    categories: Result<(), String>,
+    pinned: Result<(), String>,
+) -> Result<(), String> {
+    let mut errors = Vec::new();
+    if let Err(e) = history {
+        errors.push(format!("history: {e}"));
+    }
+    if let Err(e) = categories {
+        errors.push(format!("categories: {e}"));
+    }
+    if let Err(e) = pinned {
+        errors.push(format!("pinned: {e}"));
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+/// 可注入写函数的同步落盘核心（便于单测，不触真实 DB）
+fn persist_snapshot_with<FH, FC, FP>(
+    items: &[String],
+    categories: &HashMap<String, String>,
+    category_list: &[String],
+    pinned_items: &[String],
+    mut save_history: FH,
+    mut save_categories: FC,
+    mut save_pinned: FP,
+) -> Result<(), String>
+where
+    FH: FnMut(&[String]) -> Result<(), String>,
+    FC: FnMut(&HashMap<String, String>, &[String]) -> Result<(), String>,
+    FP: FnMut(&[String]) -> Result<(), String>,
+{
+    combine_persist_errors(
+        save_history(items),
+        save_categories(categories, category_list),
+        save_pinned(pinned_items),
+    )
+}
+
+/// 在独立线程调用：对三类数据做一次同步落盘（走真实 database API）
+fn persist_clipboard_snapshot_sync(
+    items: &[String],
+    categories: &HashMap<String, String>,
+    category_list: &[String],
+    pinned_items: &[String],
+) -> Result<(), String> {
+    tauri::async_runtime::block_on(async {
+        let mut errors = Vec::new();
+        if let Err(e) = crate::utils::database::save_history_items_only_async(items).await {
+            errors.push(format!("history: {e}"));
+        }
+        if let Err(e) = crate::utils::database::save_categories_state_async(categories, category_list)
+            .await
+        {
+            errors.push(format!("categories: {e}"));
+        }
+        if let Err(e) =
+            crate::utils::database::save_pinned_items_order_async(pinned_items).await
+        {
+            errors.push(format!("pinned: {e}"));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
+    })
+}
+
+const EXIT_SYNC_FALLBACK_TIMEOUT_SECS: u64 = 3;
 
 fn build_history_fingerprints(history: &[String]) -> Vec<(usize, u64)> {
     history
@@ -163,6 +260,28 @@ impl ClipboardManager {
                             log::error!("保存置顶状态失败: {}", e);
                         }
                     }
+                }
+
+                // 退出同步兜底可能已用更新快照写入：本线程若带着更旧 clone 完成 I/O，重写一次让最新胜出
+                if exit_sync_completed() {
+                    log::warn!("检测到退出同步兜底已完成，persist 线程用当前内存快照覆盖写一次");
+                    let items = lock_arc_mutex(&hist_clone).clone();
+                    let categories = lock_arc_mutex(&cat_clone).clone();
+                    let category_list = lock_arc_mutex(&cat_list_clone).clone();
+                    let pinned_items = lock_arc_mutex(&pinned_clone).clone();
+                    let rewrite = tauri::async_runtime::block_on(async {
+                        let _ = crate::utils::database::save_history_items_only_async(&items).await;
+                        let _ = crate::utils::database::save_categories_state_async(
+                            &categories,
+                            &category_list,
+                        )
+                        .await;
+                        let _ = crate::utils::database::save_pinned_items_order_async(
+                            &pinned_items,
+                        )
+                        .await;
+                    });
+                    let _ = rewrite;
                 }
 
                 // 通知等待的线程保存已完成
@@ -1035,6 +1154,7 @@ impl ClipboardManager {
 
     /// 退出时强制刷新所有脏数据到数据库
     /// Bug修复 (B6): 确保应用退出前数据不丢失
+    /// 超时后执行同步兜底写，避免仅 log 后进程退出丢数据
     pub fn save_history_on_exit(&self) -> Result<(), String> {
         // 标记所有数据为脏，通知持久化线程立即执行
         {
@@ -1047,15 +1167,62 @@ impl ClipboardManager {
             cvar.notify_one();
         }
         // 等待持久化线程完成（最多 5 秒）
-        let (lock, cvar) = &*self.persist_state;
-        let mut state = lock.lock();
-        if !state.save_completed {
-            let result = cvar.wait_for(&mut state, std::time::Duration::from_secs(5));
-            if result.timed_out() {
-                log::warn!("等待持久化线程完成超时");
+        {
+            let (lock, cvar) = &*self.persist_state;
+            let mut state = lock.lock();
+            if !state.save_completed {
+                let result = cvar.wait_for(&mut state, std::time::Duration::from_secs(5));
+                if result.timed_out() && !state.save_completed {
+                    log::warn!("等待持久化线程完成超时，进入退出同步兜底");
+                }
             }
         }
-        Ok(())
+
+        let save_completed = {
+            let (lock, _) = &*self.persist_state;
+            lock.lock().save_completed
+        };
+        if !should_run_exit_sync_fallback(save_completed) {
+            return Ok(());
+        }
+
+        let items = lock_arc_mutex(&self.history).clone();
+        let categories = lock_arc_mutex(&self.categories).clone();
+        let category_list = lock_arc_mutex(&self.category_list).clone();
+        let pinned = lock_arc_mutex(&self.pinned_items).clone();
+
+        // 带超时 join：磁盘挂死时不在 Drop 上无限阻塞
+        let (done_tx, done_rx) = std_mpsc::channel();
+        std::thread::spawn(move || {
+            let result =
+                persist_clipboard_snapshot_sync(&items, &categories, &category_list, &pinned);
+            let _ = done_tx.send(result);
+        });
+
+        match done_rx.recv_timeout(std::time::Duration::from_secs(
+            EXIT_SYNC_FALLBACK_TIMEOUT_SECS,
+        )) {
+            Ok(Ok(())) => {
+                log::warn!("persist 线程超时，退出同步兜底已写入");
+                EXIT_SYNC_COMPLETED.store(true, Ordering::SeqCst);
+                let (lock, _) = &*self.persist_state;
+                let mut state = lock.lock();
+                mark_persist_completed(&mut state);
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                log::error!("退出同步兜底落盘失败: {}", e);
+                Err(e)
+            }
+            Err(_) => {
+                let msg = format!(
+                    "退出同步兜底超时({}s)，放弃等待（进程即将退出）",
+                    EXIT_SYNC_FALLBACK_TIMEOUT_SECS
+                );
+                log::error!("{}", msg);
+                Err(msg)
+            }
+        }
     }
 
     pub fn set_grouped_items_protected_from_limit(&mut self, enabled: bool) {
@@ -1300,5 +1467,80 @@ mod tests {
         let pinned = vec!["不存在ID".to_string()];
         apply_pin_order(&mut history, &pinned);
         assert_eq!(history, vec!["普通A".to_string()]);
+    }
+
+    #[test]
+    fn test_should_run_exit_sync_fallback() {
+        assert!(should_run_exit_sync_fallback(false));
+        assert!(!should_run_exit_sync_fallback(true));
+    }
+
+    #[test]
+    fn test_mark_persist_completed_clears_dirty_flags() {
+        let mut state = PersistState {
+            history_dirty: true,
+            categories_dirty: true,
+            pinned_dirty: true,
+            clear_all: false,
+            save_completed: false,
+        };
+        mark_persist_completed(&mut state);
+        assert!(!state.history_dirty);
+        assert!(!state.categories_dirty);
+        assert!(!state.pinned_dirty);
+        assert!(state.save_completed);
+    }
+
+    #[test]
+    fn test_persist_snapshot_with_success() {
+        let items = vec!["a".to_string()];
+        let categories = HashMap::from([("id_a".to_string(), "cat".to_string())]);
+        let category_list = vec!["cat".to_string()];
+        let pinned = vec!["id_a".to_string()];
+        let result = persist_snapshot_with(
+            &items,
+            &categories,
+            &category_list,
+            &pinned,
+            |got| {
+                assert_eq!(got, &items);
+                Ok(())
+            },
+            |cats, list| {
+                assert_eq!(cats, &categories);
+                assert_eq!(list, &category_list[..]);
+                Ok(())
+            },
+            |p| {
+                assert_eq!(p, &pinned[..]);
+                Ok(())
+            },
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_persist_snapshot_with_collects_all_errors() {
+        let empty_cats = HashMap::new();
+        let result = persist_snapshot_with(
+            &["x".to_string()],
+            &empty_cats,
+            &[],
+            &["p".to_string()],
+            |_| Err("disk full".to_string()),
+            |_, _| Err("locked".to_string()),
+            |_| Err("io".to_string()),
+        );
+        let err = result.unwrap_err();
+        assert!(err.contains("history: disk full"), "{err}");
+        assert!(err.contains("categories: locked"), "{err}");
+        assert!(err.contains("pinned: io"), "{err}");
+    }
+
+    #[test]
+    fn test_combine_persist_errors_partial_failure() {
+        let combined = combine_persist_errors(Ok(()), Err("c".into()), Ok(()));
+        assert_eq!(combined.unwrap_err(), "categories: c");
+        assert!(combine_persist_errors(Ok(()), Ok(()), Ok(())).is_ok());
     }
 }

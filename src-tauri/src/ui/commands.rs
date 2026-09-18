@@ -34,7 +34,7 @@ use crate::utils::utils_helpers::{
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::OnceLock;
@@ -62,6 +62,62 @@ pub(crate) static COPY_PASTE_DEDUP_WINDOW_STATS: OnceLock<StdMutex<DedupWindowSt
 pub(crate) static AUTO_BACKUP_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 pub(crate) static BACKUP_JOB_MUTEX: OnceLock<tauri::async_runtime::Mutex<()>> = OnceLock::new();
 static SETTINGS_SAVE_MUTEX: OnceLock<tauri::async_runtime::Mutex<()>> = OnceLock::new();
+/// 截图导出/渲染 in-flight 计数；关窗 cleanup 须等待其归零，避免删掉正在读取的 boot 源图
+static SCREENSHOT_EXPORT_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) struct ScreenshotExportGuard;
+
+impl ScreenshotExportGuard {
+    pub(crate) fn enter() -> Self {
+        SCREENSHOT_EXPORT_IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for ScreenshotExportGuard {
+    fn drop(&mut self) {
+        SCREENSHOT_EXPORT_IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+pub(crate) fn screenshot_export_in_flight() -> usize {
+    SCREENSHOT_EXPORT_IN_FLIGHT.load(Ordering::SeqCst)
+}
+
+fn wait_screenshot_exports_drain(timeout: std::time::Duration) -> bool {
+    let started = std::time::Instant::now();
+    while screenshot_export_in_flight() > 0 {
+        if started.elapsed() >= timeout {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    true
+}
+
+#[cfg(test)]
+mod screenshot_export_in_flight_tests {
+    use super::*;
+
+    #[test]
+    fn test_screenshot_export_guard_tracks_in_flight() {
+        assert_eq!(screenshot_export_in_flight(), 0);
+        {
+            let _g1 = ScreenshotExportGuard::enter();
+            assert_eq!(screenshot_export_in_flight(), 1);
+            let _g2 = ScreenshotExportGuard::enter();
+            assert_eq!(screenshot_export_in_flight(), 2);
+        }
+        assert_eq!(screenshot_export_in_flight(), 0);
+    }
+
+    #[test]
+    fn test_wait_screenshot_exports_drain_ok_when_idle() {
+        assert!(wait_screenshot_exports_drain(
+            std::time::Duration::from_millis(50)
+        ));
+    }
+}
 
 pub(crate) struct RecentCopyPaste {
     pub(crate) request_id: String,
@@ -106,6 +162,20 @@ pub(crate) fn replace_screenshot_boot_image_path(next_path: Option<PathBuf>) {
 }
 
 pub(crate) fn cleanup_all_screenshot_boot_images() {
+    // 导出进行中：等待 in-flight 归零再删文件，避免 source_image_path 被中途删除
+    if !wait_screenshot_exports_drain(std::time::Duration::from_millis(3_000)) {
+        if screenshot_export_in_flight() > 0 {
+            log::warn!(
+                "截图导出仍在进行，跳过本轮 boot 图清理（in_flight={})",
+                screenshot_export_in_flight()
+            );
+            // 只清 slot，不删文件；下次关窗或启动清理再删
+            if let Ok(mut slot) = screenshot_boot_image_slot().lock() {
+                *slot = None;
+            }
+            return;
+        }
+    }
     if let Ok(mut slot) = screenshot_boot_image_slot().lock() {
         *slot = None;
     }

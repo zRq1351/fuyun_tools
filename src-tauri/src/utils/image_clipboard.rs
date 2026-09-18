@@ -15,10 +15,10 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::image::Image;
-use tauri::Emitter;
+use tauri::{AppHandle, Emitter};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Shell::DragQueryFileW;
 #[cfg(target_os = "windows")]
@@ -65,6 +65,27 @@ pub type ClipboardImagePayload = (Vec<u8>, u32, u32, Option<(Vec<u8>, String)>);
 static IMAGE_PERSIST_QUEUE_FULL_COUNT: AtomicU64 = AtomicU64::new(0);
 static IMAGE_PERSIST_QUEUE_TIMEOUT_DROP_COUNT: AtomicU64 = AtomicU64::new(0);
 static IMAGE_PERSIST_QUEUE_WAIT_MS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static PERSIST_DROP_APP: OnceLock<AppHandle> = OnceLock::new();
+
+/// 启动时注册 AppHandle，用于 persist 超时丢弃时向前端发事件
+pub fn register_persist_drop_app(app: AppHandle) {
+    let _ = PERSIST_DROP_APP.set(app);
+}
+
+fn emit_image_persist_drop(item_id: &str, reason: &str, timeout_drop_count: u64) {
+    let Some(app) = PERSIST_DROP_APP.get() else {
+        return;
+    };
+    let payload = serde_json::json!({
+        "itemId": item_id,
+        "reason": reason,
+        "timeoutDropCount": timeout_drop_count,
+        "message": "图片持久化队列超时，部分图片未入库"
+    });
+    if let Err(e) = app.emit("image-persist-drop", payload) {
+        log::warn!("发送 image-persist-drop 事件失败: {}", e);
+    }
+}
 
 fn push_persist_task_with_timeout(
     persist_tx: &SyncSender<PersistTask>,
@@ -1087,6 +1108,8 @@ impl ImageClipboardManager {
                 "图片持久化队列发送失败或超时降级丢弃: {}",
                 task_back.item_id
             );
+            let drop_count = IMAGE_PERSIST_QUEUE_TIMEOUT_DROP_COUNT.load(Ordering::Relaxed);
+            emit_image_persist_drop(&task_back.item_id, "persist_timeout", drop_count);
             let mut pending = lock_arc_mutex(&self.pending_images);
             pending.remove(&task_back.item_id);
         }
@@ -3142,5 +3165,28 @@ mod tests {
         );
         assert_eq!(extract_signature_from_item_id("legacy_id"), "legacy_id");
         assert_eq!(extract_signature_from_item_id("img_123_"), "img_123_");
+    }
+
+    #[test]
+    fn test_persist_timeout_drop_counter_increments() {
+        let before = IMAGE_PERSIST_QUEUE_TIMEOUT_DROP_COUNT.load(Ordering::Relaxed);
+        let (tx, rx) = sync_channel::<PersistTask>(1);
+        // 填满通道后，短超时路径应 Err 并增加 drop 计数
+        let mk = |id: &str| PersistTask {
+            item_id: id.to_string(),
+            image_path: "x.png".to_string(),
+            rgba: Arc::new(vec![0u8; 4]),
+            width: 1,
+            height: 1,
+            encoded_bytes: None,
+        };
+        assert!(push_persist_task_with_timeout(&tx, mk("a")).is_ok());
+        // 不消费 rx，第二次在极短队列上应很快返回 Err（默认 45ms 超时）
+        let err = push_persist_task_with_timeout(&tx, mk("b"));
+        assert!(err.is_err());
+        let after = IMAGE_PERSIST_QUEUE_TIMEOUT_DROP_COUNT.load(Ordering::Relaxed);
+        assert!(after > before);
+        // 保证接收端存在，避免通道断开干扰
+        let _ = rx.try_recv();
     }
 }
