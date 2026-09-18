@@ -80,6 +80,123 @@
     </el-card>
 
     <el-card
+        class="overview-card perf-card"
+        shadow="never"
+    >
+      <template #header>
+        <div class="card-header">
+          <span>{{ $t('settings.diagnostic.perfTitle') }}</span>
+          <div class="perf-actions">
+            <el-button
+                :loading="perfLoading"
+                size="small"
+                @click="loadPerfDashboard"
+            >
+              {{ $t('settings.diagnostic.perfRefresh') }}
+            </el-button>
+            <el-button
+                size="small"
+                @click="resetPerfMetrics"
+            >
+              {{ $t('settings.diagnostic.perfReset') }}
+            </el-button>
+          </div>
+        </div>
+      </template>
+
+      <div class="overview-grid perf-grid">
+        <div class="overview-item">
+          <div class="overview-label">{{ $t('settings.diagnostic.perfProcessMemory') }}</div>
+          <div class="overview-value">{{ perf.system.processMemoryMb || 0 }} MB</div>
+        </div>
+        <div class="overview-item">
+          <div class="overview-label">{{ $t('settings.diagnostic.perfSystemMemory') }}</div>
+          <div class="overview-value">
+            {{ perf.system.usedMemoryMb || 0 }} / {{ perf.system.totalMemoryMb || 0 }} MB
+            （{{ (perf.system.memoryUsagePercent || 0).toFixed(1) }}%）
+          </div>
+        </div>
+        <div class="overview-item">
+          <div class="overview-label">{{ $t('settings.diagnostic.perfCpu') }}</div>
+          <div class="overview-value">{{ (perf.system.cpuUsagePercent || 0).toFixed(1) }}%</div>
+        </div>
+        <div class="overview-item">
+          <div class="overview-label">{{ $t('settings.diagnostic.perfSamples') }}</div>
+          <div class="overview-value">{{ perf.sampleCount }}</div>
+        </div>
+        <div class="overview-item">
+          <div class="overview-label">{{ $t('settings.diagnostic.perfSlow') }}</div>
+          <div class="overview-value warning">{{ perf.slowCount }}</div>
+        </div>
+        <div class="overview-item">
+          <div class="overview-label">{{ $t('settings.diagnostic.perfErrors') }}</div>
+          <div class="overview-value error">{{ perf.errorCount }}</div>
+        </div>
+      </div>
+
+      <div
+          v-if="perf.sampleCount === 0"
+          class="form-hint perf-empty"
+      >
+        {{ $t('settings.diagnostic.perfEmpty') }}
+      </div>
+
+      <div
+          v-else
+          class="perf-sections"
+      >
+        <div
+            v-for="section in perfSections"
+            :key="section.key"
+            class="perf-section"
+        >
+          <div class="item-title perf-section-title">
+            {{ section.title }}
+          </div>
+          <div
+              v-if="!section.items.length"
+              class="form-hint"
+          >
+            {{ $t('settings.diagnostic.perfEmptySection') }}
+          </div>
+          <table
+              v-else
+              class="perf-table"
+          >
+            <thead>
+            <tr>
+              <th>{{ $t('settings.diagnostic.perfColLabel') }}</th>
+              <th>{{ $t('settings.diagnostic.perfColAvg') }}</th>
+              <th>{{ $t('settings.diagnostic.perfColMax') }}</th>
+              <th>{{ $t('settings.diagnostic.perfColSamples') }}</th>
+              <th>{{ $t('settings.diagnostic.perfColStatus') }}</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr
+                v-for="item in section.items"
+                :key="item.key + section.key"
+            >
+              <td>{{ item.label }}</td>
+              <td>{{ Math.round(item.avgDurationMs) }} ms</td>
+              <td>{{ item.maxDurationMs }} ms</td>
+              <td>{{ item.sampleCount }}</td>
+              <td>
+                <el-tag
+                    :type="item.lastStatus === 'error' ? 'danger' : 'info'"
+                    size="small"
+                >
+                  {{ item.lastStatus === 'error' ? $t('settings.diagnostic.statusError') : (item.lastStatus || '—') }}
+                </el-tag>
+              </td>
+            </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </el-card>
+
+    <el-card
         v-for="item in items"
         :key="item.key"
         class="diagnostic-card"
@@ -140,7 +257,7 @@
 </template>
 
 <script setup>
-import {onMounted, onUnmounted, reactive, ref} from 'vue'
+import {computed, onMounted, onUnmounted, reactive, ref} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {ElMessage} from 'element-plus'
 import {listen} from '@tauri-apps/api/event'
@@ -165,7 +282,61 @@ const overview = reactive({
 const items = ref([])
 const loading = ref(false)
 const lastActionMessage = ref('')
-// unlisten / refreshTimer / disposed 在下方 onMounted 前声明（勿重复 let）
+const perfLoading = ref(false)
+const perf = reactive({
+  system: {
+    processMemoryMb: 0,
+    usedMemoryMb: 0,
+    totalMemoryMb: 0,
+    memoryUsagePercent: 0,
+    cpuUsagePercent: 0
+  },
+  sampleCount: 0,
+  slowCount: 0,
+  errorCount: 0,
+  startupTop: [],
+  ipcTop: [],
+  slowTop: []
+})
+
+const perfSections = computed(() => [
+  {key: 'startup', title: t('settings.diagnostic.perfStartupTop'), items: perf.startupTop},
+  {key: 'ipc', title: t('settings.diagnostic.perfIpcTop'), items: perf.ipcTop},
+  {key: 'slow', title: t('settings.diagnostic.perfSlowTop'), items: perf.slowTop}
+])
+
+const loadPerfDashboard = async () => {
+  perfLoading.value = true
+  try {
+    const data = await DiagnosticService.getPerfDashboard()
+    if (!data) return
+    Object.assign(perf.system, data.system || {})
+    perf.sampleCount = data.sampleCount || 0
+    perf.slowCount = data.slowCount || 0
+    perf.errorCount = data.errorCount || 0
+    perf.startupTop = data.startupTop || []
+    perf.ipcTop = data.ipcTop || []
+    perf.slowTop = data.slowTop || []
+  } catch (error) {
+    console.error('加载性能面板失败:', error)
+  } finally {
+    perfLoading.value = false
+  }
+}
+
+const resetPerfMetrics = async () => {
+  try {
+    const result = await DiagnosticService.runAction('perf-metrics.reset')
+    if (result?.message) {
+      ElMessage.success(result.message)
+    } else {
+      ElMessage.success(t('settings.diagnostic.perfResetDone'))
+    }
+    await Promise.all([loadPerfDashboard(), loadDiagnostics()])
+  } catch (error) {
+    ElMessage.error(String(error?.message || error))
+  }
+}
 
 const statusType = (status) => {
   if (status === 'healthy') return 'success'
@@ -203,6 +374,7 @@ const loadDiagnostics = async () => {
   } finally {
     loading.value = false
   }
+  loadPerfDashboard()
 }
 
 const scheduleRefresh = (reason = '') => {
@@ -353,6 +525,47 @@ onUnmounted(() => {
 
 .overview-value.warning {
   color: var(--el-color-warning);
+}
+
+.perf-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.perf-grid {
+  margin-bottom: 12px;
+}
+
+.perf-empty {
+  padding: 8px 0;
+}
+
+.perf-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.perf-section-title {
+  margin-bottom: 8px;
+}
+
+.perf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.perf-table th,
+.perf-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  text-align: left;
+}
+
+.perf-table th {
+  color: var(--fy-text-muted);
+  font-weight: 500;
 }
 
 .item-title {

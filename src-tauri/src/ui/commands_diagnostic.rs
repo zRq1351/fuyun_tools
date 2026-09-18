@@ -1,5 +1,9 @@
 use crate::core::app_state::AppState as SharedAppState;
-use crate::core::perf_metrics::{get_perf_metrics_snapshot, reset_perf_metrics};
+use crate::core::perf_metrics::{
+    get_ipc_metrics, get_memory_metrics, get_perf_metrics_snapshot, get_perf_summary,
+    get_startup_metrics, get_system_resources, reset_perf_metrics, PerfMetricSnapshot, PerfSummary,
+    SystemResourceSnapshot,
+};
 use crate::sync::{lock_arc_mutex, Mutex};
 use crate::ui::commands::{
     get_copy_paste_dedup_debug_state_value, now_unix_ms, COPY_PASTE_DEDUP_HIT_COUNT,
@@ -78,6 +82,120 @@ pub struct DiagnosticActionResult {
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticActionRequest {
     pub action_key: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerfDashboardResponse {
+    pub generated_at: i64,
+    pub system: SystemResourceSnapshot,
+    pub summary: PerfSummary,
+    pub startup_top: Vec<PerfMetricSnapshot>,
+    pub ipc_top: Vec<PerfMetricSnapshot>,
+    pub memory_top: Vec<PerfMetricSnapshot>,
+    pub slow_top: Vec<PerfMetricSnapshot>,
+    pub sample_count: u64,
+    pub slow_count: u64,
+    pub error_count: u64,
+}
+
+/// 按 avg_duration_ms 降序取前 n 条（同 avg 时按 key 稳定排序）
+pub(crate) fn top_perf_metrics(
+    mut items: Vec<PerfMetricSnapshot>,
+    n: usize,
+) -> Vec<PerfMetricSnapshot> {
+    items.sort_by(|a, b| {
+        b.avg_duration_ms
+            .partial_cmp(&a.avg_duration_ms)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.key.cmp(&b.key))
+    });
+    items.into_iter().take(n).collect()
+}
+
+#[tauri::command]
+pub async fn get_perf_dashboard() -> Result<PerfDashboardResponse, String> {
+    let all = get_perf_metrics_snapshot();
+    let sample_count = all.len() as u64;
+    let slow_count = all
+        .iter()
+        .filter(|item| crate::ui::commands_writeback::perf_metric_is_slow(item))
+        .count() as u64;
+    let error_count = all
+        .iter()
+        .filter(|item| item.last_status == "error")
+        .count() as u64;
+
+    let startup_top = top_perf_metrics(get_startup_metrics(), 8);
+    let mut ipc_items = get_ipc_metrics();
+    // 部分 IPC 埋点 category 为 Other，按 key/label 补充
+    ipc_items.extend(all.iter().filter(|item| {
+        item.category != "ipc"
+            && (item.key.to_ascii_lowercase().contains("ipc")
+                || item.label.contains("IPC")
+                || item.label.contains("ipc"))
+    }).cloned());
+    // 去重
+    ipc_items.sort_by(|a, b| a.key.cmp(&b.key));
+    ipc_items.dedup_by(|a, b| a.key == b.key);
+    let ipc_top = top_perf_metrics(ipc_items, 8);
+    let memory_top = top_perf_metrics(get_memory_metrics(), 8);
+    let slow_top = top_perf_metrics(all, 8);
+
+    Ok(PerfDashboardResponse {
+        generated_at: now_unix_ms() as i64,
+        system: get_system_resources(),
+        summary: get_perf_summary(),
+        startup_top,
+        ipc_top,
+        memory_top,
+        slow_top,
+        sample_count,
+        slow_count,
+        error_count,
+    })
+}
+
+#[cfg(test)]
+mod perf_dashboard_tests {
+    use super::*;
+
+    fn metric(key: &str, avg: f64) -> PerfMetricSnapshot {
+        PerfMetricSnapshot {
+            key: key.to_string(),
+            label: key.to_string(),
+            category: "other".to_string(),
+            sample_count: 1,
+            success_count: 1,
+            error_count: 0,
+            last_duration_ms: avg as u64,
+            avg_duration_ms: avg,
+            max_duration_ms: avg as u64,
+            last_status: "ok".to_string(),
+            last_error: None,
+            last_recorded_at: 0,
+        }
+    }
+
+    #[test]
+    fn test_top_perf_metrics_sorts_by_avg_desc() {
+        let items = vec![
+            metric("a", 10.0),
+            metric("c", 30.0),
+            metric("b", 20.0),
+        ];
+        let top = top_perf_metrics(items, 2);
+        assert_eq!(top.len(), 2);
+        assert_eq!(top[0].key, "c");
+        assert_eq!(top[1].key, "b");
+    }
+
+    #[test]
+    fn test_top_perf_metrics_respects_limit() {
+        let items = vec![metric("x", 1.0)];
+        assert!(top_perf_metrics(items, 0).is_empty());
+        assert_eq!(top_perf_metrics(vec![metric("x", 1.0)], 5).len(), 1);
+    }
 }
 
 pub(crate) async fn build_diagnostic_items_inner(

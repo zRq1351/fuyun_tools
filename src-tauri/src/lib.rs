@@ -784,6 +784,7 @@ pub fn run() {
             // 性能监控命令
             get_system_resources,
             get_perf_summary,
+            get_perf_dashboard,
             get_metrics_by_category,
             get_startup_metrics,
             get_memory_metrics,

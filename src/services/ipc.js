@@ -138,6 +138,7 @@ export const IPC_COMMANDS = {
     SAVE_BACKUP_SETTINGS: 'save_backup_settings',
     GET_DIAGNOSTIC_OVERVIEW: 'get_diagnostic_overview',
     GET_DIAGNOSTIC_ITEMS: 'get_diagnostic_items',
+    GET_PERF_DASHBOARD: 'get_perf_dashboard',
     RUN_DIAGNOSTIC_ACTION: 'run_diagnostic_action',
     LIST_RECORDING_AUDIO_DEVICES: 'list_recording_audio_devices',
     LIST_RECORDING_SYSTEM_OUTPUT_DEVICES: 'list_recording_system_output_devices',
@@ -565,6 +566,7 @@ export const BackupService = {
 export const DiagnosticService = {
     getOverview: () => ipcInvoke(IPC_COMMANDS.GET_DIAGNOSTIC_OVERVIEW),
     getItems: () => ipcInvoke(IPC_COMMANDS.GET_DIAGNOSTIC_ITEMS),
+    getPerfDashboard: () => ipcInvoke(IPC_COMMANDS.GET_PERF_DASHBOARD),
     runAction: (actionKey) => ipcInvoke(IPC_COMMANDS.RUN_DIAGNOSTIC_ACTION, {request: {actionKey}}),
 };
 
