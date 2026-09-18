@@ -4,7 +4,7 @@ use crate::core::error_codes::AppErrorKind;
 use crate::sync::{lock_arc_mutex, Mutex};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex};
 use std::thread;
 use std::time::Duration;
@@ -66,6 +66,106 @@ fn hidden_since_map() -> &'static StdMutex<HashMap<String, std::time::Instant>> 
     &MAP
 }
 
+fn last_gc_destroyed_map() -> &'static StdMutex<HashMap<String, std::time::Instant>> {
+    static MAP: LazyLock<StdMutex<HashMap<String, std::time::Instant>>> =
+        LazyLock::new(|| StdMutex::new(HashMap::new()));
+    &MAP
+}
+
+fn recently_recreated_labels() -> &'static StdMutex<HashSet<String>> {
+    static SET: LazyLock<StdMutex<HashSet<String>>> =
+        LazyLock::new(|| StdMutex::new(HashSet::new()));
+    &SET
+}
+
+fn idle_gc_stats_store() -> &'static StdMutex<IdleGcStats> {
+    static STORE: LazyLock<StdMutex<IdleGcStats>> = LazyLock::new(|| {
+        StdMutex::new(IdleGcStats {
+            scan_count: 0,
+            destroyed_count: 0,
+            skipped_visible: 0,
+            skipped_missing: 0,
+            thrash_deferred: 0,
+            last_events: VecDeque::new(),
+        })
+    });
+    &STORE
+}
+
+/// GC 销毁后短时间又重建 → 下一轮 GC 推迟销毁，避免 thrash
+const GC_THRASH_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdleGcEvent {
+    pub at_ms: i64,
+    pub label: String,
+    pub action: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdleGcStatsSnapshot {
+    pub scan_count: u64,
+    pub destroyed_count: u64,
+    pub skipped_visible: u64,
+    pub skipped_missing: u64,
+    pub thrash_deferred: u64,
+    pub last_events: Vec<IdleGcEvent>,
+}
+
+#[derive(Debug)]
+struct IdleGcStats {
+    scan_count: u64,
+    destroyed_count: u64,
+    skipped_visible: u64,
+    skipped_missing: u64,
+    thrash_deferred: u64,
+    last_events: VecDeque<IdleGcEvent>,
+}
+
+fn push_idle_gc_event(label: &str, action: &str, detail: &str) {
+    let mut stats = idle_gc_stats_store()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    match action {
+        "destroyed" => stats.destroyed_count += 1,
+        "skip_visible" => stats.skipped_visible += 1,
+        "skip_missing" => stats.skipped_missing += 1,
+        "thrash_defer" => stats.thrash_deferred += 1,
+        _ => {}
+    }
+    stats.last_events.push_back(IdleGcEvent {
+        at_ms: crate::ui::commands::now_unix_ms() as i64,
+        label: label.to_string(),
+        action: action.to_string(),
+        detail: detail.to_string(),
+    });
+    while stats.last_events.len() > 20 {
+        stats.last_events.pop_front();
+    }
+}
+
+/// 纯函数：是否因「GC 后快速重建」而推迟本轮销毁
+pub(crate) fn should_defer_gc_for_thrash(recently_recreated: bool) -> bool {
+    recently_recreated
+}
+
+pub fn get_idle_window_gc_stats() -> IdleGcStatsSnapshot {
+    let stats = idle_gc_stats_store()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    IdleGcStatsSnapshot {
+        scan_count: stats.scan_count,
+        destroyed_count: stats.destroyed_count,
+        skipped_visible: stats.skipped_visible,
+        skipped_missing: stats.skipped_missing,
+        thrash_deferred: stats.thrash_deferred,
+        last_events: stats.last_events.iter().cloned().collect(),
+    }
+}
+
 fn mark_hidden_since(label: &str) {
     let mut map = hidden_since_map()
         .lock()
@@ -80,7 +180,26 @@ fn clear_hidden_since(label: &str) {
     map.remove(label);
 }
 
+/// 懒创建路径调用：若距上次 GC 销毁在 thrash 窗口内，标记本轮 GC 推迟
+fn note_window_recreate_if_after_gc(label: &str) {
+    let destroyed_at = {
+        let map = last_gc_destroyed_map()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        map.get(label).copied()
+    };
+    if let Some(at) = destroyed_at {
+        if at.elapsed() <= GC_THRASH_WINDOW {
+            let mut set = recently_recreated_labels()
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            set.insert(label.to_string());
+        }
+    }
+}
+
 /// 可闲置销毁的功能窗口（settings 常驻，不销毁）
+/// document_manager_widget：用户偏好桌面小部件常驻，不纳入 GC
 fn idle_gc_eligible(label: &str) -> bool {
     matches!(
         label,
@@ -94,7 +213,6 @@ fn idle_gc_eligible(label: &str) -> bool {
             | "recording_toolbar"
             | "launcher"
             | "document_manager"
-            | "document_manager_widget"
             | "selection_toolbar"
     )
 }
@@ -116,6 +234,12 @@ pub fn start_idle_window_gc(app_handle: AppHandle) {
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(std::time::Duration::from_secs(30));
+            {
+                let mut stats = idle_gc_stats_store()
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
+                stats.scan_count += 1;
+            }
             let now = std::time::Instant::now();
             let expired: Vec<String> = {
                 let map = hidden_since_map()
@@ -130,16 +254,39 @@ pub fn start_idle_window_gc(app_handle: AppHandle) {
                     .collect()
             };
             for label in expired {
+                // thrash 防护：GC 后 60s 内又打开过的窗口，本轮跳过销毁
+                let recently_recreated = {
+                    let mut set = recently_recreated_labels()
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner());
+                    set.remove(&label)
+                };
+                if should_defer_gc_for_thrash(recently_recreated) {
+                    push_idle_gc_event(&label, "thrash_defer", "GC 后快速重建，本轮跳过销毁");
+                    // 重置隐藏计时，避免下一轮立刻再判过期
+                    mark_hidden_since(&label);
+                    continue;
+                }
+
                 let Some(window) = app_handle.get_webview_window(&label) else {
                     clear_hidden_since(&label);
+                    push_idle_gc_event(&label, "skip_missing", "窗口不存在");
                     continue;
                 };
                 // 仍可见则不销毁
                 if matches!(window.is_visible(), Ok(true)) {
                     clear_hidden_since(&label);
+                    push_idle_gc_event(&label, "skip_visible", "窗口仍可见");
                     continue;
                 }
                 destroy_window_by_label(&app_handle, &label);
+                {
+                    let mut map = last_gc_destroyed_map()
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner());
+                    map.insert(label.clone(), std::time::Instant::now());
+                }
+                push_idle_gc_event(&label, "destroyed", "闲置窗口已销毁");
             }
         }
     });
@@ -1249,6 +1396,7 @@ pub fn ensure_window_for_label(app: &AppHandle, label: &str) -> Result<(), Strin
     if !is_window_feature_enabled(app, label) {
         return Err(format!("功能已禁用，无法创建窗口: {}", label));
     }
+    note_window_recreate_if_after_gc(label);
     match label {
         "clipboard" => {
             ensure_clipboard_window(app)?;
@@ -1800,4 +1948,29 @@ fn position_result_window_near_toolbar(window: &tauri::WebviewWindow, app: &AppH
     x = x.clamp(min_x, max_x.max(min_x));
     let clamped_y = y.clamp(min_y, max_y.max(min_y));
     let _ = window.set_position(tauri::PhysicalPosition::new(x, clamped_y));
+}
+
+#[cfg(test)]
+mod idle_gc_tests {
+    use super::*;
+
+    #[test]
+    fn test_should_defer_gc_for_thrash() {
+        assert!(should_defer_gc_for_thrash(true));
+        assert!(!should_defer_gc_for_thrash(false));
+    }
+
+    #[test]
+    fn test_idle_gc_eligible_excludes_widget_and_settings() {
+        assert!(idle_gc_eligible("clipboard"));
+        assert!(idle_gc_eligible("launcher"));
+        assert!(!idle_gc_eligible("document_manager_widget"));
+        assert!(!idle_gc_eligible("settings"));
+    }
+
+    #[test]
+    fn test_idle_gc_stats_snapshot_events_capped() {
+        let snap = get_idle_window_gc_stats();
+        assert!(snap.last_events.len() <= 20);
+    }
 }

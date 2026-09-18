@@ -785,6 +785,7 @@ pub fn run() {
             get_system_resources,
             get_perf_summary,
             get_perf_dashboard,
+            get_idle_window_gc_stats,
             get_metrics_by_category,
             get_startup_metrics,
             get_memory_metrics,

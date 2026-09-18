@@ -2537,6 +2537,13 @@ pub async fn get_ipc_metrics() -> Result<Vec<crate::core::perf_metrics::PerfMetr
     Ok(crate::core::perf_metrics::get_ipc_metrics())
 }
 
+/// 闲置窗口 GC 统计
+#[tauri::command]
+pub async fn get_idle_window_gc_stats(
+) -> Result<crate::ui::window_manager::IdleGcStatsSnapshot, String> {
+    Ok(crate::ui::window_manager::get_idle_window_gc_stats())
+}
+
 /// 获取主题
 #[tauri::command]
 pub async fn get_theme() -> Result<String, String> {

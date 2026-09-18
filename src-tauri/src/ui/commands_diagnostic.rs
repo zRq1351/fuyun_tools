@@ -684,6 +684,49 @@ pub(crate) async fn build_diagnostic_items_inner(
             ],
             last_checked_at: checked_at,
         },
+        {
+            let gc = crate::ui::window_manager::get_idle_window_gc_stats();
+            let gc_status = if gc.thrash_deferred > 0 && gc.destroyed_count == 0 {
+                "warning"
+            } else if gc.scan_count == 0 {
+                "unknown"
+            } else {
+                "healthy"
+            };
+            let mut gc_details = vec![
+                format!(
+                    "扫描 {} 次 / 销毁 {} / 可见跳过 {} / 缺失跳过 {} / thrash 推迟 {}",
+                    gc.scan_count,
+                    gc.destroyed_count,
+                    gc.skipped_visible,
+                    gc.skipped_missing,
+                    gc.thrash_deferred
+                ),
+            ];
+            for ev in gc.last_events.iter().rev().take(6) {
+                gc_details.push(format!("[{}] {} — {}", ev.action, ev.label, ev.detail));
+            }
+            if gc.last_events.is_empty() {
+                gc_details.push("暂无 GC 事件（窗口隐藏闲置后才会触发）".to_string());
+            }
+            DiagnosticItem {
+                key: "window-idle-gc".to_string(),
+                title: "闲置窗口回收".to_string(),
+                status: gc_status.to_string(),
+                summary: format!(
+                    "已销毁 {} 个闲置窗口，thrash 推迟 {} 次",
+                    gc.destroyed_count, gc.thrash_deferred
+                ),
+                details: gc_details,
+                actions: vec![DiagnosticAction {
+                    key: "diagnostic.refresh".to_string(),
+                    label: "刷新".to_string(),
+                    action_type: "refresh".to_string(),
+                    target: None,
+                }],
+                last_checked_at: checked_at,
+            }
+        },
         DiagnosticItem {
             key: "overlay-window".to_string(),
             title: "覆盖层窗口状态".to_string(),

@@ -139,6 +139,7 @@ export const IPC_COMMANDS = {
     GET_DIAGNOSTIC_OVERVIEW: 'get_diagnostic_overview',
     GET_DIAGNOSTIC_ITEMS: 'get_diagnostic_items',
     GET_PERF_DASHBOARD: 'get_perf_dashboard',
+    GET_IDLE_WINDOW_GC_STATS: 'get_idle_window_gc_stats',
     RUN_DIAGNOSTIC_ACTION: 'run_diagnostic_action',
     LIST_RECORDING_AUDIO_DEVICES: 'list_recording_audio_devices',
     LIST_RECORDING_SYSTEM_OUTPUT_DEVICES: 'list_recording_system_output_devices',
@@ -567,6 +568,7 @@ export const DiagnosticService = {
     getOverview: () => ipcInvoke(IPC_COMMANDS.GET_DIAGNOSTIC_OVERVIEW),
     getItems: () => ipcInvoke(IPC_COMMANDS.GET_DIAGNOSTIC_ITEMS),
     getPerfDashboard: () => ipcInvoke(IPC_COMMANDS.GET_PERF_DASHBOARD),
+    getIdleWindowGcStats: () => ipcInvoke(IPC_COMMANDS.GET_IDLE_WINDOW_GC_STATS),
     runAction: (actionKey) => ipcInvoke(IPC_COMMANDS.RUN_DIAGNOSTIC_ACTION, {request: {actionKey}}),
 };
 
