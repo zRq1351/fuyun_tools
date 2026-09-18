@@ -270,7 +270,7 @@ impl ClipboardManager {
                     let categories = lock_arc_mutex(&cat_clone).clone();
                     let category_list = lock_arc_mutex(&cat_list_clone).clone();
                     let pinned_items = lock_arc_mutex(&pinned_clone).clone();
-                    let rewrite = tauri::async_runtime::block_on(async {
+                    tauri::async_runtime::block_on(async {
                         let _ = crate::utils::database::save_history_items_only_async(&items).await;
                         let _ = crate::utils::database::save_categories_state_async(
                             &categories,
@@ -282,7 +282,6 @@ impl ClipboardManager {
                         )
                         .await;
                     });
-                    let _ = rewrite;
                 }
 
                 // 通知等待的线程保存已完成

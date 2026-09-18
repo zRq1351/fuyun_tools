@@ -526,6 +526,7 @@ fn blend_filled_ellipse(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_number_callout(
     canvas: &mut RgbaImage,
     x: f32,
@@ -573,6 +574,7 @@ fn shape_fill_params(item: &ScreenshotExportShapeItem) -> (bool, f32) {
     (filled, opacity.clamp(0.0, 1.0))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_shape_fill(
     canvas: &mut RgbaImage,
     shape_type: &str,

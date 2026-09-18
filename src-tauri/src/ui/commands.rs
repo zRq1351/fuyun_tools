@@ -163,18 +163,18 @@ pub(crate) fn replace_screenshot_boot_image_path(next_path: Option<PathBuf>) {
 
 pub(crate) fn cleanup_all_screenshot_boot_images() {
     // 导出进行中：等待 in-flight 归零再删文件，避免 source_image_path 被中途删除
-    if !wait_screenshot_exports_drain(std::time::Duration::from_millis(3_000)) {
-        if screenshot_export_in_flight() > 0 {
-            log::warn!(
-                "截图导出仍在进行，跳过本轮 boot 图清理（in_flight={})",
-                screenshot_export_in_flight()
-            );
-            // 只清 slot，不删文件；下次关窗或启动清理再删
-            if let Ok(mut slot) = screenshot_boot_image_slot().lock() {
-                *slot = None;
-            }
-            return;
+    if !wait_screenshot_exports_drain(std::time::Duration::from_millis(3_000))
+        && screenshot_export_in_flight() > 0
+    {
+        log::warn!(
+            "截图导出仍在进行，跳过本轮 boot 图清理（in_flight={})",
+            screenshot_export_in_flight()
+        );
+        // 只清 slot，不删文件；下次关窗或启动清理再删
+        if let Ok(mut slot) = screenshot_boot_image_slot().lock() {
+            *slot = None;
         }
+        return;
     }
     if let Ok(mut slot) = screenshot_boot_image_slot().lock() {
         *slot = None;
