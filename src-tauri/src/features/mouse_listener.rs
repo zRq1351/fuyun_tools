@@ -8,7 +8,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, LazyLock, Mutex as StdMutex, OnceLock};
 use std::thread;
 use std::time::Duration;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::core::app_state::AppState as SharedAppState;
 use crate::ui::window_manager::{
@@ -180,7 +180,10 @@ fn handle_hook_event(
             if let Ok(mut pos_guard) = GLOBAL_STATE.last_mouse_pos.try_lock() {
                 *pos_guard = (last_x, last_y);
             }
-            handle_selection_toolbar_autoclose(listener_app_handle, Some((last_x, last_y)));
+            // 文本区按下往往是新一次划词的起点：此时不要收起工具栏，避免「先隐后现」闪烁
+            if !is_cursor_ibeam() {
+                handle_selection_toolbar_autoclose(listener_app_handle, Some((last_x, last_y)));
+            }
             log::debug!("检测到鼠标左键按下 at ({}, {})", last_x, last_y);
 
             let mut state_guard = lock_arc_mutex(&GLOBAL_STATE.mouse_action_state);
@@ -958,10 +961,12 @@ fn run_detection_cycle(app_handle: &AppHandle, state: &Arc<Mutex<SharedAppState>
                 let now = std::time::Instant::now();
                 let should_skip =
                     if let Some((last_text, last_anchor, last_time)) = last_emit_guard.as_ref() {
-                        (last_anchor.0 - anchor_pos.0).abs() <= 6
-                            && (last_anchor.1 - anchor_pos.1).abs() <= 6
-                            && *last_text == text
-                            && now.duration_since(*last_time) <= Duration::from_millis(300)
+                        let same_text = *last_text == text;
+                        let near_anchor = (last_anchor.0 - anchor_pos.0).abs() <= 20
+                            && (last_anchor.1 - anchor_pos.1).abs() <= 20;
+                        let within_window = now.duration_since(*last_time)
+                            <= Duration::from_millis(800);
+                        same_text && (near_anchor || within_window)
                     } else {
                         false
                     };
@@ -971,7 +976,19 @@ fn run_detection_cycle(app_handle: &AppHandle, state: &Arc<Mutex<SharedAppState>
                 should_skip
             };
             if should_debounce {
-                log::debug!("命中划词工具栏去抖策略，跳过重复弹窗");
+                log::debug!("命中划词工具栏去抖策略，窗口若已可见则跳过");
+                let visible = app_handle
+                    .get_webview_window("selection_toolbar")
+                    .and_then(|w| w.is_visible().ok())
+                    .unwrap_or(false);
+                if visible {
+                    return;
+                }
+                let app_handle_clone = app_handle.clone();
+                let text_clone = text.clone();
+                tauri::async_runtime::spawn(async move {
+                    show_selection_toolbar_impl(app_handle_clone, text_clone, Some(anchor_pos));
+                });
                 return;
             }
 

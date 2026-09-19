@@ -871,16 +871,41 @@ const canCropToSelection = computed(() =>
     (currentTool.value === 'select' || SHAPE_TOOLS.includes(currentTool.value) || currentTool.value === 'pen' || currentTool.value === 'highlight' || currentTool.value === 'text' || currentTool.value === 'mosaic')
 )
 
+async function resolveCropDataUrl() {
+  // asset:// 等会污染 canvas；有后端源路径时走 render，避免 toDataURL SecurityError
+  if (sourceImagePath.value) {
+    const renderResult = await invoke('render_screenshot_to_png_data', {
+      request: buildBackendExportRequest('')
+    })
+    if (!renderResult?.success || !renderResult?.pngBase64) {
+      throw new Error(renderResult?.error || renderResult?.message || t('screenshot.cropUnavailable'))
+    }
+    return {
+      dataUrl: `data:image/png;base64,${renderResult.pngBase64}`,
+      cssW: Math.max(1, Number(renderResult.width || 0) / dpr),
+      cssH: Math.max(1, Number(renderResult.height || 0) / dpr)
+    }
+  }
+  if (!isPixelCtxReadable()) {
+    try {
+      await loadScreenshotPixelFromBlob(screenshotSrc.value, {reset: false})
+    } catch (_) { /* fall through to canvas path */ }
+  }
+  const cropCanvas = getCroppedCanvas()
+  return {
+    dataUrl: cropCanvas.toDataURL('image/png'),
+    cssW: Math.max(1, cropCanvas.width / dpr),
+    cssH: Math.max(1, cropCanvas.height / dpr)
+  }
+}
+
 async function applyCropToSelection() {
   if (!canCropToSelection.value) {
     showCaptureError(t('screenshot.cropUnavailable'))
     return
   }
   try {
-    const cropCanvas = getCroppedCanvas()
-    const dataUrl = cropCanvas.toDataURL('image/png')
-    const cssW = Math.max(1, cropCanvas.width / dpr)
-    const cssH = Math.max(1, cropCanvas.height / dpr)
+    const {dataUrl, cssW, cssH} = await resolveCropDataUrl()
     sourceImagePath.value = ''
     screenshotSrc.value = dataUrl
     const img = new Image()
@@ -897,6 +922,7 @@ async function applyCropToSelection() {
     if (screenshotPixelCtx) {
       try {
         screenshotPixelCtx.drawImage(img, 0, 0)
+        screenshotPixelCtx.getImageData(0, 0, 1, 1)
       } catch (_) { /* ignore */ }
     }
     resetAnnotationStateForNewImage()
@@ -3775,8 +3801,11 @@ function getCroppedCanvas() {
   }
 
 
+  const baseSource = (isPixelCtxReadable() && screenshotPixelCanvas)
+      ? screenshotPixelCanvas
+      : screenshotImg.value
   ctx.drawImage(
-      screenshotImg.value,
+      baseSource,
       sourceX, sourceY, sourceWidth, sourceHeight,
       0, 0, sourceWidth, sourceHeight
   )

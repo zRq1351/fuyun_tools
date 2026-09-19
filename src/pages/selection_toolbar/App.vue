@@ -163,126 +163,116 @@ const parseBackground = (bgColor) => {
 let stateVersion = 0
 let shrunkPhysicalX = null
 let shrunkPhysicalY = null
+/** 划词弹出后的静默期：光标恰在魔法棒上时不要立刻展开，避免闪几下 */
+let blockEnterUntil = 0
+let settleExpandTimer = null
 
-const onMouseEnter = async () => {
-  // 如果正在动画中或已经展开，忽略重复触发
-  if (isAnimating || isHovered.value) return
-
-  if (hoverTimeout) {
-    clearTimeout(hoverTimeout)
-    hoverTimeout = null
+function isPointerOverToolbarUi() {
+  try {
+    const area = document.querySelector('.interactive-area')
+    const mini = document.querySelector('.mini-icon')
+    return !!((area && area.matches(':hover')) || (mini && mini.matches(':hover')))
+  } catch (_) {
+    return false
   }
-  if (enterTimeout) return
+}
 
-  enterTimeout = setTimeout(async () => {
-    enterTimeout = null
-    // 再次检查，防止在延迟期间状态已改变
+/** 静默期结束后：若光标仍停在魔法棒上，补一次展开（否则要移开再进入） */
+function scheduleExpandIfPointerOnWand() {
+  if (settleExpandTimer) {
+    clearTimeout(settleExpandTimer)
+    settleExpandTimer = null
+  }
+  const delay = Math.max(0, blockEnterUntil - Date.now()) + 30
+  settleExpandTimer = setTimeout(() => {
+    settleExpandTimer = null
     if (isAnimating || isHovered.value) return
-
-    const currentVersion = ++stateVersion
-    isAnimating = true // 设置动画锁
-
-    // catch 里也要能恢复样式，故提到 try 外
-    const miniIcon = document.querySelector('.mini-icon')
-    try {
-      // 先隐藏魔法棒
-      if (miniIcon) {
-        miniIcon.style.opacity = '0'
-        miniIcon.style.pointerEvents = 'none'
+    if (Date.now() < blockEnterUntil) return
+    if (!isPointerOverToolbarUi()) return
+    enterTimeout = setTimeout(() => {
+      enterTimeout = null
+      if (!isAnimating && !isHovered.value && isPointerOverToolbarUi()) {
+        runExpandToolbar()
       }
+    }, 40)
+  }, delay)
+}
 
-      // 等待一帧确保魔法棒隐藏生效
-    await new Promise(resolve => requestAnimationFrame(resolve))
-
-    // 使用缓存设置获取按钮列表（避免每次展开都发起IPC请求）
+async function runExpandToolbar() {
+  const currentVersion = ++stateVersion
+  isAnimating = true
+  const miniIcon = document.querySelector('.mini-icon')
+  try {
     const settings = await getCachedSettings().catch(() => null)
     if (settings) {
       webSearchEngine.value = settings.selection_web_search_engine || 'bing'
       customPrompts.value = Array.isArray(settings.selection_custom_prompts) ? settings.selection_custom_prompts : []
     }
-
     const factor = await appWindow.scaleFactor()
-      const physicalPos = await appWindow.outerPosition()
-      if (stateVersion !== currentVersion) {
-        // 版本过期：必须恢复魔法棒内联样式，否则永久隐形
-        if (miniIcon) {
-          miniIcon.style.removeProperty('opacity')
-          miniIcon.style.removeProperty('pointer-events')
-        }
-        return
-      }
-
-      // 保存当前的缩小状态位置，以便后续精准恢复，防止窗口漂移
-      shrunkPhysicalX = physicalPos.x
-      shrunkPhysicalY = physicalPos.y
-
-      const logicalX = physicalPos.x / factor
-      const logicalY = physicalPos.y / factor
-
-      // 搜索按钮始终显示，基础按钮数 = 3(翻译、解释、复制) + 1(搜索)
-      let buttonCount = 4
-      buttonCount += enabledCustomPrompts.value.length
-
-      const targetWidth = buttonCount * 60 + 12
-      const targetHeight = 100
-
-      const expandedX = logicalX - (targetWidth - 64) / 2
-      const expandedY = logicalY - (targetHeight - 64) / 2
-
-      let newPhysicalX = Math.round(expandedX * factor)
-      let newPhysicalY = Math.round(expandedY * factor)
-      const newPhysicalWidth = Math.round(targetWidth * factor)
-      const newPhysicalHeight = Math.round(targetHeight * factor)
-
-      // 获取当前显示器边界进行裁剪，防止放大后超出屏幕
-      const monitor = await currentMonitor()
-      if (monitor) {
-        const minPhysicalX = monitor.position.x
-        const minPhysicalY = monitor.position.y
-        const maxPhysicalX = monitor.position.x + monitor.size.width - newPhysicalWidth
-        const maxPhysicalY = monitor.position.y + monitor.size.height - newPhysicalHeight
-
-        newPhysicalX = Math.max(minPhysicalX, Math.min(newPhysicalX, maxPhysicalX))
-        newPhysicalY = Math.max(minPhysicalY, Math.min(newPhysicalY, maxPhysicalY))
-      }
-
-      // 放大窗口，此时工具栏还未显示（opacity: 0）
-      await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
-
-      // 等待窗口调整完成后，再显示工具栏
-      await new Promise(resolve => setTimeout(resolve, 50))
-      if (stateVersion !== currentVersion) {
-        if (miniIcon) {
-          miniIcon.style.removeProperty('opacity')
-          miniIcon.style.removeProperty('pointer-events')
-        }
-        return
-      }
-
-      // 恢复魔法棒的CSS状态并显示工具栏
-      if (miniIcon) {
-        miniIcon.style.removeProperty('opacity')
-        miniIcon.style.removeProperty('pointer-events')
-      }
-      isHovered.value = true
-    } catch (e) {
-      console.error('展开工具栏失败:', e)
-      // Restore miniIcon opacity if it was hidden before the error
-      if (miniIcon) {
-        miniIcon.style.removeProperty('opacity')
-        miniIcon.style.removeProperty('pointer-events')
-      }
-    } finally {
-      isAnimating = false // 释放动画锁
-      // 动画执行期间如果鼠标已离开，立即执行收起操作
-      if (pendingLeave) {
-        pendingLeave = false
-        const leaveVersion = ++stateVersion
-        isAnimating = true
-        shrinkWindow(leaveVersion)
-      }
+    const physicalPos = await appWindow.outerPosition()
+    if (stateVersion !== currentVersion) return
+    shrunkPhysicalX = physicalPos.x
+    shrunkPhysicalY = physicalPos.y
+    const logicalX = physicalPos.x / factor
+    const logicalY = physicalPos.y / factor
+    let buttonCount = 4
+    buttonCount += enabledCustomPrompts.value.length
+    const targetWidth = buttonCount * 60 + 12
+    const targetHeight = 100
+    let newPhysicalX = Math.round(logicalX * factor)
+    let newPhysicalY = Math.round(logicalY * factor)
+    const newPhysicalWidth = Math.round(targetWidth * factor)
+    const newPhysicalHeight = Math.round(targetHeight * factor)
+    const monitor = await currentMonitor()
+    if (monitor) {
+      const minPhysicalX = monitor.position.x
+      const minPhysicalY = monitor.position.y
+      const maxPhysicalX = monitor.position.x + monitor.size.width - newPhysicalWidth
+      const maxPhysicalY = monitor.position.y + monitor.size.height - newPhysicalHeight
+      newPhysicalX = Math.max(minPhysicalX, Math.min(newPhysicalX, maxPhysicalX))
+      newPhysicalY = Math.max(minPhysicalY, Math.min(newPhysicalY, maxPhysicalY))
     }
-  }, 80)
+    await WindowService.resizeSelectionToolbar(newPhysicalX, newPhysicalY, newPhysicalWidth, newPhysicalHeight)
+    if (stateVersion !== currentVersion) return
+    isHovered.value = true
+    if (miniIcon) {
+      miniIcon.style.removeProperty('opacity')
+      miniIcon.style.removeProperty('pointer-events')
+    }
+  } catch (e) {
+    console.error('展开工具栏失败:', e)
+    if (miniIcon) {
+      miniIcon.style.removeProperty('opacity')
+      miniIcon.style.removeProperty('pointer-events')
+    }
+    isHovered.value = false
+  } finally {
+    isAnimating = false
+    pendingLeave = false
+  }
+}
+
+const onMouseEnter = () => {
+  if (isAnimating || isHovered.value) return
+  if (Date.now() < blockEnterUntil) {
+    // 静默期内已在魔法棒上：期满后自动补展开
+    scheduleExpandIfPointerOnWand()
+    return
+  }
+  if (hoverTimeout) {
+    clearTimeout(hoverTimeout)
+    hoverTimeout = null
+  }
+  if (enterTimeout) return
+  enterTimeout = setTimeout(() => {
+    enterTimeout = null
+    if (isAnimating || isHovered.value) return
+    if (Date.now() < blockEnterUntil) {
+      scheduleExpandIfPointerOnWand()
+      return
+    }
+    void runExpandToolbar()
+  }, 40)
 }
 
 const shrinkWindow = async (version) => {
@@ -293,29 +283,34 @@ const shrinkWindow = async (version) => {
     isHovered.value = false
 
     // 等待一帧确保CSS生效
-    await new Promise(resolve => requestAnimationFrame(resolve))
+    await new Promise(resolve => {
+      let done = false
+      const finish = () => {
+        if (done) return
+        done = true
+        resolve()
+      }
+      try {
+        requestAnimationFrame(finish)
+      } catch (_) {
+        finish()
+        return
+      }
+      setTimeout(finish, 32)
+    })
 
     // 缩小窗口到魔法棒尺寸
     const factor = await appWindow.scaleFactor()
     let newPhysicalX, newPhysicalY
 
+    // 缩小后仍用展开前的顶点（顶点不变策略下两者相同）
     if (shrunkPhysicalX !== null && shrunkPhysicalY !== null) {
       newPhysicalX = shrunkPhysicalX
       newPhysicalY = shrunkPhysicalY
     } else {
       const physicalPos = await appWindow.outerPosition()
-      const logicalX = physicalPos.x / factor
-      const logicalY = physicalPos.y / factor
-      // 搜索按钮始终显示，基础按钮数 = 3(翻译、解释、复制) + 1(搜索)
-      let buttonCount = 4
-      buttonCount += enabledCustomPrompts.value.length
-      const currentWidth = buttonCount * 60 + 12
-      const currentHeight = 100
-
-      const shrunkX = logicalX + (currentWidth - 64) / 2
-      const shrunkY = logicalY + (currentHeight - 64) / 2
-      newPhysicalX = Math.round(shrunkX * factor)
-      newPhysicalY = Math.round(shrunkY * factor)
+      newPhysicalX = physicalPos.x
+      newPhysicalY = physicalPos.y
     }
 
     const newPhysicalWidth = Math.round(64 * factor)
@@ -416,66 +411,43 @@ onMounted(async () => {
       selectedText.value = String(window.__SELECTION_TOOLBAR_TEXT__)
     }
     const onDomText = async (event) => {
-      selectedText.value = typeof event?.detail === 'string' ? event.detail : ''
-      if (isHovered.value) {
-        const currentVersion = ++stateVersion
-        await shrinkWindow(currentVersion)
+      const next = typeof event?.detail === 'string' ? event.detail : ''
+      selectedText.value = next
+      // 弹出后短时间不响应悬停展开，等魔法棒稳定
+      blockEnterUntil = Date.now() + 400
+      isHovered.value = false
+      if (enterTimeout) {
+        clearTimeout(enterTimeout)
+        enterTimeout = null
       }
       if (hoverTimeout) {
         clearTimeout(hoverTimeout)
         hoverTimeout = null
       }
-      if (enterTimeout) {
-        clearTimeout(enterTimeout)
-        enterTimeout = null
-      }
+      // 光标若已停在魔法棒上，静默期结束后自动展开
+      scheduleExpandIfPointerOnWand()
     }
     window.addEventListener('selection-toolbar-text', onDomText)
     unlistenDomText = () => window.removeEventListener('selection-toolbar-text', onDomText)
     unlistenSelectedText = await listen('selected-text', async (event) => {
       selectedText.value = typeof event.payload === 'string' ? event.payload : ''
-      if (isHovered.value) {
-        const currentVersion = ++stateVersion
-        await shrinkWindow(currentVersion)
+      blockEnterUntil = Date.now() + 400
+      isHovered.value = false
+      if (enterTimeout) {
+        clearTimeout(enterTimeout)
+        enterTimeout = null
       }
       if (hoverTimeout) {
         clearTimeout(hoverTimeout)
         hoverTimeout = null
       }
-      if (enterTimeout) {
-        clearTimeout(enterTimeout)
-        enterTimeout = null
-      }
+      scheduleExpandIfPointerOnWand()
     })
 
-    // Fallback listener for fast mouse exits from the window
-    const onMouseOut = (e) => {
-      // 检查是否真正离开了工具栏范围
-      // e.relatedTarget 不存在说明移出了窗口
-      // 如果存在，说明移动到了另一个元素，我们需要判断该元素是否在我们的 toolbar 内部
-      if (!e.relatedTarget) {
-        onMouseLeave()
-      } else {
-        // 检查新目标是否还在 document.body 内（或者我们能掌控的 DOM 树内）
-        // 由于这是 Tauri 应用，relatedTarget 通常在内部
-        // 但保险起见，如果移到了 html/body 边缘之外
-        const isInside = document.body.contains(e.relatedTarget)
-        if (!isInside) {
-           onMouseLeave()
-        }
-      }
-    }
-    window.addEventListener('mouseout', onMouseOut)
-    unlistenMouseOut = () => window.removeEventListener('mouseout', onMouseOut)
+    // 不注册 window mouseout / document mouseleave：展开时窗口 resize 会伪造 leave
+    unlistenMouseOut = () => {}
+    unlistenMouseLeave = () => {}
 
-    // 原生 mouseleave 兜底
-    const onMouseLeaveDoc = () => {
-      onMouseLeave()
-    }
-    document.documentElement.addEventListener('mouseleave', onMouseLeaveDoc)
-    unlistenMouseLeave = () => document.documentElement.removeEventListener('mouseleave', onMouseLeaveDoc)
-
-    // Reset state when the window loses focus
     unlistenFocus = await appWindow.onFocusChanged(async ({ payload: focused }) => {
       if (!focused && isHovered.value) {
         if (hoverTimeout) {
@@ -523,6 +495,10 @@ onBeforeUnmount(() => {
   if (enterTimeout) {
     clearTimeout(enterTimeout)
     enterTimeout = null
+  }
+  if (settleExpandTimer) {
+    clearTimeout(settleExpandTimer)
+    settleExpandTimer = null
   }
 })
 

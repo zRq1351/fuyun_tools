@@ -545,6 +545,11 @@ pub fn run() {
             };
             if res {
                 start_text_selection_listener(app_handle.clone(), state_arc.clone());
+                // 划词已启用时预创建工具栏窗口，避免首次划词「创建→显示」闪烁
+                let _ = crate::ui::window_manager::ensure_window_for_label(
+                    &app_handle,
+                    "selection_toolbar",
+                );
             }
 
             if text_clipboard_enabled {

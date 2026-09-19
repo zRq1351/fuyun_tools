@@ -199,7 +199,7 @@ fn note_window_recreate_if_after_gc(label: &str) {
 }
 
 /// 可闲置销毁的功能窗口（settings 常驻，不销毁）
-/// document_manager_widget：用户偏好桌面小部件常驻，不纳入 GC
+/// document_manager_widget / selection_toolbar：高频唤起，销毁重建体验差
 fn idle_gc_eligible(label: &str) -> bool {
     matches!(
         label,
@@ -213,14 +213,13 @@ fn idle_gc_eligible(label: &str) -> bool {
             | "recording_toolbar"
             | "launcher"
             | "document_manager"
-            | "selection_toolbar"
     )
 }
 
 fn idle_gc_ttl(label: &str) -> std::time::Duration {
     match label {
         // 会话型工具条：用完较快回收
-        "longshot_toolbar" | "longshot_border" | "selection_toolbar" | "recording_toolbar" => {
+        "longshot_toolbar" | "longshot_border" | "recording_toolbar" => {
             std::time::Duration::from_secs(120)
         }
         // 高频但可重建
@@ -1481,19 +1480,17 @@ fn show_selection_toolbar_internal(
     };
 
     set_toolbar_window(&toolbar_window, anchor_pos);
-    let _ = toolbar_window.set_always_on_top(false);
-    let _ = toolbar_window.set_always_on_top(true);
-    if show_overlay_window(&app_handle, "selection_toolbar", &toolbar_window, false) {
-        if let Err(e) = app_handle.emit("selected-text", selected_text.clone()) {
-            log::error!("未能发送选择文本到前端:{}", e);
-        }
+    if !matches!(toolbar_window.is_always_on_top(), Ok(true)) {
+        let _ = toolbar_window.set_always_on_top(true);
     }
+    // 单通道更新文案，避免 emit+eval 双触发导致前端反复收起/展开
     if let Ok(payload) = serde_json::to_string(&selected_text) {
         let script = format!(
             "window.__SELECTION_TOOLBAR_TEXT__ = {payload}; window.dispatchEvent(new CustomEvent('selection-toolbar-text', {{ detail: {payload} }}));"
         );
         let _ = toolbar_window.eval(&script);
     }
+    show_overlay_window(&app_handle, "selection_toolbar", &toolbar_window, false);
 }
 
 pub fn show_selection_toolbar_impl(
@@ -1512,22 +1509,28 @@ pub fn show_selection_toolbar_force_impl(
     show_selection_toolbar_internal(app_handle, selected_text, anchor_pos, true);
 }
 
-/// 设置工具栏窗口位置
+/// 设置工具栏窗口位置：贴在划词锚点/光标附近
 fn set_toolbar_window(window: &tauri::WebviewWindow, anchor_pos: Option<(i32, i32)>) {
     let initial_width = 64u32;
     let initial_height = 64u32;
-    let logical_offset_x = 10f64;
-    let logical_offset_y = 15f64;
+    // 与划词结束点（松手/光标）保持更远距离，避免压在选区末尾
+    let logical_offset_x = 36f64;
+    let logical_offset_y = 48f64;
     let _ = window.set_size(tauri::LogicalSize::new(initial_width, initial_height));
-    if let Some((mx, my)) = anchor_pos {
+    // 无划词锚点时用当前光标，禁止落到屏幕远端的 RightCenter
+    let anchor = anchor_pos.or_else(|| get_physical_cursor_position().ok());
+    if let Some((mx, my)) = anchor {
         let scale_factor = window.scale_factor().unwrap_or(1.0);
         let physical_initial_width = (initial_width as f64 * scale_factor) as i32;
         let physical_initial_height = (initial_height as f64 * scale_factor) as i32;
         let offset_x = (logical_offset_x * scale_factor) as i32;
         let offset_y = (logical_offset_y * scale_factor) as i32;
 
-        let mut x = mx + offset_x;
-        let mut y = my + offset_y;
+        // 图标中心 ≈ 划词结束点 + 偏移；窗口左上角再回退半个窗口
+        let half_w = physical_initial_width / 2;
+        let half_h = physical_initial_height / 2;
+        let mut x = mx + offset_x - half_w;
+        let mut y = my + offset_y - half_h;
         let monitor_from_anchor = window
             .available_monitors()
             .ok()
@@ -1550,21 +1553,10 @@ fn set_toolbar_window(window: &tauri::WebviewWindow, anchor_pos: Option<(i32, i3
             let min_y = monitor_pos.y;
             let max_x = monitor_pos.x + monitor_size.width as i32 - physical_initial_width;
             let max_y = monitor_pos.y + monitor_size.height as i32 - physical_initial_height;
-            let below_y = my + offset_y;
-            let above_y = my - physical_initial_height - offset_y;
-            if below_y <= max_y {
-                y = below_y;
-            } else if above_y >= min_y {
-                y = above_y;
-            } else {
-                y = below_y.clamp(min_y, max_y.max(min_y));
-            }
             x = x.clamp(min_x, max_x.max(min_x));
             y = y.clamp(min_y, max_y.max(min_y));
         }
         let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
-    } else {
-        let _ = window.move_window(Position::RightCenter);
     }
 }
 

@@ -324,17 +324,25 @@ fn get_selected_text_windows(
     };
     let sequence_before_copy = get_clipboard_sequence_number();
 
-    // 2. 短暂等待用户发起手动 Ctrl+C，避免后续模拟干扰用户按键
-    let deadline = std::time::Instant::now() + Duration::from_millis(200);
+    // 仅当划词修饰键包含 Ctrl 时，才预留时间等待用户手动 Ctrl+C；
+    // 否则固定等待 200ms 会让魔法棒迟迟不出现/反复重试
+    let wait_for_user_ctrl = {
+        let guard = lock_arc_mutex(&state_manager);
+        let key = guard.settings.selection_modifier_key.to_lowercase();
+        key.contains("ctrl")
+    };
     let mut user_copying = false;
-    while std::time::Instant::now() < deadline {
-        if crate::features::mouse_listener::is_ctrl_pressed_by_os()
-            || crate::features::mouse_listener::is_any_ctrl_pressed()
-        {
-            user_copying = true;
-            break;
+    if wait_for_user_ctrl {
+        let deadline = std::time::Instant::now() + Duration::from_millis(200);
+        while std::time::Instant::now() < deadline {
+            if crate::features::mouse_listener::is_ctrl_pressed_by_os()
+                || crate::features::mouse_listener::is_any_ctrl_pressed()
+            {
+                user_copying = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
         }
-        thread::sleep(Duration::from_millis(20));
     }
 
     // 3. 依次尝试多种复制按键组合，适配不同应用
