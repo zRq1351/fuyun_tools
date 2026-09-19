@@ -44,6 +44,38 @@ export function resolveExportShapeFill(item) {
   }
 }
 
+export function constrainRectPoint(start, current) {
+  const dx = (Number(current?.x) || 0) - (Number(start?.x) || 0)
+  const dy = (Number(current?.y) || 0) - (Number(start?.y) || 0)
+  const side = Math.max(Math.abs(dx), Math.abs(dy))
+  return {
+    x: (Number(start?.x) || 0) + (dx < 0 ? -side : side),
+    y: (Number(start?.y) || 0) + (dy < 0 ? -side : side)
+  }
+}
+
+export function constrainCirclePoint(start, current) {
+  return constrainRectPoint(start, current)
+}
+
+export function constrainLinePoint(start, current) {
+  const sx = Number(start?.x) || 0
+  const sy = Number(start?.y) || 0
+  const cx = Number(current?.x) || 0
+  const cy = Number(current?.y) || 0
+  const dx = cx - sx
+  const dy = cy - sy
+  const len = Math.sqrt(dx * dx + dy * dy)
+  if (len < 1e-6) return {x: sx, y: sy}
+  const angle = Math.atan2(dy, dx)
+  const step = Math.PI / 4
+  const snapped = Math.round(angle / step) * step
+  return {
+    x: sx + Math.cos(snapped) * len,
+    y: sy + Math.sin(snapped) * len
+  }
+}
+
 export function computeMosaicBlockParams({stroke, scale, centerX, centerY, srcW, srcH}) {
   const strokePx = Math.max(1, Number(stroke) || 8)
   const scaleFactor = Number(scale) || 0

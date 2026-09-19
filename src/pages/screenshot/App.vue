@@ -266,6 +266,15 @@
         <div class="divider"/>
 
         <button
+            :disabled="!canCropToSelection"
+            :title="t('screenshot.cropToSelection')"
+            class="tool-btn"
+            @click="applyCropToSelection"
+        >
+          <Crop class="tool-icon-wrap"/>
+        </button>
+
+        <button
             :disabled="historyIndex <= 0"
             :title="t('screenshot.undo')"
             class="tool-btn"
@@ -460,12 +469,13 @@
         class="shape-overlay-item"
         @mousedown.stop="startDragShapeItem(shape.id, $event)"
     >
-      <template v-if="shape.type === 'rect'">
+      <template v-if="shape.type === 'rect' || shape.type === 'redact'">
         <div
             :style="getShapeFillStyle(shape)"
             class="shape-fill"
         />
         <div
+            v-if="shape.type !== 'redact'"
             :style="getShapeStrokeStyle(shape)"
             class="shape-rect"
         />
@@ -525,7 +535,7 @@
           </template>
         </svg>
       </template>
-      <template v-if="selectedShapeId === shape.id && (shape.type === 'rect' || shape.type === 'circle' || shape.type === 'number')">
+      <template v-if="selectedShapeId === shape.id && (shape.type === 'rect' || shape.type === 'circle' || shape.type === 'number' || shape.type === 'redact')">
         <div
             class="shape-resize-handle tl"
             @mousedown.stop="startResizeShapeItem(shape.id, 'tl', $event)"
@@ -611,12 +621,15 @@ import {emit, listen} from '@tauri-apps/api/event'
 import {Check, Circle, Pin, Square, X} from 'lucide-vue-next'
 import {
   Brush,
+  Crop,
   DocumentCopy,
   Download,
   Edit,
   EditPen,
   Flag,
   Grid,
+  Hide,
+  MagicStick,
   Minus,
   Pointer,
   RefreshLeft,
@@ -628,6 +641,8 @@ import {ScreenshotService} from '@/services/ipc.js'
 import {parseErrorMessage} from '@/utils/errorHandler.js'
 import {
   computeMosaicBlockParams,
+  constrainLinePoint,
+  constrainRectPoint,
   ensureShapeFillFields as ensureShapeFillFieldsImpl,
   hexToRgba,
   nextNumberCalloutIndex as nextNumberCalloutIndexFromItems,
@@ -679,8 +694,8 @@ const shapeFillOpacity = ref(0.35)
 const mosaicSize = ref(8)
 const NUMBER_DEFAULT_RADIUS = 22
 const NUMBER_MIN_RADIUS = 14
-const SHAPE_TOOLS = ['line', 'arrow', 'rect', 'circle', 'number']
-const FILLABLE_SHAPE_TOOLS = ['rect', 'circle', 'number']
+const SHAPE_TOOLS = ['line', 'arrow', 'rect', 'circle', 'number', 'redact']
+const FILLABLE_SHAPE_TOOLS = ['rect', 'circle', 'number', 'redact']
 const pickColor = ref('')
 const pickColorRgb = ref('')
 const pickerDisplayMode = ref('hex')
@@ -833,11 +848,13 @@ const dpr = window.devicePixelRatio || 1
 const drawingTools = [
   {id: 'select', name: 'screenshot.selectMove', icon: Pointer},
   {id: 'pen', name: 'screenshot.brush', icon: EditPen},
+  {id: 'highlight', name: 'screenshot.highlight', icon: MagicStick},
   {id: 'line', name: 'screenshot.line', icon: Minus},
   {id: 'arrow', name: 'screenshot.arrow', icon: TopRight},
   {id: 'rect', name: 'screenshot.rectangle', icon: Square},
   {id: 'circle', name: 'screenshot.circle', icon: Circle},
   {id: 'number', name: 'screenshot.numberCallout', icon: Flag},
+  {id: 'redact', name: 'screenshot.redact', icon: Hide},
   {id: 'text', name: 'screenshot.text', icon: Edit},
   {id: 'mosaic', name: 'screenshot.mosaic', icon: Grid},
   {id: 'picker', name: 'screenshot.colorPicker', icon: Brush}
@@ -846,6 +863,57 @@ const isDevMode = import.meta.env.DEV
 
 const hasSelection = computed(() => rect.width > 0 && rect.height > 0)
 const canExport = computed(() => hasSelection.value)
+const canCropToSelection = computed(() =>
+    regionSelectMode.value === 'screenshot' &&
+    hasSelection.value &&
+    state.value === 'selected' &&
+    !longshotResultActive.value &&
+    (currentTool.value === 'select' || SHAPE_TOOLS.includes(currentTool.value) || currentTool.value === 'pen' || currentTool.value === 'highlight' || currentTool.value === 'text' || currentTool.value === 'mosaic')
+)
+
+async function applyCropToSelection() {
+  if (!canCropToSelection.value) {
+    showCaptureError(t('screenshot.cropUnavailable'))
+    return
+  }
+  try {
+    const cropCanvas = getCroppedCanvas()
+    const dataUrl = cropCanvas.toDataURL('image/png')
+    const cssW = Math.max(1, cropCanvas.width / dpr)
+    const cssH = Math.max(1, cropCanvas.height / dpr)
+    sourceImagePath.value = ''
+    screenshotSrc.value = dataUrl
+    const img = new Image()
+    await new Promise((resolve, reject) => {
+      img.onload = resolve
+      img.onerror = reject
+      img.src = dataUrl
+    })
+    screenshotImg.value = img
+    screenshotPixelCanvas = document.createElement('canvas')
+    screenshotPixelCanvas.width = img.width
+    screenshotPixelCanvas.height = img.height
+    screenshotPixelCtx = screenshotPixelCanvas.getContext('2d')
+    if (screenshotPixelCtx) {
+      try {
+        screenshotPixelCtx.drawImage(img, 0, 0)
+      } catch (_) { /* ignore */ }
+    }
+    resetAnnotationStateForNewImage()
+    await nextTick()
+    initCanvas()
+    rect.x = 0
+    rect.y = 0
+    rect.width = cssW
+    rect.height = cssH
+    state.value = 'selected'
+    currentTool.value = 'select'
+    isCaptureReady.value = true
+  } catch (err) {
+    console.error('裁剪失败:', err)
+    showCaptureError(String(err?.message || err || t('screenshot.cropUnavailable')))
+  }
+}
 const showExportRouteIndicator = computed(() =>
     isDevMode &&
     regionSelectMode.value === 'screenshot' &&
@@ -1798,6 +1866,7 @@ function buildBackendExportRequest(outputPath) {
       type: command.type,
       color: command.color,
       lineWidth: command.lineWidth,
+      opacity: command.opacity != null ? Number(command.opacity) : undefined,
       points: Array.isArray(command.points)
           ? command.points.map((point) => ({x: point.x, y: point.y}))
           : []
@@ -2470,16 +2539,28 @@ function handleCanvasMouseDown(event) {
 
   const ctx = canvas.value.getContext('2d')
 
-  if (currentTool.value === 'pen' || currentTool.value === 'mosaic') {
+  if (currentTool.value === 'pen' || currentTool.value === 'mosaic' || currentTool.value === 'highlight') {
     ctx.beginPath()
     ctx.moveTo(drawStart.x, drawStart.y)
+    if (currentTool.value === 'highlight') {
+      ctx.globalAlpha = 0.35
+      ctx.strokeStyle = currentColor.value || '#F5D76E'
+      ctx.lineWidth = 18
+      ctx.lineCap = 'round'
+    }
     activeRasterCommand = {
       type: currentTool.value,
-      color: currentColor.value,
+      color: currentTool.value === 'highlight' ? (currentColor.value || '#F5D76E') : currentColor.value,
       lineWidth: currentTool.value === 'mosaic'
           ? (Number(mosaicSize.value) || 8)
-          : (Number(lineWidth.value) || 1),
+          : currentTool.value === 'highlight'
+              ? 18
+              : (Number(lineWidth.value) || 1),
+      opacity: currentTool.value === 'highlight' ? 0.35 : undefined,
       points: [{x: drawStart.x, y: drawStart.y}]
+    }
+    if (currentTool.value === 'highlight') {
+      ctx.globalAlpha = 1
     }
   } else if (SHAPE_TOOLS.includes(currentTool.value)) {
     currentDrawingSnapshot = ctx.getImageData(0, 0, canvas.value.width, canvas.value.height)
@@ -2491,9 +2572,21 @@ function handleCanvasMouseMove(event) {
 
   if (!isDrawing.value) return
 
-  const x = p.x
-  const y = p.y
+  const x0 = p.x
+  const y0 = p.y
+  let x = x0
+  let y = y0
   const ctx = canvas.value.getContext('2d')
+
+  if (event.shiftKey && (currentTool.value === 'rect' || currentTool.value === 'redact'
+      || currentTool.value === 'circle' || currentTool.value === 'number'
+      || currentTool.value === 'line' || currentTool.value === 'arrow')) {
+    const constrained = (currentTool.value === 'line' || currentTool.value === 'arrow')
+        ? constrainLinePoint(drawStart, {x, y})
+        : constrainRectPoint(drawStart, {x, y})
+    x = constrained.x
+    y = constrained.y
+  }
 
   if (currentTool.value === 'pen') {
     ctx.strokeStyle = currentColor.value
@@ -2501,6 +2594,15 @@ function handleCanvasMouseMove(event) {
     ctx.lineCap = 'round'
     ctx.lineTo(x, y)
     ctx.stroke()
+    activeRasterCommand?.points?.push({x, y})
+  } else if (currentTool.value === 'highlight') {
+    ctx.globalAlpha = 0.35
+    ctx.strokeStyle = currentColor.value || '#F5D76E'
+    ctx.lineWidth = 18
+    ctx.lineCap = 'round'
+    ctx.lineTo(x, y)
+    ctx.stroke()
+    ctx.globalAlpha = 1
     activeRasterCommand?.points?.push({x, y})
   } else if (currentTool.value === 'mosaic') {
     // 先记点，再画：采样失败也不能丢掉命令，否则导出同样无马赛克
@@ -2528,16 +2630,20 @@ function handleCanvasMouseMove(event) {
       if (currentTool.value === 'arrow') {
         drawArrowHead(ctx, drawStart.x, drawStart.y, x, y)
       }
-    } else if (currentTool.value === 'rect') {
-      if (shapeFillEnabled.value) {
-        ctx.fillStyle = hexToRgba(currentColor.value, shapeFillOpacity.value)
+    } else if (currentTool.value === 'rect' || currentTool.value === 'redact') {
+      if (currentTool.value === 'redact' || shapeFillEnabled.value) {
+        ctx.fillStyle = currentTool.value === 'redact'
+            ? '#000000'
+            : hexToRgba(currentColor.value, shapeFillOpacity.value)
         const rx = Math.min(drawStart.x, x)
         const ry = Math.min(drawStart.y, y)
         const rw = Math.abs(x - drawStart.x)
         const rh = Math.abs(y - drawStart.y)
         ctx.fillRect(rx, ry, rw, rh)
       }
-      ctx.strokeRect(drawStart.x, drawStart.y, x - drawStart.x, y - drawStart.y)
+      if (currentTool.value !== 'redact') {
+        ctx.strokeRect(drawStart.x, drawStart.y, x - drawStart.x, y - drawStart.y)
+      }
     } else if (currentTool.value === 'circle' || currentTool.value === 'number') {
       const radius = currentTool.value === 'number'
           ? Math.max(NUMBER_MIN_RADIUS, Math.sqrt(Math.pow(x - drawStart.x, 2) + Math.pow(y - drawStart.y, 2)))
@@ -2574,8 +2680,18 @@ function handleCanvasMouseUp(event) {
   isDrawing.value = false
 
   const p = toScenePoint(event)
-  const x = p.x
-  const y = p.y
+  let x = p.x
+  let y = p.y
+  // 与 mousemove 预览同一套 Shift 约束，保证提交几何与预览一致
+  if (event.shiftKey && (currentTool.value === 'rect' || currentTool.value === 'redact'
+      || currentTool.value === 'circle' || currentTool.value === 'number'
+      || currentTool.value === 'line' || currentTool.value === 'arrow')) {
+    const constrained = (currentTool.value === 'line' || currentTool.value === 'arrow')
+        ? constrainLinePoint(drawStart, {x, y})
+        : constrainRectPoint(drawStart, {x, y})
+    x = constrained.x
+    y = constrained.y
+  }
   const ctx = canvas.value.getContext('2d')
 
   if (currentTool.value === 'text') {
@@ -2786,7 +2902,7 @@ function syncFillControlsFromShape(item) {
 function startResizeShapeItem(id, handle, event) {
   if (editingTextId.value !== null) return
   const item = shapeItems.value.find((entry) => entry.id === id)
-  if (!item || (item.type !== 'rect' && item.type !== 'circle' && item.type !== 'number')) return
+  if (!item || (item.type !== 'rect' && item.type !== 'redact' && item.type !== 'circle' && item.type !== 'number')) return
   selectedShapeId.value = id
   selectedTextId.value = null
   syncFillControlsFromShape(item)
@@ -2924,7 +3040,7 @@ function createShapeItem(type, fromX, fromY, toX, toY) {
     return item
   }
   if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return
-  if (type === 'rect') {
+  if (type === 'rect' || type === 'redact') {
     const item = ensureShapeFillFields({
       id: shapeItemIdSeed++,
       type,
@@ -2932,10 +3048,10 @@ function createShapeItem(type, fromX, fromY, toX, toY) {
       y: Math.min(fromY, toY),
       width: Math.max(2, Math.abs(dx)),
       height: Math.max(2, Math.abs(dy)),
-      color: currentColor.value,
-      lineWidth: stroke,
-      filled: shapeFillEnabled.value,
-      fillOpacity: shapeFillEnabled.value ? (Number(shapeFillOpacity.value) || 0.35) : 0
+      color: type === 'redact' ? '#000000' : currentColor.value,
+      lineWidth: type === 'redact' ? 0 : stroke,
+      filled: type === 'redact' ? true : shapeFillEnabled.value,
+      fillOpacity: type === 'redact' ? 1 : (shapeFillEnabled.value ? (Number(shapeFillOpacity.value) || 0.35) : 0)
     })
     shapeItems.value.push(item)
     return item
@@ -3022,9 +3138,11 @@ function getShapeStrokeStyle(shape) {
 }
 
 function getShapeFillStyle(shape) {
-  if (!shape?.filled) return {display: 'none'}
+  if (!shape?.filled && shape?.type !== 'redact') return {display: 'none'}
   return {
-    backgroundColor: hexToRgba(shape.color, shape.fillOpacity ?? 0.35)
+    backgroundColor: shape.type === 'redact'
+        ? '#000000'
+        : hexToRgba(shape.color, shape.fillOpacity ?? 0.35)
   }
 }
 
@@ -3428,8 +3546,12 @@ function applyMosaicAtScenePoint(ctx, x, y, strokeWidth) {
 
 function applyRasterCommand(ctx, command) {
   if (!command) return
-  if (command.type === 'pen') {
+  if (command.type === 'pen' || command.type === 'highlight') {
     if (!Array.isArray(command.points) || command.points.length < 2) return
+    const opacity = command.type === 'highlight'
+        ? (command.opacity != null ? Number(command.opacity) : 0.35)
+        : 1
+    ctx.globalAlpha = opacity
     ctx.strokeStyle = command.color
     ctx.lineWidth = command.lineWidth
     ctx.lineCap = 'round'
@@ -3441,6 +3563,7 @@ function applyRasterCommand(ctx, command) {
       ctx.lineTo(point.x, point.y)
     }
     ctx.stroke()
+    ctx.globalAlpha = 1
     return
   }
   if (command.type === 'mosaic') {
@@ -3564,6 +3687,7 @@ function commitActiveRasterCommand() {
     type: activeRasterCommand.type,
     color: activeRasterCommand.color,
     lineWidth: activeRasterCommand.lineWidth,
+    opacity: activeRasterCommand.opacity != null ? Number(activeRasterCommand.opacity) : undefined,
     points: points.map((point) => ({x: point.x, y: point.y}))
   })
   activeRasterCommand = null
@@ -3753,6 +3877,11 @@ function drawShapeItemsOnLongshotCanvas(ctx, view) {
       ctx.strokeRect(x, y, w, h)
       continue
     }
+    if (item.type === 'redact') {
+      ctx.fillStyle = '#000000'
+      ctx.fillRect(x, y, w, h)
+      continue
+    }
     if (item.type === 'circle' || item.type === 'number') {
       const cx = x + w / 2
       const cy = y + h / 2
@@ -3913,7 +4042,15 @@ function drawShapeItemToContext(ctx, item, cropLeft, cropTop) {
       ctx.fillStyle = hexToRgba(item.color, item.fillOpacity ?? 0.35)
       ctx.fillRect(x, y, item.width, item.height)
     }
-    ctx.strokeRect(x, y, item.width, item.height)
+    if (item.type !== 'redact') {
+      ctx.strokeRect(x, y, item.width, item.height)
+    }
+    ctx.restore()
+    return
+  }
+  if (item.type === 'redact') {
+    ctx.fillStyle = '#000000'
+    ctx.fillRect(x, y, item.width, item.height)
     ctx.restore()
     return
   }

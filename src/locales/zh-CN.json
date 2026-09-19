@@ -779,6 +779,10 @@
   "screenshot": {
     "selectMove": "框选/移动",
     "brush": "画笔",
+    "highlight": "荧光笔",
+    "redact": "遮挡黑条",
+    "cropToSelection": "裁剪到选区",
+    "cropUnavailable": "当前状态无法裁剪",
     "line": "直线",
     "arrow": "箭头",
     "rectangle": "矩形",

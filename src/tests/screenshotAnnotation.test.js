@@ -1,5 +1,7 @@
 import {describe, it, expect} from 'vitest'
 import {
+  constrainLinePoint,
+  constrainRectPoint,
   hexToRgba,
   nextNumberCalloutIndex,
   ensureShapeFillFields,
@@ -90,6 +92,27 @@ describe('resolveExportShapeFill', () => {
       filled: true,
       fillOpacity: 0.9
     })
+  })
+})
+
+describe('constrainRectPoint', () => {
+  it('右下拖拽取正方形边长', () => {
+    expect(constrainRectPoint({x: 0, y: 0}, {x: 80, y: 30})).toEqual({x: 80, y: 80})
+  })
+  it('左上拖拽保持负方向', () => {
+    expect(constrainRectPoint({x: 100, y: 100}, {x: 40, y: 70})).toEqual({x: 40, y: 40})
+  })
+})
+
+describe('constrainLinePoint', () => {
+  it('接近水平时吸附到水平', () => {
+    const p = constrainLinePoint({x: 0, y: 0}, {x: 100, y: 5})
+    expect(Math.abs(p.y)).toBeLessThan(1)
+    expect(p.x).toBeGreaterThan(99)
+  })
+  it('接近 45° 时吸附', () => {
+    const p = constrainLinePoint({x: 0, y: 0}, {x: 50, y: 48})
+    expect(Math.abs(p.x - p.y)).toBeLessThan(2)
   })
 })
 

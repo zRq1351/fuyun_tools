@@ -73,6 +73,8 @@ pub(crate) struct ScreenshotExportRasterCommand {
     pub(super) raster_type: String,
     pub(super) color: String,
     pub(super) line_width: f32,
+    #[serde(default)]
+    pub(super) opacity: Option<f32>,
     pub(super) points: Vec<ScreenshotExportRasterPoint>,
 }
 
@@ -305,8 +307,11 @@ fn render_normal_raster_commands(
             continue;
         }
         match command.raster_type.as_str() {
-            "pen" => {
-                let color = parse_hex_color(&command.color);
+            "pen" | "highlight" => {
+                let mut color = parse_hex_color(&command.color);
+                if command.raster_type == "highlight" {
+                    color = fill_color_with_opacity(color, command.opacity.unwrap_or(0.35));
+                }
                 let width = (command.line_width * dpr).max(1.0);
                 for segment in command.points.windows(2) {
                     let from = (
@@ -356,8 +361,11 @@ fn render_longshot_raster_commands(
             continue;
         }
         match command.raster_type.as_str() {
-            "pen" => {
-                let color = parse_hex_color(&command.color);
+            "pen" | "highlight" => {
+                let mut color = parse_hex_color(&command.color);
+                if command.raster_type == "highlight" {
+                    color = fill_color_with_opacity(color, command.opacity.unwrap_or(0.35));
+                }
                 let width = (command.line_width / fit).max(1.0);
                 for segment in command.points.windows(2) {
                     let from =
@@ -565,6 +573,9 @@ fn draw_number_callout(
 }
 
 fn shape_fill_params(item: &ScreenshotExportShapeItem) -> (bool, f32) {
+    if item.shape_type == "redact" {
+        return (true, 1.0);
+    }
     let filled = item.filled.unwrap_or(false) || item.shape_type == "number";
     let opacity = item.fill_opacity.unwrap_or(if item.shape_type == "number" {
         1.0
@@ -591,7 +602,7 @@ fn apply_shape_fill(
     let h = height.max(1.0).round() as u32;
     let fill = fill_color_with_opacity(color, fill_opacity);
     match shape_type {
-        "rect" => {
+        "rect" | "redact" => {
             blend_filled_rect(canvas, left, top, w, h, fill);
         }
         "circle" | "number" => {
@@ -667,7 +678,11 @@ fn render_normal_shapes(
     dpr: f32,
 ) {
     for item in &request.shape_items {
-        let color = parse_hex_color(&item.color);
+        let color = if item.shape_type == "redact" {
+            Rgba([0, 0, 0, 255])
+        } else {
+            parse_hex_color(&item.color)
+        };
         let x = (item.x - selection.x) * dpr;
         let y = (item.y - selection.y) * dpr;
         let width = item.width.max(1.0) * dpr;
@@ -688,6 +703,7 @@ fn render_normal_shapes(
         }
         match item.shape_type.as_str() {
             "rect" => draw_rect_shape(canvas, x, y, width, height, color, line_width),
+            "redact" => {}
             "circle" => draw_circle_shape(canvas, x, y, width, height, color, line_width),
             "number" => {
                 let n = item.number.unwrap_or(0);
@@ -742,7 +758,11 @@ fn render_shape_item_for_longshot(
     view_x: f32,
     view_y: f32,
 ) {
-    let color = parse_hex_color(&item.color);
+    let color = if item.shape_type == "redact" {
+        Rgba([0, 0, 0, 255])
+    } else {
+        parse_hex_color(&item.color)
+    };
     let line_width = (item.line_width / fit).max(1.0);
     let (filled, fill_opacity) = shape_fill_params(item);
     let (x1, y1) = longshot_scene_to_image(item.x, item.y, fit, view_x, view_y);
@@ -762,6 +782,7 @@ fn render_shape_item_for_longshot(
         "rect" => {
             draw_rect_shape(canvas, x1, y1, w, h, color, line_width);
         }
+        "redact" => {}
         "circle" => {
             draw_circle_shape(canvas, x1, y1, w, h, color, line_width);
         }
@@ -954,5 +975,12 @@ mod tests {
         let (filled, op) = shape_fill_params(&item);
         assert!(filled);
         assert!((op - 0.8).abs() < 0.001);
+
+        item.shape_type = "redact".to_string();
+        item.filled = Some(false);
+        item.fill_opacity = None;
+        let (filled, op) = shape_fill_params(&item);
+        assert!(filled);
+        assert!((op - 1.0).abs() < 0.001);
     }
 }

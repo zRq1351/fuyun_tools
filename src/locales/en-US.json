@@ -778,6 +778,10 @@
   "screenshot": {
     "selectMove": "Select/Move",
     "brush": "Brush",
+    "highlight": "Highlighter",
+    "redact": "Blackout",
+    "cropToSelection": "Crop to selection",
+    "cropUnavailable": "Crop is not available now",
     "line": "Line",
     "arrow": "Arrow",
     "rectangle": "Rectangle",
