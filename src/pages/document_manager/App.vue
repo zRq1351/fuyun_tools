@@ -239,8 +239,46 @@
                     :value="ext.value"
                 />
               </el-select>
+              <el-select
+                  v-model="tagFilter"
+                  :placeholder="t('documentManager.tagFilter')"
+                  clearable
+                  multiple
+                  size="small"
+                  style="width:160px;margin-left:8px"
+                  @change="searchFiles"
+              >
+                <el-option
+                    v-for="tg in allTags"
+                    :key="tg.tag"
+                    :label="`${tg.tag} (${tg.count})`"
+                    :value="tg.tag"
+                />
+              </el-select>
+            </div>
+            <div
+                v-if="multiSelectedIds.size > 0"
+                class="dm-batch-bar"
+            >
+              <span>{{ t('documentManager.batchSelected', {n: multiSelectedIds.size}) }}</span>
+              <el-button size="small" @click="promptBatchTags('add')">{{ t('documentManager.batchAddTags') }}</el-button>
+              <el-button size="small" @click="promptBatchTags('remove')">{{ t('documentManager.batchRemoveTags') }}</el-button>
+              <el-button size="small" @click="promptBatchTags('replace')">{{ t('documentManager.batchReplaceTags') }}</el-button>
+              <el-button size="small" @click="multiSelectedIds.clear()">{{ t('documentManager.clearMultiSelect') }}</el-button>
             </div>
             <div class="dm-toolbar-actions">
+              <el-button
+                  size="small"
+                  @click="openTagManager"
+              >
+                {{ t('documentManager.tagManager') }}
+              </el-button>
+              <el-button
+                  size="small"
+                  @click="rebuildFtsIndex"
+              >
+                {{ t('documentManager.rebuildFts') }}
+              </el-button>
               <el-button
                   type="primary"
                   @click="openImportDialog"
@@ -290,10 +328,10 @@
             <div
                 v-for="item in items"
                 :key="item.id"
-                :class="{ selected: selectedId === item.id, 'ctx-anchor': ctxAnchorId === item.id }"
+                :class="{ selected: selectedId === item.id || multiSelectedIds.has(item.id), 'ctx-anchor': ctxAnchorId === item.id }"
                 :data-file-id="item.id"
                 class="dm-file-card sortable-file"
-                @click="selectedId = item.id"
+                @click="onFileCardClick(item, $event)"
                 @dblclick="openDocument(item)"
                 @contextmenu.prevent="showContextMenu($event, item)"
             >
@@ -327,6 +365,17 @@
                     class="dm-file-name"
                 >
                   {{ item.title || item.fileName }}
+                </div>
+                <div
+                    v-if="item.snippet"
+                    class="dm-file-snippet"
+                >
+                  <template
+                      v-for="(part, pi) in snippetParts(item.snippet, searchKeyword)"
+                      :key="pi"
+                  >
+                    <span :class="{ 'dm-snippet-hit': part.hit }">{{ part.text }}</span>
+                  </template>
                 </div>
                 <div class="dm-file-meta">
                   <span class="dm-file-ext">{{ item.fileExt.toUpperCase() }}</span>
@@ -1132,6 +1181,40 @@
       </el-button>
     </template>
   </el-dialog>
+
+  <el-dialog
+      v-model="tagManagerVisible"
+      :title="t('documentManager.tagManager')"
+      width="420px"
+  >
+    <div
+        v-if="allTags.length === 0"
+        class="dm-empty"
+    >
+      {{ t('documentManager.tagEmpty') }}
+    </div>
+    <div
+        v-for="tg in allTags"
+        :key="tg.tag"
+        class="dm-tag-row"
+    >
+      <span class="dm-tag-name">{{ tg.tag }}</span>
+      <span class="dm-tag-count">{{ t('documentManager.tagCount', {n: tg.count}) }}</span>
+      <el-button
+          size="small"
+          @click="renameTag(tg.tag)"
+      >
+        {{ t('documentManager.tagRename') }}
+      </el-button>
+      <el-button
+          size="small"
+          type="danger"
+          @click="removeTag(tg.tag)"
+      >
+        {{ t('documentManager.tagRemove') }}
+      </el-button>
+    </div>
+  </el-dialog>
 </template>
 
 <script setup>
@@ -1227,6 +1310,10 @@ const stats = ref(null)
 const loading = ref(false)
 const searchKeyword = ref('')
 const fileExtFilter = ref(null)
+const tagFilter = ref([])
+const allTags = ref([])
+const multiSelectedIds = ref(new Set())
+const tagManagerVisible = ref(false)
 const categoryFilter = ref(null)
 const rootFilter = ref(null)
 const currentPage = ref(1)
@@ -1468,6 +1555,7 @@ async function loadFiles(preserveSelection) {
       categoryId: categoryFilter.value === -1 ? -1 : categoryFilter.value, rootId: rootFilter.value,
       keyword: searchKeyword.value || null,
       fileExt: fileExtFilter.value || null,
+      tags: (tagFilter.value && tagFilter.value.length) ? tagFilter.value : null,
     })
     if (seq !== loadFilesSeq) return
     items.value = r.items || []
@@ -1542,8 +1630,142 @@ async function undoImportItemFn(importId, docFileId, historyItem) {
 }
 
 function searchFiles() {
-  currentPage.value = 1;
-  loadFiles()
+  currentPage.value = 1
+  loadFiles(false)
+  loadAllTags()
+}
+
+function snippetParts(snippet, keyword) {
+  const text = String(snippet || '')
+  const kw = String(keyword || '').trim()
+  if (!text) return []
+  if (!kw) return [{text, hit: false}]
+  const lower = text.toLowerCase()
+  const lowerKw = kw.toLowerCase()
+  const parts = []
+  let i = 0
+  while (i < text.length) {
+    const idx = lower.indexOf(lowerKw, i)
+    if (idx < 0) {
+      parts.push({text: text.slice(i), hit: false})
+      break
+    }
+    if (idx > i) parts.push({text: text.slice(i, idx), hit: false})
+    parts.push({text: text.slice(idx, idx + kw.length), hit: true})
+    i = idx + kw.length
+  }
+  return parts
+}
+
+function onFileCardClick(item, event) {
+  if (event.ctrlKey || event.metaKey) {
+    const next = new Set(multiSelectedIds.value)
+    if (next.has(item.id)) next.delete(item.id)
+    else next.add(item.id)
+    multiSelectedIds.value = next
+    selectedId.value = item.id
+    return
+  }
+  if (event.shiftKey && selectedId.value != null) {
+    const ids = items.value.map(i => i.id)
+    const a = ids.indexOf(selectedId.value)
+    const b = ids.indexOf(item.id)
+    if (a >= 0 && b >= 0) {
+      const [lo, hi] = a < b ? [a, b] : [b, a]
+      const next = new Set(multiSelectedIds.value)
+      for (let i = lo; i <= hi; i++) next.add(ids[i])
+      multiSelectedIds.value = next
+    }
+    selectedId.value = item.id
+    return
+  }
+  multiSelectedIds.value = new Set()
+  selectedId.value = item.id
+}
+
+async function loadAllTags() {
+  try {
+    allTags.value = await DocumentService.listTags() || []
+  } catch (_) {
+    allTags.value = []
+  }
+}
+
+async function promptBatchTags(mode) {
+  if (multiSelectedIds.value.size === 0) return
+  if (mode === 'remove' || mode === 'replace') {
+    // still need tag text
+  }
+  const {value} = await ElMessageBox.prompt(
+      t('documentManager.tagsInputPrompt'),
+      t(mode === 'add' ? 'documentManager.batchAddTags' : mode === 'remove' ? 'documentManager.batchRemoveTags' : 'documentManager.batchReplaceTags'),
+      {inputPattern: /\S/, inputErrorMessage: t('documentManager.tagsInputPrompt')}
+  ).catch(() => ({value: null}))
+  if (value == null) return
+  const tags = String(value).split(/[,，;；]/).map(s => s.trim()).filter(Boolean)
+  try {
+    const result = await DocumentService.batchUpdateTags({
+      ids: Array.from(multiSelectedIds.value),
+      mode,
+      tags
+    })
+    const failed = result?.failed?.length || 0
+    if (failed > 0) {
+      ElMessage.warning(t('documentManager.batchTagsPartial', {n: failed}))
+    } else {
+      ElMessage.success(t('documentManager.batchTagsUpdated', {n: result?.updated || 0}))
+    }
+    multiSelectedIds.value = new Set()
+    await Promise.all([loadFiles(true), loadAllTags()])
+  } catch (e) {
+    ElMessage.error(String(e?.message || e))
+  }
+}
+
+async function openTagManager() {
+  await loadAllTags()
+  tagManagerVisible.value = true
+}
+
+async function renameTag(tag) {
+  const {value} = await ElMessageBox.prompt(
+      t('documentManager.tagRenameTo'),
+      `${t('documentManager.tagRename')}: ${tag}`,
+      {inputPattern: /\S/, inputErrorMessage: t('documentManager.tagRenameTo')}
+  ).catch(() => ({value: null}))
+  if (value == null) return
+  try {
+    await DocumentService.renameTag(tag, String(value).trim())
+    await Promise.all([loadFiles(true), loadAllTags()])
+  } catch (e) {
+    ElMessage.error(String(e?.message || e))
+  }
+}
+
+async function removeTag(tag) {
+  try {
+    await ElMessageBox.confirm(
+        `${t('documentManager.tagRemove')}: ${tag}?`,
+        t('documentManager.tagManager')
+    )
+  } catch (_) {
+    return
+  }
+  try {
+    await DocumentService.removeTag(tag)
+    await Promise.all([loadFiles(true), loadAllTags()])
+  } catch (e) {
+    ElMessage.error(String(e?.message || e))
+  }
+}
+
+async function rebuildFtsIndex() {
+  try {
+    await DocumentService.rebuildFts()
+    ElMessage.success(t('documentManager.rebuildFtsDone'))
+  } catch (e) {
+    ElMessage.error(String(e?.message || e))
+  }
 }
 
 watch(categoryFilter, () => {
@@ -2218,6 +2440,7 @@ onMounted(async () => {
   }
   loadImportHistory();
   detectOrphans()
+  loadAllTags()
   // Tauri v2 的 HTML5 File 无 path 属性，改用原生拖拽事件获取文件路径
   try {
     const {getCurrentWebview} = await import('@tauri-apps/api/webview')
@@ -2252,6 +2475,49 @@ onBeforeUnmount(() => {
   background: var(--fy-bg-primary);
   color: var(--fy-text-primary);
   position: relative
+}
+
+.dm-batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  margin: 4px 0;
+  border-radius: 6px;
+  background: var(--fy-bg-secondary, rgba(0, 0, 0, 0.04));
+  font-size: 12px;
+}
+
+.dm-file-snippet {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--fy-text-secondary, #888);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-snippet-hit {
+  color: var(--fy-accent, #6c8cff);
+  font-weight: 600;
+}
+
+.dm-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.dm-tag-name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.dm-tag-count {
+  color: var(--fy-text-secondary, #888);
+  font-size: 12px;
 }
 
 .dm-layout {

@@ -427,6 +427,8 @@ pub struct DocPageRequest {
     pub root_id: Option<i64>,
     pub keyword: Option<String>,
     pub file_ext: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
 }
 
 fn default_page_limit() -> i64 {
@@ -444,8 +446,58 @@ pub async fn get_doc_page(
         request.root_id,
         request.keyword,
         request.file_ext,
+        request.tags,
     )
         .await
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchUpdateDocTagsRequest {
+    pub ids: Vec<i64>,
+    pub mode: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn batch_update_doc_tags(
+    request: BatchUpdateDocTagsRequest,
+) -> Result<document_database::BatchDocTagsResult, String> {
+    document_database::batch_update_doc_tags(&request.ids, &request.mode, &request.tags).await
+}
+
+#[tauri::command]
+pub async fn list_doc_tags() -> Result<Vec<document_database::DocTagCount>, String> {
+    document_database::list_doc_tags().await
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameDocTagRequest {
+    pub from: String,
+    pub to: String,
+}
+
+#[tauri::command]
+pub async fn rename_doc_tag(request: RenameDocTagRequest) -> Result<usize, String> {
+    document_database::rename_doc_tag(&request.from, &request.to).await
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveDocTagRequest {
+    pub tag: String,
+}
+
+#[tauri::command]
+pub async fn remove_doc_tag(request: RemoveDocTagRequest) -> Result<usize, String> {
+    document_database::remove_doc_tag(&request.tag).await
+}
+
+#[tauri::command]
+pub async fn rebuild_doc_fts() -> Result<usize, String> {
+    document_database::rebuild_doc_fts().await
 }
 
 #[derive(serde::Deserialize)]

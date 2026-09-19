@@ -47,6 +47,8 @@ pub struct DocFile {
     pub tags: String,
     pub notes: String,
     pub content_text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
     pub source_path: String,
     pub managed_path: String,
     pub storage_mode: String,
@@ -1505,6 +1507,7 @@ fn row_to_doc_file(row: &sqlx::sqlite::SqliteRow) -> DocFile {
         tags: row.try_get::<String, _>(9).unwrap_or_default(),
         notes: row.try_get::<String, _>(10).unwrap_or_default(),
         content_text: row.try_get::<String, _>(11).unwrap_or_default(),
+        snippet: None,
         source_path: row.try_get::<String, _>(12).unwrap_or_default(),
         managed_path: row.try_get::<String, _>(13).unwrap_or_default(),
         storage_mode: row.try_get::<String, _>(14).unwrap_or_default(),
@@ -1515,6 +1518,251 @@ fn row_to_doc_file(row: &sqlx::sqlite::SqliteRow) -> DocFile {
     }
 }
 
+/// 标签 JSON ↔ 列表，以及批量/改名纯逻辑（可单测）。
+pub fn parse_tags_json(raw: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    if let Ok(list) = serde_json::from_str::<Vec<String>>(trimmed) {
+        return normalize_tag_list(&list);
+    }
+    let parts: Vec<String> = trimmed
+        .split(|c| c == ',' || c == '，' || c == ';' || c == '；')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    normalize_tag_list(&parts)
+}
+
+pub fn normalize_tag_list(tags: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for tag in tags {
+        let t = tag.trim().to_string();
+        if t.is_empty() {
+            continue;
+        }
+        if !out.iter().any(|x| x == &t) {
+            out.push(t);
+        }
+    }
+    out
+}
+
+pub fn tags_to_json(tags: &[String]) -> String {
+    serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_string())
+}
+
+pub fn merge_doc_tags(existing: &[String], mode: &str, incoming: &[String]) -> Vec<String> {
+    let base = normalize_tag_list(existing);
+    let inc = normalize_tag_list(incoming);
+    match mode {
+        "replace" => inc,
+        "remove" => base.into_iter().filter(|t| !inc.contains(t)).collect(),
+        _ => {
+            let mut out = base;
+            for t in inc {
+                if !out.contains(&t) {
+                    out.push(t);
+                }
+            }
+            out
+        }
+    }
+}
+
+pub fn apply_tag_rename(tags: &[String], from: &str, to: &str) -> Vec<String> {
+    let from = from.trim();
+    let to = to.trim();
+    if from.is_empty() || to.is_empty() || from == to {
+        return normalize_tag_list(tags);
+    }
+    let mapped: Vec<String> = tags
+        .iter()
+        .map(|t| if t.trim() == from { to.to_string() } else { t.clone() })
+        .collect();
+    normalize_tag_list(&mapped)
+}
+
+pub fn build_keyword_snippet(content: &str, keyword: &str, max_len: usize) -> Option<String> {
+    let kw = keyword.trim();
+    if kw.is_empty() || content.is_empty() {
+        return None;
+    }
+    let lower_content = content.to_lowercase();
+    let lower_kw = kw.to_lowercase();
+    let byte_pos = lower_content.find(&lower_kw)?;
+    // byte offset → char index（避免 CJK 多字节错位）
+    let char_pos = content[..byte_pos].chars().count();
+    let kw_chars = kw.chars().count();
+    let total_chars = content.chars().count();
+    let window = max_len.max(24);
+    let pad = window.saturating_sub(kw_chars) / 2;
+    let start = char_pos.saturating_sub(pad);
+    let end = (char_pos + kw_chars + pad).min(total_chars);
+    if end <= start {
+        return None;
+    }
+    let mut snippet: String = content.chars().skip(start).take(end - start).collect();
+    if start > 0 {
+        snippet.insert_str(0, "…");
+    }
+    if end < total_chars {
+        snippet.push('…');
+    }
+    Some(snippet)
+}
+
+async fn write_doc_tags(conn: &mut sqlx::SqliteConnection, id: i64, tags_json: &str) -> Result<(), String> {
+    sqlx::query("UPDATE document_files SET tags = ?1 WHERE id = ?2")
+        .bind(tags_json)
+        .bind(id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    sqlx::query("UPDATE document_files_fts SET tags = ?1 WHERE rowid = ?2")
+        .bind(tags_json)
+        .bind(id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    Ok(())
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DocTagCount {
+    pub tag: String,
+    pub count: i64,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchDocTagsResult {
+    pub updated: usize,
+    pub failed: Vec<i64>,
+}
+
+pub async fn batch_update_doc_tags(
+    ids: &[i64],
+    mode: &str,
+    tags: &[String],
+) -> Result<BatchDocTagsResult, String> {
+    if ids.is_empty() {
+        return Ok(BatchDocTagsResult {
+            updated: 0,
+            failed: Vec::new(),
+        });
+    }
+    let mut conn = open_docs_db().await?;
+    let incoming = normalize_tag_list(tags);
+    let mut updated = 0usize;
+    let mut failed = Vec::new();
+    for id in ids {
+        let raw = sqlx::query_scalar::<_, String>("SELECT tags FROM document_files WHERE id = ?1")
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        let Some(raw) = raw else {
+            failed.push(*id);
+            continue;
+        };
+        let existing = parse_tags_json(&raw);
+        let merged = merge_doc_tags(&existing, mode, &incoming);
+        match write_doc_tags(&mut conn, *id, &tags_to_json(&merged)).await {
+            Ok(_) => updated += 1,
+            Err(_) => failed.push(*id),
+        }
+    }
+    Ok(BatchDocTagsResult { updated, failed })
+}
+
+pub async fn list_doc_tags() -> Result<Vec<DocTagCount>, String> {
+    let mut conn = open_docs_db().await?;
+    let rows = sqlx::query("SELECT tags FROM document_files WHERE tags IS NOT NULL AND tags != '' AND tags != '[]'")
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let mut counts: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    for row in rows {
+        let raw: String = row.try_get(0).unwrap_or_default();
+        for tag in parse_tags_json(&raw) {
+            *counts.entry(tag).or_insert(0) += 1;
+        }
+    }
+    Ok(counts
+        .into_iter()
+        .map(|(tag, count)| DocTagCount { tag, count })
+        .collect())
+}
+
+async fn apply_tag_mutation_global(from: &str, to: Option<&str>) -> Result<usize, String> {
+    let from = from.trim();
+    if from.is_empty() {
+        return Err("标签名不能为空".to_string());
+    }
+    if let Some(to) = to {
+        let to = to.trim();
+        if to.is_empty() {
+            return Err("目标标签不能为空".to_string());
+        }
+        if to == from {
+            return Ok(0);
+        }
+    }
+    let mut conn = open_docs_db().await?;
+    let rows = sqlx::query("SELECT id, tags FROM document_files WHERE tags IS NOT NULL AND tags != '' AND tags != '[]'")
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let mut changed = 0usize;
+    for row in rows {
+        let id: i64 = row.try_get(0).unwrap_or(0);
+        let raw: String = row.try_get(1).unwrap_or_default();
+        let existing = parse_tags_json(&raw);
+        let next = match to {
+            Some(to) => apply_tag_rename(&existing, from, to),
+            None => merge_doc_tags(&existing, "remove", &[from.to_string()]),
+        };
+        if next == existing {
+            continue;
+        }
+        write_doc_tags(&mut conn, id, &tags_to_json(&next)).await?;
+        changed += 1;
+    }
+    Ok(changed)
+}
+
+pub async fn rename_doc_tag(from: &str, to: &str) -> Result<usize, String> {
+    apply_tag_mutation_global(from, Some(to)).await
+}
+
+pub async fn remove_doc_tag(tag: &str) -> Result<usize, String> {
+    apply_tag_mutation_global(tag, None).await
+}
+
+pub async fn rebuild_doc_fts() -> Result<usize, String> {
+    let mut conn = open_docs_db().await?;
+    sqlx::query("DELETE FROM document_files_fts")
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    sqlx::query(
+        "INSERT INTO document_files_fts(rowid, title, content_text, tags, notes)
+         SELECT id, COALESCE(title, file_name), COALESCE(content_text, ''), COALESCE(tags, ''), COALESCE(notes, '')
+         FROM document_files",
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let n = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM document_files_fts")
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    Ok(n.max(0) as usize)
+}
+
 pub async fn get_doc_page(
     offset: i64,
     limit: i64,
@@ -1522,6 +1770,7 @@ pub async fn get_doc_page(
     root_id: Option<i64>,
     keyword: Option<String>,
     file_ext: Option<String>,
+    filter_tags: Option<Vec<String>>,
 ) -> Result<DocPageData, String> {
     let mut conn = open_docs_db().await?;
     let effective_limit = limit.clamp(1, 200);
@@ -1553,6 +1802,9 @@ pub async fn get_doc_page(
 
     let use_fts = fts_enabled && fts_query.is_some();
     let fallback_search = !use_fts && keyword_val.is_some();
+    let tag_list = filter_tags
+        .map(|t| normalize_tag_list(&t))
+        .unwrap_or_default();
 
     let base_fields =
         "df.id, df.root_id, df.title, df.file_name, df.file_ext, df.file_size, df.file_hash,
@@ -1572,6 +1824,13 @@ pub async fn get_doc_page(
         ""
     };
 
+    let mut tag_filter = String::new();
+    for tag in &tag_list {
+        // JSON 数组形如 ["work","home"]：带引号匹配降低 work/workshop 子串误伤
+        let escaped = tag.replace('\\', "\\\\").replace('"', "\\\"").replace('\'', "''");
+        tag_filter.push_str(&format!(" AND df.tags LIKE '%\"{escaped}\"%'"));
+    }
+
     let has_extra = use_fts || fallback_search;
     let extra_param = if use_fts {
         fts_query.as_ref().unwrap().clone()
@@ -1587,12 +1846,12 @@ pub async fn get_doc_page(
     let offset_idx = if has_extra { "?6" } else { "?5" };
 
     let count_sql = format!(
-        "SELECT COUNT(*) FROM document_files df LEFT JOIN document_categories c ON df.category_id = c.id {} {}",
-        base_filter, extra_filter
+        "SELECT COUNT(*) FROM document_files df LEFT JOIN document_categories c ON df.category_id = c.id {} {}{}",
+        base_filter, extra_filter, tag_filter
     );
     let list_sql = format!(
-        "SELECT {} FROM document_files df LEFT JOIN document_categories c ON df.category_id = c.id {} {} {} LIMIT {} OFFSET {}",
-        base_fields, base_filter, extra_filter, order_clause, limit_idx, offset_idx
+        "SELECT {} FROM document_files df LEFT JOIN document_categories c ON df.category_id = c.id {} {}{} {} LIMIT {} OFFSET {}",
+        base_fields, base_filter, extra_filter, tag_filter, order_clause, limit_idx, offset_idx
     );
 
     let total = if has_extra {
@@ -1645,7 +1904,14 @@ pub async fn get_doc_page(
             })?
     };
 
-    let items: Vec<DocFile> = rows.iter().map(row_to_doc_file).collect();
+    let mut items: Vec<DocFile> = rows.iter().map(row_to_doc_file).collect();
+    for item in items.iter_mut() {
+        if let Some(kw) = keyword_val.as_deref() {
+            item.snippet = build_keyword_snippet(&item.content_text, kw, 80);
+        }
+        // 分页载荷不携带全文；详情走 get_doc_detail
+        item.content_text = String::new();
+    }
 
     Ok(DocPageData {
         total,
@@ -2125,6 +2391,48 @@ mod tests {
     }
 
     // ===== build_fts_query (document version) =====
+
+    #[test]
+    fn merge_doc_tags_add_remove_replace() {
+        let existing = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(
+            super::merge_doc_tags(&existing, "add", &["b".into(), "c".into()]),
+            vec!["a", "b", "c"]
+        );
+        assert_eq!(
+            super::merge_doc_tags(&existing, "remove", &["a".into()]),
+            vec!["b"]
+        );
+        assert_eq!(
+            super::merge_doc_tags(&existing, "replace", &["z".into(), "z".into()]),
+            vec!["z"]
+        );
+    }
+
+    #[test]
+    fn apply_tag_rename_dedupes_and_preserves_case() {
+        let tags = vec!["Work".to_string(), "旧".to_string(), "Work".to_string()];
+        assert_eq!(
+            super::apply_tag_rename(&tags, "旧", "Work"),
+            vec!["Work"]
+        );
+        assert_eq!(super::apply_tag_rename(&tags, "", "x"), vec!["Work", "旧"]);
+        assert_eq!(super::apply_tag_rename(&tags, "a", "a"), vec!["Work", "旧"]);
+    }
+
+    #[test]
+    fn parse_tags_json_and_snippet() {
+        let parsed = parse_tags_json(r#"["a", "b", "a"]"#);
+        assert_eq!(parsed, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(parse_tags_json("a, b;a"), vec!["a".to_string(), "b".to_string()]);
+        let snip = build_keyword_snippet("hello world rust", "rust", 80).unwrap();
+        assert!(snip.contains("rust"));
+        assert!(build_keyword_snippet("abc", "zzz", 80).is_none());
+        // CJK：byte/char 不得错位
+        let cjk = format!("{}关键词{}", "前置".repeat(40), "后置".repeat(40));
+        let cjk_snip = build_keyword_snippet(&cjk, "关键词", 40).unwrap();
+        assert!(cjk_snip.contains("关键词"), "snippet={}", cjk_snip);
+    }
 
     #[test]
     fn doc_fts_empty() {
