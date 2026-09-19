@@ -1,4 +1,3 @@
-pub mod adaptive_poll;
 pub mod ai_client;
 pub mod ai_services;
 pub mod app_scanner;

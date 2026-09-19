@@ -661,7 +661,6 @@ pub fn run() {
             get_image_preview_by_id,
             check_previews_ready,
             copy_image_clipboard_item_to_directory,
-            get_clipboard_full_snapshot,
             get_physical_cursor_position,
             // 截图相关命令
             start_screenshot,

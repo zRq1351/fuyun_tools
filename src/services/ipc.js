@@ -74,7 +74,6 @@ export const IPC_COMMANDS = {
     COPY_IMAGE_CLIPBOARD_ITEM_TO_DIRECTORY: 'copy_image_clipboard_item_to_directory',
     COPY_TEXT: 'copy_text',
     COPY_AND_PASTE_TEXT: 'copy_and_paste_text',
-    GET_CLIPBOARD_FULL_SNAPSHOT: 'get_clipboard_full_snapshot',
     UPDATE_TEXT_ITEM: 'update_text_item',
 
     // 异步预览
@@ -206,22 +205,6 @@ export const ClipboardService = {
      */
     getHistory: () => ipcInvoke(IPC_COMMANDS.GET_CLIPBOARD_HISTORY),
 
-    /**
-     * 批量获取剪贴板完整快照（优化 IPC 通信）
-     * 一次 IPC 调用获取所有需要的数据，减少通信开销
-     * @returns {Promise<{
-     *   textHistory: string[],
-     *   textCategories: Object,
-     *   textCategoryList: string[],
-     *   textPinnedItems: string[],
-     *   imageHistory: Array,
-     *   imageCategories: Object,
-     *   imageCategoryList: string[],
-     *   imageTags: Object,
-     *   imagePinnedItems: string[]
-     * }>}
-     */
-    getFullSnapshot: () => ipcInvoke(IPC_COMMANDS.GET_CLIPBOARD_FULL_SNAPSHOT),
     getHistoryPage: ({
                          offset = 0,
                          limit = 50,
