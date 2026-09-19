@@ -108,6 +108,18 @@ pub async fn get_image_clipboard_history_page(
         true,
         None,
     );
+    let preview_bytes: u64 = result
+        .items
+        .iter()
+        .map(|item| item.preview_png_base64.len() as u64)
+        .sum();
+    record_perf_metric(
+        "image.history_page_preview_bytes",
+        "图片分页预览负载",
+        preview_bytes,
+        true,
+        None,
+    );
     Ok(result)
 }
 

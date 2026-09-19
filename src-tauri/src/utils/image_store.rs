@@ -1055,6 +1055,15 @@ pub fn load_history_page(
     ))
 }
 
+/// 路径可用时不在分页 IPC 中下发冗余 base64 预览；路径缺失时保留回退。
+pub(crate) fn page_item_preview_base64(image_path: &str, raw_preview: String) -> String {
+    if !image_path.trim().is_empty() {
+        String::new()
+    } else {
+        raw_preview
+    }
+}
+
 pub async fn load_history_page_async(
     offset: usize,
     limit: usize,
@@ -1198,7 +1207,10 @@ pub async fn load_history_page_async(
                 id: item_id,
                 width: row.try_get::<i64, _>(2).unwrap_or(0).max(0) as u32,
                 height: row.try_get::<i64, _>(3).unwrap_or(0).max(0) as u32,
-                preview_png_base64: row.try_get::<String, _>(7).unwrap_or_default(),
+                preview_png_base64: page_item_preview_base64(
+                    &image_path,
+                    row.try_get::<String, _>(7).unwrap_or_default(),
+                ),
                 image_path,
                 category: row
                     .try_get::<String, _>(5)
@@ -1464,7 +1476,37 @@ pub async fn merge_pinned_items_async(item_ids: &[String]) -> Result<(), String>
 
 #[cfg(test)]
 mod tests {
+    use super::page_item_preview_base64;
     use sqlx::sqlite::SqlitePoolOptions;
+
+    #[test]
+    fn page_item_preview_stripped_when_image_path_present() {
+        assert_eq!(
+            page_item_preview_base64("C:/blobs/a.png", "AAAA".to_string()),
+            ""
+        );
+        assert_eq!(
+            page_item_preview_base64("  C:/blobs/a.png  ", "BBBB".to_string()),
+            ""
+        );
+    }
+
+    #[test]
+    fn page_item_preview_kept_when_image_path_missing() {
+        assert_eq!(
+            page_item_preview_base64("", "PREVIEW".to_string()),
+            "PREVIEW"
+        );
+        assert_eq!(
+            page_item_preview_base64("   ", "PREVIEW2".to_string()),
+            "PREVIEW2"
+        );
+    }
+
+    #[test]
+    fn page_item_preview_empty_when_both_empty() {
+        assert_eq!(page_item_preview_base64("", String::new()), "");
+    }
 
     async fn create_test_image_pool() -> sqlx::SqlitePool {
         let pool = SqlitePoolOptions::new()
