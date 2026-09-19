@@ -626,6 +626,13 @@ import {
 import {useI18n} from 'vue-i18n'
 import {ScreenshotService} from '@/services/ipc.js'
 import {parseErrorMessage} from '@/utils/errorHandler.js'
+import {
+  computeMosaicBlockParams,
+  ensureShapeFillFields as ensureShapeFillFieldsImpl,
+  hexToRgba,
+  nextNumberCalloutIndex as nextNumberCalloutIndexFromItems,
+  resolveExportShapeFill
+} from '../../utils/screenshotAnnotation'
 
 const {t} = useI18n()
 
@@ -747,40 +754,11 @@ function onShapeFillOpacityInput() {
 }
 
 function nextNumberCalloutIndex() {
-  let maxN = 0
-  for (const item of shapeItems.value) {
-    if (item.type === 'number' && Number(item.n) > maxN) {
-      maxN = Number(item.n)
-    }
-  }
-  return maxN + 1
-}
-
-function hexToRgba(hex, opacity) {
-  let h = String(hex || '#ff0000').replace('#', '')
-  if (h.length === 3) {
-    h = h.split('').map(c => c + c).join('')
-  }
-  const r = parseInt(h.slice(0, 2), 16) || 0
-  const g = parseInt(h.slice(2, 4), 16) || 0
-  const b = parseInt(h.slice(4, 6), 16) || 0
-  const a = Math.min(1, Math.max(0, Number(opacity) || 0))
-  return `rgba(${r}, ${g}, ${b}, ${a})`
+  return nextNumberCalloutIndexFromItems(shapeItems.value)
 }
 
 function ensureShapeFillFields(item) {
-  if (!item) return item
-  if (item.type === 'number') {
-    item.filled = true
-    if (item.fillOpacity == null) item.fillOpacity = 1
-    if (item.n == null) item.n = nextNumberCalloutIndex()
-  } else if (item.filled == null) {
-    item.filled = false
-  }
-  if (item.fillOpacity == null) {
-    item.fillOpacity = item.filled ? 0.35 : 0
-  }
-  return item
+  return ensureShapeFillFieldsImpl(item, nextNumberCalloutIndex())
 }
 const textOverlayRefMap = new Map()
 const editingBeforeText = ref('')
@@ -1797,24 +1775,25 @@ function buildBackendExportRequest(outputPath) {
       strokeColor: item.strokeColor,
       shadow: !!item.shadow
     })),
-    shapeItems: shapeItems.value.map((item) => ({
-      type: item.type,
-      x: item.x,
-      y: item.y,
-      width: item.width,
-      height: item.height,
-      x1: item.x1,
-      y1: item.y1,
-      x2: item.x2,
-      y2: item.y2,
-      color: item.color,
-      lineWidth: item.lineWidth,
-      filled: !!item.filled || item.type === 'number',
-      fillOpacity: item.fillOpacity != null
-          ? Number(item.fillOpacity)
-          : (item.type === 'number' ? 1 : (item.filled ? 0.35 : 0)),
-      number: item.type === 'number' ? Number(item.n) || 0 : undefined
-    })),
+    shapeItems: shapeItems.value.map((item) => {
+      const fill = resolveExportShapeFill(item)
+      return {
+        type: item.type,
+        x: item.x,
+        y: item.y,
+        width: item.width,
+        height: item.height,
+        x1: item.x1,
+        y1: item.y1,
+        x2: item.x2,
+        y2: item.y2,
+        color: item.color,
+        lineWidth: item.lineWidth,
+        filled: fill.filled,
+        fillOpacity: fill.fillOpacity,
+        number: item.type === 'number' ? Number(item.n) || 0 : undefined
+      }
+    }),
     overlayCommands: overlayCommandLog.map((command) => ({
       type: command.type,
       color: command.color,
@@ -3349,10 +3328,9 @@ function applyMosaicAtScenePoint(ctx, x, y, strokeWidth) {
   if (!sourceCanvas && !sourceImg) return
 
   const stroke = Math.max(1, Number(strokeWidth) || 8)
-  let size
-  let blockSize
-  let centerX
-  let centerY
+  let scale
+  let sceneX
+  let sceneY
   let srcW
   let srcH
 
@@ -3365,11 +3343,9 @@ function applyMosaicAtScenePoint(ctx, x, y, strokeWidth) {
         : (sourceImg.naturalHeight || sourceImg.height || 1)
     const view = getLongshotImageViewportRect(Math.max(1, imgW), Math.max(1, imgH))
     const imagePoint = sceneToImagePoint(x, y, view)
-    const scaleFactor = 1 / Math.max(0.0001, view.fit)
-    size = Math.max(1, Math.round(stroke * 3 * scaleFactor))
-    blockSize = Math.max(1, Math.round(6 * scaleFactor))
-    centerX = Math.round(imagePoint.x)
-    centerY = Math.round(imagePoint.y)
+    scale = 1 / Math.max(0.0001, view.fit)
+    sceneX = imagePoint.x
+    sceneY = imagePoint.y
     srcW = imgW
     srcH = imgH
   } else {
@@ -3379,13 +3355,20 @@ function applyMosaicAtScenePoint(ctx, x, y, strokeWidth) {
     srcH = sourceCanvas
         ? sourceCanvas.height
         : (sourceImg.naturalHeight || sourceImg.height || 1)
-    size = Math.max(1, Math.round(stroke * 3 * dpr))
-    blockSize = Math.max(1, Math.round(6 * dpr))
-    centerX = Math.round(x * dpr)
-    centerY = Math.round(y * dpr)
+    scale = dpr
+    sceneX = x * dpr
+    sceneY = y * dpr
   }
 
-  const half = Math.floor(size / 2)
+  const mosaicParams = computeMosaicBlockParams({
+    stroke,
+    scale,
+    centerX: sceneX,
+    centerY: sceneY,
+    srcW,
+    srcH
+  })
+  const {size, blockSize, half, centerX, centerY, regionX, regionY, regionW, regionH} = mosaicParams
   const out = document.createElement('canvas')
   out.width = size
   out.height = size
@@ -3394,11 +3377,6 @@ function applyMosaicAtScenePoint(ctx, x, y, strokeWidth) {
   const imgData = outCtx.createImageData(size, size)
   const data = imgData.data
 
-  // 与后端一致：在全图坐标采样块左上角，越界 clamp
-  const regionX = Math.max(0, centerX - half)
-  const regionY = Math.max(0, centerY - half)
-  const regionW = Math.min(srcW - regionX, size)
-  const regionH = Math.min(srcH - regionY, size)
   // 必须用无 taint 的像素源；否则预览全灰，导出（后端读文件）却是真马赛克
   const region = readCleanPixelRegion(regionX, regionY, regionW, regionH)
 

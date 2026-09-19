@@ -269,6 +269,8 @@ import {ElMessage} from 'element-plus'
 import {listen} from '@tauri-apps/api/event'
 import {openUrl} from '@tauri-apps/plugin-opener'
 import {DiagnosticService} from '../../../services/ipc'
+import {statusI18nKey, statusType} from '../../../utils/diagnosticStatus'
+import {formatTimestampMs} from '../../../utils/formatDisplay'
 
 const {t} = useI18n()
 
@@ -345,24 +347,9 @@ const resetPerfMetrics = async () => {
   }
 }
 
-const statusType = (status) => {
-  if (status === 'healthy') return 'success'
-  if (status === 'warning') return 'warning'
-  if (status === 'error') return 'danger'
-  return 'info'
-}
+const statusText = (status) => t(statusI18nKey(status))
 
-const statusText = (status) => {
-  if (status === 'healthy') return t('settings.diagnostic.statusNormal')
-  if (status === 'warning') return t('settings.diagnostic.statusWarning')
-  if (status === 'error') return t('settings.diagnostic.statusError')
-  return t('settings.diagnostic.statusUnknown')
-}
-
-const formatTimestamp = (timestamp) => {
-  if (!timestamp) return t('settings.diagnostic.notChecked')
-  return new Date(Number(timestamp)).toLocaleString()
-}
+const formatTimestamp = (timestamp) => formatTimestampMs(timestamp, t('settings.diagnostic.notChecked'))
 
 const loadDiagnostics = async () => {
   loading.value = true

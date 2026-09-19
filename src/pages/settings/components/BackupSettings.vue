@@ -371,6 +371,7 @@ import {ElMessage, ElMessageBox} from 'element-plus'
 import {open, save} from '@tauri-apps/plugin-dialog'
 import {listen} from '@tauri-apps/api/event'
 import {BackupService} from '../../../services/ipc'
+import {formatBytes, formatTimestampMs} from '../../../utils/formatDisplay'
 
 const {t} = useI18n()
 
@@ -403,22 +404,7 @@ const savingSettings = ref(false)
 const manualBackupLoading = ref(false)
 let unlistenBackupRunUpdated = null
 
-const formatBytes = (bytes = 0) => {
-  if (!bytes) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let size = bytes
-  let index = 0
-  while (size >= 1024 && index < units.length - 1) {
-    size /= 1024
-    index += 1
-  }
-  return `${size.toFixed(size >= 10 || index === 0 ? 0 : 1)} ${units[index]}`
-}
-
-const formatTimestamp = (timestamp) => {
-  if (!timestamp) return t('settings.backup.notExecuted')
-  return new Date(Number(timestamp)).toLocaleString()
-}
+const formatTimestamp = (timestamp) => formatTimestampMs(timestamp, t('settings.backup.notExecuted'))
 
 const syncBackupSettings = (payload) => {
   settings.enabled = !!payload?.enabled
