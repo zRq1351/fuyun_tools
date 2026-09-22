@@ -8,8 +8,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "tauri": "cd .. && node src/node_modules/@tauri-apps/cli/tauri.js",
-    "tauri:dev": "tauri-dev.bat",
-    "tauri:build": "tauri-build.bat"
+    "tauri:dev": "..\\tauri-dev.bat",
+    "tauri:build": "..\\tauri-build.bat"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
