@@ -176,7 +176,7 @@ pub async fn open_image_preview_window_by_id(
     run_blocking("打开图片预览", move || {
         execute_open_image_preview_window_by_id(request.item_id, state_arc, app)
     })
-        .await
+    .await
 }
 
 pub(crate) fn is_screenshot_feature_enabled(state: &Arc<Mutex<SharedAppState>>) -> bool {
@@ -325,15 +325,15 @@ trait CategoryOps: Clone + Send + 'static {
         &self,
         item_id: String,
         category: String,
-    ) -> impl std::future::Future<Output=Result<(), String>> + Send;
+    ) -> impl std::future::Future<Output = Result<(), String>> + Send;
     fn remove_category_async(
         &self,
         category: String,
-    ) -> impl std::future::Future<Output=Result<(), String>> + Send;
+    ) -> impl std::future::Future<Output = Result<(), String>> + Send;
     fn add_category_async(
         &self,
         category: String,
-    ) -> impl std::future::Future<Output=Result<(), String>> + Send;
+    ) -> impl std::future::Future<Output = Result<(), String>> + Send;
 }
 
 impl CategoryOps for ClipboardManager {
@@ -341,19 +341,19 @@ impl CategoryOps for ClipboardManager {
         &self,
         item_id: String,
         category: String,
-    ) -> impl std::future::Future<Output=Result<(), String>> + Send {
+    ) -> impl std::future::Future<Output = Result<(), String>> + Send {
         ClipboardManager::set_category_async(self, item_id, category)
     }
     fn remove_category_async(
         &self,
         category: String,
-    ) -> impl std::future::Future<Output=Result<(), String>> + Send {
+    ) -> impl std::future::Future<Output = Result<(), String>> + Send {
         ClipboardManager::remove_category_async(self, category)
     }
     fn add_category_async(
         &self,
         category: String,
-    ) -> impl std::future::Future<Output=Result<(), String>> + Send {
+    ) -> impl std::future::Future<Output = Result<(), String>> + Send {
         ClipboardManager::add_category_async(self, category)
     }
 }
@@ -363,19 +363,19 @@ impl CategoryOps for ImageClipboardManager {
         &self,
         item_id: String,
         category: String,
-    ) -> impl std::future::Future<Output=Result<(), String>> + Send {
+    ) -> impl std::future::Future<Output = Result<(), String>> + Send {
         ImageClipboardManager::set_category_async(self, item_id, category)
     }
     fn remove_category_async(
         &self,
         category: String,
-    ) -> impl std::future::Future<Output=Result<(), String>> + Send {
+    ) -> impl std::future::Future<Output = Result<(), String>> + Send {
         ImageClipboardManager::remove_category_async(self, category)
     }
     fn add_category_async(
         &self,
         category: String,
-    ) -> impl std::future::Future<Output=Result<(), String>> + Send {
+    ) -> impl std::future::Future<Output = Result<(), String>> + Send {
         ImageClipboardManager::add_category_async(self, category)
     }
 }
@@ -607,7 +607,7 @@ pub(crate) fn execute_remove_clipboard_item(
         try_replace_text_clipboard_after_remove(&state, &app, &removed_item);
         Ok(())
     })
-        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardDeleteTextFailed, e))
+    .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardDeleteTextFailed, e))
 }
 
 pub(crate) fn execute_open_image_preview_window_by_id(
@@ -850,7 +850,7 @@ pub(crate) fn execute_remove_image_clipboard_item_by_id(
         try_replace_image_clipboard_after_remove(&state, &app, &removed_signature);
         Ok(())
     })
-        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardDeleteImageFailed, e))
+    .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardDeleteImageFailed, e))
 }
 
 pub(crate) fn execute_select_and_fill_image_by_id(
@@ -953,7 +953,7 @@ pub async fn get_clipboard_history_page(
         request.sort_by,
         request.sort_order,
     )
-        .await;
+    .await;
     match &result {
         Ok(_) => record_perf_metric(
             "text.history_page",
@@ -1008,7 +1008,7 @@ pub async fn set_item_category(
         category,
         "文本",
     )
-        .await
+    .await
 }
 
 #[tauri::command]
@@ -1070,7 +1070,7 @@ pub async fn warmup_image_clipboard_item_by_id(
     run_blocking("预热图片", move || {
         execute_warmup_image_clipboard_item_by_id(request.item_id, state_arc)
     })
-        .await
+    .await
 }
 
 const WARMUP_BATCH_MAX: usize = 20;
@@ -1098,14 +1098,14 @@ pub async fn warmup_multiple_images(
             }
         }
     })
-        .await
-        .map_err(|e| {
-            frontend_error(
-                ErrorCode::SystemError,
-                "批量预热图片任务执行失败",
-                e.to_string(),
-            )
-        })?;
+    .await
+    .map_err(|e| {
+        frontend_error(
+            ErrorCode::SystemError,
+            "批量预热图片任务执行失败",
+            e.to_string(),
+        )
+    })?;
     Ok(())
 }
 
@@ -1121,7 +1121,7 @@ pub async fn set_image_item_category(
         category,
         "图片",
     )
-        .await
+    .await
 }
 
 #[tauri::command]
@@ -1134,7 +1134,7 @@ pub async fn remove_image_category(
         category,
         "图片",
     )
-        .await
+    .await
 }
 
 #[tauri::command]
@@ -1255,7 +1255,7 @@ pub async fn promote_image_clipboard_item_by_id(
     run_blocking("置顶图片", move || {
         execute_promote_image_clipboard_item_by_id(request.item_id, state_arc)
     })
-        .await
+    .await
 }
 
 #[tauri::command]
@@ -1517,7 +1517,7 @@ pub async fn add_image_category(
         category,
         "图片",
     )
-        .await
+    .await
 }
 
 #[tauri::command]
@@ -1578,7 +1578,7 @@ pub async fn select_and_fill(
     run_blocking("文本回填", move || {
         execute_select_and_fill_text(request, state_arc, app)
     })
-        .await
+    .await
 }
 
 #[tauri::command]
@@ -1591,7 +1591,7 @@ pub async fn remove_clipboard_item(
     run_blocking("删除文本历史", move || {
         execute_remove_clipboard_item(item_id, state_arc, app)
     })
-        .await
+    .await
 }
 
 #[tauri::command]
@@ -1604,7 +1604,7 @@ pub async fn remove_image_clipboard_item_by_id(
     run_blocking("删除图片历史", move || {
         execute_remove_image_clipboard_item_by_id(item_id, state_arc, app)
     })
-        .await
+    .await
 }
 
 #[tauri::command]
@@ -1617,7 +1617,7 @@ pub async fn select_and_fill_image_by_id(
     run_blocking("图片回填", move || {
         execute_select_and_fill_image_by_id(request, state_arc, app)
     })
-        .await
+    .await
 }
 
 #[tauri::command]

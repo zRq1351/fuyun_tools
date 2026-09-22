@@ -575,13 +575,13 @@ mod tests {
             source_dir.join("settings/settings.json"),
             r#"{"hot_key":"Ctrl+V"}"#,
         )
-            .unwrap();
+        .unwrap();
         fs::create_dir_all(source_dir.join("text_history")).unwrap();
         fs::write(
             source_dir.join("text_history/history.json"),
             r#"{"items":["hello","world"],"categories":{},"category_list":[],"pinned_items":[]}"#,
         )
-            .unwrap();
+        .unwrap();
         fs::write(source_dir.join("manifest.json"), r#"{"version":1}"#).unwrap();
 
         // 打包
@@ -667,7 +667,7 @@ mod tests {
 
         // 读取 manifest
         let manifest = read_manifest_from_package(&zip_path).unwrap();
-        assert!(manifest.checksums.len() > 0);
+        assert!(!manifest.checksums.is_empty());
 
         // 校验 checksum
         let target = create_backup_temp_dir().unwrap();

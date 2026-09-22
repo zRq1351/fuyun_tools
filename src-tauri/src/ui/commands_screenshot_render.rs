@@ -568,7 +568,15 @@ fn draw_number_callout(
     let approx_w = glyph_count * font_size * 0.55;
     let text_x = (cx as f32 - approx_w * 0.5).round() as i32;
     let text_y = (cy as f32 - font_size * 0.55).round() as i32;
-    draw_text_mut(canvas, Rgba([255, 255, 255, 255]), text_x, text_y, scale, &font, &text);
+    draw_text_mut(
+        canvas,
+        Rgba([255, 255, 255, 255]),
+        text_x,
+        text_y,
+        scale,
+        &font,
+        &text,
+    );
     Ok(())
 }
 
@@ -776,7 +784,16 @@ fn render_shape_item_for_longshot(
     let w = x2 - x1;
     let h = y2 - y1;
     if filled && item.shape_type != "number" {
-        apply_shape_fill(canvas, item.shape_type.as_str(), x1, y1, w, h, color, fill_opacity);
+        apply_shape_fill(
+            canvas,
+            item.shape_type.as_str(),
+            x1,
+            y1,
+            w,
+            h,
+            color,
+            fill_opacity,
+        );
     }
     match item.shape_type.as_str() {
         "rect" => {

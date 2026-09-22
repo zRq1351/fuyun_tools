@@ -40,9 +40,9 @@ use crate::ui::commands_screenshot::*;
 use crate::ui::commands_vc_runtime::*;
 use crate::ui::tray_menu::rebuild_tray_menu;
 use crate::ui::window_manager::{
-    bind_overlay_window_events, bind_standard_window_close_to_hide,
-    get_physical_cursor_position, show_clipboard_window, show_doc_manager_widget_window,
-    show_image_clipboard_window, show_standard_window_by_label,
+    bind_overlay_window_events, bind_standard_window_close_to_hide, get_physical_cursor_position,
+    show_clipboard_window, show_doc_manager_widget_window, show_image_clipboard_window,
+    show_standard_window_by_label,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -380,7 +380,7 @@ pub fn run() {
                                         app_handle_inner,
                                         None,
                                     )
-                                        .await
+                                    .await
                                 {
                                     log::error!("截图失败: {}", e);
                                 }
@@ -547,7 +547,7 @@ pub fn run() {
                 start_text_selection_listener(app_handle.clone(), state_arc.clone());
                 // 划词已启用时预创建工具栏窗口，避免首次划词「创建→显示」闪烁
                 let _ = crate::ui::window_manager::ensure_window_for_label(
-                    &app_handle,
+                    app_handle,
                     "selection_toolbar",
                 );
             }
@@ -606,7 +606,6 @@ pub fn run() {
             set_image_item_pinned,
             promote_clipboard_item,
             promote_image_clipboard_item_by_id,
-            recognize_image_ocr,
             clear_text_history,
             clear_image_history,
             reorder_text_clipboard_items,
@@ -837,7 +836,7 @@ pub fn run() {
                                 rt.phase
                                     == crate::features::recording::state::RecordingPhase::Recording
                                     || rt.phase
-                                    == crate::features::recording::state::RecordingPhase::Paused
+                                        == crate::features::recording::state::RecordingPhase::Paused
                             } else {
                                 false
                             }

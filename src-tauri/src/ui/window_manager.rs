@@ -167,16 +167,12 @@ pub fn get_idle_window_gc_stats() -> IdleGcStatsSnapshot {
 }
 
 fn mark_hidden_since(label: &str) {
-    let mut map = hidden_since_map()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
+    let mut map = hidden_since_map().lock().unwrap_or_else(|p| p.into_inner());
     map.insert(label.to_string(), std::time::Instant::now());
 }
 
 fn clear_hidden_since(label: &str) {
-    let mut map = hidden_since_map()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
+    let mut map = hidden_since_map().lock().unwrap_or_else(|p| p.into_inner());
     map.remove(label);
 }
 
@@ -241,13 +237,10 @@ pub fn start_idle_window_gc(app_handle: AppHandle) {
             }
             let now = std::time::Instant::now();
             let expired: Vec<String> = {
-                let map = hidden_since_map()
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner());
+                let map = hidden_since_map().lock().unwrap_or_else(|p| p.into_inner());
                 map.iter()
                     .filter(|(label, since)| {
-                        idle_gc_eligible(label)
-                            && now.duration_since(**since) >= idle_gc_ttl(label)
+                        idle_gc_eligible(label) && now.duration_since(**since) >= idle_gc_ttl(label)
                     })
                     .map(|(label, _)| label.clone())
                     .collect()
@@ -1119,7 +1112,7 @@ fn ensure_clipboard_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Stri
     .resizable(true)
     .maximizable(false)
     .minimizable(false)
-        .accept_first_mouse(true)
+    .accept_first_mouse(true)
     .build()
     .map_err(|e| format!("创建剪贴板窗口失败: {}", e))?;
     bind_overlay_window_events(&window, app.clone(), label);
@@ -1148,7 +1141,7 @@ fn ensure_image_clipboard_window(app: &AppHandle) -> Result<tauri::WebviewWindow
     .resizable(true)
     .maximizable(false)
     .minimizable(false)
-        .accept_first_mouse(true)
+    .accept_first_mouse(true)
     .build()
     .map_err(|e| format!("创建图片剪贴板窗口失败: {}", e))?;
     bind_overlay_window_events(&window, app.clone(), label);
@@ -1175,7 +1168,7 @@ fn ensure_launcher_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Strin
     .resizable(true)
     .maximizable(false)
     .minimizable(false)
-        .accept_first_mouse(true)
+    .accept_first_mouse(true)
     .center()
     .min_inner_size(620.0, 480.0)
     .inner_size(800.0, 600.0)
@@ -1207,10 +1200,10 @@ fn ensure_screenshot_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Str
     .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
-        .resizable(false)
+    .resizable(false)
     .maximizable(false)
     .minimizable(false)
-        .accept_first_mouse(true)
+    .accept_first_mouse(true)
     .build()
     .map_err(|e| format!("创建截图窗口失败: {}", e))?;
     bind_overlay_window_events(&window, app.clone(), label);
@@ -1293,17 +1286,17 @@ fn ensure_doc_manager_widget_window(app: &AppHandle) -> Result<tauri::WebviewWin
         label,
         tauri::WebviewUrl::App("document_manager_widget.html".into()),
     )
-        .title("文档管理小部件")
-        .visible(false)
-        .resizable(true)
-        .decorations(false)
-        .shadow(false)
-        .transparent(true)
-        .skip_taskbar(true)
-        .always_on_top(false)
-        .inner_size(36.0, 48.0)
-        .build()
-        .map_err(|e| format!("创建文档管理小部件窗口失败: {}", e))?;
+    .title("文档管理小部件")
+    .visible(false)
+    .resizable(true)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .skip_taskbar(true)
+    .always_on_top(false)
+    .inner_size(36.0, 48.0)
+    .build()
+    .map_err(|e| format!("创建文档管理小部件窗口失败: {}", e))?;
     bind_overlay_window_events(&window, app.clone(), label);
     let _ = window.set_always_on_top(false);
     Ok(window)

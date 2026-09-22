@@ -20,7 +20,7 @@ use crate::utils::backup_restore::restore_backup_package as execute_restore_back
 use crate::utils::utils_helpers::{load_settings, save_settings, AppSettingsData};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
@@ -166,11 +166,11 @@ pub(crate) async fn build_prepared_backup_data(
     let settings_bytes = serde_json::to_vec(&crate::utils::backup_model::BackupSettingsFile {
         settings: settings.clone(),
     })
-        .map_err(|e| format!("序列化设置失败: {}", e))?;
+    .map_err(|e| format!("序列化设置失败: {}", e))?;
     let text_bytes = serde_json::to_vec(&crate::utils::backup_model::BackupTextHistoryFile {
         snapshot: text_history.clone(),
     })
-        .map_err(|e| format!("序列化文字历史失败: {}", e))?;
+    .map_err(|e| format!("序列化文字历史失败: {}", e))?;
     let image_bytes =
         serde_json::to_vec(&image_history).map_err(|e| format!("序列化图片历史失败: {}", e))?;
     let blob_bytes = blobs.iter().map(|blob| blob.file_size).sum::<u64>();
@@ -305,10 +305,41 @@ fn apply_auto_backup_success(settings: &mut AppSettingsData, now_ms: i64) {
     settings.backup_last_run_status = "success".to_string();
 }
 
-/// 纯函数：自动备份失败 —— 回滚 last_run_at，使本周期内可立即重试
-fn apply_auto_backup_failure(settings: &mut AppSettingsData, prev_last_run_at: i64) {
-    settings.backup_last_run_at = prev_last_run_at;
+/// 自动备份连续失败计数（内存态，进程重启清零）
+static AUTO_BACKUP_FAIL_COUNT: AtomicU32 = AtomicU32::new(0);
+
+/// 指数退避：5s, 10s, 20s, ... 封顶 min(interval, 5min)
+fn auto_backup_backoff_ms(fail_count: u32, interval_ms: i64) -> i64 {
+    let base = 5_000i64;
+    let shift = fail_count.min(6);
+    let backoff = base.saturating_mul(1i64 << shift);
+    backoff.min(interval_ms.min(300_000))
+}
+
+/// 纯函数：自动备份失败 —— 按退避推进 due 锚点，避免每 5s tick 无限重试
+fn apply_auto_backup_failure(
+    settings: &mut AppSettingsData,
+    now_ms: i64,
+    interval_ms: i64,
+    fail_count: u32,
+) {
+    let backoff = auto_backup_backoff_ms(fail_count, interval_ms);
+    // due 条件: now - last_run_at >= interval
+    // 希望在 now+backoff 时才 due => last_run_at = now + backoff - interval
+    settings.backup_last_run_at = now_ms + backoff - interval_ms;
     settings.backup_last_run_status = "failed".to_string();
+}
+
+/// 纯函数：misconfigured 也走退避，避免每 tick 写盘 + 报错
+fn apply_auto_backup_misconfigured(
+    settings: &mut AppSettingsData,
+    now_ms: i64,
+    interval_ms: i64,
+    fail_count: u32,
+) {
+    let backoff = auto_backup_backoff_ms(fail_count, interval_ms);
+    settings.backup_last_run_at = now_ms + backoff - interval_ms;
+    settings.backup_last_run_status = "misconfigured".to_string();
 }
 
 /// 纯函数：due 判定
@@ -717,19 +748,19 @@ pub async fn run_auto_backup_tick(state: Arc<Mutex<SharedAppState>>) -> Result<b
     let Some(interval_ms) = backup_frequency_interval_ms(&settings.frequency) else {
         return Ok(false);
     };
+    let now_ms = now_unix_ms() as i64;
+    if !is_auto_backup_due(settings.last_run_at, now_ms, interval_ms) {
+        return Ok(false);
+    }
     if settings.target_dir.trim().is_empty() {
+        let fail_count = AUTO_BACKUP_FAIL_COUNT.fetch_add(1, Ordering::Relaxed);
         let mut raw_settings = load_settings()?;
-        apply_backup_status_only(&mut raw_settings, "misconfigured");
+        apply_auto_backup_misconfigured(&mut raw_settings, now_ms, interval_ms, fail_count);
         save_settings(&raw_settings)?;
         return Err(frontend_error_kind(
             AppErrorKind::BackupDirNotConfigured,
             "auto backup target dir not configured",
         ));
-    }
-
-    let now_ms = now_unix_ms() as i64;
-    if !is_auto_backup_due(settings.last_run_at, now_ms, interval_ms) {
-        return Ok(false);
     }
     if AUTO_BACKUP_IN_FLIGHT.swap(true, Ordering::AcqRel) {
         return Ok(false);
@@ -761,20 +792,27 @@ pub async fn run_auto_backup_tick(state: Arc<Mutex<SharedAppState>>) -> Result<b
         }
         Ok::<BackupExportResultData, String>(response)
     }
-        .await;
+    .await;
 
     match run_result {
         Ok(_) => {
+            AUTO_BACKUP_FAIL_COUNT.store(0, Ordering::Relaxed);
             let mut raw_settings = load_settings()?;
             apply_auto_backup_success(&mut raw_settings, now_unix_ms() as i64);
             save_settings(&raw_settings)?;
             Ok(true)
         }
         Err(err) => {
-            // 失败不推进 due 锚点：回滚 last_run_at，下一 tick 可立即重试
+            let fail_count = AUTO_BACKUP_FAIL_COUNT.fetch_add(1, Ordering::Relaxed);
             let mut raw_settings = load_settings()?;
-            apply_auto_backup_failure(&mut raw_settings, prev_last_run_at);
+            apply_auto_backup_failure(
+                &mut raw_settings,
+                now_unix_ms() as i64,
+                interval_ms,
+                fail_count,
+            );
             save_settings(&raw_settings)?;
+            let _ = prev_last_run_at;
             Err(err)
         }
     }
@@ -855,7 +893,6 @@ mod tests {
             // Windows 上需要管理员权限创建符号链接，跳过这个测试
             let _ = fs::remove_dir_all(&outside_dir);
             let _ = fs::remove_dir_all(&test_dir);
-            return;
         }
 
         #[cfg(unix)]
@@ -920,7 +957,6 @@ mod tests {
             // 这正是我们想要的行为 - 路径遍历攻击会被拒绝
             if !canonical_path.starts_with(&canonical_target_dir) {
                 // 预期行为：路径不在允许的目录中
-                assert!(true);
             }
         }
 
@@ -959,29 +995,50 @@ mod tests {
 
     #[test]
     fn test_apply_backup_status_only_does_not_touch_last_run_at() {
-        let mut settings = AppSettingsData::default();
-        settings.backup_last_run_at = 1_700_000_000_000;
-        settings.backup_last_run_status = "running".to_string();
+        let mut settings = AppSettingsData {
+            backup_last_run_at: 1_700_000_000_000,
+            backup_last_run_status: "running".to_string(),
+            ..Default::default()
+        };
         apply_backup_status_only(&mut settings, "manual_failed");
         assert_eq!(settings.backup_last_run_at, 1_700_000_000_000);
         assert_eq!(settings.backup_last_run_status, "manual_failed");
     }
 
     #[test]
-    fn test_auto_backup_failure_rolls_back_last_run_at() {
+    fn test_auto_backup_failure_backoff_defers_next_attempt() {
         let mut settings = AppSettingsData::default();
-        settings.backup_last_run_at = 1_000;
-        let prev = apply_auto_backup_start(&mut settings, 9_000);
-        assert_eq!(prev, 1_000);
-        assert_eq!(settings.backup_last_run_at, 9_000);
+        let interval = 5_000;
+        let now = 9_000;
+        let prev = apply_auto_backup_start(&mut settings, now);
+        assert_eq!(prev, 0);
+        assert_eq!(settings.backup_last_run_at, now);
         assert_eq!(settings.backup_last_run_status, "running");
 
-        apply_auto_backup_failure(&mut settings, prev);
-        assert_eq!(settings.backup_last_run_at, 1_000);
+        // 第一次失败退避 5s：立即不 due，interval 后 due
+        apply_auto_backup_failure(&mut settings, now, interval, 0);
         assert_eq!(settings.backup_last_run_status, "failed");
+        assert!(!is_auto_backup_due(
+            settings.backup_last_run_at,
+            now + 100,
+            interval
+        ));
+        assert!(is_auto_backup_due(
+            settings.backup_last_run_at,
+            now + interval,
+            interval
+        ));
+    }
 
-        // 失败后应仍 due（now - prev >= interval）
-        assert!(is_auto_backup_due(settings.backup_last_run_at, 9_500, 5_000));
+    #[test]
+    fn test_auto_backup_backoff_grows_and_caps() {
+        assert_eq!(auto_backup_backoff_ms(0, 86_400_000), 5_000);
+        assert_eq!(auto_backup_backoff_ms(1, 86_400_000), 10_000);
+        assert_eq!(auto_backup_backoff_ms(5, 86_400_000), 160_000);
+        assert_eq!(auto_backup_backoff_ms(6, 86_400_000), 300_000);
+        assert_eq!(auto_backup_backoff_ms(10, 86_400_000), 300_000);
+        assert_eq!(auto_backup_backoff_ms(0, 10_000), 5_000);
+        assert_eq!(auto_backup_backoff_ms(5, 10_000), 10_000);
     }
 
     #[test]
@@ -992,7 +1049,11 @@ mod tests {
         apply_auto_backup_success(&mut settings, 10_000);
         assert_eq!(settings.backup_last_run_at, 10_000);
         assert_eq!(settings.backup_last_run_status, "success");
-        assert!(!is_auto_backup_due(settings.backup_last_run_at, 12_000, 86_400_000));
+        assert!(!is_auto_backup_due(
+            settings.backup_last_run_at,
+            12_000,
+            86_400_000
+        ));
     }
 
     #[test]

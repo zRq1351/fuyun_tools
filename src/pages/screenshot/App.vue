@@ -1579,6 +1579,41 @@ async function loadScreenshotSession() {
   }
 }
 
+function scheduleScreenshotFallback() {
+  if (!screenshotSessionRequested.value || hasScreenshotPayload.value) return
+  if (screenshotFallbackTimer) {
+    window.clearTimeout(screenshotFallbackTimer)
+  }
+  const scheduledSessionId = activeSessionId.value
+  screenshotFallbackTimer = window.setTimeout(async () => {
+    screenshotFallbackTimer = null
+    if (scheduledSessionId > 0 && activeSessionId.value !== scheduledSessionId) {
+      return
+    }
+    if (screenshotSessionRequested.value && !hasScreenshotPayload.value) {
+      if (scheduledSessionId > 0) {
+        if (fallbackRequestedSessionIds.has(scheduledSessionId)) {
+          return
+        }
+        fallbackRequestedSessionIds.add(scheduledSessionId)
+      } else {
+        if (fallbackRequestedWithoutSession) {
+          return
+        }
+        fallbackRequestedWithoutSession = true
+      }
+      const success = await requestScreenshot()
+      if (!success) {
+        if (scheduledSessionId > 0) {
+          fallbackRequestedSessionIds.delete(scheduledSessionId)
+        } else {
+          fallbackRequestedWithoutSession = false
+        }
+      }
+    }
+  }, 120)
+}
+
 async function fetchWindows() {
   try {
     const result = await invoke('get_window_list')
@@ -3352,7 +3387,7 @@ function getMergedPixelColorAt(px, py) {
   try {
     overlayData = drawCtx.getImageData(cpx, cpy, 1, 1).data
   } catch (_) {
-    overlayData = null
+    // keep null on tainted/failure
   }
   drawCtx.setTransform(oldTransform)
   if (overlayData && overlayData[3] > 0) {

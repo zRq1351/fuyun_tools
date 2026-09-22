@@ -50,9 +50,9 @@ pub fn cleanup_old_logs() {
         .filter(|path| {
             path.is_file()
                 && path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("fuyun") && name.ends_with(".log"))
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("fuyun") && name.ends_with(".log"))
         })
         .filter_map(|path| {
             let modified = path.metadata().and_then(|meta| meta.modified()).ok()?;

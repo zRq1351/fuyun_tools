@@ -555,7 +555,7 @@ pub async fn update_recording_audio_capture(
             request.capture_microphone,
             request.microphone_device_id,
         )
-            .map_err(app_error_to_frontend_json)
+        .map_err(app_error_to_frontend_json)
     })
     .await
 }
@@ -601,7 +601,7 @@ pub async fn list_recording_monitors() -> Result<Vec<RecordingMonitorItem>, Stri
     run_blocking_command(move || {
         recorder_service::list_recording_monitors().map_err(app_error_to_frontend_json)
     })
-        .await
+    .await
 }
 // input device listing & capability/installer commands removed in native WASAPI mode
 
@@ -1013,7 +1013,7 @@ mod tests {
             "http://gitee.com/ffmpeg.exe",
             Some("a".repeat(64).as_str()),
         )
-            .unwrap_err();
+        .unwrap_err();
         assert!(err.contains("HTTPS"));
     }
 

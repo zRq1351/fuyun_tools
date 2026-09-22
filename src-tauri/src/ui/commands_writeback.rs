@@ -210,11 +210,11 @@ fn wait_for_fill_window_hidden(
         window_label,
         Duration::from_millis(timeout_ms),
     )
-        .map_err(|e| {
-            let message = e.to_string();
-            log::warn!("等待{}窗口隐藏失败: {}", label, message);
-            message
-        })
+    .map_err(|e| {
+        let message = e.to_string();
+        log::warn!("等待{}窗口隐藏失败: {}", label, message);
+        message
+    })
 }
 
 pub(crate) fn spawn_fill_task<F>(

@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run",
+    "lint": "eslint .",
+    "test": "vitest run && node --test tests/clipboard-logic.test.js",
     "tauri": "cd .. && node src/node_modules/@tauri-apps/cli/tauri.js",
     "tauri:dev": "..\\tauri-dev.bat",
     "tauri:build": "..\\tauri-build.bat"

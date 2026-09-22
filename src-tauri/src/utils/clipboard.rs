@@ -277,10 +277,9 @@ impl ClipboardManager {
                             &category_list,
                         )
                         .await;
-                        let _ = crate::utils::database::save_pinned_items_order_async(
-                            &pinned_items,
-                        )
-                        .await;
+                        let _ =
+                            crate::utils::database::save_pinned_items_order_async(&pinned_items)
+                                .await;
                     });
                 }
 
@@ -565,6 +564,8 @@ impl ClipboardManager {
         let mut history = lock_arc_mutex(&self.history);
 
         let content_len = content.len();
+        // 指纹键必须与 build_history_fingerprints 一致（chars().count()），否则中文内容永远无法命中 O(1) 索引
+        let content_char_count = content.chars().count();
         log::debug!(
             "添加到历史记录，长度: {}, 当前数量: {}",
             content_len,
@@ -639,7 +640,7 @@ impl ClipboardManager {
             let candidate_idx = self
                 .fingerprint_index
                 .lock()
-                .get(&(content_len, content_hash))
+                .get(&(content_char_count, content_hash))
                 .copied();
             if let Some(exact_index) =
                 candidate_idx.filter(|&idx| history.get(idx).is_some_and(|item| item == &content))
@@ -1395,6 +1396,18 @@ mod tests {
         let dup_fp = (3, stable_text_hash("dup"));
         // 重复内容：索引指向最后出现的位置
         assert_eq!(index.get(&dup_fp), Some(&2));
+    }
+
+    #[test]
+    fn test_fingerprint_key_uses_char_count_for_cjk() {
+        let cjk = "你好世界测试内容";
+        let history = vec![cjk.to_string()];
+        let fps = build_history_fingerprints(&history);
+        assert_eq!(fps[0].0, cjk.chars().count());
+        assert_ne!(fps[0].0, cjk.len());
+        let index = build_fingerprint_index(&fps);
+        let key = (cjk.chars().count(), stable_text_hash(cjk));
+        assert_eq!(index.get(&key), Some(&0));
     }
 
     #[test]

@@ -1034,8 +1034,8 @@ pub async fn save_app_settings(
 
             if settings.image_clipboard_enabled
                 && app
-                .global_shortcut()
-                .is_registered(image_hot_key_val.as_str())
+                    .global_shortcut()
+                    .is_registered(image_hot_key_val.as_str())
             {
                 return Err(frontend_error_kind_params(
                     AppErrorKind::SettingsHotkeyConflict,
@@ -1848,8 +1848,8 @@ pub async fn save_app_settings(
                 &config.model_name,
                 &config.api_key,
             )
-                .await
-                .map_err(|e| frontend_error_kind(AppErrorKind::SettingsSaveProviderFailed, e))?;
+            .await
+            .map_err(|e| frontend_error_kind(AppErrorKind::SettingsSaveProviderFailed, e))?;
         }
     }
 
@@ -2308,7 +2308,7 @@ pub async fn copy_and_paste_text(
         simulate_paste_with_retry(&app_for_paste, "结果窗", None, started_at, false, None)
     })
     .await
-        .map_err(|e| frontend_error_kind(AppErrorKind::TaskExecutionFailed, e.to_string()))?;
+    .map_err(|e| frontend_error_kind(AppErrorKind::TaskExecutionFailed, e.to_string()))?;
     match paste_result {
         Ok(result) => {
             record_writeback_stage_metric(
@@ -2440,7 +2440,7 @@ pub async fn check_previews_ready(
         Ok(results)
     })
     .await
-        .map_err(|e| frontend_error_kind(AppErrorKind::TaskExecutionFailed, e.to_string()))?
+    .map_err(|e| frontend_error_kind(AppErrorKind::TaskExecutionFailed, e.to_string()))?
 }
 
 // ========================================
@@ -2499,7 +2499,8 @@ pub async fn toggle_recording_command(
 
 /// 获取系统资源使用情况（内存、CPU）
 #[tauri::command]
-pub async fn get_system_resources() -> Result<crate::core::perf_metrics::SystemResourceSnapshot, String> {
+pub async fn get_system_resources(
+) -> Result<crate::core::perf_metrics::SystemResourceSnapshot, String> {
     Ok(crate::core::perf_metrics::get_system_resources())
 }
 
@@ -2520,13 +2521,15 @@ pub async fn get_metrics_by_category() -> Result<
 
 /// 获取启动相关指标
 #[tauri::command]
-pub async fn get_startup_metrics() -> Result<Vec<crate::core::perf_metrics::PerfMetricSnapshot>, String> {
+pub async fn get_startup_metrics(
+) -> Result<Vec<crate::core::perf_metrics::PerfMetricSnapshot>, String> {
     Ok(crate::core::perf_metrics::get_startup_metrics())
 }
 
 /// 获取内存相关指标
 #[tauri::command]
-pub async fn get_memory_metrics() -> Result<Vec<crate::core::perf_metrics::PerfMetricSnapshot>, String> {
+pub async fn get_memory_metrics(
+) -> Result<Vec<crate::core::perf_metrics::PerfMetricSnapshot>, String> {
     Ok(crate::core::perf_metrics::get_memory_metrics())
 }
 

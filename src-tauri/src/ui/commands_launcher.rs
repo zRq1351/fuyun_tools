@@ -225,7 +225,7 @@ pub async fn update_custom_command(
         command_type,
         enabled,
     )
-        .await
+    .await
 }
 
 /// 切换自定义命令启用状态
@@ -268,22 +268,6 @@ pub async fn show_launcher(app: AppHandle) -> Result<(), String> {
 pub async fn hide_launcher(app: AppHandle) -> Result<(), String> {
     // 走 overlay 隐藏路径以正确清理 active 槽，避免影响其它 overlay 窗口联动
     crate::ui::window_manager::hide_overlay_window_by_label(&app, "launcher")
-}
-
-/// 调整启动器窗口大小
-#[tauri::command]
-pub async fn resize_launcher(app: AppHandle, height: f64) -> Result<(), String> {
-    use tauri::LogicalSize;
-    if let Some(window) = app.get_webview_window("launcher") {
-        let current_pos = window.outer_position().ok();
-        let size = LogicalSize::new(WINDOW_WIDTH, height);
-        window.set_size(size).map_err(|e| e.to_string())?;
-
-        if let Some(pos) = current_pos {
-            window.set_position(pos).map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
 }
 
 /// 切换启动器窗口显示状态

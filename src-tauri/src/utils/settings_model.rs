@@ -827,7 +827,7 @@ pub fn read_windows_credential(target: &str) -> Result<String, String> {
             Some(0),
             &mut pcred,
         )
-            .map_err(|e| format!("CredReadW failed: {e}"))?;
+        .map_err(|e| format!("CredReadW failed: {e}"))?;
         if pcred.is_null() {
             return Ok(String::new());
         }

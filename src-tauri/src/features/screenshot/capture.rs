@@ -361,7 +361,7 @@ mod tests {
         let rgba = vec![0u8; 4 * 4 * 4]; // 4x4 透明黑
         let b64 = rgba_to_base64_png(&rgba, 4, 4).unwrap();
         assert!(b64.starts_with("iVBORw0KGgo")); // PNG base64 标准前缀
-        // base64 解码后可得到 PNG 签名
+                                                 // base64 解码后可得到 PNG 签名
         use base64::Engine;
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(&b64)

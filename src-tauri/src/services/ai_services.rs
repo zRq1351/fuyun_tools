@@ -303,7 +303,7 @@ async fn execute_stream_request(
         request.window_label.clone(),
     )
     .await
-        .map_err(|e| AppErrorKind::InternalError.to_app_error_with_details(e))?;
+    .map_err(|e| AppErrorKind::InternalError.to_app_error_with_details(e))?;
 
     hide_selection_toolbar_impl(app.clone());
 

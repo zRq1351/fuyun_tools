@@ -44,7 +44,7 @@ fn init_ocr_engine(app_handle: &tauri::AppHandle) -> Result<OcrEngine, String> {
         charset.to_str().ok_or("字符集路径无效")?,
         Some(config),
     )
-        .map_err(|e| format!("初始化 OCR 引擎失败: {}", e))
+    .map_err(|e| format!("初始化 OCR 引擎失败: {}", e))
 }
 
 /// 使用 ocr-rs 进行 OCR 识别（使用缓存的引擎）

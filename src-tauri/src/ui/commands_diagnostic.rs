@@ -129,12 +129,16 @@ pub async fn get_perf_dashboard() -> Result<PerfDashboardResponse, String> {
     let startup_top = top_perf_metrics(get_startup_metrics(), 8);
     let mut ipc_items = get_ipc_metrics();
     // 部分 IPC 埋点 category 为 Other，按 key/label 补充
-    ipc_items.extend(all.iter().filter(|item| {
-        item.category != "ipc"
-            && (item.key.to_ascii_lowercase().contains("ipc")
-                || item.label.contains("IPC")
-                || item.label.contains("ipc"))
-    }).cloned());
+    ipc_items.extend(
+        all.iter()
+            .filter(|item| {
+                item.category != "ipc"
+                    && (item.key.to_ascii_lowercase().contains("ipc")
+                        || item.label.contains("IPC")
+                        || item.label.contains("ipc"))
+            })
+            .cloned(),
+    );
     // 去重
     ipc_items.sort_by(|a, b| a.key.cmp(&b.key));
     ipc_items.dedup_by(|a, b| a.key == b.key);
@@ -179,11 +183,7 @@ mod perf_dashboard_tests {
 
     #[test]
     fn test_top_perf_metrics_sorts_by_avg_desc() {
-        let items = vec![
-            metric("a", 10.0),
-            metric("c", 30.0),
-            metric("b", 20.0),
-        ];
+        let items = vec![metric("a", 10.0), metric("c", 30.0), metric("b", 20.0)];
         let top = top_perf_metrics(items, 2);
         assert_eq!(top.len(), 2);
         assert_eq!(top[0].key, "c");
@@ -693,16 +693,14 @@ pub(crate) async fn build_diagnostic_items_inner(
             } else {
                 "healthy"
             };
-            let mut gc_details = vec![
-                format!(
-                    "扫描 {} 次 / 销毁 {} / 可见跳过 {} / 缺失跳过 {} / thrash 推迟 {}",
-                    gc.scan_count,
-                    gc.destroyed_count,
-                    gc.skipped_visible,
-                    gc.skipped_missing,
-                    gc.thrash_deferred
-                ),
-            ];
+            let mut gc_details = vec![format!(
+                "扫描 {} 次 / 销毁 {} / 可见跳过 {} / 缺失跳过 {} / thrash 推迟 {}",
+                gc.scan_count,
+                gc.destroyed_count,
+                gc.skipped_visible,
+                gc.skipped_missing,
+                gc.thrash_deferred
+            )];
             for ev in gc.last_events.iter().rev().take(6) {
                 gc_details.push(format!("[{}] {} — {}", ev.action, ev.label, ev.detail));
             }
@@ -735,7 +733,7 @@ pub(crate) async fn build_diagnostic_items_inner(
             } else {
                 "healthy"
             }
-                .to_string(),
+            .to_string(),
             summary: match active_overlay_window.as_deref() {
                 Some(label) => format!("当前活动覆盖层窗口: {}", label),
                 None => "当前没有活动覆盖层窗口".to_string(),
@@ -754,14 +752,14 @@ pub(crate) async fn build_diagnostic_items_inner(
                     None => "最近动作: 无".to_string(),
                 },
             ]
-                .into_iter()
-                .chain(overlay_lifecycle_history.iter().rev().take(5).map(|item| {
-                    format!(
-                        "历史: {} -> {} (focused={}, at={})",
-                        item.label, item.action, item.focused, item.occurred_at
-                    )
-                }))
-                .collect(),
+            .into_iter()
+            .chain(overlay_lifecycle_history.iter().rev().take(5).map(|item| {
+                format!(
+                    "历史: {} -> {} (focused={}, at={})",
+                    item.label, item.action, item.focused, item.occurred_at
+                )
+            }))
+            .collect(),
             actions: vec![DiagnosticAction {
                 key: "diagnostic.refresh".to_string(),
                 label: "刷新".to_string(),

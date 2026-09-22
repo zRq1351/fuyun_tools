@@ -197,14 +197,14 @@ pub async fn copy_image_clipboard_item_to_directory(
             "savedPath": target_path.to_string_lossy(),
         }))
     })
-        .await
-        .map_err(|e| {
-            frontend_error(
-                ErrorCode::SystemError,
-                "复制图片任务执行失败",
-                e.to_string(),
-            )
-        })?
+    .await
+    .map_err(|e| {
+        frontend_error(
+            ErrorCode::SystemError,
+            "复制图片任务执行失败",
+            e.to_string(),
+        )
+    })?
 }
 
 /// 开始截图（全屏）
@@ -275,8 +275,8 @@ pub async fn start_manual_longshot(
     tauri::async_runtime::spawn_blocking(|| {
         std::thread::sleep(std::time::Duration::from_millis(90))
     })
-        .await
-        .map_err(|e| format!("等待截图窗口隐藏失败: {}", e))?;
+    .await
+    .map_err(|e| format!("等待截图窗口隐藏失败: {}", e))?;
     crate::features::screenshot::longshot::start_manual_longshot(app, request)
 }
 
@@ -305,8 +305,8 @@ pub async fn cancel_manual_longshot(
     tauri::async_runtime::spawn_blocking(move || {
         crate::features::screenshot::longshot::cancel_manual_longshot(session_id, app)
     })
-        .await
-        .map_err(|e| format!("取消长截图任务执行失败: {}", e))?
+    .await
+    .map_err(|e| format!("取消长截图任务执行失败: {}", e))?
 }
 
 #[tauri::command]
@@ -318,8 +318,8 @@ pub async fn finish_manual_longshot(
     let result = tauri::async_runtime::spawn_blocking(move || {
         crate::features::screenshot::longshot::finish_manual_longshot(session_id, app)
     })
-        .await
-        .map_err(|e| format!("完成长截图任务执行失败: {}", e))??;
+    .await
+    .map_err(|e| format!("完成长截图任务执行失败: {}", e))??;
     if !result.image_path.is_empty() {
         replace_screenshot_boot_image_path(Some(PathBuf::from(&result.image_path)));
     }
@@ -585,14 +585,14 @@ pub async fn export_screenshot_to_path(
     }
 
     tauri::async_runtime::spawn_blocking(move || export_screenshot_image(&request))
-    .await
-    .map_err(|e| format!("执行截图导出任务失败: {}", e))?
-    .map(|_| {
-        serde_json::json!({
-            "success": true,
-            "path": output_path
+        .await
+        .map_err(|e| format!("执行截图导出任务失败: {}", e))?
+        .map(|_| {
+            serde_json::json!({
+                "success": true,
+                "path": output_path
+            })
         })
-    })
 }
 
 #[tauri::command]
@@ -605,8 +605,8 @@ pub async fn render_screenshot_to_png_data(
         let height = canvas.height();
         Ok::<(Vec<u8>, u32, u32), String>((canvas.into_raw(), width, height))
     })
-        .await
-        .map_err(|e| format!("执行截图渲染任务失败: {}", e))??;
+    .await
+    .map_err(|e| format!("执行截图渲染任务失败: {}", e))??;
     let png_base64 = crate::features::screenshot::capture::rgba_to_base64_png(&rgba, width, height)
         .map_err(|e| format!("转换PNG失败: {}", e))?;
     Ok(serde_json::json!({
@@ -628,8 +628,8 @@ pub async fn copy_screenshot_to_clipboard(
         let height = canvas.height();
         Ok::<(Vec<u8>, u32, u32), String>((canvas.into_raw(), width, height))
     })
-        .await
-        .map_err(|e| format!("执行截图渲染任务失败: {}", e))??;
+    .await
+    .map_err(|e| format!("执行截图渲染任务失败: {}", e))??;
     let image = tauri::image::Image::new_owned(rgba, width, height);
     ImageClipboardManager::write_clipboard_image(&app, &image)?;
     Ok(serde_json::json!({
@@ -773,16 +773,16 @@ pub async fn pin_screenshot_on_screen(
         label.clone(),
         tauri::WebviewUrl::App("pinned_image.html".into()),
     )
-        .title("固定截图")
-        .visible(false)
-        .decorations(false)
-        .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(true)
-        .initialization_script(&payload_init_script)
-        .build()
-        .map_err(|e| format!("创建固定图片窗口失败: {}", e))?;
+    .title("固定截图")
+    .visible(false)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(true)
+    .initialization_script(&payload_init_script)
+    .build()
+    .map_err(|e| format!("创建固定图片窗口失败: {}", e))?;
     bind_overlay_window_events(&window, app.clone(), label.clone());
 
     let window_clone = window.clone();
@@ -1180,8 +1180,8 @@ pub async fn longshot_toolbar_action(action: String, app: AppHandle) -> Result<(
                     app_for_finish,
                 )
             })
-                .await
-                .map_err(|e| format!("完成长截图任务执行失败: {}", e))??;
+            .await
+            .map_err(|e| format!("完成长截图任务执行失败: {}", e))??;
             if !result.image_path.is_empty() {
                 replace_screenshot_boot_image_path(Some(PathBuf::from(&result.image_path)));
             }
@@ -1210,8 +1210,8 @@ pub async fn longshot_toolbar_action(action: String, app: AppHandle) -> Result<(
                     app_for_cancel,
                 )
             })
-                .await
-                .map_err(|e| format!("取消长截图任务执行失败: {}", e))??;
+            .await
+            .map_err(|e| format!("取消长截图任务执行失败: {}", e))??;
             let _ = app.emit(
                 "manual-longshot-shortcut-canceled",
                 serde_json::json!({
@@ -1243,8 +1243,8 @@ pub async fn finish_manual_longshot_from_shortcut(app: AppHandle) -> Result<(), 
     match tauri::async_runtime::spawn_blocking(move || {
         crate::features::screenshot::longshot::finish_manual_longshot(session_id, app_for_finish)
     })
-        .await
-        .map_err(|e| format!("完成长截图任务执行失败: {}", e))?
+    .await
+    .map_err(|e| format!("完成长截图任务执行失败: {}", e))?
     {
         Ok(result) => {
             if !result.image_path.is_empty() {
@@ -1281,8 +1281,8 @@ pub async fn cancel_manual_longshot_from_shortcut(app: AppHandle) -> Result<(), 
     tauri::async_runtime::spawn_blocking(move || {
         crate::features::screenshot::longshot::cancel_manual_longshot(session_id, app_for_cancel)
     })
-        .await
-        .map_err(|e| format!("取消长截图任务执行失败: {}", e))??;
+    .await
+    .map_err(|e| format!("取消长截图任务执行失败: {}", e))??;
     let _ = app.emit(
         "manual-longshot-shortcut-canceled",
         serde_json::json!({

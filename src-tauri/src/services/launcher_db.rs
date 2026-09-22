@@ -171,9 +171,9 @@ pub async fn load_categories() -> Result<Vec<CategoryRow>, String> {
     let rows = sqlx::query(
         "SELECT id, name, icon, position FROM launcher_categories ORDER BY position ASC, id ASC",
     )
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(|e| format!("读取分类列表失败: {}", e))?;
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|e| format!("读取分类列表失败: {}", e))?;
     Ok(rows
         .into_iter()
         .map(|r| CategoryRow {
@@ -211,9 +211,9 @@ pub async fn load_all_categories_with_app_ids() -> Result<Vec<(CategoryRow, Vec<
     let rows = sqlx::query(
         "SELECT category_id, app_id FROM launcher_category_apps ORDER BY category_id, position ASC",
     )
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(|e| format!("读取分类应用映射失败: {}", e))?;
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|e| format!("读取分类应用映射失败: {}", e))?;
 
     // 构建映射
     let mut category_apps: HashMap<String, Vec<String>> = HashMap::new();
@@ -530,10 +530,10 @@ pub async fn check_prefix_exists(prefix: &str, exclude_id: Option<&str>) -> Resu
         sqlx::query(
             "SELECT COUNT(*) as cnt FROM launcher_custom_commands WHERE prefix = ? AND id != ?",
         )
-            .bind(prefix)
-            .bind(ex_id)
-            .fetch_one(&mut *conn)
-            .await
+        .bind(prefix)
+        .bind(ex_id)
+        .fetch_one(&mut *conn)
+        .await
     } else {
         sqlx::query("SELECT COUNT(*) as cnt FROM launcher_custom_commands WHERE prefix = ?")
             .bind(prefix)

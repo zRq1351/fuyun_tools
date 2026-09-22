@@ -964,8 +964,8 @@ fn run_detection_cycle(app_handle: &AppHandle, state: &Arc<Mutex<SharedAppState>
                         let same_text = *last_text == text;
                         let near_anchor = (last_anchor.0 - anchor_pos.0).abs() <= 20
                             && (last_anchor.1 - anchor_pos.1).abs() <= 20;
-                        let within_window = now.duration_since(*last_time)
-                            <= Duration::from_millis(800);
+                        let within_window =
+                            now.duration_since(*last_time) <= Duration::from_millis(800);
                         same_text && (near_anchor || within_window)
                     } else {
                         false

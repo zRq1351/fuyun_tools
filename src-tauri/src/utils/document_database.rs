@@ -168,10 +168,10 @@ async fn delete_doc_file_internal(
         let _ = sqlx::query(
             "DELETE FROM document_import_items WHERE import_id = ?1 AND doc_file_id = ?2",
         )
-            .bind(import_id)
-            .bind(id)
-            .execute(&mut *conn)
-            .await;
+        .bind(import_id)
+        .bind(id)
+        .execute(&mut *conn)
+        .await;
 
         let remaining: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM document_import_items WHERE import_id = ?1")
@@ -252,7 +252,7 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     )
     .execute(&mut *conn)
     .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS document_categories (
@@ -267,7 +267,7 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     )
     .execute(&mut *conn)
     .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS document_files (
@@ -295,7 +295,7 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     )
     .execute(&mut *conn)
     .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_doc_files_root_id ON document_files(root_id)")
         .execute(&mut *conn)
@@ -304,15 +304,15 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_doc_files_category_id ON document_files(category_id)",
     )
-        .execute(&mut *conn)
-        .await
-        .ok();
+    .execute(&mut *conn)
+    .await
+    .ok();
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_doc_files_added_at ON document_files(added_at DESC)",
     )
-        .execute(&mut *conn)
-        .await
-        .ok();
+    .execute(&mut *conn)
+    .await
+    .ok();
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_doc_files_file_ext ON document_files(file_ext)")
         .execute(&mut *conn)
         .await
@@ -320,9 +320,9 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_doc_files_file_hash ON document_files(file_hash, root_id)",
     )
-        .execute(&mut *conn)
-        .await
-        .ok();
+    .execute(&mut *conn)
+    .await
+    .ok();
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS document_imports (
@@ -338,7 +338,7 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     )
     .execute(&mut *conn)
     .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS document_import_items (
@@ -352,14 +352,14 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     )
     .execute(&mut *conn)
     .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_import_items_import_id ON document_import_items(import_id)",
     )
-        .execute(&mut *conn)
-        .await
-        .ok();
+    .execute(&mut *conn)
+    .await
+    .ok();
 
     sqlx::query(
         "CREATE VIRTUAL TABLE IF NOT EXISTS document_files_fts USING fts5(
@@ -372,7 +372,7 @@ async fn ensure_docs_db_schema(conn: &mut SqliteConnection) -> Result<(), String
     )
     .execute(&mut *conn)
     .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     ensure_category_directories(conn).await?;
 
@@ -448,7 +448,7 @@ pub async fn get_doc_roots() -> Result<Vec<DocRoot>, String> {
     )
     .fetch_all(&mut *conn)
     .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let roots = rows
         .iter()
@@ -552,10 +552,10 @@ pub async fn add_doc_category(
     let max_pos: i64 = sqlx::query_scalar::<_, i64>(
         "SELECT COALESCE(MAX(position), -1) FROM document_categories WHERE root_id = ?1",
     )
-        .bind(root_id)
-        .fetch_one(&mut *conn)
-        .await
-        .unwrap_or(-1);
+    .bind(root_id)
+    .fetch_one(&mut *conn)
+    .await
+    .unwrap_or(-1);
 
     sqlx::query(
         "INSERT INTO document_categories (name, icon, color, position, root_id) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -817,9 +817,9 @@ pub async fn update_doc_file_meta(
              WHERE df.id = ?1",
         )
         .bind(id)
-            .fetch_optional(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
         if let Some(row) = row {
             let storage_mode: String = row.try_get(0).unwrap_or_default();
@@ -841,13 +841,13 @@ pub async fn update_doc_file_meta(
                     sqlx::query_scalar::<_, String>(
                         "SELECT name FROM document_categories WHERE id = ?1",
                     )
-                        .bind(new_cid)
-                        .fetch_optional(&mut *tx)
-                        .await
-                        .map_err(|e| {
-                            AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
-                        })?
-                        .unwrap_or_default()
+                    .bind(new_cid)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(|e| {
+                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                    })?
+                    .unwrap_or_default()
                 };
                 needs_move = true;
             }
@@ -1058,11 +1058,11 @@ pub async fn move_doc_file(id: i64, new_root_id: i64) -> Result<(), String> {
                 if let Err(e) = sqlx::query(
                     "UPDATE document_files SET managed_path = ?1, root_id = ?2 WHERE id = ?3",
                 )
-                    .bind(&new_managed_path)
-                    .bind(new_root_id)
-                    .bind(id)
-                    .execute(&mut *tx)
-                    .await
+                .bind(&new_managed_path)
+                .bind(new_root_id)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
                 {
                     let _ = tx.rollback().await;
                     let _ = safe_move_file(&dest, old_path);
@@ -1149,14 +1149,14 @@ pub async fn atomic_move_doc(
                         sqlx::query_scalar::<_, String>(
                             "SELECT name FROM document_categories WHERE id = ?1",
                         )
-                            .bind(cid)
-                            .fetch_optional(&mut *tx)
-                            .await
-                            .map_err(|e| {
-                                AppErrorKind::InternalError
-                                    .to_frontend_json_with_details(format!("{}", e))
-                            })?
-                            .unwrap_or_default()
+                        .bind(cid)
+                        .fetch_optional(&mut *tx)
+                        .await
+                        .map_err(|e| {
+                            AppErrorKind::InternalError
+                                .to_frontend_json_with_details(format!("{}", e))
+                        })?
+                        .unwrap_or_default()
                     }
                 } else {
                     String::new()
@@ -1191,11 +1191,11 @@ pub async fn atomic_move_doc(
                 if let Err(e) = sqlx::query(
                     "UPDATE document_files SET root_id = ?1, managed_path = ?2 WHERE id = ?3",
                 )
-                    .bind(effective_root_id)
-                    .bind(&new_managed)
-                    .bind(id)
-                    .execute(&mut *tx)
-                    .await
+                .bind(effective_root_id)
+                .bind(&new_managed)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
                 {
                     // 文件已移动但 DB 更新失败：把文件移回原位，避免 DB/磁盘不一致
                     rollback_moves(&mut file_moves);
@@ -1236,10 +1236,10 @@ pub async fn atomic_move_doc(
                 .bind(id)
                 .fetch_optional(&mut *tx)
                 .await
-                    .map_err(|e| {
-                        rollback_moves(&mut file_moves);
-                        AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
-                    })?;
+                .map_err(|e| {
+                    rollback_moves(&mut file_moves);
+                    AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+                })?;
 
                 if let Some(row) = row {
                     let storage_mode: String = row.try_get(0).unwrap_or_default();
@@ -1253,15 +1253,15 @@ pub async fn atomic_move_doc(
                             sqlx::query_scalar::<_, String>(
                                 "SELECT name FROM document_categories WHERE id = ?1",
                             )
-                                .bind(cid)
-                                .fetch_optional(&mut *tx)
-                                .await
-                                .map_err(|e| {
-                                    rollback_moves(&mut file_moves);
-                                    AppErrorKind::InternalError
-                                        .to_frontend_json_with_details(format!("{}", e))
-                                })?
-                                .unwrap_or_default()
+                            .bind(cid)
+                            .fetch_optional(&mut *tx)
+                            .await
+                            .map_err(|e| {
+                                rollback_moves(&mut file_moves);
+                                AppErrorKind::InternalError
+                                    .to_frontend_json_with_details(format!("{}", e))
+                            })?
+                            .unwrap_or_default()
                         };
                         let old_path = Path::new(&old_managed);
                         if old_path.exists() {
@@ -1430,10 +1430,10 @@ pub async fn get_managed_paths_for_root(root_id: i64) -> Result<HashSet<String>,
     let rows = sqlx::query_scalar::<_, String>(
         "SELECT managed_path FROM document_files WHERE root_id = ?1",
     )
-        .bind(root_id)
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .bind(root_id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(rows.into_iter().collect())
 }
 
@@ -1528,7 +1528,7 @@ pub fn parse_tags_json(raw: &str) -> Vec<String> {
         return normalize_tag_list(&list);
     }
     let parts: Vec<String> = trimmed
-        .split(|c| c == ',' || c == '，' || c == ';' || c == '；')
+        .split([',', '，', ';', '；'])
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
@@ -1579,7 +1579,13 @@ pub fn apply_tag_rename(tags: &[String], from: &str, to: &str) -> Vec<String> {
     }
     let mapped: Vec<String> = tags
         .iter()
-        .map(|t| if t.trim() == from { to.to_string() } else { t.clone() })
+        .map(|t| {
+            if t.trim() == from {
+                to.to_string()
+            } else {
+                t.clone()
+            }
+        })
         .collect();
     normalize_tag_list(&mapped)
 }
@@ -1605,7 +1611,7 @@ pub fn build_keyword_snippet(content: &str, keyword: &str, max_len: usize) -> Op
     }
     let mut snippet: String = content.chars().skip(start).take(end - start).collect();
     if start > 0 {
-        snippet.insert_str(0, "…");
+        snippet.insert(0, '…');
     }
     if end < total_chars {
         snippet.push('…');
@@ -1613,7 +1619,11 @@ pub fn build_keyword_snippet(content: &str, keyword: &str, max_len: usize) -> Op
     Some(snippet)
 }
 
-async fn write_doc_tags(conn: &mut sqlx::SqliteConnection, id: i64, tags_json: &str) -> Result<(), String> {
+async fn write_doc_tags(
+    conn: &mut sqlx::SqliteConnection,
+    id: i64,
+    tags_json: &str,
+) -> Result<(), String> {
     sqlx::query("UPDATE document_files SET tags = ?1 WHERE id = ?2")
         .bind(tags_json)
         .bind(id)
@@ -1663,7 +1673,9 @@ pub async fn batch_update_doc_tags(
             .bind(id)
             .fetch_optional(&mut *conn)
             .await
-            .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+            .map_err(|e| {
+                AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e))
+            })?;
         let Some(raw) = raw else {
             failed.push(*id);
             continue;
@@ -1680,10 +1692,12 @@ pub async fn batch_update_doc_tags(
 
 pub async fn list_doc_tags() -> Result<Vec<DocTagCount>, String> {
     let mut conn = open_docs_db().await?;
-    let rows = sqlx::query("SELECT tags FROM document_files WHERE tags IS NOT NULL AND tags != '' AND tags != '[]'")
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    let rows = sqlx::query(
+        "SELECT tags FROM document_files WHERE tags IS NOT NULL AND tags != '' AND tags != '[]'",
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     let mut counts: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
     for row in rows {
         let raw: String = row.try_get(0).unwrap_or_default();
@@ -1827,7 +1841,10 @@ pub async fn get_doc_page(
     let mut tag_filter = String::new();
     for tag in &tag_list {
         // JSON 数组形如 ["work","home"]：带引号匹配降低 work/workshop 子串误伤
-        let escaped = tag.replace('\\', "\\\\").replace('"', "\\\"").replace('\'', "''");
+        let escaped = tag
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\'', "''");
         tag_filter.push_str(&format!(" AND df.tags LIKE '%\"{escaped}\"%'"));
     }
 
@@ -1930,7 +1947,7 @@ pub async fn get_doc_stats(root_id: Option<i64>) -> Result<DocStats, String> {
     .bind(root_id)
     .fetch_one(&mut *conn)
     .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let total_size: i64 = sqlx::query_scalar::<_, i64>(
         "SELECT COALESCE(SUM(file_size), 0) FROM document_files WHERE (?1 IS NULL OR root_id = ?1)",
@@ -1938,7 +1955,7 @@ pub async fn get_doc_stats(root_id: Option<i64>) -> Result<DocStats, String> {
     .bind(root_id)
     .fetch_one(&mut *conn)
     .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let missing_files: i64 = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM document_files WHERE is_missing = 1 AND (?1 IS NULL OR root_id = ?1)",
@@ -1946,7 +1963,7 @@ pub async fn get_doc_stats(root_id: Option<i64>) -> Result<DocStats, String> {
     .bind(root_id)
     .fetch_one(&mut *conn)
     .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let rows = sqlx::query::<Sqlite>(
         "SELECT df.category_id, COALESCE(c.name, '未分类') as category_name, COUNT(*) as cnt
@@ -1959,7 +1976,7 @@ pub async fn get_doc_stats(root_id: Option<i64>) -> Result<DocStats, String> {
     .bind(root_id)
     .fetch_all(&mut *conn)
     .await
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
 
     let category_counts: Vec<CategoryCount> = rows
         .iter()
@@ -2237,19 +2254,19 @@ pub async fn undo_import_item(import_id: i64, doc_file_id: i64) -> Result<(), St
     sqlx::query::<Sqlite>(
         "DELETE FROM document_import_items WHERE import_id = ?1 AND doc_file_id = ?2",
     )
-        .bind(import_id)
-        .bind(doc_file_id)
-        .execute(&mut *tx)
-        .await
-        .ok();
+    .bind(import_id)
+    .bind(doc_file_id)
+    .execute(&mut *tx)
+    .await
+    .ok();
 
     let remaining: i64 = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM document_import_items WHERE import_id = ?1",
     )
-        .bind(import_id)
-        .fetch_one(&mut *tx)
-        .await
-        .unwrap_or(0);
+    .bind(import_id)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap_or(0);
 
     if remaining == 0 {
         sqlx::query::<Sqlite>("DELETE FROM document_imports WHERE id = ?1")
@@ -2412,10 +2429,7 @@ mod tests {
     #[test]
     fn apply_tag_rename_dedupes_and_preserves_case() {
         let tags = vec!["Work".to_string(), "旧".to_string(), "Work".to_string()];
-        assert_eq!(
-            super::apply_tag_rename(&tags, "旧", "Work"),
-            vec!["Work"]
-        );
+        assert_eq!(super::apply_tag_rename(&tags, "旧", "Work"), vec!["Work"]);
         assert_eq!(super::apply_tag_rename(&tags, "", "x"), vec!["Work", "旧"]);
         assert_eq!(super::apply_tag_rename(&tags, "a", "a"), vec!["Work", "旧"]);
     }
@@ -2424,7 +2438,10 @@ mod tests {
     fn parse_tags_json_and_snippet() {
         let parsed = parse_tags_json(r#"["a", "b", "a"]"#);
         assert_eq!(parsed, vec!["a".to_string(), "b".to_string()]);
-        assert_eq!(parse_tags_json("a, b;a"), vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(
+            parse_tags_json("a, b;a"),
+            vec!["a".to_string(), "b".to_string()]
+        );
         let snip = build_keyword_snippet("hello world rust", "rust", 80).unwrap();
         assert!(snip.contains("rust"));
         assert!(build_keyword_snippet("abc", "zzz", 80).is_none());
@@ -2625,9 +2642,9 @@ mod tests {
             );
             ",
         )
-            .execute(&pool)
-            .await
-            .unwrap();
+        .execute(&pool)
+        .await
+        .unwrap();
         pool
     }
 
@@ -2724,9 +2741,9 @@ mod tests {
              LEFT JOIN document_categories c ON df.category_id = c.id
              WHERE df.id = 1",
         )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(row.0, "测试文档");
         assert_eq!(row.1, "test.pdf");
         assert_eq!(row.2, Some("分类A".to_string()));
@@ -2813,9 +2830,9 @@ mod tests {
                 SELECT rowid FROM document_files_fts WHERE document_files_fts MATCH '\"Rust\"*'
             )",
         )
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        .fetch_all(&pool)
+        .await
+        .unwrap();
         assert_eq!(results.len(), 2, "FTS 应该找到 2 个 Rust 相关文档");
         assert!(results.contains(&"Rust 编程指南".to_string()));
         assert!(results.contains(&"Rust 高级特性".to_string()));
@@ -2892,10 +2909,10 @@ mod tests {
         let items: Vec<i64> = sqlx::query_scalar(
             "SELECT doc_file_id FROM document_import_items WHERE import_id = ?1",
         )
-            .bind(import_id)
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        .bind(import_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
         assert_eq!(items.len(), 3);
     }
 

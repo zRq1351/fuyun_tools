@@ -30,20 +30,21 @@ impl ClipboardPoller {
         F: FnMut() + Send + 'static,
         G: FnMut() -> bool + Send + 'static,
     {
-        if self
-            .running
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            return;
-        }
-
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
-        if let Ok(mut guard) = self
-            .stop_tx
-            .get_or_init(|| std::sync::Mutex::new(None))
-            .lock()
+        // CAS 与 stop_tx 写入必须在同一把锁内，避免 stop 在窗口期看到旧 sender 或误清新线程标志
         {
+            let mut guard = self
+                .stop_tx
+                .get_or_init(|| std::sync::Mutex::new(None))
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if self
+                .running
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+            {
+                return;
+            }
             *guard = Some(stop_tx);
         }
 
@@ -106,6 +107,7 @@ impl ClipboardPoller {
 
     /// 停止监听线程
     pub fn stop(&self) {
+        // running 置 false 必须与 take sender 在同一锁内，避免 start 在窗口期 CAS 失败后线程已退出
         if let Ok(mut guard) = self
             .stop_tx
             .get_or_init(|| std::sync::Mutex::new(None))
@@ -114,7 +116,7 @@ impl ClipboardPoller {
             if let Some(tx) = guard.take() {
                 let _ = tx.send(());
             }
+            self.running.store(false, Ordering::SeqCst);
         }
-        self.running.store(false, Ordering::SeqCst);
     }
 }

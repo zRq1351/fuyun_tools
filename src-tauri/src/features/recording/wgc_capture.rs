@@ -871,6 +871,6 @@ mod pts_gap_tests {
         thread::sleep(Duration::from_millis(20));
         t.mark_pause_edge(false);
         let total = t.effective_paused_total_100ns();
-        assert!(total >= 300_000 && total < 10_000_000, "total={}", total);
+        assert!((300_000..10_000_000).contains(&total), "total={}", total);
     }
 }

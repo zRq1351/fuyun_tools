@@ -32,6 +32,8 @@ export default [
                 fetch: 'readonly',
                 createImageBitmap: 'readonly',
                 miniIcon: 'readonly',
+                ResizeObserver: 'readonly',
+                AbortController: 'readonly',
                 // DOM types
                 Element: 'readonly',
                 HTMLElement: 'readonly',
@@ -55,6 +57,7 @@ export default [
         },
         rules: {
             'vue/multi-word-component-names': 'off',
+            'vue/no-mutating-props': 'off',
             'no-unused-vars': ['warn', {argsIgnorePattern: '^_'}],
             'no-console': ['warn', {allow: ['warn', 'error']}],
             'no-empty': ['warn', {allowEmptyCatch: true}],

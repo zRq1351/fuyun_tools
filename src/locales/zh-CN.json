@@ -1132,6 +1132,7 @@
     "E_LONGSHOT_DEPENDENCY_MISSING": "长截图依赖未就绪，请检查 FFmpeg 或 OpenCV 环境",
     "E_LONGSHOT_FFMPEG_READ_FAILED": "无法读取 ffmpeg 输出",
     "E_LONGSHOT_CANCELLED": "长截图已取消",
+    "E_LONGSHOT_TIMEOUT": "长截图处理超时，请重试",
     "E_RECORDING_FEATURE_DISABLED": "录屏功能已停用",
     "E_RECORDING_FFMPEG_NOT_FOUND": "未找到ffmpeg",
     "E_RECORDING_START_FAILED": "开始录制失败",

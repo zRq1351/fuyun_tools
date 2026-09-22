@@ -1784,8 +1784,14 @@ fn ensure_system_audio_capture_started(
     if !runtime.system_audio_threads.is_empty() {
         return Ok(());
     }
-    let enabled_flag = runtime.system_audio_enabled_flag.clone().unwrap();
-    let pause_flag = runtime.recording_pause_flag.clone().unwrap();
+    let enabled_flag = runtime
+        .system_audio_enabled_flag
+        .get_or_insert_with(|| Arc::new(AtomicBool::new(false)))
+        .clone();
+    let pause_flag = runtime
+        .recording_pause_flag
+        .get_or_insert_with(|| Arc::new(AtomicBool::new(false)))
+        .clone();
     // 设备错误槽位：采集线程 err_fn 写入、stats_loop 周期读取上报（原生路径无 stderr 可解析）
     let error_slot: crate::features::recording::state::AudioDeviceErrorSlot =
         Arc::new(std::sync::Mutex::new(None));
@@ -1928,8 +1934,14 @@ fn ensure_mic_capture_started(
     if runtime.mic_audio_thread.is_some() {
         return Ok(());
     }
-    let enabled_flag = runtime.mic_audio_enabled_flag.clone().unwrap();
-    let pause_flag = runtime.recording_pause_flag.clone().unwrap();
+    let enabled_flag = runtime
+        .mic_audio_enabled_flag
+        .get_or_insert_with(|| Arc::new(AtomicBool::new(false)))
+        .clone();
+    let pause_flag = runtime
+        .recording_pause_flag
+        .get_or_insert_with(|| Arc::new(AtomicBool::new(false)))
+        .clone();
     // 设备错误槽位：采集线程 err_fn 写入、stats_loop 周期读取上报
     let error_slot: crate::features::recording::state::AudioDeviceErrorSlot =
         Arc::new(std::sync::Mutex::new(None));
@@ -1961,7 +1973,7 @@ fn ensure_mic_capture_started(
                     pause_flag,
                     error_slot,
                 )
-                    .map_err(|second_err| format!("{}；回退默认设备失败: {}", first_err, second_err))
+                .map_err(|second_err| format!("{}；回退默认设备失败: {}", first_err, second_err))
             } else {
                 Err(first_err)
             }
@@ -3289,8 +3301,8 @@ pub fn stop_recording(
             // 此时按分段周期分别计算 U→拼接时间轴的偏移。
             let per_cycle = window_video_segments.len() > 1
                 && window_video_segments
-                .iter()
-                .any(|s| s.first_frame_anchor.is_some());
+                    .iter()
+                    .any(|s| s.first_frame_anchor.is_some());
             if per_cycle {
                 let total_u_ms = {
                     let rt = lock_arc_mutex(&runtime_arc);
@@ -4073,10 +4085,10 @@ pub fn resume_recording(
         // 会话已死亡（如暂停期间目标窗口被关闭）才走硬重建（新分段+按周期校准兜底）
         let wgc_soft_resume = is_wgc_target(&runtime.target_type)
             && runtime
-            .wgc_thread
-            .as_ref()
-            .map(|t| !t.is_finished())
-            .unwrap_or(false)
+                .wgc_thread
+                .as_ref()
+                .map(|t| !t.is_finished())
+                .unwrap_or(false)
             && runtime.wgc_pause_flag.is_some();
         let wgc_resume_kind = if is_wgc_target(&runtime.target_type) {
             Some(runtime.target_type.clone())
@@ -4141,9 +4153,9 @@ pub fn resume_recording(
                     capture_cursor,
                     std::time::Instant::now(),
                 )
-                    .map_err(|e| {
-                        AppError::new(ErrorCode::SystemError, "恢复显示器录制失败").with_details(e)
-                    })?
+                .map_err(|e| {
+                    AppError::new(ErrorCode::SystemError, "恢复显示器录制失败").with_details(e)
+                })?
             }
             _ => start_window_capture_to_mp4(
                 target_id.as_str(),
@@ -4154,9 +4166,9 @@ pub fn resume_recording(
                 std::time::Instant::now(),
                 is_force_default_border_enabled(),
             )
-                .map_err(|e| {
-                    AppError::new(ErrorCode::SystemError, "恢复窗口录制失败").with_details(e)
-                })?,
+            .map_err(|e| {
+                AppError::new(ErrorCode::SystemError, "恢复窗口录制失败").with_details(e)
+            })?,
         })
     } else {
         None
@@ -4484,7 +4496,7 @@ pub fn update_audio_capture(
                         ErrorCode::SystemError,
                         AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string()),
                     )
-                        .with_details(e)
+                    .with_details(e)
                 },
             )?;
         }
@@ -4864,7 +4876,7 @@ mod calibration_tests {
         assert_eq!((lx, ly), (1700, 0));
         assert!(lx + w <= 1920 && ly + h <= 1080);
         assert_eq!((w, h), (220, 600)); // 1920-1700=220
-        // 区域不与任何显示器相交
+                                        // 区域不与任何显示器相交
         assert_eq!(
             pick_monitor_and_local_rect((5000, 5000, 10, 10), &monitors),
             None

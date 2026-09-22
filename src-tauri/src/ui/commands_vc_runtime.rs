@@ -269,9 +269,9 @@ pub async fn install_vc_runtime_and_wait(
                 .arg("/norestart")
                 .status()
         })
-            .await
-            .map_err(|e| format!("启动安装程序失败: {}", e))?
-            .map_err(|e| format!("执行安装程序失败: {}", e))?;
+        .await
+        .map_err(|e| format!("启动安装程序失败: {}", e))?
+        .map_err(|e| format!("执行安装程序失败: {}", e))?;
         let exit_code = status.code().unwrap_or(-1);
         let success = matches!(exit_code, 0 | 1638 | 3010);
         let cancelled = exit_code == 1602;

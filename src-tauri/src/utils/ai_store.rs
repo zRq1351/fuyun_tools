@@ -98,8 +98,8 @@ async fn generate_and_store_key(pool: &sqlx::SqlitePool) -> [u8; 32] {
     OsRng.fill_bytes(&mut key_bytes);
     if store_key_in_credential_manager(&key_bytes)
         && load_key_from_credential_manager()
-        .map(|k| k == key_bytes)
-        .unwrap_or(false)
+            .map(|k| k == key_bytes)
+            .unwrap_or(false)
     {
         // 确保 DB 中不再残留明文密钥
         let _ = sqlx::query("DELETE FROM ai_meta WHERE key = 'encryption_key'")
@@ -311,9 +311,9 @@ pub async fn get_all_providers() -> HashMap<String, ProviderConfigFull> {
     let rows: Vec<(String, String, String, String)> = sqlx::query_as(
         "SELECT provider_key, api_url, model_name, encrypted_api_key FROM provider_configs",
     )
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
     let mut map = HashMap::new();
     for (k, u, m, ek) in rows {
         map.insert(
@@ -371,7 +371,7 @@ pub async fn migrate_from_old() {
         // 先落库成功再删凭据，避免写库失败导致密钥永久丢失
         match save_provider_config(key, &cfg.api_url, &cfg.model_name, &api_key).await {
             Ok(()) =>
-                {
+            {
                 #[cfg(windows)]
                 if let Some(target) = cred_target {
                     crate::utils::settings_model::delete_windows_credential(&target);
@@ -387,15 +387,15 @@ pub async fn migrate_from_old() {
     let legacy_provider = crate::utils::system_utils::read_text_with_backup(
         &crate::utils::system_utils::get_settings_file_path(),
     )
-        .ok()
-        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
-        .and_then(|value| {
-            value
-                .get("ai_provider")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_default();
+    .ok()
+    .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+    .and_then(|value| {
+        value
+            .get("ai_provider")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    })
+    .unwrap_or_default();
     if !legacy_provider.is_empty() {
         set_current_provider(&legacy_provider).await.ok();
     }

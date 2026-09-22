@@ -188,7 +188,7 @@ async fn try_migrate_old_data() {
                     enabled: cmd.enabled,
                     created_at: cmd.created_at,
                 })
-                    .await;
+                .await;
             }
             // 迁移成功后删除旧文件
             let _ = std::fs::remove_file(&config_path);
@@ -415,7 +415,7 @@ pub async fn add_custom_command(
         enabled: true,
         created_at,
     })
-        .await?;
+    .await?;
 
     let mut config = load_launcher_config().await;
     config.custom_commands.push(CustomCommand {
@@ -470,7 +470,7 @@ pub async fn update_custom_command(
         ct_json.as_deref(),
         enabled,
     )
-        .await?;
+    .await?;
 
     if let Some(cmd) = config
         .custom_commands

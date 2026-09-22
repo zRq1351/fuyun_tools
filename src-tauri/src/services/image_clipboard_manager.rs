@@ -3,8 +3,7 @@ use crate::features::screenshot::capture;
 use crate::services::clipboard_poller::ClipboardPoller;
 use crate::sync::{lock_arc_mutex, Mutex};
 use crate::utils::image_clipboard::ImageClipboardManager;
-use parking_lot::Mutex as ParkingMutex;
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::OnceLock;
@@ -127,69 +126,6 @@ pub fn emit_image_history_payload(app_handle: &AppHandle, state: Arc<Mutex<AppSt
     }
 }
 
-// 快速去重：存储最近图片的采样数据用于快速比较
-const SAMPLE_POINTS: usize = 10;
-type ImageSample = (u32, u32, [u8; SAMPLE_POINTS]);
-static RECENT_IMAGE_SAMPLES: LazyLock<ParkingMutex<VecDeque<ImageSample>>> =
-    LazyLock::new(|| ParkingMutex::new(VecDeque::new()));
-
-// 快速采样：从 RGBA 数据中提取 10 个采样点
-fn extract_sample_points(rgba: &[u8], width: u32, height: u32) -> [u8; SAMPLE_POINTS] {
-    let mut sample = [0u8; SAMPLE_POINTS];
-    if rgba.is_empty() || width == 0 || height == 0 {
-        return sample;
-    }
-
-    let total_bytes = rgba.len();
-    let step = (total_bytes / SAMPLE_POINTS).max(1);
-
-    for (i, item) in sample.iter_mut().enumerate().take(SAMPLE_POINTS) {
-        let idx = (i * step).min(total_bytes - 1);
-        *item = rgba[idx];
-    }
-    sample
-}
-
-// 快速去重检查：仅作为粗筛提示，真正是否重复仍以后续完整签名判断为准。
-fn matches_recent_sample(width: u32, height: u32, rgba: &[u8]) -> bool {
-    let sample = extract_sample_points(rgba, width, height);
-    let recent = RECENT_IMAGE_SAMPLES.lock();
-
-    for (idx, (recent_width, recent_height, recent_sample)) in
-        recent.iter().rev().take(3).enumerate()
-    {
-        if *recent_width == width && *recent_height == height && recent_sample == &sample {
-            log::debug!(
-                "[重复检查] 图片 {}x{} 与最近第 {} 张图片采样命中，继续执行强签名校验",
-                width,
-                height,
-                idx + 1
-            );
-            return true;
-        }
-    }
-    log::debug!("[重复检查] 图片 {}x{} 未发现重复", width, height);
-    false
-}
-
-// 更新最近图片的采样缓存
-fn update_recent_samples_with_sample(width: u32, height: u32, sample: [u8; SAMPLE_POINTS]) {
-    let mut recent = RECENT_IMAGE_SAMPLES.lock();
-
-    recent.push_back((width, height, sample));
-
-    while recent.len() > 5 {
-        recent.pop_front();
-    }
-}
-
-/// 清理最近图片的采样缓存（在删除图片时调用）
-pub fn clear_recent_samples() {
-    let mut recent = RECENT_IMAGE_SAMPLES.lock();
-    recent.clear();
-    log::debug!("[缓存清理] 已清理最近图片采样缓存");
-}
-
 /// 处理队列中的待处理图片任务
 fn process_pending_queue(
     app_handle: &AppHandle,
@@ -231,15 +167,6 @@ fn process_pending_queue(
                     continue;
                 }
 
-                if matches_recent_sample(task.width, task.height, &task.rgba) {
-                    log::debug!(
-                        "[处理线程-{}] 图片采样命中，进入强签名去重: {}x{}",
-                        worker_id,
-                        task.width,
-                        task.height
-                    );
-                }
-
                 log::debug!(
                     "[处理线程-{}] 开始处理图片任务: {}x{}",
                     worker_id,
@@ -252,7 +179,6 @@ fn process_pending_queue(
                     state_guard.image_clipboard_manager.clone()
                 };
 
-                let sample = extract_sample_points(&task.rgba, task.width, task.height);
                 let PendingImageTask {
                     rgba,
                     width,
@@ -286,8 +212,6 @@ fn process_pending_queue(
                     width,
                     height
                 );
-
-                update_recent_samples_with_sample(width, height, sample);
 
                 let is_image_visible = {
                     let state_guard = lock_arc_mutex(state);

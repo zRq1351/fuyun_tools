@@ -80,7 +80,7 @@ pub async fn add_doc_category(
         &color.unwrap_or_else(|| "#409EFF".to_string()),
         root_id,
     )
-        .await?;
+    .await?;
     Ok(result)
 }
 
@@ -254,7 +254,7 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
                 request.root_id,
                 request.category_id,
             )
-                .await
+            .await
             {
                 errors.push(format!("文件已存在（重复）: {}", file_path_str));
                 continue;
@@ -295,7 +295,7 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
                 &ext_for_extract,
             )
         })
-            .await
+        .await
         {
             Ok(text) => text,
             Err(e) => {
@@ -324,7 +324,7 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
             file_modified,
             &content_text,
         )
-            .await
+        .await
         {
             Ok(id) => {
                 if need_move {
@@ -372,7 +372,7 @@ pub async fn import_files(request: ImportFilesRequest) -> Result<ImportResult, S
             &target_dir,
             success_ids.len() as i64,
         )
-            .await
+        .await
         {
             for (doc_id, src, managed) in &success_ids {
                 if let Err(e) =
@@ -448,7 +448,7 @@ pub async fn get_doc_page(
         request.file_ext,
         request.tags,
     )
-        .await
+    .await
 }
 
 #[derive(serde::Deserialize)]
@@ -519,7 +519,7 @@ pub async fn update_doc_meta(request: UpdateDocMetaRequest) -> Result<(), String
         request.tags.as_deref(),
         request.notes.as_deref(),
     )
-        .await
+    .await
 }
 
 #[derive(serde::Deserialize)]

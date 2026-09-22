@@ -199,6 +199,8 @@ pub fn create_db_options(db_path: &PathBuf) -> sqlx::sqlite::SqliteConnectOption
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(Duration::from_millis(1200))
+        // 连接级启用外键：PRAGMA 是 per-connection 的，必须在 options 里设置才能覆盖池中所有连接
+        .foreign_keys(true)
 }
 
 /// 生成搜索关键词的上下文摘要片段

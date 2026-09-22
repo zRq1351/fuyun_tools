@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  frontend:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: src/node_modules
+          key: npm-ci-${{ runner.os }}-${{ hashFiles('src/package-lock.json') }}
+          restore-keys: |
+            npm-ci-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+  rust:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            src-tauri/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: rust-ci-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            rust-ci-${{ runner.os }}-
+
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: C:\Program Files\LLVM
+          key: llvm-${{ runner.os }}-v1
+          restore-keys: |
+            llvm-${{ runner.os }}-
+
+      - name: Install LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: choco install llvm --no-progress -y
+
+      - name: rustfmt
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: clippy
+        working-directory: src-tauri
+        env:
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: test
+        working-directory: src-tauri
+        env:
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+        run: cargo test

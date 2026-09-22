@@ -1227,8 +1227,6 @@ impl ImageClipboardManager {
             )
         };
 
-        crate::services::image_clipboard_manager::clear_recent_samples();
-
         {
             let mut categories = lock_arc_mutex(&self.categories);
             categories.remove(&removed_id);
@@ -2452,7 +2450,7 @@ fn rgba_to_png_bytes_for_storage(rgba: &[u8], width: u32, height: u32) -> Result
         image::codecs::png::FilterType::Adaptive,
     )
     .write_image(rgba, width, height, image::ColorType::Rgba8.into())
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(encoded)
 }
 
@@ -2464,7 +2462,7 @@ fn rgba_to_png_bytes(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, St
         image::codecs::png::FilterType::NoFilter,
     )
     .write_image(rgba, width, height, image::ColorType::Rgba8.into())
-        .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
+    .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))?;
     Ok(encoded)
 }
 

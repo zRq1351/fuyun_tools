@@ -392,14 +392,15 @@ mod tests {
 
     #[test]
     fn test_snapshot_with_session_fields() {
-        let mut rt = RecordingRuntime::default();
-        rt.phase = RecordingPhase::Recording;
-        rt.session_id = Some("sess-1".to_string());
-        rt.started_at_ms = 1000;
-        rt.started_instant = Some(Instant::now());
-        rt.dropped_video_frames = 7;
-        rt.audio_buffer_level_ms = 12;
-        rt.last_error = None;
+        let rt = RecordingRuntime {
+            phase: RecordingPhase::Recording,
+            session_id: Some("sess-1".to_string()),
+            started_at_ms: 1000,
+            started_instant: Some(Instant::now()),
+            dropped_video_frames: 7,
+            audio_buffer_level_ms: 12,
+            ..Default::default()
+        };
 
         let snap = rt.snapshot();
         assert_eq!(snap.state, "recording");
@@ -410,9 +411,11 @@ mod tests {
 
     #[test]
     fn test_snapshot_error_state() {
-        let mut rt = RecordingRuntime::default();
-        rt.phase = RecordingPhase::Error;
-        rt.last_error = Some("录音失败".to_string());
+        let rt = RecordingRuntime {
+            phase: RecordingPhase::Error,
+            last_error: Some("录音失败".to_string()),
+            ..Default::default()
+        };
         let snap = rt.snapshot();
         assert_eq!(snap.state, "error");
         assert_eq!(snap.last_error.as_deref(), Some("录音失败"));
@@ -420,30 +423,32 @@ mod tests {
 
     #[test]
     fn test_reset_to_idle_clears_state() {
-        let mut rt = RecordingRuntime::default();
-        rt.phase = RecordingPhase::Recording;
-        rt.session_id = Some("sess-2".to_string());
-        rt.started_at_ms = 5000;
-        rt.started_instant = Some(Instant::now());
-        rt.paused_total_ms = 100;
-        rt.max_duration_ms = 300000;
-        rt.fps = 30;
-        rt.video_bitrate_kbps = 6000;
-        rt.audio_bitrate_kbps = 192;
-        rt.mic_enabled = true;
-        rt.dropped_video_frames = 3;
-        rt.last_error = Some("x".to_string());
-        rt.output_path_tmp = Some(PathBuf::from("t.mp4"));
-        rt.output_path_final = Some(PathBuf::from("f.mp4"));
-        rt.target_type = "window".to_string();
-        rt.target_id = "hwnd1".to_string();
-        rt.window_video_segments = vec![crate::features::recording::state::WindowVideoSegment {
-            path: PathBuf::from("seg.mp4"),
-            u_start_ms: 0,
-            first_frame_anchor: None,
-        }];
-        rt.system_audio_process_ids = vec![1, 2];
-        rt.ffmpeg_stderr_tail = VecDeque::from(vec!["line".to_string()]);
+        let mut rt = RecordingRuntime {
+            phase: RecordingPhase::Recording,
+            session_id: Some("sess-2".to_string()),
+            started_at_ms: 5000,
+            started_instant: Some(Instant::now()),
+            paused_total_ms: 100,
+            max_duration_ms: 300000,
+            fps: 30,
+            video_bitrate_kbps: 6000,
+            audio_bitrate_kbps: 192,
+            mic_enabled: true,
+            dropped_video_frames: 3,
+            last_error: Some("x".to_string()),
+            output_path_tmp: Some(PathBuf::from("t.mp4")),
+            output_path_final: Some(PathBuf::from("f.mp4")),
+            target_type: "window".to_string(),
+            target_id: "hwnd1".to_string(),
+            window_video_segments: vec![crate::features::recording::state::WindowVideoSegment {
+                path: PathBuf::from("seg.mp4"),
+                u_start_ms: 0,
+                first_frame_anchor: None,
+            }],
+            system_audio_process_ids: vec![1, 2],
+            ffmpeg_stderr_tail: VecDeque::from(vec!["line".to_string()]),
+            ..Default::default()
+        };
 
         rt.reset_to_idle();
         assert_eq!(rt.phase, RecordingPhase::Idle);

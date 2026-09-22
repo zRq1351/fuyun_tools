@@ -836,4 +836,38 @@ mod tests {
         let err2 = AppErrorKind::DatabaseError.to_app_error_with_details("locked");
         assert_eq!(err2.details.as_deref(), Some("locked"));
     }
+
+    #[test]
+    fn test_all_error_kinds_have_i18n_keys_in_zh_and_en() {
+        let manifest = std::env!("CARGO_MANIFEST_DIR");
+        let locales_dir = std::path::Path::new(manifest).join("../src/locales");
+        let read_error_codes = |file: &str| -> std::collections::HashSet<String> {
+            let raw = std::fs::read_to_string(locales_dir.join(file))
+                .unwrap_or_else(|e| panic!("读取 {} 失败: {}", file, e));
+            let json: serde_json::Value = serde_json::from_str(&raw)
+                .unwrap_or_else(|e| panic!("{} JSON 解析失败: {}", file, e));
+            json["errorCodes"]
+                .as_object()
+                .unwrap_or_else(|| panic!("{} 缺少 errorCodes 对象", file))
+                .keys()
+                .cloned()
+                .collect()
+        };
+
+        let zh = read_error_codes("zh-CN.json");
+        let en = read_error_codes("en-US.json");
+
+        for kind in all_error_kinds() {
+            let key = format!("E_{}", kind.to_key());
+            assert!(zh.contains(&key), "zh-CN.json 缺少错误码翻译: {}", key);
+            assert!(en.contains(&key), "en-US.json 缺少错误码翻译: {}", key);
+        }
+        assert_eq!(
+            zh.len(),
+            en.len(),
+            "zh/en errorCodes 数量不一致: zh={}, en={}",
+            zh.len(),
+            en.len()
+        );
+    }
 }
