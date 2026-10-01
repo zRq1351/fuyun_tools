@@ -85,14 +85,16 @@
 </template>
 
 <script setup>
-import {onMounted, onUnmounted, ref} from 'vue'
+import {onMounted, onUnmounted, ref, watch} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
 import {useI18n} from 'vue-i18n'
 import {useWindowDrag} from '../../composables/useWindowDrag'
+import {useWindowDpi} from '../../composables/useWindowDpi'
 import ContextMenu from '../../components/ContextMenu.vue'
 
 const {t} = useI18n()
 const {startDrag} = useWindowDrag()
+const {scaleFactor, clampPositionToMonitor} = useWindowDpi()
 
 const imageSrc = ref('')
 const windowLabel = ref('')
@@ -301,6 +303,12 @@ onMounted(() => {
   if (cached) {
     applyPinnedPayload(cached)
   }
+  // DPI / 显示器变化后把窗口 clamp 回屏幕内
+  clampPositionToMonitor()
+})
+
+watch(scaleFactor, () => {
+  clampPositionToMonitor()
 })
 
 onUnmounted(() => {
@@ -390,7 +398,7 @@ onUnmounted(() => {
   padding: 6px 12px;
   border-radius: var(--fy-radius-md);
   pointer-events: none;
-  backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: var(--fy-backdrop-blur-light);
   box-shadow: var(--fy-shadow);
   transition: opacity 0.3s;
 }

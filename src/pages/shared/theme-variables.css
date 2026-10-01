@@ -120,10 +120,13 @@ html.dark,
     --fy-bg-input: #0e1018;
     --fy-bg-card: rgba(255, 255, 255, 0.02);
 
+    /* 遮罩 */
+    --fy-mask-bg: rgba(0, 0, 0, 0.5);
+
     /* 文字色 */
     --fy-text-primary: #e8ecf4;
     --fy-text-secondary: #a8b0c0;
-    --fy-text-muted: #636a7c;
+    --fy-text-muted: #7b8394;
     --fy-text-inverse: #0e1018;
     --fy-text-accent: #a4b4ff;
 
@@ -188,10 +191,13 @@ html.light,
     --fy-bg-input: #ffffff;
     --fy-bg-card: rgba(255, 255, 255, 0.9);
 
+    /* 遮罩 */
+    --fy-mask-bg: rgba(15, 23, 42, 0.4);
+
     /* 文字色 */
     --fy-text-primary: #0f172a;
     --fy-text-secondary: #475569;
-    --fy-text-muted: #94a3b8;
+    --fy-text-muted: #64748b;
     --fy-text-inverse: #ffffff;
     --fy-text-accent: #4F6BF6;
 
@@ -302,10 +308,13 @@ html.eye-care,
     --fy-bg-input: #fffcf5;
     --fy-bg-card: rgba(255, 250, 240, 0.8);
 
+    /* 遮罩 */
+    --fy-mask-bg: rgba(61, 52, 41, 0.4);
+
     /* 文字色 */
     --fy-text-primary: #3d3429;
     --fy-text-secondary: #5c5040;
-    --fy-text-muted: #a89880;
+    --fy-text-muted: #7a6d5d;
     --fy-text-inverse: #ffffff;
     --fy-text-accent: #8b7355;
 

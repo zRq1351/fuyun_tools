@@ -2152,21 +2152,6 @@ watch([searchKeyword, categoryFilter], () => {
   margin-left: 12px;
 }
 
-.nav-action-btn {
-  appearance: none;
-  border: none;
-  background: var(--fy-bg-overlay);
-  color: var(--fy-text-secondary);
-  border-radius: var(--fy-radius-sm);
-  font-size: 11px;
-  line-height: 1;
-  font-weight: 600;
-  padding: 0 10px;
-  height: 24px;
-  cursor: pointer;
-  transition: all var(--fy-duration-fast) ease;
-}
-
 .icon-btn {
   flex: 0 0 auto;
   width: 24px;
@@ -2180,16 +2165,6 @@ watch([searchKeyword, categoryFilter], () => {
   display: inline-flex;
   align-items: center;
   font-weight: 700;
-}
-
-.nav-action-btn:hover {
-  background: var(--fy-bg-hover);
-  color: var(--fy-text-primary);
-}
-
-.nav-action-btn:focus-visible {
-  outline: 2px solid var(--fy-accent-light);
-  outline-offset: 2px;
 }
 
 </style>

@@ -5,6 +5,7 @@
         ref="menuRef"
         :style="menuStyle"
         class="context-menu"
+        role="menu"
         @click.stop
         @mouseover="activateItemOnHover"
     >
@@ -44,6 +45,7 @@ watch(() => props.show, async (visible) => {
     adjustedY.value = props.y
     await nextTick()
     adjustPosition()
+    setupA11y()
     if (!hasListeners) {
       hasListeners = true
       document.addEventListener('mousedown', onDocMouseDown)
@@ -75,11 +77,26 @@ function getItems() {
   ) || []
 }
 
+// 为菜单项补齐 ARIA 角色与 tabindex（菜单项由父组件 slot 提供）
+function setupA11y() {
+  const el = menuRef.value
+  if (!el) return
+  el.querySelectorAll('.context-menu-item').forEach(i => {
+    i.setAttribute('role', 'menuitem')
+    i.setAttribute('tabindex', '-1')
+  })
+}
+
 function highlightItem(idx) {
   const items = getItems()
-  items.forEach(i => i.classList.remove('context-menu-item-active'))
+  items.forEach(i => {
+    i.classList.remove('context-menu-item-active')
+    i.setAttribute('tabindex', '-1')
+  })
   if (idx >= 0 && idx < items.length) {
     items[idx].classList.add('context-menu-item-active')
+    items[idx].setAttribute('tabindex', '0')
+    items[idx].focus({preventScroll: true})
     items[idx].scrollIntoView({block: 'nearest'})
   }
 }

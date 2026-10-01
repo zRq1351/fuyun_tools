@@ -22,6 +22,7 @@
           <div class="header-actions">
             <button
                 v-if="hasCategorizedApps && !searchQuery"
+                :aria-label="viewMode === 'category' ? t('launcher.listView') : t('launcher.categoryView')"
                 :title="viewMode === 'category' ? t('launcher.listView') : t('launcher.categoryView')"
                 class="mode-button"
                 @click="toggleViewMode"
@@ -33,6 +34,7 @@
               </el-icon>
             </button>
             <button
+                :aria-label="t('launcher.refreshApps')"
                 :class="{ spinning: isRefreshing }"
                 :title="t('launcher.refreshApps')"
                 class="mode-button"
@@ -44,6 +46,7 @@
               </el-icon>
             </button>
             <button
+                :aria-label="t('launcher.manageCategories')"
                 :title="t('launcher.manageCategories')"
                 class="mode-button"
                 @click="showCategoryManager = true"
@@ -54,6 +57,7 @@
               </el-icon>
             </button>
             <button
+                :aria-label="t('launcher.manageCommands')"
                 :title="t('launcher.manageCommands')"
                 class="mode-button"
                 @click="showCommandManager = true"
@@ -64,6 +68,7 @@
               </el-icon>
             </button>
             <button
+                :aria-label="t('launcher.addApp')"
                 :title="t('launcher.addApp')"
                 class="mode-button"
                 @click="showAddManualDialog = true"
@@ -74,6 +79,8 @@
               </el-icon>
             </button>
             <button
+                :aria-label="t('common.close')"
+                :title="t('common.close')"
                 class="close-button"
                 @click="hideLauncher"
                 @mousedown.stop
@@ -816,8 +823,7 @@ onBeforeUnmount(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: var(--fy-bg-overlay);
-  opacity: 0.85;
+  background: var(--fy-mask-bg);
   display: flex;
   align-items: center;
   justify-content: center;

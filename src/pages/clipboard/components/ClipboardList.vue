@@ -704,7 +704,7 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
 .clipboard-item.selected {
   background: var(--fy-accent-bg);
   border-color: var(--fy-border-active);
-  box-shadow: 0 4px 28px rgba(108, 140, 255, 0.2), 0 8px 32px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 28px color-mix(in srgb, var(--fy-accent) 20%, transparent), 0 8px 32px rgba(0, 0, 0, 0.12);
 }
 
 .clipboard-item.pinned {
@@ -712,7 +712,7 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
 }
 
 .clipboard-item:hover {
-  box-shadow: 0 4px 24px rgba(108, 140, 255, 0.15), 0 8px 32px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 24px color-mix(in srgb, var(--fy-accent) 15%, transparent), 0 8px 32px rgba(0, 0, 0, 0.12);
 }
 
 .item-header {
@@ -727,7 +727,7 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
   font-size: 10px;
   font-family: var(--fy-font-mono);
   color: var(--fy-text-muted);
-  opacity: 0.5;
+  opacity: 0.8;
   transition: opacity 0.2s;
 }
 
@@ -740,7 +740,7 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
 .item-category {
   font-size: 10px;
   color: var(--fy-text-muted);
-  opacity: 0.6;
+  opacity: 0.8;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -779,6 +779,10 @@ defineExpose({contentRef, jumpToStart, jumpToEnd})
 .action-btn {
   width: 16px;
   height: 16px;
+  /* 扩大实际点击区域至 24x24，视觉尺寸不变 */
+  padding: 4px;
+  margin: -4px;
+  background-clip: content-box;
   border-radius: 3px;
   background: transparent;
   border: none;

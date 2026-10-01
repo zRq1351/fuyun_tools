@@ -193,9 +193,10 @@
 import {computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
-import {LogicalSize, PhysicalPosition} from '@tauri-apps/api/dpi'
+import {PhysicalPosition, PhysicalSize} from '@tauri-apps/api/dpi'
 import {currentMonitor} from '@tauri-apps/api/window'
 import {DocumentService} from '../../services/ipc.js'
+import {useWindowDpi} from '../../composables/useWindowDpi'
 import ContextMenu from '../../components/ContextMenu.vue'
 import {
   Folder, FolderOpened, Loading, Refresh,
@@ -205,6 +206,7 @@ import {
 
 const {t} = useI18n()
 const appWindow = getCurrentWebviewWindow()
+const {toPhysical, clampToMonitor} = useWindowDpi()
 
 const stats = ref(null)
 const roots = ref([])
@@ -369,13 +371,14 @@ async function pinTopRight(width, height) {
       await appWindow.setAlwaysOnTop(false)
     } catch {
     }
-    await appWindow.setSize(new LogicalSize(width, height))
+    await appWindow.setSize(new PhysicalSize(toPhysical(width), toPhysical(height)))
     const mon = await currentMonitor()
     if (!mon) return
     // 贴死右上角（0 内缩）；收起态再让窗口往屏幕外多压 1px，保证最边缘像素可命中
     const size = await appWindow.outerSize()
-    let nx = mon.position.x + mon.size.width - size.width
-    let ny = mon.position.y
+    const clamped = await clampToMonitor(mon.position.x + mon.size.width - size.width, mon.position.y, size.width, size.height)
+    let nx = clamped.x
+    let ny = clamped.y
     if (!expanded.value) {
       nx += 1
       ny -= 1

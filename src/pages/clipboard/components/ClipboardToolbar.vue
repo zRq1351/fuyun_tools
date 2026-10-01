@@ -381,6 +381,10 @@ const handleToggleReorder = () => {
   justify-content: center;
   width: 14px;
   height: 14px;
+  /* 扩大实际点击区域至 24x24，视觉尺寸不变 */
+  padding: 5px;
+  margin: -5px;
+  background-clip: content-box;
   border-radius: 50%;
   background: var(--fy-bg-overlay);
   color: inherit;

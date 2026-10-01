@@ -300,8 +300,8 @@ onBeforeUnmount(() => {
   border-radius: var(--fy-radius-sm);
   cursor: pointer;
   font-size: var(--fy-text-base);
-  backdrop-filter: blur(20px) saturate(150%);
-  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: var(--fy-backdrop-blur-light);
+  -webkit-backdrop-filter: var(--fy-backdrop-blur-light);
   transition: all 0.15s ease;
   user-select: none;
 }

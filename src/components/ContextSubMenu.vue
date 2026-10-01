@@ -2,6 +2,8 @@
   <div
       ref="itemRef"
       class="context-menu-item context-menu-item-sub"
+      aria-haspopup="menu"
+      :aria-expanded="subOpen"
       @mouseenter="openSub"
       @mouseleave="onLeave"
   >

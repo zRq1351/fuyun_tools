@@ -115,6 +115,11 @@ watch(() => props.modelValue, (newVal) => {
   box-shadow: 0 0 0 2px var(--fy-accent-bg);
 }
 
+.search-input:focus-visible {
+  outline: 2px solid var(--fy-accent);
+  outline-offset: 2px;
+}
+
 .search-input::placeholder {
   color: var(--fy-text-muted);
 }

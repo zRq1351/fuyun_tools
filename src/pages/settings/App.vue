@@ -1673,17 +1673,17 @@ body {
 }
 
 .content .el-button--primary {
-  box-shadow: 0 1px 3px rgba(108, 140, 255, 0.25);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--fy-accent) 25%, transparent);
 }
 
 .content .el-button--primary:hover {
-  box-shadow: 0 2px 8px rgba(108, 140, 255, 0.35);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--fy-accent) 35%, transparent);
   transform: translateY(-1px);
 }
 
 .content .el-button--primary:active {
   transform: translateY(0);
-  box-shadow: 0 1px 2px rgba(108, 140, 255, 0.2);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--fy-accent) 20%, transparent);
 }
 
 .content .el-input__wrapper {
@@ -1698,7 +1698,7 @@ body {
 
 .content .el-input__wrapper.is-focus {
   box-shadow: 0 0 0 1px var(--fy-accent) inset,
-  0 0 0 3px rgba(108, 140, 255, 0.12);
+  0 0 0 3px var(--fy-accent-bg);
 }
 
 .content .el-select .el-input__wrapper {

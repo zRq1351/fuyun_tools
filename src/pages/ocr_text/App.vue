@@ -1,9 +1,10 @@
 <template>
-  <div
-      :class="['ocr-text-root', `theme-${currentTheme}`]"
-      @dblclick.left.stop.prevent="closeWindow"
-  >
-    <div class="drag-handle-wrap">
+  <div :class="['ocr-text-root', `theme-${currentTheme}`]">
+    <div
+        class="drag-handle-wrap"
+        :title="t('common.close')"
+        @dblclick.left.stop.prevent="closeWindow"
+    >
       <div
           class="drag-handle"
           @mousedown.left.stop.prevent="startDrag"
@@ -14,7 +15,6 @@
         class="ocr-editor"
         :placeholder="t('ocrText.noResult')"
         spellcheck="false"
-        @dblclick.left.stop.prevent="closeWindow"
     />
   </div>
 </template>

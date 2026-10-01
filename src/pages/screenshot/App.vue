@@ -115,7 +115,7 @@
           class="region-icon-btn"
           @click.stop="cancelSelection"
       >
-        <RefreshLeft class="tool-icon-wrap"/>
+        <RotateCcw class="tool-icon-wrap"/>
       </button>
       <button
           :title="t('screenshot.cancel')"
@@ -137,14 +137,14 @@
           :title="manualLongshotRunning ? t('screenshot.pauseLongshot') : t('screenshot.startLongshot')"
           @click.stop="toggleManualLongshotRunning"
       >
-        <span
+        <Pause
             v-if="manualLongshotRunning"
-            style="font-size: 12px;"
-        >||</span>
-        <span
+            :size="12"
+        />
+        <Play
             v-else
-            style="font-size: 12px;"
-        >▶</span>
+            :size="12"
+        />
       </button>
       <button
           class="region-icon-btn"
@@ -159,7 +159,7 @@
           class="region-icon-btn"
           @click.stop="cancelSelection"
       >
-        <RefreshLeft class="tool-icon-wrap"/>
+        <RotateCcw class="tool-icon-wrap"/>
       </button>
       <button
           :title="t('screenshot.cancelLongshot')"
@@ -280,7 +280,7 @@
             class="tool-btn"
             @click="undo"
         >
-          <RefreshLeft class="tool-icon-wrap"/>
+          <Undo2 class="tool-icon-wrap"/>
         </button>
         <button
             :disabled="historyIndex >= history.length - 1"
@@ -288,7 +288,7 @@
             class="tool-btn"
             @click="redo"
         >
-          <RefreshRight class="tool-icon-wrap"/>
+          <Redo2 class="tool-icon-wrap"/>
         </button>
 
         <div class="divider"/>
@@ -299,7 +299,7 @@
             class="tool-btn"
             @click="copyToClipboardLinked"
         >
-          <DocumentCopy class="tool-icon-wrap"/>
+          <Copy class="tool-icon-wrap"/>
         </button>
         <button
             :disabled="!canExport"
@@ -407,7 +407,7 @@
               class="tool-btn mini"
               @click="toggleTextBold"
           >
-            B
+            <Bold :size="12"/>
           </button>
           <button
               :class="{ active: textStyle.stroke }"
@@ -415,7 +415,7 @@
               class="tool-btn mini"
               @click="toggleTextStroke"
           >
-            描
+            <PenLine :size="12"/>
           </button>
           <input
               v-if="textStyle.stroke"
@@ -431,7 +431,7 @@
               class="tool-btn mini"
               @click="toggleTextShadow"
           >
-            影
+            <Layers :size="12"/>
           </button>
         </template>
       </div>
@@ -618,24 +618,34 @@ import {computed, nextTick, onMounted, onUnmounted, reactive, ref, watchPostEffe
 import {invoke} from '@tauri-apps/api/core'
 import {buildFileUrlFromPath} from '../../utils/fileUrl'
 import {emit, listen} from '@tauri-apps/api/event'
-import {Check, Circle, Pin, Square, X} from 'lucide-vue-next'
 import {
-  Brush,
+  ArrowUpRight,
+  Bold,
+  Check,
+  Circle,
+  Copy,
   Crop,
-  DocumentCopy,
   Download,
-  Edit,
-  EditPen,
-  Flag,
-  Grid,
-  Hide,
-  MagicStick,
+  EyeOff,
+  Grid3x3,
+  Hash,
+  Highlighter,
+  Layers,
   Minus,
-  Pointer,
-  RefreshLeft,
-  RefreshRight,
-  TopRight
-} from '@element-plus/icons-vue'
+  MousePointer2,
+  Pause,
+  PenLine,
+  Pencil,
+  Pin,
+  Pipette,
+  Play,
+  Redo2,
+  RotateCcw,
+  Square,
+  Type,
+  Undo2,
+  X
+} from 'lucide-vue-next'
 import {useI18n} from 'vue-i18n'
 import {ScreenshotService} from '@/services/ipc.js'
 import {parseErrorMessage} from '@/utils/errorHandler.js'
@@ -846,18 +856,18 @@ const dpr = window.devicePixelRatio || 1
 
 // 定义工具
 const drawingTools = [
-  {id: 'select', name: 'screenshot.selectMove', icon: Pointer},
-  {id: 'pen', name: 'screenshot.brush', icon: EditPen},
-  {id: 'highlight', name: 'screenshot.highlight', icon: MagicStick},
+  {id: 'select', name: 'screenshot.selectMove', icon: MousePointer2},
+  {id: 'pen', name: 'screenshot.brush', icon: Pencil},
+  {id: 'highlight', name: 'screenshot.highlight', icon: Highlighter},
   {id: 'line', name: 'screenshot.line', icon: Minus},
-  {id: 'arrow', name: 'screenshot.arrow', icon: TopRight},
+  {id: 'arrow', name: 'screenshot.arrow', icon: ArrowUpRight},
   {id: 'rect', name: 'screenshot.rectangle', icon: Square},
   {id: 'circle', name: 'screenshot.circle', icon: Circle},
-  {id: 'number', name: 'screenshot.numberCallout', icon: Flag},
-  {id: 'redact', name: 'screenshot.redact', icon: Hide},
-  {id: 'text', name: 'screenshot.text', icon: Edit},
-  {id: 'mosaic', name: 'screenshot.mosaic', icon: Grid},
-  {id: 'picker', name: 'screenshot.colorPicker', icon: Brush}
+  {id: 'number', name: 'screenshot.numberCallout', icon: Hash},
+  {id: 'redact', name: 'screenshot.redact', icon: EyeOff},
+  {id: 'text', name: 'screenshot.text', icon: Type},
+  {id: 'mosaic', name: 'screenshot.mosaic', icon: Grid3x3},
+  {id: 'picker', name: 'screenshot.colorPicker', icon: Pipette}
 ]
 const isDevMode = import.meta.env.DEV
 
@@ -4719,7 +4729,7 @@ function handleKeyDown(event) {
   position: absolute;
   background: var(--fy-bg-surface);
   border: 1px solid var(--fy-border);
-  border-radius: 8px;
+  border-radius: var(--fy-radius-xl);
   padding: 5px;
   display: flex;
   flex-direction: column;
@@ -4749,7 +4759,7 @@ function handleKeyDown(event) {
   justify-content: center;
   align-items: center;
   font-size: 14px;
-  transition: all 0.15s ease;
+  transition: all var(--fy-duration-fast) ease;
 }
 
 .tool-btn:hover {

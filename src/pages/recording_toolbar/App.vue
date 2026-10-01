@@ -88,7 +88,7 @@
             type="button"
             @click.stop="closeCapsule"
         >
-          ×
+          <X :size="14"/>
         </button>
       </div>
       <div
@@ -146,7 +146,7 @@
                   :title="t('recordingToolbar.repeatLastTarget')"
                   @click="onRepeatLastTarget"
               >
-                ↻
+                <RotateCcw :size="15"/>
               </button>
             </div>
           </div>
@@ -377,7 +377,7 @@ import {invoke} from "@tauri-apps/api/core";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import {AISettingsService, RecordingService} from "@/services/ipc.js";
 import {parseErrorMessage} from "@/utils/errorHandler.js";
-import {GripVertical, Mic, MicOff, Settings} from "lucide-vue-next";
+import {GripVertical, Mic, MicOff, RotateCcw, Settings, X} from "lucide-vue-next";
 
 const {t} = useI18n()
 
@@ -575,7 +575,7 @@ const syncCapsuleLayout = async () => {
       const targetHeight = measureCapsuleContentHeight();
       await RecordingService.resizeToolbar(false, true, true, "capsule", false, targetHeight, null, true);
 
-      // Phase 2: Wait for CSS transition to complete (0.18s)
+      // Phase 2: Wait for CSS transition to complete (0.2s)
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       // Phase 3: Now shrink window width to 226px and height to 40px. The .bar is already small so no clipping.
@@ -1732,18 +1732,18 @@ body {
   gap: 8px;
   background: var(--fy-bg-primary);
   border: none;
-  border-radius: 10px;
+  border-radius: var(--fy-radius-xl);
   padding: 8px;
   flex-wrap: nowrap;
   white-space: nowrap;
   overflow: hidden;
   cursor: default;
   -webkit-app-region: no-drag;
-  transition: width 0.18s ease-out,
-  min-height 0.18s ease-out,
-  border-radius 0.18s ease-out,
-  padding 0.18s ease-out,
-  background 0.15s ease;
+  transition: width var(--fy-duration-normal) ease-out,
+  min-height var(--fy-duration-normal) ease-out,
+  border-radius var(--fy-duration-normal) ease-out,
+  padding var(--fy-duration-normal) ease-out,
+  background var(--fy-duration-fast) ease;
 }
 
 .bar.bar-collapsed {
@@ -1769,7 +1769,7 @@ body {
   align-items: stretch;
   padding: 12px;
   width: 400px;
-  border-radius: 12px;
+  border-radius: var(--fy-radius-lg);
   background: var(--fy-bg-primary);
   border: 1px solid var(--fy-border-light);
   clip-path: none;
@@ -1814,7 +1814,7 @@ body {
   cursor: pointer;
   background-clip: padding-box;
   clip-path: inset(0 round 999px);
-  transition: background 0.2s ease, border-color 0.2s ease;
+  transition: background var(--fy-duration-normal) ease, border-color var(--fy-duration-normal) ease;
 }
 
 .collapsed-pill:hover {
@@ -1905,10 +1905,10 @@ body {
   position: relative;
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 0.18s ease-out,
-  margin-top 0.18s ease-out,
-  padding-top 0.18s ease-out,
-  border-top-color 0.15s ease-out;
+  transition: grid-template-rows var(--fy-duration-normal) ease-out,
+  margin-top var(--fy-duration-normal) ease-out,
+  padding-top var(--fy-duration-normal) ease-out,
+  border-top-color var(--fy-duration-fast) ease-out;
   width: 100%;
   margin-top: 0;
   padding-top: 0;
@@ -1931,7 +1931,7 @@ body {
   overflow: hidden;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s ease-out;
+  transition: opacity var(--fy-duration-fast) ease-out;
   padding-right: 4px;
   box-sizing: border-box;
   background: transparent;
@@ -2008,7 +2008,7 @@ body {
 .capsule-settings-panel-wrapper.is-open .capsule-settings-panel {
   opacity: 1;
   pointer-events: auto;
-  transition: opacity 0.2s ease-out 0.05s;
+  transition: opacity var(--fy-duration-normal) ease-out 0.05s;
 }
 
 
@@ -2027,7 +2027,7 @@ body {
   box-sizing: border-box;
   position: relative;
   cursor: pointer;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--fy-duration-normal) ease;
 }
 
 .toolbar-inline-notice:hover {
@@ -2278,7 +2278,7 @@ body {
   color: var(--fy-text-primary);
   border-radius: 999px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--fy-duration-fast) ease;
   padding: 0;
   flex-shrink: 0;
 }
@@ -2350,7 +2350,7 @@ button:focus-visible,
 }
 
 button, [role="button"] {
-  transition: transform 0.12s var(--fy-ease-out), filter 0.12s var(--fy-ease-out), opacity 0.15s var(--fy-ease-out);
+  transition: transform 0.12s var(--fy-ease-out), filter 0.12s var(--fy-ease-out), opacity var(--fy-duration-fast) var(--fy-ease-out);
 }
 
 button:active:not(:disabled),
@@ -2396,7 +2396,7 @@ button:active:not(:disabled),
   font-size: 96px; font-weight: 700;
   color: var(--fy-text-primary);
   background: var(--fy-glass-bg);
-  backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: var(--fy-glass-blur-heavy);
   border-radius: 50%;
   animation: countdown-pop 0.5s ease-out;
 }
@@ -2404,7 +2404,7 @@ button:active:not(:disabled),
   margin-top: 12px; font-size: 13px;
   color: var(--fy-text-secondary);
   background: var(--fy-glass-bg);
-  backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: var(--fy-backdrop-blur-light);
   padding: 4px 16px;
   border-radius: 20px;
 }

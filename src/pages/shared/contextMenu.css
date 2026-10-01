@@ -64,6 +64,11 @@
     padding-left: 16px;
 }
 
+/* 键盘导航通过 .context-menu-item-active 呈现，避免双重高亮 */
+.context-menu-item:focus {
+    outline: none;
+}
+
 .context-menu-item-danger {
     color: var(--el-color-danger);
 }

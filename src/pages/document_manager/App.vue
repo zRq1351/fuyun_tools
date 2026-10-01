@@ -20,7 +20,11 @@
         <div
             v-if="orphanCount > 0"
             class="dm-orphan-banner"
+            role="button"
+            tabindex="0"
             @click="showOrphanDialog = true"
+            @keydown.enter.prevent="showOrphanDialog = true"
+            @keydown.space.prevent="showOrphanDialog = true"
         >
           <span class="dm-orphan-badge">{{ orphanCount }}</span>
           <span>个未管理文件</span>
@@ -31,7 +35,11 @@
         <div
             v-else-if="!orphanChecked"
             class="dm-orphan-banner dm-orphan-banner--hint"
+            role="button"
+            tabindex="0"
             @click="detectOrphans"
+            @keydown.enter.prevent="detectOrphans"
+            @keydown.space.prevent="detectOrphans"
         >
           <el-icon :size="14">
             <Search/>
@@ -61,7 +69,11 @@
                 :class="{ active: rootFilter === root.id }"
                 :data-root-id="root.id"
                 class="dm-root-item sortable-root"
+                role="button"
+                tabindex="0"
                 @click="selectRoot(root, $event)"
+                @keydown.enter.prevent="selectRoot(root, $event)"
+                @keydown.space.prevent="selectRoot(root, $event)"
             >
               <el-icon>
                 <Folder/>
@@ -106,7 +118,11 @@
                 v-if="rootFilter !== null"
                 :class="{ active: categoryFilter === null }"
                 class="dm-category-item dm-cat-all"
+                role="button"
+                tabindex="0"
                 @click="categoryFilter = null"
+                @keydown.enter.prevent="categoryFilter = null"
+                @keydown.space.prevent="categoryFilter = null"
             >
               <el-icon>
                 <Document/>
@@ -130,7 +146,11 @@
                   :class="{ active: categoryFilter === cat.id }"
                   :data-cat-id="cat.id"
                   class="dm-category-item sortable-category"
+                  role="button"
+                  tabindex="0"
                   @click="selectCategory(cat, $event)"
+                  @keydown.enter.prevent="selectCategory(cat, $event)"
+                  @keydown.space.prevent="selectCategory(cat, $event)"
               >
                 <el-icon :style="{ color: cat.color }">
                   <component :is="getCatIcon(cat.icon)"/>
@@ -168,7 +188,11 @@
                 v-if="rootFilter !== null && categories && categories.length > 0"
                 :class="{ active: categoryFilter === -1 }"
                 class="dm-category-item dm-cat-uncat"
+                role="button"
+                tabindex="0"
                 @click="categoryFilter = categoryFilter === -1 ? null : -1"
+                @keydown.enter.prevent="categoryFilter = categoryFilter === -1 ? null : -1"
+                @keydown.space.prevent="categoryFilter = categoryFilter === -1 ? null : -1"
             >
               <el-icon>
                 <Folder/>
@@ -331,7 +355,11 @@
                 :class="{ selected: selectedId === item.id || multiSelectedIds.has(item.id), 'ctx-anchor': ctxAnchorId === item.id }"
                 :data-file-id="item.id"
                 class="dm-file-card sortable-file"
+                role="button"
+                tabindex="0"
                 @click="onFileCardClick(item, $event)"
+                @keydown.enter.prevent="onFileCardClick(item, $event)"
+                @keydown.space.prevent="onFileCardClick(item, $event)"
                 @dblclick="openDocument(item)"
                 @contextmenu.prevent="showContextMenu($event, item)"
             >
@@ -916,7 +944,11 @@
               :key="f.path"
               :class="{ checked: scanSelected.has(f.path) }"
               class="dm-scan-file-item"
+              role="button"
+              tabindex="0"
               @click="toggleScanSelect(f.path)"
+              @keydown.enter.prevent="toggleScanSelect(f.path)"
+              @keydown.space.prevent="toggleScanSelect(f.path)"
           >
             <el-icon v-if="scanSelected.has(f.path)">
               <Select/>
@@ -1143,7 +1175,11 @@
             :key="f.path"
             :class="{ checked: orphanSelected.has(f.path) }"
             class="dm-scan-file-item"
+            role="button"
+            tabindex="0"
             @click="toggleOrphan(f.path)"
+            @keydown.enter.prevent="toggleOrphan(f.path)"
+            @keydown.space.prevent="toggleOrphan(f.path)"
         >
           <el-icon v-if="orphanSelected.has(f.path)">
             <Select/>
@@ -2475,6 +2511,16 @@ onBeforeUnmount(() => {
   background: var(--fy-bg-primary);
   color: var(--fy-text-primary);
   position: relative
+}
+
+/* 键盘可达性：可点击 div 的统一焦点样式 */
+.dm-orphan-banner:focus-visible,
+.dm-root-item:focus-visible,
+.dm-category-item:focus-visible,
+.dm-file-card:focus-visible,
+.dm-scan-file-item:focus-visible {
+  outline: 2px solid var(--fy-accent);
+  outline-offset: 2px;
 }
 
 .dm-batch-bar {

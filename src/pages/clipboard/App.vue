@@ -1147,24 +1147,6 @@ onBeforeUnmount(() => {
   margin-left: 12px;
 }
 
-.nav-action-btn {
-  appearance: none;
-  border: 1px solid var(--fy-border);
-  background: var(--fy-glass-bg);
-  color: var(--fy-text-secondary);
-  border-radius: var(--fy-radius-sm);
-  font-size: var(--fy-text-xs);
-  line-height: 1;
-  font-weight: var(--fy-weight-semibold);
-  padding: var(--fy-space-2) var(--fy-space-3);
-  min-height: 30px;
-  cursor: pointer;
-  transition: all var(--fy-duration-normal) var(--fy-ease-out);
-  box-shadow: none;
-  backdrop-filter: var(--fy-glass-blur-light);
-  -webkit-backdrop-filter: var(--fy-glass-blur-light);
-}
-
 .icon-btn {
   flex: 0 0 auto;
   width: 32px;
@@ -1178,17 +1160,6 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   font-weight: var(--fy-weight-bold);
-}
-
-.nav-action-btn:hover {
-  border-color: var(--fy-accent);
-  background: var(--fy-accent-bg);
-  color: var(--fy-accent);
-}
-
-.nav-action-btn:focus-visible {
-  outline: 2px solid var(--fy-accent);
-  outline-offset: 2px;
 }
 
 .ai-quick-top {

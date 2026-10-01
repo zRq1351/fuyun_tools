@@ -698,7 +698,7 @@ onBeforeUnmount(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--fy-mask-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -792,6 +792,11 @@ onBeforeUnmount(() => {
   padding-left: 0;
 }
 
+.prefix-input:focus-visible {
+  outline: 2px solid var(--fy-accent);
+  outline-offset: 2px;
+}
+
 .form-input, .form-select {
   width: 100%;
   padding: 8px 12px;
@@ -807,6 +812,11 @@ onBeforeUnmount(() => {
 
 .form-input:focus, .form-select:focus {
   border-color: var(--fy-accent);
+}
+
+.form-input:focus-visible, .form-select:focus-visible {
+  outline: 2px solid var(--fy-accent);
+  outline-offset: 2px;
 }
 
 .form-hint {

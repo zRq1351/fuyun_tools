@@ -17,14 +17,16 @@
             class="region-icon-btn"
             @click="togglePause"
         >
-          <span
+          <Play
               v-if="paused"
+              :size="12"
               class="btn-icon"
-          >▶</span>
-          <span
+          />
+          <Pause
               v-else
+              :size="12"
               class="btn-icon"
-          >||</span>
+          />
         </button>
         <button
             :disabled="phase === 'finishing' || phase === 'canceling' || phase === 'failed'"
@@ -88,7 +90,7 @@ import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {invoke} from '@tauri-apps/api/core'
 import {listen} from '@tauri-apps/api/event'
 import {useI18n} from 'vue-i18n'
-import {Check, X} from 'lucide-vue-next'
+import {Check, Pause, Play, X} from 'lucide-vue-next'
 
 const {t} = useI18n()
 const paused = ref(false)
@@ -248,7 +250,7 @@ const viewportStyle = computed(() => {
   height: 100%;
   background: var(--fy-bg-primary);
   border: none;
-  border-radius: 10px;
+  border-radius: var(--fy-radius-xl);
   box-sizing: border-box;
   padding: 8px;
   color: var(--fy-text-primary);
@@ -285,8 +287,7 @@ const viewportStyle = computed(() => {
   justify-content: center;
   padding: 0;
   cursor: pointer;
-  backdrop-filter: blur(2px);
-  transition: all 0.15s var(--fy-ease-out);
+  transition: all var(--fy-duration-fast) var(--fy-ease-out);
 }
 
 .region-icon-btn:hover {
@@ -364,7 +365,7 @@ const viewportStyle = computed(() => {
   height: 100%;
   object-fit: contain;
   image-rendering: auto;
-  transition: opacity 0.2s var(--fy-ease-out);
+  transition: opacity var(--fy-duration-normal) var(--fy-ease-out);
 }
 .viewport-marker {
   position: absolute;
