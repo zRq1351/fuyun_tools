@@ -806,19 +806,38 @@ impl ClipboardManager {
         // history 锁在此释放，所有内存状态已一致
 
         // === 阶段二：异步持久化到数据库（无需持有锁）===
+        // 先全量落库让新 item_id 的行存在：旧行及其 categories/pinned 映射会随全量同步
+        // 一并删除（目标表无外键级联，按 "非期望 item_id 即删" 清理），
+        // 否则 set_item_category/pin_item 的存在性检查返回 DatabaseTargetNotFound 被吞掉，
+        // 分类/置顶映射在 DB 中丢失
+        crate::utils::database::save_history_items_only_async(&self.get_history()).await?;
         if let Some((item_id, cat)) = category_to_db {
-            let _ = crate::utils::database::set_item_category(&item_id, &cat).await;
+            crate::utils::database::set_item_category(&item_id, &cat).await?;
         }
         let _ = crate::utils::database::remove_item_category(old_item_id).await;
 
         if was_pinned {
-            let _ = crate::utils::database::pin_item(&new_item_id).await;
+            crate::utils::database::pin_item(&new_item_id).await?;
             let _ = crate::utils::database::unpin_item(old_item_id).await;
         }
 
         self.enqueue_history_only_persist();
 
         Ok(())
+    }
+
+    /// 重排历史记录内存顺序（镜像图片侧 reorder_items_async），调用方负责 DB 持久化
+    pub fn reorder_history_in_memory(&self, item_ids: &[String]) {
+        let mut history = lock_arc_mutex(&self.history);
+        let new_history = reorder_contents_by_item_ids(&history, item_ids);
+        *history = new_history;
+        // 顺序变化：失效索引缓存并重建指纹/指纹索引（与 update_item_content 同锁序）
+        self.exact_index_cache.lock().clear();
+        self.history_cache_dirty.store(true, Ordering::Relaxed);
+        let mut fingerprints = lock_arc_mutex(&self.history_fingerprints);
+        *fingerprints = build_history_fingerprints(&history);
+        let mut fingerprint_index = self.fingerprint_index.lock();
+        *fingerprint_index = build_fingerprint_index(&fingerprints);
     }
 
     /// 清空历史记录
@@ -1353,6 +1372,28 @@ fn apply_pin_order(history: &mut Vec<String>, pinned_items: &[String]) {
     history.extend(unpinned_list);
 }
 
+/// 按 item_ids（十六进制文本哈希）重排历史内容；未提及的条目保持相对顺序追加在末尾
+/// 语义与图片侧 ImageClipboardManager::reorder_items_async 一致
+fn reorder_contents_by_item_ids(history: &[String], item_ids: &[String]) -> Vec<String> {
+    let mut taken: HashSet<u64> = HashSet::new();
+    let mut reordered: Vec<String> = Vec::with_capacity(history.len());
+    for id in item_ids {
+        if let Ok(hash) = u64::from_str_radix(id, 16) {
+            if taken.insert(hash) {
+                if let Some(content) = history.iter().find(|c| stable_text_hash(c) == hash) {
+                    reordered.push(content.clone());
+                }
+            }
+        }
+    }
+    for content in history {
+        if !taken.contains(&stable_text_hash(content)) {
+            reordered.push(content.clone());
+        }
+    }
+    reordered
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1555,5 +1596,80 @@ mod tests {
         let combined = combine_persist_errors(Ok(()), Err("c".into()), Ok(()));
         assert_eq!(combined.unwrap_err(), "categories: c");
         assert!(combine_persist_errors(Ok(()), Ok(()), Ok(())).is_ok());
+    }
+
+    /// F5 回归：按 item_ids 重排内存历史顺序（镜像图片侧语义）
+    #[test]
+    fn test_reorder_contents_by_item_ids_applies_given_order() {
+        let history = vec!["甲".to_string(), "乙".to_string(), "丙".to_string()];
+        let ids = vec![
+            crate::utils::database::stable_history_item_id("丙"),
+            crate::utils::database::stable_history_item_id("甲"),
+        ];
+        let out = reorder_contents_by_item_ids(&history, &ids);
+        assert_eq!(
+            out,
+            vec!["丙".to_string(), "甲".to_string(), "乙".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_reorder_contents_by_item_ids_ignores_unknown_and_duplicate() {
+        let history = vec!["a".to_string(), "b".to_string()];
+        let ids = vec![
+            "not-a-hex-id".to_string(),
+            "00000000deadbeef".to_string(), // 不在历史中
+            crate::utils::database::stable_history_item_id("b"),
+            crate::utils::database::stable_history_item_id("b"), // 重复 id 忽略
+        ];
+        let out = reorder_contents_by_item_ids(&history, &ids);
+        assert_eq!(out, vec!["b".to_string(), "a".to_string()]);
+    }
+
+    /// F4 回归：编辑已分类/已置顶的条目后，DB 中新 item_id 仍保留分类与置顶映射
+    #[test]
+    fn test_update_item_content_keeps_category_and_pin_in_db() {
+        let manager = ClipboardManager::new(100, false);
+        tauri::async_runtime::block_on(async {
+            let stamp = crate::utils::utils_helpers::now_unix_ms_i64();
+            let old_content = format!("fuyun_f4_case_old_{}", stamp);
+            let new_content = format!("fuyun_f4_case_new_{}", stamp);
+            let old_id = crate::utils::database::stable_history_item_id(&old_content);
+            let new_id = crate::utils::database::stable_history_item_id(&new_content);
+
+            manager.add_to_history(old_content.clone());
+            // 先让旧行落库，才能给它设置分类/置顶
+            crate::utils::database::save_history_items_only_async(&manager.get_history())
+                .await
+                .unwrap();
+            manager
+                .set_category_async(old_id.clone(), "F4测试分类".to_string())
+                .await
+                .unwrap();
+            manager.set_pinned_async(old_id.clone(), true).await.unwrap();
+
+            manager
+                .update_item_content(&old_id, new_content.clone())
+                .await
+                .unwrap();
+
+            // 回归点：新 item_id 的行已落库，分类/置顶映射迁移到新 id
+            let data = crate::utils::database::load_history_data_async().await.unwrap();
+            assert_eq!(
+                data.categories.get(&new_id).map(String::as_str),
+                Some("F4测试分类"),
+                "编辑后新 item_id 的分类应在 DB 中保留"
+            );
+            assert!(
+                data.pinned_items.contains(&new_id),
+                "编辑后新 item_id 的置顶应在 DB 中保留"
+            );
+            assert!(data.items.contains(&new_content));
+
+            // 清理测试数据，避免残留影响后续运行
+            manager.remove_from_history(&new_id).ok();
+            let _ = crate::utils::database::save_history_items_only_async(&manager.get_history())
+                .await;
+        });
     }
 }

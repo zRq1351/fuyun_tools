@@ -730,6 +730,7 @@ pub async fn save_app_settings(
     recording_default_fps: Option<u32>,
     recording_default_video_bitrate_kbps: Option<u32>,
     recording_default_audio_bitrate_kbps: Option<u32>,
+    recording_quality_preset: Option<String>,
     recording_capture_cursor: Option<bool>,
     recording_capture_system_audio: Option<bool>,
     recording_capture_microphone: Option<bool>,
@@ -894,6 +895,9 @@ pub async fn save_app_settings(
     }
     if let Some(val) = recording_default_audio_bitrate_kbps {
         settings.recording_default_audio_bitrate_kbps = val.clamp(32, 512);
+    }
+    if let Some(val) = recording_quality_preset {
+        settings.recording_quality_preset = val.trim().to_string();
     }
     if let Some(val) = recording_capture_cursor {
         settings.recording_capture_cursor = val;

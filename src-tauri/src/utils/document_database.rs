@@ -2033,6 +2033,30 @@ pub fn safe_move_file(src: &Path, dest: &Path) -> Result<(), String> {
         .map_err(|e| AppErrorKind::InternalError.to_frontend_json_with_details(format!("{}", e)))
 }
 
+/// 回搬/撤销导入专用：目标路径已存在时改名存放（resolve_unused_filename），绝不静默覆盖
+/// 返回实际落盘路径（dest 不存在时即为 dest）
+pub fn safe_restore_file(src: &Path, dest: &Path) -> Result<PathBuf, String> {
+    let final_dest = if dest.exists() {
+        let parent = dest
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let base_name = dest.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+        let ext = dest.extension().and_then(|s| s.to_str()).unwrap_or("");
+        let new_name = resolve_unused_filename(parent, base_name, ext);
+        log::warn!(
+            "回搬目标已存在，避免覆盖改名存放: {} -> {}",
+            dest.display(),
+            new_name
+        );
+        parent.join(new_name)
+    } else {
+        dest.to_path_buf()
+    };
+    safe_move_file(src, &final_dest)?;
+    Ok(final_dest)
+}
+
 pub fn resolve_unused_filename(dir: &std::path::Path, base_name: &str, ext: &str) -> String {
     let name = format!("{}.{}", base_name, ext);
     if !dir.join(&name).exists() {
@@ -2166,7 +2190,7 @@ pub async fn undo_import(import_id: i64) -> Result<Vec<String>, String> {
                 if let Some(parent) = source_path.parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
-                if let Err(e) = safe_move_file(managed_path, source_path) {
+                if let Err(e) = safe_restore_file(managed_path, source_path) {
                     errors.push(format!("回退失败 {}: {}", doc_id, e));
                     continue;
                 }
@@ -2235,7 +2259,7 @@ pub async fn undo_import_item(import_id: i64, doc_file_id: i64) -> Result<(), St
             if let Some(parent) = source_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            safe_move_file(managed_path, source_path).map_err(|e| {
+            safe_restore_file(managed_path, source_path).map_err(|e| {
                 AppErrorKind::InternalError.to_frontend_json_with_details(e.to_string())
             })?;
         }
@@ -2505,6 +2529,69 @@ mod tests {
         safe_move_file(&src, &dest).unwrap();
         assert!(!src.exists());
         assert!(dest.exists());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // ===== safe_restore_file（回搬/撤销导入不覆盖） =====
+
+    #[test]
+    fn safe_restore_file_renames_when_dest_exists() {
+        let tmp = std::env::temp_dir().join("fuyun_test_restore_1");
+        let src_dir = tmp.join("src");
+        let dest_dir = tmp.join("dest");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dest_dir).unwrap();
+        let src = src_dir.join("doc.txt");
+        let dest = dest_dir.join("doc.txt");
+        fs::write(&src, "仓库副本").unwrap();
+        fs::write(&dest, "用户重建的文件").unwrap();
+
+        let restored = safe_restore_file(&src, &dest).unwrap();
+
+        // 目标原内容不被覆盖
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "用户重建的文件");
+        // 仓库副本改名存放
+        assert_ne!(restored, dest);
+        assert_eq!(fs::read_to_string(&restored).unwrap(), "仓库副本");
+        assert!(!src.exists());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn safe_restore_file_moves_directly_when_dest_absent() {
+        let tmp = std::env::temp_dir().join("fuyun_test_restore_2");
+        let src_dir = tmp.join("src");
+        let dest_dir = tmp.join("dest");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dest_dir).unwrap();
+        let src = src_dir.join("doc.txt");
+        let dest = dest_dir.join("doc.txt");
+        fs::write(&src, "content").unwrap();
+
+        let restored = safe_restore_file(&src, &dest).unwrap();
+
+        assert_eq!(restored, dest);
+        assert!(!src.exists());
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "content");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn fs_rename_overwrites_existing_file_so_restore_must_precheck() {
+        // 行为核对：std::fs::rename 对已存在的同名文件是直接覆盖（Windows 走
+        // MoveFileExW(MOVEFILE_REPLACE_EXISTING)，POSIX 同名替换），
+        // 因此回搬防覆盖必须依赖 dest.exists() 预检改名，不能依赖 rename 失败
+        let tmp = std::env::temp_dir().join("fuyun_test_restore_3");
+        fs::create_dir_all(&tmp).unwrap();
+        let src = tmp.join("a.txt");
+        let dest = tmp.join("b.txt");
+        fs::write(&src, "new").unwrap();
+        fs::write(&dest, "old").unwrap();
+        let rename_result = std::fs::rename(&src, &dest);
+        assert!(
+            rename_result.is_ok() && fs::read_to_string(&dest).unwrap() == "new",
+            "rename 应直接覆盖已存在目标（当前观测行为）"
+        );
         let _ = fs::remove_dir_all(&tmp);
     }
 

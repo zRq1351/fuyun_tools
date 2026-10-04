@@ -1662,8 +1662,14 @@ pub struct ReorderRequest {
 #[tauri::command]
 pub async fn reorder_text_clipboard_items(
     request: ReorderRequest,
-    _state: State<'_, Arc<Mutex<SharedAppState>>>,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
 ) -> Result<(), String> {
+    // 先同步内存 ClipboardManager 顺序（镜像图片侧实现），再写 DB position
+    {
+        let manager_arc = get_clipboard_manager_arc(state.inner());
+        let manager = lock_arc_mutex(&manager_arc);
+        manager.reorder_history_in_memory(&request.item_ids);
+    }
     crate::utils::database::reorder_history_items_async(&request.item_ids).await
 }
 

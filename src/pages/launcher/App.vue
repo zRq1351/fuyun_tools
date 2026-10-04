@@ -448,7 +448,11 @@ const handleSelect = async (item) => {
     await executeAction(item)
     hideLauncher()
   } catch (error) {
-    if (error === 'APP_NOT_FOUND') {
+    // 后端 reject 的可能是字符串 'APP_NOT_FOUND'，也可能是含该子串的消息/对象
+    const errorText = typeof error === 'string'
+        ? error
+        : (typeof error?.message === 'string' ? error.message : String(error ?? ''))
+    if (errorText.includes('APP_NOT_FOUND')) {
       try {
         await ElMessageBox.confirm(
             t('launcher.appNotFound'),

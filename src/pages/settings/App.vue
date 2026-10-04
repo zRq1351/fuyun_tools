@@ -1142,6 +1142,18 @@ const featureLabels = computed(() => ({
   docManagerEnabled: t('settings.featureLabels.docManagerEnabled'),
 }))
 
+// 开关保存失败/取消时回退表单值：仅在值真正变化时设置抑制标志，
+// 否则没有 watch 事件消费 suppressNextAutoSave，会吞掉用户的下一次修改
+const revertFeatureToggle = (fieldName, targetValue) => {
+  if (form[fieldName] === targetValue) return
+  suppressNextAutoSave.value = true
+  form[fieldName] = targetValue
+  if (saveTimer || pendingPersistSnapshot) {
+    // 已排队的快照可能记录了开关的错误值，按当前表单重建
+    queuePersistSettings(true, 450)
+  }
+}
+
 const handleFeatureToggle = async (fieldName, newValue) => {
   const label = featureLabels.value[fieldName] || fieldName
   const action = newValue ? t('common.enable') : t('common.disable')
@@ -1161,8 +1173,7 @@ const handleFeatureToggle = async (fieldName, newValue) => {
       if (missing.length > 0) {
         loading.close()
         await showVcRuntimeMissingWarning(runtimeStatus)
-        form[fieldName] = !newValue
-        suppressNextAutoSave.value = true
+        revertFeatureToggle(fieldName, !newValue)
         return false
       }
     }
@@ -1184,8 +1195,7 @@ const handleFeatureToggle = async (fieldName, newValue) => {
           )
         } catch {
           ElMessage.info(t('settings.recording.cancelEnableRecording'))
-          form[fieldName] = !newValue
-          suppressNextAutoSave.value = true
+          revertFeatureToggle(fieldName, !newValue)
           return false
         }
         const dl = ElLoading.service({
@@ -1216,14 +1226,24 @@ const handleFeatureToggle = async (fieldName, newValue) => {
     }
     loading.setText(t('settings.enablingFeature', {action: actionVerb, feature: label}))
     await AISettingsService.saveSettings(payload)
-    suppressNextAutoSave.value = true
-    form[fieldName] = newValue
-    saveInitialFormState(buildFormSnapshot())
+    // 只把已持久化的开关字段并入基线。全量 buildFormSnapshot() 重置会把
+    // 尚未保存的其他字段一并标为基线（修改被吞），且与已排队的陈旧快照
+    // diff 后会把开关旧值写回后端
+    if (initialFormState.value) {
+      initialFormState.value = {...initialFormState.value, [fieldName]: newValue}
+    }
+    if (form[fieldName] !== newValue) {
+      suppressNextAutoSave.value = true
+      form[fieldName] = newValue
+    }
+    if (saveTimer || pendingPersistSnapshot) {
+      // 重建 pending 快照（含最新表单值）并重排防抖定时器
+      queuePersistSettings(true, 450)
+    }
     return true
   } catch (error) {
     ElMessage.error(t('common.operationFailed', {error: String(error)}))
-    form[fieldName] = !newValue
-    suppressNextAutoSave.value = true
+    revertFeatureToggle(fieldName, !newValue)
     return false
   } finally {
     const remaining = minUntil - Date.now()

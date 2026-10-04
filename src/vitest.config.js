@@ -6,7 +6,9 @@ export default defineConfig({
         // clipboard-logic.test.js 是 node:test 编写，由 node --test 运行，不纳入 vitest
         include: [
             'tests/{errorHandler,fileUrl,localeManager}.test.js',
-            'tests/{screenshotAnnotation,formatDisplay,diagnosticStatus}.test.js'
+            'tests/{screenshotAnnotation,formatDisplay,diagnosticStatus}.test.js',
+            'tests/{i18nKeys,launcherSearch}.test.js',
+            'tests/clipboardRegression.test.js'
         ],
         globals: false,
     },

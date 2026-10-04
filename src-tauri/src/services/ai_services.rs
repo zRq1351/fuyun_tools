@@ -1,6 +1,7 @@
 use crate::core::app_state::AppState as SharedAppState;
 use crate::core::error::{AppError, AppResult};
 use crate::core::error_codes::AppErrorKind;
+use crate::core::frontend_error::app_error_to_frontend_json;
 use crate::core::perf_metrics::record_perf_metric;
 use crate::services::ai_client::{AIClient, AIConfig};
 use crate::sync::{lock_arc_mutex, Mutex};
@@ -527,7 +528,7 @@ pub async fn stream_translate_text(
     request: StreamTranslateRequest,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
-) -> Result<(), AppError> {
+) -> Result<(), String> {
     execute_stream_request(
         AiStreamKind::Translation,
         StreamExecutionRequest {
@@ -542,6 +543,7 @@ pub async fn stream_translate_text(
         state.inner().clone(),
     )
     .await
+    .map_err(app_error_to_frontend_json)
 }
 
 /// 流式解释文本
@@ -550,7 +552,7 @@ pub async fn stream_explain_text(
     request: StreamExplainRequest,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
-) -> Result<(), AppError> {
+) -> Result<(), String> {
     execute_stream_request(
         AiStreamKind::Explanation,
         StreamExecutionRequest {
@@ -565,6 +567,7 @@ pub async fn stream_explain_text(
         state.inner().clone(),
     )
     .await
+    .map_err(app_error_to_frontend_json)
 }
 
 /// 流式执行自定义 Prompt
@@ -573,7 +576,7 @@ pub async fn stream_custom_prompt_text(
     request: StreamCustomPromptRequest,
     app: AppHandle,
     state: State<'_, Arc<Mutex<SharedAppState>>>,
-) -> Result<(), AppError> {
+) -> Result<(), String> {
     execute_stream_request(
         AiStreamKind::CustomPrompt(request.prompt_name),
         StreamExecutionRequest {
@@ -590,6 +593,7 @@ pub async fn stream_custom_prompt_text(
         state.inner().clone(),
     )
     .await
+    .map_err(app_error_to_frontend_json)
 }
 
 #[cfg(test)]
@@ -625,6 +629,22 @@ mod tests {
             AiStreamKind::CustomPrompt("总结".to_string()).kind_name(),
             "custom_prompt"
         );
+    }
+
+    #[test]
+    fn test_ai_stream_error_boundary_json_parseable() {
+        // 命令边界转换：AppError → 前端 JSON 字符串（修复 [object Object]）
+        let boundary = app_error_to_frontend_json(AppErrorKind::AiNotConfigured.to_app_error());
+        let v: serde_json::Value =
+            serde_json::from_str(&boundary).expect("边界错误应为合法 JSON 字符串");
+        let code = v["code"].as_str().expect("应含 code 字段");
+        assert!(code.starts_with("E_"), "code 应以 E_ 开头: {}", code);
+        assert!(v.get("message").is_some());
+
+        // AppErrorKind 直接序列化路径：E_AI_* 键（对应前端 i18n errorCodes.E_AI_*）
+        let kind_json = AppErrorKind::AiNotConfigured.to_frontend_json();
+        let v2: serde_json::Value = serde_json::from_str(&kind_json).unwrap();
+        assert_eq!(v2["code"], "E_AI_NOT_CONFIGURED");
     }
 
     #[test]

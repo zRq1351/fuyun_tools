@@ -164,7 +164,7 @@
 <script setup>
 import {ref, watch} from 'vue'
 import {useI18n} from 'vue-i18n'
-import {ElMessage} from 'element-plus'
+import {ElMessage, ElMessageBox} from 'element-plus'
 import {Close, Delete, Document, Edit} from '@element-plus/icons-vue'
 import {invoke} from '@tauri-apps/api/core'
 
@@ -226,6 +226,16 @@ const toggleCommand = async (cmd) => {
 // 删除命令
 const deleteCommand = async (cmd) => {
   if (__DEV_PANEL__) console.log('删除命令:', cmd.title, cmd.id)
+
+  try {
+    await ElMessageBox.confirm(
+        t('launcher.deleteCommandConfirm', {prefix: cmd.prefix}),
+        t('common.confirmDelete'),
+        {confirmButtonText: t('common.ok'), cancelButtonText: t('common.cancel'), type: 'warning'}
+    )
+  } catch {
+    return // 用户取消，不发 invoke
+  }
 
   try {
     await invoke('remove_custom_command', {commandId: cmd.id})

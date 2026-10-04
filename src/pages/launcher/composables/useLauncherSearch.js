@@ -130,6 +130,14 @@ export function useLauncherSearch() {
             }
         } catch (error) {
             console.error('[Custom command] Execution failed:', error)
+            const errorText = typeof error === 'string'
+                ? error
+                : (typeof error?.message === 'string' ? error.message : String(error ?? ''))
+            // 应用失效：抛给调用方走「确认移除记录」流程，不能静默吞掉；
+            // 自定义命令保持原有 toast 行为不变
+            if (action !== 'custom_command' && errorText.includes('APP_NOT_FOUND')) {
+                throw error
+            }
             ElMessage({
                 message: t('launcher.actionFailed', {error: error.message || String(error)}),
                 type: 'error',

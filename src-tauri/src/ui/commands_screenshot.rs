@@ -1355,10 +1355,12 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
         log::info!("截图任务已在进行中，忽略重复触发");
         return Ok(());
     }
+    // try_begin 成功后立即持有 RAII 守卫：本函数后续所有 `?` 早退/正常返回
+    // 都在 Drop 时统一复位 SCREENSHOT_IN_PROGRESS，不再依赖分散的手动复位
+    let _screenshot_guard = capture::ScreenshotGuard;
     let (rgba, width, height, origin_x, origin_y) = match capture::capture_full_screen() {
         Ok(data) => data,
         Err(e) => {
-            capture::set_screenshot_in_progress(false);
             record_perf_metric(
                 "screenshot.open_prepare",
                 "截图打开准备耗时",
@@ -1378,7 +1380,6 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
 
     let (image_path, _png_data) = write_screenshot_boot_image(&rgba, width, height, session_id)
         .inspect_err(|e| {
-            capture::set_screenshot_in_progress(false);
             record_perf_metric(
                 "screenshot.open_prepare",
                 "截图打开准备耗时",
@@ -1430,7 +1431,7 @@ pub async fn open_screenshot_editor(app: AppHandle, mode: Option<String>) -> Res
         }),
     );
 
-    capture::set_screenshot_in_progress(false);
+    // 正常路径同样交给 _screenshot_guard 的 Drop 统一复位（与早退路径幂等一致）
     record_perf_metric(
         "screenshot.open_prepare",
         "截图打开准备耗时",

@@ -1,6 +1,6 @@
 import {ref} from 'vue'
 import {useI18n} from 'vue-i18n'
-import {ElMessage} from 'element-plus'
+import {ElMessage, ElMessageBox} from 'element-plus'
 import {invoke} from '@tauri-apps/api/core'
 
 /**
@@ -24,6 +24,16 @@ export function useAppActions(emit) {
 
     const removeApp = async (app) => {
         if (!app || !app.id) return
+        try {
+            // 删除应用记录不可撤销，需二次确认
+            await ElMessageBox.confirm(
+                t('launcher.removeAppConfirm', {title: app.title}),
+                t('common.confirmDelete'),
+                {confirmButtonText: t('common.ok'), cancelButtonText: t('common.cancel'), type: 'warning'}
+            )
+        } catch {
+            return // 用户取消，不发 invoke
+        }
         try {
             await invoke('remove_app_record', {appId: app.id})
             emit('category-changed')

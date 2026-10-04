@@ -119,7 +119,7 @@
             </div>
             <div
                 class="action-btn action-delete"
-                @click.stop="deleteItem(entry.id, entry._index)"
+                @click.stop="deleteItem(entry.id)"
             >
               <Close :size="9"/>
             </div>
@@ -179,6 +179,7 @@ import {computed, onBeforeUnmount, onMounted, ref, watch, nextTick} from 'vue'
 import {Close, Download, FullScreen, Loading, Star} from '@element-plus/icons-vue'
 import {useI18n} from 'vue-i18n'
 import Sortable from 'sortablejs'
+import {visibleToRawIndex} from '../historyListUtils'
 
 const {t} = useI18n()
 
@@ -478,7 +479,8 @@ const onStageClick = (e) => {
 
 const navigateTo = (idx) => {
   scrollPos.value = idx * CARD_STEP
-  props.selectByIndex(idx)
+  // idx 是可见位，selectedIndex 全局语义是原始 history 下标，需换算
+  props.selectByIndex(visibleToRawIndex(props.visibleHistory, idx))
 }
 
 const handleDoubleClick = (itemId) => props.fillById(itemId)

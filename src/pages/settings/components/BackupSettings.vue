@@ -173,7 +173,7 @@
         <div class="card-header">
           <span>{{ $t('settings.backup.backupPreview') }}</span>
           <el-button
-              :disabled="!packagePreview"
+              :disabled="!packagePreview || previewingPackage"
               :loading="restoring"
               type="danger"
               @click="restoreBackup"
@@ -517,6 +517,12 @@ const previewHistoryItem = async (path) => {
     restoreTextHistory.value = response.data.restoreOptions.canRestoreTextHistory
     restoreImageHistory.value = response.data.restoreOptions.canRestoreImageHistory
   } catch (error) {
+    // 预览失败：清掉上一个包的预览与路径，否则会按新 path 执行 A 包的展示
+    packagePreview.value = null
+    packagePath.value = ''
+    restoreSettings.value = true
+    restoreTextHistory.value = true
+    restoreImageHistory.value = true
     ElMessage.error(String(error))
   } finally {
     previewingPackage.value = false

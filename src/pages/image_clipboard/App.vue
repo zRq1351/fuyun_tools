@@ -165,6 +165,7 @@ import {open as openDialog} from '@tauri-apps/plugin-dialog'
 import {ImageCategoryService, ImageClipboardService, WindowService} from '../../services/ipc'
 import ClipboardToolbar from '../clipboard/components/ClipboardToolbar.vue'
 import ImageClipboardList from './components/ImageClipboardList.vue'
+import {applyImagePageToHistory, removeImageHistoryItem} from './historyListUtils'
 import {useWindowOffset} from '../clipboard/composables/useWindowOffset'
 import {useContextMenuState} from '../shared/useContextMenuState'
 import {runCategoryAssignment} from '../shared/categoryActions'
@@ -1115,7 +1116,7 @@ const demoteLocalItemFromTop = (itemId) => {
   bumpFilterDataRevision()
 }
 
-const deleteItem = async (itemId, index) => {
+const deleteItem = async (itemId) => {
   if (!itemId) return
   const snapshot = {
     history: history.value.slice(),
@@ -1137,13 +1138,11 @@ const deleteItem = async (itemId, index) => {
     removeItemCategoryLocal(itemId)
     removeItemTagsLocal(itemId)
     pinnedItems.value = pinnedItems.value.filter((id) => id !== itemId)
-    if (Number.isInteger(index) && index >= 0 && index < history.value.length) {
-      history.value.splice(index, 1)
-      if (selectedIndex.value >= history.value.length) {
-        selectedIndex.value = Math.max(0, history.value.length - 1)
-      }
-      bumpFilterDataRevision()
-    }
+    // 按 id 定位删除：过滤态下卡片传来的可见位不等于原始 history 下标
+    const removed = removeImageHistoryItem(history.value, selectedIndex.value, itemId)
+    history.value = removed.history
+    selectedIndex.value = removed.selectedIndex
+    bumpFilterDataRevision()
     await ImageClipboardService.removeItemById(itemId)
     await syncHistory()
   } catch (error) {
@@ -1478,33 +1477,15 @@ const mergeImagePageIntoState = (data, reset = false) => {
     warmedIndices.clear()
     warmingIndices.clear()
   }
+  // reset 恒为整页重取（offset=0）：先重建空数组再写入，截断旧数据，
+  // 避免交界处残留旧条目/丢失中段条目导致加载更多跨缺口取到重复项
+  history.value = applyImagePageToHistory(history.value, items, baseOffset, reset)
   for (let i = 0; i < items.length; i++) {
     const item = items[i]
     if (!item) continue
-    const position = baseOffset + i
-    history.value[position] = {
-      id: item.id,
-      width: item.width,
-      height: item.height,
-      preview_png_base64: item.previewPngBase64,
-      image_path: item.imagePath
-    }
     setItemCategoryLocal(item.id, item.category || '未分类')
     setItemTagsLocal(item.id, item.tags)
   }
-
-
-  const seenIds = new Set()
-  const compactedHistory = []
-  for (let i = 0; i < history.value.length; i++) {
-    const item = history.value[i]
-    if (!item) continue
-    if (!seenIds.has(item.id)) {
-      seenIds.add(item.id)
-      compactedHistory.push(item)
-    }
-  }
-  history.value = compactedHistory
 
   const pinnedSet = new Set(pinnedItems.value)
   items.forEach((row) => {

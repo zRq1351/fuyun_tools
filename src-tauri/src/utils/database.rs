@@ -580,9 +580,9 @@ fn resolve_history_sort(sort_by: Option<String>, sort_order: Option<String>) -> 
         .to_lowercase();
     match (by.as_str(), order.as_str()) {
         ("pinnedfirst", "asc") | ("pinned_first", "asc") =>
-            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at ASC, hi.position ASC, hi.id ASC",
+            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at ASC, hi.position ASC, hi.updated_at DESC, hi.id DESC",
         ("pinnedfirst", _) | ("pinned_first", _) =>
-            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at DESC, hi.position ASC, hi.id ASC",
+            "CASE WHEN p.item_id IS NULL THEN 1 ELSE 0 END ASC, p.pinned_at DESC, hi.position ASC, hi.updated_at DESC, hi.id DESC",
         ("position", "asc") => "hi.position ASC, hi.id ASC",
         ("position", _) => "hi.position ASC, hi.id ASC",
         ("updatedat", "asc") | ("updated_at", "asc") => "hi.position ASC, hi.updated_at ASC, hi.id ASC",
@@ -1936,6 +1936,75 @@ mod tests {
         .await
         .unwrap();
         pool
+    }
+
+    /// F6 回归：pinnedFirst 分页排序在 position 全为 0（默认）时应按 updated_at 新→旧，
+    /// 与窗口初始内存快照方向一致；置顶项仍排在未置顶之前
+    #[tokio::test]
+    async fn integration_pinned_first_sort_returns_newest_first() {
+        let pool = create_test_pool().await;
+        // 与生产迁移一致：补 position 列（默认 0）
+        sqlx::query("ALTER TABLE history_items ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // 旧、新两条记录（id 为 AUTOINCREMENT：旧 id 小、新 id 大），position 均为默认 0
+        for (content, item_id, ts) in [("旧记录", "old_item", 1000_i64), ("新记录", "new_item", 2000_i64)]
+        {
+            sqlx::query(
+                "INSERT INTO history_items (content, item_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+            )
+            .bind(content)
+            .bind(item_id)
+            .bind(ts)
+            .bind(ts)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        // 阶段一：无置顶时两个 pinnedFirst 分支都应返回新→旧（修复前为旧→新）
+        for sort_order in ["desc", "asc"] {
+            let clause = resolve_history_sort(
+                Some("pinnedFirst".to_string()),
+                Some(sort_order.to_string()),
+            );
+            let sql = format!(
+                "SELECT hi.content FROM history_items hi
+                 LEFT JOIN pinned_items p ON p.item_id = hi.item_id
+                 ORDER BY {}",
+                clause
+            );
+            let rows: Vec<String> = sqlx::query_scalar(&sql).fetch_all(&pool).await.unwrap();
+            assert_eq!(
+                rows,
+                vec!["新记录".to_string(), "旧记录".to_string()],
+                "pinnedFirst/{} 应返回新→旧",
+                sort_order
+            );
+        }
+
+        // 阶段二：置顶旧记录后，置顶项仍排在未置顶之前
+        sqlx::query("INSERT INTO pinned_items(pinned_at, item_id) VALUES (?1, ?2)")
+            .bind(500_i64)
+            .bind("old_item")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let clause = resolve_history_sort(Some("pinnedFirst".to_string()), None);
+        let sql = format!(
+            "SELECT hi.content FROM history_items hi
+             LEFT JOIN pinned_items p ON p.item_id = hi.item_id
+             ORDER BY {}",
+            clause
+        );
+        let rows: Vec<String> = sqlx::query_scalar(&sql).fetch_all(&pool).await.unwrap();
+        assert_eq!(
+            rows,
+            vec!["旧记录".to_string(), "新记录".to_string()],
+            "置顶项应排在未置顶之前"
+        );
     }
 
     #[tokio::test]

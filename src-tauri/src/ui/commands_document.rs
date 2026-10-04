@@ -554,7 +554,7 @@ pub async fn delete_doc(request: DeleteDocRequest) -> Result<(), String> {
                     log::warn!("创建源文件目录失败 {}: {}", parent.display(), e);
                 }
             }
-            if let Err(e) = document_database::safe_move_file(managed, source) {
+            if let Err(e) = document_database::safe_restore_file(managed, source) {
                 log::warn!("回搬文件失败（记录已删除）: {}", e);
             }
         }

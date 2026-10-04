@@ -6,7 +6,9 @@ static SCREENSHOT_ALLOW_IMAGE_CLIPBOARD_ONCE: AtomicBool = AtomicBool::new(false
 
 /// RAII守卫：获取时设置标志为true，Drop时自动重置为false
 /// 防止panic导致标志永远卡在true状态
-struct ScreenshotGuard;
+/// 命令边界（如 open_screenshot_editor）在 try_begin_screenshot 成功后持有本守卫，
+/// 统一覆盖所有 `?` 早退路径的复位
+pub struct ScreenshotGuard;
 
 impl ScreenshotGuard {
     fn try_acquire() -> Option<Self> {
@@ -314,6 +316,24 @@ mod tests {
         assert!(is_screenshot_in_progress());
         // 第二次获取应失败（已在进行中）
         assert!(!try_begin_screenshot());
+        set_screenshot_in_progress(false);
+        assert!(!is_screenshot_in_progress());
+    }
+
+    #[test]
+    fn test_screenshot_guard_drop_resets_flag_for_rebegin() {
+        let _g = lock_flags();
+        set_screenshot_in_progress(false);
+        // 模拟 open_screenshot_editor：try_begin 成功后持有 RAII 守卫
+        assert!(try_begin_screenshot());
+        {
+            let _guard = ScreenshotGuard;
+            assert!(is_screenshot_in_progress());
+            // 守卫持有期间重复触发仍被拒绝
+            assert!(!try_begin_screenshot());
+        }
+        // Drop（覆盖所有 ? 早退路径）后标志复位，可再次开始
+        assert!(try_begin_screenshot());
         set_screenshot_in_progress(false);
         assert!(!is_screenshot_in_progress());
     }

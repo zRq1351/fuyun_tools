@@ -59,7 +59,8 @@
     "minutes": "分钟",
     "hours": "小时",
     "items": "条",
-    "files": "个文件"
+    "files": "个文件",
+    "settings": "设置"
   },
   "theme": {
     "dark": "暗色",
@@ -634,7 +635,10 @@
     "customCommandTypeEmpty": "[自定义命令] commandType 为空",
     "unknownCustomAction": "未知的自定义动作",
     "commandExecutionFailed": "[自定义命令] 执行失败",
-    "commandTypeUnknown": "[自定义命令] 未知的命令类型"
+    "commandTypeUnknown": "[自定义命令] 未知的命令类型",
+    "deleteCategoryConfirm": "确定要删除分类「{name}」吗？分类内应用的归属将一并移除。",
+    "deleteCommandConfirm": "确定要删除命令「{prefix}」吗？",
+    "removeAppConfirm": "确定要从列表中移除应用「{title}」吗？"
   },
   "selectionToolbar": {
     "translate": "翻译",
@@ -661,9 +665,11 @@
     "selectMonitor": "选择屏幕",
     "monitorFallbackName": "显示器 {n}",
     "deviceFallbackNotice": "{kind}设备不可用，已切换到默认设备",
+    "windowNoLongerAvailable": "目标窗口已关闭，已取消录制目标窗口",
     "targetWindow": "目标窗口",
     "selectWindow": "选择窗口",
     "systemAudio": "系统音频",
+    "mic": "麦克风",
     "selectSystemAudio": "选择系统音频设备",
     "noSystemAudio": "不捕获系统音频",
     "appAudio": "应用音频",
@@ -1014,7 +1020,8 @@
     "saveNotesFailed": "保存备注失败",
     "mergeModeLabel": "合并模式（保留现有记录）",
     "overwriteModeLabel": "覆盖模式（完全替换数据）",
-    "reorderFailed": "排序失败: {error}"
+    "reorderFailed": "排序失败: {error}",
+    "confirmDelete": "确定要删除该文件吗？"
   },
   "errorHandler": {
     "configError": "{context}: 配置错误 - {message}",

@@ -200,7 +200,25 @@ export function useClipboardHistory(pinnedItems = ref([])) {
 
         if (newItems.length === 0) return
 
-        const merged = [...pagedHistory.value, ...newItems]
+        // F13：新到页按后端时间序插入已有列表的正确位置，而非一律追加到数组尾。
+        // 已有列表按首尾 updatedAt 判定升/降序（与后端分页顺序一致）；
+        // 无法判定（相等/缺失时间字段）时退回追加，保持原行为。
+        const firstTs = pagedHistory.value[0]?.updatedAt || 0
+        const lastTs = pagedHistory.value[pagedHistory.value.length - 1]?.updatedAt || 0
+        const anchorTs = newItems[0]?.updatedAt || 0
+        let insertAt = pagedHistory.value.length
+        if (anchorTs > 0 && firstTs !== lastTs) {
+            const found = firstTs > lastTs
+                ? pagedHistory.value.findIndex((entry) => (entry.updatedAt || 0) < anchorTs)
+                : pagedHistory.value.findIndex((entry) => (entry.updatedAt || 0) > anchorTs)
+            insertAt = found >= 0 ? found : pagedHistory.value.length
+        }
+
+        const merged = [
+            ...pagedHistory.value.slice(0, insertAt),
+            ...newItems,
+            ...pagedHistory.value.slice(insertAt)
+        ]
         for (let i = 0; i < merged.length; i++) {
             merged[i].position = i
         }
@@ -220,12 +238,29 @@ export function useClipboardHistory(pinnedItems = ref([])) {
         return count;
     }
 
+    // 分页 offset / hasMore 的统一口径：已加载且能通过服务端过滤的条数。
+    // keyword 活跃时 = 已加载命中条数（searchMatchedIds ∩ 已加载 ∩ 当前分类），
+    // 否则退回分类计数。
+    const getLoadedMatchCount = (keyword) => {
+        if (!keyword) return getActiveCategoryCount();
+        const matchedIds = searchMatchedIds.value;
+        if (!matchedIds) return getActiveCategoryCount();
+        const activeCategory = categoryFilter.value === '全部' ? null : categoryFilter.value;
+        let count = 0;
+        for (const item of pagedHistory.value) {
+            if (!matchedIds.has(item.id)) continue;
+            if (activeCategory && item.category !== activeCategory && getItemCategory(item.id) !== activeCategory) continue;
+            count++;
+        }
+        return count;
+    }
+
     const loadHistoryPage = async ({reset = false} = {}) => {
         if (isLoadingPage.value) return
         isLoadingPage.value = true
         try {
-            const offset = reset ? 0 : getActiveCategoryCount()
             const keyword = searchKeyword.value.trim()
+            const offset = reset ? 0 : getLoadedMatchCount(keyword)
             const category = categoryFilter.value === '全部' ? null : categoryFilter.value
 
             const response = await ClipboardService.getHistoryPage({
@@ -241,9 +276,19 @@ export function useClipboardHistory(pinnedItems = ref([])) {
             const items = Array.isArray(response?.items) ? response.items : []
             mergePageItems(items, reset)
 
-            totalCount.value = Number.isFinite(response?.total) ? response.total : getActiveCategoryCount()
+            // 关键词活跃时把新页命中 id 并入首屏命中集，
+            // 否则 visibleHistory 的 contentMatchedIds 过滤会隐藏新加载的命中条目
+            if (keyword) {
+                const matched = new Set(searchMatchedIds.value || [])
+                for (const item of items) {
+                    if (item?.id) matched.add(item.id)
+                }
+                searchMatchedIds.value = matched
+            }
+
+            totalCount.value = Number.isFinite(response?.total) ? response.total : getLoadedMatchCount(keyword)
             pageOffset.value = pagedHistory.value.length
-            hasMore.value = getActiveCategoryCount() < totalCount.value
+            hasMore.value = getLoadedMatchCount(keyword) < totalCount.value
 
             // Update selection
             if (pagedHistory.value.length === 0) {
@@ -299,9 +344,9 @@ export function useClipboardHistory(pinnedItems = ref([])) {
 
             if (items.length === 0) {
                 if (Number.isFinite(response?.total)) {
-                    totalCount.value = Math.max(Number(response.total), getActiveCategoryCount())
+                    totalCount.value = Math.max(Number(response.total), getLoadedMatchCount(keyword))
                     pageOffset.value = pagedHistory.value.length
-                    hasMore.value = getActiveCategoryCount() < totalCount.value
+                    hasMore.value = getLoadedMatchCount(keyword) < totalCount.value
                 }
                 bumpFilterDataRevision()
                 return
@@ -322,6 +367,8 @@ export function useClipboardHistory(pinnedItems = ref([])) {
                     id: item.id,
                     content: item.content,
                     position: item.position ?? (existing?.position ?? 0),
+                    // 保留后端时间字段：mergePageItems 归位新段与 updatedAt 排序依赖它
+                    updatedAt: item.updatedAt ?? existing?.updatedAt ?? 0,
                     snippet: hasKeyword ? (item.snippet ?? existing?.snippet ?? '') : '',
                     pinned: item.pinned ?? existing?.pinned ?? false,
                     category: item.category || existing?.category || '未分类'
@@ -352,10 +399,10 @@ export function useClipboardHistory(pinnedItems = ref([])) {
             pagedHistory.value = sortPageItems(merged)
 
             totalCount.value = Number.isFinite(response?.total)
-                ? Math.max(Number(response.total), getActiveCategoryCount())
-                : Math.max(totalCount.value || 0, getActiveCategoryCount())
+                ? Math.max(Number(response.total), getLoadedMatchCount(keyword))
+                : Math.max(totalCount.value || 0, getLoadedMatchCount(keyword))
             pageOffset.value = pagedHistory.value.length
-            hasMore.value = getActiveCategoryCount() < totalCount.value
+            hasMore.value = getLoadedMatchCount(keyword) < totalCount.value
 
             if (pagedHistory.value.length === 0) {
                 selectedItemId.value = ''
@@ -379,7 +426,8 @@ export function useClipboardHistory(pinnedItems = ref([])) {
     const loadTailPage = async () => {
         if (!hasMore.value || isLoadingPage.value) return false
 
-        const loadedCount = getActiveCategoryCount()
+        const keyword = searchKeyword.value.trim()
+        const loadedCount = getLoadedMatchCount(keyword)
         const exactTotal = Math.max(Number(totalCount.value) || 0, loadedCount)
         const targetOffset = Math.max(0, exactTotal - (Number(pageSize.value) || 10))
 
@@ -389,7 +437,6 @@ export function useClipboardHistory(pinnedItems = ref([])) {
 
         isLoadingPage.value = true
         try {
-            const keyword = searchKeyword.value.trim()
             const category = categoryFilter.value === '全部' ? null : categoryFilter.value
 
             const response = await ClipboardService.getHistoryPage({
@@ -405,9 +452,9 @@ export function useClipboardHistory(pinnedItems = ref([])) {
             const items = Array.isArray(response?.items) ? response.items : []
             mergePageItems(items, false)
 
-            totalCount.value = Number.isFinite(response?.total) ? response.total : getActiveCategoryCount()
+            totalCount.value = Number.isFinite(response?.total) ? response.total : getLoadedMatchCount(keyword)
             pageOffset.value = pagedHistory.value.length
-            hasMore.value = getActiveCategoryCount() < totalCount.value
+            hasMore.value = getLoadedMatchCount(keyword) < totalCount.value
 
             return true
         } catch (error) {

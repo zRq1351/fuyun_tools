@@ -139,6 +139,7 @@
 <script setup>
 import {ref, nextTick, watch, onMounted, onBeforeUnmount} from 'vue'
 import {useI18n} from 'vue-i18n'
+import {ElMessageBox} from 'element-plus'
 import {
   Plus, Close, Edit, Delete,
   Monitor, Document, Setting, VideoCamera, Grid
@@ -225,6 +226,16 @@ const confirmDialog = async () => {
 }
 
 const handleDelete = async (category) => {
+  try {
+    // 删除分类会同时清空分类内全部应用的归属映射，需二次确认
+    await ElMessageBox.confirm(
+        t('launcher.deleteCategoryConfirm', {name: category.name}),
+        t('common.confirmDelete'),
+        {confirmButtonText: t('common.ok'), cancelButtonText: t('common.cancel'), type: 'warning'}
+    )
+  } catch {
+    return // 用户取消，不发 invoke
+  }
   try {
     await invoke('remove_launcher_category', {categoryId: category.id})
     emit('updated')

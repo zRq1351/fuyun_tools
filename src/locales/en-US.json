@@ -59,7 +59,8 @@
     "minutes": "min",
     "hours": "h",
     "items": "items",
-    "files": "files"
+    "files": "files",
+    "settings": "Settings"
   },
   "theme": {
     "dark": "Dark",
@@ -212,7 +213,8 @@
       "confirmDownload": "Download",
       "cancelEnableRecording": "Recording enable cancelled",
       "downloadingFfmpeg": "Downloading ffmpeg... {percent}%",
-      "ffmpegDownloaded": "ffmpeg downloaded. Recording has been enabled"
+      "ffmpegDownloaded": "ffmpeg downloaded. Recording has been enabled",
+      "confirmDisableWhileRecording": "Recording is in progress. Disabling recording will cancel this session and delete the recorded file. Continue?"
     },
     "selection": {
       "title": "Text Selection",
@@ -633,7 +635,10 @@
     "customCommandTypeEmpty": "[Custom command] commandType is empty",
     "unknownCustomAction": "Unknown custom action",
     "commandExecutionFailed": "[Custom command] Execution failed",
-    "commandTypeUnknown": "[Custom command] Unknown command type"
+    "commandTypeUnknown": "[Custom command] Unknown command type",
+    "deleteCategoryConfirm": "Delete category \"{name}\"? App assignments in this category will also be removed.",
+    "deleteCommandConfirm": "Delete command \"{prefix}\"?",
+    "removeAppConfirm": "Remove app \"{title}\" from the list?"
   },
   "selectionToolbar": {
     "translate": "Translate",
@@ -660,9 +665,11 @@
     "selectMonitor": "Select Screen",
     "monitorFallbackName": "Display {n}",
     "deviceFallbackNotice": "{kind} device unavailable, switched to default",
+    "windowNoLongerAvailable": "Target window has closed; recording target window cleared",
     "targetWindow": "Target Window",
     "selectWindow": "Select Window",
     "systemAudio": "System Audio",
+    "mic": "Microphone",
     "selectSystemAudio": "Select system audio device",
     "noSystemAudio": "Do not capture system audio",
     "appAudio": "App Audio",
@@ -1013,7 +1020,8 @@
     "saveNotesFailed": "Failed to save notes",
     "mergeModeLabel": "Merge (keep existing records)",
     "overwriteModeLabel": "Overwrite (replace all data)",
-    "reorderFailed": "Reorder failed: {error}"
+    "reorderFailed": "Reorder failed: {error}",
+    "confirmDelete": "Are you sure you want to delete this file?"
   },
   "errorHandler": {
     "configError": "{context}: Configuration error - {message}",
