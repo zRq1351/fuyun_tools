@@ -66,9 +66,11 @@ export const IPC_COMMANDS = {
     WARMUP_IMAGE_CLIPBOARD_ITEM_BY_ID: 'warmup_image_clipboard_item_by_id',
     WARMUP_MULTIPLE_IMAGES: 'warmup_multiple_images',
     OPEN_IMAGE_PREVIEW_WINDOW_BY_ID: 'open_image_preview_window_by_id',
+    SWITCH_IMAGE_PREVIEW_BY_ID: 'switch_image_preview_by_id',
     CLOSE_IMAGE_PREVIEW_WINDOW: 'close_image_preview_window',
     START_IMAGE_PREVIEW_WINDOW_DRAG: 'start_image_preview_window_drag',
     OPEN_TEXT_PREVIEW_WINDOW: 'open_text_preview_window',
+    SWITCH_TEXT_PREVIEW_WINDOW: 'switch_text_preview_window',
     CLOSE_TEXT_PREVIEW_WINDOW: 'close_text_preview_window',
     START_TEXT_PREVIEW_WINDOW_DRAG: 'start_text_preview_window_drag',
     COPY_IMAGE_CLIPBOARD_ITEM_TO_DIRECTORY: 'copy_image_clipboard_item_to_directory',
@@ -281,13 +283,49 @@ export const ImageClipboardService = {
         ipcInvoke(IPC_COMMANDS.WARMUP_IMAGE_CLIPBOARD_ITEM_BY_ID, {request: {itemId}}),
     warmupMultipleItems: (itemIds) =>
         ipcInvoke(IPC_COMMANDS.WARMUP_MULTIPLE_IMAGES, {itemIds}),
-    openPreviewWindowById: (itemId) =>
-        ipcInvoke(IPC_COMMANDS.OPEN_IMAGE_PREVIEW_WINDOW_BY_ID, {request: {itemId}}),
+    openPreviewWindowById: (itemId, orderedIds = null, meta = null) =>
+        ipcInvoke(IPC_COMMANDS.OPEN_IMAGE_PREVIEW_WINDOW_BY_ID, {
+            request: {
+                itemId,
+                ...(orderedIds && orderedIds.length ? {orderedIds} : {}),
+                ...(meta && Number.isFinite(meta.displayIndex) ? {displayIndex: meta.displayIndex} : {}),
+                ...(meta && Number.isFinite(meta.displayTotal) ? {displayTotal: meta.displayTotal} : {}),
+                ...(meta && typeof meta.hasPrev === 'boolean' ? {hasPrev: meta.hasPrev} : {}),
+                ...(meta && typeof meta.hasNext === 'boolean' ? {hasNext: meta.hasNext} : {})
+            }
+        }),
+    switchPreviewById: (itemId, requestId = null, navState = null) =>
+        ipcInvoke(IPC_COMMANDS.SWITCH_IMAGE_PREVIEW_BY_ID, {
+            request: {
+                itemId,
+                ...(requestId ? {requestId} : {}),
+                ...(navState && typeof navState.hasPrev === 'boolean' ? {hasPrev: navState.hasPrev} : {}),
+                ...(navState && typeof navState.hasNext === 'boolean' ? {hasNext: navState.hasNext} : {}),
+                ...(navState && Number.isFinite(navState.displayIndex) ? {displayIndex: navState.displayIndex} : {}),
+                ...(navState && Number.isFinite(navState.displayTotal) ? {displayTotal: navState.displayTotal} : {})
+            }
+        }),
     closePreviewWindow: () => ipcInvoke(IPC_COMMANDS.CLOSE_IMAGE_PREVIEW_WINDOW),
     startPreviewWindowDrag: () => ipcInvoke(IPC_COMMANDS.START_IMAGE_PREVIEW_WINDOW_DRAG),
 
-    openTextPreviewWindow: (text, itemId = null) =>
-        ipcInvoke(IPC_COMMANDS.OPEN_TEXT_PREVIEW_WINDOW, {text, itemId}),
+    openTextPreviewWindow: (text, itemId = null, meta = null) =>
+        ipcInvoke(IPC_COMMANDS.OPEN_TEXT_PREVIEW_WINDOW, {
+            text,
+            itemId,
+            ...(meta && Number.isFinite(meta.displayIndex) ? {displayIndex: meta.displayIndex} : {}),
+            ...(meta && Number.isFinite(meta.displayTotal) ? {displayTotal: meta.displayTotal} : {}),
+            ...(meta && typeof meta.hasPrev === 'boolean' ? {hasPrev: meta.hasPrev} : {}),
+            ...(meta && typeof meta.hasNext === 'boolean' ? {hasNext: meta.hasNext} : {})
+        }),
+    switchTextPreviewWindow: (text, itemId = null, meta = null) =>
+        ipcInvoke(IPC_COMMANDS.SWITCH_TEXT_PREVIEW_WINDOW, {
+            text,
+            itemId,
+            ...(meta && Number.isFinite(meta.displayIndex) ? {displayIndex: meta.displayIndex} : {}),
+            ...(meta && Number.isFinite(meta.displayTotal) ? {displayTotal: meta.displayTotal} : {}),
+            ...(meta && typeof meta.hasPrev === 'boolean' ? {hasPrev: meta.hasPrev} : {}),
+            ...(meta && typeof meta.hasNext === 'boolean' ? {hasNext: meta.hasNext} : {})
+        }),
     closeTextPreviewWindow: () => ipcInvoke(IPC_COMMANDS.CLOSE_TEXT_PREVIEW_WINDOW),
     startTextPreviewWindowDrag: () => ipcInvoke(IPC_COMMANDS.START_TEXT_PREVIEW_WINDOW_DRAG),
     updateTextItem: (itemId, newContent) =>

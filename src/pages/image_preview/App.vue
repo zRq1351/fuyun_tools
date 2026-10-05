@@ -27,6 +27,13 @@
       <div class="viewer-zoom">
         {{ zoomPercent }}
       </div>
+      <div
+          v-if="displayLabel"
+          class="viewer-pos"
+          title="序号"
+      >
+        {{ displayLabel }}
+      </div>
       <button
           class="viewer-close"
           @mousedown.left.stop.prevent
@@ -53,6 +60,32 @@
           @load="onImageLoaded"
       >
     </div>
+    <button
+        v-if="hasPrev"
+        class="viewer-nav viewer-nav-prev"
+        type="button"
+        title="上一张"
+        @mousedown.left.stop.prevent
+        @click.stop.prevent="goBy(-1)"
+    >
+      <ChevronLeft
+          :size="22"
+          :stroke-width="2"
+      />
+    </button>
+    <button
+        v-if="hasNext"
+        class="viewer-nav viewer-nav-next"
+        type="button"
+        title="下一张"
+        @mousedown.left.stop.prevent
+        @click.stop.prevent="goBy(1)"
+    >
+      <ChevronRight
+          :size="22"
+          :stroke-width="2"
+      />
+    </button>
     <div
         v-if="!isImageReady && !loadErrorMessage"
         class="viewer-loading viewer-loading-overlay"
@@ -75,8 +108,8 @@
 
 <script setup>
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
-import {GripHorizontal} from 'lucide-vue-next'
-import {listen} from '@tauri-apps/api/event'
+import {ChevronLeft, ChevronRight, GripHorizontal} from 'lucide-vue-next'
+import {listen, emit} from '@tauri-apps/api/event'
 import {getCurrentWebviewWindow} from '@tauri-apps/api/webviewWindow'
 import {buildFileUrlFromPath} from '../../utils/fileUrl'
 import {ImageClipboardService} from '../../services/ipc'
@@ -92,6 +125,10 @@ const zoomScale = ref(1)
 const offsetX = ref(0)
 const offsetY = ref(0)
 const isDragging = ref(false)
+const hasPrev = ref(false)
+const hasNext = ref(false)
+const displayIndex = ref(0)
+const displayTotal = ref(0)
 const MIN_LOADING_MS = 180
 let unlistenShowPreview = null
 let unlistenCloseRequested = null
@@ -109,6 +146,29 @@ const imageTransformStyle = computed(() => ({
   transform: `translate3d(${offsetX.value}px, ${offsetY.value}px, 0) scale(${zoomScale.value})`
 }))
 const zoomPercent = computed(() => `${Math.round(zoomScale.value * 100)}%`)
+// 与卡片序号同源的显示文案，如 "5/30"
+const displayLabel = computed(() => {
+  if (!displayIndex.value || !displayTotal.value) return ''
+  return `${displayIndex.value}/${displayTotal.value}`
+})
+
+// 上一张/下一张：邻居由剪贴板主窗口按当前卡片列表现算，保证与卡片展示顺序一致
+const goBy = (delta) => {
+  if (!imageUrl.value) return
+  const dir = delta === -1 ? -1 : 1
+  // 边界防护：第一张没有上一张、最后一张没有下一张
+  if (dir === -1 && !hasPrev.value) return
+  if (dir === 1 && !hasNext.value) return
+  const requestId = `nav-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  // 先占位 request_id，使回程载荷通过 processPayload 的过期请求过滤
+  activeRequestId.value = requestId
+  emit('image-preview-navigate', {
+    delta: dir,
+    request_id: requestId
+  }).catch((error) => {
+    console.error('发送预览导航请求失败:', error)
+  })
+}
 
 const resetViewTransform = () => {
   zoomScale.value = 1
@@ -199,6 +259,10 @@ const closeWindowNow = async () => {
   isImageReady.value = false
   loadErrorMessage.value = ''
   activeRequestId.value = ''
+  hasPrev.value = false
+  hasNext.value = false
+  displayIndex.value = 0
+  displayTotal.value = 0
   resetViewTransform()
   await new Promise((resolve) => {
     requestAnimationFrame(() => resolve())
@@ -250,6 +314,20 @@ onMounted(async () => {
     }
     if (!activeRequestId.value) {
       activeRequestId.value = payloadRequestId
+    }
+    // 边界导航能力随载荷下发（第一张无上一张、最后一张无下一张）
+    if (typeof payload.has_prev === 'boolean') {
+      hasPrev.value = payload.has_prev
+    }
+    if (typeof payload.has_next === 'boolean') {
+      hasNext.value = payload.has_next
+    }
+    // 与卡片一致的序号（1 起位置/总数）
+    if (Number.isFinite(payload.display_index) && payload.display_index > 0) {
+      displayIndex.value = payload.display_index
+    }
+    if (Number.isFinite(payload.display_total) && payload.display_total > 0) {
+      displayTotal.value = payload.display_total
     }
     // 新 payload 到达时取消挂起的关闭定时器，避免关闭动画期间新图片被误关
     if (closeTimer) {
@@ -323,6 +401,16 @@ onMounted(async () => {
   keydownHandler = (event) => {
     if (event.key === 'F5' || ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === 'r')) {
       event.preventDefault()
+      return
+    }
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      goBy(-1)
+      return
+    }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      goBy(1)
       return
     }
     if (event.key === 'Escape') {
@@ -437,6 +525,20 @@ onBeforeUnmount(() => {
   cursor: move;
 }
 
+.viewer-pos {
+  min-width: 56px;
+  text-align: center;
+  border: 1px solid var(--fy-border);
+  background: var(--fy-bg-overlay);
+  color: var(--fy-text-primary);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: var(--fy-shadow);
+  cursor: move;
+}
+
 .viewer-card {
   width: 100%;
   height: 100%;
@@ -496,6 +598,42 @@ onBeforeUnmount(() => {
   font-weight: 600;
   cursor: pointer;
   box-shadow: var(--fy-shadow);
+}
+
+.viewer-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 28;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--fy-border);
+  background: var(--fy-bg-overlay);
+  color: var(--fy-text-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: var(--fy-shadow);
+  opacity: 0.85;
+}
+
+.viewer-nav:hover {
+  background: var(--fy-bg-hover);
+  opacity: 1;
+}
+
+.viewer-nav:active:not(:disabled) {
+  transform: translateY(-50%) scale(0.96);
+}
+
+.viewer-nav-prev {
+  left: 16px;
+}
+
+.viewer-nav-next {
+  right: 16px;
 }
 
 .viewer-loading {

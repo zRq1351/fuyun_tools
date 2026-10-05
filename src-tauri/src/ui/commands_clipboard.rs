@@ -141,15 +141,83 @@ pub struct SelectAndFillImageByIdRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ItemIdRequest {
     item_id: String,
+    /// 全屏预览打开时携带的有序 id 列表（可见列表顺序），供上一张/下一张导航
+    #[serde(default)]
+    ordered_ids: Option<Vec<String>>,
+    /// 与卡片序号同源的展示序号（1 起）与总数
+    #[serde(default)]
+    display_index: Option<u32>,
+    #[serde(default)]
+    display_total: Option<u32>,
+    /// 前端计算的边界导航能力（还有下一页时末张仍有下一张），缺省时按 ordered_ids 推断
+    #[serde(default)]
+    has_prev: Option<bool>,
+    #[serde(default)]
+    has_next: Option<bool>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchImagePreviewRequest {
+    item_id: String,
+    /// 前端预生成的 request_id，原样回显到 show-image-preview 载荷
+    #[serde(default)]
+    request_id: Option<String>,
+    /// 切换后位置是否还有上一张/下一张（供预览窗口控制箭头显隐）
+    #[serde(default)]
+    has_prev: Option<bool>,
+    #[serde(default)]
+    has_next: Option<bool>,
+    /// 与卡片序号同源的展示序号（1 起）与总数
+    #[serde(default)]
+    display_index: Option<u32>,
+    #[serde(default)]
+    display_total: Option<u32>,
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn open_text_preview_window(
     text: String,
     item_id: Option<String>,
+    display_index: Option<u32>,
+    display_total: Option<u32>,
+    has_prev: Option<bool>,
+    has_next: Option<bool>,
     app: AppHandle,
 ) -> Result<(), String> {
-    crate::ui::window_manager::show_text_preview_window(app, text, item_id)
+    crate::ui::window_manager::show_text_preview_window(
+        app,
+        text,
+        item_id,
+        display_index,
+        display_total,
+        has_prev,
+        has_next,
+    )
+}
+
+/// 全屏预览内切换到相邻文本项：只重发载荷，不重置预览窗口位置/尺寸
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn switch_text_preview_window(
+    text: String,
+    item_id: Option<String>,
+    display_index: Option<u32>,
+    display_total: Option<u32>,
+    has_prev: Option<bool>,
+    has_next: Option<bool>,
+    app: AppHandle,
+) -> Result<(), String> {
+    crate::ui::window_manager::update_text_preview_window_payload(
+        app,
+        text,
+        item_id,
+        display_index,
+        display_total,
+        has_prev,
+        has_next,
+    )
 }
 
 #[tauri::command]
@@ -173,8 +241,53 @@ pub async fn open_image_preview_window_by_id(
     app: AppHandle,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
+    let ordered_ids = request.ordered_ids.unwrap_or_default();
+    let display_index = request.display_index;
+    let display_total = request.display_total;
+    let has_prev = request.has_prev;
+    let has_next = request.has_next;
     run_blocking("打开图片预览", move || {
-        execute_open_image_preview_window_by_id(request.item_id, state_arc, app)
+        execute_open_image_preview_window_by_id(
+            request.item_id,
+            ordered_ids,
+            display_index,
+            display_total,
+            has_prev,
+            has_next,
+            state_arc,
+            app,
+        )
+    })
+    .await
+}
+
+/// 全屏预览内切换到相邻图片：只重发载荷，不重置预览窗口位置/尺寸
+#[tauri::command]
+pub async fn switch_image_preview_by_id(
+    request: SwitchImagePreviewRequest,
+    state: State<'_, Arc<Mutex<SharedAppState>>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let state_arc = state.inner().clone();
+    run_blocking("切换图片预览", move || {
+        let request_id = request.request_id.unwrap_or_else(|| {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis().to_string())
+                .unwrap_or_default()
+        });
+        let preview_path = resolve_image_preview_asset_path(&request.item_id, &state_arc)?;
+        crate::ui::window_manager::update_image_preview_window_payload(
+            app,
+            request_id,
+            preview_path,
+            request.item_id,
+            request.has_prev,
+            request.has_next,
+            request.display_index,
+            request.display_total,
+        )
+        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardPreviewShowFailed, e))
     })
     .await
 }
@@ -610,8 +723,14 @@ pub(crate) fn execute_remove_clipboard_item(
     .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardDeleteTextFailed, e))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_open_image_preview_window_by_id(
     item_id: String,
+    ordered_ids: Vec<String>,
+    display_index: Option<u32>,
+    display_total: Option<u32>,
+    has_prev: Option<bool>,
+    has_next: Option<bool>,
     state: Arc<Mutex<SharedAppState>>,
     app: AppHandle,
 ) -> Result<(), String> {
@@ -620,17 +739,34 @@ pub(crate) fn execute_open_image_preview_window_by_id(
         .map_err(|e| e.to_string())?
         .as_millis()
         .to_string();
-    let manager_arc = get_image_clipboard_manager_arc(&state);
+    let preview_path = resolve_image_preview_asset_path(&item_id, &state)?;
+    show_image_preview_window(
+        app,
+        request_id,
+        preview_path,
+        item_id,
+        ordered_ids,
+        display_index,
+        display_total,
+        has_prev,
+        has_next,
+    )
+    .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardPreviewShowFailed, e))
+}
+
+pub(crate) fn resolve_image_preview_asset_path(
+    item_id: &str,
+    state: &Arc<Mutex<SharedAppState>>,
+) -> Result<String, String> {
+    let manager_arc = get_image_clipboard_manager_arc(state);
     let image_path = {
         let manager = lock_arc_mutex(&manager_arc);
         manager
-            .get_preview_image_path_by_id(&item_id)
+            .get_preview_image_path_by_id(item_id)
             .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardPreviewPathFailed, e))?
     };
-    let preview_path = ensure_preview_image_path_for_asset(&item_id, &image_path)
-        .map_err(|e| AppErrorKind::ClipboardPreviewPathFailed.to_frontend_json_with_details(e))?;
-    show_image_preview_window(app, request_id, preview_path)
-        .map_err(|e| frontend_error_kind(AppErrorKind::ClipboardPreviewShowFailed, e))
+    ensure_preview_image_path_for_asset(item_id, &image_path)
+        .map_err(|e| AppErrorKind::ClipboardPreviewPathFailed.to_frontend_json_with_details(e))
 }
 
 pub(crate) fn ensure_preview_image_path_for_asset(

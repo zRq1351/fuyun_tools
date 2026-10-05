@@ -1030,10 +1030,84 @@ const fillById = async (itemId) => {
 const openFullscreen = async (itemId) => {
   try {
     if (!itemId) return
-    await ImageClipboardService.openPreviewWindowById(itemId)
+    // 传递可见列表顺序，全屏预览按此顺序上一张/下一张
+    const list = filteredHistory.value
+    const orderedIds = list
+        .map((entry) => entry?.item?.id)
+        .filter((id) => typeof id === 'string' && id)
+    const idx = list.findIndex((entry) => entry?.item?.id === itemId)
+    previewingItemId.value = itemId
+    await ImageClipboardService.openPreviewWindowById(itemId, orderedIds, {
+      // 与卡片序号同源：位置（1 起）/ 总数
+      displayIndex: idx >= 0 ? idx + 1 : 1,
+      displayTotal: totalCount.value || list.length,
+      // 还有下一页时，即使当前是已加载最后一项也保留「下一张」
+      hasPrev: idx > 0,
+      hasNext: idx >= 0 && (idx < list.length - 1 || hasMore.value)
+    })
   } catch (error) {
     console.error('打开预览窗口失败:', error)
     ElMessage.error(t('imageClipboard.previewFailed', {error: String(error)}))
+  }
+}
+
+// 全屏预览的上一张/下一张由本窗口按「当前卡片列表」现算邻居，保证与卡片展示顺序一致
+const previewingItemId = ref('')
+let unlistenPreviewNav = null
+
+// 全屏「下一张」到已加载末尾时拉取下一页（与卡片分页行为一致），失败则保持当前张
+const ensureNextPageForPreviewNav = async () => {
+  const list = filteredHistory.value
+  const idx = list.findIndex((entry) => entry?.item?.id === previewingItemId.value)
+  if (idx < 0 || idx < list.length - 1) return
+  let guard = 0
+  while (hasMore.value && guard < 5) {
+    guard++
+    if (isLoadingPage.value) {
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      continue
+    }
+    const before = getLoadedHistoryCount()
+    await loadHistoryPage({reset: false})
+    if (getLoadedHistoryCount() > before) return
+    if (!hasMore.value) return
+  }
+}
+
+const handlePreviewNavigate = async (event) => {
+  const payload = event?.payload || {}
+  const delta = Number(payload.delta) === -1 ? -1 : 1
+  const requestId = typeof payload.request_id === 'string' ? payload.request_id : null
+  // 前进到已加载末尾时先加载下一页，再在扩展后的列表中取邻居
+  if (delta === 1) {
+    await ensureNextPageForPreviewNav()
+  }
+  const list = filteredHistory.value
+  const n = list.length
+  if (n === 0) return
+  let idx = list.findIndex((entry) => entry?.item?.id === previewingItemId.value)
+  if (idx < 0) {
+    // 基准丢失时退到列表首项，而不是按错误下标跳转
+    idx = 0
+  }
+  // 边界不回绕：第一张没有上一张、最后一张（无更多页）没有下一张（与卡片语义一致）
+  const nextIndex = idx + delta
+  if (nextIndex < 0 || nextIndex >= n) return
+  const nextId = list[nextIndex]?.item?.id
+  if (!nextId || nextId === previewingItemId.value) return
+  const previousItemId = previewingItemId.value
+  previewingItemId.value = nextId
+  try {
+    await ImageClipboardService.switchPreviewById(nextId, requestId, {
+      hasPrev: nextIndex > 0,
+      hasNext: nextIndex < n - 1 || hasMore.value,
+      // 与卡片序号同源：位置（1 起）/ 总数
+      displayIndex: nextIndex + 1,
+      displayTotal: totalCount.value || n
+    })
+  } catch (error) {
+    previewingItemId.value = previousItemId
+    console.error('切换预览图片失败:', error)
   }
 }
 
@@ -1945,6 +2019,10 @@ onMounted(async () => {
 
     }
   })
+
+  unlistenPreviewNav = await listen('image-preview-navigate', (event) => {
+    void handlePreviewNavigate(event)
+  })
 })
 
 onBeforeUnmount(() => {
@@ -1970,6 +2048,10 @@ onBeforeUnmount(() => {
   if (unlistenShowWindow) {
     unlistenShowWindow()
     unlistenShowWindow = null
+  }
+  if (unlistenPreviewNav) {
+    unlistenPreviewNav()
+    unlistenPreviewNav = null
   }
   if (unlistenHistoryPayloadUpdated) {
     unlistenHistoryPayloadUpdated()

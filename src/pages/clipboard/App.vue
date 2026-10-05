@@ -310,11 +310,88 @@ const explanationTargetLanguage = ref(localStorage.getItem('clipboard_ai_explain
 
 const handlePreview = async (content, id) => {
   try {
-    await ImageClipboardService.openTextPreviewWindow(content, id)
+    const list = visibleHistory.value
+    const idx = list.findIndex((entry) => entry?.id === id)
+    previewingItemId.value = id || ''
+    await ImageClipboardService.openTextPreviewWindow(content, id, {
+      // 与卡片序号同源：位置（1 起）/ 总数
+      displayIndex: idx >= 0 ? idx + 1 : 1,
+      displayTotal: totalCount.value || list.length,
+      // 还有下一页时，即使当前是已加载最后一项也保留「下一张」
+      hasPrev: idx > 0,
+      hasNext: idx >= 0 && (idx < list.length - 1 || hasMore.value)
+    })
   } catch (error) {
     console.error('打开文本预览失败:', error)
   }
   }
+
+// 全屏预览的上一张/下一张由本窗口按「当前卡片列表」现算邻居，保证与卡片展示顺序一致
+const previewingItemId = ref('')
+let unlistenPreviewNav = null
+let previewNavQueue = Promise.resolve()
+
+// 全屏「下一张」到已加载末尾时拉取下一页（与卡片分页行为一致），失败则保持当前条
+const ensureNextPageForPreviewNav = async () => {
+  const list = visibleHistory.value
+  const idx = list.findIndex((entry) => entry?.id === previewingItemId.value)
+  if (idx < 0 || idx < list.length - 1) return
+  let guard = 0
+  while (hasMore.value && guard < 5) {
+    guard++
+    if (isLoadingPage.value) {
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      continue
+    }
+    const before = visibleHistory.value.length
+    await loadMoreHistory()
+    if (visibleHistory.value.length > before) return
+    if (!hasMore.value) return
+  }
+}
+
+const handlePreviewNavigate = (event) => {
+  // 串行处理导航请求，防止快速连点并发切换导致乱序
+  previewNavQueue = previewNavQueue
+      .then(() => doPreviewNavigate(event))
+      .catch(() => {})
+}
+
+const doPreviewNavigate = async (event) => {
+  const payload = event?.payload || {}
+  const delta = Number(payload.delta) === -1 ? -1 : 1
+  // 前进到已加载末尾时先加载下一页，再在扩展后的列表中取邻居
+  if (delta === 1) {
+    await ensureNextPageForPreviewNav()
+  }
+  const list = visibleHistory.value
+  const n = list.length
+  if (n === 0) return
+  let idx = list.findIndex((entry) => entry?.id === previewingItemId.value)
+  if (idx < 0) {
+    idx = 0
+  }
+  // 边界不回绕：第一张没有上一张、最后一张（无更多页）没有下一张（与卡片语义一致）
+  const nextIndex = idx + delta
+  if (nextIndex < 0 || nextIndex >= n) return
+  const nextEntry = list[nextIndex]
+  const nextId = nextEntry?.id
+  if (!nextId || nextId === previewingItemId.value) return
+  const previousItemId = previewingItemId.value
+  previewingItemId.value = nextId
+  try {
+    await ImageClipboardService.switchTextPreviewWindow(nextEntry.content, nextId, {
+      hasPrev: nextIndex > 0,
+      hasNext: nextIndex < n - 1 || hasMore.value,
+      // 与卡片序号同源：位置（1 起）/ 总数
+      displayIndex: nextIndex + 1,
+      displayTotal: totalCount.value || n
+    })
+  } catch (error) {
+    previewingItemId.value = previousItemId
+    console.error('切换预览文本失败:', error)
+  }
+}
 
   const isUpdatingCategory = ref(false)
 let unlistenShowWindow = null
@@ -532,6 +609,9 @@ const init = async () => {
       const payload = event?.payload || {}
       if (payload.old_id && payload.new_id) {
         replaceLocalById(payload.old_id, payload.new_id, payload.new_content)
+        if (previewingItemId.value === payload.old_id) {
+          previewingItemId.value = payload.new_id
+        }
       }
     })
     unlistenWritebackResult = await listen('writeback-result', (event) => {
@@ -551,6 +631,10 @@ const init = async () => {
           showClose: true
         })
       }
+    })
+
+    unlistenPreviewNav = await listen('text-preview-navigate', (event) => {
+      void handlePreviewNavigate(event)
     })
 
     windowBlurHandler = async () => {
@@ -975,6 +1059,10 @@ onBeforeUnmount(() => {
   if (unlistenWritebackResult) {
     unlistenWritebackResult()
     unlistenWritebackResult = null
+  }
+  if (unlistenPreviewNav) {
+    unlistenPreviewNav()
+    unlistenPreviewNav = null
   }
   if (windowBlurHandler) {
     window.removeEventListener('blur', windowBlurHandler)

@@ -855,15 +855,90 @@ pub fn wait_for_window_hidden(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn show_image_preview_window(
     app_handle: AppHandle,
     request_id: String,
     image_path: String,
+    item_id: String,
+    ordered_ids: Vec<String>,
+    display_index: Option<u32>,
+    display_total: Option<u32>,
+    has_prev_override: Option<bool>,
+    has_next_override: Option<bool>,
 ) -> Result<(), String> {
     let window = ensure_image_preview_window(&app_handle)?;
     prepare_image_preview_window(&window)?;
+    // 先发 loading 通告注册本次 request_id，避免预览已打开时新载荷被过期请求过滤丢弃
+    let _ = app_handle.emit(
+        "show-image-preview",
+        serde_json::json!({"request_id": request_id, "loading": true}),
+    );
+    let index = ordered_ids.iter().position(|id| id == &item_id);
+    // 前端给的边界能力优先（还有下一页时末张仍有下一张），缺省按 ordered_ids 推断
+    let has_prev = has_prev_override
+        .or_else(|| index.map(|i| i > 0))
+        .unwrap_or(false);
+    let has_next = has_next_override
+        .or_else(|| index.map(|i| i + 1 < ordered_ids.len()))
+        .unwrap_or(false);
+    emit_image_preview_payload(
+        &app_handle,
+        &window,
+        &request_id,
+        &image_path,
+        &item_id,
+        Some(&ordered_ids),
+        Some(has_prev),
+        Some(has_next),
+        display_index,
+        display_total,
+    );
+    Ok(())
+}
 
-    let ext = std::path::Path::new(&image_path)
+/// 全屏预览内切换图片：只更新载荷，保持窗口现有位置与尺寸
+#[allow(clippy::too_many_arguments)]
+pub fn update_image_preview_window_payload(
+    app_handle: AppHandle,
+    request_id: String,
+    image_path: String,
+    item_id: String,
+    has_prev: Option<bool>,
+    has_next: Option<bool>,
+    display_index: Option<u32>,
+    display_total: Option<u32>,
+) -> Result<(), String> {
+    let window = ensure_image_preview_window(&app_handle)?;
+    emit_image_preview_payload(
+        &app_handle,
+        &window,
+        &request_id,
+        &image_path,
+        &item_id,
+        None,
+        has_prev,
+        has_next,
+        display_index,
+        display_total,
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_image_preview_payload(
+    app_handle: &AppHandle,
+    window: &tauri::WebviewWindow,
+    request_id: &str,
+    image_path: &str,
+    item_id: &str,
+    ordered_ids: Option<&Vec<String>>,
+    has_prev: Option<bool>,
+    has_next: Option<bool>,
+    display_index: Option<u32>,
+    display_total: Option<u32>,
+) {
+    let ext = std::path::Path::new(image_path)
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("png")
@@ -875,25 +950,42 @@ pub fn show_image_preview_window(
         "gif" => "image/gif",
         _ => "image/png",
     };
-    let base64 = std::fs::read(&image_path)
+    let base64 = std::fs::read(image_path)
         .map(|bytes| BASE64.encode(&bytes))
         .unwrap_or_default();
 
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "request_id": request_id,
         "image_path": image_path,
         "base64": base64,
         "mime": mime,
+        "item_id": item_id,
         "is_final": true
     });
+    if let Some(ids) = ordered_ids {
+        let index = ids.iter().position(|id| id == item_id);
+        payload["ordered_ids"] = serde_json::json!(ids);
+        payload["index"] = serde_json::json!(index);
+    }
+    if let Some(prev) = has_prev {
+        payload["has_prev"] = serde_json::json!(prev);
+    }
+    if let Some(next) = has_next {
+        payload["has_next"] = serde_json::json!(next);
+    }
+    if let Some(display_index) = display_index {
+        payload["display_index"] = serde_json::json!(display_index);
+    }
+    if let Some(display_total) = display_total {
+        payload["display_total"] = serde_json::json!(display_total);
+    }
     let _ = window.set_always_on_top(false);
-    let _ = show_overlay_window(&app_handle, "image_preview", &window, true);
+    let _ = show_overlay_window(app_handle, "image_preview", window, true);
     let _ = app_handle.emit("show-image-preview", payload.clone());
     if let Ok(payload_str) = serde_json::to_string(&payload) {
         let script = format!("window.__IMAGE_PREVIEW_PAYLOAD__ = {payload_str};");
         let _ = window.eval(&script);
     }
-    Ok(())
 }
 
 fn prepare_image_preview_window(window: &tauri::WebviewWindow) -> Result<(), String> {
@@ -922,19 +1014,21 @@ pub fn hide_image_preview_window(app_handle: AppHandle) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn show_text_preview_window(
     app_handle: AppHandle,
     text: String,
     item_id: Option<String>,
+    display_index: Option<u32>,
+    display_total: Option<u32>,
+    has_prev: Option<bool>,
+    has_next: Option<bool>,
 ) -> Result<(), String> {
     let window = ensure_text_preview_window(&app_handle)?;
 
     prepare_image_preview_window(&window)?;
 
-    let payload = serde_json::json!({
-        "text": text,
-        "item_id": item_id,
-    });
+    let payload = build_text_preview_payload(text, item_id, display_index, display_total, has_prev, has_next);
     let _ = window.set_always_on_top(false);
     let _ = show_overlay_window(&app_handle, "text_preview", &window, true);
     let _ = app_handle.emit("show-text-preview", payload.clone());
@@ -943,6 +1037,55 @@ pub fn show_text_preview_window(
         let _ = window.eval(&script);
     }
     Ok(())
+}
+
+/// 全屏文本预览内切换条目：只更新载荷，保持窗口现有位置与尺寸
+#[allow(clippy::too_many_arguments)]
+pub fn update_text_preview_window_payload(
+    app_handle: AppHandle,
+    text: String,
+    item_id: Option<String>,
+    display_index: Option<u32>,
+    display_total: Option<u32>,
+    has_prev: Option<bool>,
+    has_next: Option<bool>,
+) -> Result<(), String> {
+    let window = ensure_text_preview_window(&app_handle)?;
+    let payload = build_text_preview_payload(text, item_id, display_index, display_total, has_prev, has_next);
+    let _ = app_handle.emit("show-text-preview", payload.clone());
+    if let Ok(payload_str) = serde_json::to_string(&payload) {
+        let script = format!("window.__TEXT_PREVIEW_PAYLOAD__ = {payload_str};");
+        let _ = window.eval(&script);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_text_preview_payload(
+    text: String,
+    item_id: Option<String>,
+    display_index: Option<u32>,
+    display_total: Option<u32>,
+    has_prev: Option<bool>,
+    has_next: Option<bool>,
+) -> serde_json::Value {
+    let mut payload = serde_json::json!({
+        "text": text,
+        "item_id": item_id,
+    });
+    if let Some(display_index) = display_index {
+        payload["display_index"] = serde_json::json!(display_index);
+    }
+    if let Some(display_total) = display_total {
+        payload["display_total"] = serde_json::json!(display_total);
+    }
+    if let Some(prev) = has_prev {
+        payload["has_prev"] = serde_json::json!(prev);
+    }
+    if let Some(next) = has_next {
+        payload["has_next"] = serde_json::json!(next);
+    }
+    payload
 }
 
 pub fn hide_text_preview_window(app_handle: AppHandle) {
