@@ -1016,7 +1016,7 @@ const fillById = async (itemId) => {
   } catch (error) {
     console.error('回填图片失败:', error)
     writebackErrorMsg = ElMessage.error({
-      message: t('imageClipboard.pasteFailed', {error: String(error)}),
+      message: t('imageClipboard.pasteFailed'),
       duration: 0,
       showClose: true
     })
@@ -1902,8 +1902,9 @@ onMounted(async () => {
     }
 
     if (!payload.success) {
+      console.warn('图片回填失败详情:', payload.detail)
       writebackErrorMsg = ElMessage.error({
-        message: t('imageClipboard.pasteFailed', {error: String(payload.detail || t('common.unknownError'))}),
+        message: t('imageClipboard.pasteFailed'),
         duration: 0,
         showClose: true
       })

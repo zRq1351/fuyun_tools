@@ -544,8 +544,9 @@ const init = async () => {
       }
 
       if (!payload.success) {
+        console.warn('文本回填失败详情:', payload.detail)
         writebackErrorMsg = ElMessage.error({
-          message: t('clipboard.pasteFailed', {error: payload.detail || t('common.unknownError')}),
+          message: t('clipboard.pasteFailed'),
           duration: 0,
           showClose: true
         })
