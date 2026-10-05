@@ -1028,7 +1028,14 @@ pub fn show_text_preview_window(
 
     prepare_image_preview_window(&window)?;
 
-    let payload = build_text_preview_payload(text, item_id, display_index, display_total, has_prev, has_next);
+    let payload = build_text_preview_payload(
+        text,
+        item_id,
+        display_index,
+        display_total,
+        has_prev,
+        has_next,
+    );
     let _ = window.set_always_on_top(false);
     let _ = show_overlay_window(&app_handle, "text_preview", &window, true);
     let _ = app_handle.emit("show-text-preview", payload.clone());
@@ -1051,7 +1058,14 @@ pub fn update_text_preview_window_payload(
     has_next: Option<bool>,
 ) -> Result<(), String> {
     let window = ensure_text_preview_window(&app_handle)?;
-    let payload = build_text_preview_payload(text, item_id, display_index, display_total, has_prev, has_next);
+    let payload = build_text_preview_payload(
+        text,
+        item_id,
+        display_index,
+        display_total,
+        has_prev,
+        has_next,
+    );
     let _ = app_handle.emit("show-text-preview", payload.clone());
     if let Ok(payload_str) = serde_json::to_string(&payload) {
         let script = format!("window.__TEXT_PREVIEW_PAYLOAD__ = {payload_str};");

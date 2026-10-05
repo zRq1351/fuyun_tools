@@ -1950,8 +1950,10 @@ mod tests {
             .unwrap();
 
         // 旧、新两条记录（id 为 AUTOINCREMENT：旧 id 小、新 id 大），position 均为默认 0
-        for (content, item_id, ts) in [("旧记录", "old_item", 1000_i64), ("新记录", "new_item", 2000_i64)]
-        {
+        for (content, item_id, ts) in [
+            ("旧记录", "old_item", 1000_i64),
+            ("新记录", "new_item", 2000_i64),
+        ] {
             sqlx::query(
                 "INSERT INTO history_items (content, item_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
             )

@@ -1646,7 +1646,10 @@ mod tests {
                 .set_category_async(old_id.clone(), "F4测试分类".to_string())
                 .await
                 .unwrap();
-            manager.set_pinned_async(old_id.clone(), true).await.unwrap();
+            manager
+                .set_pinned_async(old_id.clone(), true)
+                .await
+                .unwrap();
 
             manager
                 .update_item_content(&old_id, new_content.clone())
@@ -1654,7 +1657,9 @@ mod tests {
                 .unwrap();
 
             // 回归点：新 item_id 的行已落库，分类/置顶映射迁移到新 id
-            let data = crate::utils::database::load_history_data_async().await.unwrap();
+            let data = crate::utils::database::load_history_data_async()
+                .await
+                .unwrap();
             assert_eq!(
                 data.categories.get(&new_id).map(String::as_str),
                 Some("F4测试分类"),
@@ -1668,8 +1673,8 @@ mod tests {
 
             // 清理测试数据，避免残留影响后续运行
             manager.remove_from_history(&new_id).ok();
-            let _ = crate::utils::database::save_history_items_only_async(&manager.get_history())
-                .await;
+            let _ =
+                crate::utils::database::save_history_items_only_async(&manager.get_history()).await;
         });
     }
 }
